@@ -21,7 +21,7 @@
 //! # What is pinned here
 //!
 //! 1. The wire form is a **name**, so a wrong value is a loud error.
-//! 2. The legacy ordinal is still accepted inbound (the Karax renderer
+//! 2. The legacy ordinal is still accepted inbound (the renderer
 //!    serialises the canonical Nim enum through `toJs`, and the Rust
 //!    integration suites write `"flowMode": 0`), and it means what the Nim
 //!    enum says it means.
@@ -156,7 +156,7 @@ fn a_view_granularity_is_never_mistaken_for_a_query_mode() {
     }
 }
 
-/// The legacy ordinal stays readable — the Karax renderer serialises the
+/// The legacy ordinal stays readable — the renderer serialises the
 /// canonical Nim enum through `toJs`, which is an ordinal — but only within
 /// range. `2` (what `fmFunction` would have produced) must be an error, not
 /// a default.

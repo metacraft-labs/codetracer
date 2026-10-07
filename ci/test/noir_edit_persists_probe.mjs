@@ -449,7 +449,7 @@ try {
   out.debugLegReturnedToEdit = false;
   out.contentAfterStop = null;
   try {
-    // WAITED FOR, not sampled. The edit toolbar mounts outside Karax's VDOM
+    // WAITED FOR, not sampled. The edit toolbar mounts asynchronously
     // and a bare `$()` immediately after the save raced it — the first run of
     // this leg reported "the Run button was not reachable" for that reason and
     // skipped the whole sequence, which is a silent hole in the gate rather

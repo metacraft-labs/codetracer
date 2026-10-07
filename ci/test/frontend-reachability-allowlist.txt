@@ -19,7 +19,7 @@
 # WHEN AN ENTRY IS CORRECT
 #     * The symbol is reached by something that is not a Nim name: an IPC
 #       message handler resolved by string, a `{.exportc.}` boundary, a
-#       dispatch table built at runtime, a Karax/IsoNim view mounted by id.
+#       dispatch table built at runtime, an IsoNim view mounted by id.
 #     * The symbol is a published API this repository is not the only consumer
 #       of — the Embed SDK surface, an extension entry point.
 #     * The symbol is one arm of a deliberately total interface (every case of

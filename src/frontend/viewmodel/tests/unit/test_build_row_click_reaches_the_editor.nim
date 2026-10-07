@@ -41,7 +41,7 @@
 ## and the GoldenLayout container. `ui/*` cannot be imported into a headless
 ## suite at all — `frontend/tests/scratchpad_add_dispatch_test.nim:29` records
 ## the same constraint for `ui/scratchpad`: "cannot be imported into a plain
-## node test (it pulls in the Karax/DOM `ui_imports` tree)". The seam is
+## node test (it pulls in the kdom/DOM `ui_imports` tree)". The seam is
 ## therefore the furthest point a headless test can observe, and it is the
 ## right one: every link past it is shared with Find in Files
 ## (`search_results.installSearchVMCallbacks`) and the Problems pane

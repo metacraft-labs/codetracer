@@ -585,7 +585,7 @@ else:
       ## mirror of the `case` in `ui/welcome_screen.triggerWelcomeStartOption`.
       ## Nothing related the two: the ViewModel suite that owns the invariant
       ## cannot import that module — it is a `when defined(js)` renderer that
-      ## pulls in Karax and Electron — so deleting an arm from the `case`
+      ## pulls in kdom and Electron — so deleting an arm from the `case`
       ## without shrinking the set would render a live button with nothing
       ## behind it, which is issue #734 exactly, and would redden nothing.
       ##

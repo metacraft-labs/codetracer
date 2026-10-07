@@ -151,7 +151,7 @@ proc toolbarChord*(config: Config; actionId: string): string =
 # `ui/editor.nim` still owns the delegation itself (`delegateShortcut`); what
 # lives here is the LIST, because the list is a claim about the shipped
 # binding table and `ui/editor.nim` cannot be imported by a suite — `nim js`
-# on it pulls the whole Karax/Monaco tree. This module already compiles into
+# on it pulls the whole kdom/Monaco tree. This module already compiles into
 # `src/frontend/tests/debug_toolbar_tooltips_test.nim`, so the list can now be
 # asserted against `defaultRendererConfig()` in
 # `src/frontend/tests/shortcut_bindings_test.nim`.

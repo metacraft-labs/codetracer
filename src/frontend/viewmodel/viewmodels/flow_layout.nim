@@ -11,7 +11,7 @@
 ##
 ## plus the loop-iteration window ("Loop Visualization", "Loop Slider Control")
 ## and the Before/After value modes. Until this module existed all five lived in
-## `src/frontend/ui/flow.nim`, a 5,161-line Karax/Monaco component — so the
+## `src/frontend/ui/flow.nim`, a 5,161-line kdom/Monaco component — so the
 ## *only* way to draw omniscience anywhere was to be the Electron desktop app.
 ## `CodeTracer-Embed-SDK.md` §3.2 excludes Monaco, GoldenLayout and "any
 ## rendering, any CSS, any component" from the package, which meant it also
@@ -39,7 +39,7 @@
 ## width entirely and uses the *order* and the *share*, which are unitless.
 ##
 ## The line that stays in `ui/flow.nim` is therefore not "the view layer" but
-## specifically: Monaco view-zone lifecycle, `noUiSlider`, Karax vdom, Monaco
+## specifically: Monaco view-zone lifecycle, `noUiSlider`, direct kdom manipulation, Monaco
 ## decorations, DOM measurement, and the repaint-hazard scheduling its comments
 ## describe. See that file's header for the split.
 ##

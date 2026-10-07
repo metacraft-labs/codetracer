@@ -93,7 +93,7 @@ pub const FLOW_MODE_WIRE_NAMES: &[&str] = &["call", "diff"];
 /// it is rejected by name.
 ///
 /// The legacy numeric form is still *accepted* on the way in, because the
-/// Karax renderer serialises this enum through `toJs` (an ordinal) and the
+/// renderer serialises this enum through `toJs` (an ordinal) and the
 /// Rust integration suites write `"flowMode": 0` directly. New senders
 /// should write the string.
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, PartialEq, Eq, JsonSchema)]

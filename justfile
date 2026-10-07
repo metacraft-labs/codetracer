@@ -1713,7 +1713,7 @@ test-frontend-js:
   # *Stop* leaves Debug mode for Edit mode. `renderer.nim`'s `stopAction` was
   # `discard` from the initial open-source commit while `SHIFT+F5` dispatched
   # to it, and nothing could see that: no runnable lane can import
-  # `renderer.nim` (`nim js` on it pulls the Karax/Monaco tree), so the two
+  # `renderer.nim` (`nim js` on it pulls the kdom/Monaco tree), so the two
   # renderer lanes compile-check it and an empty body compiles fine. The
   # behaviour therefore lives in the leaf `ui/stop_command.nim`, which this
   # runs.
@@ -1777,7 +1777,7 @@ test-frontend-js:
   # The renderer's three non-Monaco `innerHTML` sinks: a workspace path in the
   # file-conflict dialog, a context-menu label, and a recorded program's own
   # output through ansi_up.  The probe is compiled WITHOUT `-d:nodejs` on
-  # purpose -- with it, karax's `kdom` binds to an in-memory DOM emulation and
+  # purpose -- with it, `kdom` binds to an in-memory DOM emulation and
   # a test of what `innerHTML` does would be a test of the emulation.  Without
   # it the code reaches for browser globals, which the `.mjs` supplies from
   # jsdom, so the parser under test is a real one.

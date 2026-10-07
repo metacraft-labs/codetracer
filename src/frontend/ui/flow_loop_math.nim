@@ -1,7 +1,7 @@
 ## Pure loop-iteration arithmetic for the Omniscience flow loop controls.
 ##
 ## This module deliberately has **no imports**: `ui/flow.nim` is JS-only (it
-## pulls in karax and the Monaco bindings), so the arithmetic that decides
+## pulls in kdom and the Monaco bindings), so the arithmetic that decides
 ## *which loop iteration the user is currently inside* could not be unit-tested
 ## at all while it lived there. Everything here compiles on the C backend, so
 ## `src/tests/gui/tests/flow/flow_loop_math_test.nim` can exercise it headlessly

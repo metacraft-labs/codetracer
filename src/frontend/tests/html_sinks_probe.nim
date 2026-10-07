@@ -1,7 +1,7 @@
 ## The product half of `htmlSinks.test.mjs`.
 ##
 ## Compiled with `nim js` **without** `-d:nodejs` on purpose: with that switch
-## karax's `kdom` binds to an in-memory DOM emulation, and a test of what
+## `kdom` binds to an in-memory DOM emulation, and a test of what
 ## `innerHTML` does would then be a test of the emulation.  Without it the
 ## generated code reaches for the browser globals, which the `.mjs` supplies
 ## from jsdom — so `innerHTML`, `textContent` and HTML parsing are the real

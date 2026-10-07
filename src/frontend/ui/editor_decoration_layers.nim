@@ -1,7 +1,7 @@
 ## Pure layering rules for the editor's Monaco line decorations.
 ##
 ## Like `ui/flow_loop_math.nim` and `ui/trace_redraw_policy.nim`, this module
-## deliberately has **no imports**: `ui/editor.nim` is JS-only (karax + the
+## deliberately has **no imports**: `ui/editor.nim` is JS-only (kdom + the
 ## Monaco bindings), so the rule that decides *when a decoration layer may be
 ## replaced* could not be unit-tested at all while it lived inline in
 ## `styleLines`. Everything here compiles on the C backend, so

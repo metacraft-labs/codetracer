@@ -395,7 +395,7 @@ proc configureShortcuts* =
   # `hardBoundChords` is the registry and `ui/shortcut_labels.nim` is where it
   # lives, beside MONACO_SHORTCUTS_WHITELIST and for the same reason: it is a
   # claim about the shipped binding table, so a `nim js` suite has to be able to
-  # import it without pulling the Karax/Monaco tree in behind it.
+  # import it without pulling the kdom/Monaco tree in behind it.
   #
   # REPORTED, NOT PREVENTED. `CTRL+B` is a real and deliberate shadow on the
   # desktop with its reasons recorded below, so refusing to install a shadowing

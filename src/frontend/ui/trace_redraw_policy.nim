@@ -2,7 +2,7 @@
 ## already-expanded tracepoint's inline results grid?"
 ##
 ## This module deliberately has **no imports**: `ui/editor.nim` and
-## `ui/trace.nim` are JS-only (karax, Monaco and jQuery-DataTables bindings),
+## `ui/trace.nim` are JS-only (kdom, Monaco and jQuery-DataTables bindings),
 ## so the rule that decides whether to *rebuild* or merely *refresh* the
 ## tracepoint view-zone DOM could not be unit-tested at all while it lived
 ## inline in `editorAfterRedraw`. Everything here compiles on the C backend, so

@@ -4,7 +4,7 @@
 ##
 ## Provides `StateViewState` and `VariableViewState`, plain data objects
 ## that capture the current state of the StateVM as renderer-agnostic
-## snapshots.  Any view layer (Karax, IsoNim `ui`, TUI) can call
+## snapshots.  Any view layer (IsoNim `ui`, TUI) can call
 ## `getStateViewState` to obtain a flat structure suitable for rendering.
 ##
 ## Variables are flattened into a list with depth information so that

@@ -4,7 +4,7 @@
 ##
 ## Provides `DebugControlsViewState`, a plain data object that captures
 ## the current state of the DebugControlsVM as a renderer-agnostic
-## snapshot.  Any view layer (Karax, IsoNim `ui`, TUI) can call
+## snapshot.  Any view layer (IsoNim `ui`, TUI) can call
 ## `getViewState` to obtain a flat struct suitable for rendering.
 ##
 ## This is the contract between the ViewModel and View layers for the

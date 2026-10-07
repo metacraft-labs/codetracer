@@ -15,7 +15,7 @@
 ## Module-level state is a deliberate exception to the project's
 ## no-globals rule, taken for the same reason `ui/unified_diff.nim`'s
 ## `unifiedDiffVMInstances` is module-level: the two hosts are separate
-## Karax/Monaco components with no common owner, and threading a registry
+## kdom/Monaco components with no common owner, and threading a registry
 ## through both would mean widening every constructor between them. The state
 ## is confined to this module and is only reachable through the three procs
 ## below.

@@ -59,7 +59,7 @@ timeout over an engine that had answered.
 
 Every existing suite in `just test-frontend-js` compiles its Nim with
 `-d:nodejs`, and for a test of pure logic that is right. **For a test of the
-DOM it is a trap**, because karax's `kdom` selects an in-memory DOM emulation
+DOM it is a trap**, because `kdom` selects an in-memory DOM emulation
 under that switch. `getElementById` becomes a hand-rolled tree walk, and
 `innerHTML` is a string field rather than a parse. A suite that asked "does
 this string become an element?" would be asking the emulation, and the answer

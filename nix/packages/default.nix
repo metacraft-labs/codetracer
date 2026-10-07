@@ -1433,7 +1433,7 @@
 
             ln -sf ${codetracer-electron.out}/src/helpers.js $out/src/helpers.js
 
-            # The Karax-compiled renderer (ui.js) and CSS are loaded relative
+            # The compiled renderer (ui.js) and CSS are loaded relative
             # to CODETRACER_PREFIX by the Electron renderer process via index.html.
             # ui.js uses require('./helpers') so helpers.js must also be at the root.
             cp -L ${uiJavascript}/bin/ui.js $out/

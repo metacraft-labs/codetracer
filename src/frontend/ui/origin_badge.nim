@@ -50,7 +50,7 @@ when defined(js):
 export origin_chain_types
 
 # ---------------------------------------------------------------------------
-# DOM rendering (JS-only). The Karax-based surfaces (`state.nim`,
+# DOM rendering (JS-only). The kdom-based surfaces (`state.nim`,
 # `value.nim`, `flow.nim`, `editor.nim`, `scratchpad.nim`) call into
 # `renderBadgeDom` to attach the badge to a pre-existing parent node.
 # ---------------------------------------------------------------------------

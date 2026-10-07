@@ -66,7 +66,7 @@
 ## which is what this suite calls.
 ##
 ## Lane: `renderer-dom` — the BROWSER target (`nim js -d:ctRenderer`, no
-## `-d:nodejs`: `ui/state.nim`'s karax graph does not compile under it), run
+## `-d:nodejs`: `ui/state.nim`'s kdom graph does not compile under it), run
 ## by `jsdom-run.mjs` over a real DOM. WITHOUT `-d:ctInExtension`: the
 ## extension transport carries no request `seq`. Without `-d:nodejs`
 ## `std/unittest` cannot set the exit status, so this suite sets it.
