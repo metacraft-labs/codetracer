@@ -28,7 +28,7 @@
 ##
 ## ## Regenerating a fixture
 ##
-## ``contiguousRows`` and ``concurrentRows`` are exact counts over the
+## Fixed ``contiguousRows`` and ``concurrentRows`` are exact counts over the
 ## CHECKED-IN recording, and the BEAM and JavaScript recorders MEASURE those
 ## bits from the ranges the scheduler actually produced.  Re-recording a
 ## fixture can therefore legitimately change them by one or two — the same run
@@ -36,7 +36,9 @@
 ## seven another time.  That is not a reason to soften the assertion to a
 ## range: the fixture is committed precisely so the numbers are stable, and a
 ## regeneration is exactly the moment a human should look at what changed.
-## Update the count here, and say in the commit which recording it came from.
+## Fixed-count declarations retain that review boundary. BEAM instead requires
+## strict per-row replay against the independent execution stream and the four
+## original rendezvous requests; no replacement observed count is declared.
 
 import std/os
 
@@ -65,6 +67,10 @@ type
       ## ``end_step`` are GEIDs — positions in the recording's own event
       ## ordering.
 
+  ContiguityProof* = enum
+    cpFixtureCount
+    cpRecordedThreadSwitches
+
   LanguageRow* = object
     ## One row of the matrix: where its fixture is, which repo produced it,
     ## and exactly what its recorder must do and may differ on.
@@ -90,7 +96,11 @@ type
     errorMessageNote*: string
     requiredExtraKeys*: seq[string]
     forbiddenKeys*: seq[string]
-    contiguousRows*: int
+    case contiguityProof*: ContiguityProof
+    of cpFixtureCount:
+      contiguousRows*: int
+    of cpRecordedThreadSwitches:
+      rendezvousRows*: int
     concurrentRows*: int
     structuralNote*: string
     slowRowFloorMs*: int
@@ -142,6 +152,7 @@ const
       errorMessageRows: 1,
       errorMessageNote: "only /api/boom raises",
       requiredExtraKeys: @[], forbiddenKeys: @[DiscoveryModeKey],
+      contiguityProof: cpFixtureCount,
       contiguousRows: 8, concurrentRows: 0,
       structuralNote: "one wsgiref worker serving one request at a time",
       slowRowFloorMs: 40,
@@ -164,6 +175,7 @@ const
       errorMessageRows: 1,
       errorMessageNote: "only /api/boom raises",
       requiredExtraKeys: @[], forbiddenKeys: @[DiscoveryModeKey],
+      contiguityProof: cpFixtureCount,
       contiguousRows: 8, concurrentRows: 0,
       structuralNote: "one Rack worker serving one request at a time",
       slowRowFloorMs: 40,
@@ -190,6 +202,7 @@ const
       errorMessageRows: 1,
       errorMessageNote: "only /api/boom throws",
       requiredExtraKeys: @[], forbiddenKeys: @[DiscoveryModeKey],
+      contiguityProof: cpFixtureCount,
       contiguousRows: 8, concurrentRows: 0,
       structuralNote:
         "one worker holding ONE recording for all eight requests — the " &
@@ -218,15 +231,11 @@ const
         "the Plug has no error hook: /boom is answered 500 by " &
         "Plug.ErrorHandler, which the middleware only ever sees as a status",
       requiredExtraKeys: BeamKeys, forbiddenKeys: @[DiscoveryModeKey],
-      contiguousRows: 2, concurrentRows: 4,
-        # 5 -> 2 with the re-recording in b2ad0af6b: only `GET /api/users`
-        # and `GET /healthz` came out contiguous; in the other six sequential
-        # rows the client driver's `$gen_call` send and reply (a different
-        # BEAM process) were recorded inside the request's own range.
+      contiguityProof: cpRecordedThreadSwitches, rendezvousRows: 4,
+      concurrentRows: 4,
       structuralNote:
-        "MEASURED by the replay pass over the recorded ranges: the " &
-        "four-request rendezvous cohort genuinely overlaps, and six further " &
-        "rows have another BEAM process's events interleaved into their ranges",
+        "strict per-row equality to independently replayed thread switches; " &
+        "the four original rendezvous requests overlap on distinct threads",
       slowRowFloorMs: 400,
       durationNote:
         "the cohort blocks ~3.3 s in the barrier and /slow sleeps ~400 ms",
@@ -252,6 +261,7 @@ const
       errorMessageNote:
         "codetracerExpressErrors() saw only /api/boom throw",
       requiredExtraKeys: @[], forbiddenKeys: @[DiscoveryModeKey],
+      contiguityProof: cpFixtureCount,
       contiguousRows: 5, concurrentRows: 0,
       structuralNote:
         "MEASURED from the event loop: the POST (whose body parser awaits) " &
@@ -286,6 +296,7 @@ const
       errorMessageRows: 0,
       errorMessageNote: "nothing in nginx reports an application error",
       requiredExtraKeys: @[DiscoveryModeKey], forbiddenKeys: @[],
+      contiguityProof: cpFixtureCount,
       contiguousRows: 5, concurrentRows: 0,
       structuralNote:
         "the matcher follows one socket conversation on one thread, and " &

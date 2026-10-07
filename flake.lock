@@ -877,15 +877,17 @@
     "codetracer-trace-format_4": {
       "flake": false,
       "locked": {
+        "lastModified": 1790923025,
+        "narHash": "sha256-rc6UwznEbBrbP2VX1j38iAiK+g/rg4I6TxpUlRMIqvU=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format",
-        "rev": "edf6c390989da8ed632775608c60067dfa7741db",
+        "rev": "be682b8c2bcb19f2f57b9626a6b27fb513165362",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "dev",
         "repo": "codetracer-trace-format",
+        "rev": "be682b8c2bcb19f2f57b9626a6b27fb513165362",
         "type": "github"
       }
     },

@@ -250,7 +250,7 @@
     # input disagreed, so only the lane that consumes flake inputs rather than
     # sibling checkouts -- the Nix lane -- could see the disagreement.
     codetracer-trace-format = {
-      url = "github:metacraft-labs/codetracer-trace-format/dev";
+      url = "github:metacraft-labs/codetracer-trace-format/be682b8c2bcb19f2f57b9626a6b27fb513165362";
       flake = false;
     };
 

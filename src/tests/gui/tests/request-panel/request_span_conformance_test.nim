@@ -140,6 +140,7 @@ import codetracer_ctfs/container
 import codetracer_trace_writer/meta_dat
 import codetracer_trace_writer/span_stream
 import codetracer_trace_writer/new_trace_reader
+import codetracer_trace_writer/step_encoding
 import codetracer_trace_writer/global_line_index
 from codetracer_trace_writer/multi_stream_writer import DefaultLinesPerFile
 
@@ -534,8 +535,72 @@ proc checkSpan(d: Diagnostics; lang: LanguageRow; i: int;
     d.want(ctx, numericMeta(span, "http.status_code") >= 500,
       "error.message on a non-5xx row")
 
+proc checkRecordedThreadContiguity(d: Diagnostics; bytes: seq[byte];
+                                  settled: seq[SpanRecord]; rendezvousRows: int) =
+  ## Independent execution bytes determine truth; span flags are the claim.
+  let opened = openNewTraceFromBytes(bytes)
+  if opened.isErr:
+    d.note("contiguity", "execution reader refused: " & opened.error)
+    return
+  var trace = opened.get()
+  let count = trace.stepCount()
+  if count.isErr:
+    d.note("contiguity", "step count refused: " & count.error)
+    return
+  var switches: seq[tuple[index, thread: uint64]] = @[]
+  for n in 0'u64 ..< count.get():
+    let event = trace.step(n)
+    if event.isErr:
+      d.note("contiguity", "step " & $n & " refused: " & event.error)
+      return
+    if event.get().kind == sekThreadSwitch:
+      switches.add((n, event.get().threadId))
+  for span in settled:
+    let ctx = "contiguity span " & $span.spanId & " (" & span.label & ")"
+    d.want(ctx, span.startStep <= span.endStep and span.endStep < count.get(),
+      "range is outside the independently decoded execution stream")
+    var startThreadKnown = false
+    var startThread = 0'u64
+    for point in switches:
+      if point.index > span.startStep: break
+      startThreadKnown = true
+      startThread = point.thread
+    d.want(ctx, startThreadKnown,
+      "no recorded switch establishes the active thread at span start")
+    if startThreadKnown:
+      d.wantEq(ctx, "span thread equals active thread at start",
+        span.threadId, startThread)
+    var foreignSwitch = false
+    for point in switches:
+      if point.index >= span.startStep and point.index <= span.endStep and
+          point.thread != span.threadId:
+        foreignSwitch = true
+    d.wantEq(ctx, "contiguous flag equals replayed thread truth",
+      span.contiguousOnOneThread, not foreignSwitch)
+  # These slots come from the original independently defined barrier workload.
+  var cohort: seq[SpanRecord] = @[]
+  for slot in 1 .. rendezvousRows:
+    var matches: seq[SpanRecord] = @[]
+    for span in settled:
+      if span.metaValue("http.url") == "/concurrent/" & $slot:
+        matches.add(span)
+    d.wantEq("cohort", "rows for original slot " & $slot, matches.len, 1)
+    if matches.len == 1: cohort.add(matches[0])
+  d.wantEq("cohort", "original rendezvous rows", cohort.len, rendezvousRows)
+  for i, span in cohort:
+    d.want("cohort", span.concurrentWithSiblings and
+      not span.contiguousOnOneThread,
+      "rendezvous row must overlap and contain a foreign-thread switch")
+    for j in 0 ..< i:
+      let other = cohort[j]
+      d.want("cohort", span.threadId != other.threadId,
+        "rendezvous rows must name distinct recorded threads")
+      d.want("cohort", span.startStep <= other.endStep and
+        other.startStep <= span.endStep,
+        "original rendezvous ranges must genuinely overlap")
+
 proc checkFixtureAggregates(d: Diagnostics; lang: LanguageRow;
-                            settled: seq[SpanRecord]) =
+                            settled: seq[SpanRecord]; bytes: seq[byte]) =
   ## Properties of the whole session rather than of one row.
   var ids: seq[uint64] = @[]
   var seeks: seq[uint64] = @[]
@@ -563,8 +628,12 @@ proc checkFixtureAggregates(d: Diagnostics; lang: LanguageRow;
     let bucket = statusBucket(numericMeta(span, "http.status_code"))
     if bucket notin buckets: buckets.add(bucket)
 
-  d.wantEq("session", "contiguous_on_one_thread rows (" &
-    lang.structuralNote & ")", contiguous, lang.contiguousRows)
+  case lang.contiguityProof
+  of cpFixtureCount:
+    d.wantEq("session", "contiguous_on_one_thread rows (" &
+      lang.structuralNote & ")", contiguous, lang.contiguousRows)
+  of cpRecordedThreadSwitches:
+    checkRecordedThreadContiguity(d, bytes, settled, lang.rendezvousRows)
   d.wantEq("session", "concurrent_with_siblings rows (" &
     lang.structuralNote & ")", concurrent, lang.concurrentRows)
   d.wantEq("session", "rows carrying error.message (" &
@@ -812,7 +881,7 @@ suite "RS-M12 cross-language request-span conformance":
           let prev =
             if i == 0: none(SpanRecord) else: some(settled[i - 1])
           checkSpan(d, lang, i, span, prev)
-        checkFixtureAggregates(d, lang, settled)
+        checkFixtureAggregates(d, lang, settled, bytes)
         checkBindingsResolvable(d, lang, containerPath, pathCount, settled)
         checkViewModel(d, lang, settled)
         checkedLanguages += 1
