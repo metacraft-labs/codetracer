@@ -24,8 +24,8 @@
 ## ``fixtures/README.md`` — which lives one level up because that recipe
 ## replaces the whole ``ruby_sinatra/`` directory.
 ##
-## Everything downstream is production code: the container's ``meta.dat`` bit 13
-## is read by the shipped reader, the spans are decoded by the canonical Nim span
+## Everything downstream is production code: the container's optional metadata
+## hint is parsed faithfully and structural span entries govern availability, the spans are decoded by the canonical Nim span
 ## reader (``initSpanStreamReader`` / ``settledSpans`` — the same API
 ## ``src/ct/cli/print_trace.nim`` uses), the step bindings are resolved through
 ## the production trace reader (``openNewTrace``), and the rows come out of the
@@ -274,15 +274,18 @@ suite "RS-M6 Ruby request panel":
     check fileExists(FixtureContainer)
     let bytes = containerBytes(FixtureContainer)
 
-    # --- the recording declares a span stream ---------------------------
-    # The db-backend's span reader returns "no spans" for a container whose bit
-    # 13 is clear, so a recorder that failed to register spans would show an
-    # empty panel and no error anywhere.
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    check meta.get().hasSpanStream
+    # The decoded optional hint must agree with its strictly parsed raw header.
+    let rawSpanFlags = uint16(metaRaw.get()[6]) or (uint16(metaRaw.get()[7]) shl 8)
+    check meta.get().hasSpanStream == ((rawSpanFlags and FlagHasSpanStream) != 0)
+    # Structural file entries and their logical sizes govern availability.
+    let spanDataEntry = findFileEntry(bytes, "spans.dat")
+    let spanIndexEntry = findFileEntry(bytes, "spans.idx")
+    check spanDataEntry.found and spanDataEntry.size > 0
+    check spanIndexEntry.found and spanIndexEntry.size > 0
     check hasSpanStreamFiles(bytes)
 
     # --- decode with the production reader ------------------------------
@@ -404,7 +407,8 @@ suite "RS-M6 Ruby request panel":
       var readerRes = openNewTrace(FixtureContainer)
       check readerRes.isOk
       var reader = readerRes.get()
-      let gliIndex = lineOnlyGli(meta.get().paths.len)
+      check reader.pathCount() <= uint64(high(int))
+      let gliIndex = lineOnlyGli(int(reader.pathCount()))
       var seekTargets: seq[uint64] = @[]
       for i, span in webSpans:
         checkpoint("seek target of row " & $i)

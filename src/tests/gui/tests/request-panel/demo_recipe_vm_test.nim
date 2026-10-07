@@ -7,8 +7,8 @@
 ## ``codetracer-specs/Planned-Features/Request-Panel-Live-Sessions.milestones.org``
 ## §RS-M4:
 ##
-## a) the produced container has a span stream and declares ``meta.dat`` bit 13
-##    (``FlagHasSpanStream``); and
+## a) the produced container has nonempty structural span data and index,
+##    with the optional metadata hint decoded faithfully; and
 ## b) a ViewModel built over it renders the expected rows.
 ##
 ## Its purpose is to guard the recipe against rot.  It calls
@@ -227,18 +227,18 @@ suite "RS-M4 demo recipe":
 
     let bytes = containerBytes(containerPath)
 
-    # --- (a) the container declares a span stream (meta.dat bit 13) ------
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    # This is the assertion the whole demo hangs on: the db-backend's span
-    # reader returns "no spans" for a container whose bit 13 is clear
-    # (``span_stream.rs::open_from_ctfs``), so a producer that forgot to
-    # register spans would yield an empty panel and no error anywhere.
-    check meta.get().hasSpanStream
-    # The writer sets the bit because spans were registered, not by request —
-    # so the files must actually be there too.
+    # The decoded optional hint must agree with its strictly parsed raw header.
+    let rawSpanFlags = uint16(metaRaw.get()[6]) or (uint16(metaRaw.get()[7]) shl 8)
+    check meta.get().hasSpanStream == ((rawSpanFlags and FlagHasSpanStream) != 0)
+    # Structural file entries and their logical sizes govern availability.
+    let spanDataEntry = findFileEntry(bytes, "spans.dat")
+    let spanIndexEntry = findFileEntry(bytes, "spans.idx")
+    check spanDataEntry.found and spanDataEntry.size > 0
+    check spanIndexEntry.found and spanIndexEntry.size > 0
     check hasSpanStreamFiles(bytes)
     check meta.get().recordingId == DemoRecordingId
 

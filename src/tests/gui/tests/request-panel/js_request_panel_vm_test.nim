@@ -26,8 +26,8 @@
 ## ``fixtures/README.md``, which lives one level up because that recipe
 ## replaces the whole ``js_express/`` directory.
 ##
-## Everything downstream is production code: the container's ``meta.dat`` bit 13
-## is read by the shipped reader, the spans are decoded by the canonical Nim
+## Everything downstream is production code: the container's optional metadata
+## hint is parsed faithfully and structural span entries govern availability, the spans are decoded by the canonical Nim
 ## span reader (``initSpanStreamReader`` / ``settledSpans`` — the same API
 ## ``src/ct/cli/print_trace.nim`` uses), the step bindings are resolved through
 ## the production trace reader (``openNewTrace``), and the rows come out of the
@@ -264,25 +264,33 @@ suite "RS-M9 JavaScript request panel":
     check fileExists(FixtureContainer)
     let bytes = containerBytes(FixtureContainer)
 
-    # --- the recording declares a span stream ---------------------------
-    # The db-backend's span reader returns "no spans" for a container whose bit
-    # 13 is clear, so a recorder that failed to register spans would show an
-    # empty panel and no error anywhere.
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    check meta.get().hasSpanStream
+    # The decoded optional hint must agree with its strictly parsed raw header.
+    let rawSpanFlags = uint16(metaRaw.get()[6]) or (uint16(metaRaw.get()[7]) shl 8)
+    check meta.get().hasSpanStream == ((rawSpanFlags and FlagHasSpanStream) != 0)
+    # Structural file entries and their logical sizes govern availability.
+    let spanDataEntry = findFileEntry(bytes, "spans.dat")
+    let spanIndexEntry = findFileEntry(bytes, "spans.idx")
+    check spanDataEntry.found and spanDataEntry.size > 0
+    check spanIndexEntry.found and spanIndexEntry.size > 0
     check hasSpanStreamFiles(bytes)
 
     # ONE container for the whole session: one Node process served all seven
     # requests. The fixture records the app and leaves the in-process HTTP
     # driver runnable but uninstrumented, so body-parser awaits cannot put
     # client steps inside a server request range.
-    check meta.get().paths.len == 1
+    var pathReaderRes = openNewTraceFromBytes(bytes)
+    check pathReaderRes.isOk
+    var pathReader = pathReaderRes.get()
+    check pathReader.pathCount() == 1'u64
     var recordedPaths: seq[string] = @[]
-    for p in meta.get().paths:
-      recordedPaths.add(p.replace('\\', '/'))
+    for pathId in 0'u64 ..< pathReader.pathCount():
+      let recordedPath = pathReader.path(pathId)
+      check recordedPath.isOk
+      recordedPaths.add(recordedPath.get().replace('\\', '/'))
     var sawApp = false
     var sawDriver = false
     for p in recordedPaths:

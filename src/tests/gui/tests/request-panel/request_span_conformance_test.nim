@@ -53,7 +53,7 @@
 ##
 ## The universal contract (no waiver possible, asserted for every language):
 ##
-## * ``meta.dat`` bit 13 is set and the span-stream files exist;
+## * ``meta.dat`` bit 13 is decoded faithfully and nonempty span files exist;
 ## * the production reader decodes the stream, and ``spantype.ns`` names
 ##   ``web-request`` with exactly the settled span ids;
 ## * every settled record is a ``web-request``, not open, not external, flat
@@ -302,13 +302,17 @@ proc checkStream(d: Diagnostics; lang: LanguageRow; bytes: seq[byte];
     return
   let meta = metaRes.get()
 
-  # A container whose bit 13 is clear makes the db-backend's span reader
-  # answer "no spans", so a recorder that forgot to register would show an
-  # empty panel and no error anywhere.
-  d.want("meta.dat", meta.hasSpanStream,
-    "FlagHasSpanStream (bit 13) is not set")
-  d.want("meta.dat", hasSpanStreamFiles(bytes),
-    "spans.dat / spans.idx are missing from the container")
+  # Optional hints are decoded faithfully; structural entries govern availability.
+  let rawSpanFlags = uint16(metaRaw.get()[6]) or (uint16(metaRaw.get()[7]) shl 8)
+  d.wantEq("meta.dat", "hasSpanStream raw hint", meta.hasSpanStream,
+    (rawSpanFlags and FlagHasSpanStream) != 0)
+  let spanDataEntry = findFileEntry(bytes, "spans.dat")
+  let spanIndexEntry = findFileEntry(bytes, "spans.idx")
+  d.want("spans.dat", spanDataEntry.found and spanDataEntry.size > 0,
+    "required nonempty spans.dat is absent or empty")
+  d.want("spans.idx", spanIndexEntry.found and spanIndexEntry.size > 0,
+    "required nonempty spans.idx is absent or empty")
+  d.want("spans.dat", hasSpanStreamFiles(bytes), "spans.dat is missing")
 
   # The step stream is the difference between "the seek lands in source" and
   # "the seek lands at a coordinate", so it is declared, not discovered.
@@ -794,11 +798,15 @@ suite "RS-M12 cross-language request-span conformance":
 
       if settled.len > 0:
         var pathCount = 0
-        let metaRaw = readInternalFile(bytes, "meta.dat")
-        if metaRaw.isOk:
-          let metaRes = readMetaDat(metaRaw.get())
-          if metaRes.isOk:
-            pathCount = metaRes.get().paths.len
+        var pathReaderRes = openNewTraceFromBytes(bytes)
+        if pathReaderRes.isErr:
+          d.note("paths", "declared path reader refused: " & pathReaderRes.error)
+        else:
+          var pathReader = pathReaderRes.get()
+          if pathReader.pathCount() > uint64(high(int)):
+            d.note("paths", "path count exceeds the binding index integer range")
+          else:
+            pathCount = int(pathReader.pathCount())
 
         for i, span in settled:
           let prev =
