@@ -2862,6 +2862,12 @@ pub struct CallArgsUpdateResults {
     pub total_calls_count: usize,
     pub scroll_position: usize,
     pub max_depth: usize,
+    /// The global call-line index of the call the debugger is in (or, when
+    /// that call is folded away, of the nearest call line before it) — the
+    /// row a list pane's scrollbar scrubber marks (Scrollbar-Scrubbers.md
+    /// §3.5). `None` when unknown.
+    #[serde(default)]
+    pub current_call_line_index: Option<usize>,
 }
 
 impl CallArgsUpdateResults {
@@ -2882,6 +2888,7 @@ impl CallArgsUpdateResults {
             total_calls_count,
             scroll_position: 0,
             max_depth,
+            current_call_line_index: None,
         }
     }
 
@@ -2903,6 +2910,7 @@ impl CallArgsUpdateResults {
             total_calls_count,
             scroll_position: position,
             max_depth,
+            current_call_line_index: None,
         }
     }
 }

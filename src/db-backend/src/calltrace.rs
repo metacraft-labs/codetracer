@@ -162,6 +162,24 @@ impl Calltrace {
         self.rebuild_global_call_lines();
     }
 
+    /// The global call-line index of the `Call` line for `key`, or — when that
+    /// call is folded into a count line or hidden under a collapsed parent —
+    /// of the last `Call` line before it in trace order (calls are keyed in
+    /// pre-order, so that is its nearest visible predecessor).
+    pub fn call_line_index_at_or_before(&self, key: CallKey) -> Option<usize> {
+        let mut best: Option<usize> = None;
+        for (i, metadata) in self.global_call_lines.iter().enumerate() {
+            if metadata.content.kind == CallLineContentKind::Call {
+                if metadata.content.call_key.0 <= key.0 {
+                    best = Some(i);
+                } else {
+                    break;
+                }
+            }
+        }
+        best
+    }
+
     pub fn calc_scroll_position(&mut self) -> usize {
         let mut position: usize = 0;
         let mut kind = CalltraceNonExpandedKind::Callstack;
