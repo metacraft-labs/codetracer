@@ -62,6 +62,43 @@ just build-once
 This runs tup (incremental build) and webpack. Use this after modifying any `.nim` files in
 `src/ct/`, `src/frontend/`, or `src/common/`.
 
+## Local dev-env services (`repro up`)
+
+What this repo declares today, and what it does **not**:
+
+```sh
+repro up    --activity=frontend   # brings up `browser-replay` (the nginx harness)
+repro down  --activity=frontend
+repro tasks --activity=frontend
+```
+
+That is the whole service graph: **one** service, `browser-replay`, declared in
+`repro.nim` under activities `frontend` and `tests`, and described in
+[`browser-replay/README.md`](browser-replay/README.md). `repro up` with no
+`--activity` starts nothing, because the `default` activity declares no
+services — so silence there is the design, not a failure.
+
+**There is no local identity provider in this repo.**
+`src/frontend/viewmodel/identity/issuer.nim` opens with "The shared identity
+issuer: Zitadel at `login.metacraft-labs.com`" — one issuer, shared across
+products, rather than CodeTracer's own. Nothing here stands up a local
+equivalent, so a local run has no issuer to talk to unless one is already
+running on the machine.
+
+A sibling checkout in the same workspace does run one as part of its own local
+stack; if you have that checkout, its `local-dev/README.md` is the authority on
+bringing it up and on a known defect where the command exits non-zero on a
+session that came up correctly.
+
+**Do not add a second copy of the issuer here to work around that.** Two
+definitions of one shared service is the outcome worth avoiding, and the reason
+it is not simply factored into something both repos reference is a reprobuild
+limitation rather than an oversight: a dev-env service is declared as a name, an
+activity list and an opaque metadata string, with no composition and no way to
+reference a service declared elsewhere. That gap — and the build-caching
+consequence that follows from it — is recorded in the reprobuild specs repo's
+`issues/` folder, dated 2026-10-07.
+
 ## Launching the TUI / GPUI for the user
 
 The user-facing reference is README.md, "Running the terminal (TUI) and native
