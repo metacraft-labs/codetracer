@@ -183,6 +183,11 @@ export timeline_vm
 import viewmodels/state_vm
 export state_vm
 
+# PLAT-51: which values the step that produced the stop changed — the one
+# model the desktop's, the terminal's and GPUI's changed-value styling read.
+import viewmodels/value_changes
+export value_changes
+
 import viewmodels/flow_vm
 export flow_vm
 

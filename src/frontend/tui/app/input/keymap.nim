@@ -151,7 +151,7 @@ type
     kaSelectCallStack = "select-call-stack"
     kaSelectSource = "select-source"
     kaSelectVariables = "select-variables"
-    kaSelectTimeline = "select-timeline"
+    kaSelectEventLog = "select-event-log"
     kaMaximizePane = "maximize-pane"
 
     # ---- §4.2 Omniscient Stepping -----------------------------------------
@@ -493,7 +493,7 @@ proc specAction*(action: KeyAction): string =
   of kaNone: ""
   of kaFocusNextPane, kaFocusPrevPane: "Next / Previous Pane"
   of kaFocusLeft, kaFocusDown, kaFocusUp, kaFocusRight: "Directional Focus"
-  of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectTimeline:
+  of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectEventLog:
     "Direct Pane Select"
   of kaMaximizePane: "Maximize / Restore Pane"
   of kaStepOver: "Step Over (Forward)"
@@ -575,7 +575,7 @@ proc defaultKeymap*(): Keymap =
   r.add b(mmNormal, "1", kaSelectCallStack)
   r.add b(mmNormal, "2", kaSelectSource)
   r.add b(mmNormal, "3", kaSelectVariables)
-  r.add b(mmNormal, "4", kaSelectTimeline)
+  r.add b(mmNormal, "4", kaSelectEventLog)
   r.add b(mmNormal, "z", kaMaximizePane)
   # Omniscient Stepping
   r.add b(mmNormal, "n", kaStepOver)

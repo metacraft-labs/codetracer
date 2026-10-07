@@ -87,8 +87,6 @@ const
                                    label: "debugComponent-0"),
     paneFlow: DesktopPane(placement: dpNone, content: Content.History,
                           label: ""),
-    paneTimeline: DesktopPane(placement: dpLayout, content: Content.Timeline,
-                              label: "timelineComponent-0"),
     paneSearch: DesktopPane(placement: dpLayout,
                             content: Content.SearchResults,
                             label: "searchResultsComponent-0"),

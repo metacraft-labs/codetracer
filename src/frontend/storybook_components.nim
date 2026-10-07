@@ -45,7 +45,6 @@ import viewmodel/viewmodels/[
   state_vm,
   step_list_vm,
   terminal_output_vm,
-  timeline_vm,
   trace_log_vm,
   visual_replay_client,
   vcs_vm,
@@ -88,7 +87,6 @@ import viewmodel/views/[
   isonim_status_view,
   isonim_step_list_view,
   isonim_terminal_output_view,
-  isonim_timeline_view,
   isonim_trace_log_view,
   isonim_vcs_view,
   isonim_welcome_screen_view,
@@ -1378,14 +1376,6 @@ proc mountPointList(container: isonim_dom.Element; fixture: string): DisposeProc
     mountIsoNimPointList(container, vm)
     return proc() = vm.dispose())
 
-proc mountTimeline(container: isonim_dom.Element; fixture: string): DisposeProc =
-  mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
-    let vm = createTimelineVM(store)
-    vm.pan(0'u64, 400'u64)
-    vm.hover(some(180'u64))
-    mountIsoNimTimeline(container, vm)
-    return proc() = vm.dispose())
-
 proc mountSearch(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createSearchVM(store)
@@ -1573,10 +1563,6 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         let vm = createFlowVM(store); vm.iterationCount.val = 12; vm.selectIteration(5)
         mountIsoNimFlow(section.content, vm)
         disposers.add(proc() = vm.dispose())
-      of "timeline":
-        let vm = createTimelineVM(store); vm.pan(0'u64, 400'u64)
-        mountIsoNimTimeline(section.content, vm)
-        disposers.add(proc() = vm.dispose())
       of "search":
         let vm = createSearchVM(store); vm.applySearch()
         mountIsoNimSearch(section.content, vm)
@@ -1653,7 +1639,6 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "state": mountState(container, f)
     of "step-list": mountStepList(container, f)
     of "terminal-output": mountTerminalOutput(container, f)
-    of "timeline": mountTimeline(container, f)
     of "trace-log": mountTraceLog(container, f)
     of "vcs": mountVcs(container, f)
     of "welcome-screen": mountWelcome(container, f)

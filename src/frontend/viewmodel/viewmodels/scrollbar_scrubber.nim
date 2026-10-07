@@ -12,10 +12,11 @@
 ##
 ## PLAT-52 is the first pane to adopt it (the Terminal Output pane's line
 ## view, whose population is the recorded output's lines). The Event Log and
-## Call Trace adopt the same model (PLAT-51); nothing here is specific to a
-## pane. The window to fetch and the drag's coalesced fetches (§3.3) arrive
-## with the first pane that FETCHES its rows: the Terminal Output pane holds
-## every line it lists.
+## the Call Trace adopt the same model (PLAT-51) — the first panes that FETCH
+## their rows, so the window to fetch (`windowFor`) and the drag's coalesced
+## fetches (`FetchCoalescer`, §3.3: at most one request in flight per pane, a
+## newer position superseding an older one) are here too. Nothing here is
+## specific to a pane.
 ##
 ## Pure, and compiled for both backends.
 
@@ -105,6 +106,17 @@ func currentFraction*(m: ScrubberModel): float =
   ## row's span), -1.0 when there is no current row.
   if m.current < 0 or m.total <= 0: -1.0
   else: max(0.0, min(1.0, (float(m.current) + 0.5) / float(m.total)))
+
+func trackFractionAt*(pos, trackUnits: int): float =
+  ## A pointer `pos` units into a list scrubber's track of `trackUnits`, as
+  ## the fraction the model takes, with the track's ENDS at 0 and 1: the
+  ## first unit names the first row and the last unit the LAST row of the
+  ## whole population (Scrollbar-Scrubbers.md §5: "a click at the track's end
+  ## shows the LAST row of the whole population"), linearly between. (The
+  ## centre of a unit — `fractionAt` — would leave the last
+  ## `total / (2 * trackUnits)` rows unreachable by a click on a long list.)
+  if trackUnits <= 1: 0.0
+  else: max(0.0, min(1.0, float(pos) / float(trackUnits - 1)))
 
 func fractionAt*(pos, trackUnits: int): float =
   ## A pointer `pos` units into a track of `trackUnits`, as the fraction the

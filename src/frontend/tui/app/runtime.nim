@@ -158,7 +158,7 @@ type
     pcEventJump
       ## The event log: go to the event whose log index is `index`.
     pcSeek
-      ## The timeline: go to `tick`.
+      ## A seek: go to `tick`.
     pcDeleteBreakpoints
       ## The editor's menu: delete every breakpoint of `path` ("Delete
       ## breakpoints in file"), or of every file when `path` is "" ("Delete
@@ -180,6 +180,10 @@ type
       ## `path`.
     pcValueOrigin
       ## The Variables menu's "Show value origin" on the variable at `path`.
+    pcWatch
+      ## PLAT-51: a watch expression edited — `text` added (`behaviour` ""),
+      ## `path` removed (`behaviour` "remove"), or `path` replaced by `text`
+      ## (`behaviour` "edit").
     pcVcsDiff
       ## The VCS pane: show the diff of `path` (`text` its state letter) —
       ## the working tree's, or commit `behaviour`'s when it names one.
@@ -188,6 +192,10 @@ type
     pcTerminalView
       ## PLAT-52: the Terminal Output pane's toggle — show the view named by
       ## `text` (`lines` / `screen`), remembered for this recording.
+    pcFrameSeek
+      ## PLAT-51: the frame viewer's own scrubber — show frame `index`
+      ## (`behaviour` "drag" while held, "release" where it is let go:
+      ## Visual-Replay.md's Scrub Slider, whose release settles there).
 
   PaneClickRequest* = object
     kind*: PaneClickKind
@@ -610,6 +618,8 @@ proc refreshMenuForKeymap*(rt: TuiRuntime)
 
 const EventLogColumnVerbs* = ["columns", "column-show", "column-hide",
                               "column-left", "column-right"]
+const WatchVerbs* = ["watch", "unwatch", "watch-edit"]
+  ## PLAT-51: the watch verbs (`runPromptLine`).
   ## PLAT-49 part B: the event log's column verbs (`runColumnVerb`).
 
 proc describeColumns(c: EventLogColumns): string =
@@ -737,6 +747,41 @@ proc runPromptLine(rt: TuiRuntime; line: string;
                                (if words.len > 1: words[1] else: "")))
       outcome.detail = rt.app.notification
       outcome.repaint = true
+      return
+
+  # PLAT-51: THE WATCH VERBS — the desktop's watch field and row controls
+  # (Variable-State-Pane.md: watch expressions "add, edit, remove"):
+  # `:watch EXPR`, `:unwatch EXPR`, `:watch-edit OLD -> NEW`. Outside §4.3's
+  # published table, for the reason the layout verbs below give.
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let sp = text.find(' ')
+    let verb = if sp < 0: text else: text[0 ..< sp]
+    let arg = if sp < 0: "" else: text[sp + 1 .. ^1].strip()
+    if verb in WatchVerbs:
+      outcome.repaint = true
+      if arg.len == 0:
+        rt.note(":" & verb & " needs an expression")
+      elif verb == "watch":
+        outcome.paneClick = (PaneClickRequest(kind: pcWatch, text: arg))
+        rt.note("watching " & arg)
+      elif verb == "unwatch":
+        outcome.paneClick = (PaneClickRequest(kind: pcWatch, path: arg,
+                                              behaviour: "remove"))
+        rt.note("no longer watching " & arg)
+      else:
+        let at = arg.find("->")
+        if at < 0:
+          rt.note(":watch-edit needs OLD -> NEW")
+        else:
+          let old = arg[0 ..< at].strip()
+          let now = arg[at + 2 .. ^1].strip()
+          outcome.paneClick = (PaneClickRequest(kind: pcWatch, path: old,
+                                                text: now, behaviour: "edit"))
+          rt.note("watching " & now & " instead of " & old)
+      outcome.detail = rt.app.notification
       return
 
   # PLAT-6's TWELVE LAYOUT VERBS, ROUTED HERE AND ONLY WHEN A BINDING IS
@@ -1024,6 +1069,7 @@ proc scrollCallTrace(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   let m = rt.app.callTrace
   let top = m.clampTop(m.visibleTop(body) + delta, body)
   rt.app.callTrace.scrollTop = top
+  rt.app.callTraceAtEnd = false
   rt.app.callTrace.follow = false
   rt.app.callTraceScrolled = true
   outcome.pagesCallTrace = true
@@ -1122,7 +1168,7 @@ proc scrubTerminalLines(rt: TuiRuntime; area: CellArea; row: int;
   if geo.contentRows <= 0:
     return
   let sm = m.scrubberOf(geo.contentRows)
-  let f = fractionAt(row - geo.contentTop, geo.contentRows)
+  let f = trackFractionAt(row - geo.contentTop, geo.contentRows)
   let top =
     if click: sm.clickAt(f)
     else: sm.dragTo(f - sm.thumbLength / 2.0)
@@ -1219,6 +1265,53 @@ proc routeTerminalDrag(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
   true
 
+proc scrubFrameViewer(rt: TuiRuntime; col: int; behaviour: string;
+                      outcome: var RuntimeOutcome) =
+  ## The frame viewer's scrubber at column `col`: the pane shows the frame
+  ## under the pointer at once, and the host is asked for it — once per
+  ## frame crossed while held, and once more where it is released.
+  let geometry = rt.layoutGeometry()
+  let area = frameViewerOverlayArea(geometry.body)
+  let f = rt.app.frameViewer.frameAtColumn(area, col)
+  if f < 0:
+    return
+  let moved = f != rt.app.frameViewer.frameIndex
+  rt.app.frameViewer.frameIndex = f
+  if moved or behaviour == "release":
+    outcome.requestClick(PaneClickRequest(kind: pcFrameSeek, index: f,
+                                          behaviour: behaviour))
+  outcome.repaint = true
+
+proc routeFrameViewerMouse(rt: TuiRuntime; event: MouseEvent;
+                           outcome: var RuntimeOutcome): bool =
+  ## PLAT-51 (CodeTracer-TUI-Graphics.md §4): the open frame viewer's OWN
+  ## scrubber, along its bottom row. A press on it jumps there and holds
+  ## the scrubber; motion while held follows the pointer; the release
+  ## settles on the frame under it.
+  if not rt.app.frameViewer.open:
+    return false
+  if rt.app.frameViewer.scrubbing:
+    case event.kind
+    of mekMotion:
+      rt.scrubFrameViewer(event.col, "drag", outcome)
+    of mekRelease:
+      rt.app.frameViewer.scrubbing = false
+      rt.scrubFrameViewer(event.col, "release", outcome)
+    else:
+      rt.app.frameViewer.scrubbing = false
+      return false
+    return true
+  if event.kind != mekPress or event.button != mbLeft:
+    return false
+  let area = frameViewerOverlayArea(rt.layoutGeometry().body)
+  let row = rt.app.frameViewer.frameScrubberRow(area)
+  if row < 0 or event.row != row or event.col < area.col or
+     event.col >= area.col + area.width:
+    return false
+  rt.app.frameViewer.scrubbing = true
+  rt.scrubFrameViewer(event.col, "drag", outcome)
+  true
+
 proc terminalOutputOwnsToken*(rt: TuiRuntime; token: string): bool =
   ## The pane's own keys while it is focused: Left / Right step a write back /
   ## forward (the screen's "step-by-write keys ... scoped to the pane", which
@@ -1275,18 +1368,117 @@ proc eventRowAt(model: EventLogModel; area: CellArea;
     return (false, event_log.EventLogRow(), screen)
   (true, screen.visible[i], screen)
 
-proc timelineTickAt(rt: TuiRuntime; content: CellArea; col: int): int64 =
-  ## The tick the timeline's track maps column `col` to, for the bar painted
-  ## into `content` (the painter re-run on a scratch grid, so the mapping is
-  ## the drawing's), or -1 off the track.
-  var g = newStyledGrid(content.col + content.width,
-                        content.row + content.height)
-  let bar = paintTimelineBar(g, content, rt.app.timeline)
-  if bar.barRow < 0 or bar.trackWidth <= 0 or col < bar.trackCol or
-     col >= bar.trackCol + bar.trackWidth:
-    return -1
-  int64(tickForColumn(col - bar.trackCol, rt.app.timeline.minTick,
-                      rt.app.timeline.maxTick, bar.trackWidth))
+proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
+  ## The rectangle pane `kind` is painted into (its strip row first), or an
+  ## empty one when it is not on the screen.
+  let geometry = rt.layoutGeometry()
+  for i, region in geometry.projection.regions:
+    if region.pane == kind:
+      return paneUnderStrip(geometry, i)
+  CellArea()
+
+proc scrubEventLog(rt: TuiRuntime; area: CellArea; row: int;
+                   dragging: bool): bool =
+  ## PLAT-51 (Scrollbar-Scrubbers.md §3): the Event Log's scrollbar scrubber
+  ## pressed (a jump, centring the row at the fraction of the WHOLE log) or
+  ## its thumb held (the view follows). The VIEW moves; the debugger does
+  ## not. The window it lands on is fetched (`ensureWindow`, one request per
+  ## page not held) and the pages far from it released.
+  var g = newStyledGrid(area.col + area.width, area.row + area.height)
+  let screen = paintEventLog(g, area, rt.app.eventLog)
+  if screen.trackCol < 0 or screen.trackRows <= 0:
+    return false
+  let sm = rt.app.eventLog.scrubberOf(screen.trackRows)
+  let at = clamp(row, screen.trackTop, screen.trackTop + screen.trackRows - 1)
+  let hit = sm.verticalScrubberHit(screen.trackTop, screen.trackRows, at)
+  if hit.kind == shNone:
+    return false
+  let top = sm.scrubTo(hit, dragging)
+  let before = rt.app.eventLog.fetchCount
+  rt.app.eventLog.scrollTop = top
+  rt.app.eventLog.ensureWindow(top, screen.trackRows)
+  rt.app.eventLog.releaseOutside(top, screen.trackRows)
+  rt.app.listScrubFetches += rt.app.eventLog.fetchCount - before
+  true
+
+proc scrubCallTrace(rt: TuiRuntime; area: CellArea; row: int;
+                    dragging: bool; outcome: var RuntimeOutcome): bool =
+  ## PLAT-51: the Call Trace's scrollbar scrubber — the same rule over the
+  ## whole trace (`totalCallsCount`); the host loads the section the view
+  ## then shows (`pagesCallTrace`), as a scroll does.
+  if area.width <= 0 or not area.tracked:
+    return false
+  let body = area.height - 1
+  let sm = rt.app.callTrace.scrubberOf(body)
+  let at = clamp(row, area.row + 1, area.row + body)
+  let hit = sm.verticalScrubberHit(area.row + 1, body, at)
+  if hit.kind == shNone:
+    return false
+  rt.app.callTrace.scrollTop = sm.scrubTo(hit, dragging)
+  rt.app.callTraceAtEnd = rt.app.callTrace.scrollTop >= sm.maxFirstVisible
+  rt.app.callTrace.follow = false
+  rt.app.callTraceScrolled = true
+  outcome.pagesCallTrace = true
+  outcome.repaint = true
+  true
+
+proc routeVariablesResize(rt: TuiRuntime; event: MouseEvent;
+                          outcome: var RuntimeOutcome): bool =
+  ## PLAT-51: the Variables pane's name / value separator held — each motion
+  ## puts the separator under the pointer (the name column's width), the
+  ## release ends it (the desktop's column resize).
+  if not rt.app.variablesResize.active:
+    return false
+  if event.kind == mekPress:
+    rt.app.variablesResize.active = false
+    return false
+  let area = rt.app.variablesResize.area
+  let cells = max(1, event.col - area.col - nameFieldColumn())
+  rt.app.variablesNameCells = cells
+  rt.app.variables.nameCells = cells
+  if event.kind != mekMotion:
+    rt.app.variablesResize.active = false
+  outcome.repaint = true
+  true
+
+proc routeListScrubDrag(rt: TuiRuntime; event: MouseEvent;
+                        outcome: var RuntimeOutcome): bool =
+  ## PLAT-51: a press held on a list pane's scrubber thumb owns the pointer
+  ## until it is released: each motion moves the VIEW to the thumb under the
+  ## pointer (one window fetch when it lands on rows not held).
+  if not rt.app.listScrub.active:
+    return false
+  if event.kind == mekPress:
+    rt.app.listScrub.active = false
+    return false
+  let pane = rt.app.listScrub.pane
+  let area = rt.paneAreaOf(pane)
+  if event.kind != mekMotion:
+    rt.app.listScrub.active = false
+  if area.width > 0:
+    case pane
+    of paneEventLog:
+      if rt.scrubEventLog(area, event.row, dragging = true):
+        outcome.repaint = true
+    of paneCalltrace:
+      discard rt.scrubCallTrace(area, event.row, dragging = true, outcome)
+    else: discard
+  outcome.repaint = true
+  true
+
+proc scrollEventLog(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## The wheel over the Event Log: rows, as a scroll does (Scrollbar-
+  ## Scrubbers.md §3.4 — only the track and the thumb are scrubber gestures).
+  let area = rt.paneAreaOf(paneEventLog)
+  var g = newStyledGrid(area.col + area.width, area.row + area.height)
+  let screen = paintEventLog(g, area, rt.app.eventLog)
+  let body = max(1, screen.bodyHeight)
+  let top = event_log.clampScrollTop(rt.app.eventLog.scrollTop + delta,
+                           rt.app.eventLog.knownTotal, body)
+  rt.app.eventLog.scrollTop = top
+  rt.app.eventLog.ensureWindow(top, body)
+  rt.app.eventLog.releaseOutside(top, body)
+  outcome.repaint = true
 
 proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
                         outcome: var RuntimeOutcome): bool =
@@ -1294,6 +1486,23 @@ proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
   ## desktop's row click); a right click shows its whole content (the desktop
   ## opens it in a read-only editor view); a left click on a column's header
   ## orders the log by it, again to reverse (the desktop's DataTables order).
+  ## PLAT-51: a left press on the scrollbar scrubber's column jumps the VIEW
+  ## (the track) or starts a drag (the thumb).
+  block scrubber:
+    var g = newStyledGrid(area.col + area.width, area.row + area.height)
+    let s = paintEventLog(g, area, rt.app.eventLog)
+    if s.trackCol >= 0 and event.col == s.trackCol and
+       event.row >= s.trackTop and event.row < s.trackTop + s.trackRows:
+      if event.button != mbLeft:
+        return true
+      let hit = rt.app.eventLog.scrubberOf(s.trackRows).verticalScrubberHit(
+        s.trackTop, s.trackRows, event.row)
+      if hit.kind == shThumb:
+        rt.app.listScrub = (active: true, pane: paneEventLog)
+      discard rt.scrubEventLog(area, event.row,
+                               dragging = hit.kind == shThumb)
+      outcome.repaint = true
+      return true
   let (ok, row, screen) = eventRowAt(rt.app.eventLog, area, event.row)
   if not ok:
     let (onHeader, column) = screen.headerColumnAt(event.row, event.col)
@@ -1392,6 +1601,12 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
     else:
       return false
     return true
+  # K47 (PLAT-51): A PRESS ON THE TEXT PLACES THE CARET, as Monaco's does in
+  # a read-only model — a plain left press, and a right press before its menu.
+  if event.button == mbRight or
+     (event.button == mbLeft and not event.ctrl and not event.alt):
+    rt.app.caret = (src.path, line, max(1, target.column))
+    outcome.repaint = true
   case event.button
   of mbRight:
     rt.openContextMenu(rt.editorTextMenu(target), event.row, event.col,
@@ -1429,9 +1644,72 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
                                             line: line, behaviour: "smart"))
       true
     else:
-      false
+      # The caret was placed above.
+      true
   else:
     false
+
+proc openTracepointEditorAt(rt: TuiRuntime; path: string; line: int) =
+  ## PLAT-51 (and K13's "Add tracepoint"): the tracepoint editor on `line` —
+  ## the prompt with `:tracepoint ` typed, placed on that line (PLAT-50's
+  ## route); Enter runs the sweep and its hits are listed as the desktop's
+  ## editor lists them under the line.
+  rt.app.tracepointAt = (path, line)
+  discard rt.openPrompt(pkCommand)
+  discard rt.prompt.insert("tracepoint ")
+  rt.note("a tracepoint at " & path.extractFilename & ":" & $line &
+          " — type its expression and press Enter")
+
+proc caretTakesAltChord(rt: TuiRuntime; name: string): bool =
+  ## PLAT-51: whether `name` (an `Alt+<char>` key) is one the read-only
+  ## editor's caret takes right now — Alt+T, with the caret placed, the source
+  ## pane focused and nothing modal open (an open prompt, menu, omnibox or
+  ## overlay owns its keys first, as `handleToken` orders them).
+  if name != "Alt+t" or rt.app.modes.product == pmEdit or rt.prompt.open or
+     rt.app.contextMenu.open or rt.app.content.open or
+     rt.app.omnibar.isOpen or rt.app.menu.isOpen:
+    return false
+  if rt.app.caret.line <= 0 or rt.app.source.isEmpty or
+     rt.app.caret.path != rt.app.source.path:
+    return false
+  let (had, focused) = rt.focus.focusedPane()
+  had and focused == paneEditor
+
+proc handleCaretKey(rt: TuiRuntime; token: string;
+                    outcome: var RuntimeOutcome): bool =
+  ## PLAT-51: the caret's keys while it is placed and the source pane has the
+  ## focus — the arrows, Home and End move it (never the debugger); Alt+T
+  ## and Ctrl+Enter, the desktop's chords, open the tracepoint editor on its
+  ## line.
+  if rt.app.caret.line <= 0 or rt.app.source.isEmpty or
+     rt.app.caret.path != rt.app.source.path:
+    return false
+  let (had, focused) = rt.focus.focusedPane()
+  if not had or focused != paneEditor:
+    return false
+  let name = keyName(token)
+  if name in ["Alt+t", "Ctrl+Enter"]:
+    rt.openTracepointEditorAt(rt.app.caret.path, rt.app.caret.line)
+    outcome.repaint = true
+    return true
+  var (path, line, column) = rt.app.caret
+  let total = max(1, rt.app.source.totalLineCount)
+  case name
+  of "Up": line = max(1, line - 1)
+  of "Down": line = min(total, line + 1)
+  of "Left": column = max(1, column - 1)
+  of "Right": column = column + 1
+  of "Home": column = 1
+  of "End":
+    let local = line - rt.app.source.firstHeldLine
+    column =
+      if local >= 0 and local < rt.app.source.heldLines.len:
+        cellWidthOf(rt.app.source.heldLines[local]) + 1
+      else: column
+  else: return false
+  rt.app.caret = (path, line, column)
+  outcome.repaint = true
+  true
 
 proc routeDockLabelClick(rt: TuiRuntime; geometry: LayoutGeometry;
                          event: MouseEvent;
@@ -1532,36 +1810,68 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     if event.button notin {mbLeft, mbRight}:
       return false
     return rt.routeEventLogClick(under, event, outcome)
-  of paneTimeline:
-    # K30 / K45 on the scrubber's track; the event log under it as K24-K26.
-    let content = CellArea(col: under.col, row: under.row + 1,
-                           width: under.width,
-                           height: max(0, under.height - 1))
-    if content.height < 2 or not rt.app.timeline.boundsKnown:
-      return false
-    if event.row < content.row + TimelineBarRows:
-      if event.button != mbLeft:
-        return false
-      let tick = rt.timelineTickAt(content, event.col)
-      if tick < 0:
-        return false
-      # A press seeks; a drag from it seeks again where it is released (the
-      # desktop's `mousedown` / `mouseup` on the track).
-      rt.app.timelineDrag = true
-      outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: uint64(tick)))
-      return true
-    if event.button notin {mbLeft, mbRight}:
-      return false
-    let log = CellArea(col: content.col, row: content.row + TimelineBarRows - 1,
-                       width: content.width,
-                       height: content.height - TimelineBarRows + 1)
-    return rt.routeEventLogClick(log, event, outcome)
   of paneState:
     # K27 / K28.
     if rt.app.variables.isEmpty:
       return false
     var g = newStyledGrid(under.col + under.width, under.row + under.height)
     let screen = paintVariables(g, under, rt.app.variables)
+    # PLAT-51: EVERY DESKTOP VALUE FEATURE HERE TOO (Variable-State-Pane.md,
+    # "Every front-end has every value feature").
+    let (anyRow, prow) = screen.rowAtScreenRow(event.row)
+    if anyRow:
+      case prow.kind
+      of vrkHistory:
+        # A history entry is a NAVIGATION ROW: a click goes to that moment;
+        # its menu is the desktop's history row menu.
+        if event.button == mbLeft:
+          outcome.requestClick(PaneClickRequest(kind: pcSeek,
+                                                tick: prow.ticks))
+          return true
+        if event.button == mbRight:
+          rt.openContextMenu(valueHistoryEntryContextMenu(
+                               variablePathOf(prow.node.path), prow.note,
+                               prow.ticks, path = prow.node.path),
+                             event.row, event.col, outcome)
+          return true
+        return false
+      of vrkAddWatch:
+        if event.button != mbLeft:
+          return false
+        discard rt.openPrompt(pkCommand)
+        discard rt.prompt.insert("watch ")
+        rt.note("type the expression to watch and press Enter")
+        outcome.repaint = true
+        return true
+      of vrkMore:
+        if event.button != mbLeft:
+          return false
+        # The desktop's load-more row: the next chunk of the members.
+        discard rt.app.variables.expandMore(prow.node.path)
+        outcome.repaint = true
+        return true
+      of vrkVariable:
+        if event.button == mbLeft:
+          case screen.controlAt(rt.app.variables, event.row, event.col)
+          of vcHistory:
+            outcome.requestClick(PaneClickRequest(kind: pcValueHistory,
+                                                  path: prow.node.path))
+            return true
+          of vcOrigin:
+            outcome.requestClick(PaneClickRequest(kind: pcValueOrigin,
+                                                  path: prow.node.path))
+            return true
+          of vcRemoveWatch:
+            outcome.requestClick(PaneClickRequest(
+              kind: pcWatch, path: prow.node.name, behaviour: "remove"))
+            return true
+          of vcNameSeparator:
+            # The desktop's column resize: the separator is held, and the
+            # name column follows the pointer until the release.
+            rt.app.variablesResize = (active: true, area: under)
+            return true
+          of vcNone: discard
+      else: discard
     let path = screen.pathAtScreenRow(event.row)
     if path.len == 0:
       return false
@@ -1694,14 +2004,8 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
                     of caJumpBackwardToCall: "backward"
                     else: "smart")))
   of caAddTracepoint:
-    # The desktop opens its tracepoint editor on the line; this front-end
-    # sets tracepoints with `:tracepoint <expr>`, so the prompt opens with it
-    # typed, placed on the chosen line instead of the stop's.
-    rt.app.tracepointAt = (target.path, target.line)
-    discard rt.openPrompt(pkCommand)
-    discard rt.prompt.insert("tracepoint ")
-    rt.note("a tracepoint at " & target.path.extractFilename & ":" &
-            $target.line & " — type its expression and press Enter")
+    # The desktop opens its tracepoint editor on the line.
+    rt.openTracepointEditorAt(target.path, target.line)
   of caToggleCallChildren:
     outcome.togglesCall = true
     outcome.callIndex = target.index
@@ -1760,36 +2064,6 @@ proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
       outcome.repaint = true
     return event.kind != mekMotion
   false
-
-proc routeTimelineDrag(rt: TuiRuntime; event: MouseEvent;
-                       outcome: var RuntimeOutcome): bool =
-  ## K45: while a press on the timeline's track is held, the motion previews
-  ## the tick under the pointer and the release seeks there (the desktop's
-  ## drag on the track: `mousemove` previews, `mouseup` seeks).
-  if not rt.app.timelineDrag:
-    return false
-  if event.kind == mekPress:
-    rt.app.timelineDrag = false
-    return false
-  let geometry = rt.layoutGeometry()
-  let idx = geometry.regionIndexAt(event.row, event.col)
-  var tick = -1'i64
-  if idx >= 0 and geometry.projection.regions[idx].pane == paneTimeline:
-    let under = paneUnderStrip(geometry, idx)
-    let content = CellArea(col: under.col, row: under.row + 1,
-                           width: under.width,
-                           height: max(0, under.height - 1))
-    tick = rt.timelineTickAt(content, event.col)
-  if event.kind == mekMotion:
-    if tick >= 0:
-      rt.note("tick " & $tick)
-      outcome.repaint = true
-    return true
-  # The release.
-  rt.app.timelineDrag = false
-  if tick >= 0 and uint64(tick) != rt.app.timeline.currentTick:
-    outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: uint64(tick)))
-  true
 
 proc handleContextMenuKey(rt: TuiRuntime; token: string;
                           outcome: var RuntimeOutcome) =
@@ -1918,6 +2192,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
         outcome.callIndex = hit.index
         outcome.repaint = true
         return
+      of cthTrack, cthThumb:
+        # PLAT-51: the scrollbar scrubber — the VIEW jumps (the track) or
+        # follows the thumb from here (a drag); the debugger does not move.
+        if hit.kind == cthThumb:
+          rt.app.listScrub = (active: true, pane: paneCalltrace)
+        discard rt.scrubCallTrace(area, event.row,
+                                  dragging = hit.kind == cthThumb, outcome)
+        return
       of cthNone:
         discard
   if acted.status == lasNoGesture and event.kind == mekPress and
@@ -1926,6 +2208,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     if idx >= 0 and geometry.projection.regions[idx].pane == paneCalltrace and
        not rt.app.callTrace.isEmpty:
       rt.scrollCallTrace(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-51: the wheel scrolls the Event Log by rows (it did not scroll).
+    if idx >= 0 and geometry.projection.regions[idx].pane == paneEventLog and
+       rt.app.eventLog.hasContent:
+      rt.scrollEventLog(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -2145,7 +2434,7 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
       rt.note("no pane " & $dir & " of the focused one")
     outcome.repaint = true
     true
-  of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectTimeline:
+  of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectEventLog:
     let (known, pane) = directSelectPane(action)
     if not known:
       return false
@@ -2360,7 +2649,6 @@ proc menuPaneOf*(action: string): (bool, PaneKind) =
   of "aFullCalltrace": (true, paneCalltrace)
   of "aState": (true, paneState)
   of "aEventLog": (true, paneEventLog)
-  of "aTimeline": (true, paneTimeline)
   of "aTerminal": (true, paneTerminalOutput)
   of "aScratchpad": (true, paneScratchpad)
   of "aPointList": (true, panePointList)
@@ -2485,7 +2773,7 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
   else:
     # PLAT-50: A PANE THE ARRANGEMENT DOES NOT PLACE IS OPENED, as the
     # desktop's View menu opens its panel — a tab beside the event log
-    # (the "Timeline & Tracepoints" stack), else at the root.
+    # (the event stack), else at the root.
     let anchor = if b.layout.tree.contains(paneEventLog): some(paneEventLog)
                  else: none(PaneKind)
     let added = b.dispatch(cmdAddPane(pane, after = anchor))
@@ -2877,6 +3165,14 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
                           action: kaNone, detail: "")
   rt.lastToken = token
   rt.lastKey = keyName(token)
+  # PLAT-51: ALT + A CHARACTER arrives as ONE `ESC <char>` token (the
+  # framer, `host/terminal_driver.feed`). The caret's Alt+T — the desktop's
+  # "Add tracepoint" chord — is the one this front-end binds; any other is the
+  # character alone, which is what the framer delivered before it framed Alt.
+  if token.len == 2 and token[0] == '\x1b' and
+     rt.lastKey.startsWith("Alt+") and
+     not rt.caretTakesAltChord(rt.lastKey):
+    return rt.handleToken(token[1 .. 1], nowMs)
 
   # PLAT-6's MOUSE HALF, ROUTED HERE AND ONLY WHEN A BINDING IS ENABLED. The
   # decoder is not even CALLED without one, so with the flag off this is one
@@ -2889,6 +3185,15 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # button) is theirs or nobody's: it never repaints a frame for nothing.
   block:
     let (isMouse, event) = decodeMouse(token)
+    # PLAT-51 (Native-Front-End-Parity.md §1, CodeTracer-TUI.md §4.4): SHIFT
+    # IS THE TERMINAL'S. Most terminals bypass mouse reporting while Shift is
+    # held, so their own selection and menu work; one that DELIVERS a
+    # Shift-modified report finds the TUI standing down exactly as the
+    # browser build's handlers do on Shift — no menu, no drag, no focus, no
+    # repaint. (`--no-mouse` stays the whole-session escape.)
+    if isMouse and event.shift:
+      rt.lastToken = token
+      return
     if isMouse:
       # PLAT-49 part B: the pointer's passing is the auto-hide hover's too.
       if event.kind == mekMotion and event.button != mbLeft and
@@ -2898,12 +3203,17 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       # over everything, the top bar included.
       if rt.routeOverlayMouse(event, result):
         return
-      # PLAT-50 (K45): a press held on the timeline's track owns the
-      # pointer until it is released.
-      if rt.routeTimelineDrag(event, result):
-        return
       # PLAT-52: a press held on a Terminal Output scrubber, likewise.
       if rt.routeTerminalDrag(event, result):
+        return
+      # PLAT-51: the open frame viewer's own scrubber (it is over the panes).
+      if rt.routeFrameViewerMouse(event, result):
+        return
+      # PLAT-51: and on a list pane's scrubber thumb, and on the Variables
+      # pane's column separator.
+      if rt.routeListScrubDrag(event, result):
+        return
+      if rt.routeVariablesResize(event, result):
         return
       if rt.routeTopBarMouse(event, result):
         return
@@ -2999,6 +3309,10 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     return
   else:
     discard
+  # PLAT-51: THE READ-ONLY EDITOR'S CARET, once a click placed it, takes the
+  # arrows (and the tracepoint chords) while the source pane has the focus.
+  if rt.app.modes.product != pmEdit and rt.handleCaretKey(token, result):
+    return
 
   # PLAT-16, STEP 1a: THE EDITOR OWNS ITS OWN KEYS, and it owns them by FOCUS
   # rather than by a fifth input mode.

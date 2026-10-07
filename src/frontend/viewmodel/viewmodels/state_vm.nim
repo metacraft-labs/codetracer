@@ -37,6 +37,7 @@ import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types as store_types]
 import origin_chain_types
+import value_changes
 # NOTE: deliberately does NOT import `common/types`. That module *includes*
 # `common_types`, which is also included by `frontend/types.nim` under
 # different `langstring`/`TableLike` bindings — so every type in it exists
@@ -118,6 +119,23 @@ type
       ## variable path (``VariableViewState.path``) — the same key
       ## ``expandedHistories`` uses and the same key the
       ## ``ct/load-history`` request was sent under.
+
+    # -- PLAT-51: changed values --
+    valueChanges*: Signal[VariableDiff]
+      ## WHAT THE STEP THAT PRODUCED THE CURRENT STOP CHANGED
+      ## (`value_changes.diffAt`: against the recording's predecessor, not
+      ## the stop the user came from). Every front-end draws a row whose path
+      ## `isModified` in the shared changed-value style — the desktop's
+      ## `.value-changed`, the terminal's and GPUI's same token (PLAT-51:
+      ## Variable-State-Pane.md, "Changed-value styling"; no `[MOD]` badge).
+    changeTimeline*: ValueTimeline
+      ## The locals observed at each stop this session saw, the diff's input.
+    originLines*: Signal[Table[string, seq[string]]]
+      ## PLAT-51: the value-origin chains OPEN IN THE PANE, by the row's path,
+      ## one line per hop — listed under the row as the desktop's in-row
+      ## chain (`div.ct-origin-inline-chain`) is. A native host fills it
+      ## (`loadValueOrigin`) when a row's origin badge or "Show value origin"
+      ## opens it, and re-reads it at each stop.
 
     # -- Derived state --
     currentVariables*: Memo[seq[store_types.Variable]]
@@ -396,6 +414,27 @@ proc removeWatch*(vm: StateVM; expression: string) =
     exprs.delete(idx)
     vm.watchExpressions.val = exprs
 
+proc editWatch*(vm: StateVM; old, expression: string) =
+  ## PLAT-51: EDIT a watch — `old` becomes `expression`, in its place in the
+  ## list (Variable-State-Pane.md: watch expressions "add, edit, remove").
+  ## No-op when `old` is not a watch; an edit to an expression already
+  ## watched removes `old` (the list stays free of duplicates).
+  if expression.len == 0 or old == expression:
+    return
+  if not vm.collabCore.isNil:
+    vm.removeWatch(old)
+    vm.addWatch(expression)
+    return
+  var exprs = vm.watchExpressions.val
+  let at = exprs.find(old)
+  if at < 0:
+    return
+  if expression in exprs:
+    exprs.delete(at)
+  else:
+    exprs[at] = expression
+  vm.watchExpressions.val = exprs
+
 proc toggleHistory*(vm: StateVM; expression: string) =
   # Build a fresh HashSet to avoid same-reference equality on the JS target.
   # See updateHistory for full explanation.
@@ -554,6 +593,8 @@ proc createStateVM*(store: ReplayDataStore;
     let originPreferences = createSignal(defaultOriginPreferences())
     let originMetadataMode = createSignal("unavailable")
     let lastContextMenu = createSignal(newSeq[OriginContextMenuEntry]())
+    let valueChanges = createSignal(VariableDiff())
+    let originLines = createSignal(initTable[string, seq[string]]())
 
     # Derived: pick the right variable list based on the active tab.
     let currentVariables = createMemo[seq[store_types.Variable]] proc(): seq[store_types.Variable] =
@@ -614,6 +655,9 @@ proc createStateVM*(store: ReplayDataStore;
       originPreferences: originPreferences,
       originMetadataMode: originMetadataMode,
       lastContextMenu: lastContextMenu,
+      valueChanges: valueChanges,
+      originLines: originLines,
+      changeTimeline: initValueTimeline(),
       disposeProc: dispose,
     )
 
@@ -625,6 +669,24 @@ proc createStateVM*(store: ReplayDataStore;
     # the stop being left, whose answer can only ever be dropped.
     let stop = createMemo[string] proc(): string =
       stopIdentityOf(store.debugger.val)
+
+    # PLAT-51: THE CHANGED VALUES. Every answer for the locals is observed at
+    # the stop it belongs to — an answer is admitted only while the debugger
+    # is still at the stop it was requested at (PLAT-29), so the position read
+    # when it lands is its stop — and the diff is taken there. A stop whose
+    # locals have not arrived yet observes the previous answer at the new
+    # tick; the real answer REPLACES that snapshot when it lands
+    # (`ValueTimeline.observe` replaces a re-observed tick), so the marks
+    # settle on the right rows.
+    createEffect proc() =
+      discard stop.val
+      let locals = store.locals.locals.val
+      untrack(proc() =
+        let d = store.debugger.val
+        if d.rrTicks == 0'u64 and locals.len == 0:
+          return
+        vm.changeTimeline.observe(d.rrTicks, snapshotOf(locals))
+        vm.valueChanges.val = vm.changeTimeline.diffAt(d.rrTicks))
 
     createEffect proc() =
       discard stop.val
@@ -655,3 +717,17 @@ proc createStateVM*(store: ReplayDataStore;
                             watchExpressions = watches))
 
     vm
+
+proc isChanged*(vm: StateVM; path: string): bool =
+  ## PLAT-51: whether the row at `path` (the dot path `expandedPaths` uses)
+  ## holds a value the step that produced the current stop changed — drawn
+  ## in the shared changed-value style on every front-end.
+  not vm.isNil and vm.valueChanges.val.isModified(path)
+
+proc jumpToHistoryEntry*(vm: StateVM; ticks: int64) =
+  ## PLAT-51: a value-history entry is a NAVIGATION ROW (Variable-State-Pane
+  ## .md; Click-Navigation.md §2): go to the tick its value was recorded at
+  ## (`ct/goto-ticks`, the seek the terminal's and GPUI's history rows send).
+  if vm.isNil or vm.store.isNil or ticks < 0:
+    return
+  vm.store.requestHistoricalNavigation("ct/goto-ticks", %*{"ticks": ticks})

@@ -154,6 +154,19 @@ const
   OmnibarOpenMinCells* = 16
   OmnibarFieldMinCells* = 14
   OmnibarResultRows* = 10
+  OmnibarGround* = srSurfaceEditor
+    ## PLAT-51: the omnibox's ground in EVERY state is the editor's
+    ## (`editor-theme/ground`), its text the editor's default foreground.
+  OmnibarTextStyle* = CellStyle(role: srEditorText, surface: OmnibarGround)
+  OmnibarPlaceholderStyle* = CellStyle(role: srLineNumber,
+                                       surface: OmnibarGround, italic: true)
+    ## The placeholder: the editor's muted foreground (the gutter's line
+    ## numbers), italic so it is never read as a typed query.
+  OmnibarMutedStyle* = CellStyle(role: srLineNumber, surface: OmnibarGround)
+  OmnibarSelectedStyle* = CellStyle(role: srEditorText,
+                                    surface: srSurfaceSelection, bold: true)
+    ## The selected result: the editor's selection colour under the editor's
+    ## foreground, as the editor draws a selection.
   GraphicsControlCells* = 2
     ## A picture control is two cells wide and one tall: about square at the
     ## usual 1:2 cell, which is what the desktop's 16x16 marks are drawn in.
@@ -555,14 +568,21 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         # (or open and empty) it shows the Omnibar ViewModel's placeholder,
         # in italic so it is never read as a typed query; open, the query
         # with the caret where the ViewModel's `cursor` is (`omnibarCaret`).
-        g.fillSurface(0, s.col, s.width, 1, srSurfaceField)
-        g.paint(0, s.col, spaces(s.width),
-                CellStyle(role: srChromeText, surface: srSurfaceField))
+        #
+        # PLAT-51 (Commands-And-Omnibox.md, "Omnibox colours on every
+        # front-end"): THE EDITOR'S GROUND AND FOREGROUND, in every state —
+        # idle, hovered, focused / typing — and the placeholder in the
+        # editor's muted foreground (its line-number colour). The field's
+        # bounds stay the `ui/border/secondary` edge lines below. This
+        # supersedes PLAT-50's input surface (`srSurfaceField`), which the
+        # user still read as "white".
+        g.fillSurface(0, s.col, s.width, 1, OmnibarGround)
+        g.paint(0, s.col, spaces(s.width), OmnibarTextStyle)
         let (text, _) = omnibarFieldText(m, s.width)
         let showsPlaceholder = m.omnibar.isNil or m.omnibar.query.len == 0
         g.paint(0, s.col + OmnibarPad, text,
-                CellStyle(role: srChromeText, surface: srSurfaceField,
-                          italic: showsPlaceholder))
+                if showsPlaceholder: OmnibarPlaceholderStyle
+                else: OmnibarTextStyle)
         if s.width > 2 * OmnibarPad:
           g.fillSurface(0, s.col, 1, 1, srSurfaceTopBar)
           g.paint(0, s.col, FieldEdgeLeft,
@@ -835,14 +855,16 @@ proc paintOmnibarDropdown*(g: var StyledGrid; m: TopBarModel;
   let a = CellArea(col: box.col + f, row: box.row + f,
                    width: max(0, box.width - 2 * f),
                    height: max(0, box.height - 2 * f))
+  # PLAT-51: the results list is on the EDITOR'S ground too (the frame
+  # stays the menu's), its selected row on the editor's selection colour.
+  g.fillSurface(a.row, a.col, a.width, a.height, OmnibarGround)
   if m.omnibar.results.len == 0:
     let what =
       case m.omnibar.mode
       of omProgram: "program search runs in the search pane"
       of omAgent: "the agent is not available in the terminal"
       else: "no match"
-    g.paint(a.row, a.col, fitCells(" " & what, a.width),
-            CellStyle(role: srChromeMuted, surface: srSurfaceMenu))
+    g.paint(a.row, a.col, fitCells(" " & what, a.width), OmnibarMutedStyle)
     return
   for k in 0 ..< a.height:
     let i = first + k
@@ -850,16 +872,15 @@ proc paintOmnibarDropdown*(g: var StyledGrid; m: TopBarModel;
       break
     let r = m.omnibar.results[i]
     let selected = i == m.omnibar.selected
-    let surface = if selected: srSurfaceSelection else: srSurfaceMenu
+    let surface = if selected: srSurfaceSelection else: OmnibarGround
     g.fillSurface(a.row + k, a.col, a.width, 1, surface)
     g.paint(a.row + k, a.col, fitCells(" " & r.entry.label, a.width),
-            CellStyle(role: (if selected: srTabActive else: srChromeText),
-                      bold: selected))
+            if selected: OmnibarSelectedStyle else: OmnibarTextStyle)
     if r.entry.detail.len > 0:
       let dw = textCells(r.entry.detail) + 1
       if dw + textCells(r.entry.label) + 2 <= a.width:
         g.paint(a.row + k, a.col + a.width - dw, r.entry.detail & " ",
-                CellStyle(role: srChromeMuted))
+                CellStyle(role: srLineNumber, surface: surface))
 
 proc omnibarHitAt*(m: TopBarModel; lay: TopBarLayout; width, height,
                    row, col: int): tuple[inside: bool, index: int] =

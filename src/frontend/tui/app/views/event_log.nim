@@ -70,9 +70,12 @@ from codetracer_embed import EventLogColumn, EventLogColumns,
   defaultEventLogColumns, visibleColumns, eventLogColumnTitle, elcTick,
   elcIndex, elcLocation, elcKind, elcOutput, EventLogOrder,
   RecordedEventOrder, clickedHeader
+# PLAT-51: the scrollbar scrubber's shared model.
+from codetracer_embed import ScrubberModel, scrubberModel
 
 import ../layout/profile
 import ./styled_row
+import ./scrubber_track
 
 export styled_row, profile
 export EventLogColumn, EventLogColumns, defaultEventLogColumns,
@@ -116,6 +119,10 @@ type
     atEnd*: bool
       ## The server had nothing after this window. See this module's header on
       ## why the total is discovered rather than declared.
+    total*: int = -1
+      ## PLAT-51: the WHOLE log's size when the engine said it (`ct/event-load`
+      ## carries `total` since then), -1 when it did not — the population the
+      ## scrollbar scrubber spans.
 
   EventPages* = proc(offset, limit: int): EventPage {.closure.}
     ## THE SERVER-PAGINATION SEAM. Answers one window of the recorded log.
@@ -169,6 +176,10 @@ type
       ## Page index that came back short, or -1 until one does.
     knownTotal: int
       ## -1 until `endPage` is found.
+    current*: int
+      ## PLAT-51: the row of the CURRENT recording position in the whole log
+      ## (the last event at or before the debugger's tick — the engine's
+      ## `indexAtTick`), -1 when unknown: the scrubber track's mark.
 
   EventLogScreen* = object
     ## One painted pane, plus the counts and coordinates a test asserts on.
@@ -194,8 +205,16 @@ type
     columnCells*: seq[(EventLogColumn, int, int)]
       ## Each visible column with its first screen column and its width, in
       ## display order — the header's cells, for a click and for a test.
+    trackCol*: int
+      ## PLAT-51: the scrollbar scrubber's column (the pane's rightmost), -1
+      ## when the pane is too small to draw one.
+    trackTop*: int
+    trackRows*: int
+      ## The track's first screen row and its height (the body's).
 
 const
+  MinTrackedWidth* = 8
+    ## PLAT-51: the narrowest pane that gives a column to the scrubber.
   EventLogTitle* = "TRACEPOINTS"
     ## Contains the string CTUI-3's own pane title produced for `paneEventLog`
     ## in the Compact profile (`shell.paneTitle` calls that pane `Tracepoints`),
@@ -332,7 +351,16 @@ proc initEventLogModel*(pages: EventPages = nil;
     held: initTable[int, seq[EventRow]](),
     fetchedPages: @[],
     endPage: -1,
-    knownTotal: -1)
+    knownTotal: -1,
+    current: -1)
+
+proc scrubberOf*(model: EventLogModel; bodyHeight: int): ScrubberModel =
+  ## PLAT-51: the scrollbar scrubber over the WHOLE log (Scrollbar-Scrubbers.md
+  ## §2: the Event Log's population, not the rows held) — its total, the
+  ## view's first row and height, and the current position's row. While the
+  ## total is unknown the thumb is indeterminate (§3.1).
+  scrubberModel(max(0, model.knownTotal), model.scrollTop, bodyHeight,
+                model.current, totalKnown = model.knownTotal >= 0)
 
 proc pageOf*(model: EventLogModel; index: int): int =
   ## Which page an absolute event index falls in.
@@ -380,7 +408,13 @@ proc fetchPage(model: var EventLogModel; page: int) =
   let answer = model.pages(page * model.pageSize, model.pageSize)
   model.fetchedPages.add page
   model.held[page] = answer.rows
-  if answer.atEnd or answer.rows.len < model.pageSize:
+  if answer.total >= 0:
+    # PLAT-51: the engine said how long the whole log is — the end is KNOWN,
+    # not discovered by reading the page that comes back short.
+    model.knownTotal = answer.total
+    model.endPage = if answer.total <= 0: 0
+                    else: (answer.total - 1) div model.pageSize
+  elif answer.atEnd or answer.rows.len < model.pageSize:
     model.endPage = page
     model.knownTotal = page * model.pageSize + answer.rows.len
 
@@ -666,8 +700,13 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
   result = EventLogScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, eventRows: 0,
     pendingRows: 0, selectedRow: -1, currentRow: -1,
-    tickColumn: -1, contentColumn: -1, headerRow: -1)
-  result.columnCells = model.columnCellsOf(area.col, area.width)
+    tickColumn: -1, contentColumn: -1, headerRow: -1, trackCol: -1)
+  # PLAT-51: THE RIGHTMOST COLUMN IS THE SCROLLBAR SCRUBBER, inside the pane's
+  # own rectangle (Scrollbar-Scrubbers.md §4), when the pane has a body and
+  # room for it; the columns lay out in the cells left of it.
+  let tracked = area.width >= MinTrackedWidth and area.height > 2
+  let width = if tracked: area.width - ScrubberTrackCells else: area.width
+  result.columnCells = model.columnCellsOf(area.col, width)
   for (col, at, _) in result.columnCells:
     if col == elcTick: result.tickColumn = at
     if col == elcOutput: result.contentColumn = at
@@ -692,17 +731,23 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
   if header:
     result.headerRow = area.row + 1
     var at = area.col
-    for span in headerRowSpans(model, area.width):
+    for span in headerRowSpans(model, width):
       g.paint(area.row + 1, at, span.text, span.style)
       at += cellWidthOf(span.text)
   let firstBody = area.row + (if header: 2 else: 1)
   let bodyHeight = area.row + area.height - firstBody
   result.bodyHeight = bodyHeight
   let rows = model.paneRows(model.scrollTop, bodyHeight)
+  if tracked and bodyHeight > 0:
+    result.trackCol = area.col + width
+    result.trackTop = firstBody
+    result.trackRows = bodyHeight
+    paintVerticalScrubber(g, result.trackCol, firstBody, bodyHeight,
+                          model.scrubberOf(bodyHeight))
 
   if rows.len == 0:
     g.paint(firstBody, area.col,
-            truncateToCells(EmptyLogText, area.width), EmptyLogStyle)
+            truncateToCells(EmptyLogText, width), EmptyLogStyle)
     for r in area.row ..< area.row + area.height:
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
@@ -710,7 +755,7 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
   for i, row in rows:
     let screenRow = firstBody + i
     var at = area.col
-    for span in eventRowSpans(model, row, area.width):
+    for span in eventRowSpans(model, row, width):
       g.paint(screenRow, at, span.text, span.style)
       at += cellWidthOf(span.text)
     result.visible.add row

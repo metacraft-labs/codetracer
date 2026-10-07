@@ -76,10 +76,6 @@
             },
             {
               "kind": "pane",
-              "pane": "timeline"
-            },
-            {
-              "kind": "pane",
               "pane": "terminalOutput"
             }
           ]

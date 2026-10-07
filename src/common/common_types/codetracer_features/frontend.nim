@@ -192,7 +192,9 @@ type
     aTraceMacroAtCursor,      # Trace macro expansion at the editor cursor
     aTraceStaticBlockAtCursor, # Trace `static:` block at the editor cursor
     aCollabInvite,            # Create/copy/revoke a collaboration invite URL
-    aTimeline,                # Open the Timeline panel
+    aRetiredTimeline,         # Was "Open the Timeline panel"; the panel is
+                              # removed (2026-10-05). Kept for the ordinal;
+                              # no menu item, no command, no effect.
     aStartAgenticWorktreeSession, # Start a worktree-isolated agentic session
     # Visual Replay / Video Player keyboard shortcuts — M4.  Routed through the
     # standard ClientAction mechanism but scoped to the Video Player component
@@ -396,7 +398,16 @@ type
     PointList = 16,
     Scratchpad = 17,
     LowLevelCode = 18,
-    Timeline = 19,
+    ## Ordinal 19 was `Timeline`, the Timeline panel. It is REMOVED from every
+    ## product (the user, 2026-10-05: "not valuable"; Layout-System.md, "The
+    ## Timeline panel is removed"): seeking across the recording is done by
+    ## every list pane's scrollbar, a scrubber over the pane's whole
+    ## population. Retired as `RetiredDeepReviewPanel` (36) is: the member
+    ## stays so `Content` remains contiguous, it has no `makeComponent` arm,
+    ## and a saved GoldenLayout config naming it is sanitised on load
+    ## (`retiredContentIds`, `index/config.dropRetiredPanels`) — the tab is
+    ## dropped instead of left empty. Do not reuse the ordinal.
+    RetiredTimelinePanel = 19,
     SearchResults = 20,
     BuildErrors = 21,
     TraceLog = 22,
@@ -599,6 +610,14 @@ func revealsPinnedPanel*(
   else:
     true
 
+proc retiredContentIds*(): seq[int] =
+  ## The `Content` ordinals of panels that no longer exist. A saved
+  ## GoldenLayout config naming one is sanitised on load (the tab dropped, its
+  ## stack's active tab kept in range, a stack left empty removed), so a
+  ## user's remembered layout opens WITHOUT the panel rather than with an
+  ## empty tab (Layout-System.md, "The Timeline panel is removed").
+  @[ord(Content.RetiredTimelinePanel), ord(Content.RetiredDeepReviewPanel)]
+
 proc editModeHiddenContentIds*(): seq[int] =
   ## The replay-only panes an EDITING session does not show.
   ##
@@ -623,7 +642,7 @@ proc editModeHiddenContentIds*(): seq[int] =
     ord(Content.Scratchpad),
     ord(Content.Repl),
     ord(Content.EventLog),
-    ord(Content.Timeline),
+    ord(Content.RetiredTimelinePanel),
     ord(Content.TerminalOutput),
     ord(Content.StepList),
     ord(Content.Calltrace),

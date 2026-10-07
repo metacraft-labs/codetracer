@@ -11,7 +11,7 @@
 ## Every pane in this front-end is a pure function of a MODEL, and every model
 ## has a binding under `app/` that builds it out of a ViewModel: CTUI-5's
 ## `sourcePaneModelFor`, CTUI-6's `callStackModelFor`, CTUI-7's
-## `variablesModelFor`, CTUI-8's `timelineBarModelFor` and `eventLogModelFor`.
+## `variablesModelFor` and CTUI-8's `eventLogModelFor`.
 ## Until this milestone every one of those was called only from a test, because
 ## `main.nim` had no loop to call them in. This module is the thing that calls
 ## them on a real stop, and it is in `host/` for one reason: it owns a
@@ -64,6 +64,7 @@ import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
 import ../../viewmodel/host/terminal_output_source   # PLAT-52
 import ../app/call_stack_binding
+import ../app/frame_viewer_binding
 import ../app/runtime
 import ../app/source_binding
 import ../app/timeline_binding
@@ -94,6 +95,10 @@ type
     events*: EventLogVM
     controls*: DebugControlsVM
     origin*: OriginChainVM
+    frames*: FrameViewerVM
+      ## PLAT-51: the frame viewer's ViewModel, when a producer opened one
+      ## (PLAT-59 wires the producer; nil until then). The pane's own
+      ## scrubber asks it for frames (`pcFrameSeek`).
     provider*: SourceProvider
     valueTimeline*: ValueTimeline
       ## CTUI-7's step-to-step diff. Carried across stops, because a diff is by
@@ -263,7 +268,8 @@ func eventRowOf(row: store_types.EventLogRow): EventRow =
     kindId: row.kindId)
 
 proc loadedEventRows(s: TuiSession; offset, limit: int;
-                     order = RecordedEventOrder): seq[EventRow] =
+                     order = RecordedEventOrder;
+                     atRRTicks: int64 = -1): seq[EventRow] =
   ## Ask the backend for a window and read the answer OUT OF THE STORE.
   ##
   ## `requestAndLoadEventLog` decodes into `store.eventLog.rows` — see its
@@ -272,7 +278,7 @@ proc loadedEventRows(s: TuiSession; offset, limit: int;
   ## itself, which made the terminal one of three independent decoders of the
   ## same payload.
   discard s.session.requestAndLoadEventLog(start = offset, count = limit,
-                                           order = order)
+                                           order = order, atRRTicks = atRRTicks)
   result = @[]
   for row in s.session.session.store.eventLog.rows.val:
     result.add eventRowOf(row)
@@ -381,11 +387,15 @@ proc callTraceModelOf(s: TuiSession; rt: TuiRuntime): CallTraceModel =
       name: (if line.displayName.len > 0: line.displayName else: line.name),
       depth: line.depth, rrTicks: line.rrTicks,
       call: callRowOf(line, a))
-  initCallTraceModel(rows, s.session.getCurrentRRTicks(), s.callTraceStack,
-                     firstIndex = store.calltrace.startLineIndex.val,
-                     total = int(store.calltrace.totalCallsCount.val),
-                     scrollTop = rt.app.callTrace.scrollTop,
-                     follow = not rt.app.callTraceScrolled)
+  result = initCallTraceModel(rows, s.session.getCurrentRRTicks(),
+                              s.callTraceStack,
+                              firstIndex = store.calltrace.startLineIndex.val,
+                              total = int(store.calltrace.totalCallsCount.val),
+                              scrollTop = rt.app.callTrace.scrollTop,
+                              follow = not rt.app.callTraceScrolled)
+  # PLAT-51: where the debugger is in the WHOLE trace (the engine's), for the
+  # scrubber's mark.
+  result.currentIndex = int(store.calltrace.currentLineIndex.val)
 
 proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
   ## PLAT-47: **the call trace, a section at a time.** Build the pane's model
@@ -411,6 +421,7 @@ proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
   if top >= first and last <= first + model.rows.len:
     return
   let start = max(0, top - CallTraceBuffer)
+  inc rt.app.listScrubFetches
   try:
     s.session.requestAndLoadCalltrace(
       startIndex = start.int64, height = body + 2 * CallTraceBuffer,
@@ -421,8 +432,11 @@ proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
   rt.app.callTrace = s.callTraceModelOf(rt)
   if not rt.app.callTraceScrolled:
     return
-  # The reader's position is kept exactly across the load.
-  rt.app.callTrace.scrollTop = top
+  # The reader's position is kept exactly across the load — and a view the
+  # scrubber put at the END stays at the end of the trace as re-counted.
+  rt.app.callTrace.scrollTop =
+    if rt.app.callTraceAtEnd: max(0, rt.app.callTrace.total - body)
+    else: top
 
 proc scratchpadModelOf*(vm: ScratchpadVM): ScratchpadPaneModel =
   ## PLAT-50: the Scratchpad ViewModel's rows as the pane's value.
@@ -470,6 +484,18 @@ proc refreshTerminalOutput*(s: TuiSession; rt: TuiRuntime) =
     rt.app.terminalOutput)
 
 proc showViewedFile(s: TuiSession; rt: TuiRuntime)
+
+proc refreshOrigins(s: TuiSession; rt: TuiRuntime) =
+  ## PLAT-51: the origin chains open in the Variables pane, read at THIS stop
+  ## (an origin is the current value's), one line per hop.
+  var origins = initTable[string, seq[string]]()
+  for path in rt.app.openOrigins:
+    let name = variablePathOf(path)
+    try:
+      origins[path] = s.session.loadValueOrigin(name).originHopLines
+    except CatchableError:
+      origins[path] = @[]
+  rt.app.variables.origins = origins
 
 proc refresh*(s: TuiSession; rt: TuiRuntime)
 
@@ -570,9 +596,14 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   s.valueTimeline.observeStop(tick, locals)
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
                                        tickLabel = "tick " & $tick)
+  # PLAT-51: the pane's open histories and origins, its watches and the
+  # name column's width — the user's, carried across stops.
+  rt.app.variables.histories = rt.app.openHistories
+  rt.app.variables.watches =
+    if s.state.isNil: @[] else: s.state.watchExpressions.val
+  rt.app.variables.nameCells = rt.app.variablesNameCells
+  s.refreshOrigins(rt)
 
-  rt.app.timeline = timelineBarModelFor(s.timeline, s.bounds, @[], @[],
-                                        currentTick = tick)
   # §3.1's header counters. `int` rather than `uint64` because `HeaderModel`
   # carries them as `int` for the width arithmetic that formats them; a
   # recording long enough to overflow that would have overflowed the scrubber's
@@ -587,15 +618,26 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # PLAT-50: and so is the ORDER a header click chose — the pages are asked
   # for in it (read when a page is fetched, so a reorder applies at once).
   let keptOrder = rt.app.eventLog.order
+  # PLAT-51: and so is WHERE THE READER IS in the log — the scrubber moves the
+  # view, a row click moves the debugger, and the view must not jump back to
+  # the top because the debugger moved.
+  let keptScroll = rt.app.eventLog.scrollTop
+  let keptSelected = rt.app.eventLog.selected
   let runtime = rt
   rt.app.eventLog = eventLogModelFor(
     proc(offset, limit: int): EventPage =
       var rows: seq[EventRow] = @[]
       try:
-        rows = sess.loadedEventRows(offset, limit, runtime.app.eventLog.order)
+        # PLAT-51: naming the stop's tick, so the answer also says which row
+        # of the whole log is "now" — the scrubber's mark.
+        rows = sess.loadedEventRows(offset, limit, runtime.app.eventLog.order,
+                                    atRRTicks = int64(tick))
       except CatchableError:
         discard
-      EventPage(rows: rows, atEnd: rows.len < limit),
+      let ev = sess.session.session.store.eventLog
+      EventPage(rows: rows, atEnd: rows.len < limit,
+                total: (if ev.totalReported.val: ev.recordsTotal.val
+                        else: -1)),
     currentTick = tick, pageSize = EventLogPageSize)
   if keptColumns.order.len > 0:
     rt.app.eventLog.columns = keptColumns
@@ -610,6 +652,12 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # gets `elrPending` rows, which is exactly what the first run of this loop
   # showed: five `…` lines under a `TRACEPOINTS loading` title.
   rt.app.eventLog.ensureWindow(0, EventLogPageSize)
+  rt.app.eventLog.current = s.session.session.store.eventLog.currentIndex.val
+  if keptScroll > 0:
+    rt.app.eventLog.scrollTop = event_log.clampScrollTop(
+      keptScroll, rt.app.eventLog.knownTotal, EventLogPageSize)
+    rt.app.eventLog.ensureWindow(rt.app.eventLog.scrollTop, EventLogPageSize)
+  rt.app.eventLog.selected = keptSelected
 
   # PLAT-48: the top bar reads the transport ViewModel for which controls
   # are available, and the omnibar searches the session's files and the
@@ -753,6 +801,12 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
   of pcNone: discard
   of pcVcsDiff, pcVcsCommit:
     discard   # the VCS source's (`vcs_source.applyClick`)
+  of pcFrameSeek:
+    # PLAT-51: the frame viewer's own scrubber (CodeTracer-TUI-Graphics.md
+    # §4, Visual-Replay.md's Scrub Slider): the frame under the pointer,
+    # requested while held (the ViewModel's request serial drops a stale
+    # answer) and settled where it is released.
+    applyFrameSeek(s.frames, rt.app.frameViewer, int(c.index))
   of pcTerminalView:
     # PLAT-52: the Terminal Output's view toggle — the ViewModel's choice,
     # remembered for this recording (`native_host.loadRecordingPanes` wires
@@ -810,30 +864,50 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
       vm.removeValue(int(c.index))
     s.refreshScratchpad(rt)
   of pcValueHistory:
-    # K28: "Toggle value history" — the value's recorded history.
-    let name = variablePathOf(c.path)
-    try:
-      let rows = session.loadValueHistory(name)
-      var text = ""
-      for r in rows:
-        text.add $r.locationTicks & "  " & r.valueText & "\n"
-      rt.app.content = ContentOverlay(
-        open: true, title: "history of " & name & " (" & $rows.len &
-                           " value" & (if rows.len == 1: "" else: "s") & ")",
-        text: (if rows.len > 0: text else: "no recorded values"))
-    except CatchableError as e:
-      rt.app.notification = "no history for " & name & ": " & e.msg
+    # K28 / K40 (PLAT-51): "Toggle value history" and the row's history
+    # button — the history OPENS IN THE PANE, under the row, as the
+    # desktop's does (`div.ct-history-inline-container`); a second toggle
+    # closes it. Its entries are navigation rows (a click goes to the tick).
+    if rt.app.openHistories.hasKey(c.path):
+      rt.app.openHistories.del(c.path)
+    else:
+      let name = variablePathOf(c.path)
+      try:
+        var entries: seq[HistoryEntry] = @[]
+        for r in session.loadValueHistory(name):
+          entries.add HistoryEntry(ticks: uint64(max(0'i64, r.locationTicks)),
+                                   value: r.valueText)
+        rt.app.openHistories[c.path] = entries
+      except CatchableError as e:
+        rt.app.notification = "no history for " & name & ": " & e.msg
+    rt.app.variables.histories = rt.app.openHistories
   of pcValueOrigin:
-    # K28: "Show value origin" — the chain the desktop's origin panel lists.
-    let name = variablePathOf(c.path)
-    try:
-      let lines = session.loadValueOrigin(name).originHopLines
-      rt.app.content = ContentOverlay(
-        open: true, title: "origin of " & name,
-        text: (if lines.len > 0: lines.join("\n")
-               else: "no recorded origin for " & name))
-    except CatchableError as e:
-      rt.app.notification = "no origin for " & name & ": " & e.msg
+    # K28 / K41 (PLAT-51): "Show value origin" and the row's origin badge —
+    # the chain OPENS IN THE PANE under the row (the desktop's
+    # `div.ct-origin-inline-chain`), re-read at every stop.
+    let at = rt.app.openOrigins.find(c.path)
+    if at >= 0:
+      rt.app.openOrigins.delete(at)
+    else:
+      rt.app.openOrigins.add c.path
+    s.refreshOrigins(rt)
+  of pcWatch:
+    # PLAT-51: a watch added, removed or edited (the desktop's watch field
+    # and row controls); the engine evaluates watches inside the next
+    # locals load, so the pane re-reads the stop.
+    # BOTH StateVMs: the session's (whose list `ct/load-locals` sends, so
+    # the engine evaluates the watch) and the pane's own (`s.state`, which
+    # the Variables pane is read from).
+    for vm in [session.session.stateVM, s.state]:
+      if vm.isNil:
+        continue
+      case c.behaviour
+      of "remove": vm.removeWatch(c.path)
+      of "edit": vm.editWatch(c.path, c.text)
+      else: vm.addWatch(c.text)
+      if vm == s.state and s.state == session.session.stateVM:
+        break
+    s.refresh(rt)
   of pcOpenFile:
     # K17: the desktop's `FilesystemVM.openFile`.
     rt.app.viewedFile = c.path

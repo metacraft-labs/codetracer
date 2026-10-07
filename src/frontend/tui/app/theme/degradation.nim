@@ -44,7 +44,6 @@ import std/[strutils, unicode]
 import ../views/borders
 import ../views/gutter
 import ../views/styled_row
-import ../views/timeline_bar
 import ./capabilities
 import ./colour_math
 import ./palette
@@ -66,7 +65,13 @@ type
       ## "" for a role that tints text rather than painting a mark.
 
 const
-  PermittedMerges*: array[21, (SemanticRole, SemanticRole, string)] = [
+  PermittedMerges*: array[22, (SemanticRole, SemanticRole, string)] = [
+    (srChromeText, srEditorText,
+     "PLAT-51: the omnibox's text is the EDITOR's foreground" &
+     " (`editor/theme/rule/default`, Commands-And-Omnibox.md 'Omnibox colours" &
+     " on every front-end'), which the design system makes the same colour" &
+     " as the chrome's body text. Two roles because they bind two tokens" &
+     " that could part; where they do not, they are one text colour."),
     (srSyntaxPlain, srSyntaxIdentifier,
      "An identifier IS plain text. The design system paints both with" &
      " `colors/editor/syntax/primary` (`plain` is an alias of it), and" &
@@ -180,7 +185,7 @@ proc roleGlyph*(role: SemanticRole; mode: BorderMode): string =
   of srTimelineSpan: bs.span
   of srTimelineMark: bs.tracepoint
   of srTimelineNeedle: bs.needle
-  of srTimelineBounds: BoundsOpenGlyph
+  of srTimelineBounds: "["
   else: ""
 
 proc appearance*(role: SemanticRole;

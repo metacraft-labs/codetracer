@@ -843,13 +843,8 @@ type
     locals*:        seq[Variable]
     extensionRendererId*: cstring
 
-  TimelineMode* = enum TimelineVariables, TimelineRegisters
-
-  TimelineComponent* = ref object of Component
-    views*:         array[TimelineMode, Component]
-    active*:        TimelineMode
-    flow*:          FlowUpdate
-    service*:       FlowService
+  # (PLAT-51: `TimelineMode` and `TimelineComponent` stood here; the Timeline
+  # panel is removed.)
 
   # TimelineVariablesComponent* = ref object of Component
   #   timeline*:      TimelineComponent

@@ -5592,7 +5592,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
       cstring(cgpViewer.presetName),
       cstring(cgpDriver.presetName),
       cstring(cgpHost.presetName)]),
-  aTimeline: proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), aStartAgenticWorktreeSession: # aTimeline
+  aRetiredTimeline: proc(actionData: JsObject) = discard, aStartAgenticWorktreeSession: # aRetiredTimeline: the Timeline panel is removed
   proc(actionData: JsObject) = # aStartAgenticWorktreeSession
     agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
   videoPlayerTogglePlay: # --- M4 Visual Replay / Video Player handlers ----------------------------

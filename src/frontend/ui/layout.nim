@@ -1594,7 +1594,6 @@ proc mountPaneForState(state: GoldenItemState) =
       Content.Calltrace,
       Content.State,
       Content.EventLog,
-      Content.Timeline,
       Content.Build,
       Content.BuildErrors,
       Content.SearchResults,
@@ -1694,15 +1693,6 @@ proc mountPaneForState(state: GoldenItemState) =
 
       if state.content == Content.Calltrace:
         tryMountIsoNimCalltrace()
-
-      # The Timeline was the worst-placed of the five and the reason nobody
-      # reported it: `TimelineComponent` has no `register` method at all. It
-      # falls back to the base method in `types.nim`, which only assigns
-      # `self.api`, so the timeline was the one pane with NO mount call on
-      # the component-registration path — its only callers were the two
-      # `initTimelineVM*` procs. This arm is its first.
-      if state.content == Content.Timeline:
-        tryMountIsoNimTimelinePanel()
 
       # EventLog and TerminalOutput are the same shape as Calltrace: both
       # mount from `register` and nowhere else, and both are in

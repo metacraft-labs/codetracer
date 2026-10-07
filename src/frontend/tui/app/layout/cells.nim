@@ -82,15 +82,13 @@ proc contentMinWidth(kind: PaneKind): int =
   of paneCalltrace: 14  ## `#0 process_item()` truncated but still legible
   of paneState: 14      ## `ptr: 0x7ffd98`
   of paneEventLog: 12
-  of paneTimeline: 20   ## a scrubber with two ends and a marker
   else: 8
 
 proc minPaneHeight*(kind: PaneKind): int =
   ## The shortest a pane can be: a title row (or, for a tab, the tab strip that
   ## replaces it) plus at least one row of content.
-  case kind
-  of paneTimeline: 3    ## title, scrubber, one event line
-  else: 2
+  discard kind
+  2
 
 proc terminalPaneName*(kind: PaneKind): string =
   ## What the terminal calls a pane when its `LayoutNode` carries no title —
@@ -102,7 +100,6 @@ proc terminalPaneName*(kind: PaneKind): string =
   of paneCalltrace: "Call Trace"
   of paneState: "Variables"
   of paneEventLog: "Event Log"
-  of paneTimeline: "Timeline"
   of paneDebugControls: "Debug Controls"
   of paneFlow: "Flow"
   of paneSearch: "Search"

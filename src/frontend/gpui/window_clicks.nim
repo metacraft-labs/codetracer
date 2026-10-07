@@ -24,8 +24,7 @@
 ##     variable's path);
 ##   * the editor's gutter and code column of a row (`data-ct-row`);
 ##   * a call-trace row (`data-call-index`);
-##   * a pane tab in a strip (`data-ct-tab-pane`);
-##   * the timeline's track (`data-ct-timeline-track`).
+##   * a pane tab in a strip (`data-ct-tab-pane`).
 ##
 ## A press bubbles in GPUI: a nested `Tree` node's ancestors hear the press on
 ## it too. The DEEPEST row answers and the rest of that one press is ignored
@@ -64,7 +63,6 @@ type
     gcpCode = "code"
     gcpCallRow = "call"
     gcpTab = "tab"
-    gcpTimelineTrack = "timeline"
     gcpPoint = "point"
       ## A point-list row (`pointList`'s option).
     gcpStateTab = "statetab"
@@ -83,6 +81,16 @@ type
       ## A changed file, of the working tree or of an opened commit.
     gcpVcsCommit = "commit"
       ## A commit of the VCS pane's history.
+    gcpStateControl = "statecontrol"
+      ## PLAT-51: a Variables row's value control — `history:<path>`,
+      ## `origin:<path>`, `unwatch:<expression>` (`StateControlAttribute`).
+    gcpHistoryEntry = "history"
+      ## PLAT-51: a value-history row under its variable; the key is its tick.
+    gcpAddWatch = "addwatch"
+      ## PLAT-51: the Watches tab's "Add watch expression…" row.
+    gcpStateSeparator = "separator"
+      ## PLAT-51: the name / value column rule — a press starts the column
+      ## resize drag.
 
   GClickButton* = enum
     gbLeft = "left"
@@ -101,7 +109,7 @@ type
     button*: GClickButton
     ctrl*, alt*: bool
     x*, y*: int
-      ## The press, in window pixels (the timeline's tick is read from x).
+      ## The press, in window pixels.
 
   PressDedupe* = object
     ## The press the deepest row already answered, so its ancestors' copies
@@ -116,8 +124,6 @@ const
     ## the window (after every redraw) never attaches a second set.
   TabPaneAttribute* = "data-ct-tab-pane"
     ## A strip tab's pane id (`main.drawNode`).
-  TimelineTrackAttribute* = "data-ct-timeline-track"
-    ## The timeline's track (`leaves.renderTimeline`).
   FooterPositionAttribute* = "data-ct-footer-position"
     ## The footer's location (`main.drawFooter`).
   WindowRootAttribute* = "data-ct-window-root"
@@ -263,10 +269,19 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
                          index: parseBiggestInt(getAttribute(el,
                                                              CallRowAttribute)))
         except ValueError: discard
+      elif getAttribute(el, StateControlAttribute).len > 0:
+        c = GPaneClick(part: gcpStateControl,
+                       key: getAttribute(el, StateControlAttribute))
+      elif getAttribute(el, StateHistoryEntryAttribute).len > 0:
+        c = GPaneClick(part: gcpHistoryEntry,
+                       key: getAttribute(el, StateHistoryEntryAttribute))
+      elif getAttribute(el, StateAddWatchAttribute).len > 0:
+        c = GPaneClick(part: gcpAddWatch, key: "watch")
+      elif getAttribute(el, StateSeparatorAttribute).len > 0 and
+           getAttribute(r.parentNode(el), StateHeaderAttribute).len == 0:
+        c = GPaneClick(part: gcpStateSeparator, key: "separator")
       elif getAttribute(el, TabPaneAttribute).len > 0:
         c = GPaneClick(part: gcpTab, key: getAttribute(el, TabPaneAttribute))
-      elif getAttribute(el, TimelineTrackAttribute).len > 0:
-        c = GPaneClick(part: gcpTimelineTrack)
       elif getAttribute(el, TextRoleAttribute) == $trGutterLineNumber or
            getAttribute(el, EditorCodeColumnAttribute).len > 0:
         let row = r.parentNode(el)
@@ -303,7 +318,10 @@ proc findClickTarget*(r: GpuiRenderer; root: GpuiElement; part: GClickPart;
     of gcpEventRow: getAttribute(el, "data-row-index") == key
     of gcpCallRow: getAttribute(el, CallRowAttribute) == key
     of gcpTab: getAttribute(el, TabPaneAttribute) == key
-    of gcpTimelineTrack, gcpPosition: true
+    of gcpPosition, gcpAddWatch, gcpStateSeparator: true
+    of gcpStateControl, gcpHistoryEntry:
+      getAttribute(el, StateControlAttribute) == key or
+        getAttribute(el, StateHistoryEntryAttribute) == key
     of gcpGutter, gcpCode:
       let row = r.parentNode(el)
       not row.isNil and getAttribute(row, EditorRowAttribute) == key

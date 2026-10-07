@@ -439,7 +439,7 @@ proc terminalHitAt*(vm: TerminalOutputVM; st: GTerminalPane; body: PxRect;
   if lay.track.contains(x, y):
     let sm = vm.scrubberFor(st, lay.rows)
     let span = sm.thumbSpan(lay.track.h, TerminalMinThumbPx)
-    let f = fractionAt(y - lay.track.y, lay.track.h)
+    let f = trackFractionAt(y - lay.track.y, lay.track.h)
     let local = y - lay.track.y
     if local >= span.start and local < span.start + span.length:
       return GTerminalHit(kind: ghLineThumb, write: -1, fraction: f)

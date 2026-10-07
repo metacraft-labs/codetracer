@@ -107,7 +107,7 @@ proc terminalCapability*(): PaneCapability =
   ## its slot with `reportText` — the pane's name and the reason below — so an
   ## absent view is visible rather than a gap.
   paneCapability(feTerminal,
-    {paneEditor, paneCalltrace, paneState, paneEventLog, paneTimeline,
+    {paneEditor, paneCalltrace, paneState, paneEventLog,
      panePointList, paneFileTree, paneBuildOutput,
      # PLAT-47 deliverable 4: the VCS pane (`views/vcs_pane.nim`).
      paneVcs,

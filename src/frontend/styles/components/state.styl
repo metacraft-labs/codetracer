@@ -351,3 +351,13 @@
   .history-value
     color: #FDBA74
     text-align: left
+
+
+// PLAT-51 (the user, 2026-10-05): A CHANGED VALUE. The desktop drew no
+// distinction for a value the step changed (measured: no class, no rule);
+// the decision was to give it one — a subtle design-token accent on the
+// changed value, the same one the terminal and GPUI paint
+// (`StateVM.isChanged`). ui/text/information/primary-hover: the one accent of
+// the text ramps that clears 4.5:1 on the pane's surface in both modes.
+.state-component .value-expanded-text.value-changed
+  color: colors-ui-text-information-primary-hover

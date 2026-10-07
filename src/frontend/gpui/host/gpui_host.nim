@@ -326,3 +326,48 @@ proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int):
     # The rows stay unlisted; the next scroll asks again.
     discard
   vm.scroll(int64(result.top))
+
+# ---------------------------------------------------------------------------
+# PLAT-51: the Event Log's window, for its scrollbar scrubber
+# ---------------------------------------------------------------------------
+
+type
+  EventLogPage* = object
+    top*: int
+      ## The first row of the whole log the pane shows now.
+    loaded*: bool
+      ## Whether a window was read for it (`ct/event-load`).
+    total*: int
+      ## The whole log's event count (the engine's, `ct/event-load`'s
+      ## `total`), -1 while unknown.
+
+const GpuiEventLogBuffer* = 10
+  ## Rows read below the ones the pane shows.
+
+proc pageEventLog*(session: HeadlessDebugSession; top, rows: int;
+                   atRRTicks: int64 = -1): EventLogPage =
+  ## Show the event log from row `top` in a pane that shows `rows`: read the
+  ## window `[top, top + rows + buffer)` of the WHOLE log when the store does
+  ## not hold it (`ct/event-load`, naming the stop so the answer also says
+  ## which row is "now"). The view moves; the debugger does not.
+  if session.isNil:
+    return EventLogPage(total: -1)
+  let ev = session.session.store.eventLog
+  let total = if ev.totalReported.val: ev.recordsTotal.val else: -1
+  let maxTop = if total >= 0: max(0, total - max(1, rows)) else: max(0, top)
+  result.top = clamp(top, 0, maxTop)
+  result.total = total
+  let first = ev.loadedStart.val
+  let held = ev.rows.val.len
+  let last = result.top + max(1, rows)
+  if result.top == first and (last <= first + held or
+                              (total >= 0 and first + held >= total)):
+    return
+  try:
+    discard session.requestAndLoadEventLog(start = result.top,
+                                           count = rows + GpuiEventLogBuffer,
+                                           atRRTicks = atRRTicks)
+    result.loaded = true
+  except CatchableError:
+    discard
+  result.total = if ev.totalReported.val: ev.recordsTotal.val else: -1

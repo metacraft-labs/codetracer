@@ -20,11 +20,12 @@
 ##
 ## ## THE ROW, SINCE PLAT-49
 ##
-##     L ▼ wide_mapping    Dict     [("key_000", 0), ("key_001"…   [MOD]
-##     │ │ └───────────┘   └──┘     └────────────────────────┘     └───┘
-##     │ │       │           │                  │                   │
-##     │ │       │           │                  │                   §3.3.4's badge
-##     │ │       │           │                  the formatted value
+##     L ▼ wide_mapping    Dict     [("key_000", 0), ("key_001"…
+##     │ │ └───────────┘   └──┘     └──────────────────────────────┘
+##     │ │       │           │                  │
+##     │ │       │           │                  the formatted value (in the
+##     │ │       │           │                  changed-value accent when the
+##     │ │       │           │                  step changed it — PLAT-51)
 ##     │ │       │           the type the engine named
 ##     │ │       the name
 ##     │ the expander, right before the name it opens (indented by depth with it)
@@ -33,13 +34,13 @@
 ## The user's direction (2026-10-01): no unexplained first column — the
 ## expander used to sit alone in column 0 with a blank five-cell `[MOD]` field
 ## after it on every row — and no separator row per category. So a row now
-## starts with the one-letter tag of the group it belongs to, the expander sits
-## against the name, and `[MOD]` moved to the row's END: still at one computed
-## column on every row (`diffFieldColumn`), so a Tier-2 case reads it there
-## rather than searching the row, blank on an unmodified row, and no longer a
-## gap in front of every name.
+## starts with the one-letter tag of the group it belongs to and the expander
+## sits against the name. (The `[MOD]` badge that ended the row is DROPPED,
+## PLAT-51 — the user, 2026-10-05: a changed value is styled as the desktop
+## styles it, `diff_highlighter.ChangedValueStyle` on the VALUE, with no
+## badge; the five cells it reserved went to the value.)
 ##
-## THE INDENT MOVES THE EXPANDER AND THE NAME, NEVER THE TAG OR THE BADGE, for
+## THE INDENT MOVES THE EXPANDER AND THE NAME, NEVER THE TAG, for
 ## the reason `frame_item.FrameRowSpec.indent` records: a marker that appears
 ## at one column on some rows and another on others is not a column anything
 ## can read.
@@ -71,6 +72,16 @@ type
     trkNote
       ## A sentence where members would be: an empty scope, or a scope this
       ## workspace's engine cannot fill. See `app/views/variables.nim`.
+    trkHistory
+      ## PLAT-51: one entry of a variable's VALUE HISTORY, under its row as
+      ## the desktop shows it (`div.ct-history-inline-row`): the tick and the
+      ## value. A NAVIGATION ROW — a click goes to that moment.
+    trkOrigin
+      ## PLAT-51: one hop of a variable's VALUE ORIGIN chain, under its row
+      ## (the desktop's `div.ct-origin-inline-chain-hop`).
+    trkAddWatch
+      ## PLAT-51: the Watches group's "Add watch expression…" row — the
+      ## desktop's watch field, as a row that opens the prompt.
 
   TreeRowSpec* = object
     ## Everything one row is drawn from.
@@ -127,6 +138,18 @@ type
       ## PLAT-49: the row's category tag (one letter), painted first in
       ## `tagRole`. "" draws a blank cell in its place.
     tagRole*: SemanticRole
+    controls*: bool
+      ## PLAT-51: the row carries the desktop's value controls at its end —
+      ## the history button (K40) and the origin badge (K41) — and, for a
+      ## watch, its remove control.
+    historyOpen*, originOpen*: bool
+      ## Whether the row's history / origin is shown under it (the control is
+      ## drawn lit).
+    watch*: bool
+      ## The row is a watch expression: its remove control is drawn.
+    nameCells*: int
+      ## PLAT-51: the name column's width the user dragged its separator to
+      ## (the desktop's column resize), 0 for the default share.
 
 const
   CollapsedGlyph* = "▶"
@@ -135,10 +158,24 @@ const
     ## §3.3.4 names the first two. A leaf gets a blank in the same column so
     ## the name field does not move.
 
-  ModifiedTag* = "[MOD]"
-  ModifiedTagCells* = 5
   TagCells = 1
     ## The category tag's field: one cell, then a gap.
+  HistoryControlGlyph* = "↺"
+    ## PLAT-51 (K40): the value-history button, one cell (U+21BA, no emoji
+    ## presentation); `h` on the ASCII tier.
+  OriginControlGlyph* = "⇠"
+    ## PLAT-51 (K41): the value-origin badge (U+21E0); `<` on the ASCII tier.
+  RemoveWatchGlyph* = "×"
+    ## PLAT-51: a watch's remove control (U+00D7); `x` on the ASCII tier.
+  ControlCells* = 3
+    ## The controls' field at the row's end: history, origin, remove (blank
+    ## for a non-watch), before the reserved trailing cell.
+  HistoryEntryGlyph* = "↳"
+  OriginHopGlyph* = "⇠"
+  AddWatchText* = "+ Add watch expression…"
+  ControlStyle* = CellStyle(role: srChromeMuted)
+  ControlLitStyle* = CellStyle(role: srChromeAccent, bold: true)
+  HistoryTickStyle* = CellStyle(role: srChromeMuted)
   NameFieldCol* = TagCells + 1 + 2
     ## First cell of a top-level row's name: tag, gap, expander, gap.
 
@@ -180,22 +217,14 @@ proc expanderGlyph*(spec: TreeRowSpec): string =
   elif spec.expanded: ExpandedGlyph
   else: CollapsedGlyph
 
-proc diffTagText*(spec: TreeRowSpec): string =
-  ## The `[MOD]` field's text — five cells, blank when the row did not change.
-  if spec.modified: ModifiedTag else: repeat(' ', ModifiedTagCells)
-
-proc diffTagStyle*(spec: TreeRowSpec): CellStyle =
-  if spec.modified: ModifiedTagStyle else: DefaultCellStyle
-
 proc nameStyleFor*(spec: TreeRowSpec): CellStyle =
-  ## §3.3.4's "distinct background/foreground accent (Green/Bold)" on the row
-  ## whose value changed, applied to the NAME — the field a reader scans.
+  ## The name's style. (PLAT-51: the changed-value accent is on the VALUE, as
+  ## the desktop's `.value-changed` paints it, not on the name.)
   case spec.kind
   of trkScope: ScopeTitleStyle
-  of trkMore: MoreRowStyle
-  of trkNote: NoteStyle
-  of trkVariable:
-    if spec.modified: ModifiedNameStyle else: NameStyle
+  of trkMore, trkAddWatch: MoreRowStyle
+  of trkNote, trkOrigin: NoteStyle
+  of trkVariable, trkHistory: NameStyle
 
 proc valueClassOf*(spec: TreeRowSpec): PresentationClass =
   ## What the row's value IS, as the ONE presenter says.
@@ -249,21 +278,30 @@ proc formattedValue*(spec: TreeRowSpec; cells: int): string =
   spec.presentation(cells).root.text
 
 proc valueStyleFor*(spec: TreeRowSpec): CellStyle =
-  if spec.kind == trkVariable: valueStyle(spec.valueClassOf())
-  else: DefaultCellStyle
+  ## The value's style: its presentation class's, or — on a row whose value
+  ## the step changed — the shared changed-value accent (PLAT-51,
+  ## CodeTracer-TUI.md §3.3.4: no `[MOD]` badge).
+  if spec.kind != trkVariable: DefaultCellStyle
+  elif spec.modified: ChangedValueStyle
+  else: valueStyle(spec.valueClassOf())
 
-proc fieldWidths*(width: int): tuple[name, typ, value: int] =
+proc fieldWidths*(width: int; nameCells = 0): tuple[name, typ, value: int] =
   ## How the cells after the fixed prefix are shared between name, type and
-  ## value (the `[MOD]` field at the end keeps its own five cells and a gap).
+  ## value.
   ##
   ## Reported rather than recomputed by the caller, because a Tier-1 assertion
   ## about which column a field lands in and the paint of that field have to
   ## agree — the drift `frame_item.FrameItem.locationCol` exists to prevent.
   let remaining = width - NameFieldCol - ReservedTrailingCells -
-                  (ModifiedTagCells + 1)
+                  (ControlCells + 1)
   if remaining <= 0:
     return (0, 0, 0)
   var name = min(max(remaining div 3, MinimumNameCells), MaximumNameCells)
+  if nameCells > 0:
+    # PLAT-51: the width the user dragged the separator to, kept inside the
+    # row (a value field of at least `MinimumValueCells` survives).
+    name = max(MinimumNameCells,
+               min(nameCells, remaining - MinimumValueCells - 1))
   name = min(name, remaining)
   var typ = min(remaining div 5, MaximumTypeCells)
   var value = remaining - name - typ - 2
@@ -276,6 +314,12 @@ proc fieldWidths*(width: int): tuple[name, typ, value: int] =
   if value < 0:
     value = 0
   (name, typ, value)
+
+proc controlColumn*(width: int): int =
+  ## PLAT-51: where the value controls start in a row `width` cells wide —
+  ## the history button, then the origin badge, then a watch's remove
+  ## control — before the reserved trailing cell.
+  width - ReservedTrailingCells - ControlCells
 
 proc moreRowText*(remaining: int): string =
   ## `… 550 more`.
@@ -311,7 +355,7 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
        else: DefaultCellStyle))
   put(" ", DefaultCellStyle)
 
-  let widths = fieldWidths(width)
+  let widths = fieldWidths(width, spec.nameCells)
   let indent = repeat(' ', max(0, spec.depth - 1) * IndentCells)
 
   case spec.kind
@@ -329,6 +373,16 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
     put(indent & "  " & moreRowText(spec.memberCount), MoreRowStyle)
   of trkNote:
     put(indent & "  " & spec.name, NoteStyle)
+  of trkHistory:
+    # `name` is the tick label, `value` the value at it.
+    put(indent & "  " & HistoryEntryGlyph & " ", ControlStyle)
+    put(spec.name & "  ", HistoryTickStyle)
+    put(spec.value, NameStyle)
+  of trkOrigin:
+    put(indent & "  " & OriginHopGlyph & " ", ControlStyle)
+    put(spec.name, NoteStyle)
+  of trkAddWatch:
+    put(indent & "  " & AddWatchText, MoreRowStyle)
   of trkVariable:
     # The expander sits against the name, both moved by the indent; the name
     # FIELD still ends at one column on every row so type and value align.
@@ -350,12 +404,18 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
         put(repeat(' ', typeEnd - used), DefaultCellStyle)
       put(" ", DefaultCellStyle)
     put(formattedValue(spec, widths.value), valueStyleFor(spec))
-    # §3.3.4's `[MOD]`, at the row's end, in a field blank when unmodified.
-    let badgeCol = width - ReservedTrailingCells - ModifiedTagCells
-    if badgeCol > used:
-      put(repeat(' ', badgeCol - used), DefaultCellStyle)
-    if used == badgeCol:
-      put(diffTagText(spec), diffTagStyle(spec))
+    if spec.controls:
+      # PLAT-51: the desktop's value controls, at one computed column on
+      # every row (`controlColumn`) so a click reads them where they are.
+      let at = controlColumn(width)
+      if at > used:
+        put(repeat(' ', at - used), DefaultCellStyle)
+      if used == at:
+        put(HistoryControlGlyph,
+            if spec.historyOpen: ControlLitStyle else: ControlStyle)
+        put(OriginControlGlyph,
+            if spec.originOpen: ControlLitStyle else: ControlStyle)
+        put((if spec.watch: RemoveWatchGlyph else: " "), ControlStyle)
 
   if used < width:
     put(repeat(' ', width - used), DefaultCellStyle)
@@ -365,13 +425,8 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
     # same order and the same reason as `source_pane`'s execution-line
     # highlight and `frame_item`'s inspected row.
     #
-    # BUT NOT OVER A SPAN THAT ALREADY HAS A BACKGROUND, which is a correction
-    # this module made after the Tier-2 case was written rather than a
-    # precaution: `[MOD]` is a BADGE — black on green — and the first draft
-    # painted the cursor's `bright_black` straight over it, so the one row that
-    # was both selected and changed lost the marker §3.3.4 exists to show, on
-    # exactly the row a reader looks at first. That is CTUI-6's expander-column
-    # defect in a different pane.
+    # BUT NOT OVER A SPAN THAT ALREADY HAS A BACKGROUND (CTUI-6's
+    # expander-column defect: a span with its own ground keeps it).
     for i in 0 ..< spans.len:
       if not spans[i].style.hasOwnBackground:
         spans[i].style = spans[i].style.withBackground(SelectedRowBackground)
@@ -389,7 +444,14 @@ proc nameFieldColumn*(): int =
   ## together itself.
   NameFieldCol
 
-proc diffFieldColumn*(width: int): int =
-  ## Where the `[MOD]` field starts in a row `width` cells wide: at the row's
-  ## end, before the reserved trailing cell (PLAT-49).
-  width - ReservedTrailingCells - ModifiedTagCells
+proc valueFieldColumn*(width: int; nameCells = 0): int =
+  ## Where a top-level row's VALUE starts in a row `width` cells wide — the
+  ## cell a changed value's accent begins at (PLAT-51), reported so a Tier-2
+  ## case reads the colour where the paint put it.
+  let w = fieldWidths(width, nameCells)
+  NameFieldCol + w.name + 1 + (if w.typ > 0: w.typ + 1 else: 0)
+
+proc nameSeparatorColumn*(width: int; nameCells = 0): int =
+  ## PLAT-51: the cell between the name field and the type / value fields —
+  ## the column separator a drag resizes (the desktop's column resize).
+  NameFieldCol + fieldWidths(width, nameCells).name

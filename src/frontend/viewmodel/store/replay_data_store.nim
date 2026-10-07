@@ -119,6 +119,10 @@ type
     args*: Signal[Table[string, seq[CallArg]]]
     startLineIndex*: Signal[int64]
     totalCallsCount*: Signal[uint64]
+    currentLineIndex*: Signal[int64]
+      ## PLAT-51: the global call-line index of the call the debugger is in
+      ## (the engine's `currentCallLineIndex`), -1 when unknown — the row a
+      ## list pane's scrollbar scrubber marks (Scrollbar-Scrubbers.md §3.5).
     finished*: Signal[bool]
     loadingState*: Signal[LoadingState]
 
@@ -217,6 +221,19 @@ type
       ## only honest total available here is derived from what has arrived.
       ## The desktop's DataTables path has a real `recordsTotal` and publishes
       ## it through `applyEventLogRows`.
+      ##
+      ## PLAT-51: `ct/event-load` now carries the log's `total` too, and an
+      ## answer that does sets `totalReported`; this is then the engine's own
+      ## count.
+    totalReported*: Signal[bool]
+      ## PLAT-51: whether `recordsTotal` is the ENGINE'S count of the whole
+      ## log (an answer carried `total`) rather than a high-water mark — the
+      ## population a list pane's scrollbar scrubber spans.
+    currentIndex*: Signal[int]
+      ## PLAT-51: the row (in the log's current order) of the last event at
+      ## or before the tick a request named (`ct/event-load`'s `atRRTicks` →
+      ## `indexAtTick`), -1 when unknown — the scrubber's current-position
+      ## mark (Scrollbar-Scrubbers.md §3.5).
     recordsFiltered*: Signal[int]
       ## The same count after the server-side search filter, for a host that
       ## has one. Equal to `recordsTotal` when nothing filtered.
@@ -785,6 +802,27 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
       s.requestSpans.loadingState.val = lsError,
   )
 
+proc requestEventIndexAt*(store: ReplayDataStore; rrTicks: uint64) =
+  ## PLAT-51: ask the engine which row of the WHOLE event log is "now" — the
+  ## last event at or before `rrTicks` — and how long the log is
+  ## (`ct/event-load` with `indexOnly`: no window, no `ct/updated-events`, so a
+  ## host whose table reloads on that event is not made to redraw by a move).
+  ## The answer lands in `eventLog.currentIndex` (the list scrubber's mark).
+  let fut = store.backend.send("ct/event-load", %*{
+    "indexOnly": true, "atRRTicks": int64(rrTicks)})
+  let s = store
+  async_compat.onComplete(fut,
+    onSuccess = proc(response: JsonNode) =
+      var body = response
+      if not body.isNil and body.kind == JObject and body.hasKey("body") and
+          body["body"].kind == JObject:
+        body = body["body"]
+      if body.isNil or body.kind != JObject:
+        return
+      if body.hasKey("indexAtTick") and body["indexAtTick"].kind == JInt:
+        s.eventLog.currentIndex.val = body["indexAtTick"].getInt,
+    onError = proc(msg: string) = discard)
+
 proc installBackendEventHandlers(store: ReplayDataStore) =
   ## Consume backend responses/events that are not mirrored through the
   ## legacy component bridge. Most panel data still arrives through the
@@ -862,6 +900,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         args: createSignal(initTable[string, seq[CallArg]]()),
         startLineIndex: createSignal(0'i64),
         totalCallsCount: createSignal(0'u64),
+        currentLineIndex: createSignal(-1'i64),
         finished: createSignal(false),
         loadingState: createSignal(lsIdle),
       ),
@@ -880,6 +919,8 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       eventLog: EventLogStore(
         rows: createSignal(newSeq[EventLogRow]()),
         recordsTotal: createSignal(0),
+        totalReported: createSignal(false),
+        currentIndex: createSignal(-1),
         recordsFiltered: createSignal(0),
         maxRRTicks: createSignal(0'u64),
         loadedStart: createSignal(0),
@@ -1693,7 +1734,24 @@ proc applyEventLogResponse*(store: ReplayDataStore;
       (not body.isNil and body.kind == JObject and body.hasKey("events"))
   if not hasEvents:
     return
+  # PLAT-51: THE WHOLE LOG'S SIZE, when the engine says it (`ct/event-load`'s
+  # `total`) — the population a list pane's scrollbar scrubber spans
+  # (Scrollbar-Scrubbers.md §2). Absent from an older engine's answer, in
+  # which case the totals are inferred from the window as before.
+  var total = -1
+  if payload.kind == JObject:
+    let body = payload.getOrDefault("body")
+    let holder = if payload.hasKey("total"): payload
+                 elif not body.isNil and body.kind == JObject: body
+                 else: nil
+    if not holder.isNil and holder.hasKey("total") and
+        holder["total"].kind == JInt:
+      total = holder["total"].getInt
+  if total >= 0:
+    store.eventLog.totalReported.val = true
+
   store.applyEventLogRows(eventLogRowsFromJson(payload, start), start,
+                          recordsTotal = total,
                           source = elwsEventLoad)
 
 proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
@@ -1723,6 +1781,8 @@ proc clearEventLog*(store: ReplayDataStore) =
   ## recording cannot inherit the previous one's log.
   store.eventLog.rows.val = @[]
   store.eventLog.recordsTotal.val = 0
+  store.eventLog.totalReported.val = false
+  store.eventLog.currentIndex.val = -1
   store.eventLog.recordsFiltered.val = 0
   store.eventLog.maxRRTicks.val = 0'u64
   store.eventLog.loadedStart.val = 0
@@ -2218,6 +2278,11 @@ proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int =
   store.updateCalltraceSection(
     lines, start, body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64,
     args = argsTable)
+  # PLAT-51: where the debugger is in the whole trace, for the scrubber's mark.
+  let current = body.getOrDefault("currentCallLineIndex")
+  store.calltrace.currentLineIndex.val =
+    if not current.isNil and current.kind == JInt: current.getBiggestInt.int64
+    else: -1'i64
   lines.len
 
 proc stepDirectionToDapCommand*(direction: StepDirection): string =

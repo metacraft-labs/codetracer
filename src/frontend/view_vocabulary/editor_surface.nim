@@ -119,6 +119,13 @@ type
     inspectionLine*: int
     flowOverlayVisible*: bool
     gutterVisible*: bool
+    caretLine*: int
+      ## PLAT-51 (Editor-Pane.md, "The caret in a read-only editor"): the
+      ## line of the read-only debugging editor's CARET — placed by a click,
+      ## moved by the keyboard, distinct from the execution pointer and the
+      ## inspection cursor — or 0 for none.
+    caretColumn*: int
+      ## Its 1-based column.
     rows*: seq[EditorRow]
     entryContext*: string
       ## PLAT-47 B1: the tokenizer state the FIRST row starts in

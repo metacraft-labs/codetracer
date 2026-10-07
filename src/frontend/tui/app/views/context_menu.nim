@@ -27,6 +27,11 @@ import ./top_bar
 export pane_clicks
 
 const
+  TerminalMenuHint* = "Terminal menu: Shift + right-click"
+    ## PLAT-51: the INERT last row of every context menu the terminal draws
+    ## (Native-Front-End-Parity.md §1) — not an entry of the model, not
+    ## selectable, not hit by a press: the terminal's own menu is Shift +
+    ## right-click, which the TUI leaves to the terminal.
   ContextMenuMaxWidth* = 60
   ContentOverlayMaxWidth* = 100
   ContentOverlayMaxHeight* = 24
@@ -42,10 +47,12 @@ proc contextMenuArea*(s: ContextMenuState; width, height: int): CellArea =
   for e in s.menu.entries:
     label = max(label, textCells(e.label))
     hint = max(hint, textCells(e.hint))
-  let inner = 1 + label + (if hint > 0: 3 + hint else: 0) + 1
+  let inner = max(1 + label + (if hint > 0: 3 + hint else: 0) + 1,
+                  1 + textCells(TerminalMenuHint) + 1)
   let w = min(min(width, ContextMenuMaxWidth),
               inner + 2 * DropdownFrameCells)
-  let h = min(height - 1, s.menu.entries.len + 2 * DropdownFrameCells)
+  # The entries, then the inert hint row.
+  let h = min(height - 1, s.menu.entries.len + 1 + 2 * DropdownFrameCells)
   let col = max(0, min(s.anchorCol, width - w))
   let row = max(1, min(s.anchorRow + 1, height - h))
   CellArea(col: col, row: row, width: w, height: h)
@@ -79,11 +86,18 @@ proc paintContextMenu*(g: var StyledGrid; s: ContextMenuState;
       if hw + textCells(e.label) + 3 <= iw:
         g.paint(row, ic + iw - hw, e.hint & " ",
                 CellStyle(role: srChromeMuted, surface: surface))
+  # PLAT-51: the inert hint row, last, muted and never selected.
+  let hintRow = area.row + f + s.menu.entries.len
+  if hintRow < area.row + area.height - f:
+    g.fillSurface(hintRow, ic, iw, 1, srSurfaceMenu)
+    g.paint(hintRow, ic, fitCells(" " & TerminalMenuHint, iw),
+            CellStyle(role: srChromeMuted, italic: true,
+                      surface: srSurfaceMenu))
 
 proc contextMenuHitAt*(s: ContextMenuState; area: CellArea;
                        row, col: int): tuple[inside: bool, index: int] =
   ## `inside` for any cell of the framed box (the frame included); `index`
-  ## the entry on that row, -1 on the frame.
+  ## the entry on that row, -1 on the frame and on the inert hint row.
   if area.width <= 0 or not area.contains(row, col):
     return (false, -1)
   let i = row - area.row - DropdownFrameCells

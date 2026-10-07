@@ -344,7 +344,6 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
   of paneEventLog: ViewModel(s.eventLogVM)
   of paneDebugControls: ViewModel(s.debugControlsVM)
   of paneFlow: ViewModel(s.flowVM)
-  of paneTimeline: ViewModel(s.timelineVM)
   of paneSearch: ViewModel(s.searchVM)
   of panePointList: ViewModel(s.pointListVM)
   of paneScratchpad: ViewModel(s.scratchpadVM)

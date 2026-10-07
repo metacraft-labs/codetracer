@@ -91,7 +91,6 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       item("Calltrace", "aFullCalltrace"),
       item("State", "aState"),
       item("Event Log", "aEventLog"),
-      item("Timeline", "aTimeline"),
       item("Terminal Output", "aTerminal"),
       item("Scratchpad", "aScratchpad"),
       item("Breakpoints & Tracepoints", "aPointList"),

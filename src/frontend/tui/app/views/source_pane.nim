@@ -126,6 +126,12 @@ type
       ## never been.
     marks*: seq[(int, GutterMark)]
       ## Breakpoints and tracepoints on this file, by line.
+    caretLine*: int
+    caretColumn*: int
+      ## PLAT-51 (CodeTracer-TUI.md §3.3.2, Editor-Pane.md "The caret in a
+      ## read-only editor"): the read-only editor's CARET — the cell drawn in
+      ## reverse video, distinct from the execution line's band and from the
+      ## inspection cursor's ` ▹ `. Line 0: no caret.
     columnMarks*: seq[(int, int)]
       ## PLAT-50 (K14): the column breakpoints on this file, `(line,
       ## column)` — the cell they are anchored at is marked in the code, as
@@ -530,6 +536,15 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       g.restyle(row, codeCol, area.col + area.width - codeCol,
                 proc(s: CellStyle): CellStyle =
                   s.withBackground(ExecutionLineBackground))
+    # PLAT-51: THE CARET, over everything — its cell reversed (a caret past
+    # the line's end sits on the blank cell after it).
+    if line == model.caretLine and line > 0 and model.caretColumn >= 1 and
+       model.caretColumn <= codeW:
+      g.restyle(row, codeCol + model.caretColumn - 1, 1,
+                proc(s: CellStyle): CellStyle =
+                  var out2 = s
+                  out2.reverse = true
+                  out2)
 
   if model.degradedMessage.len > 0 and area.height >= 2:
     g.paint(area.row + 1, area.col,

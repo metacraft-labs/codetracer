@@ -54,7 +54,7 @@ const
   NumberStyle* = CellStyle(role: srValueNumber)
   StringStyle* = CellStyle(role: srValueString)
     ## BRIGHT green rather than plain green, deliberately: plain green + bold is
-    ## §3.3.4's diff accent (`diff_highlighter.ModifiedNameStyle`), and a string
+    ## §3.3.4's diff accent (`diff_highlighter.ChangedValueStyle`, on the value), and a string
     ## VALUE painted in the same colour as a CHANGED NAME would make the one
     ## thing this pane says loudest ambiguous on a screenshot.
   BooleanStyle* = CellStyle(role: srValueBoolean)

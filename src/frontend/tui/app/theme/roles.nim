@@ -102,6 +102,11 @@ type
     srChromeInfo = "chrome-info"
     srChromeAccent = "chrome-accent"
     srChromePrompt = "chrome-prompt"
+    srEditorText = "editor-text"
+      ## PLAT-51: the EDITOR'S default foreground as a text role, for a cell
+      ## on a ground that is not the editor's own (the omnibox's selected
+      ## result, on the editor's selection colour — Commands-And-Omnibox.md,
+      ## "Omnibox colours on every front-end").
 
     # ---- dgBorder: box drawing ---------------------------------------------
     srBorderPane = "border-pane"
@@ -172,7 +177,9 @@ type
     # ---- dgValue: CTUI-7's step-to-step diff ------------------------------
     srValueUnchanged = "value-unchanged"
     srValueModified = "value-modified"
-    srValueModifiedTag = "value-modified-tag"
+      ## PLAT-51: a CHANGED VALUE — the shared changed-value accent the
+      ## desktop's `.value-changed` paints. (`srValueModifiedTag`, the `[MOD]`
+      ## badge's black-on-green, is gone with the badge.)
 
     # ---- dgCategory: PLAT-49's per-row variable category tags -------------
     srCategoryLocal = "category-local"
@@ -360,6 +367,7 @@ const
                            attrs = {raBold}, mono = {raBold, raReverse,
                                                      raUnderline}),
 
+    srEditorText: fgOnly(dgChrome, dtEditorThemeRuleDefault),
     srBorderPane: fgOnly(dgBorder, dtColorsUiBorderSecondary),
     # THE FOCUSED PANE'S OUTLINE (PLAT-47 deliverable 9): the desktop's own
     # focus colour, measured — GoldenLayout's selected panel is outlined by
@@ -528,11 +536,16 @@ const
                            mono = {raItalic}),
 
     srValueUnchanged: bare(dgValue),
-    srValueModified: fgOnly(dgValue, dtColorsUiTextSuccessPrimary,
-                            attrs = {raBold}, mono = {raBold, raUnderline}),
-    srValueModifiedTag: fgbg(dgValue, dtColorsUiTextOnActionPrimary,
-                             dtColorsUiSurfaceAlertSuccess, attrs = {raBold},
-                             mono = {raBold, raReverse}),
+    # PLAT-51 (the user, 2026-10-05: the desktop had NO changed-value
+    # styling — measured: no class, no rule in `isonim_state_view.nim` or the
+    # stylesheets — "give it one, a subtle design-token accent on the changed
+    # value, and use the same in the terminal and GPUI"). The token is
+    # ui/text/information/primary-hover (#60a5fa / #1d4ed8): the one accent
+    # of the design system's text ramps that clears 4.5:1 on the pane's
+    # surface in BOTH modes (8.2 / 4.0 for information/primary itself — its
+    # Light value fails). Normal weight: subtle. Monochrome underlines it.
+    srValueModified: fgOnly(dgValue, dtColorsUiTextInformationPrimaryHover,
+                            mono = {raUnderline}),
 
     # PLAT-49 finding 12: the variables pane's ONE-LETTER CATEGORY TAG
     # (`state_vm.categoryTag`), each category its own colour — six of the

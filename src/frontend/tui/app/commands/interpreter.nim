@@ -733,7 +733,7 @@ proc dispatchAction*(d: Dispatcher; ctx: CommandContext; action: KeyAction;
   # that, and `drPaneLocal` is this dispatch saying so.
   of kaFocusNextPane, kaFocusPrevPane, kaFocusLeft, kaFocusDown, kaFocusUp,
      kaFocusRight, kaSelectCallStack, kaSelectSource, kaSelectVariables,
-     kaSelectTimeline, kaMaximizePane, kaScrollLineDown, kaScrollLineUp,
+     kaSelectEventLog, kaMaximizePane, kaScrollLineDown, kaScrollLineUp,
      kaHalfPageUp, kaHalfPageDown, kaCenterOnPointer, kaExpandNode,
      kaCollapseNode, kaToggleHexDec:
     paneLocal(action)

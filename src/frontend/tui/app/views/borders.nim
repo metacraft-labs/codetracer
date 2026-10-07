@@ -144,8 +144,12 @@ const AsciiFallbacks: array[21, (string, string)] = [
   ("●", "*"), ("○", "o"), ("◆", "+"),
   ("▶", ">"), ("▼", "v"), ("▲", "^")]
 
-const ExtraAsciiFallbacks: array[18, (string, string)] = [
+const ExtraAsciiFallbacks: array[20, (string, string)] = [
   ("█", "#"), ("…", "."), ("·", "."),
+  # PLAT-51: the execution pointer's mark (`gutter.ExecutionPointerMark`) and
+  # the inspection cursor's (`gutter.InspectionPointerMark`) — §3.3.2: `>` on
+  # the ASCII tier; the inspection mark keeps a distinct one.
+  ("▸", ">"), ("▹", ")"),
   # PLAT-50: the edge one-eighth blocks a pane divider and the top bar's
   # field and menu button borders are drawn with (`shell.DividerGlyph`,
   # `top_bar.FieldEdgeLeft` / `FieldEdgeRight`): a line, so `|`.

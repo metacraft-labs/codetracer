@@ -222,15 +222,18 @@ const Rejections*: seq[Rejection] = @[
       "not. PLAT-22 says the same thing from the other end: 'the editor is " &
       "deliberately not a PLAT-3 vocabulary entry ... PLAT-3's admission " &
       "test would reject it'"),
-  Rejection(name: "Timeline / scrubber",
+  Rejection(name: "Scrubber (Visual Replay, the terminal screen, a list scrollbar)",
     failsMediumIndependence: true, failsExistingFrontEnd: false,
     reason: "A scrubber's contract is continuous position within a range, " &
       "and its usefulness is its resolution. A terminal's resolution is the " &
-      "number of columns it has; a pointer's is the number of pixels. An " &
-      "abstraction over both would have to pick one and lie to the other. " &
-      "The TUI has app/views/timeline_bar.nim and the web has " &
-      "viewmodel/views/isonim_timeline_view.nim — two implementations, " &
-      "deliberately"),
+      "number of columns (or eighth-cells) it has; a pointer's is the number " &
+      "of pixels. An abstraction over both would have to pick one and lie to " &
+      "the other. The scrubbers that remain since the Timeline panel was " &
+      "removed (2026-10-05) are parts of their panes - the Visual Replay " &
+      "frame's slider, the terminal screen's scrubber and every list pane's " &
+      "scrollbar - and each front-end draws them natively over ONE shared " &
+      "pure model of fractions (viewmodels/scrollbar_scrubber.nim), which " &
+      "is the medium-independent half"),
   Rejection(name: "Frame viewer / rendered image with a pixel cursor",
     failsMediumIndependence: true, failsExistingFrontEnd: false,
     reason: "PLAT-15 deliverable 3 states the problem: 'above tier 0 a cell " &

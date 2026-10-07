@@ -22,7 +22,7 @@
 ##
 ## ## THE SOURCE PANE IS A NATIVE VIEW, AND THAT IS NOT A GAP
 ##
-## PLAT-3's admission test REFUSED `Editor`, `Timeline/scrubber` and
+## PLAT-3's admission test REFUSED `Editor`, a scrubber and
 ## `Frame viewer`, and recorded why in `admission.Rejections`: they pass the
 ## "both front-ends have one" half and fail the "can be specified without
 ## reference to a medium" half. PLAT-22 says the same thing from the other end —
@@ -136,13 +136,14 @@ const
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
-  PaneNativePanes*: set[PaneKind] = {paneEditor,
-                                     # PLAT-41 adds the second one.
-                                     paneTimeline}
+  PaneNativePanes*: set[PaneKind] = {paneEditor}
     ## The panes that are native views. See the header: this is PLAT-3's
-    ## admission decision applied, not a shortcut. Both members are refused BY
-    ## NAME in `admission.Rejections` — "Editor" and "Timeline / scrubber" —
-    ## so this set is that table's consequence rather than a preference.
+    ## admission decision applied, not a shortcut. The member is refused BY
+    ## NAME in `admission.Rejections` ("Editor"), so this set is that table's
+    ## consequence rather than a preference. (PLAT-41 added `paneTimeline` as
+    ## the second; PLAT-51 removed the Timeline panel from every product, and
+    ## the scrubbers that remain — Visual Replay's, the terminal screen's —
+    ## are parts of their panes, not panes.)
 
   PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
                                             # PLAT-45 — the desktop's panes
@@ -460,20 +461,13 @@ proc tracepointsPaneView*(vm: PointListVM): PaneView =
 # eight vocabulary trees would have overturned two of them silently.
 #
 #   5 expressed here   debugControls, flow, search, scratchpad, shell
-#   1 native escape    timeline  — PLAT-3 REJECTED "Timeline / scrubber" BY NAME
+#   1 native escape    timeline  — PLAT-3 REJECTED a scrubber BY NAME
 #   2 accepted except. fileTree, buildOutput — no replay ViewModel, by decision
 #
-# **WHY TIMELINE IS NOT A VOCABULARY TREE.** `admission.Rejections` refuses
-# "Timeline / scrubber" in the same table that refuses the editor, and for a
-# reason that does not soften: *"a scrubber's contract is continuous position
-# within a range, and its usefulness is its resolution. A terminal's resolution
-# is the number of columns it has; a pointer's is the number of pixels. An
-# abstraction over both would have to pick one and lie to the other."* It even
-# names the two implementations that exist deliberately —
-# `tui/app/views/timeline_bar.nim` and `viewmodel/views/isonim_timeline_view.nim`.
-# A `ProgressIndicator` here would be exactly the lie that table forbids: it
-# would answer "position within a range" and drop the resolution, and every
-# medium would read it as a scrubber it is not.
+# (PLAT-51 removed the Timeline panel from every product, so the native
+# escape it was is gone; the scrubber rejection stands for the scrubbers that
+# remain, which are parts of their panes and drawn natively over the shared
+# `scrollbar_scrubber` model.)
 #
 # **WHY DEBUG CONTROLS *IS* ONE, THOUGH "Toolbar / status bar" IS ALSO
 # REJECTED.** That rejection refuses admitting a TOOLBAR ENTRY, and its own
@@ -694,27 +688,6 @@ proc shellPaneView*(vm: ShellVM): PaneView =
                   "output; this pane shows what exists"
 
 # ---------------------------------------------------------------------------
-# Timeline — the SECOND sanctioned native escape
-# ---------------------------------------------------------------------------
-
-proc timelinePaneView*(medium: string): PaneView =
-  ## The timeline, declared for ONE medium. See the PLAT-41 block above.
-  ##
-  ## This is `sourcePaneView`'s shape for `admission.Rejections`' second
-  ## refusal, and it is a deliberate REFUSAL to express rather than a gap:
-  ## `portability.checkPortable` rejects a native escape on purpose, so the
-  ## suite asserts this pane is refused exactly as it asserts the other six are
-  ## portable.
-  result.pane = paneTimeline
-  result.native = medium
-  result.root = nativeEscape("timeline", medium, "timeline")
-  result.entries = entriesOf(result.root)
-  result.report = "the timeline is a native view; PLAT-3's admission test " &
-                  "refused a Timeline/scrubber entry because a scrubber's " &
-                  "usefulness is its resolution and no abstraction over a " &
-                  "column and a pixel can keep both"
-
-# ---------------------------------------------------------------------------
 # Source — the sanctioned native escape
 # ---------------------------------------------------------------------------
 
@@ -847,8 +820,6 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneSearch: searchPaneView(SearchVM(vm))
   of paneScratchpad: scratchpadPaneView(ScratchpadVM(vm))
   of paneShell: shellPaneView(ShellVM(vm))
-  # PLAT-41 — the second sanctioned native escape.
-  of paneTimeline: timelinePaneView(medium)
   of paneFileTree: fileTreePaneView(FilesystemVM(vm))
   # PLAT-41 — the ACCEPTED EXCEPTION, named with its reason.
   of paneBuildOutput:

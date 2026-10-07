@@ -110,6 +110,9 @@ type
     cmkCallArgument = "call-argument"
     cmkVariablesRow = "variables-row"
     cmkFlowValue = "flow-value"
+    cmkValueHistoryEntry = "value-history-entry"
+      ## PLAT-51: a row of a variable's value history (the desktop's history
+      ## popover row, `ui/value.createHistoryContextMenu`).
     cmkDockLabel = "dock-label"
 
   ContextMenuEntry* = object
@@ -173,6 +176,8 @@ const
   MinimiseLabel* = "Minimise container"
   ExpandCallChildrenLabel* = "Expand Call Children"
   CollapseCallChildrenLabel* = "Collapse Call Children"
+  AddToScratchpadLabel* = "Add to scratchpad"
+    ## PLAT-51: the desktop's history-row entry (`ui/value.nim`'s spelling).
   AddValueToScratchpadLabel* = "Add value to scratchpad"
   AddAllValuesToScratchpadLabel* = "Add all values to scratchpad"
   JumpToValueLabel* = "Jump to value"
@@ -378,6 +383,22 @@ func flowValueContextMenu*(path: string; line: int; name, value: string;
       entry(AddValueToScratchpadLabel, caAddValueToScratchpad,
             hint = "CTRL+<click on value>"),
       entry(AddAllValuesToScratchpadLabel, caAddAllValuesToScratchpad)])
+
+func valueHistoryEntryContextMenu*(expression, value: string;
+                                   ticks: uint64;
+                                   path = ""): ContextMenuModel =
+  ## PLAT-51: a value-history ENTRY's right-click menu — the desktop's
+  ## `ui/value.createHistoryContextMenu`: "Add to scratchpad" (the entry's
+  ## value, under the variable's name) and "Show value origin".
+  ContextMenuModel(
+    kind: cmkValueHistoryEntry,
+    target: ContextTarget(pane: paneState,
+                          path: (if path.len > 0: path else: expression),
+                          expression: expression, text: value,
+                          index: int64(ticks)),
+    entries: @[
+      entry(AddToScratchpadLabel, caAddValueToScratchpad),
+      entry("Show value origin", caShowValueOrigin)])
 
 func labels*(m: ContextMenuModel): seq[string] =
   for e in m.entries:

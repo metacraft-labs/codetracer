@@ -54,6 +54,8 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import std/jsffi
+  import ./list_scrubber_dom
 
 import ../store/types
 import ../viewmodels/terminal_output_vm
@@ -371,6 +373,13 @@ when defined(js):
     ## The panel for the real DOM.
     buildPanel(r, vm, " isonim-terminal-output")
 
+  proc terminalPreOf(panel: JsObject): JsObject {.importjs:
+    "(#.querySelector(':scope > pre') || null)".}
+  proc setStyles(el: JsObject; name, value: cstring) {.importjs:
+    "#.style.setProperty(#, #)".}
+  proc firstLineHeight(el: JsObject): float {.importjs:
+    "(function(e){const l=e.querySelector('.terminal-line');return l ? l.getBoundingClientRect().height : 0;})(#)".}
+
   proc mountIsoNimTerminalOutput*(container: isonim_dom.Element;
                                   vm: TerminalOutputVM) =
     ## Mount the panel as a child of ``container``. Reactive effects handle
@@ -378,3 +387,22 @@ when defined(js):
     let r = WebRenderer()
     let panel = renderTerminalOutputPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+    # PLAT-51 (left by PLAT-52 to here): THE LINE VIEW'S SCROLLBAR IS A
+    # SCRUBBER over every line of the output (Scrollbar-Scrubbers.md §2), as
+    # it is on the terminal and GPUI. The lines' `pre` is the scroll
+    # container; the panel is a column so it fills what the toggle leaves.
+    let p = cast[JsObject](panel)
+    let pre = terminalPreOf(p)
+    if not pre.isNil:
+      setStyles(p, "display", "flex")
+      setStyles(p, "flex-direction", "column")
+      setStyles(pre, "flex", "1 1 auto")
+      setStyles(pre, "min-height", "0")
+      setStyles(pre, "overflow-y", "auto")
+      discard attachListScrubber(pre, p,
+        total = proc(): int = vm.lines.val.len,
+        current = proc(): int = vm.currentLine(),
+        rowHeight = proc(): float =
+          let h = firstLineHeight(pre)
+          if h > 0.0: h else: 18.0,
+        paneId = "terminalOutput")

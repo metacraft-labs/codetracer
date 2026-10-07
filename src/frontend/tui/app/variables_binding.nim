@@ -65,7 +65,7 @@
 ## Nothing here constructs a ViewModel, a store or a backend. It takes the ones
 ## a real session built.
 
-import std/[sets, strutils, tables]
+import std/[sets, strutils]
 
 import codetracer_embed
 
@@ -73,21 +73,10 @@ import ./views/variables
 
 export variables
 
-const
-  SnapshotDepth* = 1
-    ## How deep the diff's per-tick snapshot goes.
-    ##
-    ## TOP-LEVEL ONLY, and that is a measured trade rather than a shortcut. A
-    ## compound value's rendering CONTAINS its members' renderings — `results`
-    ## reads `[5, 7]` and then `[5, 7, 42]` — so a member's change already moves
-    ## its ancestor's value and marks the ancestor's row. Going deeper would key
-    ## the snapshot by every node in the tree, which on `wide_state` is 1801
-    ## entries at EVERY tick the timeline holds; the badge gained would be on a
-    ## row that is only on screen when its parent is already marked.
-    ##
-    ## Stated as a constant rather than left implicit so a host that wants
-    ## per-member badges changes one number and pays for it knowingly.
+# (`SnapshotDepth`, the diff snapshot's depth, moved with the diff to the
+# shared `viewmodels/value_changes.nim`, PLAT-51.)
 
+const
   UnsupportedArguments* =
     "no per-frame argument surface: ct/load-locals does not separate " &
     "parameters from locals, and CallLine.args is never populated"
@@ -244,26 +233,6 @@ proc nodeChildrenFor*(vm: StateVM): NodeChildren =
 # ---------------------------------------------------------------------------
 # The diff's per-tick snapshot
 # ---------------------------------------------------------------------------
-
-proc snapshotOf*(variables: seq[Variable];
-                 depth = SnapshotDepth): Table[string, string] =
-  ## Every variable's rendered value at one tick, keyed by the path the pane
-  ## uses. See `SnapshotDepth`.
-  ## Walked with an explicit stack rather than a nested closure: a closure that
-  ## captured `result` would not compile under ORC's memory-safety analysis, and
-  ## a `ref` wrapper to work around it would allocate on every stop.
-  result = initTable[string, string]()
-  var pending: seq[tuple[prefix: string; rows: seq[Variable]; left: int]] = @[]
-  pending.add (prefix: "", rows: variables, left: max(1, depth))
-  while pending.len > 0:
-    let frame = pending.pop()
-    for v in frame.rows:
-      if v.name.len == 0:
-        continue
-      let path = childPath(frame.prefix, v.name)
-      result[path] = v.value
-      if frame.left > 1 and v.children.len > 0:
-        pending.add (prefix: path, rows: v.children, left: frame.left - 1)
 
 proc observeStop*(timeline: var ValueTimeline; tick: uint64;
                   variables: seq[Variable]) =

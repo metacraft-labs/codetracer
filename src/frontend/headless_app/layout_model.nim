@@ -71,7 +71,11 @@ type
     paneEventLog = "eventLog"
     paneDebugControls = "debugControls"
     paneFlow = "flow"
-    paneTimeline = "timeline"
+      ## (PLAT-51: `paneTimeline = "timeline"` stood here. The Timeline panel
+      ## is removed from every product — Layout-System.md, "The Timeline panel
+      ## is removed (2026-10-05)" — so it is no longer a pane a layout can
+      ## place. Its spelling lives on only as `RetiredPaneSpellings`, which
+      ## the v5→v6 migration drops from a saved layout.)
     paneSearch = "search"
     panePointList = "pointList"
     paneScratchpad = "scratchpad"
@@ -692,7 +696,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 5
+  LayoutSchemaVersion* = 6
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -739,6 +743,13 @@ const
     ## | 5 | `PaneKind` gains `problems` and `requests` (PLAT-48) — the
     ##       desktop's footer auto-hide panels, which the shared default now
     ##       docks. Shape unchanged; `migrateV4toV5` re-stamps the version. |
+    ## | 6 | `PaneKind` LOSES `timeline` (PLAT-51: the Timeline panel is
+    ##       removed from every product). The first REMOVAL, so the first
+    ##       migration that changes a document: `migrateV5toV6` DROPS every
+    ##       `timeline` leaf (its stack keeps its other tabs, its active tab
+    ##       follows the survivor; a container left empty goes) and every
+    ##       docked `timeline` entry — a remembered layout that held the
+    ##       Timeline opens without it, never with `ldeUnknownPane`. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -2570,6 +2581,86 @@ proc migrateV4toV5(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %5
 
+const RetiredPaneSpellings* = ["timeline"]
+  ## The spellings of panes `PaneKind` no longer has. A saved document naming
+  ## one is migrated (the pane dropped), never decoded as `ldeUnknownPane`:
+  ## the panel was removed on purpose, and a user's layout that held it is a
+  ## layout to open, not an error to report (Layout-System.md, "The Timeline
+  ## panel is removed").
+
+proc dropRetiredPanes(node: JsonNode): JsonNode =
+  ## The tree with every retired leaf removed, or nil when nothing is left.
+  ## A stack's `activeIndex` follows the active tab when it survives, else
+  ## falls on the tab that slid into its place (the nearest survivor to its
+  ## right, clamped) — the same rule the desktop's
+  ## `sanitizeLayoutConfig` applies to a GoldenLayout stack.
+  if node.isNil or node.kind != JObject:
+    return node
+  if node.hasKey("pane") and node["pane"].kind == JString and
+      node["pane"].getStr in RetiredPaneSpellings:
+    return nil
+  if not node.hasKey("children") or node["children"].kind != JArray:
+    return node
+  result = copy(node)
+  var kept = newJArray()
+  var survivors: seq[int] = @[]
+  for i, c in node["children"].getElems:
+    let k = dropRetiredPanes(c)
+    if not k.isNil:
+      kept.add k
+      survivors.add i
+  if survivors.len == 0 and node["children"].len > 0:
+    return nil
+  # A row or column left with ONE child is that child, in the container's
+  # place and with its weight (`validate`'s single-child rule; GoldenLayout
+  # collapses it the same way).
+  if node.hasKey("kind") and node["kind"].kind == JString and
+      node["kind"].getStr in ["row", "column"] and kept.len == 1 and
+      node["children"].len > 1:
+    var only = copy(kept[0])
+    if node.hasKey("weight"):
+      only["weight"] = node["weight"]
+    else:
+      if only.hasKey("weight"): only.delete("weight")
+    return only
+  result["children"] = kept
+  if result.hasKey("activeIndex") and result["activeIndex"].kind == JInt:
+    let old = result["activeIndex"].getInt
+    var mapped = survivors.find(old)
+    if mapped < 0:
+      mapped = 0
+      for s in survivors:
+        if s < old: inc mapped
+    result["activeIndex"] = %clamp(mapped, 0, max(0, survivors.len - 1))
+
+proc migrateV5toV6(doc: JsonNode): JsonNode =
+  ## PLAT-51. `PaneKind` lost `timeline`: the Timeline panel is removed from
+  ## every product. A v5 document that placed it is opened WITHOUT it — the
+  ## leaf is dropped, its stack keeps its other tabs, a container left empty
+  ## is removed, and a docked `timeline` entry (or a docked pane placed
+  ## `beside` it) loses that reference — rather than refused with
+  ## `ldeUnknownPane`, which `PaneKind`'s removal rule calls the floor, not
+  ## the answer.
+  result = copy(doc)
+  if result.hasKey("layout"):
+    let t = dropRetiredPanes(result["layout"])
+    result["layout"] = (if t.isNil: newJNull() else: t)
+  if result.hasKey("docked") and result["docked"].kind == JArray:
+    var kept = newJArray()
+    for e in result["docked"]:
+      if e.kind == JObject and e.hasKey("pane") and e["pane"].kind == JString and
+          e["pane"].getStr in RetiredPaneSpellings:
+        continue
+      var d = copy(e)
+      if d.kind == JObject and d.hasKey("beside") and
+          d["beside"].kind == JString and
+          d["beside"].getStr in RetiredPaneSpellings:
+        d.delete("beside")
+        if d.hasKey("besideBefore"): d.delete("besideBefore")
+      kept.add d
+    result["docked"] = kept
+  result["version"] = %6
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2594,6 +2685,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV3toV4(result)
     of 4:
       result = migrateV4toV5(result)
+    of 5:
+      result = migrateV5toV6(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here
@@ -2860,7 +2953,7 @@ type
 
 const
   EditModeHiddenPanes*: set[PaneKind] = {
-    paneState, paneScratchpad, paneEventLog, paneTimeline, paneTerminalOutput,
+    paneState, paneScratchpad, paneEventLog, paneTerminalOutput,
     paneCalltrace, paneAgentActivity}
     ## The replay-only panes an EDITING session does not show — the
     ## `PaneKind` image of the desktop's
@@ -2893,7 +2986,7 @@ proc sharedBundledLayout*(): LayoutNode =
   ## the root row):
   ##
   ##   Files | VCS  ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent Activity)
-  ##                           over Event Log | Timeline | Terminal Output
+  ##                           over Event Log | Terminal Output
   ##                         ‖ Test Results over Constraints
   ##
   ## (`|` separates tabs of one stack, `‖` side-by-side regions.) The right
@@ -2921,8 +3014,7 @@ proc sharedBundledLayout*(): LayoutNode =
         stack([pane(paneState), pane(paneScratchpad)], weight = 50.0),
         stack([pane(paneCalltrace), pane(paneAgentActivity)], weight = 50.0)],
         weight = 50.0),
-      stack([pane(paneEventLog), pane(paneTimeline),
-             pane(paneTerminalOutput)], weight = 50.0)],
+      stack([pane(paneEventLog), pane(paneTerminalOutput)], weight = 50.0)],
       weight = 41.25),
     column([
       stack([pane(paneTestResults)]),
@@ -2970,7 +3062,7 @@ proc sharedDefaultLayout*(): SharedLayout =
   ## and remembers its OWN last layout in its own file.
   ##
   ##   Files | VCS | Tests ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent
-  ##                                   Activity) over Event Log | Timeline |
+  ##                                   Activity) over Event Log |
   ##                                   Terminal Output
   ##
   ## ## The fold order

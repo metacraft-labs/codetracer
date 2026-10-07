@@ -1185,7 +1185,8 @@ func toEventLogEntry*(row: EventLogRow): EventLogEntry =
 proc requestAndLoadEventLog*(s: HeadlessDebugSession;
                              start: int = 0;
                              count: int = 0;
-                             order = RecordedEventOrder): seq[EventLogEntry] =
+                             order = RecordedEventOrder;
+                             atRRTicks: int64 = -1): seq[EventLogEntry] =
   ## Send ``ct/event-load``, feed the answer into the store, and return the
   ## window that was loaded.
   ##
@@ -1252,6 +1253,11 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
   if order != RecordedEventOrder:
     args["sortKey"] = %($order.column)
     args["sortAscending"] = %order.ascending
+  # PLAT-51: name the position, so the answer says which row of the whole log
+  # is "now" (`indexAtTick`) — the scrubber's mark. The window does not depend
+  # on it.
+  if atRRTicks >= 0:
+    args["atRRTicks"] = %atRRTicks
   let resp = s.backend.sendDapRequest("ct/event-load", args)
   # Drain interleaved events (the server may push events before the response).
   discard s.backend.drainEvents()
@@ -1263,6 +1269,9 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
     # answer with the PREVIOUS window on a response that had none of its own.
     if not body.isNil and body.kind == JObject and body.hasKey("events"):
       s.session.store.applyEventLogResponse(body, start)
+      if atRRTicks >= 0:
+        s.session.store.eventLog.currentIndex.val =
+          body.getOrDefault("indexAtTick").getInt(-1)
       for row in s.session.store.eventLog.rows.val:
         result.add(toEventLogEntry(row))
 

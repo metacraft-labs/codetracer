@@ -43,7 +43,7 @@
 ## is what makes the Tier-1 half of the campaign's testing architecture
 ## possible, and it is why `host/` stays as small as it does.
 
-import std/options
+import std/[options, tables]
 
 import codetracer_embed
 import headless_app/headless_app
@@ -110,7 +110,6 @@ type
       ## pane keeps its own position (`callTrace.scrollTop`) until `.` asks
       ## it to follow again.
     variables*: VariablesModel
-    timeline*: TimelineBarModel
     eventLog*: EventLogModel
     points*: PointListPaneModel
       ## PLAT-40. The Points pane's rows; empty until a session supplies them.
@@ -156,6 +155,31 @@ type
       ## `follow`) and the screen scrubber's preview are the pane's own.
     terminalDrag*: TerminalDragKind
       ## PLAT-52: a press held on one of the pane's scrubbers.
+    listScrub*: tuple[active: bool, pane: PaneKind]
+      ## PLAT-51: a press held on a list pane's scrollbar scrubber thumb (the
+      ## Event Log's or the Call Trace's) — the motion that follows drags the
+      ## VIEW (never the debugger) until the release.
+    variablesResize*: tuple[active: bool, area: CellArea]
+      ## PLAT-51: the Variables pane's name / value separator is held — the
+      ## motion that follows resizes the name column (the desktop's column
+      ## resize) until the release.
+    openHistories*: Table[string, seq[HistoryEntry]]
+      ## PLAT-51: the value histories open in the Variables pane, by path —
+      ## kept across stops (a history is the recording's, not the stop's).
+    openOrigins*: seq[string]
+      ## PLAT-51: the variables whose origin chain is open in the pane; the
+      ## chains are re-read at every stop (an origin is the current value's).
+    variablesNameCells*: int
+      ## PLAT-51: the name column's width the user dragged it to (0: the
+      ## default share).
+    callTraceAtEnd*: bool
+      ## PLAT-51: the call trace's scrubber put the view at the END of the
+      ## trace — kept there when the section it loads re-counts the trace
+      ## (`totalCallsCount` moves with the expansion the load leaves).
+    listScrubFetches*: int
+      ## PLAT-51: the window fetches scrubbing has issued this session (the
+      ## Event Log's pages asked for, the Call Trace's sections) — what a test
+      ## bounds for a top-to-bottom drag.
     location*: string
       ## PLAT-50 (K37): where the debugger is, `path:line` — what a click on
       ## the status line copies (the desktop's status bar location and its
@@ -164,12 +188,14 @@ type
       ## PLAT-50: text a click copied (Copy, the status bar's location),
       ## handed to the terminal's clipboard by the next frame (OSC 52) and
       ## cleared.
+    caret*: tuple[path: string, line, column: int]
+      ## PLAT-51: the read-only debugging editor's CARET (Editor-Pane.md, "The
+      ## caret in a read-only editor") — placed by a click on the text, moved
+      ## by the arrow keys while the source pane has the focus; Alt+T /
+      ## Ctrl+Enter open the tracepoint editor on its line. Line 0: none.
     tracepointAt*: tuple[path: string, line: int]
       ## PLAT-50: the line the editor menu's "Add tracepoint" was chosen on;
       ## the next `:tracepoint` is placed there instead of at the stop.
-    timelineDrag*: bool
-      ## PLAT-50: a press on the timeline's track is held — its release seeks
-      ## where the pointer is then (the desktop's drag on the track).
     layoutBinding*: LayoutBinding
       ## PLAT-6's terminal layout binding: the committed `Layout` with its undo
       ## log, the gesture in flight, and the responsive-profile freeze.
@@ -341,6 +367,14 @@ proc statusLine*(app: TuiApp): string =
     else: $app.shell.activeSessionId()
   app.title & "  sessions:" & $app.shell.slotCount() & "  active:" & active
 
+proc sourceWithCaret*(app: TuiApp): SourcePaneModel =
+  ## The source pane's model with the caret on it, when the caret is in the
+  ## file the pane shows.
+  result = app.source
+  if app.caret.line > 0 and app.caret.path == result.path:
+    result.caretLine = app.caret.line
+    result.caretColumn = app.caret.column
+
 proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   ## The CTUI-3 screen model for this application at this terminal size.
   ##
@@ -432,13 +466,12 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                           app.layoutBinding.pointerCol))
                   else: none((int, int))),
     profile: selected,
-    source: app.source,
+    source: app.sourceWithCaret(),
     highlighting: app.highlighting,
     callStack: app.callStack,
     callTrace: app.callTrace,
     callTraceLoaded: app.callTraceLoaded,
     variables: app.variables,
-    timeline: app.timeline,
     eventLog: app.eventLog,
     points: app.points,
     scratchpad: app.scratchpad,

@@ -49,6 +49,9 @@ import ../layout/cells
 import ../layout/project
 import ./header
 import ./styled_row
+import ./scrubber_track
+
+export scrubber_track
 
 type
   TerminalOutputPaneModel* = object
@@ -122,22 +125,10 @@ type
 const
   TerminalViewLinesLabel* = "Lines"
   TerminalViewScreenLabel* = "Screen"
-  TrackVerticalGlyph* = "│"
-  TrackHorizontalGlyph* = "─"
-  ThumbFullGlyph* = "█"
-  LowerEighths* = ["", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
-    ## `LowerEighths[k]`: the lower `k` eighths of a cell filled.
-  LeftEighths* = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
-    ## `LeftEighths[k]`: the left `k` eighths of a cell filled.
   TerminalMutedStyle = CellStyle(role: srChromeMuted, italic: true)
   ToggleActiveStyle = CellStyle(role: srTabActive)
   ToggleInactiveStyle = CellStyle(role: srTabInactive)
   InfoStyle = CellStyle(role: srChromeMuted)
-  TrackStyle* = CellStyle(role: srScrubberTrack)
-  ThumbStyle* = CellStyle(role: srScrubberThumb)
-  ThumbReversedStyle* = CellStyle(role: srScrubberTrack,
-                                  surface: srScrubberThumbGround)
-  MarkStyle* = CellStyle(role: srScrubberMark)
 
 func emptyText*(m: TerminalOutputPaneModel): string =
   ## The desktop's two overlays, word for word: loading until a session has
@@ -209,65 +200,6 @@ proc scrubberOf*(m: TerminalOutputPaneModel; rows: int): ScrubberModel =
 # ---------------------------------------------------------------------------
 # Thumb cells, in eighths
 # ---------------------------------------------------------------------------
-
-type
-  ThumbCellKind* = enum
-    tcTrack, tcThumb, tcThumbReversed
-  ThumbCell* = object
-    kind*: ThumbCellKind
-    glyph*: string
-
-proc thumbCells*(span: ThumbSpan; cells: int; vertical: bool): seq[ThumbCell] =
-  ## A track of `cells` cells with a thumb covering `span` (in EIGHTHS of a
-  ## cell), cell by cell. A cell the thumb covers fully is a full block; the
-  ## cell where the thumb starts part-way is the eighth block of its FAR part
-  ## (the lower part of a vertical cell, the right part of a horizontal one —
-  ## drawn as the complementary block in the track colour on the thumb's
-  ## ground, since only lower and left eighths exist); the cell where it ends
-  ## part-way is the eighth block of its NEAR part.
-  let first = span.start
-  let last = span.start + span.length          # exclusive, in eighths
-  for c in 0 ..< cells:
-    let a = c * 8
-    let b = a + 8
-    let lo = max(a, first)
-    let hi = min(b, last)
-    if hi <= lo:
-      result.add ThumbCell(kind: tcTrack,
-                           glyph: (if vertical: TrackVerticalGlyph
-                                   else: TrackHorizontalGlyph))
-      continue
-    let covered = hi - lo
-    if covered >= 8:
-      result.add ThumbCell(kind: tcThumb, glyph: ThumbFullGlyph)
-    elif lo > a and hi == b:
-      # Covers the far part: for a vertical cell the LOWER `covered` eighths;
-      # for a horizontal one the RIGHT eighths — the complementary left block
-      # reversed.
-      if vertical:
-        result.add ThumbCell(kind: tcThumb, glyph: LowerEighths[covered])
-      else:
-        result.add ThumbCell(kind: tcThumbReversed,
-                             glyph: LeftEighths[8 - covered])
-    elif lo == a and hi < b:
-      # Covers the near part: the UPPER eighths of a vertical cell (the
-      # complementary lower block reversed), the LEFT eighths of a horizontal
-      # one.
-      if vertical:
-        result.add ThumbCell(kind: tcThumbReversed,
-                             glyph: LowerEighths[8 - covered])
-      else:
-        result.add ThumbCell(kind: tcThumb, glyph: LeftEighths[covered])
-    else:
-      # A thumb shorter than a cell inside one cell: a full block (the
-      # shortest thumb a pointer can hit is one cell).
-      result.add ThumbCell(kind: tcThumb, glyph: ThumbFullGlyph)
-
-proc styleOf(k: ThumbCellKind): CellStyle =
-  case k
-  of tcTrack: TrackStyle
-  of tcThumb: ThumbStyle
-  of tcThumbReversed: ThumbReversedStyle
 
 # ---------------------------------------------------------------------------
 # Painting
@@ -473,7 +405,7 @@ proc terminalOutputHitAt*(m: TerminalOutputPaneModel; area: CellArea;
     let sm = m.scrubberOf(geo.contentRows)
     let span = sm.thumbSpan(geo.contentRows * 8, 8)
     let unit = (row - geo.contentTop) * 8 + 4
-    let fraction = fractionAt(row - geo.contentTop, geo.contentRows)
+    let fraction = trackFractionAt(row - geo.contentTop, geo.contentRows)
     if unit >= span.start and unit < span.start + span.length:
       return TerminalHit(kind: thLineThumb, eventIndex: -1, line: -1,
                          fraction: fraction)

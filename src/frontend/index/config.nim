@@ -454,73 +454,19 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring""
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
     quit(1)
 
-proc ensureLayoutContentPanel(config: js; contentId: int; label: cstring): js {.importjs:
-  """(function(config, contentId, label) {
-    if (!config) return config;
-    const target = Number(contentId);
-    const root = config.root || config;
-    const stateOf = (node) => node && node.componentState ? node.componentState : {};
-    const walk = (node, visit) => {
-      if (!node) return;
-      visit(node);
-      if (Array.isArray(node.content)) {
-        for (const child of node.content) walk(child, visit);
-      }
-    };
-    let hasTarget = false;
-    walk(root, (node) => {
-      if (node.type === 'component' && Number(stateOf(node).content) === target) {
-        hasTarget = true;
-      }
-    });
-    if (hasTarget) return config;
-
-    let eventLogStack = null;
-    let firstStack = null;
-    walk(root, (node) => {
-      if (node.type !== 'stack') return;
-      if (!firstStack) firstStack = node;
-      if (eventLogStack) return;
-      if (Array.isArray(node.content) && node.content.some((child) =>
-        child && child.type === 'component' && Number(stateOf(child).content) === 8)) {
-        eventLogStack = node;
-      }
-    });
-
-    const targetStack = eventLogStack || firstStack;
-    if (!targetStack) return config;
-    if (!Array.isArray(targetStack.content)) targetStack.content = [];
-    targetStack.content.push({
-      type: 'component',
-      componentType: 'genericUiComponent',
-      componentState: {
-        id: 0,
-        label: String(label),
-        content: target
-      },
-      title: 'genericUiComponent'
-    });
-    // Appending only grows the array, so a previously in-range
-    // activeItemIndex stays in range.  Clamp anyway: this is the same
-    // invariant that, when it was left unmaintained on the *removal* path,
-    // produced the permanently unloadable layouts of the saved-layout
-    // corruption bug.  GoldenLayout enforces it with a throw
-    // (node_modules/golden-layout/src/ts/items/stack.ts:169-171).
-    if (targetStack.activeItemIndex !== undefined &&
-        targetStack.activeItemIndex !== null) {
-      const index = Number(targetStack.activeItemIndex);
-      targetStack.activeItemIndex = Number.isFinite(index)
-        ? Math.min(Math.max(index, 0), targetStack.content.length - 1)
-        : 0;
-    }
-    return config;
-  })(#, #, #)""".}
-  ## Ensure a core panel exists in an otherwise valid GoldenLayout config.
-  ## This preserves user layouts while adding panels introduced after their
-  ## saved config was created.
-
-proc ensureReplayLayoutPanels(config: js): js =
-  ensureLayoutContentPanel(config, ord(Content.Timeline), cstring"timelineComponent-0")
+proc dropRetiredPanels*(config: js): js =
+  ## A loaded layout WITHOUT the panels that no longer exist
+  ## (`retiredContentIds`: the Timeline, removed 2026-10-05, and the retired
+  ## DeepReview panel). Each such tab is dropped, its stack's active tab kept
+  ## in range, a stack left empty removed — `sanitizeLayoutConfig`'s walk,
+  ## with no editor content to strip (`-1` matches no component). A user's
+  ## remembered layout that held the Timeline therefore opens without it,
+  ## never with an empty tab (Layout-System.md, "The Timeline panel is
+  ## removed").
+  ##
+  ## (This replaces `ensureReplayLayoutPanels`, which did the opposite: it
+  ## ADDED a Timeline tab to every loaded layout that lacked one.)
+  sanitizeLayoutConfig(config, -1, retiredContentIds())
 
 proc isValidLayoutConfig(config: js; autoHideState: js = nil): bool =
   ## Check if a layout config has the minimum required structure for GoldenLayout.
@@ -822,14 +768,14 @@ proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
     if not isValidLayoutConfig(config, autoHide):
       warnPrint "Layout config is invalid or incompatible: ", filename
       return await resetLayoutToDefault(filename)
-    return ensureReplayLayoutPanels(config)
+    return dropRetiredPanels(config)
   else:
     # THE FIRST RUN: no saved layout, so the desktop starts on the DEBUG
     # mode's default — the arrangement every CodeTracer front-end opens with
     # (see `installModeDefault`), written to the user's file so the next start
     # restores it like any other saved layout.
     let installed = await installModeDefault(filename, DebugMode)
-    return ensureReplayLayoutPanels(installed)
+    return dropRetiredPanels(installed)
 
 proc resetHiddenPanelLayoutToDefault(filename: string;
                                      hiddenContents: seq[int]): Future[js] {.async.} =

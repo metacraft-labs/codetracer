@@ -8,8 +8,11 @@ import
 # ViewModel layer — wired in parallel with the legacy event-bus code.
 # The EventLogVM receives the same data but does not affect rendering yet.
 # ---------------------------------------------------------------------------
-import std/json
+import std/[json, jsffi]
+from std/math import round
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+# PLAT-51: the list panes' scrollbar scrubber.
+from ../viewmodel/views/list_scrubber_dom import attachListScrubber
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/store/types as vmtypes
 from ../viewmodel/viewmodels/event_log_vm import
@@ -1333,6 +1336,9 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
   # if self.data.ui.activeFocus != self:
   #   self.data.focusComponent(self)
 
+proc attachEventLogScrubber(self: EventLogComponent)
+  ## PLAT-51: forward-declared; defined beside `onCompleteMove`.
+
 proc events(self: EventLogComponent) =
   var context = self
 
@@ -1666,6 +1672,11 @@ proc events(self: EventLogComponent) =
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
     jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
     jqFind(cstring"#" & context.detailedId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
+    # PLAT-51: THE SCROLLBAR IS A SCRUBBER over the WHOLE (filtered) log
+    # (Scrollbar-Scrubbers.md): a click on its track jumps the view there — the
+    # Scroller fetches the window it lands on — the thumb drags it, and a tick
+    # marks the last event at or before the debugger's tick.
+    attachEventLogScrubber(context)
     jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"mouseover").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
     jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"contextmenu").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
 
@@ -2117,8 +2128,88 @@ proc afterMove(self: EventLogComponent) =
     self.findActiveRow(self.activeRowTicks, true)
     self.isFlowUpdate = false
 
+proc tableRecordsDisplay(table: js): int {.importjs:
+  "(function(t){try{const i=t.page.info();return (i && i.recordsDisplay) || 0;}catch(e){return 0;}})(#)".}
+proc firstRowHeightIn(el: js): float {.importjs:
+  "(function(e){const r=e && e.querySelector('tbody tr');return r ? r.getBoundingClientRect().height : 0;})(#)".}
+proc queryIn(el: js; selector: cstring): js {.importjs: "(#.querySelector(#) || null)".}
+proc byId(id: cstring): js {.importjs: "(document.getElementById(#) || null)".}
+proc isScrubbed(el: js): bool {.importjs: "(#.dataset.ctScrubbed === '1')".}
+proc scrollHeightOf(el: js): float {.importjs: "(#.scrollHeight || 0)".}
+proc uncoveredHeight(body, wrapper: js): int {.importjs:
+  "(function(b,w){const r=b.getBoundingClientRect();let h=r.height;const c=w.closest('.component-container')||document;const f=c.querySelector('.data-tables-footer');if(f){const t=f.getBoundingClientRect().top;if(t>r.top&&t<r.bottom)h=t-r.top;}return h|0;})(#,#)".}
+proc clientHeightOf(el: js): float {.importjs: "(#.clientHeight || 0)".}
+proc scrollTopOfJs(el: js): float {.importjs: "(#.scrollTop || 0)".}
+proc setScrollTopJs(el: js; v: float) {.importjs: "#.scrollTop = #".}
+proc eventLogVisibleRows(body: js): int =
+  ## How many of the table's DRAWN rows the body shows (its real row height,
+  ## not the Scroller's virtual one).
+  let h = firstRowHeightIn(body)
+  max(1, int(round(clientHeightOf(body) / (if h > 0.0: h else: 24.0))))
+proc markScrubbed(el: js) {.importjs: "#.dataset.ctScrubbed = '1'".}
+
+proc eventLogTotal(component: EventLogComponent): int =
+  ## The FILTERED log's size: the engine's count, which the table route
+  ## publishes into the store (`applyEventLogRows`), else DataTables' own.
+  if not eventLogVMStore.isNil and
+     eventLogVMStore.eventLog.recordsFiltered.val > 0:
+    eventLogVMStore.eventLog.recordsFiltered.val
+  elif component.denseTable.isNil or component.denseTable.context.isNil: 0
+  else: tableRecordsDisplay(component.denseTable.context)
+
+proc attachEventLogScrubber(self: EventLogComponent) =
+  ## PLAT-51: the dense table's Scroller body gets the shared list scrubber.
+  let wrapper = byId(cstring(self.denseId & "_wrapper"))
+  if wrapper.isNil:
+    return
+  let body = queryIn(wrapper, cstring".dt-scroll-body")
+  if body.isNil or body.isScrubbed:
+    return
+  body.markScrubbed()
+  let component = self
+  discard attachListScrubber(
+    cast[JsObject](body), cast[JsObject](wrapper),
+    total = proc(): int = eventLogTotal(component),
+    current = proc(): int =
+      if eventLogVMStore.isNil: -1
+      else: eventLogVMStore.eventLog.currentIndex.val,
+    # DataTables' Scroller SCALES its body: the virtual height is not the
+    # drawn rows' (measured: 39340px for 70 rows of 24px), and it maps the
+    # scroll offset to a row proportionally. So a row's offset is its share
+    # of that virtual height, and the view's height in rows is the DRAWN
+    # rows'.
+    rowHeight = proc(): float =
+      let n = max(1, eventLogTotal(component))
+      max(1.0, scrollHeightOf(body) / float(n)),
+    paneId = "eventLog",
+    # THE SCROLLER'S MAPPING IS PROPORTIONAL (measured 2026-10-06): its
+    # body is sometimes SCALED (39340 px for 70 rows of 24 px), and it then
+    # shows the rows at `offset / (scrollHeight - clientHeight)` of the way
+    # through `total - visible` — so the first row in view and a jump are
+    # that same proportion, which is exact for an unscaled body too.
+    firstVisible = proc(): int =
+      let span = scrollHeightOf(body) - clientHeightOf(body)
+      let rows = eventLogTotal(component) - eventLogVisibleRows(body)
+      if span <= 0.0 or rows <= 0: 0
+      else: max(0, min(rows, int(round(scrollTopOfJs(body) / span *
+                                       float(rows))))),
+    jumpTo = proc(row: int) =
+      let span = scrollHeightOf(body) - clientHeightOf(body)
+      let rows = eventLogTotal(component) - eventLogVisibleRows(body)
+      if span > 0.0 and rows > 0:
+        setScrollTopJs(body, float(max(0, min(row, rows))) / float(rows) *
+                             span),
+    visibleRows = proc(): int = eventLogVisibleRows(body),
+    # The table's footer overlaps the bottom of its body: the track stops
+    # above it, so every pixel of the track takes a press.
+    visibleHeight = proc(): int = uncoveredHeight(body, wrapper))
+
 method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
   let component = self
+  # PLAT-51: where "now" is in the whole log, for the scrubber's mark — an
+  # index-only answer, which redraws nothing.
+  if not eventLogVMStore.isNil:
+    eventLogVMStore.requestEventIndexAt(cast[uint64](response.location.rrTicks))
   # Feed the same position into the parallel ViewModel store.
   initEventLogVM()
   syncEventLogDebuggerPosition(

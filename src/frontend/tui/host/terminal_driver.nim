@@ -202,9 +202,21 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       f.reset()
       return (true, broke)
     else:
+      # ALT + A PRINTABLE CHARACTER: `ESC <char>` in one burst is what a
+      # terminal sends for Alt+<char> (Meta sends an ESC prefix), and it is
+      # framed as ONE token so the key can be named (`key_names.keyName`:
+      # `Alt+t`, the desktop's "Add tracepoint" chord on the read-only
+      # editor's caret). The runtime takes the Alt chords it binds and treats
+      # every other one as the character alone (`runtime.handleToken`), which
+      # is what this framer delivered before it framed Alt at all — so a `q`
+      # after a stray escape still quits.
+      if b > ' ' and b <= '~':
+        let alt = Esc & $b
+        f.reset()
+        return (true, alt)
       # NOT AN ESCAPE SEQUENCE. Drop the `ESC` and honour the byte that broke
       # it, exactly as the runtime always has: `\x1b\x1b` therefore yields one
-      # `Esc`, and a `q` after a stray escape still quits.
+      # `Esc`.
       let broke = $b
       f.reset()
       return (true, broke)

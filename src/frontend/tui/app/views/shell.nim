@@ -4,7 +4,7 @@
 ## enforces it.
 ##
 ## app/views/shell.nim — CTUI-3. The root view: header, multi-pane body,
-## timeline strip, status bar.
+## status bar.
 ##
 ## ## The screen is composed ROW BY ROW, and that is a measured decision
 ##
@@ -62,7 +62,6 @@ import ./point_list
 import ./source_pane
 import ./status_bar
 import ./styled_row
-import ./timeline_bar
 import ./top_bar
 import ./tracepoint_manager
 import ./vcs_pane
@@ -82,7 +81,7 @@ export top_bar
 export tab_strip
 export binding
 export call_stack, call_trace, variables
-export event_log, timeline_bar, tracepoint_manager
+export event_log, tracepoint_manager
 # PLAT-15's frame viewer, on exactly the rule the four lines above follow: a
 # `ShellModel` field is painted by this module, so every consumer that builds
 # one needs the model type in scope from this one import.
@@ -157,15 +156,10 @@ type
       ## `CALL STACK ────` title row CTUI-3 painted, `app_shell.nim`'s
       ## cross-tier golden is unchanged, and every CTUI-3 and CTUI-5 assertion
       ## that reads that row still reads it.
-    timeline*: TimelineBarModel
-      ## CTUI-8's scrubber, as a value.
-      ##
-      ## EMPTY BY DEFAULT, on exactly the same rule as `source`, `callStack` and
-      ## `variables` above: `paintPane` delegates the `timeline` rectangle to
-      ## `app/views/timeline_bar.nim` only when the model has BOUNDS, so a shell
-      ## with no session open paints CTUI-3's own `timelineScrubber` row and
-      ## every CTUI-3 assertion that reads it still reads it.
     eventLog*: EventLogModel
+      ## CTUI-8's event log, as a value: the Event Log pane's own rectangle
+      ## (the Timeline that shared it is removed, 2026-10-05), its scrollbar a
+      ## scrubber over the whole log (PLAT-51).
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -174,12 +168,6 @@ type
     points*: PointListPaneModel
       ## PLAT-40. The Points pane, as a value. NOT LOADED BY DEFAULT, so a shell
       ## with no session paints the plain `POINTS ────` title row it always did.
-      ## CTUI-8's event log, as a value. It shares the `timeline` rectangle with
-      ## the scrubber — §3.3.5 is ONE pane holding both, and the Standard and
-      ## Ultra-wide layouts call that pane "Timeline & Tracepoints" — so the bar
-      ## takes the top `TimelineBarRows` rows and this takes the rest. In the
-      ## Compact profile they are two tabs of one stack and each owns its whole
-      ## rectangle.
     scratchpad*: ScratchpadPaneModel
       ## PLAT-50: the scratchpad pane's rows.
     terminalOutput*: TerminalOutputPaneModel
@@ -327,12 +315,6 @@ type
       ## ghost label following the pointer. Derived from `decorations`.
 
 const
-  TimelineTrackGlyph* = "─"
-  TimelineCursorGlyph* = "▲"
-    ## §3.3.5's execution-pointer marker on the scrubber. The same glyph
-    ## `app/views/timeline_bar.NeedleGlyph` paints; kept here because CTUI-3's
-    ## own one-line fallback scrubber still uses it when no bounds are known.
-
   TracepointOverlayWidth* = 64
   TracepointOverlayHeight* = 14
     ## The tracepoint dialog's ceiling. Clamped to the body, so an 80x24
@@ -524,27 +506,6 @@ proc activeLayout*(reg: ModeRegister): LayoutNode =
 # that sentence was corrected in the module header before the code caught up
 # with it.) This module re-exports it (see the `export` above), so `paintPane`'s
 # three call sites below are the same call they were.
-
-proc timelineScrubber*(tick, totalTicks, width: int): string =
-  ## §3.3.5's scrubber: `[───────▲──────]`, with the marker at the tick's own
-  ## proportion of the recording.
-  ##
-  ## Exposed so a test can assert the marker's COLUMN rather than assert that a
-  ## triangle is somewhere on the row — "contains ▲" is satisfied by a scrubber
-  ## that puts it at column 0 for every tick.
-  if width < 3:
-    return spaces(max(0, width))
-  let track = width - 2
-  var pos = 0
-  if totalTicks > 0 and tick > 0:
-    pos = int(float(track - 1) * float(min(tick, totalTicks)) /
-              float(totalTicks))
-  pos = max(0, min(track - 1, pos))
-  var line = "["
-  for i in 0 ..< track:
-    line.add(if i == pos: TimelineCursorGlyph else: TimelineTrackGlyph)
-  line.add "]"
-  line
 
 proc frameViewerOverlayArea*(body: CellArea): CellArea =
   ## The rectangle PLAT-15's frame viewer occupies: centred in the body, at
@@ -747,7 +708,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # lands on that row and the strip, painted last, takes its place. Their
   # unit-level output (and every CTUI suite that reads a painter on its own)
   # keeps the heading; the shell never shows it. A painter with NO heading of
-  # its own (the timeline, the build pane and the VCS pane, whose first row is
+  # its own (the build pane and the VCS pane, whose first row is
   # content — the build verdict, the branch) is handed the rows BELOW the
   # strip instead (`belowStrip`).
   let stacked = region.activeTab >= 0 and region.tabs.len > 0
@@ -869,28 +830,6 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
       g.paint(a.row, a.col + inner - w, statement & " ",
               CellStyle(role: srTabInactive, surface: srTabBar))
 
-  # THE TIMELINE RECTANGLE HOLDS TWO PANES, which is what §3.3.5 describes and
-  # what the Standard and Ultra-wide layouts call "Timeline & Tracepoints". The
-  # scrubber takes the top `TimelineBarRows` rows and the event log takes the
-  # rest. CTUI-3's own one-line `timelineScrubber` stays as the fallback for a
-  # shell with no bounds — see `ShellModel.timeline`.
-  #
-  # PLAT-45: THE TIMELINE IS A TAB in the shared default (of the event stack),
-  # so it is painted UNDER the strip rather than over it — `content`, not the
-  # whole rectangle — and the strip stays the thing that says which tab this
-  # is, as every other stacked pane's does.
-  if region.pane == paneTimeline and content.height >= 2:
-    if model.timeline.boundsKnown:
-      discard paintTimelineBar(g, content, model.timeline)
-      if content.height > TimelineBarRows:
-        discard paintEventLog(
-          g, CellArea(col: content.col, row: content.row + TimelineBarRows,
-                      width: inner, height: content.height - TimelineBarRows),
-          model.eventLog)
-    else:
-      g.paint(content.row + 1, content.col,
-              timelineScrubber(model.header.tick, model.header.totalTicks,
-                               inner))
   # THE DIVIDER is settled once every pane is painted (`paintDividers`):
   # its ground and line depend on the NEIGHBOURS — a strip beside it, the
   # pane to its right.

@@ -68,7 +68,7 @@
 when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
-import std/[cpuinfo, json, math, options, os, strutils, tables, times]
+import std/[cpuinfo, json, math, options, os, sets, strutils, tables, times]
 
 import isonim_gpui/renderer
 # `isonim_gpui/bindings` AND NOT `isonim_gpui/window`, since PLAT-37. The
@@ -85,6 +85,7 @@ import ./window_geometry
 import ./window_gestures
 import ./window_top_bar
 import ./window_clicks
+import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
 import ../styles/generated/design_tokens
@@ -163,12 +164,17 @@ OPTIONS:
                     and (PLAT-50) a press on a pane's row, delivered to
                     the row as the window delivers a real press:
                       click:<part>:<key>[:left|right|middle[:ctrl|alt|
-                      ctrl+alt]] (part: file, event, header, var, statetab,
-                      gutter, code, value, call, arg, tab, timeline, point,
-                      scratch, position, vcsfile, commit — a timeline's key
-                      is the permille along its track, a code or value key
-                      `<line>@<column>`, an arg's `<call>/<arg>`) and
+                      shift|ctrl+alt]] (part: file, event, header, var,
+                      statetab, gutter, code, value, call, arg, tab, point,
+                      scratch, position, vcsfile, commit, and PLAT-51's
+                      statecontrol (key `history|origin|unwatch:<path>`),
+                      history (key `<ticks>`), addwatch, separator — a code
+                      or value key `<line>@<column>`, an arg's
+                      `<call>/<arg>`) and
                       ctx:<label> (an entry of the open right-click menu)
+                    and (PLAT-51) a list pane's scrollbar scrubber:
+                      scrub:<eventLog|calltrace>:track:<permille>
+                      scrub:<eventLog|calltrace>:drag:<from>:<to>
                     and (PLAT-52) the Terminal Output pane:
                       term:view:<lines|screen>  term:line:<line>[:<col>]
                       term:track:<permille> (the line scrubber's track)
@@ -455,7 +461,9 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "hover-label", "wait", "tab", "tab-close",
                        "tab-add", "hwheel", "click", "ctx", "label-menu",
                        # PLAT-52: the Terminal Output pane's events.
-                       "term"]:
+                       "term",
+                       # PLAT-51: a list pane's scrollbar scrubber.
+                       "scrub"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -618,6 +626,10 @@ const
     ## PLAT-50 (K34): a diff's added and removed lines, the terminal's
     ## `srChromeSuccess` / `srChromeError` tokens.
   TracepointCommand = ":tracepoint "
+  WatchCommand = ":watch "
+    ## PLAT-51: the watch field (the Watches tab's "Add watch expression…"
+    ## row opens the omnibar with it); `:unwatch EXPR` and
+    ## `:watch-edit OLD -> NEW` remove and edit (the row controls).
     ## PLAT-50: the omnibar's tracepoint command ("Add tracepoint").
 
 type
@@ -946,8 +958,26 @@ var
   gCalltraceLoads = 0
     ## How many call-trace sections the window has read (the first, at open,
     ## included) — reported for the paging test.
+  gCaret: tuple[path: string, line, column: int]
+    ## PLAT-51: the read-only debugging editor's CARET (Editor-Pane.md, "The
+    ## caret in a read-only editor") — placed by a click on the text, moved
+    ## by the arrow keys, distinct from the execution pointer; Alt+T /
+    ## Ctrl+Enter (and the menu's "Add tracepoint") open the tracepoint
+    ## editor on its line. Line 0: no caret.
+  gListDrag: ListScrubDrag
+    ## PLAT-51: a press held on the Event Log's or the Call Trace's
+    ## scrollbar scrubber thumb.
+  gEventLogLoads = 0
+    ## PLAT-51: how many event-log windows the scrubber has read — reported
+    ## for the bounded-fetch test.
+  gStateResize: tuple[active: bool, startX, startPx: int]
+    ## PLAT-51: the Variables pane's column rule held — the name column
+    ## follows the pointer until the release (the desktop's column resize).
   gestureTrace = getEnv("CODETRACER_GPUI_GESTURE_TRACE", "") == "1"
     ## One stderr line per gesture step, for a window lane's record.
+
+proc drawListScrubbers(r: GpuiRenderer)
+  ## PLAT-51: forward-declared for the window's redraws.
 
 proc windowDrawn(): bool =
   ## Whether the window's arrangement has been drawn (so a redraw has a root
@@ -1448,6 +1478,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   r.appendChild(gContainer, gTop)
   # PLAT-52: the Terminal Output pane is laid out from the box it now has.
   drawTerminalPane(r)
+  # PLAT-51: and the list panes' scrubbers from theirs.
+  drawListScrubbers(r)
   if not gRoot.isNil:
     drawOverlay(r)
     drawTopBar(r)
@@ -1512,6 +1544,7 @@ proc redrawCalltrace(r: GpuiRenderer) =
       redrawWindowLeaf(r, pane, leaf)
       applyTextFaces(r, pane)
       break
+  drawListScrubbers(r)
 
 proc scrollCalltrace(r: GpuiRenderer; rows: int) =
   ## PLAT-47 B3: the wheel over the call-trace pane scrolls it a row per
@@ -1726,7 +1759,7 @@ proc scrubTerminalLines(r: GpuiRenderer; y: int; click: bool) =
   if vm.isNil or lay.track.h <= 0:
     return
   let sm = vm.scrubberFor(gTerminal, lay.rows)
-  let f = fractionAt(y - lay.track.y, lay.track.h)
+  let f = trackFractionAt(y - lay.track.y, lay.track.h)
   gTerminal.scrollTop = if click: sm.clickAt(f)
                         else: sm.dragTo(f - sm.thumbLength / 2.0)
   gTerminal.follow = false
@@ -1821,6 +1854,152 @@ proc terminalKey(r: GpuiRenderer; key: string): bool =
     true
   else: false
 
+# ---------------------------------------------------------------------------
+# PLAT-51: the Event Log's and the Call Trace's scrollbar scrubbers
+# ---------------------------------------------------------------------------
+
+proc visibleBodyOf(kind: PaneKind): PxRect =
+  ## The pane's body in window pixels when it is the visible tab of a drawn
+  ## box, else a zero rectangle.
+  let i = gGeom.tabsNodeOfPane($kind)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $kind:
+    return PxRect()
+  n.body
+
+proc eventLogRows(): int =
+  ## The rows the event log's body shows: under its column header.
+  max(1, listRowsOf(visibleBodyOf(paneEventLog), EventLogRowPx) - 1)
+
+proc callTraceRows(): int =
+  listRowsOf(visibleBodyOf(paneCalltrace), CalltraceRowPx)
+
+proc eventLogScrubber(): ScrubberModel =
+  ## The WHOLE log (the engine's count), the window's first row — the pane
+  ## shows the window from its start — and the current event's row.
+  if gSession.isNil:
+    return scrubberModel(0, 0, 0, totalKnown = false)
+  let ev = gSession.session.store.eventLog
+  scrubberModel(ev.recordsTotal.val, ev.loadedStart.val, eventLogRows(),
+                ev.currentIndex.val, totalKnown = ev.totalReported.val)
+
+proc callTraceScrubber(): ScrubberModel =
+  ## The WHOLE trace at its expansion, the ViewModel's scroll position, and
+  ## the debugger's call (the selected row when it is listed, else the
+  ## engine's `currentCallLineIndex`).
+  if gSession.isNil or gSession.session.calltraceVM.isNil:
+    return scrubberModel(0, 0, 0, totalKnown = false)
+  let vm = gSession.session.calltraceVM
+  let store = gSession.session.store
+  var current = int(store.calltrace.currentLineIndex.val)
+  for row in vm.callRows():
+    if crfSelected in row.flags:
+      current = int(row.index)
+  scrubberModel(int(store.calltrace.totalCallsCount.val),
+                int(vm.scrollPosition.val), callTraceRows(), current)
+
+proc drawListScrubbers(r: GpuiRenderer) =
+  ## Each list pane's scrubber over what its leaf drew.
+  for (kind, sm) in [(paneEventLog, eventLogScrubber()),
+                     (paneCalltrace, callTraceScrubber())]:
+    let pane = gPanes.getOrDefault($kind)
+    let body = visibleBodyOf(kind)
+    if pane.isNil or body.w <= 0 or sm.total <= 0:
+      continue
+    drawListScrubber(r, pane, body, sm, $kind)
+
+proc redrawListPane(r: GpuiRenderer; kind: PaneKind) =
+  let pane = gPanes.getOrDefault($kind)
+  if pane.isNil:
+    return
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == kind:
+      redrawWindowLeaf(r, pane, leaf)
+      applyTextFaces(r, pane)
+      break
+  drawListScrubbers(r)
+
+proc scrubListPane(r: GpuiRenderer; kind: PaneKind; y: int; dragging: bool) =
+  ## Move the pane's VIEW to the row the scrubber names (Scrollbar-Scrubbers
+  ## §3.2 / §3.3) — reading the window it lands on when it is not held. The
+  ## debugger does not move.
+  let body = visibleBodyOf(kind)
+  if gSession.isNil or body.w <= 0:
+    return
+  case kind
+  of paneEventLog:
+    let sm = eventLogScrubber()
+    let hit = listScrubHit(body, sm, listTrackRect(body).x, y)
+    if not hit.onTrack:
+      return
+    let page = gSession.pageEventLog(sm.scrubTop(hit.fraction, dragging),
+                                     eventLogRows(),
+                                     int64(gSession.getCurrentRRTicks()))
+    if page.loaded:
+      inc gEventLogLoads
+    traceGesture("eventlog top=" & $page.top & " loads=" & $gEventLogLoads &
+                 " total=" & $page.total)
+  of paneCalltrace:
+    let sm = callTraceScrubber()
+    let hit = listScrubHit(body, sm, listTrackRect(body).x, y)
+    if not hit.onTrack:
+      return
+    let top = sm.scrubTop(hit.fraction, dragging)
+    let page = gSession.pageCalltrace(callTraceRows(), top - sm.firstVisible)
+    if page.loaded:
+      inc gCalltraceLoads
+    traceGesture("calltrace top=" & $page.top & " loads=" & $gCalltraceLoads &
+                 " total=" & $page.total)
+  else:
+    return
+  redrawListPane(r, kind)
+
+proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on a list pane's scrubber: the track jumps the view, the
+  ## thumb starts a drag.
+  for (kind, sm) in [(paneEventLog, eventLogScrubber()),
+                     (paneCalltrace, callTraceScrubber())]:
+    let body = visibleBodyOf(kind)
+    if body.w <= 0 or sm.total <= 0:
+      continue
+    let hit = listScrubHit(body, sm, x, y)
+    if not hit.onTrack:
+      continue
+    if hit.onThumb:
+      gListDrag = ListScrubDrag(active: true, pane: $kind)
+    scrubListPane(r, kind, y, dragging = hit.onThumb)
+    return true
+  false
+
+proc moveListScrubber(r: GpuiRenderer; y: int) =
+  for kind in [paneEventLog, paneCalltrace]:
+    if $kind == gListDrag.pane:
+      scrubListPane(r, kind, y, dragging = true)
+
+proc refreshEventLogMark() =
+  ## After a move: ask the engine which row of the whole log is now "now"
+  ## (`indexAtTick`, index only — no window, no redraw), so the scrubber's
+  ## mark follows the debugger.
+  if gSession.isNil:
+    return
+  let ev = gSession.session.store.eventLog
+  let held = max(1, ev.rows.val.len)
+  try:
+    discard gSession.requestAndLoadEventLog(
+      start = ev.loadedStart.val, count = held,
+      atRRTicks = int64(gSession.getCurrentRRTicks()))
+  except CatchableError:
+    discard
+
+proc moveStateResize(r: GpuiRenderer; x: int)
+  ## PLAT-51: forward-declared; defined beside the state pane's clicks.
+
+proc refreshStateOrigins()
+  ## PLAT-51: forward-declared; defined beside the state pane's clicks.
+
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
@@ -1849,6 +2028,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-48: the top bar, its popovers and the pin / unpin buttons first.
     if handleTopPress(r, x, y):
       return
+    # PLAT-51: a list pane's scrollbar scrubber BEFORE the pane's rows: the
+    # track is drawn over the rows' right edge, and a press on it moves the
+    # view — never the debugger, which a press on the call row under it
+    # would.
+    if pressListScrubber(r, x, y):
+      return
     if clickCalltrace(r, x, y):
       return
     # PLAT-52: the Terminal Output pane's presses.
@@ -1859,6 +2044,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gTerminal.drag != gtdNone:
       moveTerminal(r, x, y)
       return
+    if gListDrag.active:
+      moveListScrubber(r, y)
+      return
+    if gStateResize.active:
+      moveStateResize(r, x)
+      return
     if not gGestures.active:
       handleTopHover(r, x, y)
       return
@@ -1866,6 +2057,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   of gekPointerUp:
     if gTerminal.drag != gtdNone:
       releaseTerminal(r, x, y)
+      return
+    if gListDrag.active:
+      moveListScrubber(r, y)
+      gListDrag = ListScrubDrag()
+      return
+    if gStateResize.active:
+      moveStateResize(r, x)
+      gStateResize.active = false
       return
     if not gGestures.active: return
     step = gGestures.pointerUp(committedLayout(), gGeom, x, y)
@@ -1931,12 +2130,18 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
       return
     windowPointer(r0, ev.kind, int(p.x), int(p.y), p.dy, p.dx)
 
+proc caretKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
+  ## PLAT-51: forward-declared; defined beside the pane clicks.
+
 proc windowKey(key: string; mods: seq[string]) =
   ## One key of a replay window, from its `keydown` listener or from
   ## `--window-ops`: the top bar's keys (an open omnibar or menu owns them
   ## all), then `Esc` cancels a layout gesture.
   var r: GpuiRenderer
   if handleTopKey(r, key, mods):
+    return
+  # PLAT-51: the read-only editor's caret, once placed.
+  if caretKey(r, key, mods):
     return
   # PLAT-52: the Terminal Output pane's own keys, while it has focus.
   if mods.len == 0 and terminalKey(r, key):
@@ -2026,7 +2231,7 @@ proc gpuiMenuActionAvailable(action: string): bool =
   action in ["forwardContinue", "reverseContinue", "forwardNext",
              "reverseNext", "forwardStep", "reverseStep", "forwardStepOut",
              "reverseStepOut", "findSymbol", "aFilesystem", "aFullCalltrace",
-             "aState", "aEventLog", "aTimeline", "aTerminal", "aScratchpad",
+             "aState", "aEventLog", "aTerminal", "aScratchpad",
              "aPointList", "aAgentActivity"]
 
 proc markSvgPath(controlIndex: int; enabled: bool): string =
@@ -2208,7 +2413,12 @@ proc drawTopBar(r: GpuiRenderer) =
       # words — and open, the query with its caret (a thin bar while
       # inserting, a block while overwriting) where the ViewModel's
       # `cursor` is.
-      let b = absBox(r, sg.rect, chromeOf(crInputBackground))
+      # PLAT-51 (Commands-And-Omnibox.md, "Omnibox colours on every
+      # front-end"): THE EDITOR'S GROUND AND FOREGROUND in every state —
+      # idle, hovered, focused / typing — and the placeholder in the
+      # editor's muted foreground; the border stays ui/border/secondary.
+      # (PLAT-50's input surface, `crInputBackground`, is superseded.)
+      let b = absBox(r, sg.rect, EditorGround)
       r.setAttribute(b, "data-ct-omnibar", $gOmnibar.isOpen)
       r.setStyle(b, "padding-left", $TabPadPx & "px")
       r.setStyle(b, "rounded", "6px")
@@ -2229,9 +2439,10 @@ proc drawTopBar(r: GpuiRenderer) =
         else: "⌕"
       r.setAttribute(b, "data-ct-omnibar-placeholder",
                      $(gOmnibar.query.len == 0))
-      r.setStyle(b, "color", chromeOf(
-        if gOmnibar.isOpen and gOmnibar.query.len > 0: crTabActiveForeground
-        else: crTabInactiveForeground))
+      r.setStyle(b, "color",
+        if gOmnibar.query.len > 0: EditorTextColour
+        elif gTopLayout.omnibarField or gOmnibar.isOpen: EditorLineNumberColour
+        else: EditorTextColour)
       r.appendChild(b, r.createTextNode(text))
       gTopEls.add b
     of gtTab:
@@ -2330,7 +2541,10 @@ proc drawTopBar(r: GpuiRenderer) =
   # THE OMNIBAR'S RESULTS.
   let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
   if op.rows.len > 0:
-    let box = absBox(r, op.rect, chromeOf(crMenuBackground))
+    # PLAT-51: the results list on the EDITOR'S ground too (its border the
+    # menu's), the selected row on the editor's selection colour under the
+    # editor's foreground.
+    let box = absBox(r, op.rect, EditorGround)
     r.setAttribute(box, "data-ct-omnibar-results", $gOmnibar.results.len)
     r.setStyle(box, "border-width", "1px")
     r.setStyle(box, "border-color", chromeOf(crMenuBorder))
@@ -2338,7 +2552,7 @@ proc drawTopBar(r: GpuiRenderer) =
     for row in op.rows:
       let selected = row.item >= 0 and row.item == gOmnibar.selected
       let rb = absBox(r, row.rect,
-                      if selected: chromeOf(crTabActiveBackground) else: "")
+                      if selected: EditorSelectionColour else: "")
       r.setStyle(rb, "padding-left", $TabPadPx & "px")
       r.setStyle(rb, "white-space", "nowrap")
       r.setStyle(rb, "overflow", "hidden")
@@ -2350,8 +2564,8 @@ proc drawTopBar(r: GpuiRenderer) =
       if row.item >= 0:
         r.setAttribute(rb, "data-ct-omnibar-result",
                        gOmnibar.results[row.item].entry.label)
-      r.setStyle(rb, "color", chromeOf(if selected: crTabActiveForeground
-                                       else: crWindowForeground))
+      r.setStyle(rb, "color",
+                 if row.item < 0: EditorLineNumberColour else: EditorTextColour)
       r.appendChild(rb, r.createTextNode(text))
       gTopEls.add rb
   # PLAT-50: THE RIGHT-CLICK MENU, on the desktop's dropdown surface, and an
@@ -2527,6 +2741,10 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   discard gSession.loadStopPanes()
   # PLAT-49 part B: the call the debugger is in, selected, as on the desktop.
   gSession.selectCurrentCall()
+  # PLAT-51: and the event log's current row, for its scrubber's mark; and
+  # the value-origin chains open in the Variables pane, re-read here.
+  refreshEventLogMark()
+  refreshStateOrigins()
   let editor = gPanes.getOrDefault($paneEditor)
   if not editor.isNil and not gSourceService.isNil:
     let surface = editorSurfaceFor(
@@ -2545,9 +2763,14 @@ proc refreshReplayWindow(r: GpuiRenderer) =
     # the debugger put a new line under the cursor and leaving the view 40
     # columns right of it would hide the line the move was about.
     gEditorSurface = surface
+    # PLAT-51: the caret stays where the user put it (a move does not move
+    # it), on the file it was placed in.
+    if gCaret.line > 0 and gCaret.path == surface.path:
+      gEditorSurface.caretLine = gCaret.line
+      gEditorSurface.caretColumn = gCaret.column
     gEditorScrollCols = 0
-    discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root, surface,
-                         gEditorViewportPx, gEditorScrollCols)
+    discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
+                         gEditorSurface, gEditorViewportPx, gEditorScrollCols)
     noteEditorTab(r, editorTabLabel(surface.path, false))
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin != paneEditor:
@@ -2555,6 +2778,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
       if not pane.isNil and not leaf.vm.isNil:
         redrawWindowLeaf(r, pane, leaf)
   drawTerminalPane(r)
+  drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu) &
                     gRecordings)
@@ -2720,7 +2944,6 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   of "aFullCalltrace": showPaneFromMenu(r, paneCalltrace)
   of "aState": showPaneFromMenu(r, paneState)
   of "aEventLog": showPaneFromMenu(r, paneEventLog)
-  of "aTimeline": showPaneFromMenu(r, paneTimeline)
   of "aTerminal": showPaneFromMenu(r, paneTerminalOutput)
   of "aScratchpad": showPaneFromMenu(r, paneScratchpad)
   of "aPointList": showPaneFromMenu(r, panePointList)
@@ -2761,7 +2984,13 @@ proc runGpuiTracepoint(r: GpuiRenderer; path: string; line: int;
                    " hit(s)",
               (if text.len > 0: text else: "the line never ran"))
 
+proc runWatchCommand(r: GpuiRenderer; query: string): bool
+  ## PLAT-51: forward-declared; defined beside the value history.
+
 proc acceptOmnibar(r: GpuiRenderer) =
+  # PLAT-51: a watch verb.
+  if runWatchCommand(r, gOmnibar.query):
+    return
   # PLAT-50: the tracepoint "Add tracepoint" asked for, on its line.
   if gTracepointAt.path.len > 0 and
      gOmnibar.query.startsWith(TracepointCommand):
@@ -3476,31 +3705,76 @@ proc openVcsDiff(r: GpuiRenderer; option: string) =
 # ---- a value's history and origin -------------------------------------------
 
 proc showValueHistory(r: GpuiRenderer; path: string) =
-  ## PLAT-50 (K28): "Toggle value history" — the value's recorded history.
-  let name = path.split('.')[0]
-  try:
-    let rows = gSession.loadValueHistory(name, gpuiRowBudget())
-    var text = ""
-    for row in rows:
-      text.add $row.locationTicks & "  " & row.valueText & "\n"
-    showContent(r, "history of " & name & " (" & $rows.len & " value" &
-                     (if rows.len == 1: "" else: "s") & ")",
-                (if rows.len > 0: text else: "no recorded values"))
-  except CatchableError as e:
-    traceGesture("no history for " & name & ": " & e.msg)
+  ## K28 / K40: "Toggle value history" and the row's history button — the
+  ## history OPENS IN THE PANE, under the row (PLAT-51; the desktop's
+  ## `div.ct-history-inline-container`); a second toggle closes it. Its
+  ## entries are navigation rows (`gcpHistoryEntry`).
+  let vm = gSession.session.stateVM
+  if vm.isNil:
+    return
+  var open = vm.expandedHistories.val
+  if path in open:
+    open.excl path
+  else:
+    try:
+      discard gSession.loadValueHistory(path, gpuiRowBudget())
+    except CatchableError as e:
+      traceGesture("no history for " & path & ": " & e.msg)
+    open.incl path
+  vm.expandedHistories.val = open
+  traceGesture("history " & path & " " &
+               $vm.valueHistory.val.getOrDefault(path).len & " value(s)")
+  redrawPaneOf(r, paneState)
 
 proc showValueOrigin(r: GpuiRenderer; path: string) =
-  ## PLAT-50 (K28): "Show value origin" — the chain the desktop's origin
-  ## panel lists (`ct/originChain`, `HeadlessDebugSession.loadValueOrigin`),
-  ## nearest cause first.
-  let name = path.split('.')[0]
-  try:
-    let lines = gSession.loadValueOrigin(name).originHopLines
-    showContent(r, "origin of " & name,
-                (if lines.len > 0: lines.join("\n")
-                 else: "no recorded origin for " & name))
-  except CatchableError as e:
-    showContent(r, "origin of " & name, "no origin for " & name & ": " & e.msg)
+  ## K28 / K41: "Show value origin" and the row's origin badge — the chain
+  ## OPENS IN THE PANE under the row (PLAT-51; the desktop's in-row chain),
+  ## nearest cause first; a second toggle closes it.
+  let vm = gSession.session.stateVM
+  if vm.isNil:
+    return
+  var lines = vm.originLines.val
+  if lines.hasKey(path):
+    lines.del path
+  else:
+    try:
+      lines[path] = gSession.loadValueOrigin(path).originHopLines
+    except CatchableError as e:
+      traceGesture("no origin for " & path & ": " & e.msg)
+      lines[path] = @[]
+  vm.originLines.val = lines
+  traceGesture("origin " & path & " " & $lines.getOrDefault(path).len &
+               " hop(s)")
+  redrawPaneOf(r, paneState)
+
+proc runWatchCommand(r: GpuiRenderer; query: string): bool =
+  ## PLAT-51: `:watch EXPR`, `:unwatch EXPR`, `:watch-edit OLD -> NEW` — the
+  ## desktop's watch field and row controls (Variable-State-Pane.md: watch
+  ## expressions "add, edit, remove"); the engine evaluates them inside the
+  ## next locals load.
+  var text = query.strip()
+  if not text.startsWith(":"):
+    return false
+  text = text[1 .. ^1]
+  let sp = text.find(' ')
+  let verb = if sp < 0: text else: text[0 ..< sp]
+  let arg = if sp < 0: "" else: text[sp + 1 .. ^1].strip()
+  if verb notin ["watch", "unwatch", "watch-edit"] or gSession.isNil or
+     gSession.session.stateVM.isNil or arg.len == 0:
+    return false
+  let vm = gSession.session.stateVM
+  case verb
+  of "watch": vm.addWatch(arg)
+  of "unwatch": vm.removeWatch(arg)
+  else:
+    let at = arg.find("->")
+    if at < 0:
+      return false
+    vm.editWatch(arg[0 ..< at].strip(), arg[at + 2 .. ^1].strip())
+  traceGesture("watches " & vm.watchExpressions.val.join("|"))
+  gOmnibar.close()
+  refreshReplayWindow(r)
+  true
 
 # ---- the actions -----------------------------------------------------------
 
@@ -3618,6 +3892,75 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     traceGesture(target.expression & " = " & target.text &
                  " is the value at this step")
 
+proc placeCaret(r: GpuiRenderer; path: string; line, column: int) =
+  ## Put the read-only editor's caret at `line:column` of `path` and draw it.
+  gCaret = (path, max(1, line), max(1, column))
+  if gEditorSurface.path == path:
+    gEditorSurface.caretLine = gCaret.line
+    gEditorSurface.caretColumn = gCaret.column
+    redrawEditorRows(r)
+  traceGesture("caret " & $gCaret.line & ":" & $gCaret.column)
+
+proc caretKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
+  ## PLAT-51: the caret's keys while it is placed — the arrows, Home and End
+  ## move it (never the debugger); Alt+T and Ctrl+Enter open the tracepoint
+  ## editor on its line, the desktop's chords (`Editor.TracepointCreation`).
+  if gCaret.line <= 0 or gEditorSurface.path != gCaret.path:
+    return false
+  let k = key.toLowerAscii
+  if ("alt" in mods and k == "t") or ("control" in mods and k in ["enter", "return"]):
+    gTracepointAt = (gCaret.path, gCaret.line)
+    traceGesture("tracepoint editor at " & $gCaret.line)
+    openOmnibar(r, TracepointCommand)
+    return true
+  if mods.len > 0:
+    return false
+  var line = gCaret.line
+  var column = gCaret.column
+  let total = max(1, gEditorSurface.totalLineCount)
+  case k
+  of "up", "arrowup": line = max(1, line - 1)
+  of "down", "arrowdown": line = min(total, line + 1)
+  of "left", "arrowleft": column = max(1, column - 1)
+  of "right", "arrowright": column = column + 1
+  of "home": column = 1
+  of "end": column = max(1, lineTextOf(gCaret.path, line).runeLen + 1)
+  else: return false
+  placeCaret(r, gCaret.path, line, column)
+  true
+
+proc refreshStateOrigins() =
+  ## PLAT-51: the value-origin chains open in the Variables pane, read at
+  ## THIS stop (an origin is the current value's), one line per hop.
+  if gSession.isNil or gSession.session.stateVM.isNil:
+    return
+  let vm = gSession.session.stateVM
+  var lines = initTable[string, seq[string]]()
+  for path in vm.originLines.val.keys:
+    try:
+      lines[path] = gSession.loadValueOrigin(path).originHopLines
+    except CatchableError:
+      lines[path] = @[]
+  vm.originLines.val = lines
+
+proc moveStateResize(r: GpuiRenderer; x: int) =
+  ## PLAT-51: the column rule follows the pointer (the desktop's column
+  ## resize); the state pane is drawn again at the new width.
+  stateNameColumnOverridePx = max(1, gStateResize.startPx + x -
+                                     gStateResize.startX)
+  redrawPaneOf(r, paneState)
+
+proc historyPathAt(ticks: uint64): string =
+  ## The variable whose open history holds an entry at `ticks`.
+  if gSession.isNil or gSession.session.stateVM.isNil:
+    return ""
+  let vm = gSession.session.stateVM
+  for path in vm.expandedHistories.val:
+    for e in vm.valueHistory.val.getOrDefault(path):
+      if uint64(max(0'i64, e.locationTicks)) == ticks:
+        return path
+  ""
+
 proc onPaneClick(c: GPaneClick) =
   ## PLAT-50: a press on a row of a pane (`window_clicks`), as the desktop's
   ## click there. An open popover (a menu, the omnibar's results, a
@@ -3704,6 +4047,11 @@ proc onPaneClick(c: GPaneClick) =
     # K12-K15.
     let path = editorPath()
     let column = editorColumnAt(c.x)
+    if (c.button == gbLeft and not c.ctrl and not c.alt) or c.button == gbRight:
+      # K47 (PLAT-51): a press on the text PLACES THE CARET there, as
+      # Monaco's does in a read-only model (a right press too, before its
+      # menu opens).
+      placeCaret(r, path, c.line, column)
     if c.button == gbRight:
       openContextMenuAt(r, editorMenuAt(path, c.line, column), c.x, c.y)
     elif c.button == gbLeft and c.ctrl and c.alt:
@@ -3783,25 +4131,52 @@ proc onPaneClick(c: GPaneClick) =
     for k in PaneKind:
       if $k == c.key:
         openContextMenuAt(r, tabContextMenu(k, gMaximised.isSome), c.x, c.y)
-  of gcpTimelineTrack:
-    # K30: the track is `TimelineBarWidthPx` wide from the pane's padding.
+  of gcpStateControl:
+    # PLAT-51: a Variables row's value controls — the history button (K40),
+    # the origin badge (K41), a watch's remove control.
     if c.button != gbLeft:
       return
-    let i = gGeom.tabsNodeOfPane($paneTimeline)
-    if i < 0:
+    let sep = c.key.find(':')
+    if sep < 0:
       return
-    let x0 = gGeom.nodes[i].body.x + ChromePaddingPx
-    let marks = session.timelineVM.bounds.val
-    let first = if marks.len > 0: marks[0] else: 0'u64
-    let last = if marks.len > 1: marks[1] else: first
-    let frac = clamp(float(c.x - x0) / float(TimelineBarWidthPx), 0.0, 1.0)
-    let tick = first + uint64(float(last - first) * frac + 0.5)
+    let kind = c.key[0 ..< sep]
+    let arg = c.key[sep + 1 .. ^1]
+    case kind
+    of "history": showValueHistory(r, arg)
+    of "origin": showValueOrigin(r, arg)
+    of "unwatch": discard runWatchCommand(r, ":unwatch " & arg)
+    else: discard
+  of gcpHistoryEntry:
+    # PLAT-51: a value-history row is a NAVIGATION ROW — a click goes to the
+    # moment its value was recorded; its menu is the desktop's history-row
+    # menu.
+    var ticks = 0'u64
+    try: ticks = parseBiggestUInt(c.key)
+    except ValueError: return
+    if c.button == gbRight:
+      openContextMenuAt(r, valueHistoryEntryContextMenu(
+        historyPathAt(ticks), "", ticks), c.x, c.y)
+      return
+    if c.button != gbLeft:
+      return
     try:
-      gSession.gotoTick(tick)
+      gSession.gotoTick(ticks)
     except CatchableError as e:
-      traceGesture("seek failed: " & e.msg)
+      traceGesture("history jump failed: " & e.msg)
       return
+    traceGesture("history entry at tick " & $ticks)
     afterMove(r)
+  of gcpAddWatch:
+    # PLAT-51: the watch field — the omnibar opens with `:watch `.
+    if c.button == gbLeft:
+      openOmnibar(r, WatchCommand)
+  of gcpStateSeparator:
+    # PLAT-51: the column rule held — a column resize until the release.
+    if c.button == gbLeft:
+      gStateResize = (active: true, startX: c.x,
+                      startPx: (if stateNameColumnOverridePx > 0:
+                                  stateNameColumnOverridePx
+                                else: StateNameMinPx))
   of gcpPoint:
     # K31: the desktop's click selects the point.
     if c.button != gbLeft or session.pointListVM.isNil:
@@ -4204,6 +4579,43 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))
       else:
         return "unknown terminal event '" & parts[1] & "'"
+    of "scrub":
+      # PLAT-51: a list pane's scrollbar scrubber, aimed from the geometry
+      # the window drew it at (`list_scrubber.listTrackRect`):
+      #   scrub:<eventLog|calltrace>:track:<permille>   press the track
+      #   scrub:<eventLog|calltrace>:drag:<from>:<to>   hold the thumb, move
+      #                                                 in ten steps, release
+      var kind = paneEventLog
+      var found = false
+      for k in [paneEventLog, paneCalltrace]:
+        if $k == parts[1]:
+          kind = k
+          found = true
+      if not found:
+        return "no list scrubber on '" & parts[1] & "'"
+      let body = visibleBodyOf(kind)
+      if body.w <= 0:
+        return "the " & parts[1] & " pane is not drawn"
+      let track = listTrackRect(body)
+      let x = track.x + ListTrackPx div 2
+      proc ty(permille: int): int =
+        track.y + min(track.h - 1, track.h * permille div 1000)
+      case parts[2]
+      of "track":
+        pressAt(x, ty(at(3)))
+      of "drag":
+        let sm = if kind == paneEventLog: eventLogScrubber()
+                 else: callTraceScrubber()
+        let span = sm.thumbSpan(track.h, ListMinThumbPx)
+        windowPointer(r, gekPointerDown, x,
+                      track.y + span.start + span.length div 2)
+        let a = at(3)
+        let b = at(4)
+        for k in 0 .. 10:
+          windowPointer(r, gekPointerMove, x, ty(a + (b - a) * k div 10))
+        windowPointer(r, gekPointerUp, x, ty(b))
+      else:
+        return "unknown scrub event '" & parts[2] & "'"
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
@@ -4262,7 +4674,7 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       pressAt(x, y)
       return ""
     of "click":
-      # PLAT-50: `click:<part>:<key>[:left|right|middle[:ctrl]]` — a press
+      # PLAT-50: `click:<part>:<key>[:left|right|middle[:ctrl|alt|shift]]` — a press
       # on a row the window wired (`window_clicks.findClickTarget`),
       # dispatched to it as the shim delivers a press to the element under
       # the pointer, then to the window root, as a real press bubbles.
@@ -4270,8 +4682,14 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       for p in GClickPart:
         if $p == parts[1]: part = p
       var key = if parts.len > 2: parts[2] else: ""
-      let button = if parts.len > 3: parts[3] else: "left"
-      let mods = if parts.len > 4: parts[4] else: ""
+      # PLAT-51: a value control's key is itself `<kind>:<path>`
+      # (`history:x`, `origin:x`, `unwatch:x`), so it takes two fields.
+      var shift = 0
+      if part == gcpStateControl and parts.len > 3:
+        key = parts[2] & ":" & parts[3]
+        shift = 1
+      let button = if parts.len > 3 + shift: parts[3 + shift] else: "left"
+      let mods = if parts.len > 4 + shift: parts[4 + shift] else: ""
       let ctrl = "ctrl" in mods
       let alt = "alt" in mods
       # An editor press names its COLUMN too: `<line>@<column>`, pressed at
@@ -4291,21 +4709,13 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
             pressAt(tx, ty)
             return ""
         return "no tab '" & key & "' in the window"
-      # The timeline's track: `click:timeline:<permille>`.
       let el = findClickTarget(r, (if gRoot.isNil: gContainer else: gRoot), part,
-                               if part == gcpTimelineTrack: "" else: key)
+                               key)
       if el.isNil:
         return "no " & parts[1] & " row '" & key & "' in the window"
-      # The timeline's track is named by the permille along it pressed.
       var x = 0
       if column > 0:
         x = editorXOfColumn(column)
-      if part == gcpTimelineTrack:
-        let i = gGeom.tabsNodeOfPane($paneTimeline)
-        if i < 0:
-          return "the timeline is not drawn"
-        x = gGeom.nodes[i].body.x + ChromePaddingPx +
-            TimelineBarWidthPx * parseInt(key) div 1000
       let kind = case button
                  of "right": gekContextMenu
                  of "middle": gekAuxDown
@@ -4322,6 +4732,10 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       var modifiers: set[GpuiModifier] = {}
       if ctrl: modifiers.incl gmControl
       if alt: modifiers.incl gmAlt
+      # PLAT-51: Shift is delivered like any modifier, and GPUI opens its menu
+      # on Shift + right-click like any right-click — a GPUI window has no
+      # native menu to fall back to (Native-Front-End-Parity.md §1).
+      if "shift" in mods: modifiers.incl gmShift
       let ev = GpuiEvent(kind: kind, key: $x & ",0", modifiers: modifiers)
       var node = el
       while not node.isNil and

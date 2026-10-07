@@ -31,9 +31,12 @@ from codetracer_embed import CallLine, currentCallOf,
   CallRowIndentCells,
   csIndent, csToggle, csCallee, csIndex, csPunct, csArgName, csArgValue,
   csReturnArrow, csReturnValue
+# PLAT-51: the scrollbar scrubber's shared model.
+from codetracer_embed import ScrubberModel, scrubberModel
 
 import ../layout/profile
 import ./styled_row
+import ./scrubber_track
 
 export styled_row, profile
 export CallRow, CallRowToggle, CallSegmentKind, CallSegment, callRowSegments
@@ -75,6 +78,10 @@ type
     follow*: bool
       ## Keep the current call on screen. True until the reader scrolls the
       ## pane; `.` (centre on the pointer) turns it back on.
+    currentIndex*: int
+      ## PLAT-51: the TRACE index of the call the debugger is in, from the
+      ## engine (`currentCallLineIndex`) — known even when that call is not in
+      ## the loaded section — or -1. The scrubber track's mark.
 
 const
   CallTraceTitle* = "CALL TRACE"
@@ -109,7 +116,8 @@ proc initCallTraceModel*(rows: seq[CallTraceRow] = @[];
   ## With no stack, that is the fallback.
   result = CallTraceModel(rows: rows, current: -1, firstIndex: firstIndex,
                           total: max(total, firstIndex.int + rows.len),
-                          scrollTop: max(0, scrollTop), follow: follow)
+                          scrollTop: max(0, scrollTop), follow: follow,
+                          currentIndex: -1)
   # The ViewModel's rule (`calltrace_vm.currentCallOf`, PLAT-49 part B) —
   # GPUI selects the same call from it.
   var lines: seq[CallLine] = @[]
@@ -121,6 +129,23 @@ proc initCallTraceModel*(rows: seq[CallTraceRow] = @[];
     result.current = at.get.int
 
 proc isEmpty*(m: CallTraceModel): bool = m.total == 0
+
+const
+  MinTrackedWidth* = 8
+    ## PLAT-51: the narrowest pane that gives a column to the scrubber.
+
+proc tracked*(area: CellArea): bool =
+  ## Whether a pane painted into `area` carries the scrubber column.
+  area.width >= MinTrackedWidth and area.height > 1
+
+proc currentTraceIndex*(m: CallTraceModel): int =
+  ## The trace index of the call the debugger is in, or -1.
+  ## The loaded section's answer wins when it has one: it is the ViewModel's
+  ## exact rule (`currentCallOf`, by tick and stack); the engine's
+  ## `currentCallLineIndex` places the mark when the call is outside it.
+  if m.current >= 0: m.firstIndex.int + m.current
+  elif m.currentIndex >= 0: m.currentIndex
+  else: -1
 
 proc callOf*(r: CallTraceRow): CallRow =
   ## The row's `CallRow`: the ViewModel's when the host gave one, else one
@@ -173,6 +198,12 @@ proc visibleTop*(m: CallTraceModel; bodyRows: int): int =
     elif at >= top + bodyRows: top = at - bodyRows + 1
   m.clampTop(top, bodyRows)
 
+proc scrubberOf*(m: CallTraceModel; bodyRows: int): ScrubberModel =
+  ## PLAT-51: the scrollbar scrubber over the WHOLE trace at its current
+  ## expansion (Scrollbar-Scrubbers.md §2: `totalCallsCount`, not the loaded
+  ## section) — the view's top and height, and the current call's row.
+  scrubberModel(m.total, m.visibleTop(bodyRows), bodyRows, m.currentTraceIndex)
+
 proc rowAt*(m: CallTraceModel; index: int): (bool, CallTraceRow) =
   ## The trace's call `index`, when its section is loaded.
   let local = index - m.firstIndex.int
@@ -207,6 +238,13 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
   let bodyRows = area.height - 1
   let top = m.visibleTop(bodyRows)
   let current = if m.current >= 0: m.firstIndex.int + m.current else: -1
+  # PLAT-51: THE RIGHTMOST COLUMN IS THE SCROLLBAR SCRUBBER (Scrollbar-
+  # Scrubbers.md §4), the rows laid out in the cells left of it.
+  let hasTrack = area.tracked
+  let rowWidth = if hasTrack: area.width - ScrubberTrackCells else: area.width
+  if hasTrack:
+    paintVerticalScrubber(g, area.col + rowWidth, area.row + 1, bodyRows,
+                          m.scrubberOf(bodyRows))
   for i in 0 ..< bodyRows:
     let index = top + i
     if index >= m.total:
@@ -214,7 +252,7 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
     let (loaded, r) = m.rowAt(index)
     if not loaded:
       g.paint(area.row + 1 + i, area.col,
-              truncateToCells(CallTraceLoadingText, area.width),
+              truncateToCells(CallTraceLoadingText, rowWidth),
               CallTraceLoadingStyle)
       continue
     # PLAT-49 part B: EACH PART IN ITS OWN STYLE (`segmentStyle`), and the
@@ -224,9 +262,9 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
     let isCurrent = index == current
     let y = area.row + 1 + i
     var x = area.col
-    let stop = area.col + area.width
+    let stop = area.col + rowWidth
     if isCurrent:
-      g.paint(y, area.col, spaces(area.width), CurrentRowFill)
+      g.paint(y, area.col, spaces(rowWidth), CurrentRowFill)
     for seg in callRowSegments(r.callOf):
       if x >= stop:
         break
@@ -253,6 +291,8 @@ type
     cthNone      ## not on a call row
     cthRow       ## on a call row: go to that call (the desktop's click)
     cthToggle    ## on the row's toggle: expand or collapse its children
+    cthTrack     ## PLAT-51: on the scrollbar scrubber's track (a jump)
+    cthThumb     ## PLAT-51: on the scrubber's thumb (a drag starts)
 
   CallTraceHit* = object
     kind*: CallTraceHitKind
@@ -261,6 +301,9 @@ type
     arg*: int
       ## PLAT-50 (K23): the argument under the pointer (its name, `=` or
       ## value), an index into the row's `args`; -1 for none.
+    fraction*: float
+      ## PLAT-51: on the scrubber, where along its track (the model's
+      ## fraction).
 
 proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
                      row, col: int): CallTraceHit =
@@ -273,6 +316,12 @@ proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
      col >= area.col + area.width:
     return CallTraceHit(kind: cthNone, arg: -1)
   let bodyRows = area.height - 1
+  if area.tracked and col == area.col + area.width - ScrubberTrackCells:
+    let hit = m.scrubberOf(bodyRows).verticalScrubberHit(area.row + 1,
+                                                          bodyRows, row)
+    return CallTraceHit(kind: (if hit.kind == shThumb: cthThumb
+                               else: cthTrack),
+                        index: -1, arg: -1, fraction: hit.fraction)
   let index = m.visibleTop(bodyRows) + (row - area.row - 1)
   if index >= m.total:
     return CallTraceHit(kind: cthNone, arg: -1)

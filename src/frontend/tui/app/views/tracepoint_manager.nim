@@ -55,7 +55,6 @@ import isonim_tui
 
 import ../layout/profile
 import ./styled_row
-import ./timeline_bar
 
 export styled_row, profile
 
@@ -160,8 +159,8 @@ type
 
 const
   # THE KEY CONSTANTS ARE PREFIXED, and that is not cosmetic. `app/views/shell.nim`
-  # re-exports this module beside `call_stack`, `variables`, `event_log` and
-  # `timeline_bar`, and `app/timeline_binding.nim` re-exports it beside
+  # re-exports this module beside `call_stack`, `variables` and `event_log`,
+  # and `app/timeline_binding.nim` re-exports it beside
   # `input/timeline_keys`. A bare `KeyDown` here made `call_stack_keys.KeyDown`
   # ambiguous in every suite that imports the shell — caught by
   # `tests/test_call_stack_navigation.nim` refusing to compile.
@@ -185,10 +184,11 @@ const
   TitleStyle* = CellStyle(role: srChromeTitle)
   TitleDetailStyle* = CellStyle(role: srChromeMuted)
   RuleStyle* = CellStyle(role: srBorderPane)
-  TracepointMarkStyle* = timeline_bar.MarkStyle
-    ## THE SAME YELLOW `◆` THE SCRUBBER PAINTS. One fact, one glyph, one colour,
-    ## on two panes — a dialog that chose its own would let a reader believe the
-    ## diamond on the track and the diamond in the list were different things.
+  MarkGlyph* = "◆"
+    ## A tracepoint's mark. (It was the Timeline scrubber's too; the Timeline
+    ## panel is removed, 2026-10-05.)
+  TracepointMarkStyle* = CellStyle(role: srTimelineMark)
+    ## The tracepoint mark's colour — the role keeps its historical name.
   DraftStyle* = CellStyle(role: srChromeMuted, italic: true)
   VerifiedStyle* = CellStyle(role: srChromeSuccess)
   RejectedStyle* = CellStyle(role: srChromeError)
@@ -239,8 +239,14 @@ proc sweepRequest*(model: TracepointManagerModel): TracepointRequest =
   ## difference is entirely in what the engine answers.
   requestFor(model.draft)
 
-proc marksFrom*(entries: openArray[TracepointEntry]): seq[TimelineMark] =
-  ## Every hit of every ENABLED tracepoint, as a scrubber mark.
+type
+  TracepointMark* = object
+    ## One hit of an enabled tracepoint: where it fired, and the expression.
+    tick*: uint64
+    label*: string
+
+proc marksFrom*(entries: openArray[TracepointEntry]): seq[TracepointMark] =
+  ## Every hit of every ENABLED tracepoint, as a mark.
   ##
   ## Disabled tracepoints keep their hits — turning one off and on again must
   ## not cost another sweep — and contribute no diamond, which is what
@@ -250,8 +256,7 @@ proc marksFrom*(entries: openArray[TracepointEntry]): seq[TimelineMark] =
     if not entry.draft.enabled:
       continue
     for hit in entry.hits:
-      result.add TimelineMark(tick: hit.tick, kind: tmkTracepoint,
-                              label: entry.draft.expression)
+      result.add TracepointMark(tick: hit.tick, label: entry.draft.expression)
 
 proc hitCount*(model: TracepointManagerModel): int =
   for entry in model.entries:

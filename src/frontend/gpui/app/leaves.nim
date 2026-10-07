@@ -86,7 +86,7 @@
 ## naming another front-end and draws the refusal, so the field has a
 ## PRODUCTION READER and the arm has something to break.
 
-import std/[json, math, sets, strutils]
+import std/[json, math, os, sets, strutils, tables]
 from std/unicode import runeLen, runeSubstr
 
 import isonim_gpui/renderer
@@ -107,12 +107,9 @@ from ../../view_vocabulary/fact_reader import ViewIdAttribute,
 import ../../view_vocabulary/editor_surface
 import ../../../common/view_vocabulary
 import ../../../common/value_presentation
-# The native timeline's ViewModel (PLAT-41) comes through the SDK facade, like
-# every other ViewModel a front-end consumes. `codetracer_embed` already
-# imports and exports `timeline_vm` (for the same reason as `origin_chain_vm`),
-# so naming `viewmodels/timeline_vm` here reached past the facade for nothing
-# and tripped `ci/test/sdk-facade-boundary.sh` (consumer-facade-only). The
-# siblings `shell.nim` and `edit_arm.nim` import it exactly this way.
+# Every ViewModel comes through the SDK facade, like every other ViewModel a
+# front-end consumes (`ci/test/sdk-facade-boundary.sh`, consumer-facade-only).
+# The siblings `shell.nim` and `edit_arm.nim` import it exactly this way.
 import codetracer_embed
 import isonim/core/[signals, computation]
 # PLAT-47 B1: the editor is classified by the TERMINAL'S tokenizers (the
@@ -213,6 +210,11 @@ const
   EditorGround* = DesignTokenHex[dtEditorThemeGround][dmDark]
     ## The editor's ground — Monaco's `editor.background` (PLAT-47 B1).
   EditorLineNumberColour* = DesignTokenHex[dtEditorThemeLineNumber][dmDark]
+  EditorTextColour* = DesignTokenHex[dtEditorThemeRuleDefault][dmDark]
+    ## The editor's default foreground (PLAT-51: the omnibox's text in every
+    ## state — Commands-And-Omnibox.md, "Omnibox colours on every front-end").
+  EditorSelectionColour* = DesignTokenHex[dtEditorThemeSelection][dmDark]
+    ## The editor's selection ground (the omnibox's selected result).
   EditorActiveLineNumberColour* =
     DesignTokenHex[dtEditorThemeActiveLineNumber][dmDark]
     ## The resting and the active (execution line's) line numbers.
@@ -272,8 +274,26 @@ const
     ## are comparable, and a front-end whose declared order drifts from the
     ## other's is a defect whether or not either enforces it.
 
-  ExecutionPointerGlyph* = "▶"
+  ExecutionPointerGlyph* = "▸"
+    ## PLAT-51: the execution pointer's TEXT spelling (what a plan reader
+    ## reads in the lane's `data-ct-pointer-mark` row); the window DRAWS the
+    ## desktop's own mark there (`ExecutionMarkSvg`, below), as
+    ## Native-Front-End-Parity.md §3 asks — "GPUI draws the desktop's mark
+    ## itself". It was `▶`.
   InspectionPointerGlyph* = "▷"
+  ExecutionMarkSvg* = staticRead("../../../public/resources/shared/highlight_line_arrow.svg")
+    ## The desktop's execution mark (`.gutter-highlight-active:before`'s
+    ## `HIGHLIGHT_LINE_ARROW`), byte for byte.
+  ExecutionMarkPx* = (w: 7, h: 9)
+    ## Drawn at the gutter's size: the desktop paints it `0.47em` across in a
+    ## ~14 px gutter row (`background-size: 0.47em`), keeping the SVG's
+    ## 8 : 10.13 proportion.
+  EditorCaretAttribute* = "data-ct-caret"
+    ## PLAT-51: on the read-only editor's caret, `<line>:<column>`.
+  PointerMarkAttribute* = "data-ct-pointer-mark"
+    ## On the pointer lane of the execution line: what the lane draws
+    ## (`highlight_line_arrow.svg`), so a plan reader can tell the desktop's
+    ## mark from a text glyph.
   BreakpointGlyph* = "●"
   BreakpointDisabledGlyph* = "○"
   TracepointGlyph* = "◆"
@@ -332,6 +352,17 @@ func markGlyph*(m: EditorMark): string =
   of emBreakpoint: BreakpointGlyph
   of emBreakpointDisabled: BreakpointDisabledGlyph
   of emTracepoint: TracepointGlyph
+
+var executionMarkFile {.threadvar.}: string
+
+proc executionMarkPath*(): string =
+  ## The desktop's mark written once to a file the shim's `img` can load.
+  if executionMarkFile.len == 0 or not fileExists(executionMarkFile):
+    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
+    createDir(dir)
+    executionMarkFile = dir / "highlight_line_arrow.svg"
+    writeFile(executionMarkFile, ExecutionMarkSvg)
+  executionMarkFile
 
 func pointerGlyph*(p: EditorPointer): string =
   case p
@@ -1030,7 +1061,8 @@ proc renderEditorScrollbar(r: GpuiRenderer;
   r.appendChild(result, thumb)
 
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
-                     numberWidth = 1; skipCols = 0): GpuiElement =
+                     numberWidth = 1; skipCols = 0;
+                     caretColumn = 0): GpuiElement =
   ## One row of the source editor.
   ##
   ## Every attribute below is the ROW's own field stringified. Nothing here
@@ -1097,7 +1129,22 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     r.setAttribute(lane, GutterLaneAttribute, $run.kind)
     r.setStyle(lane, "color", run.colour)
     r.setStyle(lane, "flex-shrink", "0")
-    r.appendChild(lane, r.createTextNode(run.text))
+    if run.kind == grkPointer and row.pointer == eptExecution:
+      # PLAT-51: THE DESKTOP'S MARK, drawn — not a glyph that approximates
+      # it. The lane is held at exactly one cell (`EditorColumnPx`), so the
+      # line numbers and the code do not move.
+      r.setAttribute(lane, PointerMarkAttribute, "highlight_line_arrow.svg")
+      r.setStyle(lane, "display", "flex")
+      r.setStyle(lane, "items", "center")
+      r.setStyle(lane, "width", formatFloat(EditorColumnPx, ffDecimal, 2) & "px")
+      let mark = r.createElement("img")
+      r.setAttribute(mark, "src", executionMarkPath())
+      r.setStyle(mark, "width", $ExecutionMarkPx.w & "px")
+      r.setStyle(mark, "height", $ExecutionMarkPx.h & "px")
+      r.setStyle(mark, "flex-shrink", "0")
+      r.appendChild(lane, mark)
+    else:
+      r.appendChild(lane, r.createTextNode(run.text))
     r.appendChild(gutter, lane)
   r.appendChild(el, gutter)
 
@@ -1111,6 +1158,21 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   r.setStyle(column, "overflow", "hidden")
   if row.pointer == eptExecution:
     r.setStyle(column, "background", ExecutionRowBand)
+  if caretColumn > 0 and caretColumn > skipCols:
+    # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
+    # before its column, in the editor's foreground (Monaco's cursor),
+    # distinct from the execution band and from the inspection pointer.
+    r.setStyle(column, "position", "relative")
+    let caret = r.createElement("div")
+    r.setAttribute(caret, EditorCaretAttribute, $row.line & ":" & $caretColumn)
+    r.setStyle(caret, "position", "absolute")
+    r.setStyle(caret, "left", formatFloat(float(caretColumn - 1 - skipCols) *
+                                          EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(caret, "top", "0px")
+    r.setStyle(caret, "width", "2px")
+    r.setStyle(caret, "height", "100%")
+    r.setStyle(caret, "background", EditorTextColour)
+    r.appendChild(column, caret)
 
   let code = r.createElement("span")
   r.setAttribute(code, TextRoleAttribute, $trEditorCode)
@@ -1246,53 +1308,12 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
   let runs = editorRunsOf(surface)
   for i, row in surface.rows:
     r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,
-                                          scroll.leftCols))
+                                          scroll.leftCols,
+                                          (if row.line == surface.caretLine:
+                                             surface.caretColumn else: 0)))
   if scroll.present:
     r.appendChild(parent, renderEditorScrollbar(r, scroll))
   surface.rows.len > 0
-
-const
-  TimelineBarWidthPx* = 400
-    ## The scrubber's track. A fixed track rather than the pane's width: the
-    ## pane's width is the dock's to decide and a track that re-measured it
-    ## would be a second layout owner (`admission.nim`'s rule).
-  TimelineBarHeightPx = 6
-  TimelineTrackColor = "#3a3a3a"
-  TimelineFillColor = "#4fb3a9"
-
-proc timelineText*(current, first, last: uint64): string =
-  ## `tick <current> / <last> [<percent>%]` — the terminal header's spelling.
-  let span = if last > first: last - first else: 0'u64
-  let done = if current > first: current - first else: 0'u64
-  let pct = if span == 0: 0.0 else: 100.0 * float(done) / float(span)
-  "tick " & $current & " / " & $last & " [" & formatFloat(pct, ffDecimal, 1) & "%]"
-
-proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
-  ## The recording's extent and where the debugger is in it: a line of text
-  ## (what a reader and PLAT-39's reader parse) and a track filled to the
-  ## current tick (what an eye reads).
-  let marks = vm.bounds.val
-  let first = if marks.len > 0: marks[0] else: 0'u64
-  let last = if marks.len > 1: marks[1] else: first
-  let current = vm.currentPosition.val
-  let label = r.createElement("div")
-  r.appendChild(label, r.createTextNode(timelineText(current, first, last)))
-  r.appendChild(parent, label)
-  let track = r.createElement("div")
-  # PLAT-50: a press on the track seeks (`window_clicks`, K30).
-  r.setAttribute(track, "data-ct-timeline-track", "true")
-  r.setStyle(track, "width", $TimelineBarWidthPx & "px")
-  r.setStyle(track, "height", $TimelineBarHeightPx & "px")
-  r.setStyle(track, "background", TimelineTrackColor)
-  let fill = r.createElement("div")
-  let span = if last > first: last - first else: 0'u64
-  let done = if current > first: min(current - first, span) else: 0'u64
-  let filled = if span == 0: 0 else: int(TimelineBarWidthPx.float * float(done) / float(span))
-  r.setStyle(fill, "width", $filled & "px")
-  r.setStyle(fill, "height", $TimelineBarHeightPx & "px")
-  r.setStyle(fill, "background", TimelineFillColor)
-  r.appendChild(track, fill)
-  r.appendChild(parent, track)
 
 const
   CallRowAttribute* = "data-call-index"
@@ -1419,6 +1440,22 @@ const
     ## Derived from the same number that sets each name cell's width, so it
     ## cannot disagree with the drawing — the shape `PLAT35-F3`'s scroll
     ## metric uses and the reason it is one value and not two (§30).
+  StateChangedAttribute* = "data-ct-changed"
+    ## PLAT-51: `"true"` on a row whose value the step changed.
+  StateChangedColour* = DesignTokenHex[dtColorsUiTextInformationPrimaryHover][dmDark]
+    ## PLAT-51: the shared changed-value accent (the desktop's
+    ## `.value-changed`, the terminal's `srValueModified`).
+  StateControlAttribute* = "data-ct-state-control"
+    ## PLAT-51: on a row's value controls — `history:<path>` (K40, the
+    ## history button), `origin:<path>` (K41, the origin badge),
+    ## `unwatch:<expression>` (a watch's remove control).
+  StateHistoryEntryAttribute* = "data-ct-history-entry"
+    ## PLAT-51: on a value-history row under its variable — `<ticks>`; a
+    ## click goes to that moment.
+  StateOriginHopAttribute* = "data-ct-origin-hop"
+    ## PLAT-51: on a value-origin hop under its variable.
+  StateAddWatchAttribute* = "data-ct-add-watch"
+    ## PLAT-51: the Watches tab's "Add watch expression…" row.
   StateNameColumn* = "name"
   StateValueColumn* = "value"
   StateTableAttribute* = "data-state-table"
@@ -1652,6 +1689,10 @@ proc appendStateRows(v: Variable; path: string; depth: int;
       appendStateRows(c, path & "." & c.name, depth + 1, budget, expanded,
                       selected, acc)
 
+var stateNameColumnOverridePx* = 0
+  ## PLAT-51: the name column's width the user dragged its separator to (the
+  ## desktop's column resize), 0 for the measured default.
+
 proc stateRows*(vm: StateVM; budget: Budget): seq[StateRow] =
   ## The pane's visible rows, from the ViewModel the other two front-ends read.
   ##
@@ -1815,7 +1856,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   if vm.isNil:
     return false
   let rows = stateRows(vm, budget)
-  if rows.len == 0:
+  if rows.len == 0 and vm.activeTab.val != stWatches:
     return false
   # The body: the pane view WITHOUT its variables tree, then the table. One
   # column container, so the two cannot be laid out over each other.
@@ -1830,7 +1871,9 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   let binding = renderGpui(r, pv.root)
   r.appendChild(body, binding.root)
 
-  let nameColumnPx = stateNameColumnPx(rows)
+  let nameColumnPx = if stateNameColumnOverridePx > 0:
+                       max(StateNameMinPx, stateNameColumnOverridePx)
+                     else: stateNameColumnPx(rows)
   let table = r.createElement("div")
   r.setAttribute(table, StateTableAttribute, "rows")
   # **PLAT-50's CLICK MODEL DISPATCHES ON THE VOCABULARY'S OWN TWO
@@ -1893,9 +1936,69 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     # THE RULE, between the two cells — the same element on the header, so
     # the heading and the rows cannot end their name field at different x.
     r.appendChild(el, stateSeparatorElement(r))
+    # PLAT-51: A CHANGED VALUE in the shared changed-value accent — the
+    # desktop's `.value-changed`, the terminal's `srValueModified` — read off
+    # the one flag (`StateVM.isChanged`). No badge.
+    let changed = vm.isChanged(row.path)
+    r.setAttribute(el, StateChangedAttribute, (if changed: "true" else: "false"))
     r.appendChild(el, stateCell(r, StateValueColumn, row.value, 0,
-                                StateValuePadPx, StateValueColour, false))
+                                StateValuePadPx,
+                                (if changed: StateChangedColour
+                                 else: StateValueColour), false))
+    # PLAT-51: THE DESKTOP'S VALUE CONTROLS on every row — the history button
+    # (K40), the origin badge (K41) and, on a watch, its remove control
+    # (Variable-State-Pane.md, "Every front-end has every value feature").
+    let historyOpen = row.path in vm.expandedHistories.val
+    let originOpen = row.path in vm.originLines.val
+    for (kind, glyph, lit) in [("history", "↺", historyOpen),
+                               ("origin", "⇠", originOpen)]:
+      let c = r.createElement("div")
+      r.setAttribute(c, StateControlAttribute, kind & ":" & row.path)
+      r.setStyle(c, "flex-shrink", "0")
+      r.setStyle(c, "padding-left", "6px")
+      r.setStyle(c, "color", if lit: StateChangedColour else: StateHeaderColour)
+      r.appendChild(c, r.createTextNode(glyph))
+      r.appendChild(el, c)
+    if vm.activeTab.val == stWatches and row.depth == 0:
+      let c = r.createElement("div")
+      r.setAttribute(c, StateControlAttribute, "unwatch:" & row.name)
+      r.setStyle(c, "flex-shrink", "0")
+      r.setStyle(c, "padding-left", "6px")
+      r.setStyle(c, "color", StateHeaderColour)
+      r.appendChild(c, r.createTextNode("×"))
+      r.appendChild(el, c)
     r.appendChild(table, el)
+    # PLAT-51: the row's open history and origin, UNDER it, as the desktop's
+    # (`div.ct-history-inline-container`, `div.ct-origin-inline-chain`).
+    if historyOpen:
+      let entries = vm.valueHistory.val.getOrDefault(row.path)
+      for e in entries:
+        let h = stateRowElement(r)
+        r.setAttribute(h, StateHistoryEntryAttribute, $e.locationTicks)
+        r.appendChild(h, stateCell(r, StateNameColumn,
+                                   "↳ tick " & $e.locationTicks, nameColumnPx,
+                                   (row.depth + 1) * StateIndentPx,
+                                   StateHeaderColour, false))
+        r.appendChild(h, stateSeparatorElement(r))
+        r.appendChild(h, stateCell(r, StateValueColumn, e.valueText, 0,
+                                   StateValuePadPx, StateValueColour, false))
+        r.appendChild(table, h)
+    if originOpen:
+      for i, hop in vm.originLines.val.getOrDefault(row.path):
+        let o = stateRowElement(r)
+        r.setAttribute(o, StateOriginHopAttribute, $i)
+        r.appendChild(o, stateCell(r, StateNameColumn, "⇠ " & hop, 0,
+                                   (row.depth + 1) * StateIndentPx,
+                                   StateHeaderColour, false))
+        r.appendChild(table, o)
+  if vm.activeTab.val == stWatches:
+    # PLAT-51: the desktop's watch field, as a row that opens the omnibox
+    # with `:watch `.
+    let w = stateRowElement(r)
+    r.setAttribute(w, StateAddWatchAttribute, "true")
+    r.appendChild(w, stateCell(r, StateNameColumn, "+ Add watch expression…",
+                               0, 0, StateHeaderColour, false))
+    r.appendChild(table, w)
   r.appendChild(body, table)
   r.appendChild(parent, body)
   true
@@ -2214,16 +2317,6 @@ proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
     # for the session to launch" — was a promise the session would never keep,
     # drawn on a real run of the shipped binary. `paneView` names the
     # exception and its reason without a ViewModel.
-    # **THE TIMELINE IS THIS FRONT-END'S OWN VIEW**, as the editor is: PLAT-3
-    # refused a Timeline entry in the vocabulary (`timelinePaneView` is a
-    # native escape), which obliges each medium to draw one natively. Until
-    # PLAT-41 GPUI drew nothing there — the escape node has no text — while
-    # the terminal and the desktop draw a scrubber.
-    if leaf.kind == glkBuiltin and leaf.builtin == paneTimeline and leaf.live:
-      r.setAttribute(node, StateAttribute, "live")
-      r.appendChild(node, paneTitleElement(r, leaf))
-      renderTimeline(r, node, TimelineVM(leaf.vm))
-      return (node, false)
     if leaf.kind == glkBuiltin and leaf.builtin in PaneAcceptedExceptions:
       r.setAttribute(node, StateAttribute, "pane-report")
       r.appendChild(node, paneTitleElement(r, leaf))

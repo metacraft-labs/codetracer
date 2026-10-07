@@ -119,21 +119,38 @@ const
     ## belongs to the number field's right alignment, so the mark itself is one
     ## cell.
   GutterPointerCells* = 3
-    ## `-->`.
+    ## The pointer FIELD: ` ▸ ` — one single-width glyph with a cell either
+    ## side, so the code column did not move when `-->` was replaced.
   GutterGapCells* = 1
   MinGutterNumberCells* = 2
 
   BreakpointGlyph* = "●"
   BreakpointDisabledGlyph* = "○"
   TracepointGlyph* = "◆"
-  ExecutionPointerGlyph* = "-->"
-  InspectionPointerGlyph* = " > "
+  ExecutionPointerMark = "▸"
+    ## PLAT-51 (CodeTracer-TUI.md §3.3.2, Native-Front-End-Parity.md §3): the
+    ## desktop's execution mark is a small right-pointing triangle
+    ## (`.gutter-highlight-active:before`,
+    ## `public/resources/shared/highlight_line_arrow.svg`: 8 x 10.13, so
+    ## width / height = 0.79). MEASURED, 2026-10-06, rendering each candidate
+    ## at 200 px with Pillow: `▸` (U+25B8) is 1.00 (DejaVu Sans) / 1.03
+    ## (JetBrains Mono) wide per unit of height, `►` (U+25BA) 1.54 / 2.03 — so
+    ## `▸` is the closer shape. Never `▶` (U+25B6): many terminals give it an
+    ## emoji presentation two cells wide, which shifts the gutter. The ASCII
+    ## tier draws `>` (`borders.AsciiFallbacks`). It replaced `-->`.
+  ExecutionPointerGlyph* = " " & ExecutionPointerMark & " "
+  InspectionPointerMark = "▹"
+    ## The inspection cursor's mark: the same shape, hollow (U+25B9, no emoji
+    ## presentation either). The desktop draws no distinct mark for it, so it
+    ## is the execution mark's outline rather than a second shape; the ASCII
+    ## tier draws `)`, so the two stay distinct there too.
+  InspectionPointerGlyph* = " " & InspectionPointerMark & " "
     ## CTUI-6's INSPECTION cursor in the source pane: the line an outer frame
     ## selected in the call stack pane points at.
     ##
     ## Three cells, like the execution pointer, so the code column does not move
     ## between them. A DIFFERENT GLYPH and a different colour, not a recolouring
-    ## of `-->`: a `regionText` read carries no colour at all, so a distinction
+    ## of the execution mark: a `regionText` read carries no colour at all, so a distinction
     ## made only in the palette would be invisible to exactly the Tier-2 read
     ## CTUI-6's verification gate asks for.
   NoPointerGlyph* = "   "
