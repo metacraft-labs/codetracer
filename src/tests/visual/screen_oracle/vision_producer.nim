@@ -873,6 +873,26 @@ proc inkClusters*(img: GrayImage; cell: Rect; band: GutterRun): seq[(int, int)] 
       lastInk = x
   if start >= 0: result.add (start, lastInk)
 
+proc maskClusters(img: GrayImage; spans: seq[(int, int)]; band: GutterRun;
+                  margin: int): GrayImage =
+  ## `img` with the band's rows (plus `margin`) over `spans` painted in the
+  ## band's own background: the ink in front of the number removed.
+  result = img
+  if spans.len == 0: return
+  let y0 = max(0, band.first - margin)
+  let y1 = min(img.height - 1, band.last + margin)
+  var hist: array[256, int]
+  for y in y0 .. y1:
+    for x in spans[0][0] .. spans[^1][1]:
+      inc hist[int(img.pixels[y * img.width + x])]
+  var bg = 0
+  for v in 1 .. 255:
+    if hist[v] > hist[bg]: bg = v
+  for (a, b) in spans:
+    for y in y0 .. y1:
+      for x in max(0, a - 1) .. min(img.width - 1, b + 1):
+        result.pixels[y * img.width + x] = char(bg)
+
 proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
                        scratch: string):
     tuple[ok: bool, line: int, text: string, right: int] =
@@ -910,10 +930,31 @@ proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
                       w: clusters[k - 1][1] - cell.x + 3,
                       h: band.last - band.first + 1 + 2 * margin)
       let words = ocrRegion(img, crop, scratch, psm = 7, upscale = upscale)
-      if words.len == 0: continue
       let text = words.mapIt(it.text).join(" ")
       let parsed = parseGutterDigits(text)
-      if parsed.ok: return (true, parsed.line, text, crop.x + crop.w)
+      # THE SAME CROP WITH THE MARKS IN FRONT OF THE NUMBER BLANKED. PLAT-51
+      # measured why: GPUI now draws the desktop's own execution arrow
+      # (`highlight_line_arrow.svg`), a small triangle set high in the row,
+      # and with it in the crop tesseract read GPUI's `44` as `a4` and `4`
+      # (the digits' pixels are identical to the frame it read as `> 44`
+      # before). With the marks painted over in the band's background, at 2x,
+      # the number is read as itself. Taken only when it reads MORE digits than
+      # the plain crop — a shorter reading of the same ink is the misread —
+      # so every reading that was right before stays byte-identical.
+      if k > 1:
+        let masked = maskClusters(img, clusters[0 ..< k - 1], band, margin)
+        # At 2x: measured on GPUI's `44` with the arrow blanked, 1x read `a4`
+        # and `24` (the open-topped 4 of its gutter face), 2x read `44` at both
+        # margins; Electron's blanked `44` read `| a4` at 2x, which does not
+        # parse, so its plain reading stands.
+        let mWords = ocrRegion(masked, crop, scratch, psm = 7, upscale = 2.0)
+        let mText = mWords.mapIt(it.text).join(" ")
+        let mParsed = parseGutterDigits(mText)
+        if mParsed.ok and
+           (not parsed.ok or len($mParsed.line) > len($parsed.line)):
+          return (true, mParsed.line, mText, crop.x + crop.w)
+      if parsed.ok:
+        return (true, parsed.line, text, crop.x + crop.w)
   # NO FIXED-WIDTH FALLBACK. It existed until the cluster rule was verified
   # on PLAT-39's own Electron corpus (all six read through clusters, the
   # record unchanged), and it was measured to be dangerous: on a GPUI frame

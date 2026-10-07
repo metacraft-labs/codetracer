@@ -5,7 +5,7 @@
     "Regenerate: `just plat45-arrangement-window` then",
     "`just plat45-window-record`. Asserted by test_plat45_three_media.nim."
   ],
-  "takenAt": "2026-10-03T06:12:21Z",
+  "takenAt": "2026-10-06T20:15:53Z",
   "host": "gpu-server-001",
   "frames": {
     "shared": {
@@ -77,7 +77,7 @@
           "y": 55,
           "w": 524,
           "h": 489,
-          "strip": "Call Trace Agent Activity S",
+          "strip": "Call Trace Agent Activity _M",
           "tabs": [
             "Call Trace",
             "Agent Activity"
@@ -96,10 +96,9 @@
           "y": 556,
           "w": 1045,
           "h": 487,
-          "strip": "Event Log Timeline Terminal Cutput S",
+          "strip": "Event Log Terminal Cutput -M",
           "tabs": [
             "Event Log",
-            "Timeline",
             "Terminal Output"
           ],
           "heading": "Event Log",

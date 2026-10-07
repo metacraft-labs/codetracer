@@ -288,9 +288,9 @@ proc readWide(sess: var TuiTestSession): Fidelity =
         let h = hexOfColor(cell.fg)
         if h notin result.ruleFgs:
           result.ruleFgs.add h
-  let execRow = rowOf(sess, cols, rows, "-->")
+  let execRow = rowOf(sess, cols, rows, " ▸ ")   # PLAT-51: was `-->`
   if execRow >= 0:
-    let c = colOf(sess, execRow, cols, "-->") + 6
+    let c = colOf(sess, execRow, cols, " ▸ ") + 6
     result.currentLineBg = hexOfColor(sess.cellAt(execRow, c).bg)
   result.statusBg = hexOfColor(sess.cellAt(rows - 1, cols - 1).bg)
   # The mode indicator, found by its text: since PLAT-49 part B the footer's
@@ -392,6 +392,15 @@ proc contrastViolations(sess: var TuiTestSession; cols, rows: int;
       # are asserted against the desktop in `test_plat50_desktop_reference`
       # and `test_plat50_chrome`; the text-contrast floor is not theirs.
       if ch in ["▏", "▕"]:
+        continue
+      # PLAT-51: A SCRUBBER THUMB'S END IS A SHAPE, NOT TEXT. The list panes'
+      # scrollbar scrubbers draw a thumb that ends part-way through a cell as
+      # an eighth block — the track's colour on the thumb's ground for the
+      # far part (`scrubber_track.thumbCells`, `tcThumbReversed`) — so the
+      # pair is the track against the thumb, two surfaces, and the
+      # text-contrast floor is not theirs (Scrollbar-Scrubbers.md §4).
+      if ch in ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "▎", "▍", "▌", "▋", "▊",
+                "▉"]:
         continue
       let fg = hexOfColor(cell.fg)
       let bg = hexOfColor(cell.bg)

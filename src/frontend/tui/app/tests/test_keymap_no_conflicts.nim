@@ -59,7 +59,9 @@ import ../input/modal_state
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 306
+const ExpectedAssertions = 309
+  ## PLAT-51: +3 — Ctrl+Enter in both modified-key forms and Alt+t decode
+  ## (the desktop's "Add tracepoint" chords on the read-only editor's caret).
 
 var countedAssertions = 0
 
@@ -476,14 +478,21 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
 
     # …and the decoder REFUSES what is not a key, so "every chord decodes" is
     # not satisfied by a decoder that names everything.
-    # The two modified-key forms decode TAB only: another codepoint, or a
-    # modifier outside xterm's table, is still not a key.
+    # The two modified-key forms decode TAB and (PLAT-51) ENTER only — the
+    # desktop's Ctrl+Enter "Add tracepoint" chord, which a terminal can send
+    # in no other form: another codepoint, or a modifier outside xterm's
+    # table, is still not a key.
     for junk in ["", "\x1b[<0;12;5M", "\x1b[", "\x1b[99~", "\x1b[1;9P",
                  "\x1b[15;99~", "\x1bOZ", "\x1b[0;1;2X",
-                 "\x1b[27;5;13~", "\x1b[13;5u", "\x1b[27;99;9~",
+                 "\x1b[27;5;14~", "\x1b[14;5u", "\x1b[27;99;9~",
                  "\x1b[9;99u", "\x1b[9u"]:
       checkpoint("must not decode: " & junk.escape())
       ck keyName(junk) == ""
+    ck keyName("\x1b[13;5u") == "Ctrl+Enter"
+    ck keyName("\x1b[27;5;13~") == "Ctrl+Enter"
+    # …and Alt + a printable key, the ESC-prefixed form (Alt+T, the same
+    # chord's other spelling).
+    ck keyName("\x1bt") == "Alt+t"
 
   test "§4.2's `n` is bound in two modes to two different actions":
     var boundIn: seq[string] = @[]

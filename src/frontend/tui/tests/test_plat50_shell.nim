@@ -151,13 +151,14 @@ suite "PLAT-50: the strip is the divider above it":
         moved = r
     ck moved >= 0 and moved < stripRow
     # A press ON a tab of the strip is still the tab's (it activates).
-    let tl = rt.shellScreenOf().rows[moved].cellOf("Timeline")
+    # (PLAT-51: the Terminal Output tab — the Timeline is removed.)
+    let tl = rt.shellScreenOf().rows[moved].cellOf("Terminal Output")
     rt.press(moved, tl + 1)
-    var timelineActive = false
+    var outputActive = false
     for span in rt.shellScreenOf().styledRows[moved]:
-      if span.text.contains("Timeline") and span.style.role == srTabActive:
-        timelineActive = true
-    ck timelineActive
+      if span.text.contains("Terminal Output") and span.style.role == srTabActive:
+        outputActive = true
+    ck outputActive
 
   test "a LONE pane's strip off its label is the divider above it too":
     let rt = newRuntime(200, 50)

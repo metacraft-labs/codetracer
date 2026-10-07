@@ -555,14 +555,14 @@ ARMS = [
         P_OMNIBAR,
         "the terminal's caret is a block while inserting"),
     Arm("OB5", TOPBAR,
-        "        g.fillSurface(0, s.col, s.width, 1, srSurfaceField)\n        g.paint(0, s.col, spaces(s.width),\n                CellStyle(role: srChromeText, surface: srSurfaceField))\n",
+        "        g.fillSurface(0, s.col, s.width, 1, OmnibarGround)\n        g.paint(0, s.col, spaces(s.width), OmnibarTextStyle)\n",
         "        g.fillSurface(0, s.col, s.width, 1, srSurfaceTopBar)\n        g.paint(0, s.col, spaces(s.width),\n                CellStyle(role: srChromeText, surface: srSurfaceTopBar))\n",
         S_FIELD,
-        "the omnibar field on the bar's own ground (PLAT-50: srSurfaceTopBar)",
-        # PLAT-50: the text is painted on the field's surface over the whole
-        # box, so the fill alone is invisible; both move together.
+        "the omnibar field on the bar's own ground (PLAT-51: the editor's)",
+        # The text is painted on the field's surface over the whole box, so
+        # the fill alone is invisible; both move together.
         also=((TOPBAR,
-               "                CellStyle(role: srChromeText, surface: srSurfaceField,\n                          italic: showsPlaceholder))\n",
+               "                if showsPlaceholder: OmnibarPlaceholderStyle\n                else: OmnibarTextStyle)\n",
                "                CellStyle(role: srChromeText, surface: srSurfaceTopBar,\n                          italic: showsPlaceholder))\n"),)),
     Arm("OB6", TOPBAR,
         "        if caret.shown and m.caretDrawn:\n",
@@ -1011,8 +1011,8 @@ ARMS = [
 
     # --- review: the current call on its ground ------------------------------
     Arm("CG1", CALLVIEW,
-        "    if isCurrent:\n      g.paint(y, area.col, spaces(area.width), CurrentRowFill)\n",
-        "    if false:\n      g.paint(y, area.col, spaces(area.width), CurrentRowFill)\n",
+        "    if isCurrent:\n      g.paint(y, area.col, spaces(rowWidth), CurrentRowFill)\n",
+        "    if false:\n      g.paint(y, area.col, spaces(rowWidth), CurrentRowFill)\n",
         S2_ROLES,
         "the call the debugger is in is on the pane's own ground"),
     Arm("CG2", ROLES,

@@ -51,7 +51,8 @@ template ck(cond: untyped) =
 const
   Cols = 220
   Rows = 64
-  PointerGlyph = "-->"
+  PointerGlyph = " ▸ "
+    ## PLAT-51: the pointer field (it was `-->`; the same three cells).
   MarkGlyph = "●"
   SettleQuietMs = 1500
   StepTimeoutS = 180

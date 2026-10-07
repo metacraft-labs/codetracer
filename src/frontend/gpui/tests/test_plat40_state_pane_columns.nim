@@ -818,7 +818,9 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
           # text nodes, so a stray third run cannot hide here, and the column
           # RULE between them (a third CHILD, counted in the case that owns
           # it) contributes no text of its own.
-          ck row.textNodeCount == 2
+          # (PLAT-51: plus the row's value controls, `↺` and `⇠`, each a text
+          # node of its own after the value cell.)
+          ck row.textNodeCount == 4
           ck not row.textOf.startsWith(row.cellAt(0).textOf &
                                       VariableLabelSeparator)
 
@@ -932,7 +934,9 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
         # a rule appended after the value cell would paint at the pane's right
         # edge instead of between the columns, and every width assertion in
         # this suite would still pass.
-        ck row.kids.len == 3
+        # (PLAT-51: a variable row carries its value controls after the
+        # value cell — history and origin — so it has five children.)
+        ck row.kids.len == (if row.has(StateHeaderAttribute): 3 else: 5)
         ck row.kidAt(0).attr(StateColumnAttribute) == StateNameColumn
         ck row.kidAt(1).has(StateSeparatorAttribute)
         ck row.kidAt(2).attr(StateColumnAttribute) == StateValueColumn

@@ -34,7 +34,9 @@ import ../../app/theme/colour_math
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 112
+const ExpectedAssertions = 107
+  ## PLAT-51: 112 -> 107 — the two Timeline-track cases (K30, K45) went with
+  ## the pane; value history and origin open in the pane, read under the row.
 
 var countedAssertions = 0
 
@@ -225,10 +227,11 @@ proc editorRowOfLine(s: Snapshot; line: int): (int, int) =
   (-1, -1)
 
 proc pointerLine(s: Snapshot): int =
-  ## The source line the execution pointer `-->` is on, or -1.
+  ## The source line the execution pointer ` ▸ ` is on, or -1 (PLAT-51: it
+  ## was `-->`, the same three cells).
   for r in 2 ..< Rows - 1:
     let t = s.text(r)
-    let at = t.cellFind("-->")
+    let at = t.cellFind(" ▸ ")
     if at > 0:
       var digits = ""
       var i = at - 1
@@ -293,7 +296,7 @@ suite "PLAT-50 on a real terminal: the editor (K10-K13)":
     sess.send("c")
     let t1 = sess.waitTick(t0)
     ck t1 > t0
-    discard sess.waitFor("-->")
+    discard sess.waitFor("31  ▸ ")
     ck sess.snap().pointerLine == 31
     # Right click on the gutter: disabled (dimmed), kept in the gutter.
     let (r31b, c31b) = sess.snap().editorRowOfLine(31)
@@ -311,7 +314,7 @@ suite "PLAT-50 on a real terminal: the editor (K10-K13)":
     discard sess.waitFor("return left + right")
     let (r31, c31) = sess.snap().editorRowOfLine(31)
     sess.press(r31, c31 + 12, CtrlLeft)
-    discard sess.waitFor("--> ", timeoutMs = 20000)
+    discard sess.waitFor(" ▸  ", timeoutMs = 20000)
     var deadline = getMonoTime() + initDuration(seconds = 20)
     while getMonoTime() < deadline and sess.snap().pointerLine != 31:
       sleep(80)
@@ -477,32 +480,43 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
     ck ro == rh + 1
     ck caItalic notin s[rh][ch].attrs
     ck caItalic notin s[ro][co].attrs
-    # Toggle value history: the value's recorded history (`ct/load-history`)
-    # over the body — every value it had, with the tick of each.
+    # Toggle value history (PLAT-51: IN THE PANE, under its row, as the
+    # desktop's `div.ct-history-inline-container`): one `↳ <tick>  <value>`
+    # row per value it had.
     sess.press(rh, ch + 2)
-    let (rt, _) = sess.waitFor("history of EXPRESSIONS (")
-    ck rt > 0
-    # A history row is `<tick>  <value>`, and the value is there (the
-    # Variables pane beside it shows the same text, so the overlay's own
-    # rows are read).
-    ck sess.overlayRowsBelow(rt, proc(l: string): bool =
-      let parts = l.strip.split("  ", maxsplit = 1)
-      parts.len == 2 and parts[0].len > 0 and
-        parts[0].allCharsInSet(Digits) and parts[1].strip.len > 0 and
-        not parts[1].strip.startsWith("│"))
-    sess.send("\x1b")
-    discard sess.waitFor("history of EXPRESSIONS", present = false)
+    discard sess.waitFor("↳ ")
+    # The history is a dozen rows painted in one frame, and the pty can be
+    # read while that frame is still arriving (measured: the first `↳` found
+    # on rows 9-15 with rows 3-8 not yet repainted). Read the FIRST history
+    # row once two snapshots agree on it.
+    var (rhist, chist) = sess.snap().findRow("↳ ")
+    var settleBy = getMonoTime() + initDuration(seconds = 5)
+    while getMonoTime() < settleBy:
+      sleep(150)
+      let again = sess.snap().findRow("↳ ")
+      if again == (rhist, chist): break
+      (rhist, chist) = again
+    ck rhist == rx + 1
+    # `↳ tick <n>  <value>`: the tick AND the value it had.
+    let histRow = sess.snap().text(rhist)
+    let histAt = histRow.find("↳ tick ")
+    # Read inside the Variables pane only: up to the divider after it.
+    let histSeg =
+      if histAt < 0: ""
+      else: histRow[histAt + "↳ tick ".len .. ^1].split("▏")[0]
+    let histParts = histSeg.strip.split("  ", maxsplit = 1)
+    ck histParts.len == 2 and histParts[0].strip.len > 0 and
+       histParts[0].strip.allCharsInSet(Digits) and
+       histParts[1].contains("\"")      # EXPRESSIONS' strings
+    discard chist
     # Show value origin: the chain the engine answers (`ct/originChain`),
-    # hop by hop, over the body.
+    # hop by hop, under the row too.
     sess.press(rx, cx + 4, RightButton)
     let (ro2, co2) = sess.waitFor("Show value origin")
     sess.press(ro2, co2 + 2)
-    let (rg, _) = sess.waitFor("origin of EXPRESSIONS")
-    # A hop: `tick N  kind  target <- source  file:line`.
-    ck sess.overlayRowsBelow(rg, proc(l: string): bool =
-      l.strip.startsWith("tick ") and l.contains(" <- "))
-    sess.send("\x1b")
-    discard sess.waitFor("origin of EXPRESSIONS", present = false)
+    let (rg, _) = sess.waitFor("⇠ tick ")
+    ck rg > rx
+    ck sess.snap().text(rg).contains(" <- ")
     # And `:origin` — the walk, which froze the terminal before: it answers.
     sess.send(":origin EXPRESSIONS\r")
     discard sess.waitFor("EXPRESSIONS computed from", timeoutMs = 30000)
@@ -523,24 +537,7 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
     ck true
     sess.quit()
 
-  test "a click on the timeline's track seeks there":
-    var sess = open()
-    let (rt, ct) = sess.waitFor("Timeline")
-    sess.press(rt, ct + 2)
-    let (rb, _) = sess.waitFor("TIMELINE tick")
-    ck rb == rt + 1
-    let s = sess.snap()
-    let track = s.text(rb + 1)
-    let start = track.cellFind("[")
-    let stop = track.cellFind("]")
-    ck start > 0 and stop > start + 10
-    let t0 = sess.rowText(0).tickOf
-    # Four fifths of the way along: a tick near four fifths of 171.
-    sess.press(rb + 1, start + 1 + (stop - start - 1) * 4 div 5)
-    let t1 = sess.waitTick(t0)
-    ck t1 > 120 and t1 < 150
-    ck sess.rowText(StatusRow).contains("tick " & $t1)
-    sess.quit()
+  # (K30, the timeline's track, went with the Timeline panel — PLAT-51.)
 
 suite "PLAT-50 on a real terminal: the call-trace click's status (F2)":
 
@@ -565,7 +562,7 @@ suite "PLAT-50 on a real terminal: the call-trace click's status (F2)":
 proc stepToAdd(sess: var TuiTestSession) =
   ## Into `add`'s body (line 31, `left: 2, right: 3` beside it).
   sess.send(":goto 32\r")
-  discard sess.waitFor("--> def add(")
+  discard sess.waitFor(" ▸  def add(")
   sess.send("n")
   discard sess.waitFor("/* left: 2, right: 3 */")
 
@@ -610,7 +607,7 @@ suite "PLAT-50 on a real terminal: column breakpoints and call jumps (K14, K15)"
   test "Ctrl+Alt+click on a call goes into it; the menu's call jumps too":
     var sess = open()
     sess.send(":goto 21\r")
-    discard sess.waitFor("--> def evaluate(")
+    discard sess.waitFor(" ▸  def evaluate(")
     let (rc, cc) = sess.waitFor("total = apply_op(symbol")
     sess.press(rc, cc + 9, CtrlAltLeft)
     var deadline = getMonoTime() + initDuration(seconds = 20)
@@ -622,7 +619,7 @@ suite "PLAT-50 on a real terminal: column breakpoints and call jumps (K14, K15)"
     # goes to the LINE (`dap_handler.get_call_target`'s fallback) — the
     # pointer on 85, not inside a call.
     sess.send(":goto 21\r")
-    discard sess.waitFor("--> def evaluate(")
+    discard sess.waitFor(" ▸  def evaluate(")
     let (rt, ct) = sess.waitFor("total = apply_op(symbol")
     sess.press(rt, ct + 2, CtrlAltLeft)
     deadline = getMonoTime() + initDuration(seconds = 20)
@@ -631,7 +628,7 @@ suite "PLAT-50 on a real terminal: column breakpoints and call jumps (K14, K15)"
     ck sess.snap().pointerLine == 85
     ck sess.rowText(StatusRow).contains("main.py:85")
     sess.send(":goto 21\r")
-    discard sess.waitFor("--> def evaluate(")
+    discard sess.waitFor(" ▸  def evaluate(")
     # The editor menu's "Jump to call" on the call's name.
     sess.press(rt, ct + 9, RightButton)
     let (rj, cj) = sess.waitFor("Jump to call")
@@ -772,29 +769,6 @@ suite "PLAT-50 on a real terminal: the status line, a dock label, the timeline (
     # Back in the layout: a pane at the body's right edge (its divider now
     # ends the strip row, which ended in the call trace's strip before).
     ck sess.rowText(1).strip(leading = false).endsWith("▏")
-    sess.quit()
-
-  test "a drag along the timeline's track seeks where it is released":
-    var sess = open()
-    let (rt, ct) = sess.waitFor("Timeline")
-    sess.press(rt, ct + 2)
-    let (rb, _) = sess.waitFor("TIMELINE tick")
-    let track = sess.snap().text(rb + 1)
-    let start = track.cellFind("[")
-    let stop = track.cellFind("]")
-    let a = start + 1 + (stop - start - 1) div 5
-    let b = start + 1 + (stop - start - 1) * 4 div 5
-    # Press at a fifth, move, release at four fifths (button-event motion,
-    # code 32: the left button held).
-    let t0 = sess.rowText(0).tickOf
-    sess.mouse(0, rb + 1, a)
-    let t1 = sess.waitTick(t0)
-    ck t1 > 20 and t1 < 50
-    sess.mouse(32, rb + 1, (a + b) div 2)
-    sess.mouse(32, rb + 1, b)
-    sess.mouse(0, rb + 1, b, release = true)
-    let t2 = sess.waitTick(t1)
-    ck t2 > 120 and t2 < 150
     sess.quit()
 
 suite "PLAT-50 on a real terminal: the Points pane from the View menu (K31)":

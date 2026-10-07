@@ -1,0 +1,440 @@
+{
+ "_comment": [
+  "PLAT-51 — the desktop, read from the real Electron app.",
+  "Produced by src/tests/gui/tests/visual/plat51-desktop-capture.spec.ts",
+  "(`bash scripts/plat51-capture-electron.sh`)."
+ ],
+ "savedLayout": {
+  "tabs": [
+   "FILES",
+   "VCS",
+   "TESTS",
+   "calc/main.py",
+   "STATE",
+   "SCRATCHPAD",
+   "CALLTRACE",
+   "AGENT ACTIVITY",
+   "EVENT LOG",
+   "TERMINAL OUTPUT"
+  ],
+  "timelineTabs": 0,
+  "emptyTabs": 0,
+  "pageErrors": []
+ },
+ "changedValues": {
+  "samples": [
+   {
+    "at": {
+     "line": 79,
+     "ticks": 22,
+     "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py"
+    },
+    "changed": [
+     {
+      "name": "EXPRESSIONS",
+      "text": "@[\"2 + 3\", \"10 - 4 + 1\", \"6 * 7\", \"100 / 5 - 3\", \"1 + 2 * 3 - 4 / 2\"]",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "OPERATIONS",
+      "text": "@[(\"+\", <function add at 0x7840fac244a0>), (\"-\", <function sub at 0x7840fac24540>), (\"*\", <function mul at 0x7840fac245e0>), (\"/\", <function div at 0x7840fac24680>)]",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "__cached__",
+      "text": "nil",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "__doc__",
+      "text": "\"calc — the small, fast, deterministic program behind CTUI-1's ``calc`` fixture.\n\nWHY THIS PROGRAM EXISTS, AND WHY IT LOOKS LIKE THIS\n---------------------------------------------------\n``codetracer-specs/Front-Ends/CodeTracer-TUI.milestones.org`` (CTUI-1) asks for\na fixture that is \"small, fast, deterministic; the default for stepping and\nlayout tests\".  Every constraint in that sentence is a constraint on this file:\n\n* **small / fast** — the fixture is recorded on demand by\n  ``src/frontend/tui/tests/fixtures/fixture_provider.nim`` and the Tier-1 TUI\n  lane pays for that recording the first time it runs on a workspace.  The\n  whole program is a few hundred recorded steps, so the record step costs\n  seconds rather than minutes.\n* **deterministic** — no clock, no randomness, no environment lookups, no I/O\n  other than ``print``.  A fixture whose trace differs between two recordings\n  cannot be the ground truth for a stepping test.\n* **stepping and layout** — it is written as a chain of *small named calls*\n  (``main`` -> ``evaluate`` -> ``apply_op`` -> ``add``/``sub``/``mul``/``div``)\n  rather than as one flat loop, because a calltrace pane with a single frame in\n  it exercises nothing.  Every step lands in a named function with live locals.\n\nNothing here asserts anything.  The assertions live in\n``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the recorded\ntrace through a real ``HeadlessDebugSession``.\n\"",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "__file__",
+      "text": "\"/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py\"",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "__loader__",
+      "text": "nil",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "__name__",
+      "text": "\"__main__\"",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "__package__",
+      "text": "\"\"",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "__spec__",
+      "text": "nil",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "add",
+      "text": "<function add at 0x7840fac244a0>",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "apply_op",
+      "text": "<function apply_op at 0x7840fac24720>",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "div",
+      "text": "<function div at 0x7840fac24680>",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "evaluate",
+      "text": "<function evaluate at 0x7840fac247c0>",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "main",
+      "text": "<function main at 0x7840fac24860>",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "mul",
+      "text": "<function mul at 0x7840fac245e0>",
+      "color": "#60a5fa",
+      "weight": "400"
+     },
+     {
+      "name": "sub",
+      "text": "<function sub at 0x7840fac24540>",
+      "color": "#60a5fa",
+      "weight": "400"
+     }
+    ],
+    "plain": "#fdba74"
+   },
+   {
+    "at": {
+     "line": 80,
+     "ticks": 23,
+     "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py"
+    },
+    "changed": [
+     {
+      "name": "tokens",
+      "text": "<error: <redacted>>",
+      "color": "#60a5fa",
+      "weight": "400"
+     }
+    ],
+    "plain": "#fdba74"
+   },
+   {
+    "at": {
+     "line": 81,
+     "ticks": 24,
+     "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py"
+    },
+    "changed": [
+     {
+      "name": "total",
+      "text": "2",
+      "color": "#60a5fa",
+      "weight": "400"
+     }
+    ],
+    "plain": "#fdba74"
+   },
+   {
+    "at": {
+     "line": 82,
+     "ticks": 25,
+     "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py"
+    },
+    "changed": [
+     {
+      "name": "index",
+      "text": "1",
+      "color": "#60a5fa",
+      "weight": "400"
+     }
+    ],
+    "plain": "#fdba74"
+   },
+   {
+    "at": {
+     "line": 83,
+     "ticks": 26,
+     "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py"
+    },
+    "changed": [],
+    "plain": "#fdba74"
+   },
+   {
+    "at": {
+     "line": 84,
+     "ticks": 27,
+     "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py"
+    },
+    "changed": [
+     {
+      "name": "symbol",
+      "text": "\"+\"",
+      "color": "#60a5fa",
+      "weight": "400"
+     }
+    ],
+    "plain": "#fdba74"
+   }
+  ],
+  "pageErrors": []
+ },
+ "calltrace": {
+  "start": {
+   "line": 1,
+   "ticks": 1,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/call_pages/main.py"
+  },
+  "trackAtStart": {
+   "total": 603,
+   "first": 0,
+   "visible": 24,
+   "current": 1,
+   "thumbTop": 0,
+   "thumbPx": 24,
+   "height": 599,
+   "top": 100,
+   "x": 1891
+  },
+  "trackAtEnd": {
+   "total": 603,
+   "first": 579,
+   "visible": 24,
+   "current": 1,
+   "thumbTop": 575,
+   "thumbPx": 24,
+   "height": 599,
+   "top": 100,
+   "x": 1891
+  },
+  "scrollAtEnd": [
+   {
+    "cls": "local-calltrace-view ct-scrubbed",
+    "scrollTop": 14475,
+    "scrollHeight": 15108,
+    "clientHeight": 599,
+    "row": 25
+   },
+   {
+    "cls": "dt-scroll-body ct-scrubbed",
+    "scrollTop": 0,
+    "scrollHeight": 562,
+    "clientHeight": 562,
+    "row": -1
+   },
+   {
+    "cls": "ct-scrubbed",
+    "scrollTop": 0,
+    "scrollHeight": 0,
+    "clientHeight": 0,
+    "row": -1
+   }
+  ],
+  "lastRows": [
+   "step #601",
+   "leaf #602",
+   "<end of program> #603"
+  ],
+  "afterEndPress": {
+   "line": 1,
+   "ticks": 1,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/call_pages/main.py"
+  },
+  "dragJumps": 21,
+  "trackAfterDrag": {
+   "total": 603,
+   "first": 579,
+   "visible": 24,
+   "current": 1,
+   "thumbTop": 575,
+   "thumbPx": 24,
+   "height": 599,
+   "top": 100,
+   "x": 1891
+  },
+  "afterDrag": {
+   "line": 1,
+   "ticks": 1,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/call_pages/main.py"
+  },
+  "pageErrors": []
+ },
+ "terminalOutput": {
+  "trackAtStart": {
+   "total": 129,
+   "first": 0,
+   "visible": 25,
+   "current": -1,
+   "thumbTop": 0,
+   "thumbPx": 118,
+   "height": 609,
+   "top": 743,
+   "x": 1891
+  },
+  "trackAtEnd": {
+   "total": 129,
+   "first": 104,
+   "visible": 25,
+   "current": -1,
+   "thumbTop": 491,
+   "thumbPx": 118,
+   "height": 609,
+   "top": 743,
+   "x": 1891
+  },
+  "lastLineVisible": true,
+  "afterEndPress": {
+   "line": 1,
+   "ticks": 1,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat52h/test-programs/terminal_colours/main.py"
+  },
+  "pageErrors": []
+ },
+ "eventLog": {
+  "tabs": [
+   "FILES",
+   "VCS",
+   "TESTS",
+   "src/main.nr",
+   "STATE",
+   "SCRATCHPAD",
+   "CALLTRACE",
+   "AGENT ACTIVITY",
+   "EVENT LOG",
+   "TERMINAL OUTPUT"
+  ],
+  "timelineTabs": 0,
+  "timelineContainers": 0,
+  "viewMenuItems": [
+   "Filesystem",
+   "Calltrace",
+   "State",
+   "Event Log",
+   "Terminal Output",
+   "Scratchpad",
+   "Breakpoints & Tracepoints",
+   "Agent Activity",
+   "Verification",
+   "Start Agent Worktree Session",
+   "Notifications",
+   "Reset Layout",
+   "Shell",
+   "Theme"
+  ],
+  "menuHasTimeline": false,
+  "trackAtStart": {
+   "total": 70,
+   "first": 0,
+   "visible": 23,
+   "current": -1,
+   "thumbTop": 0,
+   "thumbPx": 176,
+   "height": 537,
+   "top": 798,
+   "x": 1891
+  },
+  "trackAtEnd": {
+   "total": 70,
+   "first": 47,
+   "visible": 23,
+   "current": -1,
+   "thumbTop": 361,
+   "thumbPx": 176,
+   "height": 537,
+   "top": 798,
+   "x": 1891
+  },
+  "rowsAtEnd": [
+   "128467stdout: Regenerated 0 energy",
+   "130268stdout: Shield status 0% 0",
+   "130969stdout: shields will not hold as expected"
+  ],
+  "afterEndPress": {
+   "line": 13,
+   "ticks": 5,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/noir_space_ship/src/main.nr"
+  },
+  "trackAtTop": {
+   "total": 70,
+   "first": 0,
+   "visible": 23,
+   "current": -1,
+   "thumbTop": 0,
+   "thumbPx": 176,
+   "height": 537,
+   "top": 798,
+   "x": 1891
+  },
+  "dragJumps": 20,
+  "trackAfterDrag": {
+   "total": 70,
+   "first": 47,
+   "visible": 23,
+   "current": -1,
+   "thumbTop": 361,
+   "thumbPx": 176,
+   "height": 537,
+   "top": 798,
+   "x": 1891
+  },
+  "afterDrag": {
+   "line": 13,
+   "ticks": 5,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/noir_space_ship/src/main.nr"
+  },
+  "start": {
+   "line": 13,
+   "ticks": 5,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/noir_space_ship/src/main.nr"
+  },
+  "afterRowClick": {
+   "line": 54,
+   "ticks": 146,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/noir_space_ship/src/shield.nr"
+  },
+  "trackAfterRowClick": {
+   "total": 70,
+   "first": 0,
+   "visible": 23,
+   "current": 5,
+   "thumbTop": 0,
+   "thumbPx": 176,
+   "height": 537,
+   "top": 798,
+   "x": 1891
+  },
+  "pageErrors": [],
+  "scrollBody": {
+   "scrollTop": 0,
+   "scrollHeight": 39340,
+   "clientHeight": 562,
+   "rowHeight": 24
+  }
+ }
+}

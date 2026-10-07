@@ -33,7 +33,8 @@
 ##     unreachable from a fixture — it takes more stops than a suite should
 ##     drive — and it is the thing that decides whether a long session grows
 ##     without limit.
-##   * The `[MOD]` field's COLUMN. The Tier-2 case reads a cell there; if the
+##   * The changed VALUE's column (PLAT-51: the `[MOD]` badge is gone; the
+##     accent is on the value). The Tier-2 case reads a cell there; if the
 ##     two arithmetics drifted, that case would read the wrong cell and pass.
 ##   * The shell painting this pane into the `state` rectangle.
 ##
@@ -63,12 +64,16 @@ import ../../../../common/value_presentation
 import ../formatters/type_formatters
 import ../views/shell
 import ../views/tree_node
+import ../views/diff_highlighter
+import codetracer_embed   # `ValueTimeline.len` (the facade's value_changes)
 import ../views/variables
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 153
+const ExpectedAssertions = 155
+  ## PLAT-51: 153 -> 155, the `[MOD]` badge's seven checks became the
+  ## changed value's accent and the controls' column (nine).
 
 var countedAssertions = 0
 
@@ -257,6 +262,16 @@ suite "CTUI-7 after PLAT-2: what is still this front-end's":
     ck stringDetail("\"hello\"") == "5 chars"
     ck stringDetail("\"世界\"") == "2 chars"
 
+proc styleAtCell(row: StyledRow; col: int): CellStyle =
+  ## The style of the cell at `col` (PLAT-51: where the changed accent is).
+  var c = 0
+  for span in row:
+    let w = cellWidthOf(span.text)
+    if col >= c and col < c + w:
+      return span.style
+    c += w
+  DefaultCellStyle
+
 suite "CTUI-7: one row of the tree, and where its fields land":
 
   test "the marker columns are the same on every kind of row":
@@ -276,8 +291,9 @@ suite "CTUI-7: one row of the tree, and where its fields land":
     deep.depth = 3
 
     # PLAT-49: column 0 is the row's CATEGORY TAG (blank on a spec that
-    # names none), the expander sits against the name, and `[MOD]` is at the
-    # row's END — no lone expander column, no blank badge field in front.
+    # names none), the expander sits against the name. (PLAT-51: the `[MOD]`
+    # badge at the row's end is gone; a changed VALUE takes the desktop's
+    # changed-value accent instead, and the row's end holds its controls.)
     var tagged = leaf
     tagged.tag = "L"
     tagged.tagRole = srCategoryLocal
@@ -287,21 +303,26 @@ suite "CTUI-7: one row of the tree, and where its fields land":
     ck cellAt(rowFor(expandable), 2) == CollapsedGlyph
     ck cellAt(rowFor(opened), 2) == ExpandedGlyph
     ck treeRow(tagged)[0].style.role == srCategoryLocal
-    # THE `[MOD]` FIELD IS AT THE SAME COLUMN ON EVERY ROW, blank when the row
-    # did not change. The Tier-2 case reads a real terminal cell at exactly this
-    # column, so a drift here would move that read rather than the badge.
-    let badge = diffFieldColumn(RowWidth)
-    ck badge == RowWidth - tree_node.ReservedTrailingCells - ModifiedTagCells
+    # NO BADGE: the changed row says so by its VALUE's style, which is
+    # `diff_highlighter.ChangedValueStyle` there and nowhere else.
     ck nameFieldColumn() == 4
-    ck rowFor(modified)[badge ..< badge + ModifiedTagCells] == ModifiedTag
-    ck rowFor(leaf)[badge ..< badge + ModifiedTagCells] == "     "
+    ck not rowFor(modified).contains("[MOD]")
+    ck not rowFor(modified).contains("MOD")
+    let valueAt = valueFieldColumn(RowWidth)
+    ck styleAtCell(treeRow(modified), valueAt) == ChangedValueStyle
+    ck styleAtCell(treeRow(leaf), valueAt) != ChangedValueStyle
+    ck rowFor(modified) == rowFor(leaf)
     ck rowFor(leaf).find("counter") == nameFieldColumn()
-    ck diffTagText(modified) == ModifiedTag
-    ck diffTagText(leaf).len == ModifiedTagCells
-    # THE INDENT MOVES THE EXPANDER AND THE NAME, NEVER THE TAG OR THE BADGE.
+    # THE CONTROLS ARE AT THE SAME COLUMN ON EVERY ROW (when shown).
+    let ctl = controlColumn(RowWidth)
+    ck ctl == RowWidth - tree_node.ReservedTrailingCells - ControlCells
+    var withControls = leaf
+    withControls.controls = true
+    ck cellAt(rowFor(withControls), ctl) == HistoryControlGlyph
+    ck cellAt(rowFor(withControls), ctl + 1) == OriginControlGlyph
+    # THE INDENT MOVES THE EXPANDER AND THE NAME, NEVER THE TAG OR THE VALUE.
     ck cellAt(rowFor(deep), 0) == " "
     ck cellAt(rowFor(deep), 2 + 2 * IndentCells) == LeafGlyph
-    ck rowFor(deep)[badge ..< badge + ModifiedTagCells] == "     "
     ck rowFor(deep).find("counter") ==
        rowFor(leaf).find("counter") + 2 * IndentCells
     # Every row is exactly the width it was asked for, whatever its kind.
@@ -322,7 +343,7 @@ suite "CTUI-7: one row of the tree, and where its fields land":
     ck wide.value >= MinimumValueCells
     ck wide.name + wide.typ + wide.value + 2 ==
        RowWidth - nameFieldColumn() - tree_node.ReservedTrailingCells -
-       (ModifiedTagCells + 1)
+       (ControlCells + 1)
     # A NARROW PANE DROPS THE TYPE, NOT THE VALUE: a name and a value answer
     # "what is it now", and the type is a detail the tree's own shape carries.
     let narrow = fieldWidths(22)

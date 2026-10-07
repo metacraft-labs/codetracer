@@ -1,7 +1,7 @@
 {
   "generated": {
-    "takenAt": "2026-09-27T11:23:09.475Z",
-    "prefixDefaultSha256": "316971a1b009fa40e36c509dddac6cf79adb7096aafde3b83a5f7a8954acbe98",
+    "takenAt": "2026-10-06T20:14:56.738Z",
+    "prefixDefaultSha256": "57fffb7554a326a4023980fa44ee64fb9ebee962a1cc0576a62f801b6613dc2d",
     "loadedConfig": {
       "root": {
         "type": "row",
@@ -103,10 +103,10 @@
                 "componentType": "editorComponent",
                 "componentState": {
                   "id": 0,
-                  "label": "<repo>/test-programs/calc/main.py",
+                  "label": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
                   "content": 2,
-                  "fullPath": "<repo>/test-programs/calc/main.py",
-                  "name": "<repo>/test-programs/calc/main.py",
+                  "fullPath": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "name": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
                   "editorView": 0,
                   "isEditor": true,
                   "noInfoMessage": "",
@@ -273,25 +273,6 @@
                     "componentType": "genericUiComponent",
                     "componentState": {
                       "id": 0,
-                      "label": "timelineComponent-0",
-                      "content": 19
-                    }
-                  },
-                  {
-                    "type": "component",
-                    "content": [],
-                    "size": 1,
-                    "sizeUnit": "fr",
-                    "minSize": 200,
-                    "minSizeUnit": "px",
-                    "id": "",
-                    "maximised": false,
-                    "isClosable": true,
-                    "reorderEnabled": true,
-                    "title": "genericUiComponent",
-                    "componentType": "genericUiComponent",
-                    "componentState": {
-                      "id": 0,
                       "label": "terminalComponent-0",
                       "content": 24
                     }
@@ -406,7 +387,6 @@
         "h": 665,
         "contents": [
           8,
-          19,
           24
         ],
         "active": 0
@@ -418,8 +398,8 @@
     }
   },
   "scratch": {
-    "takenAt": "2026-09-27T11:23:18.736Z",
-    "prefixDefaultSha256": "08f974a1cf8ac730e1136ee601f22a7fe53fb297f437e986f0c7f018029ad83a",
+    "takenAt": "2026-10-06T20:15:09.208Z",
+    "prefixDefaultSha256": "a3b7ebadb1c27fe69eeb111ae71bf0a72bec46842ce3290a2ea769478e3182d0",
     "loadedConfig": {
       "root": {
         "type": "row",
@@ -521,10 +501,10 @@
                 "componentType": "editorComponent",
                 "componentState": {
                   "id": 0,
-                  "label": "<repo>/test-programs/calc/main.py",
+                  "label": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
                   "content": 2,
-                  "fullPath": "<repo>/test-programs/calc/main.py",
-                  "name": "<repo>/test-programs/calc/main.py",
+                  "fullPath": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "name": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
                   "editorView": 0,
                   "isEditor": true,
                   "noInfoMessage": "",
@@ -691,25 +671,6 @@
                     "componentType": "genericUiComponent",
                     "componentState": {
                       "id": 0,
-                      "label": "timelineComponent-0",
-                      "content": 19
-                    }
-                  },
-                  {
-                    "type": "component",
-                    "content": [],
-                    "size": 1,
-                    "sizeUnit": "fr",
-                    "minSize": 200,
-                    "minSizeUnit": "px",
-                    "id": "",
-                    "maximised": false,
-                    "isClosable": true,
-                    "reorderEnabled": true,
-                    "title": "genericUiComponent",
-                    "componentType": "genericUiComponent",
-                    "componentState": {
-                      "id": 0,
                       "label": "terminalComponent-0",
                       "content": 24
                     }
@@ -824,7 +785,6 @@
         "h": 665,
         "contents": [
           8,
-          19,
           24
         ],
         "active": 0

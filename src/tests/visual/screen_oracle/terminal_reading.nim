@@ -41,7 +41,22 @@ const
     ## What a horizontal divider row between two stacked panes is made of,
     ## in both spellings (box-drawing, and `--ascii-borders`).
 
+  ScrubberCells = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇",
+                   "▏", "▎", "▍", "▌", "▋", "▊", "▉", "|", "#"]
+    ## PLAT-51: what a list pane's scrollbar SCRUBBER draws in the pane's
+    ## last column (`views/scrubber_track.nim`: the track, the thumb in
+    ## eighth blocks, the current-position mark), and their ASCII tier.
+
 func cells(line: string): seq[Rune] = line.toRunes
+
+func withoutScrubber(line: string; width: int): string =
+  ## A list pane's row less its scrollbar scrubber: the pane's LAST cell,
+  ## when the row reaches it and it holds a track, thumb or mark glyph.
+  let r = line.toRunes
+  if width > 0 and r.len == width and $r[^1] in ScrubberCells:
+    $r[0 ..< r.len - 1]
+  else:
+    line
 
 func sliceCells(r: seq[Rune]; start, width: int): string =
   if start >= r.len: return ""
@@ -105,7 +120,8 @@ proc readTerminalEventLog*(frame: openArray[string]; title = "Event Log"):
       "no tab strip carries " & title)
   var model = EventLogModel(isVisible: true)
   var candidates = 0
-  for line in pane.body:
+  for raw in pane.body:
+    let line = raw.withoutScrubber(pane.width)
     if line.strip().len == 0: continue
     inc candidates
     let row = parseTerminalEventRow(line)

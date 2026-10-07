@@ -129,7 +129,7 @@ suite "PLAT-20: the dock projection writes gpui-kit's persisted schema":
   test "a stack becomes ONE TabPanel carrying every tab and the active index":
     resetCount()
     let layout = initLayout(stack([pane(paneState), pane(paneEventLog),
-                                   pane(paneTimeline)], activeIndex = 2))
+                                   pane(paneTerminalOutput)], activeIndex = 2))
     let doc = projectedOf(layout)
     let tab = doc["center"]["children"][0]
     ck tab["panel_name"].getStr == "TabPanel"
@@ -190,11 +190,11 @@ suite "PLAT-20: the dock projection writes gpui-kit's persisted schema":
     # panes that are not docked.
     const Edges = [(paneState, leLeft, dpLeft),
                    (paneEventLog, leRight, dpRight),
-                   (paneTimeline, leBottom, dpBottom)]
+                   (paneTerminalOutput, leBottom, dpBottom)]
     var layout = initLayout(row([pane(paneEditor, "Editor"),
                                  pane(paneState, "State"),
                                  pane(paneEventLog, "Events"),
-                                 pane(paneTimeline, "Timeline")]))
+                                 pane(paneTerminalOutput, "Terminal")]))
     var docked = 0
     for entry in Edges:
       let (p, edge, _) = entry
@@ -303,7 +303,7 @@ suite "PLAT-20: PLAT-4's TilesState decision, APPLIED":
 
     var layout = initLayout(
       row([column([pane(paneEditor), pane(paneState)]),
-           stack([pane(paneEventLog), pane(paneTimeline)], activeIndex = 1)]))
+           stack([pane(paneEventLog), pane(paneTerminalOutput)], activeIndex = 1)]))
     let docked = layout.apply(cmdDock(paneFlow, leBottom))
     ck docked.kind == loRefused  # `paneFlow` is not in the tree
     let doc = projectedOf(layout)
@@ -334,16 +334,16 @@ suite "PLAT-20: PLAT-4's TilesState decision, APPLIED":
     # tree, with the projection of each result scanned.
     var layout = initLayout(
       row([column([pane(paneEditor), pane(paneState)]),
-           stack([pane(paneEventLog), pane(paneTimeline)], activeIndex = 0)]))
+           stack([pane(paneEventLog), pane(paneTerminalOutput)], activeIndex = 0)]))
     var reached = 0
     var positional = 0
     let commands = @[
-      cmdActivateTab(paneTimeline),
+      cmdActivateTab(paneTerminalOutput),
       cmdSetWeight(paneEditor, 2.5),
       cmdAddPane(paneSearch),
       cmdSplit(paneEditor, paneScratchpad, saColumn, ssAfter),
       cmdMergeIntoStack(paneState, paneEventLog),
-      cmdMoveTab(paneTimeline, paneEventLog, 0),
+      cmdMoveTab(paneTerminalOutput, paneEventLog, 0),
       cmdDock(paneSearch, leRight),
       cmdRename(paneEditor, "Source"),
       cmdRemovePane(paneScratchpad)]

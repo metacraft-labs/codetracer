@@ -604,16 +604,10 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     ck src.root.nativeView == "editor"
     ck paneEditor in PaneNativePanes
     ck paneEditor notin PaneVocabularyPanes
-    # PLAT-41: the timeline is the SECOND sanctioned escape, refused by name in
-    # `admission.Rejections` for its own reason — a scrubber's usefulness is
-    # its resolution, and no abstraction over a column and a pixel keeps both.
-    let tl = timelinePaneView("gpui")
-    let tlReport = checkPortable(tl.root)
-    ck tlReport.violations.len == 1
-    ck tl.native == "gpui"
-    ck tl.root.nativeView == "timeline"
-    ck paneTimeline in PaneNativePanes
-    ck paneTimeline notin PaneVocabularyPanes
+    # PLAT-41 made the timeline a SECOND sanctioned escape; PLAT-51 removed
+    # the Timeline panel from every product, so the editor is the ONLY
+    # native pane left (the scrubbers that remain are inside their panes).
+    ck PaneNativePanes == {paneEditor}
     # The two ACCEPTED EXCEPTIONS report rather than render blank, and say
     # WHICH exception they are. PLAT-41 replaced flow here: flow is expressed
     # now, so asserting it reports would have been asserting the old state.
@@ -630,8 +624,8 @@ suite "PLAT-21: the product's panes, in the vocabulary, on a real recording":
     # added the five desktop panes the shared default places (each an accepted
     # exception that reports rather than renders blank). PLAT-48 adds the
     # desktop's PROBLEMS and REQUESTS footer panels, accepted exceptions too
-    # (+6).
-    expectCount(64)
+    # (+6). PLAT-51 removes the timeline escape (5 -> 1 assertion: -4).
+    expectCount(60)
 
   liveTest "the entries each pane uses are the ones the module declares":
     publishTracepoints()
@@ -1090,7 +1084,8 @@ suite "PLAT-21: the session is closed":
 # stop has is the recording's (the Python recorder now lists the module's
 # interpreter attributes too), so those 4 x n are added at run time from
 # `sameBytesRows`; the 267 are the rest, the case's three floors included.
-const ExpectedAssertions = 267
+# PLAT-51: -4, the timeline escape's five assertions became one.
+const ExpectedAssertions = 263
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

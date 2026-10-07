@@ -117,6 +117,8 @@ proc baseModel(cap: ImageCapability): FrameViewerModel =
   result.hasRaster = true
   result.capability = cap
   result.drawCalls = 2
+  # PLAT-51: scene boundaries, which the pane's own scrubber marks.
+  result.sceneMarks = @[0, 20, 33]
   result.historyRequested = true
   result.historyPixelX = 4
   result.historyPixelY = 4
@@ -211,6 +213,15 @@ proc runTier0() =
            " gap=" & $model.gap)
   emitLine("PLAT15 MAGNIFIED " & $model.magnified)
   emitLine("PLAT15 DEGRADED " & model.degradedMessage)
+  # PLAT-51: where the pane's OWN frame scrubber was painted — its screen row
+  # (1-based, as written above) and the cells of its thumb and its marks.
+  # Coordinates only; the suite reads the glyphs off the terminal.
+  let fv = frameViewerScreen(model, 78, 12)
+  var marks = ""
+  for c in fv.sceneMarkCols:
+    marks.add (if marks.len > 0: "," else: "") & $c
+  emitLine("PLAT15 SCRUBBER row=" & $(OriginRow + fv.scrubberRow) &
+           " thumb=" & $fv.scrubberThumbCol & " marks=" & marks)
   emitLine(ReadyMarker)
 
 when isMainModule:

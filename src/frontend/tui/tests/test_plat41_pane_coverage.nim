@@ -91,9 +91,10 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # (PROBLEMS, REQUESTS) — docked by the shared default, reported here.
     # PLAT-52 moved `paneTerminalOutput` into the vocabulary: it draws the
     # session's `TerminalOutputVM`.
-    ck card(allPanes()) == 20
+    # PLAT-51 removed `paneTimeline` (native): 19 panes, one native.
+    ck card(allPanes()) == 19
     ck card(PaneVocabularyPanes) == 12
-    ck card(PaneNativePanes) == 2
+    ck card(PaneNativePanes) == 1
     ck card(PaneAcceptedExceptions) == 6
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
@@ -128,22 +129,22 @@ suite "PLAT-41 LAW-P3 — each category BEHAVES as it promises":
     # so a pane listed native that turned out to be portable would mean the set
     # is wrong, not that the pane is fine.
     for pane in PaneNativePanes:
-      let pv =
-        if pane == paneEditor: sourcePaneView("gpui")
-        else: timelinePaneView("gpui")
+      # PLAT-51: the editor is the only one (the Timeline is removed).
+      ck pane == paneEditor
+      let pv = sourcePaneView("gpui")
       let report = checkPortable(pv.root)
       if report.violations.len != 1:
         checkpoint($pane & " is listed native and was not refused")
       ck report.violations.len == 1
       ck pv.native == "gpui"
 
-  test "both native panes are refused BY NAME in PLAT-3's admission table":
+  test "the native pane is refused BY NAME in PLAT-3's admission table":
     # The set is that table's consequence rather than a preference, and this is
     # what says so. A third member added here without a rejection to point at
     # would be a pane somebody decided not to express.
-    ck card(PaneNativePanes) == 2
+    # PLAT-51: one — the Timeline, PLAT-41's second, is removed.
+    ck card(PaneNativePanes) == 1
     ck paneEditor in PaneNativePanes
-    ck paneTimeline in PaneNativePanes
 
   test "every accepted exception NAMES itself as one":
     # PLAT-23's warning, enforced: an exception that reported nothing, or

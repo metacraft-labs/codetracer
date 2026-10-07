@@ -246,7 +246,9 @@ suite "PLAT-49: the top bar's tooltip and omnibar":
       if at >= seg.col + 1 and fieldSurface == srNone:
         fieldSurface = s.style.surface
       at += cellWidthOf(s.text)
-    ck fieldSurface == srSurfaceField
+    # PLAT-51 (Commands-And-Omnibox.md, "Omnibox colours on every
+    # front-end"): the EDITOR'S ground, superseding PLAT-50's input surface.
+    ck fieldSurface == srSurfaceEditor
     # …and the BOX is the field's ground end to end, not only under its
     # text: the cell before its right border (padding past the placeholder)
     # too. PLAT-50: the last cell itself is the border — the bar's ground
@@ -261,7 +263,7 @@ suite "PLAT-49: the top bar's tooltip and omnibar":
       if seg.col + seg.width - 1 >= at and seg.col + seg.width - 1 < at + w:
         edge = s.style.surface
       at += w
-    ck lastSurface == srSurfaceField
+    ck lastSurface == srSurfaceEditor
     ck edge == srSurfaceTopBar
     ck not omnibarCaret(m, lay).shown
     ob.open()

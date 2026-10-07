@@ -33,10 +33,12 @@ import nim_libvterm
 import ../fixtures/fixture_provider
 import ./lifecycle_support
 import ../../app/theme/colour_math
+import ../../../styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 59
+const ExpectedAssertions = 60
+  ## PLAT-51: +1 — the light omnibox is the editor's ground, and not white.
 
 var countedAssertions = 0
 
@@ -49,7 +51,10 @@ const
   Rows = 50
   StripGround = "#1b1b1b"   # ui/surface/primary/default, Dark
   PanelGround = "#282828"   # ui/surface/base/panel, Dark
-  FieldGround = "#242424"   # ui/surface/input/default, Dark
+  FieldGround = DesignTokenHex[dtEditorThemeGround][dmDark]
+  LightEditorGround = DesignTokenHex[dtEditorThemeGround][dmLight]
+    ## PLAT-51: the omnibox is on the EDITOR's ground (Commands-And-Omnibox.md,
+    ## "Omnibox colours on every front-end"); it was ui/surface/input/default.
   FieldEdge = "#3a3a3a"     # ui/border/secondary, Dark
   MenuFrame = "#565656"     # ui/border/primary, Dark
   ActiveTab = "#333333"     # ui/surface/primary/tertiary, Dark
@@ -307,9 +312,11 @@ suite "PLAT-50 on a real terminal: Light":
     let left = bar.cellFind("▕", 3)
     let right = bar.cellFind("▏", left + 1)
     ck left > 0 and right > left
-    # Light: the field is ui/surface/input/default (#f8f6f2), its border
-    # ui/border/secondary (#bfb8aa) — no longer raised's #f3f3f3 slab.
-    ck s[0][left + 1].bgHex == "#f8f6f2"
+    # Light: the field is the EDITOR's ground as the light theme draws its
+    # editor (PLAT-51; it was ui/surface/input/default #f8f6f2), its border
+    # ui/border/secondary (#bfb8aa) — not white on white either way.
+    ck s[0][left + 1].bgHex == LightEditorGround
+    ck s[0][left + 1].bgHex != "#ffffff"
     ck s[0][left].fgHex == "#bfb8aa"
     ck s[1][1].bgHex != "#f3f3f3"
     sess.quit()

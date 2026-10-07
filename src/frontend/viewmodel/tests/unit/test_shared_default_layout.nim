@@ -64,6 +64,12 @@ const
     ## The committed schema-3 documents: PLAT-40's and PLAT-41's layout
     ## records, written by builds that predate PLAT-45.
 
+proc paneTimelineIsGone(): bool =
+  ## No `PaneKind` spells "timeline" any more.
+  for p in PaneKind:
+    if $p == "timeline": return false
+  true
+
 proc panesOf(tree: LayoutNode): set[PaneKind] =
   for p in allPanes(tree): result.incl p
 
@@ -88,12 +94,24 @@ proc goldenRegions(item: JsonNode; x, y, w, h: float;
   case kind
   of "stack":
     var tabs: seq[string] = @[]
+    var active = item{"activeItemIndex"}.getInt(0)
+    var i = 0
     for c in item["content"]:
-      let pane = paneOfContent(c["componentState"]["content"].getInt)
-      tabs.add(if pane.isSome: $pane.get else:
-               "content#" & $c["componentState"]["content"].getInt)
+      let content = c["componentState"]["content"].getInt
+      # PLAT-51: a retired panel (the Timeline) is dropped as the desktop's
+      # `sanitizeLayoutConfig` drops it on load — the arrangement a user
+      # sees has no tab for it.
+      if content in retiredContentIds():
+        if i < item{"activeItemIndex"}.getInt(0): dec active
+        inc i
+        continue
+      let pane = paneOfContent(content)
+      tabs.add(if pane.isSome: $pane.get else: "content#" & $content)
+      inc i
+    if tabs.len == 0:
+      return
     into.add RegionRect(x: x, y: y, w: w, h: h, tabs: tabs,
-                        active: item{"activeItemIndex"}.getInt(0))
+                        active: clamp(active, 0, tabs.len - 1))
   of "component":
     goldenRegions(%*{"type": "stack", "content": [item]}, x, y, w, h, into)
   of "row", "column":
@@ -154,8 +172,16 @@ suite "PLAT-45 deliverable 1 — the vocabulary covers the desktop's default":
         for v in n: walk(v)
     walk(parseJson(HandWrittenDefault))
     ck contents.len == 11
+    # PLAT-51: every one but the Timeline, which is RETIRED (no `PaneKind`,
+    # sanitised out of a saved desktop config) — and exactly one is.
+    var retired = 0
     for c in contents:
-      ck paneOfContent(c).isSome
+      if c in retiredContentIds():
+        inc retired
+        ck c == ord(Content.RetiredTimelinePanel)
+      else:
+        ck paneOfContent(c).isSome
+    ck retired == 1
 
   test "the table is one-to-one onto Content ordinals, and inverts":
     var seen = initHashSet[int]()
@@ -189,30 +215,45 @@ suite "PLAT-45 deliverable 1 — the vocabulary covers the desktop's default":
       if p.isSome: image.incl p.get
     ck image == EditModeHiddenPanes
 
-suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5)":
+suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PLAT-51's 6)":
 
   # PLAT-48 bumped the schema to 5 (the desktop's PROBLEMS and REQUESTS
   # footer panels are new `PaneKind`s, docked by the shared default); v3 and
   # v4 documents migrate forward unchanged in their trees.
-  test "the version is 5 and the chain still starts at 1":
-    ck LayoutSchemaVersion == 5
+  test "the version is 6 and the chain still starts at 1":
+    ck LayoutSchemaVersion == 6
     ck FirstLayoutSchemaVersion == 1
 
   test "every committed v3 document restores unchanged, migrated to the current version":
+    var placedTimeline = 0
     for text in V3Corpus:
       let doc = parseJson(text)
       ck doc["version"].getInt == 3
       let restored = restoreLayoutDocument(doc)
       ck restored.version == LayoutSchemaVersion
-      # MIGRATION, NOT REJECTION, AND NOT A REWRITE: the tree the document
-      # described is the tree that came back.
-      ck equalTrees(restored.tree, fromJson(doc["layout"]))
+      # MIGRATION, NOT REJECTION, AND NOT A REWRITE: the panes the document
+      # placed are the panes that came back — less the Timeline (PLAT-51),
+      # which every one of these documents placed and v6 drops.
+      var spelled: seq[string] = @[]
+      proc walk(n: JsonNode) =
+        if n.kind == JObject:
+          if n.hasKey("pane"): spelled.add n["pane"].getStr
+          if n.hasKey("children"):
+            for c in n["children"]: walk(c)
+      walk(doc["layout"])
+      if "timeline" in spelled: inc placedTimeline
+      var back: seq[string] = @[]
+      for p in allPanes(restored.tree): back.add $p
+      var want: seq[string] = @[]
+      for sp in spelled:
+        if sp != "timeline": want.add sp
+      ck back == want
       ck validate(restored, {}).len == 0
 
   test "a current document naming the new panes round-trips":
     let layout = initLayout(sharedDefaultLayout().tree)
     let doc = saveLayout(layout)
-    ck doc["version"].getInt == 5
+    ck doc["version"].getInt == 6
     let back = restoreLayoutDocument(parseJson($doc))
     ck equalTrees(back.tree, layout.tree)
     ck panesOf(back.tree) == panesOf(layout.tree)
@@ -221,7 +262,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5)":
     var doc = saveLayout(initLayout(defaultReplayLayout()))
     doc["version"] = %3
     let back = restoreLayoutDocument(doc)
-    ck back.version == 5
+    ck back.version == 6
     ck equalTrees(back.tree, defaultReplayLayout())
 
   test "a v4 document as the previous build wrote it restores exactly, docked panes included":
@@ -237,7 +278,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5)":
       for field in ["beside", "weight"]:
         if d.hasKey(field): d.delete(field)
     let back = restoreLayoutDocument(doc)
-    ck back.version == 5
+    ck back.version == 6
     ck equalTrees(back.tree, docked.layout.tree)
     ck back.docked.len == 1
     ck back.docked[0].pane == paneFileTree and back.docked[0].edge == leLeft
@@ -258,6 +299,81 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5)":
     except LayoutDecodeError as e:
       kind = e.kind
     ck kind == ldeUnknownVersion
+
+suite "PLAT-51 — LayoutSchemaVersion 5 -> 6: the Timeline panel is removed":
+
+  # Layout-System.md, "The Timeline panel is removed (2026-10-05)": a saved
+  # layout that placed it opens WITHOUT it — its stack keeps the other tabs,
+  # a container left empty goes, a docked Timeline goes — and is never
+  # refused with `ldeUnknownPane`.
+
+  proc v5(layout: JsonNode; docked = newJArray()): JsonNode =
+    %*{"version": 5, "layout": layout, "docked": docked}
+
+  test "the v5 shared default (Event Log | Timeline | Terminal Output) opens without the tab":
+    let doc = v5(%*{"kind": "column", "weight": 1.0, "children": [
+      {"kind": "pane", "pane": "editor", "weight": 1.0},
+      {"kind": "stack", "weight": 1.0, "activeIndex": 0, "children": [
+        {"kind": "pane", "pane": "eventLog", "weight": 1.0},
+        {"kind": "pane", "pane": "timeline", "weight": 1.0},
+        {"kind": "pane", "pane": "terminalOutput", "weight": 1.0}]}]})
+    let back = restoreLayoutDocument(doc)
+    ck back.version == 6
+    ck ofTree(back.tree).canonical ==
+      "column(editor,stack[eventLog*,terminalOutput])"
+    ck validate(back, {}).len == 0
+
+  test "the ACTIVE Timeline tab hands its place to the tab that slid into it":
+    for (active, want) in [(1, "stack[eventLog,terminalOutput*]"),
+                           (2, "stack[eventLog,terminalOutput*]"),
+                           (0, "stack[eventLog*,terminalOutput]")]:
+      let doc = v5(%*{"kind": "row", "weight": 1.0, "children": [
+        {"kind": "pane", "pane": "editor", "weight": 1.0},
+        {"kind": "stack", "weight": 1.0, "activeIndex": active, "children": [
+          {"kind": "pane", "pane": "eventLog", "weight": 1.0},
+          {"kind": "pane", "pane": "timeline", "weight": 1.0},
+          {"kind": "pane", "pane": "terminalOutput", "weight": 1.0}]}]})
+      let back = restoreLayoutDocument(doc)
+      checkpoint($active & " -> " & ofTree(back.tree).canonical)
+      ck ofTree(back.tree).canonical == "row(editor," & want & ")"
+
+  test "a container the Timeline alone filled is removed, and its siblings keep the space":
+    let doc = v5(%*{"kind": "column", "weight": 1.0, "children": [
+      {"kind": "pane", "pane": "editor", "weight": 3.0},
+      {"kind": "stack", "weight": 1.0, "activeIndex": 0, "children": [
+        {"kind": "pane", "pane": "timeline", "weight": 1.0}]}]})
+    let back = restoreLayoutDocument(doc)
+    ck back.tree.contains(paneEditor)
+    ck allPanes(back.tree) == @[paneEditor]
+    ck validate(back, {}).len == 0
+
+  test "a docked Timeline is dropped; a pane docked beside it keeps its edge":
+    let doc = v5(%*{"kind": "row", "weight": 1.0, "children": [
+        {"kind": "pane", "pane": "editor", "weight": 1.0},
+        {"kind": "pane", "pane": "state", "weight": 1.0}]},
+      %*[{"pane": "timeline", "edge": "bottom", "order": 0},
+         {"pane": "eventLog", "edge": "bottom", "order": 1,
+          "beside": "timeline", "besideBefore": true}])
+    let back = restoreLayoutDocument(doc)
+    ck back.docked.len == 1
+    ck back.docked[0].pane == paneEventLog
+    ck back.docked[0].edge == leBottom
+    ck back.docked[0].beside.isNone
+    ck validate(back, {}).len == 0
+
+  test "the spelling is retired, not unknown: a v6 document naming it is refused":
+    ck "timeline" in RetiredPaneSpellings
+    var doc = v5(%*{"kind": "pane", "pane": "timeline", "weight": 1.0})
+    doc["version"] = %6
+    var kind = ldeNotAnObject
+    try:
+      discard restoreLayoutDocument(doc)
+    except LayoutDecodeError as e:
+      kind = e.kind
+    # A CURRENT document cannot name it (no build writes one); the migration
+    # is what keeps an OLD document opening.
+    ck kind == ldeUnknownPane
+    ck paneTimelineIsGone()
 
 suite "PLAT-45 deliverable 2 — a declared capability per front-end":
 
@@ -441,7 +557,7 @@ suite "PLAT-47 deliverable 1 — the shared default is the desktop's Debug-mode 
     ck ofTree(sharedDefaultLayout().tree).canonical ==
       "row(stack[fileTree*,vcs,testResults],editor," &
       "column(row(stack[state*,scratchpad],stack[calltrace*,agentActivity])," &
-      "stack[eventLog*,timeline,terminalOutput]))"
+      "stack[eventLog*,terminalOutput]))"
 
   test "it is the generated file, read back, not a tree authored here":
     ck equalTrees(sharedDefaultLayout().tree,

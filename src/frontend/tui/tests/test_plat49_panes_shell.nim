@@ -69,7 +69,10 @@ import ../app/theme/capabilities
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 204
+const ExpectedAssertions = 207
+  ## PLAT-51: +3, measured — the call trace's rows end in their scrollbar
+  ## scrubber's cell, one more span per row the selected-row sweeps visit,
+  ## and the scrubber cell's own role check.
 
 var countedAssertions = 0
 
@@ -488,15 +491,19 @@ suite "PLAT-49 part B: the call trace's rows are their semantic parts":
     # its callee bold (`.call-current`), EVERY part — and the rest of the
     # row to the pane's edge — on the active-row ground (`.event-selected`),
     # its toggle in the body colour (the `active` icon). No other row.
+    # (PLAT-51: up to the pane's scrollbar SCRUBBER, which is its last
+    # column — the desktop's selected row also ends at its scrollbar.)
+    const ScrubberRoles = {srScrubberTrack, srScrubberThumb, srScrubberMark}
     var current = false
     for s in g.rowSpans(4):
       if s.style.bold and s.text.contains("add"): current = true
-      if s.text.strip.len > 0:
+      if s.text.strip.len > 0 and s.style.role notin ScrubberRoles:
         ck s.style.surface == srSurfaceActiveRow
       if s.text.contains(CallToggleGlyphs[crtLeaf]):
         ck s.style.role == srChromeText
     ck current
-    ck g.styleAt(4, 79).surface == srSurfaceActiveRow
+    ck g.styleAt(4, 78).surface == srSurfaceActiveRow
+    ck g.styleAt(4, 79).role in ScrubberRoles
     for s in g.rowSpans(3):
       ck not s.style.bold
       ck s.style.surface != srSurfaceActiveRow

@@ -409,14 +409,16 @@ suite "CTUI-6 Tier 2: the call stack pane on a real terminal":
       let pointerCol = stackWidth + gutter.gutterWidth -
                        GutterPointerCells - GutterGapCells
       let inspectionCell = sess.cellAt(inspectionRow, pointerCol + 1)
-      let executionCell = sess.cellAt(executionRow, pointerCol)
+      # PLAT-51: both marks are the middle cell of their three-cell field
+      # (` ▸ `, ` ▹ `); they were `-->` and ` > `.
+      let executionCell = sess.cellAt(executionRow, pointerCol + 1)
       checkpoint("inspection pointer " & describeCell(inspectionCell) &
                  ", execution pointer " & describeCell(executionCell))
-      ck $inspectionCell.rune == ">"
+      ck $inspectionCell.rune == InspectionPointerGlyph.strip()
       ck inspectionCell.fg.kind == ckIndexed
       ck inspectionCell.fg.idx == ansiIndexOf(srGutterInspectionPointer)
       ck caBold in inspectionCell.attrs
-      ck $executionCell.rune == "-"
+      ck $executionCell.rune == ExecutionPointerGlyph.strip()
       ck executionCell.fg.kind == ckIndexed
       ck executionCell.fg.idx == ansiIndexOf(srGutterExecutionPointer)
       # …and the execution line still carries its background highlight, which

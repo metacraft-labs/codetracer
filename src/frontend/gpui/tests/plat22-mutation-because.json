@@ -14,6 +14,6 @@
   "E8": "Check failed: found == want",
   "E9": "Check failed: \"waiting for the session to launch\" notin output",
   "U1": "Check failed: s.totalLineCount == 4",
-  "U2": "Check failed: ExecutionPointerGlyph in output",
+  "U2": "Check failed: \"highlight_line_arrow.svg\" in output",
   "U3": "Check failed: row.pointer == eptExecution"
 }

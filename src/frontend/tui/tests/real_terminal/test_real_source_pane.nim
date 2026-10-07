@@ -165,10 +165,11 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       # ---- THE POINTER CELL'S REAL SGR --------------------------------------
       let ptrCol = pointerColumn(Cols, model0)
       ck ptrCol > 0
-      let ptrCell = sess.cellAt(row0, ptrCol)
+      # PLAT-51: the mark is the field's middle cell (` ▸ `; it was `-->`).
+      let ptrCell = sess.cellAt(row0, ptrCol + 1)
       checkpoint("pointer cell (" & $row0 & "," & $ptrCol & "): " &
                  describeCell(ptrCell))
-      ck $ptrCell.rune == "-"
+      ck $ptrCell.rune == ExecutionPointerGlyph.strip()
       # PLAT-46: the execution pointer's role, on the DERIVED 16-colour rung
       # (`derived_colours`), which libvterm reports as an index.
       ck ptrCell.fg.kind == ckIndexed
@@ -275,8 +276,8 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       let vacatedRow = sess.regionText(row0, 0, Cols, 1).split('\n')[0]
       ck not vacatedRow.contains(ExecutionPointerGlyph)
       # The accent moved with it, in the terminal's own cell model.
-      let ptrCell1 = sess.cellAt(row1, pointerColumn(Cols, model1))
-      ck $ptrCell1.rune == "-"
+      let ptrCell1 = sess.cellAt(row1, pointerColumn(Cols, model1) + 1)
+      ck $ptrCell1.rune == ExecutionPointerGlyph.strip()
       ck ptrCell1.fg.kind == ckIndexed
       ck ptrCell1.fg.idx == ansiIndexOf(srGutterExecutionPointer)
       ck caBold in ptrCell1.attrs

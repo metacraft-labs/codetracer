@@ -68,7 +68,9 @@ import ./plat45_old_profiles
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it. `+ 3`: PLAT-49 part B's positive controls
 # (a lone pane's header joined; a tab's insert and append halves were seen).
-const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5
+const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5 - 21
+  ## PLAT-51: -21 — the shared default lost a pane (the Timeline, a tab of
+  ## the event stack), and the per-pane / per-tab sweeps over it with it.
   ## + 5: PLAT-49 part B review — the round trip reaches the root band.
   ## PLAT-48: +17 — the `:pin` / `:unpin` block and the two new verbs in the
   ## every-verb sweep. PLAT-49: +2 — a press MARKS the pane (`pendingPick`)
@@ -128,7 +130,7 @@ proc allEdgesDocked(): Layout =
   ## child becomes that child) are the model's and not this file's idea of
   ## them.
   var l = ultraWide()
-  for pair in [(paneTimeline, leBottom), (paneCalltrace, leLeft),
+  for pair in [(paneTerminalOutput, leBottom), (paneCalltrace, leLeft),
                (paneState, leRight), (paneEventLog, leTop)]:
     let outcome = apply(l, cmdDock(pair[0], pair[1]))
     if outcome.kind == loApplied:
@@ -833,7 +835,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     block:
       let b = bindingOn(compact(), lpCompact)
       var moved = 0
-      for pane in [paneTimeline, paneEventLog]:
+      for pane in [paneTerminalOutput, paneEventLog]:
         let geom = b.geometry(bodyFor(80, 24))
         let target = geom.regionOfPane(paneEditor)
         discard b.beginDrag(pane)
@@ -995,11 +997,11 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
         let sweep = @[
           cmdActivateTab(paneEventLog),
           cmdSetWeight(paneEditor, 55.0),
-          cmdMoveTab(paneTimeline, paneState, 0),
+          cmdMoveTab(paneTerminalOutput, paneState, 0),
           cmdSplitMove(paneEditor, paneCalltrace, saColumn, ssAfter),
           cmdMergeIntoStack(paneEventLog, paneEditor),
-          cmdDock(paneTimeline, leBottom),
-          cmdRestoreDocked(paneTimeline, some(paneEditor)),
+          cmdDock(paneTerminalOutput, leBottom),
+          cmdRestoreDocked(paneTerminalOutput, some(paneEditor)),
           cmdDock(paneState, leLeft),
           cmdRename(paneEditor, "Source"),
           cmdSplitMove(paneEditor, paneEventLog, saRow, ssBefore),
@@ -1245,18 +1247,18 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # :move-tab — a real reorder inside the Compact stack, asserted on the
     # MODEL: the tab's index moved.
     block:
-      let b = bindingOn(compact(), lpCompact, focus = paneTimeline)
+      let b = bindingOn(compact(), lpCompact, focus = paneTerminalOutput)
       let geom = b.geometry(bodyFor(80, 24))
-      ck panePath(b.layout, paneTimeline) == some("1/1")
+      ck panePath(b.layout, paneTerminalOutput) == some("1/1")
       let moved = b.runLayoutCommand(geom, ":move-tab left")
       checkpoint(":move-tab left -> " & moved.message)
       ck moved.status == lasApplied
       ck moved.command.get.kind == lcMoveTab
-      ck panePath(b.layout, paneTimeline) == some("1/0")
+      ck panePath(b.layout, paneTerminalOutput) == some("1/0")
       verbsRun.incl lvMoveTab
       let last = b.runLayoutCommand(geom, ":move-tab last")
       ck last.status == lasApplied
-      ck panePath(b.layout, paneTimeline) == some("1/2")
+      ck panePath(b.layout, paneTerminalOutput) == some("1/2")
       let bad = b.runLayoutCommand(geom, ":move-tab sideways")
       ck bad.status == lasBadArgument
       ckMessageIsNeverSilent(bad, ":move-tab sideways")
@@ -1334,7 +1336,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
 
     # :undo-layout / :redo-layout / :reset-layout
     block:
-      let b = bindingOn(compact(), lpCompact, focus = paneTimeline)
+      let b = bindingOn(compact(), lpCompact, focus = paneTerminalOutput)
       let geom = b.geometry(bodyFor(80, 24))
       let before = $b.saveDocument()
       ck b.runLayoutCommand(geom, ":move-tab left").status == lasApplied
@@ -1440,8 +1442,8 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       checkpoint("SGR click -> " & clicked.message)
       ck clicked.status == lasApplied
       ck clicked.command.get.kind == lcActivateTab
-      ck clicked.command.get.activateTarget == paneTimeline
-      ck c.layout.tree.isVisible(paneTimeline)
+      ck clicked.command.get.activateTarget == paneTerminalOutput
+      ck c.layout.tree.isVisible(paneTerminalOutput)
       ck c.interaction.kind == ikNone
 
     # THE WHEEL, on the same protocol (buttons 64 and 65).
@@ -1456,7 +1458,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       checkpoint("wheel down on the tab strip -> " & scrolled.message)
       ck scrolled.status == lasApplied
       ck scrolled.command.get.kind == lcActivateTab
-      ck c.layout.tree.isVisible(paneTimeline)
+      ck c.layout.tree.isVisible(paneTerminalOutput)
       # A wheel over a pane BODY is not a layout gesture — that belongs to the
       # pane, and a layout that stole it would break scrolling.
       let body = c.onMouse(g2, wheel(true, region.area.row + 1,
@@ -1484,7 +1486,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       ck not b.resize(200, 60)
 
     block:
-      let b = bindingOn(compact(), lpCompact, focus = paneTimeline)
+      let b = bindingOn(compact(), lpCompact, focus = paneTerminalOutput)
       let geom = b.geometry(bodyFor(80, 24))
       ck b.runLayoutCommand(geom, ":move-tab left").status == lasApplied
       ck b.userModified

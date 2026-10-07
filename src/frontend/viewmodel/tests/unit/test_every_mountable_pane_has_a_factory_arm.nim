@@ -70,7 +70,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 42
+const ExpectedAssertions = 36
+  ## PLAT-51: 42 -> 36. The Timeline panel is removed: its arm, its mount
+  ## proc and its give-up lines went (the control-data loop -1, the mount
+  ## proc -1, the give-up triple -3, the two `clog` guards -2), and one
+  ## assertion that the retired panel has no arm and no mount proc came in
+  ## (+1).
   ## 34 before the give-up test was widened from the timeline alone to all
   ## three panes. The old test made 3 assertions; the new one makes 11 (three
   ## per pane, plus the timeline's two `clog`-regression guards), so the count
@@ -89,7 +94,8 @@ const ArmsAddedByThisChange = [
   ## The five panes moved into the factory. Named here so the derived pre-fix
   ## source below is built by deleting exactly these, and so a later change
   ## that quietly drops one is a failure rather than a shrinking list.
-  "State", "Calltrace", "Timeline", "EventLog", "TerminalOutput",
+  "State", "Calltrace", "EventLog", "TerminalOutput",
+  # (PLAT-51: "Timeline" stood here; the panel is removed from every product.)
 ]
 
 const ExemptFromDispatch = [
@@ -215,7 +221,7 @@ suite "the factory mounts every mountable pane":
       echo "direct-mount Content values with no factory arm: ", missing.join(", ")
     counted missing.len == 0
 
-  test "CONTROL DATA: the same scan reports exactly five on the pre-fix source":
+  test "CONTROL DATA: the same scan reports exactly four on the pre-fix source":
     # Without this the suite could pass because `dispatchArms` matched every
     # line in the file, or because `directMountContents` returned nothing.
     # The pre-fix source is the current one with the five arms deleted, so the
@@ -224,7 +230,7 @@ suite "the factory mounts every mountable pane":
     let preFix = source.withArmsRemoved(ArmsAddedByThisChange)
     counted preFix.len < source.len
     let missing = armsMissingFrom(preFix)
-    counted missing.len == 5
+    counted missing.len == 4
     for pane in ArmsAddedByThisChange:
       counted pane in missing
 
@@ -235,14 +241,17 @@ suite "the factory mounts every mountable pane":
     counted "Filesystem" in dispatchArms(preFix)
     counted "Scratchpad" in dispatchArms(preFix)
 
-  test "the three desktop-blank panes are dispatched, each by name":
+  test "the desktop-blank panes are dispatched, each by name; the retired one is not":
     # Named individually, not left to the aggregate above: "some pane has an
     # arm" cannot fail for its own reason, and these three are the ones the 25
     # session logs showed blank.
     let arms = layoutSource().dispatchArms()
     counted "State" in arms
     counted "Calltrace" in arms
-    counted "Timeline" in arms
+    # PLAT-51: the Timeline (blank in those logs too) is RETIRED — no arm,
+    # and not in the direct-mount set.
+    counted "RetiredTimelinePanel" notin arms and
+            "RetiredTimelinePanel" notin directMountContents(layoutSource())
 
   test "the two panes of the same shape are dispatched too":
     let arms = layoutSource().dispatchArms()
@@ -270,7 +279,7 @@ suite "the factory mounts every mountable pane":
     let source = layoutSource()
     counted source.contains("calltrace, trace, event_log, terminal_output,")
     for procName in ["tryMountIsoNimStatePanel", "tryMountIsoNimCalltrace",
-                     "tryMountIsoNimTimelinePanel", "tryMountIsoNimEventLogPanel",
+                     "tryMountIsoNimEventLogPanel",
                      "tryMountIsoNimTerminalOutputPanel"]:
       counted dispatchRegion(source).contains(procName & "()")
 
@@ -302,8 +311,7 @@ suite "the factory mounts every mountable pane":
     # audible, and this test pins both walls.
     for (path, procName) in [
         ("src/frontend/ui/state.nim", "tryMountIsoNimStatePanel"),
-        ("src/frontend/ui/calltrace.nim", "tryMountIsoNimCalltrace"),
-        ("src/frontend/ui/trace.nim", "tryMountIsoNimTimelinePanel")]:
+        ("src/frontend/ui/calltrace.nim", "tryMountIsoNimCalltrace")]:
       let source = readFile(path)
       # Audible, and at the level that does not overclaim.
       counted source.contains("cwarn \"[PIPELINE] " & procName &
@@ -313,9 +321,9 @@ suite "the factory mounts every mountable pane":
       counted not source.contains("cerror \"[PIPELINE] " & procName)
       # And it says what actually ended, which is this poll and not the pane.
       counted source.contains("abandoning THIS poll")
+    # PLAT-51: the third, the Timeline's, went with the panel.
     let trace = readFile("src/frontend/ui/trace.nim")
-    counted trace.contains("tryMountIsoNimTimelinePanel: retry #")
-    counted not trace.contains("clog \"IsoNim timeline panel: not ready")
+    counted not trace.contains("tryMountIsoNimTimelinePanel")
 
 suite "factory-arm suite self-check":
 

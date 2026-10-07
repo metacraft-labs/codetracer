@@ -95,7 +95,9 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 645
+const ExpectedAssertions = 655
+  ## PLAT-51: 645 -> 655, measured — the window's plan sweeps now include
+  ## the list panes' scrubber tracks and the value controls.
   ## 635 -> 645, 2026-10-06: ONE more non-test file under `src/frontend/gpui/`
   ## — `terminal_output_leaf.nim` (the Terminal Output pane, drawn natively)
   ## — by the second route above (10 assertions in the registry scan).

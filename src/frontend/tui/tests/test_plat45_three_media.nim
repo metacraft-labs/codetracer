@@ -76,7 +76,9 @@ let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 const PinnedArrangement =
   "row(stack[fileTree*,vcs,testResults],editor,column(row(" &
   "stack[state*,scratchpad],stack[calltrace*,agentActivity])," &
-  "stack[eventLog*,timeline,terminalOutput]))"
+  "stack[eventLog*,terminalOutput]))"
+  ## (PLAT-51: the event stack lost its Timeline tab — the panel is removed
+  ## from every product.)
   ## **THE PRODUCT DECISION, PINNED**: the shared default's arrangement — the
   ## desktop's DEBUG-mode layout (PLAT-47 deliverable 1; the user, 2026-09-27:
   ## "The default layout of desktop is the shared arrangement. It has been

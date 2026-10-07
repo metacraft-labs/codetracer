@@ -172,7 +172,7 @@ proc gpuiArrangement(layout: Layout): Arrangement =
 # ---------------------------------------------------------------------------
 
 const CommandSequence = @[
-  cmdActivateTab(paneTimeline),
+  cmdActivateTab(paneTerminalOutput),
   cmdSetWeight(paneEditor, 2.5),
   cmdAddPane(paneSearch),
   cmdSplit(paneState, paneScratchpad, saColumn, ssAfter),
@@ -188,7 +188,7 @@ const CommandSequence = @[
 proc startingLayout(): Layout =
   initLayout(
     row([column([pane(paneEditor, "Editor"), pane(paneState, "State")]),
-         stack([pane(paneEventLog, "Events"), pane(paneTimeline, "Timeline")],
+         stack([pane(paneEventLog, "Events"), pane(paneTerminalOutput, "Terminal")],
                activeIndex = 0)]))
 
 suite "PLAT-20: one command sequence, two projections, one arrangement":

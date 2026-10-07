@@ -49,6 +49,11 @@ const answersFile = path.join(answersDir, "plat45-default-arrangement.electron.j
 // `test-logs/tui-fixtures/calc-*` and threw at LOAD when that cache was cold —
 // which is every CI job, since none of them runs the terminal lanes first.
 const calcProgram = "calc/main.py";
+// An existing `calc` recording to open instead of recording one
+// (`launchMode: "trace-folder"`), for a host whose recorder cannot record —
+// the arrangement under test does not depend on which recording of `calc` is
+// open. Unset: the run records its own, as before.
+const calcTrace = process.env.PLAT45_CALC_TRACE ?? "";
 
 function prefixVar(which: string): string {
   return which === "generated" ? "PLAT45_PREFIX_GENERATED" : "PLAT45_PREFIX_SCRATCH";
@@ -85,8 +90,8 @@ function readAnswers(): Record<string, unknown> {
 for (const which of ["generated", "scratch"]) {
   test.describe(`PLAT-45 desktop default (${which})`, () => {
     test.use({
-      sourcePath: calcProgram,
-      launchMode: "trace",
+      sourcePath: calcTrace || calcProgram,
+      launchMode: calcTrace ? "trace-folder" : "trace",
       noUserLayout: true,
       codetracerPrefixOverride: process.env[prefixVar(which)] ?? "",
     });

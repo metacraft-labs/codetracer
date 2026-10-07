@@ -3899,6 +3899,17 @@ jobs:
         # give; the recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat52-capture-electron
 
+      - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the 2026-10-05 decisions: no Timeline (and a
+        # saved layout that held one opens without it), the Event Log's, the
+        # Call Trace's and the Terminal Output's scrollbars as scrubbers over
+        # the whole list, and a changed value's accent — read from the REAL
+        # Electron app with this checkout's desktop JavaScript and
+        # stylesheets. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat51-capture-electron
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

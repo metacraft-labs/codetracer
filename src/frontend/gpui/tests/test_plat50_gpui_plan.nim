@@ -24,7 +24,7 @@
 ##   * K22 — a call's menu, and Collapse Call Children collapses it;
 ##   * K7 — a tab's menu, and Close removes the tab;
 ##   * K27 / K28 — a value expands; a variable's menu;
-##   * K30 — the timeline's track seeks;
+##   * (K30, the timeline's track, went with the Timeline panel — PLAT-51;)
 ##   * K17 / K18 / K19 — Files (on `multi_root`): a file opens in the editor
 ##     (its tab names it), a folder collapses, a node opens no menu (the
 ##     desktop has none);
@@ -63,7 +63,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 112
+  ExpectedAssertions = 108
+    ## PLAT-51: 112 -> 108 — the Timeline's K30 case (3) removed with the
+    ## pane, and the history / origin read in the pane, not over it (-1).
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   MultiRootPrefix = "multi_root-"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
@@ -293,15 +295,6 @@ suite "PLAT-50 GPUI: the event log, the editor and the timeline":
     ck miss.executionLine == 1
     ck missTrace.contains("line jump failed: no backward step reaches")
 
-  test "the timeline's track seeks":
-    var trace = ""
-    # Four fifths along the track (`click:timeline:<permille>`).
-    let plan = windowPlan("click:tab:timeline:left,click:timeline:800",
-                          trace = trace)
-    ck trace.contains("pane click timeline")
-    ck plan.executionLine != 1
-    ck plan.textOf.contains("tick 13")
-
 suite "PLAT-50 GPUI: the call trace, a tab and the variables":
 
   test "a call's menu: Collapse Call Children collapses it":
@@ -358,15 +351,16 @@ suite "PLAT-50 GPUI: the call trace, a tab and the variables":
     ck entries[0][0] == "Toggle value history"
     ck entries[1][0] == "Show value origin"
     ck entries[0][1] == "true" and entries[1][1] == "true"
-    # The value's history, then its origin, over the window.
-    let hist = windowPlan("click:event:3:left,click:var:EXPRESSIONS:right," &
-                          "ctx:Toggle value history").contentOf
-    ck hist[0].startsWith("history of EXPRESSIONS (")
-    ck hist[1].contains("\"2 + 3\"")
-    let origin = windowPlan("click:event:3:left,click:var:EXPRESSIONS:right," &
-                            "ctx:Show value origin").contentOf
-    ck origin[0] == "origin of EXPRESSIONS"
-    ck origin[1].len > 0
+    # The value's history, then its origin — PLAT-51: IN THE PANE, under
+    # the row (the desktop's in-row containers), not over the window.
+    let histPlan = windowPlan("click:event:3:left,click:var:EXPRESSIONS:right," &
+                              "ctx:Toggle value history")
+    let hist = histPlan.nodesWith("data-ct-history-entry")
+    ck hist.len > 0
+    ck hist[0].textOf.contains("\"2 + 3\"")
+    let originPlan = windowPlan("click:event:3:left,click:var:EXPRESSIONS:right," &
+                                "ctx:Show value origin")
+    ck originPlan.nodesWith("data-ct-origin-hop").len > 0
 
 suite "PLAT-50 GPUI: Files":
 
@@ -532,7 +526,8 @@ suite "PLAT-50 GPUI: the chrome":
     ck o.px("w") == omnibarDesktopPx(W)
     ck o.px("w") == OmnibarDesktopFloorPx          # 24% of 1440 is below it
     ck abs(o.px("left") + o.px("w") div 2 - W div 2) <= 1
-    ck o.style("bg") == dark(dtColorsUiSurfaceInputDefault)
+    # PLAT-51: the EDITOR's ground (it was ui/surface/input/default).
+    ck o.style("bg") == dark(dtEditorThemeGround)
     ck o.style("border_color") == dark(dtColorsUiBorderSecondary)
     # No transport control has a ground of its own.
     var groundless = true

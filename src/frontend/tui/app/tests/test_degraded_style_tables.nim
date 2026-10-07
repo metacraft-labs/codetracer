@@ -65,7 +65,10 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3387
+const ExpectedAssertions = 3389
+  ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
+  ## current-line and inspection triangles, the role table traded the `[MOD]`
+  ## tag for the editor-text role, and one permitted merge was added.
 
 var countedAssertions = 0
 
@@ -104,7 +107,8 @@ const
     ## painted roles.
   ExpectedGroupCount = 21
     ## PLAT-52: `dgScrubber`.
-  ExpectedMergeCount = 21
+  ExpectedMergeCount = 22
+    ## PLAT-51: + (chrome-text, editor-text), the omnibox's editor foreground.
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
     ## be added without the number moving in a diff a reviewer reads.
 
@@ -176,9 +180,10 @@ proc sampleScreen(width, height: int): seq[StyledRow] =
   ## through an assertion.
   var model = newShellModel(width, height,
                             notification = "capability negotiation")
-  model.timeline = initTimelineBarModel(
-    minTick = 0'u64, maxTick = 400'u64, currentTick = 120'u64,
-    boundsKnown = true)
+  # (PLAT-51: the Timeline bar filled here was removed with the pane; the
+  # header's tick counters are the second painted model.)
+  model.header.tick = 120
+  model.header.totalTicks = 400
   model.callStack = initCallStackModel(
     frames = @[StackFrame(name: "main", path: "/tmp/main.py", line: 12),
                StackFrame(name: "evaluate", path: "/tmp/main.py", line: 40)],
@@ -537,8 +542,10 @@ suite "CTUI-11 Tier 1: degraded style tables":
     checkpoint("ASCII fallback pairs: " & $mapped)
     ck mapped == AsciiFallbackTable.len
     # PLAT-50: `▏` and `▕`, the divider and edge lines (27); PLAT-52: the
-    # thirteen eighth blocks a scrubber's thumb ends are drawn with (40).
-    ck mapped == 40
+    # thirteen eighth blocks a scrubber's thumb ends are drawn with (40);
+    # PLAT-51: the current-line triangle `▸` (`>`) and the inspection
+    # cursor's `▹` (`)`) (42).
+    ck mapped == 42
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.

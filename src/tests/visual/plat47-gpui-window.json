@@ -69,14 +69,14 @@
    988
   ],
   "pixelsByDesktopColour": {
-   "keyword": 139,
-   "string": 3406,
+   "keyword": 130,
+   "string": 3307,
    "comment": 133,
-   "identifier": 466,
+   "identifier": 443,
    "delimiter": 15,
-   "lineNumber": 938,
-   "activeLineNumber": 34,
-   "ground": 398607,
+   "lineNumber": 778,
+   "activeLineNumber": 11,
+   "ground": 397122,
    "oldBand4f4f4f": 0,
    "chromePaneFill": 0
   },
@@ -93,16 +93,16 @@
    "executionLine": "#404040",
    "selection": "#353535"
   },
-  "text": "main.py b\nthe recording's source\n\u00bb 1 #'/usr/bin/env python3\n\"\"\"calc \u2014 the small, fast, determinist\nWHY THIS PROGRAM EXISTS, AND WHY IT LO\n"
+  "text": "main.py b\nthe recording's source\n> 1 #'/usr/bin/env python3\n\"\"\"calc \u2014 the small, fast, determinis\nWHY THIS PROGRAM EXISTS, AND WHY IT L\n"
  },
  "band": {
   "rows": [
    123,
    148
   ],
-  "startX": 487,
+  "startX": 497,
   "endX": 852,
-  "activeNumberMaxX": 445,
+  "activeNumberMaxX": 455,
   "gutterAtBandRow": "#282828",
   "afterBandAtRow": "#282828",
   "bodyLeft": 397,
@@ -151,9 +151,15 @@
   "liveRingLeft": 476,
   "doneRingLeft": 476,
   "pressBodyRingLeft": 476,
-  "pressBodyChanged": 0,
+  "pressBodyChanged": 52,
+  "pressBodyChangedBox": [
+   664,
+   539,
+   2,
+   26
+  ],
   "savedLayout": {
-   "version": 5,
+   "version": 6,
    "layout": {
     "kind": "row",
     "children": [
@@ -225,10 +231,6 @@
          {
           "kind": "pane",
           "pane": "eventLog"
-         },
-         {
-          "kind": "pane",
-          "pane": "timeline"
          },
          {
           "kind": "pane",
@@ -338,7 +340,7 @@
     30
    ],
    "changedPixels": 14880,
-   "ghostChangedPixels": 1608,
+   "ghostChangedPixels": 2370,
    "ghostCentre": [
     51,
     51,
@@ -430,7 +432,6 @@
    {
     "panes": [
      "eventLog",
-     "timeline",
      "terminalOutput"
     ],
     "rect": [
@@ -547,14 +548,13 @@
    "scratchpad",
    "terminalOutput",
    "testResults",
-   "timeline",
    "vcs"
   ],
   "stripGround": "#282828",
   "stripInk": 141,
   "slotText": "=\nt\na\nt\ne\n",
   "savedLayout": {
-   "version": 5,
+   "version": 6,
    "layout": {
     "kind": "row",
     "children": [
@@ -629,10 +629,6 @@
          },
          {
           "kind": "pane",
-          "pane": "timeline"
-         },
-         {
-          "kind": "pane",
           "pane": "terminalOutput"
          }
         ]
@@ -690,13 +686,13 @@
    653,
    990
   ],
-  "revealChangedPixels": 42353,
+  "revealChangedPixels": 42875,
   "revealText": "State Unpin\nLocals\n\nGlobals\n\nWatches\n",
   "dismissChangedPixels": 0
  },
  "calltrace": {
-  "baseText": "<toplevel> #0() == 0\nv < main_ > #1()\nmain #2()\nstep #3(i=0) =>1\nleaf #4(i=0) => 0\nstep #5(i=1) => 3\nleaf #6(i=1) => 2\nstep #7(i=2) =>5\nleaf #8(i=2) =>4\nstep #9(i=3) =>7\nleaf #10(i=3) => 6\nstep #11(i=4) == 9\nleaf #12(i=4) => 8\nstep #13(i=5) => 11\nleaf #14(i=5) => 10\nstep #15(i=6) => 13\nleaf #16(i=6) => 12\n",
-  "endText": "v step #587(i=292) => 585\n\n- leaf #588(i=292) => 584\nv step #589(i=293) => 587\n\n- leaf #590(i=293) => 586\nv step #591(i=294) => 589\n\n- leaf #592(i=294) => 588\nv step #593(i=295) => 591\n\n- leaf #594(i=295) => 590\nv step #595(i=296) => 593\n\n- leaf #596(i=296) => 592\nv step #597(i=297) => 595\n\n- leaf #598(i=297) => 594\nv step #599(i=298) => 597\n\n- leaf #600(i=298) => 596\nv step #601(i=299) => 599\n\n- leaf #602(i=299) => 598\n",
+  "baseText": "<toplevel> #0() == 0 |\nv < main_ > #1()\nmain #2()\nstep #3(i=0) =>1\nleaf #4(i=0) => 0\nstep #5(i=1) => 3\nleaf #6(i=1) => 2\nstep #7(i=2) =>5\nleaf #8(i=2) =>4\nstep #9(i=3) =>7\nleaf #10(i=3) => 6\nstep #11(i=4) == 9\nleaf #12(i=4) => 8\nstep #13(i=5) => 11\nleaf #14(i=5) => 10\nstep #15(i=6) => 13\nleaf #16(i=6) => 12\n",
+  "endText": "v step #587(i=292) => 585 -\n\n- leaf #588(i=292) => 584\nv step #589(i=293) => 587\n\n- leaf #590(i=293) => 586\nv step #591(i=294) => 589\n\n- leaf #592(i=294) => 588\nv step #593(i=295) => 591\n\n- leaf #594(i=295) => 590\nv step #595(i=296) => 593\n\n- leaf #596(i=296) => 592\nv step #597(i=297) => 595\n\n- leaf #598(i=297) => 594\nv step #599(i=298) => 597\n\n- leaf #600(i=298) => 596\nv step #601(i=299) => 599\n\n- leaf #602(i=299) => 598\n",
   "sectionLoads": 9,
   "lastTop": "gesture calltrace top=587 rows=16 total=603"
  }

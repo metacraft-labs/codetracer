@@ -25,6 +25,7 @@
 import std/[monotimes, os, posix, strutils, times, unittest]
 
 import ../host/terminal_driver
+import ../../../common/key_names
 import ../app/theme/capabilities
 
 var CHECKS = 0
@@ -96,15 +97,21 @@ suite "the lone ESC delay, over a real pipe":
     ck first == "\x1b"
     ck second == "j"
 
-  test "ESC and a letter in ONE burst are still framed as before — the letter":
+  test "ESC and a letter in ONE burst are one token — Alt+<letter>":
     # What a terminal sends for Alt+<letter>, and indistinguishable from an Esc
-    # and a key typed faster than one read. The framing this tree has always
-    # had is kept: the ESC is dropped and the letter honoured (`key_names`
-    # produces no `Alt+<letter>`). Pinned, so a change to it is a decision.
+    # and a key typed faster than one read. Until PLAT-51 the ESC was dropped
+    # and the letter honoured, which made the desktop's Alt+T ("Add
+    # tracepoint" on the read-only editor's caret) unreachable from a real
+    # terminal. A DECISION, as this case said a change here would be: the
+    # burst is framed as ONE token that `keyName` names `Alt+j`, and the
+    # runtime treats an Alt chord it does not bind as the letter alone
+    # (`runtime.handleToken`, pinned by `test_plat51_parity`), so what a user
+    # typing Esc-then-a-key fast gets is unchanged.
     let (d, w) = pipeDriver()
     w.put("\x1bj")
     let (tok, _) = d.nextToken(1000)
-    ck tok == "j"
+    ck tok == "\x1bj"
+    ck keyName(tok) == "Alt+j"
     let (none, _) = d.nextToken(150)
     ck none == ""
 

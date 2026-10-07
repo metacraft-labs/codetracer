@@ -160,7 +160,12 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 101
+  ExpectedAppModules = 100
+    ## 2026-10-06 (PLAT-51): 101 → 100. The Timeline pane is removed:
+    ## `views/timeline_bar.nim` and its pure suite
+    ## `tests/test_timeline_scrubber_quantization.nim` went (−2), and
+    ## `views/scrubber_track.nim`, the list panes' scrollbar scrubber, came
+    ## (+1).
     ## 2026-10-06 (PLAT-52): 100 → 101. `views/terminal_output_pane.nim`,
     ## the terminal's Terminal Output pane (the line view, the screen view and
     ## their scrubbers).
@@ -257,7 +262,13 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 244
+  ExpectedStyleLiterals = 239
+    ## 2026-10-06 (PLAT-51): 244 → 239, measured. `views/timeline_bar.nim`'s
+    ## literals went with the pane; `views/scrubber_track.nim` holds the
+    ## scrubber styles moved out of `terminal_output_pane.nim`; the
+    ## omnibox's field and results took the editor's roles (`top_bar.nim`);
+    ## the `[MOD]` badge's style went from `tree_node.nim`, the value
+    ## controls' came.
     ## 2026-10-06 (PLAT-52): +10 in ONE new painting file,
     ## `views/terminal_output_pane.nim` (a run's literal colours, the future
     ## muted, the header, the scrubbers' track, thumb and marks), so 32 → 33

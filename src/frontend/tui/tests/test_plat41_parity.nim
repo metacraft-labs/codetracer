@@ -75,8 +75,11 @@ const Plat41Panes = {PaneKind.low .. paneBuildOutput}
   ## (`test_plat45_three_media.nim`), not this record's. Iterating the whole
   ## enum here would ask a committed record about panes it predates.
 
-const NewPanes = [paneDebugControls, paneFlow, paneTimeline, paneSearch,
+const NewPanes = [paneDebugControls, paneFlow, paneSearch,
                   paneScratchpad, paneShell, paneFileTree, paneBuildOutput]
+  ## (PLAT-51: `paneTimeline` stood here; the Timeline panel is removed from
+  ## every product, so the record's `timeline` rows are history and are read
+  ## by their spelling below, not through a `PaneKind`.)
   ## The eight PLAT-41 owed — every `PaneKind` outside the five PLAT-40 and
   ## the editor already drew — derived below from the sets rather than
   ## trusted.
@@ -99,14 +102,14 @@ proc gpuiDrawsData(pane: PaneKind): bool =
 suite "PLAT-41 1 — the parity table, both columns from runs":
 # ===========================================================================
 
-  test "the eight are exactly the panes outside PLAT-40's four and the editor":
+  test "the seven (eight before PLAT-51 removed the Timeline) are exactly the panes outside PLAT-40's four and the editor":
     var derived = initHashSet[PaneKind]()
     for p in Plat41Panes:
       if p notin {paneEditor, paneCalltrace, paneState, paneEventLog,
                   panePointList}:
         derived.incl p
     ck derived == NewPanes.toHashSet
-    ck derived.len == 8
+    ck derived.len == 7
 
   test "thirteen rows in each column, one per PaneKind, both directions":
     var native, desktop = initHashSet[string]()
@@ -114,6 +117,9 @@ suite "PLAT-41 1 — the parity table, both columns from runs":
     for r in rec["electron"]["rows"]: desktop.incl r["pane"].getStr
     var enumNames = initHashSet[string]()
     for p in Plat41Panes: enumNames.incl $p
+    # PLAT-51: the record predates the Timeline's removal; its row is the
+    # retired spelling, the one `layout_model.RetiredPaneSpellings` keeps.
+    enumNames.incl "timeline"
     ck native == enumNames
     ck desktop == enumNames
     ck native.len == 13
@@ -144,7 +150,7 @@ suite "PLAT-41 1 — the parity table, both columns from runs":
     # The panes whose data a plain stop provides; the four quiet ones are
     # asserted as quiet below, by their own messages.
     for p in [paneEditor, paneCalltrace, paneState, paneEventLog,
-              paneDebugControls, paneFlow, paneTimeline, paneFileTree]:
+              paneDebugControls, paneFlow, paneFileTree]:
       checkpoint($p & ": " & gpuiState(p))
       ck gpuiDrawsData(p)
 

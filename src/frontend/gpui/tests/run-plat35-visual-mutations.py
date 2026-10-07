@@ -152,7 +152,9 @@ ARMS = [
     Arm("M1", LEAVES,
         "  for i, row in surface.rows:\n"
         "    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,\n"
-        "                                          scroll.leftCols))",
+        "                                          scroll.leftCols,\n"
+        "                                          (if row.line == surface.caretLine:\n"
+        "                                             surface.caretColumn else: 0)))",
         "  for i, row in surface.rows:\n    discard row",
         SUITE,
         "stepped-editor / editor-row-count",

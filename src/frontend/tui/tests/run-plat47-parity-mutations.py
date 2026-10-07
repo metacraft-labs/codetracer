@@ -471,8 +471,8 @@ ARMS = [
         C_SESSION,
         "the interactive path never fills FILES (the pane was empty before)"),
     Arm("C1", SESSION,
-        "  initCallTraceModel(rows, s.session.getCurrentRRTicks(), s.callTraceStack,",
-        "  initCallTraceModel(@[], s.session.getCurrentRRTicks(), s.callTraceStack,",
+        "  result = initCallTraceModel(rows, s.session.getCurrentRRTicks(),",
+        "  result = initCallTraceModel(@[], s.session.getCurrentRRTicks(),",
         C_SESSION,
         "the calltrace pane is never handed the trace: it shows the stack"),
     # PLAT-49 part B: the rule is the ViewModel's (`currentCallOf`); the

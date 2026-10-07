@@ -78,7 +78,9 @@ import ./plat45_old_profiles
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 260
+const ExpectedAssertions = 244
+  ## PLAT-51: 260 -> 244, the event stack has two tabs (the Timeline removed)
+  ## and the per-tab case runs its sixteen-odd checks once fewer.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -265,11 +267,11 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
   test "a stack gives its slot to the active tab and nothing to the others":
     let body = bodyFor(80, 24)
     let node = profileLayout(lpCompact)
-    # The event stack — the last region in reading order at 80x24: its three
-    # own tabs (PLAT-47: the NS9 panes are no longer folded into it — TESTS is
+    # The event stack — the last region in reading order at 80x24: its two
+    # own tabs (PLAT-51: Event Log | Terminal Output, the Timeline removed) (PLAT-47: the NS9 panes are no longer folded into it — TESTS is
     # a tab of FILES and CONSTRAINTS is not in the default).
     let tabs = stackTabs(node)[^1]
-    ck tabs.len == 3
+    ck tabs.len == 2
     var slot = CellArea()
     var checkedTabs = 0
     for i, kind in tabs:
@@ -295,8 +297,8 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
       let region = proj.regions[proj.regions.len - 1]
       ck region.pane == kind
       ck region.activeTab == i
-      ck region.tabs.len == 3
-    ck checkedTabs == 3
+      ck region.tabs.len == 2
+    ck checkedTabs == 2
 
   test "the desktop's own default layout projects faithfully":
     # `defaultReplayLayout()` is what a replay session opens with on the

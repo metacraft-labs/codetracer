@@ -41,7 +41,7 @@
   "doc-top": true
  },
  "ticksReportedByWindow": {
-  "base": 0,
+  "base": 1,
   "menu-choose": 2,
   "omni-tick": 42
  },
@@ -124,7 +124,7 @@
    34
   ]
  },
- "footerOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:1 tick 0",
+ "footerOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:1 tick 1",
  "menuOpen": {
   "popover": [
    252,

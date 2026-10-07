@@ -93,9 +93,11 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     let body = arr(rec["editor"]["body"])
     # The ground IS the ground: most of the body is exactly the desktop's.
     ck px["ground"].getInt > body[2] * body[3] div 2
-    for cls in ["keyword", "string", "comment", "identifier", "lineNumber",
-                "activeLineNumber"]:
+    for cls in ["keyword", "string", "comment", "identifier", "lineNumber"]:
       ck px[cls].getInt > 20
+    # The active line's NUMBER only (PLAT-51: the execution mark is the
+    # desktop's arrow in its own colour now, not a glyph in the number's).
+    ck px["activeLineNumber"].getInt > 5
     # Punctuation is thin; that its colour is painted at all is the claim.
     ck px["delimiter"].getInt > 0
     # And the colours that were painted there before PLAT-47 B1 are gone.
@@ -124,7 +126,13 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck r["doneRingLeft"].getInt - before == 80
     # A press that is not on a divider resizes nothing.
     ck r["pressBodyRingLeft"].getInt == r["doneRingLeft"].getInt
-    ck r["pressBodyChanged"].getInt == 0
+    # (PLAT-51: the press places the read-only editor's CARET — a bar one
+    # cell wide at most; nothing else changes.)
+    let caretOnly =
+      r["pressBodyChanged"].getInt == 0 or
+      (arr(r["pressBodyChangedBox"])[2] <= 12 and
+       arr(r["pressBodyChangedBox"])[3] <= EditorRowPx + 2)
+    ck caretOnly
     # The layout document the window wrote carries the new weight: the Files
     # column's share grew by 80 px of the row's extent (the shared default
     # gives it 20).

@@ -41,7 +41,11 @@ import ../../../viewmodel/viewmodels/transport_icons
 # case checks every row the docked-open pane changed, and a docked band is
 # taller than the overlay the click used to open. PLAT-50: -1 — with no
 # divider row between stacked panes the docked band changes one row fewer.)
-const ExpectedAssertions = 109
+const ExpectedAssertions = 116
+  ## PLAT-51: 109 -> 116, measured. Revealing the docked BUILD pane changes
+  ## seven more rows than it did: the list panes' scrollbar scrubbers above it
+  ## are redrawn for their shorter tracks, and the "no fill glyph" sweep
+  ## visits every changed row.
 
 var countedAssertions = 0
 

@@ -6,7 +6,6 @@ import { CallTracePane } from "./panes/call-trace/call-trace-pane";
 import { ScratchpadPane } from "./panes/scratchpad/scratchpad-pane";
 import { FilesystemPane } from "./panes/filesystem/filesystem-pane";
 import { TerminalOutputPane } from "./panes/terminal/terminal-output-pane";
-import { TimelinePane } from "./panes/timeline/timeline-pane";
 import { VariableStatePane } from "./panes/variable-state/variable-state-pane";
 import { retry } from "../lib/retry-helpers";
 import { debugLogger } from "../lib/debug-logger";
@@ -36,7 +35,6 @@ export class LayoutPage extends BasePage {
   private scratchpadTabsCache: ScratchpadPane[] = [];
   private filesystemTabsCache: FilesystemPane[] = [];
   private terminalTabsCache: TerminalOutputPane[] = [];
-  private timelineTabsCache: TimelinePane[] = [];
   private callTraceTabsCache: CallTracePane[] = [];
 
   // ---------------------------------------------------------------------------
@@ -184,10 +182,6 @@ export class LayoutPage extends BasePage {
 
   async waitForTerminalLoaded(): Promise<void> {
     await this.waitForComponent("terminal", "div[id^='terminalComponent']");
-  }
-
-  async waitForTimelineLoaded(): Promise<void> {
-    await this.waitForComponent("timeline", "div[id^='timelineComponent']");
   }
 
   /**
@@ -524,17 +518,5 @@ export class LayoutPage extends BasePage {
       );
     }
     return this.terminalTabsCache;
-  }
-
-  async timelineTabs(forceReload = false): Promise<TimelinePane[]> {
-    if (forceReload || this.timelineTabsCache.length === 0) {
-      const roots = await this.page
-        .locator("div[id^='timelineComponent']")
-        .all();
-      this.timelineTabsCache = roots.map(
-        (r) => new TimelinePane(this.page, r, "TIMELINE"),
-      );
-    }
-    return this.timelineTabsCache;
   }
 }

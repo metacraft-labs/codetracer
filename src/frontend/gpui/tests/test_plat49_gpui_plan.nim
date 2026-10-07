@@ -45,6 +45,7 @@ import codetracer_embed
 import gpui/chrome
 import gpui/window_geometry
 import gpui/window_top_bar
+from gpui/app/leaves import EditorGround
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -52,7 +53,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 186
+  ExpectedAssertions = 183
+    ## PLAT-51: 186 -> 183, measured — the View menu lost its Timeline entry
+    ## (the per-entry sweep), and the omnibox's ground became the editor's.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -321,7 +324,9 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
     let field = closed.nodesWith("data-ct-omnibar")
     ck field.len == 1
     ck field[0].textOf == "⌕ " & OmnibarPlaceholder
-    ck field[0].style("bg") == chromeOf(crInputBackground)
+    # PLAT-51: the EDITOR's ground (Commands-And-Omnibox.md, "Omnibox
+    # colours on every front-end"), superseding PLAT-50's input surface.
+    ck field[0].style("bg") == EditorGround
     ck field[0].attr("data-ct-omnibar-placeholder") == "true"
     let typed = windowPlan("key:p:control,key:a,key:b,key:left")
     ck typed.nodesWith("data-ct-omnibar")[0].textOf == "⌕ a▏b"

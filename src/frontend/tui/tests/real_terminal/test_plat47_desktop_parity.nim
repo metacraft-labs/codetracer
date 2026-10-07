@@ -118,6 +118,19 @@ proc quit(sess: var TuiTestSession) =
   discard sess.waitExit(initDuration(seconds = 15))
   sess.close()
 
+proc pointerRowOf(sess: var TuiTestSession; cols, rows: int): int =
+  ## The row the source pane's execution pointer is on: ` ▸ ` right after a
+  ## line number and its gap (PLAT-51: it was `-->`). The call trace draws
+  ## `▸` too, for a collapsed call, but never after a digit.
+  for r in 0 ..< rows:
+    let t = sess.regionText(r, 0, cols, 1)
+    var at = t.find("  ▸ ")
+    while at > 0:
+      if t[at - 1] in {'0' .. '9'}:
+        return r
+      at = t.find("  ▸ ", at + 1)
+  -1
+
 proc rowOf(sess: var TuiTestSession; cols, rows: int; needle: string;
            start = 0): int =
   for r in start ..< rows:
@@ -196,7 +209,7 @@ suite "PLAT-47: the terminal shows what the desktop shows":
     got["lineNumber"] = hexOfColor(sess.cellAt(defRow,
       colOf(sess, defRow, Cols, "29")).fg)
     got["activeLineNumber"] = hexOfColor(sess.cellAt(lineOne,
-      colOf(sess, lineOne, Cols, "1 -->")).fg)
+      colOf(sess, lineOne, Cols, "1  ▸ ")).fg)
     got["executionLine"] = hexOfColor(sess.cellAt(lineOne,
       colOf(sess, lineOne, Cols, "#!/usr")).bg)
     # THE BAND IS MONACO'S WHOLE-LINE BAND: every cell from the first code
@@ -217,7 +230,7 @@ suite "PLAT-47: the terminal shows what the desktop shows":
                ", banded " & $banded)
     ck edge >= codeCol + "#!/usr/bin/env python3".len + 10
     ck banded == edge - codeCol + 1
-    ck hexOfColor(sess.cellAt(lineOne, colOf(sess, lineOne, Cols, "1 -->")).bg) !=
+    ck hexOfColor(sess.cellAt(lineOne, colOf(sess, lineOne, Cols, "1  ▸ ")).bg) !=
        got["executionLine"]
     quit(sess)
     checkpoint("terminal: " & $got)
@@ -408,7 +421,12 @@ proc focusRingOf(sess: var TuiTestSession; cols, rows: int; canvas,
   var focusCells = initHashSet[(int, int)]()
   for r in 1 ..< rows - 1:
     for c in 0 ..< cols:
+      # PLAT-51: a list pane's scrollbar-scrubber TRACK is a `│` in
+      # ui/divider/secondary, which in the dark mode is the same hex as the
+      # focus colour (ui/border/primary): it is a scrollbar, not a divider
+      # (PLAT-50's dividers are `▏`).
       if glyph(sess, r, c) in VerticalDividerGlyphs and
+         glyph(sess, r, c) != "│" and
          hexOfColor(sess.cellAt(r, c).fg) == focus:
         focusCells.incl (r, c)
   ok = focusCells.len > 0
@@ -494,7 +512,7 @@ suite "PLAT-47: --goto centres the stop, and auto-detection keeps Dark":
     # screen's 21 source rows and far from the file's end.
     var sess = spawnTui(@["--theme=dark", "--goto=25"], Cols, Rows)
     settleOnDebugger(sess, Cols, Rows)
-    let pointer = rowOf(sess, Cols, Rows, "-->")
+    let pointer = pointerRowOf(sess, Cols, Rows)   # PLAT-51: was `-->`
     ck pointer > 0
     # The source view's rows: from its tab strip (the file's tab, PLAT-49) to
     # the last row with a gutter.

@@ -6,7 +6,7 @@
 ## order, in all three layout profiles."
 ##
 ## Three profiles, because the profiles do not have the same panes: the Compact
-## one puts Variables, Timeline and Tracepoints in a `stack` so only the active
+## one puts Variables, Event Log and Tracepoints in a `stack` so only the active
 ## tab is a region, Standard shows four panes and Ultra-wide five. A cycle
 ## asserted at one geometry says nothing about the other two, and "exactly once"
 ## is the property a chain built from a stack is most likely to get wrong —
@@ -48,7 +48,10 @@ import ../layout/project
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 248
+const ExpectedAssertions = 254
+  ## PLAT-51: 248 -> 254. `4` (the Event Log) is visible in all three
+  ## geometries, where the Timeline it selected was visible in none: its
+  ## three focus checks run in each.
 
 var countedAssertions = 0
 
@@ -207,7 +210,7 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     let wanted = [(kaSelectCallStack, paneCalltrace),
                   (kaSelectSource, paneEditor),
                   (kaSelectVariables, paneState),
-                  (kaSelectTimeline, paneTimeline)]
+                  (kaSelectEventLog, paneEventLog)]
     for g in Geometries:
       inc checkedGeometries
       let pf = focusFor(g)
@@ -228,11 +231,13 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     ck checkedGeometries == GeometryCount
     ck selections == GeometryCount * 4
     ck selections == 12
-    # THE NEGATIVE THAT MATTERS, named: the shared default shows the Timeline
-    # only as a tab of the event stack, so §4.2's `4` has nothing to focus
-    # there and reports that rather than focusing something else.
+    # THE NEGATIVE THAT MATTERS, named: the compact fold shows the Call Trace
+    # only as a tab of the Variables stack, so §4.2's `1` has nothing to focus
+    # there and reports that rather than focusing something else. (PLAT-51:
+    # `4` is the Event Log, visible in every profile — the Timeline it used to
+    # select is removed.)
     let compact = focusFor(Geometries[0])
-    ck not compact.focusPaneKind(paneTimeline)
+    ck not compact.focusPaneKind(paneCalltrace)
     let (stillThere, unchanged) = compact.focusedPane()
     ck stillThere
     ck unchanged == paneEditor
@@ -403,7 +408,7 @@ suite "CTUI-9: Tab cycles every visible pane once, in every profile":
     let (notEdge, _) = seekEdgeFor(kaNextCall)
     ck not notEdge
     # `noir_space_ship`'s own extent, measured through `ct/event-load` and
-    # recorded by CTUI-8 in `tests/apps/app_timeline.nim`: tick 0 to 1314.
+    # recorded by CTUI-8 (its timeline app, retired with the pane): tick 0 to 1314.
     ck edgeTick(seStart, 0'u64, 1314'u64) == 0'u64
     ck edgeTick(seEnd, 0'u64, 1314'u64) == 1314'u64
     # A recording whose bounds are unknown answers the beginning rather than a

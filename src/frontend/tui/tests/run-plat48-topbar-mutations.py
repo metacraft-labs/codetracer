@@ -507,7 +507,7 @@ ARMS = [
         T_TABKEYS,
         "`g t` steps to the PREVIOUS session tab"),
     Arm("TK2", KEYNAMES,
-        "    if parts.len == 2 and parts[0] == \"9\":\n",
+        "    if parts.len == 2 and parts[0] in [\"9\", \"13\"]:\n",
         "    if false:\n",
         T_TABKEYS,
         "the `CSI u` spelling of Ctrl+Tab is not a key: the terminals that "

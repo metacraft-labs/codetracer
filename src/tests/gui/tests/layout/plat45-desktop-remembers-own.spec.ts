@@ -53,6 +53,11 @@ const ConstraintsContent = 49;
 // `test-logs/tui-fixtures/calc-*` and threw at LOAD when that cache was cold —
 // which is every CI job, since none of them runs the terminal lanes first.
 const calcProgram = "calc/main.py";
+// An existing `calc` recording to open instead of recording one
+// (`launchMode: "trace-folder"`), for a host whose recorder cannot record —
+// the arrangement under test does not depend on which recording of `calc` is
+// open. Unset: the run records its own, as before.
+const calcTrace = process.env.PLAT45_CALC_TRACE ?? "";
 
 // The prepared prefix this spec launches, or "" for the build itself:
 // `PLAT45_DESKTOP_PREFIX`, else the `CODETRACER_TEST_PREFIX` every other spec
@@ -180,8 +185,8 @@ function debugDefaultStacks(bundled: number[][]): number[][] {
 test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets to the shared default", () => {
   test.describe("first run, then a rearrangement", () => {
     test.use({
-      sourcePath: calcProgram,
-      launchMode: "trace",
+      sourcePath: calcTrace || calcProgram,
+      launchMode: calcTrace ? "trace-folder" : "trace",
       noUserLayout: true,
       codetracerPrefixOverride: preparedPrefix,
     });
@@ -234,8 +239,8 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
 
   test.describe("restart, then reset", () => {
     test.use({
-      sourcePath: calcProgram,
-      launchMode: "trace",
+      sourcePath: calcTrace || calcProgram,
+      launchMode: calcTrace ? "trace-folder" : "trace",
       preserveUserLayout: true,
       codetracerPrefixOverride: preparedPrefix,
     });

@@ -230,7 +230,7 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
         let (moved, kind) = pf.focusDirection(dir)
         if moved:
           st.focused = kind
-    of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectTimeline:
+    of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectEventLog:
       let (isSelect, kind) = directSelectPane(res.action)
       if isSelect:
         let pf = focusFor(cols, rows)

@@ -61,7 +61,7 @@ suite "the Menu ViewModel":
     vm.moveHighlight(-1)           # wraps to the last visible item
     ck vm.highlightedItem().label == "Theme"
     ck vm.enterFolder()            # the nested Theme folder
-    ck vm.path == @[3, 14]
+    ck vm.path == @[3, 13]          # PLAT-51: View lost its Timeline entry
     ck vm.leaveFolder()
     ck vm.highlightedItem().label == "Theme"
     vm.escape()                    # leaves View

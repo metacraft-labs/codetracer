@@ -33,15 +33,15 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | request | arms |
   |---|---|
   | 1 the shared menus | PC1 (the tab menu's order), PC2 (Run to Cursor without its key), PC3 (a disabled breakpoint offers "Disable"), PC4 (a leaf may expand), PC5 (a variable's entry disabled), PC6 (Up/Down land on disabled entries), PC7 (a disabled entry is chosen), PC8 (no Unpin on a dock label), PC9 (no word just past its end), PC10 (an ambiguous Rust path taken), PC11 ("Add all values" pins one), PC13 (a row dropped from the table), EV1 (a second header click keeps the direction) |
-  | 1 the sweep's other rows, terminal | RT21 (Alt+click at column 1), RT22 (Ctrl+Alt read as Alt), RT23 (Copy copies nothing), RT24 (a tracepoint on the stop's line), RT25 (the close button inverted), RT26 (header clicks ignored), RT27 (the status line copies nothing), RT28 (a dock label opens the tab menu), RT29 (Unpin does nothing), RT30 (a drag's release does not seek), RT31 (the View menu cannot add a pane), RT32 (the commit below opens), RT33 (`:origin` waits for a move: the freeze), RT34 (Ctrl+click pins nothing), RT35 (an argument opens the call's menu), RF1 (a Files menu again), TS7-TS11 (the host drops the column / the order / the removal / the origin answer / the tracepoint's line), VS1 (a commit only closes), VD1 (a commit's files named by their letter), EL1 (the header arrow reversed), SP1 (the close button a cell off) |
+  | 1 the sweep's other rows, terminal | RT21 (Alt+click at column 1), RT22 (Ctrl+Alt read as Alt), RT23 (Copy copies nothing), RT24 (a tracepoint on the stop's line), RT25 (the close button inverted), RT26 (header clicks ignored), RT27 (the status line copies nothing), RT28 (a dock label opens the tab menu), RT29 (Unpin does nothing), RT31 (the View menu cannot add a pane), RT32 (the commit below opens), RT33 (`:origin` waits for a move: the freeze), RT34 (Ctrl+click pins nothing), RT35 (an argument opens the call's menu), RF1 (a Files menu again), TS7-TS11 (the host drops the column / the order / the removal / the origin answer / the tracepoint's line), VS1 (a commit only closes), VD1 (a commit's files named by their letter), EL1 (the header arrow reversed), SP1 (the close button a cell off) |
   | 1 the sweep's other rows, shared ops | HS5 / HS6 (a column breakpoint sent, or kept, without its column), HS7 (a call jump without its name), HS8 (the order always ascending), HS9 (history rows without values), HS10 (the origin chain dropped), HS11 (the scratchpad never written), HS12 (a disabled column breakpoint still sent) |
   | 1 the sweep's other rows, GPUI | GM14-GM25 (column, call jump, header order, close button, value pin, footer copy, dock label menu, View menu, adopted leaves, commit files, argument menu, the clipboard never written), GL2 (arguments unmarked) |
   | 1 the engine and the shim | EN1-EN3 (`event_db`: output sorted backwards, ties reversed, the column name's key), EN4 (`dap_handler` ignores the order — the shipped defect, graded on the real terminal against a rebuilt replay-server), IG2 / IG3 (the shim never listens for the right / middle button), IG4 (every frame writes the clipboard) |
-  | 1 terminal routes | RT1 (tab menu on the middle button), RT2 (a folder opens as a file), RT3 (Files rows off by one), RT4 (gutter click does nothing), RT5 (gutter right-click inverted), RT6 (Ctrl+click ignored), RT7 (breakpoint line's menu as a plain line), RT8 (a leaf's menu enabled), RT9 (right-click on an event jumps), RT10 (timeline seeks to the start), RT11 (a value click expands nothing), RT12 (the point above selected), RT13 (Close does nothing), RT14 (Run to Cursor runs backward), RT15 (Disable enables), RT16 (Delete ALL does nothing), RT17 (an entry chosen by the right button), RT18 (Esc keeps the content), RT19 (Down moves up), RT20 (no pane route at all) |
-  | 1 terminal host | TS1 (collapsed folders still list their files), TS2 (an opened file never shown), TS3 (the status line does not say where), TS4 (the gutter right-click always enables), TS5 (a seek lands at half the tick), TS6 (Delete ALL deletes nothing) |
+  | 1 terminal routes | RT1 (tab menu on the middle button), RT2 (a folder opens as a file), RT3 (Files rows off by one), RT4 (gutter click does nothing), RT5 (gutter right-click inverted), RT6 (Ctrl+click ignored), RT7 (breakpoint line's menu as a plain line), RT8 (a leaf's menu enabled), RT9 (right-click on an event jumps), RT11 (a value click expands nothing), RT12 (the point above selected), RT13 (Close does nothing), RT14 (Run to Cursor runs backward), RT15 (Disable enables), RT16 (Delete ALL does nothing), RT17 (an entry chosen by the right button), RT18 (Esc keeps the content), RT19 (Down moves up), RT20 (no pane route at all) |
+  | 1 terminal host | TS1 (collapsed folders still list their files), TS2 (an opened file never shown), TS3 (the status line does not say where), TS4 (the gutter right-click always enables), TS6 (Delete ALL deletes nothing) |
   | 1 shared ops | HS1 (a disabled breakpoint still sent), HS2 (Run to Cursor sent as backward), HS3 (clearing a file sends nothing), HS4 (a jump with no step that way hangs), SD1 (a disabled row stored enabled), NH1 (the tree opens collapsed), PV1 (the vocabulary tree ignores the VM's expansion) |
   | 1 terminal input | MO1 (Ctrl read from the Alt bit), FT1 (a collapsed folder's twisty), PL1 (the selected point not drawn), CM1 (menu rows off by the frame), CM2 (disabled entries not italic), CM3 (the menu far from the press), CM4 (the overlay shows the title for the text) |
-  | 1 GPUI | GW1 (right button read as left), GW2 (ancestors act on the same press), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM7 (the track always seeks to the start), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GM13 (a press on the menu falls through), GL1 (the track not marked), IG1 (isonim-gpui: the right button an unknown kind) |
+  | 1 GPUI | GW1 (right button read as left), GW2 (ancestors act on the same press), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
   | 2 colours | RO1 (inactive tabs black), RO2 (the field the raised slab), RO3 (the menu on the card), RO4 (the strip divider in the border colour), RO6 (the strip on raised), RO7 (the top bar on the card), RO8 (the menu frame in the subtle border), SH4 (row 0 on the card), TB3 (controls filled), TB5 (no dropdown frame), GC1 (GPUI's window ground the old raised), GC2 (GPUI's menu on the card), GM11 (GPUI's band on the pane ground), GM12 (GPUI's omnibox border the menu's) |
   | 3 the omnibox | TB1 (not centred), TB2 (a third, not the desktop's share), TB4 (no field edge), GT1 (GPUI not centred), GT2 (GPUI a third wide) |
   | 4 dividers | BD1 (the strip is no divider), BD2 (a lone pane's whole strip is its label), SH1 (a strip-row divider on the panel), SH2 (body dividers in the subtle colour by default), SH3 (body dividers on the canvas), SH5 (a box-drawing line), RO5 (subtle is the strip colour), BO1 (the field edge degrades to `!`), CL1 (`--dividers` inverted), TM1 (the terminal never reads `--dividers`), TA1 (the shell never gets the choice), GM10 (GPUI never draws subtle lines) |
@@ -72,6 +72,9 @@ refuses unless the needle scan is clean AND every touched file matches
 every checkout.
 
 NO DECLARED SURVIVORS.
+
+PLAT-51 retired RT10, RT30, GM7, GL1 and TS5 with the Timeline panel they
+mutated (K30 / K45 and GPUI's track; a seek's host route is PLAT-51's TS1).
 
 No mocks: every suite graded here runs the product's own models, the
 product's own runtime and shell, a real PTY with real recordings, the shipped
@@ -256,7 +259,6 @@ K_CALL = ("right-click a call: Collapse Call Children, and choosing it "
 K_TAB = "right-click a tab: pin, close, maximise; Close removes it"
 K_VALUE = ("a click on a value expands it; a right click offers history and "
            "origin")
-K_TIMELINE = "a click on the timeline's track seeks there"
 K_WHERE = ("after a click moves the debugger the status line says where it "
            "landed")
 K_COLUMN = "Alt+click anchors a breakpoint at the column; the replay honours it"
@@ -268,7 +270,6 @@ K_SCRATCH = ("an argument and an inline value pinned; a close button removes "
 K_ORDER = "a header click orders the log by its column; again reverses it"
 K_STATUS = "a click on the status line copies the location"
 K_DOCK = "a right-click on a dock label: the desktop's strip menu; Unpin"
-K_DRAG = "a drag along the timeline's track seeks where it is released"
 K_POINTS = "the menu opens the Points pane; a click selects a point"
 K_VCS = "a changed file shows its diff; a commit lists its files"
 K_OKEY = "`o` on the selected variable asks for its origin and answers"
@@ -283,7 +284,6 @@ G_EVENT = "an event row goes to the event; a right click shows its content"
 G_GUTTER = "the gutter sets a breakpoint; a right click disables it"
 G_CTRL = "Ctrl+click and a middle click go to the line"
 G_TEXTMENU = "the editor's menu is the desktop's, and Run to Cursor runs there"
-G_TIMELINE = "the timeline's track seeks"
 G_CALL = "a call's menu: Collapse Call Children collapses it"
 G_TAB = "a tab's menu: Close removes the tab"
 G_VALUE = "a value expands; a variable's menu"
@@ -315,13 +315,13 @@ CASE_SUITE = {
     S_FLAG: T1,
     K_FILES: PTYK, K_FILEMENU: PTYK, K_GUTTER: PTYK, K_CTRL: PTYK,
     K_TEXTMENU: PTYK, K_BPMENU: PTYK, K_EVENT: PTYK, K_CALL: PTYK,
-    K_TAB: PTYK, K_VALUE: PTYK, K_TIMELINE: PTYK, K_WHERE: PTYK,
+    K_TAB: PTYK, K_VALUE: PTYK, K_WHERE: PTYK,
     K_COLUMN: PTYK, K_CALLJUMP: PTYK, K_COPY: PTYK, K_TRACEPOINT: PTYK,
     K_SCRATCH: PTYK, K_ORDER: PTYK, K_STATUS: PTYK, K_DOCK: PTYK,
-    K_DRAG: PTYK, K_POINTS: PTYK, K_VCS: PTYK, K_OKEY: PTYK,
+    K_POINTS: PTYK, K_VCS: PTYK, K_OKEY: PTYK,
     C_BAR: PTYC, C_MENU: PTYC, C_STRIPS: PTYC, C_BODY: PTYC,
     G_EVENT: GPLAN, G_GUTTER: GPLAN, G_CTRL: GPLAN, G_TEXTMENU: GPLAN,
-    G_TIMELINE: GPLAN, G_CALL: GPLAN, G_TAB: GPLAN, G_VALUE: GPLAN,
+    G_CALL: GPLAN, G_TAB: GPLAN, G_VALUE: GPLAN,
     G_FILES: GPLAN, G_CHROME: GPLAN, G_DIVIDERS: GPLAN,
     G_SCRATCH: GPLAN, G_ORDER: GPLAN, G_COLUMN: GPLAN, G_FLOW: GPLAN,
     G_SWEEP: GPLAN, G_VCS: GPLAN,
@@ -413,13 +413,6 @@ ARMS = [
         "  if event.button == mbRight:\n    rt.showContent(\"event #\"",
         "  if false:\n    rt.showContent(\"event #\"",
         K_EVENT, "a right-click on an event jumps instead of showing it"),
-    Arm("RT10", RUNTIME,
-        "      rt.app.timelineDrag = true\n      outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: uint64(tick)))",
-        "      rt.app.timelineDrag = true\n      outcome.requestClick(PaneClickRequest(kind: pcSeek,\n                                            tick: rt.app.timeline.minTick))",
-        K_DRAG, "the timeline seeks to its start wherever it is pressed"),
-        # (Graded by the drag case, which reads the tick after the PRESS: a
-        # plain click's release seeks again where it lands, K45, and would
-        # put a wrong press right.)
     Arm("RT11", RUNTIME,
         "      discard rt.app.variables.toggleNode(path)\n",
         "      discard path\n",
@@ -477,10 +470,6 @@ ARMS = [
         "    if session.setBreakpointEnabled(c.path, c.line, c.enabled):\n",
         "    if session.setBreakpointEnabled(c.path, c.line, true):\n",
         K_GUTTER, "the host always enables, whatever the click asked"),
-    Arm("TS5", TUISESSION,
-        "      session.gotoTick(c.tick)\n",
-        "      session.gotoTick(c.tick div 2)\n",
-        K_TIMELINE, "the host seeks to half the tick pressed"),
     Arm("TS6", TUISESSION,
         "         (c.path.len == 0 or r.path == c.path):\n",
         "         (c.path.len == 0 and r.path == c.path):\n",
@@ -584,10 +573,6 @@ ARMS = [
         "  of caClosePane:\n    applyGestureCommand(r, cmdRemovePane(target.pane))\n",
         "  of caClosePane:\n    discard target\n",
         G_TAB, "GPUI's tab menu Close closes nothing"),
-    Arm("GM7", GPUIMAIN,
-        "    let frac = clamp(float(c.x - x0) / float(TimelineBarWidthPx), 0.0, 1.0)\n",
-        "    let frac = clamp(float(x0 - x0) / float(TimelineBarWidthPx), 0.0, 1.0)\n",
-        G_TIMELINE, "GPUI's track seeks to its start wherever it is pressed"),
     Arm("GM8", GPUIMAIN,
         "      session.stateVM.toggleExpand(c.key)\n",
         "      discard c.key\n",
@@ -600,10 +585,6 @@ ARMS = [
         "  if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and\n     handlePopoverPress(r, kind, x, y):\n",
         "  if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and false and\n     handlePopoverPress(r, kind, x, y):\n",
         G_TAB, "a press on GPUI's open menu falls through to the window"),
-    Arm("GL1", GPUILEAVES,
-        '  r.setAttribute(track, "data-ct-timeline-track", "true")\n',
-        "  discard track\n",
-        G_TIMELINE, "the timeline's track is not marked for its press"),
     Arm("IG1", GRENDERER,
         "  of GpuiEventPointerContext: gekContextMenu\n",
         "  of GpuiEventPointerContext: gekOther\n",
@@ -687,8 +668,8 @@ ARMS = [
         '    rt.copyToClipboard("", "line " & $target.line)\n',
         K_COPY, "Copy copies nothing"),
     Arm("RT24", RUNTIME,
-        "    rt.app.tracepointAt = (target.path, target.line)\n",
-        '    rt.app.tracepointAt = ("", 0)\n',
+        "    rt.openTracepointEditorAt(target.path, target.line)\n",
+        '    rt.openTracepointEditorAt("", 0)\n',
         K_TRACEPOINT, "the tracepoint lands on the stop's line, not the chosen one"),
     Arm("RT25", RUNTIME,
         "    if hit.row < 0 or not hit.close:\n",
@@ -710,10 +691,6 @@ ARMS = [
         "  of caUnpin: rt.layout(cmdRestoreDocked(target.pane))\n",
         "  of caUnpin: discard\n",
         K_DOCK, "Unpin does nothing"),
-    Arm("RT30", RUNTIME,
-        "  if tick >= 0 and uint64(tick) != rt.app.timeline.currentTick:\n",
-        "  if false:\n",
-        K_DRAG, "a drag's release does not seek"),
     Arm("RT31", RUNTIME,
         "    let added = b.dispatch(cmdAddPane(pane, after = anchor))\n",
         "    let added = b.dispatch(cmdActivateTab(pane))\n",

@@ -97,7 +97,10 @@ import ./fixtures/fixture_provider
 # 162 since PLAT-41: the recording's extent now reaches `TimelineVM.bounds`,
 # so the marker case asserts where `seekAtFraction` lands (three checks)
 # where it asserted that nothing moved (two).
-const ExpectedAssertions = 162
+const ExpectedAssertions = 153
+  ## PLAT-51: 162 -> 153. The Timeline bar the jump painted is removed:
+  ## its six checks per destination became two, and the tracepoint marks
+  ## block lost its painted-bar checks.
 
 var countedAssertions = 0
 
@@ -110,8 +113,6 @@ const
     ## The densest log in CTUI-1's corpus: 70 recorded events against `calc`'s
     ## and `wide_state`'s 6. A jump suite wants a log with an interior.
   PageSize = 16
-  BarWidth = 80
-  BarHeight = 2
   LogWidth = 80
   LogHeight = 12
   SourceViewport = 16
@@ -327,24 +328,12 @@ template checkEveryPaneAt(h: JumpHarness; destination: uint64;
   ck engineFile.len > 0
   ck engineLine > 0
 
-  # ---- THE TIMELINE ------------------------------------------------------
-  # The VM's own memo, and the needle's PAINTED column against the pure
-  # mapping's answer for the destination.
+  # ---- THE TIMELINE MODEL ------------------------------------------------
+  # PLAT-51: the Timeline PANEL is removed; `TimelineVM`'s position memo is
+  # still the recording position the other panes and the scrubbers' marks
+  # follow, so it is asserted, and no bar is painted.
   ck h.timeline.currentPosition.val == destination
-  var spans: seq[TimelineSpan] = @[]
-  let barModel = timelineBarModelFor(h.timeline, bounds, spans, @[],
-                                     currentTick = destination)
-  let barScreen = timelineBarScreen(barModel, BarWidth, BarHeight)
-  ck barModel.currentTick == destination
-  ck barScreen.trackWidth == trackWidthFor(BarWidth)
-  ck barScreen.needleColumn ==
-    columnForTick(destination, bounds.minTick, bounds.maxTick,
-                  barScreen.trackWidth)
-  ck barScreen.needleColumn >= 0
-  let barRowText = rowText(barScreen.rows[1])
-  checkpoint(label & " scrubber: '" & barRowText & "'")
-  ck cellSlice(barRowText, barScreen.trackCol + barScreen.needleColumn,
-               barScreen.trackCol + barScreen.needleColumn + 1) == NeedleGlyph
+  ck bounds.minTick <= destination and destination <= bounds.maxTick
 
   # ---- THE SOURCE PANE ---------------------------------------------------
   # Through the real provider, and the line under the pointer compared against
@@ -816,23 +805,16 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       ck dialog.hitCount() == hits.len
       let marks = marksFrom(dialog.entries)
       ck marks.len == hits.len
-      ck marks[0].kind == tmkTracepoint
+      ck marks[0].label.len > 0
       ck marks[0].tick == hitTicks[0]
 
       let truth = wholeLog(h.session)
       let bounds = resolveBounds(h.timeline, @[], truth[0].maxRRTicks)
       ck bounds.known
-      let barModel = timelineBarModelFor(h.timeline, bounds, @[], marks,
-                                        currentTick = 0'u64)
-      let barScreen = timelineBarScreen(barModel, BarWidth, BarHeight)
-      let barRowText = rowText(barScreen.rows[1])
-      checkpoint("scrubber with tracepoint marks: '" & barRowText & "'")
-      ck barScreen.markColumns.len > 0
-      ck barScreen.paintedMarks == barScreen.markColumns.len
-      ck cellSlice(barRowText,
-                   barScreen.trackCol + barScreen.markColumns[^1],
-                   barScreen.trackCol + barScreen.markColumns[^1] + 1) ==
-        MarkGlyph
+      # PLAT-51: the Timeline bar that painted these is removed; the marks
+      # are the model's, at the hits' ticks, inside the recording.
+      ck marks[^1].tick == hitTicks[^1]
+      ck marks[^1].tick <= bounds.maxTick
       # A DISABLED TRACEPOINT CONTRIBUTES NO DIAMOND and keeps its hits, which is
       # the one behaviour `marksFrom` exists to have.
       dialog.selected = 0

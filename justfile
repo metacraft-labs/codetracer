@@ -6301,3 +6301,10 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
     export PATH="${extra_path}${PATH}"
 
     cd src/db-backend && cargo test --no-fail-fast --test '*_mcr_streaming_flow_test' --test mcr_streaming_unified_reader_test
+
+# PLAT-51: the real Electron app's share of the milestone and the reference
+# the terminal and GPUI are measured against (no Timeline, the list panes'
+# scrollbar scrubbers, the changed-value style) — writes
+# `src/tests/visual/answers/plat51-desktop.electron.json`.
+plat51-capture-electron *args:
+  bash scripts/plat51-capture-electron.sh {{args}}

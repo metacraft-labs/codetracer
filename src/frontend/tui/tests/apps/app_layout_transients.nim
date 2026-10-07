@@ -109,7 +109,7 @@ proc modelFor*(state: TransientState; cols, rows: int): ShellModel =
   of tsNone:
     discard
   of tsDockStrips:
-    for pair in [(paneTimeline, leBottom), (paneCalltrace, leLeft)]:
+    for pair in [(paneTerminalOutput, leBottom), (paneCalltrace, leLeft)]:
       let outcome = apply(l, cmdDock(pair[0], pair[1]))
       if outcome.kind == loApplied:
         l = outcome.layout
@@ -129,10 +129,10 @@ proc modelFor*(state: TransientState; cols, rows: int): ShellModel =
     if started.isSome:
       result.interaction = started.get.proposeShare(l, 0.8)
   of tsRevealing:
-    let outcome = apply(l, cmdDock(paneTimeline, leBottom))
+    let outcome = apply(l, cmdDock(paneTerminalOutput, leBottom))
     if outcome.kind == loApplied:
       l = outcome.layout
-    let revealed = beginReveal(l, paneTimeline)
+    let revealed = beginReveal(l, paneTerminalOutput)
     if revealed.isSome:
       result.interaction = revealed.get
   of tsDraggingOnStrip:

@@ -204,12 +204,14 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     ck body == CellArea(col: 0, row: 1, width: 80, height: 22)
     # THE PANE SET AS A WHOLE SEQUENCE, in projection order. Comparing the set
     # member by member would pass over a fourth pane nobody expected.
-    # The source pane first, at its 60-cell minimum; the rest of the shared
-    # default in one side column of two stacks.
+    # The source pane first, at least its 60-cell minimum; the rest of the
+    # shared default in one side column of two stacks. (PLAT-51: 61 / 19. The
+    # side column was held at 20 by the Timeline's 20-cell minimum, a tab of
+    # the event stack; with the Timeline removed the shares decide.)
     ck proj.visiblePaneKinds() == @[paneEditor, paneState, paneEventLog]
-    ckRegion(proj, paneEditor, 0, 1, 60, 22)
-    ckRegion(proj, paneState, 60, 1, 20, 11)
-    ckRegion(proj, paneEventLog, 60, 12, 20, 11)
+    ckRegion(proj, paneEditor, 0, 1, 61, 22)
+    ckRegion(proj, paneState, 61, 1, 19, 11)
+    ckRegion(proj, paneEventLog, 61, 12, 19, 11)
     ck coverageProblems(proj.regions, body).len == 0
     ck coveredCells(proj.regions, body) == body.cellCount()
 
@@ -259,27 +261,28 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     ck stackTabs(node) == @[
       @[paneState, paneScratchpad, paneCalltrace, paneAgentActivity,
         paneFileTree, paneVcs, paneTestResults],
-      @[paneEventLog, paneTimeline, paneTerminalOutput]]
+      @[paneEventLog, paneTerminalOutput]]
 
-    # `allPanes` sees all eleven; `visiblePanes` sees three. That difference
+    # `allPanes` sees all ten (PLAT-51: the Timeline is removed);
+    # `visiblePanes` sees three. That difference
     # IS the stacks, and it is the reason a shell need not load an invisible
     # tab.
-    ck allPanes(node).len == 11
+    ck allPanes(node).len == 10
     ck visiblePanes(node) == @[paneEditor, paneState, paneEventLog]
 
     let body = bodyArea(80, 24)
     let before = projectLayout(node, body)
     ck before.regionFor(paneEventLog).height == 11
-    ck before.regionFor(paneTimeline).cellCount() == 0
+    ck before.regionFor(paneTerminalOutput).cellCount() == 0
 
-    # A tab click — `activate(paneTimeline)`, the same call
+    # A tab click — `activate(paneTerminalOutput)`, the same call
     # `session_switch.nim` makes through GoldenLayout on the desktop.
-    ck node.activate(paneTimeline)
+    ck node.activate(paneTerminalOutput)
     let after = projectLayout(node, body)
-    ck after.visiblePaneKinds() == @[paneEditor, paneState, paneTimeline]
+    ck after.visiblePaneKinds() == @[paneEditor, paneState, paneTerminalOutput]
     # THE REGION IS THE SAME CELLS. A tab switch moves which pane owns the
     # slot; it must not move the slot.
-    ck after.regionFor(paneTimeline) == before.regionFor(paneEventLog)
+    ck after.regionFor(paneTerminalOutput) == before.regionFor(paneEventLog)
     ck after.regionFor(paneEventLog).cellCount() == 0
     ck coverageProblems(after.regions, body).len == 0
 
@@ -291,10 +294,10 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     let h = newTerminalTestHarness(80, 24)
     h.mount(proc(r: TerminalRenderer): TerminalNode =
       renderShellTree(model, r, 80, 24))
-    # The event stack's strip: row 12, from column 60 (the 80x24 case above).
+    # The event stack's strip: row 12, from column 61 (the 80x24 case above).
     let stackRow = bodyArea(80, 24).row + 11
     proc strip(h: TerminalTestHarness): string =
-      rowText(h, stackRow, 80).runeSubStr(60)
+      rowText(h, stackRow, 80).runeSubStr(61)
     proc boldAt(h: TerminalTestHarness; col: int): bool =
       attrBold in h.cellAt(stackRow, col).attrs
     let firstTabs = strip(h)
@@ -302,19 +305,19 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     # PLAT-47: a tab is its padded label; the active one is BOLD (its role's
     # weight), not bracketed.
     ck firstTabs.startsWith(" Event Log ")
-    ck boldAt(h, 61) and not boldAt(h, 73)
-    # The strip is 20 cells wide at 80x24 and cuts at the region's edge — the
-    # second label to `Timelin`, the rest entirely; the stack still holds
-    # them, in the shared default's order.
-    ck firstTabs.startsWith(" Event Log   Timelin")
-    ck stackTabs(model.layout)[^1][2] == paneTerminalOutput
+    ck boldAt(h, 62) and not boldAt(h, 74)
+    # The strip is 19 cells wide at 80x24 and cuts at the region's edge — the
+    # second label to its first cells; the stack still holds it, in the
+    # shared default's order (PLAT-51: Event Log | Terminal Output).
+    ck firstTabs.startsWith(" Event Log   Termin")
+    ck stackTabs(model.layout)[^1][1] == paneTerminalOutput
 
-    ck model.layout.activate(paneTimeline)
+    ck model.layout.activate(paneTerminalOutput)
     h.mount(proc(r: TerminalRenderer): TerminalNode =
       renderShellTree(model, r, 80, 24))
     let secondTabs = strip(h)
     checkpoint("tab strip after the click: '" & secondTabs.strip() & "'")
-    ck secondTabs.startsWith(" Event Log   Timelin")
+    ck secondTabs.startsWith(" Event Log   Termin")
     # The two strips differ ONLY in which tab is bold — a repaint that rebuilt
     # the layout from the profile would have reset the active tab and left
     # `Event Log` bold, which is the failure `shell.reprofile` guards.

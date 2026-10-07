@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1747
+const ExpectedAssertions = 1750
+  ## *1747 -> 1750 on 2026-10-06 (PLAT-51): net one more production module
+  ## under `viewmodel/` (`viewmodels/value_changes.nim` and
+  ## `views/list_scrubber_dom.nim` added, `views/isonim_timeline_view.nim`
+  ## removed with the Timeline panel) x three assertions.
   ## *1738 -> 1747 on 2026-10-06: three new production modules under
   ## `viewmodel/` — `viewmodels/terminal_output_model.nim` (the Terminal
   ## Output pane's lines and screen), `viewmodels/scrollbar_scrubber.nim` (a

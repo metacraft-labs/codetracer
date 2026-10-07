@@ -25,6 +25,9 @@ const OldProfileSizes*: array[OldProfile, (int, int)] = [
   ## The size each old profile was the answer for, one per §3.2 row.
 
 proc oldProfileLayout*(profile: OldProfile): LayoutNode =
+  ## PLAT-51: the Timeline strip these trees placed is the Terminal Output
+  ## here — the Timeline panel is removed from every product, and the
+  ## trees are kept for their SHAPES (a strip under columns, a tab stack).
   case profile
   of opCompact:
     column([
@@ -34,7 +37,7 @@ proc oldProfileLayout*(profile: OldProfile): LayoutNode =
         weight = 3.0),
       stack([
         pane(paneState, "Variables"),
-        pane(paneTimeline, "Timeline"),
+        pane(paneTerminalOutput, "Terminal"),
         pane(paneEventLog, "Tracepoints")],
         activeIndex = 0, weight = 1.0)])
   of opStandard:
@@ -44,7 +47,7 @@ proc oldProfileLayout*(profile: OldProfile): LayoutNode =
         pane(paneEditor, "Source", weight = 50.0),
         pane(paneState, "Variables", weight = 25.0)],
         weight = 4.0),
-      pane(paneTimeline, "Timeline & Tracepoints", weight = 1.0)])
+      pane(paneTerminalOutput, "Terminal Output", weight = 1.0)])
   of opUltraWide:
     column([
       row([
@@ -53,4 +56,4 @@ proc oldProfileLayout*(profile: OldProfile): LayoutNode =
         pane(paneState, "Variables", weight = 20.0),
         pane(paneEventLog, "Event Log", weight = 15.0)],
         weight = 4.0),
-      pane(paneTimeline, "Timeline & Tracepoints", weight = 1.0)])
+      pane(paneTerminalOutput, "Terminal Output", weight = 1.0)])

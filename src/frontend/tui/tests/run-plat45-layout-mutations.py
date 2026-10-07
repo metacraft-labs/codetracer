@@ -293,7 +293,7 @@ ARMS = [
         "                    depthFor(pmDebug, profile))",
         "  column([row([pane(paneCalltrace, weight = 30.0),\n"
         "               pane(paneEditor, weight = 70.0)], weight = 3.0),\n"
-        "          stack([pane(paneState), pane(paneTimeline),\n"
+        "          stack([pane(paneState), pane(paneTerminalOutput),\n"
         "                 pane(paneEventLog)], weight = 1.0)])",
         C_TERM,
         "the terminal's hand-written compact profile reinstated: its screen "

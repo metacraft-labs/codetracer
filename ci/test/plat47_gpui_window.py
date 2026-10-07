@@ -56,6 +56,7 @@ because a compositor is not a CI dependency.
 Prerequisites are refused BY NAME, never skipped.
 """
 
+from collections import Counter
 import json
 import os
 import shutil
@@ -644,7 +645,11 @@ def record():
         out["band"].update({
             "startX": xs[0], "endX": xs[-1],
             "activeNumberMaxX": max(numbers) if numbers else None,
-            "gutterAtBandRow": "#%02x%02x%02x" % px(base, body[0] + 14, y),
+            # The gutter's GROUND on the band's row: its most common colour
+            # left of the band (PLAT-51 draws the desktop's arrow mark in the
+            # gutter's first cell, so a single sampled pixel there is the mark).
+            "gutterAtBandRow": "#%02x%02x%02x" % Counter(
+                px(base, x, y) for x in range(body[0], xs[0])).most_common(1)[0][0],
             "afterBandAtRow": "#%02x%02x%02x" % px(base, xs[-1] + 1, y),
             "bodyLeft": body[0], "bodyRight": body[0] + body[2] - 1,
         })
@@ -694,6 +699,9 @@ def record():
         "doneRingLeft": left_of_ring(frames["resize-done"]),
         "pressBodyRingLeft": left_of_ring(frames["press-body"]),
         "pressBodyChanged": changed_bbox(frames["resize-done"], frames["press-body"])[1],
+        # PLAT-51: a press on the read-only editor's text places its CARET —
+        # what changed, as a box (a caret is a bar one cell wide).
+        "pressBodyChangedBox": changed_bbox(frames["resize-done"], frames["press-body"])[0],
     }
     saved = os.path.join(OUT, "a-state", "gpui-layout.json")
     out["resize"]["savedLayout"] = json.load(open(saved)) if os.path.exists(saved) else None

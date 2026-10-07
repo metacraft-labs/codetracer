@@ -232,8 +232,8 @@ suite "CTUI-3: reflow across ten resize increments":
     # size's cell counts would be measured where it hurts (PLAT-45).
     var model = demoModel(86, 26)
     ck depthFor(pmDebug, model.profile) == depthFor(pmDebug, lpCompact)
-    ck model.layout.activate(paneTimeline)
-    ck isVisible(model.layout, paneTimeline)
+    ck model.layout.activate(paneTerminalOutput)
+    ck isVisible(model.layout, paneTerminalOutput)
     var widened = 0
     # Every size here needs the same four folds as 80x24 (PLAT-45), so the
     # default's arrangement does not change — only its cell shares do — and
@@ -241,12 +241,12 @@ suite "CTUI-3: reflow across ten resize increments":
     for cols in [84, 83, 82, 81, 80]:
       ck not model.reprofile(cols, 26)
       inc widened
-      ck isVisible(model.layout, paneTimeline)
+      ck isVisible(model.layout, paneTerminalOutput)
       ck not isVisible(model.layout, paneEventLog)
       let body = bodyArea(cols, 26)
       let proj = projectLayout(model.layout, body)
       ck coverageProblems(proj.regions, body).len == 0
-      ck paneTimeline in proj.visiblePaneKinds()
+      ck paneTerminalOutput in proj.visiblePaneKinds()
       # THE SHARES FOLLOW THE SIZE even though the arrangement does not: a
       # tree that kept 86 columns' cell counts would hand the source pane
       # 62/86 of 80 columns, below its minimum.
@@ -258,7 +258,7 @@ suite "CTUI-3: reflow across ten resize increments":
     ck model.reprofile(140, 45)
     ck model.profile == selectProfile(140, 45)
     ck isVisible(model.layout, paneEventLog)
-    ck not isVisible(model.layout, paneTimeline)
+    ck not isVisible(model.layout, paneTerminalOutput)
 
   test "the reflowed screen is repainted, not merely resized":
     # `h.resize` repaints the EXISTING tree into the new buffer. For this shell

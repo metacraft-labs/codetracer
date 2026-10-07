@@ -49,6 +49,7 @@
 ## ## Templates, not procs, for anything that calls `check`
 
 import std/[sequtils, sets, strutils, unittest]
+from std/unicode import runeSubStr, runeLen
 
 import isonim/core/[signals, computation]
 import isonim/viewmodel
@@ -346,7 +347,10 @@ suite "CTUI-8: the event log pages, fetches each page once, and releases":
       ck seamCalls == 1
       ck unfetched.pendingRows == BodyHeight
       ck unfetched.eventRows == 0
-      ck rowText(unfetched.rows[2]).strip() == PendingText
+      # PLAT-51: the pane's last column is its scrubber track; the hole is
+      # the row's text before it.
+      let pendingRow = rowText(unfetched.rows[2])
+      ck pendingRow.runeSubStr(0, pendingRow.runeLen - 1).strip() == PendingText
 
   test "assertion count":
     echo "CTUI-8 VIRTUALIZATION: examined ", examinedFixtures,

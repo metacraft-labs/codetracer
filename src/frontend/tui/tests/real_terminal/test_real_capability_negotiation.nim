@@ -260,7 +260,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     ck text.contains(" Call Trace ")
     ck text.contains(" main.py ")
     ck text.contains(" Variables ")
-    ck text.contains("Timeline")
+    ck text.contains("Event Log")   # PLAT-51: the Timeline tab is removed
 
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))

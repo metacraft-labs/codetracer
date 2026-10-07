@@ -99,7 +99,8 @@ const
   UnpopulatableByADatasetIds = @[
     ContentEventLog,
     ContentCalltrace,
-    ContentTimeline,
+    # (ContentTimeline stood here: PLAT-51 removed the panel, so neither
+    # layout carries it.)
     ContentTerminalOutput
   ]
 

@@ -353,7 +353,12 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     for r in 1 ..< Rows - 2:
       for c in 0 ..< Cols:
         let ch = $s[r][c].rune
-        if ch in ["│", "─", "┼", "┬", "┴", "├", "┤"]:
+        # PLAT-51: a list pane's scrollbar SCRUBBER track is a `│` in
+        # ui/divider/secondary in the pane's last column — a scrollbar, not a
+        # box-drawing rule (Scrollbar-Scrubbers.md §4).
+        let scrubberTrack = ch == "│" and
+          hexOfColor(s[r][c].fg) == dark(dtColorsUiDividerSecondary)
+        if ch in ["│", "─", "┼", "┬", "┴", "├", "┤"] and not scrubberTrack:
           inc boxDrawn
         if ch == "▏":
           inc dividers
@@ -417,9 +422,9 @@ suite "PLAT-49 on a real terminal: tooltips and the omnibar":
     let barBg = hexOfColor(s[0][1].bg)
     checkpoint("row 0: " & top & " field at " & $field & " bg " & fieldBg &
                " bar bg " & barBg)
-    # PLAT-50: the design system's input surface, one subtle step off the
-    # bar (it was the raised slab).
-    ck fieldBg == dark(dtColorsUiSurfaceInputDefault)
+    # PLAT-51 (Commands-And-Omnibox.md, "Omnibox colours on every
+    # front-end"): the EDITOR's ground, superseding PLAT-50's input surface.
+    ck fieldBg == dark(dtEditorThemeGround)
     ck fieldBg != barBg
     ck caItalic in s[0][field + 3].attrs
     sess.send(CtrlP)
