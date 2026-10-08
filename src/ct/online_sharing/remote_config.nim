@@ -10,13 +10,23 @@
 ## - Default organization slug
 ## - Base remote URL override
 
-import std/[os, strutils]
+import std/[os, strutils, uri]
 
 const
   BearerTokenKey* = "CodeTracer-Remote-BearerToken"
   DefaultOrganizationKey* = "CodeTracer-Default-Organization"
   RemoteUrlKey* = "CodeTracer-Base-Remote-Url"
-  DefaultBaseRemoteUrl* = "https://ide.codetracer.com"
+  DefaultBaseRemoteUrl* = "https://api.codetracer.com"
+    ## The API origin the client talks to when nothing overrides it: every
+    ## ``/api/v1/*`` call and the ``/auth/desktop`` sign-in page `ct login`
+    ## opens.
+  DefaultShareBaseUrl* = "https://ide.codetracer.com"
+    ## The user-facing origin share links are issued on when the API base is
+    ## the default one.  The link is something a person opens in a browser,
+    ## so it names the product's web address, which forwards share-link and
+    ## API paths to the same service.  A deployment that overrides the API
+    ## base has no separate web origin, so its links are issued on that base
+    ## (see ``shareBaseUrlFor``).
   ConfigFileName = "remote.config"
 
 type
@@ -119,7 +129,7 @@ proc resolveBaseRemoteUrl*(config: RemoteConfig, cliBaseUrl = ""): string =
   ## 1. CLI-provided ``--base-url``
   ## 2. Environment variable ``CODETRACER_REMOTE_BASE_URL``
   ## 3. Stored config value
-  ## 4. Default (https://ide.codetracer.com)
+  ## 4. Default (``DefaultBaseRemoteUrl``, https://api.codetracer.com)
   if cliBaseUrl.len > 0:
     return cliBaseUrl
   let envUrl = getEnv("CODETRACER_REMOTE_BASE_URL", "")
@@ -129,3 +139,49 @@ proc resolveBaseRemoteUrl*(config: RemoteConfig, cliBaseUrl = ""): string =
   if configUrl.len > 0:
     return configUrl
   return DefaultBaseRemoteUrl
+
+proc normalizedOrigin(url: string): string =
+  ## ``scheme://host[:port]`` lower-cased, with any path or trailing slash
+  ## dropped, so ``https://API.codetracer.com/`` compares equal to the
+  ## default.  Returns the stripped input when it does not parse as a URL.
+  let trimmed = url.strip().strip(leading = false, chars = {'/'})
+  let parsed = parseUri(trimmed)
+  if parsed.scheme.len == 0 or parsed.hostname.len == 0:
+    return trimmed.toLowerAscii()
+  result = parsed.scheme.toLowerAscii() & "://" & parsed.hostname.toLowerAscii()
+  if parsed.port.len > 0:
+    result &= ":" & parsed.port
+  if parsed.path.strip(chars = {'/'}).len > 0:
+    result &= "/" & parsed.path.strip(chars = {'/'})
+
+proc isDefaultBaseRemoteUrl*(baseUrl: string): bool =
+  ## Whether ``baseUrl`` is the default API origin, ignoring case and a
+  ## trailing slash.
+  normalizedOrigin(baseUrl) == normalizedOrigin(DefaultBaseRemoteUrl)
+
+proc shareBaseUrlFor*(apiBaseUrl: string): string =
+  ## The origin a share link is issued on, given the resolved API base.
+  ##
+  ## * The default API base issues links on ``DefaultShareBaseUrl``, the
+  ##   product's web address.
+  ## * Any other base — ``--base-url``, ``CODETRACER_REMOTE_BASE_URL`` or the
+  ##   stored ``remote.config`` value — issues links on that same base, because
+  ##   a self-hosted deployment serves the share link where it serves the API.
+  if isDefaultBaseRemoteUrl(apiBaseUrl):
+    DefaultShareBaseUrl
+  else:
+    apiBaseUrl.strip().strip(leading = false, chars = {'/'})
+
+proc apiBaseUrlForWebOrigin*(webOrigin: string): string =
+  ## The API base to use for a link that was issued on ``webOrigin`` (a share
+  ## link or a collaboration invite).  The product's web address maps to the
+  ## default API origin; any other origin is its own API base.
+  if normalizedOrigin(webOrigin) == normalizedOrigin(DefaultShareBaseUrl):
+    DefaultBaseRemoteUrl
+  else:
+    webOrigin.strip().strip(leading = false, chars = {'/'})
+
+proc shareLinkFor*(apiBaseUrl, orgSlug, artifactId: string): string =
+  ## ``{share base}/{orgSlug}/{artifactId}/download`` — the link a user hands
+  ## to somebody else, on the origin ``shareBaseUrlFor`` picks.
+  shareBaseUrlFor(apiBaseUrl) & "/" & orgSlug & "/" & artifactId & "/download"

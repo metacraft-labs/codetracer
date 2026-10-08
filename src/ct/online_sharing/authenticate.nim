@@ -45,6 +45,11 @@ proc extractQueryParam(httpRequest: string, paramName: string): string =
         return decodeUrl(segment[eqPos + 1 .. ^1])
   return ""
 
+proc authDesktopUrlFor*(baseRemoteAddress: string, port: int): string =
+  ## The sign-in page `ct login` opens: ``{base}/auth/desktop?desktop-port=N``.
+  let base = baseRemoteAddress.strip().strip(leading = false, chars = {'/'})
+  fmt"{base}{AuthDesktopPath}?{DesktopPortQuery}={port}"
+
 proc authenticate*(remoteConfig: RemoteConfig, baseRemoteAddress: string) =
   ## Runs the full browser-based OAuth flow.
   ## Blocks until the browser callback is received or the user cancels.
@@ -57,7 +62,7 @@ proc authenticate*(remoteConfig: RemoteConfig, baseRemoteAddress: string) =
   let port = server.getLocalAddr()[1].int
 
   # Build the auth URL that the browser will navigate to.
-  let authUrl = fmt"{baseRemoteAddress}{AuthDesktopPath}?{DesktopPortQuery}={port}"
+  let authUrl = authDesktopUrlFor(baseRemoteAddress, port)
 
   echo "Opening browser for authentication..."
   echo "If the browser does not open, navigate to:"

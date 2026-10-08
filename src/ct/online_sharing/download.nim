@@ -260,7 +260,12 @@ proc downloadTraceCommand*(traceDownloadUrl: string,
       discard
 
     if inviteToken.len > 0:
-      var client = initApiClient(baseUrl.get(inviteBaseUrl))
+      # The invite is a web address; the exchange is an API call.  An invite
+      # issued on the product's web address is exchanged through the default
+      # API origin, any other invite through its own origin, and an explicit
+      # `--base-url` wins over both.
+      var client = initApiClient(
+        baseUrl.get(apiBaseUrlForWebOrigin(inviteBaseUrl)))
       defer: client.close()
       let bootstrap = client.exchangeCollabInvite(inviteToken)
       let runtime = startNativeCollabRuntime(NativeCollabBootstrap(
