@@ -345,9 +345,10 @@
           # ...and the same two knobs db-backend uses below: `nimble install`
           # needs network access the sandbox does not have, and
           # `requires "results" / "stew"` has to resolve without a nimble
-          # package store.
+          # package store: `results` from the standalone package, `stew/*`
+          # from the nim-stew pin (see `nim-results` in `flake.nix`).
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-stew}/stew:${inputs.nim-stew}";
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-results}:${inputs.nim-stew}";
 
           # WHAT GETS BUILT is noir's workspace `default-members` — the six CLI
           # crates `nargo_cli`, `acvm_cli`, `artifact_cli`, `ssa_cli`,
@@ -772,14 +773,13 @@
             preBuild = ''
               # Inject the codetracer/libs Nim package directories so
               # ``results`` and ``stew`` resolve when
-              # build_native_api.sh (ct_emulator) and writer_nim's
-              # build.rs (trace-format) run ``nim c``; ``$PWD`` is the
-              # unpacked codetracer source at this point.
+              # build_native_api.sh (ct_emulator) runs ``nim c``;
+              # ``$PWD`` is the unpacked codetracer source at this point.
               if [ -d "$PWD/libs/nim-stew/stew" ]; then
-                # Use ``libs/nim-stew/stew`` only -- it ships the
+                # Use ``libs/nim-stew/stew`` only -- it ships a
                 # newer ``results.nim`` with proper ``Result[void,
-                # E]`` support that trace-format-nim and ct_emulator
-                # rely on (the older standalone libs/nim-result
+                # E]`` support that ct_emulator relies on (the older
+                # standalone libs/nim-result
                 # mishandles ``?`` on void results so we
                 # deliberately leave it off the path).  The stew
                 # path also provides ``stew/byteutils``, ``stew/io2``
@@ -787,8 +787,13 @@
                 # transitively pull in.
                 NIM_PATHS_LIB="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
                 export CT_EMULATOR_EXTRA_NIM_PATHS="$NIM_PATHS_LIB"
-                export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="$NIM_PATHS_LIB"
               fi
+              # trace-format-nim itself needs the standalone `results`
+              # package: stew's copy above does not compile its
+              # `unsafeError` calls on `Result[void, E]` under upstream
+              # Nim 2.2, so its writer build takes the same flake inputs as the
+              # Python recorder in `nix/shells/ci-base.nix`.
+              export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${inputs.nim-results}:${inputs.nim-stew}"
               cd src/db-backend
             '';
 
@@ -1740,7 +1745,7 @@
             # flake inputs are the only available source layout.
             export RUNQUOTA_SRC="${inputs.runquota}"
             export CODETRACER_TRACE_FORMAT_NIM_SRC="${inputs.codetracer-trace-format-nim}/src"
-            export CODETRACER_RESULTS_SRC="$PWD/libs/nim-stew/stew"
+            export CODETRACER_RESULTS_SRC="${inputs.nim-results}"
             export IO_MON_SRC="${inputs.io-mon}/src"
             export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
 

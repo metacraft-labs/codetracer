@@ -52,11 +52,15 @@ let
     propagatedBuildInputs = (old.propagatedBuildInputs or [ ]) ++ [ pythonEnv.pythonPackages.black ];
 
     # writer_nim normally asks nimble to fetch these dependencies. Nix builds
-    # are network-isolated, so use the exact nim-stew gitlink revision pinned
-    # in flake.lock; its stew directory also supplies the compatible results
-    # module used by trace-format-nim.
+    # are network-isolated, so supply both from flake inputs: the standalone
+    # `results` package that trace-format-nim requires, and the nim-stew
+    # gitlink revision for its `stew/*` imports. `${inputs.nim-stew}/stew` is
+    # deliberately NOT on the path: it would expose stew's older
+    # `stew/results.nim` as a second `results` module, whose `unsafeError`
+    # does not compile on the writer's `Result[void, E]` values under
+    # upstream Nim 2.2 (see `nim-results` in `flake.nix`).
     CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
-    CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-stew}/stew:${inputs.nim-stew}";
+    CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-results}:${inputs.nim-stew}";
   });
   pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black

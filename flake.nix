@@ -294,6 +294,19 @@
       flake = false;
     };
 
+    # The standalone `results` package. codetracer-trace-format-nim declares
+    # `requires "results"`. The `stew/results.nim` copy in the nim-stew pin
+    # above is an older fork of it: its `unsafeError` constrains the value
+    # type as well (`[T, E: not void]`), so `unsafeError` on a
+    # `Result[void, E]` does not compile under upstream Nim 2.2, and the
+    # writer uses exactly that. Every sandboxed build that compiles
+    # trace-format-nim takes `results` from here. Tracks the same branch as
+    # trace-format-nim's own flake.
+    nim-results = {
+      url = "github:arnetheduck/nim-results";
+      flake = false;
+    };
+
     # Non-flake inputs: ct_test's incremental runner imports the
     # io-mon capture model and stackable-hooks propagation helpers at
     # compile time.  Workspace dev shells resolve these as sibling repos;
