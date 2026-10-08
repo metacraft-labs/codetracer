@@ -17,10 +17,16 @@ type
 
   TraceSharingConfigObj* = object
     enabled*:               bool
-    baseUrl*:               string
-    getUploadUrlApi*:       string
-    downloadApi*:           string
-    deleteApi*:             string
+    ## The four keys below named a sharing service that no longer exists.
+    ## The shipped default config no longer carries them; they stay in the
+    ## schema, each optional, so a config file written by an older release
+    ## still loads (the loader is strict, and a key it does not know would
+    ## make it reject the file).  Online sharing uses the API base from
+    ## `ct login`'s remote config, not these.
+    baseUrl* {.defaultVal: "".}:          string
+    getUploadUrlApi* {.defaultVal: "".}:  string
+    downloadApi* {.defaultVal: "".}:      string
+    deleteApi* {.defaultVal: "".}:        string
 
   ConfigObject* = object
     ## The config object is the schema for config yaml files
@@ -50,11 +56,7 @@ type
     showMinimap*:                                         bool
 
     traceSharing* {.defaultVal: TraceSharingConfigObj(
-      enabled: false,
-      baseUrl: "http://localhost:55504/api/codetracer/v1",
-      downloadApi: "/download",
-      deleteApi: "/delete",
-      getUploadUrlApi: "/get/upload/url"
+      enabled: false
     ).}:                                                  TraceSharingConfigObj
 
     rrBackend* {.defaultVal: RRBackendConfig(
@@ -165,6 +167,19 @@ proc findConfig*(folder: string, configPath: string): string =
         current = userConfigDir
         config = true
 
+proc parseConfig*(raw: string): Config =
+  ## Parse the text of a config file against the schema.  Raises on a file
+  ## the schema rejects; `loadConfig` owns what happens then.
+  var config: ConfigObject
+  var stream = newStringStream(raw)
+  try:
+    load(stream, config)
+  finally:
+    stream.close()
+  result = Config()
+  result[] = config
+  result.shortcutMap = initShortcutMap(config.bindings)
+
 proc loadConfig*(folder: string, inTest: bool): Config =
   # ignore inTest from now: TODO eventually remove?
   var file = findConfig(folder, configPath)
@@ -181,13 +196,7 @@ proc loadConfig*(folder: string, inTest: bool): Config =
     echo "error: ", e.msg
     quit(1)
   try:
-    var config: ConfigObject
-    var stream = newStringStream(raw)
-    load(stream, config)
-    stream.close()
-    var c = Config()
-    c[] = config
-    c.shortcutMap = initShortcutMap(config.bindings)
+    var c = parseConfig(raw)
 
     # Auto-discover ct-native-replay from PATH if not configured.
     if c.rrBackend.path == "":
