@@ -110,11 +110,17 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["session", "debugger", "currentGeid", "timeline", "agentSessions"],
     vscBackendAuthoritative,
     "Top-level replay/debugger and agent-service facts owned by the backend authority.")
+  # `currentLineIndex` (PLAT-51) joins the group: it holds the engine's own
+  # `currentCallLineIndex` for the stop the debugger is at, which is a fact
+  # about the recording and not a participant's choice of row. The pane's
+  # scrubber MARK is drawn from it, but the mark is a rendering of the
+  # backend's answer — the selection a user makes is `CalltraceVM
+  # .selectedEntry`, already classified shared above.
   entries.addMany("CalltraceStore",
-    ["lines", "args", "startLineIndex", "totalCallsCount", "finished",
-     "loadingState"],
+    ["lines", "args", "startLineIndex", "totalCallsCount", "currentLineIndex",
+     "finished", "loadingState"],
     vscBackendAuthoritative,
-    "Calltrace rows and loading status come from backend requests/snapshots.")
+    "Calltrace rows, the current call line the engine reports and loading status come from backend requests/snapshots.")
   entries.addMany("LocalsStore",
     ["locals", "globals", "loadingState", "loadedForRRTicks", "codeStateLine"],
     vscBackendAuthoritative,
@@ -144,11 +150,19 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # deliberately — it is not a viewport, it is which window of the log the
   # owning peer's last request fetched, and a participant who received rows
   # without it would not know what the rows' indices mean.
+  # `totalReported` and `currentIndex` (PLAT-51) join the group. Both are
+  # properties of a `ct/event-load` ANSWER rather than of this participant:
+  # `totalReported` says whether `recordsTotal` is the engine's own count or
+  # still the high-water mark derived from what has arrived — provenance of a
+  # backend field, so it has to travel with that field or the receiving peer
+  # would not know what it is holding — and `currentIndex` is the reply's
+  # `indexAtTick` for the tick the request named.
   entries.addMany("EventLogStore",
-    ["rows", "recordsTotal", "recordsFiltered", "maxRRTicks", "loadedStart",
-     "loadingState", "windowSource"],
+    ["rows", "recordsTotal", "recordsFiltered", "totalReported",
+     "currentIndex", "maxRRTicks", "loadedStart", "loadingState",
+     "windowSource"],
     vscBackendAuthoritative,
-    "Event rows, the counts, the recording's extent, the fetched window's offset, the load status and which route produced the window are all backend answers about the recording.")
+    "Event rows, the counts and whether the total is the engine's own, the row at the requested tick, the recording's extent, the fetched window's offset, the load status and which route produced the window are all backend answers about the recording.")
   # The point list has TWO producers and both are the owning peer's:
   # `applyCollections` reads the CHECKOUT's `points.toml` (which a remote
   # participant does not have) and `applyTracepointResults` reads a sweep the
@@ -239,6 +253,32 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Origin summaries are populated from the ct/load-locals backend response.")
   entries.addEntry("StateVM", "originMetadataMode", vscBackendAuthoritative,
     "Origin-metadata mode label is bridged from the db-backend ct/originMode reply.")
+  # PLAT-51's two additions to this pane, both backend-authoritative, and the
+  # second for a less obvious reason than the first.
+  #
+  # `originLines` holds the origin CHAIN TEXT for the rows whose chain is
+  # open, filled by a host through `loadValueOrigin`. WHICH rows are open is
+  # `expandedOrigins`, already classified shared above; this is the fetched
+  # content for them, exactly as `originSummaries` is.
+  entries.addEntry("StateVM", "originLines", vscBackendAuthoritative,
+    "Origin-chain hops for the rows whose chain is open, filled by the host's `loadValueOrigin`; the open set is `expandedOrigins`, this is its fetched content.")
+  # `valueChanges` is COMPUTED rather than fetched — `value_changes.diffAt`
+  # over `changeTimeline`, the locals this session happened to observe — so
+  # the instinct is to call it local. It is not, because the question is
+  # whether the value is front-end specific, and this one has a single
+  # correct answer per stop: the diff is taken against the recording's
+  # PREDECESSOR, not against the stop the user came from, so it is a fact
+  # about the recording that every participant would compute identically from
+  # the same observations. It is cached in a signal because a projection
+  # cannot wait for the predecessor's locals to arrive.
+  #
+  # Contrast `SourceVM.heldLineContexts`, which is renderer-local on exactly
+  # this test and fails it: those are opaque strings from whichever
+  # highlighter a front-end happens to have. A `VariableDiff` is structured,
+  # ViewModel-readable and highlighter-independent, so it streams from the
+  # peer that has it rather than being recomputed from nothing.
+  entries.addEntry("StateVM", "valueChanges", vscBackendAuthoritative,
+    "What the step producing the current stop changed, diffed against the recording's predecessor: one correct answer per stop, so a recording fact cached in a signal rather than a per-front-end projection.")
   entries.addEntry("StateVM", "lastContextMenu", vscRendererLocal,
     "Most-recent right-click context menu is a transient local render artefact.")
   entries.addDerived("StateVM", ["currentVariables", "isLoading",
