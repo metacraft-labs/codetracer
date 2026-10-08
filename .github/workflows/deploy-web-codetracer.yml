@@ -323,7 +323,19 @@ jobs:
         # and only the commit — now decides what this job builds, and the two
         # lanes cannot drift apart, because there is one number for each.
         id: pins
-        run: bash scripts/sibling-pins.sh --github-output
+        # This step runs BEFORE "Setup dev env", so it gets only what the
+        # runner image provides — and the self-hosted image no longer ships
+        # `python3` (2026-10-09: "python3: command not found", 0 pins
+        # resolved, the deploy refused). Use the runner's python3 when it has
+        # one, else the flake-pinned one through Nix, which every runner of
+        # this job has.
+        run: |
+          if command -v python3 >/dev/null 2>&1; then
+            bash scripts/sibling-pins.sh --github-output
+          else
+            nix shell --inputs-from . nixpkgs#python3 --command \
+              bash scripts/sibling-pins.sh --github-output
+          fi
 
       - name: Setup dev env
         # Installs Nix (with the Attic substituter/keys) and clones the
