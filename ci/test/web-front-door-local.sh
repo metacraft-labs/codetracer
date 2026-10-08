@@ -20,8 +20,8 @@
 # this section exists to prevent."*
 #
 # So this file proves the LOGIC — the fork, the allow-list, the headers, the
-# fail-closed branch — against the real generated function under the real
-# pinned wrangler. It does **not** prove, and nothing here establishes, that an
+# split between the API origin and the session platform — against the real
+# generated function under the real pinned wrangler. It does **not** prove, and nothing here establishes, that an
 # authenticated render can never be served from a shared cache to an anonymous
 # visitor. There is no shared cache in this loop. That property is gated on the
 # deploy, in the `An authenticated render never enters the shared cache` step of
@@ -62,11 +62,13 @@ bad() {
 work="$(mktemp -d "${TMPDIR:-/tmp}/ct-front-door-XXXXXX")"
 origin_pid=""
 origin_b_pid=""
+origin_c_pid=""
 wrangler_pid=""
 cleanup() {
 	[ -n "${wrangler_pid}" ] && kill "${wrangler_pid}" 2>/dev/null
 	[ -n "${origin_pid}" ] && kill "${origin_pid}" 2>/dev/null
 	[ -n "${origin_b_pid}" ] && kill "${origin_b_pid}" 2>/dev/null
+	[ -n "${origin_c_pid}" ] && kill "${origin_c_pid}" 2>/dev/null
 	rm -rf "${work}" 2>/dev/null
 	return 0
 }
@@ -126,30 +128,43 @@ else
 	ok "there is no functions/ INSIDE the publish directory"
 fi
 
-# THE DEFAULT PLATFORM ORIGIN, as generated. The deploy publishes the file as
-# rendered, so the literal the renderer baked in is the origin production uses
-# whenever no PLATFORM_ORIGIN variable is set.
-if grep -q '^const DEFAULT_PLATFORM_ORIGIN = "https://api.codetracer.com";$' \
+# THE DEFAULT API ORIGIN, as generated. The deploy publishes the file as
+# rendered, so the literal the renderer baked in is the API origin production
+# uses whenever no API_ORIGIN variable is set. And the session platform has NO
+# default: a generated default for it is the defect where `/noir` was forwarded
+# to the API origin, which answers it 404.
+if grep -q '^const DEFAULT_API_ORIGIN = "https://api.codetracer.com";$' \
 	"${work}/functions/_middleware.js"; then
-	ok "the generated default platform origin is https://api.codetracer.com"
+	ok "the generated default API origin is https://api.codetracer.com"
 else
-	bad "the generated default platform origin is https://api.codetracer.com"
-	grep -n 'DEFAULT_PLATFORM_ORIGIN =' "${work}/functions/_middleware.js" |
+	bad "the generated default API origin is https://api.codetracer.com"
+	grep -n 'DEFAULT_API_ORIGIN =' "${work}/functions/_middleware.js" |
 		sed 's/^/      /'
+fi
+if grep -q 'DEFAULT_PLATFORM_ORIGIN' "${work}/functions/_middleware.js"; then
+	bad "the session platform (PLATFORM_ORIGIN) has no generated default"
+else
+	ok "the session platform (PLATFORM_ORIGIN) has no generated default"
 fi
 
 # --------------------------------------------------------------------------
-# Two stub platform origins, A and B. Each echoes its own name, the method,
-# the path with its query, and the request body, and sets a cacheable header
-# plus a Set-Cookie, so the middleware's two header duties — deleting the
-# upstream's caching headers, and rebuilding Set-Cookie rather than folding it
-# — are observable rather than assumed.
+# Three stub origins. Each echoes its own name, the method, the path with its
+# query, and the request body, and sets a cacheable header plus a Set-Cookie,
+# so the middleware's two header duties — deleting the upstream's caching
+# headers, and rebuilding Set-Cookie rather than folding it — are observable
+# rather than assumed.
 #
-# Two, because "which origin answered" is the whole question for the default
-# and the override: A is bound as PLATFORM_ORIGIN, B is written into the
-# function as its default (the one edit this script makes to the generated
-# file — the real default is api.codetracer.com, asserted above, and this test
-# makes no network calls).
+#   API  — bound as API_ORIGIN: the API origin's override.
+#   DEF  — written into the function as its DEFAULT_API_ORIGIN (the one edit
+#          this script makes to the generated file — the real default is
+#          api.codetracer.com, asserted above, and this test makes no network
+#          calls), so "the default answered" is observable.
+#   SESS — bound as PLATFORM_ORIGIN: the session platform, when one is
+#          configured.
+#
+# Three, because "which origin answered" is the whole question: an API path
+# reaching SESS, or a session path reaching API, is exactly the conflation the
+# two settings exist to prevent.
 # --------------------------------------------------------------------------
 start_origin() {
 	python3 - "$1" "$2" <<'PY' &
@@ -184,25 +199,29 @@ with socketserver.TCPServer(("127.0.0.1", 0), H) as httpd:
 PY
 }
 
-start_origin "${work}/origin.port" A
+start_origin "${work}/origin-api.port" API
 origin_pid=$!
-start_origin "${work}/origin-b.port" B
+start_origin "${work}/origin-def.port" DEF
 origin_b_pid=$!
+start_origin "${work}/origin-sess.port" SESS
+origin_c_pid=$!
 
 for _ in $(seq 1 50); do
-	[ -s "${work}/origin.port" ] && [ -s "${work}/origin-b.port" ] && break
+	[ -s "${work}/origin-api.port" ] && [ -s "${work}/origin-def.port" ] &&
+		[ -s "${work}/origin-sess.port" ] && break
 	sleep 0.1
 done
-origin_port="$(cat "${work}/origin.port" 2>/dev/null || true)"
-origin_b_port="$(cat "${work}/origin-b.port" 2>/dev/null || true)"
-if [ -z "${origin_port}" ] || [ -z "${origin_b_port}" ]; then
+api_port="$(cat "${work}/origin-api.port" 2>/dev/null || true)"
+def_port="$(cat "${work}/origin-def.port" 2>/dev/null || true)"
+sess_port="$(cat "${work}/origin-sess.port" 2>/dev/null || true)"
+if [ -z "${api_port}" ] || [ -z "${def_port}" ] || [ -z "${sess_port}" ]; then
 	bad "the stub origins started"
 	echo "CHECKS: $((pass + fail))"
 	exit 1
 fi
-ok "the stub origins started (A on ${origin_port}, B on ${origin_b_port})"
+ok "the stub origins started (API ${api_port}, DEF ${def_port}, SESS ${sess_port})"
 
-sed -i "s|^const DEFAULT_PLATFORM_ORIGIN = .*|const DEFAULT_PLATFORM_ORIGIN = \"http://127.0.0.1:${origin_b_port}\";|" \
+sed -i "s|^const DEFAULT_API_ORIGIN = .*|const DEFAULT_API_ORIGIN = \"http://127.0.0.1:${def_port}\";|" \
 	"${work}/functions/_middleware.js"
 
 echo
@@ -219,6 +238,7 @@ start_wrangler() {
 		wrangler_pid=""
 	fi
 	front_port="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
+	front="http://127.0.0.1:${front_port}"
 	(
 		cd "${work}" || exit 1
 		exec wrangler pages dev dist \
@@ -236,10 +256,133 @@ start_wrangler() {
 	return 1
 }
 
-if ! start_wrangler "${work}/wrangler.log" \
-	--binding "PLATFORM_ORIGIN=http://127.0.0.1:${origin_port}"; then
+share_id="01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
+last_response=""
+
+# expect_origin LABEL NAME PATH [curl args...] — the request reaches stub
+# origin NAME and is marked as forwarded.
+expect_origin() {
+	local label="$1" name="$2" path="$3"
+	shift 3
+	local got
+	got="$(curl -sS -D - "$@" "${front}${path}" 2>/dev/null | tr -d '\r')"
+	if printf '%s' "${got}" | grep -q "ORIGIN-SENTINEL ${name} " &&
+		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door: *origin$'; then
+		ok "${label} reaches ${name}, marked \`X-CodeTracer-Front-Door: origin\`"
+	else
+		bad "${label} reaches ${name}, marked \`X-CodeTracer-Front-Door: origin\`"
+		printf '%s\n' "${got}" | head -12 | sed 's/^/      /'
+	fi
+	last_response="${got}"
+}
+
+# expect_static LABEL PATH — the request never leaves the static bundle, and
+# the front door did not tag it (the plain static fall-through).
+expect_static() {
+	local label="$1" path="$2" got
+	got="$(curl -sS -D - "${front}${path}" 2>/dev/null | tr -d '\r')"
+	if printf '%s' "${got}" | grep -q 'ORIGIN-SENTINEL' ||
+		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door:'; then
+		bad "${label} stays static"
+		printf '%s\n' "${got}" | head -8 | sed 's/^/      /'
+	else
+		ok "${label} stays static"
+	fi
+}
+
+# expect_static_session LABEL PATH [curl args...] — a session path with no
+# session platform configured: the STATIC bundle (its sentinel), tagged
+# `static`, and NOT made private — tagging must not change its caching.
+expect_static_session() {
+	local label="$1" path="$2"
+	shift 2
+	local got
+	got="$(curl -sS -D - "$@" "${front}${path}" 2>/dev/null | tr -d '\r')"
+	if printf '%s' "${got}" | grep -q 'STATIC-BUNDLE-SENTINEL' &&
+		! printf '%s' "${got}" | grep -q 'ORIGIN-SENTINEL' &&
+		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door: *static$' &&
+		! printf '%s' "${got}" | grep -qi '^cache-control:.*no-store' &&
+		! printf '%s' "${got}" | grep -qi '^vary:.*cookie'; then
+		ok "${label} is the static bundle, tagged \`static\`, not made private"
+	else
+		bad "${label} is the static bundle, tagged \`static\`, not made private"
+		printf '%s\n' "${got}" | head -12 | sed 's/^/      /'
+	fi
+}
+
+# The first session prefix, taken from the generated file rather than written
+# here: a list in this script would be the second implementation of "which
+# prefixes exist" that WD4 exists to prevent.
+first_prefix="$(
+	python3 - "${work}/functions/_middleware.js" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+block = re.search(r'const DYNAMIC_PREFIXES = \[(.*?)\];', src, re.S)
+names = re.findall(r'"([^"]+)"', block.group(1)) if block else []
+print(names[0] if names else "")
+PY
+)"
+if [ -n "${first_prefix}" ]; then
+	ok "the generated function declares dynamic prefixes (first: ${first_prefix})"
+else
+	bad "the generated function declares dynamic prefixes"
+	first_prefix="/noir"
+fi
+
+# THE API ORIGIN'S PATHS, which must reach origin NAME whatever the session
+# platform is.
+api_paths_reach() {
+	local name="$1"
+	expect_origin "GET /api/v1/x" "${name}" "/api/v1/x"
+	# `_headers` ends in a `/*` rule that would make this response publicly
+	# cacheable. It must not apply to a forwarded response: exactly one
+	# Cache-Control, and it is the front door's.
+	local cc_lines
+	cc_lines="$(printf '%s' "${last_response}" | grep -ci '^cache-control:' || true)"
+	if [ "${cc_lines}" -eq 1 ] &&
+		printf '%s' "${last_response}" | grep -qi '^cache-control: *private, *no-store'; then
+		ok 'the static `_headers` rules do not reach a forwarded API response'
+	else
+		bad "the static \`_headers\` rules do not reach a forwarded API response (${cc_lines} Cache-Control line(s))"
+	fi
+	expect_origin "GET /api/v1 (the prefix itself)" "${name}" "/api/v1"
+	expect_origin "GET /auth/desktop" "${name}" "/auth/desktop?desktop-port=4242"
+	if printf '%s' "${last_response}" | grep -q 'GET /auth/desktop?desktop-port=4242 '; then
+		ok "the query string is forwarded unchanged"
+	else
+		bad "the query string is forwarded unchanged"
+	fi
+	expect_origin "a share-link landing page" "${name}" "/acme/${share_id}/download"
+	expect_origin "a share-link landing page with a trailing slash" "${name}" \
+		"/acme/${share_id}/download/"
+	expect_origin "a share link with a cookie" "${name}" "/acme/${share_id}/download" \
+		-H 'Cookie: session_id=local-probe'
+	expect_origin "POST /api/v1/tenants/t/traces/upload-url" "${name}" \
+		"/api/v1/tenants/t/traces/upload-url?probe=1" \
+		-X POST -H 'Content-Type: application/json' --data '{"recordingId":"r-1"}'
+	if printf '%s' "${last_response}" |
+		grep -qF 'POST /api/v1/tenants/t/traces/upload-url?probe=1 body={"recordingId":"r-1"}'; then
+		ok "the method, query and body of a POST are forwarded"
+	else
+		bad "the method, query and body of a POST are forwarded"
+	fi
+}
+
+# The paths that are neither the API's nor the session's: always static.
+always_static() {
+	expect_static "a three-segment path whose middle is not a UUID" "/acme/not-a-uuid/download"
+	expect_static "a share-link shape with an extra segment" "/acme/${share_id}/download/more"
+	expect_static "/api/v2/x (not the forwarded API version)" "/api/v2/x"
+	expect_static "/authority (a prefix match is a whole segment)" "/authority"
+	expect_static "an anonymous / (still the static bundle)" "/"
+}
+
+echo
+echo "=== A. NO SESSION PLATFORM — production today (API_ORIGIN bound to API) ==="
+if ! start_wrangler "${work}/wrangler-nosession.log" \
+	--binding "API_ORIGIN=http://127.0.0.1:${api_port}"; then
 	bad "wrangler served the bundle"
-	tail -20 "${work}/wrangler.log" | sed 's/^/      /'
+	tail -20 "${work}/wrangler-nosession.log" | sed 's/^/      /'
 	echo "CHECKS: $((pass + fail))"
 	exit 1
 fi
@@ -249,15 +392,38 @@ ok "wrangler served the bundle"
 # A misplaced Functions directory does not fail: wrangler logs
 # `No Functions. Shimming...`, serves the static page for every request, and
 # nothing errors.
-if grep -qi 'No Functions' "${work}/wrangler.log"; then
+if grep -qi 'No Functions' "${work}/wrangler-nosession.log"; then
 	bad "wrangler FOUND the function (it logged 'No Functions' and shimmed)"
 else
 	ok "wrangler found the function (no 'No Functions. Shimming' in its log)"
 fi
 
+echo "-- the session paths are the static bundle, as on a site with no function"
+expect_static_session "${first_prefix}" "${first_prefix}"
+expect_static_session "/noir" "/noir"
+expect_static_session "/s/probe" "/s/probe"
+expect_static_session "/p/probe" "/p/probe"
+expect_static_session "a / carrying a session cookie" "/" \
+	-H 'Cookie: session_id=local-probe'
+echo "-- the API origin's paths reach the API origin (the override)"
+api_paths_reach API
+echo "-- the rest is static"
+always_static
+
 echo
-echo "Step 3: the fork"
-anon="$(curl -sS -D - "http://127.0.0.1:${front_port}/" 2>/dev/null | tr -d '\r')"
+echo "=== B. A SESSION PLATFORM CONFIGURED — WD4 (PLATFORM_ORIGIN=SESS, API_ORIGIN=API) ==="
+if ! start_wrangler "${work}/wrangler.log" \
+	--binding "PLATFORM_ORIGIN=http://127.0.0.1:${sess_port}" \
+	--binding "API_ORIGIN=http://127.0.0.1:${api_port}"; then
+	bad "wrangler served the bundle with a session platform"
+	tail -20 "${work}/wrangler.log" | sed 's/^/      /'
+	echo "CHECKS: $((pass + fail))"
+	exit 1
+fi
+ok "wrangler served the bundle with a session platform"
+
+echo "-- the fork"
+anon="$(curl -sS -D - "${front}/" 2>/dev/null | tr -d '\r')"
 if printf '%s' "${anon}" | grep -q 'STATIC-BUNDLE-SENTINEL'; then
 	ok "an anonymous / is answered by the STATIC bundle"
 else
@@ -265,11 +431,12 @@ else
 fi
 
 auth="$(curl -sS -D - -H 'Cookie: session_id=local-probe' \
-	"http://127.0.0.1:${front_port}/" 2>/dev/null | tr -d '\r')"
-if printf '%s' "${auth}" | grep -q 'ORIGIN-SENTINEL'; then
-	ok "a / carrying a session cookie is answered by the ORIGIN"
+	"${front}/" 2>/dev/null | tr -d '\r')"
+if printf '%s' "${auth}" | grep -q 'ORIGIN-SENTINEL SESS '; then
+	ok "a / carrying a session cookie is answered by the SESSION platform"
 else
-	bad "a / carrying a session cookie is answered by the ORIGIN"
+	bad "a / carrying a session cookie is answered by the SESSION platform"
+	printf '%s\n' "${auth}" | head -12 | sed 's/^/      /'
 fi
 
 # THE BUG THAT WAS PAID FOR IN THE OTHER REPO: a substring test over the whole
@@ -277,15 +444,14 @@ fi
 # looked for, which would put the front door into its authenticated branch for a
 # visitor who has never signed in.
 decoy="$(curl -sS -D - -H 'Cookie: other_session_id=x' \
-	"http://127.0.0.1:${front_port}/" 2>/dev/null | tr -d '\r')"
+	"${front}/" 2>/dev/null | tr -d '\r')"
 if printf '%s' "${decoy}" | grep -q 'STATIC-BUNDLE-SENTINEL'; then
 	ok '`other_session_id=x` does NOT flip the fork'
 else
 	bad '`other_session_id=x` does NOT flip the fork — the cookie is matched by substring'
 fi
 
-echo
-echo "Step 4: the headers on an authenticated render"
+echo "-- the headers on an authenticated render"
 if printf '%s' "${auth}" | grep -qi 'cache-control: *private, *no-store'; then
 	ok 'it carries `private, no-store`'
 else
@@ -312,134 +478,45 @@ if [ "${set_cookies}" -eq 2 ]; then
 else
 	bad "two Set-Cookie headers survive as two — got ${set_cookies}"
 fi
+# The anonymous request AFTER the authenticated one: still static.
+after="$(curl -sS -D - "${front}/" 2>/dev/null | tr -d '\r')"
+if printf '%s' "${after}" | grep -q 'STATIC-BUNDLE-SENTINEL' &&
+	! printf '%s' "${after}" | grep -q 'ORIGIN-SENTINEL'; then
+	ok "an anonymous / after an authenticated one is still the static bundle"
+else
+	bad "an anonymous / after an authenticated one is still the static bundle"
+fi
+
+echo "-- the dynamic allow-list, read from the contract"
+expect_origin "a path under ${first_prefix}, with no cookie" SESS "${first_prefix}/probe"
+expect_origin "/s/probe" SESS "/s/probe"
+expect_origin "/p/probe" SESS "/p/probe"
+
+echo "-- the API origin's paths still reach the API origin, not the session platform"
+api_paths_reach API
+always_static
 
 echo
-echo "Step 5: the dynamic allow-list, read from the contract"
-# Taken from the generated file rather than written here: a list in this script
-# would be the second implementation of "which prefixes exist" that WD4 exists
-# to prevent.
-first_prefix="$(
-	python3 - "${work}/functions/_middleware.js" <<'PY'
-import re, sys
-src = open(sys.argv[1]).read()
-block = re.search(r'const DYNAMIC_PREFIXES = \[(.*?)\];', src, re.S)
-names = re.findall(r'"([^"]+)"', block.group(1)) if block else []
-print(names[0] if names else "")
-PY
-)"
-if [ -n "${first_prefix}" ]; then
-	ok "the generated function declares dynamic prefixes (first: ${first_prefix})"
-	dyn="$(curl -sS "http://127.0.0.1:${front_port}${first_prefix}/probe" 2>/dev/null || true)"
-	if printf '%s' "${dyn}" | grep -q 'ORIGIN-SENTINEL'; then
-		ok "a path under ${first_prefix} reaches the ORIGIN even with no cookie"
-	else
-		bad "a path under ${first_prefix} reaches the ORIGIN even with no cookie"
-	fi
-else
-	bad "the generated function declares dynamic prefixes"
-	bad "a path under the first prefix reaches the ORIGIN"
-fi
-
-echo
-echo "Step 6: the service's own surfaces and the share link, with no cookie"
-front="http://127.0.0.1:${front_port}"
-share_id="01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
-
-# expect_origin LABEL PATH [curl args...] — the request reaches origin A and is
-# marked as forwarded.
-expect_origin() {
-	local label="$1" path="$2"
-	shift 2
-	local got
-	got="$(curl -sS -D - "$@" "${front}${path}" 2>/dev/null | tr -d '\r')"
-	if printf '%s' "${got}" | grep -q "ORIGIN-SENTINEL A " &&
-		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door: *origin$'; then
-		ok "${label} reaches the platform, marked \`X-CodeTracer-Front-Door: origin\`"
-	else
-		bad "${label} reaches the platform, marked \`X-CodeTracer-Front-Door: origin\`"
-		printf '%s\n' "${got}" | head -12 | sed 's/^/      /'
-	fi
-	last_response="${got}"
-}
-
-# expect_static LABEL PATH — the request never leaves the static bundle.
-expect_static() {
-	local label="$1" path="$2" got
-	got="$(curl -sS -D - "${front}${path}" 2>/dev/null | tr -d '\r')"
-	if printf '%s' "${got}" | grep -q 'ORIGIN-SENTINEL' ||
-		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door:'; then
-		bad "${label} stays static"
-		printf '%s\n' "${got}" | head -8 | sed 's/^/      /'
-	else
-		ok "${label} stays static"
-	fi
-}
-
-last_response=""
-expect_origin "GET /api/v1/x" "/api/v1/x"
-# `_headers` ends in a `/*` rule that would make this response publicly
-# cacheable. It must not apply to a forwarded response: exactly one
-# Cache-Control, and it is the front door's.
-cc_lines="$(printf '%s' "${last_response}" | grep -ci '^cache-control:' || true)"
-if [ "${cc_lines}" -eq 1 ] &&
-	printf '%s' "${last_response}" | grep -qi '^cache-control: *private, *no-store'; then
-	ok 'the static `_headers` rules do not reach a forwarded API response'
-else
-	bad "the static \`_headers\` rules do not reach a forwarded API response (${cc_lines} Cache-Control line(s))"
-fi
-expect_origin "GET /api/v1 (the prefix itself)" "/api/v1"
-expect_origin "GET /auth/desktop" "/auth/desktop?desktop-port=4242"
-if printf '%s' "${last_response}" | grep -q 'GET /auth/desktop?desktop-port=4242 '; then
-	ok "the query string is forwarded unchanged"
-else
-	bad "the query string is forwarded unchanged"
-fi
-expect_origin "a share-link landing page" "/acme/${share_id}/download"
-expect_origin "a share-link landing page with a trailing slash" "/acme/${share_id}/download/"
-expect_origin "POST /api/v1/tenants/t/traces/upload-url" \
-	"/api/v1/tenants/t/traces/upload-url?probe=1" \
-	-X POST -H 'Content-Type: application/json' --data '{"recordingId":"r-1"}'
-if printf '%s' "${last_response}" |
-	grep -qF 'POST /api/v1/tenants/t/traces/upload-url?probe=1 body={"recordingId":"r-1"}'; then
-	ok "the method, query and body of a POST are forwarded"
-else
-	bad "the method, query and body of a POST are forwarded"
-fi
-
-expect_static "a three-segment path whose middle is not a UUID" "/acme/not-a-uuid/download"
-expect_static "a share-link shape with an extra segment" "/acme/${share_id}/download/more"
-expect_static "/api/v2/x (not the forwarded API version)" "/api/v2/x"
-expect_static "/authority (a prefix match is a whole segment)" "/authority"
-expect_static "an anonymous / (still the static bundle)" "/"
-
-echo
-echo "Step 7: the platform origin — the override, an empty override, and the default"
-# Step 6 ran with PLATFORM_ORIGIN bound to A while the function's default is
-# B, so every `ORIGIN-SENTINEL A` above is the override winning.
-ok "a non-empty PLATFORM_ORIGIN overrides the default (step 6 reached A, not B)"
-
-# expect_origin_named LABEL NAME — `/api/v1/x` is answered by origin NAME.
-expect_origin_named() {
-	local label="$1" name="$2" got
-	got="$(curl -sS "http://127.0.0.1:${front_port}/api/v1/x" 2>/dev/null || true)"
-	if printf '%s' "${got}" | grep -q "ORIGIN-SENTINEL ${name} "; then
-		ok "${label}"
-	else
-		bad "${label} — got: $(printf '%s' "${got}" | head -c 200)"
-	fi
-}
-
+echo "=== C. THE API ORIGIN'S DEFAULT, and an EMPTY override ==="
 if start_wrangler "${work}/wrangler-default.log"; then
-	expect_origin_named "with no PLATFORM_ORIGIN, the generated default answers" B
+	expect_origin "with no API_ORIGIN, /api/v1/x (the generated default)" DEF "/api/v1/x"
+	expect_origin "with no API_ORIGIN, a share link (the generated default)" DEF \
+		"/acme/${share_id}/download"
+	expect_static_session "with nothing configured, ${first_prefix}" "${first_prefix}"
 else
-	bad "wrangler started with no PLATFORM_ORIGIN"
+	bad "wrangler started with no API_ORIGIN"
 	tail -10 "${work}/wrangler-default.log" | sed 's/^/      /'
 fi
 
-if start_wrangler "${work}/wrangler-empty.log" --binding "PLATFORM_ORIGIN="; then
-	expect_origin_named "an EMPTY PLATFORM_ORIGIN is ignored, not used" B
+if start_wrangler "${work}/wrangler-empty.log" --binding "API_ORIGIN=" \
+	--binding "PLATFORM_ORIGIN="; then
+	expect_origin "an EMPTY API_ORIGIN is ignored, not used" DEF "/auth/desktop"
+	expect_static_session "an EMPTY PLATFORM_ORIGIN is no session platform: ${first_prefix}" \
+		"${first_prefix}"
+	expect_static_session "an EMPTY PLATFORM_ORIGIN is no session platform: a signed-in /" "/" \
+		-H 'Cookie: session_id=local-probe'
 else
-	bad "wrangler started with an empty PLATFORM_ORIGIN"
+	bad "wrangler started with empty API_ORIGIN and PLATFORM_ORIGIN"
 	tail -10 "${work}/wrangler-empty.log" | sed 's/^/      /'
 fi
 

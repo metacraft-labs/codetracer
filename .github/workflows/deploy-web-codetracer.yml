@@ -1634,6 +1634,17 @@ jobs:
         # `X-CodeTracer-Front-Door` is what distinguishes the branches. It is an
         # observation the function sets and never reads, which is why asserting
         # on it is not circular: markup both states might one day share would be.
+        #
+        # THE SESSION BRANCH MAY BE INACTIVE, and that is not a failure. The
+        # session platform (`PLATFORM_ORIGIN`) is a separate setting from the
+        # API origin and has no default; while none is configured, the front
+        # door serves the session paths and a signed-in `/` from the static
+        # bundle and tags them `static`. Then observations 2 and 3 have nothing
+        # to observe: the step records a notice that the session branch is
+        # inactive and skips only those, and instead asserts the static
+        # fall-through actually serves the application (`/noir`, `/s/probe` are
+        # 200 and carry the shell, not a 404). Observations 1 and 4, and the
+        # `/api/v1/` -> `origin` assertion, hold either way.
         if: steps.deploy.outputs.url != ''
         shell: bash
         run: |
@@ -1667,9 +1678,33 @@ jobs:
                  "below would be vacuous" >&2
             fail=1
           elif [ "$auth_branch" = "static" ]; then
-            echo "::error::a request with a session cookie was answered by the" \
-                 "STATIC branch — the fork is absent and this is the shimmed case" >&2
-            fail=1
+            # No session platform is configured: the front door served the
+            # static bundle, as the spec requires. The fork's own assertions
+            # have nothing to observe; the static fall-through is checked
+            # instead, so this is not a silent pass.
+            echo "::notice::the session branch is inactive — no session platform" \
+                 "(PLATFORM_ORIGIN) is configured, so a signed-in / is the static" \
+                 "bundle; the session-branch cache assertions are skipped"
+            for path in /noir /s/probe; do
+              : >"$RUNNER_TEMP/fd-head"; : >"$RUNNER_TEMP/fd-body"
+              code="$(curl -sS -o "$RUNNER_TEMP/fd-body" -D "$RUNNER_TEMP/fd-head" \
+                        --max-redirs 0 -w '%{http_code}' "$host$path" || echo 000)"
+              branch="$(tr -d '\r' < "$RUNNER_TEMP/fd-head" \
+                | awk -F': ' 'tolower($1)=="x-codetracer-front-door"{print $2}')"
+              if [ "$code" != "200" ]; then
+                echo "::error::with no session platform, $path answered $code, not 200" \
+                     "— the static fall-through is not serving the application" >&2
+                fail=1
+              elif [ "$branch" != "static" ]; then
+                echo "::error::with no session platform, $path was answered by the" \
+                     "'${branch:-untagged}' branch, not 'static'" >&2
+                fail=1
+              elif ! grep -qi '<!doctype html' "$RUNNER_TEMP/fd-body"; then
+                echo "::error::with no session platform, $path did not serve the" \
+                     "application shell (no HTML document)" >&2
+                fail=1
+              fi
+            done
           else
             case "$auth_cc" in
               *no-store*) : ;;
@@ -1692,25 +1727,29 @@ jobs:
             fail=1
           fi
 
-          # THE SERVICE'S OWN SURFACES. `/api/v1/*` is forwarded to the platform
-          # with or without a cookie: clients that use this host as their API
+          # THE API ORIGIN'S SURFACES. `/api/v1/*` is forwarded to the API origin
+          # with or without a cookie, whether or not a session platform exists: clients that use this host as their API
           # base depend on it, and before the front door forwarded it every API
           # call here got the application shell — HTML with a 200. So the
           # assertion is on the branch header, which only the function sets,
-          # and not on the status: the platform answering 401 to an
+          # and not on the status: the API origin answering 401 to an
           # unauthenticated probe is the expected, correct answer.
           api_headers="$(curl -sS -D - -o /dev/null "$host/api/v1/" || true)"
           api_branch="$(printf '%s' "$api_headers" | tr -d '\r' \
             | awk -F': ' 'tolower($1)=="x-codetracer-front-door"{print $2}')"
           if [ "$api_branch" != "origin" ]; then
             echo "::error::/api/v1/ was answered by the '${api_branch:-static}' branch," \
-                 "not 'origin' — API requests to this host do not reach the platform" >&2
+                 "not 'origin' — API requests to this host do not reach the API origin" >&2
             printf '%s\n' "$api_headers" | sed 's/^/    /' >&2
             fail=1
           fi
 
           [ "$fail" -eq 0 ] || exit 1
-          echo "the authenticated render stays out of the shared cache, and /api/v1/ reaches the platform."
+          if [ "$auth_branch" = "static" ]; then
+            echo "no session platform: the session paths serve the static shell, and /api/v1/ reaches the API origin."
+          else
+            echo "the authenticated render stays out of the shared cache, and /api/v1/ reaches the API origin."
+          fi
 
       - name: Every served host can NAME the revision it is running
         # THE CHEAPEST POSSIBLE CHECK, and the one whose absence cost the most.

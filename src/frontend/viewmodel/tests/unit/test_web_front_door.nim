@@ -30,9 +30,12 @@
 ##   folds repeated names and a folded `Set-Cookie` is one a browser cannot
 ##   split, so a sign-in through the front door would end with no session;
 ## * `Vary: Cookie`;
-## * an unconfigured origin FAILS CLOSED rather than calling `context.next()`,
-##   which would serve the static page to a signed-in visitor and would be a
-##   cacheable response produced after reading a session cookie.
+## * the API origin and the session platform are SEPARATE settings. The API
+##   origin (`API_ORIGIN`, default `DefaultApiOrigin`) gets `/api/v1/*`,
+##   `/auth/*` and share links; the session platform (`PLATFORM_ORIGIN`) gets
+##   the dynamic prefixes and a signed-in `/`, and has NO default. Defaulting
+##   the session platform to the API origin forwards `/noir` to a server that
+##   answers it 404 — this is the defect the "two origins" suite pins.
 ##
 ## And one that is this product's alone: the file's own header has to name
 ## `$RUNNER_TEMP`, because this workflow's wrangler CWD is not isonim's and the
@@ -45,7 +48,7 @@ import std/[strutils, unittest]
 import ../../platform/web_deployment
 import ../../platform/web_entry
 
-const ExpectedAssertions = 78
+const ExpectedAssertions = 95
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -106,18 +109,20 @@ suite "the parts that were paid for in the other repo":
     ck rendered.contains("getSetCookie")
     ck rendered.contains("headers.append(\"Set-Cookie\"")
 
-  test "an unconfigured origin fails CLOSED":
-    ck rendered.contains("PLATFORM_ORIGIN")
+  test "an unconfigured API origin fails CLOSED, never to the shell":
+    ck rendered.contains("API_ORIGIN")
     ck rendered.contains("503")
-    # The refusal is produced BEFORE any `context.next()`, and the only
-    # `context.next()` in the file is the last line of `onRequest`.
-    let refuseAt = rendered.find("PLATFORM_ORIGIN")
+    # The API refusal is decided BEFORE the session branch and before the final
+    # static fall-through: an API call must never reach `context.next()`.
+    let apiAt = rendered.find("if (isApiPath(url.pathname)) {")
+    let refuseAt = rendered.find("return refuse(\n        503,")
+    let sessionAt = rendered.find("if (isSessionPath(url.pathname)")
     let nextAt = rendered.rfind("return context.next();")
-    ck refuseAt < nextAt
-    # The STATEMENT, not the comment that names it as the wrong answer: there
-    # is exactly one place this file hands back to the static artifact, and it
-    # is the last line of `onRequest`.
+    ck apiAt >= 0 and refuseAt > apiAt and sessionAt > refuseAt and nextAt > sessionAt
+    # Two places hand back to the static artifact: the untagged last line of
+    # `onRequest`, and the tagged session fall-through.
     ck rendered.count("return context.next();") == 1
+    ck rendered.count("await context.next();") == 1
 
 suite "the refusals are surfaced rather than re-derived":
   test "all six of the substrate's refusal reasons are passed through":
@@ -137,16 +142,16 @@ suite "the placement this workflow needs, named in the file":
     # thing to assert on.
     ck rendered.contains("$RUNNER_TEMP/functions/")
 
-suite "the service's own surfaces reach the platform":
+suite "the API origin's surfaces reach the API origin":
   test "/api/v1 and /auth are forwarded, separately from the product routes":
-    for prefix in FrontDoorPlatformPrefixes:
+    for prefix in FrontDoorApiPrefixes:
       ck rendered.contains("\"" & prefix & "\",")
       # Not smuggled into the contract's list: these are not product routes,
       # and `frontDoorDynamicPrefixes` must stay exactly `classifyPath`'s.
       ck prefix notin frontDoorDynamicPrefixes(contract)
-    ck "/api/v1" in FrontDoorPlatformPrefixes
-    ck "/auth" in FrontDoorPlatformPrefixes
-    ck rendered.contains("underPrefix(pathname, PLATFORM_PREFIXES)")
+    ck "/api/v1" in FrontDoorApiPrefixes
+    ck "/auth" in FrontDoorApiPrefixes
+    ck rendered.contains("underPrefix(pathname, API_PREFIXES)")
 
   test "a share-link landing path is recognised, and nothing else of that shape":
     const id = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
@@ -161,19 +166,50 @@ suite "the service's own surfaces reach the platform":
     ck not isShareLinkPath("/acme/" & id & "x/download")
     ck rendered.contains("SHARE_LINK_PATH.test(pathname)")
 
-  test "the platform origin defaults to the API origin, overridable but never empty":
-    ck DefaultPlatformOrigin == "https://api.codetracer.com"
-    ck rendered.contains("const DEFAULT_PLATFORM_ORIGIN = \"https://api.codetracer.com\";")
+suite "two origins: the API origin and the session platform":
+  test "the API origin defaults to api.codetracer.com, overridable but never empty":
+    ck DefaultApiOrigin == "https://api.codetracer.com"
+    ck rendered.contains("const DEFAULT_API_ORIGIN = \"https://api.codetracer.com\";")
     # A non-empty variable wins; an empty one falls through to the default.
-    ck rendered.contains("return configured || DEFAULT_PLATFORM_ORIGIN;")
+    ck rendered.contains("return configured(env, \"API_ORIGIN\") || DEFAULT_API_ORIGIN;")
+    ck rendered.contains("env[name].trim()")
     let custom = renderFrontDoorFunction(contract,
-      platformOrigin = "https://platform.example.test")
-    ck custom.contains("const DEFAULT_PLATFORM_ORIGIN = \"https://platform.example.test\";")
-    # Rendered with no origin at all, the function still refuses rather than
-    # serving the static page.
-    let unconfigured = renderFrontDoorFunction(contract, platformOrigin = "")
-    ck unconfigured.contains("const DEFAULT_PLATFORM_ORIGIN = \"\";")
+      apiOrigin = "https://api.example.test")
+    ck custom.contains("const DEFAULT_API_ORIGIN = \"https://api.example.test\";")
+    # Rendered with no API origin at all, an API call still refuses rather
+    # than being answered by the shell.
+    let unconfigured = renderFrontDoorFunction(contract, apiOrigin = "")
+    ck unconfigured.contains("const DEFAULT_API_ORIGIN = \"\";")
     ck unconfigured.contains("if (!origin) {")
+
+  test "the session platform has NO default, and is never the API origin":
+    # The defect this suite exists for: the session paths sent to the API
+    # origin, which answers them 404.
+    ck not rendered.contains("DEFAULT_PLATFORM_ORIGIN")
+    ck rendered.contains("return configured(env, \"PLATFORM_ORIGIN\");")
+    ck not rendered.contains("configured(env, \"PLATFORM_ORIGIN\") ||")
+    # The session paths use the session platform; the API paths the API one.
+    ck rendered.contains("const platform = sessionPlatform(env);")
+    ck rendered.contains("return proxyTo(request, platform, \"origin\");")
+    ck rendered.contains("const origin = apiOrigin(env);")
+    ck rendered.contains("return proxyTo(request, origin, \"origin\");")
+    # The dynamic prefixes are the SESSION list only; the API list is separate.
+    ck rendered.contains("return underPrefix(pathname, DYNAMIC_PREFIXES);")
+
+  test "with no session platform, its paths are the static bundle, tagged":
+    ck rendered.contains("if (!platform) return serveStaticTagged(context);")
+    ck rendered.contains("tagged.headers.set(\"X-CodeTracer-Front-Door\", \"static\");")
+    # Copied, not rebuilt through `markPrivate`: tagging a static response
+    # must not make it private or change its caching.
+    let fnAt = rendered.find("async function serveStaticTagged(context) {")
+    ck fnAt >= 0
+    let fnEnd = rendered.find("\n}\n", fnAt)
+    let body = rendered[fnAt .. fnEnd]
+    ck body.contains("new Response(response.body, response)")
+    ck not body.contains("markPrivate")
+    ck not body.contains("Cache-Control")
+    # The fork condition is unchanged: dynamic prefixes, or `/` with a cookie.
+    ck rendered.contains("if (isSessionPath(url.pathname) || (url.pathname === \"/\" && session)) {")
 
 suite "the tally":
   test "assertion count":
