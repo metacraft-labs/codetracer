@@ -1692,8 +1692,25 @@ jobs:
             fail=1
           fi
 
+          # THE SERVICE'S OWN SURFACES. `/api/v1/*` is forwarded to the platform
+          # with or without a cookie: clients that use this host as their API
+          # base depend on it, and before the front door forwarded it every API
+          # call here got the application shell — HTML with a 200. So the
+          # assertion is on the branch header, which only the function sets,
+          # and not on the status: the platform answering 401 to an
+          # unauthenticated probe is the expected, correct answer.
+          api_headers="$(curl -sS -D - -o /dev/null "$host/api/v1/" || true)"
+          api_branch="$(printf '%s' "$api_headers" | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="x-codetracer-front-door"{print $2}')"
+          if [ "$api_branch" != "origin" ]; then
+            echo "::error::/api/v1/ was answered by the '${api_branch:-static}' branch," \
+                 "not 'origin' — API requests to this host do not reach the platform" >&2
+            printf '%s\n' "$api_headers" | sed 's/^/    /' >&2
+            fail=1
+          fi
+
           [ "$fail" -eq 0 ] || exit 1
-          echo "the authenticated render stays out of the shared cache."
+          echo "the authenticated render stays out of the shared cache, and /api/v1/ reaches the platform."
 
       - name: Every served host can NAME the revision it is running
         # THE CHEAPEST POSSIBLE CHECK, and the one whose absence cost the most.

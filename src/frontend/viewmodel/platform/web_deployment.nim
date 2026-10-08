@@ -962,8 +962,46 @@ proc frontDoorDynamicPrefixes*(contract: DeploymentContract): seq[string] =
   for rule in contract.rewrites:
     if rule.servesEntryDocument: result.add rule.prefix
 
+const
+  DefaultPlatformOrigin* = "https://api.codetracer.com"
+    ## Where the front door forwards platform requests when the deployment
+    ## sets no `PLATFORM_ORIGIN`.  Baked into the generated function so a
+    ## deployment with no extra configuration still reaches the service; a
+    ## non-empty `PLATFORM_ORIGIN` variable overrides it.
+
+  FrontDoorPlatformPrefixes* = ["/api/v1", "/auth"]
+    ## The service's own surfaces, forwarded whether or not a session cookie is
+    ## present: the HTTP API, and the sign-in pages (`ct login` opens
+    ## `/auth/desktop`).  Clients released before the API moved to its own
+    ## origin talk to this host, and keep working through these.
+    ##
+    ## These are NOT derived from `web_entry.classifyPath`, and must not be:
+    ## that function names the product's own client-side routes, which are
+    ## answered by the entry document.  These are not product routes at all —
+    ## nothing in the static bundle can answer them.
+
+proc isShareLinkPath*(path: string): bool =
+  ## `/{org}/{uuid}/download` (optionally with a trailing slash): the landing
+  ## page a share link opens, served by the platform.  The id must be a
+  ## canonical 8-4-4-4-12 hex UUID, so any other three-segment path stays
+  ## static.  The Nim twin of the generated function's `SHARE_LINK_PATH`.
+  var parts = path.split('/')
+  if parts.len > 0 and parts[0].len == 0: parts.delete(0)
+  if parts.len == 4 and parts[3].len == 0: parts.setLen(3)
+  if parts.len != 3 or parts[0].len == 0 or parts[2] != "download":
+    return false
+  let id = parts[1]
+  if id.len != 36: return false
+  for i, c in id:
+    if i in [8, 13, 18, 23]:
+      if c != '-': return false
+    elif c notin HexDigits:
+      return false
+  true
+
 proc renderFrontDoorFunction*(contract: DeploymentContract;
-                              cookieName = "session_id"): string =
+                              cookieName = "session_id";
+                              platformOrigin = DefaultPlatformOrigin): string =
   ## The Cloudflare Pages Function that decides, per request, whether
   ## `ide.codetracer.com` serves the static WASM bundle or a
   ## substrate-allocated session — SS-M5's *"a signed-in user gets a
@@ -991,7 +1029,15 @@ proc renderFrontDoorFunction*(contract: DeploymentContract;
   ##   forgotten here fails as a static 404 rather than leaking;
   ## * fail CLOSED on an unconfigured origin — `context.next()` there would
   ##   serve the landing page to a signed-in visitor AND would be a cacheable
-  ##   response produced after reading a session cookie.
+  ##   response produced after reading a session cookie.  The origin is
+  ##   `platformOrigin` (default `DefaultPlatformOrigin`), overridden by a
+  ##   NON-EMPTY `PLATFORM_ORIGIN` variable; an empty variable is ignored rather
+  ##   than used, and only a function rendered with an empty `platformOrigin`
+  ##   and run with no variable has no origin, and refuses.
+  ##
+  ## Besides the contract's prefixes, three path families always reach the
+  ## platform: `FrontDoorPlatformPrefixes` (`/api/v1/*`, `/auth/*`) and the
+  ## share-link landing page `/{org}/{uuid}/download` (`isShareLinkPath`).
   ##
   ## ## Why this is GENERATED rather than committed as a `.js` file
   ##
@@ -1006,6 +1052,9 @@ proc renderFrontDoorFunction*(contract: DeploymentContract;
   var prefixes = ""
   for prefix in frontDoorDynamicPrefixes(contract):
     prefixes.add "  " & escapeJson(prefix) & ",\n"
+  var platformPrefixes = ""
+  for prefix in FrontDoorPlatformPrefixes:
+    platformPrefixes.add "  " & escapeJson(prefix) & ",\n"
 
   result = """/* ide.codetracer.com — the front door. GENERATED from
  * viewmodel/platform/web_deployment.nim. Do not edit.
@@ -1035,11 +1084,41 @@ const SESSION_COOKIE = @@COOKIE@@;
 const DYNAMIC_PREFIXES = [
 @@PREFIXES@@];
 
-function isDynamicPath(pathname) {
-  for (const prefix of DYNAMIC_PREFIXES) {
+/* THE SERVICE'S OWN SURFACES — the HTTP API and the sign-in pages. Not product
+ * routes, so not in the list above: nothing in the static bundle answers them.
+ * Clients that use this host as their API base reach the service through
+ * these. */
+const PLATFORM_PREFIXES = [
+@@PLATFORM_PREFIXES@@];
+
+/* The landing page a share link opens: `/{org}/{uuid}/download`, optionally
+ * with a trailing slash. The id must be a canonical UUID, so no other
+ * three-segment path leaves the static bundle. */
+const SHARE_LINK_PATH =
+  /^\/[^\/]+\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/download\/?$/;
+
+/* The platform origin when the deployment configures none. A NON-EMPTY
+ * `PLATFORM_ORIGIN` overrides it; an empty one is ignored, never used. */
+const DEFAULT_PLATFORM_ORIGIN = @@PLATFORM_ORIGIN@@;
+
+function underPrefix(pathname, prefixes) {
+  for (const prefix of prefixes) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) return true;
   }
   return false;
+}
+
+function isDynamicPath(pathname) {
+  return underPrefix(pathname, DYNAMIC_PREFIXES) ||
+    underPrefix(pathname, PLATFORM_PREFIXES) ||
+    SHARE_LINK_PATH.test(pathname);
+}
+
+function platformOrigin(env) {
+  const configured = env && typeof env.PLATFORM_ORIGIN === "string"
+    ? env.PLATFORM_ORIGIN.trim()
+    : "";
+  return configured || DEFAULT_PLATFORM_ORIGIN;
 }
 
 /* Read ONE cookie BY NAME. A substring test over the whole Cookie header also
@@ -1115,7 +1194,7 @@ const KNOWN_REFUSALS = [
 ];
 
 async function proxyToPlatform(request, env, branch) {
-  const origin = (env && env.PLATFORM_ORIGIN) || "";
+  const origin = platformOrigin(env);
   if (!origin) {
     /* FAIL CLOSED. `context.next()` here would serve the static page to a
      * signed-in visitor and would be a cacheable response produced after
@@ -1178,6 +1257,8 @@ export async function onRequest(context) {
 }
 """
   result = result.replace("@@COOKIE@@", escapeJson(cookieName))
+  result = result.replace("@@PLATFORM_PREFIXES@@", platformPrefixes)
+  result = result.replace("@@PLATFORM_ORIGIN@@", escapeJson(platformOrigin))
   result = result.replace("@@PREFIXES@@", prefixes)
 
 proc rewriteTargets*(contract: DeploymentContract): seq[string] =

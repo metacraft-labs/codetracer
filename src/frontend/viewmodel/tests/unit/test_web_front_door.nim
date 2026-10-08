@@ -45,7 +45,7 @@ import std/[strutils, unittest]
 import ../../platform/web_deployment
 import ../../platform/web_entry
 
-const ExpectedAssertions = 55
+const ExpectedAssertions = 78
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -136,6 +136,44 @@ suite "the placement this workflow needs, named in the file":
     # sentence about `dist/` is there to contrast, so its presence is not the
     # thing to assert on.
     ck rendered.contains("$RUNNER_TEMP/functions/")
+
+suite "the service's own surfaces reach the platform":
+  test "/api/v1 and /auth are forwarded, separately from the product routes":
+    for prefix in FrontDoorPlatformPrefixes:
+      ck rendered.contains("\"" & prefix & "\",")
+      # Not smuggled into the contract's list: these are not product routes,
+      # and `frontDoorDynamicPrefixes` must stay exactly `classifyPath`'s.
+      ck prefix notin frontDoorDynamicPrefixes(contract)
+    ck "/api/v1" in FrontDoorPlatformPrefixes
+    ck "/auth" in FrontDoorPlatformPrefixes
+    ck rendered.contains("underPrefix(pathname, PLATFORM_PREFIXES)")
+
+  test "a share-link landing path is recognised, and nothing else of that shape":
+    const id = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
+    ck isShareLinkPath("/acme/" & id & "/download")
+    ck isShareLinkPath("/acme/" & id & "/download/")
+    ck isShareLinkPath("/acme/" & id.toUpperAscii & "/download")
+    ck not isShareLinkPath("/acme/not-a-uuid/download")
+    ck not isShareLinkPath("/acme/" & id & "/download/extra")
+    ck not isShareLinkPath("/acme/" & id)
+    ck not isShareLinkPath("/a/b/" & id & "/download")
+    ck not isShareLinkPath("//" & id & "/download")
+    ck not isShareLinkPath("/acme/" & id & "x/download")
+    ck rendered.contains("SHARE_LINK_PATH.test(pathname)")
+
+  test "the platform origin defaults to the API origin, overridable but never empty":
+    ck DefaultPlatformOrigin == "https://api.codetracer.com"
+    ck rendered.contains("const DEFAULT_PLATFORM_ORIGIN = \"https://api.codetracer.com\";")
+    # A non-empty variable wins; an empty one falls through to the default.
+    ck rendered.contains("return configured || DEFAULT_PLATFORM_ORIGIN;")
+    let custom = renderFrontDoorFunction(contract,
+      platformOrigin = "https://platform.example.test")
+    ck custom.contains("const DEFAULT_PLATFORM_ORIGIN = \"https://platform.example.test\";")
+    # Rendered with no origin at all, the function still refuses rather than
+    # serving the static page.
+    let unconfigured = renderFrontDoorFunction(contract, platformOrigin = "")
+    ck unconfigured.contains("const DEFAULT_PLATFORM_ORIGIN = \"\";")
+    ck unconfigured.contains("if (!origin) {")
 
 suite "the tally":
   test "assertion count":
