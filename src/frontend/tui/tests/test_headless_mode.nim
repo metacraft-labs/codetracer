@@ -72,7 +72,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 28
+const ExpectedAssertions = 29
 
 var countedAssertions = 0
 
@@ -168,9 +168,17 @@ suite "CTUI-14: --headless honours --goto and refuses what it cannot honour":
       # frame that came back empty would satisfy the inequality at the end for
       # free, which is the shape Verification-Harness-Traps §4 is about.
       ck plainFrame.len > 1000
-      ck plainFrame.contains("CALL STACK")
-      ck plainFrame.contains("SOURCE")
-      ck plainFrame.contains("TIMELINE")
+      # PLAT-47: the calltrace pane lists the recording's call TRACE; PLAT-49:
+      # its tab names it, and the lone editor's tab names its file (no pane
+      # carries an upper-cased title row any more).
+      ck plainFrame.contains(" Call Trace ")
+      ck plainFrame.contains(" main.py ")
+      ck not plainFrame.contains("CALL TRACE")
+      # PLAT-45: the shared default's event stack opens on the Event Log tab
+      # (the timeline is its second tab), so the frame names the event stack.
+      # PLAT-47: a tab is its padded label; which one is active is a matter of
+      # colour and weight, not of brackets in the text.
+      ck plainFrame.contains(" Event Log ")
 
       # ---- the recording's own extent, read off that frame ----------------
       let (minTick, maxTick) = extentOf(plainFrame)

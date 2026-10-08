@@ -42,14 +42,17 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[algorithm, json, os, posix, strutils]
+import std/[algorithm, json, os, posix, sets, strutils]
 
 import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
 
 import headless_session
 import store/types as store_types   # `FilesystemEntryNode`
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
+from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
+from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
+import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
 export headless_session
 
 type
@@ -178,6 +181,10 @@ proc traceFolderProblem*(path: string): string =
   for kind, entry in walkDir(path):
     if kind == pcFile and entry.endsWith(".ct"):
       return ""
+  # A `trace.json` event stream is test-oracle output, not a recording; say
+  # so in the words every other CodeTracer entry point uses.
+  if fileExists(path / TestOracleTraceFileName):
+    return testOracleRefusal(path / TestOracleTraceFileName)
   "it holds no `trace.bin`, no `rr/` and no `.ct` container, so it is not a " &
   "CodeTracer recording"
 
@@ -221,6 +228,38 @@ proc handshakeBudgetMs*(): int =
     if parsed > 0: parsed else: DefaultHandshakeMs
   except ValueError:
     DefaultHandshakeMs
+
+const
+  MaxListedRecordings* = 64
+    ## How many recordings `recordingsBeside` lists: a folder of thousands
+    ## must not stall the omnibar's opening.
+
+proc recordingsBeside*(traceFolder: string): seq[OmnibarEntry] =
+  ## PLAT-49 part B: THE RECORDINGS A NEW SESSION TAB CAN OPEN without the
+  ## user typing a path — every folder beside `traceFolder` (its own
+  ## included) that `traceFolderProblem` accepts, as `omRecording` omnibar
+  ## entries (its name, its parent, its absolute path), in name order. The
+  ## native front-ends' answer to the desktop's welcome screen, which lists
+  ## the recordings its index knows; a typed path is accepted too
+  ## (`omnibar_vm.rankOmnibar`).
+  if traceFolder.len == 0:
+    return
+  let parent = parentDir(absolutePath(traceFolder.expandTilde()))
+  if not dirExists(parent):
+    return
+  var found: seq[string] = @[]
+  for kind, path in walkDir(parent):
+    if kind notin {pcDir, pcLinkToDir}:
+      continue
+    if traceFolderProblem(path).len == 0:
+      found.add path
+    if found.len >= MaxListedRecordings:
+      break
+  found.sort()
+  for path in found:
+    result.add OmnibarEntry(kind: OmnibarMode.omRecording,
+                            label: extractFilename(path),
+                            detail: parent, target: path)
 
 proc openLocalTrace*(traceFolder: string;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
@@ -305,29 +344,78 @@ proc listedEntry(dir, relative: string): FilesystemEntryNode =
     result.children.add FilesystemEntryNode(text: f,
                                             path: "/" & relative & "/" & f)
 
+proc storedSourcePaths(store: string): seq[string] =
+  ## Every file of the trace's `files/` store, as a path relative to it, in a
+  ## stable order — the desktop's own fallback when a trace folder carries no
+  ## `paths.json` (`index/files.loadFilenames`: the `files/` payload, read
+  ## relative to its root).
+  if not dirExists(store):
+    return
+  for path in walkDirRec(store, relative = true):
+    result.add path.replace('\\', '/')
+  result.sort()
+
+proc outermostRoots(roots: seq[string]): seq[string] =
+  ## The roots no OTHER root contains. `listedEntry` lists a folder
+  ## recursively, so a root inside another one (a package's `pkg/` beside
+  ## its parent's modules) would be drawn twice — once as its own root and
+  ## once inside its parent's. Order kept.
+  for r in roots:
+    var inside = false
+    for o in roots:
+      if o != r and r.startsWith(o & "/"):
+        inside = true
+        break
+    if not inside and r notin result:
+      result.add r
+
 proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   ## **The replay session's file tree**: the recording's own source folders,
   ## derived from its `paths.json` by the rule the desktop's Files pane uses
   ## (`trace_source_paths.sourceFolderRootsOf`), each listed from the trace's
   ## `files/` store. An empty tree when the recording lists no sources or
   ## carries no store — the pane then reports rather than guessing at a disk.
+  ##
+  ## A trace folder need not HAVE a `paths.json`: that sidecar is written
+  ## when a container is materialised or imported, and a folder straight out
+  ## of `ct record` holds the container and its `files/` store only. Then the
+  ## store itself is the list of recorded sources — the desktop's
+  ## `loadFilenames` fallback — so a recording whose sources span several
+  ## folders (a runner in one place, the package it imports in another)
+  ## lists every one of them instead of an empty tree.
   result = FilesystemEntryNode(text: "source folders", isFolder: true,
                                isExpanded: true)
-  let pathsFile = traceFolder / "paths.json"
-  if not fileExists(pathsFile): return
-  var recorded: seq[string] = @[]
-  try:
-    for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
-  except CatchableError:
-    return
   let store = traceFolder / "files"
-  for root in sourceFolderRootsOf(recorded):
+  let pathsFile = traceFolder / "paths.json"
+  var recorded: seq[string] = @[]
+  if fileExists(pathsFile):
+    try:
+      for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
+    except CatchableError:
+      recorded = @[]
+  if recorded.len == 0:
+    recorded = storedSourcePaths(store)
+  for root in outermostRoots(sourceFolderRootsOf(recorded)):
     let dir = store / root
     if dirExists(dir):
       result.children.add listedEntry(dir, root)
     elif fileExists(dir):
       result.children.add FilesystemEntryNode(text: root.extractFilename,
                                               path: "/" & root)
+
+
+proc expandAllFolders*(vm: FilesystemVM) =
+  ## PLAT-50: mark every folder of `vm`'s tree expanded.
+  if vm.isNil:
+    return
+  var paths = initHashSet[string]()
+  proc walk(n: FilesystemEntryNode) =
+    if n.isFolder:
+      paths.incl n.path
+    for c in n.children:
+      walk(c)
+  walk(vm.rootEntry.val)
+  vm.setExpandedPaths(paths)
 
 proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-RECORDING producers, asked once at open: the event log's first
@@ -350,6 +438,55 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   if not files.isNil:
     files.setRoot(recordingFileTree(s.tracePath))
     result.files = files.rootEntry.val.children.len > 0
+    # PLAT-50: BOTH NATIVE TREES OPEN FULLY EXPANDED, as they have always
+    # listed it (every root and file of a multi-root recording —
+    # `test_recording_file_tree`); from there a click collapses or expands a
+    # folder through the VM (`FilesystemVM.toggleExpanded`, the desktop's
+    # Files click), which the terminal's rows and GPUI's view follow.
+    expandAllFolders(files)
+
+proc refreshCallStackFallback*(s: HeadlessDebugSession) =
+  ## PLAT-47: hand the calltrace pane the call STACK when — and only when —
+  ## the recording provides no call trace (`CalltraceVM.fallbackStack`). Per
+  ## stop, because the stack is a fact about the stop. A recording WITH a
+  ## trace pays nothing here: the store's lines are checked first.
+  let vm = s.session.calltraceVM
+  if vm.isNil:
+    return
+  if s.session.store.calltrace.lines.val.len > 0:
+    if vm.fallbackStack.val.len > 0:
+      vm.fallbackStack.val = newSeq[string]()
+    return
+  var names: seq[string] = @[]
+  try:
+    let response = s.sendRawDapRequest("stackTrace", %*{
+      "threadId": 1, "startFrame": 0, "levels": RecordingCalltraceLevels})
+    discard s.drainEvents()
+    for f in response{"body", "stackFrames"}.getElems:
+      names.add f{"name"}.getStr("")
+  except CatchableError:
+    names = @[]
+  vm.fallbackStack.val = names
+
+proc selectCurrentCall*(s: HeadlessDebugSession) =
+  ## PLAT-49 part B: select the call the debugger is in, as the desktop does
+  ## on every move (`CalltraceComponent.onCompleteMove` -> `selectEntry`) —
+  ## `calltrace_vm.currentCallOf` over the section held, the stop's tick and
+  ## its call stack.
+  let vm = s.session.calltraceVM
+  let lines = s.session.store.calltrace.lines.val
+  if vm.isNil or lines.len == 0:
+    return
+  var names: seq[string] = @[]
+  try:
+    let response = s.sendRawDapRequest("stackTrace", %*{
+      "threadId": 1, "startFrame": 0, "levels": RecordingCalltraceLevels})
+    discard s.drainEvents()
+    for f in response{"body", "stackFrames"}.getElems:
+      names.add f{"name"}.getStr("")
+  except CatchableError:
+    return
+  vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), names))
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-STOP producer: the values in scope where the debugger now is,
@@ -359,6 +496,7 @@ proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
     result.locals = true
   except CatchableError:
     result.locals = false
+  refreshCallStackFallback(s)
 
 proc stdoutIsTerminal*(): bool =
   ## Whether standard output is a terminal.

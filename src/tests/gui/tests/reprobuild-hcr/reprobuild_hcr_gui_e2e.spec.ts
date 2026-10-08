@@ -528,15 +528,6 @@ async function expectPanelMode(
   await expect(layout.toolbarModeText()).toBeVisible();
 }
 
-async function openTimelinePane(layout: LayoutPage) {
-  await layout.waitForTimelineLoaded();
-  const timeline = (await layout.timelineTabs(true))[0];
-  if (timeline === undefined) {
-    throw new Error("Timeline pane did not open");
-  }
-  return timeline;
-}
-
 test.describe("Reprobuild HCR live GUI E2E", () => {
   test.skip(
     process.env.CODETRACER_ENABLE_MCR_HCR_GUI_E2E !== "1",
@@ -795,14 +786,11 @@ test.describe("Reprobuild HCR live GUI E2E", () => {
         "hcr-gui-generation1-live-after-jump.png",
       );
 
-      const timeline = await openTimelinePane(layout);
-      await timeline.clickTab();
+      // The Timeline panel is removed from every product; the generation-0
+      // stop's Event Log row reaches the same tick.
       await stabilizeLiveLayout(ctPage);
-      await expect(timeline.track()).toBeVisible();
-      await expect
-        .poll(() => timeline.maxTicks())
-        .toBeGreaterThanOrEqual(gen1Ticks);
-      await timeline.clickTick(gen0Ticks);
+      await expect(gen0Event).toBeVisible();
+      await clickEventLogRow(gen0Event);
       await expectPanelMode(layout, "historicalFromLive");
       await expectGenerationStop(layout, 0, GEN0_BREAKPOINT, "historical");
       await expect

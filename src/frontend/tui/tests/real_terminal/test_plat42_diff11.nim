@@ -51,7 +51,8 @@ template ck(cond: untyped) =
 const
   Cols = 220
   Rows = 64
-  PointerGlyph = "-->"
+  PointerGlyph = " ▸ "
+    ## PLAT-51: the pointer field (it was `-->`; the same three cells).
   MarkGlyph = "●"
   SettleQuietMs = 1500
   StepTimeoutS = 180
@@ -61,9 +62,15 @@ const
   ValueScenarios = ["advanced-state", "returned-calltrace",
                     "continued-event-log"]
   QuietScenario = "stepped-editor"
-  FlowStepIns = 33
-    ## The `noir-declined-arm` stop of `plat42-surfaces.json` / the window
-    ## record's `noir-flow` twin (`stepIn=33`; it was 15 until 2026-09-24).
+  MaxFlowStepIns = 200
+    ## A bound on the walk to the `noir-declined-arm` stop of
+    ## `plat42-surfaces.json` / the window record's `noir-flow` twin, not the
+    ## stop: the terminal steps in until its pointer is where that record's
+    ## is (`recordedFlowStop`). It was a COUNT (`stepIn=33`; 15 until
+    ## 2026-09-24), and a count is the engine's: on 2026-10-04 the engine
+    ## began opening a recording in the program's entry call rather than on
+    ## the trace format's `<toplevel>` entry step, and the same count reached
+    ## a different stop.
   TwinFloor = 0.2
     ## A GPUI twin row "changed" above this INK fraction. The record's
     ## changed rows measure ~0.93 and its untouched rows 0.0 (see
@@ -71,6 +78,23 @@ const
 
 let repo = lifecycle_support.repoRoot()
 let windowRecord = parseJson(readFile(repo / "src/tests/visual/plat42-window.json"))
+
+proc recordedFlowStop(): tuple[line: int, code: string] =
+  ## The `noir-declined-arm` stop as the GPUI render-plan record has it: the
+  ## line its execution pointer is on and the program text drawn there.
+  let rec = parseJson(readFile(repo / "src/tests/visual/plat42-surfaces.json"))
+  for r in rec["flowScenarios"]["noir-declined-arm"]["rows"]:
+    if r["pointer"].getStr != "eptNone":
+      let text = r["text"].getStr
+      result.line = gutterLineOf(text)
+      var code = text
+      let numberAt = code.find($result.line)
+      if numberAt >= 0: code = code[numberAt + len($result.line) .. ^1]
+      code = code.replace("\xC2\xA0", " ")
+      let comment = code.find("/*")
+      if comment >= 0: code = code[0 ..< comment]
+      result.code = code.strip()
+      return
 
 type
   TermRow = object
@@ -315,8 +339,21 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
       var colours: array[2, seq[(int, seq[string])]]
       for i, extra in [newSeq[string](), @["--no-flow-overlay"]]:
         var sess = open(noir.tracePath, extra)
-        for _ in 0 ..< FlowStepIns:
+        let stop = recordedFlowStop()
+        ck stop.line > 0 and stop.code.len > 0
+        proc atStop(sess: var TuiTestSession): bool =
+          if sess.pointerLine() != stop.line: return false
+          for r in sess.sourceRows():
+            if r.line == stop.line:
+              return r.code.strip().startsWith(stop.code)
+          false
+        var presses = 0
+        while presses < MaxFlowStepIns and not sess.atStop():
           sess.press("s")
+          inc presses
+        checkpoint("reached the record's stop (line " & $stop.line & ") after " &
+                   $presses & " step-ins")
+        ck sess.atStop()
         for r in sess.sourceRows():
           colours[i].add (r.line, sess.codeColours(r))
         sess.send("q")

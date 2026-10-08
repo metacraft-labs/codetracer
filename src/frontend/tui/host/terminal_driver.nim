@@ -80,6 +80,7 @@ import nim_termctl
 import ../app/input/modal_state
 import ../app/theme/degradation
 import ../app/views/styled_row
+import ../app/views/frame_overlay
 import ./capabilities
 import ./resize
 import ./ssh_tuning
@@ -94,6 +95,9 @@ export ssh_tuning
 const
   Esc* = '\x1b'
   MaxSequenceBytes* = 64
+  MaxStringBytes* = 512
+    ## An OSC/DCS/APC string longer than this is dropped rather than held: a
+    ## reply to this program's queries is a few dozen bytes.
     ## A CSI longer than this is not a sequence, it is a stuck terminal or a
     ## paste of binary. Dropped rather than accumulated, so one bad byte cannot
     ## make the front-end stop responding to the keyboard for the rest of the
@@ -102,6 +106,14 @@ const
 type
   InputFramer* = object
     ## The byte-to-token state machine, as a value.
+    ##
+    ## PLAT-46: while `expectStrings` is set — the start-up query round is
+    ## outstanding — `ESC ]` (OSC), `ESC P` (DCS) and `ESC _` (APC) begin a
+    ## STRING that runs to BEL or ST (`ESC \`) and is delivered as one token,
+    ## because that is the shape of a terminal's answer to OSC 11, DECRQSS and
+    ## XTGETTCAP. Outside the round those two-byte prefixes keep their old
+    ## meaning (the `ESC` is dropped and the byte honoured), so an Alt+`]` or
+    ## Alt+Shift+`P` typed later is never swallowed as the start of a reply.
     ##
     ## A VALUE AND NOT A LOOP, which is what makes it assertable without a
     ## terminal: `app/input/keymap.keyName` takes a whole token, so the framing
@@ -112,6 +124,8 @@ type
       ## When a LONE `ESC` began to be held, on `nowMs`'s clock; `0` when
       ## nothing is. Set by the driver, which owns the clock — `feed` stays a
       ## pure function of the bytes.
+    expectStrings*: bool
+      ## See above. Set by `TerminalDriver.expectReplies`.
 
 const
   EscDelayMs* = 50'i64
@@ -130,9 +144,11 @@ const
     ## which the framing turns into one `Esc` and which no keyboard sends.
 
 proc initInputFramer*(): InputFramer =
-  InputFramer(pending: "", escSinceMs: 0)
+  InputFramer(pending: "", escSinceMs: 0, expectStrings: false)
 
 proc reset*(f: var InputFramer) =
+  ## Forget the sequence being assembled. `expectStrings` is the DRIVER's
+  ## state, not the sequence's, and survives.
   f.pending = ""
   f.escSinceMs = 0
 
@@ -165,15 +181,42 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
     return (false, "")
 
   f.pending.add b
+  if f.pending.len > 2 and f.pending[1] in {']', 'P', '_'}:
+    # A STRING (only reachable while `expectStrings`): BEL or ST ends it.
+    if b == '\x07' or (b == '\\' and f.pending[^2] == Esc):
+      let token = f.pending
+      f.reset()
+      return (true, token)
+    if f.pending.len > MaxStringBytes:
+      f.reset()
+    return (false, "")
   if f.pending.len == 2:
     case b
     of '[', 'O':
       # A CSI or an SS3 is starting; keep accumulating.
       return (false, "")
+    of ']', 'P', '_':
+      if f.expectStrings:
+        return (false, "")
+      let broke = $b
+      f.reset()
+      return (true, broke)
     else:
+      # ALT + A PRINTABLE CHARACTER: `ESC <char>` in one burst is what a
+      # terminal sends for Alt+<char> (Meta sends an ESC prefix), and it is
+      # framed as ONE token so the key can be named (`key_names.keyName`:
+      # `Alt+t`, the desktop's "Add tracepoint" chord on the read-only
+      # editor's caret). The runtime takes the Alt chords it binds and treats
+      # every other one as the character alone (`runtime.handleToken`), which
+      # is what this framer delivered before it framed Alt at all — so a `q`
+      # after a stray escape still quits.
+      if b > ' ' and b <= '~':
+        let alt = Esc & $b
+        f.reset()
+        return (true, alt)
       # NOT AN ESCAPE SEQUENCE. Drop the `ESC` and honour the byte that broke
       # it, exactly as the runtime always has: `\x1b\x1b` therefore yields one
-      # `Esc`, and a `q` after a stray escape still quits.
+      # `Esc`.
       let broke = $b
       f.reset()
       return (true, broke)
@@ -255,6 +298,15 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
 # `test_real_call_stack.nim`'s hyperlink identity assertion resolve and read
 # exactly as they did.
 
+const
+  MotionTrackingOnBytes* = "\x1b[?1003h"
+  MotionTrackingOffBytes* = "\x1b[?1003l"
+    ## ANY-EVENT tracking (`?1003`) since PLAT-48; button-event tracking
+    ## (`?1002`) before it. A motion report with a button held drives a
+    ## drag (PLAT-47); one with no button lets the top bar's controls show
+    ## their tooltip and key on hover (`runtime.routeTopBarMouse`), and is
+    ## otherwise dropped without a repaint.
+
 proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   ## One frame's component tree, laid out and composited into a screen buffer.
   ##
@@ -274,6 +326,25 @@ proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   let driver = newHeadlessDriver(cols, height)
   let comp = newCompositor(cols, height)
   comp.paint(styledRowsTree(renderer, rows), driver)
+  driver.buffer
+
+proc composite*(rows: seq[StyledRow]; cols, height: int;
+                overlays: seq[FrameOverlay];
+                caps: TerminalCapabilities): ScreenBuffer =
+  ## `composite`, with the frame's overlays applied OVER the composited rows
+  ## (PLAT-47): a drop tint re-colours cells without replacing a glyph, and
+  ## the ghost label is drawn above the tint. With no overlays this is the
+  ## same call, byte for byte.
+  if overlays.len == 0:
+    return composite(rows, cols, height)
+  resetNodeIds()
+  let renderer = TerminalRenderer()
+  let driver = newHeadlessDriver(cols, height)
+  let comp = newCompositor(cols, height)
+  let tree = styledRowsTree(renderer, rows)
+  for node in overlayNodes(renderer, overlays, caps):
+    renderer.appendChild(tree, node)
+  comp.paint(tree, driver)
   driver.buffer
 
 proc plainScreen*(buf: ScreenBuffer): string =
@@ -405,6 +476,22 @@ proc newTerminalDriver*(caps: TerminalCapabilities;
                  started: false, mouseOwned: false, altOwned: false,
                  rawOwned: false)
 
+proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
+  ## PLAT-46. Replace the negotiated capabilities after the start-up query
+  ## round answered — a 24-bit terminal behind a conservative `TERM`, or a
+  ## light background — and forget what the terminal is showing, so the next
+  ## frame is a full one painted in the new colours rather than a diff against
+  ## cells painted in the old.
+  d.caps = caps
+  d.emitter.caps = caps
+  d.emitter.reset()
+
+proc expectReplies*(d: TerminalDriver; on: bool) =
+  ## Whether `ESC ]` / `ESC P` / `ESC _` begin a terminal's reply string. On
+  ## from the moment the start-up queries are written until their DA1 fence
+  ## comes back (or the reply window closes) — see `InputFramer`.
+  d.framer.expectStrings = on
+
 proc size*(d: TerminalDriver): TerminalSize =
   ## The terminal's current geometry, through the watcher when one exists so a
   ## reader and a subscriber cannot disagree.
@@ -445,6 +532,12 @@ proc start*(d: TerminalDriver) =
     # `--no-mouse` — the negotiation, observed from the terminal's side.
     d.mouseCapture = enableMouseCapture(d.outFd)
     d.mouseOwned = true
+    # PLAT-47: MOTION TRACKING too, so a drag's drop indication and ghost
+    # follow the pointer and a divider previews where it would land. Since
+    # PLAT-48 ANY motion (`?1003`), so the pointer passing over the top bar's
+    # controls shows each one's tooltip and key; a report over anything else
+    # is dropped without a frame.
+    writeAll(d.outFd, MotionTrackingOnBytes)
   # NOTHING IS SENT FOR THE KITTY KEYBOARD PROTOCOL OR FOR modifyOtherKeys,
   # on a terminal that advertises either. See
   # `app/theme/capabilities.TerminalCapabilities.kittyKeyboard`: both change
@@ -462,6 +555,7 @@ proc stop*(d: TerminalDriver) =
   ## SIGTERM leave the terminal in the same state: mouse off, alternate screen
   ## left, cursor shown, termios restored last.
   if d.mouseOwned:
+    writeAll(d.outFd, MotionTrackingOffBytes)
     disableMouseCapture(d.mouseCapture)
     d.mouseOwned = false
   if d.altOwned:
@@ -474,7 +568,8 @@ proc stop*(d: TerminalDriver) =
   d.started = false
 
 proc paint*(d: TerminalDriver; rows: seq[StyledRow];
-            prologue = ""; epilogue = "") =
+            prologue = ""; epilogue = "";
+            overlays: seq[FrameOverlay] = @[]) =
   ## One frame, degraded to the negotiated tier and written in ONE `write(2)`
   ## loop.
   ##
@@ -494,7 +589,7 @@ proc paint*(d: TerminalDriver; rows: seq[StyledRow];
   ## diffed frame and a full frame leave a terminal in the same state.
   let sz = d.size()
   let degraded = degradeRows(rows, d.caps)
-  let buf = composite(degraded, sz.cols, sz.rows)
+  let buf = composite(degraded, sz.cols, sz.rows, overlays, d.caps)
   let stream = d.emitter.emit(buf, prologue, epilogue)
   writeAll(d.outFd, stream)
   d.coalescer.noteFlush()
@@ -606,7 +701,21 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       d.framer.reset()
       return DriverEvent(kind: dekToken, token: $Esc)
     return DriverEvent(kind: dekIdle)
-  let (complete, token) = d.framer.feed(char(b))
+  var (complete, token) = d.framer.feed(char(b))
+  # PLAT-48: THE REST OF A SEQUENCE THAT IS ALREADY WAITING IS TAKEN NOW.
+  # A terminal writes an escape sequence in one write, so when its `ESC` is
+  # read the remaining bytes are already in the kernel's buffer. Reading them
+  # one per call let the caller's work between two calls — a repaint, an idle
+  # tick — run past `EscDelayMs` with `ESC` held, and `escDue` then split a
+  # mouse report queued behind a debugger step into a lone `Esc` and the keys
+  # `[ < 0 ; 5 1 ; 1 m` (a pointer release became `[` = "previous call",
+  # `1` = focus the call stack, `m` = memory dump). The delay now only ever
+  # measures bytes that had NOT arrived.
+  while not complete and d.framer.pending.len > 0:
+    let more = readByteWithTimeout(0, d.inFd)
+    if more < 0:
+      break
+    (complete, token) = d.framer.feed(char(more))
   if complete:
     return DriverEvent(kind: dekToken, token: token)
   if d.framer.holdsLoneEsc:

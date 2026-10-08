@@ -22,7 +22,7 @@
 ##
 ## ## THE SOURCE PANE IS A NATIVE VIEW, AND THAT IS NOT A GAP
 ##
-## PLAT-3's admission test REFUSED `Editor`, `Timeline/scrubber` and
+## PLAT-3's admission test REFUSED `Editor`, a scrubber and
 ## `Frame viewer`, and recorded why in `admission.Rejections`: they pass the
 ## "both front-ends have one" half and fail the "can be specified without
 ## reference to a medium" half. PLAT-22 says the same thing from the other end —
@@ -87,6 +87,9 @@ import viewmodels/search_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/filesystem_vm
+import viewmodels/vcs_vm
+# PLAT-52 — the Terminal Output pane's ViewModel.
+import viewmodels/terminal_output_vm
 
 import headless_app/layout_model
 
@@ -122,19 +125,35 @@ const
                                          # PLAT-41's measured correction: the
                                          # replay file tree is the recording's
                                          # sources, as the desktop draws it.
-                                         paneFileTree}
+                                         paneFileTree,
+                                         # PLAT-47 deliverable 4: the VCS pane,
+                                         # from the desktop's own `VCSVM`.
+                                         paneVcs,
+                                         # PLAT-52: the recorded program's
+                                         # terminal output (its lines, or its
+                                         # screen), from `TerminalOutputVM`.
+                                         paneTerminalOutput}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
-  PaneNativePanes*: set[PaneKind] = {paneEditor,
-                                     # PLAT-41 adds the second one.
-                                     paneTimeline}
+  PaneNativePanes*: set[PaneKind] = {paneEditor}
     ## The panes that are native views. See the header: this is PLAT-3's
-    ## admission decision applied, not a shortcut. Both members are refused BY
-    ## NAME in `admission.Rejections` — "Editor" and "Timeline / scrubber" —
-    ## so this set is that table's consequence rather than a preference.
+    ## admission decision applied, not a shortcut. The member is refused BY
+    ## NAME in `admission.Rejections` ("Editor"), so this set is that table's
+    ## consequence rather than a preference. (PLAT-41 added `paneTimeline` as
+    ## the second; PLAT-51 removed the Timeline panel from every product, and
+    ## the scrubbers that remain — Visual Replay's, the terminal screen's —
+    ## are parts of their panes, not panes.)
 
-  PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput}
+  PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
+                                            # PLAT-45 — the desktop's panes
+                                            # (PLAT-47 drew `paneVcs`,
+                                            # PLAT-52 `paneTerminalOutput`).
+                                            paneAgentActivity,
+                                            paneTestResults, paneConstraints,
+                                            # PLAT-48 — the desktop's footer
+                                            # panels the shared default docks.
+                                            paneProblems, paneRequests}
     ## **Panes this front-end deliberately does not draw, with the reason
     ## recorded at the dispatch arm.**
     ##
@@ -144,8 +163,13 @@ const
     ## having to be justified out loud and counted against `PaneKind`, not a
     ## reader trusting that somebody thought about it.
     ##
-    ## Both are edit-mode panes whose subject is the working tree, and the only
-    ## session in scope is a replay one. See the dispatch arm.
+    ## `paneBuildOutput` is an edit-mode pane whose subject is the working
+    ## tree, and the only session in scope is a replay one. The four PLAT-45
+    ## added that remain (it added five; PLAT-47 drew the VCS pane from the
+    ## desktop's `VCSVM`) are the desktop's own panes — placed by the shared
+    ## default in every front-end so every product opens with the same panes —
+    ## whose ViewModels the headless replay session does not own. See the two
+    ## dispatch arms.
 
   PaneAccountedFor*: set[PaneKind] =
     PaneVocabularyPanes + PaneNativePanes + PaneAcceptedExceptions
@@ -250,13 +274,20 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
       break
   tree.cursor = cursor
   let tabs = viewTabs("state.tabs", stateTabOptions(), selected = ord(tab))
-  result.root = viewCollapsible("state", "State", @[tabs, tree],
+  # NO TITLE OF ITS OWN (PLAT-49, the user, 2026-10-01: no title row inside a
+  # pane). The pane's tab strip says "State", as the desktop's GoldenLayout
+  # header does; a label here drew a second "State" as the pane's first row.
+  result.root = viewCollapsible("state", "", @[tabs, tree],
                                 expanded = true)
   result.entries = entriesOf(result.root)
 
 # ---------------------------------------------------------------------------
 # Call trace
 # ---------------------------------------------------------------------------
+
+const CalltraceFallbackCaption* =
+  "call stack — this recording has no call trace"
+  ## What the calltrace pane says when it lists the stack instead (PLAT-47).
 
 proc calltracePaneView*(vm: CalltraceVM): PaneView =
   ## The call trace: a `List`, one option per visible call line.
@@ -276,11 +307,29 @@ proc calltracePaneView*(vm: CalltraceVM): PaneView =
     return
   let lines = vm.visibleLines.val
   var options: seq[ViewOption] = @[]
-  for line in lines:
-    let label = repeat("  ", max(line.depth, 0)) &
-      (if line.displayName.len > 0: line.displayName else: line.name)
-    options.add ViewOption(id: $line.index, label: label)
+  for row in vm.callRows():
+    # THE DESKTOP'S ROW: `.call-text` (`name #index`, PLAT-47), its
+    # `.call-args` and its `.return` (PLAT-49 part B,
+    # `calltrace_vm.callRowText`), indented by the call's depth, so a row
+    # reads the same in every front-end.
+    let label = repeat("  ", max(row.depth, 0)) & callRowText(row)
+    options.add ViewOption(id: $row.index, label: label)
   if options.len == 0:
+    # PLAT-47: THE CALL-STACK FALLBACK, captioned. A recording with no call
+    # trace still has a stack at every stop, and the host hands it over
+    # (`CalltraceVM.fallbackStack`); the pane lists it under a caption that
+    # says what it is, rather than a trace-shaped list that is not one.
+    let stack = vm.fallbackStack.val
+    if stack.len > 0:
+      var frames: seq[ViewOption] = @[]
+      for i, name in stack:
+        frames.add ViewOption(id: "frame-" & $i, label: "#" & $i & " " & name)
+      result.report = CalltraceFallbackCaption
+      result.root = viewCollapsible("calltrace", CalltraceFallbackCaption,
+        @[viewList("calltrace.stack", frames, highlight = 0)],
+        expanded = true)
+      result.entries = entriesOf(result.root)
+      return
     result.report = "no call trace has been loaded"
     result.root = viewText("calltrace.report", result.report)
     result.entries = entriesOf(result.root)
@@ -299,9 +348,21 @@ proc calltracePaneView*(vm: CalltraceVM): PaneView =
 # Event log
 # ---------------------------------------------------------------------------
 
-const EventLogColumns* = @["#", "kind", "value"]
-  ## The event log's columns. Named once; the pane and any assertion over it
-  ## read the same list.
+proc eventLogCell(r: EventLogRow; col: EventLogColumn): string =
+  ## One cell of the event log's table, by column (PLAT-49 part B).
+  case col
+  of elcTick: $r.rrTicks
+  of elcIndex: $r.eventIndex
+  of elcLocation:
+    if r.file.len == 0: ""
+    else: r.file.rsplit('/', maxsplit = 1)[^1] & ":" & $r.line
+  of elcKind: r.kind
+  of elcOutput:
+    # The output's LINE TERMINATOR is not part of the text a cell shows: a
+    # `print` arrives as `2 + 3 = 5\n`, and a cell holding the `\n` draws a
+    # blank line under every event in a medium that honours it (PLAT-40
+    # measured every row of the native window's event log double-spaced).
+    r.value.strip(leading = false, chars = {'\n', '\r'})
 
 proc eventLogPaneView*(vm: EventLogVM): PaneView =
   ## The event log: a `Table`.
@@ -309,6 +370,11 @@ proc eventLogPaneView*(vm: EventLogVM): PaneView =
   ## A `Table` and not a `List` because the pane's cursor really is
   ## two-dimensional — `EventLogVM` carries `sortColumn` as well as
   ## `selectedRow`, so a column IS part of this pane's state.
+  ##
+  ## ITS COLUMNS ARE THE VIEWMODEL'S (PLAT-49 part B, finding 14):
+  ## `EventLogVM.columns` — the desktop's tick, #, kind and output by
+  ## default, location hidden — in the order and with the visibility the
+  ## user chose.
   result.pane = paneEventLog
   if vm.isNil:
     result.report = "the event log has no ViewModel; the session has not " &
@@ -322,19 +388,27 @@ proc eventLogPaneView*(vm: EventLogVM): PaneView =
     result.root = viewText("eventLog.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  let shown = vm.columns.val.visibleColumns
+  let order = vm.order()
+  var titles: seq[string] = @[]
+  for col in shown:
+    # PLAT-50: the ordering column carries the desktop's sort arrow once a
+    # header click left the recorded order (the terminal's header rule).
+    titles.add eventLogColumnTitle(col) &
+      (if order != RecordedEventOrder and order.column == col:
+         (if order.ascending: " ▲" else: " ▼")
+       else: "")
   var cells: seq[seq[string]] = @[]
   for r in rows:
-    # The output's LINE TERMINATOR is not part of the text a cell shows: a
-    # `print` arrives as `2 + 3 = 5\n`, and a cell holding the `\n` draws a
-    # blank line under every event in a medium that honours it (PLAT-40
-    # measured every row of the native window's event log double-spaced).
-    cells.add @[$r.eventIndex, r.kind, r.value.strip(leading = false,
-                                                     chars = {'\n', '\r'})]
-  let table = viewTable("eventLog", EventLogColumns, cells)
+    var line: seq[string] = @[]
+    for col in shown:
+      line.add eventLogCell(r, col)
+    cells.add line
+  let table = viewTable("eventLog", titles, cells)
   let selected = vm.selectedRow.val
   if selected.isSome and selected.get >= 0 and selected.get < cells.len:
     table.cursor = selected.get
-  table.column = max(min(vm.sortColumn.val, EventLogColumns.high), 0)
+  table.column = max(min(vm.sortColumn.val, titles.high), 0)
   result.root = table
   result.entries = entriesOf(result.root)
 
@@ -387,20 +461,13 @@ proc tracepointsPaneView*(vm: PointListVM): PaneView =
 # eight vocabulary trees would have overturned two of them silently.
 #
 #   5 expressed here   debugControls, flow, search, scratchpad, shell
-#   1 native escape    timeline  — PLAT-3 REJECTED "Timeline / scrubber" BY NAME
+#   1 native escape    timeline  — PLAT-3 REJECTED a scrubber BY NAME
 #   2 accepted except. fileTree, buildOutput — no replay ViewModel, by decision
 #
-# **WHY TIMELINE IS NOT A VOCABULARY TREE.** `admission.Rejections` refuses
-# "Timeline / scrubber" in the same table that refuses the editor, and for a
-# reason that does not soften: *"a scrubber's contract is continuous position
-# within a range, and its usefulness is its resolution. A terminal's resolution
-# is the number of columns it has; a pointer's is the number of pixels. An
-# abstraction over both would have to pick one and lie to the other."* It even
-# names the two implementations that exist deliberately —
-# `tui/app/views/timeline_bar.nim` and `viewmodel/views/isonim_timeline_view.nim`.
-# A `ProgressIndicator` here would be exactly the lie that table forbids: it
-# would answer "position within a range" and drop the resolution, and every
-# medium would read it as a scrubber it is not.
+# (PLAT-51 removed the Timeline panel from every product, so the native
+# escape it was is gone; the scrubber rejection stands for the scrubbers that
+# remain, which are parts of their panes and drawn natively over the shared
+# `scrollbar_scrubber` model.)
 #
 # **WHY DEBUG CONTROLS *IS* ONE, THOUGH "Toolbar / status bar" IS ALSO
 # REJECTED.** That rejection refuses admitting a TOOLBAR ENTRY, and its own
@@ -515,6 +582,9 @@ proc searchPaneView*(vm: SearchVM): PaneView =
   if options.len == 0:
     result.report = "no search results"
 
+const ScratchpadCloseGlyph* = "✕"
+  ## PLAT-50: a pinned value's close button, as the terminal draws it.
+
 proc scratchpadPaneView*(vm: ScratchpadVM): PaneView =
   ## The scratchpad: a `Table` of pinned expressions and their values.
   ##
@@ -535,10 +605,56 @@ proc scratchpadPaneView*(vm: ScratchpadVM): PaneView =
     result.root = viewText("scratchpad.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  # PLAT-50 (K33): each row leads with the desktop's close button
+  # (`isonim_scratchpad_view`'s `close-element`), which removes it.
   var cells: seq[seq[string]] = @[]
   for e in entries:
-    cells.add @[e.expression, e.valueText]
-  result.root = viewTable("scratchpad", @["expression", "value"], cells)
+    cells.add @[ScratchpadCloseGlyph, e.expression, e.valueText]
+  result.root = viewTable("scratchpad", @["", "expression", "value"], cells)
+  result.entries = entriesOf(result.root)
+
+proc terminalOutputPaneView*(vm: TerminalOutputVM): PaneView =
+  ## PLAT-52. The recorded program's terminal output: a `List`, one option per
+  ## line of the LINE view (its text; the styled runs are each medium's to
+  ## draw from the fragments' attributes), or one per row of the SCREEN view
+  ## when that is the view shown — the reconstructed screen at the current
+  ## position (`TerminalOutputVM.shownScreen`). The highlighted option is the
+  ## current position's line.
+  ##
+  ## A `List` rather than `Text`: a line is a THING the reader acts on (a
+  ## click goes to the write that produced it, K32), and an option's `id`
+  ## carries the write.
+  result.pane = paneTerminalOutput
+  if vm.isNil:
+    result.report = "the terminal output has no ViewModel; the session has " &
+                    "not launched"
+    result.root = viewText("terminalOutput.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  if vm.screenOffered.val and vm.view.val == tvScreen:
+    let screen = vm.shownScreen()
+    var rows: seq[ViewOption] = @[]
+    for r in 0 ..< screen.rows:
+      rows.add ViewOption(id: "screen-" & $r, label: screen.screenRowText(r))
+    result.root = viewList("terminalOutput.screen", rows, highlight = -1)
+    result.entries = entriesOf(result.root)
+    return
+  let lines = vm.lines.val
+  if lines.len == 0:
+    result.report =
+      if vm.initialLoad.val: "Loading record output..."
+      else: "The current record does not print anything to the terminal."
+    result.root = viewText("terminalOutput.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var options: seq[ViewOption] = @[]
+  for line in lines:
+    let write = if line.fragments.len > 0: line.fragments[0].eventIndex
+                else: -1
+    options.add ViewOption(id: "line-" & $line.lineIndex & "-write-" & $write,
+                           label: lineText(line))
+  result.root = viewList("terminalOutput", options,
+                         highlight = max(0, vm.currentLine()))
   result.entries = entriesOf(result.root)
 
 proc shellPaneView*(vm: ShellVM): PaneView =
@@ -572,27 +688,6 @@ proc shellPaneView*(vm: ShellVM): PaneView =
                   "output; this pane shows what exists"
 
 # ---------------------------------------------------------------------------
-# Timeline — the SECOND sanctioned native escape
-# ---------------------------------------------------------------------------
-
-proc timelinePaneView*(medium: string): PaneView =
-  ## The timeline, declared for ONE medium. See the PLAT-41 block above.
-  ##
-  ## This is `sourcePaneView`'s shape for `admission.Rejections`' second
-  ## refusal, and it is a deliberate REFUSAL to express rather than a gap:
-  ## `portability.checkPortable` rejects a native escape on purpose, so the
-  ## suite asserts this pane is refused exactly as it asserts the other six are
-  ## portable.
-  result.pane = paneTimeline
-  result.native = medium
-  result.root = nativeEscape("timeline", medium, "timeline")
-  result.entries = entriesOf(result.root)
-  result.report = "the timeline is a native view; PLAT-3's admission test " &
-                  "refused a Timeline/scrubber entry because a scrubber's " &
-                  "usefulness is its resolution and no abstraction over a " &
-                  "column and a pixel can keep both"
-
-# ---------------------------------------------------------------------------
 # Source — the sanctioned native escape
 # ---------------------------------------------------------------------------
 
@@ -609,11 +704,16 @@ proc sourcePaneView*(medium: string): PaneView =
 # The one door
 # ---------------------------------------------------------------------------
 
-proc fileTreeNode(e: FilesystemEntryNode; path: string): ViewNode =
+proc fileTreeNode(vm: FilesystemVM; e: FilesystemEntryNode;
+                  path: string): ViewNode =
+  ## PLAT-50: a folder is open while the VM has it expanded
+  ## (`FilesystemVM.isExpanded` — the desktop's Files click toggles it); the
+  ## native hosts open every folder at load (`native_host.loadRecordingPanes`).
   var kids: seq[ViewNode] = @[]
   for i, c in e.children:
-    kids.add fileTreeNode(c, path & "." & $i)
-  viewTreeNode(path, e.text, kids, expanded = kids.len > 0)
+    kids.add fileTreeNode(vm, c, path & "." & $i)
+  viewTreeNode(path, e.text, kids,
+               expanded = kids.len > 0 and vm.isExpanded(e.path))
 
 proc fileTreePaneView*(vm: FilesystemVM): PaneView =
   ## The REPLAY session's file tree: the recording's own source folders, a
@@ -636,7 +736,69 @@ proc fileTreePaneView*(vm: FilesystemVM): PaneView =
     result.root = viewText("fileTree.report", result.report)
     result.entries = entriesOf(result.root)
     return
-  result.root = fileTreeNode(root, "fileTree")
+  result.root = fileTreeNode(vm, root, "fileTree")
+  result.entries = entriesOf(result.root)
+
+# ---------------------------------------------------------------------------
+# VCS — PLAT-47 deliverable 4
+# ---------------------------------------------------------------------------
+
+const VcsCommitsTitle* = "Commits"
+  ## The caption of the commit history section.
+
+proc vcsPaneView*(vm: VCSVM): PaneView =
+  ## The VCS pane, from the desktop's own ViewModel (`VCSVM`, which the
+  ## desktop's VCS panel draws): the branch, the working tree's changed files
+  ## with their states — the desktop's `Working Tree (N)` section, one
+  ## `<state> <path>` row each — and the commit history.
+  ##
+  ## Until PLAT-47 an accepted exception: a native front-end placed the pane
+  ## and reported that it had no view. The host now fills a `VCSVM` through
+  ## the platform's VCS facade (`vcs_vm.refreshFromFacade`, the parse the
+  ## desktop reads `git status` with), so the pane shows the repository.
+  result.pane = paneVcs
+  if vm.isNil:
+    result.report = "the VCS pane has no ViewModel; this front-end's host " &
+                    "did not open a repository"
+    result.root = viewText("vcs.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  if not vm.isGitRepo.val:
+    let why = vm.errorMessage.val
+    result.report = if why.len > 0: why else: "Not a git repository"
+    result.root = viewText("vcs.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let files = vm.workingTreeFiles.val
+  var fileRows: seq[ViewOption] = @[]
+  for i, f in files:
+    fileRows.add ViewOption(id: "file-" & $i, label: f.status & " " & f.path)
+  let tree =
+    if fileRows.len == 0: @[viewText("vcs.workingTree.clean", VCSCleanTreeText)]
+    else: @[viewList("vcs.workingTree.files", fileRows)]
+  var commitRows: seq[ViewOption] = @[]
+  # PLAT-50 (K53): the commit a click opened lists the files it changed
+  # under it (`commitFilesMap`), the desktop's accordion.
+  let opened = vm.selectedCommitIndices.val
+  for i, c in vm.commits.val:
+    commitRows.add ViewOption(id: "commit-" & $i,
+                              label: c.hash & " " & c.message)
+    if opened == @[i]:
+      for (index, files) in vm.commitFilesMap.val:
+        if index == i:
+          for fi, f in files:
+            commitRows.add ViewOption(id: "commitfile-" & $i & "-" & $fi,
+                                      label: "   " & f.status & " " & f.path)
+  # The branch is the section's own caption, as the desktop's panel heads
+  # its lists with it.
+  result.root = viewCollapsible("vcs.branch", vm.currentBranch.val, @[
+    viewCollapsible("vcs.workingTree",
+                    VCSWorkingTreeTitle & " (" & $files.len & ")", tree,
+                    expanded = true),
+    viewCollapsible("vcs.commits",
+                    VcsCommitsTitle & " (" & $commitRows.len & ")",
+                    @[viewList("vcs.commits.list", commitRows)],
+                    expanded = true)], expanded = true)
   result.entries = entriesOf(result.root)
 
 proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
@@ -658,8 +820,6 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneSearch: searchPaneView(SearchVM(vm))
   of paneScratchpad: scratchpadPaneView(ScratchpadVM(vm))
   of paneShell: shellPaneView(ShellVM(vm))
-  # PLAT-41 — the second sanctioned native escape.
-  of paneTimeline: timelinePaneView(medium)
   of paneFileTree: fileTreePaneView(FilesystemVM(vm))
   # PLAT-41 — the ACCEPTED EXCEPTION, named with its reason.
   of paneBuildOutput:
@@ -685,3 +845,28 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
         "not build the working tree and will not claim to"),
       entries: {pkText},
       report: "accepted exception: edit-mode pane, no replay-session source")
+  # PLAT-47 deliverable 4.
+  of paneVcs: vcsPaneView(VCSVM(vm))
+  # PLAT-52.
+  of paneTerminalOutput: terminalOutputPaneView(TerminalOutputVM(vm))
+  of paneAgentActivity, paneTestResults,
+     paneConstraints, paneProblems, paneRequests:
+    # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
+    # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which
+    # the shared default DOCKS: revealed, each says what it is and why it is
+    # not drawn here, on this rule.)
+    #
+    # The shared default (`layout_model.sharedDefaultLayout`) places these four (five until PLAT-47 drew the VCS pane)
+    # because the desktop's default did, and "every product opens with the
+    # same panes" is only literally true if a front-end without a view still
+    # puts the pane where it goes. Their ViewModels are the desktop's; the
+    # headless replay session owns none (`headless_app.paneViewModel` answers
+    # nil for each). So this is a REPORT that names the pane and why — the
+    # same rule the GPUI capability (`gpui/app/capability.nim`) states.
+    PaneView(
+      pane: kind,
+      root: viewText($kind & ".report",
+        "the " & $kind & " pane is drawn by the desktop front-end; this " &
+        "front-end has no view for it yet"),
+      entries: {pkText},
+      report: "accepted exception: desktop pane, no native view")

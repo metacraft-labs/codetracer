@@ -103,12 +103,43 @@ proc runHeadless*(traceFolder: string; flags: app_capabilities.CapabilityFlags;
 
   var session: TuiSession = nil
   try:
-    session = openTuiSession(folder, viewportHeight = max(1, size.rows - 6))
+    # THE CLOCK, WHICH THIS PATH DID NOT HAVE. CTUI-14 bounded the tty
+    # handshake and left `--headless` on the default unbounded `DapReadBound`,
+    # so an engine that answered `launch` and then went quiet blocked this
+    # function forever — in CI, as a job that never finishes and says nothing,
+    # which is the same defect as a frozen screen with the terminal taken away.
+    #
+    # The clock only, not the escape hatch: `interruptFd` watches the terminal
+    # driver's input fd, and this mode has no terminal and no user at it. The
+    # budget is the same `CODETRACER_TUI_HANDSHAKE_MS`-overridable one the tty
+    # path uses, so a slow recording is given the same room in both.
+    session = openTuiSession(folder, viewportHeight = max(1, size.rows - 6),
+                             bound = DapReadBound(
+                               timeoutMs: handshakeBudgetMs(),
+                               interruptFd: -1))
+  except DapLaunchRefusedError as e:
+    # The same named refusal the tty path reports, with the same code: a
+    # `--headless` run is read by a script, and a script that cannot tell a
+    # bad path from a recording this build will never read has to guess which
+    # of the two to retry. See `cli.ExitUnreadableRecording`.
+    stderr.writeLine(TuiProgramName & ": cannot open " & folder & ": " & e.msg)
+    return ExitUnreadableRecording
+  except DapStalledError as e:
+    # The tty path's distinction, kept here: an engine that went quiet is not a
+    # usage error, and a CI log that said `ExitUsage` would send the next
+    # reader to the command line for a folder that named itself correctly.
+    stderr.writeLine(TuiProgramName & ": " & folder &
+                     ": the replay engine stopped answering (" & e.msg & ")")
+    return ExitEngineStalled
   except CatchableError as e:
     stderr.writeLine(TuiProgramName & ": could not open " & folder & ": " & e.msg)
     return ExitUsage
   defer: session.close()
 
+  # The recording's own sources reach the Files pane through
+  # `session.refresh` (PLAT-47) — the one path the tty loop takes too. PLAT-45
+  # filled the pane HERE only, so `--headless` showed files the interactive
+  # terminal never did.
   session.header(rt)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()

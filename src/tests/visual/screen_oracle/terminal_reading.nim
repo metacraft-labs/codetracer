@@ -9,11 +9,13 @@
 ## terminal's own view modules: a reading is taken off the frame's characters,
 ## as a user reads the screen.
 ##
-## A pane's region: its TITLE ROW is the row where the pane's upper-case title
-## starts a run followed by `-` fill (`POINTS 1 point(s) ----`); its columns
-## run from the title's first cell to the next `|` separator on that row (or
-## the frame's edge); its body is every row below the title until a row whose
-## slice starts another title, or the frame ends.
+## A pane's region (PLAT-49: a pane has no title row; its TAB STRIP names it):
+## its STRIP ROW is the row where the pane's tab label stands padded by a
+## space either side (` Breakpoints `); its columns run from the cell after
+## the nearest `|` separator to the label's left (or the frame's edge) to the
+## next separator on that row (or the frame's edge); its body is every row
+## below the strip until a row whose slice is a horizontal divider (`───`,
+## `---`, junctions), or the frame ends.
 
 import std/[sequtils, strutils]
 from std/unicode import Rune, toRunes, runeLen, `$`
@@ -31,26 +33,42 @@ type
     body*: seq[string]
 
 const
-  PaneSeparators = ["|", "│"]
+  PaneSeparators = ["|", "│", "▏"]
     ## The glyph between two side-by-side panes: ASCII under
-    ## `--ascii-borders`, the box-drawing one otherwise.
-  TitleFills = ["---", "───"]
-    ## A title row's fill, in the same two spellings.
+    ## `--ascii-borders`, the box-drawing one before PLAT-50, the edge
+    ## one-eighth block (`shell.DividerGlyph`) since.
+  DividerCells = ["─", "-", "┼", "┬", "┴", "├", "┤", "└", "┘", "┌", "┐", "+"]
+    ## What a horizontal divider row between two stacked panes is made of,
+    ## in both spellings (box-drawing, and `--ascii-borders`).
+
+  ScrubberCells = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇",
+                   "▏", "▎", "▍", "▌", "▋", "▊", "▉", "|", "#"]
+    ## PLAT-51: what a list pane's scrollbar SCRUBBER draws in the pane's
+    ## last column (`views/scrubber_track.nim`: the track, the thumb in
+    ## eighth blocks, the current-position mark), and their ASCII tier.
 
 func cells(line: string): seq[Rune] = line.toRunes
+
+func withoutScrubber(line: string; width: int): string =
+  ## A list pane's row less its scrollbar scrubber: the pane's LAST cell,
+  ## when the row reaches it and it holds a track, thumb or mark glyph.
+  let r = line.toRunes
+  if width > 0 and r.len == width and $r[^1] in ScrubberCells:
+    $r[0 ..< r.len - 1]
+  else:
+    line
 
 func sliceCells(r: seq[Rune]; start, width: int): string =
   if start >= r.len: return ""
   $r[start ..< min(r.len, start + width)]
 
-func isTitleSlice(s: string): bool =
-  ## A pane title row: an upper-case word first, and a fill after it.
-  let t = s.strip(trailing = false)
-  if t.len < 3 or t.len != s.len: return false
-  if t[0] notin {'A'..'Z'}: return false
-  let word = t.splitWhitespace()[0]
-  word.allCharsInSet({'A'..'Z', '&'}) and word.len >= 3 and
-    TitleFills.anyIt(it in t)
+func isDividerSlice(s: string): bool =
+  ## A horizontal divider: a non-empty run of divider cells and nothing else.
+  let r = s.strip().toRunes
+  if r.len == 0: return false
+  for c in r:
+    if $c notin DividerCells: return false
+  true
 
 func separatorAt(r: seq[Rune]; start: int): int =
   ## The first pane separator at or after cell `start`, or `r.len`.
@@ -59,44 +77,51 @@ func separatorAt(r: seq[Rune]; start: int): int =
   r.len
 
 proc locateTerminalPane*(frame: openArray[string]; title: string): TerminalPane =
-  ## The first pane whose title row starts with `title` (upper case). A pane
+  ## The first pane whose tab strip carries `title` as a tab label. A pane
   ## that is not on the screen answers `row == -1`.
   result = TerminalPane(title: title, row: -1)
+  let label = " " & title
   for r, line in frame:
     let rs = cells(line)
     let text = $rs
-    var start = 0
-    while true:
-      let at = text.find(title, start)
-      if at < 0: break
-      let col = text[0 ..< at].runeLen
-      let startsCell = col == 0 or $rs[col - 1] in PaneSeparators or
-                       $rs[col - 1] == " "
-      let stop = separatorAt(rs, col)
-      let slice = sliceCells(rs, col, stop - col)
-      if startsCell and slice.startsWith(title & " ") and
-         TitleFills.anyIt(it in slice):
-        result.row = r
-        result.col = col
-        result.width = stop - col
-        break
-      start = at + 1
-    if result.row >= 0: break
+    var at = text.find(label)
+    # Padded on the right as well — or at the end of a row whose trailing
+    # blanks were trimmed — so `Event Log` is not found inside a longer label.
+    while at >= 0 and at + label.len < text.len and
+          text[at + label.len] != ' ':
+      at = text.find(label, at + 1)
+    if at < 0: continue
+    let col = text[0 ..< at].runeLen
+    var left = col
+    while left > 0 and $rs[left - 1] notin PaneSeparators:
+      dec left
+    # The pane's right edge: the next separator on the strip row — or, when
+    # the pane is the rightmost, the frame's edge (the widest row: a row's
+    # trailing blanks may have been trimmed).
+    var stop = separatorAt(rs, col + 1)
+    if stop == rs.len:
+      for other in frame:
+        stop = max(stop, cells(other).len)
+    result.row = r
+    result.col = left
+    result.width = stop - left
+    break
   if result.row < 0: return
   for r in result.row + 1 .. frame.high:
     let slice = sliceCells(cells(frame[r]), result.col, result.width)
-    if isTitleSlice(slice): break
+    if isDividerSlice(slice): break
     result.body.add slice.strip(leading = false)
 
-proc readTerminalEventLog*(frame: openArray[string]; title = "TRACEPOINTS"):
+proc readTerminalEventLog*(frame: openArray[string]; title = "Event Log"):
     ScreenReading[EventLogModel] =
   let pane = locateTerminalPane(frame, title)
   if pane.row < 0:
     return unreadable[EventLogModel](urRegionNotLocated,
-      "no title row starts with " & title)
+      "no tab strip carries " & title)
   var model = EventLogModel(isVisible: true)
   var candidates = 0
-  for line in pane.body:
+  for raw in pane.body:
+    let line = raw.withoutScrubber(pane.width)
     if line.strip().len == 0: continue
     inc candidates
     let row = parseTerminalEventRow(line)
@@ -109,12 +134,12 @@ proc readTerminalEventLog*(frame: openArray[string]; title = "TRACEPOINTS"):
   model.ofRows = model.events.len
   read(model)
 
-proc readTerminalPointList*(frame: openArray[string]; title = "POINTS"):
+proc readTerminalPointList*(frame: openArray[string]; title = "Breakpoints"):
     ScreenReading[PointListModel] =
   let pane = locateTerminalPane(frame, title)
   if pane.row < 0:
     return unreadable[PointListModel](urRegionNotLocated,
-      "no title row starts with " & title)
+      "no tab strip carries " & title)
   var model = PointListModel(isVisible: true)
   var candidates = 0
   for line in pane.body:

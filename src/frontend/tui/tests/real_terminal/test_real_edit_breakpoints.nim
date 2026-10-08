@@ -84,9 +84,20 @@ proc markedLines(screen, fileText: string): seq[int] =
   ## number and text disagreed would pass either reading alone.
   let lines = fileText.splitLines()
   for row in screen.splitLines():
+    # The editor's TAB carries a dirty buffer's ` ●` (PLAT-49); its strip is
+    # not a gutter row.
+    if row.contains("the working tree"): continue
     let g = row.find(BreakpointGlyph)
     if g < 0: continue
-    let rest = row[g + BreakpointGlyph.len .. ^1]
+    var rest = row[g + BreakpointGlyph.len .. ^1]
+    # THE EDIT PANE'S OWN CELLS ONLY. Since PLAT-45 the shared default puts a
+    # column to the editor's right, so the row carries a `│` border and the
+    # neighbour's text after the file's line. PLAT-50: the divider is the
+    # edge one-eighth block `▏` (`shell.DividerGlyph`).
+    for glyph in ["│", "▏"]:
+      let border = rest.find(glyph)
+      if border >= 0:
+        rest = rest[0 ..< border]
     let words = rest.splitWhitespace()
     var number = -1
     if words.len > 0:
@@ -106,13 +117,39 @@ proc quit(sess: var TuiTestSession) =
   discard sess.waitExit(initDuration(seconds = 10))
   sess.close()
 
+proc editorTabShows(screen, file: string): bool =
+  ## PLAT-49: the Edit pane has no title row; the editor's TAB names the file,
+  ## on the strip that carries Edit mode's source statement ("the working
+  ## tree") — one row holding both is the editor showing `file`, and not the
+  ## file tree's row for it.
+  for line in screen.splitLines():
+    if line.contains("the working tree") and line.contains(" " & file & " "):
+      return true
+
+proc waitForEditorTab(sess: var TuiTestSession; file: string;
+                      timeoutMs = 20000): string =
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  var last = ""
+  while getMonoTime() < deadline:
+    discard sess.drainOutput(40)
+    last = sess.screenContents()
+    if editorTabShows(last, file):
+      return last
+    if not sess.isAlive:
+      raise newException(AssertionDefect,
+        "the binary exited before the editor showed '" & file &
+        "'; screen was:\n" & last)
+  raise newException(AssertionDefect,
+    "the editor's tab never named '" & file & "' within " & $timeoutMs &
+    " ms; screen:\n" & last)
+
 suite "PLAT-28 Tier 2: a breakpoint follows its line, on a real pty":
 
   test "F9 on `def second():`, `O` above it, then `dd` on it":
     var (sess, _) = spawnEditor("follow")
     var current = Text
     try:
-      discard sess.waitFor("EDIT " & ProjectFile)
+      discard sess.waitForEditorTab(ProjectFile)
       sess.key("j")
       sess.key("j")                    # line 3, `def second():`
       sess.key(F9)

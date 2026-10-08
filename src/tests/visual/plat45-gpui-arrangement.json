@@ -1,0 +1,124 @@
+{
+  "_comment": [
+    "PLAT-45 — the GPUI window's first screen on `calc` (no remembered",
+    "layout) and a blank compositor, read through PLAT-39's pixel reader.",
+    "Regenerate: `just plat45-arrangement-window` then",
+    "`just plat45-window-record`. Asserted by test_plat45_three_media.nim."
+  ],
+  "takenAt": "2026-10-06T20:15:53Z",
+  "host": "gpu-server-001",
+  "frames": {
+    "shared": {
+      "frame": "shared.ppm",
+      "located": true,
+      "reason": "",
+      "width": 1920,
+      "height": 1080,
+      "regions": [
+        {
+          "x": 0,
+          "y": 55,
+          "w": 387,
+          "h": 988,
+          "strip": "Files VCS Tests S",
+          "tabs": [
+            "Files",
+            "VCS",
+            "Tests"
+          ],
+          "heading": "Files",
+          "active": "Files",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
+        },
+        {
+          "x": 396,
+          "y": 55,
+          "w": 470,
+          "h": 988,
+          "strip": "’ main.py > ‘",
+          "tabs": [
+            "Editor"
+          ],
+          "heading": "",
+          "active": "Editor",
+          "outline": {
+            "top": true,
+            "bottom": true,
+            "left": true,
+            "right": true
+          }
+        },
+        {
+          "x": 875,
+          "y": 55,
+          "w": 511,
+          "h": 489,
+          "strip": "State Scratchpad S",
+          "tabs": [
+            "State",
+            "Scratchpad"
+          ],
+          "heading": "State",
+          "active": "State",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
+        },
+        {
+          "x": 1396,
+          "y": 55,
+          "w": 524,
+          "h": 489,
+          "strip": "Call Trace Agent Activity _M",
+          "tabs": [
+            "Call Trace",
+            "Agent Activity"
+          ],
+          "heading": "Call Trace",
+          "active": "Call Trace",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
+        },
+        {
+          "x": 875,
+          "y": 556,
+          "w": 1045,
+          "h": 487,
+          "strip": "Event Log Terminal Cutput -M",
+          "tabs": [
+            "Event Log",
+            "Terminal Output"
+          ],
+          "heading": "Event Log",
+          "active": "Event Log",
+          "outline": {
+            "top": false,
+            "bottom": false,
+            "left": false,
+            "right": false
+          }
+        }
+      ]
+    },
+    "blank": {
+      "frame": "blank.ppm",
+      "located": false,
+      "reason": "frame-blank: every column or row median is identical: the frame carries no layout",
+      "width": 1920,
+      "height": 1080,
+      "regions": []
+    }
+  }
+}

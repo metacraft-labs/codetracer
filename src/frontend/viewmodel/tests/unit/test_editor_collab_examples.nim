@@ -37,6 +37,7 @@ import ../../collab/codec
 import ../../collab/reducer
 import ../../collab/text_ops
 import ../generators/change_generator
+import ../../../test_support/spec_documents
 
 var countedAssertions = 0
 
@@ -47,9 +48,15 @@ template counted(condition: untyped) =
 const ExpectedAssertions = 138
 
 const
-  SpecRelativePath = "codetracer-specs/Architecture/Editor-ViewModel.md"
-  SpecSource = staticRead(
-    "../../../../../../codetracer-specs/Architecture/Editor-ViewModel.md")
+  SpecDocName = "Architecture/Editor-ViewModel.md"
+    ## Named from the specification tree's root; `test_support/spec_documents`
+    ## is the one module that knows where the sibling checkout is and how it is
+    ## laid out (see its header). `run-plat33-collab-mutations.py` digests the
+    ## same document as a read-only input and spells the path its own way,
+    ## because it is Python and reads it at run time.
+
+  SpecRelativePath = specDocumentRef(SpecDocName)
+  SpecSource = specDocument(SpecDocName)
   SectionStart = "### 12.1a The normative merge table"
   SectionEnd = "### 12.2 The algorithm"
 

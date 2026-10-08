@@ -42,9 +42,7 @@ use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
-use super::ctfs_container::{
-    BlockSource, CtfsError, EXTENDED_HEADER_SIZE, FILE_ENTRY_SIZE, HEADER_SIZE, base40_decode, base40_encode,
-};
+use super::ctfs_container::{BlockSource, CTFS_DIRECT, CtfsError, FILE_ENTRY_SIZE, base40_decode, base40_encode};
 
 /// Byte offset of the `Size` field within a 24-byte `FileEntry`
 /// (CTFS-Binary-Format.md §2: `Size` is the first field).
@@ -165,6 +163,8 @@ pub struct CtfsBlockOverlay {
     blocks: BTreeMap<u64, Vec<u8>>,
     /// Block size in bytes (1024 / 2048 / 4096), parsed from the header.
     block_size: usize,
+    /// Byte offset of the `FileEntry` array (the header's size).
+    entry_start: usize,
     /// Number of root directory entries (extended-header `max_root_entries`).
     max_root_entries: usize,
     /// The shadow `NextFreeBlock` counter: the next block number a fresh
@@ -183,33 +183,22 @@ impl CtfsBlockOverlay {
     /// layered over an existing container image, never over empty bytes).
     pub fn new(backing: Box<dyn BlockSource>, mode: OverlayMode) -> Result<Self, CtfsError> {
         let total = backing.current_size();
-        if total < (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64 {
-            return Err(CtfsError::Corrupt(format!(
-                "overlay: backing too small ({total} bytes, need at least {})",
-                HEADER_SIZE + EXTENDED_HEADER_SIZE
-            )));
-        }
-
-        // Parse the fixed + extended header to learn block_size / max_root_entries.
-        let mut header = [0u8; HEADER_SIZE + EXTENDED_HEADER_SIZE];
+        // Parse the header to learn block_size / entry_start / max_root_entries.
         // `read_block` would over-read on a sub-block-sized header, so read the
-        // 16-byte header directly via read_at.
-        let read = backing.read_at(0, &mut header)?;
-        if read != header.len() {
-            return Err(CtfsError::Corrupt("overlay: short header read".to_string()));
+        // header directly via read_at.
+        let want = super::ctfs_container::V6_HEADER_SIZE.min(usize::try_from(total).unwrap_or(usize::MAX));
+        let mut header = vec![0u8; want];
+        if want > 0 {
+            let read = backing.read_at(0, &mut header)?;
+            if read != header.len() {
+                return Err(CtfsError::Corrupt("overlay: short header read".to_string()));
+            }
         }
-        if header[..5] != super::ctfs_container::CTFS_MAGIC {
-            return Err(CtfsError::InvalidMagic);
-        }
-        let version = header[5];
-        if !(super::ctfs_container::CTFS_VERSION_MIN..=super::ctfs_container::CTFS_VERSION_MAX).contains(&version) {
-            return Err(CtfsError::UnsupportedVersion(version));
-        }
-        let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        let max_root_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
-        if !matches!(block_size, 1024 | 2048 | 4096) {
-            return Err(CtfsError::Corrupt(format!("overlay: invalid block size: {block_size}")));
-        }
+        let super::ctfs_container::ContainerHeader {
+            block_size,
+            entry_start,
+            max_root_entries,
+        } = super::ctfs_container::parse_container_header(&header)?;
 
         // The backing image is laid out as a whole number of blocks; the next
         // free block is the count of WHOLE blocks currently present.
@@ -238,6 +227,7 @@ impl CtfsBlockOverlay {
             backing,
             blocks: BTreeMap::new(),
             block_size,
+            entry_start,
             max_root_entries,
             next_free_block,
             mode,
@@ -344,8 +334,8 @@ impl CtfsBlockOverlay {
     // ── Shadow Block 0 accessors ──────────────────────────────────────────
 
     /// The byte offset of file-entry slot `index` within Block 0.
-    fn file_entry_offset(index: usize) -> usize {
-        HEADER_SIZE + EXTENDED_HEADER_SIZE + index * FILE_ENTRY_SIZE
+    fn file_entry_offset(&self, index: usize) -> usize {
+        self.entry_start + index * FILE_ENTRY_SIZE
     }
 
     /// Find the file-entry slot index for the named internal file in Block 0, or
@@ -355,7 +345,7 @@ impl CtfsBlockOverlay {
         let target = base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
         let block0 = self.read_block(0)?;
         for index in 0..self.max_root_entries {
-            let off = Self::file_entry_offset(index);
+            let off = self.file_entry_offset(index);
             if off + FILE_ENTRY_SIZE > block0.len() {
                 break;
             }
@@ -378,7 +368,7 @@ impl CtfsBlockOverlay {
             return Ok(None);
         };
         let block0 = self.read_block(0)?;
-        let off = Self::file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
+        let off = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
         let size = u64::from_le_bytes(
             block0[off..off + 8]
                 .try_into()
@@ -394,7 +384,7 @@ impl CtfsBlockOverlay {
         let index = self
             .find_file_entry(name)?
             .ok_or_else(|| CtfsError::FileNotFound(name.to_string()))?;
-        let off = Self::file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
+        let off = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
         self.mutate_block(0, |block0| {
             block0[off..off + 8].copy_from_slice(&new_size.to_le_bytes());
         })
@@ -411,7 +401,7 @@ impl CtfsBlockOverlay {
     /// the region so allocator state mutates in the overlay, not on disk.
     pub fn read_free_list_roots(&self, len: usize) -> Result<Vec<u8>, CtfsError> {
         let block0 = self.read_block(0)?;
-        let start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
+        let start = self.entry_start;
         let end = start + len;
         if end > block0.len() {
             return Err(CtfsError::Corrupt(format!(
@@ -427,7 +417,7 @@ impl CtfsBlockOverlay {
     /// `roots` replaces the `roots.len()`-byte region starting immediately after
     /// the container header. Mirrors [`read_free_list_roots`](CtfsBlockOverlay::read_free_list_roots).
     pub fn write_free_list_roots(&mut self, roots: &[u8]) -> Result<(), CtfsError> {
-        let start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
+        let start = self.entry_start;
         let block_size = self.block_size;
         if start + roots.len() > block_size {
             return Err(CtfsError::Corrupt(format!(
@@ -447,14 +437,15 @@ impl CtfsBlockOverlay {
     /// container through the overlay (M5: persist `coverage.tc` /
     /// `memwrites.tc` / `linehits.tc` namespace images into the `.ct`).
     ///
-    /// Allocates fresh data blocks (born in the overlay) for `data`, a single
-    /// root mapping block pointing at them, and a directory `FileEntry` in shadow
-    /// Block 0 — all copy-on-write, so the backing file is untouched until a
-    /// `Persist` [`flush`](CtfsBlockOverlay::flush). The layout matches the
-    /// production single-level mapping (`FileEntry = (Size, MapBlock, Name)`; the
-    /// map block holds direct data-block pointers), so a plain
-    /// [`super::ctfs_container::CtfsReader`] reads the file back after a flush
-    /// (the warm-restart proof).
+    /// Allocates fresh blocks (born in the overlay) and a directory `FileEntry`
+    /// in shadow Block 0 — all copy-on-write, so the backing file is untouched
+    /// until a `Persist` [`flush`](CtfsBlockOverlay::flush). The member is laid
+    /// out as `ctfs-container.md` §2 requires of a version 5 container: empty
+    /// owns no block (`MapBlock = 0`), at most one block is that data block
+    /// tagged with [`CTFS_DIRECT`] and no mapping block, and anything larger is
+    /// a single-level mapping whose mapping block is claimed before its data
+    /// blocks. A plain [`super::ctfs_container::CtfsReader`] reads the file
+    /// back after a flush (the warm-restart proof).
     ///
     /// Constraints (sufficient for the M5 namespace images, which are at most a
     /// few pages): `data` must fit within a single-level mapping — i.e. at most
@@ -479,6 +470,14 @@ impl CtfsBlockOverlay {
         // Empty file: a directory entry with size 0 and no blocks.
         if data.is_empty() {
             return self.set_or_create_file_entry(name, 0, 0);
+        }
+
+        if data.len() <= self.block_size {
+            let data_block = self.alloc_block();
+            let mut block = vec![0u8; self.block_size];
+            block[..data.len()].copy_from_slice(data);
+            self.write_block(data_block, block)?;
+            return self.set_or_create_file_entry(name, data.len() as u64, CTFS_DIRECT | data_block);
         }
 
         // Allocate the root mapping block first, then the data blocks.
@@ -513,7 +512,7 @@ impl CtfsBlockOverlay {
         let block0 = self.read_block(0)?;
         let mut target: Option<usize> = None;
         for index in 0..self.max_root_entries {
-            let off = Self::file_entry_offset(index);
+            let off = self.file_entry_offset(index);
             if off + FILE_ENTRY_SIZE > block0.len() {
                 break;
             }
@@ -533,7 +532,7 @@ impl CtfsBlockOverlay {
         }
         let index =
             target.ok_or_else(|| CtfsError::Corrupt(format!("overlay: root directory full, cannot add '{name}'")))?;
-        let off = Self::file_entry_offset(index);
+        let off = self.file_entry_offset(index);
         self.mutate_block(0, |block0| {
             block0[off..off + 8].copy_from_slice(&size.to_le_bytes());
             block0[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
@@ -603,7 +602,7 @@ impl CtfsBlockOverlay {
         let block0 = self.read_block(0)?;
         let mut names = Vec::new();
         for index in 0..self.max_root_entries {
-            let off = Self::file_entry_offset(index);
+            let off = self.file_entry_offset(index);
             if off + FILE_ENTRY_SIZE > block0.len() {
                 break;
             }
@@ -637,7 +636,7 @@ mod tests {
     fn data_block0_offset(path: &Path, name: &str) -> (u64, u64) {
         let reader = CtfsReader::open(path).unwrap();
         let entry = reader.file_entry(name).unwrap();
-        let data_block = reader.resolve_block_for_test(entry.1, 0).unwrap();
+        let data_block = reader.data_block_for_test(name, 0).unwrap();
         (data_block * BLOCK_SIZE as u64, entry.0)
     }
 
@@ -995,5 +994,55 @@ mod tests {
             vec!["steps.dat".to_string()],
             "the unreferenced partial tail surfaced as an internal file"
         );
+    }
+
+    /// `write_internal_file` lays a member out as a version 5 writer must
+    /// (`ctfs-container.md` §2): empty owns no block, one block is a tagged
+    /// direct block with no mapping block, and a larger member is mapped with
+    /// its mapping block claimed before its data blocks. After a `Persist`
+    /// flush a plain reader reads each one back.
+    #[test]
+    fn test_overlay_writes_version_5_member_layouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("layouts.ct");
+        write_minimal_ctfs(&path, &[("meta.dat", b"m")]).unwrap();
+        let before = std::fs::metadata(&path).unwrap().len() / BLOCK_SIZE as u64;
+
+        let small: Vec<u8> = (0..300u32).map(|i| (i % 251) as u8).collect();
+        let big: Vec<u8> = (0..(2 * BLOCK_SIZE + 5) as u32).map(|i| (i % 247) as u8).collect();
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+        overlay.write_internal_file("empty.tc", &[]).unwrap();
+        overlay.write_internal_file("small.tc", &small).unwrap();
+        overlay.write_internal_file("big.tc", &big).unwrap();
+        // One block for `small.tc`, a mapping block and three data blocks for
+        // `big.tc`, none for `empty.tc`.
+        assert_eq!(overlay.next_free_block(), before + 5);
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        overlay.flush(&mut sink).unwrap();
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(
+            reader.file_entry("empty.tc"),
+            Some((0, 0)),
+            "an empty member owns no block"
+        );
+        let (size, map_block) = reader.file_entry("small.tc").unwrap();
+        assert_eq!(size, small.len() as u64);
+        assert_eq!(
+            map_block,
+            (1 << 63) | before,
+            "a one-block member is its tagged data block"
+        );
+        let (size, map_block) = reader.file_entry("big.tc").unwrap();
+        assert_eq!(size, big.len() as u64);
+        assert_eq!(
+            map_block,
+            before + 1,
+            "the mapping block is claimed before the data blocks"
+        );
+        assert_eq!(reader.read_file("empty.tc").unwrap(), Vec::<u8>::new());
+        assert_eq!(reader.read_file("small.tc").unwrap(), small);
+        assert_eq!(reader.read_file("big.tc").unwrap(), big);
     }
 }

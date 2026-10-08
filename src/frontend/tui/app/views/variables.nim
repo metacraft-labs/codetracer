@@ -76,6 +76,8 @@ import std/[strutils, tables]
 import isonim_tui
 
 import ../../../../common/value_presentation
+from codetracer_embed import VariableCategory, vcLocal, vcArgument,
+  vcGlobal, vcReturnValue, vcRegister, vcWatch, categoryTag
 import ../layout/profile
 import ./styled_row
 import ./tree_node
@@ -141,6 +143,19 @@ type
     vrkVariable
     vrkMore
     vrkNote
+    vrkHistory
+      ## PLAT-51: an entry of the row above's value history (a navigation
+      ## row: a click goes to its tick).
+    vrkOrigin
+      ## PLAT-51: a hop of the row above's value origin chain.
+    vrkAddWatch
+      ## PLAT-51: the Watches group's "Add watch expression…" row.
+
+  HistoryEntry* = object
+    ## PLAT-51: one value of a variable's history — where (the tick a click
+    ## goes to) and what.
+    ticks*: uint64
+    value*: string
 
   VariablesRow* = object
     ## One row of the pane, before it is painted.
@@ -153,6 +168,10 @@ type
     remaining*: int
       ## For `vrkMore`: how many members are still unshown.
     note*: string
+    entry*: int
+      ## For `vrkHistory` / `vrkOrigin`: which entry / hop, 0-based.
+    ticks*: uint64
+      ## For `vrkHistory`: the tick the entry's value was recorded at.
 
   VariablesModel* = object
     ## Everything the pane shows.
@@ -188,6 +207,19 @@ type
       ## see each other's rules, and a presentation has to stay a function of
       ## its arguments. The zero value is `@[]`, which is the built-in table
       ## alone — so every existing caller of this model is unaffected.
+    histories*: Table[string, seq[HistoryEntry]]
+      ## PLAT-51: the value histories OPEN in the pane, by the variable's
+      ## path — each listed under its row (Variable-State-Pane.md: "The history
+      ## and the origin open IN the pane, under the row").
+    origins*: Table[string, seq[string]]
+      ## PLAT-51: the origin chains open in the pane, one line per hop.
+    watches*: seq[string]
+      ## PLAT-51: the watch expressions (`StateVM.watchExpressions`), so the
+      ## watch rows carry their remove control and the group its "Add watch
+      ## expression…" row.
+    nameCells*: int
+      ## PLAT-51: the name column's width, when the user dragged its
+      ## separator (0: the default share).
     populations*: int
       ## How many times `children` has been called. Asserted by the expansion
       ## suite: a re-expansion that did no work — the CTUI-4 shape, where the
@@ -206,11 +238,11 @@ type
     moreRows*: int
     noteRows*: int
     modifiedRows*: int
-    diffColumn*: int
-      ## Screen column of the `[MOD]` field's first cell. REPORTED rather than
-      ## recomputed by the caller, for the reason `frame_item.FrameItem`
-      ## records: a Tier-2 case reads a cell at this column and a drift between
-      ## the two arithmetics would move the read, not the badge.
+    valueColumn*: int
+      ## Screen column of a top-level row's value field — where a changed
+      ## value's accent starts (PLAT-51; the `[MOD]` field this replaced is
+      ## gone). REPORTED rather than recomputed by the caller, for the reason
+      ## `frame_item.FrameItem` records.
     nameColumn*: int
 
 const
@@ -246,11 +278,27 @@ const
     ## expansion set into `StateVM.expandedPaths`, which the desktop keys by the
     ## variable path alone.
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  TitleDetailStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  TitleDetailStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
   EmptyPaneText* = "no variables reported"
-  EmptyPaneStyle* = CellStyle(fg: "bright_black", italic: true)
+  EmptyPaneStyle* = CellStyle(role: srChromeMuted, italic: true)
+
+func categoryOf*(kind: ScopeKind): VariableCategory =
+  ## PLAT-49: the ViewModel's category for each of this pane's roots — the
+  ## value the row's tag and colour are read from.
+  case kind
+  of skLocals: vcLocal
+  of skArguments: vcArgument
+  of skGlobals: vcGlobal
+  of skReturnValues: vcReturnValue
+  of skRegisters: vcRegister
+  of skWatches: vcWatch
+
+const CategoryRoles*: array[VariableCategory, SemanticRole] = [
+  srCategoryLocal, srCategoryArgument, srCategoryGlobal,
+  srCategoryReturnValue, srCategoryRegister, srCategoryWatch]
+  ## The colour each category's tag is painted in.
 
 proc scopePath*(kind: ScopeKind): string =
   ScopePathPrefix & $kind
@@ -406,6 +454,24 @@ proc appendNodeRows(model: VariablesModel; scope: ScopeKind; path: string;
     rows.add VariablesRow(kind: vrkVariable, scope: scope, node: node,
                           depth: depth, expandable: node.memberCount > 0,
                           expanded: open)
+    # PLAT-51: the row's open value history and origin, under it.
+    if model.histories.hasKey(node.path):
+      let entries = model.histories[node.path]
+      if entries.len == 0:
+        rows.add VariablesRow(kind: vrkNote, scope: scope, depth: depth + 1,
+                              note: "no recorded values", node: node)
+      for i, e in entries:
+        rows.add VariablesRow(kind: vrkHistory, scope: scope, node: node,
+                              depth: depth + 1, entry: i, ticks: e.ticks,
+                              note: e.value)
+    if model.origins.hasKey(node.path):
+      let hops = model.origins[node.path]
+      if hops.len == 0:
+        rows.add VariablesRow(kind: vrkNote, scope: scope, depth: depth + 1,
+                              note: "no recorded origin", node: node)
+      for i, h in hops:
+        rows.add VariablesRow(kind: vrkOrigin, scope: scope, node: node,
+                              depth: depth + 1, entry: i, note: h)
     if open:
       model.appendNodeRows(scope, node.path, depth + 1, rows)
   let total = model.memberTotal(path)
@@ -416,26 +482,35 @@ proc appendNodeRows(model: VariablesModel; scope: ScopeKind; path: string;
 
 proc paneRows*(model: VariablesModel): seq[VariablesRow] =
   ## Every row the pane would show if it were tall enough, in order.
+  ##
+  ## PLAT-49 (the user, 2026-10-01): NO SEPARATOR ROW PER CATEGORY. The
+  ## groups keep their order (locals, arguments, globals, …) and every row
+  ## carries its group as `scope`, which the painter draws as a colour-coded
+  ## one-letter tag at the start of the line. A root that cannot be filled
+  ## still says why, as one tagged note; an open root with no members says
+  ## so the same way; a root that is not open contributes nothing.
   result = @[]
   for scope in model.scopes:
     let path = scopePath(scope.kind)
-    let open = model.isExpanded(path)
-    result.add VariablesRow(
-      kind: vrkScope, scope: scope.kind, depth: 0,
-      expandable: scope.availability == savaAvailable, expanded: open,
-      node: VarNode(path: path, name: $scope.kind,
-                    memberCount: model.memberTotal(path)))
     if scope.availability == savaUnsupported:
       result.add VariablesRow(kind: vrkNote, scope: scope.kind, depth: 1,
                               note: scope.note)
       continue
-    if not open:
+    if not model.isExpanded(path):
       continue
     if model.memberTotal(path) == 0:
-      result.add VariablesRow(kind: vrkNote, scope: scope.kind, depth: 1,
-                              note: "empty at this position")
+      # An empty watch list is the normal state, not a statement: no row.
+      if scope.kind != skWatches:
+        result.add VariablesRow(kind: vrkNote, scope: scope.kind, depth: 1,
+                                note: "empty at this position")
+      else:
+        result.add VariablesRow(kind: vrkAddWatch, scope: scope.kind,
+                                depth: 1)
       continue
     model.appendNodeRows(scope.kind, path, 1, result)
+    # PLAT-51: the Watches group ends with its "Add watch expression…" row.
+    if scope.kind == skWatches:
+      result.add VariablesRow(kind: vrkAddWatch, scope: scope.kind, depth: 1)
 
 proc rowOfPath*(rows: openArray[VariablesRow]; path: string): int =
   ## The row showing `path`, or -1.
@@ -451,18 +526,32 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
   ## The ONE place that decides which markers a row carries, so "the cursor is
   ## on the selected path" and "the badge is on a changed variable" are one rule
   ## rather than two copies of it.
+  let category = categoryOf(row.scope)
+  let tag = categoryTag(category)
+  let tagRole = CategoryRoles[category]
   case row.kind
   of vrkScope:
     TreeRowSpec(kind: trkScope, name: $row.scope, depth: 0,
                 expandable: row.expandable, expanded: row.expanded,
                 selected: model.selected == row.node.path,
-                memberCount: row.node.memberCount, width: width)
+                memberCount: row.node.memberCount, width: width,
+                tag: tag, tagRole: tagRole)
   of vrkNote:
     TreeRowSpec(kind: trkNote, name: row.note, depth: 1, memberCount: -1,
-                width: width)
+                width: width, tag: tag, tagRole: tagRole)
   of vrkMore:
     TreeRowSpec(kind: trkMore, depth: row.depth, memberCount: row.remaining,
-                width: width)
+                width: width, tag: tag, tagRole: tagRole)
+  of vrkHistory:
+    TreeRowSpec(kind: trkHistory, name: "tick " & $row.ticks,
+                value: row.note, depth: row.depth, memberCount: -1,
+                width: width, tag: tag, tagRole: tagRole)
+  of vrkOrigin:
+    TreeRowSpec(kind: trkOrigin, name: row.note, depth: row.depth,
+                memberCount: -1, width: width, tag: tag, tagRole: tagRole)
+  of vrkAddWatch:
+    TreeRowSpec(kind: trkAddWatch, depth: row.depth, memberCount: -1,
+                width: width, tag: tag, tagRole: tagRole)
   of vrkVariable:
     TreeRowSpec(
       kind: trkVariable, name: row.node.name, typeName: row.node.typeName,
@@ -473,7 +562,12 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
       focused: model.focused == row.node.path,
       memberCount: row.node.memberCount, presented: row.node.presented,
       visualisers: model.visualisers,
-      width: width)
+      width: width, tag: tag, tagRole: tagRole,
+      controls: true,
+      historyOpen: model.histories.hasKey(row.node.path),
+      originOpen: model.origins.hasKey(row.node.path),
+      watch: row.scope == skWatches and row.depth == 1,
+      nameCells: model.nameCells)
 
 # ---------------------------------------------------------------------------
 # Painting
@@ -673,7 +767,7 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
   result = VariablesScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, totalRows: 0,
     scopeRows: 0, variableRows: 0, moreRows: 0, noteRows: 0, modifiedRows: 0,
-    diffColumn: area.col + diffFieldColumn(),
+    valueColumn: area.col + valueFieldColumn(area.width, model.nameCells),
     nameColumn: area.col + nameFieldColumn())
   if area.width <= 0 or area.height <= 0:
     return
@@ -717,7 +811,7 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     of vrkScope: inc result.scopeRows
     of vrkVariable: inc result.variableRows
     of vrkMore: inc result.moreRows
-    of vrkNote: inc result.noteRows
+    of vrkNote, vrkHistory, vrkOrigin, vrkAddWatch: inc result.noteRows
     if spec.modified:
       inc result.modifiedRows
 
@@ -761,6 +855,38 @@ proc pathAtScreenRow*(screen: VariablesScreen; screenRow: int): string =
     return ""
   let row = screen.visible[i]
   if row.kind in {vrkScope, vrkVariable}: row.node.path else: ""
+
+proc rowAtScreenRow*(screen: VariablesScreen; screenRow: int):
+    (bool, VariablesRow) =
+  ## PLAT-51: the row a screen row shows, of any kind (a history entry, an
+  ## origin hop, the add-watch row, a `… n more`), or `false` outside the
+  ## body.
+  let i = screenRow - screen.area.row - 1
+  if i < 0 or i >= screen.visible.len:
+    return (false, VariablesRow())
+  (true, screen.visible[i])
+
+type
+  VariablesControl* = enum
+    vcNone, vcHistory, vcOrigin, vcRemoveWatch, vcNameSeparator
+
+proc controlAt*(screen: VariablesScreen; model: VariablesModel;
+                screenRow, col: int): VariablesControl =
+  ## PLAT-51: which of a variable row's controls a press at `col` is on —
+  ## the history button, the origin badge, a watch's remove control — or the
+  ## name column's separator (a drag resizes it).
+  let (ok, row) = screen.rowAtScreenRow(screenRow)
+  if not ok or row.kind != vrkVariable:
+    return vcNone
+  let at = screen.area.col + controlColumn(screen.area.width)
+  if col == at: return vcHistory
+  if col == at + 1: return vcOrigin
+  if col == at + 2 and row.scope == skWatches and row.depth == 1:
+    return vcRemoveWatch
+  if col == screen.area.col + nameSeparatorColumn(screen.area.width,
+                                                  model.nameCells):
+    return vcNameSeparator
+  vcNone
 
 proc renderVariablesTree*(model: VariablesModel; r: TerminalRenderer;
                           width, height: int): TerminalNode =

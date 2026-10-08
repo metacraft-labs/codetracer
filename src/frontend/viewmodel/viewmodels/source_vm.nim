@@ -140,6 +140,16 @@ type
     # -- Held window --
     heldFirstLine*: Signal[int]
     heldLines*: Signal[seq[string]]
+    heldLineContexts*: Signal[seq[string]]
+      ## One opaque string per held line — or none at all: the state the
+      ## front-end's highlighter is in at the START of that line, derived by
+      ## the front-end from the whole file when the window was fetched
+      ## (`source_provider.SourceFetch.fileLines`). Kept in step with
+      ## `heldLines` through every fill, merge and trim, so a window that
+      ## opens inside a docstring or a block comment is coloured as the
+      ## desktop colours it (PLAT-47 B4). Empty when the front-end supplied
+      ## none; a partial set is never held (a merge that cannot keep every
+      ## line's context drops them all).
     heldRevision*: Signal[SourceRevision]
     totalLineCount*: Signal[int]
     pendingRequests*: Signal[seq[SourceLineRequest]]
@@ -247,6 +257,29 @@ func topFollowingCursor*(currentTop, cursorLine, viewportHeight,
   else:
     clampTop(currentTop, viewportHeight, totalLineCount)
 
+func topCentringIfOutside*(currentTop, line, viewportHeight,
+                           totalLineCount: int): int =
+  ## Monaco's `revealLineInCenterIfOutsideViewport`, in lines: leave the
+  ## viewport where it is when `line` is already inside it, and otherwise
+  ## scroll so `line` sits in its MIDDLE.
+  ##
+  ## This is what the desktop does after every debugger stop
+  ## (`renderer.gotoLine`, `ui/editor.nim`'s complete-move handler): a step
+  ## within the visible lines does not move the view, and a stop OUTSIDE it —
+  ## a jump, a `--goto`, a continue to a far breakpoint — brings the execution
+  ## line to the centre, with context on both sides. The front-ends that draw
+  ## `SourceVM` used `topFollowingCursor` (the SMALLEST scroll) for the
+  ## execution pointer too, which put a far stop on the viewport's last row
+  ## with nothing below it; the user reported it on 2026-09-27 (PLAT-47).
+  if viewportHeight <= 0 or line <= 0:
+    return clampTop(currentTop, viewportHeight, totalLineCount)
+  let bottom = currentTop + viewportHeight - 1
+  if line >= currentTop and line <= bottom:
+    clampTop(currentTop, viewportHeight, totalLineCount)
+  else:
+    clampTop(line - (viewportHeight - 1) div 2, viewportHeight,
+             totalLineCount)
+
 # ---------------------------------------------------------------------------
 # Reading the window
 # ---------------------------------------------------------------------------
@@ -328,12 +361,13 @@ proc followCursor*(vm: SourceVM) =
     vm.viewportHeight.val, vm.totalLineCount.val)
 
 proc followExecutionPointer*(vm: SourceVM) =
-  ## Scroll the least amount that brings the line the BACKEND reports for the
-  ## current stop into view.
+  ## Bring the line the BACKEND reports for the current stop into view the
+  ## way the desktop's editor does (`topCentringIfOutside`): not at all while
+  ## it is visible, centred when it is not.
   ##
   ## This is the one a stepping front-end calls after every stop. See
   ## `executionLine` for why it is not the same call as `followCursor`.
-  vm.viewportTop.val = topFollowingCursor(
+  vm.viewportTop.val = topCentringIfOutside(
     vm.viewportTop.val, vm.executionLine.val,
     vm.viewportHeight.val, vm.totalLineCount.val)
 
@@ -347,6 +381,7 @@ proc trimToWindow*(vm: SourceVM) =
   ## lines" still passes.
   if not vm.holdsCurrentRevision:
     vm.heldLines.val = @[]
+    vm.heldLineContexts.val = @[]
     vm.heldFirstLine.val = 1
     return
   let first = vm.windowFirstLine.val
@@ -357,6 +392,7 @@ proc trimToWindow*(vm: SourceVM) =
     return
   if last < first or heldLast < first or heldFirst > last:
     vm.heldLines.val = @[]
+    vm.heldLineContexts.val = @[]
     vm.heldFirstLine.val = first
     return
   let keepFirst = max(first, heldFirst)
@@ -364,6 +400,9 @@ proc trimToWindow*(vm: SourceVM) =
   if keepFirst == heldFirst and keepLast == heldLast:
     return
   vm.heldLines.val = vm.heldLines.val[keepFirst - heldFirst .. keepLast - heldFirst]
+  if vm.heldLineContexts.val.len > 0:
+    vm.heldLineContexts.val =
+      vm.heldLineContexts.val[keepFirst - heldFirst .. keepLast - heldFirst]
   vm.heldFirstLine.val = keepFirst
 
 proc requestMissing*(vm: SourceVM): seq[SourceLineRequest] =
@@ -398,7 +437,8 @@ proc requestMissing*(vm: SourceVM): seq[SourceLineRequest] =
   vm.pendingRequests.val = result
 
 proc fulfill*(vm: SourceVM; revision: SourceRevision; firstLine: int;
-              lines: seq[string]; totalLineCount: int): bool =
+              lines: seq[string]; totalLineCount: int;
+              lineContexts: seq[string] = @[]): bool =
   ## Adopt `lines` as the text of `firstLine ..` for `revision`.
   ##
   ## Returns FALSE, and changes nothing, when `revision` is not the revision
@@ -419,10 +459,15 @@ proc fulfill*(vm: SourceVM; revision: SourceRevision; firstLine: int;
   if totalLineCount >= 0:
     vm.totalLineCount.val = totalLineCount
 
+  # A context set that does not cover every line is dropped whole: the
+  # highlighter reads the FIRST held line's context, and a partial set would
+  # make which line that is decide whether the window is coloured right.
+  let contexts = if lineContexts.len == lines.len: lineContexts else: @[]
   if not vm.holdsCurrentRevision or vm.heldLines.val.len == 0:
     vm.heldRevision.val = revision
     vm.heldFirstLine.val = firstLine
     vm.heldLines.val = lines
+    vm.heldLineContexts.val = contexts
     vm.trimToWindow()
     return true
 
@@ -433,6 +478,9 @@ proc fulfill*(vm: SourceVM; revision: SourceRevision; firstLine: int;
     return false
 
   var merged: seq[string] = @[]
+  var mergedContexts: seq[string] = @[]
+  let keepContexts = contexts.len > 0 and
+    vm.heldLineContexts.val.len == vm.heldLines.val.len
   let mergedFirst = min(heldFirst, firstLine)
   let mergedLast = max(heldLast, newLast)
   for line in mergedFirst .. mergedLast:
@@ -441,10 +489,13 @@ proc fulfill*(vm: SourceVM; revision: SourceRevision; firstLine: int;
       # revision, and a stale cached line is exactly what this VM must not
       # serve.
       merged.add(lines[line - firstLine])
+      if keepContexts: mergedContexts.add(contexts[line - firstLine])
     else:
       merged.add(vm.heldLines.val[line - heldFirst])
+      if keepContexts: mergedContexts.add(vm.heldLineContexts.val[line - heldFirst])
   vm.heldFirstLine.val = mergedFirst
   vm.heldLines.val = merged
+  vm.heldLineContexts.val = mergedContexts
   vm.trimToWindow()
   true
 
@@ -453,6 +504,7 @@ proc discardHeldText*(vm: SourceVM) =
   ## revision is unavailable, so the pane shows §14's row rather than the last
   ## revision's text under the new revision's identity.
   vm.heldLines.val = @[]
+  vm.heldLineContexts.val = @[]
   vm.heldFirstLine.val = 1
   vm.heldRevision.val = SourceRevision()
   vm.totalLineCount.val = 0
@@ -484,6 +536,7 @@ proc createSourceVM*(store: ReplayDataStore; editor: EditorVM): SourceVM =
     let viewportTop = createSignal(1)
     let heldFirstLine = createSignal(1)
     let heldLines = createSignal(newSeq[string]())
+    let heldLineContexts = createSignal(newSeq[string]())
     let heldRevision = createSignal(SourceRevision())
     let totalLineCount = createSignal(0)
     let pendingRequests = createSignal(newSeq[SourceLineRequest]())
@@ -533,6 +586,7 @@ proc createSourceVM*(store: ReplayDataStore; editor: EditorVM): SourceVM =
       viewportTop: viewportTop,
       heldFirstLine: heldFirstLine,
       heldLines: heldLines,
+      heldLineContexts: heldLineContexts,
       heldRevision: heldRevision,
       totalLineCount: totalLineCount,
       pendingRequests: pendingRequests,

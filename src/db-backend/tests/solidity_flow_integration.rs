@@ -14,10 +14,8 @@
 //! - `solc` (Solidity compiler) on PATH or set `SOLC_PATH`
 //! - `anvil` (Foundry) on PATH for a local EVM node
 //!
-//! The test is `#[ignore]` by default — run with:
-//!   `cargo nextest run --run-ignored all test_solidity_flow`
-//! or:
-//!   `just test-solidity-flow`
+//! It runs in the recorder-tests lane (`just test-recorder-siblings`), which
+//! builds the recorder; locally, `just test-solidity-flow`.
 
 mod test_harness;
 
@@ -51,9 +49,12 @@ fn create_solidity_flow_config() -> FlowTestConfig {
             "sum_val".to_string(),
             "doubled".to_string(),
             "final_result".to_string(),
+            // A state variable the function assigns is a variable too.
+            "storedResult".to_string(),
         ],
-        // `storedResult` and `emit` should not appear as local variables
-        excluded_identifiers: vec!["storedResult".to_string(), "Computed".to_string()],
+        // The emitted event, the contract and the function are names, not
+        // variables.
+        excluded_identifiers: vec!["Computed".to_string(), "FlowTest".to_string(), "run".to_string()],
         expected_values,
     }
 }
@@ -67,15 +68,18 @@ fn create_solidity_flow_config() -> FlowTestConfig {
 /// Prerequisites: `codetracer-evm-recorder`, `solc`, and `anvil`.
 /// These are provided by the Nix dev shell (`nix develop`).
 #[test]
-#[ignore = "requires evm-recorder dev shell (solc, anvil); run via: just test-solidity-flow"]
 fn test_solidity_flow_integration() {
     // --- Prerequisite checks ---
-    assert!(
-        find_evm_recorder().is_some(),
-        "EVM recorder not found. \
+    if find_evm_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "solidity_flow_integration",
+            "EVM recorder not found. \
          Set CODETRACER_EVM_RECORDER_PATH or build codetracer-evm-recorder \
-         (run `cargo build` inside the codetracer-evm-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-evm-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     // solc and anvil are provided by the EVM recorder's dev shell.
     // The record_solidity_trace function uses direnv exec to access them,

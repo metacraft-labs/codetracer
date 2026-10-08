@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Online sharing
+
+- **`ct upload`, `ct download` and `ct login` talk to `api.codetracer.com`
+  by default.** Share links are still issued on `ide.codetracer.com`, and
+  links issued earlier keep working. A server chosen with `--base-url`,
+  `CODETRACER_REMOTE_BASE_URL` or `remote.config` is used as before, and links
+  are issued on that server. Releases that use `ide.codetracer.com` as their
+  server keep working.
+- **The default configuration no longer names a sharing server under
+  `traceSharing`.** Only `traceSharing.enabled` remains; an existing
+  configuration that still has `baseUrl`, `downloadApi`, `deleteApi` or
+  `getUploadUrlApi` still loads.
+
 ## 26.10.1 - 2026-10-01
 
 This is the first published release since 25.11.1 (26.08.1 was tagged but never

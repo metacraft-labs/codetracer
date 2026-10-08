@@ -1,0 +1,122 @@
+## portable_route — what `ct record --portable` does for the backend the
+## dispatcher selected.
+##
+## NORMATIVE SOURCE: `codetracer-specs/CLI/ct/record.md`, "Portable traces"
+## (owner-decided 2026-09-30).  `--portable` asks for a trace that replays
+## away from the recording host, or later on it after its files have changed.
+## It is a dispatcher-owned option (hence `CODETRACER_PORTABLE`), forwarded to
+## whichever backend records, each implementing it with its own mechanism; a
+## backend that does not implement it yet REFUSES it by name, because an
+## ordinary trace would look portable to the user and fail on the other
+## machine.
+##
+## Implemented today by the MCR backend.  It is forwarded as ct-mcr's own
+## environment twin, `CT_PORTABLE=on`, rather than as a flag: the MCR
+## recording runs `db-backend-record` -> `ct-native-replay record --backend
+## mcr` -> `ct-mcr record -o <out> -- <program> <args>`, and a flag appended
+## by `ct` travels behind the program to the recorded program itself, while
+## the environment reaches `ct-mcr` intact (`CT_PORTABLE` is `--portable`'s
+## CLI-Parameter-Patterns Rule-3 twin).
+##
+## PURE: a function of the selection and the options, so every row is asserted
+## by `src/tests/cli/record_portable_test.nim` without a recording.
+
+import std/strutils
+import recorder_env
+
+type
+  PortableRoute* = object
+    wanted*: bool            ## the recording must be portable
+    implied*: string         ## the option that implied it, "" when asked for
+    env*: seq[(string, string)]
+      ## environment to set for the recording process chain
+    refusal*: seq[string]    ## non-empty: print and exit 1, record nothing
+    warning*: seq[string]    ## non-empty: print to stderr and record anyway
+
+const
+  PortableEnvVar* = "CODETRACER_PORTABLE"
+  McrPortableEnvVar* = "CT_PORTABLE"
+
+proc parseOnOff(v: string): tuple[ok: bool, on: bool] =
+  case v.strip().toLowerAscii()
+  of "on", "1", "true", "yes": (true, true)
+  of "off", "0", "false", "no": (true, false)
+  else: (false, false)
+
+proc portableRoute*(viaDispatchTable: bool, recorderLabel: string,
+                    nativeBackend: string, portableFlag: bool,
+                    envValue: string, upload: bool): PortableRoute =
+  ## `viaDispatchTable`: the target is recorded by a dedicated (source-level)
+  ## recorder, named `recorderLabel`; otherwise by the native backend
+  ## `nativeBackend` (`mcr`, `rr`, `ttd`).  `envValue` is
+  ## `CODETRACER_PORTABLE` as found ("" when unset).
+  result = PortableRoute()
+  var explicitOff = false
+  if envValue.strip().len > 0:
+    let (ok, on) = parseOnOff(envValue)
+    if not ok:
+      result.refusal.add("error: " & PortableEnvVar & " must be 'on' or " &
+        "'off', got '" & envValue & "'")
+      return
+    if on: result.wanted = true
+    else: explicitOff = true
+  if portableFlag:
+    # `--portable` on the command line outranks the environment (CLI wins).
+    result.wanted = true
+    explicitOff = false
+
+  # `--upload` ships the trace to another machine: it implies `--portable`
+  # (CLI/ct/record.md, "Portable traces"; owner, 2026-10-01, "warn now,
+  # implement per backend").  Strict where the backend implements it -- the
+  # MCR backend.  Elsewhere the upload goes ahead with a named warning, and
+  # each backend becomes strict when its mechanism lands.
+  let mcr = not viaDispatchTable and nativeBackend == "mcr"
+  # rr: `ct-native-replay record` runs `rr pack` on every rr recording
+  # (codetracer-native-backend src/record.rs, `record_program`), which copies
+  # every file the trace mapped into the trace directory, and a failed pack
+  # fails the recording.  So an rr trace is always portable, and `--portable`
+  # needs nothing forwarded.  Measured 2026-10-01: a packed trace replays
+  # unchanged after its binary is rebuilt, and after the directory is moved.
+  let rr = not viaDispatchTable and nativeBackend == "rr"
+  let implemented = mcr or rr
+  if upload and not implemented and not result.wanted:
+    let what =
+      if viaDispatchTable: recorderLabel & " recordings"
+      else: "the '" & nativeBackend & "' backend"
+    result.warning.add("warning: --upload sends this trace to another " &
+      "machine, but --portable is not implemented for " & what & " yet: " &
+      "the trace does not carry the files it used, so it replays only where " &
+      "those files still exist unchanged.")
+    return
+  if upload and implemented and not result.wanted:
+    if explicitOff:
+      result.refusal.add("error: " & PortableEnvVar & "=" & envValue.strip() &
+        " contradicts --upload, which ships the trace to another machine " &
+        "and so requires a portable trace (--upload implies --portable); " &
+        "drop one of the two")
+      return
+    result.wanted = true
+    result.implied = "--upload"
+
+  if not result.wanted:
+    return
+  if viaDispatchTable:
+    # Deliberately says nothing about HOW the recorder stores sources: some
+    # source-level recorders already copy them next to the trace, others do
+    # not, and none has been checked against what `--portable` promises.
+    result.refusal.add("error: --portable is not implemented for " &
+      recorderLabel & " recordings yet, so `ct` cannot promise that the " &
+      "trace replays on another machine.")
+    result.refusal.add("help: record without --portable; see \"Portable " &
+      "traces\" in the `ct record` reference.")
+    return
+  if rr:
+    return    # every rr recording is packed; nothing to forward
+  if not mcr:
+    result.refusal.add("error: --portable is not implemented for the '" &
+      nativeBackend & "' backend yet, so it could not be replayed on " &
+      "another machine.")
+    result.refusal.add("help: record with --backend=mcr, which implements " &
+      "--portable, or record without it.")
+    return
+  result.env.add(recorderForwarding(["--portable"]).env)

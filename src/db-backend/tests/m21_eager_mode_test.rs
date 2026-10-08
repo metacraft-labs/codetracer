@@ -39,8 +39,8 @@
 //!    each of `on` / `lazy` / `off` / `unavailable`.
 //! 9. `e2e_history_popover_renders_origins_eager_on_omniscient_trace` and
 //!    `e2e_omniscience_flow_renders_origins_eager_on_omniscient_trace` are
-//!    Playwright SKIP stubs gated on `ct` binary availability (per M5
-//!    discipline).
+//!    Playwright stubs, ignored as pending because the specs they stand in
+//!    for were never written.
 //!
 //! ## Test-harness shape
 //!
@@ -911,16 +911,19 @@ fn test_eager_mode_indicator_renders_current_trace_mode() {
 // never been written. They now fail instead, because that is still true.
 // See `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
 //
-// They still self-skip when the `ct` binary at `src/build-debug/bin/ct`
-// (per AGENTS.md "Running Playwright e2e tests") is absent, because
-// without it the e2e lane cannot run at all.
+// A test for coverage that does not exist cannot pass, and failing it in
+// every run keeps the default suite red for a feature nobody has built. So
+// they are ignored as pending: the runner reports them as not run, never as
+// passed, and `--run-ignored` still reaches the loud failure below. The old
+// gate on the `ct` binary is gone; it only decided whether the stub skipped
+// silently or failed.
 // ---------------------------------------------------------------------------
 
 /// Fail loudly: this stub hands off to Playwright coverage that has never
 /// been written.
 ///
-/// Reaching this point means the e2e lane's prerequisite (`ct`) is
-/// present, so the stub was selected to run. It previously printed a SKIP
+/// Reaching this point means the stub was run explicitly (it is ignored as
+/// pending). It previously printed a SKIP
 /// sentinel and returned, which reported success for a browser test that
 /// does not exist — the M21 verification row it represents is backed by
 /// nothing executable.
@@ -946,22 +949,10 @@ fn missing_playwright_coverage(test_name: &str, what: &str) -> ! {
     );
 }
 
-fn ct_binary_available() -> bool {
-    // The same path pattern the just-test-e2e target consumes.
-    let candidate = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("build-debug")
-        .join("bin")
-        .join("ct");
-    candidate.is_file()
-}
-
 #[test]
+#[ignore = "pending: the Playwright spec this stub stands in for was never written \
+            (codetracer-specs/Testing/Known-Test-Failures.md)"]
 fn e2e_history_popover_renders_origins_eager_on_omniscient_trace() {
-    if !ct_binary_available() {
-        eprintln!("SKIPPED: ct binary not on PATH (M5 Playwright discipline)");
-        return;
-    }
     // The actual end-to-end run is driven by the Playwright suite (see
     // `just test-e2e`). This stub's only job is to fail if that suite
     // does not in fact cover the history-popover eager-origin
@@ -973,11 +964,9 @@ fn e2e_history_popover_renders_origins_eager_on_omniscient_trace() {
 }
 
 #[test]
+#[ignore = "pending: the Playwright spec this stub stands in for was never written \
+            (codetracer-specs/Testing/Known-Test-Failures.md)"]
 fn e2e_omniscience_flow_renders_origins_eager_on_omniscient_trace() {
-    if !ct_binary_available() {
-        eprintln!("SKIPPED: ct binary not on PATH (M5 Playwright discipline)");
-        return;
-    }
     missing_playwright_coverage(
         "e2e_omniscience_flow_renders_origins_eager_on_omniscient_trace",
         "eager origin rendering in the omniscience flow",

@@ -54,6 +54,7 @@
 ## which are templates.
 
 import std/[options, strutils, unittest]
+from std/unicode import runeLen, runeAtPos, toUTF8
 
 import isonim/core/async_compat
 import isonim_tui
@@ -64,11 +65,14 @@ import ../frame_viewer_binding
 import ../theme/capabilities
 import ../theme/image_capability
 import ../views/shell
+import ../runtime
+import ../tui_app
+import ../views/scrubber_track
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 145
+const ExpectedAssertions = 185
 
 var countedAssertions = 0
 
@@ -87,6 +91,8 @@ template ckEq(a, b: untyped) =
 const
   FrameWidth = 32
   FrameHeight = 24
+  SceneBoundaries = @[0, 12, 30]
+    ## PLAT-51: the frames the fixture's `/info` flags `clear`.
 
 func expectedChannel(x, y: int): Rgb =
   ## THE FIXTURE'S FORMULA, evaluated in this file — never read back out of the
@@ -128,7 +134,8 @@ proc recordingClient(): RecordedClient =
     playerUrl: "http://player.test/",
     getInfoProc: proc(): VisualReplayFuture[VisualReplayInfo] =
       newCompletedFuture(VisualReplayInfo(frameCount: 40, width: FrameWidth,
-                                          height: FrameHeight)),
+                                          height: FrameHeight,
+                                          clearFrames: SceneBoundaries)),
     getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
       newCompletedFuture(VisualReplayFrame(imageSrc: "data:image/png;base64,AAAA",
                                            geid: some(geid), frame: some(3),
@@ -678,6 +685,139 @@ suite "PLAT-15: the overlay in the shell":
         inc rowsOutside
     ck rowsOutside > 0
     checkpoint("rows outside the overlay compared: " & $rowsOutside)
+
+suite "PLAT-51: the pane's OWN scrubber (CodeTracer-TUI-Graphics.md §4)":
+  # The Timeline pane, which used to carry this pane's transport (CTUI-8), is
+  # removed from every product; the frame viewer's slider is its own, along
+  # its bottom row, as the desktop Video Player's Scrub Slider is. Driven
+  # through the runtime's own entry point (`handleToken`, the SGR bytes a
+  # terminal sends) and the shell's own painter (`shellScreenOf`); the host's
+  # half is `frame_viewer_binding.applyFrameSeek`, which `tui_session`'s
+  # `pcFrameSeek` arm calls, called here on the REAL ViewModel.
+
+  proc sgr(code, row, col: int; release = false; motion = false): string =
+    "\x1b[<" & $(code + (if motion: 32 else: 0)) & ";" & $(col + 1) & ";" &
+      $(row + 1) & (if release: "m" else: "M")
+
+  proc frameRuntime(frames: FrameViewerVM): TuiRuntime =
+    let caps = resolveCapabilities(
+      initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
+                      lang = "en_US.UTF-8"), initCapabilityFlags())
+    result = newTuiRuntime(newTuiApp(), caps, 120, 40)
+    discard result.enableLayoutBinding()
+    result.app.frameViewer = frameViewerModelFor(
+      frames, createPixelHistoryVM(frames.client),
+      capabilityFor("xterm-256color"), initDegradedStateSnapshot(),
+      raster = frameRaster(), hasRaster = true, pictureCols = 60,
+      pictureRows = 10)
+
+  proc glyphAt(screen: ShellScreen; row, col: int): string =
+    var c = 0
+    for span in screen.styledRows[row]:
+      let w = span.text.runeLen
+      if col >= c and col < c + w:
+        return span.text.runeAtPos(col - c).toUTF8
+      c += w
+
+  test "the bottom row is a slider over EVERY frame, marking scene boundaries":
+    let rec = recordingClient()
+    let frames = rec.loadedFrames()
+    let rt = frameRuntime(frames)
+    let screen = rt.shellScreenOf()
+    let area = screen.frameViewerOverlay
+    let fv = screen.frameViewer
+    ckEq fv.scrubberRow, area.row + area.height - 1
+    ckEq fv.scrubberWidth, area.width
+    # The thumb is at frame 3 of 40 — the first frame at the first cell, the
+    # last at the last.
+    ckEq fv.scrubberThumbCol, area.col + frameColumn(40, 3, area.width)
+    ckEq screen.glyphAt(fv.scrubberRow, fv.scrubberThumbCol), ThumbFullGlyph
+    # The scene boundaries `/info` reported, where they are on the track (0
+    # is not covered by the thumb at 3 on a track this wide).
+    ck frameColumn(40, 0, area.width) != frameColumn(40, 3, area.width)
+    for f in SceneBoundaries:
+      let x = frameColumn(40, f, area.width)
+      ck x in fv.sceneMarkCols
+      ckEq screen.glyphAt(fv.scrubberRow, area.col + x), SceneMarkGlyph
+    # The rest of the row is the track.
+    ckEq screen.glyphAt(fv.scrubberRow,
+                        area.col + frameColumn(40, 20, area.width)),
+         TrackHorizontalGlyph
+    # The picture and the history kept their rows above it.
+    ck fv.pictureRows > 0
+    ck fv.pictureRows + fv.historyRows + 1 < area.height
+
+  test "a press jumps there, a drag follows, the release settles":
+    let rec = recordingClient()
+    let frames = rec.loadedFrames()
+    let rt = frameRuntime(frames)
+    let screen = rt.shellScreenOf()
+    let area = screen.frameViewerOverlay
+    let row = screen.frameViewer.scrubberRow
+    # A press on the track's LAST cell: the last frame — and the ViewModel
+    # is asked for it.
+    var o = rt.handleToken(sgr(0, row, area.col + area.width - 1), 0)
+    ckEq o.paneClick.kind, pcFrameSeek
+    ckEq o.paneClick.index, 39'i64
+    ckEq o.paneClick.behaviour, "drag"
+    ck rt.app.frameViewer.scrubbing
+    ckEq rt.app.frameViewer.frameIndex, 39
+    applyFrameSeek(frames, rt.app.frameViewer, int(o.paneClick.index))
+    drainPlatformCallbacks()
+    ckEq frames.currentFrame.val, 39
+    ckEq frames.currentGeid.val, some(939'u64)
+    # Held, the pointer moves to the first cell: frame 0, live.
+    o = rt.handleToken(sgr(0, row, area.col, motion = true), 0)
+    ckEq o.paneClick.kind, pcFrameSeek
+    ckEq o.paneClick.index, 0'i64
+    applyFrameSeek(frames, rt.app.frameViewer, 0)
+    drainPlatformCallbacks()
+    ckEq frames.currentFrame.val, 0
+    # The same frame again is not a second request (one per frame crossed).
+    o = rt.handleToken(sgr(0, row, area.col, motion = true), 0)
+    ckEq o.paneClick.kind, pcNone
+    # The drag follows the pointer in x only: a motion off the row still
+    # scrubs.
+    let mid = area.col + frameColumn(40, 20, area.width)
+    o = rt.handleToken(sgr(0, row - 3, mid, motion = true), 0)
+    ckEq o.paneClick.index, 20'i64
+    # The release settles where it is let go.
+    o = rt.handleToken(sgr(0, row, mid, release = true), 0)
+    ckEq o.paneClick.kind, pcFrameSeek
+    ckEq o.paneClick.behaviour, "release"
+    ckEq o.paneClick.index, 20'i64
+    ck not rt.app.frameViewer.scrubbing
+    applyFrameSeek(frames, rt.app.frameViewer, 20)
+    drainPlatformCallbacks()
+    ckEq frames.currentFrame.val, 20
+    # The pane, rebuilt from the ViewModel as the host does, shows it.
+    let rebuilt = frameViewerModelFor(
+      frames, nil, capabilityFor("xterm-256color"),
+      initDegradedStateSnapshot())
+    ck rebuilt.titleText().contains("frame 20/40")
+    rt.app.frameViewer.open = true
+    let after = rt.shellScreenOf()
+    ckEq after.frameViewer.scrubberThumbCol, mid
+    # A motion after the release is nobody's.
+    o = rt.handleToken(sgr(0, row, area.col, motion = true), 0)
+    ckEq o.paneClick.kind, pcNone
+    ckEq rt.app.frameViewer.frameIndex, 20
+
+  test "a press elsewhere in the pane is not the scrubber's; one frame has none":
+    let rec = recordingClient()
+    let frames = rec.loadedFrames()
+    let rt = frameRuntime(frames)
+    let screen = rt.shellScreenOf()
+    let area = screen.frameViewerOverlay
+    let o = rt.handleToken(sgr(0, area.row + 1, area.col + 2), 0)
+    ck o.paneClick.kind != pcFrameSeek
+    ck not rt.app.frameViewer.scrubbing
+    ckEq rt.app.frameViewer.frameIndex, 3
+    var single = rt.app.frameViewer
+    single.frameCount = 1
+    let alone = frameViewerScreen(single, 60, 20)
+    ckEq alone.scrubberRow, -1
+    ckEq frameViewerScreen(rt.app.frameViewer, 60, 20).scrubberRow, 19
 
 suite "PLAT-15: the tally":
 

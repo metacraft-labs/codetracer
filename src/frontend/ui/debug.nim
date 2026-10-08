@@ -171,8 +171,8 @@ proc tryMountIsoNimDebugControls() =
   ## issue #555 down the wrong path; there is no such element in any HTML
   ## file in the repo.)
   ##
-  ## The div lives outside Karax's VDOM tree, so direct DOM manipulation
-  ## is safe and won't be overwritten by Karax redraw cycles.
+  ## The div lives outside the menu shell's rendered tree, so direct DOM
+  ## manipulation is safe and won't be overwritten by a menu-shell redraw.
   ## Safe to call multiple times — mounts only once per `isoNimDebugMounted`
   ## cycle.
   cdebug "tryMountIsoNimDebugControls: called, isoNimDebugMounted=" & $isoNimDebugMounted & " vmIsNil=" & $debugControlsVMInstance.isNil

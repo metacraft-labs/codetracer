@@ -74,12 +74,16 @@ fn run_masm_dap_test(
     excluded: Vec<&str>,
 ) {
     // --- Prerequisite checks ---
-    assert!(
-        find_miden_recorder().is_some(),
-        "Miden recorder not found. \
+    if find_miden_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "masm_flow_dap_test",
+            "Miden recorder not found. \
          Set CODETRACER_MIDEN_RECORDER_PATH or build codetracer-miden-recorder \
-         (run `cargo build` inside the codetracer-miden-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-miden-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
     let source_path = get_masm_source_path();
@@ -128,7 +132,6 @@ fn run_masm_dap_test(
 ///   local[4] = 10  (u32wrapping_add)
 ///   local[5] = 21  (u32wrapping_mul)
 #[test]
-#[ignore = "requires miden-recorder; run via: just test-masm-flow"]
 fn masm_flow_dap_variables() {
     let mut expected_values = HashMap::new();
     expected_values.insert("local[0]".to_string(), 3);
@@ -156,7 +159,6 @@ fn masm_flow_dap_variables() {
 ///   local[1] = 5   (counter after all iterations)
 ///   local[2] = 15  (accumulator: 1+2+3+4+5 = 15)
 #[test]
-#[ignore = "requires miden-recorder; run via: just test-masm-flow"]
 fn masm_flow_dap_loop_variables() {
     let mut expected_values = HashMap::new();
     expected_values.insert("local[0]".to_string(), 5);
@@ -179,7 +181,6 @@ fn masm_flow_dap_loop_variables() {
 ///   local[1] = 150 (75 * 2, if-branch taken)
 ///   local[2] = 1   (branch indicator: if-branch)
 #[test]
-#[ignore = "requires miden-recorder; run via: just test-masm-flow"]
 fn masm_flow_dap_conditional_variables() {
     let mut expected_values = HashMap::new();
     expected_values.insert("local[0]".to_string(), 75);
@@ -202,7 +203,6 @@ fn masm_flow_dap_conditional_variables() {
 ///   local[1] = 110 (55 > 50, so 55 * 2 = 110)
 ///   local[2] = 165 (55 + 110)
 #[test]
-#[ignore = "requires miden-recorder; run via: just test-masm-flow"]
 fn masm_flow_dap_nested_calls() {
     let mut expected_values = HashMap::new();
     expected_values.insert("local[0]".to_string(), 55);
@@ -226,7 +226,6 @@ fn masm_flow_dap_nested_calls() {
 ///   local[2] = 333 (mem[0] + mem[1] = 111 + 222)
 ///   local[3] = 666 (333 * 2)
 #[test]
-#[ignore = "requires miden-recorder; run via: just test-masm-flow"]
 fn masm_flow_dap_memory_ops() {
     let mut expected_values = HashMap::new();
     expected_values.insert("local[0]".to_string(), 111);
@@ -255,7 +254,6 @@ fn masm_flow_dap_memory_ops() {
 ///   local[3] = 55  (next: same as curr after last iteration)
 ///   local[4] = 11  (counter: N + 1 after loop exit)
 #[test]
-#[ignore = "requires miden-recorder; run via: just test-masm-flow"]
 fn masm_flow_dap_fibonacci() {
     let mut expected_values = HashMap::new();
     expected_values.insert("local[0]".to_string(), 10);
@@ -282,7 +280,6 @@ fn masm_flow_dap_fibonacci() {
 ///   local[3] = 255 (0x0F OR 0xFF = 0xFF)
 ///   local[4] = 240 (0x0F XOR 0xFF = 0xF0)
 #[test]
-#[ignore = "requires miden-recorder; run via: just test-masm-flow"]
 fn masm_flow_dap_bitwise() {
     let mut expected_values = HashMap::new();
     expected_values.insert("local[0]".to_string(), 15);

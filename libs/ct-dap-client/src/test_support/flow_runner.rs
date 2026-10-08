@@ -91,7 +91,8 @@ pub struct FlowData {
     pub steps: Vec<FlowStep>,
     /// All variable names extracted (may contain duplicates).
     pub all_variables: Vec<String>,
-    /// Map of variable name to its most recent value.
+    /// Map of variable name to its most recent value, in step order and, within
+    /// a step, the after value over the before value.
     pub values: HashMap<String, Value>,
 }
 
@@ -101,6 +102,9 @@ pub struct FlowStep {
     pub line: i64,
     pub variables: Vec<String>,
     pub before_values: HashMap<String, Value>,
+    /// Values of the variables this line mentions once it has run, read by
+    /// the backend at the next step.
+    pub after_values: HashMap<String, Value>,
 }
 
 fn parse_dap_int(value: &str) -> Option<i64> {
@@ -193,10 +197,23 @@ impl FlowData {
                 }
             }
 
+            // A line's after values are what it left behind: the value a
+            // variable it assigns holds once it has run. They are read after
+            // the before values so that, within a step, the post-line value
+            // is the most recent one.
+            let mut after_values = HashMap::new();
+            if let Some(av) = step_json.get("afterValues").and_then(|v| v.as_object()) {
+                for (var_name, value) in av {
+                    after_values.insert(var_name.clone(), value.clone());
+                    values.insert(var_name.clone(), value.clone());
+                }
+            }
+
             steps.push(FlowStep {
                 line,
                 variables,
                 before_values,
+                after_values,
             });
         }
 
@@ -845,6 +862,7 @@ mod tests {
                 line: 1,
                 variables: step_variables,
                 before_values,
+                after_values: HashMap::new(),
             }],
             all_variables,
             values,
@@ -856,6 +874,38 @@ mod tests {
     /// string (`i`), matching what `FlowData::extract_int_value` expects.
     fn int_flow_value(n: i64) -> Value {
         json!({"r": n.to_string(), "i": n.to_string()})
+    }
+
+    /// `afterValues` reach `FlowData`: a variable only a line's after values
+    /// carry is found, and within a step the after value is the most recent.
+    #[test]
+    fn after_values_are_read_and_win_within_their_step() {
+        let body = json!({
+            "viewUpdates": [{
+                "steps": [
+                    {
+                        "position": 2,
+                        "exprOrder": ["total", "count"],
+                        "beforeValues": {"count": {"r": "1", "i": "1"}},
+                        "afterValues": {
+                            "total": {"r": "4", "i": "4"},
+                            "count": {"r": "2", "i": "2"}
+                        }
+                    },
+                    {"position": 3, "exprOrder": [], "beforeValues": {}}
+                ]
+            }]
+        });
+        let flow = FlowData::from_event_body(&body).expect("parse");
+        assert_eq!(flow.steps[0].after_values["total"]["i"], "4");
+        assert_eq!(
+            flow.values["total"]["i"], "4",
+            "a value only after_values carries is found"
+        );
+        assert_eq!(
+            flow.values["count"]["i"], "2",
+            "the after value is the most recent in its step"
+        );
     }
 
     #[test]

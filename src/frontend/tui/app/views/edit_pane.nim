@@ -156,7 +156,7 @@ const
     ## model is Vim's.
   CleanMarker* = ""
 
-  EditLineNumberStyle* = CellStyle(fg: "bright_black")
+  EditLineNumberStyle* = CellStyle(role: srLineNumber)
     ## Deliberately the SAME cells as `gutter.VerifiedLineNumberStyle`.
     ##
     ## Not an oversight and not a reuse of the constant: the two say different
@@ -166,16 +166,16 @@ const
     ## warning tint. Naming it separately is what lets one change without the
     ## other.
 
-  EditCaretLineBackground* = "black"
+  EditCaretLineBackground* = srSurfaceCurrentLine
     ## The caret's row, tinted as a whole. Debug mode tints the execution
     ## line; Edit mode has no execution, so the row worth tinting is the one
     ## the user is typing on.
 
-  EditTitleStyle* = CellStyle(fg: "bright_yellow", bold: true)
-  EditPathStyle* = CellStyle(fg: "white")
-  EditDirtyStyle* = CellStyle(fg: "yellow", bold: true)
-  EditStatementStyle* = CellStyle(fg: "bright_black", italic: true)
-  EditRuleStyle* = CellStyle(fg: "bright_black")
+  EditTitleStyle* = CellStyle(role: srModeEdit, bold: true)
+  EditPathStyle* = CellStyle(role: srChromeText)
+  EditDirtyStyle* = CellStyle(role: srChromeNotification, bold: true)
+  EditStatementStyle* = CellStyle(role: srChromeMuted, italic: true)
+  EditRuleStyle* = CellStyle(role: srBorderPane)
   EditPaneRule* = "─"
 
 proc initEditPaneModel*(path = ""; sourceStatement = "";
@@ -368,7 +368,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
         g.restyle(row, lo, hi - lo,
                   proc(s: CellStyle): CellStyle =
                     var out2 = style
-                    out2.bg = s.bg
+                    out2.surface = s.surface
                     out2)
     inc result.renderedLines
 
@@ -380,7 +380,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
       g.restyle(row, area.col, area.width,
                 proc(s: CellStyle): CellStyle =
                   var out2 = s
-                  out2.bg = EditCaretLineBackground
+                  out2.surface = EditCaretLineBackground
                   out2)
       result.caretRow = row
       # The caret's cell is the gutter plus its cluster column, clamped into

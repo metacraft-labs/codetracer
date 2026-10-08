@@ -35,12 +35,11 @@ const
   IsoNimSectionContentClass* = "isonim-section-content"
   IsoNimAppHeaderText* = "IsoNim Rendering (experimental)"
 
-  IsoNimAppSectionSpecs*: array[9, IsoNimAppSectionSpec] = [
+  IsoNimAppSectionSpecs*: array[8, IsoNimAppSectionSpec] = [
     IsoNimAppSectionSpec(panelId: "state", title: "State"),
     IsoNimAppSectionSpec(panelId: "calltrace", title: "Calltrace"),
     IsoNimAppSectionSpec(panelId: "event-log", title: "Event Log"),
     IsoNimAppSectionSpec(panelId: "flow", title: "Flow"),
-    IsoNimAppSectionSpec(panelId: "timeline", title: "Timeline"),
     IsoNimAppSectionSpec(panelId: "search", title: "Search"),
     IsoNimAppSectionSpec(panelId: "point-list", title: "Point List"),
     IsoNimAppSectionSpec(panelId: "scratchpad", title: "Scratchpad"),
@@ -52,7 +51,7 @@ proc sectionId*(panelId: string): string =
 
 template renderIsoNimAppShellImpl(
     r, rootClass, stateContent, calltraceContent, eventLogContent,
-    flowContent, timelineContent, searchContent, pointListContent,
+    flowContent, searchContent, pointListContent,
     scratchpadContent, shellContent: untyped): untyped =
   ui(r):
     tdiv(class = rootClass):
@@ -78,11 +77,6 @@ template renderIsoNimAppShellImpl(
           text "Flow"
         tdiv(ref = flowContent, class = IsoNimSectionContentClass):
           discard
-      tdiv(class = IsoNimPanelSectionClass, id = sectionId("timeline")):
-        h3(class = IsoNimSectionHeaderClass):
-          text "Timeline"
-        tdiv(ref = timelineContent, class = IsoNimSectionContentClass):
-          discard
       tdiv(class = IsoNimPanelSectionClass, id = sectionId("search")):
         h3(class = IsoNimSectionHeaderClass):
           text "Search"
@@ -106,7 +100,7 @@ template renderIsoNimAppShellImpl(
 
 proc sectionHosts[N](
     stateContent, calltraceContent, eventLogContent, flowContent,
-    timelineContent, searchContent, pointListContent, scratchpadContent,
+    searchContent, pointListContent, scratchpadContent,
     shellContent: N): seq[IsoNimAppSectionHost[N]] =
   @[
     IsoNimAppSectionHost[N](
@@ -117,8 +111,6 @@ proc sectionHosts[N](
       panelId: "event-log", title: "Event Log", content: eventLogContent),
     IsoNimAppSectionHost[N](
       panelId: "flow", title: "Flow", content: flowContent),
-    IsoNimAppSectionHost[N](
-      panelId: "timeline", title: "Timeline", content: timelineContent),
     IsoNimAppSectionHost[N](
       panelId: "search", title: "Search", content: searchContent),
     IsoNimAppSectionHost[N](
@@ -131,19 +123,19 @@ proc sectionHosts[N](
 
 proc renderIsoNimAppShell*(r: MockRenderer): IsoNimAppShell[MockNode] =
   var stateContent, calltraceContent, eventLogContent, flowContent: MockNode
-  var timelineContent, searchContent, pointListContent: MockNode
+  var searchContent, pointListContent: MockNode
   var scratchpadContent, shellContent: MockNode
 
   let shell = renderIsoNimAppShellImpl(
     r, "isonim-app-shell", stateContent, calltraceContent, eventLogContent,
-    flowContent, timelineContent, searchContent, pointListContent,
+    flowContent, searchContent, pointListContent,
     scratchpadContent, shellContent)
 
   IsoNimAppShell[MockNode](
     root: shell,
     sections: sectionHosts(
       stateContent, calltraceContent, eventLogContent, flowContent,
-      timelineContent, searchContent, pointListContent, scratchpadContent,
+      searchContent, pointListContent, scratchpadContent,
       shellContent),
   )
 
@@ -151,18 +143,18 @@ when defined(js):
   proc renderIsoNimAppShell*(r: WebRenderer):
       IsoNimAppShell[isonim_dom.Element] =
     var stateContent, calltraceContent, eventLogContent: isonim_dom.Element
-    var flowContent, timelineContent, searchContent: isonim_dom.Element
+    var flowContent, searchContent: isonim_dom.Element
     var pointListContent, scratchpadContent, shellContent: isonim_dom.Element
 
     let shell = renderIsoNimAppShellImpl(
       r, "isonim-app-shell", stateContent, calltraceContent, eventLogContent,
-      flowContent, timelineContent, searchContent, pointListContent,
+      flowContent, searchContent, pointListContent,
       scratchpadContent, shellContent)
 
     IsoNimAppShell[isonim_dom.Element](
       root: shell,
       sections: sectionHosts(
         stateContent, calltraceContent, eventLogContent, flowContent,
-        timelineContent, searchContent, pointListContent, scratchpadContent,
+        searchContent, pointListContent, scratchpadContent,
         shellContent),
     )

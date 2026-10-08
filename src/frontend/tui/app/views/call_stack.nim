@@ -151,11 +151,11 @@ const
     ## header and its members are distinguishable in a plaintext read. The
     ## marker columns are never indented — see `frame_item.FrameRowSpec.indent`.
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  ThreadStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  ThreadStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
   EmptyStackText* = "no frames reported"
-  EmptyStackStyle* = CellStyle(fg: "bright_black", italic: true)
+  EmptyStackStyle* = CellStyle(role: srChromeMuted, italic: true)
 
 proc initCallStackModel*(frames: seq[StackFrame] = @[];
                          userRoots: seq[string] = @[];

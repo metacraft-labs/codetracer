@@ -21,7 +21,8 @@
 //! and asserts the result as the DEFECT rather than pinning it as correct.
 //!
 //! No mock. Both containers are built from this repository's own production
-//! encoders — `codetracer_trace_writer`'s `encode_meta_dat` for the header,
+//! encoders — the db-backend's `serialize_meta_dat` for the header (the
+//! container's source paths are its `paths.dat`),
 //! `encode_step_stream` for `steps.dat`/`steps.idx`, and the same
 //! `LinePositionSpace` the writer addresses steps with. The superseded fixture
 //! differs from the current one in exactly two respects, both of which it
@@ -35,12 +36,13 @@ use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{Line, StepId};
 use codetracer_trace_writer::line_position::LinePositionSpace;
-use codetracer_trace_writer::meta_dat::{FLAG_HAS_STEP_STREAM, encode_meta_dat};
 use codetracer_trace_writer::step_stream::{StepStream, StepStreamRecord, encode_step_stream};
 
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
-use db_backend::ctfs_trace_reader::meta_dat::LAST_SHIFTED_GLOBAL_INDEX_VERSION;
+use db_backend::ctfs_trace_reader::meta_dat::{
+    FLAG_HAS_STEP_STREAM, LAST_SHIFTED_GLOBAL_INDEX_VERSION, META_DAT_VERSION, MetaDat, serialize_meta_dat,
+};
 use db_backend::trace_reader::TraceReader;
 
 /// A canonical UUIDv7, which `meta.dat` has required since v3.
@@ -123,22 +125,24 @@ fn container(addresses: &[u64], version: u16) -> Container {
             .iter()
             .map(|a| StepStreamRecord::Step { global_line_index: *a })
             .collect(),
-        // Every step absolute, so each address is on the wire as written rather
-        // than as a delta from its predecessor. The fixture is about which
-        // integers the steps carry.
-        forced_absolute: vec![true; addresses.len()],
     };
     let encoded = encode_step_stream(&stream, 4, 3).expect("encode steps.dat");
 
-    let mut meta = encode_meta_dat(
-        RECORDING_ID,
-        "superseded_gli",
-        &[],
-        "/tmp",
-        "test-recorder",
-        &SOURCES.map(str::to_owned),
-        FLAG_HAS_STEP_STREAM,
-    );
+    let mut meta = serialize_meta_dat(&MetaDat {
+        version: META_DAT_VERSION,
+        flags: FLAG_HAS_STEP_STREAM,
+        recording_id: RECORDING_ID.to_owned(),
+        program: "superseded_gli".to_owned(),
+        args: Vec::new(),
+        workdir: "/tmp".to_owned(),
+        recorder_id: "test-recorder".to_owned(),
+        ext_flags: 0,
+        mcr: None,
+        replay_launch: None,
+        layout_snapshot: None,
+        filter_provenance: Vec::new(),
+        has_filter_provenance: false,
+    });
     // The current writer can no longer stamp a superseded version — that is
     // what the bump means — so the fixture sets the field back over a header it
     // did produce. Every other byte is what a writer at that version wrote.

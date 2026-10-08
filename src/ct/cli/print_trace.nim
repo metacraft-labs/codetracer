@@ -43,12 +43,14 @@ import results
 import codetracer_trace_writer/span_stream
 import codetracer_trace_writer/new_trace_reader
 import codetracer_ct_print_lib
+import ../trace/trace_kind
 
 type
   TraceType* = enum
     ttUnknown
     ttMcrTrace       ## MCR .ct file
     ttMaterialized   ## Legacy materialized trace (no longer supported by readers)
+    ttTestOracle     ## A `trace.json` event stream: test-oracle output, never a recording
     ttSpanManifest   ## JSONL span manifest (session_manifest.jsonl, codetracer_spans.jsonl)
     ttTraceDirectory ## Directory containing trace files
 
@@ -85,6 +87,8 @@ proc detectTraceType*(path: string): TraceType =
       return ttMcrTrace
     if path.endsWith(".jsonl"):
       return ttSpanManifest
+    if path.lastPathPart == TestOracleTraceFileName:
+      return ttTestOracle
     if path.endsWith(".bin") or path.endsWith(".json"):
       # Legacy materialized trace fragments — no longer accepted, but
       # report them so callers can produce a clear migration message.
@@ -107,8 +111,11 @@ proc detectTraceType*(path: string): TraceType =
       fileExists(path / "codetracer_spans.jsonl"):
     return ttSpanManifest
 
+  if fileExists(path / TestOracleTraceFileName):
+    return ttTestOracle
+
   # Legacy 3-file bundle detection (kept only for the migration message).
-  if fileExists(path / "trace.bin") or fileExists(path / "trace.json"):
+  if fileExists(path / "trace.bin"):
     return ttMaterialized
 
   return ttTraceDirectory
@@ -435,67 +442,11 @@ proc printCtfsTrace(path: string, opts: PrintOptions) =
   echo "  Use --filter markers for the boundary-crossing detail,"
   echo "      --format json for the complete decoded document."
 
-proc printJsonTrace(path: string, opts: PrintOptions) =
-  ## Print a legacy three-file JSON trace directory.
-  ##
-  ## This is the shape the browser recorder writes (`record-web`), so it
-  ## has to be first-class here rather than a migration message: a
-  ## cross-process session routinely mixes one of these with a CTFS
-  ## container from a server recorder.
-  let eventsPath = path / "trace.json"
-  if not fileExists(eventsPath):
-    echo fmt"Error: {eventsPath} not found"
-    quit(1)
-  let events = parseFile(eventsPath)
-  var program = ""
-  if fileExists(path / "trace_metadata.json"):
-    program = parseFile(path / "trace_metadata.json"){"program"}.getStr("")
-
-  # Re-shape the on-disk events into the same `{kind, ...}` view
-  # `buildFullDocument` produces, so the marker rendering below is shared
-  # with the CTFS path rather than duplicated per format.
-  var markers: seq[JsonNode] = @[]
-  var stepIndex = 0
-  var counts = initTable[string, int]()
-  if events.kind == JArray:
-    for raw in events.elems:
-      if raw.kind != JObject:
-        continue
-      for tag, body in raw.pairs:
-        counts.mgetOrPut(tag, 0) += 1
-        if tag == "Step":
-          inc stepIndex
-        elif tag == "Event":
-          var ev = newJObject()
-          ev["kind"] = newJString("io")
-          ev["step_id"] = newJInt(stepIndex)
-          let metadata = body{"metadata"}.getStr("")
-          var bytes: seq[byte] = @[]
-          for c in metadata:
-            bytes.add(byte(c))
-          addEventMetadata(ev, bytes)
-          if isCorrelationMarker(ev):
-            markers.add(ev)
-
-  if opts.filter == "markers":
-    if opts.format == "json":
-      var arr = newJArray()
-      for m in markers:
-        arr.add(m)
-      echo pretty(arr, indent = 2)
-    else:
-      renderMarkerTable(program, markers)
-    return
-
-  if opts.format == "json":
-    echo pretty(events, indent = 2)
-    return
-
-  echo fmt"JSON trace: {path}"
-  echo fmt"  Program: {program}"
-  for tag, n in counts.pairs:
-    echo fmt"  {tag}: {n}"
-  echo fmt"  Correlation markers: {markers.len}"
+proc refuseTestOracle(path: string) =
+  ## `ct print` decodes recordings; a `trace.json` is the test-oracle output
+  ## that is compared *against* `ct print`, so it is refused, not printed.
+  echo "Error: " & testOracleRefusal(path)
+  quit(1)
 
 proc printMcrTrace(inputPath: string, opts: PrintOptions) =
   ## Print a `.ct` container (materialized DB traces and MCR traces alike).
@@ -631,7 +582,7 @@ proc verifyMcrTrace(inputPath: string): VerifyResult =
   if requests.isSome:
     result.httpRequestCount = requests.get().len
 
-proc verifyTraceDirectory(path: string): VerifyResult =
+proc verifyTraceDirectory*(path: string): VerifyResult =
   ## Verify a directory containing traces or span manifests.
   result.traceType = ttTraceDirectory
   var traceCount = 0
@@ -656,7 +607,9 @@ proc verifyTraceDirectory(path: string): VerifyResult =
   for kind, entry in walkDir(path):
     if kind == pcDir:
       let subType = detectTraceType(entry)
-      if subType == ttMaterialized:
+      if subType == ttTestOracle:
+        result.errors.add(testOracleRefusal(entry))
+      elif subType == ttMaterialized:
         let subResult = verifyMaterializedTrace(entry)
         result.eventCount += subResult.eventCount
         result.callCount += subResult.callCount
@@ -687,6 +640,9 @@ proc runVerify*(opts: PrintOptions): int =
       verifySpanManifest(opts.path)
     of ttMaterialized:
       verifyMaterializedTrace(opts.path)
+    of ttTestOracle:
+      VerifyResult(traceType: ttTestOracle, valid: false,
+                   errors: @[testOracleRefusal(opts.path)])
     of ttMcrTrace:
       verifyMcrTrace(opts.path)
     of ttTraceDirectory:
@@ -734,7 +690,9 @@ proc runPrint*(opts: PrintOptions) =
   of ttSpanManifest:
     printSpanManifest(opts.path, opts)
   of ttMaterialized:
-    printJsonTrace(opts.path, opts)
+    printMaterializedTraceStub(opts.path, opts)
+  of ttTestOracle:
+    refuseTestOracle(opts.path)
   of ttMcrTrace:
     printMcrTrace(opts.path, opts)
   of ttTraceDirectory:
@@ -744,7 +702,7 @@ proc runPrint*(opts: PrintOptions) =
     echo ""
     echo "Expected one of:"
     echo "  - A .ct file (MCR trace)"
-    echo "  - A directory with trace.bin/trace.json (materialized trace)"
+    echo "  - A directory holding a .ct container"
     echo "  - A .jsonl file (span manifest)"
     echo "  - A directory containing traces"
     quit(1)

@@ -1,0 +1,86 @@
+{
+  "kind": "row",
+  "children": [
+    {
+      "kind": "stack",
+      "activeIndex": 0,
+      "weight": 20.0,
+      "children": [
+        {
+          "kind": "pane",
+          "pane": "fileTree"
+        },
+        {
+          "kind": "pane",
+          "pane": "vcs"
+        },
+        {
+          "kind": "pane",
+          "pane": "testResults"
+        }
+      ]
+    },
+    {
+      "kind": "pane",
+      "pane": "editor",
+      "weight": 25.0
+    },
+    {
+      "kind": "column",
+      "weight": 55.0,
+      "children": [
+        {
+          "kind": "row",
+          "weight": 50.0,
+          "children": [
+            {
+              "kind": "stack",
+              "activeIndex": 0,
+              "weight": 50.0,
+              "children": [
+                {
+                  "kind": "pane",
+                  "pane": "state"
+                },
+                {
+                  "kind": "pane",
+                  "pane": "scratchpad"
+                }
+              ]
+            },
+            {
+              "kind": "stack",
+              "activeIndex": 0,
+              "weight": 50.0,
+              "children": [
+                {
+                  "kind": "pane",
+                  "pane": "calltrace"
+                },
+                {
+                  "kind": "pane",
+                  "pane": "agentActivity"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+            {
+              "kind": "pane",
+              "pane": "eventLog"
+            },
+            {
+              "kind": "pane",
+              "pane": "terminalOutput"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

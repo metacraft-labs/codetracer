@@ -208,14 +208,15 @@ WINDOWS_CARGO_HOME_IGNORE = (([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]\.cargo[/
 
 NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
 
-# The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP beside every
-# binary it links: `<out dir>/macro_sourcemap_<out name>.json`, where
-# <out name> is the output file's name without its extension -- so
-# `bin/macro_sourcemap_ct.json` for `bin/ct`, and
-# `bin/macro_sourcemap_db-backend-record.json` for `bin/db-backend-record`.
-# It does so UNCONDITIONALLY (compiler/cgen.nim `cgenWriteModules`, fork rev
-# 0b5b5ec5, the one reprobuild's `nim-fork` package builds); `--sourcemap:on`
-# only decides whether the file has expansions in it. Stock Nim writes nothing.
+# The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP for every
+# binary it links, `macro_sourcemap_<out name>.json`, where <out name> is the
+# output file's name without its extension (`macro_sourcemap_ct.json` for
+# `bin/ct`). It does so UNCONDITIONALLY; `--sourcemap:on` only decides whether
+# the file has expansions in it. Stock Nim writes nothing. Fork revisions up to
+# 0b5b5ec5 (the one reprobuild's `nim-fork` package builds) put it beside the
+# binary (`bin/macro_sourcemap_ct.json`); later revisions put it in the
+# nimcache, beside the per-module `.c.map` source maps, which every rule here
+# points at /tmp/ct-nim-cache (already excluded by NIM_SIDE_OUTPUTS_IGNORE).
 #
 # That is a side output tup was never told about, and since the `ci` / default
 # dev shells switched `nim` to the fork (ccbb85a0a, landed on dev 2026-09-20)
@@ -249,9 +250,8 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 #     job failed.
 # So the Tupfile must NOT also declare them while this exclusion is here.
 #
-# Deliberately NOT added to `!nim_tester`, which DECLARES macro_sourcemap_%B.json
-# as an output: tup refuses to exclude a file that a rule generates (the last
-# case above).
+# For the same reason no rule declares the file, whichever directory the
+# compiler in the shell writes it to.
 NIM_MACRO_SOURCEMAP_IGNORE = ^.*[/\\]macro_sourcemap_[^/\\]*\.json$
 # Cargo writes CACHEDIR.TAG (and other metadata) into a temp directory whose
 # name is `<target_dir><RANDOM>` (e.g. `db_backend_targetF5RTUl/`) while
@@ -481,7 +481,7 @@ c %f\
 --warnings:on \
 --hints:on \
 --out:%o\
-c %f |> %B macro_sourcemap_%B.json | $(NIM_SIDE_OUTPUTS_IGNORE)
+c %f |> %B | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
 # mypy
 !mypy = |> ^ %f^ mypy --implicit-optional --cache-dir /tmp/.mypy-cache %f; |>

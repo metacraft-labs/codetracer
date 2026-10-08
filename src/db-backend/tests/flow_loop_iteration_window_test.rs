@@ -30,8 +30,8 @@
 //!
 //! This test records a real Python trace with the real recorder and drives the
 //! real DAP server, per the workspace policy of preferring integration tests
-//! that mock as little as possible. It skips loudly if the recorder or a
-//! suitable Python is unavailable.
+//! that mock as little as possible. A missing recorder or Python goes through
+//! `test_harness::skip_or_fail_missing_prerequisite`.
 
 mod test_harness;
 
@@ -163,13 +163,22 @@ fn request_raw_flow(client: &mut DapStdioTestClient, location: Location) -> RawF
 #[test]
 fn materialized_call_flow_window_is_stable_across_loop_iterations() {
     if test_harness::find_python_recorder().is_none() {
-        eprintln!("SKIPPED: Python recorder not found (set CODETRACER_PYTHON_RECORDER_PATH)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "materialized_call_flow_window_is_stable_across_loop_iterations",
+            "the Python recorder is not installed",
+            "run inside the codetracer dev shell with the codetracer-python-recorder sibling checked \
+             out, or set CODETRACER_PYTHON_RECORDER_PATH",
+        );
         return;
     }
     let (_python_cmd, version_label) = match test_harness::find_suitable_python() {
         Some(pair) => pair,
         None => {
-            eprintln!("SKIPPED: Python 3.10+ not found (needed for the recorder)");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "materialized_call_flow_window_is_stable_across_loop_iterations",
+                "no Python 3.10+ interpreter for the recorder",
+                "put a Python 3.10+ interpreter on PATH (the codetracer dev shell provides one)",
+            );
             return;
         }
     };

@@ -24,6 +24,13 @@ futures-util = { version = "0.3", default-features = false, features = [
   "sink",
   "std",
 ] }
+# `record-web` writes a browser session as a CTFS `.ct` through the pure-Rust
+# trace writer (no Nim toolchain).  Path dependencies on the sibling
+# `codetracer-trace-format` checkout, like db-backend's, so the writer here and
+# the reader there always come from the same revision.
+codetracer_trace_types = { path = "../../../codetracer-trace-format/codetracer_trace_types" }
+codetracer_trace_writer = { path = "../../../codetracer-trace-format/codetracer_trace_writer" }
+codetracer_ctfs = { path = "../../../codetracer-trace-format/codetracer_ctfs" }
 
 [dev-dependencies]
 # Used by the `record_web` smoke test to exercise the receiver from a real
@@ -33,3 +40,5 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = [
   "connect",
 ] }
 tempfile = "3"
+# Reads `record-web`'s recordings back the way any CTFS consumer does.
+codetracer_trace_reader = { path = "../../../codetracer-trace-format/codetracer_trace_reader" }

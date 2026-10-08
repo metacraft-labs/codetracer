@@ -13,10 +13,12 @@
 ## one copies: `host/capabilities.nim` performs the seven `getEnv`s and hands a
 ## `TerminalEnv` VALUE to `app/theme/capabilities.resolveCapabilities`, which
 ## decides what it means. Here, `host/layout_store.nim` performs the read, the
-## write and the remove, and this module decides
+## write and the remove (`readFile`, `moveFile`, `removeFile` — none of which
+## this module may name in code, and `std/os`, where they live, is not in its
+## import list), and this module decides
 ##
-##   * **what the document is called** — `layoutDocumentFileName`, a pure
-##     function of the recording's own path;
+##   * **what the document is called** — `LayoutDocumentFileName`, one name
+##     for the terminal product (PLAT-45);
 ##   * **what an unreadable one means** — `adoptLayoutDocument`, which returns a
 ##     typed `LayoutRestoreReport` and never a silent fallback;
 ##   * **whether there is anything to write at all** — `layoutPersistPlan`.
@@ -26,9 +28,9 @@
 ##
 ## ## WHERE THE DOCUMENT LIVES, AND WHAT IT IS KEYED BY
 ##
-## **Under the user's own state directory, one file per RECORDING.**
-## `host/layout_store.layoutDocumentPathFor` composes
-## `<state root>/tui-layouts/<layoutDocumentFileName(trace folder)>`.
+## **Under the user's own state directory, ONE file for the terminal product.**
+## `host/layout_store.layoutDocumentPath` composes
+## `<state root>/<LayoutDocumentFileName>`.
 ##
 ## Three decisions are packed into that sentence, and each had a plausible
 ## alternative:
@@ -36,34 +38,27 @@
 ##   1. **NOT INSIDE THE TRACE FOLDER.** A recording is an artefact that gets
 ##      copied, archived and shared — `ct host` serves one to a browser and
 ##      `src/ct/online_sharing/` uploads one — and it may sit on a read-only
-##      mount. A pane arrangement is one user's preference about one terminal.
-##      Writing it into the recording would put a preference inside a shared
-##      artefact and would make `--layout-binding` fail on a read-only trace,
-##      which is a new failure mode for a feature that is meant to be
-##      invisible when it is off.
+##      mount. A pane arrangement is one user's preference about one terminal,
+##      and writing it into the recording would put a preference inside a
+##      shared artefact.
 ##   2. **STATE, NOT CONFIG.** `$XDG_STATE_HOME/codetracer` rather than
 ##      `$XDG_CONFIG_HOME/codetracer`, because this is something the program
 ##      writes for itself and not something a user edits — the same call
 ##      `src/ct_test/run_store.defaultRunStoreRoot` already makes in this
 ##      repository, and the XDG basedir spec's own distinction.
-##   3. **KEYED BY THE RECORDING, so one recording's arrangement never applies
-##      to another.** This is the decision worth being explicit about, because
-##      the opposite — one arrangement for the whole front-end — is what most
-##      editors do. It is wrong here: the three responsive profiles show
-##      DIFFERENT PANE SETS, and an arrangement is built against the panes a
-##      particular recording made interesting ("on this one I keep the call
-##      stack docked and the event log wide"). A single global document would
-##      apply that silently to every other recording, and the user would have
-##      no way to tell a remembered arrangement from a wrong one. Two
-##      recordings, two files.
-##
-## The file name is a READABLE SLUG plus a DIGEST of the whole path, because
-## neither half is sufficient on its own: two recordings can share a basename
-## (`/a/calc.ct` and `/b/calc.ct`) so the slug cannot be the key, and a bare
-## digest gives a user a state directory of forty-character hex nobody can
-## audit or delete by hand. The digest is over the path the HOST canonicalised,
-## which is why this routine does not canonicalise: a pure function has no
-## business asking the filesystem what a symlink points at.
+##   3. **ONE DOCUMENT PER PRODUCT, NOT PER RECORDING (PLAT-45).** PLAT-6 keyed
+##      the document by the recording, on the argument that the three
+##      responsive profiles showed DIFFERENT PANE SETS, so an arrangement made
+##      against one recording's panes would silently misapply to another.
+##      PLAT-45 removed the premise: every product opens with the same panes
+##      (the shared default, folded only when a terminal is too small), so an
+##      arrangement is a preference about the TERMINAL, and the user's intent
+##      is stated plainly — each product remembers ITS OWN last layout and
+##      restores it on the next start. The desktop keeps its GoldenLayout
+##      config under `$XDG_CONFIG_HOME/codetracer/`, the GPUI window its own
+##      file beside this one (`gpui-layout.json`), and none of the three reads
+##      another's: a layout arranged in the terminal does not change the
+##      desktop's next start.
 ##
 ## ## AN UNREADABLE DOCUMENT IS A REPORT, NEVER A SILENT DEFAULT
 ##
@@ -246,13 +241,7 @@
 ## refuse: a claim about the population, inside the instrument whose value is
 ## its claim to be exhaustive.
 
-# `std/sha1` WARNS THAT IT IS DEPRECATED IN FAVOUR OF `checksums/sha1`, and that
-# package is not in this workspace's Nim distribution — measured, not assumed:
-# `import checksums/sha1` answers `cannot open file`. `src/ct_test/discovery.nim`
-# already imports `std/sha1` for the same reason, so the warning is this
-# repository's existing state rather than a new debt, and it is named here so the
-# next reader does not "fix" it into a module that is not there.
-import std/[json, options, strutils, sha1]
+import std/[json, options, strutils]
 
 import ./binding
 
@@ -262,9 +251,9 @@ type
   LayoutRestoreStatus* = enum
     ## What reading this session's saved arrangement produced.
     lrsNoDocument = "no-document"
-      ## There is nothing saved for this recording. The ordinary first run, and
-      ## NOT a failure: the session opens on the profile's default and says
-      ## nothing, because there is nothing to say.
+      ## The terminal has nothing saved. The ordinary first run, and NOT a
+      ## failure: the session opens on the shared default and says nothing,
+      ## because there is nothing to say.
     lrsRestored = "restored"
     lrsUnreadable = "unreadable"
       ## A document is there and this build cannot read it — corrupt bytes, a
@@ -290,7 +279,8 @@ type
       ## `message` so a check asserts a kind rather than matching prose.
 
   LayoutPersistIntent* = enum
-    ## What exiting should do with the document for this recording.
+    ## What exiting (or a committed change) should do with the terminal's
+    ## document.
     lpiWrite = "write"
       ## The user rearranged something. Write it.
     lpiRemove = "remove"
@@ -308,23 +298,11 @@ type
       ## The bytes to write, for `lpiWrite`; empty otherwise.
 
 const
-  LayoutDocumentDirName* = "tui-layouts"
-    ## The one directory under the state root. Named here rather than in the
-    ## host so the layout of the state directory is one decision in one place.
-
-  LayoutDocumentExt* = ".json"
-
-  LayoutKeySlugChars* = 40
-    ## How much of the recording's own name survives into the file name. Long
-    ## enough that `ls` in the state directory is readable, short enough that
-    ## a deeply named recording cannot push the total past a filesystem's
-    ## component limit when the digest is added.
-
-  LayoutKeyDigestChars* = 16
-    ## Hex characters of SHA-1 kept. 64 bits of a digest over an absolute path;
-    ## the digest exists to separate two recordings with the same basename, not
-    ## to resist an adversary, and a collision costs one user one remembered
-    ## arrangement.
+  LayoutDocumentFileName* = "tui-layout.json"
+    ## THE terminal product's remembered arrangement, directly under the state
+    ## root. One name, one file — see the module header's decision 3. Named
+    ## here rather than in the host so the layout of the state directory is
+    ## one decision in one place.
 
   NotJsonKind* = "NotJson"
   EmptyDocumentKind* = "EmptyDocument"
@@ -332,59 +310,6 @@ const
     ## The three failures that never reach `layout_model`'s decoder, named in
     ## the same vocabulary as the ones that do, so a caller reporting
     ## `report.kind` has one kind of thing to report.
-
-proc lastPathComponent(path: string): string =
-  ## The final component of `path`, ignoring trailing separators.
-  ##
-  ## Spelled here rather than taken from `std/os.lastPathPart`, because this
-  ## module imports no `std/os`: that module is where `getEnv`, `readFile` and
-  ## `removeFile` live, and the header's "nothing here does I/O of any kind" is
-  ## worth more as a fact about the import list than as a sentence. Both
-  ## separators are honoured, because a Windows host hands this a `\`.
-  var stop = path.len
-  while stop > 0 and (path[stop - 1] == '/' or path[stop - 1] == '\\'):
-    dec stop
-  var start = stop
-  while start > 0 and path[start - 1] != '/' and path[start - 1] != '\\':
-    dec start
-  path[start ..< stop]
-
-proc layoutDocumentSlug*(traceFolder: string): string =
-  ## The readable half of the file name: the recording's own last component,
-  ## reduced to characters every filesystem agrees about.
-  ##
-  ## A run of rejected characters collapses to ONE `-` rather than one each, so
-  ## a name that is mostly punctuation does not become a row of dashes; and the
-  ## result is trimmed of leading and trailing `-` so no file starts with one.
-  var slug = ""
-  var pendingDash = false
-  for ch in lastPathComponent(traceFolder):
-    if ch in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '.', '_'}:
-      if pendingDash and slug.len > 0:
-        slug.add '-'
-      pendingDash = false
-      slug.add ch
-      if slug.len >= LayoutKeySlugChars:
-        break
-    else:
-      pendingDash = true
-  if slug.len == 0:
-    # Every character was rejected, or the path was empty. A constant rather
-    # than an empty slug, so the file name never begins with its separator.
-    return "trace"
-  slug
-
-proc layoutDocumentFileName*(canonicalTraceFolder: string): string =
-  ## **THE KEY.** `<slug>-<digest><ext>` for one recording.
-  ##
-  ## `canonicalTraceFolder` must already be absolute and normalised — the host
-  ## does that, because resolving a path is a question for the filesystem and
-  ## this module does not ask the filesystem questions. Two spellings of one
-  ## recording therefore key to one document, and two recordings with the same
-  ## basename key to two, which is the whole job.
-  let digest = ($secureHash(canonicalTraceFolder)).toLowerAscii()
-  layoutDocumentSlug(canonicalTraceFolder) & "-" &
-    digest[0 ..< min(LayoutKeyDigestChars, digest.len)] & LayoutDocumentExt
 
 proc unreadableLayoutDocument*(path, kind, why: string): LayoutRestoreReport =
   ## **THE ONE PLACE A RESTORE FAILURE IS WORDED.** Exported because
@@ -431,7 +356,8 @@ proc adoptLayoutDocument*(b: LayoutBinding; path, text: string):
 
 proc layoutPersistPlan*(b: LayoutBinding; quarantined: bool):
     LayoutPersistPlan =
-  ## What to do with this recording's document on the way out.
+  ## What to do with the terminal's document after a committed change and on
+  ## the way out.
   ##
   ## The three answers and their reasons are in the module header; what is here
   ## is that they are a FUNCTION of two facts the session already has —

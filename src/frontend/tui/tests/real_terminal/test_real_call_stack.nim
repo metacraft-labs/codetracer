@@ -71,6 +71,7 @@ import ../../app/views/source_pane
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_call_stack as stackApp
+import ./derived_colours
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
@@ -170,7 +171,7 @@ template checkMarkerCells(sess: var TuiTestSession; row: int;
   if wantExecution:
     ck $execCell.rune == ExecutionFrameGlyph
     ck execCell.fg.kind == ckIndexed
-    ck execCell.fg.idx == 11'u8        # `bright_yellow`
+    ck execCell.fg.idx == ansiIndexOf(srGutterExecutionPointer)
     ck caBold in execCell.attrs
   else:
     ck $execCell.rune != ExecutionFrameGlyph
@@ -179,7 +180,7 @@ template checkMarkerCells(sess: var TuiTestSession; row: int;
   if wantInspection:
     ck $cursorCell.rune == InspectedFrameGlyph
     ck cursorCell.fg.kind == ckIndexed
-    ck cursorCell.fg.idx == 6'u8       # `cyan`
+    ck cursorCell.fg.idx == ansiIndexOf(srGutterInspectionPointer)
     ck caBold in cursorCell.attrs
   else:
     ck $cursorCell.rune != InspectedFrameGlyph
@@ -255,10 +256,10 @@ suite "CTUI-6 Tier 2: the call stack pane on a real terminal":
                  describeCell(libraryBadge))
       ck $userBadge.rune == "u"
       ck userBadge.fg.kind == ckIndexed
-      ck userBadge.fg.idx == 2'u8        # `green`
+      ck userBadge.fg.idx == ansiIndexOf(srFrameUserBadge)
       ck $libraryBadge.rune == "l"
       ck libraryBadge.fg.kind == ckIndexed
-      ck libraryBadge.fg.idx == 8'u8     # `bright_black`
+      ck libraryBadge.fg.idx == ansiIndexOf(srFrameLibrary)
       # THE WHOLE POINT, as one assertion: the two badges do not look the same.
       ck userBadge.fg.idx != libraryBadge.fg.idx
       ck paneRow(sess, 4, stackWidth).contains(LibraryBadge)
@@ -280,7 +281,7 @@ suite "CTUI-6 Tier 2: the call stack pane on a real terminal":
       checkpoint("expander cell " & describeCell(expander))
       ck $expander.rune == GroupCollapsedGlyph
       ck expander.fg.kind == ckIndexed
-      ck expander.fg.idx == 5'u8         # `magenta`
+      ck expander.fg.idx == ansiIndexOf(srFrameGroupMarker)
       ck $sess.cellAt(2, 2).rune == NoMarkerGlyph
 
       # ---- OSC 8 HYPERLINKS, WHICH THE ScreenBuffer CANNOT REPRESENT -------
@@ -408,24 +409,32 @@ suite "CTUI-6 Tier 2: the call stack pane on a real terminal":
       let pointerCol = stackWidth + gutter.gutterWidth -
                        GutterPointerCells - GutterGapCells
       let inspectionCell = sess.cellAt(inspectionRow, pointerCol + 1)
-      let executionCell = sess.cellAt(executionRow, pointerCol)
+      # PLAT-51: both marks are the middle cell of their three-cell field
+      # (` ▸ `, ` ▹ `); they were `-->` and ` > `.
+      let executionCell = sess.cellAt(executionRow, pointerCol + 1)
       checkpoint("inspection pointer " & describeCell(inspectionCell) &
                  ", execution pointer " & describeCell(executionCell))
-      ck $inspectionCell.rune == ">"
+      ck $inspectionCell.rune == InspectionPointerGlyph.strip()
       ck inspectionCell.fg.kind == ckIndexed
-      ck inspectionCell.fg.idx == 6'u8      # `cyan`
+      ck inspectionCell.fg.idx == ansiIndexOf(srGutterInspectionPointer)
       ck caBold in inspectionCell.attrs
-      ck $executionCell.rune == "-"
+      ck $executionCell.rune == ExecutionPointerGlyph.strip()
       ck executionCell.fg.kind == ckIndexed
-      ck executionCell.fg.idx == 11'u8      # `bright_yellow`
+      ck executionCell.fg.idx == ansiIndexOf(srGutterExecutionPointer)
       # …and the execution line still carries its background highlight, which
       # the inspection line does not. TWO DIFFERENT NUMBERS is what "rendered
       # distinctly" means to a reader looking at a screen rather than at a
-      # style struct.
-      ck executionCell.bg.kind == ckIndexed
-      ck executionCell.bg.idx == 4'u8       # `blue`
-      ck not (inspectionCell.bg.kind == ckIndexed and
-              inspectionCell.bg.idx == 4'u8)
+      # style struct. Read on the line's CODE (its first code cell): since
+      # PLAT-47 the band is the desktop's Monaco band, across the code column
+      # and not under the gutter where the pointers are.
+      let codeCol = stackWidth + gutter.gutterWidth
+      let executionCode = sess.cellAt(executionRow, codeCol)
+      let inspectionCode = sess.cellAt(inspectionRow, codeCol)
+      ck executionCode.bg.kind == ckIndexed
+      ck executionCode.bg.idx == ansiIndexOf(srLineExecution, background = true)
+      ck not (inspectionCode.bg.kind == ckIndexed and
+              inspectionCode.bg.idx == ansiIndexOf(srLineExecution,
+                                                   background = true))
       ck inspectionCell.fg.idx != executionCell.fg.idx
 
       sess.send($TestAppQuitByte)
@@ -461,7 +470,7 @@ suite "CTUI-6 Tier 2: the call stack pane on a real terminal":
       let openExpander = sess.cellAt(1, 2)
       checkpoint("expanded expander cell " & describeCell(openExpander))
       ck $openExpander.rune == GroupExpandedGlyph
-      ck openExpander.fg.idx == 5'u8
+      ck openExpander.fg.idx == ansiIndexOf(srFrameGroupMarker)
 
       # SCROLL, with a real wheel event, and read the SCROLLED REGION back.
       sess.sendMouseScroll(10, 4, sdDown)

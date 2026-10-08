@@ -106,15 +106,13 @@ type
     openedUrls: seq[string]
     fullscreenRequests: seq[bool]
 
-proc newFakeBridge(volume: StoreVolume; log: BridgeLog;
-                   granted = true; answered = true;
-                   shareOrigin = ""): BrowserBridge =
-  BrowserBridge(
-    volume: volume,
-    persistenceGranted: granted,
-    persistenceAnswered: answered,
-    ownerId: "tab-under-test",
-    nowMs: proc(): int64 = t0,
+proc newFakeTabBridge(log: BridgeLog): BrowserTabBridge =
+  ## The tab half of the fake, as `platform/browser_facades.nim` declares it.
+  ## Separate from `newFakeBridge` for the same reason the real
+  ## `newBrowserTabBridge` is separate from `newBrowserBridge`: these ten
+  ## operations are what a tab has, and the store volume and `WasmHost` below
+  ## are what the WEB deployment adds to them.
+  BrowserTabBridge(
     writeClipboardText: proc(text: string): auto =
       log.clipboardText.add text
       resolvedOk(),
@@ -140,7 +138,18 @@ proc newFakeBridge(volume: StoreVolume; log: BridgeLog;
     windowState: proc(): auto =
       resolvedOk(WindowState(maximized: false, minimized: false,
                              fullscreen: false, focused: true)),
-    onWindowStateChanged: proc(handler: proc(state: WindowState)) = discard,
+    onWindowStateChanged: proc(handler: proc(state: WindowState)) = discard)
+
+proc newFakeBridge(volume: StoreVolume; log: BridgeLog;
+                   granted = true; answered = true;
+                   shareOrigin = ""): BrowserBridge =
+  BrowserBridge(
+    volume: volume,
+    persistenceGranted: granted,
+    persistenceAnswered: answered,
+    ownerId: "tab-under-test",
+    nowMs: proc(): int64 = t0,
+    tab: newFakeTabBridge(log),
     shareLinkOrigin: shareOrigin,
     wasm: noWasmModules())
       # This suite's subject is the store, the entry layer and the shell
@@ -186,7 +195,7 @@ suite "the web instantiation satisfies every facade — NS2, §3.1":
     ## The shape check `{.requiresInit.}` makes cheap: a facade field added to
     ## any of the seven fails this build at `newWebPlatform`, exactly as NS1's
     ## `test_a_remote_instantiation_needs_no_signature_change` requires of the
-    ## remote stub.
+    ## container platform.
     check not web.platform.isNil
     check not web.platform.fs.isNil
     check not web.platform.process.isNil

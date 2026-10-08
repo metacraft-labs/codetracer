@@ -48,10 +48,11 @@ import ../build_session
 import ../edit_binding
 import ../runtime
 import ../theme/capabilities
+import ../theme/degradation
 import ../views/build_output
 import ../views/shell
 
-const ExpectedAssertions = 76
+const ExpectedAssertions = 84
 
 var countedAssertions = 0
 
@@ -171,15 +172,20 @@ suite "PLAT-16 §5: the verdict states, and the one this milestone added":
 suite "PLAT-16 §5: the verdict is in a PANE, in words and in colour":
 
   test "each verdict has its own colour, and no two share one":
+    # PLAT-46: each verdict is its own ROLE, and the roles' design-system
+    # colours are distinct on the 24-bit rung in both modes.
     var colours: seq[string] = @[]
     var verdicts = 0
     for v in BuildVerdict:
       inc verdicts
       let style = verdictStyle(v)
-      checkpoint($v & " -> " & style.fg)
-      ck style.fg.len > 0
-      ck style.fg notin colours
-      colours.add style.fg
+      let fg = roleStyle(style.role, cdTrueColor).fg
+      checkpoint($v & " -> " & $style.role & " " & fg)
+      ck style.role != srNone
+      ck fg.len > 0
+      ck fg notin colours
+      ck roleStyle(style.role, cdTrueColor, dmLight).fg.len > 0
+      colours.add fg
     ck verdicts == 5
     ck colours.len == 5
 
@@ -198,15 +204,15 @@ suite "PLAT-16 §5: the verdict is in a PANE, in words and in colour":
       text.add g.rowText(row) & "\n"
     checkpoint(text)
     ck screen.renderedLines == 1
-    ck text.contains(BuildPaneTitle)
-    ck text.contains("[failed]")
+    # PLAT-49: the first row is the verdict itself, not a `BUILD ───` title.
+    ck text.startsWith("[failed]")
     ck text.contains("just build")
     ck text.contains("exit 1")
     ck text.contains("undeclared identifier")
     # AND THE COLOUR IS ON THE TITLE CELL, so a Tier-2 `cellAt` read can say
     # which verdict it is looking at without reading a glyph.
-    ck g.styleAt(0, 0).fg == verdictStyle(bvFailed).fg
-    ck g.styleAt(0, 0).fg != verdictStyle(bvSucceeded).fg
+    ck g.styleAt(0, 0).role == verdictStyle(bvFailed).role
+    ck g.styleAt(0, 0).role != verdictStyle(bvSucceeded).role
 
   test "an idle pane is a statement rather than a blank":
     # `shell.paintPane` has no emptiness guard on this pane, deliberately: a
@@ -219,8 +225,7 @@ suite "PLAT-16 §5: the verdict is in a PANE, in words and in colour":
                              model)
     let row0 = g.rowText(0)
     checkpoint(row0)
-    ck row0.contains(BuildPaneTitle)
-    ck row0.contains("[idle]")
+    ck row0.startsWith("[idle]")
     ck row0.contains("no build has been run")
 
   test "the error heuristic offers lines and hides none":

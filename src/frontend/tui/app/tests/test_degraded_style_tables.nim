@@ -9,29 +9,32 @@
 ## monochrome screen distinguishes the same states by weight, underline and
 ## glyph."
 ##
-## ## THE PROPERTY, STATED EXACTLY
+## ## THE PROPERTY, STATED EXACTLY (PLAT-46)
 ##
-## For every `DistinctionGroup`, for every pair of roles in it whose SIXTEEN-
-## COLOUR appearances differ, the two appearances differ at every one of the
-## four tiers and in both border modes — except for the pairs named in
-## `degradation.PermittedMerges`, whose count is asserted.
+## For every `DistinctionGroup` that holds STATES OF ONE THING, for every pair
+## of roles in it whose appearances differ on ANY colour rung (16, 256, 24-bit
+## or the terminal palette, in either design-system mode), the two appearances
+## differ at every one of the tiers, in both modes, both palettes and both
+## border modes — except for the pairs named in `degradation.PermittedMerges`,
+## whose count is asserted.
 ##
-## Three parts of that sentence are load-bearing and each was chosen against an
-## alternative that would have made the suite weaker:
+## `dgSurface` is the one group the property is NOT stated over, and that is a
+## decision rather than an omission: canvas, panel, card, editor, status line
+## and input are REGIONS, told apart by where they are and by the box-drawing
+## borders between them (which stay at every tier), not states one cell can
+## switch between. The two surfaces that ARE states — selection and the current
+## line — carry `reverse` in monochrome and are asserted against the base
+## surfaces below.
+##
+## Load-bearing choices:
 ##
 ##   * **Per group, not over the whole table.** A pane title and a string
-##     literal never need to be told apart; they are never in the same place. A
-##     verified breakpoint and a disabled one always do. Requiring all 595 pairs
-##     to differ would have forced arbitrary attribute combinations onto roles
-##     that share no screen, which is a table nobody could read and a property
-##     nobody would keep.
-##   * **Only pairs that differ at 16 colours.** `srGutterTracepoint` and
-##     `srGutterInspectionPointer` are both `cyan bold` on the screen this
-##     front-end paints today. A lower tier cannot lose a distinction that the
-##     tier above it never had, and demanding one would be demanding that
-##     degradation ADD information.
+##     literal never need to be told apart; they are never in the same place.
+##   * **Only pairs that differ on some colour rung.** `srValueNoneValue` and
+##     `srValueOpaque` paint one token on every rung; a lower tier cannot lose
+##     a distinction the tiers above it never had.
 ##   * **The key is the appearance, not the colour.** `distinctionKey` is the
-##     style and the glyph — everything a terminal shows. Re-picking a palette
+##     style and the glyph — everything a terminal shows. Changing a token
 ##     moves every key and reddens nothing; two states arriving at one key
 ##     reddens exactly one pair and names it.
 ##
@@ -53,19 +56,19 @@
 
 import std/[strutils, tables, unicode, unittest]
 
+import ../theme/colour_math
 import ../theme/degradation
 import ../views/borders
-# `TracepointStyle` is published TWICE — `gutter`'s cyan gutter diamond and
-# `event_log`'s magenta row tint — and `views/shell` re-exports both. Imported
-# by name so the constants below are qualified rather than ambiguous.
-import ../views/gutter
 import ../views/shell
 import ../views/styled_row
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 1358
+const ExpectedAssertions = 3389
+  ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
+  ## current-line and inspection triangles, the role table traded the `[MOD]`
+  ## tag for the editor-text role, and one permitted merge was added.
 
 var countedAssertions = 0
 
@@ -75,33 +78,48 @@ template ck(condition: untyped) =
 
 const
   AllDepths = [cdMonochrome, cdAnsi16, cdAnsi256, cdTrueColor]
+  ColourDepths = [cdAnsi16, cdAnsi256, cdTrueColor]
   AllBorderModes = [bmUnicode, bmAscii]
-  AnsiNames = [
-    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-    "bright_black", "bright_red", "bright_green", "bright_yellow",
-    "bright_blue", "bright_magenta", "bright_cyan", "bright_white"]
+  AllModes = [dmDark, dmLight]
+  AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 35
-  ExpectedGroupCount = 7
-  ExpectedMergeCount = 1
+  ExpectedRoleCount = 128
+    ## PLAT-52: +4, the scrubbers' group (`srScrubberTrack`,
+    ## `srScrubberThumb`, `srScrubberThumbGround`, `srScrubberMark`).
+    ## PLAT-50: +4 — `srBorderMenu` (a dropdown's frame), `srDividerStrip`
+    ## (the `--dividers=strip` line), `srSurfaceTopBar` (the caption bar's
+    ## ground) and `srSurfaceMenu` (a dropdown's ground).
+    ## PLAT-49 part B review: +1, `srSurfaceActiveRow` — the ground of the
+    ## call the debugger is in (the desktop's `.event-selected`).
+    ## PLAT-47 added `srLineNumberActive` (the execution line's number, the
+    ## desktop's active line number) and the three syntax roles the desktop's
+    ## Monaco Python tokenizer colours on their own (a string's quote, a
+    ## square bracket, a decorator); its B4 the eight scopes the other Monaco
+    ## tokenizers colour on their own (type identifier, primitive type
+    ## keyword, doc comment, regexp, variable, namespace, attribute name,
+    ## metatag); its deliverable 6 the drop indication's tint
+    ## (`srSurfaceDropIndicator`, a background-only overlay colour).
+    ## PLAT-49 added the six variable-category tag roles (`srCategory*`, a
+    ## group of their own) and the omnibar field's surface
+    ## (`srSurfaceField`). Its part B the call trace's argument and return
+    ## parts (`srCallArgs`, `srCallReturn`, a group of their own) and the
+    ## inactive session tab's ground (`srSessionTab`). `srNone` plus 118
+    ## painted roles.
+  ExpectedGroupCount = 21
+    ## PLAT-52: `dgScrubber`.
+  ExpectedMergeCount = 22
+    ## PLAT-51: + (chrome-text, editor-text), the omnibox's editor foreground.
     ## `degradation.PermittedMerges`'s size, asserted so a second merge cannot
-    ## be added without the number moving in a diff a reviewer reads. The same
-    ## construction `testing/dual_snap.CrossTierExclusionCount` uses.
+    ## be added without the number moving in a diff a reviewer reads.
 
-proc capsFor(depth: ColorDepth; mode: BorderMode;
-             theme = utDark): TerminalCapabilities =
+proc capsFor(depth: ColorDepth; mode: BorderMode; design = dmDark;
+             palette = pkDesign): TerminalCapabilities =
   TerminalCapabilities(colors: depth, borders: mode, mouse: true,
                        synchronizedOutput: false, kittyKeyboard: false,
-                       theme: theme)
-
-const AllThemes = [utDark, utLight, utPlain, utMonokai]
-  ## §6.2's four published themes — CTUI-14. Spelled as an array rather than
-  ## iterated from `UiTheme` so the sweep below can assert its comparison count
-  ## against a NUMBER a reader can check, which is what
-  ## `compared == pairs * depths * modes * themes` is for.
+                       theme: (if design == dmLight: utLight else: utDark),
+                       mode: design, palette: palette)
 
 proc isMerged(a, b: SemanticRole): bool =
-  ## Whether this pair is one `PermittedMerges` names, in either order.
   for (x, y, _) in PermittedMerges:
     if (x == a and y == b) or (x == b and y == a):
       return true
@@ -131,15 +149,23 @@ proc isRgb(colour: string): bool =
   colour.len == 7 and colour[0] == '#'
 
 proc cellsOf(s: string): int =
-  ## `app/views/styled_row.cellWidthOf`, named locally so the checks below read
-  ## as a width comparison. The production width table, not `len` — a
-  ## three-byte box-drawing glyph is one cell and `len` says three.
   cellWidthOf(s)
+
+proc differsOnSomeColourRung(a, b: SemanticRole): bool =
+  ## Whether ANY coloured rung, in either mode or palette, tells the two
+  ## apart — the set a lower rung could lose.
+  for design in AllModes:
+    for palette in AllPalettes:
+      for depth in ColourDepths:
+        if roleStyle(a, depth, design, palette) !=
+           roleStyle(b, depth, design, palette):
+          return true
+  false
 
 proc sampleScreen(width, height: int): seq[StyledRow] =
   ## A REAL painted screen, not a hand-made row.
   ##
-  ## `newShellModel` + `shellStyledRows` is the same path `app/tui_app.nim`
+  ## `newShellModel` + `shellScreen(...).styledRows` is the same path `app/tui_app.nim`
   ## takes for a frame, so the styles this degrades are the ones eighteen view
   ## modules actually paint. A hand-written row would degrade whatever the test
   ## author remembered to put in it.
@@ -154,172 +180,190 @@ proc sampleScreen(width, height: int): seq[StyledRow] =
   ## through an assertion.
   var model = newShellModel(width, height,
                             notification = "capability negotiation")
-  model.timeline = initTimelineBarModel(
-    minTick = 0'u64, maxTick = 400'u64, currentTick = 120'u64,
-    boundsKnown = true)
+  # (PLAT-51: the Timeline bar filled here was removed with the pane; the
+  # header's tick counters are the second painted model.)
+  model.header.tick = 120
+  model.header.totalTicks = 400
   model.callStack = initCallStackModel(
     frames = @[StackFrame(name: "main", path: "/tmp/main.py", line: 12),
                StackFrame(name: "evaluate", path: "/tmp/main.py", line: 40)],
     userRoots = @["/tmp"], executionFrame = 0, selected = 0)
-  shellStyledRows(model, width, height)
+  shellScreen(model, width, height).styledRows
 
 suite "CTUI-11 Tier 1: degraded style tables":
 
-  test "the table's shape: 35 roles in 7 groups, and one named merge":
+  test "the table's shape: every role in a group, and one named merge":
     checkpoint("roles: " & $roleCount() & " groups: " & $groupCount())
     ck roleCount() == ExpectedRoleCount
     ck groupCount() == ExpectedGroupCount
-    # EVERY GROUP IS NON-EMPTY and the partition is total: a role whose
-    # `groupOf` arm went missing would land in some group's `..` range silently,
-    # and a group with no members would make its pair sweep vacuous.
     var partitioned = 0
     for group in DistinctionGroup:
       let members = rolesIn(group)
       checkpoint($group & ": " & $members.len & " role(s)")
-      ck members.len >= 2
+      # `dgNone` holds exactly `srNone`; every real group has two states or
+      # more, or its pair sweep would be vacuous.
+      if group == dgNone:
+        ck members == @[srNone]
+      else:
+        ck members.len >= 2
       partitioned += members.len
     ck partitioned == ExpectedRoleCount
-    checkpoint("permitted merges: " & $PermittedMerges.len)
     ck PermittedMerges.len == ExpectedMergeCount
     for (a, b, why) in PermittedMerges:
-      # Each merge names its own justification, and the pair is in ONE group —
-      # a merge across groups would be meaningless, because the property is
-      # only ever asserted within one.
       ck why.len > 40
       ck groupOf(a) == groupOf(b)
 
+  test "every painted role names a design-system token, and nothing else":
+    # PLAT-46 deliverable 2. A role with neither a foreground nor a background
+    # token paints nothing of its own; those are the deliberate "no mark"
+    # states, and they are listed so a role cannot lose its binding quietly.
+    var bound = 0
+    var bare: seq[SemanticRole] = @[]
+    for role in SemanticRole:
+      let s = spec(role)
+      if s.hasFg or s.hasBg:
+        inc bound
+      else:
+        bare.add role
+    checkpoint("bound: " & $bound & " bare: " & $bare)
+    ck bare == @[srNone, srGutterNoMark, srLineOrdinary, srValueUnchanged]
+    ck bound == ExpectedRoleCount - 4
+    # THE 24-BIT RUNG IS THE TOKEN'S HEX, in both modes, for every bound role.
+    var checked = 0
+    for design in AllModes:
+      for role in SemanticRole:
+        let s = spec(role)
+        let rgb = roleStyle(role, cdTrueColor, design)
+        if s.hasFg:
+          ck rgb.fg == tokenHex(s.fg, design)
+          inc checked
+        if s.hasBg:
+          ck rgb.bg == tokenHex(s.bg, design)
+          inc checked
+    ck checked >= 2 * (ExpectedRoleCount - 4)
+
+  test "the roles PLAT-46 names are bound to the tokens it names":
+    # THE BINDING, against the milestone's own words rather than against the
+    # table: "keyword → colors/editor/syntax/keyword, pane border →
+    # colors/ui/border/secondary, focused pane border → colors/ui/border/focus,
+    # pane title → colors/ui/text/primary/label, muted chrome →
+    # colors/ui/text/primary/caption-subtle", the surfaces (panel on
+    # surface/base/panel, the editor on editor/surface/primary, the current
+    # line on editor/syntax/current-line), and the desktop's GoldenLayout strip
+    # for the tabs. Pointing any of these at another token reddens this case.
+    # PLAT-47 re-bound four of them, each to what the DESKTOP measures: the
+    # editor to its Monaco theme (keyword, the editor ground, the execution
+    # line, the selection — generated `editor-theme/*` tokens), the focused
+    # border to the desktop's selected-panel outline (ui/border/primary), and
+    # the tab strip onto the pane's surface — which PLAT-49 re-bound by the
+    # user's direction: the strip on its own ground, the selected tab on a
+    # background and in a foreground of its own.
+    const Fg = [(srSyntaxKeyword, dtEditorThemeRuleKeyword),
+                (srBorderPane, dtColorsUiBorderSecondary),
+                (srBorderFocused, dtColorsUiBorderPrimary),
+                (srChromeTitle, dtColorsUiTextPrimaryLabel),
+                (srChromeMuted, dtColorsUiTextPrimaryCaptionSubtle),
+                (srTabActive, dtColorsUiTextPrimaryHeadings),
+                (srTabInactive, dtColorsUiTextPrimaryDisabled)]
+    const Bg = [(srSurfaceCanvas, dtColorsUiSurfaceBaseCanvas),
+                (srSurfacePanel, dtColorsUiSurfaceBasePanel),
+                (srSurfaceCard, dtColorsUiSurfaceBaseCard),
+                (srSurfaceEditor, dtEditorThemeGround),
+                (srSurfaceStatusLine, dtColorsUiSurfaceBaseRaised),
+                (srSurfaceInput, dtColorsUiSurfaceInputDefault),
+                (srSurfaceSelection, dtEditorThemeSelection),
+                (srSurfaceCurrentLine, dtEditorThemeExecutionLine),
+                (srLineExecution, dtEditorThemeExecutionLine),
+                # PLAT-50 (the user, 2026-10-02): the strip and inactive
+                # tabs on the desktop's ground behind its tabs; the field on
+                # the input surface (raised was "black" / "white").
+                (srTabBar, dtColorsUiSurfacePrimaryDefault),
+                (srTabActive, dtColorsUiSurfacePrimaryTertiary),
+                (srTabInactive, dtColorsUiSurfacePrimaryDefault),
+                (srSurfaceField, dtColorsUiSurfaceInputDefault),
+                (srSurfaceTopBar, dtColorsUiSurfacePrimaryDefault),
+                (srSurfaceMenu, dtColorsUiSurfacePrimaryDefault)]
+    for (role, token) in Fg:
+      ck spec(role).hasFg and spec(role).fg == token
+    for (role, token) in Bg:
+      ck spec(role).hasBg and spec(role).bg == token
+
+  test "the 256- and 16-colour rungs are the NEAREST entries to the tokens":
+    # PLAT-46 deliverable 6: DERIVED from each role's hex, not a second table.
+    # Asserted against `colour_math`'s nearest-entry search run HERE, so a rung
+    # that came from anywhere else — a stale table, a hand-picked index — is a
+    # mismatch. `tests/test_plat46_token_derivation.nim` is the other half:
+    # change a token in a scratch build and every rung moves.
+    var checked = 0
+    for design in AllModes:
+      for role in SemanticRole:
+        let s = spec(role)
+        if not s.hasFg:
+          continue
+        let c = parseHexColour(tokenHex(s.fg, design))
+        ck roleStyle(role, cdAnsi256, design).fg ==
+           "indexed:" & $nearestXterm256(c)
+        ck roleStyle(role, cdAnsi16, design).fg == AnsiNames[nearestAnsi16Family(c)]
+        inc checked
+    ck checked >= 150
+
   test "within every group, every distinct state stays distinguishable":
-    # THE PROPERTY. See this suite's header for why it is stated per group and
-    # over pairs that differ at sixteen colours.
+    # THE PROPERTY, over roles x tiers x modes x palettes x border modes.
     var compared = 0
     var eligiblePairs = 0
     var collisions: seq[string] = @[]
     var mergesSeen = 0
     for group in DistinctionGroup:
+      if group in {dgNone, dgSurface}:
+        continue
       let members = rolesIn(group)
       for i in 0 ..< members.len:
         for j in i + 1 ..< members.len:
           let a = members[i]
           let b = members[j]
-          if ansi16Style(a) == ansi16Style(b):
-            # Already one appearance at the tier above; a lower tier cannot
-            # lose what was never there.
-            continue
           if isMerged(a, b):
             inc mergesSeen
             continue
+          if not differsOnSomeColourRung(a, b):
+            continue
           inc eligiblePairs
-          for depth in AllDepths:
-            for mode in AllBorderModes:
-              let caps = capsFor(depth, mode)
-              let keyA = distinctionKey(a, caps)
-              let keyB = distinctionKey(b, caps)
-              inc compared
-              if keyA == keyB:
-                collisions.add $group & " " & $a & " == " & $b & " at " &
-                               $depth & "/" & $mode & ": " & keyA
+          for design in AllModes:
+            for palette in AllPalettes:
+              for depth in AllDepths:
+                for mode in AllBorderModes:
+                  let caps = capsFor(depth, mode, design, palette)
+                  let keyA = distinctionKey(a, caps)
+                  let keyB = distinctionKey(b, caps)
+                  inc compared
+                  if keyA == keyB:
+                    collisions.add $group & " " & $a & " == " & $b &
+                      " at " & $depth & "/" & $mode & ": " & keyA
     checkpoint("eligible pairs: " & $eligiblePairs &
                "  comparisons: " & $compared &
                "  permitted merges skipped: " & $mergesSeen)
-    if collisions.len > 0:
-      for c in collisions:
-        checkpoint("COLLAPSE: " & c)
+    for c in collisions:
+      checkpoint("COLLAPSE: " & c)
     ck collisions.len == 0
-    # THE COMPARISON COUNT AGAINST ITS PARAMETERS. `collisions.len == 0` is
-    # satisfied by a sweep that compared nothing, which is what a `rolesIn` that
-    # stopped matching would produce.
-    ck compared == eligiblePairs * AllDepths.len * AllBorderModes.len
-    ck eligiblePairs >= 60
+    ck compared == eligiblePairs * AllModes.len * AllPalettes.len *
+                   AllDepths.len * AllBorderModes.len
+    ck eligiblePairs >= 150
     ck mergesSeen == ExpectedMergeCount
 
-  test "no THEME collapses a distinction, over all four of them":
-    # CTUI-14. A theme is a PALETTE and never a distinction, and the case above
-    # asserts that for `utDark` alone because `roleStyle`'s theme parameter
-    # defaults to it. This is the same property over the whole cross product —
-    # roles x depths x border modes x themes — and it is the check that would
-    # redden if a hue picked for `light` or `monokai` happened to collide with
-    # another role's in the same group.
-    var compared = 0
-    var eligiblePairs = 0
-    var collisions: seq[string] = @[]
-    for group in DistinctionGroup:
-      let members = rolesIn(group)
-      for i in 0 ..< members.len:
-        for j in i + 1 ..< members.len:
-          let a = members[i]
-          let b = members[j]
-          if ansi16Style(a) == ansi16Style(b):
-            continue
-          if isMerged(a, b):
-            continue
-          inc eligiblePairs
-          for theme in AllThemes:
-            for depth in AllDepths:
-              for mode in AllBorderModes:
-                let caps = capsFor(depth, mode, theme)
-                inc compared
-                if distinctionKey(a, caps) == distinctionKey(b, caps):
-                  collisions.add $theme & " " & $group & " " & $a & " == " &
-                                 $b & " at " & $depth & "/" & $mode
-    checkpoint("eligible pairs: " & $eligiblePairs & "  comparisons: " &
-               $compared & " over " & $AllThemes.len & " theme(s)")
-    if collisions.len > 0:
-      for c in collisions:
-        checkpoint("THEME COLLAPSE: " & c)
-    ck collisions.len == 0
-    # THE COMPARISON COUNT AGAINST ITS PARAMETERS, which is what says the theme
-    # axis was actually swept rather than iterated over one value.
-    ck compared == eligiblePairs * AllThemes.len * AllDepths.len *
-                   AllBorderModes.len
-    ck AllThemes.len == 4
-
-  test "a theme moves the COLOURS and never the attributes":
-    # THE OTHER HALF OF "a theme is a palette". `ansi256Style` and
-    # `trueColorStyle` are built by widening `ansi16Style` and overwriting `fg`
-    # / `bg`, so a theme cannot reach a weight — and that is asserted rather
-    # than left to the construction, because the construction is one edit away
-    # from being different.
-    var moved = 0
-    var roles = 0
-    for role in SemanticRole:
-      inc roles
-      let dark = ansi256Style(role, utDark)
-      for theme in AllThemes:
-        let tinted = ansi256Style(role, theme)
-        ck tinted.bold == dark.bold
-        ck tinted.italic == dark.italic
-        ck tinted.underline == dark.underline
-        ck tinted.reverse == dark.reverse
-        let rgb = trueColorStyle(role, theme)
-        ck rgb.bold == dark.bold
-        ck rgb.italic == dark.italic
-        if theme notin [utDark, utPlain] and tinted != dark:
-          inc moved
-    checkpoint($roles & " role(s); " & $moved &
-               " (theme, role) pair(s) whose colour moved off the dark table")
-    ck roles == ExpectedRoleCount
-    # THE NON-VACUITY FLOOR, and the important one here: a `tintsFor` that
-    # answered `DarkTints` for everything would satisfy every equality above
-    # and move nothing. Two themes x at least twenty-five tinted roles.
-    ck moved >= 50
-    # …AND `utPlain` IS DELIBERATELY THE DARK TABLE, because it never reaches a
-    # coloured rung at all: `resolveColorDepth` sends it to `cdMonochrome`.
-    for role in SemanticRole:
-      ck ansi256Style(role, utPlain) == ansi256Style(role, utDark)
+  test "the highlight surfaces are told apart from the base ones in monochrome":
+    # The two SURFACE roles that are states (a selected row, the current line)
+    # must survive the bottom rung, where the base surfaces carry nothing.
+    for highlight in [srSurfaceSelection, srSurfaceCurrentLine,
+                      srLineExecution]:
+      for base in [srSurfaceCanvas, srSurfacePanel, srSurfaceCard,
+                   srSurfaceEditor, srSurfaceStatusLine]:
+        ck roleStyle(highlight, cdMonochrome) != roleStyle(base, cdMonochrome)
 
   test "MUTATION ARM: the sweep reports a collapse when there is one":
-    # A comparison that cannot be made to fail is indistinguishable from one
-    # that is not reading the table. The COMPARISON is the same
-    # `distinctionKey` the case above uses; what is mutated is the pair handed
-    # to it.
     let caps = capsFor(cdMonochrome, bmUnicode)
-    # A genuine pair, which must differ …
     let realA = distinctionKey(srGutterBreakpoint, caps)
     let realB = distinctionKey(srGutterBreakpointDisabled, caps)
     checkpoint("breakpoint=" & realA & "  disabled=" & realB)
     ck realA != realB
-    # … and a COLLAPSED pair, built by giving two roles one appearance, which
-    # the same comparison must report as equal.
     let collapsed = distinctionKey(
       RoleAppearance(style: roleStyle(srGutterBreakpoint, cdMonochrome),
                      glyph: roleGlyph(srGutterBreakpoint, bmUnicode)))
@@ -327,9 +371,6 @@ suite "CTUI-11 Tier 1: degraded style tables":
       RoleAppearance(style: roleStyle(srGutterBreakpoint, cdMonochrome),
                      glyph: roleGlyph(srGutterBreakpoint, bmUnicode)))
     ck collapsed == collapsedTwin
-    # … and the two halves of the key each matter on their own: a pair that
-    # differs ONLY in glyph and a pair that differs ONLY in style must both be
-    # reported as distinct, or the key is reading one half.
     let styleOnly = distinctionKey(
       RoleAppearance(style: CellStyle(bold: true), glyph: "x"))
     let glyphOnly = distinctionKey(
@@ -339,44 +380,46 @@ suite "CTUI-11 Tier 1: degraded style tables":
       RoleAppearance(style: CellStyle(italic: true), glyph: "x"))
     ck styleOnly != attrOnly
 
-  test "the tier invariant holds for every role, on every rung":
-    # WHAT EACH RUNG MAY CONTAIN. The monochrome arm is CTUI-11's own gate,
-    # stated over the table rather than over a screen.
-    var monoChecked = 0
-    var ansiChecked = 0
-    var indexedChecked = 0
+  test "the tier invariant holds for every role, on every rung and palette":
+    var checked = 0
+    for design in AllModes:
+      for role in SemanticRole:
+        let mono = roleStyle(role, cdMonochrome, design)
+        if hasColour(mono):
+          checkpoint("COLOUR AT THE BOTTOM RUNG: " & $role)
+        ck not hasColour(mono)
+        let ansi = roleStyle(role, cdAnsi16, design)
+        ck isAnsiName(ansi.fg) and isAnsiName(ansi.bg)
+        let indexed = roleStyle(role, cdAnsi256, design)
+        ck not (isRgb(indexed.fg) or isRgb(indexed.bg))
+        # THE TERMINAL PALETTE, at every depth: sixteen names or the default.
+        for depth in ColourDepths:
+          let term = roleStyle(role, depth, design, pkTerminal)
+          if not (isAnsiName(term.fg) and isAnsiName(term.bg)):
+            checkpoint("NOT A SYMBOLIC INDEX UNDER --palette=terminal: " &
+                       $role & " -> " & describe(term))
+          ck isAnsiName(term.fg) and isAnsiName(term.bg)
+        inc checked
+    ck checked == 2 * ExpectedRoleCount
+
+  test "the terminal palette leaves region surfaces to the terminal":
+    # Deliverable 9: base surfaces become the DEFAULT background (SGR 49);
+    # highlights keep an index so they are still highlights.
     for role in SemanticRole:
-      let mono = roleStyle(role, cdMonochrome)
-      if hasColour(mono):
-        checkpoint("COLOUR AT THE BOTTOM RUNG: " & $role & " -> " &
-                   describe(mono))
-      ck not hasColour(mono)
-      inc monoChecked
-
-      let ansi = roleStyle(role, cdAnsi16)
-      if not (isAnsiName(ansi.fg) and isAnsiName(ansi.bg)):
-        checkpoint("NOT AN ANSI NAME AT THE 16-COLOUR RUNG: " & $role &
-                   " -> " & describe(ansi))
-      ck isAnsiName(ansi.fg) and isAnsiName(ansi.bg)
-      inc ansiChecked
-
-      let indexed = roleStyle(role, cdAnsi256)
-      if isRgb(indexed.fg) or isRgb(indexed.bg):
-        checkpoint("24-BIT AT THE 256-COLOUR RUNG: " & $role & " -> " &
-                   describe(indexed))
-      ck not (isRgb(indexed.fg) or isRgb(indexed.bg))
-      inc indexedChecked
-    checkpoint("roles checked per rung: mono " & $monoChecked & ", ansi16 " &
-               $ansiChecked & ", ansi256 " & $indexedChecked)
-    ck monoChecked == ExpectedRoleCount
-    ck ansiChecked == ExpectedRoleCount
-    ck indexedChecked == ExpectedRoleCount
+      let s = spec(role)
+      if not s.hasBg:
+        continue
+      for design in AllModes:
+        let term = roleStyle(role, cdTrueColor, design, pkTerminal)
+        if s.baseSurface:
+          ck term.bg == ""
+        else:
+          ck term.bg in AnsiNames
+    # And a mode's own body text is the terminal's default foreground.
+    for design in AllModes:
+      ck roleStyle(srChromeText, cdTrueColor, design, pkTerminal).fg == ""
 
   test "the rungs really widen: 256 and 24-bit are not the 16-colour table":
-    # THE POSITIVE TWIN of the invariant above. "No RGB at 256" is satisfied by
-    # a 256 rung that is byte-identical to the 16-colour one — which is what
-    # this ladder was before `indexed:N` existed as an inline-style spelling,
-    # and it would have been a four-tier comment over a three-tier table.
     var indexedRoles = 0
     var rgbRoles = 0
     var widened = 0
@@ -390,88 +433,44 @@ suite "CTUI-11 Tier 1: degraded style tables":
         inc rgbRoles
       if indexed != ansi and truecolor != ansi and truecolor != indexed:
         inc widened
-      # THE ATTRIBUTES NEVER MOVE between rungs. A widening that also changed a
-      # weight could not preserve the distinguishability property upward, since
-      # the property is asserted per tier and not by induction.
-      ck indexed.bold == ansi.bold and indexed.italic == ansi.italic
-      ck indexed.underline == ansi.underline and indexed.reverse == ansi.reverse
-      ck truecolor.bold == ansi.bold and truecolor.italic == ansi.italic
+      # THE ATTRIBUTES ON A COLOURED RUNG ARE THE ROLE'S OWN, OR — ONLY where
+      # that rung's derived colours merged it with another state of its
+      # group — its monochrome set (`palette.CollapsedOnRung`). Nothing else
+      # moves a weight between rungs.
+      for (depth, got) in [(cdAnsi16, ansi), (cdAnsi256, indexed),
+                           (cdTrueColor, truecolor)]:
+        let guarded = CollapsedOnRung[dmDark][rungOf(depth, pkDesign)][role]
+        var want = CellStyle()
+        let attrs = if guarded: spec(role).mono else: spec(role).attrs
+        want.bold = raBold in attrs
+        want.italic = raItalic in attrs
+        want.underline = raUnderline in attrs
+        want.reverse = raReverse in attrs
+        if role == srNone or spec(role).group in {dgSurface}:
+          continue
+        ck got.bold == want.bold and got.italic == want.italic
+        ck got.underline == want.underline and got.reverse == want.reverse
     checkpoint("roles with an indexed colour: " & $indexedRoles &
                ", with 24-bit: " & $rgbRoles &
                ", distinct at all three coloured rungs: " & $widened)
-    ck indexedRoles >= 25
-    ck rgbRoles >= 25
-    ck widened >= 25
+    ck indexedRoles >= 80
+    ck rgbRoles >= 80
+    ck widened >= 80
 
-  test "the reverse lookup claims every published pane style, consistently":
-    # WHAT MAKES THE TABLE A THEME RATHER THAN A DOCUMENT. `degradeRows` maps a
-    # painted style through `roleFor`; if that lookup missed, every pane would
-    # fall through to the mechanical projection and the role table would be
-    # decoration.
-    #
-    # WHAT IS ASSERTED IS CONSISTENCY, NOT IDENTITY, and the difference was
-    # measured rather than assumed. `roleFor` keys on the SIXTEEN-COLOUR
-    # appearance alone, and four of the twelve constants below share one with a
-    # role declared earlier in the enum:
-    #
-    #   gutter.BreakpointStyle       (red bold)         == srChromeError
-    #   gutter.BreakpointDisabledStyle (bright_black)   == srChromeMuted
-    #   source_pane.AbsentMarkerStyle (red bold)        == srChromeError
-    #   source_pane.TokenStyles[tcString] (green)       == srSourceVerified
-    #
-    # Those pairs are ALREADY one appearance on the screen this front-end paints
-    # today — a breakpoint dot and a degraded-source banner really are the same
-    # red bold — so mapping them to one role removes nothing a lower tier could
-    # have shown. Asserting a specific role NAME would therefore have been
-    # asserting the enum's declaration order, which is not a product fact. What
-    # is a product fact is that the lookup CLAIMS every published style and
-    # round-trips it: `ansi16Style(roleFor(s)) == s`.
-    #
-    # The consequence for a monochrome screen is that such a pair is told apart
-    # by GLYPH rather than by weight — `●` against a banner's text — which is
-    # exactly what CTUI-11's contract says degradation may fall back on.
-    var resolved = 0
-    var roundTripped = 0
-    for style in [BreakpointStyle, BreakpointDisabledStyle,
-                  gutter.TracepointStyle, ExecutionPointerStyle,
-                  VerifiedMarkerStyle, UnverifiedMarkerStyle,
-                  AbsentMarkerStyle, TokenStyles[tcKeyword],
-                  TokenStyles[tcString], TokenStyles[tcComment],
-                  NeedleStyle, ModifiedNameStyle]:
-      let (claimed, role) = roleFor(style)
-      if not claimed:
-        checkpoint("UNCLAIMED published style: " & describe(style))
-      ck claimed
-      if claimed:
-        if ansi16Style(role) != style:
-          checkpoint("roleFor(" & describe(style) & ") -> " & $role &
-                     " whose 16-colour style is " & describe(ansi16Style(role)))
-        ck ansi16Style(role) == style
-        inc roundTripped
-      inc resolved
-    checkpoint("published pane constants claimed: " & $resolved &
-               ", round-tripped: " & $roundTripped)
-    ck resolved == 12
-    ck roundTripped == 12
-    # THE FOUR ROLES WHOSE OWN CONSTANT IS UNAMBIGUOUS still resolve to
-    # themselves, so the lookup is not simply answering "the first role" for
-    # everything.
-    var exact = 0
-    for (style, expected) in [
-        (gutter.TracepointStyle, srGutterTracepoint),
-        (ExecutionPointerStyle, srGutterExecutionPointer),
-        (UnverifiedMarkerStyle, srSourceUnverified),
-        (TokenStyles[tcKeyword], srSyntaxKeyword)]:
-      let (claimed, role) = roleFor(style)
-      ck claimed
-      ck role == expected
-      inc exact
-    ck exact == 4
-    # THE NEGATIVE TWIN: a style no role publishes must report UNCLAIMED rather
-    # than being silently mapped onto whichever role sorts first.
-    let (claimed, _) = roleFor(CellStyle(fg: "#123456", italic: true,
-                                         reverse: true))
-    ck not claimed
+  test "the reverse lookup is gone: views say which role they mean":
+    # PLAT-46 deliverable 3. `roleFor` resolved a painted 16-colour style back
+    # to a role and so could not tell a breakpoint dot from a degraded-source
+    # banner (both `red bold`). It must not come back.
+    ck not compiles(roleFor(DefaultCellStyle))
+    # The pairs it collapsed are now distinct roles with distinct 24-bit
+    # colours where the design gives them.
+    ck BreakpointStyle.role == srGutterBreakpoint
+    ck source_pane.DegradedStyle.role == srChromeError
+    ck AbsentMarkerStyle.role == srSourceAbsent
+    ck TokenStyles[tcString].role == srSyntaxString
+    ck VerifiedMarkerStyle.role == srSourceVerified
+    ck roleStyle(srSyntaxString, cdTrueColor) !=
+       roleStyle(srSourceVerified, cdTrueColor)
 
   test "the mechanical projection is total, for styles no role claims":
     # The safety net. Whatever a future view paints, the tier invariant holds.
@@ -542,7 +541,11 @@ suite "CTUI-11 Tier 1: degraded style tables":
       inc mapped
     checkpoint("ASCII fallback pairs: " & $mapped)
     ck mapped == AsciiFallbackTable.len
-    ck mapped == 25
+    # PLAT-50: `▏` and `▕`, the divider and edge lines (27); PLAT-52: the
+    # thirteen eighth blocks a scrubber's thumb ends are drawn with (40);
+    # PLAT-51: the current-line triangle `▸` (`>`) and the inspection
+    # cursor's `▹` (`)`) (42).
+    ck mapped == 42
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.
@@ -563,7 +566,8 @@ suite "CTUI-11 Tier 1: degraded style tables":
     for row in rows:
       for span in row:
         inc spansBefore
-        if hasColour(span.style):
+        # Undegraded, a view's span carries ROLES, not colours (PLAT-46).
+        if span.style.role != srNone or span.style.surface != srNone:
           inc colouredBefore
     # THE POSITIVE FLOOR. "No colour after degrading" is satisfied by a screen
     # that had none to begin with, which is what an empty shell would give.
@@ -602,12 +606,15 @@ suite "CTUI-11 Tier 1: degraded style tables":
     var originalText = ""
     for row in rows:
       originalText.add rowText(row)
-    checkpoint("undegraded screen holds ─:" & $originalText.contains("─") &
-               " │:" & $originalText.contains("│"))
-    ck originalText.contains("─")
-    ck originalText.contains("│")
-    ck not text.contains("─")
-    ck not text.contains("│")
+    checkpoint("undegraded screen holds ▏:" & $originalText.contains("▏") &
+               " ▕:" & $originalText.contains("▕"))
+    # PLAT-50: the dividers are edge one-eighth blocks (`▏`) and there are
+    # no rule rows between stacked panes; the top bar's border lines are `▕`
+    # and `▏`. Every one of them is `|` at the ASCII tier.
+    ck originalText.contains("▏")
+    ck originalText.contains("▕")
+    ck not text.contains("▏")
+    ck not text.contains("▕")
     ck not text.contains("●")
     ck text.contains("-")
     ck text.contains("|")
@@ -650,6 +657,82 @@ suite "CTUI-11 Tier 1: degraded style tables":
                $indexedSpans & " to indexed")
     ck rgbSpans > 0
     ck indexedSpans > 0
+    # PLAT-46 DELIVERABLE 8, at the emitter: EVERY span of the degraded screen
+    # carries a background, so the terminal's own background shows nowhere.
+    var unfilled = 0
+    for row in truecolor:
+      for span in row:
+        if not isRgb(span.style.bg):
+          inc unfilled
+    checkpoint("spans with no 24-bit background: " & $unfilled)
+    ck unfilled == 0
+    # THE TAB STRIP (the sample is the shared default's Variables/Scratchpad
+    # stack, PLAT-45): the active tab lifted onto the panel, the others on the
+    # strip.
+    var tabRow = -1
+    for i in 0 ..< truecolor.len:
+      if rowText(truecolor[i]).contains(" Variables "):
+        tabRow = i
+    ck tabRow >= 0
+    if tabRow >= 0:
+      var activeBg, inactiveBg, activeFg, inactiveFg = ""
+      for span in truecolor[tabRow]:
+        if span.text.contains("Variables") and activeBg.len == 0:
+          activeBg = span.style.bg
+          activeFg = span.style.fg
+        # The stack is 16 cells wide at 120x30 (15 inside its separator), so
+        # the inactive label is cut to its first two letters at the edge.
+        if span.text.contains("Sc") and inactiveBg.len == 0:
+          inactiveBg = span.style.bg
+          inactiveFg = span.style.fg
+      checkpoint("tabs: active " & activeFg & " on " & activeBg &
+                 ", inactive " & inactiveFg & " on " & inactiveBg)
+      # PLAT-49 (the user's direction over PLAT-47's single measured
+      # ground): the selected tab on a background AND in a foreground of its
+      # own, the others on the strip's own ground in the disabled tier.
+      ck activeBg == tokenHex(dtColorsUiSurfacePrimaryTertiary, dmDark)
+      # PLAT-50: on the desktop's ground behind its tabs.
+      ck inactiveBg == tokenHex(dtColorsUiSurfacePrimaryDefault, dmDark)
+      ck activeFg == tokenHex(dtColorsUiTextPrimaryHeadings, dmDark)
+      ck inactiveFg == tokenHex(dtColorsUiTextPrimaryDisabled, dmDark)
+    # A PANE's body sits on the panel surface, and the header on its card:
+    # the shell's fills, read off the emitter. (The row under the Variables
+    # tab strip: the pane's first content row.)
+    let paneRow = tabRow + 1
+    ck paneRow > 1
+    if paneRow > 1:
+      # EVERY blank run of that row — each pane's empty cells, which no
+      # painter writes — is on the panel surface: the shell's fill, not the
+      # canvas showing through. (Single blank cells are a painted row's own
+      # separators — the selected call-stack row carries its highlight in
+      # them — and are not the pane's empty space.)
+      var blank = 0
+      var onPanel = 0
+      for span in truecolor[paneRow]:
+        if span.text.strip.len == 0 and span.text.len >= 2:
+          inc blank
+          if span.style.bg == tokenHex(dtColorsUiSurfaceBasePanel, dmDark):
+            inc onPanel
+      ck blank > 0 and onPanel == blank
+    # PLAT-50: the top bar on the desktop's caption-bar ground.
+    ck truecolor[0][0].style.bg == tokenHex(dtColorsUiSurfacePrimaryDefault,
+                                            dmDark)
+    # …and under `--palette=terminal` the same screen carries NO 24-bit and no
+    # indexed colour at all — only the sixteen names and the default.
+    let term = degradeRows(rows, capsFor(cdTrueColor, bmUnicode,
+                                         palette = pkTerminal))
+    var nonSymbolic = 0
+    var symbolic = 0
+    for row in term:
+      for span in row:
+        if not (isAnsiName(span.style.fg) and isAnsiName(span.style.bg)):
+          inc nonSymbolic
+        if span.style.fg.len > 0 or span.style.bg.len > 0:
+          inc symbolic
+    checkpoint("terminal palette: " & $symbolic & " coloured span(s), " &
+               $nonSymbolic & " not symbolic")
+    ck nonSymbolic == 0
+    ck symbolic > 0
     # …and the unicode border mode leaves the glyphs alone, so the screen at the
     # top rung is the screen the shell painted.
     for i in 0 ..< rows.len:

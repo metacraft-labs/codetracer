@@ -52,6 +52,8 @@ when defined(js):
     from ../../communication import emit
     from ../../types import data
   import kdom except Location
+  import std/jsffi
+  import ./list_scrubber_dom
 
 import ../store/types
 import ../backend/backend_service
@@ -402,11 +404,11 @@ when defined(js):
       hint: cstring"",
       handler: proc(ev: kdom.Event) =
         vm.toggleExpandCallChildren(lineIndex)))
-    result.add(ContextMenuItem(
-      name: cstring"Expand Full Callstack",
-      hint: cstring"",
-      handler: proc(ev: kdom.Event) =
-        discard))
+    # PLAT-50: no "Expand Full Callstack". Its handler was empty here; what
+    # the original sent (`ct/expand-calls` with `CallstackInternal`) unfolds
+    # the calls the engine AUTO-collapses, and no view asks the engine to
+    # auto-collapse (`autoCollapsing` is false on every load), so the entry
+    # could change nothing — measured on this desktop, deep in a recording.
 
   proc callArgContextItems(argName, argText: string):
       seq[ContextMenuItem] =
@@ -745,6 +747,41 @@ when defined(js):
     renderTraceSvg(r, svgContainer, vm)
     wireSearchForm(formEl, inputEl, vm)
     wireScrollContainer(scrollContainer, linesContainer, vm)
+    # PLAT-51: THE SCROLLBAR IS A SCRUBBER over the WHOLE trace
+    # (Scrollbar-Scrubbers.md): a click on its track jumps the view there, the
+    # thumb drags it, a tick marks the debugger's call. It scrolls the
+    # container, which `wireScrollContainer` turns into the section load.
+    let scroller = scrollContainer
+    let lines = linesContainer
+    # The debugger's call, by tick, over the section held (the ViewModel's
+    # rule); remembered while a scrubbed-away section is held, and asked again
+    # when the debugger moves.
+    var lastCurrent = -1
+    var lastTicks = high(uint64)
+    discard attachListScrubber(
+      cast[JsObject](scroller), cast[JsObject](panel),
+      total = proc(): int = int(vm.store.calltrace.totalCallsCount.val),
+      current = proc(): int =
+        let ticks = vm.store.debugger.val.rrTicks
+        let held = vm.store.calltrace.lines.val
+        let at = currentCallOf(held, ticks, @[])
+        var coversAfter = false
+        for l in held:
+          if l.rrTicks > ticks:
+            coversAfter = true
+            break
+        # Only a section that reaches PAST "now" can say which call "now" is
+        # in: one that ends before it would name its own last call.
+        if at.isSome and coversAfter:
+          lastCurrent = int(at.get)
+          lastTicks = ticks
+        elif ticks != lastTicks:
+          lastCurrent = -1
+        lastCurrent,
+      rowHeight = proc(): float =
+        let h = measureCallRowHeight(lines)
+        if h > 0.0: h else: vm.rowHeightPx.val,
+      paneId = "calltrace")
 
     panel
 

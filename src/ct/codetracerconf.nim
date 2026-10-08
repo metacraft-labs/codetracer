@@ -471,15 +471,42 @@ type
       .}: Option[bool]
     of host:
       # codetracer host --port <port>
+      #        [--bind <addr>]
       #        [--backend-socket-port <port>]
       #        [--frontend-socket <port>]
       #        [--frontend-socket-parameters
       #         <parameters>]
       #        <trace-id>/<trace-folder>
+      # `-1` MEANS "THE OPERATOR SAID NOTHING", for the same reason
+      # `hostBind`'s default is the empty string: without a value that means
+      # absence, `CODETRACER_HOST_PORT` could never be consulted without also
+      # overriding an explicit `--port`. `resolveHostPort` in
+      # `trace/host.nim` turns absence into auto-assign and carries the
+      # reasoning.
+      #
+      # It was MANDATORY until 2026-10-01 (no `defaultValue`, so confutils
+      # required it), while `CLI/ct/host.md` §Options had always said
+      # `auto-assign` — WD2's hosted path is exactly the case where the port is
+      # the substrate's to allocate rather than the operator's to choose.
       hostPort* {.
         name: "port"
-        desc: "Port to listen on"
+        defaultValue: -1
+        desc: "Port to listen on " &
+          "(default: auto-assign; " &
+          "CODETRACER_HOST_PORT)"
       .} : int
+
+      # EMPTY MEANS "THE OPERATOR SAID NOTHING", which is the only way
+      # `CODETRACER_HOST_BIND` can be consulted without also overriding an
+      # explicit `--bind 127.0.0.1`. `resolveHostBind` in `trace/host.nim`
+      # turns absence into loopback and carries the reasoning.
+      hostBind* {.
+        name: "bind"
+        defaultValue: ""
+        desc: "Interface to bind " &
+          "(default: 127.0.0.1; " &
+          "CODETRACER_HOST_BIND)"
+      .} : string
 
       hostBackendSocketPort* {.
         name: "backend-socket-port"
@@ -734,6 +761,22 @@ type
         desc: "Record a long-lived server. The recording stays readable " &
           "while it runs, so `ct replay -t <folder>` in another terminal " &
           "shows requests arriving live; stop it with Ctrl-C."
+      .}: bool
+
+      # `--portable` (codetracer-specs CLI/ct/record.md, "Portable traces"):
+      # a dispatcher-owned option, forwarded to the backend the dispatcher
+      # selects; a backend that cannot honour it refuses it by name (see
+      # src/ct/trace/portable_route.nim).
+      recordPortable* {.
+        name: "portable",
+        defaultValue: false,
+        desc: "Make the trace replayable on another machine, or later " &
+          "after its files change: the MCR backend bundles every file " &
+          "the program mapped, their debug symbols and the platform " &
+          "description into the trace, and the rr backend packs the " &
+          "files the trace mapped into it. A backend that cannot do this " &
+          "yet refuses the flag. Also honors CODETRACER_PORTABLE=on|off; " &
+          "--upload implies it, and warns where it is not implemented."
       .}: bool
 
       recordProgram* {.

@@ -6,7 +6,8 @@
 # detection → recorder dispatch → importTrace). It catches:
 # - PATH lookup issues (recorder binary not found)
 # - Language detection regressions (.sh → LangBash, etc.)
-# - Format default regressions (should produce trace.bin, not trace.json)
+# - Format regressions (a recording is a .ct container or a legacy trace.bin;
+#   a trace.json is test-oracle output and fails the check)
 # - Missing dispatch in db_backend_record.nim
 #
 # Usage:
@@ -65,12 +66,14 @@ smoke_test() {
 
 	local output
 	if output=$("$CT_BIN" record -o "$trace_dir" "${extra_args[@]}" "$program" 2>&1); then
-		# Verify trace was produced — prefer trace.bin (binary/CTFS), accept trace.json
-		if [[ -f "$trace_dir/trace.bin" ]]; then
+		# Verify a recording was produced.  A trace.json is test-oracle output,
+		# which CodeTracer refuses to open, so it fails the check.
+		if [[ -f "$trace_dir/trace.json" ]]; then
+			echo "FAIL (trace.json produced — test-oracle output, not a recording)"
+			((FAILED++)) || true
+			FAILURES="${FAILURES}  - $lang: wrote a trace.json instead of a recording\n"
+		elif [[ -f "$trace_dir/trace.bin" ]]; then
 			echo "OK (trace.bin produced)"
-			((PASSED++)) || true
-		elif [[ -f "$trace_dir/trace.json" ]]; then
-			echo "WARN (trace.json produced — expected binary format)"
 			((PASSED++)) || true
 		elif ls "$trace_dir"/*.ct 1>/dev/null 2>&1; then
 			echo "OK (.ct container produced)"

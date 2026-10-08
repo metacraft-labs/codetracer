@@ -44,7 +44,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 172
+const ExpectedAssertions = 170
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -74,15 +74,14 @@ const MissingManifest = """{"ok":false,"stage":"resolve","kind":"missing-manifes
   ## A manifest and NO line — `VfsError::position()` is `None` here. The one
   ## fixture that separates `hasRefusalPosition` from `refusalIsPositioned`.
 
-const TraceDocument = """{"events":[{"Path":"hello_noir/src/main.nr"},{"Call":{"function_id":0}},{"Step":{"path_id":0,"line":5}},{"Step":{"path_id":0,"line":6}},{"Call":{"function_id":1}},{"Step":{"path_id":1,"line":4}},{"Return":{}}],"paths":["hello_noir/src/main.nr","hello_noir/src/utils.nr"],"workdir":""}"""
-  ## The shape of a real `MemoryTrace`, trimmed. The counts below are of THIS
-  ## document, not of the 36-event one the full template produces — a fixture
-  ## small enough to read is a fixture whose expected counts can be checked by
-  ## eye.
+const TraceDocument = """{"container":"wN5yrOIAAQ==","paths":["hello_noir/src/main.nr","hello_noir/src/utils.nr"],"source_views":[],"workdir":"","capabilities":{},"steps":3,"calls":2}"""
+  ## The shape of a real `TraceResult`, trimmed: the container is a stand-in
+  ## carrying only the CTFS magic, because counting a trace reads the
+  ## counts the tracer reports beside it, not the container.
 
-const TrivialTrace = """{"events":[{"Path":"hello_noir/src/main.nr"}],"paths":["hello_noir/src/main.nr"]}"""
-  ## ONE-EVENT-ZERO-STEPS: what an artifact compiled WITHOUT instrumentation
-  ## traces to while both wasm modules report `ok`.
+const TrivialTrace = """{"container":"wN5yrOIAAQ==","paths":["hello_noir/src/main.nr"],"source_views":[],"workdir":"","capabilities":{},"steps":0,"calls":0}"""
+  ## ZERO STEPS: what an artifact compiled WITHOUT instrumentation traces to
+  ## while both wasm modules report `ok`.
   ## `ci/test/noir-wasm-worker/compare.mjs`'s header records the measurement.
 
 suite "the VFS a compile request carries":
@@ -340,10 +339,9 @@ suite "what the compiler answers, decoded":
 
 suite "what the tracer answers, counted":
 
-  test "a real trace is counted by tag":
+  test "a real trace is counted":
     let summary = summariseNoirTrace(TraceDocument)
     counted summary.decoded
-    counted summary.events == 7
     counted summary.steps == 3
     counted summary.calls == 2
     counted summary.paths.len == 2
@@ -351,14 +349,10 @@ suite "what the tracer answers, counted":
     counted summary.paths[1] == "hello_noir/src/utils.nr"
     counted summary.bytes == TraceDocument.len
     counted not isTrivialTrace(summary)
-    # Events that are neither Step nor Call are counted as events and as
-    # neither — the totals must not be made to add up by miscounting.
-    counted summary.steps + summary.calls < summary.events
 
-  test "ONE-EVENT-ZERO-STEPS is reported as trivial, not as success":
+  test "ZERO STEPS is reported as trivial, not as success":
     let summary = summariseNoirTrace(TrivialTrace)
     counted summary.decoded
-    counted summary.events == 1
     counted summary.steps == 0
     counted isTrivialTrace(summary)
     # And an undecodable answer is trivial too — "it returned bytes" is not a
@@ -367,6 +361,10 @@ suite "what the tracer answers, counted":
     counted isTrivialTrace(summariseNoirTrace(""))
     counted summariseNoirTrace("not a trace").bytes == "not a trace".len
     counted not summariseNoirTrace("not a trace").decoded
+    # The retired event-list document is not a trace either: it carries no
+    # container, so nothing CodeTracer opens could be made from it.
+    counted not summariseNoirTrace(
+      """{"events":[{"Step":{}}],"paths":["p"]}""").decoded
 
 suite "the template can be run":
 

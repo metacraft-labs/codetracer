@@ -67,6 +67,7 @@
 use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
 use num_traits::FromPrimitive;
 
+use codetracer_trace_writer::column_aware::FileTable;
 use codetracer_trace_writer::line_position::LinePositionSpace;
 use codetracer_trace_writer::meta_dat::meta_dat_has_interning_tables;
 
@@ -172,22 +173,20 @@ pub struct InterningTables {
     pub types: Vec<TypeRecord>,
     /// Variable names, indexed by `VariableId`.
     pub variable_names: Vec<String>,
-    /// Per-file addressable line lengths, indexed by `PathId` and then by
-    /// 0-based line index — the "Layout A" per-line offset table a
-    /// column-aware `paths.dat` record carries after its path bytes.
+    /// Per-file column-aware tables, indexed by `PathId` — the "Layout A"
+    /// table a column-aware `paths.dat` record carries after its path bytes:
+    /// either the file's addressable column count per line, or, for a record
+    /// stating `line_count = 0`, the conventional table (100000 lines of 1024
+    /// positions), held as that rule.
     ///
-    /// This is the table `GlobalPositionDecoder::from_line_lengths` needs, and
-    /// carrying it is what lets the pure-Rust (browser) reader decode a
-    /// column-aware container's `global_position_index` steps at all. It used
-    /// to be parsed and thrown away — `decode_column_aware_path` skipped the
-    /// tail — which left the browser reader with no way to tell a byte-offset
-    /// GLI from an M23a packed `(path_id, line)` and made it read every
-    /// column-aware step as `paths[0]` at a four-digit line.
+    /// These are what `GlobalPositionDecoder::from_file_tables` needs, and
+    /// what lets the pure-Rust (browser) reader decode a column-aware
+    /// container's `global_position_index` steps at all.
     ///
-    /// Always the same length as [`paths`](Self::paths). Every entry is EMPTY
-    /// on a line-only (non-column-aware) container, which is the signal the
-    /// caller uses to leave the legacy decode path exactly as it was.
-    pub line_lengths: Vec<Vec<u32>>,
+    /// Always the same length as [`paths`](Self::paths). Every entry is
+    /// `None` on a line-only (non-column-aware) container, which is the
+    /// signal the caller uses to leave the line-only decode path as it is.
+    pub file_tables: Vec<Option<FileTable>>,
     /// Per-file line counts, indexed by `PathId` — the count a `paths.dat`
     /// record carries when the container declares `meta.dat` bit 14
     /// (`FLAG_HAS_LINE_COUNT_TABLE`).
@@ -249,7 +248,7 @@ impl InterningTables {
         let varnames_table = Self::load_table(ctfs, "varnames")?;
 
         let mut paths = Vec::with_capacity(paths_table.count());
-        let mut line_lengths = Vec::with_capacity(paths_table.count());
+        let mut file_tables = Vec::with_capacity(paths_table.count());
         let mut line_counts = Vec::new();
         if line_count_paths {
             line_counts.reserve(paths_table.count());
@@ -257,17 +256,17 @@ impl InterningTables {
         for id in 0..paths_table.count() {
             let raw = paths_table.record(id)?;
             if column_aware_paths {
-                let (path, lengths) = decode_column_aware_path(id, raw)?;
+                let (path, table) = decode_column_aware_path(id, raw)?;
                 paths.push(path);
-                line_lengths.push(lengths);
+                file_tables.push(table);
             } else if line_count_paths {
                 let (path, count) = decode_line_count_path(id, raw)?;
                 paths.push(path);
-                line_lengths.push(Vec::new());
+                file_tables.push(None);
                 line_counts.push(count);
             } else {
                 paths.push(String::from_utf8_lossy(raw).into_owned());
-                line_lengths.push(Vec::new());
+                file_tables.push(None);
             }
         }
 
@@ -311,9 +310,42 @@ impl InterningTables {
             functions,
             types,
             variable_names,
-            line_lengths,
+            file_tables,
             line_counts,
         }))
+    }
+
+    /// The trace's source paths: the records of `paths.dat`, in id order.
+    ///
+    /// `paths.dat` is the only list of source paths a container carries
+    /// (`internal-files.md` §"`meta.dat` carries no path list"); a container
+    /// without it names none, which is an empty list rather than an error.
+    /// Unlike [`open_from_ctfs`](Self::open_from_ctfs) this reads the path
+    /// table alone, so it serves a container that interns paths and nothing
+    /// else -- a recording that writes no steps, such as an MCR recording.
+    pub fn read_source_paths(ctfs: &mut CtfsReader) -> Result<Vec<String>, String> {
+        if !ctfs.has_file("paths.dat") {
+            return Ok(Vec::new());
+        }
+        let meta = ctfs.read_file("meta.dat").unwrap_or_default();
+        let path_flags = super::meta_dat::parse_meta_dat(&meta)
+            .map(|parsed| parsed.flags)
+            .unwrap_or(0);
+        let column_aware_paths = path_flags & super::meta_dat::FLAG_HAS_COLUMN_AWARE_STEPS != 0;
+        let line_count_paths = path_flags & super::meta_dat::FLAG_HAS_LINE_COUNT_TABLE != 0;
+        let table = Self::load_table(ctfs, "paths")?;
+        let mut paths = Vec::with_capacity(table.count());
+        for id in 0..table.count() {
+            let raw = table.record(id)?;
+            paths.push(if column_aware_paths {
+                decode_column_aware_path(id, raw)?.0
+            } else if line_count_paths {
+                decode_line_count_path(id, raw)?.0
+            } else {
+                String::from_utf8_lossy(raw).into_owned()
+            });
+        }
+        Ok(paths)
     }
 
     /// Load one table. The four tables are written together, so once any of
@@ -330,29 +362,22 @@ impl InterningTables {
     }
 }
 
-/// Decode a column-aware ("Layout A") `paths.dat` record into its path AND its
-/// per-line length table.
+/// Decode a column-aware ("Layout A") `paths.dat` record into its path and its
+/// table.
 ///
 /// The record is `path_len: varint, path bytes, line_count: varint,
 /// line_lengths: signed varint × line_count`, and the per-line table is
 /// **zigzag-delta** encoded: entry 0 is the absolute length of line 0, and each
-/// subsequent entry is that line's length MINUS the previous line's. That is
-/// the exact shape `ensurePathIdColumnAware` writes
-/// (`codetracer-trace-format-nim/src/codetracer_trace_writer/interning_table.nim`,
-/// and `codetracer-trace-format-spec/trace-events.md` §"`paths.dat` per-line
-/// offset table").
+/// subsequent entry is that line's length MINUS the previous line's
+/// (`codetracer-trace-format-spec/internal-files.md` §"`paths.dat` Layout A").
 ///
-/// The tail used to be SKIPPED here, with a comment saying the per-line lengths
-/// "feed the column decoder, which is a separate concern". On the native Nim
-/// path that was true — the decoder harvested them through the `lineLengthRaw`
-/// FFI instead. In the browser there is no FFI, so skipping them left the
-/// pure-Rust reader with no per-file address table and therefore no way to
-/// decode a `global_position_index`. Reading them here is what closes that.
+/// `line_count = 0`, with no line lengths after it, is the conventional table
+/// (100000 lines of 1024 positions) and is returned as
+/// [`FileTable::Conventional`], never spelled out.
 ///
-/// `line_count == 0` is legitimate and common (a recorder that has not surfaced
-/// per-line column counts writes the `path_len` prefix and an empty tail), and
-/// yields an empty table rather than an error.
-fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Vec<u32>), String> {
+/// A record that stops after its path bytes states no table and yields
+/// `None`; the file then occupies no positions.
+fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Option<FileTable>), String> {
     let mut pos = 0usize;
     let path_len = decode_varint(raw, &mut pos)? as usize;
     if pos + path_len > raw.len() {
@@ -361,15 +386,20 @@ fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Vec<u32>),
     let path = String::from_utf8_lossy(&raw[pos..pos + path_len]).into_owned();
     pos += path_len;
 
-    // A record that stops after its path bytes is a pre-Layout-A record read
-    // under a column-aware meta bit. Treat it as "no per-line table" rather
-    // than as corruption: the decoder simply is not built, and the container
-    // keeps the legacy line-only behaviour.
     if pos >= raw.len() {
-        return Ok((path, Vec::new()));
+        return Ok((path, None));
     }
 
     let line_count = decode_varint(raw, &mut pos)? as usize;
+    if line_count == 0 {
+        if pos != raw.len() {
+            return Err(format!(
+                "paths.dat: record {id} states line_count 0 (the conventional table) but has {} byte(s) after it",
+                raw.len() - pos
+            ));
+        }
+        return Ok((path, Some(FileTable::Conventional)));
+    }
     let mut lengths = Vec::with_capacity(line_count);
     let mut previous: i64 = 0;
     for line in 0..line_count {
@@ -386,7 +416,7 @@ fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Vec<u32>),
         lengths.push(value as u32);
         previous = value;
     }
-    Ok((path, lengths))
+    Ok((path, Some(FileTable::Lines(lengths))))
 }
 
 /// Decode one `funcs.dat` record — `global_line_index: varint, name_len:
@@ -534,6 +564,45 @@ fn decode_type_record(raw: &[u8]) -> Result<TypeRecord, String> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn layout_a_record(path: &str, tail: &[u8]) -> Vec<u8> {
+        let mut record = vec![path.len() as u8];
+        record.extend_from_slice(path.as_bytes());
+        record.extend_from_slice(tail);
+        record
+    }
+
+    /// `line_count = 0` with nothing after it is the conventional table, held
+    /// as the rule rather than as 100000 entries.
+    #[test]
+    fn line_count_zero_is_the_conventional_table() {
+        let (path, table) = decode_column_aware_path(0, &layout_a_record("/a.bin", &[0])).unwrap();
+        assert_eq!(path, "/a.bin");
+        assert_eq!(table, Some(FileTable::Conventional));
+    }
+
+    /// A per-line table decodes its zigzag deltas into the lengths.
+    #[test]
+    fn a_per_line_table_decodes_its_lengths() {
+        // 12, then +3 (zigzag 6), then -5 (zigzag 9).
+        let (_, table) = decode_column_aware_path(0, &layout_a_record("/a.rs", &[3, 24, 6, 9])).unwrap();
+        assert_eq!(table, Some(FileTable::Lines(vec![12, 15, 10])));
+    }
+
+    /// Bytes after a `line_count = 0` belong to no field, so the record is
+    /// refused rather than read as the conventional table.
+    #[test]
+    fn bytes_after_line_count_zero_are_refused() {
+        let err = decode_column_aware_path(4, &layout_a_record("/a.bin", &[0, 24])).unwrap_err();
+        assert!(err.contains("record 4") && err.contains("line_count 0"), "{err}");
+    }
+
+    /// A record that ends after its path states no table at all.
+    #[test]
+    fn a_record_ending_after_its_path_states_no_table() {
+        let (_, table) = decode_column_aware_path(0, &layout_a_record("/a.rs", &[])).unwrap();
+        assert_eq!(table, None);
+    }
 
     /// A `.off` index that is not a whole number of `u64`s is rejected by name,
     /// rather than silently truncating the table.

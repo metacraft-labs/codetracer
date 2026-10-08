@@ -77,6 +77,13 @@ import ../../app/cli
 import ../../host/key_journal
 import ../fixtures/fixture_provider
 import ./lifecycle_support
+import ../../app/theme/colour_math
+import ../../../styles/generated/design_tokens
+
+let borderIndex = uint8(nearestXterm256(parseHexColour(
+  DesignTokenHex[dtColorsUiBorderSecondary][dmDark])))
+  ## The pane-border role on the 256-colour rung, in the Dark mode a pty with
+  ## no OSC 11 answer resolves to.
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
@@ -257,10 +264,10 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     ck fast.injectedMs == 0
     # THE NON-VACUITY FLOOR, and it is the important one in this file: two
     # blank screens are equal. The reconstructed screen has to be the DEBUGGER.
-    ck fast.plain.contains("SOURCE")
-    ck fast.plain.contains("CALL STACK")
-    ck fast.plain.contains("VARIABLES")
-    ck fast.plain.contains("TIMELINE")
+    ck fast.plain.contains(" main.py ")
+    ck fast.plain.contains(" Call Trace ")
+    ck fast.plain.contains(" Variables ")
+    ck fast.plain.contains("Event Log")   # PLAT-51: the Timeline is removed
     ck fast.cells.len == Cols * Rows
     var fastGlyphs = 0
     for cell in fast.cells:
@@ -307,8 +314,8 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     # is SUPPOSED to be — §3.1's furniture, and the published colour of the
     # rule every pane is drawn with.
     ck slow.cells.len == Cols * Rows
-    ck slow.plain.contains("SOURCE")
-    ck slow.plain.contains("VARIABLES")
+    ck slow.plain.contains(" main.py ")
+    ck slow.plain.contains(" Variables ")
     var glyphs = 0
     var mutedRule = 0
     var coloured = 0
@@ -317,14 +324,15 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
         inc glyphs
       if cell.fg.kind != ckDefault or cell.bg.kind != ckDefault:
         inc coloured
-      if cell.fg.kind == ckIndexed and cell.fg.idx == 244'u8:
+      if cell.fg.kind == ckIndexed and cell.fg.idx == borderIndex:
         inc mutedRule
     checkpoint("slow screen: " & $glyphs & " glyphs, " & $coloured &
-               " coloured cells, " & $mutedRule & " at indexed:244")
+               " coloured cells, " & $mutedRule & " in the border role's index")
     ck glyphs > 200
     ck coloured > 0
-    # `indexed:244` is `degradation.ansi256Style(srChromeMuted)`'s published
-    # value, and every pane rule is painted in it. A diffed stream that lost or
+    # PLAT-46: every pane rule is painted with the pane-border role, whose
+    # 256-colour rung is the nearest xterm entry to `colors/ui/border/secondary`
+    # (`borderIndex`, derived from the token, not restated). A diffed stream that lost or
     # smeared its SGR transitions loses this while the two runs still agree.
     ck mutedRule > 0
 
@@ -357,7 +365,7 @@ suite "CTUI-14 Tier 2: a hundred steps over a link with injected delay":
     # THE TEXT COMPARISON HAS THE SAME ARM: a screen with one glyph changed is
     # not equal to the original.
     var mutatedText = fast.plain
-    let at = mutatedText.find("SOURCE")
+    let at = mutatedText.find(" main.py ") + 1
     ck at >= 0
     mutatedText[at] = 'X'
     ck mutatedText != fast.plain

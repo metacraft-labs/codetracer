@@ -109,8 +109,15 @@ cd "${root}"
 
 MILESTONE_ID="${1:-PLAT-24}"
 
-SPEC_REL="../codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org"
-LAWS_REL="../codetracer-specs/Testing/Editor-Model-Conformance-Suite.md"
+# The specification checkout: the workspace sibling, or the one CT_SPECS_DIR
+# names (the variable `src/frontend/test_support/spec_documents.nim` and
+# `ci/test/shortcut-shadow-spec-agreement.sh` honour too). Its layout is the
+# one codetracer-specs `1735345d` adopted: topical documents under `spec/`,
+# milestone files under `milestones/`. An override, never a fallback — a file
+# absent there still fails by name below.
+SPECS_DIR="${CT_SPECS_DIR:-../codetracer-specs}"
+SPEC_REL="${SPECS_DIR}/milestones/CodeTracer-Platform.milestones.org"
+LAWS_REL="${SPECS_DIR}/spec/Testing/Editor-Model-Conformance-Suite.md"
 
 case "${MILESTONE_ID}" in
 PLAT-24)

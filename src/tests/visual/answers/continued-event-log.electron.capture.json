@@ -8,7 +8,7 @@
   "stoppedPath": "main.py",
   "rrTicks": 171,
   "trajectory": [
-    "entry=1@0",
+    "entry=1@1",
     "continueForward=113@171"
   ],
   "viewportCss": "1920x1080",

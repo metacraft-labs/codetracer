@@ -1,0 +1,40 @@
+// PLAT-51: A LIST PANE'S SCROLLBAR IS A SCRUBBER over the pane's whole
+// population (Scrollbar-Scrubbers.md): the Event Log, the Call Trace and the
+// Terminal Output's line view. The container's own scrollbar is hidden — its
+// track would PAGE on a click — and `views/list_scrubber_dom.nim` draws the
+// track over the container's right edge: a click JUMPS there, the thumb
+// drags the view, a tick marks where the debugger is.
+
+.ct-scrubbed
+  scrollbar-width: none
+
+  &::-webkit-scrollbar
+    display: none
+
+.ct-list-scrubber
+  position: absolute
+  right: 0
+  // Above the pane's own overlays (the event log's DataTables footer sits
+  // over the bottom of its scroll body): the track takes the press there.
+  z-index: 30
+  cursor: pointer
+  background: transparent
+
+.ct-list-scrubber-thumb
+  position: absolute
+  left: 2px
+  right: 2px
+  border-radius: 3px
+  // The window's scrollbar thumb (Monaco's `scrollbarSlider.background`,
+  // the GPUI and terminal scrubbers' thumb).
+  background: rgba(121, 121, 121, 0.4)
+
+  &:hover
+    background: rgba(100, 100, 100, 0.7)
+
+.ct-list-scrubber-mark
+  position: absolute
+  left: 0
+  right: 0
+  // The execution pointer's colour, as the terminal's and GPUI's marks.
+  background: colors-editor-action-secondary

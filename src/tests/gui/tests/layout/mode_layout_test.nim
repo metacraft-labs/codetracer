@@ -32,6 +32,7 @@ when defined(js):
   import std/jsffi
 
   import ../../../../frontend/index/layout_config_repair
+  import ../../../../frontend/index/mode_default_layout
   import ../../../../common/types
 
   const bundledDefaultLayoutJson =
@@ -131,8 +132,10 @@ when defined(js):
     ok
 
   proc modeLayout(mode: LayoutMode): js =
-    modeDefaultLayoutConfig(bundled(), ord(Content.EditorView),
-                            modeHiddenContentIds(mode), paneHomesForMode(mode))
+    ## The PRODUCTION derivation (`index/mode_default_layout`), the one the
+    ## renderer, the index process's first run and the default-layout
+    ## generator all call.
+    modeDefaultLayout(bundled(), mode)
 
   suite "the bundled layout is the arrangement these rules are about":
     ## A precondition, checked rather than assumed. Every assertion below is
@@ -232,17 +235,28 @@ when defined(js):
       check ord(Content.TestResults) in
         stackContentsHolding(debugLayout, ord(Content.Filesystem))
 
-    test "DEBUG mode nests CONSTRAINTS with the EVENT LOG":
+    test "DEBUG mode's default does not place CONSTRAINTS":
+      ## The user, 2026-09-27 (PLAT-47): CONSTRAINTS was reworked for the Noir
+      ## studio's editing surface and does not belong in the default REPLAY
+      ## layout. It was a tab of the EVENT LOG stack here until then.
       let debugLayout = modeLayout(DebugMode)
-      check ord(Content.Constraints) in
+      check componentCount(debugLayout, ord(Content.Constraints)) == 0
+      check ord(Content.Constraints) notin
         stackContentsHolding(debugLayout, ord(Content.EventLog))
 
-    test "DEBUG mode keeps both panes reachable":
+    test "DEBUG mode keeps TESTS reachable, as a tab":
       ## Re-homing is not hiding, and the difference is the point. A user
       ## debugging a failing test must still be able to open TEST RESULTS.
       let debugLayout = modeLayout(DebugMode)
       check componentCount(debugLayout, ord(Content.TestResults)) == 1
-      check componentCount(debugLayout, ord(Content.Constraints)) == 1
+
+    test "omitting is not hiding: a saved debug layout may keep CONSTRAINTS":
+      ## `modeDefaultOmittedContentIds` shapes the DEFAULT only; the hidden set
+      ## — which the mode also applies to a user's own saved layout — does not
+      ## name CONSTRAINTS, so a user who opens it in a replay keeps it.
+      check ord(Content.Constraints) in modeDefaultOmittedContentIds(DebugMode)
+      check ord(Content.Constraints) notin modeHiddenContentIds(DebugMode)
+      check modeDefaultOmittedContentIds(EditMode).len == 0
 
     test "EDIT mode nests TESTS with FILES too":
       ## "in both modes", as the request asked. Edit mode's FILES stack already
@@ -284,6 +298,8 @@ when defined(js):
     test "DEBUG mode hides nothing":
       let debugLayout = modeLayout(DebugMode)
       check modeHiddenContentIds(DebugMode).len == 0
+      check modeDefaultHiddenContentIds(DebugMode) ==
+        modeDefaultOmittedContentIds(DebugMode)
       check componentCount(debugLayout, ord(Content.EventLog)) == 1
       check componentCount(debugLayout, ord(Content.State)) == 1
 

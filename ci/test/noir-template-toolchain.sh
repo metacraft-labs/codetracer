@@ -129,7 +129,7 @@
 # removed it deliberately in `93bb72f8` "feat!: allow UTF-8 in comments
 # (#12699)". The same script, run in two shells, was two different oracles, and
 # arm U said "accepted by both" or "the engines disagree" depending only on
-# which binary the shell had found. The pin now names `codetracer`@ca080a58
+# which binary the shell had found. The pin now names `codetracer`@c008e890
 # (beta.26), so THAT particular divergence is gone.
 #
 # It is not the last one. A sibling checkout is a MUTABLE working copy and the

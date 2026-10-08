@@ -293,9 +293,39 @@ echo
 roots="$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)"
 root_count="$(printf '%s\n' "${roots}" | grep -c . || true)"
 
+# A LOCAL COMPOSITE ACTION A WORKFLOW USES IS PART OF THAT WORKFLOW. A step
+# `uses: ./.github/actions/<name>` runs `<name>/action.yml`'s own `run:` steps
+# in the calling job, so a script only that action invokes is run by every job
+# that uses it — `ci/repro-lock-build-input-siblings.sh`, called by
+# `provision-repro-lock-siblings` and by no workflow line, was reported dark
+# while eleven jobs ran it. The actions are followed FROM the workflows (and
+# from each other, to a fixpoint), never globbed: an action no workflow uses
+# confers nothing, exactly as a recipe no lane calls does.
+action_roots=""
+frontier="${roots}"
+while [ -n "${frontier}" ]; do
+	next=""
+	while IFS= read -r used; do
+		[ -z "${used}" ] && continue
+		for f in "${used}/action.yml" "${used}/action.yaml"; do
+			if [ -f "${f}" ] && ! grep -qxF -- "${f}" <<<"${action_roots}"; then
+				action_roots="${action_roots}${action_roots:+$'\n'}${f}"
+				next="${next}${next:+$'\n'}${f}"
+			fi
+		done
+	done < <(printf '%s\n' "${frontier}" | grep -v '^$' | xargs -r grep -hoE \
+		'uses:[[:space:]]*\./\.github/actions/[A-Za-z0-9_.-]+' 2>/dev/null |
+		sed -E 's#^uses:[[:space:]]*\./##' | sort -u)
+	frontier="${next}"
+done
+action_count="$(printf '%s\n' "${action_roots}" | grep -c . || true)"
+if [ "${action_count}" -gt 0 ]; then
+	roots="$(printf '%s\n%s\n' "${roots}" "${action_roots}" | grep -v '^$' | sort)"
+fi
+
 echo "Step 1: the CI roots are readable"
 if [ "${root_count}" -ge 2 ]; then
-	ok "${root_count} CI root(s): the workflow files, and only those"
+	ok "${root_count} CI root(s): the workflow files, and only those (plus ${action_count} local composite action(s) they use)"
 else
 	bad "found ${root_count} CI root(s) — reachability below would be measured from nothing"
 	echo
@@ -1119,7 +1149,8 @@ echo
 # ---------------------------------------------------------------------------
 echo "Step 4: nothing CI reaches names a script or a recipe that does not exist"
 echo "    A step invoking a missing script fails loudly — but only if that"
-echo "    workflow runs, and a step behind an \`if:\` may not for months."
+# shellcheck disable=SC2016 # literal backticks, printed
+echo '    workflow runs, and a step behind an `if:` may not for months.'
 # ---------------------------------------------------------------------------
 # THE SUBJECT IS THE WORKFLOWS AND THE LINT DISPATCHERS, AND NOT EVERY REACHABLE
 # SCRIPT. Widening it to the whole reachable set was tried and produced five
@@ -1185,6 +1216,7 @@ echo "  Every shell script under ci/ and scripts/ is reached by a workflow lane,
 echo "  declares in its own header that it is not a gate, or is recorded as dark"
 echo "  with a reason, in a list that can only shrink."
 echo "  NOT claimed: that any of them passes, or that a reachable gate is actually"
-echo "  RUN — a step behind a false \`if:\` is reachable and never executes. This"
+# shellcheck disable=SC2016 # literal backticks, printed
+echo '  RUN — a step behind a false `if:` is reachable and never executes. This'
 echo "  guard measures the graph, which is strictly less than the schedule."
 echo "RESULT: OK"

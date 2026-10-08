@@ -144,6 +144,7 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 STORE = "src/frontend/tui/host/layout_store.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
+SHELL = "src/frontend/tui/app/views/shell.nim"
 
 # THE HARNESS'S OWN INSTRUMENTS, held to the same restoration check as the
 # subject (Verification-Harness-Traps §7: an instrument is the last thing anyone
@@ -196,7 +197,7 @@ HARNESS = [DUAL, APPRT, APP_GEST, APP_MOUSE, APP_PERSIST, APP_TRANS]
 #     behaving oddly with no local edit to explain it, those three are where to
 #     look.
 TOUCHED = [SUITE, ROUTE, PERSIST, MATRIX, GEST, TRANS, MOUSE_SUITE, RELAUNCH,
-           BIND, TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL] + HARNESS
+           BIND, TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL, SHELL] + HARNESS
 
 # THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
 # real pty, so an arm against one costs a compile, a CHILD compile and a
@@ -266,14 +267,12 @@ ROUTE_CASES = [R_OFF, R_SAME, R_DOCK, R_FOCUS, R_SPEC43, R_VERBS, R_RESIZE,
                R_CLICKWHEEL, R_PROMPT, R_EDGES, C_COUNT]
 
 # The persistence suite (Tier 1) — the layout DOCUMENT.
-P_KEY = ("the document is keyed by the recording, so two recordings never "
-         "share one")
+P_KEY = "ONE document for the terminal product, never keyed by the recording"
 P_TRIP = "a docked pane survives a restart, through the product's own `:` prompt"
 P_FREEZE = "a restored arrangement freezes the responsive profile"
 P_BAD = "an unreadable document is reported BY KIND and is never overwritten"
 P_RESET = "no gesture, no document — and `:reset-layout` deletes a stale one"
-P_OFF = ("OFF BY DEFAULT: with no binding nothing is read and nothing is "
-         "written")
+P_OFF = "WITH NO BINDING nothing is read and nothing is written"
 
 # THE PROPERTY GUARDING THE USER'S FILE ON THE ONE PATH `adoptLayoutDocument`
 # CANNOT REACH. Every other unreadable arm sets the quarantine flag inside
@@ -432,13 +431,12 @@ MUTATIONS = [
         "a cell on a dock strip resolves to nothing",
     ),
     Mutation(
-        "M2", BIND,
-        "  if dt < bandV and dt < best:\n"
-        "    best = dt\n"
-        "    zone = dzTopEdge",
-        "  if false:\n"
-        "    best = dt\n"
-        "    zone = dzTopEdge",
+        # PLAT-49 part B: the body's zones are GoldenLayout's proportions,
+        # computed by the shared rule (`layout_interaction.goldenLayoutZone`)
+        # the binding's hit-test calls — the top band lives there now.
+        "M2", INTER,
+        "  elif fy <= GoldenLayoutEdgeShare: dzTopEdge\n",
+        "  elif false: dzTopEdge\n",
         C_ZONES,
         "the top edge band is unreachable, so dzTopEdge is never produced",
     ),
@@ -492,11 +490,16 @@ MUTATIONS = [
         "again — the exact defect making the assembly structural removes",
     ),
     Mutation(
-        "M6", TABS,
-        "    line.add tabLabel(tabs[span.index], span.index == active)",
-        "    line.add tabLabel(tabs[span.index], false)",
+        "M6", SHELL,
+        "    let tabRole = if span.index == active: srTabActive else: srTabInactive",
+        "    let tabRole = srTabInactive",
         C_STRIP,
-        "the active tab is painted without its brackets",
+        # SINCE PLAT-47 a tab is shaped by colour and weight alone — the
+        # desktop's strip has no brackets, so `tabLabel` pads the active tab
+        # exactly as an inactive one and the old arm (paint it inactive in
+        # TEXT) became equivalent. The active tab is now told apart by its
+        # ROLE, chosen here, and that is what this arm takes away.
+        "the active tab is painted with the inactive tab's role",
     ),
     Mutation(
         "M26", TABS,
@@ -533,8 +536,8 @@ MUTATIONS = [
     # --- every drop-target kind, through the binding -----------------------
     Mutation(
         "M7", BIND,
-        "    let sameCell = event.row == b.pressRow and event.col == b.pressCol",
-        "    let sameCell = true",
+        "    let past = b.dragThresholdPassed(event.row, event.col)",
+        "    let past = false",
         C_KINDS,
         "every release is treated as a click, so no drop ever commits",
     ),
@@ -606,10 +609,13 @@ MUTATIONS = [
     # --- drawing the transient state ---------------------------------------
     Mutation(
         "M15", BIND,
-        "    if not ghost.isEmptyArea:\n"
-        "      result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
-        "    if false:\n"
-        "      result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
+        # RE-POINTED BY PLAT-47: the ghost with no pointer (a keyboard drag,
+        # what C_DRAW's case makes) is now the `else` of the pointer-label
+        # branch, one level deeper.
+        "      if not ghost.isEmptyArea:\n"
+        "        result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
+        "      if false:\n"
+        "        result.add LayoutDecoration(kind: ldDragGhost, area: ghost,",
         C_DRAW,
         "the drag ghost is never drawn",
     ),
@@ -623,10 +629,15 @@ MUTATIONS = [
     # --- a cancelled gesture cannot have changed the layout ----------------
     Mutation(
         "M17", BIND,
+        # RE-POINTED BY PLAT-47: the cancel also forgets the drag's pointer.
         "  b.interaction = b.interaction.cancel()\n"
+        "  b.pointerRow = -1\n"
+        "  b.pointerCol = -1\n"
         "  action(lasCancelled, \"gesture cancelled\")",
         "  discard b.dropDrag()\n"
         "  b.interaction = b.interaction.cancel()\n"
+        "  b.pointerRow = -1\n"
+        "  b.pointerCol = -1\n"
         "  action(lasCancelled, \"gesture cancelled\")",
         C_CANCEL,
         "cancelling commits the drag first",
@@ -686,16 +697,16 @@ MUTATIONS = [
         "M22", BIND,
         "  if b.userModified:\n"
         "    return false\n"
-        "  b.history = newLayoutHistory(initLayout(profileLayout(selected)))",
-        "  b.history = newLayoutHistory(initLayout(profileLayout(selected)))",
+        "  if depthFor(pmDebug, selected) == before:",
+        "  if depthFor(pmDebug, selected) == before:",
         C_PROFILE,
         "a resize re-flows a layout the user has modified",
     ),
     Mutation(
         "M23", BIND,
         "  b.userModified = false\n"
-        "  action(lasApplied, \"layout reset to the \" & $b.profile & \" profile\")",
-        "  action(lasApplied, \"layout reset to the \" & $b.profile & \" profile\")",
+        "  action(lasApplied, \"layout reset to the shared default\")",
+        "  action(lasApplied, \"layout reset to the shared default\")",
         C_PROFILE,
         "`:reset-layout` does not un-freeze the profile",
     ),
@@ -790,8 +801,10 @@ MUTATIONS = [
     # had to add it.
     Mutation(
         "M33", RUNTIME,
-        "    if isMouse:",
-        "    if false:",
+        # PLAT-48 put a second `if isMouse:` above this one (the top bar takes
+        # the mouse first), so the needle names the layout binding's.
+        "    if isMouse:\n      rt.routeMouseReport(event, result)",
+        "    if false:\n      rt.routeMouseReport(event, result)",
         R_MOUSEDRAG,
         "`handleToken` stops offering a decoded mouse report to the binding, "
         "which is the state PLAT-6 landed in",
@@ -799,8 +812,8 @@ MUTATIONS = [
     ),
     Mutation(
         "M33B", RUNTIME,
-        "    if isMouse:",
-        "    if false:",
+        "    if isMouse:\n      rt.routeMouseReport(event, result)",
+        "    if false:\n      rt.routeMouseReport(event, result)",
         M_DRAG,
         "the same defect, seen from a REAL PTY: a press and a release written "
         "as SGR-1006 bytes no longer rearrange the terminal. THE SAME "
@@ -821,18 +834,23 @@ MUTATIONS = [
     ),
     Mutation(
         "M35", BIND,
-        "    let glyph = glyphFor(d.kind)",
-        "    let glyph = DockStripGlyph",
+        # RE-POINTED BY PLAT-47 (the drag ghost became a LABEL over the frame)
+        # AND AGAIN BY PLAT-48: a dock strip is no longer painted by
+        # `paintDecorations` at all — it is its labels on blanks
+        # (`views/shell.paintDockStrips`) — so collapsing the whole glyph
+        # table reached nothing the mouse drag draws and SURVIVED. What the
+        # absolute probe still reads is the strip's glyph as the decoration
+        # table states it (`glyphFor(ldDockStrip)`, a blank): a table that
+        # names the ghost's glyph for the strip disagrees with every strip
+        # cell on the real terminal.
+        "  of ldDockStrip: DockStripGlyph",
+        "  of ldDockStrip: DragGhostGlyph",
         M_MODEL,
-        "M31's defect, graded against the MOUSE suite: every decoration is "
-        "painted with one glyph. Both tiers paint the same wrong screen, so "
-        "the cell-for-cell comparison is DECLARED SPARED and stays green; only "
-        "the absolute probe — each decoration's rectangle from "
-        "`decorationsFor`, required to carry THAT KIND's glyph on the real "
-        "terminal — dies. The drag reaches two kinds with two glyphs, which is "
-        "what makes that possible at all",
+        "the decoration table names the wrong glyph for a dock strip. The "
+        "absolute probe — each decoration's rectangle from `decorationsFor`, "
+        "required to carry THAT KIND's glyph (or, for the ghost, its label) "
+        "on the real terminal — dies at the strip",
         suite=MOUSE_SUITE,
-        spares=(M_DRAG,),
     ),
     Mutation(
         "M36", BIND,
@@ -921,15 +939,14 @@ MUTATIONS = [
         suite=PERSIST,
     ),
     Mutation(
-        "M40", DOC,
-        '  layoutDocumentSlug(canonicalTraceFolder) & "-" &\n'
-        "    digest[0 ..< min(LayoutKeyDigestChars, digest.len)] & "
-        "LayoutDocumentExt",
-        "  layoutDocumentSlug(canonicalTraceFolder) & LayoutDocumentExt",
+        "M40", STORE,
+        "  layoutStateRoot() / LayoutDocumentFileName",
+        "  layoutStateRoot() / \"tui-layouts\" / LayoutDocumentFileName",
         P_KEY,
-        "the key loses its digest and becomes the recording's BASENAME, so "
-        "`/a/calc.ct` and `/b/calc.ct` share one document and one recording's "
-        "arrangement silently applies to another",
+        "PLAT-45 re-pointed this arm when the per-recording key it guarded was "
+        "deleted: the document leaves the state root for PLAT-6's old "
+        "`tui-layouts/` subdirectory, so the terminal no longer keeps its ONE "
+        "document where every product's state lives",
         suite=PERSIST,
     ),
     Mutation(
@@ -948,9 +965,13 @@ MUTATIONS = [
     Mutation(
         "M42", STORE,
         "  if not rt.layoutBindingEnabled():\n"
-        "    # WITH THE FLAG OFF NOTHING IS READ, and no path is even computed "
-        "— so the\n"
-        "    # state directory is not touched, not even by a `stat`.\n"
+        "    # WITH NO BINDING NOTHING IS READ, and no path is even computed — "
+        "so the\n"
+        "    # state directory is not touched, not even by a `stat`. The "
+        "shipped binary\n"
+        "    # always has one since PLAT-45; a Tier-1 host that built a runtime "
+        "without\n"
+        "    # one is a session with nothing to restore into.\n"
         '    return LayoutRestoreReport(status: lrsNoDocument, path: "", '
         'message: "")',
         "  if false:\n"
@@ -1367,15 +1388,13 @@ DECLARED_SURVIVORS = [
         suite=PERSIST,
     ),
     Mutation(
-        "S13", DOC,
-        "    digest[0 ..< min(LayoutKeyDigestChars, digest.len)] & "
-        "LayoutDocumentExt",
-        "    digest[0 ..< min(digest.len, LayoutKeyDigestChars)] & "
-        "LayoutDocumentExt",
+        "S13", STORE,
+        "  layoutStateRoot() / LayoutDocumentFileName",
+        "  joinPath(layoutStateRoot(), LayoutDocumentFileName)",
         "",
-        "`min`'s arguments commuted — the same integer for every input. IT "
-        "MUST SURVIVE, and it is THE CONTROL FOR M40, which rewrites the "
-        "expression this slice is part of.",
+        "`/` spelled as the `joinPath` it is. IT MUST SURVIVE, and it is THE "
+        "CONTROL FOR M40, which rewrites the same expression (re-pointed with "
+        "M40 by PLAT-45).",
         suite=PERSIST,
     ),
     Mutation(
@@ -1649,7 +1668,27 @@ def run_suite(suite: str = SUITE) -> RunResult:
     return res
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
+    # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
+    # dropped, and the run became a full, file-mutating grade: `--only=A,B`
+    # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`
+    # asserts the refusal.
+    known_flags = set()
+    unknown = [a for a in sys.argv[1:] if a.startswith("-") and
+               a.split("=", 1)[0] not in known_flags]
+    if unknown:
+        print(f"unknown argument(s): {unknown}; accepted flags: "
+              f"{sorted(known_flags) or 'none (arm ids only)'}")
+        return 2
     # An optional arm filter, so a re-run after fixing ONE arm costs one
     # compile rather than all of them. The control still runs: an arm graded
     # against a suite nobody checked is not graded.

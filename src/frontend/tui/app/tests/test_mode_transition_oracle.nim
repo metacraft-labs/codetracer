@@ -46,6 +46,10 @@
 
 import std/[algorithm, os, strutils, unittest]
 
+# The one module that knows where a published specification document is
+# (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
+import ../../../test_support/spec_documents
+
 # `product_mode` — `ProductMode`, `sourceOriginFor`, the stale-trace verdict
 # and `slugOfPreservedRow` — comes from the CORE through the sanctioned facade,
 # which is the same door the modules under test use.
@@ -70,8 +74,7 @@ template ck(condition: untyped) =
   check condition
 
 const
-  SpecRelativePath =
-    "codetracer-specs/GUI/Layout-And-Navigation/Mode-Transitions.md"
+  SpecRelativePath = specDocumentRef("GUI/Layout-And-Navigation/Mode-Transitions.md")
   PreservationHeading = "## 5. Editor contents and the caret"
   TableHeaderCell = "Preserved"
   ExpectedPreservedRows = 6
@@ -86,10 +89,7 @@ proc specPath(): string =
   ## `<repo>/src/frontend/tui/app/tests/<this>.nim`, so five `parentDir`s reach
   ## the checkout root and a sixth reaches the workspace the sibling checkouts
   ## share.
-  var dir = currentSourcePath().parentDir()
-  for _ in 0 ..< 5:
-    dir = dir.parentDir()
-  dir.parentDir() / SpecRelativePath
+  specDocumentPath("GUI/Layout-And-Navigation/Mode-Transitions.md")
 
 proc readPreservedSlugs(path: string): seq[string] =
   ## §5's first column, normalised by the PRODUCT's own normaliser.
@@ -293,7 +293,10 @@ suite "PLAT-16: the transition preserves what §5 says it preserves":
     ck firstEdit.contains(paneBuildOutput)
     ck not firstEdit.contains(paneCalltrace)
     ck debugTree.contains(paneCalltrace)
-    ck not debugTree.contains(paneFileTree)
+    # PLAT-45: the Debug default is the shared arrangement, which has a Files
+    # column as the desktop's does — so the discriminating pane is the build
+    # pane, which only Edit mode's shared default places.
+    ck not debugTree.contains(paneBuildOutput)
 
     # The user rearranges EDIT mode…
     let rearranged = column([

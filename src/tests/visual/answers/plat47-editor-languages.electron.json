@@ -1,0 +1,61 @@
+{
+ "takenAt": "2026-09-30T00:37:13.853Z",
+ "samples": {
+  "sample.c": {
+   "language": "c",
+   "tokenTypes": 31
+  },
+  "sample.cpp": {
+   "language": "cpp",
+   "tokenTypes": 39
+  },
+  "sample.go": {
+   "language": "go",
+   "tokenTypes": 29
+  },
+  "sample.java": {
+   "language": "java",
+   "tokenTypes": 32
+  },
+  "sample.js": {
+   "language": "javascript",
+   "tokenTypes": 19
+  },
+  "sample.json": {
+   "language": "json",
+   "tokenTypes": 8
+  },
+  "sample.nr": {
+   "language": "rust",
+   "tokenTypes": 14
+  },
+  "sample.py": {
+   "language": "python",
+   "tokenTypes": 13
+  },
+  "sample.rb": {
+   "language": "ruby",
+   "tokenTypes": 34
+  },
+  "sample.rs": {
+   "language": "rust",
+   "tokenTypes": 16
+  },
+  "sample.sh": {
+   "language": "shell",
+   "tokenTypes": 15
+  },
+  "sample.toml": {
+   "language": "plaintext",
+   "tokenTypes": 0
+  },
+  "sample.ts": {
+   "language": "typescript",
+   "tokenTypes": 14
+  },
+  "sample.yaml": {
+   "language": "yaml",
+   "tokenTypes": 14
+  }
+ }
+}

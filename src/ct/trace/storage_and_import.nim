@@ -200,8 +200,8 @@ proc detectTraceLang*(program: string, paths: seq[string],
 proc readTraceFolderMeta*(folder: string): CtfsMetaDat
 
 proc readMaterializedTraceMeta*(folder: string): CtfsMetaDat =
-  ## Read the metadata of a *materialized* `runtime_tracing` recording —
-  ## the shape ``ct record-web`` writes for browser sessions — into the
+  ## Read the metadata of a legacy *materialized* `runtime_tracing`
+  ## recording (a ``trace.bin`` event stream and its sidecars) into the
   ## same [CtfsMetaDat] record the CTFS path produces, so `importTrace`
   ## has exactly one downstream code path.
   ##
@@ -342,12 +342,10 @@ proc importTrace*(
   # ``meta.dat`` inside ``trace.ct``; the retired
   # ``trace_db_metadata.json`` sidecar is not accepted.
   #
-  # M41: a *materialized* `runtime_tracing` directory (``trace.json`` +
-  # ``trace_metadata.json`` + ``trace_paths.json``) is also accepted.
-  # That is the shape ``ct record-web`` writes for browser recordings
-  # and the shape the Rust replay engine already replays — refusing it
-  # here was the reason a browser recording could be replayed by every
-  # headless suite in the repo yet never opened by the GUI.
+  # M41: a legacy *materialized* `runtime_tracing` directory (``trace.bin``
+  # + ``trace_metadata.json`` + ``trace_paths.json``) is also accepted,
+  # because the Rust replay engine replays it.  A ``trace.json`` folder is
+  # test-oracle output and is refused by `describeMissingTraceContainer`.
   #
   # Sessions are deliberately *not* handled here: a ``session.toml``
   # names several recordings and belongs to `importSessionManifest`.
@@ -418,7 +416,7 @@ proc importTrace*(
     else:
       # M41: the materialized shape has no single container, so carry
       # the event stream and its sidecars across instead.  The replay
-      # engine autodetects ``trace.json`` / ``trace.bin`` in the
+      # engine autodetects ``trace.bin`` in the
       # recording folder exactly as it does in the recorder's output
       # folder (``dap_server.rs::auto_detect_materialized_trace_file``).
       copyMaterializedTracePayload(recordingSourceFolder, outputFolder)

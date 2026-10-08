@@ -374,8 +374,8 @@ ARMS = [
         "LayoutNode — a window's docked pane vanishes from the session"),
     # --- the terminal -------------------------------------------------------
     Arm("U1", TUIAPP,
-        "      initLayout(profileLayout(selected))\n    else: active.layout\n",
-        "      initLayout(profileLayout(selected))\n"
+        "      profileLayoutValue(selected)\n    else: active.layout\n",
+        "      profileLayoutValue(selected)\n"
         "    else: initLayout(active.layout.tree)\n",
         C_SHELL_SYNC,
         "the terminal binding is seeded from the session's TREE, as it was "
@@ -598,7 +598,16 @@ def check_control_hashes() -> bool:
     return ok
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     only = None
     for arg in sys.argv[1:]:
         if arg == "--needle-scan":

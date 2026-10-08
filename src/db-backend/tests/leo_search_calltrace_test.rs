@@ -29,12 +29,15 @@ fn find_db_backend() -> PathBuf {
 }
 
 #[test]
-#[ignore = "requires leo-recorder; run via: just test-leo-search-calltrace"]
 fn leo_search_calltrace_returns_compute_call() {
-    assert!(
-        find_leo_recorder().is_some(),
-        "Leo recorder not found.  Set CODETRACER_LEO_RECORDER_PATH or build codetracer-leo-recorder.",
-    );
+    if find_leo_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "leo_search_calltrace_test",
+            "Leo recorder not found.  Set CODETRACER_LEO_RECORDER_PATH or build codetracer-leo-recorder.",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
     let source_path = find_leo_flow_test().expect("flow_test.leo not found");

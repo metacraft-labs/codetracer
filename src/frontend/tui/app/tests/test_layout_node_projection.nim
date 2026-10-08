@@ -73,11 +73,14 @@ import headless_app/layout_model
 
 import ../layout/profile
 import ../layout/project
+import ./plat45_old_profiles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 256
+const ExpectedAssertions = 244
+  ## PLAT-51: 260 -> 244, the event stack has two tabs (the Timeline removed)
+  ## and the per-tab case runs its sixteen-odd checks once fewer.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -228,7 +231,10 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
         ck r.area.width >= minPaneWidth(r.pane)
         ck r.area.height >= minPaneHeight(r.pane)
     checkpoint("panes checked: " & $checkedPanes)
-    ck checkedPanes == 3 + 4 + 5
+    # PLAT-47: 80x24 folds the shared default (the desktop's Debug layout)
+    # twice (three regions — the source pane at its minimum and one side
+    # column); 120x40 and 200x60 show it unfolded (five each).
+    ck checkedPanes == 3 + 5 + 5
 
   test "the invariants hold across a sweep of terminal sizes, not three":
     # Three geometries cannot find a rounding defect that only bites at a
@@ -261,8 +267,11 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
   test "a stack gives its slot to the active tab and nothing to the others":
     let body = bodyFor(80, 24)
     let node = profileLayout(lpCompact)
-    let tabs = profileTabs(lpCompact)
-    ck tabs.len == 3
+    # The event stack — the last region in reading order at 80x24: its two
+    # own tabs (PLAT-51: Event Log | Terminal Output, the Timeline removed) (PLAT-47: the NS9 panes are no longer folded into it — TESTS is
+    # a tab of FILES and CONSTRAINTS is not in the default).
+    let tabs = stackTabs(node)[^1]
+    ck tabs.len == 2
     var slot = CellArea()
     var checkedTabs = 0
     for i, kind in tabs:
@@ -288,8 +297,8 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
       let region = proj.regions[proj.regions.len - 1]
       ck region.pane == kind
       ck region.activeTab == i
-      ck region.tabs.len == 3
-    ck checkedTabs == 3
+      ck region.tabs.len == 2
+    ck checkedTabs == 2
 
   test "the desktop's own default layout projects faithfully":
     # `defaultReplayLayout()` is what a replay session opens with on the
@@ -360,7 +369,7 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
 
     var mutated = proj.regions
     # The FIRST column widened by one, so it runs one cell into the second.
-    ck mutated[0].pane == paneCalltrace
+    ck mutated[0].pane == paneFileTree
     ck mutated[1].pane == paneEditor
     let overlapHeight = mutated[0].area.height
     mutated[0].area.width += 1
@@ -371,14 +380,14 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
       let p = found[0]
       # THE PANES, BY NAME, AND THE CELL, BY COORDINATE.
       ck p.kind == cpOverlap
-      ck p.pane == paneCalltrace
+      ck p.pane == paneFileTree
       ck p.other == paneEditor
       ck p.row == body.row
       ck p.col == proj.regionFor(paneEditor).col
       # THE SIZE, exactly: one column of the pane's height, not "some cells".
       ck p.cells == overlapHeight
       ck describe(p).contains("Overlap")
-      ck describe(p).contains("calltrace")
+      ck describe(p).contains("fileTree")
       ck describe(p).contains("editor")
     # The union is unchanged, which is the point of a SEPARATE overlap check:
     # a covered-cell count alone cannot see this mutation at all.
@@ -411,7 +420,11 @@ suite "CTUI-3: the LayoutNode -> Yoga -> cells projection is total and faithful"
 
   test "MUTATION ARM: a pane pushed outside the body is reported as outside":
     let body = bodyFor(80, 24)
-    let proj = projectLayout(profileLayout(lpCompact), body)
+    # The OLD compact tree (PLAT-45 keeps it as a fixture): this arm is about
+    # the COVERAGE CHECKER, and names cells of an arrangement whose third
+    # region spans the body's full width — which the folded shared default's
+    # does not.
+    let proj = projectLayout(oldProfileLayout(opCompact), body)
     ck coverageProblems(proj.regions, body).len == 0
 
     var mutated = proj.regions

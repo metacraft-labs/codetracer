@@ -54,7 +54,7 @@
 ## takes its `else` branch, and the case still prints `[OK]` while
 ## `programResult` goes to 1.
 
-import std/[json, monotimes, os, strutils, times, unicode, unittest]
+import std/[json, monotimes, os, sequtils, strutils, times, unicode, unittest]
 
 import isonim/core/[signals, computation]
 import isonim/viewmodel
@@ -74,7 +74,10 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 113
+# 115 -> 116 (2026-10-04): the entry stack may carry the trace's `<toplevel>`
+# root under the entry function, and every frame of it is asserted to be in
+# the entry file.
+const ExpectedAssertions = 116
 
 var countedAssertions = 0
 
@@ -98,7 +101,7 @@ const
     ## depth it actually reached — rather than by hanging.
   LatencyFrames = 40
 
-  ChecksSessionOpen = 7
+  ChecksSessionOpen = 8
   ChecksStepIn = 5
   ChecksClassification = 5
   ChecksPaneShape = 10
@@ -114,7 +117,9 @@ const
   ChecksCalltraceCursor = 4
   ChecksSameFileArm = 10
   ChecksLatency = 7
-  ChecksShellIntegration = 5
+  ChecksShellIntegration = 7
+    ## PLAT-45 added one: the call stack is a TAB of its stack in the shared
+    ## default, and the strip naming it is asserted.
   ChecksSummary = 4
   ChecksSkippedFixture = 2
 
@@ -274,8 +279,8 @@ template checkSourceFollowsFrame(h: NavHarness; frame: StackFrame;
   ck inspectionRows.len == 1
   let wantRow = 1 + frame.line - model.viewportTop
   ck (if inspectionRows.len == 1: inspectionRows[0] else: -1) == wantRow
-  ck rowStyleAt(screen.rows[wantRow], pointerFieldColumn(screen) + 1).fg ==
-     InspectionPointerStyle.fg
+  ck rowStyleAt(screen.rows[wantRow], pointerFieldColumn(screen) + 1).role ==
+     InspectionPointerStyle.role
   if executionVisible:
     ck executionRows.len == 1
     ck (if executionRows.len == 1: executionRows[0] else: -1) ==
@@ -350,18 +355,28 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       ck h.provider.supports()
       let entryStack = framesFromStackTrace(h.stackBody())
       checkpoint("entry stack: " & $entryStack.len & " frame(s)")
-      ck entryStack.len == 1
+      # The entry function, and beneath it the `<toplevel>` root the trace
+      # format opens before the program runs — both at the entry point, in
+      # the entry file. No more: the debugger has not stepped into anything.
+      ck entryStack.len in 1 .. 2
       ck entryStack[0].path == h.entryFile
+      ck entryStack.allIt(it.path == h.entryFile)
       ck h.controls.store == h.session.session.store
       ck userRootsFor(h.entryFile).len == 1
 
       # ---- STEP INTO A NESTED CALL ----------------------------------------
       # `stepIn` really steps in: the walk stops as soon as the ENGINE reports
-      # a deeper stack, and the assertion after the loop is on the depth the
-      # engine reported rather than on the number of steps it took.
+      # a deeper stack whose caller is in ANOTHER FILE, and the assertion after
+      # the loop is on the stack the engine reported rather than on the number
+      # of steps it took. "Another file" is part of the stop condition, not just
+      # of the assertion below: the recorder roots the trace in a `<toplevel>`
+      # frame in the entry file, so the first deeper stack (`main` under
+      # `<toplevel>`, both in `main.nr`) is not yet the cross-file one this
+      # fixture was chosen for.
       var stepIns = 0
       var frames = entryStack
-      while stepIns < MaxStepIns and frames.len < 2:
+      while stepIns < MaxStepIns and
+          not (frames.len >= 2 and frames[1].path != frames[0].path):
         h.session.stepIn()
         discard h.session.drainEvents()
         inc stepIns
@@ -664,9 +679,12 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       # CTUI-3 delivered the rectangle and left it empty; CTUI-5 filled the
       # `editor` one. This is the assertion that the `calltrace` one is no
       # longer empty and that what fills it is EXACTLY this pane.
-      var shellModel = newShellModel(80, 24)
+      # At 120x40, where the shared default is unfolded and the call stack
+      # has a rectangle of its own; at 80x24 the source pane's minimum folds
+      # it into a tab of the Variables stack (PLAT-45).
+      var shellModel = newShellModel(120, 40)
       shellModel.callStack = deepModel
-      let screenBody = bodyArea(80, 24)
+      let screenBody = bodyArea(120, 40)
       let stackArea = projectLayout(shellModel.layout,
                                     screenBody).regionFor(paneCalltrace)
       ck stackArea.width > 0
@@ -677,10 +695,25 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
       # `editor` rectangle CTUI-5 compared IS flush right, so a comparison
       # copied from that suite would fail here for a reason that is not a
       # defect.
-      let flushRight = stackArea.col + stackArea.width >= screenBody.col + screenBody.width
-      let inner = if flushRight: stackArea.width else: stackArea.width - 1
-      let shellText = shellRows(shellModel, 80, 24)
-      let standalone = callStackText(deepModel, inner, stackArea.height)
+      let frame = paneFrame(stackArea, screenBody)
+      let flushRight = not frame.rightDivider
+      let inner = frame.box.width
+      let shellText = shellRows(shellModel, 120, 40)
+      # PLAT-45: the call stack is the first TAB of its stack in the shared
+      # default, so the rectangle's first row is the strip and the pane owns
+      # the rows under it — `shell.paintPane`'s `content`.
+      # PLAT-47: and when another pane is BELOW it, its last row is the
+      # divider between them (`shell.paneFrame`), so the pane owns the rows of
+      # its box under the strip.
+      let paneTop = stackArea.row + 1
+      let paneRows = frame.box.height - 1
+      # PLAT-47: the pane's tab reads `Call Trace` (it lists the recording's
+      # trace when there is one; this model carries only a stack).
+      ck shellText[stackArea.row].contains(" Call Trace ")
+      # PLAT-49: the painter is handed the rectangle FROM THE STRIP'S ROW
+      # (`shell.paintPane`'s `underStrip`), so its own heading lands under the
+      # strip and its row `i` is the shell's row `i` of the box.
+      let standalone = callStackText(deepModel, inner, frame.box.height)
       var matched = 0
       var separators = 0
       for i in 0 ..< stackArea.height:
@@ -695,15 +728,21 @@ suite "CTUI-6: the call stack pane navigates without moving the debugger":
           elif at == stackArea.col + stackArea.width - 1:
             edge = $r
           at += w
-        if slice == standalone[i]:
+        if i >= 1 and i <= paneRows and i < standalone.len and
+           slice == standalone[i]:
           inc matched
-        if flushRight or edge == PaneSeparatorGlyph:
+        # The right divider runs the rectangle's full height (PLAT-50: the
+        # edge line `shell.DividerGlyph`, the strip row's included).
+        if flushRight or edge == DividerGlyph:
           inc separators
-      ck matched == stackArea.height
+      ck matched == paneRows
       ck separators == stackArea.height
-      # …and the pane still says what CTUI-3's plain title row said, so every
-      # assertion written against that row keeps reading it.
-      ck shellText[stackArea.row].contains(CallStackTitle)
+      # …and the pane's first row is its TAB STRIP, naming it (PLAT-49: no
+      # title row inside a pane; the strip is what identifies it).
+      ck shellText[stackArea.row].contains("Call Trace") and
+         not shellText[stackArea.row].contains(CallStackTitle)
+      # …and the painter's heading never shows through below it.
+      ck not shellText[paneTop].contains(CallStackTitle)
 
   test "every fixture was examined, and the assertion tally proves it":
     ck examinedFixtures == 1

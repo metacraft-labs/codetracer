@@ -74,6 +74,7 @@ import ../../app/views/styled_row
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_command_mode as cmdApp
+import ./derived_colours
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
@@ -88,9 +89,9 @@ const
   FrameTimeoutMs = 20000
   LabelTimeoutMs = 10000
 
-  Green = 2'u8      ## NORMAL's indicator colour.
-  Yellow = 3'u8     ## COMMAND's.
-  Magenta = 5'u8    ## SEARCH's.
+  # The mode indicators' colours are the DERIVED 16-colour rung of the mode
+  # roles (`derived_colours.ansiIndexOf`) since PLAT-46, not ANSI numbers the
+  # status bar spelled.
 
   GotoLine = "goto 4500"
     ## CTUI-10's own example, minus the `:` that opens the prompt.
@@ -234,7 +235,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
           checkpoint(m)
       ck mismatched.len == 0
       ck rowsCompared == Rows
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
       # NORMAL parks the cursor on the ordinary barrier: there is no prompt.
       checkCursorAt(sess, Rows - 1, Cols - 1)
       checkField(sess, cmdApp.StatusRow, cmdApp.StatusLabel, "")
@@ -246,7 +247,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       sess.send(":")
       inc step
       settledPromptFrame(sess, step, 1)
-      checkMode(sess, mmCommand, Yellow)
+      checkMode(sess, mmCommand, ansiIndexOf(srModeCommand))
       # THE ASSERTION CTUI-10 NAMES: the prompt is visible to the terminal via
       # `cursorPosition`, at the column the MODEL says the insertion point is.
       var model = initCommandLineModel(pkCommand)
@@ -272,7 +273,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       # THE SPACE REALLY ARRIVED: the buffer on screen contains one, and it is
       # the byte that separates the verb from its argument.
       ck paneRow(sess, cmdApp.promptRowOf(Rows)).contains(" 4500")
-      checkMode(sess, mmCommand, Yellow)
+      checkMode(sess, mmCommand, ansiIndexOf(srModeCommand))
       # Nothing has RUN yet — the prompt is still open.
       checkField(sess, cmdApp.StatusRow, cmdApp.StatusLabel, "")
       checkField(sess, cmdApp.ActionRow, cmdApp.ActionLabel, "")
@@ -282,7 +283,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       inc step
       settledClosedFrame(sess, step)
       ck step == 2 + GotoLine.len
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
       checkCursorAt(sess, Rows - 1, Cols - 1)
       # THE INTERPRETER'S ANSWER, ON THE TERMINAL. Compared against the same
       # `runCommand` this suite links, so the screen is asserted to be the
@@ -334,7 +335,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       let unknownMessage = paneRow(sess, cmdApp.MessageRow)
       checkpoint("unknown message: '" & unknownMessage & "'")
       ck unknownMessage.contains(UnknownLine)
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
       sess.send($TestAppQuitByte)
       let status = sess.waitExit(initDuration(seconds = 10))
@@ -367,7 +368,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       sess.send("/")
       inc step
       settledPromptFrame(sess, step, 1)
-      checkMode(sess, mmSearch, Magenta)
+      checkMode(sess, mmSearch, ansiIndexOf(srModeSearch))
       ck paneRow(sess, cmdApp.promptRowOf(Rows)) == "/"
 
       for ch in SearchTerm:
@@ -392,7 +393,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       ck live.matchCountText() == "[1/" & $matches.len & "]"
       # SEARCH OUTLIVES ITS PROMPT — that is CTUI-9's phase, and it is what
       # makes `n` mean "next match" here and "step over" in NORMAL.
-      checkMode(sess, mmSearch, Magenta)
+      checkMode(sess, mmSearch, ansiIndexOf(srModeSearch))
 
       # `n` walks the ring, on the terminal.
       var walked = 0
@@ -421,7 +422,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       sess.send(DoubleEscapeBytes)
       inc step
       settledClosedFrame(sess, step)
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
       sess.send($TestAppQuitByte)
       let status = sess.waitExit(initDuration(seconds = 10))
@@ -445,7 +446,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       sess.sendKey("ctrl+p")
       inc step
       settledPromptFrame(sess, step, 1)
-      checkMode(sess, mmCommand, Yellow)
+      checkMode(sess, mmCommand, ansiIndexOf(srModeCommand))
       let title = paneRow(sess, cmdApp.PaletteTopRow)
       checkpoint("palette title row: '" & title & "'")
       ck title.startsWith(command_palette.PaletteTitle)
@@ -468,7 +469,7 @@ suite "CTUI-10 Tier 2: the `:` prompt on a real terminal":
       sess.send(DoubleEscapeBytes)
       inc step
       settledClosedFrame(sess, step)
-      checkMode(sess, mmNormal, Green)
+      checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
       ck paneRow(sess, cmdApp.PaletteTopRow).len == 0
 
       sess.send($TestAppQuitByte)

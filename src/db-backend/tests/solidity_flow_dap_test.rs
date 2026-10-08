@@ -113,15 +113,18 @@ fn is_anvil_available() -> bool {
 /// Prerequisites: `codetracer-evm-recorder`, `solc`, and `anvil`.
 /// These are provided by the Nix dev shell (`nix develop`).
 #[test]
-#[ignore = "requires evm-recorder dev shell (solc, anvil); run via: just test-solidity-flow"]
 fn solidity_flow_dap_variables() {
     // --- Prerequisite checks ---
-    assert!(
-        find_evm_recorder().is_some(),
-        "EVM recorder not found. \
+    if find_evm_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "solidity_flow_dap_test",
+            "EVM recorder not found. \
          Set CODETRACER_EVM_RECORDER_PATH or build codetracer-evm-recorder \
-         (run `cargo build` inside the codetracer-evm-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-evm-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     assert!(
         is_solc_available(),
@@ -167,9 +170,15 @@ fn solidity_flow_dap_variables() {
         source_file: source_path.to_str().unwrap().to_string(),
         // Line 39: `uint256 final_result = doubled + 10;`
         breakpoint_line: 39,
-        expected_variables: vec!["final_result"].into_iter().map(String::from).collect(),
-        // `storedResult` and `Computed` should not appear as local variables
-        excluded_identifiers: vec!["storedResult".to_string(), "Computed".to_string()],
+        // `storedResult` is a state variable the function assigns, so it is a
+        // variable too.
+        expected_variables: vec!["final_result", "storedResult"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        // The emitted event, the contract and the function are names, not
+        // variables.
+        excluded_identifiers: vec!["Computed".to_string(), "FlowTest".to_string(), "run".to_string()],
         expected_values,
     };
 

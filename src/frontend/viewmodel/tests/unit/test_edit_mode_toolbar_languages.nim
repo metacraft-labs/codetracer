@@ -631,7 +631,7 @@ suite "EMT anti-drift and exclusion — the controls":
     expectCount(23)
 
   test "EMT-A23 no smart-* provider can appear on a user-facing surface":
-    ## EMT-D2. All 14 are generated from `SmartHarnessSpec` records and their
+    ## EMT-D2. All 13 are generated from `SmartHarnessSpec` records and their
     ## `detect` is `siblingRepoInWorkspace(projectRoot, "<recorder repo>")` — a
     ## DIRECTORY-NAME match that fires only when the workspace is or contains a
     ## recorder-repo checkout, never on a user project. Surfacing them would put
@@ -639,15 +639,18 @@ suite "EMT anti-drift and exclusion — the controls":
     ## else's.
     ##
     ## Derived and green today: it pins the mechanism, so the exclusion rests on
-    ## what the code does rather than on a list of 14 names to keep in sync.
+    ## what the code does rather than on a list of 13 names to keep in sync.
+    ## (13 since the wasmi harness was retired with its recorder; the Wasm
+    ## harness is the wazero recorder's.)
     startCount()
     const SmartCommonSrc =
       staticRead("../../../../ct_test/frameworks/smart_contract_common.nim")
     ck "siblingRepoInWorkspace" in SmartCommonSrc
     ck "spec.findRecorderRepo(projectRoot).len > 0" in SmartCommonSrc
-    # The count is asserted, so a 15th harness cannot be added unnoticed.
-    ck SmartHarnessSrc.count("SmartHarnessSpec(") == 14
-    ck SmartHarnessSrc.count("recorderRepo:") == 14
+    # The count is asserted, so a 14th harness cannot be added (nor one
+    # removed) unnoticed.
+    ck SmartHarnessSrc.count("SmartHarnessSpec(") == 13
+    ck SmartHarnessSrc.count("recorderRepo:") == 13
     when EditModeToolbarBuilt:
       # No listing whatsoever produces a smart-* command.
       for listing in [@["Nargo.toml"], @["Cargo.toml"], @["foundry.toml"],

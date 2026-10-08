@@ -1,0 +1,66 @@
+{
+ "_comment": [
+  "PLAT-48 — the desktop's menu, read from the real Electron app on calc.",
+  "Produced by src/tests/gui/tests/visual/plat48-menu-capture.spec.ts",
+  "(`just plat48-capture-electron`)."
+ ],
+ "openedByClick": true,
+ "rootLabels": [
+  "File",
+  "Edit",
+  "View",
+  "Build",
+  "Reset",
+  "Debug",
+  "Help"
+ ],
+ "gate": {
+  "vmHighlightStepOver": [
+   "Debug",
+   "Step Over"
+  ],
+  "vmHighlightStepOut": [
+   "Debug",
+   "Step Out"
+  ]
+ },
+ "debugShortcuts": {
+  "Continue": "F8 F2",
+  "Step Over": "F10",
+  "Step In": "F11",
+  "Step Out": "F12",
+  "Reverse Continue": "SHIFT+F8",
+  "Reverse Step Over": "SHIFT+F10",
+  "Reverse Step In": "SHIFT+F11",
+  "Reverse Step Out": "SHIFT+F12",
+  "Stop": "SHIFT+F5",
+  "Keyboard Shortcuts": "CTRL+ALT+K",
+  "Add a Breakpoint": "",
+  "Delete Breakpoint": "",
+  "Delete All Breakpoints": "",
+  "Enable Breakpoint": "",
+  "Enable All Breakpoints": "",
+  "Disable Breakpoint": "",
+  "Disable All Breakpoints": "",
+  "Add a Tracepoint": "",
+  "Delete Tracepoint": "",
+  "Enable Tracepoint": "",
+  "Enable All Tracepoints": "",
+  "Disable Tracepoint": "",
+  "Disable All Tracepoints": "",
+  "Run All Tracepoints": "",
+  "Invite to Collaborative Session...": ""
+ },
+ "stepOver": {
+  "before": 1,
+  "after": 2,
+  "closed": true
+ },
+ "openedByKey": true,
+ "footerLabels": [
+  "BUILD",
+  "PROBLEMS",
+  "FIND IN FILES",
+  "REQUESTS"
+ ]
+}

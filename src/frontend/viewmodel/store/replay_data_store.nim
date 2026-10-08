@@ -27,6 +27,11 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import types, request_tracker, degraded_state, stop_timeline
+# PLAT-49 part B: a call's arguments and return value, rendered by the one
+# presenter at the `calltrace-arg` budget — the desktop renders its chips with
+# the same budget (`ui/presented_value.callArgValue`).
+from ../../../common/value_presentation import present, CalltraceArgBudget
+from ../../../common/value_presentation/json_adapter import toPValue
 
 export stop_timeline
 export degraded_state
@@ -114,6 +119,10 @@ type
     args*: Signal[Table[string, seq[CallArg]]]
     startLineIndex*: Signal[int64]
     totalCallsCount*: Signal[uint64]
+    currentLineIndex*: Signal[int64]
+      ## PLAT-51: the global call-line index of the call the debugger is in
+      ## (the engine's `currentCallLineIndex`), -1 when unknown — the row a
+      ## list pane's scrollbar scrubber marks (Scrollbar-Scrubbers.md §3.5).
     finished*: Signal[bool]
     loadingState*: Signal[LoadingState]
 
@@ -212,6 +221,19 @@ type
       ## only honest total available here is derived from what has arrived.
       ## The desktop's DataTables path has a real `recordsTotal` and publishes
       ## it through `applyEventLogRows`.
+      ##
+      ## PLAT-51: `ct/event-load` now carries the log's `total` too, and an
+      ## answer that does sets `totalReported`; this is then the engine's own
+      ## count.
+    totalReported*: Signal[bool]
+      ## PLAT-51: whether `recordsTotal` is the ENGINE'S count of the whole
+      ## log (an answer carried `total`) rather than a high-water mark — the
+      ## population a list pane's scrollbar scrubber spans.
+    currentIndex*: Signal[int]
+      ## PLAT-51: the row (in the log's current order) of the last event at
+      ## or before the tick a request named (`ct/event-load`'s `atRRTicks` →
+      ## `indexAtTick`), -1 when unknown — the scrubber's current-position
+      ## mark (Scrollbar-Scrubbers.md §3.5).
     recordsFiltered*: Signal[int]
       ## The same count after the server-side search filter, for a host that
       ## has one. Equal to `recordsTotal` when nothing filtered.
@@ -780,6 +802,27 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
       s.requestSpans.loadingState.val = lsError,
   )
 
+proc requestEventIndexAt*(store: ReplayDataStore; rrTicks: uint64) =
+  ## PLAT-51: ask the engine which row of the WHOLE event log is "now" — the
+  ## last event at or before `rrTicks` — and how long the log is
+  ## (`ct/event-load` with `indexOnly`: no window, no `ct/updated-events`, so a
+  ## host whose table reloads on that event is not made to redraw by a move).
+  ## The answer lands in `eventLog.currentIndex` (the list scrubber's mark).
+  let fut = store.backend.send("ct/event-load", %*{
+    "indexOnly": true, "atRRTicks": int64(rrTicks)})
+  let s = store
+  async_compat.onComplete(fut,
+    onSuccess = proc(response: JsonNode) =
+      var body = response
+      if not body.isNil and body.kind == JObject and body.hasKey("body") and
+          body["body"].kind == JObject:
+        body = body["body"]
+      if body.isNil or body.kind != JObject:
+        return
+      if body.hasKey("indexAtTick") and body["indexAtTick"].kind == JInt:
+        s.eventLog.currentIndex.val = body["indexAtTick"].getInt,
+    onError = proc(msg: string) = discard)
+
 proc installBackendEventHandlers(store: ReplayDataStore) =
   ## Consume backend responses/events that are not mirrored through the
   ## legacy component bridge. Most panel data still arrives through the
@@ -857,6 +900,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         args: createSignal(initTable[string, seq[CallArg]]()),
         startLineIndex: createSignal(0'i64),
         totalCallsCount: createSignal(0'u64),
+        currentLineIndex: createSignal(-1'i64),
         finished: createSignal(false),
         loadingState: createSignal(lsIdle),
       ),
@@ -875,6 +919,8 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       eventLog: EventLogStore(
         rows: createSignal(newSeq[EventLogRow]()),
         recordsTotal: createSignal(0),
+        totalReported: createSignal(false),
+        currentIndex: createSignal(-1),
         recordsFiltered: createSignal(0),
         maxRRTicks: createSignal(0'u64),
         loadedStart: createSignal(0),
@@ -1688,7 +1734,24 @@ proc applyEventLogResponse*(store: ReplayDataStore;
       (not body.isNil and body.kind == JObject and body.hasKey("events"))
   if not hasEvents:
     return
+  # PLAT-51: THE WHOLE LOG'S SIZE, when the engine says it (`ct/event-load`'s
+  # `total`) — the population a list pane's scrollbar scrubber spans
+  # (Scrollbar-Scrubbers.md §2). Absent from an older engine's answer, in
+  # which case the totals are inferred from the window as before.
+  var total = -1
+  if payload.kind == JObject:
+    let body = payload.getOrDefault("body")
+    let holder = if payload.hasKey("total"): payload
+                 elif not body.isNil and body.kind == JObject: body
+                 else: nil
+    if not holder.isNil and holder.hasKey("total") and
+        holder["total"].kind == JInt:
+      total = holder["total"].getInt
+  if total >= 0:
+    store.eventLog.totalReported.val = true
+
   store.applyEventLogRows(eventLogRowsFromJson(payload, start), start,
+                          recordsTotal = total,
                           source = elwsEventLoad)
 
 proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
@@ -1718,6 +1781,8 @@ proc clearEventLog*(store: ReplayDataStore) =
   ## recording cannot inherit the previous one's log.
   store.eventLog.rows.val = @[]
   store.eventLog.recordsTotal.val = 0
+  store.eventLog.totalReported.val = false
+  store.eventLog.currentIndex.val = -1
   store.eventLog.recordsFiltered.val = 0
   store.eventLog.maxRRTicks.val = 0'u64
   store.eventLog.loadedStart.val = 0
@@ -1742,9 +1807,15 @@ proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
   store.pointList.rows.val = rows
   store.pointList.loadingState.val = lsIdle
 
+type
+  BreakpointAnchor* = tuple[line, column: int]
+    ## PLAT-50: where a breakpoint is — a line, and the column it is anchored
+    ## at (0: the whole line).
+
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
-                               verifiedLines: openArray[int]) =
-  ## Replace `path`'s breakpoint rows with the lines the ENGINE verified.
+                               verified: openArray[BreakpointAnchor];
+                               disabled: openArray[BreakpointAnchor] = []) =
+  ## Replace `path`'s breakpoint rows with the anchors the ENGINE verified.
   ##
   ## **THE ONE DECODER OF BREAKPOINT ROWS** (PLAT-40), on every runtime: the
   ## native front-ends reach it through `HeadlessDebugSession.toggleBreakpoint`
@@ -1755,20 +1826,47 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   ## is not a place and is dropped. Rows of other kinds and other files are
   ## untouched; `path`'s breakpoint set is replaced whole, as DAP's
   ## `setBreakpoints` replaces it.
+  ##
+  ## PLAT-50: an anchor carries its COLUMN (a column breakpoint, the
+  ## desktop's Alt+click), and a DISABLED breakpoint is not on the engine
+  ## (only enabled ones are sent, as the desktop's `dapSetBreakpoints` sends
+  ## them) and stays a row of the point list — and a dimmed mark in the
+  ## gutter — until it is deleted.
   var rows: seq[PointListEntry] = @[]
   for r in store.pointList.rows.val:
     if not (r.kind == PointKindBreakpoint and r.path == path):
       rows.add r
-  for line in verifiedLines:
-    if line >= 1:
-      var name = path
-      let slash = max(path.rfind('/'), path.rfind('\\'))
-      if slash >= 0: name = path[slash + 1 .. ^1]
-      rows.add PointListEntry(kind: PointKindBreakpoint,
-                              label: name & ":" & $line, path: path,
-                              line: line, enabled: true,
+  var name = path
+  let slash = max(path.rfind('/'), path.rfind('\\'))
+  if slash >= 0: name = path[slash + 1 .. ^1]
+  var lines: seq[int] = @[]
+  proc label(a: BreakpointAnchor): string =
+    name & ":" & $a.line & (if a.column > 0: ":" & $a.column else: "")
+  for a in verified:
+    if a.line >= 1 and a.line notin lines:
+      lines.add a.line
+      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
+                              path: path, line: a.line,
+                              column: max(0, a.column), enabled: true,
+                              resolution: "verified")
+  for a in disabled:
+    if a.line >= 1 and a.line notin lines:
+      lines.add a.line
+      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
+                              path: path, line: a.line,
+                              column: max(0, a.column), enabled: false,
                               resolution: "verified")
   store.applyPointRows(rows)
+
+proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
+                               verifiedLines: openArray[int];
+                               disabledLines: openArray[int] = []) =
+  ## The line-only form (every producer before PLAT-50's column
+  ## breakpoints): each line a whole-line breakpoint.
+  var verified, disabled: seq[BreakpointAnchor] = @[]
+  for l in verifiedLines: verified.add (l, 0)
+  for l in disabledLines: disabled.add (l, 0)
+  store.applyVerifiedBreakpoints(path, verified, disabled)
 
 proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
                              stopAfter = -1): JsonNode =
@@ -2100,6 +2198,42 @@ proc callLineWireOf*(entry: JsonNode): Option[CallLineWire] =
     w.callstackDepth = loc.getOrDefault("callstackDepth").getInt(0)
   some(w)
 
+const NoneValueKind = 30
+  ## `TypeKind.None`'s ordinal on the wire: the value of a call that returned
+  ## nothing (`common_types/language_features/type.nim`).
+
+proc callArgTextOf*(arg: JsonNode): string =
+  ## One argument's text: the engine's own spelling when it sent one, else
+  ## its value rendered at the `calltrace-arg` budget.
+  if arg.isNil or arg.kind != JObject: return ""
+  let t = arg.getOrDefault("text").getStr("")
+  if t.len > 0: return t
+  let v = arg.getOrDefault("value")
+  if v.isNil or v.kind != JObject: return ""
+  present(toPValue(v), CalltraceArgBudget).root.text
+
+proc callReturnTextOf*(call: JsonNode): string =
+  ## A call's return value as text, "" when it returned none — the rule both
+  ## decoders apply (the desktop's in `ui/calltrace.syncCalltraceData`).
+  if call.isNil or call.kind != JObject: return ""
+  let v = call.getOrDefault("returnValue")
+  if v.isNil or v.kind != JObject: return ""
+  if v.getOrDefault("kind").getInt(NoneValueKind) == NoneValueKind: return ""
+  present(toPValue(v), CalltraceArgBudget).root.text
+
+proc callArgsOf*(call: JsonNode): seq[CallArg] =
+  ## A call's `CallArg`s — its arguments, then its return value as
+  ## `__return` when it returned one (PLAT-49 part B).
+  if call.isNil or call.kind != JObject: return
+  let args = call.getOrDefault("args")
+  if not args.isNil and args.kind == JArray:
+    for a in args:
+      result.add CallArg(name: a.getOrDefault("name").getStr(""),
+                         text: callArgTextOf(a))
+  let r = callReturnTextOf(call)
+  if r.len > 0:
+    result.add CallArg(name: "__return", text: r)
+
 proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int =
   ## Decode a `ct/load-calltrace-section` response body into the store.
   ## Answers the number of rows written, or `-1` when the body is not a
@@ -2110,12 +2244,45 @@ proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int =
   if entries.isNil or entries.kind != JArray: return -1
   let start = body.getOrDefault("startCallLineIndex").getBiggestInt(0).int64
   var lines: seq[CallLine] = @[]
+  # PLAT-49 part B: THE ARGUMENTS AND RETURN VALUES TOO, keyed by call key —
+  # the desktop's decoder merges the response's `args` table with each call's
+  # own `args` (the table wins); this one does the same. Until part B the
+  # native front-ends decoded neither and their rows read `name #index`.
+  var argsTable = initTable[string, seq[CallArg]]()
+  let table = body.getOrDefault("args")
+  if not table.isNil and table.kind == JObject:
+    for key, list in table:
+      var converted: seq[CallArg] = @[]
+      if list.kind == JArray:
+        for a in list:
+          converted.add CallArg(name: a.getOrDefault("name").getStr(""),
+                                text: callArgTextOf(a))
+      argsTable[key] = converted
   for i in 0 ..< entries.len:
     let w = callLineWireOf(entries[i])
     if w.isSome:
       lines.add callLineOf(w.get, start + i.int64)
+      # Defensive: `callArgsOf` answers nothing for a missing call.
+      let call = entries[i]{"content", "call"}
+      let key = w.get.callKey
+      var a = if key in argsTable: argsTable[key] else: @[]
+      let own = callArgsOf(call)
+      if key notin argsTable:
+        a = own
+      else:
+        for x in own:
+          if x.name == "__return":
+            a.add x
+      if a.len > 0 and key.len > 0:
+        argsTable[key] = a
   store.updateCalltraceSection(
-    lines, start, body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64)
+    lines, start, body.getOrDefault("totalCallsCount").getBiggestInt(0).uint64,
+    args = argsTable)
+  # PLAT-51: where the debugger is in the whole trace, for the scrubber's mark.
+  let current = body.getOrDefault("currentCallLineIndex")
+  store.calltrace.currentLineIndex.val =
+    if not current.isNil and current.kind == JInt: current.getBiggestInt.int64
+    else: -1'i64
   lines.len
 
 proc stepDirectionToDapCommand*(direction: StepDirection): string =

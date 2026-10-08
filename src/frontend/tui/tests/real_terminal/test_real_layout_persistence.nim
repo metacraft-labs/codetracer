@@ -92,6 +92,7 @@ import headless_app/layout_model
 import ../../app/runtime
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
+import ../../testing/strip_read
 import ../../host/layout_store
 import ../apps/app_layout_gestures as gestureApp
 import ../apps/app_layout_persist as persistApp
@@ -99,7 +100,7 @@ import ../apps/app_layout_persist as persistApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 70
+const ExpectedAssertions = 66  # PLAT-48: the strip read as labels on blanks (one check where three were), twice
 
 const
   Stem = "app_layout_persist"
@@ -107,9 +108,11 @@ const
   Rows = persistApp.Rows
   FrameTimeoutMs = 20000
 
-  DraggedPane = paneCalltrace
-  DraggedPaneTitle = "Call Stack"
-  DraggedPaneTitleRow = "CALL STACK"
+  DraggedPane = paneFileTree
+  DraggedPaneTitle = "Files"
+  DraggedPaneTitleRow = " Files   VC"
+    ## The Files stack's strip in its 12-cell region (`VCS` cut at the edge);
+    ## PLAT-47: padded labels, no brackets.
 
   DropRow = 0
   DropCol = 40
@@ -196,7 +199,8 @@ proc newRecording(): Recording =
   # developer's own `$XDG_STATE_HOME/codetracer` would be a suite that changes
   # the machine it runs on, and the override exists for exactly that reason.
   putEnv(LayoutDirEnvVar, result.root)
-  result.document = layoutDocumentPathFor(result.trace)
+  # ONE document for the terminal product (PLAT-45), not one per recording.
+  result.document = layoutDocumentPath()
 
 proc dispose(rec: Recording) =
   delEnv(LayoutDirEnvVar)
@@ -239,24 +243,18 @@ template ckFirstFrame(sess: var TuiTestSession; label: string) =
     ck strutils.strip(contents).len > 0
 
 template ckArrangementIsDocked(sess: var TuiTestSession; label: string) =
-  ## The arrangement a docked call-stack pane produces, asserted ABSOLUTELY —
-  ## against `DockStripGlyph` and the pane's own name, neither of which is read
-  ## off a model's rendering.
+  ## The arrangement a docked pane produces, asserted ABSOLUTELY — the top
+  ## strip reads the pane's own name, padded, on a blank strip (PLAT-48's
+  ## strip, `testing/strip_read`), neither of which is read off a model's
+  ## rendering.
   block:
-    let strip = paneRow(sess, 1)      ## the body's first row, below the header
+    let strip = sess.regionText(1, 0, Cols, 1).split('\n')[0]
+      ## the body's first row, below the top bar
     checkpoint(label & " strip row: '" & strip & "'")
-    ck strip.startsWith(DraggedPaneTitle)
-    var glyphCells = 0
-    var wrongCells: seq[string] = @[]
-    for col in textCells(DraggedPaneTitle) ..< Cols:
-      let rune = $sess.cellAt(1, col).rune
-      if rune == DockStripGlyph: inc glyphCells
-      else: wrongCells.add "(1," & $col & ") is '" & rune & "'"
+    # EXACT (Verification-Harness-Traps §4b): the label, blanks besides.
+    let wrongCells = stripLabelProblems(strip, [DraggedPaneTitle])
     if wrongCells.len > 0:
       checkpoint(wrongCells[0 .. min(4, wrongCells.high)].join(", "))
-    # EXACT, not "more than none" (Verification-Harness-Traps §4b): the strip
-    # spans the body's full width and the label takes its first cells.
-    ck glyphCells == Cols - textCells(DraggedPaneTitle)
     ck wrongCells.len == 0
     # AND THE PANE IS GONE FROM THE BODY. A strip drawn beside a pane that was
     # never removed satisfies every assertion above.
@@ -273,13 +271,16 @@ template ckArrangementIsDocked(sess: var TuiTestSession; label: string) =
     ck not sess.screenContents().contains(RevealOverlayGlyph)
 
 template ckArrangementIsDefault(sess: var TuiTestSession; label: string) =
-  ## The profile's own arrangement: the pane is in the body and no strip exists.
+  ## The profile's own arrangement: the pane is in the body and no TOP strip
+  ## exists — the body starts right under the top bar. (The bottom strip, the
+  ## shared default's footer panels since PLAT-48, is part of the default.)
   block:
     let contents = sess.screenContents()
     checkpoint(label & ": default arrangement expected")
     ck contents.contains(DraggedPaneTitleRow)
-    ck contents.contains("[Variables]")     ## the Compact profile's tab stack
-    ck not contents.contains(DockStripGlyph)
+    ck contents.contains(" Variables ")     ## the shared default's Variables stack
+    ck stripLabelProblems(sess.regionText(1, 0, Cols, 1).split('\n')[0],
+                          [DraggedPaneTitle]).len > 0
 
 template ckQuitsCleanly(sess: var TuiTestSession; label: string) =
   ## The child ENDS, which is the whole premise of a relaunch test: a save that
@@ -339,13 +340,15 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
       checkpoint("after process 1 the state root holds " &
                  $filesUnder(rec.root))
       ck filesUnder(rec.root) ==
-        @[LayoutDocumentDirName / rec.document.extractFilename]
+        @[LayoutDocumentFileName]
       let written = readFile(rec.document)
       let doc = parseJson(written)
       ck doc["version"].getInt == LayoutSchemaVersion
-      ck doc["docked"].len == 1
-      ck doc["docked"][0]["pane"].getStr == $DraggedPane
-      ck doc["docked"][0]["edge"].getStr == $leTop
+      # The shared default's four footer panels (PLAT-48), and the pane the
+      # drag docked — at the top, after them in the list.
+      ck doc["docked"].len == sharedDefaultDocked().len + 1
+      ck doc["docked"][^1]["pane"].getStr == $DraggedPane
+      ck doc["docked"][^1]["edge"].getStr == $leTop
       # `revealed` IS NOT IN THE DOCUMENT AT ALL — a decoder cannot resurrect
       # what an encoder never wrote.
       ck not doc.mentionsKey("revealed")
@@ -372,7 +375,7 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
       ck fileExists(rec.document)
       ck readFile(rec.document) == written
       ck filesUnder(rec.root) ==
-        @[LayoutDocumentDirName / rec.document.extractFilename]
+        @[LayoutDocumentFileName]
     finally:
       rec.dispose()
 
@@ -419,7 +422,7 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
         # older binary once.
         ck readFile(rec.document) == planted
         ck filesUnder(rec.root) ==
-          @[LayoutDocumentDirName / rec.document.extractFilename]
+          @[LayoutDocumentFileName]
       finally:
         rec.dispose()
     checkpoint("unreadable-document arms driven on a real terminal: " &

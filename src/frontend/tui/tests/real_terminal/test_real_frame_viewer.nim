@@ -51,7 +51,7 @@
 ## takes its `else` branch, and the case still prints `[OK]` while
 ## `programResult` goes to 1.
 
-import std/[options, os, strutils, times, unittest]
+import std/[math, options, os, strutils, times, unicode, unittest]
 
 import term_assert
 
@@ -60,7 +60,7 @@ import ../../testing/dual_snap
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 61
+const ExpectedAssertions = 69
 
 var countedAssertions = 0
 
@@ -111,6 +111,12 @@ proc valueAfter(line, key: string): string =
   let at = line.find("PLAT15 " & key & " ")
   if at < 0: return ""
   line[at + ("PLAT15 " & key & " ").len .. ^1].strip().split(' ')[0]
+
+proc fieldOf(line, key: string): string =
+  ## `key`'s value on a `PLAT15 SCRUBBER` line (`row=3 thumb=14 marks=…`).
+  let at = line.find(key)
+  if at < 0: return ""
+  line[at + key.len .. ^1].split(' ')[0]
 
 proc intsOf(text: string): seq[int] =
   result = @[]
@@ -288,6 +294,27 @@ suite "PLAT-15 Tier 2: a degraded pane, on a real terminal":
     # graphics and this pane emitted no payload — which is the FACT the gap
     # reports, read off the terminal's own image parser rather than claimed.
     ckEq sess.images().len, 0
+    # PLAT-51 (CodeTracer-TUI-Graphics.md §4): THE PANE'S OWN SCRUBBER, on
+    # the terminal — the transport the removed Timeline used to carry. The
+    # child names the cells; the glyphs are read off libvterm's cells.
+    let scrub = sess.markerLine("SCRUBBER")
+    checkpoint(scrub)
+    let srow = parseInt(scrub.fieldOf("row=")) - 1
+    let thumb = parseInt(scrub.fieldOf("thumb="))
+    let marks = intsOf(scrub.fieldOf("marks="))
+    # Frame 7 of 40 on a 78-cell track; marks at 0, 20, 33.
+    ckEq thumb, int(round(7.0 / 39.0 * 77.0))
+    ckEq marks.len, 3
+    ckEq $sess.cellAt(srow, thumb).rune, "█"
+    for c in marks:
+      ckEq $sess.cellAt(srow, c).rune, "┼"
+    var track = 0
+    for c in 0 ..< 78:
+      if $sess.cellAt(srow, c).rune == "─":
+        inc track
+    ckEq track, 78 - 1 - marks.len
+    # The pixel history is above it, not overwritten by it.
+    ck not sess.screenContents().splitLines()[srow].contains("glDraw")
 
   test "an octant pin shows a refusal, a remedy, the tier AND the rest":
     compileChildApp(Stem)

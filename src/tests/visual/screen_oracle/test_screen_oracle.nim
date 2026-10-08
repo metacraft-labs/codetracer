@@ -528,6 +528,32 @@ suite "PLAT-39 — the grammar is published and every rule is disputable":
     ck r.ok
     ck r.consoleOutput == "stdout: checksum = 73"
 
+  test "the table rule takes an optional tick column, and forgives no misread digit":
+    # The native window's table grew a `tick` column before `#`; the
+    # terminal's has none. Both shapes need digits in every number column: a
+    # `0` misread as `O` is recovered by re-reading the band at 2x
+    # (`ocrLineBands`), never by the grammar accepting the letter.
+    ck parseEventTableRow("38 0 stdout 2+3 =5") == (true, "stdout: 2+3 =5")
+    ck parseEventTableRow("0 stdout 2+3 =5") == (true, "stdout: 2+3 =5")
+    ck not parseEventTableRow("38 O stdout 2+3 =5").ok
+    ck not parseEventTableRow("tick # kind output").ok
+    # And a variable name with a space in it is not an identifier.
+    ck not splitVariableRow("> builtins_ _:al(\"__name__\", \"builtins'").ok
+
+  test "the state table's name cell is an identifier, and only the pane's own ellipsis shortens it":
+    # The native window's Name/Value table: a misread cell is read again at
+    # another scale (`readStateTableName`), never forgiven by this rule.
+    ck isStateTableName("__builtins__")
+    ck isStateTableName("mul")
+    ck isStateTableName("__packag...")
+    ck not isStateTableName("- mul")
+    ck not isStateTableName("_ file__")
+    ck not isStateTableName("...")
+    # A truncated name agrees with the full name it begins, and with no other.
+    ck namesAgree(["__packag...", "add"], ["__package__", "add", "mul"])
+    ck not namesAgree(["__packag...", "add"], ["__name__", "add", "mul"])
+    ck not namesAgree(["__hame__"], ["__name__"])
+
 # ---------------------------------------------------------------------------
 suite "PLAT-39 DIFF-8 — the same scenario, two renderers, one reader":
 # ---------------------------------------------------------------------------

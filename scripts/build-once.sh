@@ -10,11 +10,22 @@ CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # network, no nix evaluation) and sets PATH, NIX_*, etc. exactly as the dev
 # shell would.  This makes `just build-once` work from a plain terminal that
 # hasn't run `direnv allow` or `nix develop`.
+#
+# The profile carries the dev shell's whole shellHook, which prepares the git
+# checkout enclosing the CURRENT directory (`node_modules` link, hook config,
+# git hooks). It is therefore sourced from inside this repository: invoked
+# from another one (`bash /path/to/codetracer/scripts/build-once.sh`), the hook
+# would otherwise prepare that repository instead.
+# scripts/test-build-once-profile-cwd.sh
 if ! command -v tup >/dev/null 2>&1 || ! command -v nim >/dev/null 2>&1; then
 	for _direnv_rc in "$CT_ROOT/.direnv"/flake-profile-*.rc; do
 		if [ -f "$_direnv_rc" ]; then
+			_ct_caller_dir="$PWD"
+			cd "$CT_ROOT"
 			# shellcheck source=/dev/null
 			source "$_direnv_rc"
+			cd "$_ct_caller_dir"
+			unset _ct_caller_dir
 			break
 		fi
 	done

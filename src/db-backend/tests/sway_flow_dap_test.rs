@@ -22,12 +22,15 @@ fn find_db_backend() -> PathBuf {
 /// full source-level variable verification requires debug info support
 /// which is tracked separately.
 #[test]
-#[ignore = "requires fuel-recorder + forc; run via: just test-sway-flow"]
 fn sway_flow_dap_recording_and_launch() {
-    assert!(
-        find_fuel_recorder().is_some(),
-        "Fuel recorder not found — set CODETRACER_FUEL_RECORDER_PATH or build codetracer-fuel-recorder"
-    );
+    if find_fuel_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "sway_flow_dap_test",
+            "Fuel recorder not found — set CODETRACER_FUEL_RECORDER_PATH or build codetracer-fuel-recorder",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let project_path = find_sway_flow_test().expect("Sway test project not found");
     let db_backend = find_db_backend();

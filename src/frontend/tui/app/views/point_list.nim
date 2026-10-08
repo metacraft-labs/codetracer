@@ -32,21 +32,26 @@ type
     path*: string
     line*: int
     enabled*: bool
+    column*: int
+      ## PLAT-50: a column breakpoint's column, 0 for a line breakpoint.
 
   PointListPaneModel* = object
     rows*: seq[PointListPaneRow]
     loaded*: bool
       ## Whether a session has supplied rows at all. A pane with no session
       ## paints the plain title row, on the rule every sibling follows.
+    selected*: int
+      ## PLAT-50 (K31): the row a click selected (the desktop's
+      ## `PointListVM.selectPoint`), drawn on the selection surface; -1 none.
 
 const
   EmptyPointsText* = "no breakpoints or tracepoints"
-  EmptyPointsStyle* = CellStyle(fg: "bright_black", italic: true)
-  DisabledPointStyle* = CellStyle(fg: "bright_black")
+  EmptyPointsStyle* = CellStyle(role: srChromeMuted, italic: true)
+  DisabledPointStyle* = CellStyle(role: srChromeMuted)
 
 proc initPointListPaneModel*(rows: seq[PointListPaneRow] = @[];
                              loaded = false): PointListPaneModel =
-  PointListPaneModel(rows: rows, loaded: loaded)
+  PointListPaneModel(rows: rows, loaded: loaded, selected: -1)
 
 proc baseName(path: string): string =
   let slash = path.rfind('/')
@@ -54,7 +59,8 @@ proc baseName(path: string): string =
 
 proc rowText*(r: PointListPaneRow): string =
   ## One row as the pane draws it.
-  result = r.kind & " " & baseName(r.path) & ":" & $r.line
+  result = r.kind & " " & baseName(r.path) & ":" & $r.line &
+           (if r.column > 0: ":" & $r.column else: "")
   if not r.enabled: result.add " (disabled)"
 
 proc titleText*(model: PointListPaneModel): string =
@@ -82,4 +88,7 @@ proc paintPointList*(g: var StyledGrid; area: CellArea;
     let text = fitCells(r.rowText(), area.width)
     g.paint(area.row + 1 + i, area.col, text,
             if r.enabled: DefaultCellStyle else: DisabledPointStyle)
+    if i == model.selected:
+      g.fillSurface(area.row + 1 + i, area.col, area.width, 1,
+                    srSurfaceSelection)
     result.add text

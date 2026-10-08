@@ -51,7 +51,7 @@
 ##
 ## ## No imports, deliberately
 ##
-## Every caller is inside `ui/`, whose modules pull in Karax, Monaco and the
+## Every caller is inside `ui/`, whose modules pull in kdom, Monaco and the
 ## Electron bridge and cannot be compiled by a unit lane. Keeping this file
 ## free of them is what lets `viewmodel/tests/unit/test_history_cursor.nim`
 ## assert the LOCATION A GESTURE LANDS ON, on both the C and JS backends,

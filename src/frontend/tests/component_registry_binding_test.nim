@@ -41,7 +41,7 @@
 ##   ``InternalStatusUpdate`` / ``CtCompleteMove``.
 ##
 ## The stand-in is limited to WHERE the events come from: ``ui/status.nim``
-## cannot be imported into a node test (it pulls in the Karax/DOM
+## cannot be imported into a node test (it pulls in the kdom/DOM
 ## ``ui_imports`` tree), so the real ``StatusComponent`` type — which is
 ## declared in ``types.nim`` — is registered here with a ``register`` override
 ## that subscribes to ``InternalStatusUpdate`` the way ``ui/status.nim`` does,

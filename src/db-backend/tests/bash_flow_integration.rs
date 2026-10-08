@@ -48,8 +48,10 @@ fn create_bash_flow_config() -> FlowTestConfig {
 #[test]
 fn test_bash_flow_integration() {
     if test_harness::find_bash_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Bash recorder not found (set CODETRACER_BASH_RECORDER_PATH or check out codetracer-shell-recorders)"
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_bash_flow_integration",
+            "the Bash recorder is not found",
+            "check out the codetracer-shell-recorders sibling, or set CODETRACER_BASH_RECORDER_PATH",
         );
         return;
     }

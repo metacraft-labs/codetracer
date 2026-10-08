@@ -99,7 +99,8 @@ const
   UnpopulatableByADatasetIds = @[
     ContentEventLog,
     ContentCalltrace,
-    ContentTimeline,
+    # (ContentTimeline stood here: PLAT-51 removed the panel, so neither
+    # layout carries it.)
     ContentTerminalOutput
   ]
 
@@ -563,12 +564,19 @@ when not defined(js):
         "proc loadEditLayoutConfig*(main: js, filename: string;",
         "proc loadReviewLayoutConfig*")
       check not loader.contains("await resetLayoutToDefault(")
-      check loader.count("resetHiddenPanelLayoutToDefault(") == 6
+      # The three recovery paths of an existing file (parse, repair,
+      # validation). The absent-file path no longer reads the user's debug
+      # file at all (PLAT-47): it installs edit mode's own default, derived
+      # from the bundled tree with the caller's hidden set, and sanitises it.
+      check loader.count("resetHiddenPanelLayoutToDefault(") == 3
+      check loader.contains("await installModeDefault(filename, EditMode,")
+      check loader.count("sanitizeEditLayoutConfig(") == 2
 
       let reset = sectionBetween(config,
         "proc resetHiddenPanelLayoutToDefault(filename: string;",
         "proc loadEditLayoutConfig*")
-      check reset.contains("await resetLayoutToDefault(filename)")
+      check reset.contains(
+        "await resetLayoutToDefault(filename, EditMode, hiddenContents,")
       check reset.contains("sanitizeEditLayoutConfig(")
       check reset.contains("ord(Content.EditorView), hiddenContents)")
 

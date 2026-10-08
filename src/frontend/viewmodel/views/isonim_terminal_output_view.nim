@@ -1,100 +1,357 @@
 ## views/isonim_terminal_output_view.nim
 ##
-## IsoNim DOM-rendering view for the Terminal Output panel.
+## IsoNim DOM-rendering view for the Terminal Output panel — the desktop's
+## view over ``TerminalOutputVM``, the ViewModel the terminal and GPUI
+## front-ends draw too.
 ##
-## Renders a live, reactive DOM tree driven by ``TerminalOutputVM``
-## signals.  Replaces the legacy Karax ``method render`` in
-## ``frontend/ui/terminal_output.nim`` (the IsoNim view is the single
-## source of truth for the panel's DOM).
+## Spec: `codetracer-specs/spec/GUI/Core-Panes/Terminal-Output-Pane.md`.
 ##
-## Both renderer overloads (Mock and Web) produce the same outer
-## structure; the per-fragment text body differs only in how the HTML
-## body is set:
-## - Mock: the fragment's ``htmlText`` lands as ``textContent`` so
-##   headless tests can assert text equality directly.
-## - Web: the same string lands as ``innerHTML`` because the legacy
-##   Karax view used ``verbatim`` to insert ANSI-decorated ``<span>``
-##   runs from the ``ansi_up`` library.
+## ONE generic builder serves both renderers (Mock for the headless suites,
+## Web for the product), so the tree a suite asserts is the tree the desktop
+## mounts.
 ##
-## Structure (per the Playwright contract in
+## ## No markup from the program reaches the DOM
+##
+## PLAT-52: a fragment carries its TEXT and its decoded SGR ATTRIBUTES
+## (`types.TermAttrs`), not `ansi_up`'s HTML. Each fragment is a `<span>`
+## whose `style` is built from the attributes (`terminal_output_model.cssOf`,
+## the declarations `ansi_up` wrote) and whose text is a TEXT NODE — so a
+## recorded program's `<img onerror=...>` is text, by construction, and this
+## view has no `innerHTML` write left (`src/frontend/tests/htmlSinks.test.mjs`
+## counts them).
+##
+## Structure (the Playwright contract in
 ## ``src/tests/gui/page-objects/panes/terminal/terminal-output-pane.ts``)::
 ##
 ##   div#terminalComponent-0.component-container.terminal[.isonim-terminal-output]
-##     pre
+##     div.terminal-view-toggle               ← shown when the screen is offered
+##       button.terminal-view-button[data-view=lines|screen][.active]
+##     pre                                    ← the LINE view
 ##       div.terminal-line#terminal-line-{lineIndex}
-##         div.{past|active|future}                ← fragment, click → jumpToEvent
-##           div                                  ← content wrapper
-##             [innerHTML / textContent = fragment.htmlText]
-##       div.empty-overlay[display reactive]
-##         text "Loading..." | "no terminal output ..."
+##         div.{past|active|future}[data-event-index]  ← click → jumpToEvent
+##           div
+##             span[style=<sgr css>] text
+##     div.terminal-screen                    ← the SCREEN view (§3)
+##       div.terminal-screen-viewport
+##         div.terminal-screen-grid[data-cols][data-rows]
+##           div.terminal-screen-row → span[style] text
+##       div.terminal-scrubber
+##         input.terminal-scrubber-range[type=range][min=0][max=n-1]
+##         div.terminal-scrubber-marks → span.terminal-scrubber-mark[data-kind]
+##         span.terminal-scrubber-label   "write i / n · tick t"
+##     div.empty-overlay
 ##
-## The ``<pre>`` body is reactive: an outer ``createRenderEffect``
-## tears it down and rebuilds it from the latest signal values
-## whenever ``vm.lines`` or ``vm.currentRRTicks`` changes.  The
-## per-line / per-fragment loops are nested inside the same effect so
-## colour classes track the debugger position automatically — the
-## legacy code achieved the same outcome via a full ``redraw()``
-## after every ``CtCompleteMove`` event.
+## The scrubber is REAL-TIME: dragging it (`input` → `scrubTo`) moves the
+## recording position to each write it crosses (`ct/event-jump`), the release
+## (`change` → `releaseScrub`) ends the drag; ArrowLeft / ArrowRight on the
+## screen step a write back / forward.
+
+import std/[strutils, tables]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
 import isonim/testing/mock_dom
 
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import std/jsffi
+  import ./list_scrubber_dom
 
 import ../store/types
 import ../viewmodels/terminal_output_vm
 
 # ---------------------------------------------------------------------------
-# Reactive helpers used inside DSL expressions
+# Pure helpers
 # ---------------------------------------------------------------------------
 
 proc displayIf(cond: bool): string =
-  ## ``block``-style display toggling for the empty-overlay div.
-  ## Keeps the overlay on its own row so the Loading / empty text
-  ## sits where the legacy Karax view placed it.
   if cond: "block" else: "none"
-
-proc emptyOverlayVisible(vm: TerminalOutputVM): bool =
-  ## Empty overlay is shown whenever there are no rendered lines —
-  ## both during the initial pre-load and after a load that produced
-  ## no terminal output.  The text content distinguishes the two
-  ## states reactively (see ``emptyOverlayText``).
-  vm.lines.val.len == 0
 
 proc emptyOverlayText(vm: TerminalOutputVM): string =
   ## "Loading record output..." while ``initialLoad`` is true; the
-  ## post-load fallback otherwise.  Matches the strings the legacy
-  ## Karax view emits so any tests that scrape the overlay text keep
-  ## working.
+  ## post-load fallback otherwise (the legacy view's strings).
   if vm.initialLoad.val:
     "Loading record output..."
   else:
     "The current record does not print anything to the terminal."
 
-proc fragmentClass(focusRRTicks, fragRRTicks: uint64): string =
-  ## past / active / future based on the debugger's current position.
-  ## Mirrors ``terminalEventView`` in the legacy view.  Pure helper so
-  ## both renderers share the comparison.
-  if fragRRTicks < focusRRTicks: "past"
-  elif fragRRTicks == focusRRTicks: "active"
-  else: "future"
+proc fragmentClass*(focusRRTicks, fragRRTicks: uint64): string =
+  ## past / active / future, the class every desktop style keys on.
+  $fragmentTense(focusRRTicks, fragRRTicks)
 
-proc onFragmentClick(vm: TerminalOutputVM; eventIndex: int): proc() =
-  ## Closure factory so each fragment captures its own event index.
+proc scrubberLabel*(vm: TerminalOutputVM): string =
+  ## "write i / n · tick t" under the screen's scrubber.
+  let n = vm.events.val.len
+  let w = vm.shownWrite.val
+  if n == 0:
+    return "no writes"
+  if w < 0:
+    return "before the first write (" & $n & " writes)"
+  "write " & $(w + 1) & " / " & $n & " · tick " &
+    $vm.events.val[w].rrTicks &
+    (if vm.scrubPreview.val >= 0: " · scrubbing" else: "")
+
+when defined(js):
+  proc evKey(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
+  proc inputValue(n: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc setInputValue(n: isonim_dom.Node; v: cstring) {.importjs: "#.value = #".}
+  proc stopEvent(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+  proc fitScreenGrid(box, grid: isonim_dom.Node) {.importjs: """
+    (function(box, grid) {
+      var fit = function() {
+        grid.style.transform = '';
+        var gw = grid.scrollWidth, gh = grid.scrollHeight;
+        var bw = box.clientWidth, bh = box.clientHeight;
+        if (!gw || !gh || !bw || !bh) return;
+        var s = Math.min(bw / gw, bh / gh);
+        grid.style.transformOrigin = 'top left';
+        grid.style.transform = 'scale(' + s + ')';
+        grid.setAttribute('data-scale', String(Math.round(s * 1000) / 1000));
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fit);
+      else fit();
+    })(#, #)""".}
+
+  proc keyOf(ev: isonim_dom.Event): string = $evKey(ev)
+  proc preventIt(ev: isonim_dom.Event) = stopEvent(ev)
+  proc valueOf(r: WebRenderer; n: isonim_dom.Element): string =
+    $inputValue(isonim_dom.Node(n))
+  proc setValue(r: WebRenderer; n: isonim_dom.Element; v: string) =
+    setInputValue(isonim_dom.Node(n), cstring(v))
+  proc fitGrid(r: WebRenderer; box, grid: isonim_dom.Element) =
+    fitScreenGrid(isonim_dom.Node(box), isonim_dom.Node(grid))
+
+proc stepKey*(vm: TerminalOutputVM; key: string): bool =
+  ## ArrowLeft / ArrowRight on the screen: the previous / next write.
+  case key
+  of "ArrowLeft":
+    discard vm.stepWrite(-1)
+    true
+  of "ArrowRight":
+    discard vm.stepWrite(1)
+    true
+  else: false
+
+when defined(js):
+  proc wireStepKeys(r: WebRenderer; node: isonim_dom.Element;
+                    vm: TerminalOutputVM) =
+    r.addEventListener(node, "keydown", proc(ev: isonim_dom.Event) =
+      if stepKey(vm, keyOf(ev)): preventIt(ev))
+
+  proc wireLineClick(r: WebRenderer; node: isonim_dom.Element;
+                     vm: TerminalOutputVM; write: int) =
+    ## A click on a line PAST its text (on the line itself, not a fragment)
+    ## goes to the write that completed the line.
+    r.addEventListener(node, "click", proc(ev: isonim_dom.Event) =
+      if ev.target == isonim_dom.Node(node): vm.jumpToEvent(write))
+
+proc keyOf(ev: MockEvent): string = ev.key
+proc preventIt(ev: MockEvent) = ev.preventDefault()
+proc valueOf(r: MockRenderer; n: MockNode): string =
+  if "value" in n.attributes: n.attributes["value"] else: ""
+proc setValue(r: MockRenderer; n: MockNode; v: string) =
+  r.setAttribute(n, "value", v)
+proc fitGrid(r: MockRenderer; box, grid: MockNode) = discard
+proc wireStepKeys(r: MockRenderer; node: MockNode; vm: TerminalOutputVM) =
+  r.addEventListener(node, "keydown", proc(ev: MockEvent) =
+    if stepKey(vm, keyOf(ev)): preventIt(ev))
+proc wireLineClick(r: MockRenderer; node: MockNode; vm: TerminalOutputVM;
+                   write: int) =
+  r.addEventListener(node, "click", proc(ev: MockEvent) =
+    if ev.target == node: vm.jumpToEvent(write))
+
+proc jumpOnClick(vm: TerminalOutputVM; eventIndex: int): proc() =
+  ## A fragment's click handler, made by a FACTORY so the write it goes to is
+  ## this call's own: a closure written inside the line loop would capture
+  ## the loop's variable, which Nim's JS backend shares across iterations —
+  ## every fragment then went to the LAST write (measured on the real
+  ## desktop: a click on line 10 sent the event-jump of write 129).
   let idx = eventIndex
   result = proc() = vm.jumpToEvent(idx)
 
-when defined(js):
-  proc makeFragmentClickListener(vm: TerminalOutputVM;
-                                 eventIndex: int): proc(ev: isonim_dom.Event) =
-    ## Factory that bakes ``eventIndex`` into the DOM event listener so
-    ## Nim's JS backend doesn't capture the loop variable by reference
-    ## (which would make every listener fire with the last iteration's value).
-    let idx = eventIndex
-    result = proc(ev: isonim_dom.Event) = vm.jumpToEvent(idx)
+# ---------------------------------------------------------------------------
+# The builder, generic over the renderer
+# ---------------------------------------------------------------------------
+
+proc el[R](r: R; tag, class: string): auto =
+  result = r.createElement(tag)
+  if class.len > 0:
+    r.setAttribute(result, "class", class)
+
+proc styledSpan[R](r: R; text: string; style: TermAttrs): auto =
+  result = r.createElement("span")
+  let css = cssOf(style)
+  if css.len > 0:
+    r.setAttribute(result, "style", css)
+  r.appendChild(result, r.createTextNode(text))
+
+proc buildPanel[R](r: R; vm: TerminalOutputVM; webClass: string): auto =
+  let panel = r.createElement("div")
+  r.setAttribute(panel, "id", "terminalComponent-0")
+  r.setAttribute(panel, "class", "component-container terminal" & webClass)
+
+  let toggle = el(r, "div", "terminal-view-toggle")
+  let linesButton = el(r, "button", "terminal-view-button")
+  r.setAttribute(linesButton, "data-view", $tvLines)
+  r.appendChild(linesButton, r.createTextNode("Lines"))
+  let screenButton = el(r, "button", "terminal-view-button")
+  r.setAttribute(screenButton, "data-view", $tvScreen)
+  r.appendChild(screenButton, r.createTextNode("Screen"))
+  r.addEventListener(linesButton, "click", proc() = vm.setView(tvLines))
+  r.addEventListener(screenButton, "click", proc() = vm.setView(tvScreen))
+  r.appendChild(toggle, linesButton)
+  r.appendChild(toggle, screenButton)
+  r.appendChild(panel, toggle)
+
+  let pre = r.createElement("pre")
+  r.appendChild(panel, pre)
+
+  # The screen's layout is inline (no stylesheet rule has to be built for
+  # it): a column — the viewport the grid is scaled into, then the scrubber —
+  # and a grid of monospaced rows that keep every space (`pre`), so a row of
+  # blanks is a row and a column is a column.
+  let screenNode = el(r, "div", "terminal-screen")
+  r.setAttribute(screenNode, "tabindex", "0")
+  r.setStyle(screenNode, "flex-direction", "column")
+  r.setStyle(screenNode, "height", "100%")
+  r.setStyle(screenNode, "outline", "none")
+  let viewport = el(r, "div", "terminal-screen-viewport")
+  r.setStyle(viewport, "flex", "1 1 auto")
+  r.setStyle(viewport, "overflow", "hidden")
+  r.setStyle(viewport, "min-height", "0")
+  let grid = el(r, "div", "terminal-screen-grid")
+  r.setStyle(grid, "display", "inline-block")
+  r.setStyle(grid, "white-space", "pre")
+  r.setStyle(grid, "font-family", "\"SpaceMono\", monospace")
+  r.setStyle(grid, "line-height", "1.25")
+  r.appendChild(viewport, grid)
+  r.appendChild(screenNode, viewport)
+  let scrubber = el(r, "div", "terminal-scrubber")
+  r.setStyle(scrubber, "flex", "0 0 auto")
+  r.setStyle(scrubber, "padding", "4px 8px")
+  let range = el(r, "input", "terminal-scrubber-range")
+  r.setAttribute(range, "type", "range")
+  r.setAttribute(range, "min", "0")
+  r.setAttribute(range, "step", "1")
+  r.setStyle(range, "width", "100%")
+  let marks = el(r, "div", "terminal-scrubber-marks")
+  r.setStyle(marks, "position", "relative")
+  r.setStyle(marks, "height", "8px")
+  let label = el(r, "span", "terminal-scrubber-label")
+  r.setStyle(label, "opacity", "0.7")
+  r.appendChild(scrubber, range)
+  r.appendChild(scrubber, marks)
+  r.appendChild(scrubber, label)
+  r.appendChild(screenNode, scrubber)
+  r.appendChild(panel, screenNode)
+
+  # The scrubber: `input` while dragged previews, `change` on release jumps.
+  r.addEventListener(range, "input", proc() =
+    let v = r.valueOf(range)
+    if v.len > 0:
+      try: vm.scrubTo(parseInt(v)) except ValueError: discard)
+  r.addEventListener(range, "change", proc() =
+    let v = r.valueOf(range)
+    if v.len > 0:
+      try: vm.scrubTo(parseInt(v)) except ValueError: discard
+    discard vm.releaseScrub())
+  # The step-by-write keys, scoped to the screen.
+  r.wireStepKeys(screenNode, vm)
+
+  let overlay = el(r, "div", "empty-overlay")
+  let overlayText = r.createTextNode("")
+  r.appendChild(overlay, overlayText)
+  r.appendChild(panel, overlay)
+
+  # Toggle and visibility.
+  createRenderEffect proc() =
+    let offered = vm.screenOffered.val
+    let view = vm.view.val
+    let screenShown = offered and view == tvScreen
+    r.setStyle(toggle, "display", displayIf(offered))
+    r.setAttribute(linesButton, "class", "terminal-view-button" &
+                   (if not screenShown: " active" else: ""))
+    r.setAttribute(screenButton, "class", "terminal-view-button" &
+                   (if screenShown: " active" else: ""))
+    r.setStyle(pre, "display", displayIf(not screenShown))
+    r.setStyle(screenNode, "display", if screenShown: "flex" else: "none")
+    r.setAttribute(panel, "data-terminal-view",
+                   (if screenShown: $tvScreen else: $tvLines))
+
+  createRenderEffect proc() =
+    let empty = vm.lines.val.len == 0
+    r.setStyle(overlay, "display", displayIf(empty))
+    r.clearChildren(overlay)
+    r.appendChild(overlay, r.createTextNode(emptyOverlayText(vm)))
+
+  # The line view.
+  createRenderEffect proc() =
+    let lines = vm.lines.val
+    let focus = vm.currentRRTicks.val
+    r.clearChildren(pre)
+    for line in lines:
+      let lineNode = el(r, "div", "terminal-line")
+      r.setAttribute(lineNode, "id", "terminal-line-" & $line.lineIndex)
+      if line.fragments.len > 0:
+        r.wireLineClick(lineNode, vm, line.fragments[^1].eventIndex)
+      for frag in line.fragments:
+        let fragNode = el(r, "div", fragmentClass(focus, frag.rrTicks))
+        r.setAttribute(fragNode, "data-event-index", $frag.eventIndex)
+        r.addEventListener(fragNode, "click", jumpOnClick(vm, frag.eventIndex))
+        let content = r.createElement("div")
+        r.appendChild(content, styledSpan(r, frag.text, frag.style))
+        r.appendChild(fragNode, content)
+        r.appendChild(lineNode, fragNode)
+      r.appendChild(pre, lineNode)
+
+  # The screen view and its scrubber.
+  createRenderEffect proc() =
+    let offered = vm.screenOffered.val
+    let shown = vm.view.val == tvScreen
+    let n = vm.events.val.len
+    let write = vm.shownWrite.val
+    discard vm.scrubPreview.val
+    r.clearChildren(grid)
+    r.clearChildren(marks)
+    r.clearChildren(label)
+    if not offered or not shown or vm.screen.isNil:
+      return
+    let screen = vm.shownScreen()
+    r.setAttribute(grid, "data-cols", $screen.cols)
+    r.setAttribute(grid, "data-rows", $screen.rows)
+    r.setAttribute(grid, "data-write", $write)
+    for row in 0 ..< screen.rows:
+      let rowNode = el(r, "div", "terminal-screen-row")
+      r.setStyle(rowNode, "white-space", "pre")
+      r.setStyle(rowNode, "height", "1.25em")
+      for run in screen.screenRowRuns(row):
+        r.appendChild(rowNode, styledSpan(r, run.text, run.attrs))
+      r.appendChild(grid, rowNode)
+    r.setAttribute(range, "max", $max(0, n - 1))
+    r.setValue(range, $max(0, write))
+    r.setAttribute(range, "value", $max(0, write))
+    for m in vm.screen.marks:
+      let mark = el(r, "span", "terminal-scrubber-mark")
+      r.setAttribute(mark, "data-kind", $m.kind)
+      r.setAttribute(mark, "data-write", $m.write)
+      r.setAttribute(mark, "title", markTitle(m.kind) & " (write " &
+                     $(m.write + 1) & ")")
+      r.setStyle(mark, "left",
+                 formatFloat(100.0 * fractionOfWrite(n, m.write), ffDecimal,
+                             3) & "%")
+      r.setStyle(mark, "position", "absolute")
+      r.setStyle(mark, "width", "3px")
+      r.setStyle(mark, "height", "8px")
+      r.setStyle(mark, "background-color",
+                 case m.kind
+                 of smClear: "rgb(187,187,0)"
+                 of smAltEnter: "rgb(0,187,187)"
+                 of smAltLeave: "rgb(0,187,0)")
+      r.appendChild(marks, mark)
+    r.appendChild(label, r.createTextNode(scrubberLabel(vm)))
+    r.fitGrid(viewport, grid)
+
+  panel
 
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
@@ -102,47 +359,8 @@ when defined(js):
 
 proc renderTerminalOutputPanel*(r: MockRenderer;
                                 vm: TerminalOutputVM): MockNode =
-  ## Render the terminal output panel for the Mock renderer.
-  ##
-  ## The panel shell is built once via the DSL; an outer
-  ## ``createRenderEffect`` rebuilds the ``<pre>`` body whenever the
-  ## lines signal or the current rrTicks signal changes.  That keeps
-  ## fragment colour classes in sync with the debugger position
-  ## without needing a separate per-fragment effect.
-  var preNode: MockNode
-
-  let panel = ui(r):
-    tdiv(id = "terminalComponent-0", class = "component-container terminal"):
-      pre(ref = preNode):
-        discard
-      tdiv(class = "empty-overlay",
-           display = displayIf(emptyOverlayVisible(vm))):
-        text emptyOverlayText(vm)
-
-  createRenderEffect proc() =
-    let lines = vm.lines.val
-    let focus = vm.currentRRTicks.val
-    r.clearChildren(preNode)
-    for line in lines:
-      # Capture loop locals so DSL closures don't share state.
-      let lineIdx = line.lineIndex
-      let lineNode = ui(r):
-        tdiv(class = "terminal-line",
-             id = "terminal-line-" & $lineIdx):
-          discard
-      r.appendChild(preNode, lineNode)
-      for frag in line.fragments:
-        let fragText = frag.htmlText
-        let fragRRTicks = frag.rrTicks
-        let onClick = onFragmentClick(vm, frag.eventIndex)
-        let fragNode = ui(r):
-          tdiv(class = fragmentClass(focus, fragRRTicks),
-               onclick = onClick):
-            tdiv:
-              text fragText
-        r.appendChild(lineNode, fragNode)
-
-  panel
+  ## The panel for the Mock renderer (the headless suites).
+  buildPanel(r, vm, "")
 
 # ---------------------------------------------------------------------------
 # Web renderer — production DOM
@@ -152,59 +370,39 @@ when defined(js):
 
   proc renderTerminalOutputPanel*(r: WebRenderer;
                                   vm: TerminalOutputVM): isonim_dom.Element =
-    ## Render the panel for the real DOM.  Uses ``innerHTML`` for the
-    ## fragment body because the legacy view inserts ANSI-decorated
-    ## ``<span>`` runs via Karax's ``verbatim``, and the page-object
-    ## tests inspect the resulting CSS classes (.past/.active/.future)
-    ## on the fragment ``div`` itself, not its children.
-    var preNode: isonim_dom.Element
+    ## The panel for the real DOM.
+    buildPanel(r, vm, " isonim-terminal-output")
 
-    let panel = ui(r):
-      tdiv(id = "terminalComponent-0",
-           class = "component-container terminal isonim-terminal-output"):
-        pre(ref = preNode):
-          discard
-        tdiv(class = "empty-overlay",
-             display = displayIf(emptyOverlayVisible(vm))):
-          text emptyOverlayText(vm)
-
-    createRenderEffect proc() =
-      let lines = vm.lines.val
-      let focus = vm.currentRRTicks.val
-      # Tear down the previous body.  IsoNim's reactive root cleans up
-      # the closures attached to the discarded fragment nodes.
-      let preNodeAsNode = isonim_dom.Node(preNode)
-      while not isonim_dom.isNodeNil(preNodeAsNode.firstChild):
-        discard isonim_dom.removeChild(preNodeAsNode, preNodeAsNode.firstChild)
-      for line in lines:
-        let lineNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
-        isonim_dom.setAttribute(lineNode, cstring"class", cstring"terminal-line")
-        isonim_dom.setAttribute(lineNode, cstring"id",
-                                cstring("terminal-line-" & $line.lineIndex))
-        for frag in line.fragments:
-          let fragNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
-          isonim_dom.setAttribute(fragNode, cstring"class",
-                                  cstring(fragmentClass(focus, frag.rrTicks)))
-          # innerHTML — the htmlText carries ANSI-decorated <span>
-          # runs from ansi_up (legacy view used Karax's `verbatim`).
-          let contentNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
-          contentNode.innerHTML = cstring(frag.htmlText)
-          isonim_dom.appendChild(isonim_dom.Node(fragNode),
-                                 isonim_dom.Node(contentNode))
-          isonim_dom.addEventListener(isonim_dom.Node(fragNode), cstring"click",
-                                      makeFragmentClickListener(vm, frag.eventIndex))
-          isonim_dom.appendChild(isonim_dom.Node(lineNode),
-                                 isonim_dom.Node(fragNode))
-        isonim_dom.appendChild(isonim_dom.Node(preNode),
-                               isonim_dom.Node(lineNode))
-
-    panel
+  proc terminalPreOf(panel: JsObject): JsObject {.importjs:
+    "(#.querySelector(':scope > pre') || null)".}
+  proc setStyles(el: JsObject; name, value: cstring) {.importjs:
+    "#.style.setProperty(#, #)".}
+  proc firstLineHeight(el: JsObject): float {.importjs:
+    "(function(e){const l=e.querySelector('.terminal-line');return l ? l.getBoundingClientRect().height : 0;})(#)".}
 
   proc mountIsoNimTerminalOutput*(container: isonim_dom.Element;
                                   vm: TerminalOutputVM) =
-    ## Mount the IsoNim terminal-output panel as a child of
-    ## ``container``.  Reactive effects handle every subsequent
-    ## update — no manual redraw is needed.
+    ## Mount the panel as a child of ``container``. Reactive effects handle
+    ## every subsequent update.
     let r = WebRenderer()
     let panel = renderTerminalOutputPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+    # PLAT-51 (left by PLAT-52 to here): THE LINE VIEW'S SCROLLBAR IS A
+    # SCRUBBER over every line of the output (Scrollbar-Scrubbers.md §2), as
+    # it is on the terminal and GPUI. The lines' `pre` is the scroll
+    # container; the panel is a column so it fills what the toggle leaves.
+    let p = cast[JsObject](panel)
+    let pre = terminalPreOf(p)
+    if not pre.isNil:
+      setStyles(p, "display", "flex")
+      setStyles(p, "flex-direction", "column")
+      setStyles(pre, "flex", "1 1 auto")
+      setStyles(pre, "min-height", "0")
+      setStyles(pre, "overflow-y", "auto")
+      discard attachListScrubber(pre, p,
+        total = proc(): int = vm.lines.val.len,
+        current = proc(): int = vm.currentLine(),
+        rowHeight = proc(): float =
+          let h = firstLineHeight(pre)
+          if h > 0.0: h else: 18.0,
+        paneId = "terminalOutput")

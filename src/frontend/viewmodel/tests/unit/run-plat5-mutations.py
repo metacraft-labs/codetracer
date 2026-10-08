@@ -27,12 +27,37 @@ it, and the SHA-256 of every touched file is compared against the control hash
 before the next arm starts. `git checkout --` rejects a mixed tracked/untracked
 argument list wholesale and can leave mutations accumulating in the tree.
 
-Usage (from the repository root):
-  direnv exec . python3 src/frontend/viewmodel/tests/unit/run-plat5-mutations.py
+THE CLOSING PASS (2026-09-27) closed PLAT-5's two recorded residuals and
+extended this harness to cover them:
+
+  * a DOCKED pane is offered every tab slot, the first included, and a bare
+    pane's body — `lcMoveTab` / `lcMergeIntoStack` take a docked source (arms
+    M1-M7 on the model, P16/P16B on the candidate list);
+  * a DIVIDER drag (`beginResizeDivider` / `proposeDivider`) moves the two
+    weights beside one divider and commits ONE `cmdSetDivider` (arms D1-D8 on
+    the model, I1-I10 on the machine), and the terminal draws its resize guide
+    for a divider between two stacks (arm B1) and its mouse picks a divider
+    up and drops it (arms B2-B4) — all graded against
+    `tui/app/tests/test_layout_binding.nim`.
+
+It also gained what every harness since PLAT-7 carries and this one did not:
+`--needle-scan`, a recorded control-digest file
+(`plat5-interaction-mutation-control.sha256`) that the full run refuses to
+start without, `--only=`, per-arm suites, and restore-on-signal.
+
+EACH ARM RUNS THE SUITE ITS KILLER LIVES IN, and only that suite.
+
+Usage (from the repository root, inside the dev shell, REPLAY_SERVER_BIN
+exported — the binding suite's lane expects it):
+  python3 src/frontend/viewmodel/tests/unit/run-plat5-mutations.py --needle-scan
+  python3 ... --record-control-hashes
+  python3 ...                       # grade every arm
+  python3 ... --only=P16,D1
 """
 
 import hashlib
 import re
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -44,8 +69,12 @@ ROOT = HERE.parents[4]
 SUITE = "src/frontend/viewmodel/tests/unit/test_layout_interaction.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
+BIND = "src/frontend/tui/app/layout/binding.nim"
+BIND_SUITE = "src/frontend/tui/app/tests/test_layout_binding.nim"
 
-TOUCHED = [SUITE, INTER, MODEL]
+TOUCHED = [SUITE, INTER, MODEL, BIND, BIND_SUITE]
+SUITES = [SUITE, BIND_SUITE]
+CONTROL_HASHES = HERE / "plat5-interaction-mutation-control.sha256"
 
 # The case names, spelled once. A typo here shows up as "the control did not
 # run this case" rather than as a silently unkillable arm.
@@ -66,7 +95,7 @@ T_PATHS = "paths round-trip against the model's own spelling"
 T_ONLY_PANE = ("the only pane of a layout can be dragged nowhere, and each "
                "refusal says why")
 T_DOCK_SPLIT = "a docked pane is split into the tree in one command"
-T_DOCK_SLOT0 = "a docked pane is never offered the first tab slot"
+T_DOCK_SLOT0 = "a docked pane is offered every tab slot, the first included"
 T_INDEX = ("moving a tab out of its own stack at an index that does not exist "
            "is refused")
 T_WHOLE_REGION = "dropping a whole tabbed region into a tab is refused by kind"
@@ -80,14 +109,33 @@ T_RESIZE = "a resize proposes weights and commits one setWeight"
 T_CLAMP = "a resize proposal is clamped, and never asks for a zero share"
 T_NO_RESIZE = ("there is nothing to resize against a stack, a root, or an "
                "absent pane")
+T_DIV_TWO = "a divider drag moves the two weights beside it and no other"
+T_DIV_CONTAINERS = ("a divider between stacks, or between whole containers, "
+                    "is draggable")
+T_DIV_SWEEP = ("every divider of every shape: cancelled untouched, committed "
+               "as proposed")
+T_NO_DIVIDER = "there is no divider in a stack, past either end, or at the root"
+T_DIV_CONTRIB = ("a region holding only contributed panes is dragged from its "
+                 "neighbour's side")
+T_GUIDE = ("a divider drag between two tabbed regions draws its guide at the "
+           "new edge")
 
 PLAT5_CASES = [
     T_FIELDS, T_SOURCE, T_BYTES, T_CANCEL, T_REVEAL, T_ORIGINS, T_PTR_COMPILE,
     T_PTR_FIELDS, T_MEDIA, T_LEGAL, T_HOVER_MEMBER, T_KINDS, T_CONTAINER,
     T_PATHS, T_ONLY_PANE, T_DOCK_SPLIT, T_DOCK_SLOT0, T_INDEX, T_WHOLE_REGION,
     T_BEGAN, T_SPLIT_NOOP, T_AGREE, T_EVERY_KIND, T_UNDO_LOG, T_NOT_DRAGGING,
-    T_RESIZE, T_CLAMP, T_NO_RESIZE,
+    T_RESIZE, T_CLAMP, T_NO_RESIZE, T_DIV_TWO, T_DIV_CONTAINERS, T_DIV_SWEEP,
+    T_NO_DIVIDER, T_DIV_CONTRIB,
 ]
+T_MOUSE_DIV = ("the mouse drags a divider between two stacks, and only that "
+               "divider moves")
+BINDING_CASES = [T_GUIDE, T_MOUSE_DIV]
+NAMED_CASES = PLAT5_CASES + BINDING_CASES
+
+
+def suite_of(case: str) -> str:
+    return BIND_SUITE if case in BINDING_CASES else SUITE
 
 
 @dataclass
@@ -218,22 +266,38 @@ MUTATIONS = [
     ),
     Mutation(
         "P15", INTER,
-        "      for slot in 0 .. parent.children.len:",
-        "      for slot in 0 ..< parent.children.len:",
+        "    for slot in 0 .. parent.children.len:",
+        "    for slot in 0 ..< parent.children.len:",
         T_INDEX,
     ),
     Mutation(
         "P16", INTER,
-        "          kind: dtIntoStack, stackAnchor: parent.children[slot - 1].pane,\n"
-        "          index: slot,",
-        "          kind: dtIntoStack, stackAnchor: parent.children[slot - 1].pane,\n"
-        "          index: slot - 1,",
+        "    if not parent.isNil and parent.kind == lnStack:\n"
+        "      return some(cmdMoveTab(source, target.stackAnchor, target.index))\n"
+        "    some(cmdMergeIntoStack(source, target.stackAnchor))",
+        "    if layout.dockedIndex(source) >= 0:\n"
+        "      return some(cmdRestoreDocked(source, some(target.stackAnchor)))\n"
+        "    if not parent.isNil and parent.kind == lnStack:\n"
+        "      return some(cmdMoveTab(source, target.stackAnchor, target.index))\n"
+        "    some(cmdMergeIntoStack(source, target.stackAnchor))",
         T_DOCK_SLOT0,
+        "RESPELLED 2026-09-27: restores the pre-closing ahRestore route for a "
+        "docked source, which lands every slot after the anchor",
+    ),
+    Mutation(
+        "P16B", INTER,
+        "  # A bare pane: dropping onto its body turns it into a two-tab stack.\n"
+        "  result.add(DropTarget(",
+        "  if layout.dockedIndex(source) >= 0:\n"
+        "    return\n"
+        "  result.add(DropTarget(",
+        T_DOCK_SLOT0,
+        "a docked pane stops being offered a bare pane's body (the old absence)",
     ),
     Mutation(
         "P17", INTER,
         "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
-        "    if not placed:\n"
+        "    if layout.dockedIndex(source) >= 0:\n"
         "      return none(LayoutCommand)\n"
         "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
         T_DOCK_SPLIT,
@@ -338,6 +402,240 @@ MUTATIONS = [
         "  if parent.isNil or parent.children.len < 2:",
         T_NO_RESIZE,
     ),
+    # --- CLOSING PASS: a docked source for lcMoveTab / lcMergeIntoStack ------
+    Mutation(
+        "M1", MODEL,
+        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        "                                  cmd.moveIndex)",
+        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        "                                  destination.children.len)",
+        T_DOCK_SLOT0,
+        "a docked pane lands last whatever slot was named",
+    ),
+    Mutation(
+        "M2", MODEL,
+        "      destination.children.insert(pane(entry.pane, entry.title),",
+        "      destination.children.insert(pane(entry.pane),",
+        T_DOCK_SLOT0,
+        "the strip's title is lost on the way into the stack",
+    ),
+    Mutation(
+        "M3", MODEL,
+        "      next.docked.delete(dockedFrom)",
+        "      discard dockedFrom",
+        T_DOCK_SLOT0,
+        "the pane stays on the strip as well: placed AND docked",
+    ),
+    Mutation(
+        "M4", MODEL,
+        "      if cmd.moveIndex < 0 or cmd.moveIndex > destination.children.len:\n"
+        "        return refusedFor(lpIndexOutOfRange, cmd.movedPane)\n"
+        "      let entry = next.docked[dockedFrom]\n"
+        "      next.docked.delete(dockedFrom)\n"
+        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        "                                  cmd.moveIndex)",
+        "      let entry = next.docked[dockedFrom]\n"
+        "      next.docked.delete(dockedFrom)\n"
+        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        "        max(0, min(cmd.moveIndex, destination.children.len)))",
+        T_DOCK_SLOT0,
+        "an index past the end is clamped instead of refused by kind",
+    ),
+    Mutation(
+        "M5", MODEL,
+        "    if dockedFrom >= 0 and not source.isNil:",
+        "    if false:",
+        T_DOCK_SLOT0,
+        "a pane both placed and docked is moved instead of refused",
+    ),
+    Mutation(
+        "M6", MODEL,
+        "      next.docked.delete(mergedFrom)",
+        "      discard mergedFrom",
+        T_DOCK_SLOT0,
+        "a docked pane merged onto a bare pane stays on the strip too",
+    ),
+    Mutation(
+        "M7", MODEL,
+        "    if mergedFrom >= 0 and not source.isNil:",
+        "    if false:",
+        T_DOCK_SLOT0,
+        "the merge stops refusing a pane that is in both places",
+    ),
+    # --- CLOSING PASS: the divider drag, in the model -----------------------
+    Mutation(
+        "D1", MODEL,
+        "      sibling.weight = rest",
+        "      discard rest",
+        T_DIV_TWO,
+        "the neighbour does not absorb the difference: the pair's sum moves",
+    ),
+    Mutation(
+        "D2", MODEL,
+        "      let across = if cmd.weightDivider.get == ssBefore: at - 1 else: at + 1",
+        "      let across = if cmd.weightDivider.get == ssBefore: at + 1 else: at - 1",
+        T_DIV_TWO,
+        "the divider on the other side of the node moves",
+    ),
+    Mutation(
+        "D3", MODEL,
+        "      for _ in 0 ..< cmd.weightLevel:",
+        "      for _ in 0 ..< 0:",
+        T_DIV_CONTAINERS,
+        "weightLevel is ignored, so no stack or container can be named",
+    ),
+    Mutation(
+        "D4", MODEL,
+        "      if parent.isNil or parent.kind == lnStack:\n"
+        "        return refusedFor(lpNoDivider, cmd.weightTarget)",
+        "      if parent.isNil:\n"
+        "        return refusedFor(lpNoDivider, cmd.weightTarget)",
+        T_NO_DIVIDER,
+        "two tabs of a stack are given a divider",
+    ),
+    Mutation(
+        "D5", MODEL,
+        "      if rest <= 0.0:",
+        "      if rest < 0.0:",
+        T_NO_DIVIDER,
+        "the neighbour may be squeezed to a zero weight",
+    ),
+    Mutation(
+        "D6", MODEL,
+        "      if effectiveWeight(node) == cmd.weightValue:\n"
+        "        return noOp()\n",
+        "",
+        T_DIV_TWO,
+        "a divider left where it was stops being loNoOp",
+    ),
+    Mutation(
+        "D7", MODEL,
+        "      if cmd.weightLevel < 0:",
+        "      if false:",
+        T_NO_DIVIDER,
+        "a negative level is read as the leaf",
+    ),
+    Mutation(
+        "D8", MODEL,
+        "      if cmd.weightValue <= 0.0:",
+        "      if cmd.weightValue < 0.0:",
+        T_NO_DIVIDER,
+        "a zero weight — one neutral share, not zero — is accepted",
+    ),
+    # --- CLOSING PASS: the divider drag, in the machine ---------------------
+    Mutation(
+        "I1", INTER,
+        "  if container.isNil or container.kind notin {lnRow, lnColumn}:",
+        "  if container.isNil or container.kind == lnPane:",
+        T_NO_DIVIDER,
+        "a stack is offered a divider drag",
+    ),
+    Mutation(
+        "I2", INTER,
+        "  if divider < 0 or divider + 1 >= container.children.len:",
+        "  if divider < 0 or divider >= container.children.len:",
+        T_NO_DIVIDER,
+        "a divider past the last child is accepted",
+    ),
+    Mutation(
+        "I3", INTER,
+        "    if i < min(at, across):",
+        "    if i <= min(at, across):",
+        T_DIV_TWO,
+        "the divider position is measured from the wrong child",
+    ),
+    Mutation(
+        "I4", INTER,
+        "  if mine < floor:\n"
+        "    mine = floor\n",
+        "",
+        T_DIV_SWEEP,
+        "a divider dragged past the container's start asks for a negative weight",
+    ),
+    Mutation(
+        "I5", INTER,
+        "  weights[across] = pair - mine",
+        "  weights[across] = weights[across]",
+        T_DIV_TWO,
+        "the proposal changes one weight, not the pair",
+    ),
+    Mutation(
+        "I6", INTER,
+        "  let other = parent.children[across]\n"
+        "  if builtInPaneBelow(other, 0, anchor, level):",
+        "  let other = parent.children[across]\n"
+        "  if false and builtInPaneBelow(other, 0, anchor, level):",
+        T_DIV_CONTRIB,
+        "a contributed-only region cannot be named from its neighbour",
+    ),
+    Mutation(
+        "I7", INTER,
+        "    if node.isContributed:\n"
+        "      return false\n",
+        "",
+        T_DIV_CONTRIB,
+        "a contributed leaf is taken as a built-in anchor",
+    ),
+    Mutation(
+        "I8", INTER,
+        "    if interaction.divider.isSome:\n"
+        "      return dividerCommand(layout, interaction)\n",
+        "",
+        T_DIV_TWO,
+        "a divider drag commits a plain one-node setWeight",
+    ),
+    Mutation(
+        "I9", INTER,
+        "                   proposed: weights, divider: some(ssAfter)))",
+        "                   proposed: weights, divider: some(ssBefore)))",
+        T_DIV_TWO,
+        "beginResizeDivider names the divider on the wrong side of child i",
+    ),
+    Mutation(
+        "I10", INTER,
+        "    return proposeDividerWeight(interaction, parent, leaf, share * total)",
+        "    discard total",
+        T_DIV_TWO,
+        "proposeShare on a divider drag falls through to the one-node resize",
+    ),
+    # --- CLOSING PASS: the terminal draws the guide for any node ------------
+    Mutation(
+        "B1", BIND,
+        "  if info.isNone:\n"
+        "    return CellArea()\n"
+        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy,\n",
+        "  if info.isNone or info.get.kind != lnPane:\n"
+        "    return CellArea()\n"
+        "  let after = geometryOf(outcome.layout, geom.body, noInteraction(), policy,\n",
+        T_GUIDE,
+        "the guide is drawn for panes only, so a divider between stacks has none",
+    ),
+    # --- CLOSING PASS: the terminal's mouse picks a divider up ---------------
+    Mutation(
+        "B2", BIND,
+        "      let divider = b.dividerAt(geom, event.row, event.col)",
+        "      let divider = none((string, int))",
+        T_MOUSE_DIV,
+        "a press on a divider cell is only a focus again",
+    ),
+    Mutation(
+        "B3", BIND,
+        "      if not past:\n"
+        "        # A click on the divider (within the threshold) is what it was\n",
+        "      if false:\n"
+        "        # A click on the divider (within the threshold) is what it was\n",
+        T_MOUSE_DIV,
+        "a click on a divider cell is treated as a drop",
+    ),
+    Mutation(
+        "B4", BIND,
+        "  some(if info.get.kind == lnRow:\n"
+        "         float(col - bounds.col + 1) / float(bounds.width)",
+        "  some(if info.get.kind != lnRow:\n"
+        "         float(col - bounds.col + 1) / float(bounds.width)",
+        T_MOUSE_DIV,
+        "the release is measured along the wrong axis",
+    ),
 ]
 
 DECLARED_SURVIVORS = []
@@ -357,15 +655,46 @@ class RunResult:
         return len(self.passed) + len(self.failed)
 
 
+_ACTIVE = None   # (path, original bytes) while an arm is applied
+
+
 def digest(path: str) -> str:
     return hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
 
 
-def run_suite() -> RunResult:
+def install_restore_on_signal() -> None:
+    """An interrupted grade must not leave a mutation in the tree."""
+    def handler(signum, _frame):
+        if _ACTIVE is not None:
+            path, original = _ACTIVE
+            (ROOT / path).write_bytes(original)
+            print(f"\nsignal {signum}: restored {path} before exiting")
+        sys.exit(128 + signum)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, handler)
+
+
+def link_flags():
+    """The `--passL:` flags the Tier-1 `tui` lane adds (PLAT-6's recipe)."""
+    path = ROOT / "build" / "grammars" / "tui-link-flags.txt"
+    if not path.is_file():
+        return []
+    return ["--passL:" + f for f in path.read_text().split()]
+
+
+def run_suite(suite: str = SUITE) -> RunResult:
+    stem = Path(suite).stem
+    if suite == BIND_SUITE:
+        archive = ROOT / "build" / "grammars" / "libcodetracer_tui_grammars.a"
+        extra = [f"-d:isonimTuiGrammarArchive={archive}", *link_flags()]
+    else:
+        extra = []
     proc = subprocess.run(
         ["nim", "c", "-r", "--hints:off", "--path:src/frontend/viewmodel",
-         "-o:/tmp/plat5-mutation-suite", SUITE],
-        cwd=ROOT, capture_output=True, text=True, timeout=3600,
+         *extra, f"--nimcache:build/nimcache/plat5-mutations-{stem}",
+         f"-o:/tmp/plat5-mutation-{stem}", suite],
+        cwd=ROOT, capture_output=True, text=True, errors="replace",
+        timeout=3600,
     )
     out = proc.stdout + proc.stderr
     res = RunResult(rc=proc.returncode)
@@ -383,36 +712,175 @@ def run_suite() -> RunResult:
     return res
 
 
-def main() -> int:
-    baseline = {p: digest(p) for p in TOUCHED}
+COUNT_CONSTANT = re.compile(
+    r"^[ \t]*(?:const[ \t]+)?(ExpectedAssertions)\*?[ \t]*=[ \t]*(\d+)", re.M)
 
-    print("== control ==")
-    control = run_suite()
-    if control.failed or not control.ran:
-        print(f"CONTROL IS NOT GREEN: rc={control.rc} failed={control.failed}")
+
+def needle_scan() -> int:
+    """Every needle occurs exactly once; every killer is a real case name in
+    its suite; every named case is some arm's killer; no needle quotes an
+    assertion-count constant (Verification-Harness-Traps §10.3); every
+    subject carries an arm; ids and justifications are distinct."""
+    problems = 0
+    counts = {}
+    for path in TOUCHED:
+        for m in COUNT_CONSTANT.finditer((ROOT / path).read_text()):
+            counts[m.group(2)] = f"{path}:{m.group(1)}"
+    for mut in MUTATIONS + DECLARED_SURVIVORS:
+        text = mut.find + mut.replace
+        if "ExpectedAssertions" in text or "CHECKS:" in text:
+            print(f"{mut.id}: NEEDLE QUOTES A COUNT NAME — §10.3")
+            problems += 1
+        for digits in re.findall(r"\d\d+", text):
+            if digits in counts:
+                print(f"{mut.id}: NEEDLE QUOTES {counts[digits]} ({digits})")
+                problems += 1
+    armed = {m.path for m in MUTATIONS}
+    unarmed = [p for p in (INTER, MODEL, BIND, SUITE) if p not in armed]
+    if unarmed:
+        print(f"SUBJECTS WITH NO ARM: {unarmed}")
+        problems += 1
+    ids = [m.id for m in MUTATIONS + DECLARED_SURVIVORS]
+    if len(set(ids)) != len(ids):
+        print("DUPLICATE ARM ID")
+        problems += 1
+    whys = {}
+    for m in MUTATIONS + DECLARED_SURVIVORS:
+        if not m.why:
+            continue
+        key = m.why[:60]
+        if key in whys:
+            print(f"{m.id}: DUPLICATE justification, shared with {whys[key]}")
+            problems += 1
+        whys[key] = m.id
+    for m in MUTATIONS + DECLARED_SURVIVORS:
+        n = (ROOT / m.path).read_text().count(m.find)
+        status = "ok" if n == 1 else "LOST" if n == 0 else "AMBIGUOUS"
+        if n != 1:
+            problems += 1
+        print(f"{m.id:<5} {status:<10} {n} occurrence(s) in {m.path}")
+    for case in NAMED_CASES:
+        src = (ROOT / suite_of(case)).read_text()
+        if f'test "{case}"' not in src:
+            print(f"KILLER NAME NOT IN {suite_of(case)}: {case!r}")
+            problems += 1
+    for m in MUTATIONS:
+        if m.killer not in NAMED_CASES:
+            print(f"{m.id}: killer {m.killer!r} is not a declared case name")
+            problems += 1
+    unused = [c for c in NAMED_CASES
+              if c not in {m.killer for m in MUTATIONS}]
+    if unused:
+        print(f"NAMED CASES NO ARM KILLS: {unused}")
+        problems += 1
+    print(f"\n{len(MUTATIONS)} arms, {len(NAMED_CASES)} named cases; "
+          f"{problems} problems")
+    return 0 if problems == 0 else 1
+
+
+def record_control_hashes() -> int:
+    lines = [f"{digest(p)}  {p}" for p in TOUCHED]
+    CONTROL_HASHES.write_text("\n".join(lines) + "\n")
+    print(f"recorded {len(lines)} digests in {CONTROL_HASHES}")
+    return 0
+
+
+def check_control_hashes() -> bool:
+    if not CONTROL_HASHES.exists():
+        print(f"CONTROL DIGESTS ABSENT: {CONTROL_HASHES.name} — run "
+              "--needle-scan, review the tree, then --record-control-hashes")
+        return False
+    recorded = {}
+    for line in CONTROL_HASHES.read_text().splitlines():
+        if line.strip():
+            h, p = line.split(None, 1)
+            recorded[p.strip()] = h
+    ok = True
+    for p in TOUCHED:
+        if p not in recorded:
+            print(f"CONTROL DIGEST ABSENT: {p}")
+            ok = False
+        elif recorded[p] != digest(p):
+            print(f"CONTROL DIGEST MOVED: {p} — re-run --needle-scan BEFORE "
+                  "--record-control-hashes (§32)")
+            ok = False
+    return ok
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
+def main() -> int:
+    global _ACTIVE
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
+    only = None
+    for arg in sys.argv[1:]:
+        if arg == "--needle-scan":
+            return needle_scan()
+        if arg == "--record-control-hashes":
+            return record_control_hashes()
+        if arg.startswith("--only="):
+            only = set(arg[len("--only="):].split(","))
+        else:
+            print(f"unknown argument: {arg}")
+            return 2
+
+    if needle_scan() != 0:
+        print("REFUSING TO RUN: the needle scan is not clean (§32)")
         return 1
-    missing = [c for c in PLAT5_CASES if c not in control.passed]
-    if missing:
-        print(f"CONTROL DID NOT RUN {len(missing)} NAMED CASES: {missing}")
+    if not check_control_hashes():
+        print("REFUSING TO RUN: a control digest moved or is absent (§32)")
         return 1
-    print(f"control: {control.total} cases, all {len(PLAT5_CASES)} named ones "
-          f"ran, 0 failures\n")
+
+    baseline = {p: digest(p) for p in TOUCHED}
+    install_restore_on_signal()
+    wanted = [m for m in MUTATIONS + DECLARED_SURVIVORS
+              if not only or m.id in only]
+    if not wanted:
+        print(f"no arm matches {sorted(only or [])}")
+        return 1
+
+    print("\n== control ==")
+    for suite in SUITES:
+        if not any(suite_of(m.killer) == suite for m in wanted):
+            continue
+        control = run_suite(suite)
+        if control.failed or not control.ran or control.rc != 0:
+            print(f"CONTROL IS NOT GREEN: {suite} rc={control.rc} "
+                  f"failed={control.failed}")
+            return 1
+        missing = [c for c in NAMED_CASES
+                   if suite_of(c) == suite and c not in control.passed]
+        if missing:
+            print(f"CONTROL DID NOT RUN {len(missing)} NAMED CASES in "
+                  f"{suite}: {missing}")
+            return 1
+        print(f"control {suite}: {control.total} cases, 0 failures")
 
     problems = 0
-    for mut in MUTATIONS + DECLARED_SURVIVORS:
+    killed = 0
+    for mut in wanted:
         path = ROOT / mut.path
-        original = path.read_text()
-        occurrences = original.count(mut.find)
+        original = path.read_bytes()
+        text = original.decode()
+        occurrences = text.count(mut.find)
         if occurrences != 1:
             print(f"{mut.id:<5} HARNESS-FAILURE      pattern occurs "
                   f"{occurrences} times in {mut.path}, expected 1")
             problems += 1
             continue
-        path.write_text(original.replace(mut.find, mut.replace))
+        _ACTIVE = (mut.path, original)
+        path.write_bytes(text.replace(mut.find, mut.replace).encode())
         try:
-            res = run_suite()
+            res = run_suite(suite_of(mut.killer))
         finally:
-            path.write_text(original)
+            path.write_bytes(original)
+            _ACTIVE = None
             # Restoration is verified, not assumed.
             for p in TOUCHED:
                 if digest(p) != baseline[p]:
@@ -435,12 +903,15 @@ def main() -> int:
             others = [f for f in res.failed if f != mut.killer]
             verdict = "killed"
             note = mut.killer + (f"  (+{len(others)} more)" if others else "")
+            killed += 1
         else:
             verdict, note = "MISDIRECTED", f"died in {res.failed}, not {mut.killer!r}"
             problems += 1
-        print(f"{mut.id:<5} {verdict:<20} {note}")
+        print(f"{mut.id:<5} {verdict:<20} {note}", flush=True)
 
-    print(f"\n{problems} problems")
+    print(f"\n{killed}/{len(wanted)} killed; declared survivors: "
+          f"{len(DECLARED_SURVIVORS)}")
+    print(f"{problems} problems")
     return 0 if problems == 0 else 1
 
 

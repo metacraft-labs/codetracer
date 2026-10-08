@@ -201,13 +201,17 @@ fn load_request_spans_from_recorded_container() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let session = staged_session(tmp.path());
 
-    // --- The container really does declare the span stream (bit 13). -----
+    // --- The container carries the span stream, found by presence. -------
+    // `spans.dat` is created lazily, after `meta.dat` is written, so a version
+    // 6 writer never sets bit 13 for it (internal-files.md §"Stream-presence
+    // flags are a hint, not a gate").
     let mut ctfs = CtfsReader::open(&session.join("trace.ct")).expect("open container");
     let meta = parse_meta_dat(&ctfs.read_file("meta.dat").expect("meta.dat")).expect("parse meta.dat");
+    assert!(ctfs.has_file("spans.dat"), "the recorded session must carry spans.dat");
     assert_eq!(
         meta.flags & FLAG_HAS_SPAN_STREAM,
-        FLAG_HAS_SPAN_STREAM,
-        "the Nim writer must have set meta.dat bit 13"
+        0,
+        "a version 6 writer must not set meta.dat bit 13 for a lazily created stream"
     );
 
     // --- Opening the stream is index-only. -------------------------------

@@ -70,7 +70,8 @@ proc gpuiSpec(name: string): string =
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
-let shimDir = repo.parentDir / "isonim-gpui/rust/target/debug"
+let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
+                   repo.parentDir / "isonim-gpui/rust/target/debug")
 
 proc runBinary(project, state: string; specs: seq[string]): (int, string) =
   let p = startProcess(bin,

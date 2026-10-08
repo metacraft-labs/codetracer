@@ -143,6 +143,7 @@ ct-cli-units
 ct-trace-units
 mcr-enrichment-units
 online-sharing-live
+identity-device-grant-live
 host-instantiations
 renderer-electron
 renderer-web
@@ -187,6 +188,7 @@ test_lane_description() {
 	ct-trace-units) echo "ct trace-layer unit suites" ;;
 	mcr-enrichment-units) echo "ct upload / MCR-enrichment unit suites" ;;
 	online-sharing-live) echo "live sharing round-trip (compile-checked only, never executed)" ;;
+	identity-device-grant-live) echo "live OIDC device-grant probe (compile-checked only; it needs a running issuer AND a browser)" ;;
 	host-instantiations) echo "JS-backend modules no other lane compiles: the facade's host instantiations and platform_host's Electron arm (compile-checked only)" ;;
 	renderer-electron) echo "the renderer entry points, BROWSER target, Electron arm (compile-checked only)" ;;
 	renderer-web) echo "the renderer entry point, BROWSER target, -d:ctWeb arm (compile-checked only)" ;;
@@ -220,7 +222,7 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
-	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron)" ;;
+	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
 		return 1
@@ -291,6 +293,31 @@ test_lane_backend() {
 	esac
 }
 
+# test_lane_is_compile_only ID — whether this lane's files are NEVER executed.
+#
+# The runner already forces this for `js-browser` and says why in as many
+# words: compile-only "BY CONSTRUCTION, not by the caller remembering a flag",
+# so that "`just`, CI and a developer typing the command by hand cannot
+# disagree". That reasoning is not specific to browsers, and until 2026-09-30
+# the two lanes below were compile-only only because their `just` recipes
+# passed `--compile-only`. A bare `run-nim-test-lane.sh <lane>` ran them.
+#
+# Measured at codetracer `26b6c2fd4`: `bash ci/lib/run-nim-test-lane.sh
+# identity-device-grant-live` compiled the probe, RAN it with no arguments,
+# got exit 2 and its usage text, and reported `0 file(s) passed, 1 failed`.
+# `online-sharing-live` had the same hole and a worse consequence — its suite
+# performs a live upload/download/delete round trip against the sharing
+# service, so running it by accident is a write to production.
+#
+# So the property lives with the lane, as data, and the caller's flag can only
+# ADD compile-only, never remove it.
+test_lane_is_compile_only() {
+	case "$1" in
+	online-sharing-live | identity-device-grant-live) echo 1 ;;
+	*) echo 0 ;;
+	esac
+}
+
 # test_lane_parity_partner ID — the lane that deliberately compiles the SAME
 # files on the other backend, or empty.
 #
@@ -338,11 +365,26 @@ test_lane_extra_flags() {
 		# connection; the define is a link-time requirement only.
 		echo "-d:ssl -d:useOpenssl3"
 		;;
+	identity-device-grant-live)
+		# Same define, a DIFFERENT reason, and the difference matters: this
+		# lane's file really does open a TLS connection — `identity/
+		# http_transport.nim` builds an `SslContext` around a CA bundle and
+		# talks to a live issuer. Without `-d:ssl` that context type does not
+		# exist and the probe does not compile.
+		echo "-d:ssl -d:useOpenssl3"
+		;;
 	ct-cli-units)
 		# src/ct/sourcemap.nim calls `GC_disable`, which only exists under the
 		# refc memory manager; with Nim 2.x's default ORC it is an undeclared
 		# identifier and `test_sourcemap.nim` does not compile at all.
-		echo "--mm:refc"
+		#
+		# `-d:ssl` arrived with `src/ct/identity/oidc_test.nim`, which this
+		# lane discovers by glob. That suite drives a FAKE transport and opens
+		# nothing — but it imports `oidc.nim`, which imports `http_transport
+		# .nim`, which needs std/net's `newContext`. Measured at 4b453a266
+		# before the define was added: `undeclared identifier: 'newContext'`,
+		# i.e. the whole lane red, from a suite that touches no network.
+		echo "--mm:refc -d:ssl -d:useOpenssl3"
 		;;
 	ct-test-incremental | ct-test-incremental-e2e)
 		# test_incremental_adapter_seam.nim imports `ct_incremental_adapter`,
@@ -569,6 +611,32 @@ test_lane_files() {
 		echo src/ct/online_sharing/online_sharing_test.nim
 		;;
 
+	identity-device-grant-live)
+		# The same arrangement as the lane above, for the same reason and with
+		# a second one on top.
+		#
+		# `identity_live_device_grant_probe.nim` cannot run here: it needs a
+		# running Zitadel AND a second agent — a browser signing in and
+		# pressing Allow — neither of which CI provisions. Its harness,
+		# `ci/test/identity-live-device-grant.sh`, drives both and SKIPS loudly
+		# (exit 2) when they are absent, which is the right behaviour there and
+		# no coverage at all here.
+		#
+		# So it is compiled. That is the weakest check that catches what
+		# actually rots, and what rots is real: the probe is the only caller of
+		# `oidc.nim`'s `awaitDeviceGrant`/`fetchJwks` pair outside a fake
+		# transport, so a signature change in the identity layer breaks it and
+		# nothing else. `online-sharing-live` beside it is the recorded
+		# precedent — that file was found not compiling at all, having rotted
+		# against three signatures, precisely because nothing ever looked at it.
+		#
+		# It is NOT test-shaped (no `unittest`, no `suite`), so
+		# `ci/test/test-lane-coverage.sh` would never have demanded a lane for
+		# it. A file nothing collects and no guard misses is the quietest hole
+		# there is; naming it here is the whole fix.
+		echo ci/test/identity_live_device_grant_probe.nim
+		;;
+
 	host-instantiations)
 		# NOT test files. Production modules of the platform facade, compiled
 		# on the backend they actually ship on. Four are echoed at the bottom
@@ -605,9 +673,10 @@ test_lane_files() {
 		# it costs seconds.
 		#
 		# Listed explicitly rather than discovered. A glob over `host/` would
-		# pull in `desktop_native.nim` and `remote_stub.nim`, which are C-backend
-		# modules `vm-unit` already compiles, and a lane that compiles a module
-		# on the wrong backend reports a green that means nothing.
+		# pull in `desktop_native.nim` and `container_platform.nim`, which are
+		# C-backend modules `vm-unit` already compiles, and a lane that
+		# compiles a module on the wrong backend reports a green that means
+		# nothing.
 		# `platform_host.nim` is here for its ELECTRON arm specifically. It is
 		# a three-way switch (`js`+`ctWeb`, `js`, native) and each arm needs a
 		# gate, or the switch acquires a hole the shape of whichever arm is
@@ -646,7 +715,16 @@ test_lane_files() {
 		# therefore checked at package time rather than on push. That gap is
 		# real and is recorded in the milestone file rather than papered over
 		# with a lane that would lie.
+		# `browser_tab.nim` is here for the same reason `web_browser.nim` is:
+		# it is `importjs` and `{.emit.}` throughout, so `vm-unit` cannot see
+		# it, and the two modules that DO import it — `web_browser.nim` here
+		# and `ui_js.nim` in `renderer-electron` — are each one edit away from
+		# not doing so. It carries the ten operations that belong to the TAB
+		# rather than to the container (§6.6), shared by the web deployment
+		# and the container deployment, which is exactly the shape of module
+		# that loses its last compiler without anyone noticing.
 		echo src/frontend/platform_host.nim
+		echo src/frontend/viewmodel/host/browser_tab.nim
 		echo src/frontend/viewmodel/host/desktop_electron.nim
 		echo src/frontend/viewmodel/host/opfs_volume.nim
 		echo src/frontend/viewmodel/host/web_browser.nim
@@ -753,7 +831,58 @@ test_lane_files() {
 		# (`index/ipc_subsystems/dap.nim`) with two sessions whose requests
 		# share a `seq`, and asserts each answer reaches the session that
 		# asked.
+		#
+		# `index_server_binds_loopback_test.nim` starts the REAL
+		# `server_config.setupServer` and then tries to connect to it from
+		# this host's own routable address: the default must refuse, and
+		# `--bind 0.0.0.0` through the real `parseArgs` must accept.
+		#
+		# `facade_endpoint_verbs_test.nim` drives `index/facade_endpoint.nim`
+		# as a server: a §6.2 `call` frame in and a `reply` frame out, over a
+		# real temporary directory, real `git` repositories and real `sh`
+		# children, and then the same dispatcher paired with the REAL client
+		# (`host/container_platform.nim`) so that both ends of the endpoint
+		# contract are exercised against each other with no socket. It needs
+		# `git` and `sh` on PATH and writes only under one `mkdtemp`
+		# directory, which it removes.
+		#
+		# `facade_endpoint_over_socket_test.nim` is the one that cannot be
+		# faked: it starts the real `setupServer` and reaches the dispatcher
+		# over a real socket.io connection, because the two suites above were
+		# green for weeks while NOTHING under `src/frontend/index/` imported
+		# `facade_endpoint` at all. It then holds the welcome's profile and
+		# the dispatcher's refusals to the biconditional §6.3 promises. Needs
+		# `git` and `sh` on PATH; writes only under one `mkdtemp` directory,
+		# which it points `XDG_CONFIG_HOME` at and then removes.
 		echo src/frontend/tests/dap_session_routing_test.nim
+		echo src/frontend/tests/index_server_binds_loopback_test.nim
+		echo src/frontend/tests/facade_endpoint_verbs_test.nim
+		#
+		# `index_serves_deployment_cache_classes_test.nim` asks the running
+		# server for two files and compares the `Cache-Control` it sends with
+		# `web_deployment.headerFor(cacheClassFor(url))` — the same pair that
+		# generates the Pages `_headers` file. Reading the function back would
+		# have passed against the broken code, because the function was right
+		# and nothing under `src/frontend/index/` called it. It writes two probe
+		# files under `codetracerExeDir` and removes them.
+		echo src/frontend/tests/facade_endpoint_over_socket_test.nim
+		#
+		# `index_serves_one_deployment_descriptor_test.nim` is §7's "it arrives
+		# differently per deployment and is the SAME document": it fetches
+		# `/deployment.json` over HTTP, reads `welcome.deployment` over a real
+		# socket, and compares the two to EACH OTHER rather than each to a
+		# shape — two deliveries of one value can drift, and a shape check
+		# passes while they do.
+		echo src/frontend/tests/index_serves_deployment_cache_classes_test.nim
+		#
+		# `index_reports_the_port_it_bound_test.nim` starts the real server on
+		# `--port 0` and then CONNECTS to the port the `CODETRACER_HOST_URL=`
+		# line named. The number cannot be compared against the input, because
+		# with auto-assign there is no input — so the connection is the check,
+		# and it is the only one an implementation that echoed the argument back
+		# could not satisfy.
+		echo src/frontend/tests/index_serves_one_deployment_descriptor_test.nim
+		echo src/frontend/tests/index_reports_the_port_it_bound_test.nim
 		;;
 
 	frontend-native-units)
@@ -948,7 +1077,8 @@ test_lane_files() {
 				'/test_plugin_surfaces\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
-				'/test_every_status_surface_has_an_entry_point\.nim$'
+				'/test_every_status_surface_has_an_entry_point\.nim$' \
+				'/test_vcs_working_tree\.nim$'
 		# `test_every_mountable_pane_has_a_factory_arm` and
 		# `test_every_status_surface_has_an_entry_point` (both 2026-09-04) are
 		# the same shape as `test_pane_mount_markers_are_released` below: their
@@ -1058,6 +1188,11 @@ test_lane_files() {
 		# `when defined(js)` guard inside the suites instead would leave two
 		# files reporting green on a backend where they had asserted nothing,
 		# which is the vacuous pass this whole file exists to prevent.
+		# `test_vcs_working_tree` (PLAT-47) runs the SYSTEM `git` through the
+		# native VCS facade (`host/native_vcs.nim`, `std/osproc`) against a
+		# real repository it builds with `scripts/plat47-vcs-fixture.sh`; its
+		# porcelain parser half is backend-independent, but the file's claim is
+		# the facade reading a real repository, which a JS target cannot.
 		# `test_pane_mount_markers_are_released` walks `src/frontend/ui/*.nim`
 		# with `std/os`'s `walkFiles` and reads each file, because its subject
 		# is a property of the SOURCE TREE — which panes declare a mount marker
@@ -1181,8 +1316,19 @@ test_lane_files() {
 				'/test_plugin_io_sdk\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_plugin_source_admission\.nim$' \
+				'/test_vcs_working_tree\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
 				'/test_project_action_runner\.nim$'
+		# EIGHT entries since 2026-10-04: `test_vcs_working_tree` (PLAT-47)
+		# runs the SYSTEM `git` through `std/osproc`, the same reason it is
+		# rejected from `vm-unit-js` above, and it dies on the same line as
+		# the rest of this family, measured on the stabilisation pass:
+		#
+		#     wasm-ld: error: @posproc.nim.c.o: undefined symbol: posix_spawnp
+		#
+		# It landed with the VCS pane (3214a61de) rejected from the JS lane
+		# and not from this one, so this lane has been red on it since.
+		#
 		# SEVEN entries since 2026-09-18. `test_editor_async_closure` (PLAT-29)
 		# joins the same `posix_spawnp` family as the five below, and the line it
 		# dies on is the same one, measured:
@@ -1574,9 +1720,11 @@ test_lane_files() {
 		# exist sat in NO lane (`ci/test/test-lane-coverage.sh` said so) and
 		# were run only by `just plat39-record-gate` and the case-floor gate.
 		# `test_screen_oracle.nim` reads the six gitignored Electron captures
-		# and needs `tesseract`; its prerequisite is `just
-		# plat35-capture-electron`, exactly as the floors recipe's declared
-		# deferral says. `test_plat39_record.nim` asserts the committed record
+		# and the two gitignored GPUI window frames, and needs `tesseract`; its
+		# prerequisites are `just plat35-capture-electron` and `just
+		# plat37-capture` (which exports the windowed frames to
+		# `captures/gpui/`), exactly as the floors recipe's declared deferral
+		# says. `test_plat39_record.nim` asserts the committed record
 		# and runs anywhere.
 		_tlf_glob src/tests/visual/screen_oracle 'test_*.nim'
 		;;

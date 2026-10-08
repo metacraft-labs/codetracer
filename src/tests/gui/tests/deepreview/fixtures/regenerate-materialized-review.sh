@@ -15,10 +15,9 @@
 # sibling repos that must be built first.  The collector reads a trace, not a
 # language.
 #
-# `nargo trace` writes the LEGACY materialized layout (a runtime_tracing
-# `trace.json`, not a `.ct` container), which is also the shape a Python
-# recording has — so the fixture exercises `materialized_source`'s legacy arm
-# as well.
+# `nargo trace` must be one that writes a `.ct` container. A `nargo` old
+# enough to write a `trace.json` event stream instead is refused by the
+# collector: that layout is test-oracle output, not a recording.
 #
 # Two fields are re-generated on every run and are therefore not asserted by
 # the tests: `commitSha` / `baseCommitSha` (a fresh `git init` each time) and

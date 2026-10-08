@@ -1,0 +1,7246 @@
+{
+ "_comment": [
+  "PLAT-52 — the desktop's Terminal Output pane, read from the real Electron app.",
+  "Produced by src/tests/gui/tests/visual/plat52-terminal-capture.spec.ts",
+  "(`bash scripts/plat52-capture-electron.sh`)."
+ ],
+ "lines": {
+  "start": {
+   "line": 1,
+   "ticks": 1,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat52/test-programs/terminal_colours/main.py"
+  },
+  "view": "lines",
+  "toggleShown": false,
+  "linesAtStart": [
+   {
+    "text": "red plain bold green",
+    "fragments": [
+     {
+      "text": "red",
+      "tense": "future",
+      "write": 0,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": " plain ",
+      "tense": "future",
+      "write": 0,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "bold green",
+      "tense": "future",
+      "write": 0,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "700",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "two writes, blue ground",
+    "fragments": [
+     {
+      "text": "two writes, ",
+      "tense": "future",
+      "write": 1,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "blue ground",
+      "tense": "future",
+      "write": 2,
+      "color": "#ffffff",
+      "background": "#0000bb",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "italic underline reverse bright magenta",
+    "fragments": [
+     {
+      "text": "italic",
+      "tense": "future",
+      "write": 3,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "italic",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": " ",
+      "tense": "future",
+      "write": 3,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "underline",
+      "tense": "future",
+      "write": 3,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "underline",
+      "opacity": "0.5"
+     },
+     {
+      "text": " ",
+      "tense": "future",
+      "write": 3,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "reverse",
+      "tense": "future",
+      "write": 3,
+      "color": "#000000",
+      "background": "#ffffff",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": " ",
+      "tense": "future",
+      "write": 3,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "bright magenta",
+      "tense": "future",
+      "write": 3,
+      "color": "#ff55ff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "256-colour orange truecolor teal on yellow",
+    "fragments": [
+     {
+      "text": "256-colour orange",
+      "tense": "future",
+      "write": 4,
+      "color": "#ff8700",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": " ",
+      "tense": "future",
+      "write": 4,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "truecolor teal",
+      "tense": "future",
+      "write": 4,
+      "color": "#008080",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": " ",
+      "tense": "future",
+      "write": 4,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "on yellow",
+      "tense": "future",
+      "write": 4,
+      "color": "#000000",
+      "background": "#bbbb00",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "col     umns    by      tab",
+    "fragments": [
+     {
+      "text": "col     umns    by      tab",
+      "tense": "future",
+      "write": 5,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "",
+    "fragments": [
+     {
+      "text": "",
+      "tense": "future",
+      "write": 6,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "one write",
+    "fragments": [
+     {
+      "text": "one write",
+      "tense": "future",
+      "write": 7,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "ends two lines",
+    "fragments": [
+     {
+      "text": "ends two lines",
+      "tense": "future",
+      "write": 8,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   0 #",
+    "fragments": [
+     {
+      "text": "row   0 ",
+      "tense": "future",
+      "write": 9,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 9,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   1 ##",
+    "fragments": [
+     {
+      "text": "row   1 ",
+      "tense": "future",
+      "write": 10,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 10,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   2 ###",
+    "fragments": [
+     {
+      "text": "row   2 ",
+      "tense": "future",
+      "write": 11,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 11,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   3 ####",
+    "fragments": [
+     {
+      "text": "row   3 ",
+      "tense": "future",
+      "write": 12,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 12,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   4 #####",
+    "fragments": [
+     {
+      "text": "row   4 ",
+      "tense": "future",
+      "write": 13,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 13,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   5 ######",
+    "fragments": [
+     {
+      "text": "row   5 ",
+      "tense": "future",
+      "write": 14,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 14,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   6 #######",
+    "fragments": [
+     {
+      "text": "row   6 ",
+      "tense": "future",
+      "write": 15,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 15,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   7 ########",
+    "fragments": [
+     {
+      "text": "row   7 ",
+      "tense": "future",
+      "write": 16,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 16,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   8 #########",
+    "fragments": [
+     {
+      "text": "row   8 ",
+      "tense": "future",
+      "write": 17,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 17,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   9 ##########",
+    "fragments": [
+     {
+      "text": "row   9 ",
+      "tense": "future",
+      "write": 18,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 18,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  10 ###########",
+    "fragments": [
+     {
+      "text": "row  10 ",
+      "tense": "future",
+      "write": 19,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 19,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  11 ############",
+    "fragments": [
+     {
+      "text": "row  11 ",
+      "tense": "future",
+      "write": 20,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 20,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  12 #############",
+    "fragments": [
+     {
+      "text": "row  12 ",
+      "tense": "future",
+      "write": 21,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 21,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  13 ##############",
+    "fragments": [
+     {
+      "text": "row  13 ",
+      "tense": "future",
+      "write": 22,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 22,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  14 ###############",
+    "fragments": [
+     {
+      "text": "row  14 ",
+      "tense": "future",
+      "write": 23,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 23,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  15 ################",
+    "fragments": [
+     {
+      "text": "row  15 ",
+      "tense": "future",
+      "write": 24,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 24,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  16 #################",
+    "fragments": [
+     {
+      "text": "row  16 ",
+      "tense": "future",
+      "write": 25,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 25,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  17 ##################",
+    "fragments": [
+     {
+      "text": "row  17 ",
+      "tense": "future",
+      "write": 26,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 26,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  18 ###################",
+    "fragments": [
+     {
+      "text": "row  18 ",
+      "tense": "future",
+      "write": 27,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 27,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  19 ####################",
+    "fragments": [
+     {
+      "text": "row  19 ",
+      "tense": "future",
+      "write": 28,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 28,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  20 #",
+    "fragments": [
+     {
+      "text": "row  20 ",
+      "tense": "future",
+      "write": 29,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 29,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  21 ##",
+    "fragments": [
+     {
+      "text": "row  21 ",
+      "tense": "future",
+      "write": 30,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 30,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  22 ###",
+    "fragments": [
+     {
+      "text": "row  22 ",
+      "tense": "future",
+      "write": 31,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 31,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  23 ####",
+    "fragments": [
+     {
+      "text": "row  23 ",
+      "tense": "future",
+      "write": 32,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 32,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  24 #####",
+    "fragments": [
+     {
+      "text": "row  24 ",
+      "tense": "future",
+      "write": 33,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 33,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  25 ######",
+    "fragments": [
+     {
+      "text": "row  25 ",
+      "tense": "future",
+      "write": 34,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 34,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  26 #######",
+    "fragments": [
+     {
+      "text": "row  26 ",
+      "tense": "future",
+      "write": 35,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 35,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  27 ########",
+    "fragments": [
+     {
+      "text": "row  27 ",
+      "tense": "future",
+      "write": 36,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 36,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  28 #########",
+    "fragments": [
+     {
+      "text": "row  28 ",
+      "tense": "future",
+      "write": 37,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 37,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  29 ##########",
+    "fragments": [
+     {
+      "text": "row  29 ",
+      "tense": "future",
+      "write": 38,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 38,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  30 ###########",
+    "fragments": [
+     {
+      "text": "row  30 ",
+      "tense": "future",
+      "write": 39,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 39,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  31 ############",
+    "fragments": [
+     {
+      "text": "row  31 ",
+      "tense": "future",
+      "write": 40,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 40,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  32 #############",
+    "fragments": [
+     {
+      "text": "row  32 ",
+      "tense": "future",
+      "write": 41,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 41,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  33 ##############",
+    "fragments": [
+     {
+      "text": "row  33 ",
+      "tense": "future",
+      "write": 42,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 42,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  34 ###############",
+    "fragments": [
+     {
+      "text": "row  34 ",
+      "tense": "future",
+      "write": 43,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 43,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  35 ################",
+    "fragments": [
+     {
+      "text": "row  35 ",
+      "tense": "future",
+      "write": 44,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 44,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  36 #################",
+    "fragments": [
+     {
+      "text": "row  36 ",
+      "tense": "future",
+      "write": 45,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 45,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  37 ##################",
+    "fragments": [
+     {
+      "text": "row  37 ",
+      "tense": "future",
+      "write": 46,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 46,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  38 ###################",
+    "fragments": [
+     {
+      "text": "row  38 ",
+      "tense": "future",
+      "write": 47,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 47,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  39 ####################",
+    "fragments": [
+     {
+      "text": "row  39 ",
+      "tense": "future",
+      "write": 48,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 48,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  40 #",
+    "fragments": [
+     {
+      "text": "row  40 ",
+      "tense": "future",
+      "write": 49,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 49,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  41 ##",
+    "fragments": [
+     {
+      "text": "row  41 ",
+      "tense": "future",
+      "write": 50,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 50,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  42 ###",
+    "fragments": [
+     {
+      "text": "row  42 ",
+      "tense": "future",
+      "write": 51,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 51,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  43 ####",
+    "fragments": [
+     {
+      "text": "row  43 ",
+      "tense": "future",
+      "write": 52,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 52,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  44 #####",
+    "fragments": [
+     {
+      "text": "row  44 ",
+      "tense": "future",
+      "write": 53,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 53,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  45 ######",
+    "fragments": [
+     {
+      "text": "row  45 ",
+      "tense": "future",
+      "write": 54,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 54,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  46 #######",
+    "fragments": [
+     {
+      "text": "row  46 ",
+      "tense": "future",
+      "write": 55,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 55,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  47 ########",
+    "fragments": [
+     {
+      "text": "row  47 ",
+      "tense": "future",
+      "write": 56,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 56,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  48 #########",
+    "fragments": [
+     {
+      "text": "row  48 ",
+      "tense": "future",
+      "write": 57,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 57,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  49 ##########",
+    "fragments": [
+     {
+      "text": "row  49 ",
+      "tense": "future",
+      "write": 58,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 58,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  50 ###########",
+    "fragments": [
+     {
+      "text": "row  50 ",
+      "tense": "future",
+      "write": 59,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 59,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  51 ############",
+    "fragments": [
+     {
+      "text": "row  51 ",
+      "tense": "future",
+      "write": 60,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 60,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  52 #############",
+    "fragments": [
+     {
+      "text": "row  52 ",
+      "tense": "future",
+      "write": 61,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 61,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  53 ##############",
+    "fragments": [
+     {
+      "text": "row  53 ",
+      "tense": "future",
+      "write": 62,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 62,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  54 ###############",
+    "fragments": [
+     {
+      "text": "row  54 ",
+      "tense": "future",
+      "write": 63,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 63,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  55 ################",
+    "fragments": [
+     {
+      "text": "row  55 ",
+      "tense": "future",
+      "write": 64,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 64,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  56 #################",
+    "fragments": [
+     {
+      "text": "row  56 ",
+      "tense": "future",
+      "write": 65,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 65,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  57 ##################",
+    "fragments": [
+     {
+      "text": "row  57 ",
+      "tense": "future",
+      "write": 66,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 66,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  58 ###################",
+    "fragments": [
+     {
+      "text": "row  58 ",
+      "tense": "future",
+      "write": 67,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 67,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  59 ####################",
+    "fragments": [
+     {
+      "text": "row  59 ",
+      "tense": "future",
+      "write": 68,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 68,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  60 #",
+    "fragments": [
+     {
+      "text": "row  60 ",
+      "tense": "future",
+      "write": 69,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 69,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  61 ##",
+    "fragments": [
+     {
+      "text": "row  61 ",
+      "tense": "future",
+      "write": 70,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 70,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  62 ###",
+    "fragments": [
+     {
+      "text": "row  62 ",
+      "tense": "future",
+      "write": 71,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 71,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  63 ####",
+    "fragments": [
+     {
+      "text": "row  63 ",
+      "tense": "future",
+      "write": 72,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 72,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  64 #####",
+    "fragments": [
+     {
+      "text": "row  64 ",
+      "tense": "future",
+      "write": 73,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 73,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  65 ######",
+    "fragments": [
+     {
+      "text": "row  65 ",
+      "tense": "future",
+      "write": 74,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 74,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  66 #######",
+    "fragments": [
+     {
+      "text": "row  66 ",
+      "tense": "future",
+      "write": 75,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 75,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  67 ########",
+    "fragments": [
+     {
+      "text": "row  67 ",
+      "tense": "future",
+      "write": 76,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 76,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  68 #########",
+    "fragments": [
+     {
+      "text": "row  68 ",
+      "tense": "future",
+      "write": 77,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 77,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  69 ##########",
+    "fragments": [
+     {
+      "text": "row  69 ",
+      "tense": "future",
+      "write": 78,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 78,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  70 ###########",
+    "fragments": [
+     {
+      "text": "row  70 ",
+      "tense": "future",
+      "write": 79,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 79,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  71 ############",
+    "fragments": [
+     {
+      "text": "row  71 ",
+      "tense": "future",
+      "write": 80,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 80,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  72 #############",
+    "fragments": [
+     {
+      "text": "row  72 ",
+      "tense": "future",
+      "write": 81,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 81,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  73 ##############",
+    "fragments": [
+     {
+      "text": "row  73 ",
+      "tense": "future",
+      "write": 82,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 82,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  74 ###############",
+    "fragments": [
+     {
+      "text": "row  74 ",
+      "tense": "future",
+      "write": 83,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 83,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  75 ################",
+    "fragments": [
+     {
+      "text": "row  75 ",
+      "tense": "future",
+      "write": 84,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 84,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  76 #################",
+    "fragments": [
+     {
+      "text": "row  76 ",
+      "tense": "future",
+      "write": 85,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 85,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  77 ##################",
+    "fragments": [
+     {
+      "text": "row  77 ",
+      "tense": "future",
+      "write": 86,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 86,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  78 ###################",
+    "fragments": [
+     {
+      "text": "row  78 ",
+      "tense": "future",
+      "write": 87,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 87,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  79 ####################",
+    "fragments": [
+     {
+      "text": "row  79 ",
+      "tense": "future",
+      "write": 88,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 88,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  80 #",
+    "fragments": [
+     {
+      "text": "row  80 ",
+      "tense": "future",
+      "write": 89,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 89,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  81 ##",
+    "fragments": [
+     {
+      "text": "row  81 ",
+      "tense": "future",
+      "write": 90,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 90,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  82 ###",
+    "fragments": [
+     {
+      "text": "row  82 ",
+      "tense": "future",
+      "write": 91,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 91,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  83 ####",
+    "fragments": [
+     {
+      "text": "row  83 ",
+      "tense": "future",
+      "write": 92,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 92,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  84 #####",
+    "fragments": [
+     {
+      "text": "row  84 ",
+      "tense": "future",
+      "write": 93,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 93,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  85 ######",
+    "fragments": [
+     {
+      "text": "row  85 ",
+      "tense": "future",
+      "write": 94,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 94,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  86 #######",
+    "fragments": [
+     {
+      "text": "row  86 ",
+      "tense": "future",
+      "write": 95,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 95,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  87 ########",
+    "fragments": [
+     {
+      "text": "row  87 ",
+      "tense": "future",
+      "write": 96,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 96,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  88 #########",
+    "fragments": [
+     {
+      "text": "row  88 ",
+      "tense": "future",
+      "write": 97,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 97,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  89 ##########",
+    "fragments": [
+     {
+      "text": "row  89 ",
+      "tense": "future",
+      "write": 98,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 98,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  90 ###########",
+    "fragments": [
+     {
+      "text": "row  90 ",
+      "tense": "future",
+      "write": 99,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 99,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  91 ############",
+    "fragments": [
+     {
+      "text": "row  91 ",
+      "tense": "future",
+      "write": 100,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 100,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  92 #############",
+    "fragments": [
+     {
+      "text": "row  92 ",
+      "tense": "future",
+      "write": 101,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 101,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  93 ##############",
+    "fragments": [
+     {
+      "text": "row  93 ",
+      "tense": "future",
+      "write": 102,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 102,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  94 ###############",
+    "fragments": [
+     {
+      "text": "row  94 ",
+      "tense": "future",
+      "write": 103,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 103,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  95 ################",
+    "fragments": [
+     {
+      "text": "row  95 ",
+      "tense": "future",
+      "write": 104,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 104,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  96 #################",
+    "fragments": [
+     {
+      "text": "row  96 ",
+      "tense": "future",
+      "write": 105,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 105,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  97 ##################",
+    "fragments": [
+     {
+      "text": "row  97 ",
+      "tense": "future",
+      "write": 106,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 106,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  98 ###################",
+    "fragments": [
+     {
+      "text": "row  98 ",
+      "tense": "future",
+      "write": 107,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 107,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  99 ####################",
+    "fragments": [
+     {
+      "text": "row  99 ",
+      "tense": "future",
+      "write": 108,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 108,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 100 #",
+    "fragments": [
+     {
+      "text": "row 100 ",
+      "tense": "future",
+      "write": 109,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 109,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 101 ##",
+    "fragments": [
+     {
+      "text": "row 101 ",
+      "tense": "future",
+      "write": 110,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 110,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 102 ###",
+    "fragments": [
+     {
+      "text": "row 102 ",
+      "tense": "future",
+      "write": 111,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 111,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 103 ####",
+    "fragments": [
+     {
+      "text": "row 103 ",
+      "tense": "future",
+      "write": 112,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 112,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 104 #####",
+    "fragments": [
+     {
+      "text": "row 104 ",
+      "tense": "future",
+      "write": 113,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 113,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 105 ######",
+    "fragments": [
+     {
+      "text": "row 105 ",
+      "tense": "future",
+      "write": 114,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 114,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 106 #######",
+    "fragments": [
+     {
+      "text": "row 106 ",
+      "tense": "future",
+      "write": 115,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 115,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 107 ########",
+    "fragments": [
+     {
+      "text": "row 107 ",
+      "tense": "future",
+      "write": 116,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 116,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 108 #########",
+    "fragments": [
+     {
+      "text": "row 108 ",
+      "tense": "future",
+      "write": 117,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 117,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 109 ##########",
+    "fragments": [
+     {
+      "text": "row 109 ",
+      "tense": "future",
+      "write": 118,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 118,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 110 ###########",
+    "fragments": [
+     {
+      "text": "row 110 ",
+      "tense": "future",
+      "write": 119,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 119,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 111 ############",
+    "fragments": [
+     {
+      "text": "row 111 ",
+      "tense": "future",
+      "write": 120,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 120,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 112 #############",
+    "fragments": [
+     {
+      "text": "row 112 ",
+      "tense": "future",
+      "write": 121,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 121,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 113 ##############",
+    "fragments": [
+     {
+      "text": "row 113 ",
+      "tense": "future",
+      "write": 122,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 122,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 114 ###############",
+    "fragments": [
+     {
+      "text": "row 114 ",
+      "tense": "future",
+      "write": 123,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 123,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 115 ################",
+    "fragments": [
+     {
+      "text": "row 115 ",
+      "tense": "future",
+      "write": 124,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 124,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 116 #################",
+    "fragments": [
+     {
+      "text": "row 116 ",
+      "tense": "future",
+      "write": 125,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 125,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 117 ##################",
+    "fragments": [
+     {
+      "text": "row 117 ",
+      "tense": "future",
+      "write": 126,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 126,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 118 ###################",
+    "fragments": [
+     {
+      "text": "row 118 ",
+      "tense": "future",
+      "write": 127,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 127,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 119 ####################",
+    "fragments": [
+     {
+      "text": "row 119 ",
+      "tense": "future",
+      "write": 128,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 128,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "done",
+    "fragments": [
+     {
+      "text": "done",
+      "tense": "future",
+      "write": 129,
+      "color": "#00ff00",
+      "background": "transparent",
+      "weight": "700",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   }
+  ],
+  "lineContextMenu": [],
+  "afterRightClick": {
+   "line": 1,
+   "ticks": 1,
+   "path": "/home/zahary/m/codetracer-gui/codetracer-plat52/test-programs/terminal_colours/main.py"
+  },
+  "ticksSeenAfterClick": [
+   108
+  ],
+  "jumpRequests": [
+   {
+    "kind": 0,
+    "content": "",
+    "highLevelPath": "/home/zahary/m/codetracer-gui/codetracer-plat52/test-programs/terminal_colours/main.py",
+    "highLevelLine": 22,
+    "metadata": "",
+    "maxRRTicks": 0,
+    "directLocationRRTicks": 108,
+    "eventIndex": 11
+   }
+  ],
+  "click": {
+   "line": 10,
+   "write": 11,
+   "before": {
+    "line": 1,
+    "ticks": 1,
+    "path": "/home/zahary/m/codetracer-gui/codetracer-plat52/test-programs/terminal_colours/main.py"
+   },
+   "after": {
+    "line": 22,
+    "ticks": 108,
+    "path": "/home/zahary/m/codetracer-gui/codetracer-plat52/test-programs/terminal_colours/main.py"
+   },
+   "moved": true
+  },
+  "linesAfterClick": [
+   {
+    "text": "red plain bold green",
+    "fragments": [
+     {
+      "text": "red",
+      "tense": "past",
+      "write": 0,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": " plain ",
+      "tense": "past",
+      "write": 0,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "bold green",
+      "tense": "past",
+      "write": 0,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "700",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "two writes, blue ground",
+    "fragments": [
+     {
+      "text": "two writes, ",
+      "tense": "past",
+      "write": 1,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "blue ground",
+      "tense": "past",
+      "write": 2,
+      "color": "#f3f3f3",
+      "background": "#0000bb",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "italic underline reverse bright magenta",
+    "fragments": [
+     {
+      "text": "italic",
+      "tense": "past",
+      "write": 3,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "italic",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": " ",
+      "tense": "past",
+      "write": 3,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "underline",
+      "tense": "past",
+      "write": 3,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "underline",
+      "opacity": "1"
+     },
+     {
+      "text": " ",
+      "tense": "past",
+      "write": 3,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "reverse",
+      "tense": "past",
+      "write": 3,
+      "color": "#000000",
+      "background": "#ffffff",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": " ",
+      "tense": "past",
+      "write": 3,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "bright magenta",
+      "tense": "past",
+      "write": 3,
+      "color": "#ff55ff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "256-colour orange truecolor teal on yellow",
+    "fragments": [
+     {
+      "text": "256-colour orange",
+      "tense": "past",
+      "write": 4,
+      "color": "#ff8700",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": " ",
+      "tense": "past",
+      "write": 4,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "truecolor teal",
+      "tense": "past",
+      "write": 4,
+      "color": "#008080",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": " ",
+      "tense": "past",
+      "write": 4,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "on yellow",
+      "tense": "past",
+      "write": 4,
+      "color": "#000000",
+      "background": "#bbbb00",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "col     umns    by      tab",
+    "fragments": [
+     {
+      "text": "col     umns    by      tab",
+      "tense": "past",
+      "write": 5,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "",
+    "fragments": [
+     {
+      "text": "",
+      "tense": "past",
+      "write": 6,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "one write",
+    "fragments": [
+     {
+      "text": "one write",
+      "tense": "past",
+      "write": 7,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "ends two lines",
+    "fragments": [
+     {
+      "text": "ends two lines",
+      "tense": "past",
+      "write": 8,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "row   0 #",
+    "fragments": [
+     {
+      "text": "row   0 ",
+      "tense": "past",
+      "write": 9,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "#",
+      "tense": "past",
+      "write": 9,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "row   1 ##",
+    "fragments": [
+     {
+      "text": "row   1 ",
+      "tense": "past",
+      "write": 10,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "##",
+      "tense": "past",
+      "write": 10,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "row   2 ###",
+    "fragments": [
+     {
+      "text": "row   2 ",
+      "tense": "active",
+      "write": 11,
+      "color": "#f3f3f3",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     },
+     {
+      "text": "###",
+      "tense": "active",
+      "write": 11,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "1"
+     }
+    ]
+   },
+   {
+    "text": "row   3 ####",
+    "fragments": [
+     {
+      "text": "row   3 ",
+      "tense": "future",
+      "write": 12,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 12,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   4 #####",
+    "fragments": [
+     {
+      "text": "row   4 ",
+      "tense": "future",
+      "write": 13,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 13,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   5 ######",
+    "fragments": [
+     {
+      "text": "row   5 ",
+      "tense": "future",
+      "write": 14,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 14,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   6 #######",
+    "fragments": [
+     {
+      "text": "row   6 ",
+      "tense": "future",
+      "write": 15,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 15,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   7 ########",
+    "fragments": [
+     {
+      "text": "row   7 ",
+      "tense": "future",
+      "write": 16,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 16,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   8 #########",
+    "fragments": [
+     {
+      "text": "row   8 ",
+      "tense": "future",
+      "write": 17,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 17,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row   9 ##########",
+    "fragments": [
+     {
+      "text": "row   9 ",
+      "tense": "future",
+      "write": 18,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 18,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  10 ###########",
+    "fragments": [
+     {
+      "text": "row  10 ",
+      "tense": "future",
+      "write": 19,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 19,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  11 ############",
+    "fragments": [
+     {
+      "text": "row  11 ",
+      "tense": "future",
+      "write": 20,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 20,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  12 #############",
+    "fragments": [
+     {
+      "text": "row  12 ",
+      "tense": "future",
+      "write": 21,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 21,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  13 ##############",
+    "fragments": [
+     {
+      "text": "row  13 ",
+      "tense": "future",
+      "write": 22,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 22,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  14 ###############",
+    "fragments": [
+     {
+      "text": "row  14 ",
+      "tense": "future",
+      "write": 23,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 23,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  15 ################",
+    "fragments": [
+     {
+      "text": "row  15 ",
+      "tense": "future",
+      "write": 24,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 24,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  16 #################",
+    "fragments": [
+     {
+      "text": "row  16 ",
+      "tense": "future",
+      "write": 25,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 25,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  17 ##################",
+    "fragments": [
+     {
+      "text": "row  17 ",
+      "tense": "future",
+      "write": 26,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 26,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  18 ###################",
+    "fragments": [
+     {
+      "text": "row  18 ",
+      "tense": "future",
+      "write": 27,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 27,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  19 ####################",
+    "fragments": [
+     {
+      "text": "row  19 ",
+      "tense": "future",
+      "write": 28,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 28,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  20 #",
+    "fragments": [
+     {
+      "text": "row  20 ",
+      "tense": "future",
+      "write": 29,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 29,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  21 ##",
+    "fragments": [
+     {
+      "text": "row  21 ",
+      "tense": "future",
+      "write": 30,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 30,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  22 ###",
+    "fragments": [
+     {
+      "text": "row  22 ",
+      "tense": "future",
+      "write": 31,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 31,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  23 ####",
+    "fragments": [
+     {
+      "text": "row  23 ",
+      "tense": "future",
+      "write": 32,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 32,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  24 #####",
+    "fragments": [
+     {
+      "text": "row  24 ",
+      "tense": "future",
+      "write": 33,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 33,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  25 ######",
+    "fragments": [
+     {
+      "text": "row  25 ",
+      "tense": "future",
+      "write": 34,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 34,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  26 #######",
+    "fragments": [
+     {
+      "text": "row  26 ",
+      "tense": "future",
+      "write": 35,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 35,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  27 ########",
+    "fragments": [
+     {
+      "text": "row  27 ",
+      "tense": "future",
+      "write": 36,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 36,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  28 #########",
+    "fragments": [
+     {
+      "text": "row  28 ",
+      "tense": "future",
+      "write": 37,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 37,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  29 ##########",
+    "fragments": [
+     {
+      "text": "row  29 ",
+      "tense": "future",
+      "write": 38,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 38,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  30 ###########",
+    "fragments": [
+     {
+      "text": "row  30 ",
+      "tense": "future",
+      "write": 39,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 39,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  31 ############",
+    "fragments": [
+     {
+      "text": "row  31 ",
+      "tense": "future",
+      "write": 40,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 40,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  32 #############",
+    "fragments": [
+     {
+      "text": "row  32 ",
+      "tense": "future",
+      "write": 41,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 41,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  33 ##############",
+    "fragments": [
+     {
+      "text": "row  33 ",
+      "tense": "future",
+      "write": 42,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 42,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  34 ###############",
+    "fragments": [
+     {
+      "text": "row  34 ",
+      "tense": "future",
+      "write": 43,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 43,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  35 ################",
+    "fragments": [
+     {
+      "text": "row  35 ",
+      "tense": "future",
+      "write": 44,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 44,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  36 #################",
+    "fragments": [
+     {
+      "text": "row  36 ",
+      "tense": "future",
+      "write": 45,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 45,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  37 ##################",
+    "fragments": [
+     {
+      "text": "row  37 ",
+      "tense": "future",
+      "write": 46,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 46,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  38 ###################",
+    "fragments": [
+     {
+      "text": "row  38 ",
+      "tense": "future",
+      "write": 47,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 47,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  39 ####################",
+    "fragments": [
+     {
+      "text": "row  39 ",
+      "tense": "future",
+      "write": 48,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 48,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  40 #",
+    "fragments": [
+     {
+      "text": "row  40 ",
+      "tense": "future",
+      "write": 49,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 49,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  41 ##",
+    "fragments": [
+     {
+      "text": "row  41 ",
+      "tense": "future",
+      "write": 50,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 50,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  42 ###",
+    "fragments": [
+     {
+      "text": "row  42 ",
+      "tense": "future",
+      "write": 51,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 51,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  43 ####",
+    "fragments": [
+     {
+      "text": "row  43 ",
+      "tense": "future",
+      "write": 52,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 52,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  44 #####",
+    "fragments": [
+     {
+      "text": "row  44 ",
+      "tense": "future",
+      "write": 53,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 53,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  45 ######",
+    "fragments": [
+     {
+      "text": "row  45 ",
+      "tense": "future",
+      "write": 54,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 54,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  46 #######",
+    "fragments": [
+     {
+      "text": "row  46 ",
+      "tense": "future",
+      "write": 55,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 55,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  47 ########",
+    "fragments": [
+     {
+      "text": "row  47 ",
+      "tense": "future",
+      "write": 56,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 56,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  48 #########",
+    "fragments": [
+     {
+      "text": "row  48 ",
+      "tense": "future",
+      "write": 57,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 57,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  49 ##########",
+    "fragments": [
+     {
+      "text": "row  49 ",
+      "tense": "future",
+      "write": 58,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 58,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  50 ###########",
+    "fragments": [
+     {
+      "text": "row  50 ",
+      "tense": "future",
+      "write": 59,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 59,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  51 ############",
+    "fragments": [
+     {
+      "text": "row  51 ",
+      "tense": "future",
+      "write": 60,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 60,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  52 #############",
+    "fragments": [
+     {
+      "text": "row  52 ",
+      "tense": "future",
+      "write": 61,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 61,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  53 ##############",
+    "fragments": [
+     {
+      "text": "row  53 ",
+      "tense": "future",
+      "write": 62,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 62,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  54 ###############",
+    "fragments": [
+     {
+      "text": "row  54 ",
+      "tense": "future",
+      "write": 63,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 63,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  55 ################",
+    "fragments": [
+     {
+      "text": "row  55 ",
+      "tense": "future",
+      "write": 64,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 64,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  56 #################",
+    "fragments": [
+     {
+      "text": "row  56 ",
+      "tense": "future",
+      "write": 65,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 65,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  57 ##################",
+    "fragments": [
+     {
+      "text": "row  57 ",
+      "tense": "future",
+      "write": 66,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 66,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  58 ###################",
+    "fragments": [
+     {
+      "text": "row  58 ",
+      "tense": "future",
+      "write": 67,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 67,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  59 ####################",
+    "fragments": [
+     {
+      "text": "row  59 ",
+      "tense": "future",
+      "write": 68,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 68,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  60 #",
+    "fragments": [
+     {
+      "text": "row  60 ",
+      "tense": "future",
+      "write": 69,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 69,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  61 ##",
+    "fragments": [
+     {
+      "text": "row  61 ",
+      "tense": "future",
+      "write": 70,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 70,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  62 ###",
+    "fragments": [
+     {
+      "text": "row  62 ",
+      "tense": "future",
+      "write": 71,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 71,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  63 ####",
+    "fragments": [
+     {
+      "text": "row  63 ",
+      "tense": "future",
+      "write": 72,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 72,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  64 #####",
+    "fragments": [
+     {
+      "text": "row  64 ",
+      "tense": "future",
+      "write": 73,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 73,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  65 ######",
+    "fragments": [
+     {
+      "text": "row  65 ",
+      "tense": "future",
+      "write": 74,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 74,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  66 #######",
+    "fragments": [
+     {
+      "text": "row  66 ",
+      "tense": "future",
+      "write": 75,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 75,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  67 ########",
+    "fragments": [
+     {
+      "text": "row  67 ",
+      "tense": "future",
+      "write": 76,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 76,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  68 #########",
+    "fragments": [
+     {
+      "text": "row  68 ",
+      "tense": "future",
+      "write": 77,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 77,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  69 ##########",
+    "fragments": [
+     {
+      "text": "row  69 ",
+      "tense": "future",
+      "write": 78,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 78,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  70 ###########",
+    "fragments": [
+     {
+      "text": "row  70 ",
+      "tense": "future",
+      "write": 79,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 79,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  71 ############",
+    "fragments": [
+     {
+      "text": "row  71 ",
+      "tense": "future",
+      "write": 80,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 80,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  72 #############",
+    "fragments": [
+     {
+      "text": "row  72 ",
+      "tense": "future",
+      "write": 81,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 81,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  73 ##############",
+    "fragments": [
+     {
+      "text": "row  73 ",
+      "tense": "future",
+      "write": 82,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 82,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  74 ###############",
+    "fragments": [
+     {
+      "text": "row  74 ",
+      "tense": "future",
+      "write": 83,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 83,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  75 ################",
+    "fragments": [
+     {
+      "text": "row  75 ",
+      "tense": "future",
+      "write": 84,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 84,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  76 #################",
+    "fragments": [
+     {
+      "text": "row  76 ",
+      "tense": "future",
+      "write": 85,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 85,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  77 ##################",
+    "fragments": [
+     {
+      "text": "row  77 ",
+      "tense": "future",
+      "write": 86,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 86,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  78 ###################",
+    "fragments": [
+     {
+      "text": "row  78 ",
+      "tense": "future",
+      "write": 87,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 87,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  79 ####################",
+    "fragments": [
+     {
+      "text": "row  79 ",
+      "tense": "future",
+      "write": 88,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 88,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  80 #",
+    "fragments": [
+     {
+      "text": "row  80 ",
+      "tense": "future",
+      "write": 89,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 89,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  81 ##",
+    "fragments": [
+     {
+      "text": "row  81 ",
+      "tense": "future",
+      "write": 90,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 90,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  82 ###",
+    "fragments": [
+     {
+      "text": "row  82 ",
+      "tense": "future",
+      "write": 91,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 91,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  83 ####",
+    "fragments": [
+     {
+      "text": "row  83 ",
+      "tense": "future",
+      "write": 92,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 92,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  84 #####",
+    "fragments": [
+     {
+      "text": "row  84 ",
+      "tense": "future",
+      "write": 93,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 93,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  85 ######",
+    "fragments": [
+     {
+      "text": "row  85 ",
+      "tense": "future",
+      "write": 94,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 94,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  86 #######",
+    "fragments": [
+     {
+      "text": "row  86 ",
+      "tense": "future",
+      "write": 95,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 95,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  87 ########",
+    "fragments": [
+     {
+      "text": "row  87 ",
+      "tense": "future",
+      "write": 96,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 96,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  88 #########",
+    "fragments": [
+     {
+      "text": "row  88 ",
+      "tense": "future",
+      "write": 97,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 97,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  89 ##########",
+    "fragments": [
+     {
+      "text": "row  89 ",
+      "tense": "future",
+      "write": 98,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 98,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  90 ###########",
+    "fragments": [
+     {
+      "text": "row  90 ",
+      "tense": "future",
+      "write": 99,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 99,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  91 ############",
+    "fragments": [
+     {
+      "text": "row  91 ",
+      "tense": "future",
+      "write": 100,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 100,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  92 #############",
+    "fragments": [
+     {
+      "text": "row  92 ",
+      "tense": "future",
+      "write": 101,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 101,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  93 ##############",
+    "fragments": [
+     {
+      "text": "row  93 ",
+      "tense": "future",
+      "write": 102,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 102,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  94 ###############",
+    "fragments": [
+     {
+      "text": "row  94 ",
+      "tense": "future",
+      "write": 103,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 103,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  95 ################",
+    "fragments": [
+     {
+      "text": "row  95 ",
+      "tense": "future",
+      "write": 104,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 104,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  96 #################",
+    "fragments": [
+     {
+      "text": "row  96 ",
+      "tense": "future",
+      "write": 105,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 105,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  97 ##################",
+    "fragments": [
+     {
+      "text": "row  97 ",
+      "tense": "future",
+      "write": 106,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 106,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  98 ###################",
+    "fragments": [
+     {
+      "text": "row  98 ",
+      "tense": "future",
+      "write": 107,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 107,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row  99 ####################",
+    "fragments": [
+     {
+      "text": "row  99 ",
+      "tense": "future",
+      "write": 108,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 108,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 100 #",
+    "fragments": [
+     {
+      "text": "row 100 ",
+      "tense": "future",
+      "write": 109,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#",
+      "tense": "future",
+      "write": 109,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 101 ##",
+    "fragments": [
+     {
+      "text": "row 101 ",
+      "tense": "future",
+      "write": 110,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##",
+      "tense": "future",
+      "write": 110,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 102 ###",
+    "fragments": [
+     {
+      "text": "row 102 ",
+      "tense": "future",
+      "write": 111,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###",
+      "tense": "future",
+      "write": 111,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 103 ####",
+    "fragments": [
+     {
+      "text": "row 103 ",
+      "tense": "future",
+      "write": 112,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####",
+      "tense": "future",
+      "write": 112,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 104 #####",
+    "fragments": [
+     {
+      "text": "row 104 ",
+      "tense": "future",
+      "write": 113,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#####",
+      "tense": "future",
+      "write": 113,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 105 ######",
+    "fragments": [
+     {
+      "text": "row 105 ",
+      "tense": "future",
+      "write": 114,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "######",
+      "tense": "future",
+      "write": 114,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 106 #######",
+    "fragments": [
+     {
+      "text": "row 106 ",
+      "tense": "future",
+      "write": 115,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#######",
+      "tense": "future",
+      "write": 115,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 107 ########",
+    "fragments": [
+     {
+      "text": "row 107 ",
+      "tense": "future",
+      "write": 116,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "########",
+      "tense": "future",
+      "write": 116,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 108 #########",
+    "fragments": [
+     {
+      "text": "row 108 ",
+      "tense": "future",
+      "write": 117,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#########",
+      "tense": "future",
+      "write": 117,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 109 ##########",
+    "fragments": [
+     {
+      "text": "row 109 ",
+      "tense": "future",
+      "write": 118,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##########",
+      "tense": "future",
+      "write": 118,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 110 ###########",
+    "fragments": [
+     {
+      "text": "row 110 ",
+      "tense": "future",
+      "write": 119,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###########",
+      "tense": "future",
+      "write": 119,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 111 ############",
+    "fragments": [
+     {
+      "text": "row 111 ",
+      "tense": "future",
+      "write": 120,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "############",
+      "tense": "future",
+      "write": 120,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 112 #############",
+    "fragments": [
+     {
+      "text": "row 112 ",
+      "tense": "future",
+      "write": 121,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#############",
+      "tense": "future",
+      "write": 121,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 113 ##############",
+    "fragments": [
+     {
+      "text": "row 113 ",
+      "tense": "future",
+      "write": 122,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##############",
+      "tense": "future",
+      "write": 122,
+      "color": "#00bb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 114 ###############",
+    "fragments": [
+     {
+      "text": "row 114 ",
+      "tense": "future",
+      "write": 123,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###############",
+      "tense": "future",
+      "write": 123,
+      "color": "#bbbb00",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 115 ################",
+    "fragments": [
+     {
+      "text": "row 115 ",
+      "tense": "future",
+      "write": 124,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "################",
+      "tense": "future",
+      "write": 124,
+      "color": "#0000bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 116 #################",
+    "fragments": [
+     {
+      "text": "row 116 ",
+      "tense": "future",
+      "write": 125,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "#################",
+      "tense": "future",
+      "write": 125,
+      "color": "#bb00bb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 117 ##################",
+    "fragments": [
+     {
+      "text": "row 117 ",
+      "tense": "future",
+      "write": 126,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "##################",
+      "tense": "future",
+      "write": 126,
+      "color": "#00bbbb",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 118 ###################",
+    "fragments": [
+     {
+      "text": "row 118 ",
+      "tense": "future",
+      "write": 127,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "###################",
+      "tense": "future",
+      "write": 127,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "row 119 ####################",
+    "fragments": [
+     {
+      "text": "row 119 ",
+      "tense": "future",
+      "write": 128,
+      "color": "#ffffff",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     },
+     {
+      "text": "####################",
+      "tense": "future",
+      "write": 128,
+      "color": "#bb0000",
+      "background": "transparent",
+      "weight": "400",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   },
+   {
+    "text": "done",
+    "fragments": [
+     {
+      "text": "done",
+      "tense": "future",
+      "write": 129,
+      "color": "#00ff00",
+      "background": "transparent",
+      "weight": "700",
+      "fontStyle": "normal",
+      "decoration": "none",
+      "opacity": "0.5"
+     }
+    ]
+   }
+  ],
+  "pageErrors": []
+ },
+ "screen": {
+  "view": "screen",
+  "toggleShown": true,
+  "rangeMax": 63,
+  "marks": [
+   {
+    "kind": "alt-enter",
+    "write": 0
+   },
+   {
+    "kind": "clear",
+    "write": 31
+   },
+   {
+    "kind": "alt-leave",
+    "write": 62
+   }
+  ],
+  "drag": [
+   {
+    "target": 3,
+    "heldTicks": 681,
+    "heldWrite": 3,
+    "ticks": 681,
+    "write": 4,
+    "rows": [
+     "┌─ dashboard ──────────────────────────────────────────────────────────────────┐",
+     "│                                                                              │",
+     "│ TASK      STATE      PROGRESS                                                │",
+     "│                                                                              │",
+     "│ compile   running     10%                                                    │",
+     "│ link      waiting      0%                                                    │",
+     "│ test      waiting      0%                                                    │",
+     "│ package   waiting      0%                                                    │",
+     "│ upload    waiting      0%                                                    │",
+     "│ verify    waiting      0%                                                    │",
+     "│                                                                              │",
+     "│ tick 1                                                                        ",
+     "│                                                                              │",
+     "│                                                                              │",
+     "│                                                                              │",
+     "│                                                                              │",
+     "│                                                                              │",
+     "│                                                                              │",
+     "│ frame 0: compile                                                              ",
+     "  frame 1: link                                                                 ",
+     "│                                           2/30                               │",
+     "│                                                                              │",
+     "└──────────────────────────────────────────────────────────────────────────────┘",
+     "                                                                                "
+    ]
+   },
+   {
+    "target": 12,
+    "heldTicks": 1717,
+    "heldWrite": 12,
+    "ticks": 1717,
+    "write": 12,
+    "rows": [
+     "┌─ dashboard ──────────────────────────────────────────────────────────────────┐",
+     "│                                                                              │",
+     "│ TASK      STATE      PROGRESS                                                │",
+     "│                                                                              │",
+     "│ compile   running     50%                                                    │",
+     "│ link      running     20%                                                    │",
+     "│ test      waiting      0%                                                    │",
+     "│ package   waiting      0%                                                    │",
+     "│ upload    waiting      0%                                                    │",
+     "│ verify    waiting      0%                                                    │",
+     "│                                                                              │",
+     "│ tick 5                                                                        ",
+     "│                                                                              │",
+     "│                                                                              │",
+     "│ frame 0: compile                                                              ",
+     "  frame 1: link                                                                 ",
+     "  frame 2: test                                                                 ",
+     "  frame 3: package                                                              ",
+     "  frame 4: upload                                                               ",
+     "  frame 5: verify                                                               ",
+     "│                                           6/30                               │",
+     "│                                                                              │",
+     "└──────────────────────────────────────────────────────────────────────────────┘",
+     "                                                                                "
+    ]
+   },
+   {
+    "target": 24,
+    "heldTicks": 3267,
+    "heldWrite": 24,
+    "ticks": 3267,
+    "write": 24,
+    "rows": [
+     "┌─ dashboard ──────────────────────────────────────────────────────────────────┐",
+     "│                                                                              │",
+     "│ TASK      STATE      PROGRESS                                                │",
+     "│                                                                              │",
+     "│ compile   done       100%                                                    │",
+     "│ link      running     80%                                                    │",
+     "│ test      running     50%                                                    │",
+     "│ package   running     20%                                                    │",
+     "│ upload    waiting      0%                                                    │",
+     "│ verify    waiting      0%                                                    │",
+     "│                                                                              │",
+     "│ tick 11                                                                       ",
+     "│                                                                              │",
+     "  frame 5: verify                                                               ",
+     "  frame 6: compile                                                              ",
+     "  frame 7: link                                                                 ",
+     "  frame 8: test                                                                 ",
+     "  frame 9: package                                                              ",
+     "  frame 10: upload                                                              ",
+     "  frame 11: verify                                                              ",
+     "│                                          12/30                               │",
+     "│                                                                              │",
+     "└──────────────────────────────────────────────────────────────────────────────┘",
+     "                                                                                "
+    ]
+   }
+  ],
+  "stepRight": {
+   "before": {
+    "line": 76,
+    "ticks": 3267,
+    "path": "/home/zahary/m/codetracer-gui/codetracer-plat52/test-programs/terminal_screen/main.py"
+   },
+   "after": {
+    "line": 76,
+    "ticks": 3524,
+    "path": "/home/zahary/m/codetracer-gui/codetracer-plat52/test-programs/terminal_screen/main.py"
+   },
+   "write": 26
+  },
+  "afterToggle": "lines",
+  "pageErrors": []
+ }
+}

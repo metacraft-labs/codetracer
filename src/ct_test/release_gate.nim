@@ -911,6 +911,22 @@ const
     "src/tests/cli/target_recognition_test.nim",
     "src/tests/cli/record_backend_selection_test.nim",
     "src/tests/cli/record_recognition_e2e_test.nim",
+    # `ct record --portable` (codetracer-specs CLI/ct/record.md, "Portable
+    # traces"): the dispatcher forwards it to MCR as CT_PORTABLE=on and every
+    # backend that cannot honour it refuses it by name.
+    "src/tests/cli/record_portable_test.nim",
+    # The rr row of "Portable traces": a packed rr trace replays after its
+    # program changes and after it is moved.
+    "src/tests/cli/record_portable_rr_e2e_test.nim",
+    # Recorder options reach ct-mcr only as environment twins
+    # (CLI/ct/record.md, "Recorder options"): the table, and the real
+    # ct -> db-backend-record -> ct-native-replay chain with a stub recorder,
+    # which is how `--use-interpose` was found landing in the program's argv.
+    "src/tests/cli/recorder_env_test.nim",
+    "src/tests/cli/recorder_env_e2e_test.nim",
+    # `ct record prog -- a b`: the program may stand before `--` (CLI/ct/record.md,
+    # "Program arguments"); the resolver and both forms through the real ct.
+    "src/tests/cli/record_child_argv_test.nim",
   ]
 
   CliReviewGateTests* = [
@@ -1038,7 +1054,7 @@ const
       unsupportedDiagnostic: ""),
   ]
 
-const ProviderGateEntries*: array[39, ProviderGateEntry] = [
+const ProviderGateEntries*: array[38, ProviderGateEntry] = [
   ProviderGateEntry(providerId: "ada-fallback",
     fixturePath: "src/ct_test/fixtures/m12_ada_project",
     researchDoc: "src/ct_test/framework_research/ada-aunit-fallback.md",
@@ -1250,11 +1266,6 @@ const ProviderGateEntries*: array[39, ProviderGateEntry] = [
     providerTest: SmartHarnessProviderTest,
     sourceFiles: SmartHarnessSourceFiles, heavy: true),
   ProviderGateEntry(providerId: "smart-wasm",
-    fixturePath: "src/ct_test/fixtures/m13_smart_contract_project",
-    researchDoc: SmartHarnessResearchDoc,
-    providerTest: SmartHarnessProviderTest,
-    sourceFiles: SmartHarnessSourceFiles, heavy: true),
-  ProviderGateEntry(providerId: "smart-wasmi",
     fixturePath: "src/ct_test/fixtures/m13_smart_contract_project",
     researchDoc: SmartHarnessResearchDoc,
     providerTest: SmartHarnessProviderTest,

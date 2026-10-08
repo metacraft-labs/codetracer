@@ -56,6 +56,7 @@ import std/[algorithm, sequtils, sets, strutils, tables, unittest]
 import ../corpus/vimrc_corpus
 import ../../keymap/vim_import
 import ../../../../common/key_names
+import ../../../test_support/spec_documents
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
@@ -72,13 +73,20 @@ template ck(condition: untyped) =
 # ===========================================================================
 
 const
-  SpecRelativePath = "codetracer-specs/GUI/Editing-Operations-And-Keymaps.md"
-  SpecSource = staticRead(
-    "../../../../../../codetracer-specs/GUI/Editing-Operations-And-Keymaps.md")
+  SpecDocName = "GUI/Editing-Operations-And-Keymaps.md"
+    ## Named from the specification tree's root, and resolved by
+    ## `test_support/spec_documents` — the one module that knows where the
+    ## sibling checkout is and what its layout is. See its header: four suites
+    ## held that knowledge privately and all four broke together when
+    ## `codetracer-specs` `1735345d` moved the topical trees under `spec/`.
+
+  SpecRelativePath = specDocumentRef(SpecDocName)
+  SpecSource = specDocument(SpecDocName)
     ## **READ, NEVER TRANSCRIBED**, exactly as `test_editor_vocabulary_oracle`
     ## reads §2.2. A transcribed copy would have been written from the same
     ## reading that produced the implementation, and the two would agree about
-    ## a misreading.
+    ## a misreading. An absent document is a COMPILE error naming the path;
+    ## there is no skip.
 
   ExpectedFamilies = 22
   ExpectedReasons = 5

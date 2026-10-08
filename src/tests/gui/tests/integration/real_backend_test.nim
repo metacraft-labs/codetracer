@@ -31,7 +31,7 @@
 ## Suite 9: Cross-language stepping workflow — full end-to-end debugging
 ## workflow (step, locals, calltrace) for Python and Noir traces.
 ##
-## The Wasm test trace has this approximate structure (from trace.json):
+## The Wasm test trace (`src/db-backend/trace/trace.ct`) has this approximate structure:
 ##   - main() at line 18 of rust_struct_test.rs
 ##   - Creates TestStruct { a: i32 }, calls test_struct() twice
 ##   - Variables: test, dummy (both TestStruct), first (usize)

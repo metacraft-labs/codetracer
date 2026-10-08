@@ -59,6 +59,9 @@
 
 import std/[os, strutils, unittest]
 
+import viewmodels/menu_vm
+import viewmodels/product_menu
+
 var countedAssertions = 0
 
 template counted(condition: untyped) =
@@ -71,6 +74,11 @@ const
   StatusViewPath = "src/frontend/viewmodel/views/isonim_status_view.nim"
   StatusPath = "src/frontend/ui/status.nim"
   UiJsPath = "src/frontend/ui_js.nim"
+  MenuTreePath = "src/frontend/viewmodel/viewmodels/product_menu.nim"
+    ## PLAT-48: the menu tree the desktop's `webTechMenu` used to spell as a
+    ## macro in `ui_js.nim` is DATA now, shared with the terminal and GPUI
+    ## (`product_menu.productMenuTree`); `ui_js.nim` builds its `MenuNode`s
+    ## from it.
 
 const ExpectedSurfaceFlags = 2
   ## `showNotifications` and `showBugReport`. Pinned so an empty or halved
@@ -156,6 +164,7 @@ suite "every status surface has something that opens it":
   let view = readTree(StatusViewPath)
   let status = readTree(StatusPath)
   let uiJs = readTree(UiJsPath)
+  let menuSrc = readTree(MenuTreePath)
   let flags = surfaceFlags(view)
 
   test "the scan finds the surfaces it is supposed to grade":
@@ -196,8 +205,14 @@ suite "every status surface has something that opens it":
     # `namesLive`, never `contains`: a commented-out entry contains a live one
     # as a substring, and `# element "Notifications", aNotifications, false` is
     # exactly the world this arm exists to reject. See `namesLive`.
-    counted namesLive(uiJs, "element \"Notifications\", aNotifications")
-    counted namesLive(uiJs, "element \"Report a Problem...\", aReportProblem")
+    #
+    # PLAT-48: the tree is `product_menu`'s data, so the entries are read from
+    # there — live lines of the source AND items of the tree it builds.
+    counted namesLive(menuSrc, "item(\"Notifications\", \"aNotifications\")") and
+            newMenuVM(productMenuTree("calc")).pathOfAction("aNotifications").len > 0
+    counted namesLive(menuSrc,
+                      "item(\"Report a Problem...\", \"aReportProblem\")") and
+            newMenuVM(productMenuTree("calc")).pathOfAction("aReportProblem").len > 0
 
   test "CONTROL: a commented-out menu entry is not a menu entry":
     # The negative that gives the arm above its meaning, and it is the pre-fix
@@ -212,8 +227,20 @@ suite "every status surface has something that opens it":
     # the entry rides a `macfolder` there and a `macexclude_folder` elsewhere.
     # A single plain `folder "Help"` would give macOS two Help menus; only one
     # of the two spellings would leave a platform with no way in.
-    counted uiJs.contains("macfolder \"Help\", \"help\":")
-    counted uiJs.contains("macexclude_folder \"Help\":")
+    #
+    # PLAT-48: the two spellings are the tree's `os` bits now — one Help
+    # folder for macOS (`OsMac`, the "help" role) and one for everywhere else
+    # (`OsNonMac`), each carrying Report a Problem.
+    var macHelp, otherHelp = false
+    for f in productMenuTree("calc").children:
+      if f.label == "Help":
+        var reports = false
+        for it in f.children:
+          if it.action == "aReportProblem": reports = true
+        if reports and f.os == OsMac and f.role == "help": macHelp = true
+        if reports and f.os == OsNonMac: otherHelp = true
+    counted macHelp
+    counted otherHelp
 
 suite "status-entry-point suite self-check":
 

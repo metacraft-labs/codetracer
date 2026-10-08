@@ -1097,7 +1097,27 @@ def install_signal_restore() -> None:
         signal.signal(sig, die)
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
+    # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
+    # dropped, and the run became a full, file-mutating grade: `--only=A,B`
+    # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`
+    # asserts the refusal.
+    known_flags = {"--needle-scan", "--record-control-hashes"}
+    unknown = [a for a in sys.argv[1:] if a.startswith("-") and
+               a.split("=", 1)[0] not in known_flags]
+    if unknown:
+        print(f"unknown argument(s): {unknown}; accepted flags: "
+              f"{sorted(known_flags) or 'none (arm ids only)'}")
+        return 2
     # ARMS NAMING ONE CASE ARE RUN INDIVIDUALLY. Passing arm ids on the command
     # line runs exactly those, with the same control run and the same verified
     # restore, so a re-run after fixing one arm does not have to re-grade the

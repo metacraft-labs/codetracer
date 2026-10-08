@@ -340,22 +340,28 @@ fn ct_print_events(ct: &Path) -> Dump {
 // Reader + handler, built the production way.
 // ---------------------------------------------------------------------------
 
-/// Serializes the tests that extract bundled sources.
+/// Serializes the tests that extract bundled sources, across PROCESSES.
 ///
 /// The extraction root is keyed by the container path alone (see
 /// `build_handler`), and two tests here open the SAME reloaded recording. Each
 /// wipes that root and then reads from it for the rest of its body, so run
 /// concurrently one could wipe the tree the other is reading ("could not clear
-/// the bundled-sources root … No such file or directory" was the visible
-/// half). Every test that calls `build_handler` holds this for its whole body.
-static BUNDLED_SOURCES_EXTRACTION: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn exclusive_bundled_sources() -> std::sync::MutexGuard<'static, ()> {
-    // A test that panicked while holding the lock has already failed; the next
-    // one wipes and re-extracts anyway, so a poisoned lock carries no state.
-    BUNDLED_SOURCES_EXTRACTION
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+/// the bundled-sources root … Directory not empty"). nextest runs every test in
+/// its own process, so an in-process mutex serializes nothing there; an
+/// exclusive lock on a file beside the extraction roots does, under both cargo
+/// test and nextest. Every test that calls `build_handler` holds it for its
+/// whole body; the lock is released when the returned file is dropped.
+fn exclusive_bundled_sources() -> std::fs::File {
+    let lock_path = std::env::temp_dir().join("codetracer-gdh7-bundled-sources.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .unwrap_or_else(|e| panic!("GDH7-CHECK-FAIL: cannot open {}: {e}", lock_path.display()));
+    file.lock()
+        .unwrap_or_else(|e| panic!("GDH7-CHECK-FAIL: cannot lock {}: {e}", lock_path.display()));
+    file
 }
 
 fn open_reader(ct: &Path) -> Arc<dyn TraceReader> {

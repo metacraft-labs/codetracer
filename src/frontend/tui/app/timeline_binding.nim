@@ -5,14 +5,15 @@
 ## and never `viewmodel/*` directly.
 ##
 ## app/timeline_binding.nim — CTUI-8. The ONE place that turns `TimelineVM`,
-## `EventLogVM` and a recorded calltrace into a `TimelineBarModel` and an
-## `EventLogModel`.
+## `EventLogVM` and a recorded calltrace into the seek targets and an
+## `EventLogModel`. (The Timeline scrubber this module also fed is removed,
+## 2026-10-05; `TimelineVM`'s extent stays as the seek keys' bounds.)
 ##
 ## Same split, same three reasons, as CTUI-5's `source_binding.nim`, CTUI-6's
 ## `call_stack_binding.nim` and CTUI-7's `variables_binding.nim`: the views stay
 ## pure functions of a value, two stops stay comparable, and the panes' memory
 ## ceiling stays a property of a field a reader can see. This module reads;
-## `views/timeline_bar.nim` and `views/event_log.nim` draw.
+## `views/event_log.nim` draws.
 ##
 ## ## WHAT THE TWO VIEWMODELS ACTUALLY OWN, MEASURED RATHER THAN ASSUMED
 ##
@@ -103,17 +104,11 @@ import codetracer_embed
 
 import ./input/timeline_keys
 import ./views/event_log
-import ./views/timeline_bar
 import ./views/tracepoint_manager
 
-export event_log, timeline_bar, timeline_keys, tracepoint_manager
+export event_log, timeline_keys, tracepoint_manager
 
 const
-  NoTimelineBoundsNote* =
-    "store.timeline is written only by the live-MCR paths; the bound comes " &
-    "from ct/event-load's maxRRTicks"
-  NoMarksNote* =
-    "no tracepoint has been run over this recording"
   EmptyLogNote* =
     "the recording carries no events"
 
@@ -264,33 +259,6 @@ proc seekTo*(vm: TimelineVM; tick: uint64) =
   if vm.isNil:
     return
   vm.seek(tick)
-
-# ---------------------------------------------------------------------------
-# The scrubber
-# ---------------------------------------------------------------------------
-
-proc timelineBarModelFor*(vm: TimelineVM;
-                          bounds: TimelineBounds;
-                          spans: seq[TimelineSpan] = @[];
-                          marks: seq[TimelineMark] = @[];
-                          currentTick = 0'u64): TimelineBarModel =
-  ## The scrubber's model for the CURRENT stop.
-  ##
-  ## `currentTick` defaults to the VM's own `currentPosition` when a VM is
-  ## given, so the needle is on the memo the product renders rather than on a
-  ## number the caller happened to have.
-  let tick =
-    if not vm.isNil and currentTick == 0'u64: vm.currentPosition.val
-    else: currentTick
-  initTimelineBarModel(
-    minTick = bounds.minTick,
-    maxTick = bounds.maxTick,
-    currentTick = tick,
-    boundsKnown = bounds.known,
-    boundsNote = (if bounds.known: "" else: NoTimelineBoundsNote),
-    spans = spans,
-    marks = marks,
-    marksNote = (if marks.len > 0: "" else: NoMarksNote))
 
 proc targetsFor*(bounds: TimelineBounds;
                  callBoundaries: seq[uint64];

@@ -221,14 +221,14 @@ suite "RS-M5 Python request panel":
     let bytes = containerBytes(FixtureContainer)
 
     # --- the recording declares a span stream ---------------------------
-    # The db-backend's span reader returns "no spans" for a container whose bit
-    # 13 is clear, so a recorder that failed to register spans would show an
-    # empty panel and no error anywhere.
+    # The span stream is found by presence: spans.dat is created lazily, after
+    # meta.dat is written, so bit 13 is never set from meta.dat version 6 on
+    # (internal-files.md §"Stream-presence flags are a hint, not a gate").
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    check meta.get().hasSpanStream
+    check not meta.get().hasSpanStream
     check hasSpanStreamFiles(bytes)
     # It is a Python recording of the demo server, not some other fixture that
     # happened to be copied in.

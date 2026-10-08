@@ -23,12 +23,12 @@
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_platform_facade.nim
 
-import std/[strutils, unittest]
+import std/[json, strutils, unittest]
 
 import ../../platform/platform
 import ../../platform/paths
 import ../../viewmodels/topbar_actions
-import ../../host/remote_stub
+import ../../host/container_platform
 import ../../host/electron_profile
 
 proc awaitOutcome[T](future: PlatformFuture[PlatformOutcome[T]]
@@ -315,23 +315,38 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
 
   setup:
     var seenVerbs: seq[string] = @[]
-    var lastArgs: seq[string] = @[]
+    var lastArgs: JsonNode = newJObject()
 
     let transport: RemoteTransport = proc(request: RemoteRequest
                                          ): PlatformFuture[RemoteResponse] =
       seenVerbs.add request.verb
       lastArgs = request.args
+      # Answers written as the §6.2 payloads the server sends, so the
+      # assertions below are about the codec both ends share rather than about
+      # a shape invented in this file. `test_container_platform_verbs.nim`
+      # drives every verb through a real `encodeCall`/`decodeCall` pair; this
+      # fake stays small because its subject is the SIGNATURES.
       let answer =
         case request.verb
-        of "fs.readText": remoteOk("fn main() {}")
-        of "fs.stat": remoteOk("1\x1f42\x1f1700000000000\x1ffalse")
-        of "fs.listDir": remoteOk("main.nr\x1f1\x1esrc\x1f2")
-        of "process.run": remoteOk("0\x1ffalse\x1fcompiled\x1f")
+        of "fs.readText": remoteOk(%"fn main() {}")
+        of "fs.stat": remoteOk(%*{"kind": "fekFile", "size": 42,
+                                  "modifiedMs": 1700000000000,
+                                  "readOnly": false})
+        of "fs.listDir": remoteOk(%*[{"name": "main.nr", "kind": "fekFile"},
+                                     {"name": "src", "kind": "fekDirectory"}])
+        of "process.run": remoteOk(%*{"exit": {"exitCode": 0,
+                                               "signalled": false,
+                                               "signalName": ""},
+                                      "stdout": "compiled", "stderr": ""})
         of "process.which": remoteErr(pkNotFound, "no nargo in the container")
-        of "vcs.status": remoteOk("main\x1forigin/main\x1f0\x1f0\x1ffalse" &
-                                  "\x1dsrc/main.nr\x1f\x1f1\x1f0")
-        of "clipboard.readText": remoteOk("pasted")
-        else: remoteOk("")
+        of "vcs.status": remoteOk(%*{
+          "branch": "main", "upstream": "origin/main", "ahead": 0,
+          "behind": 0, "detached": false,
+          "changes": [{"path": "src/main.nr", "previousPath": "",
+                       "indexStatus": "vfsModified",
+                       "workingTreeStatus": "vfsUnmodified"}]})
+        of "clipboard.readText": remoteOk(%"pasted")
+        else: remoteOk(newJNull())
       # `newCompletedFuture`, not a bare promise. A real endpoint's answer
       # arrives on a later tick and this one does not, and nim-everywhere marks
       # the difference so a synchronous caller can still observe it. A plain
@@ -340,10 +355,13 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
       # not run on the JS backend while still reporting green.
       newCompletedFuture(answer)
 
-    let remote = newRemoteStubPlatform(transport)
+    # The profile is named HERE rather than defaulted in the constructor, which
+    # is §6.3 showing through into the suite: shipping code takes it from the
+    # `welcome` frame, and a test that wants `containerProfile` has to say so.
+    let remote = newContainerPlatform(transport, containerProfile)
 
-  test "the stub satisfies every facade module with no signature altered":
-    ## The compile is the assertion. `newRemoteStubPlatform` assigns every field
+  test "the container platform satisfies every facade with no signature altered":
+    ## The compile is the assertion. `newContainerPlatform` assigns every field
     ## of all seven facades; if any operation had a signature that only made
     ## sense in-process — returning a `File`, a `Process`, a pointer or an
     ## iterator — this suite would not build.
@@ -369,7 +387,10 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
     check outcome.ok
     check outcome.value == "fn main() {}"
     check seenVerbs == @["fs.readText"]
-    check lastArgs == @["src/main.nr"]
+    # The ARGUMENT IS NAMED, not positional. §6.2: the server reads
+    # `args["path"]`, so two transposed strings are caught by the name they
+    # arrived under rather than by an arity that would still match.
+    check lastArgs["path"].getStr == "src/main.nr"
 
   test "a structured result survives the round trip":
     let outcome = awaitOutcome(remote.fs.listDir("src"))
@@ -394,8 +415,8 @@ suite "test_a_remote_instantiation_needs_no_signature_change":
     let run = outcome.value
     check run.exit.exitCode == 0
     check run.stdout == "compiled"
-    check lastArgs[0] == "nargo"
-    check lastArgs[2] == "/w"
+    check lastArgs["spec"]["command"].getStr == "nargo"
+    check lastArgs["spec"]["workingDir"].getStr == "/w"
 
   test "version control is expressed in what the panel needs, not in git argv":
     let outcome = awaitOutcome(remote.vcs.status("/w"))
@@ -467,3 +488,120 @@ suite "path arithmetic is host-free and behaves":
     check not isAbsolute("a/b")
     check not isAbsolute("")
     check splitDrive("C:/a/b") == ("C:", "/a/b")
+
+# ---------------------------------------------------------------------------
+# SEVERAL SESSIONS IN ONE PROCESS.
+#
+# One WebUI drives several container-backed sessions, each a different process
+# on the other end of a different connection with its own filesystem, its own
+# VCS and its own capability profile. "The platform" is therefore no longer a
+# property of the process, and the single `installedPlatform` that used to hold
+# it could only ever name one of them.
+#
+# The global is narrowed rather than removed — `platform()` is the ACTIVE
+# session's — so what these cases are really pinning is that the narrowing did
+# not change the single-session behaviour underneath it. That is where a
+# regression would land: every pre-session call site still says `platform()`.
+# ---------------------------------------------------------------------------
+
+proc markedPlatform(name: string): Platform =
+  ## Platforms distinguishable BY VALUE, so a lookup that returned the wrong
+  ## session's is visible. Identity comparison would pass for two platforms a
+  ## registry had aliased to one object, which is the mistake worth catching.
+  newPlatform(PlatformProfile(kind: pkContainer, displayName: name,
+                              capabilities: {capFilesystemRead},
+                              degradations: @[]))
+
+suite "several sessions, one process":
+  setup:
+    resetPlatformForTesting()
+
+  teardown:
+    resetPlatformForTesting()
+
+  test "the single-session spelling is unchanged":
+    # The whole compatibility claim, in one case: no session named anywhere,
+    # and `platform()` is what was installed.
+    installPlatform(markedPlatform("only"))
+    check platform().profile.displayName == "only"
+    check activePlatformSession() == DefaultPlatformSession
+    check platformWasExplicitlyChosen()
+
+  test "two sessions keep their own platforms":
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    check platformFor("s-1").profile.displayName == "one"
+    check platformFor("s-2").profile.displayName == "two"
+    check platformSessions() == @["s-1", "s-2"]
+
+  test "the first session installed becomes the active one":
+    installPlatform("s-1", markedPlatform("one"))
+    check activePlatformSession() == "s-1"
+    check platform().profile.displayName == "one"
+
+  test "a later session does NOT steal the active one":
+    # A second session booting in the background while the user is looking at
+    # the first must not redirect every `platform()` read in the tree. If this
+    # ever fails, a handshake completing is silently switching the UI.
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    check activePlatformSession() == "s-1"
+    check platform().profile.displayName == "one"
+
+  test "switching is explicit, and reported":
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    check setActivePlatformSession("s-2")
+    check platform().profile.displayName == "two"
+
+  test "switching to a session that has not booted is REFUSED, not silent":
+    # The refusal matters more than the switch. Pointing `platform()` at a
+    # session with nothing installed would render every panel as "unsupported"
+    # and leave the difference between "not booted" and "cannot do that"
+    # invisible to whoever is looking at it.
+    installPlatform("s-1", markedPlatform("one"))
+    check not setActivePlatformSession("s-absent")
+    check activePlatformSession() == "s-1"
+    check platform().profile.displayName == "one"
+
+  test "an unknown session refuses rather than crashing, and is not created":
+    # Two assertions in one case because they are the same promise: the answer
+    # is a refusing platform (the header's rule about `nil`), AND asking did
+    # not bring the session into existence. A lookup that registered would make
+    # `platformSessions()` grow every time a caller checked.
+    installPlatform("s-1", markedPlatform("one"))
+    let absent = platformFor("s-absent")
+    check not absent.isNil
+    check not absent.can(capFilesystemRead)
+    check platformSessions() == @["s-1"]
+    check not hasPlatformSession("s-absent")
+
+  test "a released session's platform is gone":
+    # A facade call made after the container is gone must refuse. Left
+    # installed, it would reach a transport whose socket is closed and hang
+    # pending for ever, which is the worse failure: no answer at all.
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    releasePlatformSession("s-1")
+    check platformSessions() == @["s-2"]
+    check not platformFor("s-1").can(capFilesystemRead)
+
+  test "releasing the ACTIVE session leaves the page between sessions":
+    # Not a crash and not an automatic successor: this code cannot know which
+    # of the remaining sessions the user was about to look at.
+    installPlatform("s-1", markedPlatform("one"))
+    installPlatform("s-2", markedPlatform("two"))
+    releasePlatformSession("s-1")
+    check activePlatformSession() == "s-1"
+    check not platform().can(capFilesystemRead)
+    check setActivePlatformSession("s-2")
+    check platform().profile.displayName == "two"
+
+  test "the empty session id is an ordinary session, not a sentinel":
+    # This is what makes the compatibility claim structural rather than a
+    # special case bolted on: `installPlatform(p)` and
+    # `installPlatform("", p)` must be the same thing.
+    installPlatform(DefaultPlatformSession, markedPlatform("default"))
+    check platform().profile.displayName == "default"
+    check hasPlatformSession(DefaultPlatformSession)
+    check platformFor(DefaultPlatformSession).profile.displayName == "default"

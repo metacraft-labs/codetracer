@@ -19,8 +19,9 @@
 #   BUILD_SIBLINGS_VERBOSE=1  — stream child build output to stderr instead of
 #                               capturing it into a per-repo log file.
 #   BUILD_SIBLINGS_FAIL_TAIL_LINES=N — how many trailing lines of each FAILED
-#                               repo's log the summary prints (default 60;
-#                               0 prints none).
+#                               repo's log the summary prints, and of the
+#                               toolchain lookup's log when that fails
+#                               (default 60; 0 prints none).
 #
 # Conventions:
 #   - All builds are run via `repro exec <repo> -- <cmd>` so each repo's flake
@@ -81,6 +82,29 @@ fi
 LOG_DIR="${CT_ROOT}/.tools/build-siblings-logs"
 mkdir -p "$LOG_DIR"
 
+# How many trailing lines of a failed step's log reach stderr. See the summary
+# below for why the tail is printed at all: on a CI runner the log itself is
+# gone when the job ends.
+fail_tail_lines="${BUILD_SIBLINGS_FAIL_TAIL_LINES:-60}"
+case "$fail_tail_lines" in
+'' | *[!0-9]*) fail_tail_lines=60 ;;
+esac
+
+# print_log_tail <label> <log>: the last $fail_tail_lines lines of <log>,
+# prefixed so they stand apart from this script's own messages. Diagnostics
+# only; callers decide the exit status.
+print_log_tail() {
+	local label="$1" log="$2"
+	[ "$fail_tail_lines" -gt 0 ] || return 0
+	if [ ! -s "$log" ]; then
+		echo "  $label: the log $log is empty or missing" >&2
+		return 0
+	fi
+	echo "---- $label: last $fail_tail_lines lines of $log ----" >&2
+	tail -n "$fail_tail_lines" "$log" | sed 's/^/  | /' >&2
+	echo "---- end of $label log ----" >&2
+}
+
 # Resolve the pinned compiler and zstd flags in one environment entry. Keep
 # errors per invocation: suppressing them hides activation failures, and four
 # independent entries repeat expensive provisioning before any build starts.
@@ -100,6 +124,10 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
 		printf "%s\0" "$(dirname "$nim_path")" "$(dirname "$nimble_path")" "$zstd_cflags" "$zstd_libs"
 	' >"$toolchain_output" 2>"$toolchain_log"; then
 		echo "build-siblings.sh: ERROR: required toolchain lookup failed; see $toolchain_log" >&2
+		# Naming the log is not enough: the beam arm of desktop-edge run
+		# 36407231861 ended on exactly the line above, on an ephemeral runner
+		# whose log was gone with it, so why `repro exec` failed was never seen.
+		print_log_tail "toolchain lookup" "$toolchain_log"
 		rm -f "$toolchain_output"
 		exit 1
 	fi
@@ -110,6 +138,7 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
 			IFS= read -r -d '' ZSTD_LIBS
 	} <"$toolchain_output"; then
 		echo "build-siblings.sh: ERROR: incomplete toolchain lookup; see $toolchain_log" >&2
+		print_log_tail "toolchain lookup" "$toolchain_log"
 		rm -f "$toolchain_output"
 		exit 1
 	fi
@@ -466,12 +495,6 @@ build_sibling \
 	codetracer-flow-recorder/cadence-trace-helper
 
 # Blockchain / VM recorders.  Each produces target/release/codetracer-<name>-recorder.
-#
-# wasmi is intentionally excluded: it is an upstream-wasmi fork on the
-# `wasm-tracing` branch (no Justfile, no flake, no `codetracer-wasmi-recorder`
-# binary — wasmi_cli is what gets built).  ct doesn't reference it by binary
-# name in src/, so it's effectively a research repo, not a recorder
-# produced via this script.
 for name in cairo cardano circom evm flow fuel leo miden move polkavm solana ton; do
 	build_sibling \
 		"codetracer-${name}-recorder" \
@@ -512,11 +535,8 @@ printf "  %d pass, %d already built, %d missing, %d failed\n" \
 # run 36013311965 failed with exactly that and nothing else in the Actions
 # log. A compiler or cargo failure almost always ends with its cause, so the
 # last lines are the useful ones. This is diagnostics only; the exit status
-# below is unchanged.
-fail_tail_lines="${BUILD_SIBLINGS_FAIL_TAIL_LINES:-60}"
-case "$fail_tail_lines" in
-'' | *[!0-9]*) fail_tail_lines=60 ;;
-esac
+# below is unchanged. `fail_tail_lines` and `print_log_tail` are defined at
+# the top, where the toolchain lookup uses them too.
 if [ "$fail_count" -gt 0 ] && [ "$fail_tail_lines" -gt 0 ]; then
 	for repo in $(printf '%s\n' "${!RESULT_STATE[@]}" | sort); do
 		[ "${RESULT_STATE[$repo]}" = "FAIL" ] || continue
@@ -528,13 +548,7 @@ if [ "$fail_count" -gt 0 ] && [ "$fail_tail_lines" -gt 0 ]; then
 			echo "  $repo: build output was streamed above (BUILD_SIBLINGS_VERBOSE=1)" >&2
 			continue
 		fi
-		if [ ! -s "$log" ]; then
-			echo "  $repo: the build log $log is empty or missing" >&2
-			continue
-		fi
-		echo "---- $repo: last $fail_tail_lines lines of $log ----" >&2
-		tail -n "$fail_tail_lines" "$log" | sed 's/^/  | /' >&2
-		echo "---- end of $repo log ----" >&2
+		print_log_tail "$repo" "$log"
 	done
 fi
 

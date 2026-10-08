@@ -542,6 +542,23 @@ impl TestRecording {
         }
         fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {}", e))?;
 
+        // The recording owns `temp_dir` and removes it on drop; until it
+        // exists, a failure has to remove it here.
+        let recording = Self::build_and_record_mcr(source_path, language, version_label, ct_native_replay, &temp_dir);
+        if recording.is_err() {
+            let _ = fs::remove_dir_all(&temp_dir);
+        }
+        recording
+    }
+
+    fn build_and_record_mcr(
+        source_path: &Path,
+        language: Language,
+        version_label: &str,
+        ct_native_replay: &Path,
+        temp_dir: &Path,
+    ) -> Result<Self, String> {
+        let temp_dir = temp_dir.to_path_buf();
         let binary_name = source_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -1305,9 +1322,9 @@ pub struct FlowStep {
     pub line: i64,
     pub variables: Vec<String>,
     pub before_values: HashMap<String, serde_json::Value>,
-    /// Values of variables AFTER this step executes. Populated retroactively
-    /// by `flow_preloader.rs` from the next step's `before_values`. Useful for
-    /// asserting on the result of an assignment that happens at this step.
+    /// Values of the variables this line mentions AFTER it executes, read by
+    /// `flow_preloader.rs` at the next step. Useful for asserting on the result
+    /// of an assignment that happens at this step.
     pub after_values: HashMap<String, serde_json::Value>,
     /// Loop iteration index for this step (0-based; -1 / 0 when outside
     /// a loop, depending on the recorder).
@@ -1365,6 +1382,8 @@ impl FlowData {
             if let Some(av) = step_json.get("afterValues").and_then(|v| v.as_object()) {
                 for (var_name, value) in av {
                     after_values.insert(var_name.clone(), value.clone());
+                    // Within a step the post-line value is the most recent.
+                    values.insert(var_name.clone(), value.clone());
                 }
             }
 
@@ -1792,13 +1811,68 @@ pub fn find_suitable_python() -> Option<(String, String)> {
     }
 }
 
+/// What a `--version` probe of `cmd` actually found.
+///
+/// # Why this is three states and not a bool
+///
+/// The predicate below used to be
+/// `Command::new(cmd).arg("--version").output().map(|o| o.status.success()).unwrap_or(false)`,
+/// which collapses "not on PATH" and "on PATH and broken" into one `false`.
+/// Every caller then feeds that `false` to
+/// [`skip_or_fail_missing_prerequisite`], whose default is graceful, and a
+/// skip is tallied by cargo and nextest as a PASS. So a tool that is installed
+/// and whose `--version` is broken reads here as a bare host and takes the
+/// skip — the one case where the remedy ("install it") is wrong and the right
+/// one ("it is installed and it is broken") is never printed.
+///
+/// `Command::output()` already carries the discriminator: `Err(NotFound)` is
+/// absent, `Ok(status)` with a non-zero status is present and failing. It was
+/// being discarded, not missing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandProbe {
+    /// `cmd` is not on PATH (or is not executable). A legitimate skip.
+    Absent,
+    /// `cmd` is on PATH and `--version` succeeded.
+    Usable,
+    /// `cmd` is on PATH and `--version` FAILED, with its own diagnosis.
+    /// Never a skip — see [`is_command_available`].
+    Broken(String),
+}
+
+/// Probe `cmd` for all three outcomes. Prefer this over
+/// [`is_command_available`] in new code: a caller holding a
+/// [`CommandProbe::Broken`] can print the tool's own complaint, which is the
+/// difference between a useful failure and "not available".
+pub fn probe_command(cmd: &str) -> CommandProbe {
+    match Command::new(cmd).arg("--version").output() {
+        Ok(o) if o.status.success() => CommandProbe::Usable,
+        Ok(o) => CommandProbe::Broken(format!(
+            "`{cmd} --version` exited {} — stderr: {}",
+            o.status,
+            String::from_utf8_lossy(&o.stderr).trim()
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => CommandProbe::Absent,
+        Err(e) => CommandProbe::Broken(format!("`{cmd} --version` could not be run: {e}")),
+    }
+}
+
 /// Check if a command is available on PATH.
+///
+/// **A command that is PRESENT and broken panics here rather than returning
+/// `false`.** Returning `false` would route it into the graceful-skip path,
+/// and a skip is a pass; a broken tool on the host is a defect in the host or
+/// the tool, and the run has to say so. Absent stays `false`, which is the
+/// state the skip exists for.
 pub fn is_command_available(cmd: &str) -> bool {
-    Command::new(cmd)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    match probe_command(cmd) {
+        CommandProbe::Usable => true,
+        CommandProbe::Absent => false,
+        CommandProbe::Broken(why) => panic!(
+            "PREREQUISITE PRESENT BUT BROKEN: {why}. This is NOT a missing prerequisite and must \
+             not be skipped: `{cmd}` is on PATH, so installing it is not the remedy. Fix the \
+             tool or remove it from PATH — removing it makes this an honest skip."
+        ),
+    }
 }
 
 /// Probe the recorder's Repro environment before invoking BEAM tooling.
@@ -2051,24 +2125,39 @@ pub fn find_elixir_recorder() -> Option<PathBuf> {
 /// `CODETRACER_RUBY_RECORDER_PATH` still works for out-of-tree experiments.
 ///
 /// Returns `None` if a CTFS-capable recorder is not found.
-/// Find the PHP recorder C extension.
+/// Find the PHP recorder C extension (`codetracer.so`).
 ///
 /// Search order:
-/// 1. `CODETRACER_PHP_RECORDER_PATH` env var (explicit override)
-/// 2. Sibling repo: `../../../codetracer-php-recorder/ext/modules/codetracer.so`
+/// 1. `CODETRACER_PHP_RECORDER_EXTENSION`: the extension itself, the variable
+///    `ct record` reads and `scripts/detect-siblings.sh` exports.
+/// 2. `CODETRACER_PHP_RECORDER_PATH`: the extension, or the recorder REPO,
+///    which is what `scripts/detect-siblings.sh` exports under this name; a
+///    directory is searched for `ext/modules/codetracer.so`.
+/// 3. Sibling repo: `../../../codetracer-php-recorder/ext/modules/codetracer.so`
 ///
-/// Returns `None` if the recorder is not found.
+/// Only an existing file is returned: `php -d extension=<dir>` does not fail,
+/// it just records nothing.
 pub fn find_php_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_PHP_RECORDER_EXTENSION") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
     if let Ok(path) = env::var("CODETRACER_PHP_RECORDER_PATH") {
         let p = PathBuf::from(&path);
-        if p.exists() {
+        if p.is_file() {
             return Some(p);
+        }
+        let in_repo = p.join("ext/modules/codetracer.so");
+        if in_repo.is_file() {
+            return Some(safe_canonicalize(&in_repo));
         }
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = manifest_dir.join("../../../codetracer-php-recorder/ext/modules/codetracer.so");
-    if path.exists() {
+    if path.is_file() {
         return Some(safe_canonicalize(&path));
     }
 
@@ -2134,7 +2223,12 @@ pub fn find_wazero() -> Option<PathBuf> {
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev_locations = ["../../src/build-debug/bin/wazero", "../../result/bin/wazero"];
+    let dev_locations = [
+        "../../src/build-debug/bin/wazero",
+        "../../result/bin/wazero",
+        // Sibling recorder repo (workspace layout), built with `just build`.
+        "../../../codetracer-wasm-recorder/wazero",
+    ];
     for loc in dev_locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
@@ -2145,14 +2239,46 @@ pub fn find_wazero() -> Option<PathBuf> {
     None
 }
 
+/// A `Command` for the wazero binary at `wazero`.
+///
+/// A wazero built in the sibling `codetracer-wasm-recorder` checkout links the
+/// CTFS writer from the sibling `codetracer-trace-format-nim` checkout, which
+/// may be the shared `libcodetracer_trace_writer.so`; that directory is put on
+/// the loader path so such a binary runs outside the recorder's dev shell.
+fn wazero_command(wazero: &Path) -> Command {
+    let mut cmd = Command::new(wazero);
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let ffi_dir = manifest_dir.join("../../../codetracer-trace-format-nim");
+    if cfg!(target_os = "linux") && ffi_dir.join("libcodetracer_trace_writer.so").is_file() {
+        let ffi_dir = safe_canonicalize(&ffi_dir);
+        let joined = match env::var_os("LD_LIBRARY_PATH") {
+            Some(existing) if !existing.is_empty() => {
+                let mut v = ffi_dir.into_os_string();
+                v.push(":");
+                v.push(existing);
+                v
+            }
+            _ => ffi_dir.into_os_string(),
+        };
+        cmd.env("LD_LIBRARY_PATH", joined);
+    }
+    cmd
+}
+
 /// Build a WASM test program from a Cargo project directory.
 ///
 /// Runs `cargo build --target wasm32-wasip1` in debug mode (preserving DWARF).
 /// Returns the path to the produced `.wasm` binary.
+///
+/// The build's target directory is pinned to the project's own `target/`.
+/// Otherwise an inherited `CARGO_TARGET_DIR` (the CI runners set one) puts the
+/// binary somewhere else, and the lookup below fails with "WASM binary not
+/// found" after a successful build.
 pub fn build_wasm_test_program(project_dir: &Path) -> Result<PathBuf, String> {
     let output = Command::new("cargo")
         .args(["build", "--target", "wasm32-wasip1"])
         .current_dir(project_dir)
+        .env("CARGO_TARGET_DIR", project_dir.join("target"))
         .output()
         .map_err(|e| format!("failed to run cargo build for WASM: {}", e))?;
 
@@ -2195,7 +2321,7 @@ fn record_wasm_trace(wasm_path: &Path, trace_dir: &Path) -> Result<(), String> {
     let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    let output = Command::new(&wazero)
+    let output = wazero_command(&wazero)
         .args([
             "run",
             "--out-dir",
@@ -2231,7 +2357,7 @@ pub fn record_stylus_wasm_trace(wasm_path: &Path, trace_dir: &Path, evm_trace_pa
     let wazero = find_wazero().ok_or("wazero not found; set CODETRACER_WASM_VM_PATH or add wazero to PATH")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    let output = Command::new(&wazero)
+    let output = wazero_command(&wazero)
         .args([
             "run",
             "-stylus",
@@ -2252,6 +2378,80 @@ pub fn record_stylus_wasm_trace(wasm_path: &Path, trace_dir: &Path, evm_trace_pa
     }
 
     Ok(())
+}
+
+/// Name of the recorded Stylus host-interaction capture inside a Stylus
+/// contract fixture project.
+pub const STYLUS_EVM_TRACE_FILE: &str = "evm_trace.json";
+
+/// Build the debug wasm of a Stylus contract project.
+///
+/// The debug profile keeps the DWARF that maps instructions back to source
+/// lines and locates locals; the replay needs it to produce steps and
+/// values. The build goes to a per-project target directory under the
+/// test-target scratch area, so the fixture tree stays clean and repeated
+/// runs reuse the compiled dependencies.
+pub fn build_stylus_debug_wasm(project_dir: &Path) -> Result<PathBuf, String> {
+    let cargo_toml = project_dir.join("Cargo.toml");
+    let cargo_content =
+        fs::read_to_string(&cargo_toml).map_err(|e| format!("failed to read {}: {}", cargo_toml.display(), e))?;
+    let pkg_name = cargo_content
+        .lines()
+        .find(|l| l.trim_start().starts_with("name"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .ok_or_else(|| format!("failed to parse package name from {}", cargo_toml.display()))?;
+    let dir_name = project_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| pkg_name.clone());
+    let target_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("stylus-contracts")
+        .join(dir_name);
+
+    let output = Command::new("cargo")
+        .args(["build", "--lib", "--target", "wasm32-unknown-unknown"])
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .current_dir(project_dir)
+        .output()
+        .map_err(|e| format!("failed to run cargo build for the Stylus contract: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Stylus contract build failed in {}:\nstdout: {}\nstderr: {}",
+            project_dir.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let wasm_path = target_dir
+        .join("wasm32-unknown-unknown/debug")
+        .join(format!("{}.wasm", pkg_name.replace('-', "_")));
+    if !wasm_path.is_file() {
+        return Err(format!("Stylus contract wasm not found at {}", wasm_path.display()));
+    }
+    Ok(wasm_path)
+}
+
+/// Record a Stylus contract project through the Stylus replay pipeline.
+///
+/// `project_dir` is a Stylus contract crate carrying the host-interaction
+/// capture of one transaction against it ([`STYLUS_EVM_TRACE_FILE`], the
+/// `debug_traceTransaction` / `stylusTracer` response that
+/// `cargo stylus trace` prints). The contract's debug wasm is built and
+/// re-executed by `wazero run -stylus`, whose `vm_hooks` host module answers
+/// every hostio from that capture; the replay is the materialized trace.
+pub fn record_stylus_project_trace(project_dir: &Path, trace_dir: &Path) -> Result<(), String> {
+    let evm_trace = project_dir.join(STYLUS_EVM_TRACE_FILE);
+    if !evm_trace.is_file() {
+        return Err(format!(
+            "Stylus host-interaction capture {} is missing; regenerate it with the \
+             fixture's regenerate.sh (needs a Nitro dev node, cargo-stylus and cast)",
+            evm_trace.display()
+        ));
+    }
+    let wasm = build_stylus_debug_wasm(project_dir)?;
+    record_stylus_wasm_trace(&wasm, trace_dir, &evm_trace)
 }
 
 /// Record a Python trace by running the Rust-backed CTFS Python recorder.
@@ -3874,10 +4074,21 @@ fn record_solana_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     .map_err(|e| format!("failed to write SBF crate source: {}", e))?;
 
     let target_dir = crate_dir.join("target");
+    // `-Zmir-opt-level=0`: even at `opt-level = 0`, rustc's MIR optimisations
+    // merge locals that are copies of one another into one stack slot (`b` and
+    // `c` in `let b = a; let c = b;` share a DWARF location), and a recording
+    // then cannot tell their values or their writes apart. The fixtures are
+    // debugging subjects, so they are built the way a debug build is meant to
+    // look: one slot per local, written on its own line.
+    let rustflags = match env::var("RUSTFLAGS") {
+        Ok(existing) if !existing.trim().is_empty() => format!("{existing} -Zmir-opt-level=0"),
+        _ => "-Zmir-opt-level=0".to_string(),
+    };
     let build = Command::new(&cargo_build_sbf)
         .arg("--manifest-path")
         .arg(crate_dir.join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", &target_dir)
+        .env("RUSTFLAGS", rustflags)
         .output()
         .map_err(|e| format!("failed to run cargo-build-sbf: {}", e))?;
     if !build.status.success() {
@@ -4742,6 +4953,8 @@ impl TestRecording {
                 record_wasm_trace(&wasm_binary, &trace_dir)?;
             }
             Language::Solidity => record_solidity_trace(source_path, &trace_dir)?,
+            // source_path is the Stylus contract project directory.
+            Language::Stylus => record_stylus_project_trace(source_path, &trace_dir)?,
             Language::Masm => record_masm_trace(source_path, &trace_dir)?,
             Language::Sway => record_fuel_trace(source_path, &trace_dir)?,
             Language::Move => record_move_trace(source_path, &trace_dir)?,
@@ -4780,11 +4993,9 @@ impl TestRecording {
 
         // Verify the essential trace files were produced.
         //
-        // Per Trace-Files/CTFS-Migration-Guide.md §3e, CTFS is the default
-        // materialized-trace format and a `.ct` container is self-contained.
-        // Noir is the narrow exception: nargo 1.0.0-beta.2 documents and
-        // emits only `trace.json` plus sidecars, and the db-backend has a
-        // first-class legacy event-stream loader for exactly that pipeline.
+        // Per Trace-Files/CTFS-Migration-Guide.md §3e, a `.ct` container is
+        // the only materialized-trace format, for every language.  A
+        // `trace.json` is test-oracle output and never a recording.
         let ct_count = fs::read_dir(&trace_dir)
             .map(|entries| {
                 entries
@@ -4793,30 +5004,20 @@ impl TestRecording {
                     .count()
             })
             .unwrap_or(0);
-        if ct_count == 0 {
-            if language == Language::Noir && trace_dir.join("trace.json").is_file() {
-                return Ok(TestRecording {
-                    trace_dir,
-                    source_path: source_path.to_path_buf(),
-                    binary_path: source_path.to_path_buf(), // interpreted langs have no binary
-                    temp_dir,
-                    language,
-                    version_label: version_label.to_string(),
-                });
-            }
+        if trace_dir.join("trace.json").is_file() {
             return Err(format!(
-                "no *.ct container produced in {} (CTFS is the only \
-                 supported materialized-trace format for {:?}; Noir is the \
-                 only accepted legacy trace.json event-stream producer)",
-                trace_dir.display(),
+                "the {:?} recorder wrote a trace.json in {}: {}",
                 language,
+                trace_dir.display(),
+                db_backend::materialized_source::TEST_ORACLE_OUTPUT_ERROR,
             ));
         }
-        if language == Language::Noir && trace_dir.join("trace.json").is_file() {
+        if ct_count == 0 {
             return Err(format!(
-                "Noir recorder produced both CTFS and legacy trace.json in {}; \
-                 expected exactly one materialized trace layout",
-                trace_dir.display()
+                "no *.ct container produced in {} (CTFS is the only \
+                 materialized-trace format for {:?})",
+                trace_dir.display(),
+                language,
             ));
         }
         if ct_count > 1 {

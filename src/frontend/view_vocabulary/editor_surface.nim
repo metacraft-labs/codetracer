@@ -119,7 +119,20 @@ type
     inspectionLine*: int
     flowOverlayVisible*: bool
     gutterVisible*: bool
+    caretLine*: int
+      ## PLAT-51 (Editor-Pane.md, "The caret in a read-only editor"): the
+      ## line of the read-only debugging editor's CARET — placed by a click,
+      ## moved by the keyboard, distinct from the execution pointer and the
+      ## inspection cursor — or 0 for none.
+    caretColumn*: int
+      ## Its 1-based column.
     rows*: seq[EditorRow]
+    entryContext*: string
+      ## PLAT-47 B1: the tokenizer state the FIRST row starts in
+      ## (`SourceVM.heldLineContexts`, which the host fills from the whole
+      ## file), so a medium that classifies the rows — GPUI's editor — colours
+      ## a window opening inside a docstring as the desktop does. "" when the
+      ## provider carried none: the tokenizer's initial state.
     degradedMessage*: string
     productMode*: ProductMode
       ## **Which PRODUCT mode this surface was built for, and it is orthogonal
@@ -439,6 +452,11 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
   result.rows = @[]
   if reads.len == 0:
     return
+  block entry:
+    let contexts = source.heldLineContexts.val
+    let at = reads[0].line - source.heldFirstLine.val
+    if at >= 0 and at < contexts.len:
+      result.entryContext = contexts[at]
   var windowLines: seq[string] = @[]
   var requested: seq[int] = @[]
   for read in reads:

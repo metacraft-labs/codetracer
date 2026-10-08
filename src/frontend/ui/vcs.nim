@@ -28,6 +28,7 @@ import agent_activity
 # A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
 import isonim_panel_mount
 import ../viewmodel/viewmodels/vcs_vm
+from ../viewmodel/platform/vcs import parsePorcelainV2
 import ../viewmodel/viewmodels/review_entry
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, reviewSessionFrom
@@ -49,8 +50,9 @@ proc tryMountIsoNimVCSPanel*(componentId: int)
 # ---------------------------------------------------------------------------
 
 const
-  refreshIntervalMs = 5000
-    ## Periodic auto-refresh interval in milliseconds.
+  refreshIntervalMs = VCSRefreshIntervalMs
+    ## Periodic auto-refresh interval in milliseconds — the one interval every
+    ## front-end's VCS pane refreshes at (`vcs_vm.VCSRefreshIntervalMs`).
   debounceMs = 1000
     ## Minimum interval between successive refreshes.
 
@@ -63,6 +65,17 @@ proc loadCurrentBranch(self: VCSComponent, cwd: cstring) =
   if self.currentBranch.len == 0:
     # Detached HEAD -- show abbreviated hash instead.
     self.currentBranch = gitExec(@[cstring"rev-parse", cstring"--short", cstring"HEAD"], cwd)
+
+proc loadWorkingTree(self: VCSComponent, cwd: cstring) =
+  ## The working tree's changed files, read by the SAME `parsePorcelainV2`
+  ## the native front-ends' VCS facade reads with, so the three VCS panes
+  ## cannot disagree about a file's state (PLAT-47 deliverable 4).
+  let raw = gitExec(@[cstring"status", cstring"--porcelain=v2",
+                      cstring"--branch"], cwd)
+  self.workingTreeChanges = @[]
+  for row in workingTreeRowsOf(parsePorcelainV2($raw)):
+    self.workingTreeChanges.add VCSChangedFile(
+      status: cstring(row.status), filename: cstring(row.path))
 
 proc loadBranches(self: VCSComponent, cwd: cstring) =
   let raw = gitExec(@[cstring"branch", cstring"--format=%(refname:short)"], cwd)
@@ -374,6 +387,7 @@ proc refreshVCSData*(self: VCSComponent) =
   self.isGitRepo = true
   self.errorMessage = cstring""
   self.loadCurrentBranch(cwd)
+  self.loadWorkingTree(cwd)
   self.loadBranches(cwd)
   self.loadCommits(cwd)
 
@@ -642,6 +656,12 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
       fileEntries.add((idx, rows))
   vm.syncCommitFilesMap(fileEntries)
   vm.setChangedFiles(self.gitChangedRows())
+  var working: seq[VCSFileRow] = @[]
+  for file in self.workingTreeChanges:
+    working.add VCSFileRow(status: safeStr(file.status),
+                           path: safeStr(file.filename),
+                           baseName: basename(file.filename))
+  vm.setWorkingTreeFiles(working)
   # The docked panel is never a diff (#561): a unified diff is its own editor
   # tab.  Both are cleared explicitly so a panel that once hosted one — the
   # agentic session launcher used to push its review diff in here — cannot

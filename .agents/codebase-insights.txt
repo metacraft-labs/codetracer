@@ -1324,8 +1324,10 @@ inside the directory.
     LOAD. Reasoning about the read path alone is not enough.
   * CodeTracer ships NO `default_edit_layout.json` (`src/config/` has only
     `default_layout.json`), so the edit-layout loader ALWAYS takes its
-    fallback on a fresh install. The fallback reads the debugging layout and
-    sanitises it, which is fine — but the loader's `resetLayoutToDefault`
+    fallback on a fresh install. Since PLAT-47 the fallback derives the
+    EDIT-mode default from the BUNDLED config (`config.installModeDefault`,
+    through `index/mode_default_layout.modeDefaultLayout`), not from the
+    user's debug file — but the loader's `resetLayoutToDefault`
     paths (corrupt / unrepairable / incompatible file) used to return the
     debugging layout RAW. They now go through
     `resetHiddenPanelLayoutToDefault`, which applies the caller's hidden set.
@@ -3908,31 +3910,30 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     rule written out a second time, calling nothing in the module under test.
     M5 (painter stops following the table) dies in the differential half; M26
     (`TabGapCells` widened) dies only in the absolute one.
-  * PLAT-6'S LAYOUT BINDING IS AN OPT-IN: `codetracer-tui --layout-binding`.
-    `main.nim` calls `app/runtime.enableLayoutBinding`, and `runPromptLine`
-    then routes the twelve layout verbs (`:dock`, `:move-tab`, `:resize`, …)
-    into `binding.runLayoutCommand` — a PREFIX on the `:` path, deliberately
-    not a seventeenth row in §4.3's published table, which
-    `test_gdb_command_surface.nim` parses out of `CodeTracer-TUI.md`.
-    WITHOUT THE FLAG NOTHING CHANGES: `layoutBinding` is nil, `shellModel`
-    carries the session's own tree (`slot.layout.tree`), and those words are unknown
-    commands.  It is an opt-in rather than the default because a binding's tree
-    is a CLONE of the session's, so enabling one by default would give the
-    terminal two layout authorities.  The slot now holds a `Layout` (PLAT-4's
-    closing pass) and `enableLayoutBinding` seeds from it, docked panes
-    included; the binding still works on its own copy, and making the
-    gestures write back / flipping the default is PLAT-45 deliverable 8.
-  * BOTH HALVES OF THE LAYOUT GESTURE SURFACE ARE ROUTED, behind the same
-    `--layout-binding` opt-in: `runPromptLine` takes the twelve `:` verbs and
-    `handleToken` -> `routeMouseReport` takes a decoded SGR-1006 report into
-    `binding.onMouse`.  With the flag OFF `decodeMouse` is not even called and a
-    mouse report takes the path it always took — `keyName` answers "" and
+  * SINCE PLAT-45 THE TERMINAL LAYOUT BINDING IS ON BY DEFAULT. `main.nim`
+    always calls `app/runtime.enableLayoutBinding`; `--layout-binding` is still
+    accepted (old scripts) and asks for what is now the default. `runPromptLine`
+    routes the twelve layout verbs (`:dock`, `:move-tab`, `:resize`, …) into
+    `binding.runLayoutCommand` — a PREFIX on the `:` path, deliberately not a
+    seventeenth row in §4.3's published table, which `test_gdb_command_surface
+    .nim` parses out of `CodeTracer-TUI.md`. There is ONE layout authority: an
+    applied gesture calls `runtime.afterLayoutCommit`, which writes
+    `binding.layout.clone()` back onto the active slot and fires
+    `rt.layoutCommitted` (main.nim's write-through to the document). In-process
+    harnesses that build a `TuiRuntime` WITHOUT `enableLayoutBinding` still get
+    a nil binding and the old unknown-command behaviour.
+  * BOTH HALVES OF THE LAYOUT GESTURE SURFACE ARE ROUTED whenever a binding is
+    enabled (the shipped binary always): `runPromptLine` takes the twelve `:`
+    verbs and `handleToken` -> `routeMouseReport` takes a decoded SGR-1006
+    report into `binding.onMouse`.  With no binding `decodeMouse` is not even
+    called and a mouse report takes the old path — `keyName` answers "" and
     `keymap.resolve` reports `krNone`.
     THE LAYOUT BINDING IS THE ONLY MOUSE CONSUMER IN THIS FRONT-END, and that
-    was measured rather than assumed: `call_stack_keys.applyMouse` and
-    `timeline_keys.applyMouse` are each reached only from their own module's
-    `applyKey` / `applyToken`, and those only from `tests/apps/app_call_stack
-    .nim` and `tests/apps/app_timeline.nim`.  (An earlier note here called that
+    was measured rather than assumed: `call_stack_keys.applyMouse` is reached
+    only from its own module's `applyKey` / `applyToken`, and those only from
+    `tests/apps/app_call_stack.nim` (PLAT-51 removed the Timeline pane and
+    `timeline_keys.applyMouse` with it; the pane-level mouse routes since
+    PLAT-50/51 live in `runtime.nim`).  (An earlier note here called that
     precedence question "the part that is NOT small"; there was no contest at
     all.)  `lasNoGesture` is the seam a pane's own mouse contract belongs at
     when one is wired.
@@ -3945,33 +3946,38 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     CLOSED: `test_layout_command_routing.nim`'s "a mouse DROP rebuilds the focus
     ring, so Tab cannot offer a docked pane" is the assertion and M37 is the
     arm, with S10 as its behaviour-preserving control.)
-  * A REARRANGED TERMINAL LAYOUT IS PERSISTED, PER RECORDING, BEHIND THE SAME
-    `--layout-binding` OPT-IN.  `main.nim` calls
-    `host/layout_store.restoreLayoutForSession` before the first frame and
-    `persistLayoutForSession` after the input loop.  The split is
-    `host/capabilities` -> `app/theme/capabilities` again:
-    `app/layout/persistence.nim` decides the file's NAME, what an unreadable
-    document MEANS and whether there is anything to write, and does NO I/O — no
-    `getEnv`, no file, no fd, no `std/os` in its imports; `host/layout_store.nim`
-    owns the environment, the read, the atomic write (`<path>.new` then
-    `moveFile`) and the remove.  Four rules worth knowing before touching it:
-      - the document is `<state root>/tui-layouts/<slug>-<sha1 prefix>.json`,
-        keyed by the recording's CANONICAL path.  Not in the trace folder (a
-        recording is shared, archived and may be read-only); state rather than
-        config; per recording so one arrangement never silently applies to
-        another.  Slug AND digest, because `/a/calc.ct` and `/b/calc.ct` share a
-        basename and a directory of bare hex is unauditable;
+  * THE TERMINAL REMEMBERS ONE LAYOUT (PLAT-45), NOT ONE PER RECORDING.
+    `main.nim` calls `host/layout_store.restoreLayoutForSession` before the
+    first frame, writes THROUGH on every applied gesture (`rt.layoutCommitted`
+    -> `persistLayoutForSession`, a failure reported on the status line) and
+    once more after the input loop. The split is `host/capabilities` ->
+    `app/theme/capabilities` again: `app/layout/persistence.nim` decides the
+    file's NAME, what an unreadable document MEANS and whether there is
+    anything to write, and does NO I/O; `host/layout_store.nim` owns the
+    environment, the read, the atomic write (`<path>.new` then `moveFile`) and
+    the remove.  Rules worth knowing before touching it:
+      - the document is `<state root>/tui-layout.json` (`LayoutDocumentFileName`),
+        state root = `CODETRACER_TUI_LAYOUT_DIR`, else `$XDG_STATE_HOME/codetracer`,
+        else `~/.local/state/codetracer`. The GPUI window's is `gpui-layout.json`
+        in the same directory (`gpui/layout_memory.nim`); the desktop's stays
+        under `userLayoutDir`. Each product's reset deletes its own file only;
       - AN UNREADABLE DOCUMENT IS REPORTED BY KIND ON THE STATUS LINE AND LEFT
         ALONE.  The message leads with the kind because `statusBarText`
         truncates the tail, and the file is QUARANTINED — a document from a
         NEWER build is `UnknownVersion` here, and overwriting it would destroy a
         user's arrangement for having opened an older binary once;
-      - A RESTORED DOCUMENT SETS `userModified`, so it freezes the responsive
-        profile.  Which is why AN UNTOUCHED SESSION WRITES NOTHING: persisting a
-        profile default would pin the Compact tree on a wide terminal for ever.
-        `:reset-layout` clears the flag and the exit DELETES the document;
-      - with the flag off `restoreLayoutForSession` refuses before it computes a
-        path, so the state directory is not touched, not even by a `stat`.
+      - A RESTORED DOCUMENT SETS `userModified`, so it freezes the fold.  AN
+        UNTOUCHED SESSION WRITES NOTHING: persisting the default would pin one
+        terminal size's fold for ever. `:reset-layout` clears the flag and
+        deletes the document;
+      - `ci/lib/run-nim-test-lane.sh` exports `CODETRACER_TUI_LAYOUT_DIR` to a
+        fresh temp dir PER TEST FILE when unset, so no lane reads or writes the
+        developer's own `~/.local/state/codetracer` and a suite that docked a
+        pane cannot hand its arrangement to the next file.
+      - Tests that assume where a pane sits must be written against the shared
+        default (e.g. at 80x24 the first focus stop is the Files stack; the
+        Source pane is the only bare region; the events stack is Event Log |
+        Terminal Output since PLAT-51 removed the Timeline).
     `CODETRACER_TUI_LAYOUT_DIR` overrides the state root; that is how the two
     persistence suites point a real spawned binary at a directory of their own.
     THE "file would not OPEN at all" PATH IS THE ONE ONLY
@@ -5576,7 +5582,11 @@ together and rerun that suite.
 * In the terminal the `calltrace` PaneKind is painted as the CALL STACK (the
   TUI spec's choice); there is no call-trace pane there.
 * `codetracer-gpui --layout=<file>` opens a saved layout document; the terminal
-  adopts the same JSON through `LayoutBinding.adoptLayoutDocument`.
+  adopts the same JSON through `LayoutBinding.adoptLayoutDocument`. Without
+  `--layout` GPUI restores its own `gpui-layout.json`, else opens the shared
+  default; `--layout-ops=` applies scripted gestures (activate/dock/merge/
+  remove) and saves, `--reset-layout` deletes its file, `--dock-out=` writes the
+  arrangement it opened with.
 * Reading panes off a frame: `vision_producer.readProducerPanes` (pixels) and
   `terminal_reading` (a `plainFrame` text screen, in CELLS not bytes — rows
   carry `│`/`─`). Tesseract groups narrow aligned table columns column-wise;
@@ -6163,11 +6173,12 @@ Two traps in the same area, both live:
   * `TimelineVM.markers` used to BE the extent — two numbers, min and max — and
     `timeline_vm_test.nim` pinned that as correct. The extent now lives on
     `TimelineVM.bounds` and `markers` is the real projection; `boundsFromVm`
-    (`tui/app/timeline_binding.nim`), `gpui/app/leaves.renderTimeline` and
-    `views/isonim_timeline_view` were all reading the old field.
+    (`tui/app/timeline_binding.nim`) and the (since PLAT-51 deleted) Timeline
+    panes of GPUI and the desktop were all reading the old field.
 - 2026-09-24: **A `for` inside an isonim `ui:` block runs ONCE PER RENDER, and
   `for x in someSeq` will not compile there.** Two separate facts, both found in
-  `views/isonim_timeline_view.nim`:
+  the desktop's Timeline view (deleted with the pane by PLAT-51; the facts are
+  the DSL's and still hold):
   * `dsl/ui.processForStmt` expands the loop at render time, so rows/marks
     produced by a `for` are frozen in the node that was appended — unlike
     `text`/style/attribute expressions, which the DSL wraps in their own
@@ -6264,8 +6275,711 @@ Two traps in the same area, both live:
   `cd ../isonim-gpui && nix develop --command just plat37-shims`. Never run
   the capture concurrently with `gpui-shell` or any GPUI suite: they dlopen
   the same swapped path.
+- PLAT-37's capture loads the shim through the path `isonim_gpui/bindings`
+  BAKED IN at compile time: `<ISONIM_GPUI_SRC>/../rust/target/debug/...` when
+  that file exists, else the bare soname. Build `codetracer-gpui` with
+  `ISONIM_GPUI_SRC` pointing at the SAME checkout the lane swaps
+  (`ISONIM_GPUI_DIR`), or the binary loads a different (or no) shim and every
+  windowed run dies in 4 ms with `could not load:`. And the windowed shim's
+  libxcb / libxkbcommon come from `CODETRACER_GPUI_RUNTIME_LIB_PATH`, which a
+  fallback dev-shell profile does not export: run the lane inside
+  `cd ../isonim-gpui && nix develop` (its LD_LIBRARY_PATH carries them), with
+  the binary built there too, and `xvfb-run`/`Xvfb` appended to PATH for the
+  X configuration (2026-10-02: all six scenarios painted that way;
+  `returned-calltrace`, 21 steps before the window, is the slowest — one run
+  at load ~135 outran the 60 s budget, the next painted at tick 183/240).
+- Mutation harnesses refuse an undeclared arm id and an empty `--only=` as
+  well as an unknown flag (`ci/lib/harness_guard.py`, called first in every
+  `run-plat*-mutations.py` main; asserted by
+  `ci/test/harness-argument-refusal.sh`). A new harness must call it.
 - The headless-sway + GPUI window capture DOES run on the self-hosted
   linux-x64 fleet: isonim-gpui's CI job "GUI tests (headless sway)" built the
   `gpui-backend` shim and captured a painted window on gpu-server-002
   (run 35834753536, 2026-09-23). "Unmeasured runner capability" is not a
   valid reason to record a window-capture gate dark.
+- TUI COLOURS COME FROM codetracer-design-system ONLY (PLAT-46). Views paint
+  `CellStyle(role: srX)` / `.surface`, never `fg: "red"`/hex;
+  `ci/test/tui-design-tokens-boundary.sh` (in `ci/lint/nim.sh`) forbids both
+  under `tui/app/` (tests excepted). Role -> token table: `app/theme/roles.nim`;
+  tokens: `src/frontend/styles/generated/design_tokens.nim`, generated with the
+  stylus by `just sync-design-tokens` (`scripts/tokens-to-styl.sh --nim-out`).
+  `ci/test/design-tokens-fresh.sh` regenerates both from the INDEX gitlink of
+  `libs/codetracer-design-system` — in a worktree the submodule is not checked
+  out; it falls back to `../codetracer-design-system` (git archive of the pin).
+  The pin is 3d0703d (ui-design-improvements-part4), NOT the design system's
+  dev: the committed stylus encodes that commit.
+- A Tier-1 row that never goes through `degradeRows` (test apps under
+  `tests/apps/`, `renderShellTree`) is resolved by `styledRowNode` at the
+  16-colour Dark rung, so cross-tier suites still see ANSI indices. Tests that
+  compare view styles must compare `.role`, not `.fg`.
+- The TUI's start-up query round (`host/terminal_probe.nim`) writes OSC 11,
+  XTGETTCAP, a 24-bit SGR + DECRQSS and DA1 after raw mode. `nim-libvterm`
+  (TermAssert) answers NONE of them, so every pty suite pays
+  `CT_TUI_PROBE_TIMEOUT_MS` (default 10 ms) before frame 0 and lands in Dark
+  from the default unless the test types the reply itself. Inside tmux the
+  probe spawns `tmux display -p '#{client_termfeatures}'`; a detached session
+  has no client and answers nothing.
+- The workspace's own shells export COLORTERM=truecolor from the login profile,
+  so a tmux pane started from here is truecolor by ENVIRONMENT; tests that mean
+  to exercise detection must `env -u COLORTERM` inside the pane.
+- The TUI's derived colour rungs are computed at module init. Any per-search
+  OKLab conversion of the xterm palette there is paid on EVERY cold start
+  (measured ~25 ms, enough to redden CTUI-11's 50 ms first-frame gate); keep
+  palette conversions in `colour_math.XtermLab`.
+- `:theme <dark|light>` is a HOST seam: `TuiRuntime.themeService` (set in
+  `tui/main.nim`, copied into `dispatcher.services.setTheme` by
+  `tui_session.refresh`, which rebuilds the dispatcher on every refresh — so
+  a service set directly on `rt.dispatcher` in replay mode is lost). It pins
+  the mode via `terminal_probe.switchTheme` and `adoptCapabilities` forces a
+  full repaint. `tmux capture-pane -e` is DIFFERENTIAL across lines (SGR state
+  carries from the previous line) and trims trailing cells unless `-N`.
+
+- PLAT-45, ONE DEFAULT ARRANGEMENT. `headless_app/layout_model.sharedDefaultLayout()`
+  is the tree every front-end opens with (plus a fold order). Since PLAT-47 it
+  is NOT authored: it `staticRead`s `headless_app/shared_default_layout.generated.json`,
+  the desktop's DEBUG-MODE layout (bundled config -> `modeDefaultLayout`:
+  sanitize minus hidden+omitted panes, `nestPanesIntoHosts` by
+  `paneHomesForMode`) read back by `desktop_panes.goldenConfigToLayoutNode`.
+  The authored tree is `sharedBundledLayout()` and only generates
+  `default_layout.json`. `modeDefaultLayout` is a TEMPLATE (frontend/types and
+  common/types each `include common_types`, so `LayoutMode` exists twice and a
+  proc would bind one); callers import their own types module.
+  `modeDefaultOmittedContentIds` (Constraints in Debug) is NOT the hidden set:
+  it only leaves the pane out of the starting layout, a user's saved layout
+  keeps it.
+  `sharedEditLayout()` is edit mode's;
+  `sharedEditLayout()` is edit mode's. `foldLayout(s, depth)` turns the lowest
+  ranked regions into tabs. The terminal picks the SMALLEST depth at which every
+  pane gets its cell minimum (`tui/app/layout/profile.depthFor`, minimums in
+  `layout/cells.nim`) and shows `[folded N]` on the status line; `lpCompact` /
+  `lpStandard` / `lpUltraWide` are now just named sizes (80x24/120x40/200x50).
+  `LayoutSchemaVersion` is 4 (five desktop panes added to `PaneKind`; v3
+  documents migrate by re-stamping).
+- `src/config/default_layout.json` AND `shared_default_layout.generated.json`
+  ARE GENERATED: `just generate-default-layout` compiles
+  `headless_app/generate_default_layout.nim` with `nim js` and runs it under
+  NODE (the derivation is `importjs` code the desktop runs; `--out=`/`--check=`).
+  The generated JSON must exist for `layout_model` to compile (staticRead), so
+  a bootstrap needs a placeholder. `ci/test/default-layout-fresh.sh` (a
+  `ci/lint/nim.sh` step) diffs both. Edit the bundled tree / pane homes, never
+  the JSON. A TUI started with a `tui-layout.json` remembered before PLAT-47
+  keeps the old arrangement until `:reset-layout` — isolate
+  `CODETRACER_TUI_LAYOUT_DIR` / `XDG_STATE_HOME` in any test that spawns the
+  binary.
+- `ct` STARTS THE ELECTRON MAIN SCRIPT FROM ITS OWN LOCATION
+  (`paths.electronIndexPath` = `getAppDir().parentDir/src/index.js`,
+  symlinks resolved), NOT from `CODETRACER_PREFIX`. A test prefix that must run
+  its own `index.js` needs a real COPY of `bin/ct` inside it, and the GUI
+  fixture launches `<codetracerPrefixOverride>/bin/ct` for exactly this reason.
+  Running the build's `ct` against a prefix's renderer mismatches the
+  `ClientAction` enum across the config IPC and dies in
+  `configureShortcuts` with an IndexDefect before anything renders (blank
+  window, no console error in the fixture's bucket).
+- A PREFIX WITH REAL (not symlinked) `index.js`/`ui.js` must live INSIDE the
+  checkout (e.g. `test-logs/`): Node resolves their `require`s by walking up
+  from the file. `scripts/plat45-desktop-prefix.sh` builds one.
+- The desktop's View > Reset Layout (`aResetLayout`) is IN PLACE: the index
+  deletes the desktop's files, re-reads the default through the first-run
+  loader and sends it on `reset-layout-done`; `ui_js.applySharedDefaultLayout`
+  swaps it in. Do not implement a reset by `location.reload()` — the index
+  sends `CODETRACER::init` only once, so a reloaded window stays blank.
+- THE TERMINAL DOES NOT KEEP THE DESKTOP'S PROPORTIONS. `profile.terminalDefaultAt`
+  folds in the terminal's own ORDER (`terminalFolds`: steps whose region holds
+  only panes the terminal cannot draw — report leaves — go first) and then
+  SIZES the tree for the cells (`sizeForCells`): every row/column child gets
+  its minimum first and the slack by the shared weights, written back as cell
+  counts (the projection divides by them and gets the counts back exactly).
+  Keeping the desktop's 25% editor share made the source pane 20 cells at
+  80x24. `minPaneWidth` is the content minimum (editor 60 — the old standard
+  profile's source width) floored at the pane's padded tab label, so a
+  report region too narrow to name itself folds instead of drawing a fragment.
+  A same-depth resize re-shares in place (`profile.resizeShares`, called by
+  `binding.resize` and `shell.reprofile`) so a shrink cannot leave the editor
+  under its minimum and the active tabs survive.
+- THE GPUI WINDOW LAYS ITS LEAVES OUT BY THE DOCK DOCUMENT
+  (`gpui/main.paintWindowChrome`, from `shell.projectionFor(windowId).state`).
+  gpui-kit's dock is not linked (`data-ct-dock` = `flex-placeholder`), and
+  until PLAT-45's review the window tiled EVERY leaf — inactive tabs included —
+  in one row of equal columns while `--dock-out` described the arrangement. The
+  shim's `apply_styles_to_div` takes `100%` or pixels only, so StackPanel sizes
+  are divided into pixels here; a TabPanel paints a strip naming its tabs and
+  only the active leaf. `--report-plan`/`--plan-out` still list every leaf (the
+  plan is written before the window restructures the tree). The pixel reading
+  of the window's first screen is `ci/test/plat45-arrangement-window.sh` +
+  `just plat45-window-record` -> `src/tests/visual/plat45-gpui-arrangement.json`.
+- A TERMINAL TAB STRIP DOES NOT SCROLL TO ITS ACTIVE TAB: `tabRow` lays the
+  labels out left to right and the region's edge cuts them, so in a narrow
+  stack the active label can be clipped. Since PLAT-47 `tabRow`'s TEXT does not
+  mark the active tab at all (no brackets, no `─` rule); only the painter's
+  role (`shell.paintTabRow`: srTabActive vs srTabInactive) does, so a test
+  that wants the active tab must read styles, not text.
+
+- PLAT-47 part A (desktop parity):
+  * The TUI editor's colours are GENERATED from the desktop's Monaco theme
+    JSONs (`scripts/tokens-to-styl.sh --editor-theme DIR` -> `dtEditorTheme*`
+    in design_tokens.nim; each theme file has a `codetracer` block for ground,
+    line numbers, execution line, selection). TokenClass -> Monaco scope is ONE
+    table, `tui/app/theme/editor_theme.TokenClassScope`; `UnmappedCaptures`
+    (in `tests/test_plat47_editor_theme.nim`, its only reader) lists
+    lexical-looking grammar categories with no class (coverage test).
+  * Pane frames: `shell.paneFrame` gives each pane a right `│` AND a bottom `─`
+    divider when not flush; `paintDividers` joins junctions and paints the
+    focus ring (`focusRing`: all four sides, whoever owns the divider) in
+    srBorderFocused = `ui/border/primary` (desktop's measured outline).
+  * FILES was empty in the tty because only `host/headless.nim` filled
+    `app.fileTree`; `tui_session.refresh` fills it now (and the call trace
+    from the session's `CalltraceVM`). `TuiSession.calltrace` is NOT
+    `session.session.session.calltraceVM` (the one GPUI's leaf renders).
+  * `source_vm.followExecutionPointer` centres a stop outside the viewport
+    (`topCentringIfOutside`, Monaco's revealLineInCenterIfOutsideViewport).
+    `test_editor_text_store`'s corpus includes source_vm.nim, so editing it
+    moves that suite's ExpectedAssertions.
+  * Since PLAT-47 part B the GPUI shim (`apply_styles_to_div`) DRAWS
+    `border-*` (all sides or per side), `font-weight`, `font-family`,
+    `font-size`, `padding-left/right/top/bottom`, `flex-grow` and
+    `position: absolute` + `top/left/right/bottom`, and the plan JSON carries
+    them (`lib.rs push_style!`). A style the shim does not parse is silently
+    dropped from the WINDOW while still set on the node — check
+    `render_sync.rs GpuiStyles::apply` before relying on one. The window's
+    font family is named (`chrome.WindowFontFamily`): with GPUI's default
+    `.SystemUIFont` alias no bold face resolved.
+  * `capabilities.AutoDetectSelectsLight = false`: a light OSC 11/COLORFGBG
+    background is reported, the mode stays Dark.
+
+- Layout drag/resize (PLAT-5 closing pass, 2026-09-27):
+  * A DOCKED pane is a legal source for `lcMoveTab`, `lcMergeIntoStack` and
+    `lcSplit(splitMovesPane)`; `layout_interaction.commandFor` /
+    `intoStackCandidates` no longer branch on placed-vs-docked. `ahRestore` is
+    no longer what a drag commits — it remains an explicit front-end command.
+  * Two resize gestures: `beginResize(pane)` + `proposeShare` (one weight moves,
+    all siblings shrink proportionally — the TUI's `:resize N`) and
+    `beginResizeDivider(containerPath, i)` + `proposeDivider(fraction)` (two
+    adjacent weights trade, sum conserved). The latter commits
+    `cmdSetDivider(pane, w, side, level)` = `lcSetWeight` with `weightDivider`
+    set; the node is `level` ancestors above the pane's leaf, so stacks and
+    nested rows are resizable. Refusal kind `lpNoDivider` (refusal-only; the
+    algebra suite's witness table and `refusalCovered` count must track it).
+  * `binding.resizeGuideFor` measures the resized node by PATH (`boundsOfPath`),
+    so guides draw for container nodes too. TUI mouse: press on a region's last
+    column/row whose neighbour is its sibling = divider drag (`dividerAt`);
+    release elsewhere drops (`dropDivider`), same cell = click/focus.
+  * `ci/test/frontend-reachability.sh` ratchet (1296) counts exported symbols no
+    PRODUCT code reaches — a new exported API used only by tests fails
+    `ci/lint/nim.sh`; wire it (or remove the last product use of an old one and
+    you strand it: `regionOfPane` nearly went that way).
+  * `run-plat5-mutations.py` now has `--needle-scan`, a digest file
+    (`plat5-interaction-mutation-control.sha256`) and per-arm suites; editing
+    `layout_model.nim` stales PLAT-4, PLAT-5, PLAT-9, PLAT-45 (digest files) and
+    PLAT-6 (no digest file; its TOUCHED includes both layout modules).
+- TUI call trace pages (tui_session.pageCallTrace): the store holds ONE section of the trace (startLineIndex/lines/totalCallsCount); only HeadlessDebugSession.requestAndLoadCalltrace writes it. CalltraceVM's auto-load effect also sends ct/load-calltrace-section on every stop in headless sessions, but nothing applies that answer to the store (no updated-calltrace subscriber), so it cannot clobber a paged section. A section may list one row past totalCallsCount (`<end of program>`); CallTraceModel.total takes the max.
+- PLAT-47 part B:
+  * The terminal's (and GPUI's) lexical tier runs MONACO'S OWN Monarch
+    definitions: `scripts/monarch-languages.mjs` exports them from the pinned
+    `node_modules/monaco-editor` into `tui/app/syntax/monarch_languages.json`
+    (staticRead; `ci/test/monarch-languages-fresh.sh` gates it), `monarch.nim`
+    runs them (with `js_regex.nim`, a backtracking JS-regex subset), JSON is a
+    port of the JSON language service's scanner (`json_tokens.nim`). The
+    tree-sitter-FREE half lives in `tui/app/syntax/lexical.nim` (LexerId,
+    `lexerForPath`, `monacoLineTokens`, `lexerContexts`, `tokenRuns`) so GPUI
+    links it without the grammar archive; `highlighter.nim` re-exports it.
+    Monaco's offsets are UTF-16 units, the TUI's cells.
+  * A window's first line starts in the tokenizer state the WHOLE file's
+    earlier lines leave: the host computes `lexerContexts` from
+    `SourceFetch.fileLines` and `SourceVM.heldLineContexts` carries them
+    aligned with `heldLines` (the TUI's `source_binding` and GPUI's
+    `editor_surface.entryContext` read index 0).
+  * GPUI's window is laid out from `gpui/window_geometry.windowGeometryOf`
+    (pixel rects from the projected dock JSON + the Layout for paths); the
+    same geometry hit-tests the pointer (`pointerAt`, `dividerAt`, `tabAt`).
+    `gpui/window_gestures` drives `layout_interaction` (divider drag with a
+    live preview = `pendingCommand` applied to a copy; tab drag; Esc).
+    `main.drawArrangement` MOVES the leaf elements into a fresh arrangement on
+    every redraw (never rebuilds them). `CODETRACER_GPUI_GEOMETRY_OUT` dumps
+    the geometry and `CODETRACER_GPUI_GESTURE_TRACE=1` traces gestures — the
+    window lane (`just plat47-gpui-window`) aims with them.
+  * GPUI pointer events arrive on the ROOT's `mousedown/mousemove/mouseup/
+    wheel` listeners with window coordinates (`renderer.pointerOf`). A wheel
+    turned DOWN arrives with NEGATIVE `dy`. GPUI ignores a continuous wheel
+    `axis`: isonim-gpui's `virtual_pointer` sends `wheel N` as discrete notches.
+  * `gpui_host.serveWindow` serves until no request remains (bounded): the
+    centring jump re-centres once the first answer tells it the file length,
+    and a single round left rows drawn as "loading" after a jump near the end.
+  * Test state isolation: every test directory's `config.nims` force-imports
+    `src/frontend/test_support/state_isolation.nim`, which replaces
+    `XDG_STATE_HOME`/`CODETRACER_TUI_LAYOUT_DIR` when unset or inside the
+    user's state home; the lane runner also checksums the user's state dir
+    before/after and FAILS the lane if a file appeared, was rewritten or
+    disappeared (clearing state by hand during a lane trips it too — rerun).
+    `src/frontend/test_support/` and the four test-tree `config.nims` are
+    re-included in `.gitignore` explicitly: the blanket `*.nims` and
+    `src/frontend/**/test_*` rules (the latter matches the DIRECTORY
+    `test_support`, and git cannot re-include a file below an excluded
+    directory) silently kept them out of every commit.
+  * GPUI host clocks: `gpui_set_tick(ms, cb)` (isonim-gpui) runs a cdecl
+    callback on the loop's main thread every `ms`, then repaints; `0`/nil
+    disarms, and the loop disarms it when it returns. The VCS pane uses it at
+    `vcs_vm.VCSRefreshIntervalMs` (the desktop's `refreshIntervalMs`, the TUI's
+    `VcsRefreshMs`) through `gpui_host.refreshGpuiVcs`, redrawing only when
+    `VCSVM.workingStateKey` moved.
+  * GPUI auto-hide strips: `window_geometry` takes the strips out of the area
+    FIRST (left/right full height, top/bottom between them, `DockStripPx` +
+    a gap) and lays the tree in `inner`; a strip label press is a drag of the
+    docked pane, a click (no motion) reveals it (`WindowGestures.reveal`,
+    which OUTLIVES a gesture: every entry point carries it) over the tree at
+    `revealRectOf` (a third, the terminal's rule); Esc, a second click or a
+    press outside dismisses. gpui-kit has no TOP dock: since PLAT-48
+    `projectDock` no longer refuses a top-docked layout — the window draws the
+    top strip and its reveal itself (the centre height gives up the extent),
+    and the document carries no `top_dock`.
+  * GPUI editor rows: the fetch window holds `window_geometry.editorRowsOf`
+    rows (the editor pane's body at `GpuiEditorRowPx` = 26 px, less the
+    heading and the source statement), and each row is `flex-shrink: 0`. It
+    used to be the WINDOW's height over a nominal 20 px (54 rows where 37 fit),
+    and the flex column squeezed every row to 18 px, cutting descenders.
+  * The desktop editor's Monaco language is
+    `diff_document.editorLanguageForPath(path, toCLang(lang))`: the extension's
+    Monaco id from `DiffLanguageByExtension` (TOML excepted — drawn plain, as
+    the terminal does), the recording language only as the fallback.
+    `toCLang` alone has no `.ts/.java/.sh/.json/.yaml` and opened them plain.
+- The desktop's light theme (config `theme: default_white`) keeps the DARK panels (#282828) and only switches Monaco to codetracerWhite; codetracerWhite.json's `codetracer` block holds the values MEASURED in that state (plat47-desktop-parity-light.electron.json). Launch a light desktop in Playwright with the fixture option `configTheme: "default_white"`.
+- Real-PTY suites launched without CODETRACER_TUI_LAYOUT_DIR read/write the user's ~/.local/state/codetracer/tui-layout.json; a remembered non-default arrangement then fails layout/colour read-backs. Export CODETRACER_TUI_LAYOUT_DIR (and XDG_STATE_HOME) to a scratch dir when running them by hand.
+- PLAT-48 (top bar + auto-hide panels on every front-end):
+  * ONE menu: `viewmodel/viewmodels/product_menu.productMenuTree` is the tree
+    (the desktop's old `webTechMenu` macro tree, now data); `menu_vm.MenuVM`
+    is its logical state (open path, highlight, typeahead, the ACTIVE keymap's
+    chords via `setShortcuts`). The desktop's `ui/menu.nim` keeps NO state of
+    its own: it syncs the tree/chords into `MenuComponent.vm` and draws from
+    `vm.isOnPath`; `window.__ctMenuVM` exposes it to Playwright. The terminal
+    (`tui/app/views/top_bar.nim`, row 0) and GPUI (`gpui/window_top_bar.nim`)
+    draw `nativeFrontEndMenu` (macOS entries hidden).
+  * Omnibar: `omnibar_vm.classifyOmnibarQuery` is the desktop's
+    `command_interpreter.parseQuery` rule (":grep", ":sym", "/ai", ":cmd",
+    plus "#<tick>"); the desktop maps tick to its file kind
+    (`desktopKindOf`). `omnibar_sources` builds the index.
+  * Controls: `transport_icons.TransportControls` (nerd = Codicons, unicode,
+    text; graphics = the desktop's SVG marks rasterised by
+    `common/terminal_graphics/path_raster`, sent by
+    `tui/host/control_icons` over kitty graphics after a probe). The `icons`
+    setting persists under the native state root
+    (`viewmodel/host/icons_preference`); default graphics if the probe
+    answered, else unicode — never nerd; `:icons <mode>` switches.
+  * The shared default now DOCKS the desktop's footer panels (BUILD,
+    PROBLEMS, FIND IN FILES, REQUESTS) at the bottom (`sharedDefaultDocked`,
+    layout schema v5). The terminal's default is
+    `profile.profileLayoutValue` / `dockedForMode`; the desktop's footer list
+    is derived from the same table (`ui/layout.nim`).
+  * TUI reveal: `Ctrl+o` cycles docked panes; the revealed pane is painted
+    as an overlay (area cleared first) at `binding.revealAreaFor`; `:pin
+    [edge]` / `:unpin [pane]` restore beside the pane it came from: every
+    `ahDock` of a placed pane records `DockedPane.beside` (+ `weight`),
+    persisted as `"beside"`/`"weight"`, and `ahRestore` without an anchor
+    uses it while that pane is placed.
+  * `layout_model` ahDock with order -1 moving a docked pane to ANOTHER edge
+    appends after that edge's last entry (it used to keep its old order and
+    collide with the footer's order 0).
+  * The TUI main loop keeps a held frame OWED (`frameOwed`) until painted:
+    a consumed mouse release used to leave the frame for a click never drawn.
+  * GPUI: `handleTopHover` ignores a re-reported pointer that did not move
+    (gpui re-reports after a redraw), or it takes back a keyboard highlight.
+  * Terminal key framing: two ESC bytes back to back arrive as ONE Esc token;
+    PTY tests that press Esc twice must pace them.
+  * Session tabs from the keyboard: the terminal binds `g t` / `g T` and
+    `Ctrl+Tab` / `Ctrl+Shift+Tab` (CodeTracer-TUI.md §3.3.1; keymap
+    `SpecSection` `ssSpec331`; `key_names.keyName` decodes Ctrl+Tab from
+    xterm modifyOtherKeys `CSI 27;5;9~` and `CSI 9;5u` — a terminal sends
+    plain `\t` otherwise). GPUI binds `Ctrl+Alt+PageDown/PageUp`
+    (`window_top_bar.sessionTabStepOf`): the window binds the DESKTOP's
+    chords and the desktop's Ctrl+Tab is Switch File.
+  * `codetracer-gpui --report-window-plan [--window-ops=…]` runs the WINDOW's
+    root builder (`paintWindowChrome`) over a detached root, dispatches the
+    ops through the window's own pointer/key handlers (`windowPointer`,
+    `windowKey`), and prints the root's render plan: the top bar, strips,
+    reveal overlay, popovers, pins, hover label — without a compositor.
+    `test_plat48_gpui_plan.nim` and the PLAT-48 GW arms read it. The plan's
+    `img src` SVG files are left for the reader to remove. Box sizes appear
+    in the plan as `w` / `h`, not `width` / `height`.
+  * GPUI paint order: gTopEls are appended to the root in list order after
+    the arrangement and its overlay, so a later element paints OVER an
+    earlier one. The pin buttons go before the popovers, and are skipped
+    under a revealed pane (`pinButtonShown`), or a ⇲ shows through both.
+  * `just gpui-window-captures [plat45 plat47 plat48]` (CI job
+    `gpui-window-captures`) re-takes the three GPUI window records from a
+    checkout: windowed shim + virtual pointer built in isonim-gpui's own dev
+    shell, then capture, record, and the asserting suite. PLAT-48's last case
+    opens a layout the TERMINAL saved (`codetracer-tui` in a pty, `1`,
+    `:dock top`), so the capture needs `build/bin/codetracer-tui` too.
+  * A v4 layout document restores unchanged (re-stamped v5): it keeps its
+    docked panes and does NOT gain the shared default's footer panels. v5's
+    docked entries MAY carry `beside` / `weight` (optional), which the
+    migration table's "shape unchanged" line predates.
+- Mutation harnesses REFUSE an unknown flag since PLAT-48's review
+  (`ci/test/harness-argument-refusal.sh`, a lint step): several used to drop
+  one (`wanted = [a for a in argv if not a.startswith("-")]`) and start a
+  FULL, file-mutating run — `--only=A,B` on those graded every arm, and
+  `run-plat16-mutations.py` did it with `--needle-scan`. Killing one mid-arm
+  (a `timeout`) can still leave a mutation in the tree: after an interrupted
+  run check `git diff` against the base for files you did not edit.
+- 2026-10-01: How to build and launch the TUI/GPUI for a user (dev env via
+  `repro exec . --`, sibling pins, a trace, tmux split, state isolation, the
+  windowed GPUI shim) is documented in AGENTS.md "Launching the TUI / GPUI for
+  the user" and README.md "Running the terminal (TUI) and native (GPUI)
+  front-ends". Non-obvious: `ct record` under `repro exec` ignores a PYTHONPATH
+  exported beforehand (use `repro exec . -- env PYTHONPATH=... ct record`);
+  `just rust-build` in isonim-gpui gives a window-less shim (codetracer-gpui
+  exits 0 at once), the windowed one (`--features gpui-backend`) needs
+  `LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH` even for `--report-plan`;
+  `just build-gpui`'s ISONIM_GPUI_SHIM_DIR only drives a warning -- the shim
+  path baked into the binary comes from the isonim-gpui sources it compiles
+  (ISONIM_GPUI_SRC/../rust/target/debug). If `repro exec` fails building the
+  dev shell with `could not read Username for 'https://github.com'` inside a
+  fetchgit, the binary cache lost that NAR and anonymous GitHub git is refused
+  from the build sandbox: fetch the rev with your credentials, strip .git, check
+  `nix hash path` equals the drv's outputHash, then
+  `nix-store --add-fixed --recursive sha256 <dir-named-like-the-drv>`.
+- An Electron window has NO reload path: the index process sends the renderer
+  its startup message (`CODETRACER::init` / `no-trace` / `welcome-screen`)
+  exactly once, and only `ct host` (server builds) replays the bootstrap cache
+  on reconnect. A Playwright `ctPage.reload()` in Electron leaves an empty
+  window (no `.lm_goldenlayout`, ever). Layout specs must damage a layout file
+  in a fixture-less `beforeEach`, before the app launches -- the loader reads
+  the files once, at startup (see layout_resilience.spec.ts).
+- `test_editor_change_algebra.nim`'s `ExpectedAssertions` grows by 3 for every
+  production `.nim` added anywhere under `src/frontend/viewmodel/` (outside
+  `tests/`), via its derived `ProductionModules` sweep. Adding a ViewModel
+  module means re-pinning it (and the plat25 harness control hash), naming the
+  commit that added the module.
+- The captured dev shell exports `CODETRACER_BUILD_DIR` for the checkout it was
+  entered in. GUI specs that fall back to it run THAT checkout's build from a
+  worktree; set it (and PATH) to the worktree's `src/build-debug`, or use a
+  prepared prefix (`CODETRACER_TEST_PREFIX`, `scripts/plat45-desktop-prefix.sh`).
+- codetracer imports `nim_everywhere/rs256` (identity), which exists from
+  nim-everywhere 955d13f on; the flake/repro.lock pin and the workspace's
+  `../nim-everywhere` checkout must be at or past it.
+- TUI panes have NO title row (PLAT-49): `shell.paintPane` hands each painter
+  the box FROM THE STRIP'S ROW, so the painter's own heading (`FILES ───`,
+  `CALL TRACE N call(s)`, `VARIABLES …`) lands on that row and the tab strip,
+  painted last, replaces it. Every pane gets a strip (a lone pane one tab; a
+  lone editor's tab is its file name). Painters whose first row is content (VCS
+  branch, build verdict, the timeline) get the rows BELOW the strip. Tests that
+  located a pane by its upper-cased title must look for its tab label instead
+  (` Call Trace `, ` Variables `, ` Files `, ` main.py `).
+- A TUI press on a tab only MARKS it (`LayoutBinding.pendingPick`); the drag
+  begins on motion past `DragThresholdCols`/`DragThresholdRows`, or on a release
+  that far away. A test that asserts `ikDraggingTab` must first send a motion
+  report (SGR button 32, e.g. `\e[<32;C;RM`). `lasNoGesture` messages are no
+  longer written to the status line (`runtime.routeMouseReport`).
+- The GPUI WINDOW removes each leaf's heading (`main.stripHeading`) but
+  `leaves.renderLeaf` still builds it (`--report-plan` and the arrangement
+  suites read it); redraw a window leaf with `redrawWindowLeaf`, not
+  `leaves.redrawLeafBody` (which keeps child 0 as the heading). Every GPUI
+  pane box has a strip; a bare pane's drop body is strip+body (`dropBodyOf`).
+- The TUI menu is one root `≡` button with cascading dropdowns (no
+  `menuExpanded`/`tpMenuTitle`); GPUI's band likewise (`gtMenuButton` only).
+  `--window-ops=menu:<Folder>` presses the button, then the folder.
+- The omnibar's caret is the TERMINAL'S cursor (`main.paint` epilogue,
+  `isonim_tui.caretBytes`, DECSCUSR bar/block); on terminals
+  `caretSupportFor` answers `caretDrawn` for (TERM=linux, dumb, screen, …)
+  the top bar draws it into the cell instead.
+- Files under `src/frontend/tui/app/` may reach ViewModel modules ONLY through
+  `codetracer_embed` (`from codetracer_embed import X`), never
+  `viewmodels/<module>` directly: `ci/test/sdk-facade-boundary.sh` (and the
+  vm-unit `test_sdk_facade_boundary`) fails on the direct import.
+- `ci/test/gpui-window-captures.sh` builds the windowed shim inside
+  `${ISONIM_GPUI_DIR:-../isonim-gpui}`; from a worktree whose isonim-gpui is a
+  `-pin` checkout, export `ISONIM_GPUI_DIR` or it compiles (1.4 GB) into the
+  user's sibling. The PLAT-48 window record's Ctrl+O step was seen not to
+  register once under load; a re-run took it.
+- The desktop's command palette has TWO renderers in
+  `views/isonim_command_palette_view.nim` (MockRenderer and WebRenderer);
+  the real app draws the WebRenderer one. A change to the palette's DOM must
+  be made in both (PLAT-49's placeholder was first fixed only in the Mock).
+- A real-terminal suite that changes the layout (a tab click is one) must give
+  the binary its OWN state directory (`envSet("CODETRACER_TUI_LAYOUT_DIR",
+  getEnv(...) / "<suite>")`): the lane shares one directory, and a remembered
+  layout makes every later suite open on "layout restored" instead of
+  "opening …", which `settleOnDebugger` reads as the debugger's frame.
+- `ci/test/design-tokens-fresh.sh` is red on `agents` (the design-system pin
+  moved without regenerating). The PLAT-46/47 harnesses refuse to grade while
+  it is red; stage the gitlink at 3d0703d with `git update-index --cacheinfo`
+  to grade, and restore it after.
+- PLAT-49 part B (2026-10-02) facts:
+  * The engine sends NO DAP response to `ct/expand-calls` / `ct/collapse-calls`
+    (the desktop fires them with `backend.send`). A blocking
+    `DapStdioBackend.sendDapRequest` for either never returns and wedges the
+    front-end's loop; use `sendDapRequestNoResponse`, then reload the section.
+    After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
+    row by its place in the section), on the desktop too.
+  * Call rows: `ct/load-calltrace-section` carries every call's `args` (with
+    `value`s) and `returnValue`; the response's top-level `args` /
+    `returnValues` tables are `{}` on `calc`. Both decoders now put the return
+    in the `__return` `CallArg` (`replay_data_store.callArgsOf`,
+    `ui/calltrace.syncCalltraceData`); a `TypeKind.None` (wire kind 30) return
+    is omitted. `calltrace_vm.CallRow` / `callRowSegments` is the row as data;
+    `currentCallOf` is the one "which call is the debugger in" rule.
+  * GoldenLayout 2.6.0's stack body has NO centre zone: left/right hover areas
+    are the outer quarters (full height), the middle half splits top or bottom
+    (`dist/cjs/ts/items/stack.js`, `Stack.getArea`); the ground adds 50 px
+    side areas that split the WHOLE layout. CodeTracer's shared rule
+    (`layout_interaction.goldenLayoutZone`) keeps the quarters and makes the
+    middle join, by the user's direction. A tab's left half inserts before
+    it, its right half after it (`goldenLayoutInsertsAfter`); a CLICK still
+    activates the tab it is on (`binding.tabAtCell` no longer uses
+    `pointerAt`).
+  * The bottom auto-hide strip lives on the terminal's STATUS ROW (the row
+    under `bodyArea`; `binding.stripAreaFor(leBottom)`), and in GPUI's footer
+    (`WindowGeometry.footer`). A click on a label docks the pane OPEN
+    (`cmdOpenDocked`: `DockedPane.open`, not persisted, one at a time); the
+    band (21% — the desktop's 280/1334 px) comes out of the tree's area. A
+    hover previews after 300 ms and leaving dismisses after 300 ms
+    (`headless_app/auto_hide_hover`); the TUI's idle loop wakes for it
+    (`runtime.autoHideDueMs`), GPUI arms its one shim tick (`armHoverTick`).
+    `--window-ops` gained `hover-label:<pane>` and `wait:<ms>` (advances the
+    hover clock).
+  * The desktop's event-log location column was VISIBLE on `calc` despite
+    `onCompleteMove`'s `column(2).visible(false)` (it ran before the table
+    existed / was re-initialised); the column now declares `visible:` from
+    `event_log_vm.DefaultHiddenEventLogColumns`.
+  * `just test-e2e … -g <grep>` word-splits: a grep with a space turns its
+    second word into a FILE filter and Playwright then collects every spec
+    (failing on unrelated fixtures). Use `.` for spaces.
+  * isonim-gpui's shim ticker (`gpui_set_tick`) used to wait out the
+    interval it had already started: a 300 ms hover deadline armed while a
+    5 s VCS refresh was pending fired after the 5 s. The ticker now waits
+    in 50 ms slices and restarts on every arming (`window.tick_generation`);
+    `gpui/main.armHoverTick` re-arms only when what is due changes
+    (`gArmedTick`), so pointer motion does not keep postponing it.
+  * The status note shares the status row with the footer's labels; at
+    120 columns it is much narrower. `status_bar.fitNoteCells` shortens an
+    ABSOLUTE path's directories first (`…/dir/file`) and otherwise cuts the
+    end, as before. Real-terminal tests that read frame 0's long note
+    (`settleOnDebugger` looks for "opening ") can see it cut: wait for the
+    debugger's own note (" tick ") instead.
+  * The PLAT-49 harness's desktop gates WRITE the answers files the
+    reference suite reads; `run_electron` now restores them after every
+    run (a mutated desktop once left `plat49-panes.electron.json`
+    describing the mutant).
+  * Grading from a sibling worktree: harness `because` entries are
+    repo-relative (PLAT-37's and PLAT-38's `without_checkout_path`, applied
+    to the derived string and to the graded output alike), and PLAT-20's
+    cross-front-end suite is given the `tui` lane's own
+    `-d:isonimTuiGrammarArchive=<repo>/build/grammars/libcodetracer_tui_grammars.a`,
+    so no arm depends on the worktree's name or on `../isonim-tui`.
+    PLAT-46/47 grade only with the design-system gitlink staged at 3d0703d
+    (`git update-index --cacheinfo 160000,<sha>,libs/codetracer-design-system`,
+    restored after).
+  * PLAT-49 part B review (2026-10-03):
+    - GoldenLayout's GROUND side areas (`GroundItem.createSideAreas`, 50 px
+      inside the layout along each edge) win over a stack's body by
+      `LayoutManager.getArea`'s smallest-surface rule; a drop there splits
+      the ROOT (`GroundItem.onDrop`: join a same-axis root at that end with
+      half the end sibling's share, else wrap the root 50/50). Modelled as
+      `lcSplit` with `splitRoot` (`cmdSplitRootMove`), zones `dzRoot*`,
+      region `drRootBand`, indication `diRootBand`. A stack's header (its
+      strip row) is smaller than the band and keeps its own drop.
+    - The desktop ALSO pins a pane dragged within 40 px of the window's
+      left/right/bottom edge (`layout.setupDragToPinListeners`), on top of
+      GoldenLayout's drop; measure GoldenLayout's band 45 px in.
+    - `.lm_dropTargetIndicator` has `transition: all 200ms`: read its
+      TARGET box from `style.left/top/width/height`, never
+      `getBoundingClientRect` right after a move.
+    - A terminal cell carries the desktop's pixel measures as one character
+      of its editor monospace: 9.63 x 22 px (`binding.DesktopCellWidthPx` /
+      `DesktopCellHeightPx`, measured by `plat49-panes-capture.spec.ts`).
+    - The terminal and GPUI now hold several sessions: the shipped hosts
+      register their session in `HeadlessApp` (adopted), the strip's "+"
+      opens the omnibar on `:open ` (`omRecording`; entries from
+      `native_host.recordingsBeside`), and the host opens the recording in
+      a new tab (`TuiApp.recordingOpener` / `gpui main.openRecordingInTab`);
+      a tab switch re-points the panes (`showSession`), a close stops that
+      engine. Close adopted sessions with `disconnectBackend = false` and
+      close the `HeadlessDebugSession` yourself; `DapStdioBackend.close` is
+      idempotent.
+    - The desktop's call trace marks the current call with `.event-selected`
+      (its own ground) and `.call-current` (bold); the native front-ends
+      use `ui/surface/primary/secondary-hover` (the desktop step list's
+      active row) — `srSurfaceActiveRow`.
+- PLAT-50 (2026-10-03) facts — clicks, chrome colours, dividers:
+  * The desktop's click behaviours are DATA: `headless_app/pane_clicks.nim`
+    (`ClickInventory` K1..K56, one row per behaviour with each native
+    front-end's state — done / existing / n/a, never "deferred" — and the
+    right-click menus as `ContextMenuModel` builders: tab, dock label, editor
+    text, call-trace row, call argument, Variables row, inline value). The
+    desktop has NO Files menu (its four entries ran nothing and were
+    removed), and a call argument's left press is the row's (no tooltip).
+    `ContextMenuState` (openAt / move / hover / choose) is the open menu
+    for both front-ends; a disabled entry carries its reason and is never
+    chosen. Labels are asserted against the real desktop's
+    (`plat50-desktop-capture.spec.ts` -> `answers/plat50-desktop.electron.json`).
+  * Terminal: a press the layout returns `lasNoGesture` for goes to
+    `runtime.routePaneClick`; what needs the session comes back as
+    `RuntimeOutcome.paneClick` (`PaneClickKind`) and runs in
+    `tui_session.applyPaneClick`. An open context menu / content overlay
+    owns the mouse (`routeOverlayMouse`, before the top bar) and the keys.
+    `MouseEvent.ctrl/alt/shift` are SGR bits 16/8/4.
+  * GPUI: rows are not hit-tested by pixel; `window_clicks.wireWindowClicks`
+    puts mousedown/contextmenu/auxdown listeners on recognised rows (by
+    data attributes) after every redraw, the deepest row acts and
+    `PressDedupe` drops its ancestors' copies (the root clears it). The
+    shim (isonim-gpui) delivers right/middle presses as `contextmenu` /
+    `auxdown` (`gekContextMenu` / `gekAuxDown`). `--window-ops`
+    `click:<part>:<key>[:button[:ctrl]]` and `ctx:<label>` drive them; a
+    `click:` is dispatched to the row and then to each ancestor up to (not
+    into) the element marked `data-ct-window-root`, as GPUI bubbles a real
+    press (the shim's dispatch reaches one node; element handles are fresh
+    pointers per lookup, so never compare them with `==`).
+  * A line jump the engine cannot satisfy (e.g. backward from the first
+    stop) never answers `stopped`; `waitForEvent` has no clock by default,
+    so a plan run that does it hangs — the PLAT-50 GPUI plan suite runs the
+    window under `timeout 120`.
+  * Shared ops added to `HeadlessDebugSession`: `sourceLineJump(path, line,
+    "smart"|"forward"|"backward")` (`ct/source-line-jump`, behaviour 0/1/2),
+    `setBreakpointEnabled` (a disabled breakpoint is NOT sent to the engine,
+    as the desktop's `dapSetBreakpoints`; its row stays via
+    `applyVerifiedBreakpoints(..., disabledLines)` — still the ONLY
+    pointList writer, `test_plat40_producers` enforces it), `clearBreakpoints`.
+  * Files: both native trees open fully expanded (`native_host.expandAllFolders`
+    in `loadRecordingPanes`) and then follow `FilesystemVM.isExpanded`
+    (`tui_session.fileTreeModelOf`, `pane_views.fileTreeNode`). A test that
+    builds a `FilesystemVM` itself must expand it the same way.
+  * There is NO divider row between stacked panes any more: the lower pane's
+    strip is the separator, and a press on it OFF its tabs picks up the split
+    above (`binding.dividerAt` / `onStripLabel`; a lone editor's label is
+    `LoneEditorLabelCells` wide). Body dividers are `shell.DividerGlyph` "▏"
+    (fg = `dividerLineRole(--dividers)`, bg = the right pane's base ground);
+    in a strip row the divider is the strip's ground. `--dividers=strip`
+    (default, ui/surface/primary/default = the desktop's splitters) or
+    `subtle` (ui/border/secondary); GPUI draws 1px lines only for subtle.
+  * Chrome tokens (desktop-measured): top bar / strip / inactive tabs / menu
+    surface = ui/surface/primary/default (#1b1b1b); omnibox = ui/surface/input
+    /default inside ui/border/secondary edges ▕ ▏; menu frame =
+    ui/border/primary; GPUI's `WindowChrome` is now token-derived. The omnibox
+    is centred and `clamp(24em, 24vw, 40em)` wide (terminal: 9.63 px cells,
+    `top_bar.omnibarDesktopCells`; GPUI `omnibarDesktopPx`).
+  * Desktop bugs fixed in `ui/editor.nim`: the gutter right-click
+    (`lineActionContextMenu`) re-tested the marker's empty dataset, the
+    contextmenu listener matched no `gutter-breakpoint-*` class, and
+    `onMouseDown` read `lineNumber` off a null position (the exception kept
+    the right-click menu from opening). "Expand Full Callstack" was REMOVED
+    from every call-trace menu: it sends `ct/expand-calls` with
+    `CallstackInternal`, which unfolds only calls the engine AUTO-collapsed,
+    and no view loads the trace with `autoCollapsing: true` — it could change
+    nothing. The event log's header sort was dead twice over: the visible
+    header is `ui/event_log.renderColumnHeader`'s own strip (DataTables'
+    header row is hidden) and took no click, and the ENGINE ignored the
+    order (`event_db.ordered_event_positions`; `ct/event-load` reads
+    `sortKey`/`sortAscending` and keeps each event's recorded `eventIndex`).
+    The status bar's copy control copies the file PATH (no line); the native
+    status line / footer copy the same.
+  * More shared ops: `setColumnBreakpoint` (Alt+click; columns survive every
+    re-send through `BreakpointAnchor`), `sourceCallJump` (Ctrl+Alt+click,
+    `ct/source-call-jump`, settles on the engine's error notification),
+    `loadValueHistory` (`ct/load-history`), `loadValueOrigin`
+    (`ct/originChain`), `addToScratchpad`, `requestAndLoadEventLog(order)`.
+    `pane_clicks.callTokenAt` is Monaco's word rule (+ Rust `::` paths).
+  * Terminal `o` / `:origin` used to freeze (it waited for a `stopped` an
+    origin query never sends): `RuntimeOutcome.awaitsOrigin` waits for the
+    origin event, bounded, then re-runs the walk. `o` acts on
+    `CommandContext.selectedVariable`, which nothing set before PLAT-50 (so
+    `o` always said "no variable selected"); a click on a Variables row sets
+    it, and a move (a rebuilt Variables model) clears it.
+  * A View-menu pane the arrangement does not place is ADDED (after the
+    event log) on both native front-ends; GPUI renders its leaf on demand
+    (`adoptNewLeaves`). GPUI copies through the shim's clipboard
+    (`gpui_write_clipboard`, written to the platform clipboard on the next
+    frame); the terminal through OSC 52.
+- 2026-10-04 (stabilisation, container v5 + `<toplevel>`): every spec-conforming recording is rooted in a `<toplevel>` call (call_key 0, depth 0) whose function record sits at the entry point's (path, line) — in USER source — and whose step 0 is the synthetic entry step `start` emits (`codetracer-trace-format-spec` `trace-events.md`). `MaterializedReplaySession::first_user_call` (db.rs) must skip that root BY NAME (`TOP_LEVEL_FUNCTION_NAME`) — but ONLY when it wraps the program (`is_wrapping_toplevel_root`: the step after its entry step is in another call). Fuel, Cardano and other recorders MERGE the entry function into `<toplevel>` (the root's own steps are the body); skipping their root opened the recording inside the first helper the body calls (pinned by `a_root_carrying_the_programs_body_is_the_entry`), or run-to-entry opens on the root and the first Step Over steps over the WHOLE program (every other frame is nested in the root) — measured on `calc`: tick 0 -> 171 of 171. Consequences that are NOT defects: the entry stop's tick is 1 (the root's entry step is tick 0), a step BACK from the entry lands on the root's step 0, the call trace numbers calls one higher (`<toplevel> #0`, `<__main__> #1`, `main #2`), and the Python recorder lists the module's interpreter attributes (`__builtins__`, `__file__`, …) as the module frame's variables. Suites must find calls by name/arguments and read ticks, never assume `#N` or tick 0.
+- 2026-10-04: a suite that reads a published specification document resolves it through `src/frontend/test_support/spec_documents.nim`, which honours `CT_SPECS_DIR` (an explicit `codetracer-specs` checkout, absolute; read at COMPILE time because `specDocument` is a `staticRead`) and otherwise the workspace sibling, at the `spec/` layout. The workspace's shared `../codetracer-specs` checkout may sit on a branch from before the layout change; point `CT_SPECS_DIR` at a `latest` worktree rather than moving it. `ci/test/editor-model-case-floor.sh` and `run-plat33-collab-mutations.py` honour the same variable.
+- 2026-10-04: `just plat35-capture-electron` runs whatever desktop bundle `src/build-debug` holds unless `CODETRACER_TEST_PREFIX` names a prefix built from THIS tree (`scripts/plat45-desktop-prefix.sh`); the capture's `provenance.uiBundleMtime` now records the bundle that actually ran. Re-taking those answers invalidates every tier-4 reading in `src/tests/visual/tier4-review.json` by design (`againstUiBundleMtime`), so a re-capture is also a re-reading.
+- 2026-10-05: the native `.ct` reader (`ctfs_trace_reader/mod.rs` `open_new_format_nim`) takes NAMES from the Nim FFI but everything else about a function or type from the pure-Rust `InterningTables` decode of the same container: a function's declaration site AND a type's kind and `specific_info` (struct field names). The FFI exposes neither; reading types from it alone made every type `Raw` with no fields, so struct members reached the front-ends as `[0]`. Separately, the Rust wrapper over the Nim WRITER (`NimTraceWriter::ensure_raw_type_id`) keeps only kind and name, so a test cannot write a struct's fields through it — use the committed `src/db-backend/trace/trace.ct` fixture, which carries them.
+- 2026-10-05: the screen oracle's GPUI frames (`src/tests/visual/captures/gpui/<scenario>.png`, gitignored) are written by `just plat37-capture` (`ci/test/plat37-window-frame.sh` exports every `captured` windowed run's full-output frame there, and removes a stale one first). Run it with `ISONIM_GPUI_DIR` and `ISONIM_GPUI_SRC` naming the SAME isonim-gpui checkout whose `rust/target/plat37/` holds the three shims, and `just build-gpui` from that environment first. The oracle reads the CURRENT window: its tab strips sit ABOVE the cells the grid locator finds (`identifyByStripAbove`), and its event table has a leading `tick` column (`parseEventTableRow`).
+- 2026-10-05: the screen oracle forgives NO misread in its grammars (`pane_grammar.nim`): a `0` read as `O` in the event table's `#` column, or `__builtins__` read as `builtins_ _`, is recovered by `ocrLineBands(..., accept)` re-reading the refused band at 2x (`vision_producer.nim`). 2x is not uniformly better (it split `__file__` to `_ file__` on the native window's state pane), so only a band the grammar refuses at 1x is re-read. Do not add a grammar tolerance for a misread; pass the reader's grammar as the acceptor.
+- 2026-10-05: since `c82b8a5e2` the native window's state pane is a Name/Value TABLE (a 1 px rule between the columns, no `name:` separator, names in the link colour, long names drawn `__packag…`). The screen oracle reads it in `vision_producer.readStateTable`: the rule is found by pixel run length (`stateColumnRule`, -1 on the desktop and terminal), each band is split at it, names are read on a ground mask at 2x/3x/1x until one is an identifier (`isStateTableName`), and a pane-truncated name agrees with the full name it begins (`namesAgree`). The GPUI frames the oracle reads must be re-taken (`just plat37-capture`) after any `leaves.nim` change, or the oracle grades an old window.
+- 2026-10-05: `run-plat50-clicks-mutations.py`'s engine arm EN4 rebuilds `replay-server` (DEBUG profile) into the cargo target directory `REPLAY_SERVER_BIN` sits in (`<target>/<profile>/replay-server`, from `CT_P50_ENGINE_DIR`). Point `REPLAY_SERVER_BIN` at a COPY outside a target directory and the rebuilt mutant is never the binary the terminal runs: EN4 "survives" with no case noticing. Grade it with `REPLAY_SERVER_BIN=<target>/debug/replay-server`.
+- 2026-10-06 (PLAT-52, the Terminal Output pane natively): the pane's ONE model is `viewmodels/terminal_output_model.nim` (pure, C/JS/WASM): an ANSI scanner that keeps its state across writes, SGR decoded into `types.TermAttrs` (fragments carry `text` + `style`, no HTML — the desktop builds `<span style>`s with text nodes, so `isonim_terminal_output_view` has no `innerHTML` sink), the line builder, and a libvterm-compatible screen emulator with snapshots (`TerminalScreenModel.screenAfter` replays ≤ `snapshotEvery` writes; `replayed` is the cost probe). The emulator applies ONLCR (a written `\n` is CR LF, as a terminal device delivers it); the libvterm reference test feeds libvterm `\n`→`\r\n` for the same reason. libvterm erases with the pen's fg/bg and erases the alternate screen on EVERY enable — the emulator follows both.
+- 2026-10-06: Nim's JS backend shares a loop's `let` across iterations inside closures: a click handler written inline in a `for` loop (even with `let idx = …` first) fires with the LAST iteration's value. The terminal output view's fragments all jumped to the last write on the real desktop; only the cross-front-end Electron capture showed it (the C-backend mock suite passed). Build per-item handlers with a factory proc (`jumpOnClick`), and keep a multi-item click case in a suite the `vm-js` lane runs.
+- 2026-10-06: the desktop mounts the IsoNim terminal panel INSIDE GoldenLayout's `#terminalComponent-0` with the SAME id, so `#terminalComponent-0` matches two elements (Playwright strict mode fails); select the panel by `.isonim-terminal-output`. A `.lm_tab` press does not reliably activate a GoldenLayout tab — press `.lm_tab[title='TERMINAL OUTPUT'] .lm_title`, and retry until the content is visible.
+- 2026-10-06: the Python recorder records one Write event per LINE: `sys.stdout.write("a\nb\n")` arrives as two events. And a stop inside a loop-heavy function (e.g. a `main` whose loop calls string-building helpers) takes ~30 s to reach through `ct/event-jump` or `ct/goto-ticks`, while stops in small helpers take <1 s (`codetracer-specs/issues/2026-10-06-a-stop-inside-a-loop-heavy-python-function-takes-thirty-seconds.md`); `test-programs/terminal_screen` writes through an `emit` helper so its suites are not slowed by it.
+- 2026-10-06: GPUI draws the Terminal Output pane NATIVELY from `gpui/main.nim` (`drawTerminalPane`, over `gpui/terminal_output_leaf.nim`), replacing the leaf's vocabulary `List` after `drawArrangement`, `refreshReplayWindow` and `redrawPaneOf` — `app/leaves.nim` is untouched (four harnesses digest it). Its geometry and its press hit-testing share `terminalLayout`; `--window-ops=term:…` drives it (view / line / track / drag / scrub / key / wheel). The screen scrubber is REAL-TIME on all three front-ends (the user, 2026-10-06): a drag jumps the debugger once per write crossed; a list pane's scrollbar scrubber (`viewmodels/scrollbar_scrubber.nim`, PLAT-51's model too) moves the VIEW only.
+- 2026-10-06: a `src/build-debug` that symlinks another checkout's `bin/` can carry a `ct` older than the engine `REPLAY_SERVER_BIN` names. Such a `ct` with an older Python recorder writes CTFS container v4, which the current engine refuses ("CTFS container version 4 is not readable: this reader reads versions 5 and 6"); with a current recorder it fails at record time with "unsupported CTFS version". The fixture provider caches by program hash only (`test-logs/tui-fixtures/<name>-<hash>`), so a stale recording keeps failing until it is deleted. Keep `CT_BIN` / `src/build-debug/bin/ct` and the engine from the same era, and delete the fixture to re-record. `scripts/plat45-desktop-prefix.sh` builds the Electron prefix on `src/build-debug`, so the desktop captures need that same pairing.
+- 2026-10-06: grading `run-plat50-clicks-mutations.py` in a tree other than the one `CT_P50_ENGINE_DIR`'s sandbox links: the engine arms (EN1–EN4) edit `<tree>/src/db-backend/src`, but cargo builds the sandbox's `src` symlink. If that symlink names a different checkout, the mutant is never compiled and all four "survive". Point the sandbox's `src` at the graded tree, and keep its siblings (`codetracer-trace-format*`, `libs`) at their pins. Also, `test_real_no_orphans` and `test_real_signal_handling` count EVERY replay-server on the machine, so a mutation grade or capture running beside the tui-real-terminal lane reddens them.
+- 2026-10-06 (PLAT-52 review): the DESKTOP's screen scrubber sends its moves asynchronously (`TerminalOutputVM.scrubTo` → `requestHistoricalNavigation`), so it COALESCES: at most one move in flight, the newest write the pointer reached while it is in flight waits in `scrubPending` (superseding older ones) and is sent when the recording position moves (`landScrub`, from the store effect and `setCurrentRRTicks`). A move to the tick the debugger is already at is never left in flight (no landing would be seen). Landing state is in plain fields (`lastTicks`, `scrubHeld`) and the effect calls `landScrub` under `untrack`, because sending reads `store.session` — a dependency the effect must not take. The terminal and GPUI jump synchronously (`session.eventJump` waits for the move), so they need no such queue.
+- 2026-10-06 (PLAT-51 Part A): **THE TIMELINE PANEL IS GONE FROM ALL THREE
+  PRODUCTS, AND A SAVED LAYOUT STILL OPENS.** `PaneKind.paneTimeline` is
+  removed; `LayoutSchemaVersion` is 6 and `layout_model.migrateV5toV6` drops a
+  `timeline` leaf (`RetiredPaneSpellings`) BEFORE decoding — a stack keeps its
+  other tabs (the active index slides to the tab that took its place), an
+  emptied container goes, a row/column left with one child collapses into it
+  (`validate` refuses single-child rows/columns), a docked Timeline and any
+  `beside: "timeline"` reference go. A CURRENT (v6) document naming it is
+  still `ldeUnknownPane`. The desktop retires `Content.Timeline` as
+  `RetiredTimelinePanel = 19` and sanitises saved GoldenLayout configs with
+  `index/config.dropRetiredPanels` (= `sanitizeLayoutConfig(..., retiredContentIds())`).
+  `TimelineVM` stays (its tick memo is still the position the panes follow).
+  `4` selects the Event Log (`kaSelectEventLog`, `select-event-log`).
+- 2026-10-06 (PLAT-51): **LIST SCROLLBARS ARE SCRUBBERS, ONE MODEL.**
+  `viewmodels/scrollbar_scrubber.nim` (model, `trackFractionAt` — the track's
+  ENDS are 0 and 1, not unit centres, or the last rows of a long list are
+  unreachable by a click — `windowFor`, `FetchCoalescer`). Projections:
+  terminal `tui/app/views/scrubber_track.nim` (event log / call trace /
+  terminal output's last column), GPUI `gpui/list_scrubber.nim` (the press is
+  routed BEFORE `clickCalltrace` in `main.windowPointer`, or a press on the
+  track is a jump to the call row under it), desktop
+  `viewmodel/views/list_scrubber_dom.nim` (DataTables' Scroller SCALES its
+  body: rowHeight = scrollHeight / total; a body scrolled to its END is
+  `first = total - visible`, not floor(scrollTop/rowH)). The engine answers
+  `ct/event-load` with `total` and `indexAtTick` (and an `indexOnly` mode), and
+  a calltrace section with `currentCallLineIndex` — the marks.
+  The terminal's screen readers (`screen_oracle/terminal_reading.nim`) strip
+  the scrubber column off an event-log row.
+- 2026-10-06 (PLAT-51): **TWO StateVMs IN A TUI SESSION.** `TuiSession.state`
+  (the one the Variables pane is read from) is NOT `session.session.stateVM`
+  (whose `watchExpressions` `ct/load-locals` sends). A watch edit must reach
+  BOTH (`pcWatch` in `tui_session.applyPaneClick`), or the engine evaluates
+  one list and the pane shows another.
+- 2026-10-06 (PLAT-51): changed values: the desktop had NO changed-value style;
+  now `.value-changed` (colors/ui/text/information/primary/hover, #60a5fa dark)
+  from `StateVM.isChanged`, the terminal's `srValueModified` on the VALUE (the
+  `[MOD]` badge is gone), GPUI's `StateChangedColour` — all over
+  `viewmodels/value_changes.nim` (moved from the TUI's diff_highlighter; anchor
+  = the recording's observed predecessor). The current-line mark is `▸`
+  (U+25B8, measured closer to the desktop SVG than `►`; never `▶`), ASCII `>`.
+  The terminal's menus end in an inert "Terminal menu: Shift + right-click"
+  row and every Shift-modified mouse report is left to the terminal; GPUI
+  opens its menu on Shift + right-click. `CT_SPECS_DIR` points the
+  spec-reading suites at a `codetracer-specs` checkout when the workspace
+  sibling predates the `spec/` layout.
+- 2026-10-07: RECORDING AT THE `repro.lock` PINS WITHOUT TOUCHING THE SIBLINGS. A
+  sibling `codetracer-trace-format-nim` older than the pin (`types.nim`:
+  `CtfsVersion* = 4`) makes every recorder that links it write CTFS v4, which
+  the engine refuses ("reads versions 5 and 6"), and makes every Nim suite that
+  READS a container (`request-panel/*`, through `config.nims`'s sibling path)
+  fail with "mapping root block 9223372036854775818 ... is out of bounds" (the
+  v5 block-flag bit read by a v4 reader). Export the three pinned trees side by
+  side with `git archive` (`codetracer-python-recorder`,
+  `codetracer-trace-format`, `codetracer-trace-format-nim` — the Rust crates
+  find each other by `../../codetracer-trace-format` and the writer's build.rs
+  finds the Nim repo as the trace-format's sibling), `cargo build --release
+  --lib` the Python recorder there, copy the `.so` over the package's
+  `codetracer_python_recorder.cpython-312-*.so`, and point a fresh
+  `--system-site-packages` venv at it with a `.pth` plus a
+  `codetracer-python-recorder` console script (`ct record` finds the recorder
+  ON PATH, `paths.pythonRecorderExe`). The JS recorder likewise
+  (`npx napi build --release` for `crates/recorder_native/index.node`, then
+  `npm run build`, with a COPY of the sibling's `node_modules` — its workspace
+  links are relative). Nim readers: `CODETRACER_TRACE_FORMAT_NIM_SRC=<pinned>/src`
+  overrides the sibling (`config.nims` adds it after the sibling path).
+- 2026-10-07: `CODETRACER_JS_RECORDER_PATH` MEANS TWO THINGS. The Nim suites
+  (`test_plat50_column_ops_vm`), `ct`'s GUI fixtures (`js-trace-fixture.ts`) and
+  `value-origin-fixtures.ts` read it as the CLI FILE
+  (`packages/cli/dist/index.js`); `scripts/materialize-recording.sh` reads it
+  as the repository ROOT and appends `packages/cli/dist/index.js`. No single
+  value satisfies both.
+- 2026-10-07: ALT + A CHARACTER IN A REAL TERMINAL. A terminal sends Alt+T as
+  `ESC t` in one write. `host/terminal_driver.feed` used to drop the ESC and
+  deliver `t` (the seek-to-tick key), so the read-only editor's Alt+T
+  tracepoint chord never arrived from a real terminal while the in-process
+  suite — which hands `"\x1bt"` to `handleToken` directly — passed. The framer
+  now delivers `ESC <printable>` as ONE token; `runtime.handleToken` treats an
+  Alt chord the runtime does not bind (`caretTakesAltChord`) as the character
+  alone, which is what the framer delivered before. Only a real-PTY suite
+  (`test_plat51_pty`) can see framing.

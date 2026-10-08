@@ -55,6 +55,12 @@ type
   MouseEventKind* = enum
     mekPress
     mekRelease
+    mekMotion
+      ## PLAT-47: the pointer moved with a button held (xterm's button-event
+      ## tracking, `?1002`, which `host/terminal_driver` enables beside
+      ## SGR-1006). Bit 32 of the button code; the low bits still name the
+      ## button that is down. What makes a drag's drop indication and ghost
+      ## follow the pointer rather than appear only at the release.
 
   MouseEvent* = object
     ## One decoded SGR-1006 report, in ZERO-BASED screen coordinates.
@@ -62,6 +68,9 @@ type
     button*: MouseButton
     row*: int
     col*: int
+    shift*, alt*, ctrl*: bool
+      ## PLAT-50: the modifiers held (SGR's bits 4, 8 and 16) — the desktop's
+      ## Ctrl+click on a line is "Jump to line" (`ui/editor`'s `onMouseDown`).
 
 proc decodeMouse*(token: string): (bool, MouseEvent) =
   ## Decode one SGR-1006 report. `(false, _)` when `token` is not one.
@@ -88,7 +97,10 @@ proc decodeMouse*(token: string): (bool, MouseEvent) =
   # The low two bits are the button; bits 2-4 are shift/alt/ctrl; bit 6 (64) is
   # the wheel flag. Modifiers are decoded away rather than rejected, so a
   # ctrl-click is still a click on the row it happened on.
-  event.kind = if final == 'M': mekPress else: mekRelease
+  event.kind =
+    if final == 'm': mekRelease
+    elif (code and 32) != 0: mekMotion
+    else: mekPress
   event.button =
     if (code and 64) != 0:
       if (code and 1) == 0: mbWheelUp else: mbWheelDown
@@ -98,6 +110,9 @@ proc decodeMouse*(token: string): (bool, MouseEvent) =
       of 1: mbMiddle
       of 2: mbRight
       else: mbOther
+  event.shift = (code and 4) != 0
+  event.alt = (code and 8) != 0
+  event.ctrl = (code and 16) != 0
   # 1-BASED ON THE WIRE. See this module's header.
   event.row = row - 1
   event.col = col - 1

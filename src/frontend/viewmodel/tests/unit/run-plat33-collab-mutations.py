@@ -131,11 +131,20 @@ TOUCHED = [COLLAB_TEXT, REDUCER, TEXT_OPS, TRANSACTION, OPS, GENERATOR,
 # — `ROOT / rel` resolves the `..` fine, and being in another repo is a reason
 # it can move without this repo's git status saying anything, not a reason to
 # leave it out.
+#
+# **AND IT MOVED.** `codetracer-specs` `1735345d` ("Adopt the pm layout:
+# spec/, milestones/, issues/") put the topical specification trees under
+# `spec/` and left no compatibility symlink, so the row below named a path that
+# no longer existed and this harness refused to run at all. The Nim side of
+# the same breakage is repaired once, in
+# `src/frontend/test_support/spec_documents.nim`, whose `SpecSubdir` is the
+# canonical statement of the layout; this is the one Python spelling of it and
+# it is deliberately not a second copy of that module.
 READ_ONLY_INPUTS = [
     ".github/workflows/codetracer.yml",
     "justfile",
     "ci/lib/test-lane-files.sh",
-    "../codetracer-specs/Architecture/Editor-ViewModel.md",
+    "../codetracer-specs/spec/Architecture/Editor-ViewModel.md",
     # Executed by this harness (it is in `SUITES`) but not mutated by it — see
     # `AUTHORITY` above for why it is digested here rather than in `TOUCHED`.
     AUTHORITY,
@@ -513,8 +522,24 @@ def write_source(rel, text):
     (ROOT / rel).write_text(text)
 
 
+SPECS_PREFIX = "../codetracer-specs/"
+
+
+def resolve_input(rel):
+    """Where a digested path is READ from. A path into the sibling
+    specification checkout is read from `CT_SPECS_DIR` when that names one —
+    the override `src/frontend/test_support/spec_documents.nim` honours for
+    the suites this harness runs, so the harness digests the document they
+    read. The control file keeps the canonical `../codetracer-specs/...`
+    spelling either way, so one recording compares in both environments."""
+    specs = os.environ.get("CT_SPECS_DIR", "")
+    if specs and rel.startswith(SPECS_PREFIX):
+        return Path(specs) / rel[len(SPECS_PREFIX):]
+    return ROOT / rel
+
+
 def digest(rel):
-    return hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
+    return hashlib.sha256(resolve_input(rel).read_bytes()).hexdigest()
 
 
 def declared_counts():
@@ -701,8 +726,17 @@ def install_restore_on_signal():
         signal.signal(sig, restore_active)
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main():
     global _ACTIVE
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--needle-scan", action="store_true")
     ap.add_argument("--record-control-hashes", action="store_true")

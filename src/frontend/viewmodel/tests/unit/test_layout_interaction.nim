@@ -142,13 +142,34 @@ proc withDocked(): Layout =
   let o = apply(stackedLayout(), cmdDock(paneEventLog, leBottom))
   if o.kind == loApplied: o.layout else: stackedLayout()
 
+proc dockedBesideStacks(): Layout =
+  ## `twoStacks` with Flow docked to the left: a docked source, and a
+  ## destination stack with TWO tabs, so it has three insertion slots.
+  let o = apply(twoStacks(), cmdDock(paneFlow, leLeft))
+  if o.kind == loApplied: o.layout else: twoStacks()
+
+proc threeInARow(): Layout =
+  ## Three panes with equal weights: the smallest shape in which a divider
+  ## drag and a one-node share resize are different gestures.
+  initLayout(row([pane(paneEditor, "Editor", weight = 1.0),
+                  pane(paneState, "State", weight = 1.0),
+                  pane(paneFlow, "Flow", weight = 1.0)]))
+
+proc rowOfColumns(): Layout =
+  ## A divider between two CONTAINERS, neither of which is a pane or a stack.
+  initLayout(row([
+    column([pane(paneEditor, "Editor"), pane(paneFlow, "Flow")], weight = 2.0),
+    column([pane(paneState, "State"), pane(paneCalltrace, "Call Trace")],
+           weight = 1.0)]))
+
 const
   AllShapes = ["bare pane", "two-pane row", "stacked", "two stacks",
                "deep tree", "with docked"]
 
   AllZones = [dzTabStrip, dzCentre, dzLeftEdge, dzRightEdge, dzTopEdge,
               dzBottomEdge, dzOutsideLeft, dzOutsideRight, dzOutsideTop,
-              dzOutsideBottom]
+              dzOutsideBottom, dzRootLeft, dzRootRight, dzRootTop,
+              dzRootBottom]
 
 proc shape(name: string): Layout =
   case name
@@ -173,6 +194,29 @@ proc panePathsAux(node: LayoutNode; prefix: string; acc: var seq[string]) =
 proc panePaths(l: Layout): seq[string] =
   result = @[]
   panePathsAux(l.tree, "", result)
+
+proc dividersAux(node: LayoutNode; prefix: string;
+                 acc: var seq[(string, int)]) =
+  ## Collects every (container path, divider index) of a tree. No `check`.
+  if node.isNil or node.kind == lnPane:
+    return
+  if node.kind in {lnRow, lnColumn}:
+    for d in 0 ..< node.children.len - 1:
+      acc.add((prefix, d))
+  for i, c in node.children:
+    dividersAux(c, (if prefix.len == 0: $i else: prefix & "/" & $i), acc)
+
+proc dividers(l: Layout): seq[(string, int)] =
+  result = @[]
+  dividersAux(l.tree, "", result)
+
+proc weightsOf(l: Layout; containerPath: string): seq[float] =
+  ## The effective weights of a container's children, read off the tree.
+  result = @[]
+  let c = nodeAtPath(l.tree, containerPath)
+  if not c.isNil:
+    for child in c.children:
+      result.add(effectiveWeight(child))
 
 proc renderTargets(targets: seq[DropTarget]): string =
   ## A stable rendering of a whole candidate list, for byte comparison.
@@ -278,7 +322,14 @@ suite "Interaction — separate from Layout, structurally (§4.1)":
     # Positive control (Verification-Harness-Traps §4): a walk that visited
     # nothing would report no offenders either.
     # PLAT-9 added `LayoutNode.contributedPane`, so the node's arity is 7.
-    check checkedFields == 7 + 5 + 3
+    # PLAT-48 added `DockedPane.beside` (the pane it was docked from),
+    # `DockedPane.weight` (its share there) and `DockedPane.besideBefore`
+    # (which side of `beside`), so the docked pane's is 8 — where it goes
+    # back to, never where it is drawn. PLAT-49 part B added `DockedPane.open`
+    # (docked OPEN, inline at its edge: a state a command sets, like
+    # `revealed` not persisted, and no extent — the binding derives the band),
+    # so the docked pane's arity is 9.
+    check checkedFields == 7 + 9 + 3
 
   test "layout_model names none of the transient types, and cannot":
     # `layout_interaction` imports `layout_model`; the reverse import is a
@@ -521,16 +572,19 @@ suite "dropTargetsFor — pure, and medium-free (§4.2)":
     checkpoint(perShape.join("  "))
     # A bare pane is the one shape that offers NOTHING, and the refusals that
     # make that true are asserted by kind in the next suite.
+    # PLAT-49 part B: every other shape offers the root split too
+    # (GoldenLayout's ground side areas).
     check perShape[0] == "bare pane=[]"
     check perShape[1] ==
-      "two-pane row=[intoStack,splitBefore,splitAfter,dockEdge]"
-    check perShape[2] == "stacked=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "two-pane row=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
+    check perShape[2] ==
+      "stacked=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     check perShape[3] ==
-      "two stacks=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "two stacks=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     check perShape[4] ==
-      "deep tree=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "deep tree=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     check perShape[5] ==
-      "with docked=[intoStack,splitBefore,splitAfter,dockEdge]"
+      "with docked=[intoStack,splitBefore,splitAfter,dockEdge,splitRoot]"
     for k in DropTargetKind:
       check k in everywhere
 
@@ -584,6 +638,7 @@ suite "dropTargetsFor — refusals asserted as refusals (§4.2)":
       lpDuplicatePane
     checkRefused apply(l, cmdSplitMove(paneEditor, paneEditor, saRow)),
       lpDuplicatePane
+    checkRefused apply(l, cmdSplitRootMove(paneEditor, saRow)), lpEmptyRoot
 
   test "a docked pane is split into the tree in one command":
     # PLAT-5 recorded this gesture as MISSING: `lcSplit` refused a docked
@@ -638,31 +693,91 @@ suite "dropTargetsFor — refusals asserted as refusals (§4.2)":
     checkRefused apply(both, cmdSplitMove(paneEditor, paneEventLog, saRow)),
       lpPaneBothPlacedAndDocked
 
-  test "a docked pane is never offered the first tab slot":
-    # `ahRestore` places the pane AFTER an anchor, so slot 0 has no anchor to
-    # sit after. It is not offered rather than offered-and-refused, because a
-    # highlighted zone that does nothing is worse than one that is not drawn.
-    let l = withDocked()
+  test "a docked pane is offered every tab slot, the first included":
+    # PLAT-5 recorded this as deliberate: `ahRestore` places AFTER an anchor,
+    # so a docked pane had no command reaching a stack's first slot, and slot
+    # 0 was not offered. The closing pass (2026-09-27) gave `lcMoveTab` a
+    # docked source — PLAT-4's `splitMovesPane` decision, applied to the tab
+    # strip — so the absence this case used to assert is now a presence, over
+    # EVERY slot, each one committed, applied, validated and landed where the
+    # slot says.
+    let l = dockedBesideStacks()
+    check l.placement(paneFlow) == plDocked
     var slots: seq[int] = @[]
     for zone in AllZones:
-      for target in dropTargetsFor(l, paneEventLog,
+      for target in dropTargetsFor(l, paneFlow,
                                    LayoutPointer(path: "1/0", zone: zone)):
-        if target.kind == dtIntoStack:
+        if target.kind == dtIntoStack and target.index notin slots:
           slots.add(target.index)
     checkpoint("slots offered to the docked pane: " & $slots)
-    check slots.len > 0
-    check 0 notin slots
-    # And the reason, from the algebra: there is no `beside` that lands first.
-    let first = DropTarget(kind: dtIntoStack, stackAnchor: paneState, index: 0,
-                           region: DropRegion(kind: drTabSlot, path: "1",
-                                              slot: 0))
-    let cmd = commandFor(l, paneEventLog, first)
-    check cmd.isSome
-    if cmd.isSome:
-      # It restores BESIDE State, which is slot 1 — the command exists, it
-      # just does not honour the index a slot-0 target would claim.
-      checkApplied apply(l, cmd.get)
-      check cmd.get.autoHideRestoreBeside == some(paneState)
+    check slots == @[0, 1, 2]
+    var landed = 0
+    for slot in slots:
+      let target = DropTarget(kind: dtIntoStack, stackAnchor: paneState,
+                              index: slot,
+                              region: DropRegion(kind: drTabSlot, path: "1",
+                                                 slot: slot))
+      let cmd = commandFor(l, paneFlow, target)
+      check cmd.isSome
+      if cmd.isNone:
+        continue
+      check cmd.get.kind == lcMoveTab
+      check cmd.get.moveIndex == slot
+      let outcome = apply(l, cmd.get)
+      checkpoint("slot " & $slot & " -> " & $outcome)
+      checkApplied outcome
+      if outcome.kind == loApplied:
+        checkValid outcome.layout
+        check outcome.layout.docked.len == 0
+        let stackNode = nodeAtPath(outcome.layout.tree, "1")
+        check stackNode.kind == lnStack
+        check stackNode.children.len == 3
+        check stackNode.children[slot].pane == paneFlow
+        check stackNode.activeIndex == slot
+        # The strip's title travels with the pane.
+        check stackNode.children[slot].title == "Flow"
+        inc landed
+    check landed == 3
+    # The body of a BARE pane is offered too, and makes a two-tab stack.
+    let bare = withDocked()   # Editor is a bare pane, Event Log is docked
+    var merges = 0
+    for target in dropTargetsFor(bare, paneEventLog,
+                                 LayoutPointer(path: "0", zone: dzCentre)):
+      if target.kind != dtIntoStack:
+        continue
+      inc merges
+      let cmd = commandFor(bare, paneEventLog, target)
+      check cmd.isSome
+      if cmd.isSome:
+        check cmd.get.kind == lcMergeIntoStack
+        let outcome = apply(bare, cmd.get)
+        checkApplied outcome
+        if outcome.kind == loApplied:
+          checkValid outcome.layout
+          let merged = nodeAtPath(outcome.layout.tree, "0")
+          check merged.kind == lnStack
+          check merged.children.len == 2
+          check merged.children[1].pane == paneEventLog
+          check merged.children[1].title == "Event Log"
+          check outcome.layout.docked.len == 0
+    check merges == 1
+    # What is STILL refused, by kind: an index past the end, a pane that is
+    # nowhere, and a layout already breaking §3.3 (placed AND docked).
+    checkRefused apply(l, cmdMoveTab(paneFlow, paneState, 3)),
+      lpIndexOutOfRange
+    checkRefused apply(l, cmdMoveTab(paneFlow, paneState, -1)),
+      lpIndexOutOfRange
+    checkRefused apply(l, cmdMoveTab(paneShell, paneState, 0)),
+      lpPaneNotPlaced
+    checkRefused apply(bare, cmdMergeIntoStack(paneShell, paneEditor)),
+      lpPaneNotPlaced
+    let both = Layout(tree: twoStacks().tree, docked: @[DockedPane(
+      pane: paneFlow, title: "Flow", edge: leLeft, order: 0)],
+      version: LayoutSchemaVersion)
+    checkRefused apply(both, cmdMoveTab(paneFlow, paneState, 0)),
+      lpPaneBothPlacedAndDocked
+    checkRefused apply(both, cmdMergeIntoStack(paneFlow, paneState)),
+      lpPaneBothPlacedAndDocked
 
   test "moving a tab out of its own stack at an index that does not exist is refused":
     let l = stackedLayout()
@@ -871,8 +986,8 @@ suite "commit — a command, or nothing (§4.3)":
           check outcome.layout.placement(paneEventLog) == plDocked
 
     # dtIntoStack — a DOCKED pane dragged back into a stack. The body of the
-    # tabbed region is "append a tab", which is the slot past the last one and
-    # the one `ahRestore` can name (slot 0 has no anchor to sit after).
+    # tabbed region is "append a tab", the slot past the last one; the
+    # command is `lcMoveTab` from the strip, the same one a placed pane gets.
     block:
       let l = withDocked()
       let gesture = beginDragTab(l, paneEventLog).get.hoverAt(
@@ -883,8 +998,9 @@ suite "commit — a command, or nothing (§4.3)":
       let produced = commit(l, gesture)
       check produced.isSome
       if produced.isSome:
-        check produced.get.kind == lcSetAutoHide
-        check produced.get.autoHideDirection == ahRestore
+        check produced.get.kind == lcMoveTab
+        check produced.get.movedPane == paneEventLog
+        check produced.get.moveIndex == 1
         let outcome = apply(l, produced.get)
         checkApplied outcome
         if outcome.kind == loApplied:
@@ -992,3 +1108,297 @@ suite "Interaction — resizing a split (§4.1)":
     check idle.proposeShare(twoPaneRow(), 0.5).kind == ikNone
     check idle.hoverAt(twoPaneRow(),
                        LayoutPointer(path: "0", zone: dzCentre)).kind == ikNone
+
+# ---------------------------------------------------------------------------
+# §4.3 — dragging ONE divider. PLAT-5 recorded "a resize moves one node's
+# share against its siblings, not a divider between two" as a documented
+# generalisation; the closing pass (2026-09-27) makes the divider drag a
+# gesture of its own, still committing ONE command.
+# ---------------------------------------------------------------------------
+
+suite "Interaction — dragging one divider (§4.3)":
+
+  test "a divider drag moves the two weights beside it and no other":
+    let l = threeInARow()
+    let before = $saveLayout(l)
+    # The divider between State (child 1) and Flow (child 2).
+    let started = beginResizeDivider(l, "", 1)
+    check started.isSome
+    if started.isSome:
+      check started.get.kind == ikResizingSplit
+      check started.get.node == "1"
+      check started.get.divider == some(ssAfter)
+      check started.get.proposed == @[1.0, 1.0, 1.0]
+      # Where the divider already is (two thirds along) commits none, and
+      # `apply` agrees that it is a no-op.
+      let still = started.get.proposeDivider(l, 2.0 / 3.0)
+      check still.proposed == @[1.0, 1.0, 1.0]
+      check commit(l, still).isNone
+      let stillCmd = pendingCommand(l, still)
+      check stillCmd.isSome
+      if stillCmd.isSome:
+        checkNoOp apply(l, stillCmd.get)
+      # The same move asked as a SHARE of the row: the neighbour absorbs it
+      # too, rather than every sibling.
+      let byShare = started.get.proposeShare(l, 0.5 / 3.0)
+      checkpoint($byShare)
+      check byShare.proposed.len == 3
+      check byShare.proposed[0] == 1.0
+      check abs(byShare.proposed[1] - 0.5) < 1e-9
+      check abs(byShare.proposed[2] - 1.5) < 1e-9
+      # Halfway along the row: State shrinks to half a share, Flow takes it.
+      let moved = started.get.proposeDivider(l, 0.5)
+      checkpoint($moved)
+      check moved.proposed == @[1.0, 0.5, 1.5]
+      let produced = commit(l, moved)
+      check produced.isSome
+      if produced.isSome:
+        check produced.get.kind == lcSetWeight
+        check produced.get.weightTarget == paneState
+        check produced.get.weightDivider == some(ssAfter)
+        check produced.get.weightLevel == 0
+        let outcome = apply(l, produced.get)
+        checkApplied outcome
+        if outcome.kind == loApplied:
+          checkValid outcome.layout
+          # Every weight is the proposal's — and the one NOT beside the
+          # divider is exactly what it was, which is the whole claim.
+          check weightsOf(outcome.layout, "") == moved.proposed
+          check weightsOf(outcome.layout, "")[0] == 1.0
+    # The SAME share asked of the one-node resize moves the far pane too:
+    # this is the difference, measured rather than described.
+    let shared = beginResize(l, paneState)
+    check shared.isSome
+    if shared.isSome:
+      let proposal = shared.get.proposeShare(l, 0.5 / 3.0)
+      let cmd = commit(l, proposal)
+      check cmd.isSome
+      if cmd.isSome:
+        let o = apply(l, cmd.get)
+        checkApplied o
+        if o.kind == loApplied:
+          let w = weightsOf(o.layout, "")
+          let editorShare = w[0] / (w[0] + w[1] + w[2])
+          checkpoint("editor share after a one-node resize: " & $editorShare)
+          check abs(editorShare - 1.0 / 3.0) > 0.01
+    # And none of it touched the committed layout.
+    check $saveLayout(l) == before
+
+  test "a divider between stacks, or between whole containers, is draggable":
+    # `beginResize` names a PANE and refuses a tab; a divider is named by its
+    # container and index, so the two sides may be stacks or nested rows —
+    # the default layout's tabbed region included. The command stays
+    # pane-named: the node is `weightLevel` levels above a pane's leaf.
+    for spec in [("two stacks", 1), ("row of columns", 1), ("deep tree", 0),
+                 ("default", 0)]:
+      let l =
+        case spec[0]
+        of "two stacks": twoStacks()
+        of "row of columns": rowOfColumns()
+        of "deep tree": deepTree()
+        else: initLayout(defaultReplayLayout())
+      let container =
+        if spec[0] == "default": "1/1" else: ""
+      let started = beginResizeDivider(l, container, 0)
+      checkpoint(spec[0] & " @ '" & container & "'")
+      check started.isSome
+      if started.isNone:
+        continue
+      let moved = started.get.proposeDivider(l, 0.3)
+      let produced = commit(l, moved)
+      check produced.isSome
+      if produced.isNone:
+        continue
+      checkpoint($produced.get)
+      check produced.get.weightLevel == spec[1]
+      let outcome = apply(l, produced.get)
+      checkApplied outcome
+      if outcome.kind == loApplied:
+        checkValid outcome.layout
+        let after = weightsOf(outcome.layout, container)
+        check after.len == moved.proposed.len
+        for i in 0 ..< after.len:
+          check abs(after[i] - moved.proposed[i]) < 1e-9
+        # The divider sits where it was asked to: 30% along the container.
+        var total = 0.0
+        for w in after:
+          total += w
+        check abs(after[0] / total - 0.3) < 1e-9
+
+  test "every divider of every shape: cancelled untouched, committed as proposed":
+    # The sweep form of the two claims above, over every divider the fixture
+    # shapes have and five positions each — including both ends, which clamp.
+    var swept = 0
+    var noOps = 0
+    for name in AllShapes:
+      let l = shape(name)
+      let bytes = $saveLayout(l)
+      let treeBefore = l.tree
+      for (path, d) in dividers(l):
+        let started = beginResizeDivider(l, path, d)
+        check started.isSome
+        if started.isNone:
+          continue
+        for position in [-1.0, 0.0, 0.25, 0.75, 2.0]:
+          let gesture = started.get.proposeDivider(l, position)
+          checkpoint(name & " / '" & path & "' #" & $d & " @ " & $position &
+                     " -> " & $gesture)
+          # Exactly two entries may differ, and their sum is conserved.
+          var changed = 0
+          for i in 0 ..< gesture.proposed.len:
+            if gesture.proposed[i] != started.get.proposed[i]:
+              inc changed
+            check gesture.proposed[i] > 0.0
+          check changed in {0, 2}
+          let pending = pendingCommand(l, gesture)
+          check pending.isSome
+          if pending.isNone:
+            continue
+          let outcome = apply(l, pending.get)
+          let produced = commit(l, gesture)
+          check produced.isSome == (outcome.kind == loApplied)
+          check outcome.kind != loRefused
+          if outcome.kind == loNoOp:
+            inc noOps
+          if outcome.kind == loApplied:
+            checkValid outcome.layout
+            let after = weightsOf(outcome.layout, path)
+            for i in 0 ..< after.len:
+              check abs(after[i] - gesture.proposed[i]) < 1e-9
+          inc swept
+          discard cancel(gesture)
+      check $saveLayout(l) == bytes
+      check l.tree == treeBefore
+    checkpoint("divider proposals swept: " & $swept & ", no-ops: " & $noOps)
+    # Positive controls: the fixture shapes have SEVEN dividers between them
+    # (0 + 1 + 1 + 1 + 3 + 1), five positions each — and at least one
+    # position is where its divider already sits (the two-pane row's 3:1 is
+    # 0.75), so the `loNoOp` arm of the agreement above actually ran.
+    check swept == 7 * 5
+    check noOps > 0
+
+  test "there is no divider in a stack, past either end, or at the root":
+    let l = stackedLayout()
+    check beginResizeDivider(l, "", 0).isSome
+    check beginResizeDivider(l, "", 1).isNone       # past the last divider
+    check beginResizeDivider(l, "", -1).isNone
+    check beginResizeDivider(l, "1", 0).isNone      # a stack: tabs share
+    check beginResizeDivider(l, "0", 0).isNone      # a pane
+    check beginResizeDivider(l, "7", 0).isNone      # nothing
+    check beginResizeDivider(barePane(), "", 0).isNone
+    # And the command's own refusals, by kind.
+    checkRefused apply(l, cmdSetDivider(paneEditor, 1.0, ssBefore)),
+      lpNoDivider                                   # the first child's left
+    checkRefused apply(l, cmdSetDivider(paneState, 1.0, ssAfter)),
+      lpNoDivider                                   # a tab, at level 0
+    checkApplied apply(l, cmdSetDivider(paneState, 0.5, ssBefore, level = 1))
+    checkRefused apply(l, cmdSetDivider(paneState, 1.0, ssAfter, level = 3)),
+      lpNoDivider                                   # climbed past the root
+    checkRefused apply(l, cmdSetDivider(paneEditor, 1.0, ssAfter, level = -1)),
+      lpNoDivider
+    checkRefused apply(l, cmdSetDivider(paneEditor, 0.0, ssAfter)),
+      lpNegativeWeight
+    checkRefused apply(l, cmdSetDivider(paneEditor, 4.0, ssAfter)),
+      lpNegativeWeight                              # squeezes State to 0
+    checkRefused apply(l, cmdSetDivider(paneShell, 1.0, ssAfter)),
+      lpPaneNotPlaced
+    # A divider proposal on anything but a divider drag changes nothing.
+    let shared = beginResize(l, paneEditor)
+    check shared.isSome
+    if shared.isSome:
+      check shared.get.proposeDivider(l, 0.5).proposed == shared.get.proposed
+    check noInteraction().proposeDivider(l, 0.5).kind == ikNone
+
+  test "a region holding only contributed panes is dragged from its neighbour's side":
+    # Every command but PLAT-9's contributed pair is typed on `PaneKind`, so a
+    # contributed leaf cannot anchor `cmdSetDivider`. The SAME divider is
+    # named from the other side instead, and moves the same two weights.
+    let l = initLayout(row([contributedPaneNode("acme.graph", "Graph"),
+                            pane(paneState, "State")]))
+    let started = beginResizeDivider(l, "", 0)
+    check started.isSome
+    if started.isSome:
+      let moved = started.get.proposeDivider(l, 0.25)
+      let produced = commit(l, moved)
+      check produced.isSome
+      if produced.isSome:
+        check produced.get.weightTarget == paneState
+        check produced.get.weightDivider == some(ssBefore)
+        let outcome = apply(l, produced.get)
+        checkApplied outcome
+        if outcome.kind == loApplied:
+          let after = weightsOf(outcome.layout, "")
+          check abs(after[0] - moved.proposed[0]) < 1e-9
+          check abs(after[1] - moved.proposed[1]) < 1e-9
+
+suite "the drop indication — what a front-end draws (PLAT-47)":
+
+  test "every hovered drop maps to the region it would occupy, with no measurement":
+    # GoldenLayout's drop zone, logically: a split shows the HALF on the
+    # drop's side, a join the stack's tab strip at the insertion slot, a join
+    # onto a bare pane the whole pane, a dock the layout edge. Swept over every
+    # shape, source, pane path and zone, so each mapping is exercised where it
+    # can occur.
+    var seen: set[DropIndicationKind] = {}
+    var checked = 0
+    for name in AllShapes:
+      let l = shape(name)
+      for source in l.allPanes():
+        let started = beginDragTab(l, source)
+        if started.isNone:
+          continue
+        for path in panePaths(l):
+          for zone in AllZones:
+            let moved = started.get.hoverAt(l, LayoutPointer(path: path,
+                                                             zone: zone))
+            let ind = dropIndicationOf(moved)
+            seen.incl ind.kind
+            check ind.source == source
+            if moved.hover.isNone:
+              check ind.kind == diNone
+              continue
+            inc checked
+            let t = moved.hover.get
+            case t.kind
+            of dtSplitBefore, dtSplitAfter:
+              check ind.kind == diSplitHalf
+              check ind.path == t.region.path
+              check ind.axis == t.axis
+              # The half is on the side the pointer's edge strip names.
+              check t.region.kind == drNodeStrip
+              check ind.side == t.region.side
+            of dtIntoStack:
+              if t.region.kind == drTabSlot:
+                check ind.kind == diTabSlot
+                check ind.slot == t.region.slot
+              else:
+                check ind.kind == diWholeNode
+              check ind.path == t.region.path
+            of dtDockEdge:
+              check ind.kind == diLayoutEdge
+              check ind.side == t.edge
+            of dtSplitRoot:
+              # PLAT-49 part B: a root split shows the band along that edge
+              # of the whole layout (GoldenLayout's ground side area).
+              check ind.kind == diRootBand
+              check ind.side == t.edge
+              check t.region.kind == drRootBand
+    checkpoint("hovered drops checked: " & $checked)
+    check checked > 100
+    check seen == {diNone, diSplitHalf, diTabSlot, diWholeNode, diLayoutEdge,
+                   diRootBand}
+
+  test "nothing is indicated when nothing is dragged":
+    let l = shape(AllShapes[1])
+    check dropIndicationOf(noInteraction()).kind == diNone
+    let resizing = beginResize(l, l.allPanes()[0])
+    if resizing.isSome:
+      check dropIndicationOf(resizing.get).kind == diNone
+
+  test "a DropIndication carries no measurement":
+    # PLAT-5's purity law, for the value a renderer reads: its only integer is
+    # an index into the model (the tab slot), and its only string a path.
+    var names: seq[string] = @[]
+    for name, _ in DropIndication().fieldPairs:
+      names.add name
+    check names == @["kind", "source", "path", "side", "slot", "axis"]

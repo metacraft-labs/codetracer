@@ -109,11 +109,16 @@ proc readUploadPassword(encrypt: bool, passwordStdin: bool,
 proc shareUrlFor(baseUrl, orgSlug, artifactId: string): string =
   ## The link a user hands to somebody else.
   ##
+  ## ``baseUrl`` is the resolved API base.  The link is issued on
+  ## ``remote_config.shareBaseUrlFor(baseUrl)`` (``shareLinkFor``): the
+  ## product's web address for the default API base, the base itself for an
+  ## overridden one.
+  ##
   ## `/{orgSlug}/{artifactId}/download` — the same grammar
   ## `artifact.parseArtifactShareUrl` reads back, and deliberately carrying no
   ## kind (AS-1 §5.3): the id is unique across kinds, so the service resolves
   ## the kind from the id and no link already handed to a user needs rewriting.
-  baseUrl.strip(chars = {'/'}) & "/" & orgSlug & "/" & artifactId & "/download"
+  shareLinkFor(baseUrl, orgSlug, artifactId)
 
 proc reviewDatasetTarget*(datasetDir: string, tenantId: string,
     artifactId: string,

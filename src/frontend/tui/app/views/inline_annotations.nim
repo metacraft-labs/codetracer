@@ -82,7 +82,7 @@ const
   AnnotationGap* = 2
     ## Cells between the end of the code and the start of the annotation.
 
-  AnnotationStyle* = CellStyle(fg: "bright_black", italic: true)
+  AnnotationStyle* = CellStyle(role: srChromeMuted, italic: true)
     ## Muted and italic, so the annotation reads as commentary rather than as
     ## source. Distinct from the comment token class (`bright_black`, italic)
     ## ONLY by... nothing — and that is deliberate: an inline annotation IS a
@@ -249,3 +249,37 @@ proc annotationSpan*(lineText: string; values: openArray[Annotation];
     return StyledSpan(text: "", style: AnnotationStyle)
   let fitted = fitAnnotation(text, annotationRoom(codeWidth, renderedCells))
   StyledSpan(text: fitted, style: AnnotationStyle)
+
+type
+  AnnotationTarget* = object
+    ## PLAT-50 (K36): one value of a drawn annotation, as a click target —
+    ## the cells its `name: value` occupies, from the annotation's first cell.
+    startCell*, endCell*: int
+      ## `[startCell, endCell)`, relative to the annotation's start.
+    value*: Annotation
+
+proc annotationTargets*(lineText: string; values: openArray[Annotation];
+                        codeWidth, renderedCells: int): seq[AnnotationTarget] =
+  ## Where each value of `annotationSpan`'s text is, by the same arithmetic:
+  ## `/* ` then `name: value` pairs joined by `, `, cut where the span was cut
+  ## (a value the `…` replaced is not a target; one the cut runs through is,
+  ## over the cells still drawn).
+  let selected = annotationsForLine(lineText, values)
+  let full = annotationText(selected)
+  if full.len == 0:
+    return
+  let fitted = fitAnnotation(full, annotationRoom(codeWidth, renderedCells))
+  if fitted.len == 0:
+    return
+  let drawn = cellWidth(fitted) -
+              (if fitted != full: cellWidth(AnnotationEllipsis) else: 0)
+  var at = cellWidth(AnnotationOpen)
+  for i, v in selected:
+    if i > 0:
+      at += cellWidth(AnnotationSeparator)
+    let w = cellWidth(v.name & ": " & v.value)
+    if at >= drawn:
+      break
+    result.add AnnotationTarget(startCell: at, endCell: min(at + w, drawn),
+                                value: v)
+    at += w

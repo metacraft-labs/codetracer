@@ -86,7 +86,16 @@ SCENARIOS = "src/tests/visual/scenarios.json"
 # subjects only.
 SUITE = "src/frontend/gpui/tests/test_cross_renderer_visual_alignment.nim"
 
-TOUCHED = [LEAVES, ANSWERS, VOCAB, BRIEF, SCENARIOS, SUITE]
+# `PLAT35-F5` / `PLAT35-F12`'s suite, graded by the N-arms below. A SECOND
+# graded suite and not a second harness: §14 is explicit that a second harness
+# IMPLEMENTATION is the trap, and the lock, the needle scan, the digest gate,
+# the derived `because` and the verdicts are all reused verbatim here. It is in
+# `TOUCHED` for §16c's reason, the same one `SUITE` is there for — a change
+# touching only the suite invalidates every arm graded against it while
+# producing no overlap signal in a harness whose TOUCHED names subjects only.
+FOOTER_SUITE = "src/frontend/gpui/tests/test_plat35_event_log_footer.nim"
+
+TOUCHED = [LEAVES, ANSWERS, VOCAB, BRIEF, SCENARIOS, SUITE, FOOTER_SUITE]
 
 CONTROL_HASHES = HARNESS_DIR / "plat35-visual-mutation-control.sha256"
 BECAUSE_FILE = HARNESS_DIR / "plat35-visual-mutation-because.json"
@@ -95,7 +104,8 @@ NIMCACHE = REPO / "build" / "plat35mut"
 
 # The `gpui-shell` lane's flags, from `ci/lib/test-lane-files.sh`: no
 # `isonim_tui` flags at all, which is that lane's whole point.
-SUITE_CMD = {SUITE: ["--path:src/frontend/viewmodel"]}
+SUITE_CMD = {SUITE: ["--path:src/frontend/viewmodel"],
+             FOOTER_SUITE: ["--path:src/frontend/viewmodel"]}
 
 
 @dataclass
@@ -133,9 +143,19 @@ ARMS = [
     # ------------------------------------------------------------------
     # THE PANE MUTATION — the milestone's own gate, half one
     # ------------------------------------------------------------------
+    # RE-AIMED 2026-10-03, `PLAT35-F3`. The claim and the mutation are
+    # unchanged; the loop they are aimed at gained an argument.
+    # `renderEditorRow` now takes the horizontal scroll offset, so the call
+    # spans two lines and the old one-line needle occurs ZERO times — which
+    # the needle scan caught by name (`M1.find: occurs 0 time(s)`) rather
+    # than letting the arm run unaimed.
     Arm("M1", LEAVES,
-        "  for row in surface.rows:\n    r.appendChild(parent, renderEditorRow(r, row, widest))",
-        "  for row in surface.rows:\n    discard row",
+        "  for i, row in surface.rows:\n"
+        "    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,\n"
+        "                                          scroll.leftCols,\n"
+        "                                          (if row.line == surface.caretLine:\n"
+        "                                             surface.caretColumn else: 0)))",
+        "  for i, row in surface.rows:\n    discard row",
         SUITE,
         "stepped-editor / editor-row-count",
         CTL[LEAVES][0], CTL[LEAVES][1],
@@ -301,7 +321,7 @@ ARMS = [
     # action. The needle quotes the sequence, so it had to follow.
     Arm("M9", SCENARIOS,
         '      "viewport": "laptop",\n      "operations": [\n        { "kind": "stepIn", "times": 21 },\n        { "kind": "stepOut", "times": 1 }\n      ],',
-        '      "viewport": "wide",\n      "operations": [\n        { "kind": "stepIn", "times": 6 }\n      ],',
+        '      "viewport": "wide",\n      "operations": [\n        { "kind": "stepIn", "times": 5 }\n      ],',
         SUITE,
         "THE POPULATION: the six scenarios are pairwise distinct on screen",
         CTL[SCENARIOS][0], CTL[SCENARIOS][1],
@@ -311,6 +331,105 @@ ARMS = [
         "one screen is eight cases wearing a six. This arm makes "
         "`returned-calltrace` a second `stepped-editor`, and the pairwise "
         "distinctness case is the only thing in the suite that can see it."),
+
+    # ------------------------------------------------------------------
+    # `PLAT35-F5` AND `PLAT35-F12` — the event log's footer and header
+    # ------------------------------------------------------------------
+    # Graded against FOOTER_SUITE rather than SUITE. Every one of these five
+    # mutations leaves the pane LOOKING right: a footer is still drawn, the
+    # header is still marked, the rule is still declared. That is the point —
+    # N1 in particular is the arm-C shape, satisfying "a footer exists and
+    # carries a number" while violating the only thing the number is for.
+    Arm("N1", LEAVES,
+        "  r.appendChild(parent, eventLogFooterElement(\n"
+        "    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,\n"
+        "    vm.totalEventCount.val))\n",
+        "  r.appendChild(parent, eventLogFooterElement(\n"
+        "    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,\n"
+        "    vm.eventRows.val.len))\n",
+        FOOTER_SUITE,
+        "the published total is the ViewModel's, NOT the rows in hand",
+        CTL[LEAVES][0], CTL[LEAVES][1],
+        "**THE ARM-C ARM: A FOOTER THAT COUNTS THE ROWS IN HAND.** The "
+        "footer still exists, still carries `data-event-log-total`, still "
+        "reads `Rows N to M of T` — and `T` is now the length of the window "
+        "instead of `store.eventLog.recordsTotal`. On the capture scenario "
+        "the whole log IS six rows, so this mutation is INVISIBLE in every "
+        "frame and in any check that asserts a footer is present and holds a "
+        "number; it is caught only because the suite seeds a window where the "
+        "two answers differ. `Event-Log-Pane.md`'s Requirement is what it "
+        "violates: *'no single window can supply them: they describe the "
+        "whole log and the whole filtered log, not the rows in hand'*. It is "
+        "the §7a defect this campaign exists to catch — a rendered affordance "
+        "that does not do what it advertises."),
+
+    Arm("N2", LEAVES,
+        "  let first = windowStart + 1\n",
+        "  let first = 1\n",
+        FOOTER_SUITE,
+        "a paged window names its own offset, so the FIRST field moves too",
+        CTL[LEAVES][0], CTL[LEAVES][1],
+        "THE FOOTER FORGETS WHICH WINDOW IT IS SHOWING. `Rows 1 to 246 of "
+        "1000` for the window at offset 240: the count is right, the range "
+        "is a lie, and a pane that has paged reports the first page forever. "
+        "Aimed at the pure formula rather than at the renderer, so a reader "
+        "can tell a wrong FIELD from a wrong NUMBER — N1 breaks the third "
+        "field and this breaks the first."),
+
+    Arm("N3", LEAVES,
+        '      r.setStyle(cell, "font-weight", "bold")\n',
+        '      r.setStyle(cell, "font-weight", "normal")\n',
+        FOOTER_SUITE,
+        "the header's cells differ from a data row's in COLOUR and in WEIGHT",
+        CTL[LEAVES][0], CTL[LEAVES][1],
+        "THE HEADER KEEPS ITS COLOUR AND LOSES ITS WEIGHT, which is half of "
+        "`PLAT35-F12` restored. The finding's words are *'the same weight AND "
+        "colour as a data row'*, and the two halves are separable: this arm "
+        "exists because a case that checked only the colour would have passed "
+        "on a header the pixel readers called *'nearly "
+        "indistinguishable'* for its weight. The rule and the marker are "
+        "untouched, so every existence check still passes."),
+
+    Arm("N4", LEAVES,
+        "  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]\n",
+        "  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimaryHover][dmDark]\n",
+        FOOTER_SUITE,
+        "the header carries the rule, in the PUBLISHED token",
+        CTL[LEAVES][0], CTL[LEAVES][1],
+        "THE RULE IS DRAWN IN THE WRONG PUBLISHED TOKEN — the HOVER variant "
+        "of the very token it should take, `#818181` instead of `#565656`. "
+        "Still a token, still from the generated table, still a plausible "
+        "edit, and the rule still draws; only the value is wrong. The case "
+        "catches it because it compares the RENDERED colour against "
+        "`DesignTokenHex[dtColorsUiBorderPrimary][dmDark]` directly rather "
+        "than against the renderer's own constant.\n\n"
+        "**THIS ARM WAS AIMED SOMEWHERE ELSE FIRST AND SURVIVED, WHICH IS "
+        "WHY IT IS AIMED HERE.** It originally replaced the token lookup with "
+        "the LITERAL `\"#565656\"` — the token's own correct dark value — on "
+        "the theory that a case comparing the constant to the table would "
+        "catch it. It did not: both sides of that comparison are the same six "
+        "characters, so the arm graded **OK**. A hex literal equal to the "
+        "token is a SOURCE property that no assertion over the render plan "
+        "can see, and the suite now says so in the case rather than implying "
+        "a check it does not have."),
+
+    Arm("N5", LEAVES,
+        '  r.setAttribute(result, EventLogFooterAttribute, "true")\n',
+        '  r.setAttribute(result, EventLogFooterAttribute, "true")\n'
+        '  r.setAttribute(result, "data-column-index", "0")\n',
+        FOOTER_SUITE,
+        "the footer carries NO column index, so a click cannot re-sort the log",
+        CTL[LEAVES][0], CTL[LEAVES][1],
+        "THE FOOTER BECOMES A HEADER CELL AS FAR AS THE CLICK DISPATCHER IS "
+        "CONCERNED. `window_clicks.nim:211-217` classifies a press inside the "
+        "`eventLog` context as `gcpEventHeader` when the element carries a "
+        "`data-column-index` and its parent carries no `data-row-index` — "
+        "which is exactly what this adds — so clicking the row count would "
+        "RE-ORDER THE EVENT LOG. Nothing about the drawing changes, which is "
+        "why no pixel reading and no text check can see it. It is "
+        "`PLAT35-F7`'s clause inverted: not an affordance that fails to do "
+        "what it advertises, but an element that does something it never "
+        "advertised."),
 ]
 
 # §10.3's rejection list. A `find` or `control_find` holding any of these is
@@ -652,7 +771,16 @@ def grade(selected: list[Arm]) -> int:
     return 0 if killed == len(results) else 1
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--needle-scan", action="store_true")
     ap.add_argument("--record-control-hashes", action="store_true")

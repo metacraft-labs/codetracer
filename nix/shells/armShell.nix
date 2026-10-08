@@ -193,8 +193,16 @@ mkShell {
   # ldLibraryPaths = "${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib";
 
   shellHook = ''
-    # copied from https://github.com/NixOS/nix/issues/8034#issuecomment-2046069655
-    ROOT_PATH=$(git rev-parse --show-toplevel)
+    # ROOT_PATH is the CodeTracer checkout this shell prepares: the git
+    # toplevel of the current directory when it is a CodeTracer checkout, and
+    # "" otherwise, in which case nothing is written (see ci-base.nix).
+    ROOT_PATH="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -z "$ROOT_PATH" ] \
+      || [ ! -f "$ROOT_PATH/nix/shells/ci-base.nix" ] \
+      || [ ! -f "$ROOT_PATH/ci/dev/should-install-git-hooks.sh" ]; then
+      echo "codetracer dev shell: $PWD is not inside a CodeTracer checkout; skipping repository setup." >&2
+      ROOT_PATH=""
+    fi
 
     # copied case for libstdc++.so (needed by better-sqlite3) from
     # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
@@ -232,7 +240,9 @@ mkShell {
     # ===========================================================================
     # Sibling repo detection (unified script)
     # ===========================================================================
-    source "$ROOT_PATH/scripts/detect-siblings.sh" "$ROOT_PATH"
+    if [ -n "$ROOT_PATH" ]; then
+      source "$ROOT_PATH/scripts/detect-siblings.sh" "$ROOT_PATH"
+    fi
 
     # ui-test shell hooks
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
@@ -240,22 +250,28 @@ mkShell {
 
     # workaround to reuse devshell node_modules for tup build
     # make sure it's always updated
-    rm -rf $ROOT_PATH/node_modules
-    ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
+    if [ -n "$ROOT_PATH" ]; then
+      rm -rf "$ROOT_PATH/node_modules"
+      ln -s "$NIX_NODE_PATH" "$ROOT_PATH/node_modules"
+    fi
 
     # Active build output dir; see ci-base.nix for the rationale. macOS/arm
     # defaults to the reprobuild build (src/build-<config>-repro). We do not
     # export CODETRACER_PREFIX so ct self-resolves from its own location and a
     # binary run from any build dir uses that dir's assets.
-    _ct_config="''${CODETRACER_CONFIG:-debug}"
-    case "$(uname -s)" in
-      Darwin) _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro" ;;
-      *)      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}" ;;
-    esac
-    export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
-    export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-    export PATH=$PATH:$CODETRACER_BUILD_DIR/bin
-    export PATH=$PATH:$ROOT_PATH/node_modules/.bin/
+    if [ -n "$ROOT_PATH" ]; then
+      _ct_config="''${CODETRACER_CONFIG:-debug}"
+      case "$(uname -s)" in
+        Darwin) _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro" ;;
+        *)      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}" ;;
+      esac
+      export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
+      export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+      export PATH=$PATH:$ROOT_PATH/node_modules/.bin/
+    fi
+    if [ -n "''${CODETRACER_BUILD_DIR:-}" ]; then
+      export PATH=$PATH:$CODETRACER_BUILD_DIR/bin
+    fi
     export CODETRACER_DEV_TOOLS=1
     export CODETRACER_LOG_LEVEL=INFO
 

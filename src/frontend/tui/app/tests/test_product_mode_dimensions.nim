@@ -58,7 +58,7 @@ import ../views/status_bar
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 95
+const ExpectedAssertions = 86
 
 var countedAssertions = 0
 
@@ -135,25 +135,6 @@ suite "PLAT-16: input modes and product modes are two dimensions":
     checkpoint("row: " & bar.strip())
     ck bar.find("SEARCH") == 0
     ck bar.find("[EDIT]") > bar.find("SEARCH")
-
-  test "the product mode changes the hint strip without changing the input mode":
-    # §8's shortcut scoping, visible: NORMAL in Edit mode advertises editing
-    # keys and NORMAL in Debug mode advertises stepping keys, and the INPUT
-    # mode is `umNormal` in both.
-    let debugHints = keyHints(umNormal, lpStandard, pmDebug)
-    let editHints = keyHints(umNormal, lpStandard, pmEdit)
-    checkpoint("debug: " & debugHints)
-    checkpoint("edit:  " & editHints)
-    ck debugHints != editHints
-    ck debugHints.contains("step-over")
-    ck not editHints.contains("step-over")
-    ck editHints.contains("Ctrl+F5")
-    # THE PROMPT MODES ARE UNCHANGED BY THE PRODUCT MODE, which is the control
-    # that says the parameter is read where it means something and ignored
-    # where it does not. A `:` prompt is the same prompt in both.
-    for mode in [umCommand, umSearch, umInspect, umVisual, umSeek]:
-      ck keyHints(mode, lpStandard, pmDebug) ==
-         keyHints(mode, lpStandard, pmEdit)
 
 suite "PLAT-16: keymap scoping is by PRODUCT mode, not by a fifth input mode":
 

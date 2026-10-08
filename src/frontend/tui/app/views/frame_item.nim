@@ -154,16 +154,16 @@ const
   UserBadge* = "usr"
   LibraryBadge* = "lib"
 
-  ExecutionFrameStyle* = CellStyle(fg: "bright_yellow", bold: true)
-  InspectedFrameStyle* = CellStyle(fg: "cyan", bold: true)
-  GroupMarkerStyle* = CellStyle(fg: "magenta", bold: true)
-  FrameIndexStyle* = CellStyle(fg: "bright_black")
-  UserBadgeStyle* = CellStyle(fg: "green")
-  LibraryBadgeStyle* = CellStyle(fg: "bright_black")
-  UserFrameNameStyle* = CellStyle(fg: "white")
-  LibraryFrameNameStyle* = CellStyle(fg: "bright_black")
-  FrameLocationStyle* = CellStyle(fg: "blue")
-  InspectedRowBackground* = "bright_black"
+  ExecutionFrameStyle* = CellStyle(role: srGutterExecutionPointer)
+  InspectedFrameStyle* = CellStyle(role: srGutterInspectionPointer)
+  GroupMarkerStyle* = CellStyle(role: srFrameGroupMarker)
+  FrameIndexStyle* = CellStyle(role: srChromeMuted)
+  UserBadgeStyle* = CellStyle(role: srFrameUserBadge)
+  LibraryBadgeStyle* = CellStyle(role: srFrameLibrary)
+  UserFrameNameStyle* = CellStyle(role: srChromeText)
+  LibraryFrameNameStyle* = CellStyle(role: srFrameLibrary)
+  FrameLocationStyle* = CellStyle(role: srFrameLocation)
+  InspectedRowBackground* = srSurfaceSelection
     ## THE INSPECTION CURSOR'S ROW HIGHLIGHT.
     ##
     ## Deliberately NOT `gutter.ExecutionLineBackground` (`blue`), which the

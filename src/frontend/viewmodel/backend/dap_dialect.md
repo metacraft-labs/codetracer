@@ -328,7 +328,7 @@ So the wire form is now a **name**:
   (`"call"`, `"diff"`), a leaf module with no imports so `common_types` and the
   IsoNim ViewModel layer can both hold it and a Rust test can read it as text.
 * Rust `FlowMode` serialises to that name and parses it, still accepting the
-  legacy ordinal inbound (the Karax renderer serialises the canonical Nim enum
+  legacy ordinal inbound (the renderer serialises the canonical Nim enum
   through `toJs`, and several Rust suites write `"flowMode": 0`) but rejecting
   an out-of-range one instead of defaulting.
 * `flow_vm.nim` routes its three-valued view granularity through one named

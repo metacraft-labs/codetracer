@@ -10,6 +10,7 @@ name: BEAM Materialized Trace DAP Flow
 
 on:
   pull_request:
+    branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
       - 'libs/ct-dap-client/**'
@@ -167,6 +168,10 @@ jobs:
             bash -lc './ci/test/beam-flow-cross-repo.sh verify_beam_flow_zero_test_guard'
 
       - name: Run BEAM (Elixir + Erlang) DAP flow integration
+        # Graceful skipping OFF: this lane provisions the tools its tests need,
+        # so a missing one is a failure here, not a skip that passes.
+        env:
+          CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |
           set -euo pipefail
           export TMPDIR="${{ github.workspace }}/../tmp"

@@ -48,9 +48,10 @@ fn create_javascript_flow_config() -> FlowTestConfig {
 #[test]
 fn test_javascript_flow_integration() {
     if test_harness::find_js_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: JavaScript recorder not found \
-             (set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder)"
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_javascript_flow_integration",
+            "the JavaScript recorder is not built",
+            "check out codetracer-js-recorder and run `just build` there, or set CODETRACER_JS_RECORDER_PATH",
         );
         return;
     }

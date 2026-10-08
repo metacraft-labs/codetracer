@@ -35,6 +35,8 @@ when not defined(ctWeb):
   import panel_transfer
 
 import kdom except Location
+from ../headless_app/layout_model import sharedDefaultDocked, DockedPane
+from ../headless_app/desktop_panes import PaneContent
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
@@ -1230,6 +1232,26 @@ proc swapLayout*(data: Data, config: GoldenLayoutResolvedConfig) =
   finally:
     data.ui.isLoadingLayout = false
 
+proc unpinAllPanels*(data: Data) =
+  ## Put every panel pinned to a screen edge back into the GoldenLayout tree.
+  ##
+  ## PLAT-45's desktop reset calls this BEFORE it swaps in the shared default:
+  ## a pinned panel lives outside the tree, so a swap alone would leave it
+  ## pinned AND bring a second copy of it back with the default arrangement.
+  ## Unpinned first, it is an ordinary tab of the outgoing tree, and the swap
+  ## replaces it like every other pane. `unpinPanel` owns the reparenting and
+  ## the auto-hide bookkeeping; this only walks a copy of the list, because
+  ## each unpin removes its panel from `autoHideState.panels`.
+  if autoHideState.isNil or data.ui.isNil or data.ui.layout.isNil:
+    return
+  let pinned = autoHideState.panels
+  for panel in pinned:
+    try:
+      unpinPanel(data.ui.layout, panel)
+    except CatchableError:
+      cwarn "layout: reset could not unpin '" & $panel.title & "': " &
+        getCurrentExceptionMsg()
+
 proc closeLayoutTab*(data: Data, content: Content, id: int) =
   ## A TAB WITH NO COMPONENT BEHIND IT IS CLOSED, NOT AN ERROR.
   ##
@@ -1572,7 +1594,6 @@ proc mountPaneForState(state: GoldenItemState) =
       Content.Calltrace,
       Content.State,
       Content.EventLog,
-      Content.Timeline,
       Content.Build,
       Content.BuildErrors,
       Content.SearchResults,
@@ -1672,15 +1693,6 @@ proc mountPaneForState(state: GoldenItemState) =
 
       if state.content == Content.Calltrace:
         tryMountIsoNimCalltrace()
-
-      # The Timeline was the worst-placed of the five and the reason nobody
-      # reported it: `TimelineComponent` has no `register` method at all. It
-      # falls back to the base method in `types.nim`, which only assigns
-      # `self.api`, so the timeline was the one pane with NO mount call on
-      # the component-registration path — its only callers were the two
-      # `initTimelineVM*` procs. This arm is its first.
-      if state.content == Content.Timeline:
-        tryMountIsoNimTimelinePanel()
 
       # EventLog and TerminalOutput are the same shape as Calltrace: both
       # mount from `register` and nowhere else, and both are in
@@ -2602,12 +2614,20 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       title: cstring
       label: cstring   ## The component label used as DOM id and renderer key
 
-    let standaloneAutoHidePanels: seq[AutoHidePanelDef] = @[
-      (content: Content.Build,         title: cstring"BUILD",          label: cstring"buildComponent-0"),
-      (content: Content.BuildErrors,   title: cstring"PROBLEMS",       label: cstring"errorsComponent-0"),
-      (content: Content.SearchResults, title: cstring"FIND IN FILES", label: cstring"searchResultsComponent-0"),
-      (content: Content.RequestPanel,  title: cstring"REQUESTS",       label: cstring"requestPanelComponent-0"),
-    ]
+    # PLAT-48: THE FOOTER IS THE SHARED DEFAULT'S DOCKED PANES
+    # (`layout_model.sharedDefaultDocked`), translated through the one table
+    # that relates a `PaneKind` to the desktop's `Content` and component
+    # label (`desktop_panes.PaneContent`). The terminal and the GPUI window
+    # draw the same list as their bottom dock strip, so the three front-ends
+    # cannot disagree about which panels the footer holds.
+    var standaloneAutoHidePanels: seq[AutoHidePanelDef] = @[]
+    for docked in sharedDefaultDocked():
+      let row = PaneContent[docked.pane]
+      # `desktop_panes` names `common/types.Content`; this module's is the
+      # frontend's `include`d copy of the same enum, so the ordinal carries.
+      standaloneAutoHidePanels.add (content: Content(ord(row.content)),
+                                    title: cstring(docked.title),
+                                    label: cstring(row.label))
 
     let host = kdom.document.getElementById(cstring"auto-hide-standalone-host")
 

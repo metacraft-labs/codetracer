@@ -52,11 +52,15 @@ let
     propagatedBuildInputs = (old.propagatedBuildInputs or [ ]) ++ [ pythonEnv.pythonPackages.black ];
 
     # writer_nim normally asks nimble to fetch these dependencies. Nix builds
-    # are network-isolated, so use the exact nim-stew gitlink revision pinned
-    # in flake.lock; its stew directory also supplies the compatible results
-    # module used by trace-format-nim.
+    # are network-isolated, so supply both from flake inputs: the standalone
+    # `results` package that trace-format-nim requires, and the nim-stew
+    # gitlink revision for its `stew/*` imports. `${inputs.nim-stew}/stew` is
+    # deliberately NOT on the path: it would expose stew's older
+    # `stew/results.nim` as a second `results` module, whose `unsafeError`
+    # does not compile on the writer's `Result[void, E]` values under
+    # upstream Nim 2.2 (see `nim-results` in `flake.nix`).
     CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
-    CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-stew}/stew:${inputs.nim-stew}";
+    CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-results}:${inputs.nim-stew}";
   });
   pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black
@@ -312,6 +316,7 @@ with pkgs;
     ourPkgs.noir # codetracer-noir-recorder runtime
     ourPkgs.circom # codetracer-circom-recorder runtime
     ourPkgs.cargo-stylus # M28 (Stylus three-way parity)
+    ourPkgs.wazero # wasm + Stylus replay recorder (origin and flow tests)
     foundry # M28: cast / forge / anvil
 
     # Reprobuild MVP CLI — `just build-once`'s scripts/build-once.sh
@@ -555,7 +560,25 @@ with pkgs;
     export CPPFLAGS_wasm32_unknown_unknown="--target=wasm32 --sysroot=$(pwd)/src/db-backend/wasm-sysroot -isystem $(pwd)/src/db-backend/wasm-sysroot/include"
     export CFLAGS_wasm32_unknown_unknown="-I$(pwd)/src/db-backend/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
 
-    ROOT_PATH=$(git rev-parse --show-toplevel)
+    # ROOT_PATH is the CodeTracer checkout this shell prepares, and only ever
+    # that. Everything below that writes (the `node_modules` link, the
+    # tree-sitter parser) or points the build somewhere (CODETRACER_BUILD_DIR,
+    # CODETRACER_REPO_ROOT_PATH) is anchored to it. The checkout is the git
+    # toplevel of the current directory WHEN that toplevel is a CodeTracer
+    # checkout, recognised by files only this repository has at its top level.
+    # Entered from anywhere else (`nix develop /path/to/codetracer` run in the
+    # workspace root or a sibling repository) ROOT_PATH is empty and the
+    # repository setup is skipped: the shell must write nothing into a
+    # directory it does not own. A `node_modules` link planted at the workspace
+    # root is found by node and tsc from every repository below it.
+    # ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+    ROOT_PATH="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -z "$ROOT_PATH" ] \
+      || [ ! -f "$ROOT_PATH/nix/shells/ci-base.nix" ] \
+      || [ ! -f "$ROOT_PATH/ci/dev/should-install-git-hooks.sh" ]; then
+      echo "codetracer dev shell: $PWD is not inside a CodeTracer checkout; skipping repository setup." >&2
+      ROOT_PATH=""
+    fi
 
     # tree-sitter-nim's generated parser. BUILD-CRITICAL, and it lives here --
     # in the shellHook BOTH shells compose -- rather than in main.nix's
@@ -593,7 +616,7 @@ with pkgs;
     # point: three hand-rolled `tree-sitter generate` copies already exist
     # (three powershell jobs in codetracer.yml, and nix/packages/default.nix),
     # and a fourth is how the next path gets missed.
-    if [ -f "$ROOT_PATH/libs/tree-sitter-nim/grammar.js" ]; then
+    if [ -n "$ROOT_PATH" ] && [ -f "$ROOT_PATH/libs/tree-sitter-nim/grammar.js" ]; then
       ROOT_DIR="$ROOT_PATH" bash "$ROOT_PATH/non-nix-build/ensure_tree_sitter_nim_parser.sh"
     fi
 
@@ -631,8 +654,10 @@ with pkgs;
     # so a stale local one never wins.
     export NIX_NODE_PATH="${ourPkgs.node-modules-derivation}/bin/node_modules"
     export NODE_PATH="$NODE_PATH:$NIX_NODE_PATH"
-    rm -rf $ROOT_PATH/node_modules
-    ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
+    if [ -n "$ROOT_PATH" ]; then
+      rm -rf "$ROOT_PATH/node_modules"
+      ln -s "$NIX_NODE_PATH" "$ROOT_PATH/node_modules"
+    fi
 
     # Playwright (M5 + codetracer's own TS e2e).
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
@@ -655,13 +680,15 @@ with pkgs;
     # uses that dir's assets. CODETRACER_PREFIX stays an explicit override for
     # packaged installs. See codetracer-specs Architecture/
     # Build-Outputs-And-Path-Resolution.md.
-    _ct_config="''${CODETRACER_CONFIG:-debug}"
-    case "$(uname -s)" in
-      Darwin) _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro" ;;
-      *)      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}" ;;
-    esac
-    export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
-    export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+    if [ -n "$ROOT_PATH" ]; then
+      _ct_config="''${CODETRACER_CONFIG:-debug}"
+      case "$(uname -s)" in
+        Darwin) _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro" ;;
+        *)      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}" ;;
+      esac
+      export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
+      export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+    fi
 
     # Materialized Python origin-DAP tests must not depend on a runner-global
     # Python or an adjacent checkout. This absolute interpreter contains the
@@ -687,8 +714,12 @@ with pkgs;
     export CODETRACER_PYTHON_VERSION="${pythonEnv.version}"
     export CODETRACER_PYTHON_ABI_TAG="${pythonEnv.abiTag}"
 
-    export PATH=$CODETRACER_BUILD_DIR/bin:$PATH
-    export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
+    if [ -n "''${CODETRACER_BUILD_DIR:-}" ]; then
+      export PATH=$CODETRACER_BUILD_DIR/bin:$PATH
+    fi
+    if [ -n "$ROOT_PATH" ]; then
+      export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
+    fi
     export CODETRACER_DEV_TOOLS=0
     export CODETRACER_LOG_LEVEL=INFO
 
@@ -698,6 +729,11 @@ with pkgs;
     # via the `.envrc` override. `scripts/build-once.sh` calls `repro`
     # which reads these.
     export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
+    # The package catalog `repro.nim`'s `uses: "sqlite3"` resolves from (see
+    # the `reprobuild-packages` input in flake.nix). When it is set, reprobuild
+    # consults no other location, so this is also the catalog every lane of
+    # this shell agrees on.
+    export REPROBUILD_PACKAGES_ROOT=${inputs.reprobuild-packages}
     export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
     export BLAKE3_PREFIX=${pkgs.libblake3}
     export RUNQUOTA_SRC=${inputs.runquota}

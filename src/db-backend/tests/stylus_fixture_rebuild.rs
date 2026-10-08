@@ -84,19 +84,9 @@ fn rebuild_stylus_ctfs_fixture() {
         std::fs::read_to_string(dir.join("trace_metadata.json")).expect("read committed trace_metadata.json");
     let legacy: LegacyMeta = serde_json::from_str(&meta_json).expect("parse trace_metadata.json");
 
-    // Load the committed recorded source paths, if present.
-    let mut paths: Vec<String> = std::fs::read_to_string(dir.join("trace_paths.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    for path in &mut paths {
-        if path.ends_with("test-programs/stylus_fund_tracker/src/lib.rs") {
-            *path = source_path.clone();
-        }
-    }
-    if paths.is_empty() {
-        paths.push(source_path);
-    }
+    // The source paths need no list of their own: `meta.dat` carries none
+    // (`paths.dat` is the only list), and a legacy `events.log` names each
+    // path in a `Path` event, rewritten to this checkout above.
 
     // 3. Build the canonical binary `meta.dat`. M-REC-1.5 made `meta.dat`
     //    the only metadata form a `.ct` may carry; it requires a
@@ -110,7 +100,7 @@ fn rebuild_stylus_ctfs_fixture() {
         args: legacy.args,
         workdir: env!("CARGO_MANIFEST_DIR").to_string(),
         recorder_id: "evm".to_string(),
-        paths,
+        ext_flags: 0,
         mcr: None,
         replay_launch: None,
         layout_snapshot: None,

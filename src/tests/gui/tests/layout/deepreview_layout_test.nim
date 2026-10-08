@@ -56,7 +56,8 @@ const StandardPanelContentIds = [
   CalltraceContentId,       # 6  — CALLTRACE
   AgentActivityContentId,   # 35 — AGENT ACTIVITY
   EventLogContentId,        # 8  — EVENT LOG
-  TimelineContentId,        # 19 — TIMELINE
+  # (19, TIMELINE, stood here: PLAT-51 removed the panel; the bundled
+  # default no longer places it.)
   TerminalOutputContentId,  # 24 — TERMINAL OUTPUT
 ]
 

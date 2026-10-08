@@ -86,23 +86,38 @@
 ## naming another front-end and draws the refusal, so the field has a
 ## PRODUCTION READER and the arm has something to break.
 
-import std/[json, strutils]
+import std/[json, math, os, sets, strutils, tables]
+from std/unicode import runeLen, runeSubstr
 
 import isonim_gpui/renderer
+# `PLAT35-F3`: the pane's own padding, so the scrollbar's track covers
+# exactly the span the rows do. `chrome.ChromePaddingPx`'s own comment says
+# why the number lives there — "two spellings of one number is §30" — and an
+# absolutely-placed overlay has to subtract the same one `stylePaneBox` adds.
+import ../chrome
 import ./shell
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_binding
+# `PLAT35-F4` x PLAT-50: the two attributes `window_clicks` dispatches a
+# VARIABLE press on. Imported from where the vocabulary declares them rather
+# than spelled again here, so this renderer and the binding cannot drift
+# about what a `Tree` row is called (§30) — see `renderState`'s `table`.
+from ../../view_vocabulary/fact_reader import ViewIdAttribute,
+                                              ViewKindAttribute
 import ../../view_vocabulary/editor_surface
 import ../../../common/view_vocabulary
 import ../../../common/value_presentation
-# The native timeline's ViewModel (PLAT-41) comes through the SDK facade, like
-# every other ViewModel a front-end consumes. `codetracer_embed` already
-# imports and exports `timeline_vm` (for the same reason as `origin_chain_vm`),
-# so naming `viewmodels/timeline_vm` here reached past the facade for nothing
-# and tripped `ci/test/sdk-facade-boundary.sh` (consumer-facade-only). The
-# siblings `shell.nim` and `edit_arm.nim` import it exactly this way.
+# Every ViewModel comes through the SDK facade, like every other ViewModel a
+# front-end consumes (`ci/test/sdk-facade-boundary.sh`, consumer-facade-only).
+# The siblings `shell.nim` and `edit_arm.nim` import it exactly this way.
 import codetracer_embed
 import isonim/core/[signals, computation]
+# PLAT-47 B1: the editor is classified by the TERMINAL'S tokenizers (the
+# tree-sitter-free half of its highlighter) and painted from the one editor
+# theme — the same `TokenClass`, the same generated tokens.
+import ../../tui/app/syntax/lexical
+import ../../tui/app/theme/editor_theme
+import ../../styles/generated/design_tokens
 
 export shell, editor_surface
 # `value_presentation` is re-exported because the BUDGETS are this medium's
@@ -184,13 +199,49 @@ const
 
   TextRoleAttribute* = "data-ct-text-role"
   TextMetricAttribute* = "data-ct-text-metric"
-  ExecutionRowBand* = "#4f4f4f"
-    ## The execution row's band, drawn as the desktop editor draws it: the
-    ## `.on` line class's `ON_BG_COLOR` in `styles/default_dark_theme.styl`.
-    ## PLAT-39's reader locates the execution line GEOMETRICALLY by exactly
-    ## this band (`vision_producer`'s editor reading); until 2026-09-23 GPUI
-    ## drew none, which PLAT-39 filed as its GAP 3 and which left the pointer
-    ## readable on screen only as a glyph OCR cannot reliably find.
+  ExecutionRowBand* = DesignTokenHex[dtEditorThemeExecutionLine][dmDark]
+    ## The execution row's band, drawn as the desktop's Monaco draws its
+    ## current line: `editor-theme/executionLine` (measured `#404040` in
+    ## Dark), across the CODE COLUMN to the editor's right edge and NOT under
+    ## the line numbers (PLAT-47 B1). Until then GPUI drew the old `.on` line
+    ## class's `#4f4f4f` under the whole row, gutter included. PLAT-39's reader
+    ## locates the execution line GEOMETRICALLY by a band; it now reads it on
+    ## the code column (`EditorCodeColumnAttribute`).
+  EditorGround* = DesignTokenHex[dtEditorThemeGround][dmDark]
+    ## The editor's ground — Monaco's `editor.background` (PLAT-47 B1).
+  EditorLineNumberColour* = DesignTokenHex[dtEditorThemeLineNumber][dmDark]
+  EditorTextColour* = DesignTokenHex[dtEditorThemeRuleDefault][dmDark]
+    ## The editor's default foreground (PLAT-51: the omnibox's text in every
+    ## state — Commands-And-Omnibox.md, "Omnibox colours on every front-end").
+  EditorSelectionColour* = DesignTokenHex[dtEditorThemeSelection][dmDark]
+    ## The editor's selection ground (the omnibox's selected result).
+  EditorActiveLineNumberColour* =
+    DesignTokenHex[dtEditorThemeActiveLineNumber][dmDark]
+    ## The resting and the active (execution line's) line numbers.
+  EditorCodeColumnAttribute* = "data-ct-code-column"
+    ## Marks a row's CODE COLUMN — everything right of the gutter, grown to
+    ## the pane's right edge — which is what carries the execution band.
+  EditorTokenClassAttribute* = "data-ct-token-class"
+    ## A code run's `TokenClass`, so a plan reader can check the class a run
+    ## was painted as without re-deriving the colour.
+  GutterLaneAttribute* = "data-ct-gutter-lane"
+    ## **WHICH LANE OF THE GUTTER A RUN IS** — `pointer`, `mark` or `number`
+    ## (`GutterRunKind`). PLAT-35 / `PLAT35-F13`, `PLAT35-F14`.
+    ##
+    ## The gutter is drawn as three runs rather than one text node because the
+    ## MARK has to be painted a colour of its own: before this it sat inside
+    ## the one gutter span and therefore took the line-number colour, which is
+    ## the whole of `PLAT35-F13`'s first half. The attribute exists so that
+    ## *which* run carries the mark is readable from the render plan — the
+    ## structural instrument `--pixels-out` corresponds to — instead of being
+    ## inferred from a glyph's position in a string.
+    ##
+    ## A NEW attribute NAME on purpose. Every census this tree already takes
+    ## counts `data-ct-text-role`, `data-ct-text-metric` and `data-ct-token`,
+    ## and all three stay on the ONE gutter span, so splitting the run moves
+    ## none of those numbers (checked: `test_plat35_text_faces.nim`'s
+    ## `rolesIn(pane, trGutterLineNumber) == surface.rows.len` is still the row
+    ## count).
   TokenAttribute* = "data-ct-token"
     ## **PLAT-35's tier-3 rows for text metrics and token colour.**
     ##
@@ -223,12 +274,39 @@ const
     ## are comparable, and a front-end whose declared order drifts from the
     ## other's is a defect whether or not either enforces it.
 
-  ExecutionPointerGlyph* = "▶"
+  ExecutionPointerGlyph* = "▸"
+    ## PLAT-51: the execution pointer's TEXT spelling (what a plan reader
+    ## reads in the lane's `data-ct-pointer-mark` row); the window DRAWS the
+    ## desktop's own mark there (`ExecutionMarkSvg`, below), as
+    ## Native-Front-End-Parity.md §3 asks — "GPUI draws the desktop's mark
+    ## itself". It was `▶`.
   InspectionPointerGlyph* = "▷"
+  ExecutionMarkSvg* = staticRead("../../../public/resources/shared/highlight_line_arrow.svg")
+    ## The desktop's execution mark (`.gutter-highlight-active:before`'s
+    ## `HIGHLIGHT_LINE_ARROW`), byte for byte.
+  ExecutionMarkPx* = (w: 7, h: 9)
+    ## Drawn at the gutter's size: the desktop paints it `0.47em` across in a
+    ## ~14 px gutter row (`background-size: 0.47em`), keeping the SVG's
+    ## 8 : 10.13 proportion.
+  EditorCaretAttribute* = "data-ct-caret"
+    ## PLAT-51: on the read-only editor's caret, `<line>:<column>`.
+  PointerMarkAttribute* = "data-ct-pointer-mark"
+    ## On the pointer lane of the execution line: what the lane draws
+    ## (`highlight_line_arrow.svg`), so a plan reader can tell the desktop's
+    ## mark from a text glyph.
   BreakpointGlyph* = "●"
   BreakpointDisabledGlyph* = "○"
   TracepointGlyph* = "◆"
-  NoMarkGlyph* = " "
+  EmptyLaneGlyph* = "\u00A0"
+    ## **AN EMPTY LANE IS ONE NO-BREAK SPACE, and the no-break is load-bearing
+    ## rather than tidy.** Each lane is drawn as its own span (see
+    ## `GutterLaneAttribute`), so a lane whose whole text is one ASCII space is
+    ## a span whose ONLY character is a trailing space — and the text layout
+    ## drops a span's trailing ASCII spaces, which is the measurement
+    ## `GutterGap` below was written from. A dropped lane is a lane of zero
+    ## width, which would put the line numbers back at a different x per row
+    ## and re-open `PLAT35-F16`.
+  NoMarkGlyph* = EmptyLaneGlyph
     ## **THE MEDIUM'S OWN SPELLING, and it is not the terminal's.** The terminal
     ## draws its execution pointer as `-->` across three cells because a
     ## terminal's gutter is measured in cells and CTUI-5 fixed that width; a
@@ -266,31 +344,6 @@ proc slotPath(slot: DockPaneSlot): string =
     parts.add $i
   parts.join("/")
 
-const GpuiNominalLineHeightPx* = 20
-  ## **A NOMINAL line height, and the word is doing work.**
-  ##
-  ## A GPU surface's true line height is a font metric the renderer resolves at
-  ## PAINT time — which is the same fact that makes `gpuiRowBudget().cells` zero
-  ## rather than a number (`value_presentation/surfaces.nim` says so at the
-  ## function, and PLAT-21 recorded that two of the three front-ends decline
-  ## `Budget.cells` for this reason). So this constant is NOT a claim about what
-  ## the window will draw.
-  ##
-  ## It sizes exactly one thing: how many lines `SourceVM`'s FETCH WINDOW holds.
-  ## Being wrong makes the window hold too many lines or too few — a round trip
-  ## more or a few kilobytes more — and `GpuiSourceOverscan` absorbs the
-  ## difference in both directions. It can never make the editor draw a line it
-  ## does not have, because a line outside the window is a REQUEST rather than a
-  ## blank (`EditorRow.held`). A constant whose error is bounded by a cache miss
-  ## is a constant that may be nominal; one that decided what was on screen
-  ## would not be.
-
-func editorRowsForViewport*(heightPx: int): int =
-  ## How many source lines the editor's fetch window should hold for a window
-  ## `heightPx` tall. At least one, because a window of zero lines makes every
-  ## read a request, which reads exactly like a provider that never answers.
-  max(1, heightPx div GpuiNominalLineHeightPx)
-
 func markGlyph*(m: EditorMark): string =
   ## One function, so the glyph table and any assertion over it ask the same
   ## question, and so a fifth mark does not compile until it has one.
@@ -300,38 +353,294 @@ func markGlyph*(m: EditorMark): string =
   of emBreakpointDisabled: BreakpointDisabledGlyph
   of emTracepoint: TracepointGlyph
 
+var executionMarkFile {.threadvar.}: string
+
+proc executionMarkPath*(): string =
+  ## The desktop's mark written once to a file the shim's `img` can load.
+  if executionMarkFile.len == 0 or not fileExists(executionMarkFile):
+    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
+    createDir(dir)
+    executionMarkFile = dir / "highlight_line_arrow.svg"
+    writeFile(executionMarkFile, ExecutionMarkSvg)
+  executionMarkFile
+
 func pointerGlyph*(p: EditorPointer): string =
   case p
-  of eptNone: " "
+  of eptNone: EmptyLaneGlyph
   of eptInspection: InspectionPointerGlyph
   of eptExecution: ExecutionPointerGlyph
+
+func markColour*(m: EditorMark; inherited: string): string =
+  ## **THE COLOUR THE MARK GLYPH IS PAINTED. THE VALUES ARE THE ELECTRON
+  ## FRONT-END'S OWN**, read out of its gutter classes rather than chosen here
+  ## — the brief's §6: *"the Electron front-end is the reference; where the
+  ## reference is wrong, that is a change to the Electron front-end and to the
+  ## design system, never a licence for the GPUI front-end to differ"*.
+  ## Measured 2026-10-03 in `src/frontend/styles/components/text_editor.styl`:
+  ##
+  ##   `.gutter-breakpoint-enabled`   `background: colors-ui-text-error-primary`
+  ##   `.gutter-breakpoint-disabled`  `background: colors-ui-surface-primary-tertiary`
+  ##   `.gutter-trace`                `background: colors-ui-border-action`
+  ##
+  ## which are `dtColorsUiTextErrorPrimary`, `dtColorsUiSurfacePrimaryTertiary`
+  ## and `dtColorsUiBorderAction` in the generated token table — so the hex is
+  ## the design system's and this function names only the mapping. (Dark:
+  ## `#fca5a5`, `#333333`, `#6366f1`.)
+  ##
+  ## **WHY THIS FUNCTION EXISTS AT ALL — `PLAT35-F13`.** Until 2026-10-03 the
+  ## mark was one character inside the ONE gutter span, so it took the gutter's
+  ## colour, which is the line-number colour. Measured off this front-end's own
+  ## window plan at 1440x900 with `--replay-ops=setBreakpoint@1`: the marked
+  ## row's gutter run was `#575757` — byte-identical to the unmarked rows
+  ## around it — while the SAME node's `data-ct-token` already said
+  ## `gutter.breakpoint.enabled`. The declaration and the ink disagreed and the
+  ## declaration was the true one; this makes the ink follow it.
+  ##
+  ## `emNone` returns the colour the run would have INHERITED. A no-mark lane
+  ## is one blank cell with no ink, so no value is observable there, and
+  ## returning the inherited one keeps a run's declared colour equal to what is
+  ## drawn rather than publishing a colour nothing uses. An exhaustive `case`,
+  ## so a fifth mark does not compile until somebody has looked its class up.
+  ##
+  ## **`#333333` FOR A DISABLED BREAKPOINT IS DARKER THAN THE LINE NUMBERS
+  ## (`#575757`) AND IS RECORDED HERE RATHER THAN SILENTLY CORRECTED.** It is
+  ## the reference's value for a FILLED DISC on a panel ground, used here for a
+  ## `○` outline on the editor's `#282828`; and no scenario in
+  ## `src/tests/visual/scenarios.json` draws a disabled breakpoint or a
+  ## tracepoint, so a different value here would be a choice no lane in this
+  ## tree can grade. Per §6 that is a design-system question and not this
+  ## front-end's to re-decide.
+  case m
+  of emNone: inherited
+  of emBreakpoint: DesignTokenHex[dtColorsUiTextErrorPrimary][dmDark]
+  of emBreakpointDisabled:
+    DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark]
+  of emTracepoint: DesignTokenHex[dtColorsUiBorderAction][dmDark]
 
 const GutterGap* = "\u00A0\u00A0\u00A0\u00A0"
   ## Between the gutter and the code. A reader — a person, or PLAT-39's
   ## reader splitting the execution band into ink clusters — must be able to
   ## tell where the number ends and the code begins; `39def` could not.
   ##
-  ## FOUR NO-BREAK SPACES, both halves measured on the window frames: the text
-  ## layout drops a span's trailing ASCII spaces, and the face drawn is the
-  ## window's proportional default (the shim does not draw `font-family`, so
-  ## `gpuiMetricFor`'s mono is declared rather than applied — `PLAT35-VG1`),
-  ## where two no-break spaces measured ~9 px and `44` still merged into
-  ## `def`. Four clear the reader's 14 px cluster gap.
+  ## FOUR NO-BREAK SPACES, and the first half of that is measured on the window
+  ## frames: the text layout drops a span's trailing ASCII spaces, and two
+  ## no-break spaces measured ~9 px while `44` still merged into `def`. Four
+  ## clear the reader's 14 px cluster gap.
+  ##
+  ## **THE SECOND HALF OF THIS COMMENT USED TO BE FALSE AND IS CORRECTED HERE,
+  ## 2026-10-03.** It said the face drawn is *"the window's proportional
+  ## default (the shim does not draw `font-family`, so `gpuiMetricFor`'s mono
+  ## is declared rather than applied — `PLAT35-VG1`)"*. That stopped being true
+  ## on 2026-10-02: `chrome.MonoFontFamily` plus `main.applyTextFaces` set the
+  ## key `gpui_app.rs`'s `apply_styles_to_div` already read, and the gutter is
+  ## drawn in `Menlo` on this platform. `chrome.MonoFontFamily`'s own header
+  ## carries that measurement and names this parenthesis as the line to fix in
+  ## the pass that next edits this file; this is that pass.
+  ##
+  ## **EDITING IT MOVES THE `*-control.sha256` DIGESTS OF SIX MUTATION
+  ## HARNESSES THAT DIGEST THIS FILE BYTE-FOR-BYTE**, and each must be
+  ## RE-GRADED before its digest is re-recorded
+  ## (`Verification-Harness-Traps` §39). The six, measured at review on
+  ## 2026-10-03 against `c05d8443a` by parsing EVERY `*-control.sha256` in the
+  ## tree — not by reading the harnesses a reviewer happened to think of,
+  ## which is how the two earlier counts in this comment's history were both
+  ## wrong (an earlier draft said THREE, `chrome.nim`'s said FOUR; both
+  ## counted only the harnesses under `src/frontend/gpui/tests/` and missed
+  ## the three under `src/frontend/tui/tests/` that digest this file across
+  ## the medium boundary):
+  ##
+  ##   * `run-plat20-mutations.py`          `plat20-mutation-control.sha256`
+  ##   * `run-plat22-mutations.py`          `plat22-mutation-control.sha256`
+  ##   * `run-plat35-visual-mutations.py`   `plat35-visual-…`
+  ##   * `run-plat42-surface-mutations.py`  `plat42-surface-…`
+  ##   * `run-plat47-parity-mutations.py`   `plat47-parity-…`
+  ##   * `run-plat49-chrome-mutations.py`   `plat49-chrome-…`
+  ##
+  ## `run-plat21-mutations.py` does NOT, which both earlier drafts had right:
+  ## its subjects are `gpui_binding` / `fact_reader` / `pane_views` /
+  ## `gpui_gaps` / `mappings` / `surfaces` / `terminal_binding`.
+  ##
+  ## **ALL SIX WERE GREEN AT THE PARENT COMMIT, SO EVERY ONE OF THEM WAS RUN
+  ## RATHER THAN REASONED ABOUT.** §39 forbids re-recording without
+  ## re-grading; it does not license leaving a lane red unexamined. Graded at
+  ## `c05d8443a` on aarch64-darwin, 2026-10-03:
+  ##
+  ##   * `plat20` — **14 of 14 KILLED.** It grades on this host, so it was
+  ##     RE-GRADED against these bytes and its digest IS re-recorded in this
+  ##     commit.
+  ##   * `plat22` — REFUSES: *"`src/build-debug/bin/replay-server` does not
+  ##     exist, so every case that spawns a replay-server would fail on an
+  ##     UNMUTATED tree and every arm would score MIS-ATTRIBUTED."* The
+  ##     harness is right to refuse and it mutated nothing.
+  ##   * `plat35-visual` — **0 of 9 KILLED, all nine DID-NOT-COMPILE**,
+  ##     including the `.md` and `.json` subjects, which no mutation could
+  ##     have broken. Its suite reads
+  ##     `../codetracer-specs/Testing/Cross-Renderer-Visual-Alignment.md` at
+  ##     run time and the sibling now keeps that file under `spec/Testing/`.
+  ##     Recording its digest would certify a harness that cannot kill
+  ##     anything.
+  ##   * `plat42-surface` — ABORTS: baseline
+  ##     `test_gpui_editing_surface.nim` is RED on
+  ##     `countedAssertions == ExpectedAssertions` (it needs `/proc/self/statm`,
+  ##     which macOS has not).
+  ##   * `plat47-parity`, `plat49-chrome` — *"REFUSING TO RUN:
+  ##     `REPLAY_SERVER_BIN` is not exported"*. Their needle scans pass
+  ##     (`0 problems`); only the environment is missing.
+  ##
+  ## So FIVE of the six digests are STALE AS OF THIS COMMIT, deliberately, and
+  ## each is owed a re-grade by a pass that can run it: a built
+  ## `src/build-debug/bin/replay-server` and an exported `REPLAY_SERVER_BIN`
+  ## (plat22, plat47, plat49), the specs sibling at the path the suite reads
+  ## (plat35-visual), and a green editing-surface baseline (plat42-surface).
+  ## None of them is a defect in this change, and none is re-recorded blind.
+
+const GutterLaneGap* = " "
+  ## **ONE CELL BETWEEN THE LANES AND THE NUMBER FIELD, DECLARED rather than
+  ## inherited from whichever lane happens to be empty.** `PLAT35-F13`'s second
+  ## half: until 2026-10-03 `●` abutted its digit with ZERO cells while `▶` had
+  ## one, and the one was an accident of ordering — the mark lane sat between
+  ## the pointer and the number, so an occupied POINTER lane was separated from
+  ## the digits by the empty MARK lane and an occupied mark lane was separated
+  ## by nothing at all. One lane, two paddings, neither of them chosen.
+  ##
+  ## It is the terminal's own `gutter.GutterGapCells = 1`, carried across
+  ## rather than re-picked.
+  ##
+  ## **ONE CELL AND NOT TWO** (there is no second gap BETWEEN the two lanes),
+  ## measured: every gutter cell costs about one column of code, and
+  ## `PLAT35-F3` (the editor clipped mid-token with no ellipsis) is what that
+  ## width cost. A second gap cell would buy separation between `▶` and `●`,
+  ## which differ in shape and now in colour, at the price of one more clipped
+  ## column on every row of every frame.
+  ##
+  ## **THE TWO NUMBERS THIS PARAGRAPH USED TO CARRY WERE BOTH WRONG AND ARE
+  ## CORRECTED HERE, 2026-10-03.** It said *"the GPUI editor pane is 276 px
+  ## wide at 1440x900 and a Menlo cell is ~8 px"*. Measured on the frames and
+  ## against `window_geometry` (see `EditorColumnPx` below for the method):
+  ## the editor pane is 348 px (body) / 324 px (inner) at 1440x900, and the
+  ## cell is 9.70 px. The CONCLUSION is unchanged — 324 / 9.70 is 33 columns,
+  ## so one gutter cell is still about one column — which is why
+  ## `PLAT35-F13` and `PLAT35-F14` are not reopened; their entries quote the
+  ## old figures and the ledger's `gate.iteration5` says so.
+  ##
+  ## `PLAT35-F3` is now CLOSED, by a horizontal scrollbar rather than by a
+  ## narrower gutter: the clipped columns are reachable, so the cell this gap
+  ## costs is no longer a column of text nobody can see.
+  ##
+  ## **ASCII AND NOT NO-BREAK**, unlike `GutterGap` and `EmptyLaneGlyph`: it is
+  ## the FIRST character of the number run and is followed by the padding and
+  ## the digits, so it is interior rather than trailing and the layout keeps
+  ## it. The byte budget is the reason to prefer the shorter spelling —
+  ## `tests/plat42_gutter.MaxLaneBytes` is 12, and `▶` + `●` + this gap + the
+  ## padding of a four-digit field is 3 + 3 + 1 + 3 = 10 bytes before the first
+  ## digit.
+
+type
+  GutterRunKind* = enum
+    ## The gutter's three runs, left to right. A KIND rather than a position,
+    ## so a plan reader asks which lane a run IS instead of counting glyphs
+    ## into a string.
+    grkPointer = "pointer"
+    grkMark = "mark"
+    grkNumber = "number"
+
+  GutterRun* = object
+    ## One painted run of one row's gutter.
+    kind*: GutterRunKind
+    text*: string
+    colour*: string
+      ## The hex this run is painted in. `pointer` and `number` carry the
+      ## gutter's own line-number colour — resting, or Monaco's active one on
+      ## the execution row — and `mark` carries `markColour`'s.
+
+func gutterRuns*(row: EditorRow; numberWidth: int): array[3, GutterRun] =
+  ## **THE GUTTER, AS THE THREE RUNS IT IS DRAWN AS:**
+  ## `<pointer><mark><lane gap><right-aligned number><GutterGap>`.
+  ##
+  ## `gutterText` is this function joined, so there is ONE definition of the
+  ## gutter's geometry and an assertion over the string and the rendering ask
+  ## the same question (`Verification-Harness-Traps` §30). It is the shape the
+  ## terminal's `gutter.gutterRow` already has — styled spans, always the same
+  ## ones, whatever the line — and for the same second reason: a gutter whose
+  ## run count changed when a breakpoint appeared would be a different tree per
+  ## row.
+  ##
+  ## **EACH LANE IS ONE RESERVED CELL AT A FIXED INDEX: pointer 0, mark 1.**
+  ## `PLAT35-F14`. Until 2026-10-03 the padding was consumed BEFORE the lanes
+  ## (`spaces(numberWidth - number.len) & pointer & mark & number`), so the
+  ## lanes' cell indices moved with the line number's digit count. Measured on
+  ## this front-end's own window plan, 1440x900, unstepped, with
+  ## `--replay-ops=setBreakpoint@1`:
+  ##
+  ##     line  1 (pointer)  [' ', '▶', ' ', '1']
+  ##     line  2 (mark)     [' ', ' ', '●', '2']
+  ##     line 10            [' ', ' ', '1', '0']
+  ##
+  ## The dot and the TENS DIGIT both at cell index 2, in one frame — so the
+  ## mark formed no column a reader could scan down, and on a two-digit row it
+  ## moved into the cell the pointer occupies on a one-digit row. The padding
+  ## now sits BETWEEN the lanes and the number, which is where the terminal
+  ## puts it: `padLeft(number, numberWidth)` INSIDE the number field, with the
+  ## lanes outside it.
+  ##
+  ## **THE LANES STAY LEFT OF THE NUMBER.** The pointer sat after the number
+  ## until 2026-09-23, where it OCR'd glued to the digits (`44p`) and PLAT-39's
+  ## gutter grammar — marker glyphs, then digits — rejected every execution row
+  ## it had located by its band. The desktop editor's gutter (`> 44`) and the
+  ## terminal's both draw the markers left of the digits. (The terminal's exact
+  ## order is `mark`, number, gap, `pointer`, gap — `gutter.gutterRow` — which
+  ## is NOT the `--> ● 44` this comment used to claim; the GPUI order keeps
+  ## both lanes before the number because its pointer is one glyph and its
+  ## gutter has no third field to spare.)
+  ##
+  ## **WHY THIS DOES NOT REDDEN PLAT-39 — QUOTED FROM ITS READER RATHER THAN
+  ## ARGUED.** The sentence this geometry used to be justified by, *"the only
+  ## wide gap on a row is `GutterGap`, the one a reader locates the gutter's
+  ## end by"*, is not what that reader does.
+  ## `screen_oracle/vision_producer.readGutterDigits` reads *"the shortest
+  ## prefix of the band's clusters (up to `MaxGutterClusters`) that parses as
+  ## `EditorGrammar`"*, with `MaxGutterClusters = 3` and its own comment
+  ## reading: *"Electron's gutter is two clusters (the arrow, ~30 px left of
+  ## the number, then the number); GPUI's is one (`▶ 44`). A THIRD COVERS A
+  ## MARK DRAWN IN ITS OWN LANE."* So the reader already admits three, and the
+  ## invariant it needs is that the gutter's ink forms AT MOST three clusters
+  ## and that no admissible prefix can end mid-number. Both still hold:
+  ##
+  ##   * the pointer and the mark are ADJACENT cells, so they never split from
+  ##     one another — the gutter's ink is at most TWO clusters (the lanes,
+  ##     then the number) where it was one;
+  ##   * the digits stay contiguous, so no cluster boundary falls inside a
+  ##     number;
+  ##   * `GutterGap` — the only thing between the number and the code — is
+  ##     untouched, so the number's cluster still cannot run into the code;
+  ##   * a prefix that stops at the lane cluster is REJECTED and retried,
+  ##     because `pane_grammar.parseGutterDigits` strips leading marker glyphs
+  ##     by CLASS (`uint8(text[i]) >= 0x80'u8`, which is every glyph in these
+  ##     lanes) and then requires at least one digit.
+  ##
+  ## Padded to the widest line number in the surface, so every row's code still
+  ## starts in one column (the gutter face is monospaced,
+  ## `gpuiMetricFor(trGutterLineNumber)`), and the total width is still a
+  ## constant for a surface — `2 + 1 + numberWidth + 4` cells, one more than
+  ## before — which is what keeps `PLAT35-F16` closed.
+  let number = $row.line
+  # THE GUTTER'S OWN COLOUR, UNCHANGED: Monaco's resting line number, and its
+  # active one on the execution line.
+  let own = if row.pointer == eptExecution: EditorActiveLineNumberColour
+            else: EditorLineNumberColour
+  [GutterRun(kind: grkPointer, text: pointerGlyph(row.pointer), colour: own),
+   GutterRun(kind: grkMark, text: markGlyph(row.mark),
+             colour: markColour(row.mark, own)),
+   GutterRun(kind: grkNumber,
+             text: GutterLaneGap & spaces(max(0, numberWidth - number.len)) &
+                   number & GutterGap,
+             colour: own)]
 
 func gutterText*(row: EditorRow; numberWidth: int): string =
-  ## `<padding><pointer><mark><number><gap>`, right-aligned as one unit.
-  ##
-  ## The lanes are LEFT of the number, as the desktop editor (`> 44`) and the
-  ## terminal (`--> ● 44`) draw them; the pointer sat after the number until
-  ## 2026-09-23, where it OCR'd glued to the digits (`44p`). The PADDING goes
-  ## in front of the lanes rather than between them and the number, so the
-  ## only wide gap on a row is `GutterGap` — the one a reader locates the
-  ## gutter's end by. Padded to the widest line number in the surface, so
-  ## every row's code starts in one column (the gutter face is monospaced,
-  ## `gpuiMetricFor(trGutterLineNumber)`).
-  let number = $row.line
-  spaces(max(0, numberWidth - number.len)) & pointerGlyph(row.pointer) &
-    markGlyph(row.mark) & number & GutterGap
+  ## One row's whole gutter as text — `gutterRuns` joined, never a second
+  ## spelling of it.
+  for run in gutterRuns(row, numberWidth):
+    result.add run.text
 
 func inlineValueText*(values: openArray[EditorValue]): string =
   ## `/* x: 42, str: "ready" */`, or "" for no values.
@@ -410,8 +719,350 @@ func gpuiTokenFor*(role: TextRole; row: EditorRow): string =
   of trValueName: "value.name.foreground"
   of trValueText: "value.text.foreground"
 
-proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
-                     numberWidth = 1): GpuiElement =
+func tokenColour*(cls: TokenClass): string =
+  ## The colour a code run of class `cls` is painted: the editor theme's rule
+  ## for the class's Monaco scope (`editor_theme.tokenClassToken`), Dark.
+  DesignTokenHex[tokenClassToken(cls)][dmDark]
+
+# ---------------------------------------------------------------------------
+# `PLAT35-F3` — THE EDITOR'S HORIZONTAL SCROLLBAR
+# ---------------------------------------------------------------------------
+#
+# **THE FINDING.** The editor clipped a source line mid-token at the pane's
+# right edge with no ellipsis, no wrap and no horizontal scrollbar, so the
+# rest of the statement was unrecoverable. Measured on this front-end's own
+# captures: every row carried `nowrap; overflow: hidden` and no
+# `text_overflow`, and no node anywhere was a scrollbar — 68 of 68
+# role-bearing nodes at 1920x1080 and 54 of 54 at 1440x900.
+#
+# **THE REFERENCE IS ELECTRON, AND IT ALREADY HAS ONE.** The ledger attributed
+# this to `PLAT35-PD1` and parked it as "one decision for both front-ends".
+# That attribution is wrong, read off the spec:
+# `Cross-Renderer-Visual-Alignment.md`'s `PLAT35-PD1` row is about *"the state
+# and call-trace panes"* and says *"the value text has neither an ellipsis nor
+# a horizontal scrollbar"* — not the editor. The same document's §4.1 reads
+# the Electron EDITOR's own horizontal scrollbar off the live DOM at every
+# probed run: *"the content height passes through — 2574 for the lines, 2586
+# with the horizontal scrollbar, 2607 with the view zone"*, and *"it is not a
+# race with the horizontal scrollbar — its 12px is in the content height of
+# every probed run"*. So the Electron arm is correct here and this one simply
+# did not match it; `tools/visual-review-brief.md` says what follows from
+# that — *"the Electron front-end is the reference"*.
+#
+# No ellipsis and no wrap: the desktop editor has neither
+# (`editing_core.terminalWrapSettings` turns soft wrap off in every editor
+# this product ships), and inventing one here would be the divergence the
+# brief forbids.
+#
+# **THE DIGEST DEBT THIS EDIT INCURS, named here as `GutterGap`'s header
+# names iteration 4's.** Editing this file, `gpui/main.nim`,
+# `gpui/window_geometry.nim`, `tests/test_cross_renderer_visual_alignment.nim`
+# and `tests/test_plat48_gpui_plan.nim` moves the `*-control.sha256` of **TEN**
+# mutation harnesses: the six that digest this file (plat20, plat22,
+# plat35-visual, plat42-surface, plat47-parity, plat49-chrome) plus
+# plat44-editing, plat45-layout, plat48-topbar AND **plat34-front-end**, which
+# digest `main.nim`.
+#
+# **THE COUNT WAS NINE AND IS TEN, and the tenth is the same mistake one
+# directory further out.** Iteration 4's count read only
+# `src/frontend/gpui/tests/` and was corrected to six for this file; the first
+# draft of this paragraph widened the scan to `src/frontend/tui/tests/` and
+# still missed `src/frontend/viewmodel/tests/unit/`, where
+# `plat34-front-end-mutation-control.sha256` carries `gpui/main.nim` — at the
+# digest it had at `524acca27`, so this change is what moves it. Found at the
+# adversarial review of 2026-10-03 by scanning EVERY `*-control.sha256` in the
+# tree for the four edited paths rather than the directories somebody expected
+# them in.
+#
+# All ten were run. **plat20 (14 of 14 KILLED) and plat44-editing (8 KILLED,
+# 1 declared survivor, 0 arms not as required) grade on this host, were
+# re-graded against the committed bytes and their digests are re-recorded in
+# this change.** The other eight refuse, and their digests are deliberately
+# LEFT STALE (§39: a digest re-recorded without a re-grade is an expectation
+# re-recorded without one). The verdicts and the verbatim refusals are in
+# `src/tests/visual/tier4-gpui-readings.json`'s `gate.iteration5digests`.
+#
+# **AND TWO ARMS WERE UNAIMED BY THIS EDIT AND ARE RE-AIMED**, because an arm
+# whose needle no longer occurs cannot be killed: plat22's `E7` (the
+# placeholder decision moved into `drawnCodeText`) and plat35-visual's `M1`
+# (the row-append loop gained the scroll argument). Both needle scans caught
+# them by name.
+
+const
+  EditorColumnPx* = 9.70
+    ## **ONE COLUMN OF THE EDITOR'S MONOSPACED FACE, IN PIXELS — MEASURED, not
+    ## declared, and that distinction is `PLAT35-VG1`'s.**
+    ##
+    ## The shim in this workspace is built without `--features gpui-backend`,
+    ## so nothing in this process can ask a text system how wide a glyph is
+    ## (see `gpuiMetricFor`). The number below is therefore read off the
+    ## FRAMES this front-end produces, the same way `window_geometry
+    ## .GpuiEditorRowPx = 26` was read off the row pitch.
+    ##
+    ## **How, and on what.** All seven `build/plat35/gpui/*.png` captures of
+    ## 2026-10-03, decoded, the editor pane located by its ground
+    ## (`EditorGround`, `#282828`), every inked run on every text row
+    ## collected, and the advance taken as the period that maximises the
+    ## concentration of those run-start x positions modulo it (the circular
+    ## resultant). A monospaced grid has a sharp maximum there and a
+    ## proportional one has none. The seven answers:
+    ##
+    ##     shell 9.650  editor 9.670  gutterLanes 9.670  state 9.710
+    ##     calltrace 9.720  editorWithMark 9.730  eventLog 9.735
+    ##
+    ## mean 9.698, spread 0.085 px (0.9%), 183–387 run starts per frame.
+    ## 9.70 is that mean to the nearest hundredth. The same decoding returns
+    ## the row pitch as 26 px on the same frames, which is `GpuiEditorRowPx`
+    ## independently re-measured and is why the method is trusted here.
+    ##
+    ## **IT CORRECTS A NUMBER THIS FILE ALREADY CARRIED.** `GutterLaneGap`'s
+    ## comment says *"the GPUI editor pane is 276 px wide at 1440x900 and a
+    ## Menlo cell is ~8 px"*. Both halves are wrong on the frames: the editor
+    ## pane is 346 px wide at 1440x900 (302..647) and the cell is 9.70 px.
+    ## The conclusion that comment drew — one gutter cell costs about one
+    ## column of code — survives the correction, so the gap stays at one.
+  EditorScrollbarPx* = 12
+    ## **THE SCROLLBAR'S THICKNESS, AND IT IS THE REFERENCE'S OWN NUMBER.**
+    ##
+    ## Monaco's `horizontalScrollbarSize` default, which the desktop editor
+    ## takes because `ui/editor.nim`'s `createMonacoEditor` call for the main
+    ## editor passes no `scrollbar` bag at all:
+    ## `node_modules/monaco-editor/esm/vs/editor/common/config/editorOptions.js`
+    ## line 1903, `horizontalScrollbarSize: 12`. It is the SAME 12 px
+    ## `Cross-Renderer-Visual-Alignment.md` §4.1 measured in the Electron
+    ## editor's content height (`2574` -> `2586`), which is two independent
+    ## readings of one value and the reason this is not a guess.
+    ##
+    ## (The reference's stylesheet overrides the drawn slider to `0.875rem`
+    ## in `styles/components/text_editor.styl`. That is the painted height,
+    ## not the height Monaco RESERVES in layout; the reserved one is what a
+    ## second front-end has to match to leave the same room, and it is the
+    ## one the live DOM's arithmetic exposed.)
+  EditorScrollbarMinThumbPx* = 20
+    ## Monaco's `MINIMUM_SLIDER_SIZE`, quoted from
+    ## `node_modules/monaco-editor/esm/vs/base/browser/ui/scrollbar/scrollbarState.js`
+    ## line 8. Without it a file whose longest line is far past the pane draws
+    ## a thumb a few pixels wide, which reads as no thumb.
+  EditorScrollbarThumbColour* = "#79797966"
+    ## Monaco's `scrollbarSlider.background` for a dark theme, quoted from
+    ## `.../platform/theme/common/colors/miscColors.js`:
+    ## `Color.fromHex('#797979').transparent(0.4)`. `0.4 * 255 = 102 = 0x66`,
+    ## and the shim parses `#rrggbbaa` (`gpui_app.parse_color`), so the alpha
+    ## is carried rather than pre-composited against a ground this element
+    ## does not own.
+    ##
+    ## **NOT A DESIGN-SYSTEM TOKEN, and that is said rather than hidden.**
+    ## `design_tokens.nim` publishes no scrollbar colour — `grep -ci croll`
+    ## over `styles/generated/design_tokens.nim` answers 0 — and neither
+    ## custom Monaco theme publishes one either: `codetracerDark.json` carries
+    ## 46 entries under `colors` and `codetracerWhite.json` 10, and NONE of
+    ## the 56 matches `croll`. (An earlier draft of this paragraph said those
+    ## two files "carry no `colors` block". They both do; the true statement
+    ## is the one above, and it is the one the conclusion needs. Corrected at
+    ## the adversarial review of 2026-10-03, measured.) So the reference's own
+    ## default is the only published value, and §3.1's "never a hex" rule is
+    ## about the `data-ct-token` attribute, which this element deliberately
+    ## does not claim to carry.
+  EditorScrollbarAttribute* = "data-ct-editor-scrollbar"
+    ## **THE SCROLLBAR'S TRACK.** Present on exactly one node, and only on
+    ## frames whose content is wider than the pane. Its value is the axis
+    ## (`horizontal`) rather than `"true"`, so a vertical one can be added
+    ## later without a reader of this one silently counting it.
+  EditorScrollbarThumbAttribute* = "data-ct-editor-scrollbar-thumb"
+  EditorScrollMetricAttribute* = "data-ct-editor-scroll"
+    ## **WHAT THE EDITOR'S HORIZONTAL EXTENT ACTUALLY IS**, stamped on the
+    ## editor's own node on EVERY frame — including the frames with no
+    ## scrollbar, where it reads `content=<px>;viewport=<px>` with the content
+    ## no wider. That is deliberate: a reader can tell "this pane has nothing
+    ## to scroll" from "this pane was never asked" (`viewport=0`, the width
+    ## no caller supplied), which is Verification-Harness-Traps §5a — two
+    ## states behind one absence is the merge that makes a probe unfalsifiable.
+
+type
+  EditorHScroll* = object
+    ## **The editor's horizontal extent, and the scrollbar that follows from
+    ## it.** A value rather than a drawing, so the predicate "is there
+    ## anything off the right-hand edge" is one function a suite can call with
+    ## no renderer (`editorHScrollOf`), and the drawing below has no second
+    ## opinion about it (§30).
+    viewportPx*: int
+      ## The editor pane's own INNER width — its box less its chrome padding.
+      ## Zero means no caller supplied one; see `EditorScrollMetricAttribute`.
+    contentPx*: int
+      ## Gutter plus the widest drawn code line, at `EditorColumnPx`.
+    gutterCols*: int
+    codeCols*: int
+    leftCols*: int
+      ## How many code columns are scrolled off to the left. Clamped into
+      ## `0 .. maxLeftCols`, so a caller cannot scroll past the end.
+    maxLeftCols*: int
+    present*: bool
+      ## Whether a scrollbar is drawn at all. **False whenever the content
+      ## fits**, which is Monaco's `horizontal: 'auto'` — the reference's own
+      ## default, `editorOptions.js` line 1900 — and is the half of this that
+      ## a bare existence check would not notice was missing.
+    thumbPx*: int
+    thumbLeftPx*: int
+
+func columnsPx*(cols: int): int =
+  ## `cols` columns of the editor's face, in whole pixels.
+  int(round(float(cols) * EditorColumnPx))
+
+func editorNumberWidth*(rows: openArray[EditorRow]): int =
+  ## The gutter's number-field width for a surface: the widest DRAWN line
+  ## number. `renderEditor`'s own derivation, lifted out of it so the window
+  ## can ask for it without re-deriving it beside it (§30).
+  result = 1
+  for row in rows:
+    result = max(result, len($row.line))
+
+func editorGutterColumns*(numberWidth: int): int =
+  ## How many columns the gutter occupies, **asked of `gutterRuns` rather
+  ## than recomputed from `2 + 1 + numberWidth + 4`**: a second spelling of
+  ## the geometry is a second chance to get it wrong, and the lanes have
+  ## already moved once this week.
+  gutterText(EditorRow(line: 1), numberWidth).runeLen
+
+func drawnCodeText*(row: EditorRow): string =
+  ## The text a row's CODE span actually draws — the source line, or the
+  ## loading placeholder for a line the window does not hold yet. Not the
+  ## inline value: that is a separate span, and it is the one thing in this
+  ## subtree that already elides (`text-overflow: ellipsis`, below), so
+  ## counting it as content the scrollbar promises to reveal would promise
+  ## something the ellipsis has already given up.
+  if row.held: row.text else: EditorLoadingText
+
+func editorCodeColumns*(rows: openArray[EditorRow]): int =
+  ## The widest drawn code line, in columns.
+  for row in rows:
+    result = max(result, drawnCodeText(row).runeLen)
+
+func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
+                      viewportPx: int; leftCols = 0): EditorHScroll =
+  ## **THE WHOLE DECISION, IN ONE PLACE.** Given the rows as drawn, the
+  ## gutter's width and the pane's inner width: whether anything is off the
+  ## right-hand edge, how far it can be scrolled, and the thumb that says so.
+  ##
+  ## The slider arithmetic is Monaco's, quoted from `scrollbarState.js`
+  ## (`_computeValues`): `sliderSize = round(max(MINIMUM_SLIDER_SIZE,
+  ## floor(visibleSize * representableSize / scrollSize)))` with
+  ## `representableSize == visibleSize` (this scrollbar has no arrows), and
+  ## `sliderPosition = floor(scrollPosition * (representableSize - sliderSize)
+  ## / (scrollSize - visibleSize))`.
+  ##
+  ## **ONE DEVIATION, AND IT IS MEASURED RATHER THAN PREFERRED:** the
+  ## position is taken as a fraction of `maxLeftCols` and not of
+  ## `contentPx - viewportPx`. In Monaco the whole content scrolls; here the
+  ## GUTTER DOES NOT — the desktop editor's line-number margin is fixed and
+  ## this one's is too — so the two denominators differ by the gutter, and
+  ## using Monaco's would leave the thumb short of the track's end at the
+  ## last column.
+  result.viewportPx = max(0, viewportPx)
+  result.gutterCols = editorGutterColumns(numberWidth)
+  result.codeCols = editorCodeColumns(rows)
+  result.contentPx = columnsPx(result.gutterCols + result.codeCols)
+  if rows.len == 0 or result.viewportPx <= 0 or
+     result.contentPx <= result.viewportPx:
+    # Nothing off the edge — or nobody said how wide the pane is. Either way
+    # no scrollbar, and `leftCols` falls back to 0 so a stale scroll offset
+    # cannot survive the pane growing wide enough to hold the file.
+    return
+  result.present = true
+  let visibleCodePx = max(0, result.viewportPx - columnsPx(result.gutterCols))
+  let visibleCodeCols = int(floor(float(visibleCodePx) / EditorColumnPx))
+  result.maxLeftCols = max(0, result.codeCols - visibleCodeCols)
+  result.leftCols = clamp(leftCols, 0, result.maxLeftCols)
+  let track = result.viewportPx
+  result.thumbPx = min(track, max(EditorScrollbarMinThumbPx,
+    int(floor(float(track) * float(result.viewportPx) /
+              float(result.contentPx)))))
+  result.thumbLeftPx =
+    if result.maxLeftCols <= 0: 0
+    else: (track - result.thumbPx) * result.leftCols div result.maxLeftCols
+
+func scrollMetricText*(scroll: EditorHScroll): string =
+  ## `EditorScrollMetricAttribute`'s value.
+  "content=" & $scroll.contentPx & ";viewport=" & $scroll.viewportPx &
+  ";gutterCols=" & $scroll.gutterCols & ";codeCols=" & $scroll.codeCols &
+  ";leftCols=" & $scroll.leftCols & ";maxLeftCols=" & $scroll.maxLeftCols
+
+func dropColumns*(text: string; skip: int): string =
+  ## `text` with its first `skip` COLUMNS gone. Columns and not bytes: the
+  ## face is monospaced, so a column is a rune, and a byte slice would cut a
+  ## multi-byte glyph in half.
+  if skip <= 0: return text
+  let n = text.runeLen
+  if skip >= n: "" else: text.runeSubstr(skip)
+
+func dropColumns*(runs: seq[TokenRun]; skip: int): seq[TokenRun] =
+  ## The same, over classified runs: the runs of a line concatenate to the
+  ## line (`lexical.TokenRun`'s own contract), so dropping `skip` columns
+  ## from the front of the line is dropping them from the front of the run
+  ## sequence. A run emptied by the cut is DROPPED rather than kept empty —
+  ## an empty span is a node with no ink and the censuses count nodes.
+  if skip <= 0: return runs
+  var left = skip
+  for run in runs:
+    let n = run.text.runeLen
+    if left >= n:
+      left -= n
+    elif left == 0:
+      result.add run
+    else:
+      result.add TokenRun(text: run.text.runeSubstr(left), class: run.class)
+      left = 0
+
+proc renderEditorScrollbar(r: GpuiRenderer;
+                           scroll: EditorHScroll): GpuiElement =
+  ## The track, and the thumb inside it at its offset.
+  ##
+  ## **THE TRACK IS NOT FILLED**, which is the reference's own look: Monaco's
+  ## horizontal scrollbar paints a slider over the editor's ground and no
+  ## track behind it. The track element still exists, carries the full width
+  ## and is what `EditorScrollbarAttribute` marks, because the thing a reader
+  ## has to be able to measure is the slider's share of the PANE and that
+  ## needs both numbers present.
+  ##
+  ## The thumb is offset with `padding-left` on the track rather than a
+  ## margin: `gpui_app.apply_styles_to_div` reads per-side padding and reads
+  ## no per-side margin, so a `margin-left` here would be a style nothing
+  ## draws — the defect `GutterGap`'s comment was corrected for.
+  ##
+  ## **IT IS AN OVERLAY AND NOT A ROW, AND THAT IS MEASURED RATHER THAN
+  ## PREFERRED.** The first version appended it to the editor's flex column.
+  ## On the 1920x1080 frames that worked; on all three 1440x900 frames the
+  ## rows already fill the pane, so the bar landed past the bottom edge and
+  ## the pane's own `overflow: hidden` ate it — `build/plat35/gpui/
+  ## gutterLanes.png` showed exactly ONE scanline of it at y=851 against the
+  ## twelve at 1920. The remedy is the reference's own structure rather than
+  ## a taller pane or a row fewer: Monaco draws `.monaco-scrollable-element
+  ## > .scrollbar.horizontal` ABSOLUTELY at the bottom of the editor, over
+  ## the content, which is why its 12 px shows up in the content height and
+  ## not in the line count. Reserving a row instead would have moved this
+  ## front-end's `editor-row-count` on every scenario, which `corpus-pins
+  ## .json` grades as a set.
+  result = r.createElement("div")
+  r.setAttribute(result, EditorScrollbarAttribute, "horizontal")
+  r.setStyle(result, "display", "flex")
+  r.setStyle(result, "position", "absolute")
+  r.setStyle(result, "left", $ChromePaddingPx & "px")
+  r.setStyle(result, "bottom", "0px")
+  r.setStyle(result, "width", $scroll.viewportPx & "px")
+  r.setStyle(result, "height", $EditorScrollbarPx & "px")
+  r.setStyle(result, "flex-shrink", "0")
+  r.setStyle(result, "padding-left", $scroll.thumbLeftPx & "px")
+  let thumb = r.createElement("div")
+  r.setAttribute(thumb, EditorScrollbarThumbAttribute, "true")
+  r.setStyle(thumb, "width", $scroll.thumbPx & "px")
+  r.setStyle(thumb, "height", $EditorScrollbarPx & "px")
+  r.setStyle(thumb, "flex-shrink", "0")
+  r.setStyle(thumb, "background-color", EditorScrollbarThumbColour)
+  r.setStyle(thumb, "rounded", "3px")
+  r.appendChild(result, thumb)
+
+proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
+                     numberWidth = 1; skipCols = 0;
+                     caretColumn = 0): GpuiElement =
   ## One row of the source editor.
   ##
   ## Every attribute below is the ROW's own field stringified. Nothing here
@@ -419,6 +1070,9 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
   ## ViewModels — so a rendering that drifts from the model is a rendering
   ## whose attributes stop matching the surface, which is exactly the
   ## comparison PLAT-22's second named integration test makes.
+  ##
+  ## `runs` is the row's text classified by the terminal's tokenizer
+  ## (`lexical.tokenRuns`); each is painted in its class's theme colour.
   let el = r.createElement("div")
   r.setAttribute(el, EditorRowAttribute, $row.line)
   r.setAttribute(el, EditorPointerAttribute, $row.pointer)
@@ -437,29 +1091,111 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
   # it (`test_plat42_window.nim`).
   r.setStyle(el, "white-space", "nowrap")
   r.setStyle(el, "overflow", "hidden")
-  if row.pointer == eptExecution:
-    r.setStyle(el, "background", ExecutionRowBand)
+  # A ROW IS ALWAYS A FULL LINE HIGH. The host asks for the rows the pane
+  # shows (`window_geometry.editorRowsOf`); should the pane shrink below them
+  # later, the pane clips the last rows rather than the flex column squeezing
+  # every row and cutting off descenders.
+  r.setStyle(el, "flex-shrink", "0")
 
   let gutter = r.createElement("span")
   r.setAttribute(gutter, TextRoleAttribute, $trGutterLineNumber)
   r.setAttribute(gutter, TextMetricAttribute, gpuiMetricFor(trGutterLineNumber))
   r.setAttribute(gutter, TokenAttribute, gpuiTokenFor(trGutterLineNumber, row))
-  # THE MARKER LANES ARE LEFT OF THE NUMBER, as the desktop editor (`> 44`)
-  # and the terminal (`--> ● 44`) draw them. The pointer sat AFTER the number
-  # until 2026-09-23, where it OCR'd as a letter glued to the digits (`44p`)
-  # and PLAT-39's gutter grammar — marker glyphs, then digits — rejected every
-  # execution row it had located by its band.
-  r.appendChild(gutter,
-    r.createTextNode(gutterText(row, numberWidth)))
+  # THE MARKER LANES ARE LEFT OF THE NUMBER, each one reserved cell at a fixed
+  # index, and the geometry — with the measurements it was changed from — is
+  # `gutterRuns`'. The pointer sat AFTER the number until 2026-09-23, where it
+  # OCR'd as a letter glued to the digits (`44p`) and PLAT-39's gutter grammar
+  # — marker glyphs, then digits — rejected every execution row it had located
+  # by its band.
+  #
+  # THREE RUNS AND NOT ONE TEXT NODE, which is `PLAT35-F13`: the MARK has to be
+  # painted its own colour and a character inside the gutter span can only take
+  # the gutter's. Same pattern as the code column's classified `piece` spans
+  # below — a child span per run, its own `color`, `flex-shrink: 0`, inside a
+  # flex parent — so the face still comes from the ONE metric-bearing node
+  # (children inherit it, which is how the code runs are monospaced) and every
+  # role / metric / token census is unmoved.
+  r.setStyle(gutter, "display", "flex")
   r.setStyle(gutter, "flex-shrink", "0")
+  # The line numbers are Monaco's: resting, and active on the execution line.
+  # Still set on the gutter itself, so a reader of the SPAN's colour reads what
+  # it read before; each run then states its own, and for two of the three it
+  # is this same value.
+  r.setStyle(gutter, "color",
+             if row.pointer == eptExecution: EditorActiveLineNumberColour
+             else: EditorLineNumberColour)
+  for run in gutterRuns(row, numberWidth):
+    let lane = r.createElement("span")
+    r.setAttribute(lane, GutterLaneAttribute, $run.kind)
+    r.setStyle(lane, "color", run.colour)
+    r.setStyle(lane, "flex-shrink", "0")
+    if run.kind == grkPointer and row.pointer == eptExecution:
+      # PLAT-51: THE DESKTOP'S MARK, drawn — not a glyph that approximates
+      # it. The lane is held at exactly one cell (`EditorColumnPx`), so the
+      # line numbers and the code do not move.
+      r.setAttribute(lane, PointerMarkAttribute, "highlight_line_arrow.svg")
+      r.setStyle(lane, "display", "flex")
+      r.setStyle(lane, "items", "center")
+      r.setStyle(lane, "width", formatFloat(EditorColumnPx, ffDecimal, 2) & "px")
+      let mark = r.createElement("img")
+      r.setAttribute(mark, "src", executionMarkPath())
+      r.setStyle(mark, "width", $ExecutionMarkPx.w & "px")
+      r.setStyle(mark, "height", $ExecutionMarkPx.h & "px")
+      r.setStyle(mark, "flex-shrink", "0")
+      r.appendChild(lane, mark)
+    else:
+      r.appendChild(lane, r.createTextNode(run.text))
+    r.appendChild(gutter, lane)
   r.appendChild(el, gutter)
+
+  # THE CODE COLUMN: the rest of the row, grown to the pane's right edge, so
+  # the execution band covers exactly what Monaco's current-line band covers.
+  let column = r.createElement("div")
+  r.setAttribute(column, EditorCodeColumnAttribute, "true")
+  r.setStyle(column, "display", "flex")
+  r.setStyle(column, "flex-grow", "1")
+  r.setStyle(column, "white-space", "nowrap")
+  r.setStyle(column, "overflow", "hidden")
+  if row.pointer == eptExecution:
+    r.setStyle(column, "background", ExecutionRowBand)
+  if caretColumn > 0 and caretColumn > skipCols:
+    # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
+    # before its column, in the editor's foreground (Monaco's cursor),
+    # distinct from the execution band and from the inspection pointer.
+    r.setStyle(column, "position", "relative")
+    let caret = r.createElement("div")
+    r.setAttribute(caret, EditorCaretAttribute, $row.line & ":" & $caretColumn)
+    r.setStyle(caret, "position", "absolute")
+    r.setStyle(caret, "left", formatFloat(float(caretColumn - 1 - skipCols) *
+                                          EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(caret, "top", "0px")
+    r.setStyle(caret, "width", "2px")
+    r.setStyle(caret, "height", "100%")
+    r.setStyle(caret, "background", EditorTextColour)
+    r.appendChild(column, caret)
 
   let code = r.createElement("span")
   r.setAttribute(code, TextRoleAttribute, $trEditorCode)
   r.setAttribute(code, TextMetricAttribute, gpuiMetricFor(trEditorCode))
   r.setAttribute(code, TokenAttribute, gpuiTokenFor(trEditorCode, row))
-  r.appendChild(code,
-    r.createTextNode(if row.held: row.text else: EditorLoadingText))
+  r.setStyle(code, "display", "flex")
+  # `skipCols` IS THE HORIZONTAL SCROLL, and it is applied to the CODE and
+  # not to the row: the gutter does not move, exactly as the desktop editor's
+  # line-number margin does not. Zero on every frame nobody has scrolled, so
+  # the drawn tree is byte-identical to the one before `PLAT35-F3` until the
+  # wheel is turned.
+  if row.held and runs.len > 0:
+    for run in dropColumns(runs, skipCols):
+      let piece = r.createElement("span")
+      r.setAttribute(piece, EditorTokenClassAttribute, $run.class)
+      r.setStyle(piece, "color", tokenColour(run.class))
+      r.setStyle(piece, "flex-shrink", "0")
+      r.appendChild(piece, r.createTextNode(run.text))
+      r.appendChild(code, piece)
+  else:
+    r.setStyle(code, "color", tokenColour(tcPlain))
+    r.appendChild(code,
+      r.createTextNode(dropColumns(drawnCodeText(row), skipCols)))
   # THE FLOW OVERLAY, DRAWN AS THE DESKTOP EDITOR DRAWS IT: a line inside an
   # arm the run declined is dimmed to half opacity (`.line-flow-skip` in
   # `styles/components/flow.styl`), and a line that ran is left as it is
@@ -468,7 +1204,7 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
   if row.flow == efsNotTaken:
     r.setStyle(code, "opacity", FlowNotTakenOpacity)
   r.setStyle(code, "flex-shrink", "0")
-  r.appendChild(el, code)
+  r.appendChild(column, code)
 
   let annotation = inlineValueText(row.values)
   if annotation.len > 0:
@@ -483,12 +1219,41 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow;
     r.setStyle(ann, "overflow", "hidden")
     r.setStyle(ann, "text-overflow", "ellipsis")
     r.appendChild(ann, r.createTextNode(annotation))
-    r.appendChild(el, ann)
+    r.appendChild(column, ann)
+  r.appendChild(el, column)
   el
 
+proc editorRunsOf*(surface: EditorSurface): seq[seq[TokenRun]] =
+  ## Every row's text classified as the terminal classifies it: the path's
+  ## Monaco tokenizer (`lexical.lexerForPath`; a tree-sitter language or an
+  ## unknown one is left plain), the state running on from row to row from
+  ## the surface's `entryContext`. A row still loading is empty and leaves
+  ## the state where it was.
+  let lexer = if grammarForPath(surface.path) != giNone: lxNone
+              else: lexerForPath(surface.path)
+  var context = if surface.entryContext.len > 0: surface.entryContext
+                else: initialContext(lexer)
+  for row in surface.rows:
+    if lexer == lxNone or not row.held:
+      result.add @[]
+    else:
+      result.add tokenRuns(lexer, row.text, context)
+
 proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
-                   escape: ViewNode; surface: EditorSurface): bool =
+                   escape: ViewNode; surface: EditorSurface;
+                   viewportPx = 0; scrollLeftCols = 0): bool =
   ## Draw the source editor into `parent`. Answers whether it drew ROWS.
+  ##
+  ## `viewportPx` is the editor pane's INNER width in pixels and
+  ## `scrollLeftCols` how far right the code is scrolled — `PLAT35-F3`. The
+  ## width is a parameter rather than something read here because this
+  ## module is handed slots and ViewModels and no pixels (see the header):
+  ## the pane's rectangle belongs to the window's geometry, and the window
+  ## passes it (`main.editorBodyWidthFor` / `window_geometry
+  ## .editorBodyWidthOf`). **Nobody passing it means NO SCROLLBAR, not a
+  ## guessed one** — a default width here would be this front-end inventing
+  ## a pane size, and every suite that draws an editor without a window
+  ## would then be grading a number nothing measured.
   ##
   ## **THE MEDIUM IS CHECKED FIRST, AND A MISMATCH IS A REFUSAL RATHER THAN A
   ## ROUNDING.** `escape` is what `pane_views.sourcePaneView` declared and
@@ -530,53 +1295,918 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     let msg = r.createElement("div")
     r.appendChild(msg, r.createTextNode(surface.degradedMessage))
     r.appendChild(parent, msg)
-  var widest = 1
-  for row in surface.rows:
-    widest = max(widest, len($row.line))
-  for row in surface.rows:
-    r.appendChild(parent, renderEditorRow(r, row, widest))
+  let widest = editorNumberWidth(surface.rows)
+  # PLAT-47 B1: the editor's own ground, Monaco's `editor.background`.
+  r.setStyle(parent, "background-color", EditorGround)
+  # `PLAT35-F3`. The extent is decided ONCE, before the rows are drawn, and
+  # both the rows' scroll offset and the scrollbar come out of that one
+  # value — so a clamped offset and the thumb that reports it cannot
+  # disagree (§30).
+  let scroll = editorHScrollOf(surface.rows, widest, viewportPx,
+                               scrollLeftCols)
+  r.setAttribute(parent, EditorScrollMetricAttribute, scrollMetricText(scroll))
+  let runs = editorRunsOf(surface)
+  for i, row in surface.rows:
+    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,
+                                          scroll.leftCols,
+                                          (if row.line == surface.caretLine:
+                                             surface.caretColumn else: 0)))
+  if scroll.present:
+    r.appendChild(parent, renderEditorScrollbar(r, scroll))
   surface.rows.len > 0
 
 const
-  TimelineBarWidthPx* = 400
-    ## The scrubber's track. A fixed track rather than the pane's width: the
-    ## pane's width is the dock's to decide and a track that re-measured it
-    ## would be a second layout owner (`admission.nim`'s rule).
-  TimelineBarHeightPx = 6
-  TimelineTrackColor = "#3a3a3a"
-  TimelineFillColor = "#4fb3a9"
+  CallRowAttribute* = "data-call-index"
+    ## PLAT-49 part B: a call-trace row's trace index.
+  CallToggleAttribute* = "data-call-toggle"
+    ## Its toggle state (`leaf`, `expanded`, `collapsed`).
+  CallPartAttribute* = "data-call-part"
+    ## A row part's `CallSegmentKind` (`callee`, `argName`, `argValue`, …).
+  CallSelectedAttribute* = "data-call-selected"
+  CallArgAttribute* = "data-call-arg"
+    ## PLAT-50: the argument a row part belongs to (0-based into `args`).
+  CallRowPx* = 26
+    ## A row's height: the window's row pitch (`window_geometry
+    ## .GpuiEditorRowPx`), fixed, so a press is mapped to the row it is on
+    ## (`main.clickCalltrace`).
+  CallIndentPx* = 16
+    ## The desktop's depth offset per level (`paddingForDepth(item, 16)`).
+  CallArgsColour* = DesignTokenHex[dtColorsUiTextSuccessPrimary][dmDark]
+    ## CALLTRACE_ARGS_COLOR (#BBF7D0) — the token the terminal's `srCallArgs`
+    ## paints.
+  CallReturnColour* = DesignTokenHex[dtColorsUiTextInformationOnColor][dmDark]
+    ## CALLTRACE_RETURN_COLOR (#BFDBFE, Dark) exactly: the window is Dark.
+    ## (The terminal's `srCallReturn` takes information-primary, the token
+    ## with a legible Light value.)
+  CallToggleColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+  CallTextColour* = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
+  CallSelectedBackground* =
+    DesignTokenHex[dtColorsUiSurfacePrimarySecondaryHover][dmDark]
+    ## The selected row's ground (`.event-selected`): the design system's
+    ## active-row token (the desktop's `.active-step-line`), the terminal's
+    ## `srSurfaceActiveRow`.
 
-proc timelineText*(current, first, last: uint64): string =
-  ## `tick <current> / <last> [<percent>%]` — the terminal header's spelling.
-  let span = if last > first: last - first else: 0'u64
-  let done = if current > first: current - first else: 0'u64
-  let pct = if span == 0: 0.0 else: 100.0 * float(done) / float(span)
-  "tick " & $current & " / " & $last & " [" & formatFloat(pct, ffDecimal, 1) & "%]"
+proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
+                      vm: CalltraceVM): bool =
+  ## PLAT-49 part B (finding 8): THE CALL TRACE, ROW BY ROW FROM THE
+  ## VIEWMODEL'S `CallRow`s — indented by depth, the toggle, the callee and
+  ## its index, the arguments with their values in the arguments' colour and
+  ## ` => value` in the return's, the selected row on its own ground — the
+  ## desktop's row (`isonim_calltrace_view.renderCallLineRowWeb`) from the
+  ## same parts the terminal paints (`calltrace_vm.callRowSegments`). False
+  ## when there are no rows (the fallback and the reports stay
+  ## `pane_views`').
+  let rows = vm.callRows()
+  if rows.len == 0:
+    return false
+  let list = r.createElement("div")
+  r.setAttribute(list, "data-calltrace", "rows")
+  r.setStyle(list, "display", "flex")
+  r.setStyle(list, "flex-direction", "column")
+  for row in rows:
+    let el = r.createElement("div")
+    r.setAttribute(el, CallRowAttribute, $row.index)
+    r.setAttribute(el, CallToggleAttribute, $row.toggle)
+    let selected = crfSelected in row.flags
+    r.setAttribute(el, CallSelectedAttribute,
+                   (if selected: "true" else: "false"))
+    # A call row is one line, its parts side by side.
+    for (key, value) in [("display", "flex"), ("white-space", "nowrap")]:
+      r.setStyle(el, key, value)
+    r.setStyle(el, "overflow", "hidden")
+    r.setStyle(el, "flex-shrink", "0")
+    r.setStyle(el, "height", $CallRowPx & "px")
+    r.setStyle(el, "items", "center")
+    r.setStyle(el, "padding-left", $(row.depth * CallIndentPx) & "px")
+    if selected:
+      r.setStyle(el, "background", CallSelectedBackground)
+    for seg in row.callRowSegments(indent = false):
+      let piece = r.createElement("span")
+      r.setAttribute(piece, CallPartAttribute, $seg.kind)
+      # PLAT-50 (K23): an argument's parts name it, for its right-click menu.
+      if seg.arg > 0:
+        r.setAttribute(piece, CallArgAttribute, $(seg.arg - 1))
+      r.setStyle(piece, "flex-shrink", "0")
+      r.setStyle(piece, "color",
+        case seg.kind
+        of csToggle:
+          # On the selected row the toggle is the desktop's `active` icon,
+          # in the body colour — the muted one is not legible on that ground.
+          (if selected: CallTextColour else: CallToggleColour)
+        of csPunct, csArgName, csArgValue: CallArgsColour
+        of csReturnArrow, csReturnValue: CallReturnColour
+        else: CallTextColour)
+      if selected and seg.kind in {csCallee, csIndex}:
+        r.setStyle(piece, "font-weight", "bold")
+      r.appendChild(piece, r.createTextNode(seg.text))
+      r.appendChild(el, piece)
+    r.appendChild(list, el)
+  r.appendChild(parent, list)
+  true
 
-proc renderTimeline(r: GpuiRenderer; parent: GpuiElement; vm: TimelineVM) =
-  ## The recording's extent and where the debugger is in it: a line of text
-  ## (what a reader and PLAT-39's reader parse) and a track filled to the
-  ## current tick (what an eye reads).
-  let marks = vm.bounds.val
-  let first = if marks.len > 0: marks[0] else: 0'u64
-  let last = if marks.len > 1: marks[1] else: first
-  let current = vm.currentPosition.val
-  let label = r.createElement("div")
-  r.appendChild(label, r.createTextNode(timelineText(current, first, last)))
-  r.appendChild(parent, label)
-  let track = r.createElement("div")
-  r.setStyle(track, "width", $TimelineBarWidthPx & "px")
-  r.setStyle(track, "height", $TimelineBarHeightPx & "px")
-  r.setStyle(track, "background", TimelineTrackColor)
-  let fill = r.createElement("div")
-  let span = if last > first: last - first else: 0'u64
-  let done = if current > first: min(current - first, span) else: 0'u64
-  let filled = if span == 0: 0 else: int(TimelineBarWidthPx.float * float(done) / float(span))
-  r.setStyle(fill, "width", $filled & "px")
-  r.setStyle(fill, "height", $TimelineBarHeightPx & "px")
-  r.setStyle(fill, "background", TimelineFillColor)
-  r.appendChild(track, fill)
-  r.appendChild(parent, track)
+const
+  StateColumnAttribute* = "data-column"
+    ## **`PLAT35-F4`. WHICH COLUMN A STATE-PANE CELL IS**, `name` or `value`,
+    ## on every cell of every row INCLUDING the header's.
+    ##
+    ## The finding this answers: *"the state pane's rows are flat
+    ## `name: value` strings … no column structure, so name and value cannot
+    ## be distinguished and nothing aligns vertically"* — measured as ZERO
+    ## occurrences of this attribute anywhere in the pane, over all seven
+    ## `scenarios.json` plans, at `73e8c3dc4` and again at `42655fd72`.
+    ##
+    ## It is the attribute a reader can ask the shipped binary for
+    ## (`--report-window-plan`), which is why the structure is published here
+    ## rather than left to be inferred from text and pixels.
+  StateRowAttribute* = "data-state-row"
+    ## A body row's index among the pane's VISIBLE rows. The header has none,
+    ## so "the rows" and "the header" are separable by a reader without
+    ## counting children.
+  StateHeaderAttribute* = "data-state-header"
+    ## `"true"` on the header row, and on nothing else.
+  StateDepthAttribute* = "data-state-depth"
+    ## A row's depth in the variable tree. Published because the INDENT lives
+    ## inside the name cell (see `renderState`) — so a reader can check that
+    ## an indented row still ends its name field where every other row does,
+    ## which is the whole of the alignment claim.
+  StateSelectedAttribute* = "data-state-selected"
+    ## Whether this row is `StateVM.selectedPath`'s. Carried so the fact the
+    ## vocabulary `Tree` published as `data-cursor` is not LOST by drawing the
+    ## rows here; nothing paints it yet, and a selected-row ground is not
+    ## `PLAT35-F4`'s to add.
+  StateAlignAttribute* = "data-state-value-x"
+    ## **THE ONE X EVERY VALUE CELL STARTS AT**, in px, on the table.
+    ##
+    ## Derived from the same number that sets each name cell's width, so it
+    ## cannot disagree with the drawing — the shape `PLAT35-F3`'s scroll
+    ## metric uses and the reason it is one value and not two (§30).
+  StateChangedAttribute* = "data-ct-changed"
+    ## PLAT-51: `"true"` on a row whose value the step changed.
+  StateChangedColour* = DesignTokenHex[dtColorsUiTextInformationPrimaryHover][dmDark]
+    ## PLAT-51: the shared changed-value accent (the desktop's
+    ## `.value-changed`, the terminal's `srValueModified`).
+  StateControlAttribute* = "data-ct-state-control"
+    ## PLAT-51: on a row's value controls — `history:<path>` (K40, the
+    ## history button), `origin:<path>` (K41, the origin badge),
+    ## `unwatch:<expression>` (a watch's remove control).
+  StateHistoryEntryAttribute* = "data-ct-history-entry"
+    ## PLAT-51: on a value-history row under its variable — `<ticks>`; a
+    ## click goes to that moment.
+  StateOriginHopAttribute* = "data-ct-origin-hop"
+    ## PLAT-51: on a value-origin hop under its variable.
+  StateAddWatchAttribute* = "data-ct-add-watch"
+    ## PLAT-51: the Watches tab's "Add watch expression…" row.
+  StateNameColumn* = "name"
+  StateValueColumn* = "value"
+  StateTableAttribute* = "data-state-table"
+  # **THE NAME/VALUE COLUMN RULE IS DRAWN, AND THE SPEC DOES PUBLISH IT.**
+  # The element is `StateSeparatorAttribute`'s, below; this is the spec
+  # reading, because the text that stood here said the opposite.
+  #
+  # **THE CENSUS THAT SETTLES IT**, taken by CODEPOINT and COLUMN INDEX over
+  # **all five** fenced wireframes of `Variable-State-Pane.md`. Measured at
+  # the THIRD adversarial review of 2026-10-04 — the one that read the
+  # wireframes; three reviews share that date and are distinguished here by
+  # what each measured, because "adversarial review, 2026-10-04" on its own
+  # names no instrument. Re-measured from this pass before being written
+  # down:
+  #
+  #   | block   | section               | rows with an interior U+007C      | col |
+  #   | 47–56   | Value Expansion       | 0 — AND NO OUTER FRAME AT ALL     | —   |
+  #   | 75–82   | Value History         | 0                                 | —   |
+  #   | 92–98   | Column Resizing       | 2 (header 94, body 96)            | 14  |
+  #   | 191–214 | ## Wireframe (ASCII …) | 10 (header 197, body 199–206, 208) | 26 |
+  #   | 254–263 | Desired Future Design | 1 (256)                           | 28  |
+  #
+  # THIRTEEN wireframed rows carry the bar at a CONSTANT column, the ASCII
+  # Reference's outer frame being at 0 and 67. Block 47–56 draws NO `|` at
+  # all, outer or interior — it is a frameless tree diagram — so its silence
+  # about an interior rule is not a statement about one, and the earlier text
+  # built its whole case on that silence.
+  #
+  # **THREE READINGS ARE RETRACTED, IN THE WORDS THEY WERE PUBLISHED IN.**
+  # The record of the error is worth more than a clean file.
+  #  1. RETRACTED: *"the `+---...---+` rules above and below (lines 95, 97,
+  #     198) are unbroken dashes with no `+` at the column position, which is
+  #     what a published column boundary would have put there."* **THAT PROBE
+  #     FAILS ITS OWN POSITIVE CONTROL.** §"Column Resizing"'s prose
+  #     guarantees the subject outright — *"The Name/Value column separator
+  #     can be dragged to resize"* — and its rules (93, 95, 97) carry `+` at
+  #     columns 0 and 28 and **none at column 14**, which is where both of
+  #     its rows put the bar. A probe that answers "no boundary" where the
+  #     boundary is textually guaranteed is measuring the wrong thing
+  #     (`Verification-Harness-Traps` §67). The same probe would deny the
+  #     OUTER frame of the ASCII Reference, whose rules carry `+` at 0 and 67
+  #     only because the dashes run between them.
+  #  2. RETRACTED as evidence: *"`State.ColumnResize` is ranked **`Low`** in
+  #     that same document's test-scenario table."* True, and it ranks the
+  #     DRAG's test priority. Its own description — *"Drag column separator
+  #     to resize"* — names the separator as a thing that exists, so the row
+  #     is evidence FOR the rule and against only the drag's urgency.
+  #  3. RETRACTED as evidence: the *"Fixed flex tracks with no separator
+  #     element"* row at line 148. It is the **BlockTracer** column of
+  #     §"Applicability: this pane is CodeTracer-only", whose opening
+  #     sentence excludes it from this pane — *"Everything above describes
+  #     the CodeTracer desktop/web pane"*, *"BlockTracer implements none of
+  #     value expansion, 'load more', or column resizing"*.
+  #
+  # **WHAT STANDS FROM THE EARLIER PASSES, BECAUSE IT WAS MEASURED AND
+  # RIGHT**: the rule paints iff it declares its own height, and the colour
+  # the framebuffer holds is not the declared token. Both are carried on
+  # `StateSeparatorAttribute`, where a reader looking at the drawing will be.
+  #
+  # **THE DRAG IS STILL NOT DRAWN, AND STAYS NAMED RESIDUE**
+  # (`PLAT35-F4.residue` 1): it needs a persisted width and a
+  # pointer-capture model, it is the `Low`-ranked row above, and the
+  # governing clause is the one `PLAT35-F7`'s remedy turns on — *"A rendered
+  # affordance must do the thing it advertises, or not be rendered"*. So the
+  # rule carries NO `cursor` and NO click handler, and a case asserts that: a
+  # static rule is not an affordance, and a `col-resize` cursor over no drag
+  # would be.
+  StateSeparatorAttribute* = "data-state-separator"
+    ## **THE 1 px RULE BETWEEN THE NAME AND VALUE COLUMNS**, on the header
+    ## row and on every body row — the `|` thirteen of the spec's wireframed
+    ## rows put at a constant column (see `StateTableAttribute`).
+    ##
+    ## **IT PAINTS IFF IT DECLARES ITS OWN HEIGHT. NECESSARY AND
+    ## SUFFICIENT.** A childless flex child inherits none: a row declaring
+    ## `height: 26px` does not pass it to a child with no content. Four arms
+    ## were measured — `flex-shrink: 0` plus its own `height: 26px` → paints
+    ## on 276 of 276 scanned rows; its own `height: 26px` alone → 194 of 276;
+    ## `flex-shrink: 0` with no height → **nothing**; a bare `div` with a
+    ## background → **nothing**. `flex-shrink` is neither necessary nor
+    ## sufficient. In the two failing arms the element still consumed its 1 px
+    ## of layout width: present, laid out, INVISIBLE, which is §7a. Both
+    ## declarations are made below, which is the arm that painted everywhere.
+    ##
+    ## **THE RENDERED COLOUR IS NOT THE DECLARED TOKEN, AND AN EXACT-TOKEN
+    ## PIXEL PROBE CANNOT FIND THIS RULE IN ANY BUILD — WORKING OR BROKEN.**
+    ## `StateSeparatorColour` declares `#565656`; the frame holds
+    ## **`(75, 75, 75)` = `#4B4B4B`**, that token over the pane's `#282828`
+    ## ground at coverage ≈ 0.76. (RE-MEASURED AT THE PLAT-50 MERGE,
+    ## 2026-10-05, AND BOTH NUMBERS MOVED: it read `(71, 73, 76)` = `#47494C`
+    ## over a `#1b222c` ground at 0.746 / 0.750 / 0.762. PLAT-50's
+    ## `0a52bd0aa` re-grounded the panes on the desktop's own tokens —
+    ## `main.PanelGround = "#282828"`, `ui/surface/base/panel` — and its notes
+    ## name `#1b222c` as what it replaced. The rule declares the same token
+    ## and sits at the same x on the same rows; only the ground beneath it
+    ## changed, so the composite did.) The
+    ## blend is the RASTERISER's and not the token's — the shim parses a
+    ## 6-digit hex at full alpha (`gpui_app.parse_color`) — so a 1 px logical
+    ## box simply fails to land on one whole device pixel.
+    ##
+    ## A search for exact `#565656` is the FALSE NEGATIVE that cost this
+    ## finding two passes: the rule was built, probed for the declared token,
+    ## reported as painting nothing, deleted, and its absence asserted in a
+    ## suite. **IT IS NOT MERELY BLIND, IT IS INSENSITIVE**, measured over all
+    ## seven frames at the merged bytes: exact `#565656` counts 350 / 468 /
+    ## 429 / 464 / 602 / 388 / 328 in `shell` / `editor` / `state` /
+    ## `calltrace` / `eventLog` / `editorWithMark` / `gutterLanes` — a few
+    ## hundred in EVERY frame, including the two whose state pane has no rows
+    ## and therefore no rule at all. So the declared-token count does not
+    ## distinguish a drawn rule from an undrawn one in either direction.
+    ## **Any pixel assertion here must target the
+    ## RENDERED value and must carry a POSITIVE CONTROL proving the probe can
+    ## find the rule when the rule is there** (`Verification-Harness-Traps`
+    ## §67). The shim's own source refutes the deleted-on-sight reading
+    ## outright: `apply_styles_to_div` applies `bg` UNCONDITIONALLY
+    ## (`gpui-nim-shim/src/gpui_app.rs:415`–`:419` → `el = el.bg(color)`),
+    ## with no test of children and none of height.
+  StateTreeViewId* = "state.root"
+    ## `pane_views.statePaneView`'s id for the variables `Tree`. The ONE node
+    ## this renderer takes over from the vocabulary; everything else the pane
+    ## view answers — the `Collapsible` and the `Tabs` over §3.3.4's three
+    ## roots — is still drawn by `gpui_binding`, so `Locals` / `Globals` /
+    ## `Watches` keep ONE owner and one spelling.
+  StateHeaderNameLabel* = "Name"
+  StateHeaderValueLabel* = "Value"
+    ## `Variable-State-Pane.md` §"Variable Display" publishes a table of
+    ## **TWO** columns and these are its two headings — `Name` (*"Variable or
+    ## expression name"*) and `Value` (*"Current value (expandable for
+    ## complex types)"*) — and §"Column Resizing" draws the same two over a
+    ## `| Name | Value |` header.
+    ##
+    ## **THERE IS NO TYPE COLUMN, AND ITS ABSENCE IS A READING OF THE SPEC
+    ## RATHER THAN AN OMISSION.** `tools/visual-review-brief.md`'s `editor`
+    ## block asks for *"name, type and value per row"* and the spec does not;
+    ## the brief is the review instrument and the spec is the published
+    ## specification. `store_types.Variable.typeName` is in reach here and is
+    ## deliberately not drawn. Changing that is a spec change — it would move
+    ## Electron and the design system too — and is recorded in
+    ## `PLAT35-F4.specCorrection`, not taken here.
+  StateCharPx* = 8
+    ## The width budgeted per character of a NAME, for the one purpose of
+    ## deciding the name column's width.
+    ##
+    ## A BUDGET AND NOT A MEASUREMENT, exactly as `window_geometry.TabCharPx`
+    ## is and for the same reason: nothing in this workspace can ask a text
+    ## system for an advance (`PLAT35-VG1` — the shim is built without
+    ## `--features gpui-backend`), and a column whose width is known HERE is
+    ## what lets the header and every row agree about where the value column
+    ## starts. Eight px is under `TabCharPx`'s ten because this
+    ## is body text rather than the tab strip's bold face.
+  StateIndentPx* = 14
+    ## A child row's offset per level. INSIDE the name cell, so depth moves
+    ## the name and never the column.
+  StateNameMinPx* = 72
+  StateNameMaxPx* = 260
+    ## The name column's bounds. A floor so `Name` and a one-letter variable
+    ## still read as a column; a ceiling so one long dunder cannot push the
+    ## value column off a laptop-width pane.
+  StateValuePadPx* = 6
+    ## The value cell's own left inset, past the RULE that ends the name
+    ## column. So `stateValueColumnPx` is the name column's width, plus
+    ## `StateSeparatorPx`, plus this.
+    ##
+    ## (Until this pass the line above said this inset was *"the ONLY thing
+    ## between the two columns — there is no rule"*. That is RETRACTED with
+    ## the reading it rested on; see `StateTableAttribute`.)
+  StateSeparatorPx* = 1
+    ## The rule's width, and the second term of `stateValueColumnPx`. ONE
+    ## device-independent pixel, which is what the spec's single `|` column
+    ## is and is why the rendered colour is a composite rather than the token
+    ## (`StateSeparatorAttribute`).
+  StateSeparatorColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
+    ## `colors/ui/border/primary` — `#565656` in dark mode. **DECLARED, NOT
+    ## RENDERED**: the frame holds `#4B4B4B` over PLAT-50's `#282828` pane
+    ## ground (it was `#47494C` over `#1b222c`). See
+    ## `StateSeparatorAttribute`.
+  StateRowPx* = CallRowPx
+    ## A row's height, and it is the window's own row pitch rather than a new
+    ## number — the call trace's rows take the same one, which is
+    ## `window_geometry.GpuiEditorRowPx` read off the frame. MEASURED rather
+    ## than chosen: the rows this pane already drew sat 26 px apart in the
+    ## captured frame (y 214, 240, 266, …), so declaring it changes no
+    ## spacing.
+    ##
+    ## It is ALSO the rule's own height, which is what makes the rule paint at
+    ## all (`StateSeparatorAttribute`). It was introduced for that, kept
+    ## through the two passes that had deleted the rule on a false reading,
+    ## and is load-bearing again.
+  StateNameColour* = DesignTokenHex[dtColorsUiTextPrimaryActive][dmDark]
+    ## `.value-name { color: colors-ui-text-primary-active }` —
+    ## `styles/components/state.styl:232`, the Electron front-end's own
+    ## choice, carried across rather than picked (§6: the desktop is the
+    ## reference).
+  StateValueColour* = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
+  StateHeaderColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+
+type
+  StateRow* = object
+    ## One VISIBLE row of the state pane, flattened.
+    path*: string      ## `StateVM.expandedPaths`' and `selectedPath`'s spelling
+    name*: string
+    value*: string     ## the presenter's answer at the caller's budget
+    typeName*: string  ## carried, NOT drawn — see `StateHeaderValueLabel`
+    depth*: int
+    hasChildren*: bool
+    expanded*: bool
+    selected*: bool
+
+proc appendStateRows(v: Variable; path: string; depth: int;
+                     budget: Budget; expanded: HashSet[string];
+                     selected: string; acc: var seq[StateRow]) =
+  ## `v` and, when `v` is expanded, its descendants, in draw order.
+  ##
+  ## **THE PATH SPELLING AND THE EXPANSION RULE ARE
+  ## `pane_views.variableRow`'s, and that agreement is GATED rather than
+  ## trusted**: `test_plat40_state_pane_columns.nim` compares the paths this
+  ## produces against the ids of `statePaneView`'s own visible `Tree` rows,
+  ## for the same ViewModel, and fails if they differ. Two derivations of one
+  ## rule is §30; a derivation the suite compares against the other is the
+  ## shape this file can have without publishing a `stateRows` on `StateVM`
+  ## (which is the durable answer, and would move two more harnesses').
+  let rendered =
+    if v.presented.isNil: v.value
+    else: presentText(v.presented, budget)
+  acc.add StateRow(path: path, name: v.name, value: rendered,
+                   typeName: v.typeName, depth: depth,
+                   hasChildren: v.hasChildren or v.children.len > 0,
+                   expanded: path in expanded,
+                   selected: path == selected)
+  if path in expanded:
+    for c in v.children:
+      appendStateRows(c, path & "." & c.name, depth + 1, budget, expanded,
+                      selected, acc)
+
+var stateNameColumnOverridePx* = 0
+  ## PLAT-51: the name column's width the user dragged its separator to (the
+  ## desktop's column resize), 0 for the measured default.
+
+proc stateRows*(vm: StateVM; budget: Budget): seq[StateRow] =
+  ## The pane's visible rows, from the ViewModel the other two front-ends read.
+  ##
+  ## `MaxTreeRows` caps the TOP-LEVEL loop, which is where
+  ## `statePaneView` caps it too — the same cap in the same place, so the two
+  ## renderings cannot show different numbers of variables.
+  result = @[]
+  if vm.isNil:
+    return
+  let expanded = vm.expandedPaths.val
+  let selected = vm.selectedPath.val
+  let vars = vm.currentVariables.val
+  for i, v in vars:
+    if i >= MaxTreeRows: break
+    appendStateRows(v, v.name, 0, budget, expanded, selected, result)
+
+func stateNameColumnPx*(rows: openArray[StateRow]): int =
+  ## **THE ONE WIDTH EVERY NAME CELL GETS**, header included.
+  ##
+  ## Decided ONCE, from the widest drawn name at its own indent and from the
+  ## `Name` heading, then clamped. One number for the whole pane is what makes
+  ## *"nothing aligns vertically"* answerable: the value column's x is this
+  ## plus the rule's 1 px plus the value cell's inset
+  ## (`stateValueColumnPx`), and it is the same arithmetic on every row
+  ## because it is the same number.
+  ##
+  ## (This docstring said *"plus the value cell's inset and NOTHING ELSE
+  ## (there is no boundary rule)"*. RETRACTED — the rule is drawn, and the
+  ## arithmetic above is the one `stateValueColumnPx` does.)
+  ##
+  ## A pure `func` so the rule has a test of its own that opens no window
+  ## (`test_plat40_state_pane_columns.nim`, suite 1), which is the half a plan
+  ## reading cannot gate: a plan shows what one program state produced, and
+  ## this shows what the rule answers for a state no recording has to reach.
+  var widest = StateHeaderNameLabel.runeLen * StateCharPx
+  for row in rows:
+    let needed = row.depth * StateIndentPx + row.name.runeLen * StateCharPx
+    if needed > widest:
+      widest = needed
+  min(max(widest, StateNameMinPx), StateNameMaxPx)
+
+func stateValueColumnPx*(nameColumnPx: int): int =
+  ## Where the value column's text begins, given the name column's width.
+  ## Derived, never a second literal — `StateAlignAttribute`'s own reason.
+  ##
+  ## THREE terms, and the middle one is the drawn rule: a layout engine puts
+  ## the 1 px `div` between the two cells, so a value x that skipped it would
+  ## be a published number the drawing disagrees with. The suite recomputes
+  ## the same sum from the plan's own three boxes rather than reading this.
+  nameColumnPx + StateSeparatorPx + StateValuePadPx
+
+proc stateCell(r: GpuiRenderer; column, text: string; widthPx: int;
+               indentPx: int; colour: string; bold: bool): GpuiElement =
+  ## One cell: its column, its width when it has a fixed one, its text.
+  ##
+  ## `white-space: nowrap; overflow: hidden; text-overflow: ellipsis` is what
+  ## the vocabulary `Tree` binding already put on these rows, and it is kept
+  ## BYTE-FOR-BYTE: `PLAT35-F7` is open against exactly that elision and this
+  ## change is not its remedy. A cell that started wrapping here would have
+  ## silently answered another milestone's open question.
+  # **A `div` AND NOT A `span`, AND THAT IS MEASURED.** The shim renders a
+  # `span` as a `TextContainer`, which honours NEITHER `white-space: nowrap`
+  # NOR `text-overflow: ellipsis`: with `span`s the `__builtins__` value — a
+  # 7269-character string carrying 21 newlines — wrapped to twenty-one drawn
+  # lines and pushed every other variable out of the pane, where the
+  # vocabulary `Tree`'s `li` had elided it to one. Four pixel readers saw the
+  # wrapped form before this line existed. A `div` is what the `Tree` rows
+  # were, so the pane's line budget and `PLAT35-F7`'s measured elision are
+  # both exactly what they were.
+  result = r.createElement("div")
+  r.setAttribute(result, StateColumnAttribute, column)
+  if widthPx > 0:
+    r.setStyle(result, "width", $widthPx & "px")
+    r.setStyle(result, "flex-shrink", "0")
+  else:
+    # The value column takes the rest of the row and clips inside it. Without
+    # `min-width: 0` a flex child cannot shrink below its content, so there is
+    # nothing for the ellipsis to be an ellipsis OF.
+    r.setStyle(result, "flex-grow", "1")
+    r.setStyle(result, "min-width", "0")
+  r.setStyle(result, "white-space", "nowrap")
+  r.setStyle(result, "overflow", "hidden")
+  r.setStyle(result, "text-overflow", "ellipsis")
+  if indentPx > 0:
+    r.setStyle(result, "padding-left", $indentPx & "px")
+  r.setStyle(result, "color", colour)
+  if bold:
+    r.setStyle(result, "font-weight", "bold")
+  r.appendChild(result, r.createTextNode(text))
+
+proc stateSeparatorElement(r: GpuiRenderer): GpuiElement =
+  ## **THE COLUMN RULE**, one per row, between the name cell and the value
+  ## cell — `StateSeparatorAttribute`'s element.
+  ##
+  ## FOUR DECLARATIONS AND EVERY ONE OF THEM IS LOAD-BEARING:
+  ##  * `width: 1px` — the spec's single `|` column, and the second term of
+  ##    `stateValueColumnPx`.
+  ##  * `height: 26px` (`StateRowPx`) — **WITHOUT ITS OWN HEIGHT IT DOES NOT
+  ##    PAINT.** A childless flex child inherits none from a row that declares
+  ##    one; measured, four arms, on `StateSeparatorAttribute`.
+  ##  * `flex-shrink: 0` — so a wide value cannot squeeze the rule to nothing.
+  ##    Not sufficient on its own (the no-height arms painted nothing with it)
+  ##    and not necessary (the height-only arm painted on 194 of 276 rows),
+  ##    but the pair is the arm that painted on 276 of 276.
+  ##  * `background` — the only thing that puts ink on the pixel.
+  ##    `apply_styles_to_div` applies it unconditionally.
+  ##
+  ## NO `cursor` AND NO CLICK HANDLER, deliberately: the drag is residue, and
+  ## a rule that advertised one without having it is exactly what
+  ## `PLAT35-F7`'s clause forbids.
+  result = r.createElement("div")
+  r.setAttribute(result, StateSeparatorAttribute, "true")
+  r.setStyle(result, "width", $StateSeparatorPx & "px")
+  r.setStyle(result, "height", $StateRowPx & "px")
+  r.setStyle(result, "flex-shrink", "0")
+  r.setStyle(result, "background", StateSeparatorColour)
+
+proc stateRowElement(r: GpuiRenderer): GpuiElement =
+  ## A row: one line, its cells side by side. The header and a body row are
+  ## the SAME container, so the heading cannot drift from the rows it names.
+  result = r.createElement("div")
+  r.setStyle(result, "display", "flex")
+  r.setStyle(result, "white-space", "nowrap")
+  r.setStyle(result, "overflow", "hidden")
+  r.setStyle(result, "flex-shrink", "0")
+  r.setStyle(result, "height", $StateRowPx & "px")
+  r.setStyle(result, "items", "center")
+
+proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
+                  pv: var PaneView; budget: Budget): bool =
+  ## **`PLAT35-F4`: THE STATE PANE'S ROWS AS THE SPEC'S TWO COLUMNS** — a
+  ## `Name` / `Value` header, one shared alignment x, the 1 px rule between
+  ## the columns (`StateSeparatorAttribute`), and
+  ## `StateColumnAttribute` on every cell — drawn natively from `StateVM`,
+  ## exactly as the call trace's rows are drawn from `CalltraceVM`
+  ## (`renderCallTrace`, PLAT-49 part B: *"a vocabulary `List` option is one
+  ## label and could not carry the parts the desktop styles apart"*). A
+  ## vocabulary `Tree` node carries ONE `label` and no columns, which is the
+  ## same sentence one pane over.
+  ##
+  ## THIS CONVERGES THE THREE FRONT-ENDS RATHER THAN DIVERGING THEM, measured:
+  ## the terminal already aligns these fields
+  ## (`tui/app/views/tree_node.fieldWidths`, *"the name FIELD still ends at
+  ## one column on every row so type and value align"*) and so does the web
+  ## (`viewmodel/views/isonim_state_view.nim`'s `span.value-name` /
+  ## `span.value-type` / `span.value-view`). Neither of them reaches
+  ## `pane_views.statePaneView`: excluding tests it has exactly one functional
+  ## caller in this tree, `renderPaneView` below.
+  ##
+  ## THE PANE'S OWN CHROME STAYS THE VOCABULARY'S. `pv.root`'s `Tabs` over
+  ## §3.3.4's three roots is rendered by `gpui_binding` as before; only the
+  ## `state.root` `Tree` is taken over. So `--report-plan` still prints
+  ## `Locals` (`test_gpui_editing_surface` asserts it), the tab strip has one
+  ## owner, and a seventeenth vocabulary entry — a tree WITH columns, which
+  ## `admission.Rejections` has never considered-and-refused — remains the
+  ## durable answer and not a precondition.
+  ##
+  ## False when there are no variables, so the pane's own report
+  ## (*"no variables at this position"*) is still the vocabulary's to draw and
+  ## `data-ct-state` still reads `pane-report`.
+  if vm.isNil:
+    return false
+  let rows = stateRows(vm, budget)
+  if rows.len == 0 and vm.activeTab.val != stWatches:
+    return false
+  # The body: the pane view WITHOUT its variables tree, then the table. One
+  # column container, so the two cannot be laid out over each other.
+  let body = r.createElement("div")
+  r.setStyle(body, "display", "flex")
+  r.setStyle(body, "flex-direction", "column")
+  var kept: seq[ViewNode] = @[]
+  for child in pv.root.children:
+    if child.id != StateTreeViewId:
+      kept.add child
+  pv.root.children = kept
+  let binding = renderGpui(r, pv.root)
+  r.appendChild(body, binding.root)
+
+  let nameColumnPx = if stateNameColumnOverridePx > 0:
+                       max(StateNameMinPx, stateNameColumnOverridePx)
+                     else: stateNameColumnPx(rows)
+  let table = r.createElement("div")
+  r.setAttribute(table, StateTableAttribute, "rows")
+  # **PLAT-50's CLICK MODEL DISPATCHES ON THE VOCABULARY'S OWN TWO
+  # ATTRIBUTES, AND THIS TABLE CARRIES THEM RATHER THAN GROWING A SECOND
+  # CLICK PATH BESIDE THEM (§30).**
+  #
+  # `window_clicks.wireWindowClicks` decides a press is a VARIABLE press by
+  # walking for `data-view-kind == "Tree"` under an ancestor whose
+  # `data-view-id` is `state.root`, and then wires `gcpVariable` with the
+  # node's `data-view-id` AS THE KEY — which `main` hands straight to
+  # `stateVM.toggleExpand` (left) and `variablesContextMenu` (right).
+  # Taking the `state.root` `Tree` over, as `renderState` does, removed the
+  # ancestor that makes `ctx` become `state`, so every variable press in this
+  # pane stopped being recognised. MEASURED, not inferred: with this table
+  # unlabelled, PLAT-50's own case *"a value expands; a variable's menu"*
+  # fails and the suite counts 95 assertions; upstream's `leaves.nim` at the
+  # same merge counts 104.
+  #
+  # So the table IS the state tree now and says so, and each body row names
+  # the variable it draws. The KEY SPELLING IS ALREADY GATED: `StateRow.path`
+  # is compared against `statePaneView`'s own visible `Tree` row ids by
+  # `test_plat40_state_pane_columns.nim`, so the id this publishes is the id
+  # the ViewModel's `expandedPaths` uses and the one the menu will act on.
+  r.setAttribute(table, ViewIdAttribute, StateTreeViewId)
+  r.setAttribute(table, StateAlignAttribute,
+                 $stateValueColumnPx(nameColumnPx))
+  r.setStyle(table, "display", "flex")
+  r.setStyle(table, "flex-direction", "column")
+  r.setStyle(table, "overflow", "hidden")
+
+  # THE HEADER, which is the half of the finding a `data-column` census does
+  # not cover: *"no header row"* was what all four pixel readers reported.
+  let header = stateRowElement(r)
+  r.setAttribute(header, StateHeaderAttribute, "true")
+  r.appendChild(header, stateCell(r, StateNameColumn, StateHeaderNameLabel,
+                                  nameColumnPx, 0, StateHeaderColour, true))
+  r.appendChild(header, stateSeparatorElement(r))
+  r.appendChild(header, stateCell(r, StateValueColumn, StateHeaderValueLabel,
+                                  0, StateValuePadPx, StateHeaderColour, true))
+  r.appendChild(table, header)
+
+  for i, row in rows:
+    let el = stateRowElement(r)
+    r.setAttribute(el, StateRowAttribute, $i)
+    r.setAttribute(el, StateDepthAttribute, $row.depth)
+    r.setAttribute(el, StateSelectedAttribute,
+                   (if row.selected: "true" else: "false"))
+    # The two the click model reads (see the note on `table`): the row IS a
+    # vocabulary `Tree` row as far as a press is concerned, and its id is the
+    # path `toggleExpand` and `variablesContextMenu` take.
+    r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
+    r.setAttribute(el, ViewIdAttribute, row.path)
+    # The indent is the NAME CELL's padding and not the row's: a fixed-width
+    # name cell ends where every other row's does however deep the row is,
+    # which is the terminal's rule (`tree_node.fieldWidths`) and is why a
+    # nested row cannot push the value column right.
+    r.appendChild(el, stateCell(r, StateNameColumn, row.name, nameColumnPx,
+                                row.depth * StateIndentPx, StateNameColour,
+                                false))
+    # THE RULE, between the two cells — the same element on the header, so
+    # the heading and the rows cannot end their name field at different x.
+    r.appendChild(el, stateSeparatorElement(r))
+    # PLAT-51: A CHANGED VALUE in the shared changed-value accent — the
+    # desktop's `.value-changed`, the terminal's `srValueModified` — read off
+    # the one flag (`StateVM.isChanged`). No badge.
+    let changed = vm.isChanged(row.path)
+    r.setAttribute(el, StateChangedAttribute, (if changed: "true" else: "false"))
+    r.appendChild(el, stateCell(r, StateValueColumn, row.value, 0,
+                                StateValuePadPx,
+                                (if changed: StateChangedColour
+                                 else: StateValueColour), false))
+    # PLAT-51: THE DESKTOP'S VALUE CONTROLS on every row — the history button
+    # (K40), the origin badge (K41) and, on a watch, its remove control
+    # (Variable-State-Pane.md, "Every front-end has every value feature").
+    let historyOpen = row.path in vm.expandedHistories.val
+    let originOpen = row.path in vm.originLines.val
+    for (kind, glyph, lit) in [("history", "↺", historyOpen),
+                               ("origin", "⇠", originOpen)]:
+      let c = r.createElement("div")
+      r.setAttribute(c, StateControlAttribute, kind & ":" & row.path)
+      r.setStyle(c, "flex-shrink", "0")
+      r.setStyle(c, "padding-left", "6px")
+      r.setStyle(c, "color", if lit: StateChangedColour else: StateHeaderColour)
+      r.appendChild(c, r.createTextNode(glyph))
+      r.appendChild(el, c)
+    if vm.activeTab.val == stWatches and row.depth == 0:
+      let c = r.createElement("div")
+      r.setAttribute(c, StateControlAttribute, "unwatch:" & row.name)
+      r.setStyle(c, "flex-shrink", "0")
+      r.setStyle(c, "padding-left", "6px")
+      r.setStyle(c, "color", StateHeaderColour)
+      r.appendChild(c, r.createTextNode("×"))
+      r.appendChild(el, c)
+    r.appendChild(table, el)
+    # PLAT-51: the row's open history and origin, UNDER it, as the desktop's
+    # (`div.ct-history-inline-container`, `div.ct-origin-inline-chain`).
+    if historyOpen:
+      let entries = vm.valueHistory.val.getOrDefault(row.path)
+      for e in entries:
+        let h = stateRowElement(r)
+        r.setAttribute(h, StateHistoryEntryAttribute, $e.locationTicks)
+        r.appendChild(h, stateCell(r, StateNameColumn,
+                                   "↳ tick " & $e.locationTicks, nameColumnPx,
+                                   (row.depth + 1) * StateIndentPx,
+                                   StateHeaderColour, false))
+        r.appendChild(h, stateSeparatorElement(r))
+        r.appendChild(h, stateCell(r, StateValueColumn, e.valueText, 0,
+                                   StateValuePadPx, StateValueColour, false))
+        r.appendChild(table, h)
+    if originOpen:
+      for i, hop in vm.originLines.val.getOrDefault(row.path):
+        let o = stateRowElement(r)
+        r.setAttribute(o, StateOriginHopAttribute, $i)
+        r.appendChild(o, stateCell(r, StateNameColumn, "⇠ " & hop, 0,
+                                   (row.depth + 1) * StateIndentPx,
+                                   StateHeaderColour, false))
+        r.appendChild(table, o)
+  if vm.activeTab.val == stWatches:
+    # PLAT-51: the desktop's watch field, as a row that opens the omnibox
+    # with `:watch `.
+    let w = stateRowElement(r)
+    r.setAttribute(w, StateAddWatchAttribute, "true")
+    r.appendChild(w, stateCell(r, StateNameColumn, "+ Add watch expression…",
+                               0, 0, StateHeaderColour, false))
+    r.appendChild(table, w)
+  r.appendChild(body, table)
+  r.appendChild(parent, body)
+  true
+
+# ---------------------------------------------------------------------------
+# The event log's FOOTER and its HEADER ROW — `PLAT35-F5` and `PLAT35-F12`
+# ---------------------------------------------------------------------------
+
+const
+  EventLogFooterAttribute* = "data-event-log-footer"
+    ## **THE ROW-COUNT FOOTER** (`PLAT35-F5`). The pane drew none at all:
+    ## measured at `3e2a5c5ba`, the body was ONE vocabulary `Table` whose
+    ## children are the header texts and six `data-row-index` rows, with no
+    ## footer node and no count-bearing attribute anywhere in the subtree
+    ## (`grep -i footer src/frontend/gpui/app/leaves.nim` returned nothing).
+    ##
+    ## **IT CARRIES NO `data-column-index`, AND THAT IS LOAD-BEARING RATHER
+    ## than cosmetic.** `window_clicks` classifies a press inside the
+    ## `eventLog` context as a HEADER CELL when the element has a
+    ## `data-column-index` and its parent has no `data-row-index`
+    ## (`window_clicks.nim:211-217`) — which is exactly the shape a footer
+    ## built out of column cells would have. Such a footer would re-sort the
+    ## log when clicked, which is `PLAT35-F7`'s clause in reverse: an element
+    ## that does a thing it does not advertise. The footer is a plain `div`
+    ## appended AFTER the table element for the same reason, so the table's
+    ## own subtree — every `data-row-index`, `data-column-index` and
+    ## `data-cell` the vocabulary binding wrote, and the column arithmetic in
+    ## `tableColumnWidthsPx` — is left BYTE-FOR-BYTE as it was.
+  EventLogTotalAttribute* = "data-event-log-total"
+    ## The number the footer's `of N` was computed from, published so a test
+    ## can assert WHICH number it is rather than that a number is present.
+    ##
+    ## **THE DISTINCTION THIS ATTRIBUTE EXISTS TO MAKE.** A footer that
+    ## counted the rows it holds would read `6` on a recording with thousands
+    ## of events, and `Event-Log-Pane.md`'s Requirement says why it cannot be
+    ## computed that way: the counts come from `ct/update-table`'s
+    ## `recordsTotal` / `recordsFiltered`, and *"no single window can supply
+    ## them: they describe the whole log and the whole filtered log, not the
+    ## rows in hand"*. `rows` is ONE WINDOW — `store.eventLog.loadedStart`
+    ## says which — so `rows.len` is wrong outright once the pane has paged.
+  EventLogHeaderAttribute* = "data-event-log-header"
+    ## **THE HEADER ROW, MARKED AND STYLED AS ONE** (`PLAT35-F12`, the two
+    ## sub-claims that are grounded). Measured at `3e2a5c5ba`: all six
+    ## `data-row-index` rows and the header share ONE style object,
+    ## `{gap: 12px, display: flex, white_space: nowrap}` — `layOutRow` in
+    ## `gpui_binding.nim:486` applies the same three declarations to `head`
+    ## and to every body `tr` — so the header was the same weight and colour
+    ## as a data row.
+  EventLogRulePx* = 1
+    ## The header rule's width, the state pane's `StateSeparatorPx`.
+  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
+    ## **A PUBLISHED TOKEN AND NOT A HEX LITERAL**, the same one the state
+    ## pane's column rule takes (`StateSeparatorColour`). The event-log spec
+    ## publishes no rule — grepped at `codetracer-specs@90ff8fce` for zebra /
+    ## divider / header rule / alternat / stripe / border over
+    ## `Event-Log-Pane.md`: **zero hits for all six** — so this is grounded on
+    ## the TOKEN plus convergence with the two front-ends that already draw
+    ## one, not on a clause. The terminal rules its event-log title row with
+    ## `PaneRule "─"` at `RuleStyle = CellStyle(role: srBorderPane)`
+    ## (`tui/app/views/event_log.nim:203,230,537-541`); the state pane rules
+    ## its columns with this token. Typing `#565656` here instead is what arm
+    ## **G** of the state-pane suite exists to redden.
+  EventLogHeaderColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+    ## The header's own colour, `StateHeaderColour`'s token — and the
+    ## terminal's `HeaderStyle = CellStyle(role: srChromeMuted, bold: true)`
+    ## (`tui/app/views/event_log.nim:223`) is the same decision in that
+    ## medium. Both front-ends distinguish the header by COLOUR AND WEIGHT
+    ## together, so this renderer does both rather than picking one.
+  EventLogFooterColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
+    ## The footer reads as chrome, not as data — the header's token.
+
+proc eventLogTotalOf*(windowStart, shown, total: int): int =
+  ## **THE NUMBER THE FOOTER'S `of N` IS, DECIDED ONCE.** The drawn string and
+  ## the published `EventLogTotalAttribute` both read it from here, so the
+  ## attribute a test asserts on and the text a user reads cannot disagree —
+  ## the shape `stateValueColumnPx` and `data-state-value-x` already take one
+  ## pane over (§30). The clamp below was written out twice — once for the
+  ## string and once for the attribute — until it was written here once.
+  ##
+  ## THE FLOOR IS THE STORE'S OWN ARITHMETIC, NOT A COUNT OF THE ROWS IN HAND.
+  ## `recordsTotal` is a high-water mark, and the store raises it exactly this
+  ## way when a producer supplies none (`replay_data_store.nim:1640-1641`). It
+  ## can only lift `N` to something already known to have ARRIVED, and on any
+  ## window whose total is larger it does nothing at all.
+  max(total, windowStart + shown)
+
+proc eventLogFooterText*(windowStart, shown, total: int): string =
+  ## **`Rows N to M of T`** — the desktop's own footer, to the byte.
+  ##
+  ## `PLAT35-PD2` records the Electron pane's footer as **`Rows 1 to 6 of 6`**
+  ## and §6 makes the desktop the reference, so the shape is carried across
+  ## rather than chosen. The web front-end builds the same three fields out of
+  ## DataTables — `viewmodel/views/isonim_event_log_view.nim:399-411` nests
+  ## `Rows` / `to` / `of` around a `data-tables-footer-input`, a
+  ## `data-tables-footer-end-row` and a `data-tables-footer-rows-count` — so
+  ## this spelling CONVERGES on the two front-ends that have a footer instead
+  ## of adding a third. (PD2's complaint about Electron is a different one —
+  ## no column headers, and one row drawn six times — and neither defect is
+  ## imported here: the columns and headers are already right in GPUI, which
+  ## is the half of the finding that passed.)
+  ##
+  ## A PURE FUNCTION OF THREE INTEGERS, so the formula is asserted without a
+  ## renderer, a window or a session.
+  ##
+  ## **WHY `T` IS FLOORED BY THE WINDOW.** `store.eventLog.recordsTotal` is
+  ## documented as a HIGH-WATER MARK rather than the engine's count —
+  ## *"`ct/event-load`'s response body carries `events`, `content` and
+  ## `markers` and no total, so the only honest total available here is
+  ## derived from what has arrived"* (`replay_data_store.nim:212-219`) — and
+  ## the store itself floors it exactly this way when the producer supplies
+  ## none: `recordsTotal.val = max(recordsTotal.val, start + rows.len)`
+  ## (`replay_data_store.nim:1640-1641`). So the floor is the store's own
+  ## arithmetic repeated at the last moment, NOT a count of the rows in hand:
+  ## it can only raise `T` to something already known to have arrived, and on
+  ## every window where the total is larger — every paged or `update-table`
+  ## window — it does nothing at all. Without it a pane whose total had not
+  ## been published yet would print `Rows 1 to 6 of 0`, a footer visibly
+  ## disagreeing with the rows above it.
+  let first = windowStart + 1
+  let last = windowStart + shown
+  result = "Rows " & $first & " to " & $last & " of " &
+           $eventLogTotalOf(windowStart, shown, total)
+
+proc eventLogFooterElement(r: GpuiRenderer; windowStart, shown,
+                           total: int): GpuiElement =
+  ## The footer node: its text, its two attributes, and no column cell.
+  result = r.createElement("div")
+  r.setAttribute(result, EventLogFooterAttribute, "true")
+  r.setAttribute(result, EventLogTotalAttribute,
+                 $eventLogTotalOf(windowStart, shown, total))
+  r.setStyle(result, "color", EventLogFooterColour)
+  r.setStyle(result, "white-space", "nowrap")
+  r.setStyle(result, "overflow", "hidden")
+  r.setStyle(result, "flex-shrink", "0")
+  r.appendChild(result, r.createTextNode(
+    eventLogFooterText(windowStart, shown, total)))
+
+proc styleEventLogHeader(r: GpuiRenderer; table: GpuiElement): bool =
+  ## Mark the vocabulary table's header row and style it AS a header: the
+  ## rule under it, and its cells' colour and weight.
+  ##
+  ## **THE HEADER IS FOUND THE WAY THE CLICK CLASSIFIER FINDS IT** — the row
+  ## carrying no `data-row-index` (`window_clicks.nim:211-213`) — rather than
+  ## by position. One definition of "the header row", in two readers, is §30;
+  ## `nthChild(table, 0)` would have been a second one, and it would drift
+  ## the moment the binding appended anything before `head`.
+  for i in 0 ..< childCount(table):
+    let row = nthChild(table, i)
+    if getAttribute(row, "data-row-index").len > 0:
+      continue
+    r.setAttribute(row, EventLogHeaderAttribute, "true")
+    # THE RULE. `border-bottom-width` plus `border-color` and not a 1 px
+    # child `div`: the shim draws a border on the element itself
+    # (`gpui_app.rs:640-666`, the 2026-09-29 repair — *"Both were parsed into
+    # the plan and never drawn"*), so there is no childless flex child to
+    # inherit no height, which is the trap `StateSeparatorAttribute` carries.
+    r.setStyle(row, "border-bottom-width", $EventLogRulePx & "px")
+    r.setStyle(row, "border-color", EventLogRuleColour)
+    for c in 0 ..< childCount(row):
+      let cell = nthChild(row, c)
+      r.setStyle(cell, "color", EventLogHeaderColour)
+      r.setStyle(cell, "font-weight", "bold")
+    return true
+  false
+
+proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
+                     pv: var PaneView): bool =
+  ## **`PLAT35-F5` AND `PLAT35-F12`: THE EVENT LOG'S FOOTER AND ITS HEADER.**
+  ##
+  ## This leaf is deliberately NOT the shape `renderCallTrace` and
+  ## `renderState` have, and the difference is the whole argument for it.
+  ## Those two draw their rows natively because *"a vocabulary `List` option
+  ## is one label and could not carry the parts the desktop styles apart"* —
+  ## their vocabulary node was the wrong shape. The event log's is the RIGHT
+  ## shape: `eventLogPaneView` already builds a true `Table` with the
+  ## ViewModel's columns, the sort arrow, the 2-D cursor and the click
+  ## attributes, and the pane's columns and headers were measured PRESENT and
+  ## aligned at `3e2a5c5ba`. Re-drawing that table here would duplicate
+  ## `tableColumnWidthsPx`, every `data-*` attribute `window_clicks`
+  ## dispatches on, and the sort-arrow logic — §30's shape, for nothing.
+  ##
+  ## So the vocabulary table is rendered through the SHARED binding
+  ## unchanged, and the two things the vocabulary has no word for are added
+  ## around it: the footer, and the header's own styling.
+  ##
+  ## **WHY THIS LIVES IN `leaves.nim` AND NOT IN `gpui_binding.nim`.** The
+  ## header styling would have been one line shorter in the `pkTable` arm,
+  ## and it is not taken there because that file is NOT GPUI-private:
+  ## `tui/tests/test_cross_renderer_panes.nim` imports it at line 119
+  ## (`../../view_vocabulary/gpui_binding as gbind`) and builds its GPUI
+  ## column from it at line 369, so a style added there reaches a suite whose
+  ## subject is three-way AGREEMENT, and would style the scratchpad, the
+  ## point list and the VCS tables too. That suite imports no
+  ## `gpui/app/leaves` — verified at `3e2a5c5ba`, and `app/shell.nim` names
+  ## `leaves` only in prose — so a native leaf cannot reach it.
+  if vm.isNil or pv.report.len > 0:
+    return false
+  let binding = renderGpui(r, pv.root)
+  r.appendChild(parent, binding.root)
+  discard styleEventLogHeader(r, binding.root)
+  # The window, from the signals the spec designates. `eventRows` is the
+  # window's rows and `loadedStart` its offset; `totalEventCount` is
+  # `store.eventLog.recordsTotal`, aliased on the ViewModel
+  # (`event_log_vm.nim:347-348`, wired at `:995`).
+  r.appendChild(parent, eventLogFooterElement(
+    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,
+    vm.totalEventCount.val))
+  true
 
 proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
                     leaf: GpuiLeaf; budget: Budget): bool =
@@ -586,7 +2216,29 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
   ## `pane_views.paneView` is the ONE door, and its `case` is exhaustive over
   ## `PaneKind`, so a pane added to the enum without a view does not compile
   ## rather than becoming a name nothing renders.
-  let pv = paneView(leaf.builtin, leaf.vm, budget, GpuiMedium)
+  ##
+  ## PLAT-49 part B: the call trace's ROWS are drawn natively from its
+  ## semantic rows (`renderCallTrace`) — a vocabulary `List` option is one
+  ## label and could not carry the parts the desktop styles apart.
+  ##
+  ## `PLAT35-F4`: and so are the state pane's, for the same reason one pane
+  ## over (`renderState`). It takes the pane view rather than re-asking for
+  ## one, because the `Tabs` half of that view is still the vocabulary's to
+  ## draw.
+  if leaf.builtin == paneCalltrace and not leaf.vm.isNil and
+     renderCallTrace(r, parent, CalltraceVM(leaf.vm)):
+    return true
+  var pv = paneView(leaf.builtin, leaf.vm, budget, GpuiMedium)
+  if leaf.builtin == paneState and not leaf.vm.isNil and
+     renderState(r, parent, StateVM(leaf.vm), pv, budget):
+    return true
+  # `PLAT35-F5` / `PLAT35-F12`: and so are the event log's footer and header
+  # rule (`renderEventLog`) — which, unlike the two arms above, keeps the
+  # vocabulary's own `Table` and adds only the parts the vocabulary has no
+  # word for. See that proc for why it is not in the shared binding.
+  if leaf.builtin == paneEventLog and not leaf.vm.isNil and
+     renderEventLog(r, parent, EventLogVM(leaf.vm), pv):
+    return true
   let binding = renderGpui(r, pv.root)
   r.appendChild(parent, binding.root)
   pv.report.len == 0
@@ -606,8 +2258,10 @@ proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
   r.appendChild(result, r.createTextNode(
     if leaf.title.len > 0: leaf.title else: leaf.paneId))
 
-proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
-                surface: EditorSurface): (GpuiElement, bool) =
+proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
+                surface: EditorSurface;
+                editorViewportPx = 0;
+                editorScrollLeftCols = 0): (GpuiElement, bool) =
   ## One leaf's subtree, and whether it is a REPORT rather than a live pane.
   ##
   ## Three states and not two, which is PLAT-9's `PaneRefKind` arriving at a
@@ -654,7 +2308,8 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
       let heading = paneTitleElement(r, leaf)
       r.appendChild(node, heading)
       let drewRows = renderEditor(r, node, sourcePaneView(GpuiMedium).root,
-                                  surface)
+                                  surface, editorViewportPx,
+                                  editorScrollLeftCols)
       return (node, not drewRows)
     # **AN ACCEPTED EXCEPTION SAYS WHICH EXCEPTION IT IS** (PLAT-41's LAW-P3),
     # in every product mode. `fileTree` and `buildOutput` have no replay
@@ -662,16 +2317,6 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
     # for the session to launch" — was a promise the session would never keep,
     # drawn on a real run of the shipped binary. `paneView` names the
     # exception and its reason without a ViewModel.
-    # **THE TIMELINE IS THIS FRONT-END'S OWN VIEW**, as the editor is: PLAT-3
-    # refused a Timeline entry in the vocabulary (`timelinePaneView` is a
-    # native escape), which obliges each medium to draw one natively. Until
-    # PLAT-41 GPUI drew nothing there — the escape node has no text — while
-    # the terminal and the desktop draw a scrubber.
-    if leaf.kind == glkBuiltin and leaf.builtin == paneTimeline and leaf.live:
-      r.setAttribute(node, StateAttribute, "live")
-      r.appendChild(node, paneTitleElement(r, leaf))
-      renderTimeline(r, node, TimelineVM(leaf.vm))
-      return (node, false)
     if leaf.kind == glkBuiltin and leaf.builtin in PaneAcceptedExceptions:
       r.setAttribute(node, StateAttribute, "pane-report")
       r.appendChild(node, paneTitleElement(r, leaf))
@@ -713,6 +2358,31 @@ proc renderLeaf(r: GpuiRenderer; leaf: GpuiLeaf;
     # would be this front-end deciding a question that milestone owns.
     return (node, false)
 
+proc setHeadingText*(r: GpuiRenderer; node: GpuiElement; text: string) =
+  ## Replace a leaf's heading text (its first child's text).
+  if node.isNil or childCount(node) == 0:
+    return
+  let heading = nthChild(node, 0)
+  if heading.isNil or getAttribute(heading, TextRoleAttribute) != $trPaneTitle:
+    return
+  while childCount(heading) > 0:
+    r.removeChild(heading, nthChild(heading, 0))
+  r.appendChild(heading, r.createTextNode(text))
+
+proc redrawLeafBody*(r: GpuiRenderer; node: GpuiElement; leaf: GpuiLeaf;
+                     heading = "") =
+  ## PLAT-47 B3: draw a live pane's view again, in place — everything after
+  ## its heading removed and rebuilt by `renderPaneView`, the function that
+  ## drew it the first time — after its ViewModel moved (a scrolled call
+  ## trace). `heading`, when given, replaces the title's text.
+  if node.isNil or leaf.kind != glkBuiltin:
+    return
+  while childCount(node) > 1:
+    r.removeChild(node, nthChild(node, childCount(node) - 1))
+  discard renderPaneView(r, node, leaf, GpuiPanelBudget)
+  if heading.len > 0:
+    setHeadingText(r, node, heading)
+
 const NoSurfaceSuppliedReport* =
   "no editor surface was supplied to renderLeaves; the host builds one from " &
   "SourceVM and this call did not pass it"
@@ -729,9 +2399,15 @@ const NoSurfaceSuppliedReport* =
 
 proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
                    surface = EditorSurface(medium: GpuiMedium,
-                                           report: NoSurfaceSuppliedReport)):
+                                           report: NoSurfaceSuppliedReport);
+                   editorViewportPx = 0;
+                   editorScrollLeftCols = 0):
                    LeafRenderOutcome =
   ## Build the element tree for one window.
+  ##
+  ## `editorViewportPx` is the editor pane's inner width, from the window's
+  ## own geometry; `renderEditor`'s doc comment says why it is passed in and
+  ## why zero draws no scrollbar (`PLAT35-F3`).
   ##
   ## A REFUSED projection draws its refusal. It does not draw an empty window
   ## and it does not fall back to a default arrangement: the terminal's
@@ -751,7 +2427,8 @@ proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
     r.appendChild(root, text)
     return
   for leaf in leafSet.leaves:
-    let (node, reported) = renderLeaf(r, leaf, surface)
+    let (node, reported) = renderLeaf(r, leaf, surface, editorViewportPx,
+                                      editorScrollLeftCols)
     # PLAT-35's focus-order row. The index is the leaf's position in the
     # projected document's own order — the order this front-end would move
     # focus in — stamped so the question can be answered from the RENDERED

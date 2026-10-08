@@ -56,18 +56,26 @@ type
     ## exactly the failure mode the GoldenLayout config has today, where an
     ## unrecognised `componentName` produces a blank tab.
     ##
-    ## The set is the panes `SessionViewModel` actually owns, not a wish list:
-    ## the eleven mounted by `viewmodel/app/isonim_app.nim` plus the editor
-    ## and the debug controls, which that module mounts elsewhere. The five
-    ## that make a replay navigable are the first five values, and
-    ## `ReplayCorePanes` below names them.
+    ## The set is the panes `SessionViewModel` actually owns — the eleven
+    ## mounted by `viewmodel/app/isonim_app.nim` plus the editor and the debug
+    ## controls, which that module mounts elsewhere — the two edit-mode panes
+    ## PLAT-16 added, and (PLAT-45) the five panes the desktop's default
+    ## places that no native front-end has a view for yet. Those five are
+    ## placed everywhere and drawn as REPORT leaves where a front-end cannot
+    ## draw them (`PaneCapability`), which is what lets every product open
+    ## with the same panes. The five that make a replay navigable are the
+    ## first five values, and `ReplayCorePanes` below names them.
     paneEditor = "editor"
     paneCalltrace = "calltrace"
     paneState = "state"
     paneEventLog = "eventLog"
     paneDebugControls = "debugControls"
     paneFlow = "flow"
-    paneTimeline = "timeline"
+      ## (PLAT-51: `paneTimeline = "timeline"` stood here. The Timeline panel
+      ## is removed from every product — Layout-System.md, "The Timeline panel
+      ## is removed (2026-10-05)" — so it is no longer a pane a layout can
+      ## place. Its spelling lives on only as `RetiredPaneSpellings`, which
+      ## the v5→v6 migration drops from a saved layout.)
     paneSearch = "search"
     panePointList = "pointList"
     paneScratchpad = "scratchpad"
@@ -97,6 +105,37 @@ type
       ## in a pane, not a modal. A compiler error list is something a user
       ## navigates while editing, which is the argument for `paneBuildOutput`
       ## over an overlay."*
+    paneVcs = "vcs"
+      ## PLAT-45. The desktop's version-control pane (`Content.VCS`).
+      ##
+      ## THE FIVE VALUES BELOW ARE THE PANES `src/config/default_layout.json`
+      ## PLACED AND THIS ENUM LACKED, and they are here so the shared default
+      ## (`sharedDefaultLayout`) can say "the same panes" and mean it. Adding
+      ## them is the persisted-format change that takes `LayoutSchemaVersion`
+      ## to 4 (see its version history). They are LAST, for the reason the two
+      ## PLAT-16 values above give: no existing member's ordinal moves.
+      ##
+      ## Where they meet the desktop's `Content` ordinals is ONE table,
+      ## `headless_app/desktop_panes.PaneContent`, and nowhere else.
+    paneAgentActivity = "agentActivity"
+      ## PLAT-45. The desktop's Agent Activity pane (`Content.AgentActivity`).
+    paneTerminalOutput = "terminalOutput"
+      ## PLAT-45. The recorded program's terminal output
+      ## (`Content.TerminalOutput`).
+    paneTestResults = "testResults"
+      ## PLAT-45. The desktop's Test Results pane (`Content.TestResults`).
+    paneConstraints = "constraints"
+      ## PLAT-45. The desktop's Constraints pane (`Content.Constraints`).
+    paneProblems = "problems"
+      ## PLAT-48. The desktop's PROBLEMS footer panel (`Content.BuildErrors`).
+      ##
+      ## THE TWO VALUES BELOW ARE THE DESKTOP'S FOOTER AUTO-HIDE PANELS THIS
+      ## ENUM COULD NOT NAME (BUILD and FIND IN FILES already were
+      ## `paneBuildOutput` and `paneSearch`), added so the shared default can
+      ## carry the footer as docked panes (`sharedDefaultDocked`). Schema
+      ## version 5; LAST, for the ordinal reason the PLAT-16 values give.
+    paneRequests = "requests"
+      ## PLAT-48. The desktop's REQUESTS footer panel (`Content.RequestPanel`).
 
   PaneRefKind* = enum
     ## PLAT-9 / Extensibility-Model.md §6.1. WHAT KIND OF PANE A SLOT HOLDS.
@@ -265,6 +304,12 @@ type
       ## `lcMoveTab` named a destination whose enclosing node is not a stack.
     lpIndexOutOfRange = "IndexOutOfRange"
       ## `lcMoveTab` named an insertion index outside `0 .. len`.
+    lpNoDivider = "NoDivider"
+      ## A divider resize (`lcSetWeight` with `weightDivider`) named a side of
+      ## a node that has no divider on it: the node is the root, a tab of a
+      ## stack (tabs share one region), or the first/last child of its row or
+      ## column on the side named. Also a `weightLevel` that climbs past the
+      ## root, or is negative.
 
   LayoutProblemSource* = enum
     ## Where a `LayoutProblemKind` can come from. A kind may have both
@@ -321,6 +366,34 @@ type
       ## that reopened four overlays would be a bug, and `toJson` omitting
       ## this field is what prevents it. It lives here for locality; it
       ## belongs to PLAT-5's transient state.
+    open*: bool
+      ## PLAT-49 part B (finding 9): DOCKED OPEN — the desktop's clicked
+      ## strip tab (`auto_hide.showDockedPanel`): the pane is shown INLINE at
+      ## its edge and TAKES SPACE, the arrangement projected into what is
+      ## left (no overlay), while its label stays on its strip. Set by
+      ## `cmdOpenDocked`, cleared by `cmdCloseDocked`; at most ONE docked pane
+      ## is open at a time (the desktop's single `dockedPanel`). NOT PERSISTED,
+      ## as the desktop does not persist `dockedVisible`.
+    beside*: Option[PaneKind]
+      ## PLAT-48: where the pane came FROM — the placed pane it sat beside when
+      ## it was docked (`pinPlaceOf`, read before the dock took it out of the
+      ## tree). `ahRestore` without an explicit anchor puts it back there
+      ## while that pane is still placed, so "pin, then unpin" — in any
+      ## front-end, across a restart — returns a pane to its own container
+      ## instead of appending it to the root. Persisted (`"beside"`);
+      ## `none` for a pane that was never placed (the shared default's footer
+      ## panels) or was docked alone in its container.
+    weight*: float
+      ## PLAT-48: the share the pane had in its container when it was docked,
+      ## given back on restore (0 — the neutral share — when it had none).
+      ## Persisted (`"weight"`) when positive.
+    besideBefore*: bool
+      ## PLAT-48: the pane goes back BEFORE `beside` rather than after it —
+      ## true when `beside` was its NEXT sibling, i.e. the pane was the first
+      ## of its container. Without it a pane pinned from the front of a stack
+      ## came back behind the pane that had followed it (Call Trace | Agent
+      ## Activity became Agent Activity | Call Trace). Persisted
+      ## (`"besideBefore": true`) only when set.
 
   Layout* = object
     ## The persisted unit: a tree, the panes docked beside it, and a version.
@@ -394,6 +467,12 @@ type
     ahRestore = "restore"
       ## Remove it from `docked` and place it back with `lcAddPane`'s
       ## semantics.
+    ahOpen = "open"
+      ## PLAT-49 part B: keep it docked and show it OPEN — inline at its
+      ## edge, taking space (`DockedPane.open`); any other open docked pane
+      ## closes.
+    ahClose = "close"
+      ## PLAT-49 part B: back to collapsed — its label only.
 
   LayoutCommand* = object
     ## A variant object, unlike `LayoutNode`, and for the reason the module
@@ -406,6 +485,28 @@ type
     of lcSetWeight:
       weightTarget*: PaneKind
       weightValue*: float
+      weightDivider*: Option[SplitSide]
+        ## `none` — every caller before this field existed — sets the weight
+        ## of `weightTarget`'s own leaf and nothing else, so the node's share
+        ## moves against ALL its siblings, which keep their proportions to
+        ## each other.
+        ##
+        ## `some(side)` is a DIVIDER DRAG: the node named by `weightTarget` and
+        ## `weightLevel` takes `weightValue` as its (effective) weight, and the
+        ## ONE sibling across the divider on `side` absorbs the difference, so
+        ## the pair's sum — and therefore every other sibling's share — is
+        ## unchanged. Layout-ViewModel §4.3 needs this because `commit` yields
+        ## ONE command and a divider between two of three panes moves two
+        ## weights; two `lcSetWeight`s would make the transient layer sequence
+        ## layout changes, which §4.3 forbids. A flag rather than a new
+        ## command kind, for `splitMovesPane`'s reason: the same operation.
+      weightLevel*: int
+        ## Divider drags only. How many levels ABOVE `weightTarget`'s leaf the
+        ## resized node sits: `0` is the leaf, `1` its parent, and so on.
+        ## Every node holds at least one pane, so every node — a stack, a
+        ## row of stacks — is some pane's ancestor at some level; this is how
+        ## a pane-named command reaches a divider between two containers
+        ## without a path, which is a renderer's way of pointing.
     of lcAddPane:
       addedPane*: PaneKind
       addedTitle*: string
@@ -419,6 +520,13 @@ type
       removedPane*: PaneKind
     of lcMoveTab:
       movedPane*: PaneKind
+        ## Placed in the tree, OR DOCKED on an auto-hide strip (PLAT-5's
+        ## closing pass, 2026-09-27 — the same decision PLAT-4's took for
+        ## `splitMovesPane`). A docked source leaves `docked` with its strip
+        ## title and lands at `moveIndex`, any slot from `0` to `len`; before
+        ## this, `ahRestore` was its only way back and it places AFTER an
+        ## anchor, so a stack's first slot was unreachable in one command. A
+        ## pane in both places is `lpPaneBothPlacedAndDocked`.
       moveBeside*: PaneKind
         ## A pane in the DESTINATION stack. Named by pane rather than by path
         ## because a path is a renderer's way of pointing and this module has
@@ -431,6 +539,15 @@ type
       splitAxis*: SplitAxis
       splitSide*: SplitSide
       splitMovesPane*: bool
+      splitRoot*: bool
+        ## PLAT-49 part B (finding 11): split the WHOLE LAYOUT rather than
+        ## `splitTarget` — GoldenLayout's ground drop (`GroundItem.onDrop`, a
+        ## drop on one of its 50 px side areas along the layout's outer
+        ## edges): the dragged pane goes to that side of the root. When the
+        ## root is already a row (column) and the split is on that axis, the
+        ## pane joins it at that end and takes HALF of the end sibling's
+        ## share; otherwise the root is wrapped in a new row (column), half
+        ## and half. `splitTarget` is not read. Only with `splitMovesPane`.
         ## PLAT-5. When false — every PLAT-4 caller — `splitNewPane` must NOT
         ## be in the tree and a duplicate is `lpDuplicatePane`. When true it
         ## must ALREADY be, and the split MOVES it: detach (§2.4's collapse
@@ -460,6 +577,8 @@ type
         ## tree always gains a pane.
     of lcMergeIntoStack:
       mergedPane*: PaneKind
+        ## Placed or DOCKED, as `movedPane` — a docked pane dropped onto a
+        ## bare pane makes the same two-tab stack a placed one does.
       mergeBeside*: PaneKind
       mergeWholeRegion*: bool
         ## The §8-decision-1 gesture: drag a whole SPLIT into a tab, rather
@@ -577,7 +696,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 3
+  LayoutSchemaVersion* = 6
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -616,6 +735,21 @@ const
     ## | 2 | adds `docked: []` (PLAT-4). The tree encoding is unchanged, so
     ##       the v1→v2 migration only supplies the missing array. |
     ## | 3 | `PaneKind` gains `fileTree` and `buildOutput` (PLAT-16). |
+    ## | 4 | `PaneKind` gains `vcs`, `agentActivity`, `terminalOutput`,
+    ##       `testResults` and `constraints` (PLAT-45) — the panes the
+    ##       desktop's default placed and the shared vocabulary could not
+    ##       name. The document's shape is unchanged, so `migrateV3toV4` is the
+    ##       identity that re-stamps the version, for the v2→v3 reason below. |
+    ## | 5 | `PaneKind` gains `problems` and `requests` (PLAT-48) — the
+    ##       desktop's footer auto-hide panels, which the shared default now
+    ##       docks. Shape unchanged; `migrateV4toV5` re-stamps the version. |
+    ## | 6 | `PaneKind` LOSES `timeline` (PLAT-51: the Timeline panel is
+    ##       removed from every product). The first REMOVAL, so the first
+    ##       migration that changes a document: `migrateV5toV6` DROPS every
+    ##       `timeline` leaf (its stack keeps its other tabs, its active tab
+    ##       follows the survivor; a container left empty goes) and every
+    ##       docked `timeline` entry — a remembered layout that held the
+    ##       Timeline opens without it, never with `ldeUnknownPane`. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -1169,6 +1303,33 @@ proc indexIn(parent: LayoutNode; child: LayoutNode): int =
       return i
   -1
 
+proc pinPlaceOf*(layout: Layout; pane: PaneKind):
+    tuple[beside: Option[PaneKind], before: bool] =
+  ## PLAT-48: the pane `pane` should come back BESIDE when it is unpinned —
+  ## read BEFORE the pin (`cmdDock`) takes it out of the tree, and handed to
+  ## `cmdRestoreDocked(pane, beside)` on unpin, so "pin, then unpin" puts a
+  ## pane back in the container it left (its stack, or its split) rather
+  ## than appending it to the root, which is `ahRestore`'s answer without an
+  ## anchor: the previous sibling leaf when there is one (the restore lands
+  ## directly after it), else the next one; `none` when the pane is alone in
+  ## its container or not placed. And on which side of it the pane sat: `before` is true
+  ## when the anchor is the pane's NEXT sibling (the pane was first in its
+  ## container), so the restore goes in front of it, where the pane was.
+  let leaf = find(layout.tree, pane)
+  let parent = parentOf(layout.tree, leaf)
+  if leaf.isNil or parent.isNil:
+    return (none(PaneKind), false)
+  let at = indexIn(parent, leaf)
+  for i in countdown(at - 1, 0):
+    let c = parent.children[i]
+    if c.kind == lnPane and not c.isContributed:
+      return (some(c.pane), false)
+  for i in at + 1 ..< parent.children.len:
+    let c = parent.children[i]
+    if c.kind == lnPane and not c.isContributed:
+      return (some(c.pane), true)
+  (none(PaneKind), false)
+
 proc copyOf(n: LayoutNode): LayoutNode =
   ## A shallow structural copy: the same fields, the same child refs. Used
   ## when a node is about to be rewritten by `becomes` but its old contents
@@ -1187,7 +1348,7 @@ proc wrapRootAround(root: LayoutNode; leaf: LayoutNode; leafFirst: bool) =
   root.becomes(LayoutNode(kind: lnRow, weight: root.weight, children: kids))
 
 proc insertBeside(root: LayoutNode; anchor: Option[PaneKind];
-                  leaf: LayoutNode): bool =
+                  leaf: LayoutNode; before = false): bool =
   ## `lcAddPane`'s placement rule, shared by `ahRestore`.
   ##
   ## With an anchor: the new leaf joins the anchor's own container, directly
@@ -1207,9 +1368,12 @@ proc insertBeside(root: LayoutNode; anchor: Option[PaneKind];
       wrapRootAround(root, leaf, leafFirst = false)
       return true
     let at = indexIn(parent, target)
-    parent.children.insert(leaf, at + 1)
+    # `before`: in FRONT of the anchor (the pane was its container's first,
+    # `DockedPane.besideBefore`); otherwise directly after it.
+    let into = if before: at else: at + 1
+    parent.children.insert(leaf, into)
     if parent.kind == lnStack:
-      parent.activeIndex = at + 1
+      parent.activeIndex = into
     return true
   if root.kind == lnPane:
     wrapRootAround(root, leaf, leafFirst = false)
@@ -1294,7 +1458,16 @@ proc cmdActivateTab*(pane: PaneKind): LayoutCommand =
   LayoutCommand(kind: lcActivateTab, activateTarget: pane)
 
 proc cmdSetWeight*(pane: PaneKind; weight: float): LayoutCommand =
-  LayoutCommand(kind: lcSetWeight, weightTarget: pane, weightValue: weight)
+  LayoutCommand(kind: lcSetWeight, weightTarget: pane, weightValue: weight,
+                weightDivider: none(SplitSide), weightLevel: 0)
+
+proc cmdSetDivider*(pane: PaneKind; weight: float; side: SplitSide;
+                    level = 0): LayoutCommand =
+  ## `lcSetWeight` as a DIVIDER DRAG: the node `level` levels above `pane`'s
+  ## leaf takes `weight`, and its sibling on `side` absorbs the difference.
+  ## See `weightDivider`.
+  LayoutCommand(kind: lcSetWeight, weightTarget: pane, weightValue: weight,
+                weightDivider: some(side), weightLevel: level)
 
 proc cmdAddPane*(pane: PaneKind; title = ""; weight = 0.0;
                  after: Option[PaneKind] = none(PaneKind)): LayoutCommand =
@@ -1323,6 +1496,15 @@ proc cmdSplitMove*(target: PaneKind; movedPane: PaneKind; axis: SplitAxis;
                 splitNewTitle: title, splitAxis: axis, splitSide: side,
                 splitMovesPane: true)
 
+proc cmdSplitRootMove*(movedPane: PaneKind; axis: SplitAxis;
+                       side: SplitSide = ssAfter; title = ""): LayoutCommand =
+  ## `lcSplit` over the WHOLE LAYOUT (`splitRoot`): the drop "drag this tab to
+  ## the layout's outer edge" — GoldenLayout's ground side areas. The pane is
+  ## already in the layout (placed or docked) and is MOVED.
+  LayoutCommand(kind: lcSplit, splitTarget: movedPane, splitNewPane: movedPane,
+                splitNewTitle: title, splitAxis: axis, splitSide: side,
+                splitMovesPane: true, splitRoot: true)
+
 proc cmdMergeIntoStack*(pane: PaneKind; beside: PaneKind;
                         wholeRegion = false): LayoutCommand =
   LayoutCommand(kind: lcMergeIntoStack, mergedPane: pane, mergeBeside: beside,
@@ -1346,6 +1528,26 @@ proc cmdRestoreDocked*(pane: PaneKind;
                 autoHidePane: pane, autoHideEdge: leLeft, autoHideOrder: -1,
                 autoHideTitle: "", autoHideRestoreBeside: beside)
 
+proc cmdOpenDocked*(pane: PaneKind): LayoutCommand =
+  ## PLAT-49 part B: show a docked pane OPEN — inline at its edge, taking
+  ## space — the desktop's click on a strip tab (`showDockedPanel`).
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahOpen,
+                autoHidePane: pane, autoHideEdge: leLeft, autoHideOrder: -1,
+                autoHideTitle: "", autoHideRestoreBeside: none(PaneKind))
+
+proc cmdCloseDocked*(pane: PaneKind): LayoutCommand =
+  ## PLAT-49 part B: back to its label only (`hideDockedPanel`).
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahClose,
+                autoHidePane: pane, autoHideEdge: leLeft, autoHideOrder: -1,
+                autoHideTitle: "", autoHideRestoreBeside: none(PaneKind))
+
+proc openDocked*(layout: Layout): Option[DockedPane] =
+  ## The docked pane shown open, if any.
+  for d in layout.docked:
+    if d.open:
+      return some(d)
+  none(DockedPane)
+
 proc cmdRename*(pane: PaneKind; title: string): LayoutCommand =
   LayoutCommand(kind: lcRename, renameTarget: pane, renameTitle: title)
 
@@ -1365,7 +1567,11 @@ proc `$`*(cmd: LayoutCommand): string =
   case cmd.kind
   of lcActivateTab: "activateTab(" & $cmd.activateTarget & ")"
   of lcSetWeight:
-    "setWeight(" & $cmd.weightTarget & ", " & $cmd.weightValue & ")"
+    if cmd.weightDivider.isSome:
+      "setDivider(" & $cmd.weightTarget & "^" & $cmd.weightLevel & ", " &
+        $cmd.weightValue & ", " & $cmd.weightDivider.get & ")"
+    else:
+      "setWeight(" & $cmd.weightTarget & ", " & $cmd.weightValue & ")"
   of lcAddPane:
     "addPane(" & $cmd.addedPane & ", after=" &
       (if cmd.addAfter.isSome: $cmd.addAfter.get else: "root") & ")"
@@ -1374,9 +1580,13 @@ proc `$`*(cmd: LayoutCommand): string =
     "moveTab(" & $cmd.movedPane & " -> beside " & $cmd.moveBeside & " @" &
       $cmd.moveIndex & ")"
   of lcSplit:
-    (if cmd.splitMovesPane: "splitMove(" else: "split(") &
-      $cmd.splitTarget & ", " & $cmd.splitNewPane & ", " &
-      $cmd.splitAxis & ", " & $cmd.splitSide & ")"
+    (if cmd.splitRoot:
+       "splitRoot(" & $cmd.splitNewPane & ", " & $cmd.splitAxis & ", " &
+         $cmd.splitSide & ")"
+     else:
+       (if cmd.splitMovesPane: "splitMove(" else: "split(") &
+         $cmd.splitTarget & ", " & $cmd.splitNewPane & ", " &
+         $cmd.splitAxis & ", " & $cmd.splitSide & ")")
   of lcMergeIntoStack:
     "mergeIntoStack(" & $cmd.mergedPane & " -> " & $cmd.mergeBeside &
       (if cmd.mergeWholeRegion: ", wholeRegion" else: "") & ")"
@@ -1387,6 +1597,10 @@ proc `$`*(cmd: LayoutCommand): string =
         $cmd.autoHideOrder & ")"
     of ahRestore:
       "restoreDocked(" & $cmd.autoHidePane & ")"
+    of ahOpen:
+      "openDocked(" & $cmd.autoHidePane & ")"
+    of ahClose:
+      "closeDocked(" & $cmd.autoHidePane & ")"
   of lcRename: "rename(" & $cmd.renameTarget & ", '" & cmd.renameTitle & "')"
   of lcAddContributedPane:
     "addContributedPane(" & cmd.addedContributedPane & ", after=" &
@@ -1463,6 +1677,42 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     return appliedTo(next)
 
   of lcSetWeight:
+    if cmd.weightDivider.isSome:
+      # A DIVIDER DRAG: two weights move, their sum does not, so every other
+      # sibling keeps its share exactly. Compared and computed on EFFECTIVE
+      # weights (a zero is "one neutral share"), because that is what a
+      # renderer divides by and therefore what "did not move" means.
+      let leaf = tree.find(cmd.weightTarget)
+      if leaf.isNil:
+        return refusedFor(lpPaneNotPlaced, cmd.weightTarget)
+      if cmd.weightLevel < 0:
+        return refusedFor(lpNoDivider, cmd.weightTarget)
+      var node = leaf
+      for _ in 0 ..< cmd.weightLevel:
+        node = parentOf(tree, node)
+        if node.isNil:
+          return refusedFor(lpNoDivider, cmd.weightTarget)
+      let parent = parentOf(tree, node)
+      if parent.isNil or parent.kind == lnStack:
+        return refusedFor(lpNoDivider, cmd.weightTarget)
+      let at = indexIn(parent, node)
+      let across = if cmd.weightDivider.get == ssBefore: at - 1 else: at + 1
+      if at < 0 or across < 0 or across >= parent.children.len:
+        return refusedFor(lpNoDivider, cmd.weightTarget)
+      let sibling = parent.children[across]
+      if cmd.weightValue <= 0.0:
+        return refusedFor(lpNegativeWeight, cmd.weightTarget)
+      let pair = effectiveWeight(node) + effectiveWeight(sibling)
+      let rest = pair - cmd.weightValue
+      if rest <= 0.0:
+        # The neighbour would be squeezed to nothing or less: refused by the
+        # same kind a negative weight is, because that is what it would be.
+        return refusedFor(lpNegativeWeight, cmd.weightTarget)
+      if effectiveWeight(node) == cmd.weightValue:
+        return noOp()
+      node.weight = cmd.weightValue
+      sibling.weight = rest
+      return appliedTo(next)
     if cmd.weightValue < 0.0:
       return refusedFor(lpNegativeWeight, cmd.weightTarget)
     let leaf = tree.find(cmd.weightTarget)
@@ -1532,7 +1782,12 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
 
   of lcMoveTab:
     let source = tree.find(cmd.movedPane)
-    if source.isNil:
+    let dockedFrom = next.dockedIndex(cmd.movedPane)
+    if dockedFrom >= 0 and not source.isNil:
+      # §3.3 broken on the INPUT; which copy would move is not a question
+      # this command can answer — `lcSplit`'s move arm refuses it the same way.
+      return refusedFor(lpPaneBothPlacedAndDocked, cmd.movedPane)
+    if source.isNil and dockedFrom < 0:
       return refusedFor(lpPaneNotPlaced, cmd.movedPane)
     let anchor = tree.find(cmd.moveBeside)
     if anchor.isNil:
@@ -1540,6 +1795,22 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     let destination = parentOf(tree, anchor)
     if destination.isNil or destination.kind != lnStack:
       return refusedFor(lpTargetNotAStack, cmd.moveBeside)
+    if dockedFrom >= 0:
+      # FROM AN AUTO-HIDE STRIP, at any index — including 0. The same
+      # decision PLAT-4's closing pass took for `splitMovesPane`: "the pane
+      # comes from somewhere else in this layout" covers the strip as well as
+      # the tree. `ahRestore` can only place AFTER an anchor, so before this
+      # a docked pane could not be dropped into a stack's first slot in one
+      # command. Nothing leaves the tree, so no collapse rule fires and the
+      # outcome is never `loNoOp`; the strip's title travels with the pane.
+      if cmd.moveIndex < 0 or cmd.moveIndex > destination.children.len:
+        return refusedFor(lpIndexOutOfRange, cmd.movedPane)
+      let entry = next.docked[dockedFrom]
+      next.docked.delete(dockedFrom)
+      destination.children.insert(pane(entry.pane, entry.title),
+                                  cmd.moveIndex)
+      destination.activeIndex = cmd.moveIndex
+      return appliedTo(next)
     let sourceParent = parentOf(tree, source)
     let sameStack = sourceParent == destination
     let finalLen =
@@ -1583,7 +1854,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # it. Every guard here is the mirror of the branch below — "must not be
       # in the tree" becomes "must be", and the detach brings §2.4's collapse
       # rules with it exactly as `lcMoveTab`'s cross-stack path does.
-      if cmd.splitNewPane == cmd.splitTarget:
+      if cmd.splitNewPane == cmd.splitTarget and not cmd.splitRoot:
         return refusedFor(lpDuplicatePane, cmd.splitNewPane)
       let dockedAt = next.dockedIndex(cmd.splitNewPane)
       let moving = tree.find(cmd.splitNewPane)
@@ -1593,7 +1864,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
       if dockedAt < 0 and moving.isNil:
         return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
-      if tree.find(cmd.splitTarget).isNil:
+      if not cmd.splitRoot and tree.find(cmd.splitTarget).isNil:
         return refusedFor(lpPaneNotPlaced, cmd.splitTarget)
       if dockedAt >= 0:
         # From the auto-hide strip: leave `docked`, keep the strip's title.
@@ -1612,6 +1883,37 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpDuplicatePane, cmd.splitNewPane)
       if next.dockedIndex(cmd.splitNewPane) >= 0:
         return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+    if cmd.splitRoot:
+      # GOLDENLAYOUT'S GROUND DROP (`GroundItem.onDrop`), on the tree as it
+      # is after the detach.
+      if not cmd.splitMovesPane:
+        return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
+      if not tree.find(cmd.splitNewPane).isNil:
+        # The pane was the whole tree: nothing is left to split beside it
+        # (the only pane of a layout can be dragged nowhere).
+        return refusedFor(lpEmptyRoot, cmd.splitNewPane)
+      let containerKind = if cmd.splitAxis == saRow: lnRow else: lnColumn
+      let fresh = pane(cmd.splitNewPane, movedTitle, 0.0)
+      if tree.kind == containerKind and tree.children.len > 0:
+        # The root already runs along that axis: join it at that end; the
+        # end sibling gives the newcomer half of its share.
+        let at = if cmd.splitSide == ssBefore: 0 else: tree.children.len
+        let sibling = tree.children[if at == 0: 0 else: tree.children.high]
+        let half = effectiveWeight(sibling) * 0.5
+        sibling.weight = half
+        fresh.weight = half
+        tree.children.insert(fresh, at)
+      else:
+        let inner = copyOf(tree)
+        let share = tree.weight
+        inner.weight = 0.0
+        let kids =
+          if cmd.splitSide == ssBefore: @[fresh, inner] else: @[inner, fresh]
+        tree.becomes(LayoutNode(kind: containerKind, weight: share,
+                                children: kids))
+      if equalTrees(tree, layout.tree):
+        return noOp()
+      return appliedTo(next)
     # RE-FOUND AFTER THE DETACH, for `lcMoveTab`'s reason: collapsing can
     # rewrite a container in place, so a ref taken before it may no longer be
     # in the tree. The target pane is unique, so finding it again is exact.
@@ -1646,7 +1948,10 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     if cmd.mergedPane == cmd.mergeBeside:
       return refusedFor(lpDuplicatePane, cmd.mergedPane)
     let source = tree.find(cmd.mergedPane)
-    if source.isNil:
+    let mergedFrom = next.dockedIndex(cmd.mergedPane)
+    if mergedFrom >= 0 and not source.isNil:
+      return refusedFor(lpPaneBothPlacedAndDocked, cmd.mergedPane)
+    if source.isNil and mergedFrom < 0:
       return refusedFor(lpPaneNotPlaced, cmd.mergedPane)
     if tree.find(cmd.mergeBeside).isNil:
       return refusedFor(lpPaneNotPlaced, cmd.mergeBeside)
@@ -1657,15 +1962,24 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # restriction stays until a user asks for it to be lifted, and this is
       # the typed outcome that says so.
       return refusedFor(lpStackChildNotPane, cmd.mergedPane)
-    let sourceParent = parentOf(tree, source)
-    let anchorParent = parentOf(tree, tree.find(cmd.mergeBeside))
-    if not anchorParent.isNil and anchorParent.kind == lnStack and
-       sourceParent == anchorParent:
-      return noOp()
-    let moved = copyOf(source)
-    discard detachPane(tree, cmd.mergedPane)
-    if not normaliseInPlace(tree):
-      return refusedFor(lpEmptyRoot, cmd.mergedPane)
+    var moved: LayoutNode
+    if mergedFrom >= 0:
+      # From an auto-hide strip — `lcMoveTab`'s docked arm, for a bare-pane
+      # anchor: nothing leaves the tree, so there is nothing to collapse and
+      # the outcome is never `loNoOp`.
+      let entry = next.docked[mergedFrom]
+      next.docked.delete(mergedFrom)
+      moved = pane(entry.pane, entry.title)
+    else:
+      let sourceParent = parentOf(tree, source)
+      let anchorParent = parentOf(tree, tree.find(cmd.mergeBeside))
+      if not anchorParent.isNil and anchorParent.kind == lnStack and
+         sourceParent == anchorParent:
+        return noOp()
+      moved = copyOf(source)
+      discard detachPane(tree, cmd.mergedPane)
+      if not normaliseInPlace(tree):
+        return refusedFor(lpEmptyRoot, cmd.mergedPane)
     let anchorAgain = tree.find(cmd.mergeBeside)
     if anchorAgain.isNil:
       return refusedFor(lpPaneNotPlaced, cmd.mergeBeside)
@@ -1693,8 +2007,16 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       let already = next.dockedIndex(cmd.autoHidePane)
       if already >= 0:
         let d = next.docked[already]
+        # A negative order means "the end of that edge's strip" (`cmdDock`).
+        # On the SAME edge that is where the pane already is; moving to
+        # ANOTHER edge it is after that edge's last entry — keeping the old
+        # order there collided with whatever sat at it (PLAT-48 found it: the
+        # shared default docks the footer at bottom orders 0–3, so a pane
+        # redocked from the left strip to the bottom was refused).
         let wanted =
-          if cmd.autoHideOrder < 0: d.order else: cmd.autoHideOrder
+          if cmd.autoHideOrder >= 0: cmd.autoHideOrder
+          elif d.edge == cmd.autoHideEdge: d.order
+          else: maxOrderAt(next, cmd.autoHideEdge) + 1
         if d.edge == cmd.autoHideEdge and d.order == wanted:
           return noOp()
         if orderTaken(next, cmd.autoHideEdge, wanted, cmd.autoHidePane, true):
@@ -1716,12 +2038,17 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpDockOrderCollision, cmd.autoHidePane)
       let title =
         if cmd.autoHideTitle.len > 0: cmd.autoHideTitle else: leaf.title
+      # Where it came from, read before it leaves (PLAT-48).
+      let (beside, besideBefore) = Layout(tree: tree).pinPlaceOf(cmd.autoHidePane)
+      let weight = leaf.weight
       discard detachPane(tree, cmd.autoHidePane)
       if not normaliseInPlace(tree):
         return refusedFor(lpEmptyRoot, cmd.autoHidePane)
       next.docked.add(DockedPane(pane: cmd.autoHidePane, title: title,
                                  edge: cmd.autoHideEdge, order: order,
-                                 revealed: false))
+                                 revealed: false, beside: beside,
+                                 besideBefore: besideBefore,
+                                 weight: weight))
       return appliedTo(next)
     of ahRestore:
       let at = next.dockedIndex(cmd.autoHidePane)
@@ -1734,9 +2061,41 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
         return refusedFor(lpPaneNotPlaced, cmd.autoHideRestoreBeside.get)
       let entry = next.docked[at]
       let leaf = pane(entry.pane, entry.title)
-      if not insertBeside(tree, cmd.autoHideRestoreBeside, leaf):
+      leaf.weight = entry.weight
+      # No anchor named: back beside the pane it was docked from, while that
+      # pane is placed (PLAT-48); otherwise `lcAddPane`'s root placement.
+      let remembered = cmd.autoHideRestoreBeside.isNone and
+                       entry.beside.isSome and tree.contains(entry.beside.get)
+      let anchor =
+        if cmd.autoHideRestoreBeside.isSome: cmd.autoHideRestoreBeside
+        elif remembered: entry.beside
+        else: none(PaneKind)
+      if not insertBeside(tree, anchor, leaf,
+                          before = remembered and entry.besideBefore):
         return refusedFor(lpPaneNotPlaced, cmd.autoHidePane)
       next.docked.delete(at)
+      return appliedTo(next)
+    of ahOpen, ahClose:
+      # PLAT-49 part B: OPEN (docked inline, taking space) or CLOSED. The
+      # pane stays docked — its label stays on the strip — so nothing moves
+      # in the tree; the binding projects the tree into what the open pane
+      # leaves.
+      let at = next.dockedIndex(cmd.autoHidePane)
+      if at < 0:
+        return refusedFor(lpPaneNotDocked, cmd.autoHidePane)
+      let opening = cmd.autoHideDirection == ahOpen
+      var changed = false
+      for i in 0 ..< next.docked.len:
+        # Opening one closes every other (one docked pane open at a time);
+        # closing touches only the pane named.
+        let want = if opening: i == at
+                   elif i == at: false
+                   else: next.docked[i].open
+        if next.docked[i].open != want:
+          next.docked[i].open = want
+          changed = true
+      if not changed:
+        return noOp()
       return appliedTo(next)
 
   of lcRename:
@@ -1954,7 +2313,8 @@ proc problemSources*(kind: LayoutProblemKind): set[LayoutProblemSource] =
     {lpsStructural, lpsRefusal}
   of lpPaneNeitherPlacedNorDocked:
     {lpsStructural, lpsRefusal}
-  of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack, lpIndexOutOfRange:
+  of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack, lpIndexOutOfRange,
+     lpNoDivider:
     {lpsRefusal}
   of lpMalformedContributedPane:
     ## Both, and PLAT-9 needs both: a hand-built or hand-edited tree can hold
@@ -2072,6 +2432,12 @@ proc toJson*(d: DockedPane): JsonNode =
   result["order"] = %d.order
   if d.title.len > 0:
     result["title"] = %d.title
+  if d.beside.isSome:
+    result["beside"] = %($d.beside.get)
+  if d.weight > 0.0:
+    result["weight"] = %d.weight
+  if d.besideBefore:
+    result["besideBefore"] = %true
 
 proc saveLayout*(layout: Layout): JsonNode =
   ## A versioned document, which is what a shell persists. `docked` is always
@@ -2197,6 +2563,104 @@ proc migrateV2toV3(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %3
 
+proc migrateV3toV4(doc: JsonNode): JsonNode =
+  ## PLAT-45. `PaneKind` gained the five panes the desktop's default places
+  ## (`vcs`, `agentActivity`, `terminalOutput`, `testResults`,
+  ## `constraints`). As with v2→v3 nothing about the SHAPE of a document
+  ## changed, so this re-stamps the version and touches nothing else: every
+  ## v3 document decodes unchanged, and the bump exists to make an OLDER build
+  ## refuse a v4 document that names one of the new panes as a whole
+  ## (`ldeUnknownVersion`) instead of dropping that pane (`ldeUnknownPane`).
+  result = copy(doc)
+  result["version"] = %4
+
+proc migrateV4toV5(doc: JsonNode): JsonNode =
+  ## PLAT-48. `PaneKind` gained `problems` and `requests`, the desktop's
+  ## footer panels. Shape unchanged: re-stamps the version, for the v3→v4
+  ## reason.
+  result = copy(doc)
+  result["version"] = %5
+
+const RetiredPaneSpellings* = ["timeline"]
+  ## The spellings of panes `PaneKind` no longer has. A saved document naming
+  ## one is migrated (the pane dropped), never decoded as `ldeUnknownPane`:
+  ## the panel was removed on purpose, and a user's layout that held it is a
+  ## layout to open, not an error to report (Layout-System.md, "The Timeline
+  ## panel is removed").
+
+proc dropRetiredPanes(node: JsonNode): JsonNode =
+  ## The tree with every retired leaf removed, or nil when nothing is left.
+  ## A stack's `activeIndex` follows the active tab when it survives, else
+  ## falls on the tab that slid into its place (the nearest survivor to its
+  ## right, clamped) — the same rule the desktop's
+  ## `sanitizeLayoutConfig` applies to a GoldenLayout stack.
+  if node.isNil or node.kind != JObject:
+    return node
+  if node.hasKey("pane") and node["pane"].kind == JString and
+      node["pane"].getStr in RetiredPaneSpellings:
+    return nil
+  if not node.hasKey("children") or node["children"].kind != JArray:
+    return node
+  result = copy(node)
+  var kept = newJArray()
+  var survivors: seq[int] = @[]
+  for i, c in node["children"].getElems:
+    let k = dropRetiredPanes(c)
+    if not k.isNil:
+      kept.add k
+      survivors.add i
+  if survivors.len == 0 and node["children"].len > 0:
+    return nil
+  # A row or column left with ONE child is that child, in the container's
+  # place and with its weight (`validate`'s single-child rule; GoldenLayout
+  # collapses it the same way).
+  if node.hasKey("kind") and node["kind"].kind == JString and
+      node["kind"].getStr in ["row", "column"] and kept.len == 1 and
+      node["children"].len > 1:
+    var only = copy(kept[0])
+    if node.hasKey("weight"):
+      only["weight"] = node["weight"]
+    else:
+      if only.hasKey("weight"): only.delete("weight")
+    return only
+  result["children"] = kept
+  if result.hasKey("activeIndex") and result["activeIndex"].kind == JInt:
+    let old = result["activeIndex"].getInt
+    var mapped = survivors.find(old)
+    if mapped < 0:
+      mapped = 0
+      for s in survivors:
+        if s < old: inc mapped
+    result["activeIndex"] = %clamp(mapped, 0, max(0, survivors.len - 1))
+
+proc migrateV5toV6(doc: JsonNode): JsonNode =
+  ## PLAT-51. `PaneKind` lost `timeline`: the Timeline panel is removed from
+  ## every product. A v5 document that placed it is opened WITHOUT it — the
+  ## leaf is dropped, its stack keeps its other tabs, a container left empty
+  ## is removed, and a docked `timeline` entry (or a docked pane placed
+  ## `beside` it) loses that reference — rather than refused with
+  ## `ldeUnknownPane`, which `PaneKind`'s removal rule calls the floor, not
+  ## the answer.
+  result = copy(doc)
+  if result.hasKey("layout"):
+    let t = dropRetiredPanes(result["layout"])
+    result["layout"] = (if t.isNil: newJNull() else: t)
+  if result.hasKey("docked") and result["docked"].kind == JArray:
+    var kept = newJArray()
+    for e in result["docked"]:
+      if e.kind == JObject and e.hasKey("pane") and e["pane"].kind == JString and
+          e["pane"].getStr in RetiredPaneSpellings:
+        continue
+      var d = copy(e)
+      if d.kind == JObject and d.hasKey("beside") and
+          d["beside"].kind == JString and
+          d["beside"].getStr in RetiredPaneSpellings:
+        d.delete("beside")
+        if d.hasKey("besideBefore"): d.delete("besideBefore")
+      kept.add d
+    result["docked"] = kept
+  result["version"] = %6
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2217,6 +2681,12 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV1toV2(result)
     of 2:
       result = migrateV2toV3(result)
+    of 3:
+      result = migrateV3toV4(result)
+    of 4:
+      result = migrateV4toV5(result)
+    of 5:
+      result = migrateV5toV6(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here
@@ -2270,6 +2740,19 @@ proc restoreLayoutDocument*(j: JsonNode): Layout =
       if entry["title"].kind != JString:
         raiseDecode(ldeWrongFieldType, "docked.title is " & $entry["title"].kind)
       d.title = entry["title"].getStr
+    if entry.hasKey("beside"):
+      if entry["beside"].kind != JString:
+        raiseDecode(ldeWrongFieldType, "docked.beside is " & $entry["beside"].kind)
+      d.beside = some(parsePaneKind(entry["beside"].getStr))
+    if entry.hasKey("besideBefore"):
+      if entry["besideBefore"].kind != JBool:
+        raiseDecode(ldeWrongFieldType,
+                    "docked.besideBefore is " & $entry["besideBefore"].kind)
+      d.besideBefore = entry["besideBefore"].getBool
+    if entry.hasKey("weight"):
+      if entry["weight"].kind notin {JFloat, JInt}:
+        raiseDecode(ldeWrongFieldType, "docked.weight is " & $entry["weight"].kind)
+      d.weight = max(0.0, entry["weight"].getFloat)
     result.docked.add(d)
 
 proc restoreLayout*(j: JsonNode): LayoutNode =
@@ -2390,3 +2873,344 @@ proc redo*(h: var LayoutHistory): bool =
   inc h.cursor
   h.value = h.replayPrefix()
   true
+
+# ---------------------------------------------------------------------------
+# PLAT-45 — ONE default arrangement, shared by every front-end, and the fold
+# ---------------------------------------------------------------------------
+#
+# Until PLAT-45 there were three defaults that shared nothing but this
+# module's tree type: the desktop's hand-written `src/config/default_layout.json`
+# (GoldenLayout, `Content` ordinals), the GPUI window's `defaultReplayLayout()`
+# and the terminal's three hand-written profile trees. A change to "the
+# default" had to be made three times, by hand, with nothing checking that it
+# was. What follows is the replacement: ONE authored arrangement
+# (`sharedDefaultLayout`), and each front-end's first screen a DERIVATION of it
+# — the desktop translates it into GoldenLayout's config at build time
+# (`headless_app/desktop_panes`), GPUI docks it, and the terminal lays it out
+# as it is, folding only when its cells cannot give some pane its minimum.
+#
+# ## Why the fold order is in the model and the cell arithmetic is not
+#
+# Layout-ViewModel §8.2 (PLAT-6) refused to make the terminal's profiles
+# re-flows of a shared default, because that would mean "either the shared
+# default learns what a cell is … or the terminal renders panes it cannot
+# fit". PLAT-45 avoids both horns rather than accepting one. The model gains a
+# UNITLESS fold order — which region gives up its own place first: a RANKING,
+# not a size — and the terminal's binding keeps every cell: it decides HOW
+# MANY folds its cells require (`tui/app/layout/profile.depthFor`). A folded
+# pane is never dropped; it becomes a tab of the region it folds into.
+
+type
+  FoldStep* = object
+    ## One step of the fold: the region holding `region` gives up its own
+    ## place and its panes become tabs of the region holding `into`.
+    ##
+    ## Regions are named BY A PANE THEY HOLD rather than by a path, because a
+    ## path is exactly what the earlier steps of a fold change. A pane is
+    ## stable under every step (the fold's first law), so "the region that
+    ## holds the constraints pane" means the same region at every depth.
+    region*: PaneKind
+    into*: PaneKind
+
+  SharedLayout* = object
+    ## The authored default: a tree and its fold order.
+    tree*: LayoutNode
+    folds*: seq[FoldStep]
+      ## LOWEST-RANKED FIRST: `folds[0]` is the first region to give up its
+      ## own place when a front-end is too small to show everything. The
+      ## order is DATA (PLAT-45's risk note: "if the folded compact result is
+      ## worse … the order changes, not the rule").
+    docked*: seq[DockedPane]
+      ## PLAT-48. The panes the default keeps AUTO-HIDDEN beside the tree:
+      ## the desktop's footer panels (`sharedDefaultDocked`). Empty for a
+      ## mode whose default docks nothing.
+
+  FrontEndKind* = enum
+    ## The three products that open the shared default.
+    feDesktop = "desktop"
+    feGpui = "gpui"
+    feTerminal = "terminal"
+
+  PaneCapability* = object
+    ## Which `PaneKind` values a front-end can DRAW, stated by the front-end
+    ## (PLAT-45 deliverable 2). A pane of the shared default that a front-end
+    ## cannot draw is still PLACED — as a report leaf naming the pane and the
+    ## reason (`reportLeaves`) — never silently omitted, so "every product
+    ## opens with the same panes" is literally true and an absent view is
+    ## visible rather than a gap. PLAT-41's data-or-report rule, one level up.
+    frontEnd*: FrontEndKind
+    drawable*: set[PaneKind]
+    reasons*: array[PaneKind, string]
+      ## Why each pane NOT in `drawable` is not drawn. Empty for a drawable
+      ## pane. A test asserts every undrawable pane has one, so a report leaf
+      ## can never say nothing.
+
+  ReportLeaf* = object
+    ## A placed pane a front-end draws as a report instead of data.
+    pane*: PaneKind
+    frontEnd*: FrontEndKind
+    reason*: string
+
+const
+  EditModeHiddenPanes*: set[PaneKind] = {
+    paneState, paneScratchpad, paneEventLog, paneTerminalOutput,
+    paneCalltrace, paneAgentActivity}
+    ## The replay-only panes an EDITING session does not show — the
+    ## `PaneKind` image of the desktop's
+    ## `frontend.editModeHiddenContentIds()` through the one table where the
+    ## two id spaces meet (`desktop_panes.PaneContent`). Written out here
+    ## because this module must not import the desktop's `Content`; the
+    ## equality with the desktop's set is asserted, not assumed
+    ## (`test_shared_default_layout.nim`).
+
+proc sharedBundledLayout*(): LayoutNode =
+  ## **THE BUNDLED TREE** — the one authored arrangement, and the INPUT every
+  ## mode's default is derived from; nobody's layout as it stands.
+  ##
+  ## `src/config/default_layout.json` is its GoldenLayout translation
+  ## (`desktop_panes.layoutNodeToGoldenConfig`, written by
+  ## `generate_default_layout`), and the desktop derives each MODE's default
+  ## from that file (`index/mode_default_layout.modeDefaultLayout`: the
+  ## panes a mode hides or does not start with removed, the panes it homes
+  ## elsewhere moved). What every front-end OPENS with is the DEBUG mode's
+  ## default, read back from that derivation — `sharedDefaultLayout` below —
+  ## not this tree. Until PLAT-47 it was this tree, and the terminal and GPUI
+  ## window drew the standing TEST RESULTS / CONSTRAINTS column the desktop's
+  ## own code calls "nobody's layout" (the user's report of 2026-09-27).
+  ##
+  ## ## Its content
+  ##
+  ## The desktop's arrangement as users already know it — the hand-written
+  ## `default_layout.json` PLAT-45 replaced, plus the editor GoldenLayout
+  ## inserts at runtime (`utils.openNewLayoutContainer` puts it at index 1 of
+  ## the root row):
+  ##
+  ##   Files | VCS  ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent Activity)
+  ##                           over Event Log | Terminal Output
+  ##                         ‖ Test Results over Constraints
+  ##
+  ## (`|` separates tabs of one stack, `‖` side-by-side regions.) The right
+  ## column exists for the EDITING surface (the Noir studio's §1a keeps
+  ## CONSTRAINTS in a column of its own there); the debug mode re-homes TESTS
+  ## into the FILES stack and does not start with CONSTRAINTS.
+  ##
+  ## ## The weights are the desktop's RENDERED shares
+  ##
+  ## With every top-level size declared, GoldenLayout's `addChild` gives the
+  ## runtime editor `1/4` of the row and scales the others by `3/4`, so the
+  ## declared 20 / 55 / 25 render as 15 / 25 / 41.25 / 18.75 — the weights
+  ## here. `layoutNodeToGoldenConfig` re-derives the percentages the config
+  ## must declare. Zero weights are the model's "equal share", which is what
+  ## an unsized GoldenLayout child means.
+  ##
+  ## ## Titles are empty on purpose
+  ##
+  ## Each front-end names its panes; what is shared is WHERE a pane is.
+  row([
+    stack([pane(paneFileTree), pane(paneVcs)], weight = 15.0),
+    pane(paneEditor, weight = 25.0),
+    column([
+      row([
+        stack([pane(paneState), pane(paneScratchpad)], weight = 50.0),
+        stack([pane(paneCalltrace), pane(paneAgentActivity)], weight = 50.0)],
+        weight = 50.0),
+      stack([pane(paneEventLog), pane(paneTerminalOutput)], weight = 50.0)],
+      weight = 41.25),
+    column([
+      stack([pane(paneTestResults)]),
+      stack([pane(paneConstraints)])],
+      weight = 18.75)])
+
+const SharedDefaultLayoutJson* =
+  staticRead("shared_default_layout.generated.json")
+  ## THE SHARED DEFAULT, AS GENERATED: the desktop's debug-mode default
+  ## (`index/mode_default_layout.modeDefaultLayout(bundled, DebugMode)`) read
+  ## back into this vocabulary by `desktop_panes.goldenConfigToLayoutNode`.
+  ## Written by `generate_default_layout` (run under node, because the
+  ## per-mode derivation is the desktop's own JavaScript) and checked fresh by
+  ## `ci/test/default-layout-fresh.sh`, beside `default_layout.json`. A
+  ## committed generated file rather than a computation here, because the
+  ## derivation this vocabulary must equal is the desktop's, and the desktop's
+  ## is JavaScript.
+
+proc sharedDefaultDocked*(): seq[DockedPane] =
+  ## **THE DESKTOP'S FOOTER, AS DOCKED PANES** (PLAT-48 deliverable 6).
+  ##
+  ## The desktop pins four panels to its bottom auto-hide strip on every
+  ## start — BUILD, PROBLEMS, FIND IN FILES, REQUESTS — and until PLAT-48
+  ## that list lived only in `ui/layout.nim`, so the terminal and GPUI opened
+  ## without them. It is the shared default's now: the desktop builds its
+  ## footer from this list (through `desktop_panes.PaneContent`), and the
+  ## terminal and GPUI draw it as their bottom dock strip. The titles are
+  ## the desktop's own strip labels.
+  @[DockedPane(pane: paneBuildOutput, title: "BUILD", edge: leBottom,
+               order: 0),
+    DockedPane(pane: paneProblems, title: "PROBLEMS", edge: leBottom,
+               order: 1),
+    DockedPane(pane: paneSearch, title: "FIND IN FILES", edge: leBottom,
+               order: 2),
+    DockedPane(pane: paneRequests, title: "REQUESTS", edge: leBottom,
+               order: 3)]
+
+proc sharedDefaultLayout*(): SharedLayout =
+  ## **THE DEFAULT EVERY PRODUCT OPENS WITH** — the desktop's DEBUG-mode
+  ## layout (PLAT-47 deliverable 1): the bundled tree above with TESTS as a
+  ## tab of the FILES panel beside VCS and no CONSTRAINTS, exactly as the
+  ## desktop's per-mode layout draws it. The user, 2026-09-27: "The default
+  ## layout of desktop is the shared arrangement. It has been reviewed and
+  ## used for a long time." Each product then lets the user rearrange freely
+  ## and remembers its OWN last layout in its own file.
+  ##
+  ##   Files | VCS | Tests ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent
+  ##                                   Activity) over Event Log |
+  ##                                   Terminal Output
+  ##
+  ## ## The fold order
+  ##
+  ## Lowest-ranked first: the file tree (into the call-trace stack, which is
+  ## also navigation); then the call trace behind the state pane, the event
+  ## stack behind it too, and last everything behind the editor — the one
+  ## pane a replay cannot be read without, so it is the one that never becomes
+  ## a hidden tab.
+  let tree = fromJson(parseJson(SharedDefaultLayoutJson))
+  SharedLayout(tree: tree, docked: sharedDefaultDocked(), folds: @[
+    FoldStep(region: paneFileTree, into: paneCalltrace),
+    FoldStep(region: paneCalltrace, into: paneState),
+    FoldStep(region: paneEventLog, into: paneState),
+    FoldStep(region: paneState, into: paneEditor)])
+
+proc sharedEditLayout*(): SharedLayout =
+  ## EDIT MODE'S shared default (PLAT-45 deliverable 5's second half).
+  ##
+  ## The same arrangement with the replay-only panes gone — which is what the
+  ## desktop's edit mode shows, because it derives its edit layout from the
+  ## debug default by hiding `editModeHiddenContentIds` — plus the terminal's
+  ## build pane in front of the Test Results stack, where `:build`'s verdict
+  ## lands. Its weights are the desktop's edit-mode shares (the hidden middle
+  ## column leaves Files 20 / Editor 55 / NS9 25). The placement relation is
+  ## asserted equal to "the debug default minus `EditModeHiddenPanes`, plus
+  ## the build pane" by `test_shared_default_layout.nim`, so the two trees
+  ## cannot drift apart silently.
+  let tree = row([
+    stack([pane(paneFileTree), pane(paneVcs)], weight = 20.0),
+    pane(paneEditor, weight = 55.0),
+    column([
+      stack([pane(paneBuildOutput), pane(paneTestResults)]),
+      stack([pane(paneConstraints)])],
+      weight = 25.0)])
+  SharedLayout(tree: tree, folds: @[
+    FoldStep(region: paneConstraints, into: paneBuildOutput),
+    FoldStep(region: paneFileTree, into: paneBuildOutput),
+    FoldStep(region: paneBuildOutput, into: paneEditor)])
+
+proc regionOf*(tree: LayoutNode; kind: PaneKind): LayoutNode =
+  ## The REGION holding `kind`: its stack when it is a tab, else its own leaf.
+  ## nil when the pane is not placed.
+  let leaf = find(tree, kind)
+  if leaf.isNil:
+    return nil
+  let parent = parentOf(tree, leaf)
+  if not parent.isNil and parent.kind == lnStack: parent else: leaf
+
+proc visibleRegionCount*(tree: LayoutNode): int =
+  ## How many regions occupy space: stacks, and leaves that are not tabs. The
+  ## quantity the fold's monotonicity law is stated over.
+  if tree.isNil:
+    return 0
+  case tree.kind
+  of lnPane, lnStack: 1
+  of lnRow, lnColumn:
+    var n = 0
+    for c in tree.children:
+      n += visibleRegionCount(c)
+    n
+
+proc foldStep(tree: LayoutNode; step: FoldStep) =
+  ## One step, in place. A step whose two regions are already one (or whose
+  ## panes are absent) changes nothing — `foldLayout` is TOTAL.
+  let r = regionOf(tree, step.region)
+  let t = regionOf(tree, step.into)
+  if r.isNil or t.isNil or r == t:
+    return
+  let parent = parentOf(tree, r)
+  if parent.isNil:
+    return
+  var moved: seq[LayoutNode] = @[]
+  if r.kind == lnStack:
+    for c in r.children:
+      moved.add clone(c)
+  else:
+    moved.add clone(r)
+  for m in moved:
+    m.weight = 0.0
+  # INTO THE TARGET FIRST, then detach: the collapse below may rewrite the
+  # target's parent IN PLACE with the target's contents (`becomes`), and it
+  # must copy the target as it is after the panes arrived.
+  if t.kind == lnStack:
+    for m in moved:
+      t.children.add m
+  else:
+    let inner = copyOf(t)
+    inner.weight = 0.0
+    t.becomes(LayoutNode(kind: lnStack, weight: t.weight, activeIndex: 0,
+                         children: @[inner] & moved))
+  var kept: seq[LayoutNode] = @[]
+  var totalBefore = 0.0
+  for c in parent.children:
+    totalBefore += effectiveWeight(c)
+    if c != r:
+      kept.add c
+  if parent.kind != lnStack:
+    renormalise(kept, totalBefore)
+  parent.children = kept
+  discard normaliseInPlace(tree)
+
+proc maxFoldDepth*(s: SharedLayout): int =
+  ## The deepest meaningful fold. `foldLayout` clamps to it.
+  s.folds.len
+
+proc foldLayout*(s: SharedLayout; depth: int): LayoutNode =
+  ## **THE FOLD** (PLAT-45 deliverable 4). Pure and total: a fresh tree, the
+  ## input untouched, any integer accepted (negative is 0, beyond the order is
+  ## the deepest fold).
+  ##
+  ## Laws, each asserted over every depth by `test_shared_default_layout.nim`
+  ## and each with a mutation arm in `run-plat45-layout-mutations.py`:
+  ##
+  ##   1. every pane of the input is in every output (a folded pane is a tab,
+  ##      never dropped);
+  ##   2. depth 0 is the identity;
+  ##   3. folding is monotone — depth n+1 has no more visible regions than
+  ##      depth n;
+  ##   4. the result validates.
+  result = clone(s.tree)
+  let steps = min(max(depth, 0), s.folds.len)
+  for i in 0 ..< steps:
+    foldStep(result, s.folds[i])
+
+proc paneCapability*(frontEnd: FrontEndKind; drawable: set[PaneKind];
+                     reasons: openArray[(PaneKind, string)]): PaneCapability =
+  ## A front-end's capability declaration.
+  result = PaneCapability(frontEnd: frontEnd, drawable: drawable)
+  for (p, why) in reasons:
+    result.reasons[p] = why
+
+proc canDraw*(c: PaneCapability; kind: PaneKind): bool =
+  kind in c.drawable
+
+proc reportLeaves*(tree: LayoutNode; c: PaneCapability): seq[ReportLeaf] =
+  ## Every placed pane this front-end cannot draw, in tree order — the slots
+  ## it fills with a report rather than data. Never a pane it can draw, and
+  ## never a pane that is not placed.
+  for p in allPanes(tree):
+    if not c.canDraw(p):
+      result.add ReportLeaf(pane: p, frontEnd: c.frontEnd,
+                            reason: c.reasons[p])
+
+proc reportText*(r: ReportLeaf; name = ""): string =
+  ## What the slot says. Names the pane AND the reason, because a report that
+  ## said only "unavailable" would name nothing a user can act on. `name` is
+  ## the front-end's own name for the pane (the terminal says "Test Results");
+  ## empty means the pane's vocabulary spelling.
+  (if name.len > 0: name else: $r.pane) & ": not drawn by the " &
+    $r.frontEnd & " front-end — " & r.reason

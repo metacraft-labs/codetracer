@@ -24,7 +24,7 @@
 ## THE COMMAND ITSELF IS NOT ASSERTED HERE, because it cannot be: the two
 ## surfaces that raise it — the `CTRL+F10` entry in `ui/editor.nim`'s Monaco
 ## `commands` table and the "Run to Cursor" context-menu item — live in a
-## module `nim js` cannot build outside the Karax/Monaco tree. What the
+## module `nim js` cannot build outside the kdom/Monaco tree. What the
 ## direction MEANS once it arrives is asserted where it is decided, in
 ## `dap_handler.rs`'s `run_to_cursor_*` cases, against the step actually landed
 ## on.

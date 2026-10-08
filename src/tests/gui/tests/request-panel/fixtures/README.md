@@ -1,3 +1,5 @@
+<!-- markdownlint-configure-file { "MD024": { "siblings_only": true } } -->
+
 # Request-panel test fixtures
 
 ## `python_flask/serve.ct` — a recorded Flask session (RS-M5)
@@ -252,8 +254,11 @@ successive slices of one thread.
 **The cohort spans are not `contiguous_on_one_thread`.** The recorder replays
 its session sidecar into a single exec stream, so an overlapping request's
 events are interleaved into its neighbours' ranges. The eight sequential
-requests are contiguous. Both bits are measured from the recorded ranges, not
-declared.
+requests do not overlap one another, but the client that issues them is another
+BEAM process, and in six of them its call and reply were recorded inside the
+request's range; only `GET /api/users` and `GET /healthz` are contiguous in the
+current recording. Both bits are measured from the recorded ranges, not
+declared, so a re-recording can move the contiguous count.
 
 **There are no per-line step events.** The recorder applies step instrumentation
 to `.erl` sources; an Elixir app recorded through `mix run` reaches the
@@ -328,11 +333,14 @@ covers the handler.
 ## native_nginx/nginx.ct — real nginx recorded by ct-mcr (RS-M10)
 
 A **real recording**, and the one row of the matrix that no middleware
-produced. `ct-mcr record` recorded a real `nginx` process under LD_PRELOAD
-interposition while `curl` drove five requests at it over loopback;
+produced. `ct-mcr record` recorded a real `nginx` process (the recorder's Linux
+default attach mode) while `curl` drove five requests at it over loopback;
 `codetracer-native-recorder`'s request discoverer then read that container's
 own OS events back and appended the spans it found to the same container's
-`spans.dat` / `spans.idx` / `spantype.ns`, stamping `meta.dat` bit 13 in place.
+`spans.dat` / `spans.idx` / `spantype.ns`. `meta.dat` is not rewritten, so its
+bit-13 span-stream hint stays clear: readers find the stream by those files'
+presence (trace-format spec, internal-files.md, "Stream-presence flags are a
+hint, not a gate").
 
 It is consumed by `../native_request_panel_vm_test.nim`
 (`vm_native_request_panel_rows`), registered in `src/ct_test/release_gate.nim`'s
@@ -341,22 +349,40 @@ nginx, no recorder build and no server.
 
 ### Regenerating
 
+Record it on a Linux x86-64 host with CPUID faulting (Intel, or AMD Zen 4 and
+later; ct-mcr refuses to record without it), from this repository's root:
+
 ```sh
-direnv exec ../codetracer-native-recorder just \
-  record-request-panel-fixture \
+direnv exec ../codetracer-native-recorder bash -c '
+  exec env -i PATH="$PATH" HOME=/nonexistent LANG=C TZ=UTC \
+    just --no-deps record-request-panel-fixture "$0"' \
   "$PWD/src/tests/gui/tests/request-panel/fixtures/native_nginx"
 ```
+
+`codetracer-example-recordings`' `regen-device-recordings.yml` (job
+`linux-x86_64`) records it this way on a CI runner.
+
+**Record under `env -i`.** nginx inherits the recorder's environment and the
+recording keeps it (the stack's `envp` and the `guest.env` member). Recorded
+from a developer shell or a CI job, the fixture would publish that shell's
+credentials; one recorded from a CI job on 2026-10-03 carried a git
+`AUTHORIZATION` header. `committed_recordings_carry_no_credentials_test.rs`
+(db-backend) fails the suite on any committed recording that carries one.
+`--no-deps` skips the recipe's rebuild of the server-record tool, which needs
+a real `HOME`; build it first (`just build-codetracer-native-recorder`, with
+`ct_cli` from `just build-ct-mcr`).
 
 The recipe **replaces the whole target directory**. It records exactly the
 schedule `just demo-request-panel native` records.
 
-It passes `--no-full-snapshot`, which is what makes the result checkable in at
-all: the recording-start memory image of an nginx process is ~58 MB of
-`cp0.mem`, and nothing the Request Panel reads — the span stream, `meta.dat`,
-the per-thread event streams the spans index into — comes from it. Even so this
-fixture is ~2.1 MB against ~170–290 KB for the five managed rows, because a
-native recording holds every syscall and lock event the process made, not a
-per-line step stream of application code.
+The container carries the recording-start memory image: the recorder no longer
+has a way to leave it out (`--no-full-snapshot` was removed on 2026-09-25).
+The image is stored as compressed pages, so the fixture is about 2.7 MB, of
+which the Request Panel reads only the span stream, `meta.dat` and the
+per-thread event streams the spans index into. Against ~170–290 KB for the
+five managed rows, the rest of the difference is that a native recording
+holds every syscall and lock event the process made, not a per-line step
+stream of application code.
 
 ### What the session contains
 
@@ -412,7 +438,7 @@ read a growing container over a real HTTP socket with real byte-range requests.
 
 Regenerate:
 
-```
+```sh
 cd src/db-backend
 direnv exec ../.. env CT_REGENERATE_REMOTE_DELTA_FIXTURE=1 \
   cargo test --test remote_span_tail_http_test remote_live_panel_over_http_range

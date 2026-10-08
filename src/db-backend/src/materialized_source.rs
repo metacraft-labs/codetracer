@@ -1,17 +1,19 @@
 //! Opening a *materialized* recording directory as a trace reader.
 //!
-//! A materialized (CTFS) recording reaches the db-backend in one of three
-//! on-disk layouts, and the debugger already reads all three
-//! (`dap_server::setup`):
+//! A materialized recording reaches the db-backend in one of two on-disk
+//! layouts:
 //!
-//! 1. a `*.ct` CTFS container — what the current recorders write;
-//! 2. a legacy `runtime_tracing` `trace.json` event stream — what external
-//!    recorders that have not adopted the CTFS writer still emit, `nargo
-//!    trace` being the live example;
-//! 3. a legacy `runtime_tracing` `trace.bin` capnp event stream — what the
-//!    Python recorder emits.
+//! 1. a `*.ct` CTFS container — what the production recorders write;
+//! 2. a legacy `runtime_tracing` `trace.bin` capnp event stream — what the
+//!    pre-CTFS recordings in `codetracer-example-recordings` are.
 //!
-//! `dap_server::setup` interleaves those three arms with DAP handler
+//! A directory holding only a `trace.json` event stream is not a recording.
+//! That layout is the output of the pure-Python and pure-Ruby test oracles,
+//! which exists to be compared against `ct print` of a production `.ct`
+//! recording; it is refused by name ([`TEST_ORACLE_OUTPUT_ERROR`]) rather
+//! than reviewed.
+//!
+//! `dap_server::setup` interleaves the recording layouts with DAP handler
 //! construction, so a second consumer cannot call it.  This module is the
 //! reader-opening half on its own, so the DeepReview collector
 //! (`crate::deepreview`) reads exactly the recordings the debugger reads
@@ -20,7 +22,7 @@
 //!
 //! `crate::diff::load_and_postprocess_trace` is deliberately *not* reused:
 //! it is CTFS-only ("legacy … sidecars are no longer accepted"), which would
-//! have made the collector refuse the Noir and Python recordings that
+//! have made the collector refuse the `trace.bin` recordings that
 //! `ct replay` opens without complaint.
 
 use std::error::Error;
@@ -30,11 +32,37 @@ use log::info;
 
 use crate::ctfs_trace_reader::CTFSTraceReader;
 
-/// The three file names that identify a materialized recording, in the order
-/// they are tried.  A `*.ct` container wins over a legacy sidecar when a
-/// directory somehow holds both, because the container is the newer artefact.
-pub const LEGACY_JSON_TRACE_FILE: &str = "trace.json";
+/// The legacy event-stream file name of a materialized recording.  A `*.ct`
+/// container wins over it when a directory somehow holds both, because the
+/// container is the newer artefact.
 pub const LEGACY_BINARY_TRACE_FILE: &str = "trace.bin";
+
+/// The file name the pure-Python and pure-Ruby test oracles write.
+pub const TEST_ORACLE_TRACE_FILE: &str = "trace.json";
+
+/// Why a directory holding only [`TEST_ORACLE_TRACE_FILE`] is refused.
+pub const TEST_ORACLE_OUTPUT_ERROR: &str = "is a trace.json event stream: test-oracle output written by \
+     the pure-Python or pure-Ruby recorder to be compared against `ct print` of a production \
+     recording. It is not a recording and CodeTracer does not open it; record the program with \
+     the production recorder to get a .ct recording";
+
+/// The refusal every entry point gives for test-oracle output at `path`.
+///
+/// One wording for the debugger, the browser engine and the review
+/// collector, so a user meets the same explanation whichever way they tried
+/// to open the file.
+pub fn test_oracle_refusal(path: impl std::fmt::Display) -> String {
+    format!("'{path}' {TEST_ORACLE_OUTPUT_ERROR}")
+}
+
+/// Whether `path` names test-oracle output: a file called
+/// [`TEST_ORACLE_TRACE_FILE`], or a directory holding one.
+pub fn is_test_oracle_output(path: &Path) -> bool {
+    if path.is_file() {
+        return path.file_name().is_some_and(|name| name == TEST_ORACLE_TRACE_FILE);
+    }
+    path.join(TEST_ORACLE_TRACE_FILE).is_file()
+}
 
 /// Locate the unique `*.ct` CTFS container inside `dir`, if there is one.
 fn find_ct_container(dir: &Path) -> Option<PathBuf> {
@@ -70,21 +98,22 @@ fn legacy_workdir(stream_path: &Path) -> PathBuf {
         })
 }
 
-/// Whether `dir` looks like a materialized recording this module can open.
+/// Whether `dir` looks like a materialized recording, or like test-oracle
+/// output that `open_materialized_trace` refuses by name.
 ///
 /// Cheap and filesystem-only: it names files, it does not decode them.  The
-/// ct-side survey (`src/ct/trace/trace_kind.nim`) applies the same rules, and
-/// the two must agree or `ct review collect` routes a recording here that
-/// this module then refuses.
+/// ct-side survey (`src/ct/trace/trace_kind.nim`) applies the same rules.
+/// Oracle output is included so that `ct review collect` reports the refusal
+/// against the directory instead of claiming the folder holds nothing.
 pub fn is_materialized_recording(dir: &Path) -> bool {
     find_ct_container(dir).is_some()
-        || dir.join(LEGACY_JSON_TRACE_FILE).is_file()
+        || dir.join(TEST_ORACLE_TRACE_FILE).is_file()
         || dir.join(LEGACY_BINARY_TRACE_FILE).is_file()
 }
 
 /// Open a materialized recording directory as a `CTFSTraceReader`.
 ///
-/// All three layouts converge on `CTFSTraceReader::from_events` /
+/// Both layouts converge on `CTFSTraceReader::from_events` /
 /// `CTFSTraceReader::open`, which is the same postprocessing pipeline the
 /// debugger runs, so the `Db` a collector sees is the `Db` a replay session
 /// sees.
@@ -92,21 +121,6 @@ pub fn open_materialized_trace(dir: &Path) -> Result<CTFSTraceReader, Box<dyn Er
     if let Some(ct_path) = find_ct_container(dir) {
         info!("deepreview: opening CTFS container {}", ct_path.display());
         return CTFSTraceReader::open(&ct_path);
-    }
-
-    let json_path = dir.join(LEGACY_JSON_TRACE_FILE);
-    if json_path.is_file() {
-        info!("deepreview: opening legacy trace.json at {}", json_path.display());
-        let json_bytes = std::fs::read(&json_path)?;
-        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
-        // Shared with `dap_server`: the same stream needs the same repair, and
-        // two copies of it would diverge silently.
-        crate::dap_server::normalize_legacy_trace_json_values(&mut json_value);
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
-            .map_err(|e| format!("failed to decode legacy trace.json at {}: {e}", json_path.display()))?;
-        let workdir = legacy_workdir(&json_path);
-        return CTFSTraceReader::from_events(events, &workdir);
     }
 
     let bin_path = dir.join(LEGACY_BINARY_TRACE_FILE);
@@ -121,10 +135,13 @@ pub fn open_materialized_trace(dir: &Path) -> Result<CTFSTraceReader, Box<dyn Er
         return CTFSTraceReader::from_events(events, &workdir);
     }
 
+    if dir.join(TEST_ORACLE_TRACE_FILE).is_file() {
+        return Err(test_oracle_refusal(dir.display()).into());
+    }
+
     Err(format!(
-        "'{}' is not a materialized recording: it holds no *.ct container, no {} and no {}",
+        "'{}' is not a materialized recording: it holds no *.ct container and no {}",
         dir.display(),
-        LEGACY_JSON_TRACE_FILE,
         LEGACY_BINARY_TRACE_FILE
     )
     .into())

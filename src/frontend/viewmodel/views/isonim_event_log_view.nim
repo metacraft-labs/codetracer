@@ -75,6 +75,31 @@ proc columnHeaderText(vm: EventLogVM; col: int; baseName: string): string =
   if vm.sortAscending.val: baseName & " ^"
   else: baseName & " v"
 
+# ---------------------------------------------------------------------------
+# The column menu (PLAT-49 part B, finding 14) — Event-Log-Pane.md's
+# "[+ Columns]": every column of the ViewModel's order, a check to show or
+# hide it and a move left / right, all through `EventLogVM`.
+# ---------------------------------------------------------------------------
+
+const
+  EventLogColumnsButtonClass* = "eventLog-columns-button"
+  EventLogColumnsButtonText* = "Columns +"
+  EventLogColumnsMenuClass* = "eventLog-columns-menu"
+  EventLogColumnOptionClass* = "eventLog-column-option"
+  EventLogColumnCheckClass* = "eventLog-column-check"
+  EventLogColumnLeftClass* = "eventLog-column-left"
+  EventLogColumnRightClass* = "eventLog-column-right"
+
+proc columnCheckClass*(vm: EventLogVM; col: EventLogColumn): string =
+  EventLogColumnCheckClass &
+    (if vm.columns.val.isVisible(col): " checked" else: "")
+
+proc columnCheckGlyph*(vm: EventLogVM; col: EventLogColumn): string =
+  if vm.columns.val.isVisible(col): "☑" else: "☐"
+
+proc columnOptionTitle*(col: EventLogColumn): string =
+  eventLogColumnTitle(col)
+
 proc rowClass(vm: EventLogVM; index: int): string =
   let sel = vm.selectedRow.val
   if sel.isSome and sel.get == index: "event-row selected" else: "event-row"
@@ -332,7 +357,7 @@ when defined(js):
     ## placeholders; DataTables populates them after `afterMount`.
     ## `componentId` is threaded into the legacy `eventLogComponent-N`
     ## root id so page objects and DataTables helpers can locate it.
-    var markerContainer: isonim_dom.Element
+    var markerContainer, columnsMenu: isonim_dom.Element
 
     let panel = ui(r):
       tdiv(id = "eventLogComponent-" & $componentId,
@@ -350,6 +375,13 @@ when defined(js):
           tdiv(class = "eventLog-switch eventLog-button eventLog-normal-color-button"):
             span(id = "detailed"):
               text "detailed"
+          button(class = "ct-button-sm-secondary " & EventLogColumnsButtonClass,
+                 title = "Show, hide or move the event log's columns",
+                 onclick = proc() = vm.toggleColumnsMenu()):
+            text EventLogColumnsButtonText
+        tdiv(ref = columnsMenu, class = EventLogColumnsMenuClass,
+             display = displayIf(vm.columnsMenuOpen.val)):
+          discard
         tdiv(class = "event-log-marker-banner",
              display = markerBannerDisplay(vm)):
           text markerBannerText(vm)
@@ -386,6 +418,28 @@ when defined(js):
       proc(): seq[MarkerEventRow] = vm.visibleMarkerRows.val,
       proc(item: proc(): MarkerEventRow, index: int): isonim_dom.Element =
         renderMarkerRow(r, vm, item))
+
+    # The column menu's rows: the ViewModel's ORDER, hidden columns in their
+    # places (a hidden column cannot move; its arrows do nothing).
+    indexEach[EventLogColumn, WebRenderer, isonim_dom.Element](r, columnsMenu,
+      proc(): seq[EventLogColumn] = vm.columns.val.order,
+      proc(item: proc(): EventLogColumn, index: int): isonim_dom.Element =
+        ui(r):
+          tdiv(class = EventLogColumnOptionClass,
+               `data-column` = $item()):
+            span(class = columnCheckClass(vm, item()),
+                 onclick = proc() = discard vm.toggleColumn(item())):
+              text columnCheckGlyph(vm, item())
+            span(class = "eventLog-column-title"):
+              text columnOptionTitle(item())
+            button(class = EventLogColumnLeftClass,
+                   title = "Move left",
+                   onclick = proc() = discard vm.moveColumn(item(), -1)):
+              text "◀"
+            button(class = EventLogColumnRightClass,
+                   title = "Move right",
+                   onclick = proc() = discard vm.moveColumn(item(), 1)):
+              text "▶")
 
     panel
 

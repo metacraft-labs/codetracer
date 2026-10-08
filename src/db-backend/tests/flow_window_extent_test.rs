@@ -59,6 +59,8 @@
 //! Run with:
 //!     cargo test --test flow_window_extent_test -- --nocapture
 
+mod test_harness;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -96,7 +98,7 @@ fn find_nargo() -> bool {
     Command::new("nargo").arg("--version").output().is_ok()
 }
 
-fn record_noir_space_ship_trace() -> Option<PathBuf> {
+fn record_noir_space_ship_trace() -> PathBuf {
     let target_dir = PathBuf::from(format!(
         "{}/test-traces/flow_window_extent_{}",
         env!("CARGO_MANIFEST_DIR"),
@@ -111,16 +113,14 @@ fn record_noir_space_ship_trace() -> Option<PathBuf> {
         .args(["trace", "--out-dir", target_dir.to_str().unwrap()])
         .current_dir(&canonical)
         .output()
-        .ok()?;
-    if !result.status.success() {
-        eprintln!(
-            "nargo trace failed:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&result.stdout),
-            String::from_utf8_lossy(&result.stderr)
-        );
-        return None;
-    }
-    Some(target_dir)
+        .expect("`nargo trace` could not be started");
+    assert!(
+        result.status.success(),
+        "nargo trace failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    target_dir
 }
 
 /// The FIRST `shield.nr` step — the call entry, which is where a calltrace
@@ -167,19 +167,20 @@ fn assert_fixture_shape() {
 #[test]
 fn flow_window_extent_contains_the_lines_the_window_draws() {
     if !find_nargo() {
-        eprintln!("SKIPPED: nargo not on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "flow_window_extent_contains_the_lines_the_window_draws",
+            "`nargo` is not on PATH",
+            "run inside the codetracer dev shell, which provides the pinned noir",
+        );
         return;
     }
     assert_fixture_shape();
 
-    let Some(target_dir) = record_noir_space_ship_trace() else {
-        eprintln!("SKIPPED: nargo trace unavailable");
-        return;
-    };
-    let Some(db) = load_db_from_ctfs(&target_dir) else {
-        eprintln!("SKIPPED: nargo produced no *.ct container in {}", target_dir.display());
-        return;
-    };
+    // `nargo` is present (checked above), so a recording that fails is a
+    // failure, not a missing prerequisite.
+    let target_dir = record_noir_space_ship_trace();
+    let db = load_db_from_ctfs(&target_dir)
+        .unwrap_or_else(|| panic!("nargo produced no *.ct container in {}", target_dir.display()));
 
     let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
     let target_step_id = find_iterate_asteroids_first_step(&db, &reader).expect("at least one shield.nr step");

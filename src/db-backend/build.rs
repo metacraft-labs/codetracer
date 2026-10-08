@@ -1113,18 +1113,19 @@ fn which_nim() -> Option<PathBuf> {
     None
 }
 
-/// Source files that drive C-code regeneration.  Adding a new FFI shim
-/// (`*_ffi.nim`) means adding it here too so build.rs reruns and the
-/// staleness check below picks it up.
+/// The four FFI shims, kept as an explicit list only so that
+/// `rerun-if-changed` still names something real in a checkout that has no
+/// private recorder tree to walk.
 ///
-/// Self-hosted CI runners keep `target/release/build/` and
-/// `ct_emulator/build/native_c_files/` across runs, so a "regenerate if
-/// the cached C file is missing" check is not enough: the cached C from
-/// a previous (pre-M17/M18) build silently shadows fresh Nim source and
-/// `libmcr_emulator.so` ends up missing every `mcrUndoMap*` /
-/// `mcrLastMileReverseStep*` / `mcrDataWatch*` symbol the version
-/// script tries to export.  We list the Nim inputs explicitly here and
-/// regenerate when any is newer than the cached output.
+/// They are NOT the generation's input set, and — despite what the name
+/// suggests — only the first of them is an entry point: both
+/// `build_native_api.sh` and `build_wasm_api.sh` pass Nim exactly one
+/// module, `src/ct_emulator/emulator_wasm_api.nim`, and the other three are
+/// reached from it by `import` like any other module.  Nim then pulls in
+/// that module's whole transitive closure, and the generated C carries
+/// `_Static_assert`s derived from modules nowhere near this list.  See
+/// `nim_input_roots` below for why that distinction had to be made
+/// load-bearing.
 fn nim_input_files(emulator_dir: &Path) -> Vec<PathBuf> {
     let src = emulator_dir.join("src/ct_emulator");
     vec![
@@ -1135,9 +1136,140 @@ fn nim_input_files(emulator_dir: &Path) -> Vec<PathBuf> {
     ]
 }
 
+/// Source TREES that drive C-code regeneration.
+///
+/// Self-hosted CI runners keep `target/release/build/` and
+/// `ct_emulator/build/native_c_files/` across runs, so a "regenerate if
+/// the cached C file is missing" check is not enough: the cached C from
+/// a previous (pre-M17/M18) build silently shadows fresh Nim source and
+/// `libmcr_emulator.so` ends up missing every `mcrUndoMap*` /
+/// `mcrLastMileReverseStep*` / `mcrDataWatch*` symbol the version
+/// script tries to export.  So the cache is compared by mtime against
+/// its inputs.
+///
+/// **THIS USED TO BE THE FOUR FILES OF `nim_input_files`, AND THAT WAS
+/// WRONG** — measured 2026-09-29, on a `just build-once` that had got
+/// past every other blocker:
+///
+/// ```text
+/// @pct_events@ssignal_events.nim.c:6:22: error: static assertion failed
+///   due to requirement '4 == 3': CT_PS_SIG_PAY_VERSION != SignalDeliveryVersion
+/// @pct_events@ssignal_events.nim.c:10:22: error: static assertion failed
+///   due to requirement '245 == 216': CT_PS_SIG_PAY_FIXED != SignalDeliveryFixedSizeV3
+/// ```
+///
+/// The generated C was produced on 2026-09-24 from a v3 signal-payload
+/// layout; `ct_events/src/ct_events/{signal_events.nim,
+/// ct_signal_payload_layout.h}` moved to v4 on 2026-09-28.  The newest
+/// file in the hand-maintained list was from 2026-08-26 — OLDER than the
+/// cache — so the staleness gate answered "fresh" and handed a v3 C file
+/// to a v4 header.  `signal_events.nim` is reached transitively (it is
+/// not an FFI shim and never would have been added to that list), and its
+/// own `_Static_assert` is what caught the skew: without that assertion
+/// the mismatch would have linked.
+///
+/// A hand-maintained file list cannot express "and everything those
+/// import", and the note that used to live here — *"adding a new FFI shim
+/// means adding it here too"* — is a rule that has now been broken twice
+/// in the direction it warned about.  Walking source TREES
+/// over-approximates instead, and an unnecessary regeneration costs one
+/// Nim compile whose time is dominated by the C compiler anyway (the
+/// argument the clean-slate comment in `regenerate_c` already makes).
+///
+/// **The tree list below is not hand-picked either: it mirrors the
+/// `--path:` block of `build_native_api.sh` / `build_wasm_api.sh`**, which
+/// is the set of roots Nim is told to search and therefore the only set
+/// the transitive closure can be drawn from.  Keeping the two in
+/// correspondence is a check anyone can run — `grep 'path:'
+/// ct_emulator/build_native_api.sh` — whereas "the trees I happened to
+/// need" is the same unfalsifiable rule that failed above.  Watching a
+/// strict subset is NOT merely conservative: it reproduces exactly the
+/// stale-cache defect this function exists to prevent, one directory
+/// over.  Both scripts declare the same eight in-repo roots; the
+/// generated C measured at `4bf4eea1e` draws on five of them
+/// (`ct_emulator`, `ct_events`, `ct_instrument`, `ct_interpose`,
+/// `ct_time_model` — read off Nim's own `emulator_wasm_api.deps`), and
+/// the remaining three are on `--path:` so a future import can reach them
+/// without touching this file.
+///
+/// The ninth `--path:` root is the out-of-repo
+/// `../codetracer-trace-format-nim/src` sibling, and it is watched too.
+/// It is a mutable sibling checkout like any other, not a pinned store
+/// path: `emulator_wasm_api.deps` resolves
+/// `codetracer_trace_writer/memwrites_builder.nim` and
+/// `codetracer_ctfs/cow_btree.nim` out of that working tree, so a change
+/// there reaches the generated C by exactly the route `signal_events.nim`
+/// took.  Leaving it out would reproduce the stale-cache defect one
+/// repository over — the same mistake as watching a strict subset of the
+/// in-repo roots, and the reason this list is derived from `--path:`
+/// rather than from the trees that happened to be needed.
+fn nim_input_roots(emulator_dir: &Path) -> Vec<PathBuf> {
+    let recorder_root = match emulator_dir.parent() {
+        Some(p) => p.to_path_buf(),
+        None => return Vec::new(),
+    };
+    let mut roots = vec![emulator_dir.join("src")];
+    for sibling in [
+        "ct_time_model",
+        "ct_events",
+        "ct_instrument",
+        "ct_recorder",
+        "ct_replayer",
+        "ct_loader",
+        "ct_interpose",
+    ] {
+        roots.push(recorder_root.join(sibling).join("src"));
+    }
+    // `$PROJECT_ROOT/../codetracer-trace-format-nim/src` in both scripts.
+    if let Some(workspace_root) = recorder_root.parent() {
+        roots.push(workspace_root.join("codetracer-trace-format-nim").join("src"));
+    }
+    roots
+}
+
+/// The newest mtime anywhere under `root`, or `None` when it cannot be
+/// walked.  `None` is deliberately NOT treated as "unchanged" by the
+/// caller — an unreadable input tree is a reason to regenerate, not a
+/// reason to trust the cache.
+fn newest_mtime_under(root: &Path) -> Option<std::time::SystemTime> {
+    let mut newest: Option<std::time::SystemTime> = None;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if let Ok(mtime) = meta.modified()
+                && newest.map(|n| mtime > n).unwrap_or(true)
+            {
+                newest = Some(mtime);
+            }
+        }
+    }
+    newest
+}
+
 fn track_nim_inputs(emulator_dir: &Path) {
+    // Cargo walks a directory given to `rerun-if-changed`, so naming the
+    // trees here keeps build.rs's own rerun trigger and the staleness gate
+    // below reading the same input set.  The four FFI shims stay listed as
+    // well: they are cheap, and they keep the trigger working if a tree is
+    // absent (public repo without the private recorder).
     for f in nim_input_files(emulator_dir) {
         println!("cargo:rerun-if-changed={}", f.display());
+    }
+    for root in nim_input_roots(emulator_dir) {
+        // Only ABSENT-safe because cargo treats a named path that does not
+        // exist as changed on every run — naming a missing tree would make
+        // build.rs rerun unconditionally in a checkout without the private
+        // recorder, which is exactly where none of this work happens.
+        if root.exists() {
+            println!("cargo:rerun-if-changed={}", root.display());
+        }
     }
     println!(
         "cargo:rerun-if-changed={}",
@@ -1146,10 +1278,7 @@ fn track_nim_inputs(emulator_dir: &Path) {
 }
 
 /// Returns true iff the cached C is missing or older than any tracked
-/// Nim input.  Self-hosted CI runners keep build artefacts between
-/// runs; without an mtime check the build.rs happily reuses stale C
-/// from before the M17/M18 FFI shims existed and the resulting .so
-/// fails to export their symbols.
+/// Nim input.
 fn needs_regeneration(emulator_dir: &Path, output_dir: &Path) -> bool {
     let cached = output_dir.join("@memulator_wasm_api.nim.c");
     let Ok(cached_meta) = std::fs::metadata(&cached) else {
@@ -1158,11 +1287,25 @@ fn needs_regeneration(emulator_dir: &Path, output_dir: &Path) -> bool {
     let Ok(cached_mtime) = cached_meta.modified() else {
         return true;
     };
-    nim_input_files(emulator_dir).iter().any(|src| {
+    let ffi_shim_is_newer = nim_input_files(emulator_dir).iter().any(|src| {
         std::fs::metadata(src)
             .and_then(|m| m.modified())
             .map(|src_mtime| src_mtime > cached_mtime)
             .unwrap_or(false)
+    });
+    if ffi_shim_is_newer {
+        return true;
+    }
+    nim_input_roots(emulator_dir).iter().any(|root| {
+        // An existing tree we cannot read is stale by assumption; an
+        // absent one (public repo without the private recorder) is not,
+        // because there is nothing there to have changed.
+        if !root.exists() {
+            return false;
+        }
+        newest_mtime_under(root)
+            .map(|newest| newest > cached_mtime)
+            .unwrap_or(true)
     })
 }
 

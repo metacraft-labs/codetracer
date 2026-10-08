@@ -306,10 +306,13 @@ pub fn parse_event_line(line: &str) -> Result<BrowserEvent, ParseError> {
 /// Trait abstracting the CTFS writer surface so the receiver can be
 /// unit-tested without touching disk.
 ///
-/// In production this is implemented by the CTFS multi-stream container
-/// writer (see `codetracer-trace-format-nim` for the canonical
-/// implementation).  In tests we use [`InMemoryCtfsWriter`].
-pub trait CtfsWriter: Send + Sync {
+/// In production this is implemented by
+/// `browser_stream_host::CtfsRecordingWriter`, which writes a CTFS `.ct`.
+/// In tests we use [`InMemoryCtfsWriter`].
+///
+/// `Send` but not `Sync`: the host shares a writer as
+/// `Arc<Mutex<dyn CtfsWriter>>`, and the mutex provides the sharing.
+pub trait CtfsWriter: Send {
     /// Called once at session start with the manifest and program info.
     fn session_start(&mut self, program: &str, args: &[String]) -> io::Result<()>;
     /// Called when a `Manifest` event arrives (may be a no-op if the

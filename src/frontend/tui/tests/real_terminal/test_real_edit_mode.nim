@@ -82,7 +82,7 @@ import term_assert
 import ../fixtures/fixture_provider
 import ./lifecycle_support
 
-const ExpectedAssertions = 61
+const ExpectedAssertions = 63
 
 var countedAssertions = 0
 
@@ -100,6 +100,10 @@ const
 
   ProjectFile = "alpha.nim"
   ProjectText = "proc alpha() =\n  echo 1\n"
+  DirtyTab = ProjectFile & " ●"
+    ## The editor's tab while its buffer differs from the file (PLAT-49: the
+    ## pane has no title row, so the tab carries the marker the title's
+    ## `[+]` did).
 
   CtrlZ = "\x1a"
     ## Ctrl+z on the wire. WRITTEN AS A BYTE, not as `sendKey("ctrl+z")` — see
@@ -216,11 +220,12 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
     let dir = projectDir()
     var sess = spawnEditor(dir)
     try:
-      let screen = waitForScreenText(sess, "EDIT ")
+      let screen = waitForScreenText(sess, "[EDIT]")
       checkpoint(screen)
       # THE PRODUCT MODE IS LEGIBLE FROM THE WINDOW (Mode-Transitions.md §7):
-      # the pane's own title and the status line's separate indicator.
-      ck screen.contains("EDIT " & ProjectFile)
+      # the status line's separate indicator — and the editor's tab names
+      # the working-tree file (PLAT-49: a pane has no title row).
+      ck screen.contains(" " & ProjectFile & " ")
       ck screen.contains("[EDIT]")
       # …and the INPUT mode indicator is still NORMAL, beside it, which is the
       # orthogonality visible on a terminal rather than in a type.
@@ -232,10 +237,12 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck screen.contains("echo 1")
       # Edit mode's OWN pane set (§4): a file tree and a build surface, and no
       # call stack.
-      ck screen.contains("FILES")
-      ck screen.contains("BUILD")
+      ck screen.contains(" Files ")
+      ck screen.contains(" Build & Run ")
       ck screen.contains(ProjectFile)
       ck not screen.contains("CALL STACK")
+      ck not screen.contains(" Call Trace ")
+      ck not screen.contains("CALL TRACE")
       # The build pane is a statement rather than a blank.
       ck screen.contains("[idle]")
     finally:
@@ -250,7 +257,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       discard waitForScreenText(sess, "proc alpha() =")
       # THE BUFFER IS CLEAN BEFORE THE KEY. Without this the marker assertion
       # below is satisfied by a pane that always draws it.
-      ck not sess.screenContents().contains("[+]")
+      ck not sess.screenContents().contains(DirtyTab)
 
       # ONE BYTE, ON A REAL FD, into the widget's own `insertText`.
       sess.send("Z")
@@ -262,7 +269,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       # …AND THE BUFFER IS MARKED MODIFIED. Mode-Transitions.md §5 requires an
       # unsaved buffer to survive a switch; the marker is what lets a user know
       # they have one.
-      ck typed.contains("[+]")
+      ck typed.contains(DirtyTab)
       # NOTHING WAS WRITTEN TO DISK: `:w` is the only thing that writes, and it
       # was not typed.
       ck readFile(dir / ProjectFile) == ProjectText
@@ -278,7 +285,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       discard waitForScreenText(sess, "proc alpha() =")
       sess.send("Z")
       discard waitForScreenText(sess, "Zproc alpha() =")
-      ck sess.screenContents().contains("[+]")
+      ck sess.screenContents().contains(DirtyTab)
 
       # THE BYTE, NOT `sendKey("ctrl+z")`. It happens to work in this checkout
       # (see the module header) and the discipline is kept anyway: the
@@ -293,7 +300,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       # THE DIRTY MARKER IS GONE, which is the assertion that says the marker
       # is a COMPARISON against the loaded bytes rather than a flag a mutation
       # set. A flag would still be true here.
-      ck not undone.contains("[+]")
+      ck not undone.contains(DirtyTab)
       # AND NOTHING WAS EVER WRITTEN. `:w` is the only thing that writes.
       ck readFile(dir / ProjectFile) == ProjectText
     finally:
@@ -350,16 +357,19 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck not debug.contains("[EDIT]")
       # …and the pane set moved with it (Mode-Transitions.md §4 requirement 4:
       # mode and layout change together or not at all).
-      ck not debug.contains("EDIT " & ProjectFile)
-      ck debug.contains("CALL STACK")
+      ck not debug.contains(" " & ProjectFile & " ")
+      # The calltrace pane's tab label: in the shared default (PLAT-45) it is a
+      # tab of a stack, and a session with no frames paints the strip, not a
+      # title row. PLAT-47: the tab reads `Call Trace`, padded, not bracketed.
+      ck debug.contains(" Call Trace ")
 
       # BACK, and the editor is the one that was there — §6's reversibility,
       # through a real terminal.
       sess.send(CtrlF5)
-      let back = waitForScreenText(sess, "EDIT " & ProjectFile)
+      let back = waitForScreenText(sess, " " & ProjectFile & " ")
       ck back.contains("NORMAL [EDIT]")
       ck back.contains("proc alpha() =")
-      ck back.contains("FILES")
+      ck back.contains(" Files ")
     finally:
       sess.send(QuitByte)
       discard sess.waitExit(initDuration(seconds = 10))
@@ -403,7 +413,7 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
       settleOnDebugger(sess, Cols, Rows)
       let opened = sess.screenContents()
       ck opened.contains("NORMAL [DEBUG]")
-      ck opened.contains("CALL STACK")
+      ck opened.contains(" Call Trace ")
       # THE POSITIVE CONTROL ON THE ABSENCE BELOW: the notice is not on screen
       # before the edit, so "it appeared" is an event rather than a constant.
       ck not opened.contains("predates")
@@ -426,14 +436,14 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
       ck editing.contains("editing ")
       ck editing.contains("1 file(s)")
       # …and it really opened the file, off the real disk.
-      ck editing.contains("EDIT " & ProjectFile)
+      ck editing.contains(" " & ProjectFile & " ")
       ck editing.contains("proc alpha() =")
-      ck editing.contains("FILES")
+      ck editing.contains(" Files ")
 
       # ---- a real byte into the buffer -------------------------------------
       sess.send("Z")
       let typed = waitForScreenText(sess, "Zproc alpha() =")
-      ck typed.contains("[+]")
+      ck typed.contains(DirtyTab)
 
       # ---- `:w`, which needs the focus off the editor ----------------------
       # While the editor is focused every printable key is text, `:` included —

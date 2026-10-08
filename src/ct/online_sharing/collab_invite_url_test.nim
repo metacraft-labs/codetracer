@@ -15,8 +15,8 @@ suite "online sharing collaboration invite URLs":
 
     check parsed.baseUrl == "https://ide.codetracer.com"
     check parsed.inviteToken == "native-token"
-    check buildCollabInviteExchangePath("https://ide.codetracer.com/api/v1/") ==
-      "https://ide.codetracer.com/api/v1/collab/invites/exchange"
+    check buildCollabInviteExchangePath("https://api.codetracer.com/api/v1/") ==
+      "https://api.codetracer.com/api/v1/collab/invites/exchange"
 
   test "native load-trace invite starts active collaboration runtime":
     let runtime = startNativeCollabRuntime(NativeCollabBootstrap(

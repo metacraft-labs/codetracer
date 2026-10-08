@@ -45,6 +45,7 @@ pub mod materialization_cache;
 pub mod memwrites_namespace;
 pub mod meta_dat;
 pub mod server_prep_encoding;
+pub mod snapshot_payload;
 pub mod span_stream;
 pub mod step_map_namespace;
 // M0/2 — as with `call_stream_source` above, the seekable `steps.dat` /
@@ -648,15 +649,16 @@ impl CTFSTraceReader {
 
     /// Build a reader directly from a decoded `TraceLowLevelEvent` stream.
     ///
-    /// CTFS is the canonical materialized-trace container, but some
-    /// external recorders still emit the legacy `runtime_tracing`
-    /// materialized layout — a `trace.json` file holding the same
-    /// `Vec<TraceLowLevelEvent>` payload that CTFS stores (CBOR-encoded)
-    /// in `events.log`.  The Noir recorder (`nargo trace`) is the
-    /// current example.  Rather than failing such traces (which would
-    /// then wrongly fall through to the rr/MCR replay-worker path), we
-    /// run the very same postprocessing pipeline `open()` uses so the
-    /// resulting reader is indistinguishable from a CTFS-loaded one.
+    /// CTFS is the canonical materialized-trace container, and the
+    /// production recorders, `nargo trace` among them, write `.ct`.  A
+    /// bare `Vec<TraceLowLevelEvent>` stream — the same payload CTFS
+    /// stores (CBOR-encoded) in `events.log` — still reaches the
+    /// db-backend from pre-CTFS `trace.bin` recordings, and from tests that
+    /// build an event list directly.  Those run the very same
+    /// postprocessing pipeline `open()` uses so the resulting reader is
+    /// indistinguishable from a CTFS-loaded one.  A `trace.json` event
+    /// stream is test-oracle output and is never handed here
+    /// (`materialized_source::TEST_ORACLE_OUTPUT_ERROR`).
     pub fn from_events(events: Vec<TraceLowLevelEvent>, workdir: &Path) -> Result<Self, Box<dyn Error>> {
         let mut db = Db::new(&workdir.to_path_buf());
         let mut processor = TraceProcessor::new(&mut db);
@@ -779,7 +781,7 @@ fn is_new_format(ctfs: &CtfsReader) -> bool {
 ///
 /// Built from the FORMAT CRATE's own constants so it cannot drift from the
 /// parser that reads it.
-fn structural_presence_meta() -> [u8; 8] {
+fn structural_presence_meta() -> [u8; 12] {
     use codetracer_trace_writer::meta_dat::{
         FLAG_HAS_CALL_STREAM, FLAG_HAS_INTERNING_TABLES, FLAG_HAS_IO_EVENT_STREAM, FLAG_HAS_STEP_STREAM,
         FLAG_HAS_VALUE_STREAM, META_DAT_MAGIC, META_DAT_VERSION,
@@ -795,7 +797,9 @@ fn structural_presence_meta() -> [u8; 8] {
         | FLAG_HAS_IO_EVENT_STREAM
         | FLAG_HAS_INTERNING_TABLES;
 
-    let mut buf = [0u8; 8];
+    // Twelve bytes: the header of a current `meta.dat` ends with the u32
+    // `flags_ext` word, left zero here.
+    let mut buf = [0u8; 12];
     buf[0..4].copy_from_slice(&META_DAT_MAGIC);
     buf[4..6].copy_from_slice(&META_DAT_VERSION.to_le_bytes());
     buf[6..8].copy_from_slice(&flags.to_le_bytes());
@@ -1216,7 +1220,7 @@ impl CTFSTraceReader {
                 Some(ns)
             }
             Err(e) => {
-                info!("CTFS: step-map.ns malformed ({e}); falling back to whole-table breakpoint build");
+                warn!("CTFS: {e}; falling back to the whole-table breakpoint build");
                 None
             }
         }
@@ -1377,11 +1381,8 @@ impl CTFSTraceReader {
 
         // ── Vocabulary ─────────────────────────────────────────────────
         //
-        // `paths` appear in BOTH `meta.dat` and `paths.dat`. Prefer the
-        // interning table: it is the table the step / function records index
-        // into, so using it keeps every `PathId` consistent by construction.
-        // `meta.dat`'s copy is the fallback for a container that predates the
-        // binary tables.
+        // Source paths come from `paths.dat` alone: it is the table the step /
+        // function records index into, and `meta.dat` carries no copy of it.
         let tables = interning_tables::InterningTables::open_from_ctfs(ctfs)
             .map_err(|e| format!("interning tables unreadable: {e}"))?;
 
@@ -1426,18 +1427,28 @@ impl CTFSTraceReader {
                     tables.types.len(),
                     tables.variable_names.len(),
                 );
-                if tables.line_lengths.iter().any(|lls| !lls.is_empty()) {
-                    let files_with_tables = tables.line_lengths.iter().filter(|lls| !lls.is_empty()).count();
+                if tables.file_tables.iter().any(Option::is_some) {
+                    let files_with_tables = tables.file_tables.iter().filter(|t| t.is_some()).count();
+                    // A path whose record states no table occupies no
+                    // positions, which an empty per-line table expresses.
                     let decoder =
-                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_line_lengths(
-                            tables.line_lengths.clone(),
+                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_file_tables(
+                            tables
+                                .file_tables
+                                .iter()
+                                .map(|t| {
+                                    t.clone().unwrap_or(
+                                        codetracer_trace_reader::global_position_decoder::FileTable::Lines(Vec::new()),
+                                    )
+                                })
+                                .collect(),
                         );
                     info!(
                         "CTFS pure-Rust reader: column-aware container — global_position_index decoder built \
                          from {} of {} paths' Layout A line tables ({} addressable positions); steps decode to \
                          (file, line, column)",
                         files_with_tables,
-                        tables.line_lengths.len(),
+                        tables.file_tables.len(),
                         decoder.total_positions(),
                     );
                     position_decoder = Some(std::sync::Arc::new(decoder));
@@ -1468,16 +1479,10 @@ impl CTFSTraceReader {
                 }
             }
             None => {
-                info!(
-                    "CTFS pure-Rust reader: no binary interning tables — falling back to meta.dat's {} paths",
-                    meta.paths.len()
-                );
-                for path in &meta.paths {
-                    db.paths.push(path.clone());
-                    let path_id = PathId(db.paths.len() - 1);
-                    db.register_path_version(path.clone(), path_id);
-                    db.step_map.push(HashMap::new());
-                }
+                // `paths.dat` is the only list of source paths
+                // (`internal-files.md` §"`meta.dat` carries no path list"), so
+                // a container without it names none.
+                info!("CTFS pure-Rust reader: no binary interning tables — the trace names no source paths");
             }
         }
 
@@ -2051,8 +2056,18 @@ impl CTFSTraceReader {
     /// population (steps, calls, events, step_map) comes next.
     #[cfg(feature = "nim-reader")]
     fn open_new_format_nim(ctfs: &mut CtfsReader, ct_file_path: &Path, follow: bool) -> Result<Self, Box<dyn Error>> {
+        // A `meta.dat` of another schema version is refused here, with this
+        // crate's diagnostic, so both entry points (this one and the
+        // pure-Rust `from_bytes`) say the same thing about it -- including,
+        // for a version before the global line index correction, what
+        // reading it anyway would do.
+        if let Ok(meta_bytes) = ctfs.read_file("meta.dat")
+            && !meta_bytes.is_empty()
+            && let Err(e @ meta_dat::MetaDatError::UnsupportedVersion(_)) = meta_dat::parse_meta_dat(&meta_bytes)
+        {
+            return Err(format!("meta.dat is not readable: {e}").into());
+        }
         use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
-        use num_traits::FromPrimitive;
         use std::path::PathBuf;
 
         let ct_path = ct_file_path.to_string_lossy().to_string();
@@ -2110,12 +2125,14 @@ impl CTFSTraceReader {
         let has_all_interning_tables = ["paths.dat", "funcs.dat", "types.dat", "varnames.dat"]
             .iter()
             .all(|name| ctfs.has_file(name));
-        let declared_sites = if has_all_interning_tables {
-            interning_tables::InterningTables::open_from_ctfs(ctfs)
-                .map_err(|e| format!("interning tables: {e}"))?
-                .map(|tables| tables.functions)
+        let structured_tables = if has_all_interning_tables {
+            interning_tables::InterningTables::open_from_ctfs(ctfs).map_err(|e| format!("interning tables: {e}"))?
         } else {
             None
+        };
+        let (declared_sites, declared_types) = match structured_tables {
+            Some(tables) => (Some(tables.functions), Some(tables.types)),
+            None => (None, None),
         };
         for i in 0..reader.function_count() {
             let name = reader.function(i).map_err(|e| format!("function {i}: {e}"))?;
@@ -2138,14 +2155,44 @@ impl CTFSTraceReader {
             db.functions.push(FunctionRecord { name, path_id, line });
         }
 
-        // Types — only the type name is available via FFI.
+        // Types. The Nim FFI exposes a type's NAME only, but the `types.dat`
+        // record (`kind, lang_type, specific_info`) also carries its kind and,
+        // for a struct, its field names. Those come from the same pure-Rust
+        // decode the function sites do. Without them every type read as
+        // `Raw` with no fields, so a struct's members reached the front-ends
+        // unnamed (`[0]` where the recording says `a`). The two readers must
+        // agree on the count, and on every name, or the container is refused:
+        // a kind is never inferred from a name or a payload.
+        if let Some(types) = declared_types.as_ref()
+            && types.len() as u64 != reader.type_count()
+        {
+            return Err(format!(
+                "types: the Nim reader reports {} type(s) but types.dat decodes {}",
+                reader.type_count(),
+                types.len()
+            )
+            .into());
+        }
         for i in 0..reader.type_count() {
             let name = reader.type_name(i).map_err(|e| format!("type {i}: {e}"))?;
-            db.types.push(TypeRecord {
-                kind: TypeKind::Raw,
-                lang_type: name,
-                specific_info: TypeSpecificInfo::None,
-            });
+            match declared_types.as_ref().map(|types| types.get(i as usize)) {
+                Some(Some(record)) if record.lang_type == name => db.types.push(record.clone()),
+                Some(Some(record)) => {
+                    return Err(format!(
+                        "type {i}: the Nim reader names it {name:?} but types.dat decodes as {:?}",
+                        record.lang_type
+                    )
+                    .into());
+                }
+                Some(None) => {
+                    return Err(format!("type {i}: the Nim reader reports it but types.dat has no such record").into());
+                }
+                None => db.types.push(TypeRecord {
+                    kind: TypeKind::Raw,
+                    lang_type: name,
+                    specific_info: TypeSpecificInfo::None,
+                }),
+            }
         }
 
         // Variable names
@@ -2315,33 +2362,42 @@ impl CTFSTraceReader {
         // bit-for-bit identical to pre-extension behaviour.
         let position_decoder: Option<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder> =
             if column_aware {
+                use codetracer_trace_reader::global_position_decoder::FileTable;
+                use codetracer_trace_writer_nim::PathTableKind;
                 let path_total = reader.path_count();
-                let mut per_file: Vec<Vec<u32>> = Vec::with_capacity(path_total as usize);
+                let mut per_file: Vec<FileTable> = Vec::with_capacity(path_total as usize);
                 let mut any_with_lines = false;
                 for fid in 0..path_total {
-                    let line_count = reader.line_count_raw(fid);
-                    let mut lls: Vec<u32> = Vec::with_capacity(line_count as usize);
-                    for li in 0..line_count {
-                        match reader.line_length_raw(fid, li as u32) {
-                            Some(v) => lls.push(v),
-                            None => {
-                                // Should not happen because `line_count_raw`
-                                // returns the exact populated length, but
-                                // be defensive: a missing entry leaves a
-                                // zero-byte line which the decoder treats
-                                // as a no-op slot.
-                                lls.push(0);
+                    let table = match reader.path_table_kind(fid) {
+                        // The conventional table is held as its rule; the
+                        // reader's per-line answers for it are never read.
+                        Some(PathTableKind::Conventional) => FileTable::Conventional,
+                        Some(PathTableKind::Lines) => {
+                            let line_count = reader.line_count_raw(fid);
+                            let mut lls: Vec<u32> = Vec::with_capacity(line_count as usize);
+                            for li in 0..line_count {
+                                // `line_count_raw` is the exact populated
+                                // length, so a missing entry is not expected;
+                                // a zero-length line is the decoder's no-op
+                                // slot if it happens.
+                                lls.push(reader.line_length_raw(fid, li as u32).unwrap_or(0));
                             }
+                            FileTable::Lines(lls)
                         }
-                    }
-                    if !lls.is_empty() {
+                        // No column-aware table: the file occupies no
+                        // positions.
+                        Some(PathTableKind::Bare) | Some(PathTableKind::LineCount) | None => {
+                            FileTable::Lines(Vec::new())
+                        }
+                    };
+                    if table != FileTable::Lines(Vec::new()) {
                         any_with_lines = true;
                     }
-                    per_file.push(lls);
+                    per_file.push(table);
                 }
                 if any_with_lines {
                     Some(
-                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_line_lengths(
+                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_file_tables(
                             per_file,
                         ),
                     )
@@ -2711,26 +2767,17 @@ impl CTFSTraceReader {
 
         // ── Events ─────────────────────────────────────────────────────
         //
-        // event_fields returns (kind: u8, step_id: u64, data: Vec<u8>).
-        // Nim IOEventKind: 0=stdout, 1=stderr, 2=file_op, 3=error.
-        // Map to EventLogKind using num_traits::FromPrimitive for the
-        // standard values, with a fallback mapping for the Nim-specific
-        // kind codes.
+        // event_fields returns (kind: u8, step_id: u64, data: Vec<u8>), where
+        // `kind` is the recorder's exact `EventLogKind` ordinal
+        // (`trace-events.md` §"EventLogKind (u8 enum)").
         for idx in 0..event_count {
             match reader.event_fields(idx) {
                 Ok((kind_byte, step_id_raw, data)) => {
-                    // Map Nim IOEventKind values to EventLogKind.
-                    // Nim: 0=ioStdout → Write, 1=ioStderr → WriteOther,
-                    //      2=ioFileOp → WriteFile, 3=ioError → Error.
-                    let kind = match kind_byte {
-                        0 => EventLogKind::Write,
-                        1 => EventLogKind::WriteOther,
-                        2 => EventLogKind::WriteFile,
-                        3 => EventLogKind::Error,
-                        other => {
-                            // Try the Rust enum's own discriminant values
-                            // for forward compatibility.
-                            EventLogKind::from_u8(other).unwrap_or(EventLogKind::Write)
+                    let kind = match event_stream_source::event_log_kind_from_ordinal(kind_byte) {
+                        Ok(kind) => kind,
+                        Err(e) => {
+                            log::error!("event {idx} refused: {e}");
+                            break;
                         }
                     };
 
@@ -3699,7 +3746,7 @@ mod tests {
             args: args.iter().map(|s| (*s).to_owned()).collect(),
             workdir: workdir.to_owned(),
             recorder_id: "test".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -4906,7 +4953,7 @@ mod tests {
             args,
             workdir: workdir.to_owned(),
             recorder_id: "test".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -5199,16 +5246,16 @@ mod tests {
     /// STRUCTURAL PRESENCE WINS: a container whose `steps.dat` is present but
     /// whose `has_step_stream` (bit 9) hint is CLEAR must still read its steps.
     ///
-    /// The db-backend `serialize_meta_dat` emits only bits 0..3, so re-stamping
-    /// the real bundle's meta leaves `steps.dat` structurally present with the
-    /// step bit cleared — exactly the still-recording shape the spec forbids a
-    /// reader from gating on.
+    /// Re-stamping the real bundle's meta with the step bit cleared leaves
+    /// `steps.dat` structurally present under a clear hint — exactly the shape
+    /// the spec forbids a reader from gating on.
     #[test]
     fn step_stream_read_by_structural_presence_when_step_bit_clear() {
         let (meta, others) = real_split_bundle_files();
 
         let mut md = meta_dat::parse_meta_dat(&meta).unwrap();
         md.mcr = None;
+        md.flags &= !meta_dat::FLAG_HAS_STEP_STREAM;
         let cleared = meta_dat::serialize_meta_dat(&md);
         assert_eq!(
             meta_dat::parse_meta_dat(&cleared).unwrap().flags & meta_dat::FLAG_HAS_STEP_STREAM,
@@ -5276,7 +5323,7 @@ mod tests {
             args: vec![],
             workdir: "/tmp".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: Some(test_mcr_fields()),
             replay_launch: None,
             layout_snapshot: None,

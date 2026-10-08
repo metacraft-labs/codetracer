@@ -47,12 +47,16 @@ fn run_circom_dap_test(
     expected_values: HashMap<String, i64>,
     excluded: Vec<&str>,
 ) {
-    assert!(
-        find_circom_recorder().is_some(),
-        "Circom recorder not found. \
+    if find_circom_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "circom_flow_dap_test",
+            "Circom recorder not found. \
          Set CODETRACER_CIRCOM_RECORDER_PATH or build codetracer-circom-recorder \
-         (run `cargo build` inside the codetracer-circom-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-circom-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
     let source_path = get_circom_source_path();
@@ -96,7 +100,6 @@ fn run_circom_dap_test(
 ///   doubled  = 84  (sum_val * 2)
 ///   out      = 94  (doubled + a)
 #[test]
-#[ignore = "requires circom-recorder; run via: just test-circom-flow"]
 fn circom_flow_dap_variables() {
     let mut expected_values = HashMap::new();
     expected_values.insert("a".to_string(), 10);

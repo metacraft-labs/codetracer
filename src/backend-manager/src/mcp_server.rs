@@ -4039,7 +4039,7 @@ mod tests {
             args: vec![],
             workdir: workdir.to_str().unwrap().to_owned(),
             recorder_id: "test".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,

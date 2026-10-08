@@ -943,9 +943,9 @@ suite "PLAT-22: the GPUI editing surface":
     # The editor drew the recording's own source, not a title.
     ck "Editor" in output
     ck "calc" in output or "#!/usr/bin/env python3" in output
-    # The execution pointer reached the plan's TEXT, which is the reader that
-    # works across the FFI boundary — the plan carries no attribute map.
-    ck ExecutionPointerGlyph in output
+    # The execution pointer reached the plan: PLAT-51 draws the desktop's
+    # mark (`highlight_line_arrow.svg`), named on its lane, not a glyph.
+    ck "highlight_line_arrow.svg" in output
     # The state pane rendered its vocabulary tree rather than its name.
     ck "Locals" in output
     expectCount(7)

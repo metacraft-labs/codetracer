@@ -29,7 +29,7 @@
 ##   vm.scroll(100)
 ##   echo vm.visibleLines.val       # lines around index 100
 
-import std/[json, sets, options, strutils]
+import std/[json, sets, options, strutils, tables]
 # Diagnostics go through `vm_log`, not the renderer's `lib/logging`: that
 # module reaches `dom`/`kdom` and would put a DOM shim in the Embed SDK's
 # package graph (CodeTracer-Embed-SDK.md §3.2). See vm_log.nim.
@@ -103,6 +103,15 @@ type
     # correctly regardless of font-size / em scaling.
     rowHeightPx*: Signal[float]
 
+    # -- The call-stack fallback (PLAT-47) --
+    fallbackStack*: Signal[seq[string]]
+      ## The frames of the call STACK at the current stop, innermost first,
+      ## set by a host ONLY when the recording provides no call trace (the
+      ## store's `calltrace.lines` is empty after the host asked). A pane that
+      ## has no trace to list shows these instead and says so — the terminal's
+      ## and GPUI's calltrace panes; the desktop does not read it. Empty
+      ## whenever the recording has a trace.
+
     # -- Derived state --
     visibleLines*: Memo[seq[CallLine]]
     hasMoreAbove*: Memo[bool]
@@ -117,6 +126,146 @@ type
       ## call tree ends before the execution did, and a pane that renders
       ## it as an ordinary end of trace is making a false claim about the
       ## program.
+
+# ---------------------------------------------------------------------------
+# PLAT-49 part B (finding 8): ONE CALL ROW, SEMANTICALLY
+# ---------------------------------------------------------------------------
+#
+# The desktop's calltrace row (`views/isonim_calltrace_view.renderCallLineRowWeb`)
+# is: a depth offset; a toggle (`.collapse-call-img` / `.expand-call-img` /
+# `.dot-call-img`); `.call-text` — `name #index`; `.call-args` — `(` then each
+# `.call-arg` as `name=` + value, `, ` between them, `)`; and `.return` — ` => `
+# and the return value when the call returned one. Selected, the row is
+# `.event-selected` and its toggle `.active`.
+#
+# The terminal used to draw `name #index` and nothing else, and GPUI a plain
+# list label. `CallRow` is that row as DATA — callee, arguments with their
+# values, return value, depth, toggle state, flags — and `callRowSegments` its
+# breakdown into typed runs, so every front-end draws the same parts and styles
+# each by its KIND, the way the desktop's stylesheet styles each class.
+
+type
+  CallRowToggle* = enum
+    ## The desktop's toggle icon.
+    crtLeaf = "leaf"
+      ## `.dot-call-img`: the call made no calls.
+    crtExpanded = "expanded"
+      ## `.collapse-call-img`: its children are listed below it.
+    crtCollapsed = "collapsed"
+      ## `.expand-call-img`: it has children, hidden.
+
+  CallRowArg* = object
+    name*: string
+    value*: string
+      ## The argument's value as the `calltrace-arg` presentation budget
+      ## renders it (one line) — the desktop's `.call-arg-text`.
+
+  CallRowFlag* = enum
+    crfSelected = "selected"
+      ## The selected row (`.event-selected`).
+    crfCurrent = "current"
+      ## The call the debugger is in.
+
+  CallRow* = object
+    ## One call-trace row, as data.
+    index*: int64
+    depth*: int
+    callee*: string
+      ## `displayName` when set, else `name` — the desktop's `callDisplayName`.
+    args*: seq[CallRowArg]
+    returnValue*: string
+    hasReturn*: bool
+      ## The call returned a value to show (`.return`'s ` => value`).
+    toggle*: CallRowToggle
+    flags*: set[CallRowFlag]
+    rrTicks*: uint64
+    file*: string
+    line*: int
+
+  CallSegmentKind* = enum
+    ## The parts of a row, each styled by kind (the desktop's classes).
+    csIndent = "indent"
+    csToggle = "toggle"
+    csCallee = "callee"           ## `.call-text`'s name
+    csIndex = "index"             ## `.call-text`'s ` #N`
+    csPunct = "punct"             ## `(`, `)`, `=`, `, `
+    csArgName = "argName"         ## `.call-arg-name`
+    csArgValue = "argValue"       ## `.call-arg-text`
+    csReturnArrow = "returnArrow" ## `.return-arrow`
+    csReturnValue = "returnValue" ## `.return-text`
+
+  CallSegment* = object
+    kind*: CallSegmentKind
+    text*: string
+    arg*: int
+      ## PLAT-50: which argument a part belongs to — 1-based into the row's
+      ## `args` (its name, its `=`, its value: the desktop's `.call-arg`),
+      ## 0 for a part of no argument.
+
+const
+  ReturnArgName* = "__return"
+    ## The `CallArg` that carries a call's return value beside its arguments
+    ## — the desktop view's convention (`returnValueForRow`), which both
+    ## decoders now fill from the call's `returnValue`.
+  CallRowIndentCells* = 2
+    ## A text medium's indent per depth level.
+  CallToggleGlyphs*: array[CallRowToggle, string] = ["·", "▾", "▸"]
+    ## A text medium's toggles: the desktop's dot, collapse and expand icons.
+
+func callRowOf*(line: CallLine; args: seq[CallArg];
+                selected: Option[int64] = none(int64);
+                current = false): CallRow =
+  ## THE ROW, from a `CallLine` and its call's `CallArg`s (the store's
+  ## `calltrace.args[line.callKey]`).
+  result = CallRow(
+    index: line.index, depth: max(0, line.depth),
+    callee: (if line.displayName.len > 0: line.displayName else: line.name),
+    toggle: (if not line.hasChildren: crtLeaf
+             elif line.isExpanded: crtExpanded
+             else: crtCollapsed),
+    rrTicks: line.rrTicks, file: line.location.file,
+    line: line.location.line)
+  for a in args:
+    if a.name == ReturnArgName:
+      result.returnValue = a.text
+      result.hasReturn = a.text.len > 0
+    else:
+      result.args.add CallRowArg(name: a.name, value: a.text)
+  if selected.isSome and selected.get == line.index:
+    result.flags.incl crfSelected
+  if current:
+    result.flags.incl crfCurrent
+
+func callRowSegments*(r: CallRow; indent = true): seq[CallSegment] =
+  ## The row's parts in order: indent, toggle, callee, index, the argument
+  ## list (always, `()` for none — the desktop's `.call-args` draws the
+  ## parentheses for every row), and ` => value` when the call returned one.
+  if indent and r.depth > 0:
+    result.add CallSegment(kind: csIndent,
+                           text: repeat(" ", r.depth * CallRowIndentCells))
+  result.add CallSegment(kind: csToggle, text: CallToggleGlyphs[r.toggle])
+  result.add CallSegment(kind: csPunct, text: " ")
+  result.add CallSegment(kind: csCallee, text: r.callee)
+  result.add CallSegment(kind: csIndex, text: " #" & $r.index)
+  result.add CallSegment(kind: csPunct, text: "(")
+  for i, a in r.args:
+    if i > 0:
+      result.add CallSegment(kind: csPunct, text: ", ")
+    result.add CallSegment(kind: csArgName, text: a.name, arg: i + 1)
+    result.add CallSegment(kind: csPunct, text: "=", arg: i + 1)
+    result.add CallSegment(kind: csArgValue, text: a.value, arg: i + 1)
+  result.add CallSegment(kind: csPunct, text: ")")
+  if r.hasReturn:
+    result.add CallSegment(kind: csReturnArrow, text: " => ")
+    result.add CallSegment(kind: csReturnValue, text: r.returnValue)
+
+func callRowText*(r: CallRow; indent = false): string =
+  ## The row as one string — what the desktop's row reads as text
+  ## (`.call-text` + `.call-args` + `.return`), without the toggle icon.
+  for seg in r.callRowSegments(indent):
+    if seg.kind notin {csToggle}:
+      result.add seg.text
+  result = result.strip(leading = true, trailing = false)
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -294,6 +443,41 @@ proc setRowHeightPx*(vm: CalltraceVM; h: float) =
   if h > 0.0 and abs(h - vm.rowHeightPx.val) > 0.5:
     vm.rowHeightPx.val = h
 
+func currentCallOf*(lines: openArray[CallLine]; tick: uint64;
+                    stack: openArray[string]): Option[int64] =
+  ## THE CALL THE DEBUGGER IS IN, among `lines`, at `tick` with the call
+  ## STACK `stack` (innermost first): the last line entered at or before
+  ## `tick` whose name is the innermost frame's and whose depth is the
+  ## stack's (`stack.len - 1`, the trace's root being depth 0). A call that
+  ## already returned was entered before `tick` too, so "the last line
+  ## entered" alone would name `mul` while the debugger is back in `main`;
+  ## with no stack, it is that fallback. `none` when no line qualifies. The
+  ## desktop selects this call on every move (`CalltraceComponent
+  ## .onCompleteMove` -> `selectEntry`); the terminal and GPUI mark it from
+  ## this rule (PLAT-49 part B).
+  var lastEntered = none(int64)
+  for l in lines:
+    if l.rrTicks > tick:
+      continue
+    lastEntered = some(l.index)
+    let name = if l.displayName.len > 0: l.displayName else: l.name
+    if stack.len > 0 and (name == stack[0] or l.name == stack[0]) and
+       l.depth == stack.len - 1:
+      result = some(l.index)
+  if result.isNone and stack.len == 0:
+    result = lastEntered
+
+proc callRows*(vm: CalltraceVM): seq[CallRow] =
+  ## The visible rows as `CallRow`s, with their arguments and return values
+  ## from the store and the selection.
+  let args = vm.store.calltrace.args.val
+  let selected = vm.selectedEntry.val
+  for line in vm.visibleLines.val:
+    let a = if line.callKey.len > 0 and line.callKey in args:
+              args[line.callKey]
+            else: @[]
+    result.add callRowOf(line, a, selected)
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -414,6 +598,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
     # view once rows have rendered so the virtual-scroll math uses the actual
     # em/rem-derived pixel height rather than the compile-time approximation.
     let rowHeightPx = createSignal(24.0)
+    let fallbackStack = createSignal(newSeq[string]())
 
     # Derived: the §14 degraded state this pane renders.
     let degradedState = createMemo[PaneDegradation] proc(): PaneDegradation =
@@ -432,6 +617,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       rawIgnorePatterns: rawIgnorePatterns,
       backendSearchResults: backendSearchResults,
       rowHeightPx: rowHeightPx,
+      fallbackStack: fallbackStack,
       visibleLines: visibleLines,
       hasMoreAbove: hasMoreAbove,
       hasMoreBelow: hasMoreBelow,

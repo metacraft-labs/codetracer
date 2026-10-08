@@ -6,6 +6,7 @@ import
   ui / auto_hide
 
 import viewmodel / viewmodels / editor_gutter_lanes
+from viewmodel / viewmodels / menu_vm import newMenuVM
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -679,15 +680,6 @@ proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): S
   when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
     data.registerComponent(result, Content.Scratchpad)
 
-proc makeTimelineComponent*(data: Data, id: int): TimelineComponent =
-  result = TimelineComponent(
-    id: id,
-    active: TimelineVariables,
-    service: data.services.flow,
-  )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
-    data.registerComponent(result, Content.Timeline)
-
 proc makeRequestPanelComponent*(data: Data, id: int, inExtension: bool = false): RequestPanelComponent =
   result = RequestPanelComponent(
     id: id,
@@ -819,20 +811,16 @@ proc makeMenuComponent*(data: Data): MenuComponent =
   result = MenuComponent(
     id: data.generateId(Content.Menu),
     elements: MenuData(),
-    active: false,
-    activePath: @[],
+    vm: newMenuVM(),
     activePathWidths: JsAssoc[int,int]{},
     activePathOffsets: JsAssoc[int,int]{},
     prepared: @[],
-    searchResults: @[],
     nameMap: JsAssoc[cstring, ClientAction]{},
-    searchQuery: cstring"",
     debug: data.debugComponent,
     service: data.services.editor,
     iconWidth: 24,
     mainMenuWidth: 18,
-    folderArrowCharWidth: 2,
-    keyNavigation: false)
+    folderArrowCharWidth: 2)
   data.ui.menu = result
   when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
     data.registerComponent(result, Content.Menu)
@@ -1077,7 +1065,6 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.EventLog:        data.makeEventLogComponent(id)
   of Content.State:           data.makeStateComponent(id)
   of Content.Calltrace:       data.makeCalltraceComponent(id)
-  of Content.Timeline:        data.makeTimelineComponent(id)
   of Content.Filesystem:      data.makeFilesystemComponent(id)
   of Content.Scratchpad:      data.makeScratchpadComponent(id)
   of Content.Repl:            data.makeReplComponent(id)

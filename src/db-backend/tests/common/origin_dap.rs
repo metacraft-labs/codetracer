@@ -103,8 +103,9 @@ pub struct OriginQueryResult {
 pub enum QueryOutcome {
     Ok(Box<OriginQueryResult>),
     /// A clear environment problem (recorder native extension missing,
-    /// language interpreter version too old, etc.) - the caller should
-    /// `eprintln!("SKIPPED: ...")` and return without failing the test.
+    /// language interpreter version too old, etc.) - the caller routes it
+    /// through `origin_dap_gate::unavailable`, which fails in a strict lane
+    /// and otherwise skips loudly and records the skip.
     Skipped(String),
 }
 
@@ -532,4 +533,28 @@ pub fn fixture_dir(language_subdir: &str, scenario: &str) -> PathBuf {
 /// Returns the standard `main.<ext>` file inside a fixture directory.
 pub fn fixture_source(language_subdir: &str, scenario: &str, file_name: &str) -> PathBuf {
     fixture_dir(language_subdir, scenario).join(file_name)
+}
+
+/// The 1-based line of a fixture source whose trimmed text is exactly
+/// `statement`. It must occur exactly once.
+///
+/// A breakpoint line hard-coded into a test goes stale the moment the fixture
+/// gains a comment, and then the query silently asks about a different line —
+/// one origin test asked for `c` on the line that declares `a`. Finding the
+/// line by its text keeps the test pointed at the statement it means.
+pub fn fixture_line(language_subdir: &str, scenario: &str, file_name: &str, statement: &str) -> u32 {
+    let src = fixture_source(language_subdir, scenario, file_name);
+    let contents = std::fs::read_to_string(&src)
+        .unwrap_or_else(|e| panic!("failed to read fixture source {}: {e}", src.display()));
+    let matches: Vec<u32> = contents
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.trim() == statement)
+        .map(|(index, _)| index as u32 + 1)
+        .collect();
+    match matches.as_slice() {
+        [line] => *line,
+        [] => panic!("fixture {} has no line `{statement}`", src.display()),
+        many => panic!("fixture {} has `{statement}` on several lines: {many:?}", src.display()),
+    }
 }

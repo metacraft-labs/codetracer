@@ -266,8 +266,8 @@ window.addEventListener("manual-dap-initialize", async () => {
     if (haveDirectTraceUrl) {
       // ?trace=<url> path: whole-file fetch the cross-origin `.ct` container
       // into the VFS at the canonical `<folder>/trace.ct` name so the WASM
-      // launch-time auto-detect (see dap_server.rs candidate list
-      // ["trace.ct", "trace.json"]) mounts it without an explicit trace_file.
+      // launch-time auto-detect (`browser_detect_trace_file_in_vfs` in
+      // dap_server.rs) mounts it without an explicit trace_file.
       setStatus("Fetching trace from URL...", "pending");
       appendLog(`direct: fetching ${traceUrl} into VFS as ${traceFolder}/trace.ct`);
       worker.postMessage({

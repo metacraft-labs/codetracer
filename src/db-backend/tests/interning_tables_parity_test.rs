@@ -326,3 +326,56 @@ fn a_legacy_container_without_tables_yields_none() {
         "a container without the tables must yield None, not an error"
     );
 }
+
+/// The native reader keeps a struct type's KIND and FIELD NAMES, not only its
+/// name.
+///
+/// The Nim FFI exposes a type's name alone; the `types.dat` record also carries
+/// `kind` and `specific_info`. The native reader once built every type from the
+/// FFI name as `Raw` with no fields, so a struct value's members reached every
+/// front-end unnamed — `[0]` in the locals pane where the recording says `a`.
+///
+/// The subject is the committed in-repo fixture recording
+/// (`trace/trace.ct`, `struct TestStruct { a: i32 }`): the Rust wrapper over
+/// the Nim writer cannot write a struct's fields (`ensure_raw_type_id` keeps
+/// only kind and name), so a bundle written here would have no fields to
+/// lose. If the fixture is missing this FAILS rather than skipping.
+#[test]
+fn the_native_reader_keeps_a_struct_types_kind_and_field_names() {
+    use codetracer_trace_types::TypeSpecificInfo;
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("trace/trace.ct");
+    assert!(
+        fixture.is_file(),
+        "the fixture {} is required by this case",
+        fixture.display()
+    );
+
+    // The control: the container itself carries the struct and its field.
+    let mut ctfs = CtfsReader::open(&fixture).expect("open");
+    let tables = InterningTables::open_from_ctfs(&mut ctfs).unwrap().unwrap();
+    let id = tables
+        .types
+        .iter()
+        .position(|t| t.lang_type == "struct TestStruct")
+        .expect("the fixture interns `struct TestStruct`");
+    let local = &tables.types[id];
+    assert!(
+        matches!(&local.specific_info, TypeSpecificInfo::Struct { fields } if fields.iter().any(|f| f.name == "a")),
+        "types.dat records the field `a`; got {local:?}"
+    );
+
+    let nim = CTFSTraceReader::open(&fixture).expect("the Nim FFI reader must open the fixture");
+    let native = nim.type_record(TypeId(id)).expect("the struct type is interned");
+    assert_eq!(
+        native.kind,
+        TypeKind::Struct,
+        "the native reader must keep the type's kind"
+    );
+    let fields: Vec<&str> = match &native.specific_info {
+        TypeSpecificInfo::Struct { fields } => fields.iter().map(|f| f.name.as_str()).collect(),
+        other => panic!("the native reader must keep the struct's fields; got {other:?}"),
+    };
+    assert_eq!(fields, ["a"]);
+    assert_eq!(native, local, "the native and pure-Rust readers decode the same record");
+}

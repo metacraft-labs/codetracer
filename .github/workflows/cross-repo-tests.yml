@@ -2,10 +2,12 @@ name: Cross-Repo Integration Tests
 
 on:
   pull_request:
+    branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
       - 'scripts/resolve-sibling-rev.sh'
       - 'scripts/run-cross-repo-tests.sh'
+      - 'ci/test/build-recorder-siblings.sh'
       - '.github/workflows/cross-repo-tests.yml'
   push:
     branches: [main, dev, stable]
@@ -13,6 +15,7 @@ on:
       - 'src/db-backend/**'
       - 'scripts/resolve-sibling-rev.sh'
       - 'scripts/run-cross-repo-tests.sh'
+      - 'ci/test/build-recorder-siblings.sh'
       - '.github/workflows/cross-repo-tests.yml'
   workflow_dispatch:
     inputs:
@@ -224,6 +227,10 @@ jobs:
           echo "Resolved rr-backend PATH (first 200 chars): ${RR_PATH:0:200}..."
 
       - name: Run cross-repo integration tests
+        # Graceful skipping OFF: this lane provisions the tools its tests need,
+        # so a missing one is a failure here, not a skip that passes.
+        env:
+          CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |
           CT_NATIVE_REPLAY="$(pwd)/../codetracer-native-backend/target/debug/ct-native-replay"
           echo "Using ct-native-replay: $CT_NATIVE_REPLAY"
@@ -247,8 +254,27 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  shell-recorder-tests:
+  # The db-backend tests that record through a SIBLING recorder that
+  # codetracer's dev shell does not ship: Bash and Zsh, PHP, the value-origin
+  # tests for Aiken, Cairo, Circom, Leo, Solana and Sway (plus the Cairo GLI
+  # decode regression), and the flow / calltrace tests of the blockchain
+  # recorders (Aiken, Cadence, Cairo, Circom, EVM / Solidity, Leo, MASM, Move,
+  # PolkaVM, Solana, Sway, Tolk). `test-non-gui` excludes them by name
+  # (ci/test/non-gui-not-provided.linux.txt names this job as where they run).
+  #
+  # WHY HERE AND NOT IN `test-non-gui`. The recorders are thirteen separate
+  # Rust / C builds. `test-non-gui` runs on every Codetracer CI trigger, docs and
+  # frontend changes included; this workflow is path-filtered to the db-backend
+  # sources and the scripts that build and run these tests.
+  # Building them here costs runner time only when it can find something, and
+  # reuses the db-backend test build this job already did for the shell
+  # recorders instead of adding a job (and a Linux x64 queue slot) of its own.
+  recorder-tests:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # The thirteen recorder builds dominate; most of their dependency trees are
+    # large (cairo-lang, fuel-vm, solana sbpf, aiken, sui, miden, revm). Bounded
+    # so a hung build frees the runner.
+    timeout-minutes: 210
 
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -347,34 +373,151 @@ jobs:
             direnv exec "$RECORDER_DIR" \
               bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
 
-      - name: Run shell-recorder integration tests
+      # The recorder siblings, cloned with `clone-repo` rather than added to the
+      # `extra-siblings` block above: those entries are `=dev` branch tips, and
+      # ci/test/sibling-provisioning-test.sh's branch-tip ceiling is lowered,
+      # never raised. Same shape `test-non-gui` uses for the js recorder.
+      - name: Clone codetracer-cairo-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-cairo-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-cairo-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-circom-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-circom-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-circom-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-leo-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-leo-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-leo-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-cardano-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-cardano-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-cardano-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-solana-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-solana-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-solana-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-fuel-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-fuel-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-fuel-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-php-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-php-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-php-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-evm-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-evm-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-evm-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-flow-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-flow-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-flow-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-miden-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-miden-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-miden-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-move-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-move-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-move-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-polkavm-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-polkavm-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-polkavm-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-ton-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-ton-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-ton-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Build recorder siblings
+        # Each recorder is built in its own dev shell with its own `just`
+        # targets; codetracer's shell only supplies direnv and just.
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: nix develop .#devShells.x86_64-linux.default --command just build-recorder-siblings
+
+      - name: Run recorder integration tests
+        # Graceful skipping OFF (the recipe sets it): every recorder these tests
+        # use is built above, and the Solana and Sway fixtures' compilers
+        # (cargo-build-sbf, forc) come from codetracer's Linux dev shell.
         # CT_EMULATOR_EXTRA_NIM_PATHS: the emulator's `syscall_replay.nim`
-        # imports `stew/endians2`, but `ct_emulator.nimble` does not declare
-        # `stew` as a dependency, so a fresh Nim build cannot resolve the
-        # module. Codetracer ships pinned copies as submodules under
-        # `libs/nim-stew` and `libs/nim-result`; injecting them here is what the
-        # other db-backend jobs in `codetracer.yml` do.
+        # imports `stew/endians2`, which `ct_emulator.nimble` does not declare;
+        # codetracer's pinned `libs/nim-stew` and `libs/nim-result` supply it, as
+        # in the other db-backend jobs.
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: |
-          CLONE_DIR="$(pwd)/../codetracer-shell-recorders"
-          BASH_RECORDER="${CLONE_DIR}/bash-recorder/launcher.sh"
-          ZSH_RECORDER="${CLONE_DIR}/zsh-recorder/launcher.zsh"
-          echo "Using bash recorder: $BASH_RECORDER"
-          echo "Using zsh recorder: $ZSH_RECORDER"
-          nix develop .#devShells.x86_64-linux.default --command \
-            bash -c "
-              export CODETRACER_BASH_RECORDER_PATH='${BASH_RECORDER}'
-              export CODETRACER_ZSH_RECORDER_PATH='${ZSH_RECORDER}'
-              cd src/db-backend
-              cargo test --test bash_flow_integration --test zsh_flow_integration -- --nocapture
-            "
+        run: nix develop .#devShells.x86_64-linux.default --command just test-recorder-siblings
 
       - name: Upload test logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: shell-recorder-test-logs
+          name: recorder-test-logs
           path: target/cross-test-logs/
           retention-days: 14
           if-no-files-found: ignore

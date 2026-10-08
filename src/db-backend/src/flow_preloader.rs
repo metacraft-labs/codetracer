@@ -285,6 +285,10 @@ pub struct CallFlowPreloader<'a> {
     active_loops: Vec<Position>,
     last_step_id: StepId,
     last_expr_order: Vec<String>,
+    /// For Nim: the spelling a source name was last found under (`x_1`,
+    /// `n_p0`, a mangled global), tried right after the plain name so a name
+    /// looked up again later in the walk costs one probe, not the whole search.
+    nim_spellings: HashMap<String, String>,
     diff_lines: HashSet<(PathBuf, i64)>,
     diff_call_keys: HashSet<i64>, //  TODO: if we add Eq, Hash it seems we can do CallKey
     mode: FlowMode,
@@ -315,6 +319,7 @@ impl<'a> CallFlowPreloader<'a> {
             active_loops: vec![],
             last_step_id: StepId(-1),
             last_expr_order: vec![],
+            nim_spellings: HashMap::new(),
             diff_lines,
             diff_call_keys,
             mode,
@@ -1303,6 +1308,110 @@ impl<'a> CallFlowPreloader<'a> {
         flow_events
     }
 
+    /// Load the value `value_name` has at the replay's CURRENT step, the way
+    /// the flow shows a variable a line mentions. For Nim it also tries the
+    /// compiler's disambiguated spellings (`_pN`, `_N`, mangled globals).
+    fn load_flow_value(
+        &mut self,
+        replay: &mut dyn ReplaySession,
+        value_name: &str,
+        location: &Location,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
+        // Try loading the value with the original name first
+        let value_result = replay.load_value(value_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang);
+
+        // Check if we need to try alternate names (either error or "not found" value)
+        let needs_alternate_names = self.lang == Lang::Nim
+            && match &value_result {
+                Err(_) => true,
+                Ok(v) => v.is_not_found(),
+            };
+
+        // For Nim, try alternate naming strategies if the original name fails
+        if needs_alternate_names {
+            let mut found_value = None;
+            let mut found_spelling: Option<String> = None;
+
+            // The spelling this name was found under earlier in the walk.
+            if let Some(spelling) = self.nim_spellings.get(value_name).cloned()
+                && let Ok(value) = replay.load_value(&spelling, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                && !value.is_not_found()
+            {
+                found_value = Some(value);
+            }
+
+            // Strategy 1: Try _pN suffixes for parameters (Nim 2.x uses _p0, _p1, etc.)
+            for suffix in (0..=5).take_while(|_| found_value.is_none()) {
+                let param_name = format!("{}_p{}", value_name, suffix);
+                if let Ok(value) = replay.load_value(&param_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                    && !value.is_not_found()
+                {
+                    info!(
+                        "    found Nim param via suffixed name: {} -> {}",
+                        value_name, param_name
+                    );
+                    found_value = Some(value);
+                    found_spelling = Some(param_name);
+                    break;
+                }
+            }
+
+            // Strategy 2: Try _N suffixes for local variables (Nim 2.2+ uses _1, _2, etc.)
+            if found_value.is_none() {
+                for suffix in 1..=5 {
+                    let suffixed_name = format!("{}_{}", value_name, suffix);
+                    if let Ok(value) =
+                        replay.load_value(&suffixed_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                        && !value.is_not_found()
+                    {
+                        info!(
+                            "    found Nim local via suffixed name: {} -> {}",
+                            value_name, suffixed_name
+                        );
+                        found_value = Some(value);
+                        found_spelling = Some(suffixed_name);
+                        break;
+                    }
+                }
+            }
+
+            // Strategy 3: Try mangled names for global variables (module-level)
+            // Uses both Nim 1.6 (ROT13) and Nim 2.x (direct) styles
+            if found_value.is_none() {
+                let path = Path::new(&location.path);
+                if let Some(mut iter) = nim_mangling::MangledNameDualIterator::new(value_name, path, 20) {
+                    while let Some(mangled_name) = iter.next_candidate() {
+                        if let Ok(value) =
+                            replay.load_value(mangled_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                            && !value.is_not_found()
+                        {
+                            // Copy name only on success (to release borrow before calling iter methods)
+                            let matched_name = mangled_name.to_string();
+                            info!(
+                                "    found Nim global via mangled name: {} -> {} (style: {:?})",
+                                value_name,
+                                matched_name,
+                                iter.current_style()
+                            );
+                            // Record successful style for future lookups
+                            iter.record_success();
+                            found_value = Some(value);
+                            found_spelling = Some(matched_name);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(spelling) = found_spelling {
+                self.nim_spellings.insert(value_name.to_string(), spelling);
+            }
+            found_value.ok_or_else(|| -> Box<dyn Error> { "not found".into() })
+        } else {
+            value_result
+        }
+    }
+
     #[allow(clippy::unwrap_used)]
     fn log_expressions(
         &mut self,
@@ -1335,85 +1444,7 @@ impl<'a> CallFlowPreloader<'a> {
         if let Some(var_list) = self.flow_preloader.get_var_list(line, location) {
             info!("  log expressions: {:?}", var_list.clone());
             for value_name in &var_list {
-                // Try loading the value with the original name first
-                let value_result = replay.load_value(value_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang);
-
-                // Check if we need to try alternate names (either error or "not found" value)
-                let needs_alternate_names = self.lang == Lang::Nim
-                    && match &value_result {
-                        Err(_) => true,
-                        Ok(v) => v.is_not_found(),
-                    };
-
-                // For Nim, try alternate naming strategies if the original name fails
-                let final_value = if needs_alternate_names {
-                    let mut found_value = None;
-
-                    // Strategy 1: Try _pN suffixes for parameters (Nim 2.x uses _p0, _p1, etc.)
-                    for suffix in 0..=5 {
-                        let param_name = format!("{}_p{}", value_name, suffix);
-                        if let Ok(value) =
-                            replay.load_value(&param_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
-                            && !value.is_not_found()
-                        {
-                            info!(
-                                "    found Nim param via suffixed name: {} -> {}",
-                                value_name, param_name
-                            );
-                            found_value = Some(value);
-                            break;
-                        }
-                    }
-
-                    // Strategy 2: Try _N suffixes for local variables (Nim 2.2+ uses _1, _2, etc.)
-                    if found_value.is_none() {
-                        for suffix in 1..=5 {
-                            let suffixed_name = format!("{}_{}", value_name, suffix);
-                            if let Ok(value) =
-                                replay.load_value(&suffixed_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
-                                && !value.is_not_found()
-                            {
-                                info!(
-                                    "    found Nim local via suffixed name: {} -> {}",
-                                    value_name, suffixed_name
-                                );
-                                found_value = Some(value);
-                                break;
-                            }
-                        }
-                    }
-
-                    // Strategy 3: Try mangled names for global variables (module-level)
-                    // Uses both Nim 1.6 (ROT13) and Nim 2.x (direct) styles
-                    if found_value.is_none() {
-                        let path = Path::new(&location.path);
-                        if let Some(mut iter) = nim_mangling::MangledNameDualIterator::new(value_name, path, 20) {
-                            while let Some(mangled_name) = iter.next_candidate() {
-                                if let Ok(value) =
-                                    replay.load_value(mangled_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
-                                    && !value.is_not_found()
-                                {
-                                    // Copy name only on success (to release borrow before calling iter methods)
-                                    let matched_name = mangled_name.to_string();
-                                    info!(
-                                        "    found Nim global via mangled name: {} -> {} (style: {:?})",
-                                        value_name,
-                                        matched_name,
-                                        iter.current_style()
-                                    );
-                                    // Record successful style for future lookups
-                                    iter.record_success();
-                                    found_value = Some(value);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    found_value.ok_or_else(|| -> Box<dyn Error> { "not found".into() })
-                } else {
-                    value_result
-                };
+                let final_value = self.load_flow_value(replay, value_name, location);
 
                 if let Ok(value) = final_value {
                     // if variable_map.contains_key(value_name) {
@@ -1484,14 +1515,34 @@ impl<'a> CallFlowPreloader<'a> {
             }
         }
 
+        // AFTER values of the previous line: every variable that line
+        // mentions, read at THIS step — the first step at which the recording
+        // holds what the previous line assigned. The flow walks with `next`, so
+        // this step is in the same frame as the previous one (a step in another
+        // frame ends the walk before it gets here).
+        //
+        // A name this line also mentions was just loaded here and is reused. A
+        // name it does not mention is looked up on its own: filling after
+        // values only from this line's names dropped every assignment whose
+        // variable the next line happens not to use (`x = f()` followed by a
+        // line without `x` never showed the value it assigned). A name with no
+        // value here (out of scope, or not recorded) gets no after value rather
+        // than a placeholder.
         if self.last_step_id.0 >= 0 && flow_view_update.steps.len() >= 2 {
             let index = flow_view_update.steps.len() - 2;
-
-            for variable in &self.last_expr_order {
-                if variable_map.contains_key(variable) {
+            let previous_names = self.last_expr_order.clone();
+            for variable in &previous_names {
+                let value = match variable_map.get(variable) {
+                    Some(value) => Some(value.clone()),
+                    None => match self.load_flow_value(replay, variable, location) {
+                        Ok(value) if !value.is_not_found() => Some(to_ct_value(&value)),
+                        _ => None,
+                    },
+                };
+                if let Some(value) = value {
                     flow_view_update.steps[index]
                         .after_values
-                        .insert(variable.clone(), variable_map[variable].clone());
+                        .insert(variable.clone(), value);
                 }
             }
         }

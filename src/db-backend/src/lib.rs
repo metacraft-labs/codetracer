@@ -120,8 +120,8 @@ pub mod macro_sourcemap;
 // resolver (spec `Planned-Features/Mixed-Trace-Implicit-Switch.md`, P1/P3).
 pub mod mixed_altitude;
 // RV-4 — the one place that answers "open this materialized recording
-// directory", shared by the DeepReview collector and (for its legacy-stream
-// repair) `dap_server`.
+// directory", shared by the DeepReview collector and (for its test-oracle
+// refusal) `dap_server`.
 pub mod materialized_source;
 pub mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. The Nim shim
@@ -194,6 +194,9 @@ pub mod remote_request_spans;
 // `sourcemap_cache` integration calls into it lazily on
 // per-path translation requests when no sourcemap is loaded.
 pub mod autoformat;
+// The missing-prerequisite gate for this crate's own unit tests.
+#[cfg(test)]
+mod test_prerequisite;
 // Column-Aware-Tracing-And-Deminification §P5 — user-provided variable
 // rename list.  Loaded at trace open from `<recording-dir>/renames.toml`
 // (or via `--rename-list <path>` on the CLI) and composed with the §P3

@@ -292,7 +292,7 @@ proc recordDb(
   # Materialized traces are CTFS-only; the recorders write a single
   # `<program>.ct` container into ``traceFolder`` directly, so we no longer
   # need to set CODETRACER_DB_TRACE_PATH (which used to point recorders at
-  # the legacy ``trace.json`` sidecar).
+  # a legacy event-stream sidecar).
 
   # The whole per-language argv/env table lives in trace/recorder_dispatch.nim
   # so it can be asserted by a test without recording anything.  See that

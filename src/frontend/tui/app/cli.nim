@@ -57,6 +57,7 @@
 import std/strutils
 
 import ./theme/capabilities
+import ./theme/roles
 
 # The product's own version, not a second one. `src/ct/version.nim` imports
 # `strutils` and nothing else, so reaching it costs nothing and cannot drag a
@@ -89,7 +90,7 @@ type
       ## the one `TuiCommand`'s own comment gives about `--help`: the fields
       ## differ. A trace folder and a project folder are different arguments
       ## resolved against different things — `host/native_host.traceFolderProblem`
-      ## refuses a folder with no `trace.json`, which is exactly what a project
+      ## refuses a folder that holds no recording, which is exactly what a project
       ## is — and `--goto` is meaningless for one of them. A shared branch with
       ## a boolean on it would let `--goto 500 --edit .` parse.
     tckUsageError
@@ -118,39 +119,28 @@ type
       recordKeys*: string
       replayKeys*: string
         ## `--record-keys=<file>` and `--replay-keys=<file>`, or "".
+      dividers*: DividerChoice
+        ## PLAT-50: `--dividers=strip|subtle` — the colour a pane divider is
+        ## drawn in (`roles.DividerChoice`); `strip` when absent.
       noFlowOverlay*: bool
         ## `--no-flow-overlay` — the flow overlay hidden for this session.
         ## PLAT-42 built the overlay on both native front-ends and shows it by
         ## default (`FlowOverlayShownByDefault`); this is the GPUI binary's
         ## flag of the same name, so the two can be asked for the same screen.
       layoutBinding*: bool
-        ## `--layout-binding` — PLAT-6's rearrangeable layout, OFF BY DEFAULT.
+        ## `--layout-binding` — accepted, and since PLAT-45 it asks for what
+        ## is already the default.
         ##
-        ## A MODE RATHER THAN A CAPABILITY, which is why it is a `bool` here
-        ## and not a field of `CapabilityFlags`: it says nothing about what the
-        ## terminal can do. With it the front-end gives itself a
-        ## `LayoutBinding` (`app/runtime.enableLayoutBinding`), the `:`
-        ## prompt's twelve layout verbs — `:move-tab`, `:dock`, `:resize`, … —
-        ## reach it, and so does the MOUSE: `runtime.handleToken` decodes an
-        ## SGR-1006 report and hands it to `binding.onMouse`, so a tab can be
-        ## dragged, a pane docked and a tab strip scrolled with a pointer.
-        ## **And the arrangement is REMEMBERED**, per recording, under the
-        ## user's own state directory — `app/layout/persistence.nim` decides
-        ## where and what happens to a document this build cannot read, and
-        ## `host/layout_store.nim` is the only thing that opens it.
-        ## Without it the shell paints the session's own `LayoutNode` exactly as
-        ## CTUI-3 painted it, those words are unknown commands, and a mouse
-        ## report is the inert token it has always been — the decoder is not
-        ## even called, and **no layout document is read, written or removed**:
-        ## `host/layout_store` computes no path without a binding, so the state
-        ## directory is not touched, not even by a `stat`.
-        ##
-        ## OPT-IN, and the reason is recorded at `app/runtime
-        ## .enableLayoutBinding`: a binding's tree is a CLONE of the session's,
-        ## so enabling one by default would give the terminal a second layout
-        ## authority. The divergence that would cause is latent today (nothing
-        ## calls `headless_app.activatePane`), and the flag is what keeps it
-        ## latent while the gesture surface is reachable for anybody who asks.
+        ## PLAT-6 made the rearrangeable layout an opt-in: with the flag the
+        ## `:` prompt's layout verbs and the mouse reached a `LayoutBinding`,
+        ## and the arrangement was remembered per recording. PLAT-45
+        ## deliverable 8 made both the DEFAULT — every product lets the user
+        ## rearrange freely and remembers its own last layout — so the shipped
+        ## binary enables the binding on every interactive session and keeps
+        ## ONE document for the terminal (`host/layout_store.nim`). The flag
+        ## still parses, still needs a trace and still contradicts
+        ## `--headless` (a settled screen has no prompt to rearrange from), so
+        ## a command line written for PLAT-6 means what it meant.
     of tckEditProject:
       projectPath*: string
         ## The project folder, exactly as it was written. Resolved by `host/`,
@@ -210,8 +200,8 @@ const
     ## that owns it.
     ##
     ## **EMPTY AS OF CTUI-14, and that is a state this list is written to be
-    ## able to reach.** The four it carried are built: `--theme` resolves a
-    ## palette through `app/theme/degradation.tintsFor`, `--goto` seeks before
+    ## able to reach.** The four it carried are built: `--theme` selects a
+    ## design-system colour mode (PLAT-46), `--goto` seeks before
     ## the first debugger frame, and `--record-keys` / `--replay-keys` are
     ## `host/key_journal.nim`. The mechanism is deliberately NOT deleted with
     ## its last entry — a published option that is not built is a state this
@@ -277,6 +267,23 @@ const
     ## that as a usage error would send a user to inspect a command line that
     ## was correct.
 
+  ExitUnreadableRecording* = 5
+    ## A REAL recording, correctly written, that THIS BUILD cannot read — the
+    ## engine opened it, found a container version outside the range it
+    ## implements, and said so.
+    ##
+    ## Fourth code because fourth fact, and the three it is not are each a
+    ## different message to send a user looking for. `ExitUsage` says "that is
+    ## not a recording", which about a perfectly good older one is false.
+    ## `ExitEngineStalled` says "the engine went quiet", which about an engine
+    ## that answered with a reason is also false — and its remedy line invites
+    ## a user to go run `replay-server` by hand to find out what it says, when
+    ## it has already said it. `ExitUnhandled` says nobody considered this.
+    ##
+    ## Nothing the user can do to the FILE changes the outcome; the remedy is
+    ## to re-record the program. A distinct code lets a script tell that apart
+    ## from a bad path, which is the one of these four a script can retry.
+
   TuiVersionText* = TuiProgramName & " " & CodeTracerVersionStr
     ## Deliberately the CodeTracer version. The TUI is a front-end of this
     ## repository's debugger, not a separately versioned product, and a second
@@ -295,14 +302,22 @@ options:
   --no-color         monochrome: weight, underline and glyph carry every state
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
-  -t, --theme=NAME   dark (default), light, plain, monokai
+  -t, --theme=NAME   dark, light (the design system's two colour modes;
+                     detected from the terminal's background when absent),
+                     plain (no colour)
+  --palette=NAME     design (default: the design system's colours, 24-bit
+                     where the terminal has it) or terminal (only the sixteen
+                     ANSI colours and the terminal's own foreground and
+                     background, so your terminal theme decides)
   --image-tier=NAME  pin the image rendering tier: protocol, half-block,
                      quadrant, sextant, octant, braille, ascii (detected)
   --goto=TICK        seek to TICK before the first debugger frame
   --record-keys=FILE write every input token to FILE, one per line
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
-  --layout-binding   let : and the mouse rearrange the panes, and remember them
+  --layout-binding   (default) : and the mouse rearrange panes; remembered
   --no-flow-overlay  do not dim the lines the run did not reach
+  --dividers=NAME    strip (default: pane dividers in the tab strips' ground,
+                     as the desktop's splitters) or subtle (a distinct line)
   --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
@@ -370,6 +385,14 @@ proc optionValue(arg: string; name: string): (bool, string) =
     return (true, arg[name.len + 1 .. ^1])
   (false, "")
 
+proc themeRefusal(name: string): string =
+  ## Why `--theme=<name>` was refused: a RETIRED theme names its replacement
+  ## (PLAT-46 retired `monokai`), anything else lists the valid names.
+  let retired = retiredThemeMessage(name)
+  if retired.len > 0:
+    return retired
+  "unknown theme '" & name & "'; pick one of " & themeNames()
+
 proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   ## Classify `args` — the arguments AFTER the program name.
   ##
@@ -399,6 +422,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var replayKeys = ""
   var layoutBinding = false
   var noFlowOverlay = false
+  var dividers = dcStrip
   var editProject = ""
   var editRequested = false
   var i = first
@@ -453,11 +477,10 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       let (ok, theme) = parseTheme(args[i])
       inc i
       if not ok:
-        return TuiCommand(
-          kind: tckUsageError,
-          message: "unknown theme '" & args[i - 1] & "'; pick one of " &
-                   themeNames())
+        return TuiCommand(kind: tckUsageError,
+                          message: themeRefusal(args[i - 1]))
       flags.theme = theme
+      flags.themePinned = true
     else:
       if arg.startsWith("-"):
         block options:
@@ -471,11 +494,35 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
           if isTheme:
             let (ok, theme) = parseTheme(themeName)
             if not ok:
+              return TuiCommand(kind: tckUsageError,
+                                message: themeRefusal(themeName))
+            flags.theme = theme
+            flags.themePinned = true
+            break options
+          # PLAT-50: the divider colour, the user's open choice.
+          let (isDividers, dividersName) = optionValue(arg, "--dividers")
+          if isDividers:
+            var known = false
+            for c in DividerChoice:
+              if $c == dividersName:
+                dividers = c
+                known = true
+            if not known:
               return TuiCommand(
                 kind: tckUsageError,
-                message: "unknown theme '" & themeName & "'; pick one of " &
-                         themeNames())
-            flags.theme = theme
+                message: "unknown dividers '" & dividersName &
+                         "'; pick one of strip, subtle")
+            break options
+          # PLAT-46 deliverable 9.
+          let (isPalette, paletteName) = optionValue(arg, "--palette")
+          if isPalette:
+            let (okPalette, palette) = parsePalette(paletteName)
+            if not okPalette:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "unknown palette '" & paletteName &
+                         "'; pick one of " & paletteNames())
+            flags.palette = palette
             break options
           # PLAT-14 / CodeTracer-TUI-Graphics.md §2.2. An explicit tier beats
           # every probe, including the multiplexer and SSH ones
@@ -543,7 +590,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
         # PLAT-16: with `--edit` given, THE POSITIONAL IS THE PROJECT and not a
         # trace folder. Decided by the flag rather than by looking at what is on
         # disk, on this layer's own rule: `app/cli.nim` does no filesystem I/O,
-        # and a parser that guessed from the presence of `trace.json` would
+        # and a parser that guessed from the presence of a recording would
         # make the command line's meaning depend on the machine it runs on.
         if editRequested:
           if editProject.len > 0:
@@ -707,9 +754,9 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
     TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
-               noFlowOverlay: noFlowOverlay)
+               noFlowOverlay: noFlowOverlay, dividers: dividers)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
-               noFlowOverlay: noFlowOverlay)
+               noFlowOverlay: noFlowOverlay, dividers: dividers)

@@ -18,6 +18,15 @@
 //!
 //! Asserts the same flow values as the streaming test:
 //!   a = 10, b = 32, sum = 42, doubled = 84, final_result = 94.
+//!
+//! ## Why it is `#[ignore]`d
+//!
+//! Its inputs cannot be produced by any test lane: the cooperatively-linked
+//! program and its recording are made by hand, on a SIP-disabled macOS arm64
+//! host, and handed in through the environment. Run by default it could only
+//! ever return early and be counted as passed, so it is ignored instead, which
+//! the runner reports as not run. Run it with `--ignored` after supplying the
+//! artefacts; if any of them is missing it then FAILS, naming what is missing.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -32,19 +41,20 @@ fn find_db_backend() -> PathBuf {
 }
 
 #[test]
+#[ignore = "manual: needs an out-of-band cooperative recording (CT_COOP_TRACE_CT, CT_COOP_PROGRAM, CT_COOP_SOURCE) and CT_COOP_QUERY=1; no lane produces one"]
 fn rust_mcr_coop_flow_variables_and_values() {
-    // Cooperative artifacts are produced out-of-band; SKIP when not wired.
-    let recording = match TestRecording::from_cooperative_env(Language::Rust) {
-        Some(r) => r,
-        None => {
-            eprintln!("SKIPPED: cooperative env not set (CT_COOP_TRACE_CT / CT_COOP_PROGRAM / CT_COOP_SOURCE)");
-            return;
-        }
-    };
-    if std::env::var("CT_COOP_QUERY").as_deref() != Ok("1") {
-        eprintln!("SKIPPED: CT_COOP_QUERY != 1");
-        return;
-    }
+    let recording = TestRecording::from_cooperative_env(Language::Rust).unwrap_or_else(|| {
+        panic!(
+            "this test was run explicitly but its cooperative recording is not supplied: set \
+             CT_COOP_TRACE_CT (an existing .ct), CT_COOP_PROGRAM and CT_COOP_SOURCE"
+        )
+    });
+    assert_eq!(
+        std::env::var("CT_COOP_QUERY").as_deref(),
+        Ok("1"),
+        "this test was run explicitly but CT_COOP_QUERY is not 1, so db-backend would not use the \
+         cooperative query server it exists to exercise"
+    );
 
     let db_backend = find_db_backend();
     let source_path = recording.source_path.clone();

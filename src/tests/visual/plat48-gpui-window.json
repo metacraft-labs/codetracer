@@ -1,0 +1,242 @@
+{
+ "_comment": [
+  "PLAT-48 \u2014 the top bar and the auto-hide panels in a real GPUI window,",
+  "read from its own pixels (and OCR). Captured by",
+  "`just plat48-gpui-window` (headless sway, a virtual pointer, wtype) and",
+  "measured by `just plat48-gpui-window-record` (ci/test/plat48_gpui_window.py).",
+  "`ticksReportedByWindow` and `reportedByWindow` are the window's own",
+  "report (its session's tick, the ViewModel's highlight, the stack a",
+  "placed pane joined), carried labelled beside the pixel/OCR evidence",
+  "for the same step; every other field is read from the frames.",
+  "Asserted by src/frontend/gpui/tests/test_plat48_gpui_window.nim."
+ ],
+ "frame": [
+  1920,
+  1080
+ ],
+ "settled": {
+  "base": true,
+  "menu-root": true,
+  "menu-open": true,
+  "menu-hover": true,
+  "menu-key": true,
+  "menu-choose": true,
+  "ctl-last": true,
+  "hover-control": true,
+  "omni-typed": true,
+  "omni-tick": true,
+  "omni-sym": true,
+  "reveal-base": true,
+  "reveal-bottom": true,
+  "reveal-esc": true,
+  "key-reveal": true,
+  "hover-slot": true,
+  "pinned": true,
+  "unpinned": true,
+  "top-base": true,
+  "top-docked": true,
+  "top-revealed": true,
+  "top-esc": true,
+  "top-back": true,
+  "doc-top": true
+ },
+ "ticksReportedByWindow": {
+  "base": 1,
+  "menu-choose": 2,
+  "omni-tick": 42
+ },
+ "controlClicks": [
+  {
+   "id": "next",
+   "before": 2,
+   "after": 3
+  },
+  {
+   "id": "step-in",
+   "before": 3,
+   "after": 4
+  },
+  {
+   "id": "next",
+   "before": 4,
+   "after": 5
+  },
+  {
+   "id": "reverse-next",
+   "before": 5,
+   "after": 4
+  },
+  {
+   "id": "reverse-step-in",
+   "before": 4,
+   "after": 3
+  },
+  {
+   "id": "step-out",
+   "before": 3,
+   "after": 171
+  },
+  {
+   "id": "reverse-step-out",
+   "before": 171,
+   "after": 16
+  },
+  {
+   "id": "run-to-entry",
+   "before": 16,
+   "after": 0
+  },
+  {
+   "id": "continue",
+   "before": 0,
+   "after": 171
+  },
+  {
+   "id": "reverse-continue",
+   "before": 171,
+   "after": 0
+  }
+ ],
+ "controlMarkInk": {
+  "reverse-next": 56,
+  "next": 56,
+  "reverse-step-in": 84,
+  "step-in": 100,
+  "reverse-step-out": 122,
+  "step-out": 124,
+  "reverse-continue": 44,
+  "continue": 44,
+  "run-to-entry": 111
+ },
+ "menuBandOcr": "N A I",
+ "menuTitlesOcr": "File \u00bb\nEdit \u00bb\nView \u00bb\nBuild \u00bb\nReset \u00bb\nDebug \u00bb\nHelp \u00bb",
+ "menuRoot": {
+  "popover": [
+   12,
+   46,
+   240,
+   190
+  ],
+  "button": [
+   12,
+   12,
+   34,
+   34
+  ]
+ },
+ "footerOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:1 tick 1",
+ "menuOpen": {
+  "popover": [
+   252,
+   176,
+   508,
+   690
+  ],
+  "changedBox": [
+   12,
+   50,
+   748,
+   816
+  ],
+  "changed": 358024,
+  "rootPopover": [
+   12,
+   46,
+   240,
+   190
+  ]
+ },
+ "menuStepOverOcr": "Step Over F10",
+ "menuStepOverShortcut": "F10",
+ "menuHover": {
+  "stepInRowChanged": 13197
+ },
+ "menuKey": {
+  "stepOutRowChanged": 13198
+ },
+ "menuChoose": {
+  "popoverPixelsChanged": 345568
+ },
+ "controlHoverOcr": "Next (F10)",
+ "omnibarQueryOcr": "o :sym add|",
+ "omnibarAttempts": {
+  "#42": 1,
+  ":sym add": 1
+ },
+ "omnibarSymOcr": "add main.py:29",
+ "revealBottom": {
+  "rect": [
+   12,
+   714,
+   1896,
+   330
+  ],
+  "changedBox": [
+   12,
+   714,
+   1896,
+   366
+  ],
+  "changedOutside": 0,
+  "ocr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to"
+ },
+ "revealEscChanged": 0,
+ "keyRevealOcr": "Build Output Unpin\nthe buildOutput pane is an edit-mode view; a replay session does not build the working tree and will not claim to",
+ "pinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS State main.py:79 tick 42",
+ "unpinnedFooterOcr": "BUILD PROBLEMS FIND IN FILES REQUESTS main.py:111 tick 168",
+ "unpinnedTabsOcr": "State Scratchpad h'|",
+ "topStrip": {
+  "rect": [
+   12,
+   54,
+   1896,
+   24
+  ],
+  "ocr": "State"
+ },
+ "topReveal": {
+  "rect": [
+   12,
+   86,
+   1896,
+   319
+  ],
+  "changedOutside": 0,
+  "ocr": "State Unpin\nLocals"
+ },
+ "topEscChanged": 0,
+ "docTop": {
+  "strip": [
+   12,
+   54,
+   1896,
+   24
+  ],
+  "terminalTopDocked": [
+   "calltrace"
+  ],
+  "ocr": "Call Trace"
+ },
+ "reportedByWindow": {
+  "menuHoverHighlight": 2,
+  "menuKeyHighlight": 3,
+  "menuClosed": true,
+  "omnibarQuery": ":sym add",
+  "omnibarSymResults": [
+   "add"
+  ],
+  "keyReveal": "buildOutput",
+  "pinnedDocked": true,
+  "unpinnedPlaced": true,
+  "unpinnedStack": [
+   "state",
+   "scratchpad"
+  ],
+  "topDocked": true,
+  "topRevealPane": "state",
+  "topBackPlaced": true,
+  "docTopSlots": [
+   "calltrace"
+  ]
+ }
+}

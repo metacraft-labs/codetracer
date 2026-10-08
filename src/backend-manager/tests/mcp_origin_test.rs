@@ -972,13 +972,14 @@ fn test_cli_trace_exec_script_value_origin() {
 // `c -> b -> a`, terminating at the literal `10`.
 //
 // Note on the rendered locations.  A hop's `sourceText` is the statement
-// that *produced* the value; its `location` is where that value is
-// *read* — one statement later.  So the chain queried at `print(c)`
-// (`main.py:12`) renders as:
+// that *produced* the value, and its `location` is that same statement: the
+// engine navigates to the step that wrote the value (db-backend
+// `origin_chain_inferred`, "jump to the step that wrote the value").  So the
+// chain queried at `print(c)` (`main.py:12`) renders as:
 //
-//     main.py:12  c = b      (c is read at the print)
-//     main.py:11  b = a      (b is read at `c = b`)
-//     main.py:10  a = 10     (a is read at `b = a`)
+//     main.py:11  c = b
+//     main.py:10  b = a
+//     main.py:9   a = 10
 //
 // The pairing, not just the set of lines, is what these tests pin: a
 // renderer that dropped `sourceText` and printed `targetExpr = sourceExpr`
@@ -1129,8 +1130,8 @@ fn test_cli_trace_origin_json_output() {
         .collect();
     assert_eq!(
         lines,
-        vec![12, 11, 10],
-        "hops must carry the fixture's read sites, newest first: {chain}"
+        vec![11, 10, 9],
+        "hops must carry the statements that wrote each value, newest first: {chain}"
     );
 
     assert_eq!(
@@ -1203,9 +1204,9 @@ fn test_cli_trace_origin_markdown_output() {
     // what makes a reordered or reversed chain fail here.
     let mut offsets = Vec::new();
     for row in [
-        "| 0 | `trivialCopy` | `main.py:12` | `c = b` |",
-        "| 1 | `trivialCopy` | `main.py:11` | `b = a` |",
-        "| 2 | `literal` | `main.py:10` | `a = 10` |",
+        "| 0 | `trivialCopy` | `main.py:11` | `c = b` |",
+        "| 1 | `trivialCopy` | `main.py:10` | `b = a` |",
+        "| 2 | `literal` | `main.py:9` | `a = 10` |",
     ] {
         let at = stdout.find(row).unwrap_or_else(|| {
             panic!("markdown is missing the row `{row}`; stdout was:\n{stdout}")
@@ -1242,9 +1243,9 @@ fn test_cli_trace_origin_text_output_matches_spec_layout() {
     // on the following line — in walk order.
     let mut offsets = Vec::new();
     for block in [
-        "  0. [=] main.py:12\n     c = b",
-        "  1. [=] main.py:11\n     b = a",
-        "  2. [L] main.py:10\n     a = 10",
+        "  0. [=] main.py:11\n     c = b",
+        "  1. [=] main.py:10\n     b = a",
+        "  2. [L] main.py:9\n     a = 10",
     ] {
         let at = stdout.find(block).unwrap_or_else(|| {
             panic!("text is missing the hop block:\n{block}\nstdout was:\n{stdout}")

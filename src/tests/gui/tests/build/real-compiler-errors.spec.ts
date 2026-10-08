@@ -7,7 +7,7 @@
  *
  * The injected error text mirrors actual compiler output (ANSI codes, file
  * locations, multi-line diagnostics) so the build location parser and the
- * Karax renderer are exercised end-to-end.
+ * IsoNim renderer are exercised end-to-end.
  *
  * Why simulation rather than live compilation:
  *   For materialized-trace languages (Noir, etc.) the build happens inside
@@ -84,7 +84,7 @@ const GCC_ERROR_OUTPUT: Array<{ text: string; isStdout: boolean }> = [
 
 /**
  * Inject simulated build output into the frontend's data model and trigger
- * a Karax redraw so the BUILD and PROBLEMS panels reflect the injected data.
+ * an IsoNim redraw so the BUILD and PROBLEMS panels reflect the injected data.
  *
  * This reaches into `window.data` which the Nim-compiled frontend exposes
  * as the global reactive data store.
@@ -134,14 +134,14 @@ async function injectBuildOutput(
       // onBuildStdout / onBuildStderr use. Since appendBuild is a Nim
       // template inlined into the component methods, we cannot call it
       // directly from JS. Instead, we populate the raw data arrays and
-      // rely on the Karax render method to parse locations at render time.
+      // rely on the IsoNim view's render path to parse locations at render time.
       for (const line of lines) {
         // Nim tuples compile to JS objects with Field0, Field1, ... keys
         // (not plain arrays). The type is (cstring, bool).
         build.output.push({ Field0: line.text, Field1: line.isStdout });
       }
 
-      // Trigger a Karax redraw so the DOM reflects the injected data.
+      // Trigger an IsoNim redraw so the DOM reflects the injected data.
       if (typeof data.redraw === "function") {
         data.redraw();
       }
@@ -153,7 +153,7 @@ async function injectBuildOutput(
     { lines, exitCode },
   );
 
-  // Wait a beat for Karax to re-render.
+  // Wait a beat for IsoNim to re-render.
   await page.waitForTimeout(500);
 }
 
@@ -416,8 +416,8 @@ test.describe("Real compiler errors in build panels", () => {
     ).then(() => true as const).catch(() => false);
 
     if (!hasProblems) {
-      // Karax renderer may not have fired for background tabs.
-      test.skip(true, "Problems panel Karax renderer not initialized");
+      // IsoNim renderer may not have fired for background tabs.
+      test.skip(true, "Problems panel IsoNim renderer not initialized");
       return;
     }
 
@@ -486,7 +486,7 @@ test.describe("Real compiler errors in build panels", () => {
     ).then(() => true as const).catch(() => false);
 
     if (!hasProblems) {
-      test.skip(true, "Problems panel Karax renderer not initialized");
+      test.skip(true, "Problems panel IsoNim renderer not initialized");
       return;
     }
 
@@ -505,9 +505,9 @@ test.describe("Real compiler errors in build panels", () => {
     expect(badgeText).toContain("3");
   });
 
-  // Skip: filter buttons use Karax event handlers that don't fire when
-  // the panel is rendered via vnodeToDom in standalone auto-hide mode.
-  // TODO: Fix when standalone panels use proper Karax rendering.
+  // Skip: filter buttons don't fire when the panel is mounted through the
+  // standalone auto-hide mode's direct IsoNim remount path.
+  // TODO: Fix when standalone panels wire up IsoNim event handling for this case.
   test.skip("PROBLEMS panel filter buttons work with injected errors", async ({
     ctPage,
   }) => {
@@ -558,7 +558,7 @@ test.describe("Real compiler errors in build panels", () => {
     ).then(() => true as const).catch(() => false);
 
     if (!hasProblems) {
-      test.skip(true, "Problems panel Karax renderer not initialized");
+      test.skip(true, "Problems panel IsoNim renderer not initialized");
       return;
     }
 
@@ -585,7 +585,7 @@ test.describe("Real compiler errors in build panels", () => {
     expect(restored).toBe(3);
   });
 
-  // Skip: Group by File toggle uses Karax event handlers (same issue as filter buttons).
+  // Skip: Group by File toggle has the same event-wiring issue as the filter buttons (see above).
   test.skip("PROBLEMS panel Group by File groups errors by path", async ({
     ctPage,
   }) => {
@@ -635,7 +635,7 @@ test.describe("Real compiler errors in build panels", () => {
     ).then(() => true as const).catch(() => false);
 
     if (!hasProblems) {
-      test.skip(true, "Problems panel Karax renderer not initialized");
+      test.skip(true, "Problems panel IsoNim renderer not initialized");
       return;
     }
 

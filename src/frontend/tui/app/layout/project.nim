@@ -97,7 +97,7 @@ import isonim_tui
 import headless_app/layout_model
 import headless_app/extent_distribution
 
-import ./profile
+import ./cells
 
 type
   PaneRegion* = object
@@ -517,7 +517,9 @@ proc projectLayout*(node: LayoutNode; area: CellArea;
         return
       var titles: seq[string] = @[]
       for c in n.children:
-        titles.add(if c.title.len > 0: c.title else: $c.pane)
+        # PLAT-45: an untitled tab (every tab of the shared default) takes
+        # the terminal's own name for its pane, not the enum's spelling.
+        titles.add(if c.title.len > 0: c.title else: terminalPaneName(c.pane))
       place(kids[0], where, titles, n.activeIndex)
     of lnRow, lnColumn:
       let kids = childIndices[index]

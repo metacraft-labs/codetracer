@@ -1,3 +1,26 @@
+//! Windows Time Travel Debugging (TTD) end-to-end DAP smoke tests.
+//!
+//! ## Platform gate
+//!
+//! TTD exists only on Windows, so this target is compiled only there (the
+//! `cfg` below). It used to be compiled everywhere and return early on every
+//! other host, which cargo counted as six passes that asserted nothing.
+//!
+//! On Windows, what the tests need and cannot provide themselves goes through
+//! `test_harness::skip_or_fail_missing_prerequisite` (a failure under
+//! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`, otherwise a skip written to
+//! the lane's skip report):
+//!
+//! - `ct-native-replay`;
+//! - a TTD fixture: either `CT_TTD_TRACE_MANIFEST`, or one recorded here, which
+//!   needs the codetracer-native-backend sibling's `tracepoint.c`, a C compiler
+//!   and an elevated process (TTD refuses to record otherwise).
+//!
+//! Anything else — a compiler that fails, a recording that fails for another
+//! reason, a DAP session that does not launch — is a real failure.
+
+#![cfg(windows)]
+
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::task::{
     EVENT_KINDS_COUNT, RunTracepointsArg, SearchValue, Stop, TableArgs, TraceSession, Tracepoint, TracepointMode,
@@ -187,14 +210,35 @@ struct TtdFixture {
     source_path: Option<PathBuf>,
 }
 
-fn should_skip_ttd_tests() -> Option<String> {
-    if !cfg!(windows) {
-        return Some("only supported on Windows".to_string());
+/// What an attempt to obtain a TTD fixture produced.
+enum Fixture {
+    Ready(TtdFixture),
+    /// A prerequisite for producing one is missing on this host.
+    Unavailable {
+        what: String,
+        remedy: &'static str,
+    },
+}
+
+/// Obtain a fixture with `obtain`, or report through the prerequisite gate why
+/// this host cannot, returning `None` only in the latter case. A failure that
+/// is not a missing prerequisite panics.
+fn fixture_or_report(test_name: &str, obtain: impl FnOnce() -> Result<Fixture, String>) -> Option<TtdFixture> {
+    if let Err(e) = resolve_ct_native_replay() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            test_name,
+            &e,
+            "build it with `just ensure-ct-native-replay` (codetracer-native-backend sibling) or set CT_NATIVE_REPLAY_PATH",
+        );
+        return None;
     }
-    if resolve_ct_native_replay().is_err() {
-        return Some("ct-native-replay binary not found".to_string());
+    match obtain().unwrap_or_else(|e| panic!("{test_name}: could not produce a TTD fixture: {e}")) {
+        Fixture::Ready(fixture) => Some(fixture),
+        Fixture::Unavailable { what, remedy } => {
+            test_harness::skip_or_fail_missing_prerequisite(test_name, &what, remedy);
+            None
+        }
     }
-    None
 }
 
 fn resolve_manifest_path() -> Result<PathBuf, String> {
@@ -302,6 +346,8 @@ fn find_compiler(candidates: &[&str]) -> Option<String> {
     None
 }
 
+/// Compile `source`. `Ok(None)` means no C compiler is available; a compiler
+/// that is present and fails is an `Err`.
 fn compile_c_program(source: &Path, debug_info: bool) -> Result<Option<PathBuf>, String> {
     let compiler = find_compiler(&["clang", "gcc", "cl"]);
     let Some(compiler) = compiler else {
@@ -332,7 +378,11 @@ fn compile_c_program(source: &Path, debug_info: bool) -> Result<Option<PathBuf>,
 
     let result = command.output().map_err(|e| format!("compile failed: {e}"))?;
     if !result.status.success() {
-        return Ok(None);
+        return Err(format!(
+            "{compiler} failed to compile {}: {}",
+            source.display(),
+            String::from_utf8_lossy(&result.stderr).trim()
+        ));
     }
 
     Ok(Some(output))
@@ -382,7 +432,7 @@ fn record_ttd_trace(ct_native_replay: &Path, exe: &Path, output_trace: &Path) ->
     ))
 }
 
-fn auto_record_tracepoint_fixture() -> Result<Option<TtdFixture>, String> {
+fn auto_record_tracepoint_fixture() -> Result<Fixture, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source = manifest_dir
         .join("..")
@@ -395,11 +445,20 @@ fn auto_record_tracepoint_fixture() -> Result<Option<TtdFixture>, String> {
         .join("tracepoint")
         .join("tracepoint.c");
     if !source.is_file() {
-        return Ok(None);
+        return Ok(Fixture::Unavailable {
+            what: format!(
+                "no CT_TTD_TRACE_MANIFEST fixture, and the program to record one from is absent ({})",
+                source.display()
+            ),
+            remedy: "check out the codetracer-native-backend sibling, or set CT_TTD_TRACE_MANIFEST",
+        });
     }
 
     let Some(exe) = compile_c_program(&source, true)? else {
-        return Ok(None);
+        return Ok(Fixture::Unavailable {
+            what: "no C compiler (clang, gcc or cl, or CT_TTD_CC) to build the TTD fixture".to_string(),
+            remedy: "install a C compiler or set CT_TTD_CC",
+        });
     };
 
     let ct_native_replay = resolve_ct_native_replay()?;
@@ -407,13 +466,28 @@ fn auto_record_tracepoint_fixture() -> Result<Option<TtdFixture>, String> {
     fs::create_dir_all(&out_dir).map_err(|e| format!("create temp dir: {e}"))?;
     let trace_path = out_dir.join("ttd-tracepoint-c.run");
     let Some(trace) = record_ttd_trace(&ct_native_replay, &exe, &trace_path)? else {
-        return Ok(None);
+        return Ok(Fixture::Unavailable {
+            what: "TTD refused to record: the process is not elevated".to_string(),
+            remedy: "run the tests from an elevated (administrator) process with Microsoft.TimeTravelDebugging installed",
+        });
     };
 
-    Ok(Some(TtdFixture {
+    Ok(Fixture::Ready(TtdFixture {
         trace_path: trace,
         source_path: Some(source),
     }))
+}
+
+/// The tracepoint program's fixture: from `CT_TTD_TRACE_MANIFEST` when it names
+/// one, otherwise recorded here.
+fn tracepoint_fixture() -> Result<Fixture, String> {
+    if let Ok(manifest) = resolve_manifest_path()
+        && let Some(fixture) =
+            parse_ttd_fixture_by_program_suffix(&manifest, "tests/programs/c/tracepoint/tracepoint.c")?
+    {
+        return Ok(Fixture::Ready(fixture));
+    }
+    auto_record_tracepoint_fixture()
 }
 
 fn normalize_manifest_path(raw: &str, base_dir: &Path) -> PathBuf {
@@ -558,17 +632,14 @@ fn launch_ttd_session_with_fixture(session: &mut DapStdioSession, fixture: &TtdF
     Ok(())
 }
 
-fn launch_ttd_session(session: &mut DapStdioSession) -> Result<(), String> {
+/// The first fixture `CT_TTD_TRACE_MANIFEST` names, otherwise one recorded here.
+fn first_ttd_fixture() -> Result<Fixture, String> {
     if let Ok(manifest) = resolve_manifest_path()
         && let Ok(fixture) = parse_first_ttd_fixture(&manifest)
     {
-        return launch_ttd_session_with_fixture(session, &fixture);
+        return Ok(Fixture::Ready(fixture));
     }
-
-    let Some(fixture) = auto_record_tracepoint_fixture()? else {
-        return Err("TTD manifest missing and auto-recording failed or unavailable".to_string());
-    };
-    launch_ttd_session_with_fixture(session, &fixture)
+    auto_record_tracepoint_fixture()
 }
 
 fn find_marker_line(path: &Path, marker: &str) -> Result<usize, String> {
@@ -651,17 +722,12 @@ fn request_tracepoint_locals(
 
 #[test]
 fn e2e_codetracer_dap_ttd_smoke_windows() {
-    if let Some(reason) = should_skip_ttd_tests() {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_smoke_windows: {reason}");
+    let Some(fixture) = fixture_or_report("e2e_codetracer_dap_ttd_smoke_windows", first_ttd_fixture) else {
         return;
-    }
+    };
 
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
-    if let Err(err) = launch_ttd_session(&mut session) {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_smoke_windows: {err}");
-        session.disconnect().ok();
-        return;
-    }
+    launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");
 
     let threads = session
         .send_request("threads", json!({}))
@@ -728,17 +794,12 @@ fn e2e_codetracer_dap_ttd_smoke_windows() {
 
 #[test]
 fn e2e_codetracer_dap_ttd_breakpoint_runto_windows() {
-    if let Some(reason) = should_skip_ttd_tests() {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_breakpoint_runto_windows: {reason}");
+    let Some(fixture) = fixture_or_report("e2e_codetracer_dap_ttd_breakpoint_runto_windows", first_ttd_fixture) else {
         return;
-    }
+    };
 
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
-    if let Err(err) = launch_ttd_session(&mut session) {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_breakpoint_runto_windows: {err}");
-        session.disconnect().ok();
-        return;
-    }
+    launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");
 
     let threads = session
         .send_request("threads", json!({}))
@@ -834,17 +895,13 @@ fn e2e_codetracer_dap_ttd_breakpoint_runto_windows() {
 
 #[test]
 fn e2e_codetracer_dap_ttd_tracepoint_call_eval_windows() {
-    if let Some(reason) = should_skip_ttd_tests() {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_tracepoint_call_eval_windows: {reason}");
+    let Some(fixture) = fixture_or_report("e2e_codetracer_dap_ttd_tracepoint_call_eval_windows", first_ttd_fixture)
+    else {
         return;
-    }
+    };
 
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
-    if let Err(err) = launch_ttd_session(&mut session) {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_tracepoint_call_eval_windows: {err}");
-        session.disconnect().ok();
-        return;
-    }
+    launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");
 
     let threads = session
         .send_request("threads", json!({}))
@@ -903,17 +960,15 @@ fn e2e_codetracer_dap_ttd_tracepoint_call_eval_windows() {
 
 #[test]
 fn e2e_codetracer_dap_ttd_tracepoint_call_eval_failure_windows() {
-    if let Some(reason) = should_skip_ttd_tests() {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_tracepoint_call_eval_failure_windows: {reason}");
+    let Some(fixture) = fixture_or_report(
+        "e2e_codetracer_dap_ttd_tracepoint_call_eval_failure_windows",
+        first_ttd_fixture,
+    ) else {
         return;
-    }
+    };
 
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
-    if let Err(err) = launch_ttd_session(&mut session) {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_tracepoint_call_eval_failure_windows: {err}");
-        session.disconnect().ok();
-        return;
-    }
+    launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");
 
     let threads = session
         .send_request("threads", json!({}))
@@ -973,30 +1028,16 @@ fn e2e_codetracer_dap_ttd_tracepoint_call_eval_failure_windows() {
 
 #[test]
 fn e2e_codetracer_dap_ttd_tracepoint_return_struct_windows() {
-    if let Some(reason) = should_skip_ttd_tests() {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_tracepoint_return_struct_windows: {reason}");
-        return;
-    }
-
-    let fixture = if let Ok(manifest) = resolve_manifest_path() {
-        match parse_ttd_fixture_by_program_suffix(&manifest, "tests/programs/c/tracepoint/tracepoint.c")
-            .expect("parse fixture")
-        {
-            Some(fixture) => Some(fixture),
-            None => auto_record_tracepoint_fixture().expect("auto record"),
-        }
-    } else {
-        auto_record_tracepoint_fixture().expect("auto record")
-    };
-
-    let Some(fixture) = fixture else {
-        eprintln!("SKIPPED: no tracepoint fixture found and auto-record unavailable");
+    let Some(fixture) = fixture_or_report(
+        "e2e_codetracer_dap_ttd_tracepoint_return_struct_windows",
+        tracepoint_fixture,
+    ) else {
         return;
     };
-    let Some(source_path) = fixture.source_path.clone() else {
-        eprintln!("SKIPPED: tracepoint fixture missing program path");
-        return;
-    };
+    let source_path = fixture
+        .source_path
+        .clone()
+        .expect("the tracepoint fixture must name its program source (the manifest entry's `program`)");
 
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
     launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");
@@ -1034,30 +1075,16 @@ fn e2e_codetracer_dap_ttd_tracepoint_return_struct_windows() {
 
 #[test]
 fn e2e_codetracer_dap_ttd_tracepoint_return_string_windows() {
-    if let Some(reason) = should_skip_ttd_tests() {
-        eprintln!("SKIPPED: e2e_codetracer_dap_ttd_tracepoint_return_string_windows: {reason}");
-        return;
-    }
-
-    let fixture = if let Ok(manifest) = resolve_manifest_path() {
-        match parse_ttd_fixture_by_program_suffix(&manifest, "tests/programs/c/tracepoint/tracepoint.c")
-            .expect("parse fixture")
-        {
-            Some(fixture) => Some(fixture),
-            None => auto_record_tracepoint_fixture().expect("auto record"),
-        }
-    } else {
-        auto_record_tracepoint_fixture().expect("auto record")
-    };
-
-    let Some(fixture) = fixture else {
-        eprintln!("SKIPPED: no tracepoint fixture found and auto-record unavailable");
+    let Some(fixture) = fixture_or_report(
+        "e2e_codetracer_dap_ttd_tracepoint_return_string_windows",
+        tracepoint_fixture,
+    ) else {
         return;
     };
-    let Some(source_path) = fixture.source_path.clone() else {
-        eprintln!("SKIPPED: tracepoint fixture missing program path");
-        return;
-    };
+    let source_path = fixture
+        .source_path
+        .clone()
+        .expect("the tracepoint fixture must name its program source (the manifest entry's `program`)");
 
     let mut session = DapStdioSession::spawn().expect("spawn db-backend dap session");
     launch_ttd_session_with_fixture(&mut session, &fixture).expect("launch TTD DAP session");

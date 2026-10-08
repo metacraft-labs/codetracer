@@ -54,7 +54,10 @@
 ## constructed without a `TerminalCapabilities`, and the paint is a method on
 ## the driver.
 
-import std/os
+import std/[os, strutils, tables]
+
+from isonim_tui import caretSupportFor, caretBytes, TextCaret, CaretSupport,
+  caretShapes, caretDrawn, ckBar, ckBlock
 
 import ./app/cli
 # `./app/edit_binding` IS DELIBERATELY NOT IMPORTED. It was, until the landing
@@ -77,8 +80,19 @@ import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
 import ./host/terminal_driver
+import ./host/terminal_probe
 import ./host/tui_session
+import ./host/vcs_source
+# PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
+import headless_app/headless_app
+import headless_app/session_tabs
+from backend/stdio_backend import toBackendService
+from ./app/views/file_tree import FileTreeModel
+import ./host/control_icons
+import ./host/image_probe
+import ./app/theme/palette
 import ../viewmodel/host/keymap_preference
+import ../viewmodel/host/icons_preference
 
 const
   IdlePollMs = 200
@@ -89,6 +103,15 @@ const
     ## long the process sleeps between two events it does not have. It exists so
     ## a partially framed escape sequence — an `ESC` with nothing after it — is
     ## not held forever.
+
+proc idleWaitMs(rt: TuiRuntime): int =
+  ## How long the loop may block: `IdlePollMs`, or less when the auto-hide
+  ## hover has a preview or a dismissal due sooner (PLAT-49 part B) — so a
+  ## preview opens when its delay is up, not up to `IdlePollMs` later.
+  let due = rt.autoHideDueMs()
+  if due < 0:
+    return IdlePollMs
+  clamp(int(due - nowMs()), 5, IdlePollMs)
 
 type
   EditHostState = ref object
@@ -164,6 +187,64 @@ proc wireEditServices(rt: TuiRuntime; root: string;
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
   state
 
+proc wireTopBar(rt: TuiRuntime) =
+  ## PLAT-48: the top bar's host half, for both loops.
+  ##
+  ##   * the menu is enabled for what this front-end performs and shows the
+  ##     ACTIVE keymap's chords (`runtime.refreshMenuForKeymap`);
+  ##   * the `icons` setting the user chose last time is read back; a stored
+  ##     value that is not a mode is refused by name on the status line;
+  ##   * `:icons` writes it through `saveIconsPreference`;
+  ##   * when nothing was chosen and the environment says Nerd Fonts are in
+  ##     use, the status line SUGGESTS `nerd` — a font cannot be measured
+  ##     from a terminal, so it is never switched on for the user.
+  rt.refreshMenuForKeymap()
+  let stored = loadIconsPreference()
+  case stored.status
+  of iplLoaded:
+    rt.app.icons = stored.mode
+    rt.app.iconsChosen = true
+  of iplRefused:
+    rt.app.notification = stored.message
+  of iplAbsent:
+    rt.app.icons = defaultIconsMode(graphicsDrawn = false)
+    if nerdFontHint(getEnv("NERD_FONT", getEnv("NERDFONT", "")),
+                    getEnv("TERM_PROGRAM", ""), getEnv("KITTY_FONT", "")):
+      rt.app.notification = NerdSuggestion
+  rt.saveIcons = proc(mode: IconsMode): string = saveIconsPreference(mode)
+
+var gIconState: ControlIconState
+  ## What the terminal already holds of the controls' pictures (one terminal
+  ## per process).
+
+type GraphicsProbeState = object
+  ## PLAT-48: the kitty graphics query sent after the first frame, so the
+  ## `icons` default can be `graphics` on a terminal that draws pictures —
+  ## measured, never assumed from `$TERM`. Sent AFTER frame 0 rather than in
+  ## the start-up round, so the cold-start gate pays nothing for it.
+  open: bool
+  deadlineMs: int64
+
+const GraphicsProbeWaitMs = 500'i64
+
+proc startGraphicsProbe(driver: TerminalDriver; rt: TuiRuntime):
+    GraphicsProbeState =
+  ## Ask, unless a multiplexer is in the path (tmux or screen would need a
+  ## passthrough this probe does not negotiate; `image_capability` refuses
+  ## tier 0 there too) or the user already chose a mode that is not
+  ## `graphics`.
+  let env = readImageEnv()
+  if env.tmux.len > 0 or env.sty.len > 0:
+    return
+  if rt.app.iconsChosen and rt.app.icons != imGraphics:
+    return
+  driver.expectReplies(true)
+  writeAll(driver.outFd, ProbeQuery & ProbeFence)
+  GraphicsProbeState(open: true, deadlineMs: nowMs() + GraphicsProbeWaitMs)
+
+proc isGraphicsProbeReply(token: string): bool =
+  token.startsWith("\x1b_Gi=" & $ProbeImageId & ";")
+
 proc startHighlights(rt: TuiRuntime; driver: TerminalDriver): HighlightWorker =
   ## PLAT-29. The Edit pane's parse moves onto a worker thread: the runtime
   ## hands it requests, the driver wakes on its pipe, and `drainHighlights`
@@ -215,6 +296,10 @@ proc advanceBuild(rt: TuiRuntime; state: EditHostState;
   if result and report:
     rt.app.notification = describeVerdict(state.running.session)
 
+var gCaretSupport = caretShapes
+  ## PLAT-49: whether the running terminal shapes its cursor (`interactive`
+  ## decides it once, from `TERM` / `TERM_PROGRAM` / `TMUX`).
+
 proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## One frame of `rt` onto `driver`.
   ##
@@ -225,12 +310,54 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## and what it costs a reader of the frame barrier.
   let screen = rt.shellScreenOf()
   var epilogue = ""
+  # PLAT-48: the debugger controls as the desktop's marks, placed over the
+  # cells the top bar reserved — only on a terminal measured to draw them.
+  let mode = rt.caps.mode
+  epilogue.add controlIconBytes(gIconState, screen.topBarLayout,
+                                rt.app.controlsEnabledOf(),
+                                RoleColourTable[mode][srChromeText].fgRgb,
+                                RoleColourTable[mode][srChromeMuted].fgRgb)
   let (prompting, row, col) = rt.promptCursor()
   if prompting:
-    epilogue = "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" & ShowCursorBytes
+    epilogue.add "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" &
+                 ShowCursorBytes
+  # PLAT-49: AN OPEN OMNIBAR OWNS THE CARET. The terminal's cursor goes where
+  # its text goes — a thin bar while inserting, a block while overwriting
+  # (DECSCUSR) — after the modal prologue, so it wins over the mode's shape;
+  # where the terminal is not known to shape its cursor, the top bar has
+  # already drawn the caret into its cell and the cursor stays hidden.
+  let caret = screen.topBar.omnibarCaret(screen.topBarLayout)
+  if caret.shown and not prompting:
+    epilogue.add caretBytes(
+      TextCaret(row: caret.row, col: caret.col, visible: true,
+                shape: (if caret.overwrite: ckBlock else: ckBar)),
+      gCaretSupport)
+  # PLAT-50: TEXT A CLICK COPIED (the editor menu's Copy) goes to the
+  # terminal's clipboard — OSC 52 (`ESC ] 52 ; c ; <base64> BEL`, xterm's
+  # "Manipulate Selection Data",
+  # https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands),
+  # which a terminal that allows it forwards to the system clipboard — once.
+  if rt.app.clipboard.len > 0:
+    epilogue.add osc52Copy(rt.app.clipboard)
+    rt.app.clipboard = ""
   driver.paint(screen.styledRows,
                prologue = cursorControlBytes(rt.modal.mode),
-               epilogue = epilogue)
+               epilogue = epilogue,
+               overlays = screen.frameOverlays)
+
+proc themeSwitch(negotiation: StartupNegotiation; driver: TerminalDriver;
+                 rt: TuiRuntime): proc(name: string): bool {.closure.} =
+  ## §4.3's `:theme <dark|light>`: the interpreter has already validated the
+  ## name against `ThemeNames`; this pins that design-system mode, re-resolves
+  ## and hands the runtime the new capabilities. The loop's paint after the
+  ## command is then a FULL frame (`adoptCapabilities` forgot the screen).
+  result = proc(name: string): bool =
+    let (known, theme) = parseTheme(name)
+    if not known or theme == utPlain:
+      return false
+    discard negotiation.switchTheme(driver, theme)
+    rt.caps = negotiation.caps
+    true
 
 proc interactive(command: TuiCommand): int =
   ## Open a trace and run the loop until the user quits or the terminal goes
@@ -285,10 +412,24 @@ proc interactive(command: TuiCommand): int =
   # including an exception. `nim-termctl`'s signal handlers and `atexit` hook
   # cover a kill and a crash; this covers a normal return and a raise.
   defer: driver.stop()
+  # PLAT-46: THE ONE START-UP QUERY ROUND — the terminal's real background
+  # (OSC 11) and whether it keeps 24-bit colour (DECRQSS / XTGETTCAP, tmux's
+  # `RGB`) — in raw mode, before frame 0, bounded by one short wait. Late
+  # replies are taken by the loop below.
+  let negotiation = driver.negotiateOnTerminal(command.flags)
 
   var size = driver.size()
   let app = newTuiApp()
-  app.notification = "opening " & folder & " …"
+  # PLAT-49: whether this terminal shapes its cursor (DECSCUSR) — decided
+  # from its own identity; where it is not known to, the omnibar's caret is
+  # drawn into its cell instead (`isonim_tui.caretSupportFor`).
+  gCaretSupport = caretSupportFor(getEnv("TERM"), getEnv("TERM_PROGRAM"),
+                                  inTmux = getEnv("TMUX").len > 0)
+  app.caretDrawn = gCaretSupport == caretDrawn
+  # The negotiation's note FIRST: the status line clips a long notification
+  # from the right, and a trace folder's path is long.
+  app.notification = capabilityNote(negotiation.caps) & " | opening " &
+                     folder & " …"
   # PLAT-16: THE PROJECT A REPLAY SESSION EDITS IS THE WORKING DIRECTORY, and
   # that is a decision rather than a fallback, so it is written down here.
   #
@@ -317,10 +458,12 @@ proc interactive(command: TuiCommand): int =
   # inside CTUI-11's cold-start budget for a mode most sessions never enter.
   let projectRoot = getCurrentDir()
   app.projectRoot = projectRoot
-  let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+  let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  rt.themeService = themeSwitch(negotiation, driver, rt)
   let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =
     let listing = listProjectFiles(projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
+  wireTopBar(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -329,34 +472,34 @@ proc interactive(command: TuiCommand): int =
   # reverse) — its pending writes finish while the shared wake pipe is open.
   let files = startFiles(rt, projectRoot, highlights)
   defer: files.stop()
-  # PLAT-6's OPT-IN, and it is the only thing that turns the layout binding on
-  # in a shipped binary. `app/runtime.enableLayoutBinding` records why it is an
-  # opt-in and what would have to be true to flip the default; what matters
-  # here is the shape: one guarded line, before the first frame, so the binding
-  # is seeded from the arrangement this session would have painted anyway.
+  # PLAT-45: THE LAYOUT IS THE USER'S BY DEFAULT, AND IT IS REMEMBERED.
   #
-  # WITHOUT THE FLAG NOTHING BELOW CHANGES. `shellModel` carries the session's
-  # own `LayoutNode`, an empty `docked` and no `Interaction`, which is exactly
-  # the model CTUI-3 built, and the `:` prompt routes to §4.3's interpreter as
-  # it always has.
-  var layoutRestore = LayoutRestoreReport()
-  if command.layoutBinding:
-    discard rt.enableLayoutBinding()
-    # AND THE ARRANGEMENT COMES BACK. PLAT-6's Goal sentence promises "move
-    # tabs, resize splits, dock panes, SAVE AND RESTORE", and until this line
-    # the fourth clause was the one a user did not get: `binding.saveDocument`
-    # and `binding.restoreDocument` existed and nothing in the product called
-    # either, so an arrangement did not survive a restart.
-    #
-    # KEYED BY THE RECORDING, held under the user's own state directory, and
-    # behind the SAME opt-in as the gestures — with the flag off
-    # `restoreLayoutForSession` computes no path and opens no file at all.
-    # `app/layout/persistence.nim`'s header carries the reasoning for each of
-    # those three; what matters here is that this is the only place a shipped
-    # binary reads one.
-    layoutRestore = restoreLayoutForSession(rt, folder)
-    if layoutRestore.message.len > 0:
-      app.notification = layoutRestore.message
+  # Until PLAT-45 this was PLAT-6's opt-in: only `--layout-binding` gave the
+  # terminal a rearrangeable layout, and only then was it saved — per
+  # recording. PLAT-45 deliverable 8 flips both: every session starts on the
+  # shared default (or on the arrangement the user last left the TERMINAL in),
+  # the `:` layout verbs and the mouse can rearrange it, and every committed
+  # change is written through to ONE document for the terminal product under
+  # the user's state directory (`host/layout_store.layoutDocumentPath`). The
+  # desktop and the GPUI window keep files of their own and never read this
+  # one. `--layout-binding` is still accepted, and asks for what is now the
+  # default. What made PLAT-6 keep this an opt-in — the session slot holding a
+  # bare tree — is gone since PLAT-4's closing pass, and a committed gesture is
+  # now written back onto the slot (`runtime.afterLayoutCommit`).
+  #
+  # The binding is enabled before the first frame, seeded from the arrangement
+  # this session would have painted anyway, so frame 0 is unchanged by it.
+  discard rt.enableLayoutBinding()
+  rt.layoutCommitted = proc(rt: TuiRuntime) =
+    # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
+    # know about, on the status line, and is not fatal: the arrangement is
+    # still on screen and the exit save below tries again.
+    let saved = persistLayoutForSession(rt)
+    if saved.outcome == lpoFailed:
+      rt.app.notification = saved.message
+  let layoutRestore = restoreLayoutForSession(rt)
+  if layoutRestore.message.len > 0:
+    app.notification = layoutRestore.message
   # FRAME 0, BEFORE THE ENGINE. See this module's header on why the order is
   # this way round.
   paint(driver, rt)
@@ -393,6 +536,24 @@ proc interactive(command: TuiCommand): int =
     driver.stop()
     stderr.writeLine(TuiProgramName & ": cancelled while opening " & folder)
     return ExitOk
+  except DapLaunchRefusedError as e:
+    # THE ENGINE ANSWERED, AND THE ANSWER REACHES THE USER. This arm sits
+    # ABOVE the stalled one on purpose: before it existed, a recording
+    # `replay-server` had explicitly refused — naming the container version it
+    # found, the version it requires, and that re-recording is the remedy —
+    # produced no response at all. The refusal arrived as a `ct/notification`
+    # the handshake buffered, the wait for `stopped` ran out its budget, and
+    # the user was told the engine had stopped answering. Before CTUI-14 put a
+    # clock on that wait, they were told nothing and the panes simply stayed
+    # empty for as long as they cared to look.
+    #
+    # The engine's sentence is printed VERBATIM and alone. Every fact a user
+    # needs is already in it and a summary of it here would be a second
+    # wording of the same thing, free to go stale against the reader that
+    # produced it.
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": cannot open " & folder & ": " & e.msg)
+    return ExitUnreadableRecording
   except DapStalledError as e:
     # A DISTINCT EXIT CODE, because this is a distinct fact. `ExitUsage` would
     # send a user to look at their command line for a folder that named itself
@@ -410,19 +571,106 @@ proc interactive(command: TuiCommand): int =
     stderr.writeLine(TuiProgramName & ": could not open " & folder & ": " &
                      e.msg)
     return ExitUsage
-  defer: session.close()
+  # PLAT-49 part B: EVERY SESSION THIS PROCESS OPENED, by its tab's id — the
+  # one above and each a "+" opens — closed on the way out.
+  var sessions = initTable[int, TuiSession]()
+  defer:
+    for s in sessions.values:
+      s.close()
+    if sessions.len == 0:
+      session.close()
   # THE HATCH COMES OFF NOW. See `tui_session.disarmHandshakeInterrupt`: a read
   # abandoned mid-message cannot be resynchronised, which is the right trade
   # while the session is still being built and the wrong one afterwards.
   session.disarmHandshakeInterrupt()
 
   session.header(rt)
+  app.dividers = command.dividers
   if command.noFlowOverlay:
     session.setFlowOverlay(false)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()
   session.refresh(rt)
+
+  # PLAT-49 part B (finding 7): THE SESSION IS A TAB OF THE STRIP. It is put
+  # into `HeadlessApp` (adopted, as GPUI's is: the engine is this host's), so
+  # the strip and the header read it; a second recording opened from the
+  # strip's "+" becomes the next tab, and a click on a tab — or its close
+  # control — re-points the panes at that session (`showSession`).
+  let firstSlot = app.shell.openSession(
+    session.session.backend.toBackendService(),
+    title = app.traceName, layout = app.layoutBinding.layout,
+    adopt = session.session.sdk)
+  sessions[int(firstSlot.id)] = session
+  var shownId = firstSlot.id
+  app.recordings = recordingsBeside(folder)
+
+  proc showSession(id: HeadlessSessionId) =
+    ## Point the terminal at the session behind tab `id`: its header, its
+    ## panes from its current stop, its files and its omnibar index. The
+    ## arrangement is the terminal's one remembered layout (PLAT-45
+    ## deliverable 8), the same in every tab — a new tab starts from it, as
+    ## the desktop's new tab starts from the current one.
+    if not sessions.hasKey(int(id)):
+      return
+    session = sessions[int(id)]
+    shownId = id
+    let slot = app.shell.activeSlot()
+    if not slot.isNil:
+      slot.layout = app.layoutBinding.layout.clone()
+    session.header(rt)
+    app.fileTree = FileTreeModel()      # this session's files (`refresh`)
+    session.setViewportHeight(rt.sourcePaneRows())
+    session.refresh(rt)
+    app.refreshOmnibarIndex()
+    app.notification = describe(session)
+
+  app.recordingOpener = proc(path: string): string =
+    # The handshake is BOUNDED, as the first one is; no keyboard hatch: the
+    # loop is running and owns the input.
+    var opened: TuiSession = nil
+    try:
+      opened = openTuiSession(path, viewportHeight = max(1, size.rows - 6),
+                              bound = DapReadBound(timeoutMs: handshakeBudgetMs(),
+                                                   interruptFd: -1))
+    except CatchableError as e:
+      return "could not open " & path & ": " & e.msg.splitLines()[0]
+    if command.noFlowOverlay:
+      opened.setFlowOverlay(false)
+    opened.learnExtent()
+    let slot = app.shell.openSession(
+      opened.session.backend.toBackendService(),
+      title = extractFilename(opened.session.tracePath.strip(chars = {'/'})),
+      layout = app.layoutBinding.layout, adopt = opened.session.sdk)
+    sessions[int(slot.id)] = opened
+    showSession(slot.id)
+    ""
+
+  app.sessionCloser = proc(index: int): bool =
+    # Rule 4: "Closing a tab stops its backend and removes it" — and the last
+    # tab is not closed (the desktop's close control is not drawn on it).
+    let tabs = app.shell.tabsOf()
+    if index < 0 or index >= tabs.len or tabs.len < 2:
+      return false
+    let id = tabs[index].id
+    if not app.shell.closeTab(index, disconnectBackend = false):
+      return false
+    if sessions.hasKey(int(id)):
+      sessions[int(id)].close()
+      sessions.del(int(id))
+    showSession(app.shell.activeSessionId())
+    true
+  # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
+  # panel reads for a replay — the process's own working directory.
+  let vcs = newVcsSource(projectRoot)
+  defer: vcs.close()
+  vcs.refresh(rt)
   app.notification = describe(session)
+  if negotiation.caps.tmuxRgbWithheld:
+    # THE ONE CAPABILITY FINDING THAT OUTLIVES FRAME 0: a user whose tmux is
+    # painting their 24-bit terminal at 256 colours needs the remedy, and it
+    # is one line of tmux configuration.
+    app.notification.add " | " & tmuxRgbRemedy(negotiation.caps)
 
   # §6.2's `--goto=<tick>`: BEFORE THE FIRST DEBUGGER FRAME, which is the whole
   # of what the flag adds over typing `:goto` — `session.seekToStartupTick`
@@ -443,9 +691,14 @@ proc interactive(command: TuiCommand): int =
   # opposite precedence and is also deliberate.
   if layoutRestore.status == lrsUnreadable:
     app.notification = layoutRestore.message
+  # The menu's chords and the omnibar's commands, now that the session's
+  # ViewModels exist.
+  rt.refreshMenuForKeymap()
   paint(driver, rt)
+  var graphicsProbe = startGraphicsProbe(driver, rt)
 
   var running = true
+  var frameOwed = false
   while running:
     # §6.2's `--replay-keys`: "replay input events from file and exit". The
     # journal REPLACES the keyboard rather than being merged with it, so a
@@ -459,21 +712,32 @@ proc interactive(command: TuiCommand): int =
         break
       ev = DriverEvent(kind: dekToken, token: token)
     else:
-      ev = driver.nextEvent(IdlePollMs)
+      ev = driver.nextEvent(idleWaitMs(rt))
     case ev.kind
     of dekEof:
       # The terminal closed its end. Not an error and not a quit key: the user
       # is gone, and the only correct thing left is to give the tty back.
       running = false
     of dekIdle:
+      if graphicsProbe.open and nowMs() > graphicsProbe.deadlineMs:
+        # No answer: the terminal draws no pictures. The default stays.
+        graphicsProbe.open = false
+      if not graphicsProbe.open:
+        negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, on
       # exactly `editInteractive`'s rule and for §5's reason. A replay session
       # that switched to Edit mode and typed `:build` owns a process, and a
       # loop that never polled it would leave that build running with no
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
-      if drainHighlights(rt, highlights, files) or built:
+      let vcsChanged = vcs.tick(rt)
+      # PLAT-49 part B: the auto-hide hover's clock — a preview due after
+      # the pointer rested on a label, a dismissal due after it left.
+      let hoverChanged = rt.tickAutoHide(nowMs())
+      if drainHighlights(rt, highlights, files) or built or vcsChanged or
+         hoverChanged or frameOwed:
         paint(driver, rt)
+        frameOwed = false
     of dekResize:
       size = ev.size
       rt.resize(size.cols, size.rows)
@@ -485,6 +749,26 @@ proc interactive(command: TuiCommand): int =
       session.refresh(rt)
       paint(driver, rt)
     of dekToken:
+      # PLAT-48: THE ANSWER TO THE GRAPHICS QUERY. `OK` means the terminal
+      # draws pictures: the controls default to the desktop's marks, unless
+      # the user chose otherwise. Never a key, never journalled.
+      if isGraphicsProbeReply(ev.token):
+        graphicsProbe.open = false
+        if ev.token.contains(";OK"):
+          rt.app.graphicsDrawn = true
+          if not rt.app.iconsChosen:
+            rt.app.icons = imGraphics
+          paint(driver, rt)
+        continue
+      # PLAT-46: A TERMINAL'S LATE ANSWER TO THE START-UP ROUND IS NOT A KEY.
+      # It re-decides the capabilities and repaints; it is never journalled.
+      let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
+      if wasReply:
+        if changed:
+          rt.caps = negotiation.caps
+          app.notification = capabilityNote(negotiation.caps)
+          paint(driver, rt)
+        continue
       # RECORDED BEFORE IT IS HANDLED, so the journal of a session that quit on
       # this token still contains it. A `q` written down only after the loop
       # decided to stop would be a journal that replays to a different screen
@@ -494,7 +778,13 @@ proc interactive(command: TuiCommand): int =
       if outcome.quit:
         running = false
       else:
-        session.applyOutcome(rt, outcome)
+        # PLAT-49 part B: a tab click (or `next-session-tab`) chose another
+        # session: the panes follow it before the outcome is applied.
+        if app.shell.activeSessionId() != shownId:
+          showSession(app.shell.activeSessionId())
+        # PLAT-50: a click in the VCS pane is the VCS source's.
+        if not vcs.applyClick(rt, outcome.paneClick):
+          session.applyOutcome(rt, outcome)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         # `report = false`: the line the key just wrote is the user's own.
@@ -506,20 +796,33 @@ proc interactive(command: TuiCommand): int =
         # the frames dropped are the ones a terminal could not have shown
         # before they were replaced. `ssh_tuning.WriteCoalescer.maxHeld` is what
         # stops a held key from freezing the screen for as long as it is held.
-        if outcome.repaint and
-           not driver.holdFrame(journal.pendingReplay > 0):
-          paint(driver, rt)
+        #
+        # PLAT-48: A HELD FRAME IS OWED, NOT DROPPED. It was held because the
+        # next token was already waiting — but that token may change nothing
+        # on screen (the release half of a click on a debugger control, a
+        # pointer passing over the body), and a frame held for a token that
+        # repaints nothing was never drawn: the step the click made happened
+        # and the screen kept the old tick. `frameOwed` carries it to the
+        # next token and to the next idle tick.
+        if outcome.repaint or frameOwed:
+          if driver.holdFrame(journal.pendingReplay > 0):
+            frameOwed = true
+          else:
+            paint(driver, rt)
+            frameOwed = false
 
-  # THE ARRANGEMENT IS SAVED HERE, AND ONLY IF IT IS THE USER'S. Once per
-  # session rather than once per gesture: a drag is a press and a release, and
-  # writing through on each would put two file writes inside one pointer
-  # movement for a document nobody reads until the next launch.
+  # THE ARRANGEMENT IS SAVED AGAIN ON THE WAY OUT, AND ONLY IF IT IS THE
+  # USER'S. PLAT-45 added the write-through on every committed change (a drag
+  # commits once, on release, so a pointer movement costs no writes); this
+  # final save is what makes a session that ended with the default in place —
+  # untouched, or reset — remove a stale document.
   #
-  # `persistLayoutForSession` answers `lpoDisabled` and touches nothing when
-  # `--layout-binding` is off, `lpoQuarantined` when this session started from
-  # a document it could not read, and `lpoRemoved` when the arrangement is the
-  # profile's own — which is what makes `:reset-layout` reach all the way to
-  # the disk instead of leaving a stale document behind.
+  # `persistLayoutForSession` answers `lpoQuarantined` when this session
+  # started from a document it could not read, and `lpoRemoved` when the
+  # arrangement is the shared default's own — which is what makes
+  # `:reset-layout` reach all the way to the disk instead of leaving a stale
+  # document behind. Every committed change was already written through
+  # (`rt.layoutCommitted` above); this is the last word.
   #
   # BEFORE `driver.stop()` runs from its `defer`, so a failure message is
   # composed while the screen is still ours; it is REPORTED ON STDERR after the
@@ -595,6 +898,7 @@ proc editInteractive(command: TuiCommand): int =
   let driver = newTerminalDriver(caps)
   driver.start()
   defer: driver.stop()
+  let negotiation = driver.negotiateOnTerminal(command.editFlags)
 
   var size = driver.size()
   let app = newTuiApp()
@@ -606,7 +910,9 @@ proc editInteractive(command: TuiCommand): int =
   app.modes = initModeRegister(pmEdit)
   app.projectRoot = root
 
-  let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+  let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  rt.themeService = themeSwitch(negotiation, driver, rt)
+  rt.dispatcher.services.setTheme = rt.themeService
 
   # THE HOST'S FOUR CAPABILITIES, INJECTED — one function, shared with
   # `interactive`. See `wireEditServices`.
@@ -617,6 +923,7 @@ proc editInteractive(command: TuiCommand): int =
   # walk happened on the ordinary screen; this hands back its answer.
   let edit = wireEditServices(rt, root, proc(): EditListResult =
     EditListResult(files: listing.files, truncated: listing.truncated))
+  wireTopBar(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -634,32 +941,51 @@ proc editInteractive(command: TuiCommand): int =
   if furnished.len > 0:
     app.notification = furnished
   discard rt.focus.focusPaneKind(paneEditor)
+  # PLAT-47 deliverable 4: in Edit mode the VCS pane reads the project, the
+  # folder the desktop's edit mode hands its VCS panel.
+  let vcs = newVcsSource(root)
+  defer: vcs.close()
+  vcs.refresh(rt)
 
   paint(driver, rt)
 
   var loop = true
   while loop:
-    let ev = driver.nextEvent(IdlePollMs)
+    let ev = driver.nextEvent(idleWaitMs(rt))
     case ev.kind
     of dekEof:
       loop = false
     of dekIdle:
+      negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, which
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
       # session is checked on every tick. See `host/build_runner.pollBuild`.
       let built = advanceBuild(rt, edit, report = true)
-      if drainHighlights(rt, highlights, files) or built:
+      let vcsChanged = vcs.tick(rt)
+      let hoverChanged = rt.tickAutoHide(nowMs())
+      if drainHighlights(rt, highlights, files) or built or vcsChanged or
+         hoverChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size
       rt.resize(size.cols, size.rows)
       paint(driver, rt)
     of dekToken:
+      let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
+      if wasReply:
+        if changed:
+          rt.caps = negotiation.caps
+          app.notification = capabilityNote(negotiation.caps)
+          paint(driver, rt)
+        continue
       let outcome = rt.handleToken(ev.token, nowMs())
       if outcome.quit:
         loop = false
       else:
+        # PLAT-50: a click in the VCS pane is the VCS source's, in Edit mode
+        # too.
+        discard vcs.applyClick(rt, outcome.paneClick)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         discard advanceBuild(rt, edit, report = false)

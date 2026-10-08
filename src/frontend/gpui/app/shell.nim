@@ -66,6 +66,7 @@ import codetracer_embed
 import headless_app/headless_app
 import headless_app/window_set
 import ./dock_projection
+import ./pane_names
 
 export headless_app, window_set, dock_projection
 
@@ -236,6 +237,19 @@ proc syncSessionLayouts*(shell: GpuiShell) =
     # a `LayoutNode`) loses every docked pane on the way to `saveLayouts`.
     session.layout = slot.layout.clone()
 
+proc showSessionIn*(shell: GpuiShell; id: WindowId;
+                    session: HeadlessSessionId): bool =
+  ## PLAT-49 part B: window `id` shows `session` from now on — a session tab
+  ## chosen in it. The window keeps its arrangement (one per window, as the
+  ## terminal keeps one); `leavesFor` then hands out the new session's
+  ## ViewModels. False when either is unknown.
+  if shell.isNil or shell.windows.indexOf(id) < 0 or
+     shell.app.slot(session).isNil:
+    return false
+  shell.bindings[int(id)] = session
+  shell.syncSessionLayouts()
+  true
+
 proc applyIn*(shell: GpuiShell; id: WindowId;
               cmd: LayoutCommand): WindowSetOutcome =
   ## Apply one layout command in one window, and keep the session in step.
@@ -319,6 +333,10 @@ proc leavesFor*(shell: GpuiShell; id: WindowId;
         let node = tree.find(leaf.builtin)
         if not node.isNil:
           leaf.title = node.title
+      # PLAT-45: an untitled leaf (every pane of the shared default) takes
+      # this window's own name for its pane, never the enum's spelling.
+      if leaf.kind == glkBuiltin and leaf.title.len == 0:
+        leaf.title = gpuiPaneName(leaf.builtin)
     result.leaves.add leaf
 
 # ---------------------------------------------------------------------------

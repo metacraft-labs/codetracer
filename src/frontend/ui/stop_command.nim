@@ -8,7 +8,7 @@
 ## dispatched through `ui_js.nim`'s action table, and inert.
 ##
 ## The reason that could survive is that nothing can test it. `nim js` on
-## `renderer.nim` pulls the Karax/Monaco tree, so no runnable lane imports it —
+## `renderer.nim` pulls the kdom/Monaco tree, so no runnable lane imports it —
 ## `renderer-electron` and `renderer-web` compile-check it and stop there. A
 ## proc body that is only ever compiled is a proc body whose emptiness no
 ## check can see. So the decision lives here, in a leaf that imports only
@@ -60,7 +60,7 @@
 ## recorded here because it is the kind of estimate that gets believed:
 ## `closeSession` is the wrong call (see 1 above), and it lives in
 ## `ui/session_switch.nim`, which imports `../renderer` — importing it here
-## would pull the Karax/Monaco tree into this leaf and destroy the only reason
+## would pull the kdom/Monaco tree into this leaf and destroy the only reason
 ## `stop_command.nim` exists.
 ##
 ## ## Pause is a separate operation and DOES NOT EXIST YET

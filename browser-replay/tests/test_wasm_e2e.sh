@@ -5,7 +5,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BR_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$BR_DIR/.." && pwd)"
-BASE_URL="https://localhost:8443"
+# The replay server is reached at a name under the org development scheme, not at
+# bare `localhost`: the certificate it serves is the org leaf for
+# `*.codetracer.localhost` and does not cover `localhost`. The name needs no
+# /etc/hosts entry -- RFC 6761 reserves `localhost`, so resolvers answer any name
+# under it from loopback -- and its root CA is already trusted machine-wide, so
+# no --cacert anywhere below -- and, as of this change, no `-k` either.
+#
+# Every curl in this file used to be `curl -sk`. `-k` is `--insecure`: it skips
+# verification altogether, so the tests proved only that *something* answered on
+# the port, never that it presented a credential any client would accept. With
+# the org root in the system trust store that bypass is no longer needed, and
+# dropping it is the point of the migration rather than a tidy-up: the tests now
+# fail if TLS is wrong, which is what section 7 asks of them.
+BASE_URL="https://replay.codetracer.localhost:8443"
 PASS=0
 FAIL=0
 
@@ -40,7 +53,7 @@ bash "$BR_DIR/start-server.sh" 2>/dev/null || true
 sleep 1
 
 # Test 1: WASM JS module served
-STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL/app/pkg/db_backend.js")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/app/pkg/db_backend.js")
 if [ "$STATUS" = "200" ]; then
 	pass "db_backend.js served (HTTP $STATUS)"
 else
@@ -48,7 +61,7 @@ else
 fi
 
 # Test 2: WASM binary served with correct content-type
-HEADERS=$(curl -sk -D - -o /dev/null "$BASE_URL/app/pkg/db_backend_bg.wasm")
+HEADERS=$(curl -s -D - -o /dev/null "$BASE_URL/app/pkg/db_backend_bg.wasm")
 STATUS=$(echo "$HEADERS" | head -1 | grep -o "[0-9][0-9][0-9]" | head -1)
 CONTENT_TYPE=$(echo "$HEADERS" | grep -i "content-type" | head -1)
 if [ "$STATUS" = "200" ]; then
@@ -64,7 +77,7 @@ else
 fi
 
 # Test 3: worker.js served
-STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL/app/worker.js")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/app/worker.js")
 if [ "$STATUS" = "200" ]; then
 	pass "worker.js served"
 else
@@ -72,7 +85,7 @@ else
 fi
 
 # Test 4: index.html served
-STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$BASE_URL/app/index.html")
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/app/index.html")
 if [ "$STATUS" = "200" ]; then
 	pass "index.html served"
 else
@@ -84,7 +97,7 @@ mkdir -p "$BR_DIR/traces/e2e-test"
 echo '{"program":"test_prog","recordingMode":"mcr-interpose","platform":"x86_64-linux-gnu","tickSource":"none"}' >"$BR_DIR/traces/e2e-test/meta.json"
 dd if=/dev/urandom of="$BR_DIR/traces/e2e-test/trace.ct" bs=1024 count=10 2>/dev/null
 
-RANGE_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" -H "Range: bytes=0-99" "$BASE_URL/traces/e2e-test/trace.ct")
+RANGE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Range: bytes=0-99" "$BASE_URL/traces/e2e-test/trace.ct")
 if [ "$RANGE_STATUS" = "206" ]; then
 	pass "MCR trace range request (HTTP $RANGE_STATUS)"
 else

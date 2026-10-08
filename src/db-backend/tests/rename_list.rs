@@ -60,16 +60,30 @@ fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sourcemap")
 }
 
+/// Copy the lodash bundle and its map into a fresh directory owned by
+/// one test.  Each test writes its own `renames.toml` next to the
+/// bundle, and the test harness may run the tests of this binary in
+/// separate processes at once, so a shared directory would let one
+/// test see (or delete) another test's rename list.
+fn private_fixture_copy() -> tempfile::TempDir {
+    let source = fixture_dir();
+    let copy = tempfile::tempdir().expect("tempdir for the fixture copy");
+    for name in ["lodash.min.js", "lodash.min.js.map"] {
+        let from = source.join(name);
+        assert!(from.is_file(), "fixture {} missing at {}", name, from.display());
+        std::fs::copy(&from, copy.path().join(name)).expect("copy fixture file");
+    }
+    copy
+}
+
 /// Build a minimal trace that lands a step on the recorded minified
 /// bundle so [`Handler::load_sourcemaps`] discovers the sibling map.
-fn build_trace_into_fixture() -> (Arc<dyn TraceReader>, PathBuf) {
-    let dir = fixture_dir();
+/// The returned directory is the test's private copy of the fixture;
+/// it is deleted when the returned `TempDir` is dropped.
+fn build_trace_into_fixture() -> (Arc<dyn TraceReader>, PathBuf, tempfile::TempDir) {
+    let copy = private_fixture_copy();
+    let dir = copy.path().to_path_buf();
     let min_path = dir.join("lodash.min.js");
-    assert!(
-        min_path.is_file(),
-        "fixture lodash.min.js missing at {}",
-        min_path.display()
-    );
 
     let events: Vec<TraceLowLevelEvent> = vec![
         TraceLowLevelEvent::Path(min_path.clone()),
@@ -106,12 +120,11 @@ fn build_trace_into_fixture() -> (Arc<dyn TraceReader>, PathBuf) {
         }),
     ];
     let reader = CTFSTraceReader::from_events(events, &dir).expect("from_events");
-    (Arc::new(reader), dir)
+    (Arc::new(reader), dir, copy)
 }
 
 /// Drop a `renames.toml` next to the fixture for the duration of the
-/// test.  The guard removes the file on drop so concurrent tests on
-/// other fixtures don't pick it up.
+/// test, removing it on drop.
 struct RenamesGuard {
     path: PathBuf,
 }
@@ -183,7 +196,7 @@ fn p5_rename_list_applies_via_cache_resolver() {
     // is the process env, not memory invariants, so resuming after a
     // poison is safe.
     let _guard = env_mutex().lock().unwrap_or_else(|p| p.into_inner());
-    let (reader, fixture) = build_trace_into_fixture();
+    let (reader, fixture, _fixture_copy) = build_trace_into_fixture();
     let mut handler =
         Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader.clone(), false);
     handler.load_sourcemaps(&fixture);
@@ -256,7 +269,7 @@ fn p5_rename_list_composes_with_sourcemap_names() {
     // is the process env, not memory invariants, so resuming after a
     // poison is safe.
     let _guard = env_mutex().lock().unwrap_or_else(|p| p.into_inner());
-    let (reader, fixture) = build_trace_into_fixture();
+    let (reader, fixture, _fixture_copy) = build_trace_into_fixture();
     let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&fixture);
     let _renames = RenamesGuard::new(
@@ -308,7 +321,7 @@ fn p5_rename_list_kill_switch_disables_loader() {
     unsafe { std::env::set_var(key, "0") };
     assert!(!rename_list_enabled(), "sanity: kill switch parsed");
 
-    let (reader, fixture) = build_trace_into_fixture();
+    let (reader, fixture, _fixture_copy) = build_trace_into_fixture();
     let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&fixture);
     let _renames = RenamesGuard::new(
@@ -355,7 +368,7 @@ fn p5_explicit_path_overrides_sibling_lookup() {
     // is the process env, not memory invariants, so resuming after a
     // poison is safe.
     let _guard = env_mutex().lock().unwrap_or_else(|p| p.into_inner());
-    let (reader, fixture) = build_trace_into_fixture();
+    let (reader, fixture, _fixture_copy) = build_trace_into_fixture();
     let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&fixture);
 

@@ -1,0 +1,20 @@
+{
+  "D1": "roleStyle(role, cdAnsi256, design).fg == \"indexed:\" & $nearestXterm256(c)",
+  "D2": "roleStyle(role, cdAnsi16, design).fg == AnsiNames[nearestAnsi16Family(c)]",
+  "D3": "term.bg == \"\"",
+  "G1": "STALE: src/frontend/styles/generated/design_tokens.nim differs from what 3d0703d7da8124bde6ad82e4a6a0b5cdd29d49fc generates:",
+  "G2": "STALE: src/frontend/styles/generated/alias.styl differs from what 3d0703d7da8124bde6ad82e4a6a0b5cdd29d49fc generates:",
+  "H1": "FAIL: hand-written #rrggbb in src/frontend/tui/app/views/gutter.nim:",
+  "H2": "FAIL: ANSI colour name painted directly in src/frontend/tui/app/views/source_pane.nim (paint a role):",
+  "P1": "after.colors == cdTrueColor",
+  "P2": "lightCaps.modeFrom == bsOsc11",
+  "P3": "dec.truecolor",
+  "P4": "p.hasBackground",
+  "P5": "f.panelBg == hexT(dtColorsUiSurfaceBasePanel, mode)",
+  "S1": "blank > 0 and onPanel == blank",
+  "S3": "activeBg == tokenHex(dtColorsUiSurfacePrimaryTertiary, dmDark)",
+  "S4": "f.editorBg == hexT(dtEditorThemeGround, mode)",
+  "T1": "spec(role).hasFg and spec(role).fg == token",
+  "T2": "spec(role).hasFg and spec(role).fg == token",
+  "T3": "spec(role).hasBg and spec(role).bg == token"
+}

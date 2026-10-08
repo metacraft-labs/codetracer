@@ -59,7 +59,7 @@ type MaterializedFlowFixture = {
   label: string;
   language: string;
   traceDir: string;
-  traceFileName: "trace.bin" | "trace.json";
+  traceFileName: "trace.bin" | "trace.ct";
   sourceFileName: string;
   requiredSourceSnippets: string[];
   calltraceFunction: string;
@@ -92,7 +92,7 @@ const materializedFixtures: MaterializedFlowFixture[] = [
     label: "Ruby",
     language: "ruby",
     traceDir: rubyFlowTraceFixture,
-    traceFileName: "trace.json",
+    traceFileName: "trace.ct",
     sourceFileName: "ruby_flow_test.rb",
     requiredSourceSnippets: ["def calculate_sum", "def sum_with_while"],
     calltraceFunction: "calculate_sum",
@@ -108,7 +108,7 @@ const materializedFixtures: MaterializedFlowFixture[] = [
     label: "JavaScript",
     language: "javascript",
     traceDir: javascriptFlowTraceFixture,
-    traceFileName: "trace.json",
+    traceFileName: "trace.ct",
     sourceFileName: "javascript_flow_test.js",
     requiredSourceSnippets: ["function calculate_sum", "var sum_val"],
     calltraceFunction: "calculate_sum",

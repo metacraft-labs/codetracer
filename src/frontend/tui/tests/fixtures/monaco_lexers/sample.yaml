@@ -1,0 +1,28 @@
+# A YAML sample.
+name: sample
+version: 1.0
+enabled: true
+nothing: null
+count: 42
+ratio: -1.5e3
+anchors:
+  base: &base
+    image: "ubuntu:22.04"
+    env:
+      - KEY=value
+  derived:
+    <<: *base
+    tag: 'single quoted'
+multiline: |
+  first line
+  second line
+folded: >
+  folded text
+list:
+  - one
+  - two: 2
+    three: [3, 4]
+  - {inline: map, other: 5}
+---
+second: document
+...

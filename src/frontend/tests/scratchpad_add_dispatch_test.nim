@@ -26,7 +26,7 @@
 ## Only two things are stand-ins, both stated here rather than mocked
 ## silently:
 ## - ``SinkComponent`` stands in for ``ScratchpadComponent``.  ``ui/scratchpad``
-##   cannot be imported into a plain node test (it pulls in the Karax/DOM
+##   cannot be imported into a plain node test (it pulls in the kdom/DOM
 ##   ``ui_imports`` tree), so the component subscribes to
 ##   ``InternalAddToScratchpad`` exactly like ``ScratchpadComponent.register``
 ##   does and counts the deliveries its handler receives.  The subscription

@@ -151,20 +151,26 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # than of that milestone: THE SCAN IS BY NAME, so a symbol added anywhere in
 # `src/frontend` marks every unreached export of the same name as reached.
 #
-# `viewmodel/identity/token.nim:254 issuedAt` — an accessor on `IdentityClaims`
+# `viewmodel/identity/token.nim:153 issuedAt` — an accessor on `IdentityClaims`
 # that no product module reaches — is now masked, because the indicator's
 # disclosure reads `cert.issuedAt` off a test certificate. Those are unrelated
 # symbols in unrelated modules. The masking is not fixable from the milestone's
 # side either: `issued_at` is the certificate standard's own field name and the
 # disclosure is required to show it.
 #
-# A SECOND MASKING WAS FOUND THE SAME WAY AND WAS FIXED. `token.nim:234`
-# exports its own `SignatureVerifier`, and SB-1's verifier seam was first
-# called the same thing, which masked it and would have taken this to 1224.
-# The seam is now `CertificateSignatureVerifier`, so token.nim's export is
-# counted again. Two unrelated types of one name in one import graph was worth
-# separating on its own terms; that it also un-masked a finding is how it was
-# noticed.
+# A SECOND MASKING WAS FOUND THE SAME WAY AND WAS FIXED. `token.nim` exported
+# its own `SignatureVerifier`, and SB-1's verifier seam was first called the
+# same thing, which masked it and would have taken this to 1224. The seam is
+# now `CertificateSignatureVerifier`, so token.nim's export was counted again.
+#
+# 2026-09-30: token.nim's `SignatureVerifier` NO LONGER EXISTS. It was the
+# synchronous Ed25519 seam of the retired `CTI\x01` container; the identity
+# layer verifies RS256 asynchronously through `IdentityTransport` now. So the
+# collision this paragraph is about is gone, and the paragraph is kept for one
+# reason: do NOT rename `CertificateSignatureVerifier` back. Its other argument
+# stands on its own — two unrelated types of one name in one import graph is a
+# reading hazard — and reverting would re-create a collision that this guard
+# can only report as a lowered ceiling.
 #
 # THE LESSON FOR THE NEXT READER: a DROP in this number is not automatically
 # progress. Check whether a name went away or a name merely arrived somewhere
@@ -621,8 +627,31 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #       `reasonlessDisabledStartOptions` (asserted by
 #       `welcome_screen_vm_test.nim`); `flow_vm.FlowWireTakenOrdinal` (the
 #       sibling of the `FlowWireNotTakenOrdinal` carried above).
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1296 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1296 bash ci/test/frontend-reachability.sh
+#
+# 1296 -> 1292 ON 2026-09-28: the terminal and GPUI desktop-parity work reached
+# four exports nothing had reached (and removed or moved into their tests the
+# ones it added and nothing reads); the ceiling follows the tree down.
+#
+# 1292 -> 1285 ON 2026-10-04, after `agents` had drifted to 1300 (red on the
+# branch itself) with the identity, web-deployment and PLAT-48..50 work:
+#   -13, a CLASSIFICATION FIX, not a hiding: `frontend/test_support/` and
+#       `frontend/tui/testing/` are test-support trees whose every importer is
+#       a suite or the lane runner (`tui/testing/`'s own LAYER RULE says so and
+#       `test_tui_build_prerequisites.nim` asserts it), so the guard now reads
+#       them as test code, as it reads `tests/`. All thirteen were "tested, no
+#       product module reaches it" helpers a suite calls: `spec_documents`'
+#       `specDocument` and `specDocumentRef`, `strip_read`'s `footerTitles` and
+#       `stripLabelProblems`, and nine of `dual_snap`'s (CTUI-2's two-tier
+#       harness).
+#   -2, DELETED: `layout_model.pinAnchorOf` (its one reader was folded into
+#       `pinPlaceOf` and only comments named it) and
+#       `event_log_vm.closeColumnsMenu` (no caller: the column menu toggles).
+#   The other new findings since 1292 are the identity layer's and the web
+#   front door's accessors (`device_grant`, `jwt`, `session`, `token`,
+#   `endpoint_codec`, `endpoint_protocol`), tested and awaiting their product
+#   callers; they are left for those features' owners, inside the ceiling.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1285 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1285 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
@@ -719,6 +748,28 @@ lint_step "Value presentation boundary: one pipeline, pure, with no surface bypa
 lint_step "TUI layer split: the decision half of each decide/perform pair does no I/O" \
 	bash ci/test/tui-layer-split-boundary.sh
 
+# PLAT-46: the terminal front-end paints from the design system and nothing
+# else. The first gate is a source scan with its own positive controls (no
+# hand-written `#rrggbb` under `tui/app/`, no ANSI colour name painted by a view,
+# no reverse lookup); the second regenerates the desktop's stylus AND the TUI's
+# `design_tokens.nim` from the pinned `libs/codetracer-design-system` revision
+# in one resolver run and fails when either committed output differs — the
+# staleness question the generator's header said was a good gate to have.
+lint_step "TUI design tokens: no hand-written colour, no ANSI-name painting under tui/app" \
+	bash ci/test/tui-design-tokens-boundary.sh
+
+lint_step "Design tokens: the committed stylus and the TUI token module are what the pinned design system generates" \
+	bash ci/test/design-tokens-fresh.sh
+
+lint_step "Default layout: the committed desktop default is what the shared default arrangement generates" \
+	bash ci/test/default-layout-fresh.sh
+
+# PLAT-47 B4: the terminal tokenises source with the desktop's own Monaco
+# Monarch definitions, exported to JSON; the committed export must be what the
+# linked `monaco-editor` generates.
+lint_step "Monarch definitions: the terminal's tokenizer table is what the linked monaco-editor exports" \
+	bash ci/test/monarch-languages-fresh.sh
+
 # PLAT-39's LAW-R4 and PLAT-40's production-caller gate. Both are source scans
 # with their own positive and negative controls, need no build and no
 # toolchain beyond coreutils, grep and sed, and were wired into no lane — which
@@ -730,6 +781,23 @@ lint_step "PLAT-39 oracle independence: the vision producer imports nothing from
 
 lint_step "PLAT-40 production callers: every pane producer has a caller a user can reach" \
 	bash ci/test/plat40-production-callers.sh
+
+# Two more source scans of the same kind — coreutils, grep and sed, no build —
+# that `shell-gate-coverage.sh` reported as reachable from no lane.
+#
+# PLAT-35's §30a scan: neither cross-renderer answer producer derives its
+# answer from the other's, and nothing else under src/ relays one. It was red
+# when it landed (it refused PLAT-39's screen-oracle records, and later every
+# milestone's desktop-reference suite), which is why it was never wired; it now
+# grades the screen oracle as a fourth subject set and sets aside, by name,
+# readers of another milestone's `plat<N>-` record.
+lint_step "PLAT-35 answer independence: neither producer's answer is derived from the other's" \
+	bash ci/test/plat35-answer-independence.sh
+
+# The `-d:ctWeb` partition inventory (WD1c §7.5): the deferred convergence may
+# shrink freely and grow only by editing the inventory. Costs milliseconds.
+lint_step "ctWeb partition: the compile-time web fork is the recorded inventory" \
+	bash ci/test/ctweb-partition-inventory.sh
 
 # `VALID_DAP_COMMANDS` against the tables it mirrors, in BOTH directions. The
 # allow-list is hand-written but no longer hand-CHECKED: the guard derives the
@@ -747,6 +815,14 @@ lint_step "DAP command sync: contract suite" \
 
 lint_step "DAP command sync: the allow-list names everything the engine dispatches" \
 	python3 ci/test/dap-command-sync.py
+
+# The mutation harnesses edit the product's sources in place. One that DROPS a
+# flag it does not know turns `--only=…` into a full, file-mutating grading run;
+# every harness must refuse the flag instead, before touching anything — and an
+# arm id it does not declare, or an empty `--only=`, likewise
+# (`ci/lib/harness_guard.py`). Pure Python start-up per harness, no build.
+lint_step "Mutation harnesses refuse an unknown flag or arm id before touching a file" \
+	bash ci/test/harness-argument-refusal.sh
 
 # Canary for the chronicles/distinct-type breakage that takes every editor in
 # the project down. Currently QUARANTINED against an upstream nimsuggest crash;

@@ -186,6 +186,19 @@ proc containerBytes(path: string): seq[byte] =
   for i in 0 ..< raw.len:
     result[i] = byte(raw[i])
 
+
+proc recordedPaths(container: string): seq[string] =
+  ## The container's source paths: its ``paths.dat`` records, in id order.
+  ## ``meta.dat`` carries no path list (internal-files.md §"``meta.dat``
+  ## carries no path list").
+  var opened = openNewTrace(container)
+  doAssert opened.isOk, "openNewTrace: " & opened.error
+  var reader = opened.get()
+  for id in 0'u64 ..< reader.pathCount():
+    let p = reader.path(id)
+    doAssert p.isOk, "path " & $id & ": " & p.error
+    result.add p.get()
+
 proc metaValue(span: SpanRecord; key: string): string =
   for (k, v) in span.metadata:
     if k == key:
@@ -265,23 +278,23 @@ suite "RS-M9 JavaScript request panel":
     let bytes = containerBytes(FixtureContainer)
 
     # --- the recording declares a span stream ---------------------------
-    # The db-backend's span reader returns "no spans" for a container whose bit
-    # 13 is clear, so a recorder that failed to register spans would show an
-    # empty panel and no error anywhere.
+    # The span stream is found by presence: spans.dat is created lazily, after
+    # meta.dat is written, so bit 13 is never set from meta.dat version 6 on
+    # (internal-files.md §"Stream-presence flags are a hint, not a gate").
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    check meta.get().hasSpanStream
+    check not meta.get().hasSpanStream
     check hasSpanStreamFiles(bytes)
 
     # ONE container for the whole session: one Node process served all seven
     # requests. The fixture records the app and leaves the in-process HTTP
     # driver runnable but uninstrumented, so body-parser awaits cannot put
     # client steps inside a server request range.
-    check meta.get().paths.len == 1
+    check recordedPaths(FixtureContainer).len == 1
     var recordedPaths: seq[string] = @[]
-    for p in meta.get().paths:
+    for p in recordedPaths(FixtureContainer):
       recordedPaths.add(p.replace('\\', '/'))
     var sawApp = false
     var sawDriver = false

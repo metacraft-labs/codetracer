@@ -32,7 +32,10 @@
 ## So each state carries a second assertion that does NOT go through the
 ## comparison: the decoration's own rectangle, taken from
 ## `binding.decorationsFor` — the MODEL's expectation — is probed on the REAL
-## terminal and required to hold that kind's glyph. A shared defect in the glyph
+## terminal and required to hold that kind's glyph. Since PLAT-47 the drop
+## target and caret are TINTS (the cell keeps the glyph the model's screen has
+## there, on a background the ungestured screen did not have) and the drag
+## ghost is a LABEL over the frame (its last character is probed). A shared defect in the glyph
 ## table or in the rectangle reddens that probe while leaving the equality
 ## green, which is the whole point of writing it.
 ##
@@ -73,7 +76,7 @@
 ##
 ## Verification-Harness-Traps §13.
 
-import std/[options, os, strutils, times, unicode, unittest]
+import std/[options, os, strutils, tables, times, unicode, unittest]
 
 import isonim_tui
 import term_assert
@@ -86,7 +89,10 @@ import ../apps/app_layout_transients as transApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 57
+const ExpectedAssertions = 64
+  ## 57 -> 64 (PLAT-47): a sixth state (`tsDraggingOnStrip`, the join's tint
+  ## and caret) x two geometries x three comparison assertions, and the
+  ## mutation arm's check that its replacement differs from the kept glyph.
 
 const
   Stem = "app_layout_transients"
@@ -120,6 +126,27 @@ proc modelDecorations(state: transApp.TransientState;
   let geom = geometryOf(composed, bodyArea(cols, rows), model.interaction)
   decorationsFor(composed, geom, model.interaction)
 
+proc modelScreen(state: transApp.TransientState;
+                 cols, rows: int): seq[seq[string]] =
+  ## The model's screen as cells: the painted rows (`shellRows`, which carry
+  ## every GLYPH decoration) with the frame's LABEL overlays written over them
+  ## (PLAT-47: the drag ghost is a label above the frame, `frameOverlaysOf`).
+  ## A tint overlay changes colours only, so it moves no cell here.
+  let model = transApp.modelFor(state, cols, rows)
+  for line in shellRows(model, cols, rows):
+    var row: seq[string] = @[]
+    for r in runes(line):
+      row.add $r
+    result.add row
+  for o in frameOverlaysOf(modelDecorations(state, cols, rows)):
+    if o.kind != foLabel or o.row < 0 or o.row >= result.len:
+      continue
+    var c = o.col
+    for r in runes(o.text):
+      if c >= 0 and c < result[o.row].len:
+        result[o.row][c] = $r
+      inc c
+
 proc paintedCellsOfModel(state: transApp.TransientState;
                          cols, rows: int): int =
   ## The number of non-blank cells the model says the screen has. The
@@ -127,10 +154,26 @@ proc paintedCellsOfModel(state: transApp.TransientState;
   ## blank satisfy a cell-for-cell equality for free (Verification-Harness-Traps
   ## §4b), and this number is knowable because the tree is a pure function of
   ## the geometry.
-  for line in shellRows(transApp.modelFor(state, cols, rows), cols, rows):
-    for r in runes(line):
-      if $r != " ":
+  for row in modelScreen(state, cols, rows):
+    for cell in row:
+      if cell != " ":
         inc result
+
+proc colourKey[C](c: C): string =
+  case c.kind
+  of ckDefault: "default"
+  of ckIndexed: "idx" & $c.idx
+  of ckRgb: $c.r & "," & $c.g & "," & $c.b
+
+proc paintRank(d: LayoutDecoration; index: int): int =
+  ## Where a decoration lands in the frame's paint order: every GLYPH
+  ## decoration in list order (`paintDecorations`), then the OVERLAYS in
+  ## `frameOverlaysOf`'s order — the tint, its caret, the ghost label.
+  case d.kind
+  of ldDropTarget: 10_000
+  of ldDropCaret: 10_001
+  of ldDragGhost: 10_002
+  else: index
 
 # ---------------------------------------------------------------------------
 # The probe registers. Filled by the sweep in the first case and asserted in
@@ -146,6 +189,9 @@ var
   probesMade = 0
   kindsProbed: set[LayoutDecorationKind] = {}
   statesSwept = 0
+  baselineBg = initTable[(int, int, int), string]()
+    ## Every cell's background on the UNGESTURED screen (step 0), per
+    ## geometry: what a drop tint must have changed.
 
 # ---------------------------------------------------------------------------
 # Assertion templates. Every helper that calls `check` is a TEMPLATE.
@@ -212,33 +258,78 @@ proc probeDecorationsOnTheTerminal(sess: var TuiTestSession;
   ## cannot demonstrate that from inside the same case.
   block:
     let decorations = modelDecorations(state, atCols, atRows)
+    let screen = modelScreen(state, atCols, atRows)
+    if state == transApp.tsNone:
+      for r in 0 ..< atRows:
+        for c in 0 ..< atCols:
+          baselineBg[(atCols, r, c)] = colourKey(sess.cellAt(r, c).bg)
     var skipped = 0
     var wrong: seq[string] = @[]
     for i, d in decorations:
       kindsProbed.incl d.kind
       if d.area.isEmptyArea:
         continue
-      let probeRow = d.area.row + d.area.height - 1
-      let probeCol = d.area.col + d.area.width - 1
-      # A later decoration paints over this one, so the cell would be asserted
-      # against the wrong kind.
+      var probeRow = d.area.row + d.area.height - 1
+      var probeCol = d.area.col + d.area.width - 1
+      if d.kind == ldDragGhost:
+        # A LABEL (PLAT-47): its last non-blank character, drawn over the
+        # frame.
+        let text = frameOverlaysOf(@[d])[0].text.strip(leading = false)
+        probeRow = d.area.row
+        probeCol = d.area.col + text.runeLen - 1
+      # Something painted later covers the cell, so it would be asserted
+      # against the wrong decoration.
       var covered = false
-      for j in i + 1 ..< decorations.len:
-        if decorations[j].area.contains(probeRow, probeCol):
+      for j, other in decorations:
+        if j != i and paintRank(other, j) > paintRank(d, i) and
+           (if other.kind == ldDragGhost:
+              probeRow == other.area.row and probeCol >= other.area.col and
+              probeCol < other.area.col +
+                frameOverlaysOf(@[other])[0].text.runeLen
+            else: other.area.contains(probeRow, probeCol)):
           covered = true
-      # …and so does this decoration's own label, which is written along the
-      # first row of its rectangle after the fill.
-      if probeRow == d.area.row and
+      # …and so does a glyph decoration's own label, which is written along
+      # the first row of its rectangle after the fill.
+      if d.kind notin OverlayDecorations and probeRow == d.area.row and
          probeCol < d.area.col + labelCellsOf(d):
         covered = true
-      if covered or probeRow >= atRows or probeCol >= atCols:
+      if covered or probeRow >= atRows or probeCol >= atCols or
+         probeCol < 0:
         inc skipped
         continue
       inc probesMade
-      let rune = $sess.cellAt(probeRow, probeCol).rune
-      if rune != glyphFor(d.kind):
-        wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
-          ") reads '" & rune & "' rather than '" & glyphFor(d.kind) & "'"
+      let cell = sess.cellAt(probeRow, probeCol)
+      let rune = $cell.rune
+      case d.kind
+      of ldDropTarget, ldDropCaret:
+        # A TINT (PLAT-47): the glyph the model's screen has there, KEPT, on
+        # a background the ungestured screen did not have.
+        let want = screen[probeRow][probeCol]
+        if rune != want:
+          wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
+            ") reads '" & rune & "' rather than the kept glyph '" & want & "'"
+        let before = baselineBg.getOrDefault((atCols, probeRow, probeCol), "")
+        if before.len == 0 or colourKey(cell.bg) == before:
+          wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
+            ") is not tinted: background " & colourKey(cell.bg) &
+            " as on the ungestured screen"
+      of ldDragGhost:
+        let want = screen[probeRow][probeCol]
+        if rune != want:
+          wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
+            ") reads '" & rune & "' rather than the label's '" & want & "'"
+      of ldRevealOverlay:
+        # THE PANE ITSELF (PLAT-48), not a fill: the cell the model's screen
+        # has there — the revealed pane's own content — and never the old
+        # `RevealOverlayGlyph` fill.
+        let want = screen[probeRow][probeCol]
+        if rune != want or rune == RevealOverlayGlyph:
+          wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
+            ") reads '" & rune & "' rather than the pane's '" & want & "'"
+      else:
+        if rune != glyphFor(d.kind):
+          wrong.add $d.kind & " at (" & $probeRow & "," & $probeCol &
+            ") reads '" & rune & "' rather than '" & glyphFor(d.kind) & "'"
     for w in wrong:
       probeMismatches.add $state & " at " & $atCols & "x" & $atRows & ": " & w
     probeNotes.add $state & " at " & $atCols & "x" & $atRows & ": " &
@@ -354,14 +445,21 @@ suite "PLAT-6 Tier 2: the transient states, harness against a real terminal":
     # A CELL THAT CARRIES A DECORATION, not (0,0): mutating a blank cell would
     # be an arm about the comparison rather than about the decorations, and a
     # hard-coded coordinate keeps passing after the layout moves the content.
-    let target = firstCellWhere(tier1, proc(c: CanonCell): bool =
-      c.rune == glyphFor(ldDropTarget))
+    # Since PLAT-47 the drop target is a TINT and carries the pane's own
+    # glyph, so the cell is found through the model's rectangle: its last
+    # cell, whatever glyph the tint kept there.
+    var target = (row: -1, col: -1)
+    for d in modelDecorations(transApp.tsDragging, 120, 40):
+      if d.kind == ldDropTarget and not d.area.isEmptyArea:
+        target = (row: d.area.row + d.area.height - 1,
+                  col: d.area.col + d.area.width - 1)
     checkpoint("mutating the drop-target cell (" & $target.row & "," &
                $target.col & ")")
     ck target.row >= 0
     let before = cellAtCanon(tier1, target.row, target.col)
-    ck before.rune == glyphFor(ldDropTarget)
-    mutateCellmapRune(tier1, target.row, target.col, "X")
+    let replacement = if before.rune == "X": "Y" else: "X"
+    ck before.rune != replacement
+    mutateCellmapRune(tier1, target.row, target.col, replacement)
     let after = compareSnapshotDirs(tier1, tier2)
     ck after.len == 1
     if after.len == 1:
@@ -371,7 +469,7 @@ suite "PLAT-6 Tier 2: the transient states, harness against a real terminal":
       ck d.kind == dkCell
       ck d.row == target.row
       ck d.col == target.col
-      ck d.tier1.contains("'X'")
+      ck d.tier1.contains("'" & replacement & "'")
       ck d.tier2.contains(before.rune)
       ck d.summary == "the runes differ"
 

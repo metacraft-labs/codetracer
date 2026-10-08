@@ -23,6 +23,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod test_harness;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -407,7 +409,11 @@ fn p6_3_translated_column_flows_through_to_stack_frame() {
     // So a recorded column of 29 (1-indexed) should produce a frame
     // line of 5 and column of 1.
     if !translation_enabled() {
-        eprintln!("CT_SOURCEMAP_TRANSLATION is off; skipping P6.3 column-flow assertion.");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "p6_3_translated_column_flows_through_to_stack_frame",
+            "CT_SOURCEMAP_TRANSLATION turns sourcemap translation off in this environment, so the P6.3 column-flow assertion cannot be checked",
+            "unset CT_SOURCEMAP_TRANSLATION",
+        );
         return;
     }
 

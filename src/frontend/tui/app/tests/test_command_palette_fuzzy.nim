@@ -65,7 +65,9 @@ import ../views/command_palette
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 90
+# 90 -> 93 (2026-10-04): the gate reads CPU time, and asserts its instrument
+# (a CPU sample per run, a non-zero best, no run's CPU over its wall time).
+const ExpectedAssertions = 93
 
 var countedAssertions = 0
 
@@ -87,6 +89,17 @@ const
     ## 10% margin on a gate the lane has to keep passing. More samples of the
     ## SAME work narrows the estimator without touching the budget: the
     ## assertion is still "< 8 ms" and the runs are still cold and identical.
+    ##
+    ## AND THE 8 ms IS CPU TIME, since 2026-10-04. The budget is about the
+    ## search's cost, and a wall clock on a host shared with CI runners (load
+    ## 100-260 on 24 cores) measures the scheduler as much as the search:
+    ## best-of-12 samples went over on the unmodified tree 4 times in 12
+    ## (codetracer-specs issue 2026-09-30-wall-clock-gates-fail-under-host-load).
+    ## The process's CPU time over the same `setQuery` excludes the time the
+    ## process spent runnable but not running, so the gate now moves only when
+    ## the WORK does. The wall-clock figures are still taken and printed, and
+    ## asserted to be at least the CPU figure (a CPU clock that read zero, or
+    ## more than the elapsed time, is a broken instrument, not a fast search).
 
   IntendedQuery = "cdmg"
     ## A SUBSEQUENCE, not a prefix and not a substring — `c`, `d`, `m`, `g` in
@@ -418,20 +431,20 @@ suite "CTUI-10: the palette ranks isonim-tui's way over real symbols":
     # The selected row carries the highlight background on every cell.
     var highlighted = 0
     for col in 0 ..< width:
-      if g.styleAt(2, col).bg == command_palette.SelectedBackground:
+      if g.styleAt(2, col).surface == command_palette.SelectedBackground:
         inc highlighted
     checkpoint("highlighted cells on the selected row: " & $highlighted)
     ck highlighted == width
     # …and the row BELOW it does not, which is the positive twin.
     var spill = 0
     for col in 0 ..< width:
-      if g.styleAt(3, col).bg == command_palette.SelectedBackground:
+      if g.styleAt(3, col).surface == command_palette.SelectedBackground:
         inc spill
     ck spill == 0
     # The matched characters are accented, one cell per query character.
     var accented = 0
     for col in 0 ..< width:
-      if g.styleAt(2, col).fg == command_palette.MatchStyle.fg:
+      if g.styleAt(2, col).role == command_palette.MatchStyle.role:
         inc accented
     checkpoint("accented cells: " & $accented)
     ck accented == IntendedQuery.len
@@ -459,6 +472,7 @@ suite "CTUI-10: the palette ranks isonim-tui's way over real symbols":
     var model = initPaletteModel(index)
     discard model.open()
     var elapsed: seq[int64] = @[]
+    var cpu: seq[int64] = @[]
     var hitCounts: seq[int] = @[]
     for _ in 0 ..< GateRuns:
       # THE SAME QUERY EVERY RUN, and every run is COLD: `rankWith` calls
@@ -470,16 +484,28 @@ suite "CTUI-10: the palette ranks isonim-tui's way over real symbols":
       # assumed. Varying the query instead would compare five different amounts
       # of work and make "the best of five" mean the cheapest query.
       let started = getMonoTime()
+      let cpuStarted = cpuTime()
       let n = model.setQuery(IntendedQuery)
+      cpu.add int64((cpuTime() - cpuStarted) * 1_000_000.0)
       elapsed.add (getMonoTime() - started).inMicroseconds
       hitCounts.add n
       model.query = ""
-    let best = min(elapsed)
+    let best = min(cpu)
     echo "CTUI-10 PALETTE GATE: ", GateSymbols, " symbols, query `",
-         IntendedQuery, "` -> ", hitCounts[0], " hit(s); ", elapsed,
-         " microseconds over ", GateRuns, " run(s); best ", best,
-         " us against ", GateBudgetMs * 1000, " us"
+         IntendedQuery, "` -> ", hitCounts[0], " hit(s); CPU ", cpu,
+         " us, wall ", elapsed, " us over ", GateRuns, " run(s); best CPU ",
+         best, " us (best wall ", min(elapsed), " us) against ",
+         GateBudgetMs * 1000, " us"
     ck elapsed.len == GateRuns
+    ck cpu.len == GateRuns
+    # The instrument reads: some CPU was spent, and no run spent more CPU
+    # than the time that elapsed (one clock tick of slack: `cpuTime` is
+    # `clock()`, read at its own resolution).
+    ck best > 0
+    var cpuOverWall = 0
+    for i in 0 ..< GateRuns:
+      if cpu[i] > elapsed[i] + 1000: inc cpuOverWall
+    ck cpuOverWall == 0
     ck best < GateBudgetMs * 1000
     # THE SWEEP REALLY SWEPT: the first run's hit count is not zero — a matcher
     # that returned nothing would be very fast — and it is what the ORACLE says

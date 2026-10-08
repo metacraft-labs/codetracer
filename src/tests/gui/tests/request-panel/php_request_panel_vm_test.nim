@@ -165,6 +165,19 @@ proc containerBytes(path: string): seq[byte] =
   for i in 0 ..< raw.len:
     result[i] = byte(raw[i])
 
+
+proc recordedPaths(container: string): seq[string] =
+  ## The container's source paths: its ``paths.dat`` records, in id order.
+  ## ``meta.dat`` carries no path list (internal-files.md §"``meta.dat``
+  ## carries no path list").
+  var opened = openNewTrace(container)
+  doAssert opened.isOk, "openNewTrace: " & opened.error
+  var reader = opened.get()
+  for id in 0'u64 ..< reader.pathCount():
+    let p = reader.path(id)
+    doAssert p.isOk, "path " & $id & ": " & p.error
+    result.add p.get()
+
 proc metaValue(span: SpanRecord; key: string): string =
   for (k, v) in span.metadata:
     if k == key:
@@ -254,14 +267,14 @@ suite "RS-M7 PHP request panel":
     let bytes = containerBytes(FixtureContainer)
 
     # --- the recording declares a span stream ---------------------------
-    # The db-backend's span reader returns "no spans" for a container whose bit
-    # 13 is clear, so a recorder that failed to register spans would show an
-    # empty panel and no error anywhere.
+    # The span stream is found by presence: spans.dat is created lazily, after
+    # meta.dat is written, so bit 13 is never set from meta.dat version 6 on
+    # (internal-files.md §"Stream-presence flags are a hint, not a gate").
     let metaRaw = readInternalFile(bytes, "meta.dat")
     check metaRaw.isOk
     let meta = readMetaDat(metaRaw.get())
     check meta.isOk
-    check meta.get().hasSpanStream
+    check not meta.get().hasSpanStream
     check hasSpanStreamFiles(bytes)
     # NOTE: ``meta.get().recorderId`` is deliberately NOT asserted.  The FFI's
     # ``ct_write_meta_dat`` is a documented no-op on the multi-stream backend
@@ -274,8 +287,8 @@ suite "RS-M7 PHP request panel":
     # not one of eight per-request recordings.  The path table is the direct
     # evidence that interning is shared across the eight requests: the app is
     # interned once for the worker, not once per request.
-    check meta.get().paths.len == 1
-    check meta.get().paths[0].replace('\\', '/').endsWith(DemoAppSuffix)
+    check recordedPaths(FixtureContainer).len == 1
+    check recordedPaths(FixtureContainer)[0].replace('\\', '/').endsWith(DemoAppSuffix)
 
     # --- decode with the production reader ------------------------------
     let readerRes = initSpanStreamReader(bytes)
@@ -411,7 +424,7 @@ suite "RS-M7 PHP request panel":
       var traceRes = openNewTrace(FixtureContainer)
       check traceRes.isOk
       var trace = traceRes.get()
-      let gliIndex = lineOnlyGli(meta.get().paths.len)
+      let gliIndex = lineOnlyGli(recordedPaths(FixtureContainer).len)
       var seekTargets: seq[uint64] = @[]
       for i, span in webSpans:
         checkpoint("seek target of row " & $i)

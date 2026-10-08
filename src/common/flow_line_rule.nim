@@ -16,7 +16,7 @@
 ##
 ## Like `ui/flow_loop_math.nim`, `ui/trace_redraw_policy.nim` and
 ## `ui/editor_decoration_layers.nim`, this module deliberately has **no
-## imports**: `ui/editor.nim` is JS-only (karax plus the Monaco bindings), so
+## imports**: `ui/editor.nim` is JS-only (kdom plus the Monaco bindings), so
 ## the decision that turns a loaded flow window into one inline CSS class per
 ## source line could not be unit-tested at all while it lived inline in
 ## `flowStyleLines`. Everything here compiles on the C backend, so

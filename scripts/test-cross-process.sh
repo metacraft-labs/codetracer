@@ -109,7 +109,7 @@ require_file() {
 # pipeline failure is reported by the gate, before twenty tests fail for
 # a reason none of them can explain.
 record_fixture() {
-	local container payload
+	local container
 	[ -d "$FIXTURE_DIR" ] || die "three-trace demo sources are missing: $FIXTURE_DIR"
 
 	local regenerator="$FIXTURE_DIR/regenerate.sh"
@@ -129,16 +129,12 @@ record_fixture() {
 		die "the materialiser reported '$RECORDING_DIR', which is not a directory"
 	export RECORDING_DIR
 
-	# The browser tiers write the three-file JSON shape; the server tier
-	# writes a CTFS container. Checking the actual payloads (rather than
-	# just the directory) is what stops an interrupted pipeline from
-	# looking like a complete recording.
+	# The browser tiers are single-file CTFS recordings; the server tier is
+	# a directory holding one. Checking the actual payloads (rather than
+	# just the names) is what stops an interrupted pipeline from looking
+	# like a complete recording.
 	for container in frontend.ct frontend-wasm.ct; do
-		[ -d "$RECORDING_DIR/$container" ] ||
-			die "required trace container is missing: $RECORDING_DIR/$container"
-		for payload in trace.json trace_metadata.json trace_paths.json; do
-			require_file "$RECORDING_DIR/$container/$payload" "required trace payload"
-		done
+		require_file "$RECORDING_DIR/$container" "required trace payload"
 	done
 	[ -d "$RECORDING_DIR/backend.ct" ] ||
 		die "required trace container is missing: $RECORDING_DIR/backend.ct"

@@ -374,6 +374,58 @@ where
     handle_client(receiving_receiver, &receiving_thread, writer, cli_default_rename_list)
 }
 
+/// A recording this build structurally cannot open, refused on the container
+/// version the reader found in it.
+///
+/// **Why this is a type and not a formatted string.** `launch_failure_text`
+/// renders anything it cannot downcast with `{err:?}`, so a refusal boxed as a
+/// `String` reaches the user as an escaped Rust debug literal. The precedent
+/// here is [`ReplayWorkerStartError`], which exists for the same reason: a
+/// caller must be able to branch on *why* the launch failed instead of
+/// substring-matching a rendered message.
+///
+/// **Why it is distinct from every other open failure.** `refuse_unreadable_ctfs_version`
+/// already separates the three states `setup` can be in — not a container at
+/// all, a container this build reads, and a container whose VERSION it refuses
+/// — and it does so structurally, off six header bytes, with no reader and no
+/// text matching. What it could not do is get its answer to a user: it returned
+/// a `String`, which `launch_failure_text` renders with `{err:?}`, and the only
+/// carrier out was a `ct/notification` that no handshake can key on. So the
+/// refusal reached the engine's log and stopped there, and the front-ends
+/// reported a stall or a timeout for a recording whose reason was already
+/// known. This type is that answer made carryable.
+///
+/// A version-refused recording is **not** a corrupt one, and must never be
+/// reported as such: the bytes are intact and were written correctly by an
+/// older recorder. The only remedy is re-recording the program; nothing can be
+/// done to the file.
+#[derive(Debug, Clone)]
+pub struct ContainerVersionRefusal {
+    /// The container the reader refused.
+    pub container: PathBuf,
+    /// The reader's own refusal, verbatim — the one place the container
+    /// version it found, the versions it requires, and the re-record remedy are
+    /// all written down. It is quoted rather than paraphrased because a
+    /// paraphrase here would be a second vocabulary for the same fact, free to
+    /// drift from the reader that produced it.
+    pub reader_refusal: String,
+}
+
+impl fmt::Display for ContainerVersionRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: this recording cannot be opened by this build: {}. The file itself is \
+             intact and there is nothing that can be changed about it to make this build \
+             read it.",
+            self.container.display(),
+            self.reader_refusal
+        )
+    }
+}
+
+impl Error for ContainerVersionRefusal {}
+
 #[allow(clippy::too_many_arguments)]
 fn setup(
     trace_folder: &Path,
@@ -408,6 +460,15 @@ fn setup(
     } else {
         find_ctfs_container_in_dir(trace_folder)
     };
+
+    // A CTFS container of another version is refused here, by name, rather
+    // than falling through to the replay-worker path as if it were not a
+    // container at all (`ctfs-container.md` §2, "Older versions are refused").
+    for candidate in [trace_folder, trace_path.as_path()] {
+        if candidate.is_file() {
+            refuse_unreadable_ctfs_version(candidate)?;
+        }
+    }
 
     if let Some(ctfs_path) = ctfs_candidate {
         info!("detected CTFS container: {}", ctfs_path.display());
@@ -472,6 +533,12 @@ fn setup(
             Err(e) => {
                 // Not a valid CTFS materialised trace — fall through to
                 // MCR native replay or rr replay-worker handling below.
+                //
+                // A container whose VERSION this build refuses never reaches
+                // here: `refuse_unreadable_ctfs_version` above has already
+                // returned it, structurally, off the header's six bytes. That
+                // is the right place for it — a header probe needs no reader,
+                // so it answers even for a container no reader will open.
                 info!(
                     "CTFS open as materialised trace failed for {}: {e} — trying replay-worker path",
                     ctfs_path.display()
@@ -480,83 +547,19 @@ fn setup(
         }
     }
 
-    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
-    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS
-    // `.ct` container.  External recorders that have not yet adopted the
-    // CTFS writer still emit this — the Noir recorder (`nargo trace`)
-    // being the live example.  Treat it exactly like a materialized
-    // trace by decoding the events and running the same postprocessing
-    // pipeline `CTFSTraceReader::open()` uses, rather than wrongly
-    // falling through to the rr/MCR replay-worker path below.
-    let legacy_json_path = {
-        let direct = trace_folder.join("trace.json");
-        if direct.is_file() {
-            Some(direct)
-        } else if trace_folder.is_file() && trace_folder.file_name().map(|n| n == "trace.json").unwrap_or(false) {
-            Some(trace_folder.to_path_buf())
+    // A `trace.json` event stream is what the pure-Python and pure-Ruby
+    // test oracles write; it is compared against `ct print`, never opened.
+    // Refuse it by name instead of letting it fall through to the
+    // replay-worker path, whose error would say nothing about why.
+    if crate::materialized_source::is_test_oracle_output(trace_folder)
+        || crate::materialized_source::is_test_oracle_output(&trace_path)
+    {
+        let shown = if trace_folder.is_file() {
+            trace_folder
         } else {
-            None
-        }
-    };
-    if let Some(json_path) = legacy_json_path {
-        info!(
-            "detected legacy runtime_tracing materialized trace: {}",
-            json_path.display()
-        );
-        let json_bytes = std::fs::read(&json_path)?;
-        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
-        normalize_legacy_trace_json_values(&mut json_value);
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
-            .map_err(|e| format!("failed to decode legacy trace.json at {}: {e}", json_path.display()))?;
-        // Workdir: prefer `trace_metadata.json` next to `trace.json`,
-        // else fall back to the trace folder itself.
-        let meta_workdir = json_path
-            .parent()
-            .map(|d| d.join("trace_metadata.json"))
-            .filter(|p| p.is_file())
-            .and_then(|p| std::fs::read(&p).ok())
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from));
-        let workdir = meta_workdir.unwrap_or_else(|| {
-            json_path
-                .parent()
-                .map(|d| d.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."))
-        });
-        let reader = CTFSTraceReader::from_events(events, &workdir)?;
-        info!(
-            "legacy materialized trace loaded: {} steps, {} calls, {} events",
-            reader.step_count(),
-            reader.call_count(),
-            reader.event_count(),
-        );
-        let reader: Arc<dyn TraceReader> = Arc::new(reader);
-        let mut handler = Handler::construct_with_reader(
-            TraceKind::Materialized,
-            RecreatorArgs {
-                name: thread_name.to_string(),
-                ..RecreatorArgs::default()
-            },
-            reader,
-            false,
-        );
-        handler.raw_diff_index = raw_diff_index;
-        // RS-M2 — remember the recording directory so
-        // `ct/load-request-spans` can find the container (and any
-        // pre-cutover sidecar beside it).  Stores a path only: the
-        // span stream is deliberately not read at trace-open time.
-        handler.set_trace_folder(trace_folder);
-        handler.load_macro_sourcemaps(trace_folder);
-        // P3 — load Source Map V3 indexes for every recorded source.
-        handler.load_sourcemaps(trace_folder);
-        // §P5 — user-provided variable rename list.
-        handler.load_rename_list(trace_folder, rename_list_path);
-        if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-        }
-        handler.initialized = true;
-        return Ok(handler);
+            trace_path.as_path()
+        };
+        return Err(crate::materialized_source::test_oracle_refusal(shown.display()).into());
     }
 
     // Legacy `runtime_tracing` binary materialized layout: a `trace.bin`
@@ -565,9 +568,8 @@ fn setup(
     // CTFS container but is NOT one — `CtfsReader::open` rejects it on the
     // version byte (0x00 vs the CTFS-required 2..4), so `setup` would
     // otherwise fall through to the rr replay-worker path and fail with
-    // "program path has no file name".  Decode it the same way as
-    // `trace.json`: read the events, then run the shared `from_events`
-    // postprocessing pipeline.
+    // "program path has no file name".  Read the events, then run the
+    // shared `from_events` postprocessing pipeline.
     let legacy_bin_path = {
         let direct = trace_folder.join("trace.bin");
         if direct.is_file() {
@@ -699,33 +701,6 @@ fn setup(
     }
 }
 
-/// Repair a legacy `runtime_tracing` `trace.json` in place.
-///
-/// `pub` because `materialized_source` opens the same streams for the
-/// DeepReview collector and must apply the same repair; two copies of it would
-/// diverge and give a review a different trace from the one the debugger
-/// shows.
-pub fn normalize_legacy_trace_json_values(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                normalize_legacy_trace_json_values(item);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            if let Some(serde_json::Value::String(text)) = map.get("i")
-                && let Ok(parsed) = text.parse::<i64>()
-            {
-                map.insert("i".to_string(), serde_json::Value::Number(parsed.into()));
-            }
-            for child in map.values_mut() {
-                normalize_legacy_trace_json_values(child);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// File name of a multi-recording session manifest. Mirrored on the Nim
 /// side by `ct/src/ct/trace/trace_container.nim::SESSION_MANIFEST_FILE`.
 /// Spec: `codetracer-specs/Trace-Files/Session-Manifest.md` §5.
@@ -766,8 +741,8 @@ fn is_session_manifest_path(path: &Path) -> bool {
 ///    naming the manifest routes the launch through `setup_session`
 ///    (M41). Auto-detecting a single trace file here instead would open
 ///    one arbitrary member and silently show a fraction of the program;
-/// 4. otherwise auto-detect, preferring CTFS containers but keeping
-///    legacy materialized `trace.json` / `trace.bin` fixtures loadable;
+/// 4. otherwise auto-detect, preferring CTFS containers, then a legacy
+///    `trace.bin`, then test-oracle `trace.json` (which `setup` refuses);
 /// 5. failing that, default to `trace.ct` so `setup`'s error message
 ///    points at the canonical name.
 fn resolve_launch_trace_file(folder: &Path, explicit: Option<&PathBuf>) -> PathBuf {
@@ -1630,64 +1605,20 @@ pub fn setup_from_vfs(
         }
     }
 
-    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
-    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS `.ct`
-    // container.  External recorders that have not adopted the CTFS
-    // writer still emit this — the Noir recorder (`nargo trace`) is the
-    // live example.  The native `try_open_trace` path already handles
-    // this format; the browser path must too, otherwise client-side WASM
-    // replay of a Noir trace fails after `configurationDone` (the handler
-    // is never constructed, so `threads`/`stackTrace` return nothing).
-    let json_candidates = [join_vfs(trace_folder, "trace.json"), trace_folder.to_string()];
-    for candidate in &json_candidates {
-        if !crate::vfs::vfs_exists(candidate) || !candidate.ends_with("trace.json") {
-            continue;
+    // A `trace.json` is test-oracle output from the pure Python and Ruby
+    // recorders, never a recording; refuse it by name rather than with the
+    // generic "nothing found" below.
+    for candidate in [
+        join_vfs(trace_folder, trace_file),
+        join_vfs(trace_folder, crate::materialized_source::TEST_ORACLE_TRACE_FILE),
+    ] {
+        let is_oracle = candidate.rsplit('/').next() == Some(crate::materialized_source::TEST_ORACLE_TRACE_FILE);
+        if is_oracle && crate::vfs::vfs_exists(&candidate) {
+            return Err(crate::materialized_source::test_oracle_refusal(&candidate).into());
         }
-        let json_bytes = match crate::vfs::vfs_read(candidate) {
-            Some(b) => b,
-            None => continue,
-        };
-        info!("setup_from_vfs: detected legacy materialized trace.json at VFS path {candidate:?}");
-        let mut json_value: serde_json::Value = serde_json::from_slice(&json_bytes)
-            .map_err(|e| format!("failed to parse legacy trace.json at {candidate:?}: {e}"))?;
-        normalize_legacy_trace_json_values(&mut json_value);
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_value(json_value)
-            .map_err(|e| format!("failed to decode legacy trace.json at {candidate:?}: {e}"))?;
-        // Workdir: prefer `trace_metadata.json` alongside `trace.json` in
-        // the VFS, else fall back to the trace folder.
-        let meta_vfs = join_vfs(trace_folder, "trace_metadata.json");
-        let workdir = crate::vfs::vfs_read(&meta_vfs)
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from(trace_folder));
-        let ctfs_reader = CTFSTraceReader::from_events(events, &workdir)?;
-        info!(
-            "setup_from_vfs: legacy materialized trace loaded: {} steps, {} calls, {} events",
-            ctfs_reader.step_count(),
-            ctfs_reader.call_count(),
-            ctfs_reader.event_count(),
-        );
-        let reader: Arc<dyn TraceReader> = Arc::new(ctfs_reader);
-        let mut handler = Handler::construct_with_reader(
-            TraceKind::Materialized,
-            RecreatorArgs {
-                name: thread_name.to_string(),
-                ..RecreatorArgs::default()
-            },
-            reader,
-            false,
-        );
-        handler.raw_diff_index = raw_diff_index;
-        if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-        }
-        handler.initialized = true;
-        return Ok(handler);
     }
 
-    Err("setup_from_vfs: no CTFS (.ct) container or legacy trace.json \
-         found in VFS"
-        .into())
+    Err("setup_from_vfs: no CTFS (.ct) container found in VFS".into())
 }
 
 fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<PathBuf> {
@@ -1815,25 +1746,31 @@ fn find_ct_file_in_dir(dir: &Path) -> Option<PathBuf> {
 }
 
 fn legacy_materialized_trace_file_in_dir(dir: &Path) -> Option<PathBuf> {
-    for name in ["trace.json", "trace.bin"] {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    let candidate = dir.join(crate::materialized_source::LEGACY_BINARY_TRACE_FILE);
+    candidate.is_file().then_some(candidate)
 }
 
+/// Pick the file a launch of `folder` opens.  Test-oracle output is picked
+/// too, last, so that `setup` refuses it by name rather than reporting a
+/// missing `trace.ct`.
 fn auto_detect_materialized_trace_file(folder: &Path) -> Option<PathBuf> {
-    find_ct_file_in_dir(folder).or_else(|| legacy_materialized_trace_file_in_dir(folder))
+    find_ct_file_in_dir(folder)
+        .or_else(|| legacy_materialized_trace_file_in_dir(folder))
+        .or_else(|| {
+            let oracle = folder.join(crate::materialized_source::TEST_ORACLE_TRACE_FILE);
+            oracle.is_file().then_some(oracle)
+        })
 }
 
+/// Whether the launch names a file `setup` handles without a replay worker:
+/// a legacy `trace.bin`, or test-oracle output, which `setup` refuses.
 fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
+    let handled = |name: &str| {
+        name == crate::materialized_source::LEGACY_BINARY_TRACE_FILE
+            || name == crate::materialized_source::TEST_ORACLE_TRACE_FILE
+    };
     if folder.is_file() {
-        return folder
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "trace.json" || name == "trace.bin");
+        return folder.file_name().and_then(|name| name.to_str()).is_some_and(handled);
     }
 
     let trace_path = folder.join(trace_file);
@@ -1841,15 +1778,16 @@ fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
         && trace_path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "trace.json" || name == "trace.bin")
+            .is_some_and(handled)
 }
 
 /// Determine whether the trace in `folder` is a DB-based trace (JavaScript,
 /// Python, Ruby, etc.) that does NOT require an rr replay worker.
 ///
 /// Most materialized traces are CTFS containers, but a few checked-in legacy
-/// fixtures still use sidecar `trace.json` / `trace.bin` files. Detect both so
-/// neither path incorrectly starts an rr replay worker.
+/// fixtures still use a `trace.bin` event stream, and test-oracle
+/// `trace.json` output must reach `setup`'s refusal.  Detect both so neither
+/// path incorrectly starts an rr replay worker.
 ///
 /// For CTFS, this reduces to detecting whether the folder (or the resolved
 /// trace file) is a CodeTracer DB CTFS container with materialized contents
@@ -1870,6 +1808,40 @@ fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
         return true;
     }
     is_legacy_materialized_trace(folder, trace_file)
+}
+
+/// Refuse, naming both versions, a file that is a CTFS container of a
+/// version this backend does not read. Version bytes 0 and 1 are not
+/// containers: the legacy `runtime_tracing` binary shares the magic with
+/// version 0.
+/// The refusal is returned as a TYPED [`ContainerVersionRefusal`] and not as a
+/// `String`, because the type is what carries it the rest of the way to the
+/// user. `launch_failure_text` renders anything it cannot downcast with
+/// `{err:?}`, which turns this sentence into an escaped Rust literal; and the
+/// front-ends' handshakes need to be able to tell a stated refusal from an
+/// engine that went quiet, which they do by the event this error's `Display`
+/// ends up on. Returning a string here left both of those broken while the
+/// diagnosis itself was already correct — the engine knew, and said so only to
+/// its own log.
+fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), ContainerVersionRefusal> {
+    use std::io::Read;
+    let mut header = [0u8; 6];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Ok(());
+    };
+    if file.read_exact(&mut header).is_err() || header[..5] != [0xC0, 0xDE, 0x72, 0xAC, 0xE2] {
+        return Ok(());
+    }
+    match header[5] {
+        0 | 1 => Ok(()),
+        version => crate::ctfs_trace_reader::ctfs_container::check_container_version(version).map_err(|e| {
+            warn!("refusing {}: {e}", path.display());
+            ContainerVersionRefusal {
+                container: path.to_path_buf(),
+                reader_refusal: e.to_string(),
+            }
+        }),
+    }
 }
 
 /// Classify a CTFS container as a DB (materialized) trace this backend can
@@ -2761,12 +2733,11 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
 ///
 /// The native auto-detect uses `Path::is_file()`, which always returns
 /// false under wasm32, so the browser path re-detects against the in-memory
-/// [`crate::vfs`] instead.  Materialized traces are CTFS-only, with the
-/// legacy `runtime_tracing` `trace.json` layout still accepted.
+/// [`crate::vfs`] instead.  Materialized traces are CTFS-only.
 ///
 /// Returns an error when the folder holds a multi-recording session
 /// manifest: `setup_from_vfs` has no session branch, and the probe below
-/// would happily latch onto a `trace.ct`/`trace.json` sitting beside the
+/// would happily latch onto a `trace.ct` sitting beside the
 /// manifest and open a fraction of the program with no error at all — the
 /// exact silent failure the native launch path was fixed for.
 #[cfg(feature = "browser-transport")]
@@ -2787,11 +2758,10 @@ fn browser_detect_trace_file_in_vfs(ctx: &mut Ctx) -> Result<(), Box<dyn Error>>
         .into());
     }
 
-    // `trace.ct` is the canonical CTFS container; `trace.json` is the
-    // legacy `runtime_tracing` materialized layout still emitted by some
-    // recorders (e.g. `nargo trace`).  Probe both so client-side WASM
-    // replay works for either.
-    let candidates = ["trace.ct", "trace.json"];
+    // `trace.ct` is the canonical CTFS container.  A `trace.json` is probed
+    // too, last, only so that `setup_from_vfs` refuses it by name as
+    // test-oracle output instead of reporting that nothing was found.
+    let candidates = ["trace.ct", crate::materialized_source::TEST_ORACLE_TRACE_FILE];
     for name in &candidates {
         let vfs_path = if folder.is_empty() {
             (*name).to_string()
@@ -3082,11 +3052,39 @@ pub fn handle_message_browser(
 /// the concrete type survives to here. If a future caller wraps it in a
 /// `format!`, this downcast stops matching and the test named below goes red.
 fn launch_failure_text(err: &(dyn Error + 'static)) -> String {
-    match err.downcast_ref::<ReplayWorkerStartError>() {
-        Some(worker_error) => worker_error.to_string(),
-        None => format!("launch error: {err:?}"),
+    if let Some(worker_error) = err.downcast_ref::<ReplayWorkerStartError>() {
+        return worker_error.to_string();
     }
+    // A container the reader refuses ON VERSION is the one launch failure whose
+    // user-facing wording is already decided — by the reader that refused it.
+    // `Display`, not `{err:?}`: the debug rendering would reach the user as an
+    // escaped Rust literal, and the sentence it mangles is the only place the
+    // version found, the version required and the re-record remedy are
+    // written down.
+    if let Some(version_refusal) = err.downcast_ref::<ContainerVersionRefusal>() {
+        return version_refusal.to_string();
+    }
+    format!("launch error: {err:?}")
 }
+
+/// The event that says, unambiguously, "the `launch` I acknowledged cannot
+/// succeed, and here is why".
+///
+/// **Why a second event and not just the notification.** A client waiting for
+/// the handshake's `stopped` has to be able to stop waiting when the launch
+/// has failed, and `ct/notification` of kind `Error` cannot tell it that:
+/// `dap_handler::complete_move` emits one for a trace that opened PERFECTLY
+/// WELL whose first step carries a recorded error event ("recorded error on
+/// step #N: …"). A handshake that aborted on every error notification would
+/// refuse working recordings — the same conflation this whole change exists to
+/// undo, pointing the other way.
+///
+/// So the carrier for the GUI is left exactly as it was — `ct/notification`,
+/// rendered into the status bar by `src/frontend/ui/status.nim`, same shape,
+/// same kind — and the handshake signal is a separate event beside it. Clients
+/// that do not know this event ignore it, as DAP requires; the two carry the
+/// same sentence so there is one wording, not two.
+pub const LAUNCH_FAILED_EVENT: &str = "ct/launch-failed";
 
 /// Tell the DAP client that a `launch` it asked for cannot succeed.
 ///
@@ -3100,11 +3098,11 @@ fn launch_failure_text(err: &(dyn Error + 'static)) -> String {
 ///
 /// A second `launch` response is not the fix: `request_seq` has already been
 /// answered, and two responses to one request is a protocol violation. The
-/// carrier is `ct/notification`, the route the frontend already consumes —
+/// carriers are `ct/notification`, the route the frontend already consumes —
 /// `src/frontend/middleware.nim` forwards it and `src/frontend/ui/status.nim`
-/// subscribes to `CtNotification` and renders every one into the status bar.
-/// No new renderer surface is introduced here; the GUI prompt issue #689 asks
-/// for (usage count, reset time, upgrade link) is still unspecified work.
+/// subscribes to `CtNotification` and renders every one into the status bar —
+/// and [`LAUNCH_FAILED_EVENT`], which the handshake waits key on. See that
+/// constant for why one of them could not do both jobs.
 fn send_launch_failure_notification(sender: &Sender<DapMessage>, text: &str) {
     let notification = task::Notification::new(task::NotificationKind::Error, text, false);
     let body = match serde_json::to_value(&notification) {
@@ -3114,18 +3112,23 @@ fn send_launch_failure_notification(sender: &Sender<DapMessage>, text: &str) {
             return;
         }
     };
-    let event = DapMessage::Event(Event {
-        base: ProtocolMessage {
-            // Patched by the sending thread, like every other message queued
-            // on this channel (see `patch_message_seq`).
-            seq: 0,
-            type_: "event".to_string(),
-        },
-        event: "ct/notification".to_string(),
-        body,
-    });
-    if let Err(send_err) = sender.send(event) {
-        error!("failed to send launch-failure notification: {send_err:?}");
+    for (name, body) in [
+        ("ct/notification", body),
+        (LAUNCH_FAILED_EVENT, json!({ "message": text })),
+    ] {
+        let event = DapMessage::Event(Event {
+            base: ProtocolMessage {
+                // Patched by the sending thread, like every other message queued
+                // on this channel (see `patch_message_seq`).
+                seq: 0,
+                type_: "event".to_string(),
+            },
+            event: name.to_string(),
+            body,
+        });
+        if let Err(send_err) = sender.send(event) {
+            error!("failed to send launch-failure event {name}: {send_err:?}");
+        }
     }
 }
 
@@ -3698,6 +3701,7 @@ mod tests {
     use crate::ctfs_trace_reader::meta_dat::{
         FLAG_HAS_MCR_FIELDS, META_DAT_VERSION, McrFields, MetaDat, serialize_meta_dat,
     };
+    use crate::materialized_source::TEST_ORACLE_OUTPUT_ERROR;
 
     /// Build a `meta.dat` payload with the `FlagHasMcrFields` bit set.
     /// The MCR sub-block is filled with plausible-but-arbitrary values:
@@ -3712,7 +3716,7 @@ mod tests {
             args: vec!["arg0".to_owned()],
             workdir: "/tmp/run".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec!["src/main.c".to_owned()],
+            ext_flags: 0,
             mcr: Some(McrFields {
                 tick_source: 1,
                 total_threads: 1,
@@ -3745,7 +3749,7 @@ mod tests {
             args: vec!["script.rb".to_owned()],
             workdir: "/srv/proj".to_owned(),
             recorder_id: "ruby".to_owned(),
-            paths: vec![],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -3780,6 +3784,33 @@ mod tests {
             is_mcr_ctfs_container(&mut ctfs),
             "expected meta.dat with FlagHasMcrFields to be classified as MCR",
         );
+    }
+
+    /// A container of another version is refused by name, not routed on as if
+    /// it were no container (`ctfs-container.md` §2).
+    #[test]
+    fn a_container_of_another_version_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("old.ct");
+        write_minimal_ctfs(&ct_path, &[("meta.dat", &non_mcr_meta_dat_bytes())]).unwrap();
+        assert!(refuse_unreadable_ctfs_version(&ct_path).is_ok());
+
+        let mut bytes = std::fs::read(&ct_path).unwrap();
+        bytes[5] = 4;
+        std::fs::write(&ct_path, &bytes).unwrap();
+        // `.to_string()` because the refusal is now a typed
+        // [`ContainerVersionRefusal`] rather than a `String`. The assertion is
+        // unchanged and still reads the same sentence: the type exists so the
+        // sentence survives `launch_failure_text`'s `{err:?}` and can be told
+        // apart from an engine that went quiet, neither of which a `String`
+        // could do. What it SAYS was already right.
+        let err = refuse_unreadable_ctfs_version(&ct_path).unwrap_err().to_string();
+        assert!(err.contains("version 4") && err.contains("versions 5 and 6"), "{err}");
+
+        // The legacy runtime_tracing binary shares the magic with version 0.
+        bytes[5] = 0;
+        std::fs::write(&ct_path, &bytes).unwrap();
+        assert!(refuse_unreadable_ctfs_version(&ct_path).is_ok());
     }
 
     /// MCR native recordings may carry stream names that overlap with
@@ -3893,7 +3924,7 @@ mod tests {
     /// would auto-detect as a single trace if the manifest were ignored.
     fn write_session_fixture(dir: &Path) {
         std::fs::write(dir.join(SESSION_MANIFEST_FILE), "version = 1\n").unwrap();
-        std::fs::write(dir.join("trace.json"), "[]").unwrap();
+        std::fs::write(dir.join("trace.ct"), b"").unwrap();
     }
 
     /// Build a DAP `launch` request naming `folder` as `traceFolder`,
@@ -3916,7 +3947,7 @@ mod tests {
         assert_eq!(
             resolve_launch_trace_file(dir.path(), None),
             PathBuf::from(SESSION_MANIFEST_FILE),
-            "a folder carrying a session.toml must launch as the session, not as the trace.json beside it",
+            "a folder carrying a session.toml must launch as the session, not as the trace.ct beside it",
         );
         assert!(
             resolve_session_manifest_path(dir.path(), Path::new(SESSION_MANIFEST_FILE)).is_some(),
@@ -3951,8 +3982,11 @@ mod tests {
     #[test]
     fn resolve_launch_trace_file_auto_detects_a_single_recording() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
-        assert_eq!(resolve_launch_trace_file(dir.path(), None), PathBuf::from("trace.json"),);
+        std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
+        assert_eq!(
+            resolve_launch_trace_file(dir.path(), None),
+            PathBuf::from("recording.ct"),
+        );
 
         let empty = tempfile::tempdir().unwrap();
         assert_eq!(
@@ -3998,15 +4032,196 @@ mod tests {
     #[test]
     fn handle_message_launch_still_auto_detects_a_single_recording() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+        std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
 
         let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
         let mut ctx = Ctx::default();
         let request = launch_request_for_folder(dir.path());
         handle_message(&DapMessage::Request(request), sender, &mut ctx).unwrap();
 
-        assert_eq!(ctx.launch_trace_file, PathBuf::from("trace.json"));
+        assert_eq!(ctx.launch_trace_file, PathBuf::from("recording.ct"));
         assert!(resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_none(),);
+    }
+
+    /// A well-formed `trace.json` event stream: the shape the pure-Python
+    /// and pure-Ruby test oracles write.  Well-formed on purpose, so a
+    /// refusal below is a refusal of the format and not a parse error.
+    fn oracle_trace_json() -> Vec<u8> {
+        use codetracer_trace_types::{
+            CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
+        };
+        let events: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/oracle/main.py")),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<module>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ];
+        serde_json::to_vec(&events).unwrap()
+    }
+
+    fn setup_error(trace_folder: &Path, trace_file: &Path) -> String {
+        let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+        match setup(
+            trace_folder,
+            trace_file,
+            None,
+            Path::new(""),
+            None,
+            sender,
+            false,
+            "oracle-test",
+            None,
+        ) {
+            Ok(_) => panic!("{} was opened as a recording", trace_folder.join(trace_file).display()),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_debugger_refuses_a_trace_json_folder_as_test_oracle_output() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trace.json"), oracle_trace_json()).unwrap();
+        let launched_as = resolve_launch_trace_file(dir.path(), None);
+        let message = setup_error(dir.path(), &launched_as);
+        assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+        assert!(
+            message.contains(&dir.path().display().to_string()),
+            "the refusal must name the path; got: {message}"
+        );
+    }
+
+    #[test]
+    fn the_debugger_refuses_a_trace_json_file_as_test_oracle_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("trace.json");
+        std::fs::write(&json, oracle_trace_json()).unwrap();
+        let message = setup_error(&json, Path::new(""));
+        assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+    }
+
+    // ── A container version this build refuses ───────────────────────
+    //
+    // `refuse_unreadable_ctfs_version` decided this correctly already; what it
+    // could not do was get the answer out. These arms pin the two steps that
+    // carry it: the refusal survives as a TYPE, and `launch_failure_text`
+    // renders that type's sentence rather than its debug form. See
+    // [`ContainerVersionRefusal`].
+
+    /// A container at a version this build does not read is refused, TYPED,
+    /// and the text a client receives is the sentence and not an escaped Rust
+    /// literal.
+    ///
+    /// Hermetic: the container is five header bytes written here, so the arm
+    /// depends on no committed fixture and cannot be quietly turned into a
+    /// test of nothing by a re-recording. Version 4 because that is the
+    /// version the recordings in the field carry; the assertion is on what the
+    /// refusal SAYS, so it holds for any version outside the readable set.
+    #[test]
+    fn a_container_version_this_build_cannot_read_is_refused_by_name_and_by_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let container = dir.path().join("trace.ct");
+        // Magic, then the version byte. Nothing else is read before the
+        // version gate, which is the point of probing the header rather than
+        // asking a reader that will not open it.
+        std::fs::write(&container, [0xC0u8, 0xDE, 0x72, 0xAC, 0xE2, 4, 0, 0]).unwrap();
+
+        let typed = refuse_unreadable_ctfs_version(&container)
+            .expect_err("a container at an unreadable version must be refused");
+
+        let boxed: Box<dyn Error> = Box::new(typed.clone());
+        let user_facing = launch_failure_text(&*boxed);
+        assert_eq!(
+            user_facing,
+            typed.to_string(),
+            "the user-facing text must be the type's `Display`. With the downcast removed it is \
+             `{{err:?}}`, and the sentence reaches the user as an escaped Rust literal."
+        );
+        assert!(
+            !user_facing.contains('\\'),
+            "a debug-escaped message has reached the user: {user_facing}"
+        );
+        assert!(
+            user_facing.contains("container version 4"),
+            "the version FOUND must reach the user: {user_facing}"
+        );
+        assert!(
+            user_facing.contains(&container.display().to_string()),
+            "the refusal must name the recording it is about: {user_facing}"
+        );
+        assert!(
+            !user_facing.to_lowercase().contains("corrupt"),
+            "an intact recording from an older recorder is not corrupt: {user_facing}"
+        );
+    }
+
+    /// THE CONTROL. The probe refuses one thing, not everything: a container
+    /// at a version this build reads is not refused, and neither is a file
+    /// that is not a container at all.
+    ///
+    /// Without this, the arm above is satisfied by a probe that refuses every
+    /// path it is handed — which would take every working recording, and every
+    /// legacy `trace.bin`, off the paths that serve them.
+    #[test]
+    fn the_version_probe_refuses_only_an_unreadable_container() {
+        use crate::ctfs_trace_reader::ctfs_container::CTFS_VERSION;
+        let dir = tempfile::tempdir().unwrap();
+
+        let readable = dir.path().join("readable.ct");
+        std::fs::write(&readable, [0xC0u8, 0xDE, 0x72, 0xAC, 0xE2, CTFS_VERSION, 0, 0]).unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&readable).is_ok(),
+            "a container at the version this build writes must not be refused"
+        );
+
+        // Version byte 0 is the legacy `runtime_tracing` binary stream, which
+        // shares the magic and is NOT a container; it has its own loader
+        // further down `setup` and must reach it.
+        let legacy = dir.path().join("trace.bin");
+        std::fs::write(&legacy, [0xC0u8, 0xDE, 0x72, 0xAC, 0xE2, 0, 0, 0]).unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&legacy).is_ok(),
+            "the legacy binary stream is not a container and must not be refused as one"
+        );
+
+        let not_a_container = dir.path().join("notes.txt");
+        std::fs::write(&not_a_container, b"this is not a recording").unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&not_a_container).is_ok(),
+            "a file that is not a CTFS container must not be refused on version"
+        );
+
+        let absent = dir.path().join("absent.ct");
+        assert!(
+            refuse_unreadable_ctfs_version(&absent).is_ok(),
+            "a path that does not exist is not a version refusal; `setup`'s own error owns it"
+        );
+    }
+
+    /// A folder with no container at all still reaches the replay-worker
+    /// path's own error, so the refusal above has not been turned into a
+    /// catch-all for every way a launch can fail.
+    #[test]
+    fn a_folder_with_no_container_still_reaches_the_replay_worker_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let message = setup_error(dir.path(), Path::new("trace.ct"));
+        assert!(
+            !message.contains("container version"),
+            "a folder with no container must not be reported as a version refusal: {message}"
+        );
+        assert!(
+            message.contains("replay-worker"),
+            "the fall-through to the replay-worker path must be intact: {message}"
+        );
     }
 
     // ── Browser handshake order-independence ──────────────────────────
@@ -4032,12 +4247,23 @@ mod tests {
             CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
         };
 
-        /// The smallest legacy `runtime_tracing` trace `setup_from_vfs`
-        /// will open: one path, one function, one call, three steps.
-        /// Serialised as `trace.json`, the layout `nargo trace` still
-        /// emits and the browser path explicitly supports.
-        fn minimal_trace_json() -> Vec<u8> {
-            let events: Vec<TraceLowLevelEvent> = vec![
+        /// A `.ct` container holding `events`, built in memory by the same
+        /// pure-Rust writer the web recorders use.
+        fn container_bytes(events: Vec<TraceLowLevelEvent>) -> Vec<u8> {
+            use codetracer_trace_writer::{ctfs_writer::CtfsTraceWriter, trace_writer::TraceWriter};
+            let mut writer = CtfsTraceWriter::new_in_memory("main", &[]);
+            TraceWriter::begin_writing_trace_events(&mut writer, Path::new("trace")).unwrap();
+            for event in events {
+                TraceWriter::add_event(&mut writer, event);
+            }
+            TraceWriter::finish_writing_trace_events(&mut writer).unwrap();
+            writer.take_container_bytes().expect("in-memory writer")
+        }
+
+        /// The smallest trace `setup_from_vfs` will open: one path, one
+        /// function, one call, three steps.
+        fn minimal_trace_events() -> Vec<TraceLowLevelEvent> {
+            vec![
                 TraceLowLevelEvent::Path(PathBuf::from("/browser/handshake/main.nr")),
                 TraceLowLevelEvent::Function(FunctionRecord {
                     path_id: PathId(0),
@@ -4060,15 +4286,57 @@ mod tests {
                     path_id: PathId(0),
                     line: Line(3),
                 }),
-            ];
-            serde_json::to_vec(&events).unwrap()
+            ]
         }
 
-        /// Seed the process-wide VFS with `<folder>/trace.json`.  Each
-        /// test uses its own folder name so the shared static store never
-        /// makes two tests interfere.
+        /// Seed the process-wide VFS with `<folder>/trace.ct`, the
+        /// container the in-browser replay engine is handed.  Each test
+        /// uses its own folder name so the shared static store never makes
+        /// two tests interfere.
         fn seed_vfs(folder: &str) {
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), container_bytes(minimal_trace_events()));
+        }
+
+        /// A `trace.json` in the VFS is test-oracle output.  Well-formed on
+        /// purpose, so the refusal is a refusal of the format.
+        fn setup_from_vfs_error(folder: &str, trace_file: &str) -> String {
+            let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+            match setup_from_vfs(folder, trace_file, None, None, sender, false, "oracle-test") {
+                Ok(_) => panic!("{folder}/{trace_file} was opened as a recording"),
+                Err(e) => e.to_string(),
+            }
+        }
+
+        #[test]
+        fn a_trace_json_in_the_vfs_is_refused_as_test_oracle_output() {
+            let folder = "browser-oracle-named";
+            crate::vfs::vfs_write(
+                &format!("{folder}/trace.json"),
+                serde_json::to_vec(&minimal_trace_events()).unwrap(),
+            );
+            let message = setup_from_vfs_error(folder, "trace.json");
+            assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
+            assert!(
+                message.contains(folder),
+                "the refusal must name the path; got: {message}"
+            );
+        }
+
+        #[test]
+        fn a_folder_holding_only_a_trace_json_is_refused_as_test_oracle_output() {
+            let folder = "browser-oracle-detected";
+            crate::vfs::vfs_write(
+                &format!("{folder}/trace.json"),
+                serde_json::to_vec(&minimal_trace_events()).unwrap(),
+            );
+            let mut ctx = Ctx {
+                launch_trace_folder: PathBuf::from(folder),
+                ..Ctx::default()
+            };
+            browser_detect_trace_file_in_vfs(&mut ctx).unwrap();
+            let file = ctx.launch_trace_file.to_string_lossy().to_string();
+            let message = setup_from_vfs_error(folder, &file);
+            assert!(message.contains(TEST_ORACLE_OUTPUT_ERROR), "got: {message}");
         }
 
         fn request(seq: i64, command: &str, arguments: serde_json::Value) -> DapMessage {
@@ -4391,7 +4659,7 @@ mod tests {
         fn a_session_manifest_in_the_vfs_is_refused() {
             let folder = "browser-handshake-session";
             crate::vfs::vfs_write(&format!("{folder}/{SESSION_MANIFEST_FILE}"), b"version = 1\n".to_vec());
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), minimal_trace_json());
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), container_bytes(minimal_trace_events()));
 
             let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
             let mut ctx = Ctx::default();
@@ -4422,9 +4690,8 @@ mod tests {
         // is NOT reachable from the browser, and these tests do not pretend
         // otherwise:
         //
-        //   * the browser opens a legacy `trace.json` as
-        //     `TraceKind::Materialized` — the `nargo trace` shape the web
-        //     product replays (`setup_from_vfs`);
+        //   * the browser opens the in-browser Noir tracer's `trace.ct` as
+        //     `TraceKind::Materialized` (`setup_from_vfs`);
         //   * `Handler::source_line_jump` answers a Materialized trace with
         //     a direct index jump, and enters the
         //     `disable_breakpoints ... enable_breakpoints` bracket only in
@@ -4443,13 +4710,12 @@ mod tests {
         // threshold becomes load-bearing right here, and these tests are
         // what will say whether it still behaves.
 
-        /// The source path used by [`trace_json_with_lines`].
+        /// The source path used by [`trace_with_lines`].
         const RUN_TO_LINE_PATH: &str = "/browser/runtoline/main.nr";
 
-        /// A legacy `trace.json` with one step per line, `1..=line_count`,
-        /// in the shape `nargo trace` emits and the browser path opens as
-        /// `TraceKind::Materialized`.
-        fn trace_json_with_lines(line_count: i64) -> Vec<u8> {
+        /// A `.ct` container with one step per line, `1..=line_count`, which
+        /// the browser path opens as `TraceKind::Materialized`.
+        fn trace_with_lines(line_count: i64) -> Vec<u8> {
             let mut events: Vec<TraceLowLevelEvent> = vec![
                 TraceLowLevelEvent::Path(PathBuf::from(RUN_TO_LINE_PATH)),
                 TraceLowLevelEvent::Function(FunctionRecord {
@@ -4468,13 +4734,13 @@ mod tests {
                     line: Line(line),
                 }));
             }
-            serde_json::to_vec(&events).unwrap()
+            container_bytes(events)
         }
 
         /// Like [`drive`], but the caller chooses the trace bytes instead
         /// of always getting the 3-step handshake fixture.
         fn drive_against(folder: &str, trace: Vec<u8>, commands: &[(&str, serde_json::Value)]) -> Vec<DapMessage> {
-            crate::vfs::vfs_write(&format!("{folder}/trace.json"), trace);
+            crate::vfs::vfs_write(&format!("{folder}/trace.ct"), trace);
             let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
             let mut ctx = Ctx::default();
             let mut handler: Option<Handler> = None;
@@ -4542,7 +4808,7 @@ mod tests {
             commands.push(("continue", json!({ "threadId": 1 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             let verified = received
                 .iter()
@@ -4588,7 +4854,7 @@ mod tests {
             commands.push(("ct/source-line-jump", json!({ "path": RUN_TO_LINE_PATH, "line": 5 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             let lines = stack_trace_lines(&received);
             assert_eq!(
@@ -4619,7 +4885,7 @@ mod tests {
             commands.push(("continue", json!({ "threadId": 1 })));
             commands.push(("stackTrace", json!({ "threadId": 1 })));
 
-            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+            let received = drive_against(folder, trace_with_lines(5), &commands);
 
             assert_eq!(
                 stack_trace_lines(&received),

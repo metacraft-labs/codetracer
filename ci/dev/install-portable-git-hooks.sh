@@ -57,50 +57,10 @@ done
 repo_root=$(git rev-parse --show-toplevel)
 
 # LINKED WORKTREES RUN NO HOOKS under the core.hooksPath git-hooks.nix writes
-# from the main checkout: the RELATIVE `.git/hooks`. git resolves a relative
-# hooks path against the toplevel of whichever worktree runs the hook, and in a
-# linked worktree `.git` is a file, so the path names nothing and git runs no
-# hook at all -- no error, no warning; commits and pushes simply go unchecked.
-#
-# The value is removed, not made absolute. Unset, git uses
-# `$GIT_COMMON_DIR/hooks` from every worktree -- the same directory the relative
-# value meant from the main checkout. An absolute value would be spelled for
-# one OS only, and in a checkout shared with a Nix shell (WSL on the same disk)
-# `M:/...` is a RELATIVE path to Linux git and `/mnt/m/...` a nonexistent one
-# to Windows git: the same silent no-hooks failure, moved to the other side.
-# Only a global or system core.hooksPath would then win over the default, and
-# only in that case is an absolute local value written, to keep outranking it.
-#
-# Touched only when the relative value resolves, from the main checkout, to
-# the common hooks directory; anything else is somebody's deliberate choice.
-# A Nix dev shell entered from the main checkout writes `.git/hooks` again when
-# it reinstalls; the next run of this installer (env.ps1 runs it) removes it.
+# from the main checkout: the RELATIVE `.git/hooks`. ci/dev/git-hooks-path.sh
+# explains the defect and owns the repair, which the Nix dev shell runs too.
 anchor_hooks_path() {
-	local current common main_wt resolved wanted
-	current=$(git config --local --get core.hooksPath) || return 0
-	case "$current" in
-	/* | [A-Za-z]:[\\/]* | '~'*) return 0 ;;
-	esac
-	common=$(git rev-parse --path-format=absolute --git-common-dir)
-	main_wt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-	wanted=$(CDPATH='' cd -- "$common/hooks" 2>/dev/null && pwd -P) || return 0
-	resolved=$(CDPATH='' cd -- "$main_wt" && CDPATH='' cd -- "$current" 2>/dev/null && pwd -P) || resolved=
-	if [ "$resolved" != "$wanted" ]; then
-		say "core.hooksPath is the relative '$current', which is not this repository's"
-		say "  common hooks directory; leaving it as it is."
-		return 0
-	fi
-	if git config --global --get core.hooksPath >/dev/null 2>&1 ||
-		git config --system --get core.hooksPath >/dev/null 2>&1; then
-		wanted=$(CDPATH='' cd -- "$wanted" && { pwd -W 2>/dev/null || pwd; })
-		git config --local core.hooksPath "$wanted"
-		say "core.hooksPath: the relative '$current' ran no hooks in linked worktrees;"
-		say "  a global/system core.hooksPath exists, so it is now the absolute $wanted"
-	else
-		git config --local --unset-all core.hooksPath
-		say "core.hooksPath: removed the relative '$current', which ran no hooks in"
-		say "  linked worktrees. Unset, every worktree uses $common/hooks."
-	fi
+	bash "$(dirname -- "${BASH_SOURCE[0]}")/git-hooks-path.sh" anchor || true
 }
 
 if [ -z "$hooks_dir" ]; then

@@ -45,7 +45,6 @@ import ../views/[
   isonim_event_log_view,
   isonim_flow_view,
   isonim_editor_view,
-  isonim_timeline_view,
   isonim_search_view,
   isonim_point_list_view,
   isonim_scratchpad_view,
@@ -97,11 +96,11 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   mountIsoNimCalltrace(shell.sections[1].content, session.calltraceVM)
   mountIsoNimEventLog(shell.sections[2].content, session.eventLogVM)
   mountIsoNimFlow(shell.sections[3].content, session.flowVM)
-  mountIsoNimTimeline(shell.sections[4].content, session.timelineVM)
-  mountIsoNimSearch(shell.sections[5].content, session.searchVM)
-  mountIsoNimPointList(shell.sections[6].content, session.pointListVM)
-  mountIsoNimScratchpadPanel(shell.sections[7].content, session.scratchpadVM)
-  mountIsoNimShell(shell.sections[8].content, session.shellVM)
+  # (PLAT-51: the Timeline panel is removed from every product.)
+  mountIsoNimSearch(shell.sections[4].content, session.searchVM)
+  mountIsoNimPointList(shell.sections[5].content, session.pointListVM)
+  mountIsoNimScratchpadPanel(shell.sections[6].content, session.scratchpadVM)
+  mountIsoNimShell(shell.sections[7].content, session.shellVM)
 
   # Note: Editor is not mounted here because it requires additional
   # parameters (index, path, isExpansion, expansionDepth) that depend

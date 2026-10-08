@@ -50,7 +50,6 @@
 
 import std/[strutils]
 
-import ../views/timeline_bar
 import ./mouse
 
 export mouse
@@ -254,46 +253,12 @@ proc applyKey*(state: var TimelineKeyState; token: string;
   else:
     TimelineKeyResult(action: tkaNone, tick: 0'u64)
 
-# ---------------------------------------------------------------------------
-# The mouse
-# ---------------------------------------------------------------------------
-
-proc applyMouse*(screen: TimelineBarScreen; model: TimelineBarModel;
-                 event: MouseEvent): TimelineKeyResult =
-  ## §4.4: "Clicking on the timeline scrubber: seeks the execution pointer
-  ## directly to the clicked time ratio."
-  ##
-  ## Against the scrubber AS PAINTED rather than against the model, for the
-  ## reason CTUI-6 recorded for `call_stack_keys.applyMouse`: the cell a user
-  ## clicked is a fact about what was on the terminal, and a model that has
-  ## since been repainted at another width would map the same coordinates onto
-  ## another tick.
-  if event.kind != mekPress:
-    # Only the press acts. Acting on both halves of one click would issue TWO
-    # seeks for one click — and "one click, one atomic goto" is this
-    # milestone's contract.
-    return TimelineKeyResult(action: tkaNone, tick: 0'u64)
-  if event.button != mbLeft and event.button != mbMiddle and
-     event.button != mbRight:
-    return TimelineKeyResult(action: tkaNone, tick: 0'u64)
-  let column = trackColumnAt(screen, event.row, event.col)
-  if column < 0:
-    return TimelineKeyResult(action: tkaNone, tick: 0'u64)
-  if not model.boundsKnown:
-    return noTarget()
-  seekTo(tickForColumn(column, model.minTick, model.maxTick,
-                       screen.trackWidth))
-
 proc applyToken*(state: var TimelineKeyState; token: string;
-                 screen: TimelineBarScreen; model: TimelineBarModel;
                  targets: TimelineTargets;
                  currentTick: uint64): TimelineKeyResult =
-  ## One token of any kind: an SGR-1006 mouse report, or a key.
-  ##
-  ## The single entry point a driver uses, so a driver cannot forget to try the
-  ## mouse decoder first — which would make every mouse report land in
-  ## `applyKey`'s `else` branch and silently do nothing.
-  let (isMouse, event) = decodeMouse(token)
+  ## One token: a key. (A mouse report seeks nothing: the Timeline scrubber
+  ## it once landed on is removed, 2026-10-05; the seek KEYS stay.)
+  let (isMouse, _) = decodeMouse(token)
   if isMouse:
-    return applyMouse(screen, model, event)
+    return TimelineKeyResult(action: tkaNone, tick: 0'u64)
   applyKey(state, token, targets, currentTick)

@@ -38,6 +38,7 @@ const VCSContainerClass* = "component-container vcs-container"
 const VCSNoRepoClass* = "vcs-no-repo"
 const VCSNoFilesText* = "No changed files"
 
+
 ## Branch lane colour palette — cycled by ``VCSGraphCell.colorIdx``.
 ## Values are chosen to harmonise with the CodeTracer dark-theme design system
 ## (CT_SECONDARY_BLUE, VALUE_RESULT_COLOR, etc.) while giving enough contrast
@@ -89,6 +90,7 @@ type
 
 proc statusClass*(status: string): string =
   case status
+  of "?", "untracked": "vcs-status-untracked"
   of "A", "added": "vcs-status-added"
   of "D", "deleted": "vcs-status-deleted"
   of "M", "modified": "vcs-status-modified"
@@ -951,6 +953,46 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
   r.attachFileDiffClick(diffBtn, callbacks, rowTarget)
   row
 
+proc renderWorkingTreeRow[R](r: R; callbacks: VCSCallbacks;
+                             file: VCSFileRow): auto =
+  ## One working-tree file: its state letter and its repository path. A click
+  ## opens the file's working-tree diff (`file:<path>`), the target the
+  ## changed-file rows already use.
+  let rowTarget = "file:" & file.path
+  var row: typeof(r.createElement("div"))
+  let node = ui(r):
+    tdiv(ref = row, class = "vcs-file-item vcs-working-file"):
+      span(class = "vcs-file-status vcs-working-status " &
+                   statusClass(file.status)):
+        text statusLabel(file.status)
+      span(class = "vcs-file-name vcs-working-path"):
+        text file.path
+  r.attachFileDiffClick(row, callbacks, rowTarget)
+  node
+
+proc renderWorkingTree[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
+  ## PLAT-47 deliverable 4 — VCS-Panel.md's normal mode "shows the working
+  ## tree state of the current project (modified files, staged changes, ...)":
+  ## every changed file with its state, above the commit history.
+  var list: typeof(r.createElement("div"))
+  let files = vm.workingTreeFiles.val
+  let panel = ui(r):
+    tdiv(class = "vcs-working-tree"):
+      tdiv(class = "vcs-section-header"):
+        text VCSWorkingTreeTitle
+        span(class = "vcs-working-count"):
+          text " (" & $files.len & ")"
+      tdiv(ref = list, class = "vcs-file-list vcs-working-list")
+  if files.len == 0:
+    let empty = ui(r):
+      tdiv(class = "vcs-no-files"):
+        text VCSCleanTreeText
+    r.appendRenderedChild(list, empty)
+  else:
+    for file in files:
+      r.appendRenderedChild(list, renderWorkingTreeRow(r, callbacks, file))
+  panel
+
 proc renderChangedFiles[R](r: R; vm: VCSVM;
                            callbacks: VCSCallbacks): auto =
   var list: typeof(r.createElement("div"))
@@ -1081,6 +1123,7 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
       r.appendRenderedChild(body, renderBranchPicker(r, vm, callbacks))
       r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks,
                                                    showRefresh = true))
+      r.appendRenderedChild(body, renderWorkingTree(r, vm, callbacks))
       # Commit graph with accordion expand/collapse and infinite-scroll.
       r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
     restoreCommitListScroll(body)

@@ -117,7 +117,42 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1690
+const ExpectedAssertions = 1750
+  ## *1747 -> 1750 on 2026-10-06 (PLAT-51): net one more production module
+  ## under `viewmodel/` (`viewmodels/value_changes.nim` and
+  ## `views/list_scrubber_dom.nim` added, `views/isonim_timeline_view.nim`
+  ## removed with the Timeline panel) x three assertions.
+  ## *1738 -> 1747 on 2026-10-06: three new production modules under
+  ## `viewmodel/` — `viewmodels/terminal_output_model.nim` (the Terminal
+  ## Output pane's lines and screen), `viewmodels/scrollbar_scrubber.nim` (a
+  ## list pane's scrollbar as a scrubber) and `host/terminal_output_source.nim`
+  ## (the native front-ends' producer) — x three assertions.
+  ## *1735 -> 1738 on 2026-10-04: one new production module under
+  ## `viewmodel/`, `host/native_vcs_details.nim` (a commit's changed files and
+  ## a file's diff for the native VCS panes) x three assertions.
+  ## *1693 -> 1735 on 2026-10-01: §35's enumeration over `viewmodel/` — FOURTEEN
+  ## net new production modules x three assertions, landed on 2026-09-30 by
+  ## lines of work that each left this number alone (none ran this suite after
+  ## the merge that combined them). Per commit: `5ba334de4` `identity/issuer.nim`
+  ## (+3); `f9cee486d` `identity/jwt.nim` (+3); `b53bb9d1d`
+  ## `identity/rs256_verifier.nim` replacing `identity/webcrypto_verifier.nim`
+  ## (0); `cbce5bb66` `platform/endpoint_codec.nim` and
+  ## `platform/endpoint_protocol.nim` (+6); `f892f9eea`
+  ## `host/container_platform.nim` replacing `host/remote_stub.nim` (0);
+  ## `8008eeb74` `host/browser_tab.nim` and `host/container_boot.nim` (+6);
+  ## `111119e87` `platform/browser_facades.nim` (+3); `0026c2d6e`
+  ## `platform/deployment_descriptor.nim` (+3); `01fce044d`
+  ## `host/icons_preference.nim`, `viewmodels/menu_vm.nim`,
+  ## `viewmodels/omnibar_sources.nim`, `viewmodels/omnibar_vm.nim`,
+  ## `viewmodels/product_menu.nim` and `viewmodels/transport_icons.nim` (+18).
+  ## None calls `rebase(` or spells `mapOver`; every other case's count is
+  ## unchanged (measured per case against `3214a61de`). No law, population or
+  ## example moved.*
+  ## *1690 -> 1693 on 2026-09-29: §35's enumeration over `viewmodel/` — PLAT-47
+  ## part B's one new production module x three assertions:
+  ## `host/native_vcs.nim` (the system-git VCS facade, moved out of
+  ## `desktop_native.nim` so the terminal and GPUI hosts share it). It calls
+  ## no `rebase(` and spells no `mapOver`.*
   ## *1687 -> 1690 on 2026-09-24: §35's enumeration over `viewmodel/` again —
   ## M50's one new production module x three assertions:
   ## `viewmodels/desktop_test_host.nim` (the desktop Test Results host, issue

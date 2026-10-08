@@ -316,6 +316,11 @@ type
       ## see `resolution` below. A row with `line == 0` is a row a pane must
       ## not offer as a jump target.
     enabled*: bool
+    column*: int
+      ## PLAT-50: a breakpoint ANCHORED AT A COLUMN (1-based) — the desktop's
+      ## Alt+click (`ui/editor.lineActionClickAt`, Column-Aware Navigation
+      ## M6), which the replay stops at only on a step at that column. 0 (the
+      ## zero value, every other producer) is a line breakpoint.
 
     # -- PLAT-11 -----------------------------------------------------------
     #
@@ -373,21 +378,69 @@ type
       ## The locals the expression named, as ``(name, rendered)``.
     errorMessage*: string
 
+  TermColorKind* = enum
+    ## How a recorded program named a colour (ANSI SGR).
+    tckDefault   ## no colour: the surface's own foreground / background
+    tckIndexed   ## a palette index, 0..255 (30-37, 90-97, `38;5;n`, ...)
+    tckRgb       ## a direct colour (`38;2;r;g;b`)
+
+  TermColor* = object
+    ## One SGR colour, AS THE PROGRAM WROTE IT. Medium-neutral: each front-end
+    ## resolves it (`terminal_output_model.termColorRgb`) onto its own medium.
+    kind*: TermColorKind
+    index*: int
+      ## `tckIndexed`'s palette index.
+    r*, g*, b*: int
+      ## `tckRgb`'s components, 0..255.
+
+  TermAttrs* = object
+    ## The decoded SGR state a run of output was written in. The value the
+    ## desktop's `ansi_up` used to turn into `<span style=...>` inside the
+    ## ViewModel; now DATA, so the terminal and GPUI read the same attributes
+    ## the desktop draws (PLAT-52, Terminal-Output-Pane.md §2).
+    fg*: TermColor
+    bg*: TermColor
+    bold*: bool
+    faint*: bool
+    italic*: bool
+    underline*: bool
+    blink*: bool
+    reverse*: bool
+    hidden*: bool
+    strike*: bool
+
+  TerminalOutputEvent* = object
+    ## One recorded write to the terminal, as `ct/loaded-terminal` delivers it
+    ## (a `ProgramEvent` of kind `Write`), decoded: `content` is the text the
+    ## program wrote (base64 already undone).
+    content*: string
+    rrTicks*: uint64
+      ## `directLocationRRTicks`: the moment the write happened.
+    eventIndex*: int
+      ## The write's position in the terminal's own list (0-based).
+    logIndex*: int
+      ## The event log's index for it (`ProgramEvent.eventIndex`).
+    path*: string
+    line*: int
+      ## Where it was written from (`highLevelPath` / `highLevelLine`).
+    stdout*: bool
+
   TerminalEventFragment* = object
-    ## One text fragment within a terminal-output line.
+    ## One text fragment within a terminal-output line: one styled run of ONE
+    ## write.
     ##
-    ## Mirrors the legacy ``TerminalEvent`` ref-object (see
-    ## ``frontend/types.nim``) but in the simpler value-type shape the
-    ## ViewModel layer uses.
+    ## PLAT-52: the fragment carries its TEXT and its decoded SGR ATTRIBUTES
+    ## (`style`) as data. Until then it carried `htmlText` — the desktop's
+    ## `ansi_up` rendering — which only a browser could draw; the desktop now
+    ## builds its spans from these two fields in its view.
     ##
-    ## ``htmlText`` carries the already-ANSI-converted HTML string the
-    ## view emits verbatim (the legacy view uses ``verbatim``); the
-    ## fragment is associated with one ``ProgramEvent`` via
-    ## ``eventIndex`` so click handlers can dispatch a navigation jump.
-    ## ``rrTicks`` is the source event's ``directLocationRRTicks`` —
-    ## the view compares it against the current debugger position to
-    ## colour the fragment as ``past`` / ``active`` / ``future``.
-    htmlText*: string
+    ## ``eventIndex`` is the write's position in the terminal's list (the
+    ## `TerminalOutputEvent` it came from), so a click can go to it.
+    ## ``rrTicks`` is the write's `directLocationRRTicks` — the views compare
+    ## it with the debugger's position to draw the fragment as past / active /
+    ## future (`terminal_output_model.fragmentTense`).
+    text*: string
+    style*: TermAttrs
     eventIndex*: int
     rrTicks*: uint64
 

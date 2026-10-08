@@ -87,8 +87,8 @@ CT_INSTRUMENT_BIN="${CT_INSTRUMENT_BIN:-}"
 if [ -z "$CT_INSTRUMENT_BIN" ]; then
 	CT_INSTRUMENT_BIN="$(newest_executable \
 		"$WASM_INSTRUMENTER/target/release/ct-instrument" \
-		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" \
-		|| CT_INSTRUMENT_BIN=""
+		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" ||
+		CT_INSTRUMENT_BIN=""
 fi
 if [ -z "$CT_INSTRUMENT_BIN" ] && command -v ct-instrument >/dev/null 2>&1; then
 	CT_INSTRUMENT_BIN="$(command -v ct-instrument)"
@@ -102,8 +102,8 @@ if [ -z "$RECORD_WEB_BIN" ]; then
 	RECORD_WEB_BIN="$(newest_executable \
 		"$CODETRACER_ROOT/src/backend-manager/target/release/session-manager" \
 		"$CODETRACER_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" \
-		|| RECORD_WEB_BIN=""
+		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" ||
+		RECORD_WEB_BIN=""
 fi
 if [ -z "$RECORD_WEB_BIN" ]; then
 	missing+=("- session-manager not built (cargo build in $CODETRACER_ROOT/src/backend-manager)")
@@ -322,13 +322,13 @@ wait "$RECORD_WEB_PID" 2>/dev/null || true
 forget_pid "$RECORD_WEB_PID"
 
 for name in frontend frontend-wasm; do
-	if [ ! -d "$RECORD_WEB_OUT/$name.ct" ]; then
+	if [ ! -f "$RECORD_WEB_OUT/$name.ct" ]; then
 		echo "[regenerate] record-web did not produce $name.ct" >&2
 		echo "[regenerate] contents of $RECORD_WEB_OUT:" >&2
 		ls -la "$RECORD_WEB_OUT" >&2 || true
 		exit 1
 	fi
-	cp -R "$RECORD_WEB_OUT/$name.ct" "$OUT_DIR/$name.ct"
+	cp "$RECORD_WEB_OUT/$name.ct" "$OUT_DIR/$name.ct"
 done
 rm -rf "$RECORD_WEB_OUT"
 

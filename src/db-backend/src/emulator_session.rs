@@ -113,6 +113,7 @@ use std::sync::Once;
 
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::meta_dat::{MetaDat, parse_meta_dat};
+use crate::ctfs_trace_reader::snapshot_payload::read_snapshot_payload;
 use crate::db::DbRecordEvent;
 use crate::dwarf_index::{DwarfIndex, PcInfo};
 use crate::emulator_ffi;
@@ -141,11 +142,16 @@ static NIM_RUNTIME_INIT: Once = Once::new();
 /// will need the full binary anyway for `.eh_frame`-driven unwinding.
 const BUNDLED_DEBUG_FILE: &str = "debug.dat";
 
-/// CTFS file carrying the initial memory snapshot, written by the
-/// recorder's `__libc_start_main` wrapper (see
+/// Logical name of the initial memory snapshot, written by the recorder's
+/// `__libc_start_main` wrapper on the `--attach=premain` path (see
 /// `codetracer-native-recorder/ct_interpose/src/ct_interpose/full_snapshot.c`).
 ///
-/// Wire format: a flat sequence of `(address: u64 LE, size: u64 LE, bytes[size])`
+/// It is a snapshot payload: stored raw under this name when it fits in one
+/// container block, otherwise as the `cp0.mzd` + `cp0.mzi` chunked-compressed
+/// pair (`ctfs_trace_reader::snapshot_payload`). Always read it through
+/// `read_snapshot_payload`, never with a plain `read_file`.
+///
+/// Payload format: a flat sequence of `(address: u64 LE, size: u64 LE, bytes[size])`
 /// tuples — one per captured memory region. The recorder writes one region
 /// per `/proc/self/maps` entry it deems "live" (skipping kernel-only ranges
 /// and explicit `[vvar]/[vsyscall]` slots), capping the total at
@@ -206,6 +212,16 @@ const CP0_FSBASE_FILE: &str = "cp0.fsbase";
 /// which is still correct for static binaries with no ASLR (load base
 /// equals static base).
 const CP0_MAPS_FILE: &str = "cp0.maps";
+
+/// Members that mark a recording whose initial state is the execve-stop
+/// boundary (`ct-mcr record --attach=instruction0`, the Linux/x86-64
+/// default): the loader's first instruction, before `ld.so` has mapped any
+/// library. Such a recording carries no `cp0.*` members. Reaching `main`
+/// from that boundary means serving the loader window from the recorded
+/// events (file-backed `mmap`s, `openat`, `read`, ...), which this session
+/// does not do, so it refuses the recording by name instead of seeding an
+/// empty emulator.
+const INSTRUCTION0_BOUNDARY_MEMBERS: [&str; 4] = ["bootelf.bin", "bootelf.stk", "cp.entry.lay", "cp.entry.reg"];
 
 /// Compact layout: 18 × u64 LE.
 const CP0_REGS_COMPACT_LEN: usize = 18 * 8;
@@ -734,6 +750,10 @@ pub struct EmulatorReplaySession {
     /// `Option::None`. The default has `version = 0` which would never
     /// match a real serialised header — useful as a sentinel in tests.
     meta: MetaDat,
+    /// The trace's source paths: the records of `paths.dat`, in id order
+    /// (`meta.dat` carries no path list). Empty for an empty session and for
+    /// a recording that names no source.
+    source_paths: Vec<String>,
     /// In-process breakpoint table: maps `(path, line)` to one or more
     /// allocated [`Breakpoint`] records. We track the structure rather
     /// than just IDs so that `delete_breakpoint` can locate the entry
@@ -784,7 +804,7 @@ pub struct EmulatorReplaySession {
     /// * The bundled bytes failed to parse as an ELF (corrupt bundle).
     ///
     /// When `None`, the session falls back to the M-DWARF-2 behaviour
-    /// where `build_location` synthesises `(meta.paths[0], 1)`.
+    /// where `build_location` synthesises `(paths[0], 1)`.
     dwarf: Option<DwarfIndex>,
     /// PC rebase offset for the main executable: the value to subtract
     /// from the runtime PC before consulting the bundled DWARF index.
@@ -934,13 +954,14 @@ impl EmulatorReplaySession {
                 args: Vec::new(),
                 workdir: String::new(),
                 recorder_id: String::new(),
-                paths: Vec::new(),
+                ext_flags: 0,
                 mcr: None,
                 replay_launch: None,
                 layout_snapshot: None,
                 filter_provenance: Vec::new(),
                 has_filter_provenance: false,
             },
+            source_paths: Vec::new(),
             breakpoints: HashMap::new(),
             next_breakpoint_id: 1,
             breakpoint_suppression: None,
@@ -1001,7 +1022,10 @@ impl EmulatorReplaySession {
     /// Returns `Err` if the bytes are not a valid CTFS container, if
     /// `meta.dat` is missing or unparseable, or if the trace does not
     /// declare `FLAG_HAS_MCR_FIELDS` (callers should route those to
-    /// `MaterializedReplaySession` instead).
+    /// `MaterializedReplaySession` instead). Also returns `Err` for a
+    /// recording whose initial state is the `--attach=instruction0`
+    /// execve-stop boundary (see `INSTRUCTION0_BOUNDARY_MEMBERS`), and for a
+    /// malformed `cp0.mem` snapshot payload.
     pub fn new_from_ctfs_bytes(bytes: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::from_bytes(bytes).map_err(|e| ctfs_error(format!("CTFS parse failed: {e}")))?;
 
@@ -1018,6 +1042,9 @@ impl EmulatorReplaySession {
                 "EmulatorReplaySession requires an MCR trace (meta.dat with FLAG_HAS_MCR_FIELDS)",
             ));
         }
+
+        let source_paths = crate::ctfs_trace_reader::interning_tables::InterningTables::read_source_paths(&mut ctfs)
+            .map_err(|e| ctfs_error(format!("paths.dat unreadable: {e}")))?;
 
         // M-DWARF-3: look for the recorder-bundled binary (`debug.dat`).
         // Missing is fine — older traces predate the bundling step, and
@@ -1084,8 +1111,26 @@ impl EmulatorReplaySession {
         // needed.
         let pc_rebase = compute_pc_rebase_from_cp0_maps(&mut ctfs, &meta.program, elf_bytes.as_deref());
 
-        let cp0_mem_bytes = match ctfs.read_file(CP0_MEM_FILE) {
-            Ok(bytes) if !bytes.is_empty() => Some(bytes),
+        if !ctfs.has_file(CP0_REGS_FILE) {
+            let boundary: Vec<&str> = INSTRUCTION0_BOUNDARY_MEMBERS
+                .iter()
+                .copied()
+                .filter(|name| ctfs.has_file(name))
+                .collect();
+            if !boundary.is_empty() {
+                return Err(ctfs_error(format!(
+                    "EmulatorReplaySession cannot open this recording: its initial state is the \
+                     execve-stop boundary of `ct-mcr record --attach=instruction0` ({}), and it has \
+                     no {CP0_REGS_FILE} / {CP0_MEM_FILE}. The emulator session starts from the \
+                     `main` boundary that `--attach=premain` records; re-record with \
+                     `ct-mcr record --attach=premain`.",
+                    boundary.join(", ")
+                )));
+            }
+        }
+
+        let cp0_mem_bytes = match read_snapshot_payload(&mut ctfs, CP0_MEM_FILE).map_err(ctfs_error)? {
+            Some(bytes) if !bytes.is_empty() => Some(bytes),
             _ => None,
         };
         let cp0_regs_bytes = match ctfs.read_file(CP0_REGS_FILE) {
@@ -1124,6 +1169,7 @@ impl EmulatorReplaySession {
 
         Ok(Self {
             meta,
+            source_paths,
             breakpoints: HashMap::new(),
             next_breakpoint_id: 1,
             breakpoint_suppression: None,
@@ -1243,11 +1289,11 @@ impl EmulatorReplaySession {
 
     /// Resolve the active source path for synthesised locations.
     ///
-    /// Prefers the first entry in `meta.paths` (the writer convention
+    /// Prefers the first entry in `paths.dat` (the writer convention
     /// puts the program's primary source first); falls back to
     /// `meta.program` so we never emit an empty `Location.path`.
     fn primary_path(&self) -> String {
-        if let Some(first) = self.meta.paths.first()
+        if let Some(first) = self.source_paths.first()
             && !first.is_empty()
         {
             return first.clone();
@@ -1287,7 +1333,7 @@ impl EmulatorReplaySession {
     /// * The PC falls outside every CU range (libc, JIT page, padding).
     ///
     /// The returned `PcInfo.file` is the raw DWARF path; the caller is
-    /// responsible for deciding whether to override `meta.paths[0]` with
+    /// responsible for deciding whether to override `paths[0]` with
     /// it. We deliberately don't canonicalise here — the recorder side
     /// embeds source paths exactly as the compiler emitted them, so the
     /// DWARF path matches the meta path for the same compilation unit.
@@ -1371,7 +1417,7 @@ impl EmulatorReplaySession {
             expansion_id: -1,
             expansion_first_line: -1,
             expansion_last_line: -1,
-            missing_path: self.meta.paths.is_empty() && self.meta.program.is_empty(),
+            missing_path: self.source_paths.is_empty() && self.meta.program.is_empty(),
             ..Location::default()
         }
     }
@@ -1416,7 +1462,7 @@ impl EmulatorReplaySession {
     /// When a bundled DWARF index is available and resolves the current
     /// PC, the returned location carries the real `(file, line)` from
     /// the binary's `.debug_line` table. Otherwise it falls back to the
-    /// M-DWARF-2 placeholder of `(meta.paths[0], 1)` — F5 still passes
+    /// M-DWARF-2 placeholder of `(paths[0], 1)` — F5 still passes
     /// against that fallback, just with a less informative breakpoint
     /// line.
     fn build_location(&self) -> Location {
@@ -1432,9 +1478,9 @@ impl EmulatorReplaySession {
 
         if let Some(info) = self.dwarf_pc_info() {
             // Adopt the DWARF-reported source file when it disagrees
-            // with `meta.paths[0]` — the DWARF line table is the
+            // with `paths[0]` — the DWARF line table is the
             // authoritative answer for "which source file does this PC
-            // belong to". `meta.paths[0]` is a useful default but is
+            // belong to". `paths[0]` is a useful default but is
             // chosen by recorder-side heuristics, not by the PC.
             let dwarf_path = info.file.to_string_lossy().into_owned();
             if !dwarf_path.is_empty() {
@@ -1466,7 +1512,7 @@ impl EmulatorReplaySession {
             expansion_id: -1,
             expansion_first_line: -1,
             expansion_last_line: -1,
-            missing_path: self.meta.paths.is_empty() && self.meta.program.is_empty(),
+            missing_path: self.source_paths.is_empty() && self.meta.program.is_empty(),
             ..Location::default()
         }
     }
@@ -2421,6 +2467,19 @@ impl ReplaySession for EmulatorReplaySession {
 mod tests {
     use super::*;
     use crate::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
+
+    /// `paths.dat` + `paths.off` interning `paths` in id order: the records,
+    /// then their u64 offsets with the trailing sentinel.
+    fn paths_members(paths: &[&str]) -> (Vec<u8>, Vec<u8>) {
+        let mut dat = Vec::new();
+        let mut off = Vec::new();
+        for p in paths {
+            off.extend_from_slice(&(dat.len() as u64).to_le_bytes());
+            dat.extend_from_slice(p.as_bytes());
+        }
+        off.extend_from_slice(&(dat.len() as u64).to_le_bytes());
+        (dat, off)
+    }
     use crate::ctfs_trace_reader::meta_dat::{FLAG_HAS_MCR_FIELDS, META_DAT_VERSION, McrFields, serialize_meta_dat};
 
     /// Build a synthetic CTFS payload with the `FlagHasMcrFields` bit set
@@ -2437,7 +2496,7 @@ mod tests {
             args: vec!["arg0".to_owned()],
             workdir: "/tmp/run".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec!["src/main.c".to_owned(), "src/util.c".to_owned()],
+            ext_flags: 0,
             mcr: Some(McrFields {
                 tick_source: 1,
                 total_threads: 1,
@@ -2466,7 +2525,17 @@ mod tests {
         // resemble the production layout even though we don't yet read it.
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("synthetic.ct");
-        write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("t00000000000", b"")]).unwrap();
+        let (paths_dat, paths_off) = paths_members(&["src/main.c", "src/util.c"]);
+        write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", &dat),
+                ("paths.dat", &paths_dat),
+                ("paths.off", &paths_off),
+                ("t00000000000", b""),
+            ],
+        )
+        .unwrap();
         std::fs::read(&ct_path).unwrap()
     }
 
@@ -2506,8 +2575,9 @@ mod tests {
 
         assert_eq!(session.meta.program, "/usr/local/bin/example");
         assert_eq!(
-            session.meta.paths,
-            vec!["src/main.c".to_owned(), "src/util.c".to_owned()]
+            session.source_paths,
+            vec!["src/main.c".to_owned(), "src/util.c".to_owned()],
+            "the source paths are paths.dat's records"
         );
         assert!(
             session.meta.mcr.is_some(),
@@ -2530,7 +2600,7 @@ mod tests {
             args: vec!["script.rb".to_owned()],
             workdir: "/srv/proj".to_owned(),
             recorder_id: "ruby".to_owned(),
-            paths: vec!["script.rb".to_owned()],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -2578,7 +2648,7 @@ mod tests {
 
         let path = &frames[0].content.call.location.path;
         assert!(!path.is_empty(), "frame source path must be non-empty");
-        assert_eq!(path, "src/main.c", "frame path should pick the first meta.paths entry");
+        assert_eq!(path, "src/main.c", "frame path should pick the first paths.dat entry");
     }
 
     /// F5c-3 acceptance: `add_breakpoint` must report success so the
@@ -2726,7 +2796,7 @@ mod tests {
             args: vec![],
             workdir: "/tmp/run".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec!["src/main.c".to_owned()],
+            ext_flags: 0,
             mcr: Some(McrFields {
                 tick_source: 1,
                 total_threads: 1,
@@ -2750,10 +2820,13 @@ mod tests {
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("synthetic_with_dwarf.ct");
+        let (paths_dat, paths_off) = paths_members(&["src/main.c"]);
         write_minimal_ctfs(
             &ct_path,
             &[
                 ("meta.dat", &dat),
+                ("paths.dat", &paths_dat),
+                ("paths.off", &paths_off),
                 ("t00000000000", b""),
                 (BUNDLED_DEBUG_FILE, HELLO_ELF_FIXTURE),
             ],
@@ -2805,7 +2878,7 @@ mod tests {
             args: vec![],
             workdir: "/tmp/run".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec!["src/main.c".to_owned()],
+            ext_flags: 0,
             mcr: Some(McrFields {
                 tick_source: 1,
                 total_threads: 1,
@@ -2829,10 +2902,13 @@ mod tests {
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("synthetic_bad_dwarf.ct");
+        let (paths_dat, paths_off) = paths_members(&["src/main.c"]);
         write_minimal_ctfs(
             &ct_path,
             &[
                 ("meta.dat", &dat),
+                ("paths.dat", &paths_dat),
+                ("paths.off", &paths_off),
                 ("t00000000000", b""),
                 // Not an ELF — DwarfIndex::from_elf_bytes will return
                 // DwarfError::Object("File magic is not …"), which the
@@ -2855,7 +2931,7 @@ mod tests {
     /// PC matching a real instruction, `load_callstack` must surface a
     /// frame whose `line` is the DWARF-resolved line (not the M-DWARF-2
     /// `1` placeholder) and whose `path` matches the DWARF-emitted file
-    /// (overriding `meta.paths[0]` when they disagree).
+    /// (overriding `paths[0]` when they disagree).
     ///
     /// This is the headline test for M-DWARF-3: it walks the full
     /// recorder → bundle → replay → DAP `stackTrace` data path inside a
@@ -2908,7 +2984,7 @@ mod tests {
         );
         assert!(
             loc.path.ends_with("hello.c"),
-            "DWARF-resolved path must override meta.paths[0] (= src/main.c); got loc.path = {}",
+            "DWARF-resolved path must override paths[0] (= src/main.c); got loc.path = {}",
             loc.path,
         );
         // The emulator FFI surfaces the raw PC via `Location.offset` —
@@ -3039,6 +3115,18 @@ mod tests {
         include_dwarf: bool,
         cp0_maps: Option<&str>,
     ) -> Vec<u8> {
+        synthetic_mcr_ctfs_bytes_with_members(cp0_regs, cp0_mem_regions, include_dwarf, cp0_maps, &[])
+    }
+
+    /// The general fixture builder: everything the helpers above write,
+    /// plus `extra` members stored verbatim.
+    fn synthetic_mcr_ctfs_bytes_with_members(
+        cp0_regs: Option<&[u8]>,
+        cp0_mem_regions: &[(u64, Vec<u8>)],
+        include_dwarf: bool,
+        cp0_maps: Option<&str>,
+        extra: &[(&str, &[u8])],
+    ) -> Vec<u8> {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
@@ -3047,7 +3135,7 @@ mod tests {
             args: vec![],
             workdir: "/tmp/run".to_owned(),
             recorder_id: "mcr".to_owned(),
-            paths: vec!["src/main.c".to_owned()],
+            ext_flags: 0,
             mcr: Some(McrFields {
                 tick_source: 1,
                 total_threads: 1,
@@ -3077,12 +3165,23 @@ mod tests {
             mem_blob.extend(pack_cp0_mem_region(*addr, bytes));
         }
 
-        let mut entries: Vec<(&str, &[u8])> = vec![("meta.dat", &dat), ("t00000000000", b"")];
+        let (paths_dat, paths_off) = paths_members(&["src/main.c"]);
+        let mut entries: Vec<(&str, &[u8])> = vec![
+            ("meta.dat", &dat),
+            ("paths.dat", &paths_dat),
+            ("paths.off", &paths_off),
+            ("t00000000000", b""),
+        ];
         if include_dwarf {
             entries.push((BUNDLED_DEBUG_FILE, HELLO_ELF_FIXTURE));
         }
-        if !mem_blob.is_empty() {
-            entries.push((CP0_MEM_FILE, &mem_blob));
+        let mem_members = if mem_blob.is_empty() {
+            Vec::new()
+        } else {
+            crate::ctfs_trace_reader::snapshot_payload::encode_snapshot_payload(CP0_MEM_FILE, &mem_blob).unwrap()
+        };
+        for (name, bytes) in &mem_members {
+            entries.push((name.as_str(), bytes.as_slice()));
         }
         if let Some(regs) = cp0_regs {
             entries.push((CP0_REGS_FILE, regs));
@@ -3091,6 +3190,7 @@ mod tests {
         if let Some(bytes) = cp0_maps_bytes {
             entries.push((CP0_MAPS_FILE, bytes));
         }
+        entries.extend_from_slice(extra);
 
         write_minimal_ctfs(&ct_path, &entries).unwrap();
         std::fs::read(&ct_path).unwrap()
@@ -3289,7 +3389,7 @@ mod tests {
         );
         assert!(
             loc.path.ends_with("hello.c"),
-            "DWARF-resolved file should override meta.paths[0]; got path={}",
+            "DWARF-resolved file should override paths[0]; got path={}",
             loc.path,
         );
         assert_eq!(loc.offset, PC_ADD_BODY as i64);
@@ -3308,7 +3408,7 @@ mod tests {
             /* include_dwarf */ false,
         );
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
-        // No dwarf bundled either: location falls back to meta.paths[0]
+        // No dwarf bundled either: location falls back to paths[0]
         // / line=1.
         assert!(session.dwarf.is_none());
     }
@@ -3329,6 +3429,128 @@ mod tests {
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes)
             .expect("corrupt cp0.regs must not abort session construction");
         assert!(session.dwarf.is_none(), "no DWARF was bundled in this fixture");
+    }
+
+    /// `cp0.mem` larger than one container block is stored as the
+    /// `cp0.mzd` + `cp0.mzi` chunked-compressed pair, and the session must
+    /// seed the emulator from it: the bytes of a region that spans two
+    /// frames read back through the emulator.
+    #[test]
+    fn new_from_ctfs_bytes_seeds_memory_from_compressed_cp0_mem() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let base = 0x6000_0000u64;
+        let region: Vec<u8> = (0..(1usize << 20) + 8192).map(|i| (i % 251) as u8).collect();
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: base + 0x1000,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: base,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &[(base, region.clone())], false);
+        let probe = CtfsReader::from_bytes(bytes.clone()).unwrap();
+        assert!(
+            probe.has_file("cp0.mzd") && probe.has_file("cp0.mzi") && !probe.has_file(CP0_MEM_FILE),
+            "the fixture must store cp0.mem in its compressed form"
+        );
+
+        let _session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+
+        let offset = (1usize << 20) + 100;
+        let mut buf = [0u8; 16];
+        let rc = unsafe { emulator_ffi::mcrReadMemory(base + offset as u64, buf.as_mut_ptr(), buf.len() as _) };
+        assert!(rc >= 0, "mcrReadMemory failed with {rc}");
+        assert_eq!(
+            &buf[..],
+            &region[offset..offset + 16],
+            "bytes past the first frame must be seeded"
+        );
+        assert_eq!(unsafe { emulator_ffi::mcrGetPC() }, base);
+    }
+
+    /// Half of `cp0.mem`'s compressed pair is a malformed container; the
+    /// session refuses it and names the missing member.
+    #[test]
+    fn new_from_ctfs_bytes_refuses_half_a_compressed_cp0_mem() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let regs_blob = pack_cp0_regs_compact(&InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: 0x1000,
+            rflags: 0x202,
+        });
+        let bytes = synthetic_mcr_ctfs_bytes_with_members(
+            Some(&regs_blob),
+            &[],
+            false,
+            None,
+            &[("cp0.mzd", b"\x28\xb5\x2f\xfd")],
+        );
+        let err = match EmulatorReplaySession::new_from_ctfs_bytes(bytes) {
+            Ok(_) => panic!("half a compressed cp0.mem must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("cp0.mzi ABSENT"),
+            "the refusal must name the missing member: {err}"
+        );
+    }
+
+    /// A recording whose initial state is the `--attach=instruction0`
+    /// execve-stop boundary carries no `cp0.*`; the session refuses it by
+    /// name rather than coming up with an all-zero register file.
+    #[test]
+    fn new_from_ctfs_bytes_refuses_an_instruction0_recording_by_name() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_members(
+            None,
+            &[],
+            true,
+            None,
+            &[
+                ("bootelf.bin", b"CBL1"),
+                ("cp.entry.lay", b"CPEL"),
+                ("cp.entry.reg", &[0u8; 164]),
+            ],
+        );
+        let err = match EmulatorReplaySession::new_from_ctfs_bytes(bytes) {
+            Ok(_) => panic!("an instruction0 recording must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("--attach=instruction0")
+                && err.contains("bootelf.bin, cp.entry.lay, cp.entry.reg")
+                && err.contains("--attach=premain"),
+            "the refusal must name the boundary, its members and the mode to record with: {err}"
+        );
     }
 
     // ── M-Replay-PC-Rebase fixtures ─────────────────────────────────────
@@ -3494,7 +3716,7 @@ mod tests {
         );
         assert!(
             loc.path.ends_with("hello.c"),
-            "DWARF-resolved file should override meta.paths[0]; got path={}",
+            "DWARF-resolved file should override paths[0]; got path={}",
             loc.path,
         );
         // The raw runtime PC must still flow through `Location.offset`

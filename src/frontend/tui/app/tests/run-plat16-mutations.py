@@ -310,13 +310,9 @@ MUTATIONS = [
         DIMS,
         "the state space is the PRODUCT of the two, not their sum",
         "The product indicator disappears: one dimension is on screen."),
-    Mutation(
-        "M15", STATUS,
-        "  if mode == umNormal and product == pmEdit:",
-        "  if false:",
-        DIMS,
-        "the product mode changes the hint strip without changing the input mode",
-        "The hint strip stops being a function of the product mode."),
+    # M15 (the hint strip a function of the product mode) retired by PLAT-49:
+    # the user removed the status line's key hints altogether (2026-10-01), so
+    # there is no strip left for the product mode to change.
 
     # ---- the editing surface ----------------------------------------------
     Mutation(
@@ -345,8 +341,8 @@ MUTATIONS = [
         "not a mutation."),
     Mutation(
         "M18", SHELL,
-        "  if region.pane == paneEditor and model.product == pmEdit and",
-        "  if region.pane == paneEditor and not model.edit.isEmpty and",
+        "  if region.pane == paneEditor and model.product == pmEdit:",
+        "  if region.pane == paneEditor and not model.edit.isEmpty:",
         SOURCE,
         "the editor rectangle is painted from the PRODUCT mode and nothing else",
         "The pane branches on the DATA rather than on the mode, so Debug mode "
@@ -378,8 +374,8 @@ MUTATIONS = [
         "The pane silently loses the first error."),
     Mutation(
         "M22", BUILDPANE,
-        '  of bvCancelled: CellStyle(fg: "yellow", bold: true)',
-        '  of bvCancelled: CellStyle(fg: "red", bold: true)',
+        '  of bvCancelled: CellStyle(role: srBuildCancelled)',
+        '  of bvCancelled: CellStyle(role: srBuildFailed)',
         BUILDS,
         "each verdict has its own colour, and no two share one",
         "Two verdicts become indistinguishable to a colour read."),
@@ -420,7 +416,7 @@ MUTATIONS = [
         "`--edit` PARSES AND SILENTLY DOES NOTHING — the exact failure "
         "`cli.PlannedOptions`' header is written against. The positional then "
         "reaches the front-end as a trace folder and the binary refuses it for "
-        "having no `trace.json`: a true diagnosis of the wrong question.\n"
+        "not being a recording: a true diagnosis of the wrong question.\n"
         "\n"
         "        THE FIRST VERSION OF THIS ARM DID NOT COMPILE (it changed the "
         "object variant's branch and left a field of the other branch behind), "
@@ -628,7 +624,7 @@ DECLARED_SURVIVORS = [
         "  let mode = $m.mode & \" \" & productIndicator(m.product)",
         "  let mode = ($m.mode) & \" \" & productIndicator(m.product)",
         DIMS, "",
-        "Redundant parentheses around `$m.mode`. Pairs M14/M15: the dimension "
+        "Redundant parentheses around `$m.mode`. Pairs M14: the dimension "
         "cases redden because an INDICATOR went, not because this line moved."),
     Mutation(
         "S7", RUNTIME,
@@ -704,7 +700,7 @@ CONTROL_PAIRS = {
     "M1": "S1", "M2": "S1", "M3": "S1", "M4": "S1", "M5": "S1", "M6": "S1",
     "M7": "S3", "M8": "S3", "M9": "S3", "M18": "S3", "M25": "S3",
     "M10": "S2", "M11": "S2", "M12": "S2", "M13": "S2",
-    "M14": "S6", "M15": "S6",
+    "M14": "S6",
     "M16": "S4", "M17": "S4",
     "M19": "S5", "M20": "S5", "M21": "S5", "M22": "S5",
     "M23": "S7", "M24": "S7",
@@ -721,7 +717,6 @@ SUITE_CASES = {
     DIMS: [
         "the two enums have their own cardinalities, and neither names the other",
         "the state space is the PRODUCT of the two, not their sum",
-        "the product mode changes the hint strip without changing the input mode",
         "every action's scope is declared, and the three arms are exactly these",
         "one physical key, two product modes, two answers — and a control",
         "Ctrl+F5 is one command, reachable from both product modes",
@@ -831,18 +826,17 @@ BECAUSE = {
     'M12': 'r.kind == krAction',
     'M13': 'fromModeTransitions == @["toggle-product-mode"]',
     'M14': 'bar.find("[EDIT]") > bar.find("SEARCH")',
-    'M15': 'debugHints != editHints',
     'M16': 'not text.contains(ExecutionPointerGlyph)',
     'M17': 'not buf.isDirty',
-    'M18': 'not inDebug.contains(EditPaneTitle)',
+    'M18': 'not inDebug.contains("proc alpha() =")',
     'M19': 'cancelled.verdict == bvCancelled',
     'M20': 'statusOf(bvCancelled) == bsIdle',
     'M21': 's.truncated',
-    'M22': 'style.fg notin colours',
+    'M22': 'fg notin colours',
     'M23': 'asked.len == 1',
     'M24': 'asked.len == 1',
-    'M25': 'firstEdit.contains(paneFileTree)',
-    'M26': "Unhandled exception: the binary exited before 'EDIT ' appeared; screen was:",
+    'M25': 'firstEdit.contains(paneBuildOutput)',
+    'M26': "Unhandled exception: the binary exited before '[EDIT]' appeared; screen was:",
     'M27': "Unhandled exception: 'Zproc alpha() =' never appeared within 20000 ms; screen:",
     'M32': 'walks == 1',
     'M28': 'switched.detail.contains("predates")',
@@ -1012,7 +1006,27 @@ def run_suite(suite: str) -> RunResult:
     return res
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main() -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
+    # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
+    # dropped, and the run became a full, file-mutating grade: `--only=A,B`
+    # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`
+    # asserts the refusal.
+    known_flags = {"--collect-because"}
+    unknown = [a for a in sys.argv[1:] if a.startswith("-") and
+               a.split("=", 1)[0] not in known_flags]
+    if unknown:
+        print(f"unknown argument(s): {unknown}; accepted flags: "
+              f"{sorted(known_flags) or 'none (arm ids only)'}")
+        return 2
     # ---- THE LOCK, FIRST, BEFORE ANY DIGEST IS READ --------------------
     lock = open(LOCK_PATH, "w")
     try:

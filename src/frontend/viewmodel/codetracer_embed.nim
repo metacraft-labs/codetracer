@@ -183,6 +183,11 @@ export timeline_vm
 import viewmodels/state_vm
 export state_vm
 
+# PLAT-51: which values the step that produced the stop changed — the one
+# model the desktop's, the terminal's and GPUI's changed-value styling read.
+import viewmodels/value_changes
+export value_changes
+
 import viewmodels/flow_vm
 export flow_vm
 
@@ -244,6 +249,20 @@ export debug_controls_vm
 
 import viewmodels/request_panel_vm
 export request_panel_vm
+
+# PLAT-52: the Terminal Output pane — its ViewModel and the pure model under
+# it (the line view's styled fragments, the screen emulator with its snapshots
+# and the built-in scrubber's marks; `terminal_output_vm` re-exports
+# `terminal_output_model`), and the list panes' scrollbar SCRUBBER model
+# (Scrollbar-Scrubbers.md §3). The terminal and GPUI front-ends draw both, so
+# both must be behind this one door. Adds nothing to the facade's import graph
+# beyond the three modules: they import `std/*`, `isonim/core/*`,
+# `isonim/viewmodel`, `backend_service` and `store/*`, all already here.
+import viewmodels/terminal_output_vm
+export terminal_output_vm
+
+import viewmodels/scrollbar_scrubber
+export scrollbar_scrubber
 
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
@@ -412,6 +431,20 @@ export editing_core
 # the ten reactive primitives PLUS the capability-gated I/O. §8.1.2's grants
 # are what stand between a plugin and a process, and an embedder has no
 # manifest and therefore no grants at all.
+
+# PLAT-48: THE TOP BAR'S LOGICAL STATE, for every front-end. The Menu
+# ViewModel (its tree is `product_menu`'s, the desktop's menu), the Omnibar
+# ViewModel and the index it searches (`omnibar_sources`, over the session's
+# own `FilesystemVM` and store), and the debugger controls' renderings
+# (`transport_icons`). The terminal and the GPUI window are SDK consumers and
+# reach them here; the desktop's renderer imports them directly. All five are
+# plain Nim over `std/*` and the ViewModels this facade already exports —
+# `filesystem_vm` is `session_vm`'s own import, exported so its type is
+# nameable — so the facade's graph gains no renderer, no I/O and no process.
+import viewmodels/[menu_vm, product_menu, omnibar_vm, omnibar_sources,
+                   transport_icons, filesystem_vm]
+export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
+       filesystem_vm
 
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"

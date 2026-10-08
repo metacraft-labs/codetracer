@@ -30,7 +30,7 @@ import ./api_client
 
 const
   SampleRecordingId = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
-  SampleBaseApiUrl = "https://ide.codetracer.com/api/v1/"
+  SampleBaseApiUrl = "https://api.codetracer.com/api/v1/"
   SampleTenantId = "tenant-123"
 
 suite "M-REC-8 — online-sharing client wire format":
@@ -75,14 +75,14 @@ suite "M-REC-8 — online-sharing client wire format":
     # surrounding URL grammar.
     let path = buildUploadUrlPath(SampleBaseApiUrl, SampleTenantId)
     check path ==
-      "https://ide.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
+      "https://api.codetracer.com/api/v1/tenants/tenant-123/traces/upload-url"
 
   test "confirm-upload path embeds the UUIDv7 recordingId":
     let path = buildConfirmUploadPath(SampleBaseApiUrl, SampleRecordingId)
     # Path component is the bare UUIDv7 — no `trace-` prefix, no integer
     # encoding.
     check path ==
-      "https://ide.codetracer.com/api/v1/traces/" &
+      "https://api.codetracer.com/api/v1/traces/" &
         SampleRecordingId & "/confirm-upload"
     check SampleRecordingId in path
     # Pre-M-REC-8 the path had `/traces/<int>/...`; an integer-shaped
@@ -93,7 +93,7 @@ suite "M-REC-8 — online-sharing client wire format":
   test "download-url path embeds the UUIDv7 recordingId":
     let path = buildDownloadUrlPath(SampleBaseApiUrl, SampleRecordingId)
     check path ==
-      "https://ide.codetracer.com/api/v1/traces/" &
+      "https://api.codetracer.com/api/v1/traces/" &
         SampleRecordingId & "/download-url"
     check SampleRecordingId in path
 
@@ -181,5 +181,5 @@ suite "M31 — client-controlled omniscient-DB upload mode":
     # while the body extension is in flight.
     let path = buildFinalizePath(SampleBaseApiUrl, SampleSessionId)
     check path ==
-      "https://ide.codetracer.com/api/v1/traces/" &
+      "https://api.codetracer.com/api/v1/traces/" &
         SampleSessionId & "/finalize"

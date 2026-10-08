@@ -93,7 +93,7 @@ pub const FLOW_MODE_WIRE_NAMES: &[&str] = &["call", "diff"];
 /// it is rejected by name.
 ///
 /// The legacy numeric form is still *accepted* on the way in, because the
-/// Karax renderer serialises this enum through `toJs` (an ordinal) and the
+/// renderer serialises this enum through `toJs` (an ordinal) and the
 /// Rust integration suites write `"flowMode": 0` directly. New senders
 /// should write the string.
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, PartialEq, Eq, JsonSchema)]
@@ -2862,6 +2862,12 @@ pub struct CallArgsUpdateResults {
     pub total_calls_count: usize,
     pub scroll_position: usize,
     pub max_depth: usize,
+    /// The global call-line index of the call the debugger is in (or, when
+    /// that call is folded away, of the nearest call line before it) — the
+    /// row a list pane's scrollbar scrubber marks (Scrollbar-Scrubbers.md
+    /// §3.5). `None` when unknown.
+    #[serde(default)]
+    pub current_call_line_index: Option<usize>,
 }
 
 impl CallArgsUpdateResults {
@@ -2882,6 +2888,7 @@ impl CallArgsUpdateResults {
             total_calls_count,
             scroll_position: 0,
             max_depth,
+            current_call_line_index: None,
         }
     }
 
@@ -2903,6 +2910,7 @@ impl CallArgsUpdateResults {
             total_calls_count,
             scroll_position: position,
             max_depth,
+            current_call_line_index: None,
         }
     }
 }

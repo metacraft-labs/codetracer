@@ -98,6 +98,10 @@ type
       ## `SourceVM`'s window and nothing else. THE PANE HOLDS NO MORE THAN
       ## THIS, which is the memory contract, and it is why the field is the
       ## window rather than the file.
+    entryContext*: string
+      ## The highlighter's state at the start of `heldLines[0]`
+      ## (`SourceVM.heldLineContexts[0]`), "" when none was derived. A few
+      ## bytes, not the text above the window (PLAT-47 B4).
     totalLineCount*: int
     viewportTop*: int
       ## First line the pane shows.
@@ -122,6 +126,16 @@ type
       ## never been.
     marks*: seq[(int, GutterMark)]
       ## Breakpoints and tracepoints on this file, by line.
+    caretLine*: int
+    caretColumn*: int
+      ## PLAT-51 (CodeTracer-TUI.md §3.3.2, Editor-Pane.md "The caret in a
+      ## read-only editor"): the read-only editor's CARET — the cell drawn in
+      ## reverse video, distinct from the execution line's band and from the
+      ## inspection cursor's ` ▹ `. Line 0: no caret.
+    columnMarks*: seq[(int, int)]
+      ## PLAT-50 (K14): the column breakpoints on this file, `(line,
+      ## column)` — the cell they are anchored at is marked in the code, as
+      ## the desktop's `ct-column-breakpoint-marker` decoration marks it.
     values*: seq[Annotation]
       ## What the ViewModel reports at THIS tick. Rebuilt every frame; see
       ## `inline_annotations.nim` on why nothing here is cached.
@@ -159,20 +173,20 @@ const
     ## What a visible-but-unheld line shows. See this module's header: never a
     ## blank, because a blank is how a source pane lies about a working
     ## debugger.
-  SourceLoadingStyle* = CellStyle(fg: "bright_black", italic: true)
+  SourceLoadingStyle* = CellStyle(role: srChromeMuted, italic: true)
 
   VerifiedMarker* = "[verified]"
   UnverifiedMarker* = "[UNVERIFIED]"
   AbsentMarker* = "[NO SOURCE]"
-  VerifiedMarkerStyle* = CellStyle(fg: "green")
-  UnverifiedMarkerStyle* = CellStyle(fg: "yellow", bold: true)
-  AbsentMarkerStyle* = CellStyle(fg: "red", bold: true)
+  VerifiedMarkerStyle* = CellStyle(role: srSourceVerified)
+  UnverifiedMarkerStyle* = CellStyle(role: srSourceUnverified)
+  AbsentMarkerStyle* = CellStyle(role: srSourceAbsent)
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  PathStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
-  DegradedStyle* = CellStyle(fg: "red", bold: true)
-  FlowNotTakenStyle* = CellStyle(fg: "bright_black")
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  PathStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
+  DegradedStyle* = CellStyle(role: srChromeError)
+  FlowNotTakenStyle* = CellStyle(role: srLineNotTaken)
     ## A line the run did not reach, de-emphasised. `bright_black` is the
     ## colour this pane already uses for text that is present but not the
     ## subject (the path, the rule, the loading placeholder); the syntax
@@ -181,18 +195,30 @@ const
 
   TokenStyles*: array[TokenClass, CellStyle] = [
     tcPlain: DefaultCellStyle,
-    tcKeyword: CellStyle(fg: "magenta", bold: true),
-    tcType: CellStyle(fg: "cyan"),
-    tcString: CellStyle(fg: "green"),
-    tcNumber: CellStyle(fg: "yellow"),
-    tcComment: CellStyle(fg: "bright_black", italic: true),
-    tcIdentifier: CellStyle(fg: "white"),
-    tcOperator: CellStyle(fg: "bright_blue"),
-    tcPunctuation: CellStyle(fg: "blue")]
+    tcKeyword: CellStyle(role: srSyntaxKeyword),
+    tcType: CellStyle(role: srSyntaxType),
+    tcString: CellStyle(role: srSyntaxString),
+    tcNumber: CellStyle(role: srSyntaxNumber),
+    tcComment: CellStyle(role: srSyntaxComment),
+    tcIdentifier: CellStyle(role: srSyntaxIdentifier),
+    tcOperator: CellStyle(role: srSyntaxOperator),
+    tcPunctuation: CellStyle(role: srSyntaxPunctuation),
+    tcStringEscape: CellStyle(role: srSyntaxStringEscape),
+    tcBracket: CellStyle(role: srSyntaxBracket),
+    tcTag: CellStyle(role: srSyntaxTag),
+    tcTypeIdentifier: CellStyle(role: srSyntaxTypeIdentifier),
+    tcKeywordType: CellStyle(role: srSyntaxKeywordType),
+    tcCommentDoc: CellStyle(role: srSyntaxCommentDoc),
+    tcRegexp: CellStyle(role: srSyntaxRegexp),
+    tcVariable: CellStyle(role: srSyntaxVariable),
+    tcNamespace: CellStyle(role: srSyntaxNamespace),
+    tcAttributeName: CellStyle(role: srSyntaxAttributeName),
+    tcMetatag: CellStyle(role: srSyntaxMetatag)]
     ## §3.3.2's "per-language token highlighting mapped ... to terminal ANSI
     ## colors (keywords, types, strings, comments, identifiers)".
     ##
-    ## NINE DISTINCT STYLES, and `test_syntax_highlighting_ansi.nim` asserts
+    ## TWELVE DISTINCT STYLES (the last three since PLAT-47, the scopes the
+    ## desktop's Monaco Python tokenizer colours on their own), and `test_syntax_highlighting_ansi.nim` asserts
     ## the number rather than spot-checking two of them: a palette with a
     ## repeat renders two token classes identically while every span-level
     ## assertion stays green.
@@ -223,16 +249,20 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
                           gutterMode = gutLineNumbers;
                           degradedMessage = "";
                           inspectionLine = 0;
-                          notTakenLines: seq[int] = @[]): SourcePaneModel =
+                          notTakenLines: seq[int] = @[];
+                          entryContext = "";
+                          columnMarks: seq[(int, int)] = @[]): SourcePaneModel =
   ## `inspectionLine` is LAST and defaults to 0, so every CTUI-5 call site
   ## builds exactly the model it built before CTUI-6 existed.
   SourcePaneModel(
     path: path, revisionLabel: revisionLabel, provenance: provenance,
     firstHeldLine: firstHeldLine, heldLines: heldLines,
+    entryContext: entryContext,
     totalLineCount: totalLineCount, viewportTop: viewportTop,
     executionLine: executionLine, inspectionLine: inspectionLine,
-    marks: marks, values: values, heat: heat, notTakenLines: notTakenLines,
-    gutterMode: gutterMode, degradedMessage: degradedMessage)
+    marks: marks, columnMarks: columnMarks, values: values, heat: heat,
+    notTakenLines: notTakenLines, gutterMode: gutterMode,
+    degradedMessage: degradedMessage)
 
 # ---------------------------------------------------------------------------
 # Reading the model
@@ -386,9 +416,11 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
   # entry point; `highlightWindow` behind it is the parse.
   let file =
     if cache.isNil:
-      highlightWindow(model.path, model.firstHeldLine, model.heldLines)
+      highlightWindow(model.path, model.firstHeldLine, model.heldLines,
+                      model.entryContext)
     else:
-      cache.highlight(model.path, 0, "", model.firstHeldLine, model.heldLines)
+      cache.highlight(model.path, 0, "", model.firstHeldLine, model.heldLines,
+                      model.entryContext)
 
   let bodyRows = area.height - 1
   for i in 0 ..< bodyRows:
@@ -422,15 +454,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       g.paint(row, at, fitted, span.style)
       at += cellWidthOf(fitted)
 
-    # How far the execution-line highlight reaches on this row. Grown as the
-    # code and the annotation are painted; see the `restyle` call below for the
-    # measurement that decided it is not the whole row.
-    var highlightCells = gutW
-
     if codeW <= 0:
-      if line == model.executionLine and line > 0:
-        g.restyle(row, area.col, highlightCells, proc(s: CellStyle): CellStyle =
-          s.withBackground(ExecutionLineBackground))
       continue
 
     let codeCol = area.col + gutW
@@ -438,14 +462,12 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       inc result.loadingLines
       let loading = truncateToCells(SourceLoadingText, codeW)
       g.paint(row, codeCol, loading, SourceLoadingStyle)
-      highlightCells += cellWidthOf(loading)
     else:
       inc result.materializedLines
       let raw = model.heldTextAt(line)
       let text = truncateToCells(raw, codeW)
       g.paint(row, codeCol, text, DefaultCellStyle)
       let shown = cellWidthOf(text)
-      highlightCells += shown
       for span in file.spansForLine(line):
         if span.class == tcPlain:
           continue
@@ -457,7 +479,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
         restyleClamped(g, row, lo, hi - lo, codeCol, codeCol + codeW,
                        proc(s: CellStyle): CellStyle =
                          var out2 = style
-                         out2.bg = s.bg
+                         out2.surface = s.surface
                          out2)
       # THE FLOW OVERLAY. Applied after the syntax colours so it replaces
       # them, and before the execution-line background so a stop inside a
@@ -466,8 +488,18 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       if line in model.notTakenLines and shown > 0:
         g.restyle(row, codeCol, shown, proc(s: CellStyle): CellStyle =
           var out2 = FlowNotTakenStyle
-          out2.bg = s.bg
+          out2.surface = s.surface
           out2)
+      # PLAT-50 (K14): A COLUMN BREAKPOINT'S CELL, underlined in the
+      # breakpoint's colour — the desktop's inline `ct-column-breakpoint-
+      # marker` on the one character the breakpoint is anchored at.
+      for (ml, mc) in model.columnMarks:
+        if ml == line and mc >= 1 and mc <= shown:
+          g.restyle(row, codeCol + mc - 1, 1, proc(s: CellStyle): CellStyle =
+            var out2 = s
+            out2.role = srGutterBreakpoint
+            out2.underline = true
+            out2)
       # The inline annotation, for the EXECUTION line only. §3.3.2 renders the
       # evaluated values "at the current step", and a value printed beside a
       # line the debugger is not on is a value from another moment.
@@ -476,50 +508,43 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
         if span.text.len > 0:
           inc result.annotatedLines
           g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)
-          highlightCells += AnnotationGap + cellWidthOf(span.text)
 
     if line == model.executionLine and line > 0:
-      # §3.3.2's "background highlight on current active execution line".
+      # §3.3.2's "background highlight on current active execution line",
+      # DRAWN AS THE DESKTOP DRAWS IT (PLAT-47): Monaco's stop decoration is a
+      # whole-line band across the editor's content area, from the first code
+      # column to the editor's right edge, whatever the line's length — and
+      # not under the line numbers (measured off the Electron app on `calc`:
+      # `plat47-desktop-parity.electron.json` reads the band 30px inside the
+      # editor's right edge, past the end of the line). So the band covers
+      # the code column, text, annotation and trailing blanks alike, to the
+      # pane's right edge, and the gutter keeps its own colours (the active
+      # line number and the `-->` pointer mark the line there).
       #
-      # APPLIED LAST, so it keeps every foreground the gutter and the
-      # highlighter decided — see `styled_row.restyle`'s docstring on why this
-      # is not painted first.
+      # APPLIED LAST, so it keeps every foreground the highlighter decided —
+      # see `styled_row.restyle`'s docstring on why this is not painted first.
       #
-      # AND APPLIED TO THE LINE'S EXTENT RATHER THAN TO THE WHOLE ROW, which is
-      # a MEASURED decision against CTUI-5's < 250-byte single-step emission
-      # gate rather than a taste one. A step changes two rows: the one the
-      # pointer left and the one it reached. With the highlight spanning the
-      # full pane the compositor's diff is 2 x paneWidth cells, and the
-      # emission was measured at 224 bytes on a 56-column pane and 292 on a
-      # 90-column one, over 40 short lines — over the gate at the width the
-      # Ultra-wide profile gives this pane. Ending the highlight at the end of
-      # the line's own text (plus the gutter, plus the inline annotation) keeps
-      # the syntax colours and brings the same step to 149 bytes at BOTH
-      # widths, because the cost stops depending on the pane and starts
-      # depending on the line.
-      #
-      # THIS IS A TRADE, NOT A CONVENTION MATCH, and saying so is the honest
-      # form. The mainstream GUI editors — VS Code, IntelliJ, Vim's
-      # `cursorline`, Emacs's `hl-line` — all highlight the FULL row, so the
-      # ragged right edge here is a visible departure from what a reader
-      # arriving from one of them expects. What buys it is that a terminal pane
-      # pays per emitted cell over a link this front-end is specified to run
-      # across (SSH, container shells), and §3.3.2's own sentence asks for "a
-      # background highlight on the current active execution line" without
-      # saying how far right it reaches. The line stays unambiguous either way:
-      # the `-->` pointer, the gutter tint and the highlight all agree on it.
-      #
-      # WHAT THAT DOES NOT BUY, stated because the gate is a number and this
-      # is the condition under which it is still missed: a line long enough to
-      # FILL the code column and dense in tokens costs 344 bytes at 56 columns
-      # and 348 at 90 — the runes are 112 of that and the rest is one SGR
-      # transition per token, on both the row the pointer left and the row it
-      # reached. The measurement on the real `calc` fixture is in CTUI-5's
-      # Implementation section; this comment records the worst case rather
-      # than leaving it to be found.
-      g.restyle(row, area.col, min(highlightCells, area.width),
+      # THE EMISSION COST. CTUI-5 (2026-09) ended the band at the end of the
+      # line's text to keep a one-line step under its 250-byte gate: a band
+      # that ends with the text makes a step's cost depend on the line rather
+      # than on the pane. Parity with the desktop is the stronger requirement
+      # now, and the cost is measured, not assumed:
+      # `test_source_stepping_forward_backward.nim` still asserts the gate at
+      # its 56-column pane with the full-width band, and
+      # `test_plat47_desktop_parity.nim` reads the band back off a real PTY
+      # to the pane's last column.
+      g.restyle(row, codeCol, area.col + area.width - codeCol,
                 proc(s: CellStyle): CellStyle =
                   s.withBackground(ExecutionLineBackground))
+    # PLAT-51: THE CARET, over everything — its cell reversed (a caret past
+    # the line's end sits on the blank cell after it).
+    if line == model.caretLine and line > 0 and model.caretColumn >= 1 and
+       model.caretColumn <= codeW:
+      g.restyle(row, codeCol + model.caretColumn - 1, 1,
+                proc(s: CellStyle): CellStyle =
+                  var out2 = s
+                  out2.reverse = true
+                  out2)
 
   if model.degradedMessage.len > 0 and area.height >= 2:
     g.paint(area.row + 1, area.col,
@@ -527,6 +552,59 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
+
+type
+  SourceClickTarget* = object
+    ## PLAT-50: what a press on the source pane is on.
+    line*: int
+      ## The source line pressed, 0 for none.
+    onGutter*: bool
+    column*: int
+      ## The code column pressed (1-based cell of the line's text); 0 on the
+      ## gutter or past the code column.
+    lineText*: string
+      ## The held text of `line` ("" while it is loading).
+    value*: int
+      ## The inline value pressed (an index into `values`), -1 for none.
+    values*: seq[Annotation]
+      ## Every value the line's annotation shows.
+
+proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
+                          row, col: int): SourceClickTarget =
+  ## A press at `(row, col)` on the pane `paintSourcePane` painted into
+  ## `area`, read back by the same arithmetic: the line, the gutter or the
+  ## code column, and on the execution line which inline value it is on.
+  result = SourceClickTarget(value: -1)
+  if area.width <= 0 or area.height <= 1 or row <= area.row or
+     row >= area.row + area.height or col < area.col or
+     col >= area.col + area.width:
+    return
+  let line = model.viewportTop + (row - area.row - 1)
+  if line < 1 or (model.totalLineCount > 0 and line > model.totalLineCount):
+    return
+  result.line = line
+  let gutW = min(area.width, model.paneGutterWidth())
+  let codeW = max(0, area.width - gutW)
+  if col < area.col + gutW:
+    result.onGutter = true
+    return
+  let codeCol = area.col + gutW
+  result.column = col - codeCol + 1
+  if not model.holdsLine(line):
+    return
+  let raw = model.heldTextAt(line)
+  result.lineText = raw
+  if line == model.executionLine and model.values.len > 0:
+    let shown = cellWidthOf(truncateToCells(raw, codeW))
+    let start = codeCol + shown + AnnotationGap
+    let targets = annotationTargets(raw, model.values, codeW, shown)
+    for t in targets:
+      result.values.add t.value
+    for i, t in targets:
+      if col >= start + t.startCell and col < start + t.endCell:
+        result.value = i
+        result.column = 0
+        break
 
 proc sourcePaneScreen*(model: SourcePaneModel; width, height: int;
                        cache: HighlighterCache = nil): SourcePaneScreen =

@@ -33,9 +33,10 @@
 ## PLAT-6's own status note says so about cross-tier equality. So the row-for-row
 ## comparison below is paired with assertions made against the SPECIFICATION of
 ## the decoration rather than against the model's rendering of it: after the
-## gesture, the body's last row must be `binding.DockStripGlyph` in every cell
-## the pane's own title does not occupy, and the pane's `CALL STACK ───` title
-## row must be gone from the screen entirely. A binding that had stopped docking
+## gesture, the body's last row must read the shared default's footer labels
+## and then the pane's own, each padded, on a blank strip
+## (`testing/strip_read.stripLabelProblems`, PLAT-48's strip), and the pane's
+## `[Files]` tab label must be gone from the screen entirely. A binding that had stopped docking
 ## — and a renderer that had stopped drawing strips — would fail those whatever
 ## the two tiers agreed about.
 ##
@@ -71,12 +72,13 @@ import headless_app/layout_model
 import ../../app/runtime
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
+import ../../testing/strip_read
 import ../apps/app_layout_gestures as gestureApp
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 46
+const ExpectedAssertions = 44  # PLAT-48: the strip read as labels on blanks (one check where three were)
 
 const
   Stem = "app_layout_gestures"
@@ -93,13 +95,18 @@ const
     ## directly.
   UndoLine = "undo-layout"
 
-  DockedPaneKind = paneCalltrace
-    ## The Compact profile's first projected region, and therefore the pane
-    ## `newPaneFocus` starts on. Spelled as a constant and ASSERTED below rather
-    ## than assumed: a profile change that moved the first region would
-    ## otherwise silently make this case about a different pane.
-  DockedPaneTitle = "Call Stack"
-  DockedPaneTitleRow = "CALL STACK"
+  DockedPaneKind = paneFileTree
+    ## The shared default's first region at 80x24 (the Files/VCS stack, with
+    ## Files the active tab), and therefore the pane `newPaneFocus` starts on.
+    ## Spelled as a constant and ASSERTED below rather than assumed: a change
+    ## to the shared default that moved the first region would otherwise
+    ## silently make this case about a different pane. Its "title row" is its
+    ## tab label, ` Files `, which the dock takes off the body.
+  DockedPaneTitle = "Files"
+  DockedPaneTitleRow = " Files   VC"
+    ## The strip as the 12-cell region shows it (11 inside its divider): the
+    ## two padded labels, `VCS` cut at the edge. PLAT-47: a tab is its padded
+    ## label, not `[Files]`.
 
 var countedAssertions = 0
 
@@ -139,6 +146,23 @@ proc bottomStripRow(rt: TuiRuntime): int =
     if s.edge == leBottom:
       return s.area.row
   -1
+
+proc bottomStripCol(rt: TuiRuntime): int =
+  ## Where the bottom strip's labels start on the status row: after the
+  ## status bar's file info (the desktop's order, PLAT-49 part B review).
+  for s in rt.layoutGeometry().strips:
+    if s.edge == leBottom:
+      return s.area.col
+  0
+
+proc bottomStripWidth(rt: TuiRuntime): int =
+  ## How many cells of its row the bottom strip's labels take (PLAT-49 part
+  ## B: the strip is on the status row, which carries the status text after
+  ## the labels).
+  for s in rt.layoutGeometry().strips:
+    if s.edge == leBottom:
+      return s.area.width
+  0
 
 # ---------------------------------------------------------------------------
 # Assertion templates. Every helper that calls `check` is a TEMPLATE.
@@ -212,15 +236,20 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
 
       # ---- THE UNGESTURED SCREEN -------------------------------------------
       ckScreenMatches(sess, model.shellScreenOf().rows, "before the gesture")
-      # ABSOLUTE, not differential: there is no dock strip yet, and the pane
-      # that is about to be docked is on the screen under its own title.
+      # ABSOLUTE, not differential: the bottom strip carries the shared
+      # default's footer panels only (PLAT-48), and the pane that is about to
+      # be docked is on the screen under its own title.
       let before = sess.screenContents()
-      ck not before.contains(DockStripGlyph)
+      let footerBefore = stripLabelProblems(
+        sess.regionText(Rows - 1, model.bottomStripCol(), model.bottomStripWidth(), 1)
+          .split('\n')[0], footerTitles())
+      for p in footerBefore[0 .. min(3, footerBefore.high)]: checkpoint(p)
+      ck footerBefore.len == 0
       ck before.contains(DockedPaneTitleRow)
-      # …and the Compact profile's tab stack is there, which is what says this
+      # …and the shared default's Variables stack is there, which is what says this
       # is the arrangement the case was written against.
-      ck before.contains("[Variables]")
-      ck model.bottomStripRow() < 0
+      ck before.contains(" Variables ")
+      ck model.bottomStripRow() == Rows - 1
 
       # ---- THE GESTURE, ONE BYTE AT A TIME ---------------------------------
       typeAt(sess, DockLine)
@@ -242,45 +271,39 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :dock bottom")
 
       # …AND ABSOLUTELY. This is the pair that survives both tiers being wrong
-      # together: the strip's cells are asserted against `DockStripGlyph` and
+      # together: the strip's cells are asserted against its labels and blanks and
       # the pane's title against the pane's own name, neither of which is read
       # off the model's rendering.
       let stripRow = model.bottomStripRow()
       checkpoint("the bottom dock strip is on row " & $stripRow)
       ck stripRow > 0
-      ck stripRow == Rows - 2          ## the body's last row, above the status
-      let stripText = sess.regionText(stripRow, 0, Cols, 1).split('\n')[0]
+      ck stripRow == Rows - 1          ## the status row (PLAT-49 part B)
+      let stripText = sess.regionText(stripRow, model.bottomStripCol(),
+                                      model.bottomStripWidth(), 1).split('\n')[0]
       checkpoint("strip row: '" & stripText & "'")
-      ck stripText.startsWith(DockedPaneTitle)
-      var glyphCells = 0
-      var wrongCells: seq[string] = @[]
-      for col in textCells(DockedPaneTitle) ..< Cols:
-        let rune = $sess.cellAt(stripRow, col).rune
-        if rune == DockStripGlyph:
-          inc glyphCells
-        else:
-          wrongCells.add "(" & $stripRow & "," & $col & ") is '" & rune & "'"
+      # EXACT (Verification-Harness-Traps §4b): every label in strip order —
+      # the footer's, then the docked pane's — and nothing but blanks besides.
+      let wrongCells = stripLabelProblems(stripText,
+                                          footerTitles() & @[DockedPaneTitle])
       if wrongCells.len > 0:
         checkpoint(wrongCells[0 .. min(4, wrongCells.high)].join(", "))
-      # EXACT, not "more than none" (Verification-Harness-Traps §4b): the strip
-      # spans the body's full width and the label takes its first cells, so the
-      # number of glyph cells is knowable.
-      ck glyphCells == Cols - textCells(DockedPaneTitle)
       ck wrongCells.len == 0
       # AND THE PANE IS GONE FROM THE BODY. A strip drawn beside a pane that
       # was never removed would satisfy every assertion above.
       let after = sess.screenContents()
       ck not after.contains(DockedPaneTitleRow)
-      ck after.contains(DockStripGlyph)
+      ck after.count(" " & DockedPaneTitle & " ") == 1
 
       # ---- `:undo-layout` PUTS IT BACK, ON THE TERMINAL --------------------
       typeAt(sess, UndoLine)
       for token in tokensOf(UndoLine):
         discard model.handleToken(token, 0'i64)
       ck model.app.layoutBinding.layout.dockedIndex(DockedPaneKind) < 0
-      ck model.bottomStripRow() < 0
+      ck model.bottomStripRow() == Rows - 1
       let restored = sess.screenContents()
-      ck not restored.contains(DockStripGlyph)
+      ck stripLabelProblems(sess.regionText(Rows - 1, model.bottomStripCol(),
+                                            model.bottomStripWidth(), 1).split('\n')[0],
+                            footerTitles()).len == 0
       ck restored.contains(DockedPaneTitleRow)
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :undo-layout")
 
@@ -314,7 +337,9 @@ suite "PLAT-6 Tier 2: a layout gesture through a real pty":
       let status = paneRow(sess, Rows - 1)
       checkpoint("status row: '" & status & "'")
       ck status.toLowerAscii().contains("teleport")
-      ck not sess.screenContents().contains(DockStripGlyph)
+      ck stripLabelProblems(sess.regionText(Rows - 1, model.bottomStripCol(),
+                                            model.bottomStripWidth(), 1).split('\n')[0],
+                            footerTitles()).len == 0
       ckScreenMatches(sess, model.shellScreenOf().rows, "after :teleport")
 
       sess.send($TestAppQuitByte)

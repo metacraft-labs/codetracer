@@ -1,0 +1,189 @@
+{
+ "_comment": [
+  "PLAT-50 — the desktop's chrome and click behaviours, read from the real Electron app on calc.",
+  "Produced by src/tests/gui/tests/visual/plat50-desktop-capture.spec.ts",
+  "(`bash scripts/plat50-capture-electron.sh`)."
+ ],
+ "chrome": {
+  "viewportWidth": 1900,
+  "bar": {
+   "ground": "#1b1b1b",
+   "box": {
+    "x": 0,
+    "y": 0,
+    "w": 1900,
+    "h": 34
+   }
+  },
+  "menuButton": {
+   "box": {
+    "x": 4,
+    "y": 6,
+    "w": 34,
+    "h": 26
+   },
+   "ground": "#1b1b1b",
+   "border": "#3a3a3a"
+  },
+  "toolbar": {
+   "box": {
+    "x": 46,
+    "y": 2,
+    "w": 645,
+    "h": 34
+   }
+  },
+  "transportButton": {
+   "ground": "#1b1b1b",
+   "box": {
+    "x": 172,
+    "y": 5,
+    "w": 28,
+    "h": 28
+   }
+  },
+  "omnibox": {
+   "box": {
+    "x": 703,
+    "y": 5,
+    "w": 452,
+    "h": 28
+   },
+   "ground": "#1b1b1b",
+   "border": "#3a3a3a"
+  },
+  "sessionStrip": {
+   "box": {
+    "x": 1159,
+    "y": 6,
+    "w": 645,
+    "h": 26
+   }
+  },
+  "strip": {
+   "groundBehindTabs": "#1b1b1b",
+   "inactiveTab": "#282828",
+   "activeTab": "#282828",
+   "inactiveTitle": "#727272",
+   "activeTitle": "#c8c8c8",
+   "splitter": "#1b1b1b",
+   "paneGround": "#282828"
+  }
+ },
+ "omniboxCentre": 929,
+ "omniboxShare": 0.23789473684210527,
+ "menu": {
+  "ground": "#1b1b1b",
+  "border": "#565656"
+ },
+ "menus": {
+  "tab": [
+   "Pin to Left",
+   "Pin to Bottom",
+   "Pin to Right",
+   "Close",
+   "Maximise container"
+  ],
+  "callTraceWithChildren": [
+   "Collapse Call Children"
+  ],
+  "callTraceLeaf": [
+   "Expand Call Children"
+  ],
+  "filesNode": [],
+  "editorText": [
+   "Copy",
+   "Find",
+   "Jump to line",
+   "Run to Cursor",
+   "Jump backward to line",
+   "Jump to call",
+   "Jump forward to call",
+   "Jump backward to call",
+   "Add breakpoint",
+   "Add tracepoint"
+  ],
+  "callArgument": [
+   "Add value to scratchpad"
+  ],
+  "dockLabelBottom": [
+   "Pin to Left",
+   "Pin to Right",
+   "Unpin",
+   "Close"
+  ],
+  "editorTextOnBreakpointFirst": [
+   "Copy",
+   "Find",
+   "Jump to line",
+   "Run to Cursor",
+   "Jump backward to line",
+   "Jump to call",
+   "Jump forward to call",
+   "Jump backward to call",
+   "Disable breakpoint",
+   "Delete breakpoint",
+   "Delete breakpoints in file",
+   "Delete ALL breakpoints",
+   "Add tracepoint"
+  ],
+  "editorTextOnBreakpoint": [
+   "Copy",
+   "Find",
+   "Jump to line",
+   "Run to Cursor",
+   "Jump backward to line",
+   "Jump to call",
+   "Jump forward to call",
+   "Jump backward to call",
+   "Enable breakpoint",
+   "Delete breakpoint",
+   "Delete breakpoints in file",
+   "Delete ALL breakpoints",
+   "Add tracepoint"
+  ],
+  "variablesRow": [
+   "Toggle value history",
+   "Show value origin"
+  ]
+ },
+ "clicks": {
+  "gutterBreakpoint": true,
+  "gutterDisabled": true,
+  "callTraceRow": {
+   "from": {
+    "line": 1,
+    "ticks": 1
+   },
+   "to": {
+    "line": 29,
+    "ticks": 32
+   },
+   "moved": true
+  },
+  "eventLogRow": {
+   "from": {
+    "line": 29,
+    "ticks": 32
+   },
+   "to": {
+    "line": 111,
+    "ticks": 68
+   },
+   "moved": true
+  },
+  "eventLogSort": {
+   "before": "stdout: 2 + 3 = 5",
+   "ascending": "stdout: 1 + 2 * 3 - 4 / 2 = 2",
+   "descending": "stdout: checksum = 73",
+   "header": "output ▼"
+  },
+  "callArgumentClick": {
+   "tooltip": false,
+   "rowClass": "calltrace-call-line calltrace-row",
+   "moved": false
+  },
+  "statusLocationCopied": "/home/zahary/m/codetracer-gui/codetracer-green2/test-programs/calc/main.py"
+ },
+ "pageErrors": []
+}

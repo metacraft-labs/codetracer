@@ -102,6 +102,19 @@ export stdio_backend
 
 import ../../version_gpui
 
+# PLAT-47 B1: the tokenizer states a window's lines start in, computed from the
+# whole file as the terminal's session computes them (`tui_session
+# .serveSourceWindow`). `lexical` is the tree-sitter-free half of the
+# terminal's highlighter, so this links no grammar archive.
+import tui/app/syntax/lexical
+
+# PLAT-47 deliverable 4: the VCS pane's ViewModel is the desktop's (`VCSVM`),
+# filled through the platform's VCS facade over the system `git` — reading a
+# repository is a HOST capability, like opening a recording.
+import viewmodels/vcs_vm
+import host/native_vcs
+import isonim/core/owner
+
 proc gpuiFrontEndVersion*(): string =
   ## The version this binary reports. One function, so `--version` and any
   ## future about-box cannot part.
@@ -142,6 +155,8 @@ type
     vm*: SourceVM
     provider*: SourceProvider
     store*: ReplayDataStore
+    contexts*: LexerContextCache
+      ## PLAT-47 B1: each held line's tokenizer entry state, per file text.
 
 proc newGpuiSourceService*(session: HeadlessDebugSession;
                            traceFolder: string;
@@ -153,7 +168,13 @@ proc newGpuiSourceService*(session: HeadlessDebugSession;
   GpuiSourceService(
     vm: vm,
     provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
-    store: store)
+    store: store,
+    contexts: newLexerContextCache())
+
+const ServeRounds = 4
+  ## How many follow-and-fetch rounds `serveWindow` may take to converge.
+
+proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest])
 
 proc serveWindow*(s: GpuiSourceService) =
   ## Follow the execution pointer and serve every line the window then lacks.
@@ -163,9 +184,25 @@ proc serveWindow*(s: GpuiSourceService) =
   ## range to the NEW window and then asks for the gap. Reversed, the trim runs
   ## against the old window and the editor asks for lines it is about to scroll
   ## away from.
+  ##
+  ## **UNTIL THE WINDOW HOLDS STILL** (at most `ServeRounds` rounds). The
+  ## first fetch is what tells the view the file's LENGTH, and the centring
+  ## jump (`followExecutionPointer`, PLAT-47 part A) clamps to it — so after
+  ## a jump near a file's end the window moves once more when the first
+  ## answer arrives, and a single round left the moved-in rows drawn as
+  ## loading (measured on `calc` after `stepIn=21,stepOut=1`: 15 of 54 rows).
+  ## The terminal converges by itself because it serves on every frame; a
+  ## window that draws once must converge before it draws.
   if s.isNil or s.vm.isNil:
     return
-  for request in s.vm.followAndRequest():
+  for _ in 0 ..< ServeRounds:
+    let requests = s.vm.followAndRequest()
+    if requests.len == 0:
+      break
+    s.serveRequests(requests)
+
+proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest]) =
+  for request in requests:
     var captured = SourceFetch(status: sfsProviderUnavailable,
                                detail: "the provider callback never ran")
     # SEEDED WITH A STATUS THAT CANNOT BE MISTAKEN FOR SUCCESS, and drained.
@@ -179,7 +216,17 @@ proc serveWindow*(s: GpuiSourceService) =
     # the same comment.
     s.provider.fetch(request, proc(fetch: SourceFetch) = captured = fetch)
     drainSourceCallbacks()
-    discard s.store.applySourceFetch(s.vm, captured)
+    # PLAT-47 B1: the state each fetched line STARTS in, from the whole file
+    # the provider read, carried with the window (`heldLineContexts`) so the
+    # editor colours a window opening inside a multi-line string as the
+    # desktop does — the terminal's `serveSourceWindow`, line for line.
+    let contexts =
+      if captured.fileLines.len > 0 and captured.lines.len > 0:
+        s.contexts.contextsFor(captured.revision.path, captured.fileLines,
+                               captured.firstLine,
+                               captured.firstLine + captured.lines.len - 1)
+      else: @[]
+    discard s.store.applySourceFetch(s.vm, captured, contexts)
 
 proc availability*(s: GpuiSourceService): SourceAvailability =
   ## Page-Descriptions.md §14's source axis for this session.
@@ -200,3 +247,127 @@ proc close*(s: GpuiSourceService) =
   if s.isNil or s.vm.isNil:
     return
   s.vm.dispose()
+
+proc openGpuiVcs*(directory: string): VCSVM =
+  ## PLAT-47 deliverable 4: the VCS pane's ViewModel for `directory` — the
+  ## desktop's `VCSVM`, read through the system `git`
+  ## (`vcs_vm.refreshFromFacade`: the branch, `git status --porcelain=v2`
+  ## read by the parse the desktop's panel reads with, and the history).
+  ##
+  ## WHICH DIRECTORY is the desktop's rule (`ui/git_cli.gitWorkingDirectory`):
+  ## the process's working directory for a replay, the project for Edit mode.
+  ## The caller passes it, and re-reads it every `VCSRefreshIntervalMs`
+  ## through `refreshGpuiVcs` (the window's tick, `gpui/main.nim`).
+  ## The reactive root lives as long as the window (the process).
+  var vm: VCSVM
+  createRoot proc(dispose: proc()) =
+    vm = createVCSVM()
+  vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
+  vm
+
+proc refreshGpuiVcs*(vm: VCSVM; directory: string): bool =
+  ## Re-read `directory` into the VCS pane's ViewModel, as the desktop's panel
+  ## does every `VCSRefreshIntervalMs`; answers whether what the pane draws
+  ## changed (`workingStateKey`), so the window redraws the pane only then.
+  if vm.isNil or directory.len == 0:
+    return false
+  let before = vm.workingStateKey()
+  vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
+  vm.workingStateKey() != before
+
+const GpuiCalltraceBuffer* = CALLTRACE_BUFFER
+  ## Rows read above and below the ones the pane shows: the desktop's
+  ## `CalltraceVM` pre-fetch, as the terminal's `tui_session.CallTraceBuffer`.
+
+type
+  CalltracePage* = object
+    top*: int
+      ## The first row the pane shows now.
+    loaded*: bool
+      ## Whether a section was read for it (`ct/load-calltrace-section`).
+    total*: int
+      ## The whole trace's call count.
+
+proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int):
+    CalltracePage =
+  ## PLAT-47 B3: scroll the call trace by `delta` rows in a pane that shows
+  ## `rows`, and read the section around the rows then shown — plus the
+  ## desktop's buffer either side — when the store does not hold them all.
+  ## `ct/load-calltrace-section`, the desktop's paging, exactly as the
+  ## terminal's `tui_session.pageCallTrace` does. The ViewModel's
+  ## `scrollPosition` / `viewportHeight` are what the pane then lists
+  ## (`CalltraceVM.visibleLines`).
+  if session.isNil:
+    return
+  let vm = session.session.calltraceVM
+  if vm.isNil:
+    return
+  let store = session.session.store
+  result.total = int(store.calltrace.totalCallsCount.val)
+  if result.total <= 0:
+    return
+  let body = max(1, rows)
+  vm.viewportHeight.val = body
+  result.top = clamp(int(vm.scrollPosition.val) + delta, 0,
+                     max(0, result.total - body))
+  vm.scroll(int64(result.top))
+  let first = int(store.calltrace.startLineIndex.val)
+  let held = store.calltrace.lines.val.len
+  let last = result.top + min(body, result.total - result.top)
+  if result.top >= first and last <= first + held:
+    return
+  let start = max(0, result.top - GpuiCalltraceBuffer)
+  try:
+    session.requestAndLoadCalltrace(startIndex = int64(start),
+                                    height = body + 2 * GpuiCalltraceBuffer,
+                                    depth = RecordingCalltraceDepth)
+    result.loaded = true
+  except CatchableError:
+    # The rows stay unlisted; the next scroll asks again.
+    discard
+  vm.scroll(int64(result.top))
+
+# ---------------------------------------------------------------------------
+# PLAT-51: the Event Log's window, for its scrollbar scrubber
+# ---------------------------------------------------------------------------
+
+type
+  EventLogPage* = object
+    top*: int
+      ## The first row of the whole log the pane shows now.
+    loaded*: bool
+      ## Whether a window was read for it (`ct/event-load`).
+    total*: int
+      ## The whole log's event count (the engine's, `ct/event-load`'s
+      ## `total`), -1 while unknown.
+
+const GpuiEventLogBuffer* = 10
+  ## Rows read below the ones the pane shows.
+
+proc pageEventLog*(session: HeadlessDebugSession; top, rows: int;
+                   atRRTicks: int64 = -1): EventLogPage =
+  ## Show the event log from row `top` in a pane that shows `rows`: read the
+  ## window `[top, top + rows + buffer)` of the WHOLE log when the store does
+  ## not hold it (`ct/event-load`, naming the stop so the answer also says
+  ## which row is "now"). The view moves; the debugger does not.
+  if session.isNil:
+    return EventLogPage(total: -1)
+  let ev = session.session.store.eventLog
+  let total = if ev.totalReported.val: ev.recordsTotal.val else: -1
+  let maxTop = if total >= 0: max(0, total - max(1, rows)) else: max(0, top)
+  result.top = clamp(top, 0, maxTop)
+  result.total = total
+  let first = ev.loadedStart.val
+  let held = ev.rows.val.len
+  let last = result.top + max(1, rows)
+  if result.top == first and (last <= first + held or
+                              (total >= 0 and first + held >= total)):
+    return
+  try:
+    discard session.requestAndLoadEventLog(start = result.top,
+                                           count = rows + GpuiEventLogBuffer,
+                                           atRRTicks = atRRTicks)
+    result.loaded = true
+  except CatchableError:
+    discard
+  result.total = if ev.totalReported.val: ev.recordsTotal.val else: -1

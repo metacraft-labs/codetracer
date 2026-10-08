@@ -44,6 +44,9 @@
 ## `programResult` goes to 1.
 
 import std/[os, strutils, tables, unittest]
+# The one module that knows where a published specification document is
+# (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
+import ../../../test_support/spec_documents
 
 import ../cli
 import ../theme/capabilities
@@ -52,7 +55,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 365
+const ExpectedAssertions = 428
 
 const
   LandedThroughMilestone = 14
@@ -85,17 +88,10 @@ proc specPath(): string =
   ## rather than from the working directory — the lane runner's cwd is the repo
   ## root today and a resolver that depended on that would break the first time
   ## someone ran the binary by hand.
-  var dir = currentSourcePath().parentDir
-  while true:
-    let candidate = dir.parentDir / "codetracer-specs" / "Front-Ends" /
-                    "CodeTracer-TUI.md"
-    if fileExists(candidate):
-      return candidate
-    let parent = dir.parentDir
-    if parent == dir:
-      break
-    dir = parent
-  ""
+  ## Resolved by `test_support/spec_documents`; "" when the document is not
+  ## there, which the cases below turn into a named failure.
+  let candidate = specDocumentPath("Front-Ends/CodeTracer-TUI.md")
+  if fileExists(candidate): candidate else: ""
 
 proc sectionText(document, heading: string): string =
   ## The text of one `### N.M` section, from its heading to the next one.
@@ -646,7 +642,27 @@ suite "CTUI-11 Tier 1: capability resolution":
     checkpoint("--theme=solarized -> " & badTheme.message)
     ck badTheme.kind == tckUsageError
     ck badTheme.message.contains("solarized")
-    ck badTheme.message.contains("monokai")
+    ck badTheme.message.contains("plain")
+    # PLAT-46: `monokai` is RETIRED, and refused with its replacement named
+    # rather than as an unknown word — in both spellings.
+    for spelling in [@["--theme=monokai", "/tmp"], @["-t", "monokai", "/tmp"]]:
+      let retired = parseTuiCommand(spelling)
+      checkpoint($spelling & " -> " & retired.message)
+      ck retired.kind == tckUsageError
+      ck retired.message.contains("retired")
+      ck retired.message.contains("--theme=dark")
+    # …and a GIVEN theme is pinned, an absent one is not (the mode is then
+    # detected from the terminal's background).
+    ck parseTuiCommand(["--theme=dark", "/tmp"]).flags.themePinned
+    ck not dark.flags.themePinned
+    # `--palette`: both names, and a refusal.
+    ck parseTuiCommand(["--palette=terminal", "/tmp"]).flags.palette ==
+       pkTerminal
+    ck parseTuiCommand(["--palette=design", "/tmp"]).flags.palette == pkDesign
+    ck dark.flags.palette == pkDesign
+    let badPalette = parseTuiCommand(["--palette=solarized", "/tmp"])
+    ck badPalette.kind == tckUsageError
+    ck badPalette.message.contains("terminal")
 
     # `--goto` CARRIES A TICK, and 0 is a tick.
     let goto = parseTuiCommand(["--goto=4500", "/tmp"])
@@ -688,7 +704,7 @@ suite "CTUI-11 Tier 1: capability resolution":
     let plainCaps = resolveCapabilities(
       initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
                       lang = "en_US.UTF-8"),
-      initCapabilityFlags(theme = utPlain))
+      initCapabilityFlags(theme = utPlain, themePinned = true))
     checkpoint("--theme=plain on a truecolor terminal: " & describe(plainCaps))
     ck plainCaps.colors == cdMonochrome
     ck plainCaps.colorsFrom == csFlag
@@ -831,7 +847,9 @@ suite "CTUI-11 Tier 1: capability resolution":
     # every acceptance check below for free. Sixteen tokens over thirteen
     # lines: `-h/--help`, `-v/--version` and `-t/--theme` are each written as
     # a pair, PLAT-6 added `--layout-binding` and PLAT-42 `--no-flow-overlay`.
-    ck options.len == 16
+    # PLAT-46 added `--palette`: seventeen.
+    ck options.len == 17
+    ck "--palette" in options
     ck "--layout-binding" in options
     ck "--no-flow-overlay" in options
 
@@ -1003,6 +1021,117 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck empty.len == 0
     ck backtickedRunes(empty).len == 0
     ck backtickedRunes(empty).len < SpecUnicodeGlyphs.len
+
+  test "PLAT-46: the mode comes from --theme, then OSC 11, then COLORFGBG":
+    let env = initTerminalEnv(term = "xterm-256color", lang = "en_US.UTF-8")
+    # NOTHING ANSWERED, NOTHING SET: Dark, from the default.
+    let none = resolveCapabilities(env, initCapabilityFlags())
+    ck none.mode == dmDark
+    ck none.modeFrom == bsDefault
+    ck backgroundNote(none) == "bg: default -> dark"
+    # OSC 11 — a light and a dark answer, in xterm's 4-digit and a 2-digit
+    # channel width, both scaled.
+    let (okLight, light) = parseOsc11Reply("\x1b]11;rgb:ffff/ffff/ffff\x1b\\")
+    ck okLight
+    ck light == (255, 255, 255)
+    let (okDark, darkBg) = parseOsc11Reply("\x1b]11;rgb:1e/1e/2e\x07")
+    ck okDark
+    ck darkBg == (30, 30, 46)
+    ck not parseOsc11Reply("\x1b]11;?\x1b\\")[0]
+    let lightCaps = resolveCapabilities(env, initCapabilityFlags(),
+      TerminalProbe(attempted: true, hasBackground: true, background: light))
+    # PLAT-47: the user's decision of 2026-09-27 — a light background is
+    # READ and REPORTED, and does not select Light
+    # (`AutoDetectSelectsLight`); `--theme=light` does.
+    ck not AutoDetectSelectsLight
+    ck lightCaps.mode == dmDark
+    ck lightCaps.modeFrom == bsOsc11
+    checkpoint(backgroundNote(lightCaps))
+    ck backgroundNote(lightCaps) ==
+       "bg: osc11 #ffffff (light; --theme=light to use it) -> dark"
+    let darkCaps = resolveCapabilities(env, initCapabilityFlags(),
+      TerminalProbe(attempted: true, hasBackground: true, background: darkBg))
+    ck darkCaps.mode == dmDark
+    ck backgroundNote(darkCaps) == "bg: osc11 #1e1e2e -> dark"
+    # THE THRESHOLD is mid-grey: just above and just below it.
+    ck isLightBackground((0x80, 0x80, 0x80))
+    ck not isLightBackground((0x70, 0x70, 0x70))
+    # COLORFGBG, vim's reading of the last field.
+    for (value, known, mode) in [("15;0", true, dmDark), ("0;15", true, dmLight),
+                                 ("0;default;7", true, dmLight),
+                                 ("7;8", true, dmDark), ("", false, dmDark),
+                                 ("junk", false, dmDark)]:
+      let (k, m) = parseColorFgBg(value)
+      ck k == known
+      if known: ck m == mode
+    let fgbg = resolveCapabilities(
+      initTerminalEnv(term = "xterm", colorFgBg = "0;15"), initCapabilityFlags())
+    ck fgbg.mode == dmDark
+    ck fgbg.modeFrom == bsColorFgBg
+    # OSC 11 BEATS COLORFGBG (it is the terminal's actual background) …
+    let both = resolveCapabilities(
+      initTerminalEnv(term = "xterm", colorFgBg = "0;15"), initCapabilityFlags(),
+      TerminalProbe(attempted: true, hasBackground: true, background: darkBg))
+    ck both.mode == dmDark
+    # … AND --theme BEATS BOTH.
+    let pinned = resolveCapabilities(
+      initTerminalEnv(term = "xterm", colorFgBg = "0;15"),
+      initCapabilityFlags(theme = utDark, themePinned = true),
+      TerminalProbe(attempted: true, hasBackground: true, background: light))
+    ck pinned.mode == dmDark
+    ck pinned.modeFrom == bsFlag
+    let pinnedLight = resolveCapabilities(env,
+      initCapabilityFlags(theme = utLight, themePinned = true))
+    ck pinnedLight.mode == dmLight
+
+  test "PLAT-46: a positive 24-bit answer beats a conservative TERM":
+    let xterm = initTerminalEnv(term = "xterm", lang = "en_US.UTF-8")
+    let before = resolveCapabilities(xterm, initCapabilityFlags())
+    ck before.colors == cdAnsi16
+    let after = resolveCapabilities(xterm, initCapabilityFlags(),
+      TerminalProbe(attempted: true, answered: true, truecolor: true,
+                    truecolorVia: "decrqss"))
+    ck after.colors == cdTrueColor
+    ck after.colorsFrom == csProbe
+    # A NEGATIVE answer moves nothing.
+    let negative = resolveCapabilities(xterm, initCapabilityFlags(),
+      TerminalProbe(attempted: true, answered: true))
+    ck negative.colors == cdAnsi16
+    # THE FLAGS AND THE REQUESTS STILL WIN over a positive probe.
+    let yes = TerminalProbe(attempted: true, answered: true, truecolor: true)
+    ck resolveCapabilities(xterm, initCapabilityFlags(noColor = true),
+                           yes).colors == cdMonochrome
+    ck resolveCapabilities(initTerminalEnv(term = "xterm", noColor = "1"),
+                           initCapabilityFlags(), yes).colors == cdMonochrome
+    ck resolveCapabilities(initTerminalEnv(term = "dumb"),
+                           initCapabilityFlags(), yes).colors == cdMonochrome
+    # TMUX: RGB passed on is 24-bit; RGB not passed on is WITHHELD, and the
+    # remedy names the client's terminal.
+    let tmuxEnv = initTerminalEnv(term = "screen", lang = "en_US.UTF-8",
+                                  tmux = "/tmp/tmux-1/default,1,0")
+    let rgb = resolveCapabilities(tmuxEnv, initCapabilityFlags(),
+      TerminalProbe(attempted: true, tmuxQueried: true, tmuxRgb: true,
+                    tmuxClientTerm: "xterm-256color"))
+    ck rgb.colors == cdTrueColor
+    ck not rgb.tmuxRgbWithheld
+    let withheld = resolveCapabilities(tmuxEnv, initCapabilityFlags(),
+      TerminalProbe(attempted: true, tmuxQueried: true, tmuxRgb: false,
+                    tmuxClientTerm: "xterm-256color"))
+    ck withheld.colors == cdAnsi16
+    ck withheld.tmuxRgbWithheld
+    checkpoint(tmuxRgbRemedy(withheld))
+    ck tmuxRgbRemedy(withheld).contains("terminal-features")
+    ck tmuxRgbRemedy(withheld).contains("xterm-256color*:RGB")
+    ck capabilityNote(withheld).contains("tmux")
+    ck tmuxRgbRemedy(rgb) == ""
+    # OUTSIDE tmux, nothing is ever "withheld".
+    ck not resolveCapabilities(xterm, initCapabilityFlags(),
+      TerminalProbe(attempted: true, tmuxQueried: true)).tmuxRgbWithheld
+    # NOTHING TO ASK when the depth and the mode are both flags.
+    ck not probeWanted(xterm, initCapabilityFlags(
+      forceTrueColor = true, theme = utDark, themePinned = true))
+    ck probeWanted(xterm, initCapabilityFlags(forceTrueColor = true))
+    ck not probeWanted(initTerminalEnv(term = "dumb"), initCapabilityFlags())
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

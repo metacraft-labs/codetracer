@@ -6,9 +6,9 @@
   "operationsMoved": 0,
   "stoppedLine": 1,
   "stoppedPath": "main.py",
-  "rrTicks": 0,
+  "rrTicks": 1,
   "trajectory": [
-    "entry=1@0"
+    "entry=1@1"
   ],
   "viewportCss": "1920x1080",
   "capturePixels": "1920x1080",

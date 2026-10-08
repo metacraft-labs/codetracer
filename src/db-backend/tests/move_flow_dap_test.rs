@@ -84,19 +84,23 @@ fn get_move_source_path() -> PathBuf {
 /// `"test_computation"` picks
 /// `flow_test__flow_test__test_computation.json.zst`).
 ///
-/// Returns `(db_backend_path, trace_recording, source_path)`.
+/// Returns `(db_backend_path, trace_recording, source_path)`, or `None` when
+/// the Move recorder is missing and the prerequisite gate allows the skip.
 ///
 /// # Panics
 ///
-/// Panics if the Move recorder is not found, the trace file is missing,
-/// or recording fails.
-fn setup_move_trace(test_fn_name: &str) -> (PathBuf, TestRecording, PathBuf) {
-    assert!(
-        find_move_recorder().is_some(),
-        "Move recorder not found. \
-         Set CODETRACER_MOVE_RECORDER_PATH or build codetracer-move-recorder \
-         (run `cargo build` inside the codetracer-move-recorder repo)."
-    );
+/// Panics if the trace file is missing or recording fails.
+fn setup_move_trace(test_fn_name: &str) -> Option<(PathBuf, TestRecording, PathBuf)> {
+    if find_move_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            test_fn_name,
+            "Move recorder not found. \
+             Set CODETRACER_MOVE_RECORDER_PATH or build codetracer-move-recorder \
+             (run `cargo build` inside the codetracer-move-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return None;
+    }
 
     let db_backend = find_db_backend();
     let trace_file = get_move_trace_file(test_fn_name);
@@ -112,7 +116,7 @@ fn setup_move_trace(test_fn_name: &str) -> (PathBuf, TestRecording, PathBuf) {
 
     println!("Trace recorded to: {}", recording.trace_dir.display());
 
-    (db_backend, recording, source_path)
+    Some((db_backend, recording, source_path))
 }
 
 /// Run a DAP lifecycle test for a Move trace.
@@ -124,7 +128,9 @@ fn setup_move_trace(test_fn_name: &str) -> (PathBuf, TestRecording, PathBuf) {
 /// recorder currently lacks source map support (all steps at line 1,
 /// variable names are bytecode indices).
 fn run_move_dap_lifecycle_test(test_fn_name: &str) {
-    let (db_backend, recording, _source_path) = setup_move_trace(test_fn_name);
+    let Some((db_backend, recording, _source_path)) = setup_move_trace(test_fn_name) else {
+        return;
+    };
 
     // Verify trace files were produced.  Per the CTFS migration guide
     // (Trace-Files/CTFS-Migration-Guide.md §3e) the `.ct` container is
@@ -170,7 +176,6 @@ fn run_move_dap_lifecycle_test(test_fn_name: &str) {
 /// be upgraded to verify variables at the breakpoint:
 ///   a=10, b=32, sum_val=42, doubled=84, final_result=94
 #[test]
-#[ignore = "requires move-recorder; run via: just test-move-flow"]
 fn move_flow_dap_variables() {
     run_move_dap_lifecycle_test("test_computation");
 }
@@ -187,7 +192,6 @@ fn move_flow_dap_variables() {
 /// Once source map support is added, upgrade to verify:
 ///   px=10, py=10, sum_coords=20, area=40
 #[test]
-#[ignore = "requires move-recorder; run via: just test-move-flow"]
 fn move_flow_dap_struct_variables() {
     run_move_dap_lifecycle_test("test_structs");
 }
@@ -204,7 +208,6 @@ fn move_flow_dap_struct_variables() {
 /// Once source map support is added, upgrade to verify:
 ///   len=5, first=10, last=50, sum=150, popped=50, new_len=4
 #[test]
-#[ignore = "requires move-recorder; run via: just test-move-flow"]
 fn move_flow_dap_vector_ops() {
     run_move_dap_lifecycle_test("test_vectors");
 }
@@ -221,7 +224,6 @@ fn move_flow_dap_vector_ops() {
 /// Once source map support is added, upgrade to verify:
 ///   counter=10, accumulator=55, power=128, iterations=7
 #[test]
-#[ignore = "requires move-recorder; run via: just test-move-flow"]
 fn move_flow_dap_loop_variables() {
     run_move_dap_lifecycle_test("test_loops");
 }
@@ -238,7 +240,6 @@ fn move_flow_dap_loop_variables() {
 /// Once source map support is added, upgrade to verify:
 ///   x=12, y=8, sum=20, product=96, max=12, nested_result=15
 #[test]
-#[ignore = "requires move-recorder; run via: just test-move-flow"]
 fn move_flow_dap_nested_calls() {
     run_move_dap_lifecycle_test("test_nested_calls");
 }
@@ -255,7 +256,6 @@ fn move_flow_dap_nested_calls() {
 /// Once source map support is added, upgrade to verify:
 ///   v1=42, container_label=3
 #[test]
-#[ignore = "requires move-recorder; run via: just test-move-flow"]
 fn move_flow_dap_generic_function() {
     run_move_dap_lifecycle_test("test_generics");
 }
@@ -272,7 +272,6 @@ fn move_flow_dap_generic_function() {
 /// Once source map support is added, upgrade to verify:
 ///   fib_0=0, fib_1=1, fib_5=5, fib_10=55, fib_15=610
 #[test]
-#[ignore = "requires move-recorder; run via: just test-move-flow"]
 fn move_flow_dap_fibonacci() {
     run_move_dap_lifecycle_test("test_fibonacci");
 }

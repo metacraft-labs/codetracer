@@ -49,10 +49,15 @@ type
     ## How this verifier reaches the signature primitive.
     ##
     ## Spelled with the ``Certificate`` prefix rather than the obvious
-    ## ``SignatureVerifier``, and not for style: ``viewmodel/identity/token.nim``
-    ## already exports an unrelated ``SignatureVerifier`` — an identity-token
-    ## seam over a different primitive — and the status-bar indicator re-exports
-    ## this one into the same front end. Two unrelated types of that name in one
+    ## ``SignatureVerifier``, and not for style. ``viewmodel/identity/token.nim``
+    ## used to export an unrelated ``SignatureVerifier`` — the synchronous
+    ## Ed25519 seam of the retired ``CTI\x01`` container — and the status-bar
+    ## indicator re-exports this one into the same front end.
+    ##
+    ## THAT COLLISION IS GONE as of 2026-09-30: identity verifies RS256
+    ## asynchronously through ``IdentityTransport`` and defines no such type.
+    ## The prefix STAYS anyway, because the rest of this paragraph is the real
+    ## argument and does not depend on the collision existing. Two unrelated types of that name in one
     ## import graph is a real reading hazard, and it also masked token.nim's
     ## export from ``ci/test/frontend-reachability.sh``, whose scan is by name:
     ## naming this the same thing silently marked a genuinely unreached export

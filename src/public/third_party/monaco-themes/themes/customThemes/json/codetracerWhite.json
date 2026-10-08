@@ -190,5 +190,13 @@
     "editorIndentGuide.activeBackground": "#FBC95A",
     "editorSuggestWidget.foreground": "#464646",
     "editorSuggestWidget.background": "#F5F5F5"
+  },
+  "codetracer": {
+    "$comment": "PLAT-47. The colours the desktop paints AROUND Monaco in its light theme (config `theme: default_white`), as the eye sees them, so the terminal's light editor (generated from this file by scripts/tokens-to-styl.sh --editor-theme) equals the desktop's. Every value here was MEASURED from the real Electron app launched in its light theme (src/tests/visual/answers/plat47-desktop-parity-light.electron.json, `just plat47-capture-electron`), and tests/test_plat47_editor_theme.nim fails when the file and the capture part. The desktop's light stylesheet keeps the dark panel surfaces, so its light editor is this theme's rules on the dark ground #282828 (issues/2026-09-28-desktop-light-theme-keeps-dark-panels.md). A resting line number is Monaco's light line-number colour at the stylesheet's 50% opacity over that ground; the execution line is the light stop decoration under this theme's line highlight; the selection is this theme's opaque selection. Monaco ignores this key.",
+    "ground": "#282828",
+    "lineNumber": "#26505e",
+    "activeLineNumber": "#c8c8c8",
+    "executionLine": "#c5ca88",
+    "selection": "#4f5b66"
   }
 }

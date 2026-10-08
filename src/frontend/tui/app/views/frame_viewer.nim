@@ -74,12 +74,16 @@
 ## doing it here instead would be a second quantiser beside the one CTUI-11
 ## already asserts.
 
+import std/math
+
 import isonim_tui
 
 import ../../../../common/terminal_graphics
 import ../layout/profile
 import ../theme/image_capability
 import ./styled_row
+import ./scrubber_track
+from codetracer_embed import ThumbSpan
 
 export styled_row, terminal_graphics, image_capability, profile
 
@@ -195,6 +199,13 @@ type
       ## and a pane that printed one for the other would label a stale list
       ## with a live coordinate.
     historyRequested*: bool
+    sceneMarks*: seq[int]
+      ## PLAT-51: the frames flagged `clear` (scene boundaries,
+      ## `FrameViewerVM.clearFrames`), marked on the pane's own scrubber as
+      ## the desktop's Scrub Slider marks them.
+    scrubbing*: bool
+      ## PLAT-51: the pane's scrubber is held — `frameIndex` is the frame
+      ## under the pointer.
 
   FrameViewerScreen* = object
     ## One painted overlay, plus the counts a test asserts on.
@@ -212,6 +223,14 @@ type
       ## `magnifier.magnifierTier(capability.tier)` while magnified and
       ## `capability.tier` otherwise. Reported rather than inferred, because
       ## §4's "declares its tier" is a claim about what a user is looking at.
+    scrubberRow*: int
+      ## PLAT-51: the row of the pane's OWN frame scrubber (its bottom row),
+      ## -1 when the pane has none (one frame or fewer, or no room).
+    scrubberCol*, scrubberWidth*: int
+    scrubberThumbCol*: int
+      ## The cell the thumb (the frame shown) is painted on.
+    sceneMarkCols*: seq[int]
+      ## The cells a scene-boundary mark is painted on.
     candidatesEvaluated*: int
       ## The only WORK quantity this pane claims: candidate masks the per-cell
       ## argmin evaluated, summed over the picture. An EQUALITY against
@@ -222,12 +241,12 @@ type
 const
   FrameViewerTitle* = "FRAME VIEWER"
   PixelHistoryTitle* = "PIXEL HISTORY"
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  MutedStyle* = CellStyle(fg: "bright_black")
-  DegradedStyle* = CellStyle(fg: "red", bold: true)
-  PassStyle* = CellStyle(fg: "green")
-  FailStyle* = CellStyle(fg: "red", bold: true)
-  SelectedStyle* = CellStyle(fg: "white", bold: true, reverse: true)
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  MutedStyle* = CellStyle(role: srChromeMuted)
+  DegradedStyle* = CellStyle(role: srChromeError)
+  PassStyle* = CellStyle(role: srChromeSuccess)
+  FailStyle* = CellStyle(role: srChromeError)
+  SelectedStyle* = CellStyle(role: srChromeText, surface: srSurfaceSelection, bold: true)
   PassGlyph* = "+"
   FailGlyph* = "x"
     ## ASCII, deliberately. §2.5's tier exists for `TERM=dumb` and a CI log,
@@ -457,6 +476,64 @@ proc gridRowSpans*(grid: CellGrid; row: int; width: int;
     result.add StyledSpan(text: cell.glyph, style: style)
     inc col
 
+const
+  SceneMarkGlyph* = "┼"
+    ## A scene boundary on the frame scrubber's track (ASCII `+`).
+
+func hasFrameScrubber*(model: FrameViewerModel; area: CellArea): bool =
+  ## PLAT-51 (CodeTracer-TUI-Graphics.md §4): the pane has its OWN scrubber,
+  ## along its bottom row, as the desktop's Video Player does — when there
+  ## is more than one frame to scrub and room for the title, one picture row
+  ## and the track.
+  model.frameCount > 1 and area.width >= 2 and area.height >= 3
+
+func frameScrubberRow*(model: FrameViewerModel; area: CellArea): int =
+  if model.hasFrameScrubber(area): area.row + area.height - 1 else: -1
+
+func frameColumn*(frameCount, frame, width: int): int =
+  ## The cell of the track `frame` is at: the first frame at the first cell,
+  ## the last at the last.
+  if frameCount <= 1 or width <= 1: 0
+  else: int(round(float(max(0, min(frame, frameCount - 1))) /
+                  float(frameCount - 1) * float(width - 1)))
+
+func frameAtColumn*(model: FrameViewerModel; area: CellArea; col: int): int =
+  ## The frame a press at screen column `col` on the scrubber names: the
+  ## track's ends are the first and the last frame (Visual-Replay.md "Range
+  ## `0` to `frameCount - 1`"). -1 when the pane has no scrubber.
+  if not model.hasFrameScrubber(area):
+    return -1
+  let local = max(0, min(col - area.col, area.width - 1))
+  if area.width <= 1: 0
+  else: int(round(float(local) / float(area.width - 1) *
+                  float(model.frameCount - 1)))
+
+proc paintFrameScrubber(g: var StyledGrid; area: CellArea;
+                        model: FrameViewerModel;
+                        screen: var FrameViewerScreen) =
+  let row = model.frameScrubberRow(area)
+  if row < 0:
+    return
+  let w = area.width
+  let at = frameColumn(model.frameCount, model.frameIndex, w)
+  let cells = thumbCells(ThumbSpan(start: at * 8, length: 8), w,
+                         vertical = false)
+  for i, cell in cells:
+    g.paint(row, area.col + i, cell.glyph, styleOf(cell.kind))
+  for f in model.sceneMarks:
+    if f < 0 or f >= model.frameCount:
+      continue
+    let x = frameColumn(model.frameCount, f, w)
+    if x == at:
+      continue   # the thumb is on top
+    g.paint(row, area.col + x, SceneMarkGlyph, MarkStyle)
+    if x notin screen.sceneMarkCols:
+      screen.sceneMarkCols.add x
+  screen.scrubberRow = row
+  screen.scrubberCol = area.col
+  screen.scrubberWidth = w
+  screen.scrubberThumbCol = area.col + at
+
 proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
                        model: FrameViewerModel): FrameViewerScreen =
   ## Paint the overlay into `area` of `g`, and report what it painted.
@@ -469,7 +546,9 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
   result = FrameViewerScreen(rows: @[], area: area, pictureRows: 0,
                              pictureCols: 0, historyRows: 0, degradedRows: 0,
                              tierDrawn: model.drawableTierFor(),
-                             candidatesEvaluated: 0)
+                             candidatesEvaluated: 0, scrubberRow: -1,
+                             scrubberCol: -1, scrubberWidth: 0,
+                             scrubberThumbCol: -1)
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -487,7 +566,9 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
   # is that "pixel history is mostly text" — but a list that took the whole
   # pane would leave no picture to pick a pixel WITH, which is the one thing
   # the terminal front-end cannot do without.
-  let body = area.height - 1
+  # PLAT-51: the pane's own frame scrubber takes the bottom row.
+  let scrubberRows = if model.hasFrameScrubber(area): 1 else: 0
+  let body = area.height - 1 - scrubberRows
   let magnifierLine = if model.magnified: 1 else: 0
   let wantHistory =
     if model.history.len > 0 or model.historyRequested: model.history.len + 1
@@ -559,13 +640,14 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
             MutedStyle)
     inc atRow
 
-  if historyHeight >= 1 and atRow < area.row + area.height:
+  let bottom = area.row + area.height - scrubberRows
+  if historyHeight >= 1 and atRow < bottom:
     g.paint(atRow, area.col,
             truncateToCells(model.historyTitleText(), area.width), TitleStyle)
     inc atRow
     var shown = 0
     while shown < model.history.len and shown < historyHeight - 1 and
-          atRow < area.row + area.height:
+          atRow < bottom:
       var at = area.col
       for span in historyRowSpans(model.history[shown],
                                  shown == model.selectedDrawCall, area.width):
@@ -574,6 +656,8 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
       inc atRow
       inc shown
       inc result.historyRows
+
+  paintFrameScrubber(g, area, model, result)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
@@ -625,7 +709,11 @@ proc emitFrameViewerPicture*(model: FrameViewerModel;
   ## fact in `remedyFor`'s one string. A guard no case can reach is a row that
   ## looks like coverage (Verification-Harness-Traps §32a), so it is gone rather
   ## than kept as defence in depth over a condition that cannot occur.
-  let pictureHeight = max(0, height - 1)
+  let scrubberRows =
+    if model.hasFrameScrubber(CellArea(col: 0, row: 0, width: width,
+                                       height: height)): 1
+    else: 0
+  let pictureHeight = max(0, height - 1 - scrubberRows)
   let gap = model.resolveGap(width, pictureHeight)
   if gap != fdgNone:
     raise newException(EmitError,

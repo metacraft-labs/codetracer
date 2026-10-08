@@ -188,11 +188,30 @@ suite "Headless app — launch":
     let app = newHeadlessApp()
     let slot = app.openSession(mockBackend().toBackendService())
     slot.session.launch(traceOf("/tmp/trace-b"))
+    # PLAT-45 added five DESKTOP panes to `PaneKind` (VCS, Agent Activity,
+    # Terminal Output, Test Results, Constraints) so the shared default can
+    # name them; no headless ViewModel exists for them, and `paneViewModel`
+    # answers nil by design (`headless_app.paneViewModel`'s arm). They are the
+    # front-ends' report leaves, not replay panes, and asserted nil here so a
+    # ViewModel wired to them later is a visible change.
+    #
+    # PLAT-48 adds two more of the same kind: the desktop's PROBLEMS and
+    # REQUESTS footer panels, which the shared default now docks at the
+    # bottom (`layout_model.sharedDefaultDocked`).
+    # PLAT-52: `paneTerminalOutput` left this set — the session's
+    # `TerminalOutputVM` is its ViewModel.
+    const DesktopOnlyPanes = {paneVcs, paneAgentActivity,
+                              paneTestResults, paneConstraints,
+                              paneProblems, paneRequests}
     var replayPanes = 0
     var editPanes = 0
+    var desktopPanes = 0
     for p in PaneKind:
       checkpoint("pane " & $p)
-      if p in EditOnlyPanes:
+      if p in DesktopOnlyPanes:
+        inc desktopPanes
+        check slot.paneViewModel(p).isNil
+      elif p in EditOnlyPanes:
         inc editPanes
         # THE OTHER HALF, asserted rather than skipped: an Edit-mode pane must
         # answer nil, not a ViewModel that happens to be lying around. A pane
@@ -205,6 +224,7 @@ suite "Headless app — launch":
         check not slot.paneViewModel(p).isNil
     checkpoint("replay panes " & $replayPanes & ", edit-only " & $editPanes)
     check editPanes == 1
+    check desktopPanes == 6
     check replayPanes > 0
     # The pane PLAT-41 moved, pinned by name so the move cannot be undone
     # quietly by re-adding it to the set above.

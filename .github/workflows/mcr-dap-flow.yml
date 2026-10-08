@@ -17,6 +17,7 @@ name: MCR DAP Flow
 
 on:
   pull_request:
+    branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
       - 'libs/ct-dap-client/**'
@@ -133,11 +134,16 @@ jobs:
           #   entry point as a SIBLING of codetracer-trace-format and
           #   hard-errors when it is absent, so it must be provisioned
           #   wherever codetracer-trace-format is.
+          # codetracer-visual-replay: ensure-ct-mcr's `ct_cli` imports
+          #   `gfx_stream/ctfs_visual` from it, and the build stops with
+          #   "cannot open file: gfx_stream/ctfs_visual" without it. Bare:
+          #   clone-siblings resolves it from this commit's repro.lock.
           siblings: |
             codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || 'dev' }}
             codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'dev' }}
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
+            codetracer-visual-replay
 
       - name: Run MCR DAP flow tests
         # The single canonical target. scripts/detect-siblings.sh (sourced
@@ -146,8 +152,13 @@ jobs:
         # ensure-ct-mcr / ensure-ct-native-replay prerequisites then build
         # ct-mcr / ct-native-replay on demand via the siblings' own `just`
         # targets (direnv exec, per cross-repo-builds.md) before the tests
-        # run. Languages whose compiler is absent honest-SKIP inside the
-        # Rust tests.
+        # run.
+        #
+        # Graceful skipping OFF: codetracer's dev shell carries every compiler
+        # these tests use (gnatmake, ldc2, gfortran, go, fpc, gcc/clang, nim,
+        # rustc), so a missing one is a failure here, not a skip that passes.
+        env:
+          CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |
           set -euo pipefail
           mkdir -p test-logs

@@ -153,8 +153,34 @@ func ocrNormalise*(s: string): string =
     if c in {'a' .. 'z', '0' .. '9'}: result.add c
     elif c in {'A' .. 'Z'}: result.add char(ord(c) + 32)
 
+proc drawnByTheWindow(node: JsonNode): bool =
+  ## Whether the WINDOW paints this node of the leaf plan (`--plan-out` is the
+  ## leaf tree the window is built from, before its chrome). Two kinds of
+  ## node are in the plan and never on screen:
+  ##
+  ##   * a leaf's HEADING (`data-ct-text-role="pane-title"`): since PLAT-49
+  ##     the window removes it — the pane's tab strip names the pane — so a
+  ##     needle such as the call trace's `Call Trace 27 call(s)` could never
+  ##     be legible;
+  ##   * a stack's INACTIVE tab (`data-ct-tab="i/n@a"` with `i != a`): the
+  ##     window draws a stack's active tab only. The VCS tab beside the file
+  ##     tree lists the working tree's changed files, which made the needle
+  ##     set depend on whichever checkout the lane ran in.
+  let attrs = node{"attributes"}
+  if attrs.isNil or attrs.kind != JObject:
+    return true
+  if attrs{"data-ct-text-role"}.getStr == "pane-title":
+    return false
+  let tab = attrs{"data-ct-tab"}.getStr
+  let at = tab.find('@')
+  let slash = tab.find('/')
+  if at > 0 and slash > 0 and slash < at:
+    return tab[0 ..< slash] == tab[at + 1 .. ^1]
+  true
+
 proc collectPlanText(node: JsonNode; into: var seq[string]) =
   if node.isNil or node.kind != JObject: return
+  if not drawnByTheWindow(node): return
   let t = node{"text"}
   if not t.isNil and t.kind == JString and t.getStr.len > 0:
     into.add t.getStr

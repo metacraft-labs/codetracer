@@ -50,7 +50,30 @@ SIGNIN_PATH="src/ct/online_sharing/authenticate.nim"
 SIGNIN_SUPPORT="src/ct/online_sharing/remote_config.nim"
 DEVICE_GRANT="src/frontend/viewmodel/identity/device_grant.nim"
 IDENTITY_DIR="src/frontend/viewmodel/identity"
-EXPECTED_SURFACES=52
+# The suites, and their PATH IS LOAD-BEARING. `ci/lib/test-lane-files.sh`
+# collects `src/frontend/viewmodel/tests/unit/test_*.nim` by glob and collects
+# nothing else in this area, so a suite written anywhere else runs only by
+# hand. Two identity suites were written under `src/tests/identity/` and did
+# exactly that: 32 cases that had never once executed in CI. Anything added
+# here must sit where a lane will find it.
+IDENTITY_SUITES="src/frontend/viewmodel/tests/unit/test_identity_*.nim"
+# 74 files in `src/` mention a credential-shaped word anywhere, comments
+# included. The number moved from 52 while nobody was updating it, which is the
+# ratchet doing its job late rather than not at all: this gate was red for ten
+# checks before the identity work touched it, and the drift came in through
+# `src/common/` and the two editor hosts.
+#
+# Every one of the 75 now resolves to a declared kind and none of them resolves
+# to `identity`, which is the claim that actually matters. The count is the
+# ratchet around it.
+#
+# 74 -> 75 on 2026-09-30, and the one file is named rather than the number
+# bumped blind: `test_identity_token.nim`, whose rewrite for the JWS format
+# explains in a comment why HS256 against an RSA issuer invites verifying the
+# public key as an HMAC secret. Prose, in a file the `identitytest` rule
+# classifies, and step 4 scans it for CODE that names or collects a credential
+# and finds none.
+EXPECTED_SURFACES=75
 
 # Credential-shaped NAMES the identity layer is allowed to carry, and why.
 # Budgeted rather than forbidden, because the layer legitimately holds bearer
@@ -64,7 +87,33 @@ EXPECTED_SURFACES=52
 #                     reads as handling a secret, and `displayPrompt` exists so
 #                     that no caller has to decide which of the two codes is
 #                     safe to show.
-EXPECTED_IDENTITY_CREDENTIAL_NAMES=1
+#   jwt.nim           the word "secret" inside the REFUSAL MESSAGE for an
+#                     algorithm the issuer did not advertise: "invites
+#                     verifying an RSA public key as an HMAC secret". A string
+#                     literal, not a name, and the scanner cannot tell the two
+#                     apart on purpose — it refuses to strip, because a `#`
+#                     inside a literal would truncate a line and could hide a
+#                     real call.
+#
+#                     REWORDING IT TO DODGE THIS SCANNER WOULD BE THE WRONG
+#                     FIX, and this file already says why one entry above: a
+#                     euphemism is worse than a budgeted hit, because the
+#                     message is what tells a reader which forgery was
+#                     attempted. So it is budgeted.
+#   device_grant.nim  `secretAccessToken` and `secretRefreshToken` on
+#                     `TokenGrant` — RFC 6749 §5.1's token response. Both ARE
+#                     bearer credentials and the flow cannot work without
+#                     holding them, so they follow `secretDeviceCode`'s naming
+#                     rather than hiding behind `token2`.
+#
+#                     THE THIRD FIELD IS DELIBERATELY NOT NAMED THIS WAY.
+#                     `idToken` is an ASSERTION — signed, audience-scoped,
+#                     short-lived, and useless to an attacker as anything but a
+#                     claim about who someone was. The refresh token mints new
+#                     ones without the user present and is the longest-lived
+#                     thing this flow produces. Giving all three the same name
+#                     shape would have said they carry the same risk.
+EXPECTED_IDENTITY_CREDENTIAL_NAMES=4
 
 # POSIX ERE. `\b`/`\d`/`\w` are GNU-or-PCRE and the engine is part of the
 # scanner (Verification-Harness-Traps.md 4).
@@ -132,6 +181,15 @@ kind_of() {
 	src/frontend/ui/agent_activity.nim) printf 'debuggee' ;;
 	src/frontend/viewmodel/viewmodels/agent_activity_vm.nim) printf 'debuggee' ;;
 	src/frontend/viewmodel/identity/*) printf 'identitybearer' ;;
+	# The identity suites. Their hits are comments explaining the forgeries the
+	# modules refuse — where a user types a password, why an RSA public key
+	# must not be read as an HMAC secret. Step 4 scans these files for CODE
+	# that names or collects a credential, so this kind covers the prose only.
+	#
+	# They sit in the UNIT LANE's directory, and this rule sits ABOVE the
+	# `src/frontend/viewmodel/*` one, or they would classify as `platform` and
+	# an identity suite would be indistinguishable from any viewmodel file.
+	src/frontend/viewmodel/tests/unit/test_identity_*) printf 'identitytest' ;;
 	src/tests/gui/tests/agent-activity/*) printf 'debuggee' ;;
 	src/frontend/tests/*) printf 'platform' ;;
 	src/frontend/viewmodel/views/isonim_agent_activity_view.nim) printf 'provider' ;;
@@ -139,6 +197,24 @@ kind_of() {
 	src/frontend/ui_js.nim | src/frontend/subwindow.nim) printf 'debuggee' ;;
 	src/frontend/viewmodel/*) printf 'platform' ;;
 	src/ct/codetracerconf.nim | src/ct/utilities/types.nim) printf 'config' ;;
+	# `getpwuid` and /etc/passwd — the Unix account DATABASE, read to resolve a
+	# user name. The word is the only thing it shares with a credential.
+	src/common/paths.nim) printf 'unixpasswd' ;;
+	# `../../etc/passwd` and `../secrets` as PATH-TRAVERSAL INPUTS. These are
+	# the canonical hostile paths, so a file that tests traversal defences is
+	# guaranteed to contain the word — the presence is evidence the defence is
+	# tested, not that a credential is handled.
+	src/frontend/gpui/host/gpui_host.nim | src/frontend/tui/host/edit_host.nim) printf 'traversalfixture' ;;
+	src/common/plugin_surfaces_test.nim | src/common/project_definitions_test.nim) printf 'traversalfixture' ;;
+	# The plugin permission model's own WARNING TEXT: a capability that can
+	# reach "credentials, keys and customer data" says so to the person
+	# granting it. Naming the hazard is the feature.
+	src/common/plugin_model/capabilities.nim | src/common/plugin_capabilities_test.nim) printf 'pluginwarning' ;;
+	# A struct member named "secret" in a VALUE-RENDERING fixture — a field of
+	# a program being debugged, which is the `debuggee` kind.
+	src/common/value_visualisers_test.nim) printf 'debuggee' ;;
+	# "secretly", in a sentence about two media behaving differently.
+	src/common/view_vocabulary/admission.nim) printf 'prose' ;;
 	*) printf 'UNCLASSIFIED' ;;
 	esac
 }
@@ -252,7 +328,12 @@ echo "    grant to hide its own secret behind a euphemism, which is worse."
 # ---------------------------------------------------------------------------
 id_collect=0
 id_named=0
-for f in "${IDENTITY_DIR}"/*.nim; do
+# THE SUITES ARE SCANNED TOO, not only the modules. A test that hardcoded a
+# password to exercise a path would be a real credential in this layer, and a
+# gate that looked only at `src/frontend/viewmodel/identity/` would not see it.
+# It costs nothing: `scan_code` skips comment lines, and the suites' hits are
+# all prose about the forgeries the modules refuse.
+for f in "${IDENTITY_DIR}"/*.nim ${IDENTITY_SUITES}; do
 	[ -f "${f}" ] || continue
 	c="$(count_of "$(scan_code "${f}" "${COLLECTION_PATTERN}")")"
 	if [ "${c}" -gt 0 ]; then
@@ -270,7 +351,7 @@ if [ "${id_named}" -eq "${EXPECTED_IDENTITY_CREDENTIAL_NAMES}" ]; then
 	ok "the identity layer carries ${id_named} budgeted credential-shaped name(s)"
 else
 	bad "the identity layer names a credential in ${id_named} place(s), budget is ${EXPECTED_IDENTITY_CREDENTIAL_NAMES} — a new one is a decision about what this layer may hold, not an oversight"
-	for f in "${IDENTITY_DIR}"/*.nim; do
+	for f in "${IDENTITY_DIR}"/*.nim ${IDENTITY_SUITES}; do
 		[ -f "${f}" ] || continue
 		scan_code "${f}" "${CREDENTIAL_PATTERN}" | sed "s|^|      ${f}:|"
 	done

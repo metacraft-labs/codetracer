@@ -58,6 +58,7 @@ import ./settings
 import ./clipboard
 import ./download
 import ./shell
+import ./browser_facades
 import ./platform
 import ./store_volume
 import ./project_store
@@ -66,9 +67,19 @@ import ./paths
 
 export platform, project_store, archive, wasm_registry
 
+# `BrowserTabBridge` and the three tab facades moved to
+# `platform/browser_facades.nim`, so the container deployment can reach them
+# without the project store and the wasm registry coming along. Re-exported
+# here so every existing importer of `web_platform` is unaffected by where
+# they now live.
+export browser_facades
+
 type
   BrowserBridge* {.requiresInit.} = ref object
-    ## Everything the tab supplies that is not the project store.
+    ## Everything the WEB deployment's tab supplies: the project store's
+    ## volume and the facts about it, the wasm host, the share origin, and —
+    ## as `tab` — the generic tab operations the container deployment supplies
+    ## too.
     ##
     ## `{.requiresInit.}` for the same reason the facades carry it: a bridge
     ## operation added here must fail the build at `host/web_browser.nim` and
@@ -88,29 +99,17 @@ type
       ## concern and a store that read the wall clock directly would be
       ## untestable for the same reason the time facade exists.
 
-    writeClipboardText*: proc(text: string
-                             ): PlatformFuture[PlatformOutcome[Nothing]]
-    writeClipboardHtml*: proc(html, plainText: string
-                             ): PlatformFuture[PlatformOutcome[Nothing]]
-    offerDownload*: proc(suggestedName: string; content: seq[byte];
-                         mimeType: string
-                        ): PlatformFuture[PlatformOutcome[Nothing]]
-    pickFiles*: proc(options: OpenDialogOptions
-                    ): PlatformFuture[PlatformOutcome[seq[string]]]
-      ## The File System Access API's `showOpenFilePicker`. The returned
-      ## strings are store paths of the *imported copies*, not host paths —
-      ## §4.2's "opening work from elsewhere goes through the import path
-      ## (upload or a shared link) rather than a path box".
-    pickDirectory*: proc(options: OpenDialogOptions
-                        ): PlatformFuture[PlatformOutcome[string]]
-    suggestSaveName*: proc(options: SaveDialogOptions
-                          ): PlatformFuture[PlatformOutcome[string]]
-    openExternalUrl*: proc(url: string
-                          ): PlatformFuture[PlatformOutcome[Nothing]]
-    setFullscreen*: proc(fullscreen: bool
-                        ): PlatformFuture[PlatformOutcome[Nothing]]
-    windowState*: proc(): PlatformFuture[PlatformOutcome[WindowState]]
-    onWindowStateChanged*: proc(handler: proc(state: WindowState))
+    tab*: BrowserTabBridge
+      ## The tab operations the clipboard, download and shell facades are
+      ## built over — `platform/browser_facades.nim`, which owns both the
+      ## record and the three builders.
+      ##
+      ## Separate from the fields above rather than flattened into them
+      ## because the CONTAINER deployment is a tab too and has none of the
+      ## fields above: no project store, no OPFS volume, no `WasmHost`. Those
+      ## seven are what makes this bridge the WEB's; `BrowserTabBridge` is
+      ## what the two deployments actually share, and §6.6's "a verb the tab
+      ## can answer, the tab answers" is a statement about that smaller set.
     shareLinkOrigin*: string
       ## Configuration, never a constant. Empty means sharing is not
       ## configured for this deployment, which is a legitimate build (a local
@@ -517,80 +516,6 @@ const webVcsPending* =
   "there is no version control in the browser yet: no history, no commits " &
   "and no diffs. Export the project to take your work with you"
 
-proc buildClipboard(web: WebPlatform;
-                    profile: PlatformProfile): ClipboardFacade =
-  let bridge = web.bridge
-  ClipboardFacade(
-    profile: profile,
-    writeText: proc(text: string): PlatformFuture[PlatformOutcome[Nothing]] =
-      bridge.writeClipboardText(text),
-    readText: proc(): PlatformFuture[PlatformOutcome[string]] =
-      # `capClipboardRead` is absent from the web profile: reading needs a
-      # permission the product does not ask for. The degradation sentence
-      # `webProfile` carries says paste is handled by the browser's own paste
-      # event, which is why this is a refusal rather than a prompt.
-      resolvedUnsupported[string]("reading the clipboard"),
-    writeHtml: proc(html, plainText: string
-                   ): PlatformFuture[PlatformOutcome[Nothing]] =
-      bridge.writeClipboardHtml(html, plainText))
-
-proc buildDownload(web: WebPlatform; profile: PlatformProfile): DownloadFacade =
-  let bridge = web.bridge
-  DownloadFacade(
-    profile: profile,
-    offerFile: proc(suggestedName: string; content: seq[byte];
-                    mimeType: string): PlatformFuture[PlatformOutcome[Nothing]] =
-      bridge.offerDownload(suggestedName, content, mimeType),
-    offerText: proc(suggestedName, content,
-                    mimeType: string): PlatformFuture[PlatformOutcome[Nothing]] =
-      var bytes = newSeq[byte](content.len)
-      for i in 0 ..< content.len: bytes[i] = content[i].byte
-      bridge.offerDownload(suggestedName, bytes, mimeType),
-    openFileDialog: proc(options: OpenDialogOptions
-                        ): PlatformFuture[PlatformOutcome[seq[string]]] =
-      bridge.pickFiles(options),
-    saveFileDialog: proc(options: SaveDialogOptions
-                        ): PlatformFuture[PlatformOutcome[string]] =
-      bridge.suggestSaveName(options),
-    pickDirectory: proc(options: OpenDialogOptions
-                       ): PlatformFuture[PlatformOutcome[string]] =
-      bridge.pickDirectory(options))
-
-proc buildShell(web: WebPlatform; profile: PlatformProfile): ShellFacade =
-  let bridge = web.bridge
-  ShellFacade(
-    profile: profile,
-    openExternalUrl: proc(url: string
-                         ): PlatformFuture[PlatformOutcome[Nothing]] =
-      # The allow-list belongs HERE and not only in `host/web_browser.nim`,
-      # because the bridge is pluggable: this is the `ShellFacade` the web
-      # instantiation hands to callers, and a bridge that forgot the check
-      # would inherit nothing.  Measured — `test_platform_web.nim`'s fake
-      # bridge accepted `javascript:` right through a guard that was only in
-      # the real one.
-      if not allowedExternalUrlScheme(url):
-        refuseExternalUrl(url)
-      else:
-        bridge.openExternalUrl(url),
-    revealInFileManager: proc(path: string
-                             ): PlatformFuture[PlatformOutcome[Nothing]] =
-      resolvedUnsupported[Nothing]("revealing a file in a file manager"),
-    windowState: proc(): PlatformFuture[PlatformOutcome[WindowState]] =
-      bridge.windowState(),
-    minimizeWindow: proc(): PlatformFuture[PlatformOutcome[Nothing]] =
-      resolvedUnsupported[Nothing]("minimising the window"),
-    toggleMaximizeWindow: proc(): PlatformFuture[PlatformOutcome[Nothing]] =
-      resolvedUnsupported[Nothing]("maximising the window"),
-    closeWindow: proc(): PlatformFuture[PlatformOutcome[Nothing]] =
-      resolvedUnsupported[Nothing]("closing the window"),
-    setFullscreen: proc(fullscreen: bool
-                       ): PlatformFuture[PlatformOutcome[Nothing]] =
-      bridge.setFullscreen(fullscreen),
-    onWindowStateChanged: bridge.onWindowStateChanged,
-    openSessionWindow: proc(sessionId: string
-                           ): PlatformFuture[PlatformOutcome[Nothing]] =
-      resolvedUnsupported[Nothing]("opening a second application window"))
-
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
@@ -666,9 +591,12 @@ proc newWebPlatform*(bridge: BrowserBridge; store: StoreSession): WebPlatform =
   result.platform.process = buildProcess(result, profile)
   result.platform.vcs = buildVcs(result, profile)
   result.platform.settings = buildSettings(result, profile)
-  result.platform.clipboard = buildClipboard(result, profile)
-  result.platform.download = buildDownload(result, profile)
-  result.platform.shell = buildShell(result, profile)
+  # The three the TAB answers, from `platform/browser_facades.nim` — the same
+  # builders `host/container_platform.nim` uses, so there is one
+  # implementation of each rather than one per deployment (§6.6).
+  result.platform.clipboard = buildBrowserClipboard(bridge.tab, profile)
+  result.platform.download = buildBrowserDownload(bridge.tab, profile)
+  result.platform.shell = buildBrowserShell(bridge.tab, profile)
 
 proc openWebStore*(bridge: BrowserBridge
                   ): PlatformFuture[PlatformOutcome[StoreSession]] =
@@ -708,8 +636,8 @@ proc exportProjectArchive*(web: WebPlatform; projectId, suggestedName: string
       if not built.ok:
         return resolvedErr[Nothing](pkInvalidArgument, built.reason)
       mapOutcome(
-        bridge.offerDownload(suggestedName & ".tar", built.bytes,
-                             "application/x-tar"),
+        bridge.tab.offerDownload(suggestedName & ".tar", built.bytes,
+                                 "application/x-tar"),
         proc(ignored: Nothing): Nothing =
           store.markExported(projectId)
           nothing))

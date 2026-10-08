@@ -1,0 +1,14 @@
+{
+  "name": "sample",
+  "version": "1.0.0",
+  "private": true,
+  "nothing": null,
+  "count": 42,
+  "ratio": -1.5e3,
+  "tags": ["a", "b", "c"],
+  "nested": {
+    "escaped": "quote \" and \\ backslash",
+    "empty": {},
+    "list": [1, 2.5, false]
+  }
+}

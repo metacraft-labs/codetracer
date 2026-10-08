@@ -74,6 +74,8 @@ import nim_libvterm
 import term_assert
 
 import ../../app/theme/capabilities
+import ../../app/theme/colour_math
+import ../../app/theme/roles
 import ../../app/views/borders
 import ../../host/terminal_driver
 # `waitForCompleteFrame` and its diagnosis-not-a-timeout failure. Imported for
@@ -85,7 +87,9 @@ import ../fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 76
+# 76 -> 77 (2026-10-04): the cold start is sampled `ColdStarts` times and the
+# sample count is asserted beside the frame-0 check.
+const ExpectedAssertions = 77
 
 var countedAssertions = 0
 
@@ -98,11 +102,9 @@ const
   FixtureName = "calc"
   Cols = 120
   Rows = 40
-    ## 120x40 selects the STANDARD profile: `app/layout/profile.selectProfile`
-    ## takes `lpCompact` below `TallProfileMinHeight` (35) whatever the width,
-    ## and `lpStandard` at `StandardMinWidth` (120). Chosen so the timeline gets
-    ## a rectangle of its own — in the Compact profile it is a TAB of the state
-    ## stack, and `TIMELINE` is not a pane title on the screen at all.
+    ## 120x40 is where the shared default (PLAT-45) opens unfolded, so every
+    ## region's strip is on the screen — the timeline is a tab of the events
+    ## stack there, labelled `Timeline`.
   ExitNoTerminalStatus = 3
     ## `main.nim`'s `ExitNoTerminal`. Spelled here rather than imported: this
     ## file must not pull the entrypoint's module graph in to read one integer,
@@ -117,6 +119,18 @@ const
     ## alternate screen, first frame. The engine handshake is measured
     ## separately and reported, because it is a different number with a
     ## different owner (CTUI-14).
+  ColdStarts = 5
+    ## Cold starts sampled; the gate is on the BEST. One sample used to be the
+    ## whole measurement, and on a host shared with CI runners (load 100-260
+    ## on 24 cores) one wall-clock sample measures the scheduler: the
+    ## unmodified tree went over 6 times in 10 while the same binary idle
+    ## measured 44-49 ms (codetracer-specs issue
+    ## 2026-09-30-wall-clock-gates-fail-under-host-load). Every sample is a
+    ## NEW process to its first frame — the same cold start, not a warm
+    ## repaint — so the minimum is still a cold start, and a regression that
+    ## makes EVERY start slower still fails; what no longer fails is one start
+    ## that waited for a CPU. The palette gate takes the best of nine for the
+    ## same reason.
 
 var tracePath = ""
 
@@ -243,10 +257,10 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # every "does not contain" below for free.
     let text = screenText(sess)
     checkpoint("status row: " & statusRowText(sess))
-    ck text.contains("CALL STACK")
-    ck text.contains("SOURCE")
-    ck text.contains("VARIABLES")
-    ck text.contains("TIMELINE")
+    ck text.contains(" Call Trace ")
+    ck text.contains(" main.py ")
+    ck text.contains(" Variables ")
+    ck text.contains("Event Log")   # PLAT-51: the Timeline tab is removed
 
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))
@@ -268,8 +282,8 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # …and the screen is otherwise the same debugger, so the flag turned off a
     # protocol and not the application.
     let text = screenText(sess)
-    ck text.contains("CALL STACK")
-    ck text.contains("SOURCE")
+    ck text.contains(" Call Trace ")
+    ck text.contains(" main.py ")
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
@@ -352,7 +366,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # The positive twin for that loop, through the same haystack: the Unicode
     # glyphs really would have been findable if they were there.
     ck text.len > 0
-    ck text.contains("SOURCE")
+    ck text.contains(" main.py ")
 
     sess.send("q")
     let status = sess.waitExit(initDuration(seconds = 15))
@@ -366,10 +380,10 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # colour at all, on any terminal.
     #
     # `docs/tui-testing.md`: "every colour a Tier-2 case relies on for its
-    # MEANING must also be asserted ABSOLUTELY". `indexed:244` is what
-    # `app/theme/degradation.ansi256Style(srChromeMuted)` publishes for the
-    # muted chrome every pane rule is painted in, so the assertion is the
-    # published number and not "some colour".
+    # MEANING must also be asserted ABSOLUTELY". PLAT-46: the pane rules are
+    # painted with the pane-border role, whose 256-colour rung is DERIVED from
+    # `colors/ui/border/secondary` — the nearest xterm-256 entry to its hex,
+    # computed here from the token rather than restated as a number.
     var sess = baseSession(@[tracePath], term = "xterm-256color").spawn()
     settleOnDebugger(sess)
     let cells = screenCells(sess)
@@ -379,12 +393,14 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     for cell in cells:
       if cell.fg.kind != ckDefault or cell.bg.kind != ckDefault:
         inc coloured
-      if cell.fg.kind == ckIndexed and cell.fg.idx == 244'u8:
+      if cell.fg.kind == ckIndexed and cell.fg.idx == uint8(nearestXterm256(
+          parseHexColour(DesignTokenHex[dtColorsUiBorderSecondary][dmDark]))):
         inc mutedRule
       if cell.fg.kind == ckRgb:
         inc rgb
     checkpoint("256-colour screen: " & $coloured & " coloured cells, " &
-               $mutedRule & " at indexed:244, " & $rgb & " truecolor")
+               $mutedRule & " in the border role's derived index, " & $rgb &
+               " truecolor")
     ck coloured > 0
     ck mutedRule > 0
     # …and a 256-colour terminal is NOT sent 24-bit SGR, which is the whole
@@ -489,7 +505,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # and not a no-op.
     let after = screenText(sess)
     checkpoint("after step: " & statusRowText(sess))
-    ck after.contains("SOURCE")
+    ck after.contains(" main.py ")
     ck statusRowText(sess).len > 0
     sess.send("q")
     discard sess.waitExit(initDuration(seconds = 15))
@@ -502,18 +518,31 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # MEASURED TO FRAME 0. `main.nim` negotiates, claims the tty and paints
     # before it spawns `replay-server`; the engine handshake is CTUI-14's number
     # and is reported below rather than gated here.
-    let started = getMonoTime()
-    var sess = baseSession(@[tracePath]).spawn()
-    waitForCompleteFrame(sess, Cols, Rows, timeoutMs = 20000)
-    let firstFrameMs = (getMonoTime() - started).inMilliseconds
-    let firstRow = strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1),
-                                  leading = false)
-    checkpoint("first frame at " & $firstFrameMs & " ms; status row: '" &
-               firstRow & "'")
-    # THE FIRST FRAME REALLY IS FRAME 0 — the one painted before the engine —
-    # which is what makes the number the cold start rather than a partial
-    # debugger.
-    ck firstRow.contains("opening ")
+    var samples: seq[int64] = @[]
+    var openingFrames = 0
+    var started = getMonoTime()
+    var sess: TuiTestSession
+    for i in 0 ..< ColdStarts:
+      started = getMonoTime()
+      sess = baseSession(@[tracePath]).spawn()
+      waitForCompleteFrame(sess, Cols, Rows, timeoutMs = 20000)
+      samples.add (getMonoTime() - started).inMilliseconds
+      let firstRow = strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1),
+                                    leading = false)
+      checkpoint("cold start " & $i & ": first frame at " & $samples[^1] &
+                 " ms; status row: '" & firstRow & "'")
+      # THE FIRST FRAME REALLY IS FRAME 0 — the one painted before the engine
+      # — which is what makes the number the cold start rather than a partial
+      # debugger. Every sample, not only the best.
+      if firstRow.contains("opening "): inc openingFrames
+      if i < ColdStarts - 1:
+        sess.send("q")
+        discard sess.waitExit(initDuration(seconds = 15))
+        sess.close()
+    let firstFrameMs = min(samples)
+    echo "CTUI-11 COLD START SAMPLES: ", samples, " ms; best ", firstFrameMs
+    ck samples.len == ColdStarts
+    ck openingFrames == ColdStarts
     ck firstFrameMs < ColdStartBudgetMs
 
     settleOnDebugger(sess)

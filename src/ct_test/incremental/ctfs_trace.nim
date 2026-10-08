@@ -1,18 +1,17 @@
 ## CTFS `.ct` dependency discovery — the M12 deliverable of the
 ## Trace-Based-Incremental-Testing prototype campaign (Phase 3).
 ##
-## Phase 1/2 read the *legacy* CodeTracer trace forms: the 3-file JSON
-## (`trace.json` + `trace_paths.json`, `trace_reader.nim`) and a hand-crafted
-## native calltrace projection (`native_trace.nim`). M12 makes the engine read
-## the **modern CTFS `.ct` bundle** — the binary container the native recorders
-## (and the native Ruby recorder) actually emit.
+## The engine reads the executed-function set of every CTFS `.ct` bundle here —
+## the binary container the native recorders and the interpreted-language
+## recorders emit. (The native calltrace projection is read by
+## `native_trace.nim`.)
 ##
 ## # The modern CTFS event-dump format (CONFIRMED against a real `.ct`)
 ##
 ## CTFS is a binary container; `codetracer-trace-format-nim` ships a reader and a
 ## `ct-print` tool that dumps a bundle's events. `ct-print --json-events <.ct>`
-## emits a JSON **array** of `type`-tagged objects (NOT the legacy
-## externally-tagged `{"Function": {...}}` form). The records this reader needs:
+## emits a JSON **array** of `type`-tagged objects. The records this reader
+## needs:
 ##
 ##   * `{"type":"path","path_id":N,"name":"<file>"}` — interns a source path.
 ##   * `{"type":"function","function_id":N,"name":"<fnname>"}` — the function
@@ -80,7 +79,7 @@
 import std/[json, os, osproc, algorithm, tables, strutils]
 import results
 
-import trace_reader   # ExecutedFunction
+import trace_reader   # ExecutedFunction, refuseTestOracleOutput
 import ctfs_seekable  # readExecutedFunctionsSeekable — the M1 in-process path
 
 export results
@@ -120,7 +119,8 @@ proc resolveCtBundle*(traceDirOrCtFile: string): Result[string, string] =
   ##   * a path to a `.ct` file directly (used as-is), OR
   ##   * a trace DIRECTORY that contains exactly one `*.ct` bundle.
   ## A directory with no `.ct`, or more than one, is an `Err` (ambiguous ⇒
-  ## re-run, never a guess). A non-existent path is an `Err`.
+  ## re-run, never a guess). A non-existent path is an `Err`.  A directory whose
+  ## only trace is a `trace.json` event stream is refused as test-oracle output.
   if fileExists(traceDirOrCtFile) and
       traceDirOrCtFile.toLowerAscii().endsWith(CtfsExtension):
     return ok(traceDirOrCtFile)
@@ -131,6 +131,9 @@ proc resolveCtBundle*(traceDirOrCtFile: string): Result[string, string] =
           path.toLowerAscii().endsWith(CtfsExtension):
         found.add path
     if found.len == 0:
+      let oracle = refuseTestOracleOutput(traceDirOrCtFile)
+      if oracle.isErr:
+        return err(oracle.error)
       return err("no " & CtfsExtension & " bundle found in: " & traceDirOrCtFile)
     if found.len > 1:
       found.sort()

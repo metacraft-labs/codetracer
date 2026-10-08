@@ -29,9 +29,8 @@
 //! The union and a point-in-time read only disagree on a trace whose
 //! steps carry *sparse* values — i.e. where a step records just the
 //! binding that line wrote. That is exactly the shape every JavaScript
-//! trace had before M37 (and the shape the committed
-//! `examples/recordings/javascript/flow_test` fixture still has), and it
-//! is the shape no current recorder produces. A live recording therefore
+//! trace had before M37, and it is the shape no current recorder
+//! produces. A live recording therefore
 //! cannot distinguish the two implementations: with full per-step
 //! snapshots the prefix-union happens to agree with the snapshot almost
 //! everywhere.
@@ -102,9 +101,10 @@ const RETURN_LINE: u32 = 21;
 fn require_js_recorder() -> Option<String> {
     if find_js_recorder().is_none() {
         if std::env::var("CT_PROVIDERS_ALLOW_MISSING").is_ok() {
-            eprintln!(
-                "SKIPPED (CT_PROVIDERS_ALLOW_MISSING=1): JavaScript recorder not found; \
-                 set CODETRACER_JS_RECORDER_PATH or build codetracer-js-recorder"
+            test_harness::skip_or_fail_missing_prerequisite(
+                "javascript_locals_dap_test",
+                "the JavaScript recorder is not built (skipping allowed by CT_PROVIDERS_ALLOW_MISSING=1)",
+                "check out codetracer-js-recorder and run `just build` there, or set CODETRACER_JS_RECORDER_PATH",
             );
             return None;
         }

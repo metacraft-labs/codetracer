@@ -66,7 +66,13 @@ func classOfDoc(id: string): int =
   ## that filters by class and the manifest that records it cannot disagree.
   parseInt($id[1])
 
-const ExpectedAssertions = 9469
+const ExpectedAssertions = 10353
+  ## 9857 -> 10353 (PLAT-47 part B): `source_vm.nim` (`CorpusMid`) grew by the
+  ## held line contexts (`heldLineContexts`, carried through fills, trims and
+  ## merges).
+  ## Moves with the corpus: `CorpusMid` is `viewmodels/source_vm.nim`, which
+  ## PLAT-47 extended (`topCentringIfOutside`), and PLAT-47 added the
+  ## end-of-document round trip (one per store).
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -310,6 +316,11 @@ template storeContract(makeStore: untyped; storeName: string) =
       # that is not a divisor of any line length still lands mid-line, at line
       # starts and at line ends over a file this size.
       off += 7
+    # THE END OF THE DOCUMENT, always: the stride lands on `body.len` only
+    # when 7 divides it, so a corpus file that grew by a few bytes silently
+    # stopped checking the one offset past every subtree (the PLAT-24
+    # harness's arm R3 went unkilled when `source_vm.nim` changed size).
+    counted s.offsetOf(s.posOf(body.len)) == body.len
     # §4: a loop that ran zero times satisfies every check inside it.
     counted checkedOffsets > 1000
 

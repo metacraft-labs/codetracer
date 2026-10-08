@@ -6,7 +6,7 @@
 ##
 ## Why these live at this layer
 ## ----------------------------
-## The logic used to be inline in `ui/flow.nim`, which imports karax and the
+## The logic used to be inline in `ui/flow.nim`, which imports kdom and the
 ## Monaco bindings and therefore only compiles on the JS backend — so it could
 ## only be observed through Playwright, and in practice it was not observed at
 ## all. Extracted, it is a total function over a `seq[int]` and can be pinned

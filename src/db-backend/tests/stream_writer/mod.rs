@@ -3,41 +3,42 @@
 //! Mirrors the production Nim streaming protocol just enough to exercise the
 //! db-backend follow reader against a *growing* split-stream `.ct`:
 //!
-//!  1. [`IncrementalCtfsStreamWriter::create`] lays down Block 0 (CTFS v4
-//!     header + extended header + a `FileEntry` for `steps.dat`, `steps.idx`,
-//!     `meta.dat`, each starting at size 0 with a pre-allocated root mapping
-//!     block) and flushes it. After this the container is a VALID (if empty)
-//!     CTFS file the reader can open.
+//!  1. [`IncrementalCtfsStreamWriter::create`] lays down Block 0 (CTFS v5
+//!     header + extended header + a `FileEntry` for each managed file, each
+//!     created empty: `(Size, MapBlock) = (0, 0)`, owning no block) and
+//!     flushes it. After this the container is a VALID (if empty) CTFS file
+//!     the reader can open.
 //!  2. [`IncrementalCtfsStreamWriter::flush_chunk`] encodes a chunk of steps via
 //!     the PRODUCTION `encode_step_stream` encoder, appends the compressed chunk
 //!     bytes to `steps.dat` and the chunk's 8-byte offset to `steps.idx`,
 //!     GROWS both files' `FileEntry.Size` in Block 0, and flushes the touched
 //!     blocks — exactly the "FileEntry.Size grows as a chunk is flushed" growth
 //!     signal the follow source watches.
-//!  3. [`IncrementalCtfsStreamWriter::finalize`] writes a real `meta.dat`
-//!     (via `encode_meta_dat` with the `has_step_stream` flag) LAST — the
-//!     finalization signal.
+//!  3. [`IncrementalCtfsStreamWriter::finalize`] writes a version 6 `meta.dat`
+//!     (with the `has_step_stream` flag) LAST — the finalization signal.
 //!
-//! To keep block mapping trivial the writer uses ONLY direct (level-1) mapping:
-//! each file's root map block holds up to `entries_per_block - 1` direct data
-//! block pointers, so fixtures must stay under that bound (511 blocks/file for
-//! the default 4096-byte block — far beyond any test's needs).
+//! Members are laid out as `ctfs-container.md` §2 requires: a member of at
+//! most one block is that data block, tagged with bit 63, and the append that
+//! takes it past one block claims a level-1 mapping block (slot 0 = the old
+//! data block) before its new data blocks. To keep the mapping trivial the
+//! writer uses only level 1, so fixtures must stay under 511 blocks per file
+//! for the default 4096-byte block — far beyond any test's needs.
 //!
 //! It is NOT a general CTFS writer; it deliberately models the minimal subset
 //! the follow-reader tests need.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
 use codetracer_trace_types::{Line, PathId};
 use codetracer_trace_types::{StepRecord, TraceLowLevelEvent};
 use codetracer_trace_writer::call_stream::{CallStreamRecord, encode_call_stream};
-use codetracer_trace_writer::meta_dat::{
-    FLAG_HAS_CALL_STREAM, FLAG_HAS_STEP_STREAM, FLAG_HAS_VALUE_STREAM, encode_meta_dat,
-};
 use codetracer_trace_writer::step_stream::{StepStreamBuilder, encode_step_stream};
 use codetracer_trace_writer::value_stream::{ValueRecordEntry, ValueStreamEvent, encode_value_stream};
+use db_backend::ctfs_trace_reader::meta_dat::{
+    FLAG_HAS_CALL_STREAM, FLAG_HAS_STEP_STREAM, FLAG_HAS_VALUE_STREAM, META_DAT_VERSION, MetaDat, serialize_meta_dat,
+};
 
 const BLOCK_SIZE: usize = 4096;
 const HEADER_SIZE: usize = 8;
@@ -45,7 +46,8 @@ const EXTENDED_HEADER_SIZE: usize = 8;
 const FILE_ENTRY_SIZE: usize = 24;
 const MAX_ROOT_ENTRIES: u32 = 31;
 const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
-const CTFS_VERSION_V4: u8 = 4;
+const CTFS_VERSION: u8 = 5;
+const CTFS_DIRECT: u64 = 1 << 63;
 const BASE40_CHARS: &[u8; 40] = b"\x000123456789abcdefghijklmnopqrstuvwxyz./-";
 
 /// The fixed root-directory order of the files this writer manages. The
@@ -85,13 +87,24 @@ fn base40_encode(name: &str) -> u64 {
     encoded
 }
 
-/// Per-file bookkeeping: current logical size and root map block.
+/// Per-file bookkeeping: current logical size, its data blocks in file order,
+/// and its level-1 mapping block once it has outgrown one block.
 struct FileState {
     name: String,
     size: u64,
-    map_block: u64,
-    /// Number of data blocks already mapped (= next direct map index to fill).
-    data_blocks: u64,
+    data_blocks: Vec<u64>,
+    mapping_block: Option<u64>,
+}
+
+impl FileState {
+    /// The `FileEntry.MapBlock` word for the member's current layout.
+    fn map_block_word(&self) -> u64 {
+        match (self.mapping_block, self.data_blocks.first()) {
+            (Some(mapping), _) => mapping,
+            (None, Some(&only)) => CTFS_DIRECT | only,
+            (None, None) => 0,
+        }
+    }
 }
 
 /// An incremental CTFS streaming writer for the follow-reader tests.
@@ -118,9 +131,9 @@ pub struct IncrementalCtfsStreamWriter {
 }
 
 impl IncrementalCtfsStreamWriter {
-    /// Create a new growing container at `path` with the three managed files
-    /// pre-declared at size 0 (each with a reserved root mapping block), and
-    /// flush Block 0 so the file is immediately a valid CTFS container.
+    /// Create a new growing container at `path` with the managed files
+    /// pre-declared empty (owning no block), and flush Block 0 so the file is
+    /// immediately a valid CTFS container.
     pub fn create(path: &Path, chunk_size: usize) -> std::io::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
@@ -129,19 +142,17 @@ impl IncrementalCtfsStreamWriter {
             .truncate(true)
             .open(path)?;
 
-        // Block 0 (directory) is block 0; reserve a root mapping block per file.
-        let mut next_block = 1u64;
-        let mut files = Vec::new();
-        for name in FILES {
-            let map_block = next_block;
-            next_block += 1;
-            files.push(FileState {
+        // Block 0 is the directory; a member claims blocks on its first write.
+        let next_block = 1u64;
+        let files = FILES
+            .iter()
+            .map(|name| FileState {
                 name: name.to_string(),
                 size: 0,
-                map_block,
-                data_blocks: 0,
-            });
-        }
+                data_blocks: Vec::new(),
+                mapping_block: None,
+            })
+            .collect();
 
         let mut writer = IncrementalCtfsStreamWriter {
             file,
@@ -156,8 +167,7 @@ impl IncrementalCtfsStreamWriter {
             call_chunks_flushed: 0,
         };
 
-        // Grow the backing file to cover the reserved blocks (block 0 + the
-        // per-file root map blocks), zero-filled.
+        // Grow the backing file to cover block 0, zero-filled.
         writer.ensure_len(writer.next_block * BLOCK_SIZE as u64)?;
         writer.flush_block_zero()?;
         writer.write_path_table()?;
@@ -303,15 +313,21 @@ impl IncrementalCtfsStreamWriter {
         // and the readers validate it. A placeholder here produces a container
         // the production Nim reader refuses at open, which is what a test using
         // this writer to stand in for a recorder must not do.
-        let meta = encode_meta_dat(
-            "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
-            "prog",
-            &[],
-            "/wd",
-            "test-recorder",
-            &[],
+        let meta = serialize_meta_dat(&MetaDat {
+            version: META_DAT_VERSION,
             flags,
-        );
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
+            program: "prog".to_owned(),
+            args: Vec::new(),
+            workdir: "/wd".to_owned(),
+            recorder_id: "test-recorder".to_owned(),
+            ext_flags: 0,
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
+        });
         self.append_to_file("meta.dat", &meta)?;
         self.flush_block_zero()?;
         self.file.flush()?;
@@ -333,47 +349,46 @@ impl IncrementalCtfsStreamWriter {
         self.files.iter().position(|f| f.name == name).expect("managed file")
     }
 
-    /// Append `bytes` to the logical end of a managed file, allocating data
-    /// blocks and writing their direct map pointers as needed, then grow the
-    /// file's `FileEntry.Size`.
+    /// Append `bytes` to the logical end of a managed file, claiming blocks
+    /// in the order `ctfs-container.md` §5 gives — the level-1 mapping block
+    /// first when the member outgrows one block, then its data blocks in file
+    /// order — and then grow the file's `FileEntry.Size`.
     fn append_to_file(&mut self, name: &str, bytes: &[u8]) -> std::io::Result<()> {
         let fi = self.file_index(name);
+        let new_size = self.files[fi].size + bytes.len() as u64;
+        let blocks_needed = new_size.div_ceil(BLOCK_SIZE as u64) as usize;
+        assert!(blocks_needed < BLOCK_SIZE / 8, "fixture exceeds level-1 mapping");
+        if blocks_needed > 1 && self.files[fi].mapping_block.is_none() {
+            let mapping = self.alloc_block()?;
+            for (slot, block) in self.files[fi].data_blocks.clone().into_iter().enumerate() {
+                self.write_ptr(mapping, slot, block)?;
+            }
+            self.files[fi].mapping_block = Some(mapping);
+        }
+        while self.files[fi].data_blocks.len() < blocks_needed {
+            let block = self.alloc_block()?;
+            let slot = self.files[fi].data_blocks.len();
+            if let Some(mapping) = self.files[fi].mapping_block {
+                self.write_ptr(mapping, slot, block)?;
+                self.flush_block(mapping)?;
+            }
+            self.files[fi].data_blocks.push(block);
+        }
+
         let mut written = 0usize;
         while written < bytes.len() {
-            let (map_block, data_blocks, size) = {
-                let f = &self.files[fi];
-                (f.map_block, f.data_blocks, f.size)
-            };
-            let offset_in_file = size + written as u64;
-            let block_index = offset_in_file / BLOCK_SIZE as u64;
+            let offset_in_file = self.files[fi].size + written as u64;
+            let block_index = (offset_in_file / BLOCK_SIZE as u64) as usize;
             let offset_in_block = (offset_in_file % BLOCK_SIZE as u64) as usize;
-
-            // Allocate a new data block when we are at a fresh block boundary.
-            let data_block = if block_index >= data_blocks {
-                let blk = self.alloc_block()?;
-                // Direct mapping only: write the pointer at `block_index` in the
-                // root map block.
-                assert!(
-                    block_index < (BLOCK_SIZE / 8 - 1) as u64,
-                    "fixture exceeds direct mapping"
-                );
-                self.write_ptr(map_block, block_index as usize, blk)?;
-                self.flush_block(map_block)?;
-                self.files[fi].data_blocks = block_index + 1;
-                blk
-            } else {
-                self.read_ptr(map_block, block_index as usize)?
-            };
-
-            let space = BLOCK_SIZE - offset_in_block;
-            let to_write = space.min(bytes.len() - written);
+            let data_block = self.files[fi].data_blocks[block_index];
+            let to_write = (BLOCK_SIZE - offset_in_block).min(bytes.len() - written);
             let phys_off = data_block * BLOCK_SIZE as u64 + offset_in_block as u64;
             self.ensure_len(phys_off + to_write as u64)?;
             self.file.seek(SeekFrom::Start(phys_off))?;
             self.file.write_all(&bytes[written..written + to_write])?;
             written += to_write;
         }
-        self.files[fi].size += bytes.len() as u64;
+        self.files[fi].size = new_size;
         Ok(())
     }
 
@@ -401,14 +416,6 @@ impl IncrementalCtfsStreamWriter {
         Ok(())
     }
 
-    fn read_ptr(&mut self, block: u64, index: usize) -> std::io::Result<u64> {
-        let off = block * BLOCK_SIZE as u64 + (index * 8) as u64;
-        self.file.seek(SeekFrom::Start(off))?;
-        let mut buf = [0u8; 8];
-        self.file.read_exact(&mut buf)?;
-        Ok(u64::from_le_bytes(buf))
-    }
-
     /// Ensure the touched block's bytes are durable. `set_len` + buffered writes
     /// are flushed by the OS lazily; an explicit flush keeps a concurrent reader
     /// honest. (Here block flushing is a no-op beyond the final `file.flush()`,
@@ -417,13 +424,13 @@ impl IncrementalCtfsStreamWriter {
         Ok(())
     }
 
-    /// Rewrite Block 0: header + extended header + the three file entries with
+    /// Rewrite Block 0: header + extended header + the file entries with
     /// their current sizes / map blocks. This is the growth commit point — a
     /// follow reader's `refresh()` re-reads exactly these `FileEntry.Size`s.
     fn flush_block_zero(&mut self) -> std::io::Result<()> {
         let mut block0 = vec![0u8; BLOCK_SIZE];
         block0[0..5].copy_from_slice(&CTFS_MAGIC);
-        block0[5] = CTFS_VERSION_V4;
+        block0[5] = CTFS_VERSION;
         block0[8..12].copy_from_slice(&(BLOCK_SIZE as u32).to_le_bytes());
         block0[12..16].copy_from_slice(&MAX_ROOT_ENTRIES.to_le_bytes());
 
@@ -431,9 +438,7 @@ impl IncrementalCtfsStreamWriter {
         for (i, f) in self.files.iter().enumerate() {
             let off = entry_start + i * FILE_ENTRY_SIZE;
             let name_encoded = base40_encode(&f.name);
-            // A size-0 file keeps map_block 0 (the reader treats it as empty);
-            // once it has data, expose its real root map block.
-            let map_block = if f.size == 0 { 0 } else { f.map_block };
+            let map_block = f.map_block_word();
             block0[off..off + 8].copy_from_slice(&f.size.to_le_bytes());
             block0[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
             block0[off + 16..off + 24].copy_from_slice(&name_encoded.to_le_bytes());

@@ -319,6 +319,7 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
     of StartupCommand.host:
       hostCommand(
         conf.hostPort,
+        conf.hostBind,
         conf.hostBackendSocketPort, conf.hostFrontendSocketPort,
         conf.hostFrontendSocketParameters, conf.hostTraceArg,
         conf.hostIdleTimeout,
@@ -396,7 +397,8 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
         conf.recordUpload,
         conf.recordUseInterpose,
         conf.recordProgram, conf.recordArgs,
-        server = conf.recordServer)
+        server = conf.recordServer,
+        portable = conf.recordPortable)
     of StartupCommand.`record-test`:
       recordTest(
         conf.recordTestTestName, conf.recordTestPath,

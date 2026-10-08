@@ -9,10 +9,17 @@
 // documented in spec §7.2 (M23 Sway row) only fire when the source line
 // touches a storage receiver (e.g. `storage.balance.write(x)`); this
 // fixture is local-only so the override path is inert here.
+//
+// `#[inline(never)]` keeps `compute` a function of its own, with its own frame
+// and source-map entries; inlined into `main`, nothing of it is left to step
+// into. It is not enough to make `a`, `b` and `c` observable: forc 0.70.3
+// emits no variable debug information at all and folds the body's statements
+// away. tests/origin_sway_dap_test.rs says what a recording can support today.
 script;
 
 use std::logging::log;
 
+#[inline(never)]
 fn compute() -> u64 {
     let a: u64 = 10;
     let b: u64 = a;

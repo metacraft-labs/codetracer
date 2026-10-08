@@ -19,12 +19,15 @@ fn find_db_backend() -> PathBuf {
 /// Record the Solana flow test program and verify the DAP server can launch
 /// and process the recording.
 #[test]
-#[ignore = "requires solana-recorder; run via: just test-solana-flow"]
 fn solana_flow_dap_recording_and_launch() {
-    assert!(
-        find_solana_recorder().is_some(),
-        "Solana recorder not found — build codetracer-solana-recorder"
-    );
+    if find_solana_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "solana_flow_dap_test",
+            "Solana recorder not found — build codetracer-solana-recorder",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let source = find_solana_flow_test().expect("Solana test program not found");
     let db_backend = find_db_backend();

@@ -4,7 +4,7 @@
 ## enforces it.
 ##
 ## app/views/shell.nim — CTUI-3. The root view: header, multi-pane body,
-## timeline strip, status bar.
+## status bar.
 ##
 ## ## The screen is composed ROW BY ROW, and that is a measured decision
 ##
@@ -35,7 +35,7 @@
 ## an ordinary single-pane layout would be indistinguishable from a deliberate
 ## one, which is the failure the rule is written against.
 
-import std/strutils
+import std/[options, sets, strutils, unicode, wordwrap]
 
 import isonim_tui
 
@@ -52,6 +52,7 @@ import ../syntax/highlighter
 import codetracer_embed
 import ./build_output
 import ./call_stack
+import ./call_trace
 import ./edit_pane
 import ./file_tree
 import ./event_log
@@ -61,19 +62,26 @@ import ./point_list
 import ./source_pane
 import ./status_bar
 import ./styled_row
-import ./timeline_bar
+import ./top_bar
 import ./tracepoint_manager
+import ./vcs_pane
+import ./frame_overlay
 import ./variables
+import ./context_menu
+import ./scratchpad_pane
+import ./terminal_output_pane
 
 export header, status_bar, profile, project, source_pane, styled_row
-# PLAT-6 moved `tabRow` and `PaneRuleGlyph` to `app/layout/tab_strip.nim`, so
+# PLAT-48: the top bar is painted by this module from a `ShellModel` field.
+export top_bar
+# PLAT-6 moved `tabRow` to `app/layout/tab_strip.nim`, so
 # the painter and the binding's hit-test read ONE answer about where tab `i`
 # sits. Re-exported here because this module declared both before, and every
 # CTUI-3 call site must keep resolving.
 export tab_strip
 export binding
-export call_stack, variables
-export event_log, timeline_bar, tracepoint_manager
+export call_stack, call_trace, variables
+export event_log, tracepoint_manager
 # PLAT-15's frame viewer, on exactly the rule the four lines above follow: a
 # `ShellModel` field is painted by this module, so every consumer that builds
 # one needs the model type in scope from this one import.
@@ -81,6 +89,12 @@ export frame_viewer
 # PLAT-16's two Edit-mode panes, on exactly that rule: both are `ShellModel`
 # fields painted by this module.
 export edit_pane, file_tree, build_output
+# PLAT-50: the right-click menu and the event-content overlay are
+# `ShellModel` fields painted by this module.
+export context_menu
+export scratchpad_pane
+# PLAT-52: the Terminal Output pane is a `ShellModel` field painted here.
+export terminal_output_pane
 
 type
   ShellModel* = object
@@ -88,6 +102,16 @@ type
     ## `app/tui_app.nim` from a `HeadlessApp`; this module never learns that a
     ## debugger exists.
     header*: HeaderModel
+    fileInfo*: string
+      ## The status bar's file info — the current file's language and
+      ## encoding (`headless_app/footer_info`), drawn first on the status row
+      ## as the desktop draws it; the bottom labels follow it.
+    topBar*: TopBarModel
+      ## PLAT-48. Row 0: the program menu, the debugger controls, the
+      ## omnibar, the session tabs, then `header`'s trace and tick and the
+      ## badge (`views/top_bar`). Its menu and omnibar are the shared
+      ## ViewModels the runtime holds; a shell built with none (a Tier-1
+      ## suite's) draws the row with a closed menu button and omnibar icon.
     status*: StatusBarModel
     layout*: LayoutNode
       ## THE SAME TREE THE DESKTOP PERSISTS. Held rather than derived, because
@@ -114,6 +138,14 @@ type
       ## strip CTUI-3 painted, `app_shell.nim`'s cross-tier golden is unchanged,
       ## and every CTUI-3, CTUI-5 and CTUI-6 assertion that reads that row still
       ## reads it.
+    callTraceLoaded*: bool
+      ## Whether a session asked for the call trace (so an empty `callTrace`
+      ## means "this recording has none", not "nothing asked yet").
+    callTrace*: CallTraceModel
+      ## PLAT-47. The recording's call TRACE, as the desktop's calltrace pane
+      ## lists it. When it has rows the `calltrace` rectangle draws it; when
+      ## the recording provides none, the rectangle falls back to `callStack`
+      ## below and says so (`call_trace.StackFallbackTitle`).
     callStack*: CallStackModel
       ## CTUI-6's call stack pane, as a value.
       ##
@@ -124,24 +156,23 @@ type
       ## `CALL STACK ────` title row CTUI-3 painted, `app_shell.nim`'s
       ## cross-tier golden is unchanged, and every CTUI-3 and CTUI-5 assertion
       ## that reads that row still reads it.
-    timeline*: TimelineBarModel
-      ## CTUI-8's scrubber, as a value.
-      ##
-      ## EMPTY BY DEFAULT, on exactly the same rule as `source`, `callStack` and
-      ## `variables` above: `paintPane` delegates the `timeline` rectangle to
-      ## `app/views/timeline_bar.nim` only when the model has BOUNDS, so a shell
-      ## with no session open paints CTUI-3's own `timelineScrubber` row and
-      ## every CTUI-3 assertion that reads it still reads it.
     eventLog*: EventLogModel
+      ## CTUI-8's event log, as a value: the Event Log pane's own rectangle
+      ## (the Timeline that shared it is removed, 2026-10-05), its scrollbar a
+      ## scrubber over the whole log (PLAT-51).
+    vcs*: VcsPaneModel
+      ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
+      ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
+      ## loaded by default, so a shell with no repository read paints the
+      ## generic title it always did.
     points*: PointListPaneModel
       ## PLAT-40. The Points pane, as a value. NOT LOADED BY DEFAULT, so a shell
       ## with no session paints the plain `POINTS ────` title row it always did.
-      ## CTUI-8's event log, as a value. It shares the `timeline` rectangle with
-      ## the scrubber — §3.3.5 is ONE pane holding both, and the Standard and
-      ## Ultra-wide layouts call that pane "Timeline & Tracepoints" — so the bar
-      ## takes the top `TimelineBarRows` rows and this takes the rest. In the
-      ## Compact profile they are two tabs of one stack and each owns its whole
-      ## rectangle.
+    scratchpad*: ScratchpadPaneModel
+      ## PLAT-50: the scratchpad pane's rows.
+    terminalOutput*: TerminalOutputPaneModel
+      ## PLAT-52: the recorded program's terminal output — its lines, its
+      ## screen and their scrubbers.
     tracepoints*: TracepointManagerModel
       ## CTUI-8's post-hoc tracepoint dialog. An OVERLAY: when `open` it is
       ## painted over the middle of the body, after every pane, so it is not
@@ -179,6 +210,10 @@ type
       ## per frame and break that identity. `binding.geometryOf` recombines the
       ## two, and an empty `docked` recombines to exactly the projection CTUI-3
       ## drew, so every golden written before PLAT-6 is byte-identical.
+    dragPointer*: Option[(int, int)]
+      ## PLAT-47: the pointer's cell during a drag (row, column) — the
+      ## binding's measurement, where the ghost label is drawn. `none` when no
+      ## drag is in flight or no pointer is known.
     interaction*: Interaction
       ## PLAT-6. The gesture in flight, READ and never stored: §5's third
       ## obligation is that a binding draws transient state from `Interaction`,
@@ -198,6 +233,21 @@ type
     build*: BuildPaneModel
       ## PLAT-16. Edit mode's `paneBuildOutput`, as a value. Its zero verdict is
       ## `bvIdle`, which is what a project nobody has built is in.
+    focused*: PaneKind
+    hasFocus*: bool
+    dividers*: DividerChoice
+      ## PLAT-50: which colour a pane divider is drawn in (`--dividers`).
+    contextMenu*: ContextMenuState
+      ## PLAT-50: the open right-click menu (`headless_app/pane_clicks`),
+      ## painted over everything at the cell it was opened at.
+    content*: ContentOverlay
+      ## PLAT-50: an event's full content (a right-click on an event-log
+      ## row), over the body.
+      ## PLAT-46. The pane the keyboard's focus is in (the runtime's
+      ## `PaneFocus`), so the shell can give it the FOCUSED border role —
+      ## the focused pane is distinguished by its border's colour and weight,
+      ## not only by the glyphs every pane shares. `hasFocus` false (the zero
+      ## value) paints every pane with the ordinary border role.
     edit*: EditPaneModel
       ## PLAT-16. Edit mode's Source pane, as a value.
       ##
@@ -246,17 +296,25 @@ type
     decorations*: seq[LayoutDecoration]
       ## What was painted over the panes: the strips, and whatever the gesture
       ## in flight asked for. Empty when there is no gesture and nothing docked.
+    topBarLayout*: TopBarLayout
+      ## PLAT-48. Where row 0's parts are, so a click is hit-tested against
+      ## the cells the paint used (`top_bar.topBarHitAt`).
+    topBar*: TopBarModel
+      ## PLAT-49: the top bar's model as painted (the header folded in), so
+      ## the host can place the omnibar's caret without rebuilding it.
+    menuDropdowns*: seq[MenuDropdown]
+    contextMenuArea*: CellArea
+      ## PLAT-50: where the open right-click menu was painted.
+    contentArea*: CellArea
+      ## PLAT-50: where the event-content overlay was painted.
+      ## PLAT-48. The open menu's dropdowns, over everything else.
+    frameOverlays*: seq[FrameOverlay]
+      ## PLAT-47 deliverable 6: what the compositor draws OVER this frame's
+      ## cells — a drag's drop tint and insertion caret (re-colouring, never
+      ## replacing, the cells of the region the drop would occupy) and the
+      ## ghost label following the pointer. Derived from `decorations`.
 
 const
-  PaneSeparatorGlyph* = "│"
-    ## The right-hand edge a pane draws when it is not flush with the body's
-    ## right edge.
-  TimelineTrackGlyph* = "─"
-  TimelineCursorGlyph* = "▲"
-    ## §3.3.5's execution-pointer marker on the scrubber. The same glyph
-    ## `app/views/timeline_bar.NeedleGlyph` paints; kept here because CTUI-3's
-    ## own one-line fallback scrubber still uses it when no bounds are known.
-
   TracepointOverlayWidth* = 64
   TracepointOverlayHeight* = 14
     ## The tracepoint dialog's ceiling. Clamped to the body, so an 80x24
@@ -276,25 +334,18 @@ const
 
 proc paneTitle*(kind: PaneKind; fallback: string): string =
   ## What a pane calls itself. The `LayoutNode`'s own title wins — it is what a
-  ## saved layout carries — and the constant below is only the default
+  ## saved layout carries — and `cells.terminalPaneName` is only the default
   ## `layout_model` documents as "use the pane's own default, which this module
-  ## does not decide either".
+  ## does not decide either". Every pane of the shared default (PLAT-45) takes
+  ## that default: its titles are empty on purpose.
   if fallback.len > 0:
     return fallback
-  case kind
-  of paneEditor: "Source"
-  of paneCalltrace: "Call Stack"
-  of paneState: "Variables"
-  of paneEventLog: "Event Log"
-  of paneTimeline: "Timeline"
-  of paneDebugControls: "Debug Controls"
-  of paneFlow: "Flow"
-  of paneSearch: "Search"
-  of panePointList: "Points"
-  of paneScratchpad: "Scratchpad"
-  of paneShell: "Shell"
-  of paneFileTree: "Files"
-  of paneBuildOutput: "Build & Run"
+  terminalPaneName(kind)
+
+const TerminalCaps = terminalCapability()
+  ## PLAT-45 deliverable 2: what this front-end can draw, evaluated once. A
+  ## placed pane outside it is painted as a REPORT (`paintReport`), never as an
+  ## empty rectangle.
 
 proc newShellModel*(width, height: int; hdr = initHeaderModel();
                     mode = umNormal; notification = "";
@@ -309,7 +360,8 @@ proc newShellModel*(width, height: int; hdr = initHeaderModel();
     header: hdr,
     status: initStatusBarModel(mode = mode, profile = selected,
                                notification = notification,
-                               product = product),
+                               product = product,
+                               fold = foldNote(product, selected)),
     layout: layoutForMode(product, selected),
     profile: selected,
     product: product)
@@ -320,18 +372,23 @@ proc newShellModel*(width, height: int; hdr = initHeaderModel();
 
 
 proc reprofile*(model: var ShellModel; width, height: int): bool =
-  ## Re-select the profile for a new terminal size, replacing the layout tree
-  ## only when the profile actually changed.
+  ## Re-derive the default for a new terminal size, replacing the layout tree
+  ## only when the DEFAULT actually changed — i.e. when the new size needs a
+  ## different fold depth (PLAT-45).
   ##
-  ## Returns whether it changed, and the guard is the point: a resize inside
-  ## one profile's band must NOT throw away which tab the user selected, and a
-  ## reflow that rebuilt the tree unconditionally would silently reset
+  ## Returns whether it changed, and the guard is the point: a resize that
+  ## needs the same depth must NOT throw away which tab the user selected, and
+  ## a reflow that rebuilt the tree unconditionally would silently reset
   ## `activeIndex` to 0 on every column of a drag.
   let selected = selectProfile(width, height)
+  let before = depthFor(model.product, model.profile)
+  let after = depthFor(model.product, selected)
   model.status.profile = selected
-  if selected == model.profile:
-    return false
+  model.status.fold = foldNote(model.product, selected)
   model.profile = selected
+  if before == after:
+    resizeShares(model.layout, model.product, selected)
+    return false
   model.layout = layoutForMode(model.product, selected)
   true
 
@@ -441,24 +498,6 @@ proc activeLayout*(reg: ModeRegister): LayoutNode =
 # Pane painting
 # ---------------------------------------------------------------------------
 
-proc titleRow(title: string; width: int): string =
-  ## `CALL STACK ─────────` — a pane's first row.
-  ##
-  ## Uppercased because both §3.1 drawings show pane titles that way in the
-  ## wider profile, and the rule glyph makes a pane's extent readable from a
-  ## `regionText` at Tier 2 without a border box eating two columns.
-  if width <= 0:
-    return ""
-  var line = toUpperAscii(title)
-  if textCells(line) + 1 <= width:
-    line.add " "
-    # `repeatGlyph` rather than `while textCells(line) < width: line.add …` —
-    # see `styled_row.repeatGlyph` for why the obvious spelling is quadratic.
-    # This one is the hottest of them all: it draws EVERY pane that has no
-    # painter of its own, on every repaint.
-    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
-  fitCells(line, width)
-
 # `tabRow` MOVED to `app/layout/tab_strip.nim` in PLAT-6, unchanged in
 # behaviour, and is now ASSEMBLED FROM `tabSpans` — the same table the terminal
 # binding's hit-test reads — so a column on screen and a tab index cannot come
@@ -467,27 +506,6 @@ proc titleRow(title: string; width: int): string =
 # that sentence was corrected in the module header before the code caught up
 # with it.) This module re-exports it (see the `export` above), so `paintPane`'s
 # three call sites below are the same call they were.
-
-proc timelineScrubber*(tick, totalTicks, width: int): string =
-  ## §3.3.5's scrubber: `[───────▲──────]`, with the marker at the tick's own
-  ## proportion of the recording.
-  ##
-  ## Exposed so a test can assert the marker's COLUMN rather than assert that a
-  ## triangle is somewhere on the row — "contains ▲" is satisfied by a scrubber
-  ## that puts it at column 0 for every tick.
-  if width < 3:
-    return spaces(max(0, width))
-  let track = width - 2
-  var pos = 0
-  if totalTicks > 0 and tick > 0:
-    pos = int(float(track - 1) * float(min(tick, totalTicks)) /
-              float(totalTicks))
-  pos = max(0, min(track - 1, pos))
-  var line = "["
-  for i in 0 ..< track:
-    line.add(if i == pos: TimelineCursorGlyph else: TimelineTrackGlyph)
-  line.add "]"
-  line
 
 proc frameViewerOverlayArea*(body: CellArea): CellArea =
   ## The rectangle PLAT-15's frame viewer occupies: centred in the body, at
@@ -512,141 +530,377 @@ proc tracepointOverlayArea*(body: CellArea): CellArea =
            row: body.row + (body.height - h) div 2,
            width: w, height: h)
 
+const
+  DividerGlyph* = "▏"
+    ## PLAT-50: a pane divider is U+258F LEFT ONE EIGHTH BLOCK — a line at
+    ## the divider cell's left edge, its foreground the divider's colour and
+    ## its background the fill beside it (the user's direction, 2026-10-02),
+    ## so it joins the tab strips it meets as a box-drawing `│` on its own
+    ## ground could not. Monochrome keeps the glyph (a visible line where
+    ## colour is gone, CTUI-11); the ASCII tier draws `|`.
+
+proc paintTabRow(g: var StyledGrid; row, col: int; tabs: seq[string];
+                 active, width: int) =
+  ## A tab strip: the strip on its own surface, the active tab lifted onto the
+  ## pane's surface and every other tab on the strip's — PLAT-46 deliverable 4,
+  ## the desktop's GoldenLayout strip in cells. The TEXT is `tabRow`'s,
+  ## unchanged, so every column the hit-test reads is where it was.
+  let text = tabRow(tabs, active, width)
+  g.fillSurface(row, col, width, 1, srTabBar)
+  g.paint(row, col, text, CellStyle(role: srTabBar))
+  for span in tabSpans(tabs, active):
+    let start = col + span.startCol
+    let w = min(span.width, col + width - start)
+    if w <= 0:
+      continue
+    let tabRole = if span.index == active: srTabActive else: srTabInactive
+    g.fillSurface(row, start, w, 1, tabRole)
+    g.restyleRole(row, start, w, srTabBar, tabRole)
+
+type
+  PaneFrame* = object
+    ## Where a pane's own box ends and its divider begins (PLAT-47).
+    box*: CellArea
+      ## The cells the pane's painters get: its rectangle minus its divider.
+    rightDivider*: bool
+      ## The rectangle's last column is a divider: another pane is to the
+      ## right. A pane flush with the body's right edge has none.
+      ##
+      ## PLAT-50: THERE IS NO BOTTOM DIVIDER. PLAT-47 put a `─` row between
+      ## vertically adjacent panes; since PLAT-49 every pane opens with its tab
+      ## strip, and the user (2026-10-02) asked for the row above a tab bar to
+      ## go — the strip IS the separator, as GoldenLayout's header is. A pane
+      ## keeps its whole height; a vertical resize is picked up on the lower
+      ## pane's strip, off its tabs (`binding.dividerAt`).
+
+proc paneFrame*(area, body: CellArea): PaneFrame =
+  ## A pane's frame inside `body`. A rectangle one cell wide keeps that cell
+  ## for its content rather than giving it to a divider.
+  let right = area.col + area.width < body.col + body.width and area.width > 1
+  PaneFrame(
+    box: CellArea(col: area.col, row: area.row,
+                  width: area.width - (if right: 1 else: 0),
+                  height: area.height),
+    rightDivider: right)
+
+proc dividerCells*(regions: seq[PaneRegion]; body: CellArea): HashSet[(int, int)] =
+  ## Every divider cell of the screen, as `(row, col)`.
+  result = initHashSet[(int, int)]()
+  for region in regions:
+    let a = region.area
+    if a.width <= 0 or a.height <= 0:
+      continue
+    let f = paneFrame(a, body)
+    if f.rightDivider:
+      for row in a.row ..< a.row + a.height:
+        result.incl (row, a.col + a.width - 1)
+
+proc stripCells*(regions: seq[PaneRegion]; body: CellArea): HashSet[(int, int)] =
+  ## PLAT-50: every cell of every pane's TAB STRIP row (a pane's first row,
+  ## its box's width), as `(row, col)` — where a divider takes the strip's
+  ## ground instead of drawing its line.
+  result = initHashSet[(int, int)]()
+  for region in regions:
+    let a = region.area
+    if a.width <= 0 or a.height <= 0:
+      continue
+    let f = paneFrame(a, body)
+    for col in a.col ..< a.col + f.box.width:
+      result.incl (a.row, col)
+
+proc focusRing*(focused: CellArea; body: CellArea): HashSet[(int, int)] =
+  ## The cells beside the focused pane's box — the column left of it and the
+  ## column right of it — whichever pane's divider happens to be in each.
+  ## Intersected with the divider cells by the caller, this is the focused
+  ## pane's outline, symmetric whichever neighbour OWNS a shared divider (the
+  ## defect the user reported on 2026-09-27). Since PLAT-50 there are no
+  ## horizontal dividers, so the outline is the two sides.
+  result = initHashSet[(int, int)]()
+  let box = paneFrame(focused, body).box
+  let left = box.col - 1
+  let right = box.col + box.width
+  for row in box.row ..< box.row + box.height:
+    result.incl (row, left)
+    result.incl (row, right)
+
+proc groundOf(regions: seq[PaneRegion]; row, col: int): SemanticRole =
+  ## PLAT-50: the BASE fill of the pane at `(row, col)` — the editor's ground
+  ## below its strip, every other pane's panel — not whatever a row painted
+  ## over it (a selected row's highlight must not bleed into a divider).
+  for region in regions:
+    if region.area.contains(row, col):
+      if region.pane == paneEditor and row > region.area.row:
+        return srSurfaceEditor
+      return srSurfacePanel
+  srSurfacePanel
+
+proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
+                   body: CellArea; focused: CellArea; hasFocus: bool;
+                   choice: DividerChoice) =
+  ## Settle every divider cell once all panes are painted (PLAT-50):
+  ##
+  ## * in a TAB-STRIP ROW — the cell beside it, either side, is a strip — the
+  ##   divider is the strip's own ground, so two strips side by side run on
+  ##   as one bar (the user, 2026-10-02: "the vertical divider cell inside a
+  ##   tab-bar row gets the inactive-tab background"); its glyph is drawn in
+  ##   that same ground, invisible in colour and a separator in monochrome;
+  ## * in a BODY ROW it is `DividerGlyph`, a one-eighth line at the cell's
+  ##   left edge in the chosen colour (`dividerLineRole`; the focused pane's
+  ##   sides in `srBorderFocused`), on the ground of the pane to its right —
+  ##   so the two fills either side meet at the line.
+  let cells = dividerCells(regions, body)
+  let strips = stripCells(regions, body)
+  var ring = initHashSet[(int, int)]()
+  if hasFocus and focused.width > 0 and focused.height > 0:
+    ring = focusRing(focused, body)
+  let line = dividerLineRole(choice)
+  for cell in cells:
+    let (row, col) = cell
+    if row < 0 or row >= g.height or col < 0 or col >= g.width:
+      continue
+    # THE FOCUSED PANE'S SIDES STAY UNBROKEN: beside its body rows the
+    # outline is drawn even where the neighbour's strip begins (a pane whose
+    # side faces two stacked panes meets the lower one's strip mid-side).
+    # Only the focused pane's own strip row keeps the strip's ground.
+    let focusSide = cell in ring and row != focused.row
+    let stripBeside = (row, col - 1) in strips or (row, col + 1) in strips
+    if stripBeside and not focusSide:
+      g.paint(row, col, DividerGlyph,
+              CellStyle(role: srDividerStrip, surface: srTabBar))
+      continue
+    let role = if focusSide: srBorderFocused else: line
+    let ground = if (row, col + 1) in strips: srTabBar
+                 else: groundOf(regions, row, col + 1)
+    g.paint(row, col, DividerGlyph, CellStyle(role: role, surface: ground))
+
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea) =
   ## One pane, into its own rectangle and no other.
-  let a = region.area
-  if a.width <= 0 or a.height <= 0:
+  ##
+  ## THE RECTANGLE'S LAST COLUMN IS A DIVIDER when another pane is beyond it
+  ## (`paneFrame`; PLAT-50: there is no divider row). `a` below is the pane's
+  ## own box — the rectangle without it — and is what every painter is
+  ## handed.
+  let full = region.area
+  if full.width <= 0 or full.height <= 0:
     return
-  let flushRight = a.col + a.width >= body.col + body.width
-  let inner = if flushRight: a.width else: a.width - 1
-
-  # THE SOURCE PANE OWNS ITS WHOLE RECTANGLE, title row included. CTUI-5's
-  # provenance marker lives in that title row, so a shell that painted the
-  # generic `SOURCE ────` title first and let the pane fill the body would
-  # render a verified file and an unverified one identically at the top of the
-  # pane — the exact thing the milestone forbids.
+  let frame = paneFrame(full, body)
+  let flushRight = not frame.rightDivider
+  let inner = frame.box.width
+  let a = CellArea(col: full.col, row: full.row, width: full.width,
+                   height: frame.box.height)
+  # PLAT-46: THE PANE'S SURFACE FIRST, under every cell of its rectangle, so
+  # whatever the painter below leaves blank is the pane's body and not the
+  # terminal's background. The editor rectangle is the editor surface.
   #
+  # The editor's first row — its tab strip — stays on the strip's surface:
+  # the desktop's editor tab sits on its strip, not in the editor.
+  g.fillSurface(full.row, full.col, full.width, full.height, srSurfacePanel)
+  if region.pane == paneEditor and a.height > 1:
+    g.fillSurface(a.row + 1, a.col, inner, a.height - 1, srSurfaceEditor)
+
+  # PLAT-49 (the user, 2026-10-01): NO TITLE ROW INSIDE A PANE. Every pane's
+  # first row is a TAB STRIP — a stack's tabs, or a lone pane's one tab with
+  # its name — and the strip is what identifies the pane, as the desktop's
+  # GoldenLayout header does. The `FILES ─────` / `CALL TRACE 28 call(s) ───`
+  # rows the painters below draw first are their own headings; each painter is
+  # handed the rectangle FROM THE STRIP'S ROW (`underStrip`), so its heading
+  # lands on that row and the strip, painted last, takes its place. Their
+  # unit-level output (and every CTUI suite that reads a painter on its own)
+  # keeps the heading; the shell never shows it. A painter with NO heading of
+  # its own (the build pane and the VCS pane, whose first row is
+  # content — the build verdict, the branch) is handed the rows BELOW the
+  # strip instead (`belowStrip`).
+  let stacked = region.activeTab >= 0 and region.tabs.len > 0
+  # A LONE EDITOR'S TAB IS ITS FILE, as the desktop's editor tab is: the open
+  # file's name (`●` after it while an Edit-mode buffer is modified). A lone
+  # pane's strip is not hit-tested tab by tab (pressing anywhere on it picks
+  # the pane up, `binding.onMouse`), so the label's width moves nothing.
+  var lone = paneTitle(region.pane, region.title)
+  if region.pane == paneEditor:
+    let file =
+      if model.product == pmEdit: editorTabLabel(model.edit.path,
+                                                 model.edit.dirty)
+      else: editorTabLabel(model.source.path, false)
+    if file.len > 0:
+      lone = file
+  let stripTabs = if stacked: region.tabs else: @[lone]
+  let stripActive = if stacked: region.activeTab else: 0
+  let under = CellArea(col: a.col, row: a.row, width: inner, height: a.height)
+  let content = CellArea(col: a.col, row: a.row + 1, width: inner,
+                         height: max(0, a.height - 1))
+  template underStrip(body: untyped) =
+    if under.height > 1:
+      body
+  template belowStrip(body: untyped) =
+    if content.height > 0:
+      body
   # PLAT-16: WHICH MODEL THE `editor` RECTANGLE IS PAINTED FROM IS DECIDED BY
-  # THE PRODUCT MODE, AND BY NOTHING ELSE.
-  #
-  # CodeTracer-TUI-Edit-Mode.md §2: Debug shows the recording's source through
-  # `SourceVM`'s window, Edit shows the working tree through a whole mutable
-  # buffer. They are two models and two painters, and the branch is on
-  # `model.product` rather than on "is there an edit buffer" — a branch on the
-  # data would paint the edit pane in Debug mode for any session that had ever
-  # opened a file, which is the silent cross-mode leak §2.1 consequence 2 warns
-  # a user must be able to SEE rather than guess at.
-  if region.pane == paneEditor and model.product == pmEdit and
-     region.activeTab < 0:
-    discard paintEditPane(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.edit, model.highlighting)
-  elif region.pane == paneFileTree and not model.fileTree.isEmpty and
-       region.activeTab < 0:
-    discard paintFileTree(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.fileTree)
-  elif region.pane == paneBuildOutput and region.activeTab < 0:
-    # NO EMPTINESS GUARD, and that is the difference between this pane and
-    # every other one. An empty call stack means "no session", which is what
-    # the generic title row says perfectly well; an idle BUILD pane is a
-    # statement — `BUILD [idle] build: not started` — and a user who has just
-    # pressed `:build` needs to see the verdict change from it. A pane that
-    # painted a generic title until the first line of output arrived would show
-    # nothing at all for the whole of a cold compile.
-    discard paintBuildOutput(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.build)
-  elif region.pane == paneEditor and not model.source.isEmpty and
-     region.activeTab < 0:
-    discard paintSourcePane(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.source, model.highlighting)
-  # THE CALL STACK PANE OWNS ITS WHOLE RECTANGLE, title row included, on the
-  # same rule and for the same reason: its title carries the frame count and the
-  # thread the backend named, and a shell that painted a generic title first
-  # would show a 51-frame stack and a 4-frame one identically at the top.
-  elif region.pane == paneCalltrace and not model.callStack.isEmpty and
-       region.activeTab < 0:
-    discard paintCallStack(
-      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-      model.callStack)
-  # THE VARIABLES PANE IS THE FIRST ONE THAT CAN BE IN A TAB STACK, and that is
-  # why this arm is shaped differently from the two above. `paneState` sits in a
-  # `stack` with `paneEventLog` in every profile's layout, so the rectangle
-  # already carries CTUI-3's tab strip on its first row; the pane owns what is
-  # left. Its own title row (`VARIABLES 22 name(s) …`) goes below the strip
-  # rather than replacing it, because the strip is what says which of the two
-  # stacked panes is on screen and CTUI-9 will make it clickable.
+  # THE PRODUCT MODE, AND BY NOTHING ELSE (CodeTracer-TUI-Edit-Mode.md §2):
+  # Debug shows the recording's source through `SourceVM`'s window, Edit the
+  # working tree through a whole mutable buffer — two models, two painters,
+  # and the branch is on `model.product`, never on "is there an edit buffer".
+  if region.pane == paneEditor and model.product == pmEdit:
+    underStrip:
+      discard paintEditPane(g, under, model.edit, model.highlighting)
+  elif region.pane == paneFileTree and not model.fileTree.isEmpty:
+    underStrip:
+      discard paintFileTree(g, under, model.fileTree)
+  elif region.pane == paneVcs and model.vcs.loaded:
+    belowStrip:
+      discard paintVcsPane(g, content, model.vcs)
+  elif region.pane == paneBuildOutput:
+    # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
+    # not started` — and a user who has just pressed `:build` needs to see the
+    # verdict change from it.
+    belowStrip:
+      discard paintBuildOutput(g, content, model.build)
+  elif region.pane == paneEditor and not model.source.isEmpty:
+    # CTUI-5's provenance marker stays visible: the gutter carries it on
+    # every line (`gutter.initGutterLineSpec`'s `provenance`).
+    underStrip:
+      discard paintSourcePane(g, under, model.source, model.highlighting)
+  elif region.pane == paneCalltrace and not model.callTrace.isEmpty:
+    underStrip:
+      discard paintCallTrace(g, under, model.callTrace)
+  elif region.pane == paneCalltrace and not model.callStack.isEmpty:
+    # THE FALLBACK SAYS SO (PLAT-47): the pane where the desktop lists the
+    # recording's calls is showing only the stack, because this recording
+    # carries no call trace — once a session is open (`callTraceLoaded` is
+    # the session's statement that it asked and got nothing). The note is
+    # the pane's first content row, in place of the stack's heading.
+    if model.callTraceLoaded:
+      belowStrip:
+        discard paintCallStack(g, content, model.callStack)
+        paintFallbackCaption(g, content)
+    else:
+      underStrip:
+        discard paintCallStack(g, under, model.callStack)
   elif region.pane == paneState and not model.variables.isEmpty:
-    if region.activeTab >= 0 and region.tabs.len > 0:
-      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
-      if a.height >= 2:
-        discard paintVariables(
-          g, CellArea(col: a.col, row: a.row + 1, width: inner,
-                      height: a.height - 1),
-          model.variables)
-    else:
-      discard paintVariables(
-        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-        model.variables)
-  # THE EVENT LOG HAS A RECTANGLE OF ITS OWN in two profiles — a column in
-  # Ultra-wide, a tab of the Compact stack — and shares the `timeline` one in
-  # the third. This arm is the first two; the third is below.
+    underStrip:
+      discard paintVariables(g, under, model.variables)
   elif region.pane == paneEventLog and model.eventLog.hasContent:
-    if region.activeTab >= 0 and region.tabs.len > 0:
-      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
-      if a.height >= 2:
-        discard paintEventLog(
-          g, CellArea(col: a.col, row: a.row + 1, width: inner,
-                      height: a.height - 1),
-          model.eventLog)
-    else:
-      discard paintEventLog(
-        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-        model.eventLog)
-  # PLAT-40. THE POINTS PANE, when a session has supplied its rows. Before this
-  # arm the pane reached the terminal as a title over an empty rectangle.
+    underStrip:
+      discard paintEventLog(g, under, model.eventLog)
+  # PLAT-40. THE POINTS PANE, when a session has supplied its rows.
   elif region.pane == panePointList and model.points.loaded:
-    if region.activeTab >= 0 and region.tabs.len > 0:
-      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
-      if a.height >= 2:
-        discard paintPointList(
-          g, CellArea(col: a.col, row: a.row + 1, width: inner,
-                      height: a.height - 1),
-          model.points)
-    else:
-      discard paintPointList(
-        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-        model.points)
-  elif region.activeTab >= 0 and region.tabs.len > 0:
-    g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
-  else:
-    g.paint(a.row, a.col, titleRow(paneTitle(region.pane, region.title), inner))
+    underStrip:
+      discard paintPointList(g, under, model.points)
+  # PLAT-50. THE SCRATCHPAD — the values a click pinned.
+  elif region.pane == paneScratchpad and model.scratchpad.loaded:
+    underStrip:
+      discard paintScratchpad(g, under, model.scratchpad)
+  # PLAT-52. THE TERMINAL OUTPUT — lines, or a TUI program's screen.
+  # Unloaded (no session supplied it yet) it says it is loading, as the
+  # desktop's pane does — never an empty rectangle.
+  elif region.pane == paneTerminalOutput:
+    underStrip:
+      discard paintTerminalOutput(g, under, model.terminalOutput)
+  elif not TerminalCaps.canDraw(region.pane):
+    # PLAT-45: A REPORT LEAF. The shared default places this pane and the
+    # terminal has no view for it, so the slot says which pane it is and why
+    # it is not drawn — never an empty rectangle that looks like a pane with
+    # nothing in it (PLAT-41's data-or-report rule).
+    let report = reportText(
+      ReportLeaf(pane: region.pane, frontEnd: feTerminal,
+                 reason: TerminalCaps.reasons[region.pane]),
+      terminalPaneName(region.pane))
+    var line = 0
+    if inner > 0:
+      for piece in wrapWords(report, max(1, inner)).splitLines():
+        if content.row + line >= a.row + a.height:
+          break
+        g.paint(content.row + line, a.col, fitCells(piece, inner))
+        inc line
+  paintTabRow(g, a.row, a.col, stripTabs, stripActive, inner)
+  # THE EDITOR SAYS WHICH SOURCE IT SHOWS, ALWAYS (CodeTracer-TUI-Edit-Mode
+  # §2's Requirement; Mode-Transitions §7): with no title row to carry it, the
+  # mode's source statement (`product_mode.sourceStatementFor` — "the working
+  # tree" in Edit mode) stands on the strip, right-aligned in the inactive
+  # tabs' tier, beside the file's tab — never in a row of the pane.
+  if region.pane == paneEditor and not stacked:
+    let statement =
+      if model.product == pmEdit and model.edit.sourceStatement.len > 0:
+        model.edit.sourceStatement
+      else: sourceStatementFor(model.product)
+    let spans = tabSpans(stripTabs, stripActive)
+    let tabEnd = if spans.len > 0: spans[^1].startCol + spans[^1].width else: 0
+    let w = textCells(statement) + 1
+    if statement.len > 0 and tabEnd + 2 + w <= inner:
+      g.paint(a.row, a.col + inner - w, statement & " ",
+              CellStyle(role: srTabInactive, surface: srTabBar))
 
-  # THE TIMELINE RECTANGLE HOLDS TWO PANES, which is what §3.3.5 describes and
-  # what the Standard and Ultra-wide layouts call "Timeline & Tracepoints". The
-  # scrubber takes the top `TimelineBarRows` rows and the event log takes the
-  # rest. CTUI-3's own one-line `timelineScrubber` stays as the fallback for a
-  # shell with no bounds — see `ShellModel.timeline`.
-  if region.pane == paneTimeline and a.height >= 2:
-    if model.timeline.boundsKnown:
-      discard paintTimelineBar(
-        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
-        model.timeline)
-      if a.height > TimelineBarRows:
-        discard paintEventLog(
-          g, CellArea(col: a.col, row: a.row + TimelineBarRows, width: inner,
-                      height: a.height - TimelineBarRows),
-          model.eventLog)
-    else:
-      g.paint(a.row + 1, a.col,
-              timelineScrubber(model.header.tick, model.header.totalTicks,
-                               inner))
-  if not flushRight:
+  # THE DIVIDER is settled once every pane is painted (`paintDividers`):
+  # its ground and line depend on the NEIGHBOURS — a strip beside it, the
+  # pane to its right.
+
+proc paintDockStrips*(g: var StyledGrid; geometry: LayoutGeometry) =
+  ## PLAT-48 deliverable 6: every auto-hide strip, the terminal's spelling of
+  ## the desktop's footer. The strip is a run of cells on the tab-strip
+  ## surface; each docked pane's label is a tab on it — the revealed one in
+  ## the active tab's colour and weight, the others in the inactive tier. A
+  ## top or bottom strip's labels read across; a LEFT or RIGHT strip's read
+  ## DOWN, one character per row (a terminal cannot rotate text).
+  for strip in geometry.strips:
+    let a = strip.area
+    if a.isEmptyArea:
+      continue
     for row in a.row ..< a.row + a.height:
-      g.paint(row, a.col + a.width - 1, PaneSeparatorGlyph)
+      g.paint(row, a.col, spaces(a.width), CellStyle(role: srTabBar))
+    g.fillSurface(a.row, a.col, a.width, a.height, srTabBar)
+    for slot in strip.slots:
+      let s = slot.area
+      if s.isEmptyArea:
+        continue
+      # PLAT-49 part B: a label is lit while its pane is PREVIEWED (the hover
+      # overlay) or DOCKED OPEN (the click), as the desktop's strip tab is
+      # `active` in both states.
+      let shown = (geometry.revealing and geometry.revealPane == slot.pane) or
+                  (not geometry.openDock.isEmptyArea and
+                   geometry.openDockPane == slot.pane)
+      let role = if shown: srTabActive else: srTabInactive
+      g.fillSurface(s.row, s.col, s.width, s.height, role)
+      if strip.edge in {leTop, leBottom}:
+        g.paint(s.row, s.col, fitCells(" " & slot.title & " ", s.width),
+                CellStyle(role: role, bold: shown))
+      else:
+        var r = s.row
+        for rune in runes(slot.title):
+          if r >= s.row + s.height:
+            break
+          g.paint(r, s.col, fitCells($rune, s.width),
+                  CellStyle(role: role, bold: shown))
+          inc r
+
+proc paintRevealedPane*(g: var StyledGrid; geometry: LayoutGeometry;
+                        model: ShellModel) =
+  ## PLAT-48 deliverable 6: A REVEALED DOCK IS THE DOCKED PANE ITSELF, painted
+  ## over the body against its edge — its title row and its content, by the
+  ## same painter that draws it when it is placed — never a fill glyph, and
+  ## never reflowing the arrangement behind it (the rectangle is an overlay,
+  ## not one of the projection's regions). Its edge toward the body takes
+  ## the focus ring's colour, so where the overlay ends is visible without a
+  ## drawn border.
+  let a = geometry.reveal
+  var title = ""
+  for strip in geometry.strips:
+    for slot in strip.slots:
+      if slot.pane == geometry.revealPane:
+        title = slot.title
+  let region = PaneRegion(pane: geometry.revealPane, title: title, area: a,
+                          tabs: @[], activeTab: -1)
+  # AN OVERLAY REPLACES WHAT IS UNDER IT: the cells are cleared first, so no
+  # glyph of the panes behind shows through the rows the painter leaves
+  # blank. The arrangement behind is not reflowed — it is simply covered.
+  for row in a.row ..< a.row + a.height:
+    g.paint(row, a.col, spaces(a.width), DefaultCellStyle)
+  paintPane(g, region, model, a)
+  g.restyle(a.row, a.col, a.width,
+            proc(s: CellStyle): CellStyle =
+              var r = s
+              if r.role in {srChromeTitle, srBorderPane}:
+                r.role = srBorderFocused
+              r)
 
 proc degradedBanner(status: ProjectionStatus; width: int): string =
   ## What a non-`prOk` projection puts on the first body row. It names the
@@ -656,6 +910,30 @@ proc degradedBanner(status: ProjectionStatus; width: int): string =
 # ---------------------------------------------------------------------------
 # The screen
 # ---------------------------------------------------------------------------
+
+const
+  DragGhostStyle* = CellStyle(role: srTabActive, surface: srTabActive,
+                              bold: true, reverse: true)
+    ## The ghost label: an active tab, lifted off the strip by reverse video.
+
+proc frameOverlaysOf*(decorations: seq[LayoutDecoration]): seq[FrameOverlay] =
+  ## The decorations a frame draws as OVERLAYS (`OverlayDecorations`), in
+  ## paint order: the tint, the caret over it, the ghost over both.
+  for kind in [ldDropTarget, ldDropCaret, ldDragGhost]:
+    for d in decorations:
+      if d.kind != kind or d.area.isEmptyArea:
+        continue
+      case kind
+      of ldDropTarget:
+        result.add FrameOverlay(kind: foTint, row: d.area.row, col: d.area.col,
+                                width: d.area.width, height: d.area.height)
+      of ldDropCaret:
+        result.add FrameOverlay(kind: foCaret, row: d.area.row, col: d.area.col,
+                                width: d.area.width, height: d.area.height)
+      else:
+        result.add FrameOverlay(kind: foLabel, row: d.area.row, col: d.area.col,
+                                width: d.area.width, height: 1,
+                                text: d.label, style: DragGhostStyle)
 
 proc shellScreen*(model: ShellModel; width, height: int;
                   policy = DefaultProjectionPolicy): ShellScreen =
@@ -668,10 +946,13 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # so this is the same call CTUI-3 made, and every golden written before
   # PLAT-6 is byte-identical.
   let composed = initLayout(model.layout, model.docked)
-  let geometry = geometryOf(composed, body, model.interaction, policy)
+  let geometry = geometryOf(composed, body, model.interaction, policy,
+                            footerLeadCells(model.fileInfo))
   let projection = geometry.projection
-  let decorations = decorationsFor(composed, geometry, model.interaction,
-                                   policy)
+  let decorations = decorationsFor(
+    composed, geometry, model.interaction, policy,
+    pointerRow = (if model.dragPointer.isSome: model.dragPointer.get[0] else: -1),
+    pointerCol = (if model.dragPointer.isSome: model.dragPointer.get[1] else: -1))
   result = ShellScreen(rows: @[], styledRows: @[], body: body,
                        projection: projection,
                        overlay: (if model.tracepoints.open:
@@ -680,15 +961,37 @@ proc shellScreen*(model: ShellModel; width, height: int;
                        frameViewerOverlay: (if model.frameViewer.open:
                                               frameViewerOverlayArea(body)
                                             else: CellArea()),
-                       geometry: geometry, decorations: decorations)
+                       geometry: geometry, decorations: decorations,
+                       frameOverlays: frameOverlaysOf(decorations))
   if width <= 0 or height <= 0:
     return
 
   var g = newStyledGrid(width, height)
-  g.paint(0, 0, headerText(model.header, width))
+  # PLAT-46 deliverable 8: EVERY CELL HAS A SURFACE. The canvas under all of
+  # it, the header on a card; each pane fills its own rectangle in `paintPane`
+  # and the status line its row below.
+  g.fillSurface(0, 0, width, height, srSurfaceCanvas)
+  g.fillSurface(0, 0, width, HeaderRows, srSurfaceTopBar)
+  # PLAT-48: ROW 0 IS THE TOP BAR — the menu, the debugger controls, the
+  # omnibar and the session tabs, with the header's trace, tick and badge
+  # where the row leaves room (`views/top_bar`). The session tabs used to be
+  # the header's own strip; they are the top bar's now.
+  var bar = model.topBar
+  bar.header = model.header
+  let barLayout = topBarLayout(bar, width)
+  result.topBarLayout = barLayout
+  result.topBar = bar
+  paintTopBar(g, bar, barLayout)
 
   for region in projection.regions:
     paintPane(g, region, model, geometry.inner)
+  var focusedArea = CellArea()
+  if model.hasFocus:
+    for region in projection.regions:
+      if region.pane == model.focused:
+        focusedArea = region.area
+  paintDividers(g, projection.regions, geometry.inner, focusedArea,
+                model.hasFocus, model.dividers)
   if projection.status != prOk and body.height > 0:
     g.paint(body.row, body.col, degradedBanner(projection.status, width))
 
@@ -704,12 +1007,14 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # over it would obscure the field a user is typing into. The frame viewer is
   # painted first and the dialog, when both are open, is on top.
   if model.frameViewer.open:
-    result.frameViewer = paintFrameViewer(g, frameViewerOverlayArea(body),
-                                          model.frameViewer)
+    let area = frameViewerOverlayArea(body)
+    g.fillSurface(area.row, area.col, area.width, area.height, srSurfaceCard)
+    result.frameViewer = paintFrameViewer(g, area, model.frameViewer)
 
   if model.tracepoints.open:
-    discard paintTracepointManager(g, tracepointOverlayArea(body),
-                                   model.tracepoints)
+    let area = tracepointOverlayArea(body)
+    g.fillSurface(area.row, area.col, area.width, area.height, srSurfaceCard)
+    discard paintTracepointManager(g, area, model.tracepoints)
 
   # PLAT-6's transient state, painted LAST over the body, on exactly the rule
   # above: the drag ghost, the highlighted drop target, the resize guide, the
@@ -718,12 +1023,80 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # gesture is in flight, so this call paints nothing on a screen CTUI-3 would
   # have painted and the goldens do not move.
   paintDecorations(g, decorations)
+  # PLAT-49 part B: A DOCKED PANE SHOWN OPEN, in the band the tree gave up
+  # (`geometry.openDock`) — a pane of the tiled screen, painted as a placed
+  # pane is, with its one-tab strip.
+  if not geometry.openDock.isEmptyArea:
+    let open = PaneRegion(pane: geometry.openDockPane,
+                          title: geometry.openDockTitle,
+                          area: geometry.openDock, tabs: @[], activeTab: -1)
+    paintPane(g, open, model, geometry.openDock)
+  # PLAT-48: the dock strips as labels on the tab-strip surface, and a
+  # revealed dock as the docked pane itself, over the body. (The bottom
+  # strip is on the status row since PLAT-49 part B and is painted with it,
+  # below.)
+  paintDockStrips(g, geometry)
+  if geometry.revealing and not geometry.reveal.isEmptyArea:
+    paintRevealedPane(g, geometry, model)
+
+  # PLAT-48: the menu's dropdowns and the omnibar's results are over
+  # EVERYTHING — the panes, the dialogs, the strips — as the desktop's are.
+  paintControlTooltip(g, bar, barLayout, width)
+  result.menuDropdowns = menuDropdowns(bar, barLayout, width, height)
+  paintMenuDropdowns(g, result.menuDropdowns)
+  paintOmnibarDropdown(g, bar, barLayout, width, height)
+  # PLAT-50: the event-content overlay over the body, and the right-click
+  # menu over everything.
+  result.contentArea = contentOverlayArea(model.content, body)
+  paintContentOverlay(g, model.content, result.contentArea)
+  result.contextMenuArea = contextMenuArea(model.contextMenu, width, height)
+  paintContextMenu(g, model.contextMenu, result.contextMenuArea)
 
   var status = model.status
   if projection.status != prOk and status.notification.len == 0:
     status.notification = "layout " & $projection.status
   if height > HeaderRows:
-    g.paint(height - 1, 0, statusBarText(status, width))
+    # PLAT-49 part B (finding 9): THE BOTTOM AUTO-HIDE LABELS ARE IN THIS ROW,
+    # as the desktop renders them inside its status bar (Auto-Hide-Panes.md
+    # §3.1, "Bottom strip integration"), IN THE DESKTOP'S ORDER (measured,
+    # `plat49-panes-capture.spec.ts`): the file info first — language and
+    # encoding — then the labels, then the status bar's own text.
+    let lead = footerLeadCells(model.fileInfo)
+    var footerEnd = min(width, lead)
+    for strip in geometry.strips:
+      if strip.edge == leBottom and strip.area.row == height - 1 and
+         not strip.area.isEmptyArea:
+        footerEnd = strip.area.col + strip.area.width + 1
+    let sc = min(width, footerEnd)
+    let sw = width - sc
+    g.fillSurface(height - 1, 0, width, 1, srSurfaceStatusLine)
+    if lead > 0:
+      # In the status line's own text colour, as the rest of its text.
+      g.paint(height - 1, 1, fitCells(model.fileInfo, max(0, min(width - 1,
+              lead - 3))))
+    if sw > 0:
+      g.paint(height - 1, sc, statusBarText(status, sw))
+      # The two indicators in their own roles: the input mode, then the
+      # product mode, exactly where `statusBarText` put them (it never drops
+      # them).
+      let modeCells = min(sw, textCells($status.mode))
+      g.paint(height - 1, sc, fitCells($status.mode, modeCells),
+              modeStyle(status.mode))
+      let productText = productIndicator(status.product)
+      let productCol = sc + textCells($status.mode) + 1
+      if productCol < width:
+        g.paint(height - 1, productCol,
+                fitCells(productText, min(textCells(productText),
+                                          width - productCol)),
+                productStyle(status.product))
+    # The labels over the row's left, after the status line's ground.
+    for strip in geometry.strips:
+      if strip.edge == leBottom:
+        paintDockStrips(g, LayoutGeometry(strips: @[strip],
+                                          revealing: geometry.revealing,
+                                          revealPane: geometry.revealPane,
+                                          openDock: geometry.openDock,
+                                          openDockPane: geometry.openDockPane))
 
   for row in 0 ..< height:
     result.rows.add g.rowText(row)
@@ -735,11 +1108,36 @@ proc shellRows*(model: ShellModel; width, height: int;
   ## against, unchanged by CTUI-5.
   shellScreen(model, width, height, policy).rows
 
-proc shellStyledRows*(model: ShellModel; width, height: int;
-                      policy = DefaultProjectionPolicy): seq[StyledRow] =
-  ## The rows with their style. What CTUI-5's pane assertions and the component
-  ## tree below both read.
-  shellScreen(model, width, height, policy).styledRows
+proc frameTree*(r: TerminalRenderer; screen: ShellScreen): TerminalNode =
+  ## A composed frame as a component tree: its rows, then (PLAT-47) its
+  ## overlays over them — the drop tint and caret, the drag ghost — at the
+  ## 16-colour Dark rung `styledRowNode` resolves an undegraded row at (see
+  ## `styled_row`'s header).
+  result = styledRowsTree(r, screen.styledRows)
+  if screen.frameOverlays.len > 0:
+    for node in overlayNodes(r, screen.frameOverlays, HarnessOverlayCaps):
+      r.appendChild(result, node)
+
+proc visibleRows*(screen: ShellScreen): seq[string] =
+  ## The frame's rows as a terminal SHOWS them: `rows` with the label
+  ## overlays (PLAT-47's drag ghost) written over the cells they cover. Tints
+  ## change colours only, so they move no character.
+  var grid: seq[seq[string]] = @[]
+  for line in screen.rows:
+    var row: seq[string] = @[]
+    for r in runes(line):
+      row.add $r
+    grid.add row
+  for o in screen.frameOverlays:
+    if o.kind != foLabel or o.row < 0 or o.row >= grid.len:
+      continue
+    var c = o.col
+    for r in runes(o.text):
+      if c >= 0 and c < grid[o.row].len:
+        grid[o.row][c] = $r
+      inc c
+  for row in grid:
+    result.add row.join("")
 
 proc renderShellTree*(model: ShellModel; r: TerminalRenderer;
                       width, height: int;
@@ -749,4 +1147,4 @@ proc renderShellTree*(model: ShellModel; r: TerminalRenderer;
   ## Built through the renderer's own element API rather than the `ui` DSL, for
   ## the reason `app/tui_app.nim` records — this milestone's compile must not
   ## depend on `isonim`'s tailwind style map being generated.
-  styledRowsTree(r, shellStyledRows(model, width, height, policy))
+  frameTree(r, shellScreen(model, width, height, policy))

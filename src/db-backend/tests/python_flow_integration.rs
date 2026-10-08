@@ -48,9 +48,10 @@ fn create_python_flow_config() -> FlowTestConfig {
 #[test]
 fn test_python_flow_integration() {
     if test_harness::find_python_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Python recorder not found \
-             (set CODETRACER_PYTHON_RECORDER_PATH or check out sibling/submodule)"
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_python_flow_integration",
+            "the Python recorder is not installed",
+            "run inside the codetracer dev shell with the codetracer-python-recorder sibling checked out, or set CODETRACER_PYTHON_RECORDER_PATH",
         );
         return;
     }
@@ -59,7 +60,11 @@ fn test_python_flow_integration() {
     let (_python_cmd, version_label) = match test_harness::find_suitable_python() {
         Some(pair) => pair,
         None => {
-            eprintln!("SKIPPED: Python 3.10+ not found (needed for the recorder)");
+            test_harness::skip_or_fail_missing_prerequisite(
+                "test_python_flow_integration",
+                "no Python 3.10+ interpreter for the recorder",
+                "put a Python 3.10+ interpreter on PATH (the codetracer dev shell provides one)",
+            );
             return;
         }
     };

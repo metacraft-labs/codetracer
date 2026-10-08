@@ -29,7 +29,6 @@
                         "content": [
                             {
                                 "type": "component",
-                                "size": "100%",
                                 "componentType": "genericUiComponent",
                                 "componentState": {
                                     "id": 0,
@@ -54,6 +53,7 @@
             },
             {
                 "type": "column",
+                "size": "55%",
                 "content": [
                     {
                         "type": "row",
@@ -115,6 +115,7 @@
                     },
                     {
                         "type": "stack",
+                        "size": "50%",
                         "content": [
                             {
                                 "type": "component",
@@ -131,16 +132,6 @@
                                 "componentType": "genericUiComponent",
                                 "componentState": {
                                     "id": 0,
-                                    "label": "timelineComponent-0",
-                                    "content": 19
-                                },
-                                "title": "genericUiComponent"
-                            },
-                            {
-                                "type": "component",
-                                "componentType": "genericUiComponent",
-                                "componentState": {
-                                    "id": 0,
                                     "label": "terminalComponent-0",
                                     "content": 24
                                 },
@@ -148,8 +139,7 @@
                             }
                         ]
                     }
-                ],
-                "size": "55%"
+                ]
             },
             {
                 "type": "column",

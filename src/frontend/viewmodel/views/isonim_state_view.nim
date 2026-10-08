@@ -208,6 +208,14 @@ proc rowClass(item: proc(): VariableViewState): string =
   ## Outer row class with depth-borders class.
   "value-expanded value-expanded-name border-value-" & $item().depth
 
+proc valueTextClass(vm: StateVM; item: proc(): VariableViewState): string =
+  ## PLAT-51: the value's class, with `value-changed` when the step that
+  ## produced the current stop changed it (`StateVM.isChanged`) — the
+  ## desktop's changed-value styling, which it did not have before (the
+  ## user, 2026-10-05). The terminal and GPUI read the same flag.
+  if vm.isChanged(item().path): "value-expanded-text value-changed"
+  else: "value-expanded-text"
+
 proc rowPaddingLeft(item: proc(): VariableViewState; pxPerLevel: int): string =
   let depth = item().depth
   if depth > 0: $(depth * pxPerLevel) & "px" else: "0px"
@@ -595,10 +603,15 @@ template renderOriginChainLineImpl*(r, line: untyped): untyped =
       span(class = chainLineTextClass(line)):
         text line().text
 
-template renderHistoryRowImpl*(r, row: untyped): untyped =
-  ## One value-history line: "<rrTicks>  <value>".
+template renderHistoryRowImpl*(r, row, vm: untyped): untyped =
+  ## One value-history line: "<rrTicks>  <value>". PLAT-51: A NAVIGATION ROW
+  ## (Variable-State-Pane.md: "a click moves the recording position to it on
+  ## every front-end") — a click goes to the tick its value was recorded at.
+  let jumpVM = vm
+  let jumpRow = row
   ui(r):
-    tdiv(class = "ct-history-inline-row ct-flex"):
+    tdiv(class = "ct-history-inline-row ct-flex",
+         onclick = proc() = jumpVM.jumpToHistoryEntry(jumpRow().locationTicks)):
       tdiv(class = "history-location ct-mr-4"):
         text $row().locationTicks
       tdiv(class = "history-value"):
@@ -613,11 +626,11 @@ proc renderOriginChainLines(r: MockRenderer; container: MockNode;
       renderOriginChainLineImpl(r, line))
 
 proc renderHistoryRows(r: MockRenderer; container: MockNode;
-                       item: proc(): VariableViewState) =
+                       item: proc(): VariableViewState; vm: StateVM) =
   indexEach[VariableHistoryRowView, MockRenderer, MockNode](r, container,
     proc(): seq[VariableHistoryRowView] = item().history,
     proc(row: proc(): VariableHistoryRowView, index: int): MockNode =
-      renderHistoryRowImpl(r, row))
+      renderHistoryRowImpl(r, row, vm))
 
 when defined(js):
   proc renderOriginChainLines(r: WebRenderer; container: isonim_dom.Element;
@@ -630,12 +643,12 @@ when defined(js):
         renderOriginChainLineImpl(r, line))
 
   proc renderHistoryRows(r: WebRenderer; container: isonim_dom.Element;
-                         item: proc(): VariableViewState) =
+                         item: proc(): VariableViewState; vm: StateVM) =
     indexEach[VariableHistoryRowView, WebRenderer, isonim_dom.Element](
       r, container,
       proc(): seq[VariableHistoryRowView] = item().history,
       proc(row: proc(): VariableHistoryRowView, index: int): isonim_dom.Element =
-        renderHistoryRowImpl(r, row))
+        renderHistoryRowImpl(r, row, vm))
 
 # ---------------------------------------------------------------------------
 # Variable row component (shared between Mock and Web renderers)
@@ -712,7 +725,7 @@ template renderVariableRowImpl*(r, vm, item,
               text item().typeName
         tdiv:
           span(class = "value-view"):
-            span(class = "value-expanded-text"):
+            span(class = valueTextClass(vm, item)):
               text item().value
             if atomTypeVisible(item):
               span(class = "value-type"):
@@ -768,7 +781,7 @@ proc renderVariableRow*(r: MockRenderer; vm: StateVM;
   # Attach the reactive sub-lists AFTER the row exists — a plain `for`
   # inside the `ui()` block would only ever run once (see #558).
   renderOriginChainLines(r, chainContainer, item, vm)
-  renderHistoryRows(r, historyContainer, item)
+  renderHistoryRows(r, historyContainer, item, vm)
   row
 
 when defined(js):
@@ -781,7 +794,7 @@ when defined(js):
     let row = renderVariableRowImpl(r, vm, item,
                                     chainContainer, historyContainer)
     renderOriginChainLines(r, chainContainer, item, vm)
-    renderHistoryRows(r, historyContainer, item)
+    renderHistoryRows(r, historyContainer, item, vm)
     # Scroll the history container to the bottom whenever rows arrive or grow.
     # Reads item().history to track the signal; fires after indexEach updates.
     createRenderEffect(proc() =
@@ -1035,11 +1048,11 @@ when defined(ctPlat18Slice):
         renderOriginChainLineImpl(r, line))
 
   proc renderHistoryRows(r: FrameRenderer; container: FrameNode;
-                         item: proc(): VariableViewState) =
+                         item: proc(): VariableViewState; vm: StateVM) =
     indexEach[VariableHistoryRowView, FrameRenderer, FrameNode](r, container,
       proc(): seq[VariableHistoryRowView] = item().history,
       proc(row: proc(): VariableHistoryRowView, index: int): FrameNode =
-        renderHistoryRowImpl(r, row))
+        renderHistoryRowImpl(r, row, vm))
 
   proc renderVariableRow*(r: FrameRenderer; vm: StateVM;
                           item: proc(): VariableViewState): FrameNode =
@@ -1047,7 +1060,7 @@ when defined(ctPlat18Slice):
     let row = renderVariableRowImpl(r, vm, item,
                                     chainContainer, historyContainer)
     renderOriginChainLines(r, chainContainer, item, vm)
-    renderHistoryRows(r, historyContainer, item)
+    renderHistoryRows(r, historyContainer, item, vm)
     row
 
   proc renderStatePanel*(r: FrameRenderer; vm: StateVM): FrameNode =

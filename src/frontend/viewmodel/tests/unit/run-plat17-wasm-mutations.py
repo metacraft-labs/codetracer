@@ -1136,7 +1136,27 @@ def enumerate_touched() -> int:
 # Main
 # ---------------------------------------------------------------------------
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main(argv: list[str]) -> int:
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(argv, globals())
+    if refused:
+        return refused
+    # AN UNKNOWN FLAG IS REFUSED BEFORE ANYTHING IS TOUCHED. It used to be
+    # dropped, and the run became a full, file-mutating grade: `--only=A,B`
+    # or `--derive` here graded every arm; `ci/test/harness-argument-refusal.sh`
+    # asserts the refusal.
+    known_flags = {"--collect-because", "--enumerate-touched", "--needle-scan", "--only", "--record-control-hashes"}
+    unknown = [a for a in argv if a.startswith("-") and
+               a.split("=", 1)[0] not in known_flags]
+    if unknown:
+        print(f"unknown argument(s): {unknown}; accepted flags: "
+              f"{sorted(known_flags) or 'none (arm ids only)'}")
+        return 2
     only = None
     for a in argv:
         if a.startswith("--only="):

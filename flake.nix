@@ -67,12 +67,15 @@
     # THIS INPUT WAS A FLAKE.  Dropping ``flake = true`` is what let the pin
     # move to a branch that produces a trace this product can open.
     noir = {
-      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=ca080a58b05106e37a7b5178a11a8f4503951a2b";
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=c008e89028a360a7854ac9e0e017b647bf8fd0a8";
       flake = false;
     };
 
+    # The wasm recorder (`wazero`), including the Stylus replay host
+    # (`wazero run -stylus`). Its package links the CTFS trace writer, so the
+    # binary in the dev shells records.
     wazero = {
-      url = "github:metacraft-labs/codetracer-wasm-recorder?ref=wasm-tracing";
+      url = "github:metacraft-labs/codetracer-wasm-recorder/agents";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
@@ -115,7 +118,11 @@
       # `error: attribute 'python' missing`.  Every lane other than the Nix
       # lane took the recorder from a local checkout or a workspace override
       # and so never saw the disagreement.
-      url = "github:metacraft-labs/codetracer-python-recorder/dev";
+      #
+      # `/agents` while the 2026-10 trace format is integrated there: the
+      # recorder that writes it (filter provenance before the first record) is
+      # on `agents` and reaches `dev` with the next promotion, like `wazero`.
+      url = "github:metacraft-labs/codetracer-python-recorder/agents";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
@@ -157,11 +164,17 @@
       # reprobuild revision's own flake.lock and mirror its `runquota-src`.
       # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
       # equality so the two pins cannot silently diverge again.
-      url = "github:metacraft-labs/runquota/f4f0f93a3b93d05a48b80859df22bae32fcb5d3c";
+      url = "github:metacraft-labs/runquota/4ec72e92aeaf9f6ed5caad9a8043ca703cc9df8c";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
+      # runquota's release dev shell takes reprobuild's packaging sources as
+      # `release-packaging-src`, pinned to a reprobuild revision of its own.
+      # Here that would be a second, competing reprobuild pin in this lock, so
+      # point it at the one `reprobuild` input below (reprobuild's own flake
+      # makes the same override for the same reason).
+      inputs.release-packaging-src.follows = "reprobuild";
       flake = true;
     };
 
@@ -210,7 +223,7 @@
       # single pin: a second `nim-fork-src` pin here would be two pins for one
       # thing with nothing keeping them equal — the failure mode
       # `scripts/test-flake-pin-alignment.sh` exists to catch for `runquota`.)
-      url = "github:metacraft-labs/reprobuild/466bd8d7a4192786f836bf5f74a119bcf15ff05d";
+      url = "github:metacraft-labs/reprobuild/3850ec25b371e706b7923dcf56430af0ea895fc1";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
@@ -246,8 +259,15 @@
     # declarations below, and so is `codetracer-native-recorder`. Only this one
     # input disagreed, so only the lane that consumes flake inputs rather than
     # sibling checkouts -- the Nix lane -- could see the disagreement.
+    #
+    # `/agents` while the 2026-10 trace format is integrated there: the
+    # writer that produces it, and the readers in this repository that refuse
+    # anything older, land on `agents` together and reach `dev` with the next
+    # promotion. The recorders this flake builds (the Python recorder above,
+    # and those that follow `codetracer-trace-format-nim`) take the writer
+    # from these two inputs.
     codetracer-trace-format = {
-      url = "github:metacraft-labs/codetracer-trace-format/dev";
+      url = "github:metacraft-labs/codetracer-trace-format/agents";
       flake = false;
     };
 
@@ -266,7 +286,8 @@
       flake = false;
     };
     codetracer-trace-format-nim = {
-      url = "github:metacraft-labs/codetracer-trace-format-nim/dev";
+      # `/agents` with `codetracer-trace-format` above, for the same reason.
+      url = "github:metacraft-labs/codetracer-trace-format-nim/agents";
       flake = false;
     };
 
@@ -276,6 +297,19 @@
     # this repository's libs/nim-stew gitlink for sandboxed recorder builds.
     nim-stew = {
       url = "github:status-im/nim-stew/9c3596d9de809a5933fd777cec1183c2cdf521ec";
+      flake = false;
+    };
+
+    # The standalone `results` package. codetracer-trace-format-nim declares
+    # `requires "results"`. The `stew/results.nim` copy in the nim-stew pin
+    # above is an older fork of it: its `unsafeError` constrains the value
+    # type as well (`[T, E: not void]`), so `unsafeError` on a
+    # `Result[void, E]` does not compile under upstream Nim 2.2, and the
+    # writer uses exactly that. Every sandboxed build that compiles
+    # trace-format-nim takes `results` from here. Tracks the same branch as
+    # trace-format-nim's own flake.
+    nim-results = {
+      url = "github:arnetheduck/nim-results";
       flake = false;
     };
 
@@ -289,6 +323,22 @@
     };
     nim-stackable-hooks = {
       url = "github:metacraft-labs/nim-stackable-hooks/dev";
+      flake = false;
+    };
+
+    # Non-flake input: the reprobuild-packages catalog. `repro.nim` declares
+    # `uses: "sqlite3 >=0"` off Windows, and sqlite3 is no longer bundled with
+    # reprobuild's stdlib: reprobuild looks it up in this catalog, as
+    # `packages/interfaces/sqlite3/repro.nim`, and a recipe that uses a moved
+    # package with no catalog reachable does not compile. Every dev shell that
+    # runs `repro` on this recipe exports it as REPROBUILD_PACKAGES_ROOT
+    # (`nix/shells/ci-base.nix`), because in CI nothing clones the catalog
+    # beside this checkout and the `repro` this flake pins is built from a store
+    # path, beside which there is no catalog either. `.envrc` overrides it with
+    # a `../reprobuild-packages` sibling when one exists, so a workspace uses
+    # its own checkout.
+    reprobuild-packages = {
+      url = "github:metacraft-labs/reprobuild-packages/dev";
       flake = false;
     };
 

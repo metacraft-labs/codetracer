@@ -36,11 +36,8 @@ type
     renderedLines*: int
 
 const
-  BuildPaneTitle* = "BUILD"
-  BuildPaneRule* = "─"
-  BuildRuleStyle* = CellStyle(fg: "bright_black")
-  BuildOutputStyle* = CellStyle(fg: "white")
-  BuildTruncatedStyle* = CellStyle(fg: "yellow", italic: true)
+  BuildOutputStyle* = CellStyle(role: srChromeText)
+  BuildTruncatedStyle* = CellStyle(role: srChromeNotification, italic: true)
   TruncatedNote* = "… earlier output dropped"
 
 proc verdictStyle*(verdict: BuildVerdict): CellStyle =
@@ -49,11 +46,11 @@ proc verdictStyle*(verdict: BuildVerdict): CellStyle =
   ## say which verdict it is looking at, and two verdicts sharing a colour
   ## would be indistinguishable to that assertion.
   case verdict
-  of bvIdle: CellStyle(fg: "bright_black", bold: true)
-  of bvRunning: CellStyle(fg: "cyan", bold: true)
-  of bvSucceeded: CellStyle(fg: "green", bold: true)
-  of bvFailed: CellStyle(fg: "red", bold: true)
-  of bvCancelled: CellStyle(fg: "yellow", bold: true)
+  of bvIdle: CellStyle(role: srBuildIdle)
+  of bvRunning: CellStyle(role: srBuildRunning)
+  of bvSucceeded: CellStyle(role: srBuildSucceeded)
+  of bvFailed: CellStyle(role: srBuildFailed)
+  of bvCancelled: CellStyle(role: srBuildCancelled)
 
 proc initBuildPaneModel*(verdict = bvIdle; headline = "";
                          lines: seq[string] = @[]; truncated = false;
@@ -72,9 +69,11 @@ proc paintBuildOutput*(g: var StyledGrid; area: CellArea;
   result = BuildPaneScreen(rows: @[], area: area, renderedLines: 0)
   if area.width <= 0 or area.height <= 0:
     return
+  # PLAT-49: NO TITLE BAR — the tab strip above the pane names it. The
+  # first row is the build's VERDICT (`[idle] build: not started`), content
+  # a user watches change, without a `BUILD ───` heading or rule.
   var parts = @[
-    StyledSpan(text: BuildPaneTitle, style: verdictStyle(model.verdict)),
-    StyledSpan(text: " [" & $model.verdict & "]",
+    StyledSpan(text: "[" & $model.verdict & "]",
                style: verdictStyle(model.verdict))]
   if model.headline.len > 0:
     parts.add StyledSpan(text: " " & model.headline, style: BuildOutputStyle)
@@ -85,9 +84,6 @@ proc paintBuildOutput*(g: var StyledGrid; area: CellArea;
       continue
     g.paint(area.row, area.col + used, fitted, span.style)
     used += cellWidthOf(fitted)
-  if used < area.width:
-    g.paint(area.row, area.col + used,
-            repeatGlyph(BuildPaneRule, area.width - used), BuildRuleStyle)
   result.rows.add parts
 
   var row = area.row + 1

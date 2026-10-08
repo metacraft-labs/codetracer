@@ -1234,13 +1234,17 @@ impl Handler {
             let call_lines = self.load_local_calltrace(args)?;
             let total_count = self.calc_total_calls();
             let position = self.calltrace.calc_scroll_position();
-            CallArgsUpdateResults::finished_update_call_lines(
+            let mut update = CallArgsUpdateResults::finished_update_call_lines(
                 call_lines,
                 start_call_line_index,
                 total_count,
                 position,
                 self.calltrace.depth_offset,
-            )
+            );
+            if let Some(current) = self.reader.call_key_for_step(self.step_id) {
+                update.current_call_line_index = self.calltrace.call_line_index_at_or_before(current);
+            }
+            update
         };
         let raw_event = self.dap_client.updated_calltrace_event(&update)?;
         sender.send(raw_event)?;
@@ -2627,22 +2631,100 @@ impl Handler {
             }
         };
 
-        // Determine the slice to return.
-        let (page_events, page_contents) = if count > 0 {
-            // Explicit pagination: return the requested window.
-            let clamped_start = start.min(all_events.len());
-            let clamped_end = (clamped_start + count).min(all_events.len());
-            let slice = &all_events[clamped_start..clamped_end];
-            let contents = slice.iter().map(|e| e.content.as_str()).collect::<Vec<_>>().join("\n");
-            (slice.to_vec(), contents)
-        } else {
-            // Legacy behaviour: return the first 20 events (matches
-            // the original `first_events` semantics).
-            let n = all_events.len().min(20);
-            let slice = &all_events[..n];
-            let contents = slice.iter().map(|e| e.content.as_str()).collect::<Vec<_>>().join("\n");
-            (slice.to_vec(), contents)
+        // The order the event log's header click asked for (`sortKey`, a
+        // column name, and `sortAscending`); the recorded order when absent.
+        // The window below is cut from the ORDERED list, so a pane that pages
+        // through a sorted log pages through it in that order.
+        let order = req
+            .arguments
+            .get("sortKey")
+            .and_then(serde_json::Value::as_str)
+            .and_then(crate::event_db::EventOrderKey::from_column_name)
+            .map(|key| crate::event_db::EventOrder {
+                key,
+                ascending: req
+                    .arguments
+                    .get("sortAscending")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
+            })
+            .filter(|o| !o.is_recorded());
+
+        // Determine the slice to return: the requested window of the
+        // ordered list, or (legacy, `count` 0) its first 20 events.
+        let positions = match order {
+            Some(order) => crate::event_db::ordered_event_positions(all_events.len(), |i| &all_events[i], order),
+            None => (0..all_events.len()).collect(),
         };
+        let (skip, take) = if count > 0 { (start, count) } else { (0, 20) };
+        // The WHOLE log's size, which a list pane's scrollbar scrubber spans
+        // (Scrollbar-Scrubbers.md §2: "the ENTIRE recording's population ...
+        // not the loaded window"). Until now the answer carried only the
+        // window, and a native pane learned the total only by reading a page
+        // that came back short.
+        let total = positions.len();
+        // The row of the CURRENT recording position in this order, when the
+        // caller names the position (`atRRTicks`): the last event at or before
+        // that tick (Scrollbar-Scrubbers.md §3.5, the track's current-position
+        // mark). Not a parameter of the window — the rows are a property of
+        // the recording, not of the position.
+        let index_at_tick: i64 = match req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64) {
+            Some(at) => {
+                let mut best: Option<usize> = None;
+                for (i, event) in all_events.iter().enumerate() {
+                    if event.direct_location_rr_ticks <= at {
+                        best = Some(i);
+                    }
+                }
+                match best {
+                    Some(event_index) => positions
+                        .iter()
+                        .position(|&p| p == event_index)
+                        .map(|p| p as i64)
+                        .unwrap_or(-1),
+                    None => -1,
+                }
+            }
+            None => -1,
+        };
+        // `indexOnly`: the caller wants only where "now" is in the log (and its
+        // size) — the scrubber's mark after a move — and NOT a window: no
+        // `ct/updated-events` is sent, so a host whose table reloads on that
+        // event (the desktop's) is not made to redraw by a move.
+        if req
+            .arguments
+            .get("indexOnly")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            self.respond_dap(
+                req,
+                serde_json::json!({
+                    "total": total,
+                    "indexAtTick": index_at_tick,
+                }),
+                sender,
+            )?;
+            return Ok(());
+        }
+        // Each event carries its place in the RECORDED log (`eventIndex`),
+        // whatever order the window was cut in, so a sorted pane still
+        // numbers an event as the recording does.
+        let page_events: Vec<ProgramEvent> = positions
+            .iter()
+            .skip(skip)
+            .take(take)
+            .map(|&i| {
+                let mut event = all_events[i].clone();
+                event.event_index = i;
+                event
+            })
+            .collect();
+        let page_contents = page_events
+            .iter()
+            .map(|e| e.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         let raw_event = self.dap_client.updated_events(page_events.clone())?;
         sender.send(raw_event)?;
@@ -2674,6 +2756,8 @@ impl Handler {
                 "events": page_events,
                 "content": page_contents,
                 "markers": marker_rows,
+                "total": total,
+                "indexAtTick": index_at_tick,
             }),
             sender,
         )?;
@@ -8005,16 +8089,18 @@ mod tests {
         Ok(())
     }
 
+    // A manual tool, not a test: it checks a trace the caller names, and with
+    // no trace named it has nothing to check. It used to return early and
+    // count as passed in every run; it is ignored instead, and run on purpose
+    // with `just test-valid-trace <trace-dir>`.
     #[test]
-    fn test_valid_trace() {
-        // can be called from just test-valid-trace <my-trace-dir>
-        // calling inside db-backend
-        // env CODETRACER_VALID_TEST_TRACE_DIR=<trace-dir> cargo test test_valid_trace
-        let raw_path = env::var("CODETRACER_VALID_TEST_TRACE_DIR").unwrap_or("".to_string());
-        if raw_path.is_empty() {
-            // assume called as part of normal tests or by mistake: just don't do anything and return
-            return;
-        }
+    #[ignore = "manual: run with `just test-valid-trace <trace-dir>` (sets CODETRACER_VALID_TEST_TRACE_DIR)"]
+    fn manual_valid_trace() {
+        let raw_path = env::var("CODETRACER_VALID_TEST_TRACE_DIR").unwrap_or_default();
+        assert!(
+            !raw_path.is_empty(),
+            "CODETRACER_VALID_TEST_TRACE_DIR is not set: run `just test-valid-trace <trace-dir>`"
+        );
         let path = &PathBuf::from(raw_path);
         // (&PathBuf::from("/home/user/codetracer-desktop/src/db-backend/example-trace/")
         let db = load_db_for_trace(path);

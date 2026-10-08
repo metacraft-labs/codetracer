@@ -180,8 +180,21 @@ TEST_MARKERS = (
     "/tests/",
     "/test_suites/",
     "/stubs/",
+    "/frontend/test_support/",
+    "/frontend/tui/testing/",
 )
 """Path fragments that make a file a non-product reader.
+
+``frontend/test_support/`` and ``frontend/tui/testing/`` are test-support
+trees, not product code, and are classified by what reads them: every module
+that imports either is a suite, a suite's ``config.nims`` or the lane runner.
+``tui/testing/`` says so in its own LAYER RULE (nothing under it is reachable
+from the release entrypoint, which ``test_tui_build_prerequisites.nim``
+asserts on every run), and ``test_support/`` exists to be force-imported into
+the test trees (``state_isolation.nim``) or to locate a published oracle for a
+suite (``spec_documents.nim``). Scanning them as PRODUCT counted a helper a
+suite calls as "tested, and no product module reaches it" — a finding that can
+only be closed by making a product module call test infrastructure.
 
 ``stubs/`` is here with the test trees deliberately: ``viewmodel/stubs`` exists
 to poison declarations for the host-free build gate, so a mention there is a

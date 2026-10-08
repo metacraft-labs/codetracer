@@ -264,6 +264,25 @@ proc activate*(app: HeadlessApp; id: HeadlessSessionId): bool =
   app.activeId = id
   true
 
+proc moveSlot*(app: HeadlessApp; id: HeadlessSessionId; toIndex: int): bool =
+  ## PLAT-48: reorder the session tabs — move `id` to position `toIndex`
+  ## (clamped). False, changing nothing, when `id` is unknown or already
+  ## there. Which session is active does not change.
+  app.requireLive()
+  var at = -1
+  for i, s in app.slots:
+    if s.id == id:
+      at = i
+  if at < 0:
+    return false
+  let target = max(0, min(app.slots.high, toIndex))
+  if target == at:
+    return false
+  let moved = app.slots[at]
+  app.slots.delete(at)
+  app.slots.insert(moved, target)
+  true
+
 proc closeSession*(app: HeadlessApp; id: HeadlessSessionId;
                    disconnectBackend: bool = true): bool =
   ## Dispose and remove a session. False when `id` is unknown.
@@ -325,7 +344,6 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
   of paneEventLog: ViewModel(s.eventLogVM)
   of paneDebugControls: ViewModel(s.debugControlsVM)
   of paneFlow: ViewModel(s.flowVM)
-  of paneTimeline: ViewModel(s.timelineVM)
   of paneSearch: ViewModel(s.searchVM)
   of panePointList: ViewModel(s.pointListVM)
   of paneScratchpad: ViewModel(s.scratchpadVM)
@@ -356,6 +374,30 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
     # in replay either. Answering `nil` says exactly what is true — *this
     # replay session has no ViewModel for that pane* — and `paneIsLive`
     # reports false.
+    nil
+  of paneTerminalOutput:
+    # PLAT-52. The recorded program's terminal output — its lines and its
+    # screen — which the session's `TerminalOutputVM` holds (filled by the
+    # native hosts' `loadRecordingPanes` from `ct/load-terminal`). Until
+    # PLAT-52 this pane answered nil below, as a desktop-only pane.
+    ViewModel(s.terminalOutputVM)
+  of paneVcs, paneAgentActivity, paneTestResults,
+     paneConstraints:
+    # PLAT-45. NIL, FOR THE SAME REASON AS THE BUILD PANE AND SAID AS PLAINLY.
+    #
+    # These are the five panes the desktop's default places and the shared
+    # default therefore places everywhere. Their ViewModels are the desktop's
+    # (GoldenLayout components with their own services), and the headless
+    # replay session owns none of them — so a native front-end draws each as
+    # a REPORT leaf naming the pane and the reason
+    # (`layout_model.PaneCapability`), and this answers what is true: no
+    # ViewModel here, `paneIsLive` false.
+    nil
+  of paneProblems, paneRequests:
+    # PLAT-48. The desktop's PROBLEMS and REQUESTS footer panels, which the
+    # shared default now docks. Their ViewModels are the desktop's (a build's
+    # diagnostics, a service's request log); the replay session owns neither,
+    # so nil, for the reason above.
     nil
 
 proc paneIsLive*(slot: HeadlessSessionSlot; kind: PaneKind): bool =

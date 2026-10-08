@@ -130,6 +130,12 @@ proc keyName*(token: string): string =
       if c >= ' ' and c <= '~':
         return $c
       return ""
+  # PLAT-51: Alt + a printable character — `ESC <char>`, what a terminal
+  # sends for Alt+T (Meta sends ESC prefix). The desktop's "Add tracepoint"
+  # chord (`Editor.TracepointCreation`: Ctrl+Enter / Alt+T).
+  if token.len == 2 and token[0] == '\x1b' and token[1] > ' ' and
+     token[1] <= '~' and token[1] notin {'[', 'O'}:
+    return "Alt+" & $token[1]
   # SS3: ESC O P..S — F1 to F4.
   if token.len == 3 and token[0] == '\x1b' and token[1] == 'O':
     case token[2]
@@ -182,12 +188,40 @@ proc keyName*(token: string): string =
       except ValueError:
         return ""
     return ""
+  of 'u':
+    # The `CSI u` convention (fixterms, kitty's keyboard protocol in its
+    # legacy-compatible form): `CSI <codepoint> ; <modifier> u`. Decoded for
+    # TAB only — `Ctrl+Tab` / `Ctrl+Shift+Tab`, which CodeTracer-TUI.md
+    # §3.3.1 binds and which a terminal can send in no other form. Anything
+    # else stays "not a key" rather than a guess.
+    let parts = params.split(';')
+    if parts.len == 2 and parts[0] in ["9", "13"]:
+      # TAB, and (PLAT-51) ENTER — `Ctrl+Enter`, the desktop's "Add
+      # tracepoint" chord, which a terminal can send in no other form.
+      try:
+        let m = parseInt(parts[1])
+        if ModifierNames.hasKey(m):
+          return ModifierNames[m] & (if parts[0] == "9": "+Tab" else: "+Enter")
+      except ValueError:
+        return ""
+    return ""
   of '~':
     let parts = params.split(';')
     var code = 0
     try:
       code = parseInt(parts[0])
     except ValueError:
+      return ""
+    # xterm's `modifyOtherKeys`: `CSI 27 ; <modifier> ; <codepoint> ~`.
+    # Decoded for TAB only, for the reason the `CSI u` arm above gives.
+    if code == 27:
+      if parts.len == 3 and parts[2] in ["9", "13"]:
+        try:
+          let m = parseInt(parts[1])
+          if ModifierNames.hasKey(m):
+            return ModifierNames[m] & (if parts[2] == "9": "+Tab" else: "+Enter")
+        except ValueError:
+          return ""
       return ""
     var base = ""
     if FunctionKeyCodes.hasKey(code):

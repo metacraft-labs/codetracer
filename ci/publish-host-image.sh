@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+# NOT-A-CI-GATE: an operator's publication step, not a check. It WRITES `ct host`'s
+# image into an Incus daemon's image store (and confirms the write);
+# `ci/test/host-image-serves-in-a-container.sh` is the gate that runs it.
+# Publish `ct host`'s OCI image into an Incus daemon's image store, and CONFIRM
+# it is resolvable before anything depends on it — WD2.
+#
+# ## Why a conversion and not `incus image import` on the OCI tarball
+#
+# `packages.codetracer-host-image` is a `dockerTools.buildLayeredImage`, which
+# is a docker-archive: `manifest.json`, a config blob and one tar per layer.
+# `incus image import` (6.0.6) takes an Incus UNIFIED tarball — `metadata.yaml`
+# plus `rootfs/` — or a metadata/rootfs pair. It does not read a docker
+# archive, and the failure is not obvious: it reports a metadata error about a
+# file the archive legitimately does not have.
+#
+# The other route Incus offers is `incus image copy docker:<ref> local:`, which
+# needs the image in a registry the daemon can reach. That is the right route
+# for a deployment that has one, and it is the WRONG requirement to impose
+# here: §8a of the substrate spec makes "running offline" a supported
+# configuration — locally built images, pools of depth 1 — and a publication
+# step that needed a registry would make an offline substrate unable to run the
+# product this campaign is about.
+#
+# So the layers are applied, in manifest order, into a `rootfs/` beside a
+# `metadata.yaml`, and the result is packed the way
+# `isonim-platform/session/src/image.nim` packs its own: one archive format,
+# sorted names, zeroed owners, a constant mtime and `gzip -n`. Same recipe
+# rather than a similar one, because the substrate's `sha256File` is what
+# checks the fingerprint and a differently-packed tarball would content-address
+# differently for a reason that has nothing to do with its contents.
+#
+# ## The confirmation is the point of the script
+#
+# `sessionctl image-resolve --reference REF` answers "" for a reference the
+# daemon does not have, and `incus.resolveImage`'s own header says why that
+# matters: a session started from the wrong environment LOOKS like a working
+# session and fails in the user's editor rather than here. So this script does
+# not finish on a successful import — it finishes when the substrate's own
+# resolver can name the image, and exits non-zero otherwise.
+#
+#   ci/publish-host-image.sh [--alias NAME] [--sessionctl PATH] [--keep-work]
+#
+# Everything it needs is discovered: `nix`, `incus` and (for the confirmation)
+# a `sessionctl` on PATH or named with `--sessionctl`.
+set -euo pipefail
+
+alias_name=""
+sessionctl_bin="${SESSIONCTL:-sessionctl}"
+keep_work=0
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--alias)
+		alias_name="${2:-}"
+		shift 2
+		;;
+	--help | -h)
+		sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+		exit 0
+		;;
+	--sessionctl)
+		sessionctl_bin="${2:-}"
+		shift 2
+		;;
+	--keep-work)
+		keep_work=1
+		shift
+		;;
+	*)
+		echo "unknown argument: $1" >&2
+		exit 2
+		;;
+	esac
+done
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+for tool in nix incus tar; do
+	command -v "${tool}" >/dev/null 2>&1 || {
+		echo "publish-host-image: ${tool} is not on PATH" >&2
+		exit 1
+	}
+done
+
+if [ -z "${alias_name}" ]; then
+	# The revision, so two builds of two commits are two images rather than one
+	# name that silently moves. A dirty tree gets `-dirty`, for the same reason
+	# the deploy workflow refuses an abbreviated commit: a name that cannot be
+	# traced back to bytes is a name nothing can check.
+	rev="$(git rev-parse HEAD)"
+	if [ -n "$(git status --porcelain)" ]; then rev="${rev}-dirty"; fi
+	# `-` AND NOT `:`. `incus` parses `name:rest` as `remote:name`, so an alias
+	# containing a colon imports fine and is then unusable as an argument:
+	# measured 2026-10-01, `incus image delete codetracer-host:wd2verify`
+	# answered `Error: The remote "codetracer-host" doesn't exist`. The alias was
+	# still RESOLVABLE, because `resolveImage` matches alias names out of
+	# `image list --format json` rather than through argument parsing — so the
+	# publication looked entirely healthy and only an operator trying to delete
+	# or copy it would have found out.
+	alias_name="codetracer-host-${rev}"
+fi
+
+case "${alias_name}" in
+*:*)
+	# Refused rather than accepted-and-broken: see the default above. An alias
+	# with a colon is importable, resolvable, and cannot be named as an argument
+	# to any other `incus` verb.
+	echo "publish-host-image: an alias may not contain ':' —" \
+		"incus parses 'name:rest' as 'remote:name', so '${alias_name}'" \
+		"would import and then be unusable as an argument" >&2
+	exit 2
+	;;
+esac
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/ct-host-image-XXXXXX")"
+cleanup() {
+	[ "${keep_work}" -eq 1 ] && return 0
+	# `chmod` FIRST, and the trap must not fail. The extracted layers are nix
+	# store paths, whose directories are mode 555 — `rm -rf` cannot remove a
+	# child of a directory it cannot write, so a bare cleanup leaves the tree
+	# behind AND returns non-zero, which under `set -e` in an EXIT trap turns a
+	# successful publication into a failed script. Measured: the first run of
+	# this script reported `PUB-EXIT=1` after importing nothing, with sixty
+	# lines of `Permission denied` from tzdata's zoneinfo.
+	chmod -R u+w "${work}" 2>/dev/null || true
+	rm -rf "${work}" 2>/dev/null || true
+	return 0
+}
+trap cleanup EXIT
+
+echo "==> building packages.codetracer-host-image"
+# `?submodules=1` and both trace-format overrides are this flake's documented
+# invocation; without them the build resolves a different pair of FFI inputs,
+# and the two must move together or not at all.
+oci_tar="$(nix build --no-link --print-out-paths '.?submodules=1#codetracer-host-image')"
+echo "    ${oci_tar}"
+
+echo "==> unpacking the docker archive"
+mkdir -p "${work}/oci"
+tar -xf "${oci_tar}" -C "${work}/oci"
+
+manifest="${work}/oci/manifest.json"
+[ -f "${manifest}" ] || {
+	echo "publish-host-image: ${oci_tar} carries no manifest.json; it is not a docker archive" >&2
+	exit 1
+}
+
+echo "==> applying layers in manifest order"
+rootfs="${work}/unified/rootfs"
+mkdir -p "${rootfs}"
+layers="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))[0]["Layers"]))' "${manifest}")"
+layer_count=0
+while IFS= read -r layer; do
+	[ -n "${layer}" ] || continue
+	# ORDER MATTERS AND OVERWRITING IS THE POINT. A later layer replaces a file
+	# an earlier one wrote; extracting them in any other order, or with
+	# `--keep-old-files`, produces a rootfs that is a mixture of two builds.
+	tar -xf "${work}/oci/${layer}" -C "${rootfs}"
+	layer_count=$((layer_count + 1))
+done <<<"${layers}"
+echo "    ${layer_count} layer(s)"
+
+# WRITABLE BEFORE ANYTHING TRIES TO MODIFY IT. Every path in these layers is a
+# nix store path, extracted with its own 444/555 modes, so the whiteout sweep
+# below and the cleanup above both need this. It does not affect the image: the
+# modes that ship are the ones `tar` records, and `tar` is run after this with
+# `--owner=0 --group=0`, which is what makes the archive deterministic in the
+# first place.
+chmod -R u+w "${rootfs}"
+
+# `.wh.` whiteouts: a layer deletes a file by adding a marker rather than by
+# removing it, and tar knows nothing about that convention. Left in place they
+# are visible files with odd names; the file they were meant to delete also
+# survives, which is the half that matters.
+find "${rootfs}" -name '.wh.*' -print0 | while IFS= read -r -d '' marker; do
+	victim="$(dirname "${marker}")/$(basename "${marker}" | sed 's/^\.wh\.//')"
+	rm -rf -- "${victim}" "${marker}"
+done
+
+echo "==> writing the Incus init"
+# AN OCI IMAGE AND AN INCUS CONTAINER START DIFFERENTLY, and the difference is
+# the whole of this step.
+#
+# An OCI runtime reads `config.Entrypoint` — `/bin/ct host --bind 0.0.0.0` — and
+# hands the container a configured network. An Incus container ignores that
+# config entirely: it boots `/sbin/init`, and its NIC comes up with NO address,
+# because a managed bridge hands addresses out over DHCP to a client INSIDE the
+# container. Converted without an init, this image produces a container the
+# substrate can RESOLVE and cannot RUN; converted with an init but no DHCP
+# client, it produces one that boots with an interface that is up and unusable
+# — which from outside is indistinguishable from one that was never attached,
+# and is what made isonim-platform's seam S81 take four months to find.
+#
+# So this is the same init `isonim-platform/session/src/image.nim` writes, for
+# the same reasons, and the comments there are the long form of every line
+# here. The three that are easy to get wrong:
+#
+#   * `/run/isonim-net.status` is written `pending` FIRST, before anything that
+#     can block, so a reader arriving during boot sees "not yet" rather than
+#     nothing. Three states, not two.
+#   * dhcpcd runs WITHOUT `--nobackground`: the lease has to be renewed, and a
+#     client that exited would leave a long session losing its network mid-edit
+#     with nothing running to notice.
+#   * the verdict is the OBSERVED DEFAULT ROUTE, never the client's exit
+#     status — a client can exit 0 having configured nothing, and non-zero
+#     having configured IPv4 and only failed at IPv6.
+#
+# The route test is `[ -n "$(...)" ]` and NOT `| grep -q .`, which is what the
+# substrate's own init uses. `grep` is not in this image — it is GNU grep, a
+# separate package from coreutils — so the piped form failed silently and the
+# status file read `no-lease` while `dhcpcd.log` said `leased 10.159.161.115`
+# and `ip route` showed the default route. Measured 2026-10-01. That is exactly
+# the "NIC, no lease" ambiguity the status file exists to remove, reintroduced
+# by a test that depended on a binary the image does not carry; the pure-shell
+# form removes the dependency rather than adding the package.
+#
+# `ct host` is NOT started here. The session's work arrives through
+# `incus exec`, which is what the substrate drives; an init that also launched
+# the server would race the allocator for the port and give a tenant a process
+# it never asked for.
+# MATERIALISE A DIRECTORY BEFORE WRITING INTO IT. `dockerTools` points several
+# top-level names at the store — `/etc` here is a SYMLINK — so `mkdir -p`
+# happily "succeeds" and the write that follows lands on a read-only
+# filesystem. The first run of this step failed exactly there:
+#   .../unified/rootfs/etc/dhcpcd.conf: Read-only file system
+# `chmod -R u+w` does not help: it changes the permissions of the link's target
+# in the store, not of the link.
+materialise() {
+	local d="$1"
+	if [ -L "${d}" ]; then
+		local target
+		target="$(readlink -f "${d}")"
+		rm -f "${d}"
+		mkdir -p "${d}"
+		if [ -d "${target}" ]; then
+			cp -aL "${target}/." "${d}/" 2>/dev/null || true
+			chmod -R u+w "${d}" 2>/dev/null || true
+		fi
+	else
+		mkdir -p "${d}"
+	fi
+}
+
+materialise "${rootfs}/etc"
+materialise "${rootfs}/sbin"
+materialise "${rootfs}/var"
+mkdir -p "${rootfs}/run/dhcpcd" "${rootfs}/var/lib/dhcpcd" "${rootfs}/var/log"
+# dhcpcd carries on SILENTLY without these and never obtains a lease; from the
+# host the container looks attached and healthy.
+[ -e "${rootfs}/var/run" ] || ln -s ../run "${rootfs}/var/run"
+
+# `rm -f` BEFORE each write, and this is the second half of the same trap.
+# `materialise` handles a DIRECTORY that is a link into the store; these two
+# are FILES that are. `pkgs.dhcpcd` ships `/etc/dhcpcd.conf`, so dockerTools
+# linked it, and `: >` on a symlink truncates the LINK'S TARGET — which is in
+# /nix/store, a read-only filesystem. Measured twice, with the same message
+# and two different causes:
+#   .../unified/rootfs/etc/dhcpcd.conf: Read-only file system
+# The first was the directory, the second the file; `>` follows a symlink and
+# never replaces it, so neither a `mkdir` nor a `chmod` could have helped.
+rm -f "${rootfs}/etc/dhcpcd.conf" "${rootfs}/sbin/init"
+: >"${rootfs}/etc/dhcpcd.conf"
+
+# A PASSWD AND GROUP WITH ROOT ONLY, for the reason
+# `isonim-platform/session/src/image.nim` gives: `id` inside the session has to
+# resolve, and nothing else is named — there is no second account to become.
+#
+# `dockerTools` ships neither, because an OCI runtime does not need them: a
+# container started by `Entrypoint` never asks who it is. `ct host` does, three
+# layers down — node's `os.userInfo()` calls `uv_os_get_passwd`, which fails
+# ENOENT with no entry for uid 0, and the server exits before it listens:
+#
+#   errno: -2, code: 'ENOENT', syscall: 'uv_os_get_passwd'
+#
+# Measured 2026-10-01 inside a container launched from this image, after the
+# library path and the init were already fixed. Third defect in the same chain,
+# same shape as the other two: everything upstream was green because nothing
+# upstream starts the server.
+printf 'root:x:0:0:root:/root:/bin/sh\n' >"${rootfs}/etc/passwd"
+printf 'root:x:0:\n' >"${rootfs}/etc/group"
+mkdir -p "${rootfs}/root"
+
+cat >"${rootfs}/sbin/init" <<'INIT'
+#!/bin/sh
+export PATH=/bin:/usr/bin:/sbin:/usr/sbin
+echo pending > /run/isonim-net.status
+ip link set lo up 2>/dev/null
+ip link set eth0 up 2>/dev/null
+dhcpcd --timeout 15 eth0 >/var/log/dhcpcd.log 2>&1 || true
+i=0
+while [ $i -lt 20 ]; do
+  [ -n "$(ip -4 route show default 2>/dev/null)" ] && break
+  sleep 1
+  i=$((i+1))
+done
+if [ -n "$(ip -4 route show default 2>/dev/null)" ]; then
+  echo ok > /run/isonim-net.status
+else
+  echo no-lease > /run/isonim-net.status
+fi
+while true; do sleep 3600; done
+INIT
+chmod 0755 "${rootfs}/sbin/init"
+
+echo "==> writing metadata.yaml"
+# The same four keys `isonim-platform/session/src/image.nim` writes, and the
+# same constant epoch: the tarball is content-addressed, so a build timestamp
+# in it would give two identical images two fingerprints.
+cat >"${work}/unified/metadata.yaml" <<YAML
+architecture: x86_64
+creation_date: 1
+properties:
+  description: CodeTracer host (ct host)
+  os: nixos
+  release: codetracer
+YAML
+
+echo "==> packing the unified tarball"
+# Byte-for-byte the recipe `session/src/image.nim`'s `packImage` uses. Not a
+# similar one: the substrate's `sha256File` is what checks the fingerprint, and
+# a differently-packed archive content-addresses differently for reasons that
+# have nothing to do with what is in it.
+unified="${work}/codetracer-host.tar.gz"
+(
+	cd "${work}/unified"
+	find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort >"${work}/filelist"
+	tar --format=gnu --sort=name \
+		--owner=0 --group=0 --numeric-owner --mtime='@1' \
+		--no-recursion -T "${work}/filelist" -cf - |
+		gzip -n -9 >"${unified}"
+)
+echo "    $(wc -c <"${unified}") bytes, $(wc -l <"${work}/filelist") entries"
+
+echo "==> importing as ${alias_name}"
+# `--reuse` so republishing the same alias replaces it rather than failing.
+# A publication that refused on its second run would push every operator
+# towards deleting by hand, which is the step that gets skipped.
+incus image import "${unified}" --alias "${alias_name}" --reuse
+
+echo "==> confirming with sessionctl image-resolve"
+# THE STEP THIS SCRIPT EXISTS FOR. An import that succeeded and a reference the
+# substrate cannot resolve are not the same thing — a project pointed at an
+# unresolvable image gets a session built from the substrate's own base image,
+# which looks like a working session and fails in the user's editor.
+if ! command -v "${sessionctl_bin}" >/dev/null 2>&1 && [ ! -x "${sessionctl_bin}" ]; then
+	echo "publish-host-image: no sessionctl (${sessionctl_bin}); the image was imported but NOT confirmed" >&2
+	echo "  remedy: pass --sessionctl PATH, or set SESSIONCTL" >&2
+	exit 1
+fi
+
+resolved="$("${sessionctl_bin}" image-resolve --reference "${alias_name}" 2>/dev/null || true)"
+fingerprint="$(printf '%s' "${resolved}" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("fingerprint", ""))
+except Exception:
+    print("")' || true)"
+
+if [ -z "${fingerprint}" ]; then
+	echo "publish-host-image: the daemon accepted the import and the substrate cannot resolve '${alias_name}'" >&2
+	echo "  sessionctl answered: ${resolved}" >&2
+	echo "  a project pointed at this reference would get the substrate's base image instead" >&2
+	exit 1
+fi
+
+echo "published ${alias_name} -> ${fingerprint}"
+printf '{"alias":"%s","fingerprint":"%s","layers":%s}\n' \
+	"${alias_name}" "${fingerprint}" "${layer_count}"

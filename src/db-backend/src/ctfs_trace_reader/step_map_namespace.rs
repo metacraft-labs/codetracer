@@ -38,35 +38,29 @@
 //! build, byte-identically. Wiring a writer to emit `step-map.ns` in production
 //! is a separate, writer-side toggle (see the M26 milestone note).
 //!
-//! ## Format (spec §4.1)
+//! ## Format (version 2, `codetracer-trace-format-spec/internal-files.md` §"`step-map.ns`")
 //!
 //! ```text
-//! Header:
-//!   [magic: u32]            # 0x53544D50 ("STMP"), little-endian
-//!   [version: u16]          # 1
-//!   [path_count: u32]       # number of paths with step data
-//!   [path_table_offset: u64]
-//!
-//! Path table (at path_table_offset), sorted by PathId:
-//!   [path_id: u64]
-//!   [line_count: u32]
-//!   [lines_offset: u64]
-//!
-//! Line entries (at lines_offset for each path), sorted by line number:
-//!   [line_number: u32]
-//!   [step_count: u32]
-//!   [first_step_id: i64]
-//!   [last_step_id: i64]
-//!   [steps_offset: u64]     # offset to the full step_id list
-//!
-//! Step ID lists (at steps_offset):
-//!   [step_ids: step_count x i64]   # ascending
+//! Header (26 bytes):
+//!   magic: u32 = 0x53544D50 ("STMP")   version: u16 = 2
+//!   chunk_count: u32   path_count: u32   line_count: u32   step_count: u64
+//! Chunk table, chunk_count x 20 bytes, in key order:
+//!   frame_offset: u64 (from the end of the table)   first_path_id: u64   first_line: u32
+//! Frames: one zstd frame per chunk, back to back; the last ends at the end of the member.
+//! Chunk content: line records in ascending (path_id, line) order:
+//!   path_delta: varint   line: varint (absolute after a path change or at a chunk's
+//!   start, else the line minus the previous one)   count: varint
+//!   runs until their repeats add up to count: gap: varint, repeat: varint
+//!   (the id before a list's first is -1)
 //! ```
 //!
-//! All integers are little-endian. The reader is defensive: any structural
-//! inconsistency (bad magic, truncated section, out-of-bounds offset) is
-//! reported as an error so the caller can cleanly fall back to the whole-table
-//! build rather than serving wrong breakpoints.
+//! All fixed-width integers are little-endian. The reader refuses, by name,
+//! every malformation the specification lists -- counts that disagree with
+//! the header, a chunk whose first key is not its table key, keys that do not
+//! ascend, a `count`, `gap` or `repeat` of 0, runs that overshoot their count,
+//! a frame that does not decode to its declared size -- because each is a map
+//! that would answer some breakpoint with the wrong steps. The caller treats a
+//! refusal as "no usable index" and falls back to the whole-table build.
 
 use std::collections::HashMap;
 
@@ -76,19 +70,29 @@ use codetracer_trace_types::{PathId, StepId};
 /// little-endian `u32` (`0x53544D50`).
 pub const STEP_MAP_MAGIC: u32 = 0x5354_4D50;
 
-/// The only format version this reader (and the test writer) understand.
-pub const STEP_MAP_VERSION: u16 = 1;
+/// The only format version this reader (and the serializer) understand.
+pub const STEP_MAP_VERSION: u16 = 2;
 
 /// The CTFS container-internal file name (and sidecar base name) for the
 /// prepopulated step-map namespace, per the spec's container layout.
 pub const STEP_MAP_FILE: &str = "step-map.ns";
+
+/// The decompressed size at or past which a chunk is closed (after the record
+/// that reaches it). Normative, so that two writers produce the same bytes.
+pub const STEP_MAP_CHUNK_TARGET: usize = 65_536;
+
+/// The zstd level every chunk is compressed at.
+pub const STEP_MAP_ZSTD_LEVEL: i32 = 3;
+
+const HEADER_SIZE: usize = 26;
+const CHUNK_ENTRY_SIZE: usize = 20;
 
 /// Errors surfaced while parsing a `step-map.ns` blob. Every variant is a
 /// recoverable "this table is unusable, fall back to the whole-table build"
 /// signal — the caller never propagates these as hard failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepMapError {
-    /// The blob is shorter than the fixed 18-byte header.
+    /// The blob is shorter than the fixed 26-byte header.
     TooShort,
     /// The magic did not match [`STEP_MAP_MAGIC`].
     BadMagic(u32),
@@ -101,17 +105,24 @@ pub enum StepMapError {
         /// The byte offset the parser attempted to read at.
         offset: usize,
     },
+    /// The member is well-framed but says something a step map cannot: the
+    /// message names what.
+    Invalid(String),
 }
 
 impl std::fmt::Display for StepMapError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StepMapError::TooShort => write!(f, "step-map.ns shorter than header"),
+            StepMapError::TooShort => write!(f, "step-map.ns shorter than its 26-byte header"),
             StepMapError::BadMagic(m) => write!(f, "step-map.ns bad magic 0x{m:08X}"),
-            StepMapError::UnsupportedVersion(v) => write!(f, "step-map.ns unsupported version {v}"),
+            StepMapError::UnsupportedVersion(v) => write!(
+                f,
+                "step-map.ns version {v} is not readable: this reader reads version {STEP_MAP_VERSION} only"
+            ),
             StepMapError::OutOfBounds { section, offset } => {
                 write!(f, "step-map.ns {section} out of bounds at offset {offset}")
             }
+            StepMapError::Invalid(what) => write!(f, "step-map.ns refused: {what}"),
         }
     }
 }
@@ -170,21 +181,100 @@ fn read_u64(buf: &[u8], off: usize, section: &'static str) -> Result<u64, StepMa
         .ok_or(StepMapError::OutOfBounds { section, offset: off })
 }
 
-/// Read a little-endian `i64` at `off`, bounds-checked.
-fn read_i64(buf: &[u8], off: usize, section: &'static str) -> Result<i64, StepMapError> {
-    read_u64(buf, off, section).map(|v| v as i64)
+fn invalid<T>(what: impl Into<String>) -> Result<T, StepMapError> {
+    Err(StepMapError::Invalid(what.into()))
+}
+
+/// Read an unsigned LEB128 varint of at most ten bytes.
+fn read_varint(buf: &[u8], pos: &mut usize, chunk: usize) -> Result<u64, StepMapError> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let Some(&byte) = buf.get(*pos) else {
+            return invalid(format!("chunk {chunk} ends inside a record"));
+        };
+        *pos += 1;
+        if shift == 63 && byte > 1 {
+            return invalid(format!("chunk {chunk}: a varint overflows 64 bits"));
+        }
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+        shift += 7;
+        if shift > 63 {
+            return invalid(format!("chunk {chunk}: a varint is longer than ten bytes"));
+        }
+    }
+}
+
+/// The content size a zstd frame header declares, or `None` when the frame
+/// declares none (RFC 8878 §3.1.1.1).
+fn declared_content_size(frame: &[u8]) -> Option<u64> {
+    if frame.len() < 5 || frame[0..4] != [0x28, 0xB5, 0x2F, 0xFD] {
+        return None;
+    }
+    let fhd = frame[4];
+    let fcs_flag = fhd >> 6;
+    let single_segment = fhd & 0x20 != 0;
+    let dict_id_bytes = [0usize, 1, 2, 4][(fhd & 0x03) as usize];
+    let fcs_bytes = match fcs_flag {
+        0 if single_segment => 1,
+        0 => return None,
+        1 => 2,
+        2 => 4,
+        _ => 8,
+    };
+    let start = 5 + usize::from(!single_segment) + dict_id_bytes;
+    let field = frame.get(start..start + fcs_bytes)?;
+    let mut raw = [0u8; 8];
+    raw[..fcs_bytes].copy_from_slice(field);
+    let value = u64::from_le_bytes(raw);
+    Some(if fcs_bytes == 2 { value + 256 } else { value })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn inflate(frame: &[u8]) -> Result<Vec<u8>, String> {
+    zstd::decode_all(std::io::Cursor::new(frame)).map_err(|e| e.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn inflate(frame: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut decoder =
+        ruzstd::decoding::StreamingDecoder::new(std::io::Cursor::new(frame)).map_err(|e| e.to_string())?;
+    let mut raw = Vec::new();
+    decoder.read_to_end(&mut raw).map_err(|e| e.to_string())?;
+    Ok(raw)
+}
+
+/// Inflate chunk `chunk`'s frame, refusing one that declares no content size
+/// or does not decode to the size it declares.
+fn inflate_chunk(frame: &[u8], chunk: usize) -> Result<Vec<u8>, StepMapError> {
+    let Some(declared) = declared_content_size(frame) else {
+        return invalid(format!("chunk {chunk}'s frame does not declare its content size"));
+    };
+    let content = match inflate(frame) {
+        Ok(content) => content,
+        Err(e) => return invalid(format!("chunk {chunk}'s frame does not decode: {e}")),
+    };
+    if content.len() as u64 != declared {
+        return invalid(format!(
+            "chunk {chunk}'s frame decodes to {} bytes, not the {declared} it declares",
+            content.len()
+        ));
+    }
+    Ok(content)
 }
 
 impl StepMapNamespace {
-    /// Parse a `step-map.ns` blob per the spec §4.1 layout.
+    /// Parse a version 2 `step-map.ns` member.
     ///
     /// Returns a fully-resident [`StepMapNamespace`] on success, or a
-    /// [`StepMapError`] when the blob is malformed. Callers treat any error as
-    /// "no usable prepopulated table" and fall back to the whole-table build.
+    /// [`StepMapError`] naming what is wrong. Callers treat any error as "no
+    /// usable prepopulated table" and fall back to the whole-table build.
     pub fn parse(buf: &[u8]) -> Result<Self, StepMapError> {
-        // ── Header ──────────────────────────────────────────────────────
-        // [magic:u32][version:u16][path_count:u32][path_table_offset:u64] = 18 bytes.
-        if buf.len() < 18 {
+        if buf.len() < 6 {
             return Err(StepMapError::TooShort);
         }
         let magic = read_u32(buf, 0, "header.magic")?;
@@ -195,74 +285,151 @@ impl StepMapNamespace {
         if version != STEP_MAP_VERSION {
             return Err(StepMapError::UnsupportedVersion(version));
         }
-        let path_count = read_u32(buf, 6, "header.path_count")? as usize;
-        let path_table_offset = read_u64(buf, 10, "header.path_table_offset")? as usize;
+        if buf.len() < HEADER_SIZE {
+            return Err(StepMapError::TooShort);
+        }
+        let chunk_count = read_u32(buf, 6, "header.chunk_count")? as usize;
+        let path_count = read_u32(buf, 10, "header.path_count")? as u64;
+        let line_count = read_u32(buf, 14, "header.line_count")? as u64;
+        let step_count = read_u64(buf, 18, "header.step_count")?;
 
-        // ── Path table ──────────────────────────────────────────────────
-        // Each entry: [path_id:u64][line_count:u32][lines_offset:u64] = 20 bytes.
-        let mut by_path: HashMap<usize, HashMap<usize, Vec<StepId>>> = HashMap::with_capacity(path_count);
-        let mut lines_desc: HashMap<usize, Vec<usize>> = HashMap::with_capacity(path_count);
-        let mut total_step_ids = 0usize;
+        let table_end = chunk_count
+            .checked_mul(CHUNK_ENTRY_SIZE)
+            .and_then(|t| t.checked_add(HEADER_SIZE))
+            .filter(|&end| end <= buf.len())
+            .ok_or(StepMapError::OutOfBounds {
+                section: "chunk_table",
+                offset: HEADER_SIZE,
+            })?;
+        let mut chunks: Vec<(usize, u64, u32)> = Vec::with_capacity(chunk_count);
+        for c in 0..chunk_count {
+            let base = HEADER_SIZE + c * CHUNK_ENTRY_SIZE;
+            let offset = read_u64(buf, base, "chunk_table.frame_offset")?;
+            let start = usize::try_from(offset)
+                .ok()
+                .and_then(|o| o.checked_add(table_end))
+                .filter(|&start| start <= buf.len())
+                .ok_or(StepMapError::OutOfBounds {
+                    section: "chunk_table.frame_offset",
+                    offset: base,
+                })?;
+            chunks.push((
+                start,
+                read_u64(buf, base + 8, "chunk_table.first_path_id")?,
+                read_u32(buf, base + 16, "chunk_table.first_line")?,
+            ));
+        }
+        if let Some(&(first, _, _)) = chunks.first()
+            && first != table_end
+        {
+            return invalid("the first frame does not start at the end of the chunk table");
+        }
+
+        let mut by_path: HashMap<usize, HashMap<usize, Vec<StepId>>> = HashMap::new();
+        let mut lines_desc: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut total_step_ids = 0u64;
+        let mut total_lines = 0u64;
         let mut min_step_id = i64::MAX;
         let mut max_step_id = i64::MIN;
-        for p in 0..path_count {
-            let base = path_table_offset + p * 20;
-            let path_id = read_u64(buf, base, "path_table.path_id")? as usize;
-            let line_count = read_u32(buf, base + 8, "path_table.line_count")? as usize;
-            let lines_offset = read_u64(buf, base + 12, "path_table.lines_offset")? as usize;
-
-            let mut by_line: HashMap<usize, Vec<StepId>> = HashMap::with_capacity(line_count);
-            for l in 0..line_count {
-                // Each line entry: [line:u32][step_count:u32][first:i64][last:i64][steps_offset:u64]
-                // = 4 + 4 + 8 + 8 + 8 = 32 bytes. (The spec's prose "~28 bytes"
-                // is a rough SIZE ESTIMATE, not the on-disk record stride.)
-                let lbase = lines_offset + l * 32;
-                let line = read_u32(buf, lbase, "line_entry.line")? as usize;
-                let step_count = read_u32(buf, lbase + 4, "line_entry.step_count")? as usize;
-                // first_step_id / last_step_id are range-check hints; the
-                // authoritative data is the explicit step-id list, so we read
-                // them only to validate the bounds match the list ends.
-                let first_hint = read_i64(buf, lbase + 8, "line_entry.first_step_id")?;
-                let last_hint = read_i64(buf, lbase + 16, "line_entry.last_step_id")?;
-                let steps_offset = read_u64(buf, lbase + 24, "line_entry.steps_offset")? as usize;
-
-                let mut step_ids = Vec::with_capacity(step_count);
-                for s in 0..step_count {
-                    let sbase = steps_offset + s * 8;
-                    step_ids.push(StepId(read_i64(buf, sbase, "step_id_list")?));
-                }
-                // Defensive consistency check: the hints must bracket the list.
-                // A mismatch means a corrupt/foreign table — bail to fallback.
-                if step_count > 0 {
-                    let actual_first = step_ids[0].0;
-                    let actual_last = step_ids[step_count - 1].0;
-                    if actual_first != first_hint || actual_last != last_hint {
-                        return Err(StepMapError::OutOfBounds {
-                            section: "line_entry.step_bounds_mismatch",
-                            offset: lbase,
-                        });
+        let mut previous_key: Option<(u64, u64)> = None;
+        for (c, &(start, first_path, first_line)) in chunks.iter().enumerate() {
+            let end = chunks.get(c + 1).map_or(buf.len(), |next| next.0);
+            if end < start {
+                return invalid(format!("chunk {c}'s frame ends before it starts"));
+            }
+            let content = inflate_chunk(&buf[start..end], c)?;
+            let mut pos = 0usize;
+            let (mut path, mut line) = (first_path, 0u64);
+            let mut first_record = true;
+            while pos < content.len() {
+                let path_delta = read_varint(&content, &mut pos, c)?;
+                let line_field = read_varint(&content, &mut pos, c)?;
+                if first_record {
+                    if path_delta != 0 || line_field != u64::from(first_line) {
+                        return invalid(format!(
+                            "chunk {c}'s first record is not its table key ({first_path}, {first_line})"
+                        ));
                     }
+                    line = line_field;
+                } else if path_delta > 0 {
+                    path = path
+                        .checked_add(path_delta)
+                        .ok_or_else(|| StepMapError::Invalid(format!("chunk {c}: a path id overflows")))?;
+                    line = line_field;
+                } else {
+                    if line_field == 0 {
+                        return invalid(format!("chunk {c}: keys do not ascend strictly (a line delta of 0)"));
+                    }
+                    line = line
+                        .checked_add(line_field)
+                        .ok_or_else(|| StepMapError::Invalid(format!("chunk {c}: a line overflows")))?;
                 }
-                total_step_ids += step_ids.len();
-                if let (Some(first), Some(last)) = (step_ids.first(), step_ids.last()) {
+                if line > u64::from(u32::MAX) {
+                    return invalid(format!("chunk {c}: line {line} does not fit 32 bits"));
+                }
+                if previous_key.is_some_and(|previous| (path, line) <= previous) {
+                    return invalid(format!("chunk {c}: keys do not ascend strictly at ({path}, {line})"));
+                }
+                previous_key = Some((path, line));
+                first_record = false;
+
+                let count = read_varint(&content, &mut pos, c)?;
+                if count == 0 {
+                    return invalid(format!("chunk {c}: line ({path}, {line}) has a count of 0"));
+                }
+                let mut ids: Vec<StepId> = Vec::with_capacity(count.min(1 << 20) as usize);
+                let mut previous_id = -1i64;
+                let mut decoded = 0u64;
+                while decoded < count {
+                    let gap = read_varint(&content, &mut pos, c)?;
+                    let repeat = read_varint(&content, &mut pos, c)?;
+                    if gap == 0 || repeat == 0 {
+                        return invalid(format!("chunk {c}: line ({path}, {line}) has a gap or repeat of 0"));
+                    }
+                    if repeat > count - decoded {
+                        return invalid(format!(
+                            "chunk {c}: the runs of line ({path}, {line}) overshoot its count {count}"
+                        ));
+                    }
+                    let gap =
+                        i64::try_from(gap).map_err(|_| StepMapError::Invalid(format!("chunk {c}: a gap overflows")))?;
+                    for _ in 0..repeat {
+                        previous_id = previous_id
+                            .checked_add(gap)
+                            .ok_or_else(|| StepMapError::Invalid(format!("chunk {c}: a step id overflows")))?;
+                        ids.push(StepId(previous_id));
+                    }
+                    decoded += repeat;
+                }
+                total_step_ids += count;
+                total_lines += 1;
+                if let (Some(first), Some(last)) = (ids.first(), ids.last()) {
                     min_step_id = min_step_id.min(first.0);
                     max_step_id = max_step_id.max(last.0);
                 }
-                by_line.insert(line, step_ids);
+                by_path.entry(path as usize).or_default().insert(line as usize, ids);
             }
-            // Descending line order for the M0/3 line-map accessor. The line
-            // entries were read in the spec's ascending order, so a reverse of
-            // the keys is enough — no sort.
+            if first_record {
+                return invalid(format!("chunk {c} holds no record"));
+            }
+        }
+        let paths_seen = by_path.len() as u64;
+        if (paths_seen, total_lines, total_step_ids) != (path_count, line_count, step_count) {
+            return invalid(format!(
+                "the decoded counts ({paths_seen} paths, {total_lines} lines, {total_step_ids} steps) \
+                 disagree with the header ({path_count}, {line_count}, {step_count})"
+            ));
+        }
+        for (path_id, by_line) in &by_path {
             let mut desc: Vec<usize> = by_line.keys().copied().collect();
             desc.sort_unstable_by(|a, b| b.cmp(a));
-            lines_desc.insert(path_id, desc);
-            by_path.insert(path_id, by_line);
+            lines_desc.insert(*path_id, desc);
         }
 
         Ok(StepMapNamespace {
             by_path,
             lines_desc,
-            total_step_ids,
+            total_step_ids: total_step_ids as usize,
             min_step_id,
             max_step_id,
         })
@@ -369,99 +536,120 @@ impl StepMapNamespace {
     }
 }
 
-/// Serialize a `path_id → (line → step_ids)` map into the spec §4.1 `STMP`
-/// wire format. This is the inverse of [`StepMapNamespace::parse`].
+fn write_varint(out: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        out.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
+}
+
+/// Serialize a `path_id → (line → step_ids)` map as a version 2 `step-map.ns`
+/// member, byte for byte as `internal-files.md` §"`step-map.ns`" specifies.
+/// This is the inverse of [`StepMapNamespace::parse`].
 ///
-/// It lives in the production crate (not behind `#[cfg(test)]`) for two
-/// reasons: (1) it is the natural place to keep the write↔read round-trip
-/// honest and audited against the spec, and (2) it is the building block a
-/// future writer-side emission toggle would reuse. Tests drive it to produce a
-/// genuine prepopulated table from real recorded steps — the table is DERIVED
-/// from the trace, never faked.
-///
-/// `entries` is consumed as `(path_id, line, ascending_step_ids)` triples. The
-/// function sorts paths by id and lines by number to honor the spec's
-/// binary-searchable ordering.
+/// `entries` is consumed as `(path_id, line, step_ids)` triples; ids are
+/// sorted, and lines and paths are written in ascending key order. Not
+/// available on wasm32, which has a zstd decoder but no encoder.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn serialize_step_map(entries: &[(PathId, usize, Vec<StepId>)]) -> Vec<u8> {
-    // Group by path, then by line, sorting both keys to match the spec ordering.
-    let mut by_path: std::collections::BTreeMap<u64, std::collections::BTreeMap<u32, Vec<i64>>> =
-        std::collections::BTreeMap::new();
+    let mut by_key: std::collections::BTreeMap<(u64, u32), Vec<i64>> = std::collections::BTreeMap::new();
     for (path_id, line, step_ids) in entries {
         let mut ids: Vec<i64> = step_ids.iter().map(|s| s.0).collect();
         ids.sort_unstable();
-        by_path.entry(path_id.0 as u64).or_default().insert(*line as u32, ids);
+        by_key.insert((path_id.0 as u64, *line as u32), ids);
     }
+    let path_count = by_key
+        .keys()
+        .map(|k| k.0)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    let step_count: usize = by_key.values().map(Vec::len).sum();
 
-    let path_count = by_path.len();
-
-    // Layout plan (so every offset is known before we write any bytes):
-    //   [header: 18 bytes]
-    //   [path table: path_count * 20 bytes]
-    //   [for each path: its line entries: line_count * 28 bytes]
-    //   [for each line: its step-id list: step_count * 8 bytes]
-    const HEADER_SIZE: usize = 18;
-    const PATH_ENTRY_SIZE: usize = 20;
-    // [line:u32][step_count:u32][first:i64][last:i64][steps_offset:u64] = 32 bytes.
-    const LINE_ENTRY_SIZE: usize = 32;
-
-    let path_table_offset = HEADER_SIZE;
-    let mut cursor = path_table_offset + path_count * PATH_ENTRY_SIZE;
-
-    // Reserve each path's line-entry block, recording where it starts.
-    let mut line_block_offsets: Vec<usize> = Vec::with_capacity(path_count);
-    for by_line in by_path.values() {
-        line_block_offsets.push(cursor);
-        cursor += by_line.len() * LINE_ENTRY_SIZE;
-    }
-
-    // Reserve each line's step-id list, recording where it starts. We flatten in
-    // the same (path, line) iteration order used above.
-    let mut step_list_offsets: Vec<usize> = Vec::new();
-    for by_line in by_path.values() {
-        for ids in by_line.values() {
-            step_list_offsets.push(cursor);
-            cursor += ids.len() * 8;
-        }
-    }
-
-    let total = cursor;
-    let mut buf = vec![0u8; total];
-
-    // ── Header ──────────────────────────────────────────────────────────
-    buf[0..4].copy_from_slice(&STEP_MAP_MAGIC.to_le_bytes());
-    buf[4..6].copy_from_slice(&STEP_MAP_VERSION.to_le_bytes());
-    buf[6..10].copy_from_slice(&(path_count as u32).to_le_bytes());
-    buf[10..18].copy_from_slice(&(path_table_offset as u64).to_le_bytes());
-
-    // ── Path table + line entries + step lists ──────────────────────────
-    let mut step_list_idx = 0usize;
-    for (p, (path_id, by_line)) in by_path.iter().enumerate() {
-        let pbase = path_table_offset + p * PATH_ENTRY_SIZE;
-        let lines_offset = line_block_offsets[p];
-        buf[pbase..pbase + 8].copy_from_slice(&path_id.to_le_bytes());
-        buf[pbase + 8..pbase + 12].copy_from_slice(&(by_line.len() as u32).to_le_bytes());
-        buf[pbase + 12..pbase + 20].copy_from_slice(&(lines_offset as u64).to_le_bytes());
-
-        for (l, (line, ids)) in by_line.iter().enumerate() {
-            let lbase = lines_offset + l * LINE_ENTRY_SIZE;
-            let steps_offset = step_list_offsets[step_list_idx];
-            step_list_idx += 1;
-            let first = ids.first().copied().unwrap_or(0);
-            let last = ids.last().copied().unwrap_or(0);
-            buf[lbase..lbase + 4].copy_from_slice(&line.to_le_bytes());
-            buf[lbase + 4..lbase + 8].copy_from_slice(&(ids.len() as u32).to_le_bytes());
-            buf[lbase + 8..lbase + 16].copy_from_slice(&first.to_le_bytes());
-            buf[lbase + 16..lbase + 24].copy_from_slice(&last.to_le_bytes());
-            buf[lbase + 24..lbase + 32].copy_from_slice(&(steps_offset as u64).to_le_bytes());
-
-            for (s, id) in ids.iter().enumerate() {
-                let sbase = steps_offset + s * 8;
-                buf[sbase..sbase + 8].copy_from_slice(&id.to_le_bytes());
+    let mut chunks: Vec<(u64, u32, Vec<u8>)> = Vec::new();
+    let mut current: Option<(u64, u32, Vec<u8>)> = None;
+    let mut previous = (0u64, 0u32);
+    for (&(path, line), ids) in &by_key {
+        let content = match current.as_mut() {
+            Some((_, _, content)) => {
+                let path_delta = path - previous.0;
+                write_varint(content, path_delta);
+                write_varint(
+                    content,
+                    if path_delta > 0 {
+                        u64::from(line)
+                    } else {
+                        u64::from(line - previous.1)
+                    },
+                );
+                content
             }
+            None => {
+                let (_, _, content) = current.insert((path, line, Vec::new()));
+                write_varint(content, 0);
+                write_varint(content, u64::from(line));
+                content
+            }
+        };
+        write_varint(content, ids.len() as u64);
+        let mut previous_id = -1i64;
+        let mut run: Option<(u64, u64)> = None;
+        for &id in ids {
+            let gap = (id - previous_id) as u64;
+            previous_id = id;
+            run = match run {
+                Some((g, n)) if g == gap => Some((g, n + 1)),
+                Some((g, n)) => {
+                    write_varint(content, g);
+                    write_varint(content, n);
+                    Some((gap, 1))
+                }
+                None => Some((gap, 1)),
+            };
+        }
+        if let Some((g, n)) = run {
+            write_varint(content, g);
+            write_varint(content, n);
+        }
+        previous = (path, line);
+        if content.len() >= STEP_MAP_CHUNK_TARGET
+            && let Some(done) = current.take()
+        {
+            chunks.push(done);
         }
     }
+    if let Some(done) = current {
+        chunks.push(done);
+    }
 
-    buf
+    let frames: Vec<Vec<u8>> = chunks
+        .iter()
+        .map(
+            |(_, _, content)| match zstd::bulk::compress(content, STEP_MAP_ZSTD_LEVEL) {
+                Ok(frame) => frame,
+                Err(e) => unreachable!("in-memory zstd compression cannot fail: {e}"),
+            },
+        )
+        .collect();
+    let mut out =
+        Vec::with_capacity(HEADER_SIZE + chunks.len() * CHUNK_ENTRY_SIZE + frames.iter().map(Vec::len).sum::<usize>());
+    out.extend_from_slice(&STEP_MAP_MAGIC.to_le_bytes());
+    out.extend_from_slice(&STEP_MAP_VERSION.to_le_bytes());
+    out.extend_from_slice(&(chunks.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(path_count as u32).to_le_bytes());
+    out.extend_from_slice(&(by_key.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(step_count as u64).to_le_bytes());
+    let mut offset = 0u64;
+    for ((path, line, _), frame) in chunks.iter().zip(&frames) {
+        out.extend_from_slice(&offset.to_le_bytes());
+        out.extend_from_slice(&path.to_le_bytes());
+        out.extend_from_slice(&line.to_le_bytes());
+        offset += frame.len() as u64;
+    }
+    for frame in frames {
+        out.extend_from_slice(&frame);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -537,12 +725,9 @@ mod tests {
     #[test]
     fn rejects_truncated_body() {
         let mut blob = serialize_step_map(&[(PathId(0), 1, vec![StepId(7)])]);
-        // Lop off the final step-id list bytes — the parser must bail, not panic.
+        // Lop off the end of the last frame — the parser must bail, not panic.
         blob.truncate(blob.len() - 4);
-        assert!(matches!(
-            StepMapNamespace::parse(&blob),
-            Err(StepMapError::OutOfBounds { .. })
-        ));
+        assert!(StepMapNamespace::parse(&blob).is_err());
     }
 
     #[test]
@@ -551,5 +736,201 @@ mod tests {
         let ns = StepMapNamespace::parse(&blob).expect("empty table parses");
         assert_eq!(ns.entry_count(), 0);
         assert!(ns.step_ids_on_line(PathId(0), 1).is_none());
+    }
+
+    // ── Version 2 (internal-files.md §"`step-map.ns`") ───────────────────
+
+    fn varint(out: &mut Vec<u8>, mut v: u64) {
+        while v >= 0x80 {
+            out.push((v as u8) | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    }
+
+    /// A version 2 member assembled from the specification: the header
+    /// counts, one chunk-table entry per `(first_path, first_line, content)`,
+    /// and each content compressed as one zstd frame.
+    fn v2_member(counts: (u32, u32, u64), chunks: &[(u64, u32, Vec<u8>)]) -> Vec<u8> {
+        let frames: Vec<Vec<u8>> = chunks.iter().map(|c| zstd::bulk::compress(&c.2, 3).unwrap()).collect();
+        let mut out = Vec::new();
+        out.extend_from_slice(&0x5354_4D50u32.to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&(chunks.len() as u32).to_le_bytes());
+        out.extend_from_slice(&counts.0.to_le_bytes());
+        out.extend_from_slice(&counts.1.to_le_bytes());
+        out.extend_from_slice(&counts.2.to_le_bytes());
+        let mut off = 0u64;
+        for (c, f) in chunks.iter().zip(&frames) {
+            out.extend_from_slice(&off.to_le_bytes());
+            out.extend_from_slice(&c.0.to_le_bytes());
+            out.extend_from_slice(&c.1.to_le_bytes());
+            off += f.len() as u64;
+        }
+        for f in frames {
+            out.extend_from_slice(&f);
+        }
+        out
+    }
+
+    /// The specification's own example: one line, ids 0, 2, 4, 6, 7 -- the
+    /// first gap counts from -1, and runs are maximal.
+    const EXAMPLE_RECORD: [u8; 9] = [0, 3, 5, 1, 1, 2, 3, 1, 1];
+
+    #[test]
+    fn a_version_2_member_from_the_specification_is_read() {
+        let blob = v2_member((1, 1, 5), &[(0, 3, EXAMPLE_RECORD.to_vec())]);
+        let ns = StepMapNamespace::parse(&blob).expect("a version 2 member must parse");
+        assert_eq!(
+            ns.step_ids_on_line(PathId(0), 3),
+            Some(&vec![StepId(0), StepId(2), StepId(4), StepId(6), StepId(7)])
+        );
+        assert_eq!(ns.entry_count(), 1);
+        assert_eq!(ns.total_step_ids(), 5);
+    }
+
+    /// Keys are delta-coded within a chunk: a path delta restates the line, a
+    /// zero path delta adds to it; and a chunk's first record restates its key.
+    #[test]
+    fn keys_are_delta_coded_within_a_chunk_and_restated_at_its_start() {
+        let mut c0 = Vec::new();
+        // (2, 10): ids 5   then (2, 12): ids 1, 3   then (5, 4): id 9
+        c0.extend_from_slice(&[0, 10, 1, 6, 1]);
+        c0.extend_from_slice(&[0, 2, 2, 2, 1, 2, 1]);
+        c0.extend_from_slice(&[3, 4, 1, 10, 1]);
+        let mut c1 = Vec::new();
+        // (5, 7): ids 100..=102
+        c1.extend_from_slice(&[0, 7, 3]);
+        varint(&mut c1, 101);
+        c1.extend_from_slice(&[1, 1, 2]);
+        let blob = v2_member((2, 4, 7), &[(2, 10, c0), (5, 7, c1)]);
+        let ns = StepMapNamespace::parse(&blob).expect("parse");
+        assert_eq!(ns.step_ids_on_line(PathId(2), 10), Some(&vec![StepId(5)]));
+        assert_eq!(ns.step_ids_on_line(PathId(2), 12), Some(&vec![StepId(1), StepId(3)]));
+        assert_eq!(ns.step_ids_on_line(PathId(5), 4), Some(&vec![StepId(9)]));
+        assert_eq!(
+            ns.step_ids_on_line(PathId(5), 7),
+            Some(&vec![StepId(100), StepId(101), StepId(102)])
+        );
+    }
+
+    #[test]
+    fn an_empty_map_is_the_26_byte_header() {
+        let blob = serialize_step_map(&[]);
+        assert_eq!(blob.len(), 26);
+        assert_eq!(&blob[4..6], &2u16.to_le_bytes());
+        assert!(blob[6..].iter().all(|&b| b == 0), "every count of an empty map is 0");
+        let ns = StepMapNamespace::parse(&blob).expect("empty map parses");
+        assert_eq!(ns.entry_count(), 0);
+    }
+
+    /// The serializer writes the specified bytes: the example record above is
+    /// the content of its one chunk.
+    #[test]
+    fn the_serializer_writes_version_2() {
+        let blob = serialize_step_map(&[(
+            PathId(0),
+            3,
+            vec![StepId(0), StepId(2), StepId(4), StepId(6), StepId(7)],
+        )]);
+        assert_eq!(blob, v2_member((1, 1, 5), &[(0, 3, EXAMPLE_RECORD.to_vec())]));
+    }
+
+    /// A chunk closes after the record that brings its content to 65,536
+    /// bytes or more, and the next record restates its key in a new chunk.
+    #[test]
+    fn the_serializer_closes_a_chunk_at_the_target() {
+        // Each line holds 20,000 ids spaced 3 then 4 apart alternately: no two
+        // adjacent runs share a gap, so its content is about 40 KB.
+        let lines: Vec<(PathId, usize, Vec<StepId>)> = (0..4)
+            .map(|l| {
+                let mut id = l as i64;
+                let ids = (0..20_000)
+                    .map(|k| {
+                        let here = id;
+                        id += if k % 2 == 0 { 30 } else { 40 };
+                        StepId(here)
+                    })
+                    .collect();
+                (PathId(1), 10 + l, ids)
+            })
+            .collect();
+        let blob = serialize_step_map(&lines);
+        let chunk_count = u32::from_le_bytes(blob[6..10].try_into().unwrap());
+        assert_eq!(
+            chunk_count, 2,
+            "two ~40 KB records reach the target, so four make two chunks"
+        );
+        let second_first_line = u32::from_le_bytes(blob[26 + 20 + 16..26 + 20 + 20].try_into().unwrap());
+        assert_eq!(second_first_line, 12, "the second chunk opens at the third line");
+        let ns = StepMapNamespace::parse(&blob).expect("parse");
+        for (path, line, ids) in &lines {
+            assert_eq!(ns.step_ids_on_line(*path, *line), Some(ids));
+        }
+    }
+
+    fn refused(blob: &[u8], what: &str) -> String {
+        let err = StepMapNamespace::parse(blob).expect_err(what).to_string();
+        assert!(
+            err.contains("step-map.ns"),
+            "{what}: the refusal does not name the member: {err}"
+        );
+        err
+    }
+
+    /// Each malformation `internal-files.md` names is refused: every one is a
+    /// map that would answer some breakpoint with the wrong steps.
+    #[test]
+    fn a_malformed_version_2_member_is_refused() {
+        let good = || vec![(0u64, 3u32, EXAMPLE_RECORD.to_vec())];
+        refused(&v2_member((1, 1, 6), &good()), "a step count that disagrees");
+        refused(&v2_member((1, 2, 5), &good()), "a line count that disagrees");
+        refused(&v2_member((2, 1, 5), &good()), "a path count that disagrees");
+        refused(
+            &v2_member((1, 1, 5), &[(0, 4, EXAMPLE_RECORD.to_vec())]),
+            "a table key that is not the first record's",
+        );
+        refused(
+            &v2_member((1, 1, 5), &[(0, 3, vec![1, 3, 5, 1, 1, 2, 3, 1, 1])]),
+            "a chunk's first record with a path delta",
+        );
+        refused(
+            &v2_member((1, 2, 2), &[(0, 3, vec![0, 3, 1, 1, 1, 0, 0, 1, 1, 1])]),
+            "a repeated key",
+        );
+        refused(&v2_member((1, 1, 0), &[(0, 3, vec![0, 3, 0])]), "a count of 0");
+        refused(&v2_member((1, 1, 1), &[(0, 3, vec![0, 3, 1, 0, 1])]), "a gap of 0");
+        refused(&v2_member((1, 1, 1), &[(0, 3, vec![0, 3, 1, 1, 0])]), "a repeat of 0");
+        refused(
+            &v2_member((1, 1, 2), &[(0, 3, vec![0, 3, 2, 1, 3])]),
+            "runs that overshoot the count",
+        );
+        refused(
+            &v2_member((1, 1, 5), &[(0, 3, EXAMPLE_RECORD[..7].to_vec())]),
+            "a record cut short",
+        );
+        refused(
+            &v2_member((1, 2, 2), &[(0, 9, vec![0, 9, 1, 1, 1]), (0, 3, vec![0, 3, 1, 3, 1])]),
+            "chunks out of key order",
+        );
+
+        // A frame whose declared content size is not what it decodes to.
+        let mut blob = v2_member((1, 1, 5), &good());
+        let frame_start = 26 + 20;
+        let fhd = blob[frame_start + 4];
+        assert_eq!(fhd >> 6, 0, "the fixture's frame declares its size in one byte");
+        assert_ne!(fhd & 0x20, 0, "the fixture's frame is single-segment");
+        blob[frame_start + 5] += 1;
+        refused(&blob, "a frame that does not decode to its declared size");
+    }
+
+    /// Version 1 is refused by its version, naming it.
+    #[test]
+    fn a_version_1_member_is_refused_by_version() {
+        let mut blob = serialize_step_map(&[(PathId(0), 1, vec![StepId(0)])]);
+        blob[4..6].copy_from_slice(&1u16.to_le_bytes());
+        let err = StepMapNamespace::parse(&blob).unwrap_err();
+        assert_eq!(err, StepMapError::UnsupportedVersion(1));
+        assert!(err.to_string().contains("version 1"), "{err}");
     }
 }

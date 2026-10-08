@@ -62,7 +62,7 @@ import ../apps/app_shell as shellApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 48
+const ExpectedAssertions = 49
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -164,15 +164,19 @@ suite "CTUI-3 Tier 2: the shell's geometry on a real terminal":
     checkpoint("panes read back: " & $checkedPanes & ", rows compared: " &
                $checkedRows)
     # EXACT COUNTS, not "more than none" (Verification-Harness-Traps §4b). The
-    # pane count is 3 + 4 + 5, and the row count is each pane's height summed —
-    # both knowable, both asserted, so a loop that skipped a region reddens
-    # here instead of leaving `mismatches.len == 0` true for free.
-    ck checkedPanes == 3 + 4 + 5
-    ck checkedRows == (17 + 17 + 5) + (30 + 30 + 30 + 8) +
-                      (46 + 46 + 46 + 46 + 12)
+    # region count is the shared default's (PLAT-47: the desktop's Debug
+    # layout): 3 at 80x24, where the terminal folds twice, and all 5 at 120x40
+    # and 200x60; the row count is
+    # each region's height summed — both knowable, both asserted, so a loop
+    # that skipped a region reddens here instead of leaving
+    # `mismatches.len == 0` true for free.
+    ck checkedPanes == 3 + 5 + 5
+    ck checkedRows == (22 + 11 + 11) +
+                      (38 + 38 + 19 + 19 + 19) +
+                      (58 + 58 + 29 + 29 + 29)
     ck mismatches.len == 0
 
-  test "a real SIGWINCH reflows the shell from Compact to Standard":
+  test "a real SIGWINCH re-folds the shell from 80x24 to 120x40":
     # THE ONLY PLACE THE SIGNAL EXISTS. See this file's header for why the
     # child emits a window-op and what asserting on it proves.
     var sess = spawnShell(80, 24, reflow = true)
@@ -184,11 +188,13 @@ suite "CTUI-3 Tier 2: the shell's geometry on a real terminal":
       checkpoint("body row at 80x24: '" & firstBody.strip() & "'")
       ck firstBody.strip(leading = false) ==
          before[bodyRow].strip(leading = false)
-      ck firstBody.contains("CALL STACK")
-      # The Compact profile's tab strip is on screen before the resize, which
-      # is what makes its absence afterwards evidence of a profile change
-      # rather than of a blank screen.
-      ck sess.screenContents().contains("[Variables]")
+      ck firstBody.contains(" Variables ")
+      # At 80x24 the shared default is FOLDED (PLAT-45): the status line says
+      # so and the FILES region is a tab rather than a column. Both are on
+      # screen before the resize, which is what makes their change afterwards
+      # evidence of a re-fold rather than of a blank screen.
+      ck sess.screenContents().contains("[folded 2]")
+      ck not sess.screenContents().contains(" Files ")
 
       # THE KERNEL-DELIVERED RESIZE. No pump between this call and the wait
       # below, so the baseline `waitForRegionChange` captures is the screen as
@@ -239,11 +245,12 @@ suite "CTUI-3 Tier 2: the shell's geometry on a real terminal":
         checkpoint(stale[0 .. min(4, stale.high)].join("\n"))
       ck compared == 40
       ck stale.len == 0
-      # And the profile really did change: the Standard tree has three columns
-      # and no tab strip at all.
+      # And the fold really did change: at 120x40 the shared default fits
+      # unfolded, so the status line drops its note and FILES is a region of
+      # its own again.
       let screen = sess.screenContents()
-      ck screen.contains("VARIABLES")
-      ck not screen.contains("[Variables]")
+      ck screen.contains(" Files ")
+      ck not screen.contains("[folded")
 
       sess.send("q")
       let status = sess.waitExit(initDuration(seconds = 5))

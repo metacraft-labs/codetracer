@@ -2,6 +2,7 @@
 extern crate log;
 
 mod backend_manager;
+pub mod boundary_log;
 pub mod browser_stream_host;
 pub mod browser_stream_receiver;
 mod config;
@@ -143,40 +144,33 @@ enum Commands {
         /// browser-runtime endpoint default).
         #[arg(long, default_value = browser_stream_host::DEFAULT_BIND)]
         bind: String,
-        /// Directory under which per-program `.ct` trace directories
-        /// land.  Created on demand.
+        /// Directory under which each browser session's `<program>.ct`
+        /// recording lands.  Created on demand.
         #[arg(long, default_value = ".")]
         out_dir: PathBuf,
-        /// Working directory recorded in `trace_metadata.json`.
+        /// Working directory recorded in each recording's metadata.
         /// Defaults to the host process's current working directory.
         #[arg(long)]
         workdir: Option<PathBuf>,
-        /// Command spawned once per recording, fed the exact `trace.json`
-        /// byte stream on stdin, so snapshots and slices are derived while
-        /// the page is still running.
+        /// Command spawned once per recording, fed the recording's
+        /// boundary log (CTBL v1) on stdin, so snapshots and slices are
+        /// derived while the page is still running.
         ///
         /// Repeat the flag once per word of the command line — the program
         /// first, then each argument — so no shell quoting rules are
         /// involved and an argument may safely begin with `-`.
-        /// `{trace_dir}` in any of them is replaced with the recording's
-        /// `.ct` path, which the daemon only knows once the page has
-        /// announced its program name.
+        /// `{trace}` in any of them is replaced with the path the
+        /// recording's `.ct` will be written to, which the daemon only
+        /// knows once the page has announced its program name.
         ///
-        /// Off by default: without it `record-web` spawns nothing and
-        /// behaves exactly as it always has.  The consumer's absence or
-        /// failure costs seek performance only; the recording is the
-        /// source of truth and is unaffected.  See
-        /// `codetracer-specs/Recording-Backends/WASM-Replay-Snapshots-And-Slices.md`
-        /// §2, and `stream-snapshots-demo.sh` in the cross-process demo
+        /// Off by default: without it `record-web` spawns nothing.  The
+        /// consumer's absence or failure costs seek performance only; the
+        /// recording is the source of truth and is unaffected.  See
+        /// `codetracer-specs/Recording-Backends/Browser-Recording-Container.md`
+        /// §4, and `stream-snapshots-demo.sh` in the cross-process demo
         /// fixture for a worked example.
         #[arg(long = "snapshot-consumer", value_name = "WORD")]
         snapshot_consumer: Vec<String>,
-        /// Create this marker file inside the `.ct` once `trace.json` is
-        /// complete, for the file-following consumer shape
-        /// (`--boundary-stream <file> --stream-done <marker>`).  Off by
-        /// default, because it adds a file to the recording directory.
-        #[arg(long, value_name = "NAME")]
-        stream_done_marker: Option<String>,
         /// Exit by itself once no browser has been connected for this
         /// long, so the daemon cannot outlive whatever started it.
         ///
@@ -3154,18 +3148,12 @@ async fn run_record_web(
         running.local_addr,
         browser_stream_host::DEFAULT_ENDPOINT_PATH,
     );
-    eprintln!(
-        "writing recorded `.ct` directories under: {}",
-        out_dir.display(),
-    );
+    eprintln!("writing recorded `.ct` files under: {}", out_dir.display());
     if !stream_consumer.command.is_empty() {
         eprintln!(
             "streaming each recording into: {}",
             stream_consumer.command.join(" "),
         );
-    }
-    if let Some(marker) = &stream_consumer.done_marker {
-        eprintln!("marking each finished recording with: <program>.ct/{marker}");
     }
     match idle_timeout {
         Some(timeout) => eprintln!(
@@ -3385,15 +3373,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         out_dir,
         workdir,
         snapshot_consumer,
-        stream_done_marker,
         idle_timeout,
     }) = &cli.command
     {
         flexi_logger::init();
         let stream_consumer = browser_stream_host::StreamConsumerConfig {
             command: snapshot_consumer.clone(),
-            done_marker: stream_done_marker.clone(),
         };
+        stream_consumer.validate()?;
         // A bad spec is fatal rather than a fallback to the default: a
         // caller who asked for a specific watchdog and got a different one
         // would have no way to tell.

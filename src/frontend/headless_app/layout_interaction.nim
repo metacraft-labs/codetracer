@@ -73,6 +73,9 @@ type
     dtSplitAfter = "splitAfter"
     dtDockEdge = "dockEdge"
       ## Become an auto-hidden pane on this edge of the whole layout.
+    dtSplitRoot = "splitRoot"
+      ## PLAT-49 part B: split the WHOLE LAYOUT on `edge` — GoldenLayout's
+      ## ground side areas (`lcSplit` with `splitRoot`).
 
   DropZone* = enum
     ## Which part of a node's region — or of the window's border — a pointer
@@ -92,6 +95,14 @@ type
     dzOutsideRight = "outsideRight"
     dzOutsideTop = "outsideTop"
     dzOutsideBottom = "outsideBottom"
+    dzRootLeft = "rootLeft"
+      ## PLAT-49 part B: over the band along the layout's OWN outer edge,
+      ## inside it — GoldenLayout's ground side area
+      ## (`GoldenLayoutRootBandPx` deep): a drop splits the whole layout on
+      ## that side. Like `dzOutside*`, names no node.
+    dzRootRight = "rootRight"
+    dzRootTop = "rootTop"
+    dzRootBottom = "rootBottom"
 
   LayoutPointer* = object
     ## Where a gesture currently is, in the LAYOUT's own vocabulary.
@@ -119,6 +130,9 @@ type
       ## One insertion slot of a stack's tab strip.
     drLayoutStrip = "layoutStrip"
       ## A strip along one edge of the whole layout.
+    drRootBand = "rootBand"
+      ## PLAT-49 part B: the band along one edge INSIDE the whole layout —
+      ## where a root split lands (GoldenLayout's ground side area).
 
   DropRegion* = object
     ## §4.2's "the region each occupies", in the only terms this module has:
@@ -127,7 +141,7 @@ type
     ## it.
     path*: string
     case kind*: DropRegionKind
-    of drNodeStrip, drLayoutStrip:
+    of drNodeStrip, drLayoutStrip, drRootBand:
       side*: LayoutEdge
     of drTabSlot:
       slot*: int
@@ -152,7 +166,7 @@ type
     of dtSplitBefore, dtSplitAfter:
       splitTarget*: PaneKind
       axis*: SplitAxis
-    of dtDockEdge:
+    of dtDockEdge, dtSplitRoot:
       edge*: LayoutEdge
 
   DragOriginKind* = enum
@@ -193,6 +207,15 @@ type
         ## Candidate weights for the affected siblings — the whole child list
         ## of the resized node's parent, in its own order, so index `i` here
         ## is child `i` there.
+      divider*: Option[SplitSide]
+        ## `none` for `beginResize`: the node's share moves against ALL its
+        ## siblings, and `proposed` differs from the committed weights in one
+        ## entry. `some(side)` for `beginResizeDivider`: a DIVIDER DRAG — the
+        ## node and its one neighbour on `side` trade weight, `proposed`
+        ## differs in exactly those two entries, and every other sibling keeps
+        ## its share. §4.1's field set plus this one, because "which divider"
+        ## is a fact about the gesture that neither `node` nor `proposed` can
+        ## carry (a proposal equal to the committed weights names no pair).
     of ikRevealingDock:
       edge*: LayoutEdge
       pane*: PaneKind
@@ -363,7 +386,7 @@ proc `==`*(a, b: DropRegion): bool =
   if a.kind != b.kind or a.path != b.path:
     return false
   case a.kind
-  of drNodeStrip, drLayoutStrip: a.side == b.side
+  of drNodeStrip, drLayoutStrip, drRootBand: a.side == b.side
   of drTabSlot: a.slot == b.slot
   of drWholeNode: true
 
@@ -374,7 +397,7 @@ proc `==`*(a, b: DropTarget): bool =
   of dtIntoStack: a.stackAnchor == b.stackAnchor and a.index == b.index
   of dtSplitBefore, dtSplitAfter:
     a.splitTarget == b.splitTarget and a.axis == b.axis
-  of dtDockEdge: a.edge == b.edge
+  of dtDockEdge, dtSplitRoot: a.edge == b.edge
 
 proc `$`*(r: DropRegion): string =
   case r.kind
@@ -382,6 +405,7 @@ proc `$`*(r: DropRegion): string =
   of drNodeStrip: "strip('" & r.path & "', " & $r.side & ")"
   of drTabSlot: "tabSlot('" & r.path & "', " & $r.slot & ")"
   of drLayoutStrip: "layoutStrip(" & $r.side & ")"
+  of drRootBand: "rootBand(" & $r.side & ")"
 
 proc `$`*(t: DropTarget): string =
   case t.kind
@@ -391,6 +415,8 @@ proc `$`*(t: DropTarget): string =
     $t.kind & "(" & $t.splitTarget & ", " & $t.axis & ") @" & $t.region
   of dtDockEdge:
     "dockEdge(" & $t.edge & ") @" & $t.region
+  of dtSplitRoot:
+    "splitRoot(" & $t.edge & ") @" & $t.region
 
 proc `$`*(o: DragOrigin): string =
   case o.kind
@@ -408,13 +434,99 @@ proc `$`*(i: Interaction): string =
     var parts: seq[string] = @[]
     for w in i.proposed:
       parts.add($w)
-    "resizingSplit('" & i.node & "', [" & parts.join(", ") & "])"
+    "resizingSplit('" & i.node & "', [" & parts.join(", ") & "]" &
+      (if i.divider.isSome: ", divider " & $i.divider.get else: "") & ")"
   of ikRevealingDock:
     "revealingDock(" & $i.pane & "@" & $i.edge & ")"
 
 # ---------------------------------------------------------------------------
 # §4.2 — the drop-target model
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# GoldenLayout's drop zones, as proportions (PLAT-49 part B, finding 11)
+# ---------------------------------------------------------------------------
+
+const
+  GoldenLayoutEdgeShare* = 0.25
+    ## How far into a pane's body an EDGE zone reaches, as a share of the
+    ## body's extent on that axis. Measured in the desktop's GoldenLayout
+    ## 2.6.0 (`dist/cjs/ts/items/stack.js`, `Stack.getArea`): the left hover
+    ## area is `x1 .. x1 + contentWidth * 0.25` over the body's full height,
+    ## the right one `x1 + contentWidth * 0.75 .. x2`; the top and bottom ones
+    ## lie between those two, in the middle half of the width. A drop there
+    ## SPLITS the pane on that side and the new pane takes HALF of it (the
+    ## `highlightArea`, `contentWidth * 0.5`; `onDrop` halves the target's
+    ## size) — `dropIndicationOf`'s `diSplitHalf`.
+    ##
+    ## ONE DEVIATION, BY THE USER'S DIRECTION (2026-10-01, finding 11: "the
+    ## centre joins the stack"). GoldenLayout's top and bottom zones are the
+    ## whole upper and lower HALVES of that middle column, so a non-empty
+    ## stack's body has no centre and a join happens only on its header. Here
+    ## the top and bottom zones are the same quarter deep as the left and
+    ## right ones, and the middle — the centre half of the body on both axes
+    ## — JOINS the stack (`dzCentre`). The edge zones keep GoldenLayout's
+    ## proportion on both axes.
+
+func goldenLayoutZone*(dx, dy, width, height: int): DropZone =
+  ## **The zone of a body point**, for every front-end: `dx`, `dy` is the
+  ## pointer's offset inside a pane's drop body of `width` x `height`, in the
+  ## front-end's OWN unit (a terminal's cells, a window's pixels). Pure
+  ## arithmetic on the binding's measurement — nothing measured is kept, so
+  ## PLAT-5's purity law holds: the Interaction still carries only the zone.
+  ##
+  ## Judged at the UNIT'S CENTRE (`dx + 0.5`), so a body two units wide has a
+  ## left and a right zone and nothing between, one unit wide only a centre.
+  ## Left and right are tested first (GoldenLayout's left and right areas run
+  ## the body's full height); then top, bottom, and the centre.
+  if width <= 0 or height <= 0:
+    return dzCentre
+  let fx = (float(dx) + 0.5) / float(width)
+  let fy = (float(dy) + 0.5) / float(height)
+  if fx <= GoldenLayoutEdgeShare: dzLeftEdge
+  elif fx >= 1.0 - GoldenLayoutEdgeShare: dzRightEdge
+  elif fy <= GoldenLayoutEdgeShare: dzTopEdge
+  elif fy >= 1.0 - GoldenLayoutEdgeShare: dzBottomEdge
+  else: dzCentre
+
+const
+  GoldenLayoutRootBandPx* = 50
+    ## How deep GoldenLayout's GROUND side areas are, in pixels
+    ## (`dist/cjs/ts/items/ground-item.js`, `GroundItem.createSideAreas`:
+    ## `areaSize = 50`): four bands INSIDE the layout along its outer edges.
+    ## `LayoutManager.getArea` picks the SMALLEST area under the pointer, so
+    ## over the band a stack's body loses to it (its area is the whole stack)
+    ## and a drop there splits the WHOLE LAYOUT on that side
+    ## (`GroundItem.onDrop`, `lcSplit`'s `splitRoot`); a stack's header,
+    ## smaller than the band along the edge, keeps its own drop. Measured on
+    ## the desktop (`plat49-panes-capture.spec.ts`, `rootBand`).
+
+func goldenLayoutRootBand*(unitPx: float): int =
+  ## The band's depth in a front-end's own unit of `unitPx` pixels — a
+  ## window's pixel (1.0) or, for a terminal, the desktop's character cell
+  ## along that axis. At least one unit.
+  if unitPx <= 0.0: 1
+  else: max(1, int(float(GoldenLayoutRootBandPx) / unitPx + 0.5))
+
+func rootZoneOf*(edge: LayoutEdge): DropZone =
+  case edge
+  of leLeft: dzRootLeft
+  of leRight: dzRootRight
+  of leTop: dzRootTop
+  of leBottom: dzRootBottom
+
+func goldenLayoutWins*(bandSurface, areaSurface: int): bool =
+  ## `LayoutManager.getArea`'s rule between two areas under the pointer: the
+  ## SMALLER surface wins, and on a tie the one considered first (the
+  ## ground's side areas are listed before the stacks' — `calculateItemAreas`).
+  bandSurface <= areaSurface
+
+func goldenLayoutInsertsAfter*(dx, tabWidth: int): bool =
+  ## Over a tab of a stack's strip, whether the insertion point is AFTER that
+  ## tab: GoldenLayout's `Stack.highlightHeaderDropZone` puts the drop
+  ## placeholder before a tab when the pointer is left of the tab's middle
+  ## and after it otherwise. `dx` is the offset into the tab.
+  tabWidth > 0 and 2 * dx + 1 > tabWidth
 
 proc edgeOfZone(zone: DropZone): Option[LayoutEdge] =
   case zone
@@ -423,6 +535,21 @@ proc edgeOfZone(zone: DropZone): Option[LayoutEdge] =
   of dzOutsideTop: some(leTop)
   of dzOutsideBottom: some(leBottom)
   else: none(LayoutEdge)
+
+proc rootEdgeOfZone(zone: DropZone): Option[LayoutEdge] =
+  case zone
+  of dzRootLeft: some(leLeft)
+  of dzRootRight: some(leRight)
+  of dzRootTop: some(leTop)
+  of dzRootBottom: some(leBottom)
+  else: none(LayoutEdge)
+
+func rootSplitOf(edge: LayoutEdge): (SplitAxis, SplitSide) =
+  case edge
+  of leLeft: (saRow, ssBefore)
+  of leRight: (saRow, ssAfter)
+  of leTop: (saColumn, ssBefore)
+  of leBottom: (saColumn, ssAfter)
 
 proc commandFor*(layout: Layout; source: PaneKind;
                  target: DropTarget): Option[LayoutCommand] =
@@ -434,28 +561,24 @@ proc commandFor*(layout: Layout; source: PaneKind;
   ## different statement from "the command would be refused". The refusals
   ## belong to `apply` and are asked for separately, so that a target which is
   ## merely illegal right now still has a command to be refused by kind.
-  let placed = layout.tree.contains(source)
-  let docked = layout.dockedIndex(source) >= 0
-  if not placed and not docked:
+  if layout.placement(source) == plAbsent:
     return none(LayoutCommand)
   case target.kind
   of dtIntoStack:
-    if placed:
-      # The anchor's parent decides which command says "become a tab here":
-      # a stack takes `lcMoveTab` at an index, a bare pane has to BECOME a
-      # stack first and that is `lcMergeIntoStack`.
-      let anchorLeaf = layout.tree.find(target.stackAnchor)
-      if anchorLeaf.isNil:
-        return none(LayoutCommand)
-      let parent = parentOf(layout.tree, anchorLeaf)
-      if not parent.isNil and parent.kind == lnStack:
-        return some(cmdMoveTab(source, target.stackAnchor, target.index))
-      return some(cmdMergeIntoStack(source, target.stackAnchor))
-    # A DOCKED source rejoins the tree through `ahRestore`, which places it
-    # with `lcAddPane`'s semantics — beside the anchor, inside the anchor's
-    # own container. `dropTargetsFor` only offers this when that container is
-    # a stack, so "beside" and "a tab of" are the same placement.
-    some(cmdRestoreDocked(source, some(target.stackAnchor)))
+    # The anchor's parent decides which command says "become a tab here": a
+    # stack takes `lcMoveTab` at an index, a bare pane has to BECOME a stack
+    # first and that is `lcMergeIntoStack`. PLACED OR DOCKED, THE SAME TWO
+    # COMMANDS: both take their pane from an auto-hide strip as well as from
+    # the tree (PLAT-5's closing pass, 2026-09-27). Until then a docked source
+    # rejoined a stack through `ahRestore`, which places AFTER an anchor — so
+    # the first slot and a bare-pane anchor were not reachable at all.
+    let anchorLeaf = layout.tree.find(target.stackAnchor)
+    if anchorLeaf.isNil:
+      return none(LayoutCommand)
+    let parent = parentOf(layout.tree, anchorLeaf)
+    if not parent.isNil and parent.kind == lnStack:
+      return some(cmdMoveTab(source, target.stackAnchor, target.index))
+    some(cmdMergeIntoStack(source, target.stackAnchor))
   of dtSplitBefore, dtSplitAfter:
     let side = if target.kind == dtSplitBefore: ssBefore else: ssAfter
     # PLACED OR DOCKED, ONE COMMAND EITHER WAY. `lcSplit`'s `splitMovesPane`
@@ -467,44 +590,37 @@ proc commandFor*(layout: Layout; source: PaneKind;
     some(cmdSplitMove(target.splitTarget, source, target.axis, side))
   of dtDockEdge:
     some(cmdDock(source, target.edge))
+  of dtSplitRoot:
+    let (axis, side) = rootSplitOf(target.edge)
+    some(cmdSplitRootMove(source, axis, side))
 
 proc intoStackCandidates(layout: Layout; source: PaneKind; leaf: LayoutNode;
                          leafPath: string): seq[DropTarget] =
   ## Every "become a tab here" target the node under the pointer offers.
+  ##
+  ## THE SAME LIST FOR A PLACED AND A DOCKED SOURCE. `lcMoveTab` and
+  ## `lcMergeIntoStack` both take a docked pane since PLAT-5's closing pass,
+  ## so a pane dragged out of an auto-hide strip is offered every slot —
+  ## the first included — and a bare pane's body, exactly as a placed one is.
   result = @[]
   let parent = parentOf(layout.tree, leaf)
-  let placed = layout.tree.contains(source)
   if not parent.isNil and parent.kind == lnStack:
     let anchor = parent.children[0].pane
     let stackPath = nodePath(layout.tree, parent)
     if stackPath.isNone:
       return
-    if placed:
-      # One slot per insertion point. `apply` decides which of them are legal
-      # — dragging within the source's own stack has one fewer.
-      for slot in 0 .. parent.children.len:
-        result.add(DropTarget(
-          kind: dtIntoStack, stackAnchor: anchor, index: slot,
-          region: DropRegion(kind: drTabSlot, path: stackPath.get,
-                             slot: slot)))
-    else:
-      # `ahRestore` inserts AFTER its anchor, so a docked pane can name every
-      # slot EXCEPT THE VERY FIRST: slot `i` is "after tab `i - 1`". Slot 0
-      # is not offered rather than offered and refused, because there is no
-      # command that reaches it — advertising it would be a highlighted drop
-      # zone that does nothing.
-      for slot in 1 .. parent.children.len:
-        result.add(DropTarget(
-          kind: dtIntoStack, stackAnchor: parent.children[slot - 1].pane,
-          index: slot,
-          region: DropRegion(kind: drTabSlot, path: stackPath.get,
-                             slot: slot)))
+    # One slot per insertion point. `apply` decides which of them are legal
+    # — dragging within the source's own stack has one fewer.
+    for slot in 0 .. parent.children.len:
+      result.add(DropTarget(
+        kind: dtIntoStack, stackAnchor: anchor, index: slot,
+        region: DropRegion(kind: drTabSlot, path: stackPath.get,
+                           slot: slot)))
     return
-  if placed:
-    # A bare pane: dropping onto its body turns it into a two-tab stack.
-    result.add(DropTarget(
-      kind: dtIntoStack, stackAnchor: leaf.pane, index: 1,
-      region: DropRegion(kind: drWholeNode, path: leafPath)))
+  # A bare pane: dropping onto its body turns it into a two-tab stack.
+  result.add(DropTarget(
+    kind: dtIntoStack, stackAnchor: leaf.pane, index: 1,
+    region: DropRegion(kind: drWholeNode, path: leafPath)))
 
 proc splitCandidates(leaf: LayoutNode; leafPath: string): seq[DropTarget] =
   ## The four edge strips of a node's region, as split targets. The mapping
@@ -555,6 +671,14 @@ proc dropTargetsFor*(layout: Layout; source: PaneKind;
     if isLegal(layout, source, candidate):
       result.add(candidate)
     return
+  let rootEdge = rootEdgeOfZone(pointer.zone)
+  if rootEdge.isSome:
+    let candidate = DropTarget(
+      kind: dtSplitRoot, edge: rootEdge.get,
+      region: DropRegion(kind: drRootBand, path: "", side: rootEdge.get))
+    if isLegal(layout, source, candidate):
+      result.add(candidate)
+    return
   let node = nodeAtPath(layout.tree, pointer.path)
   # A hit-test resolves to the pane whose region the pointer is in. A path
   # naming a container is not a drop location: containers have no region of
@@ -576,6 +700,9 @@ proc regionForZone(layout: Layout; pointer: LayoutPointer): Option[DropRegion] =
   let outside = edgeOfZone(pointer.zone)
   if outside.isSome:
     return some(DropRegion(kind: drLayoutStrip, path: "", side: outside.get))
+  let rootEdge = rootEdgeOfZone(pointer.zone)
+  if rootEdge.isSome:
+    return some(DropRegion(kind: drRootBand, path: "", side: rootEdge.get))
   let node = nodeAtPath(layout.tree, pointer.path)
   if node.isNil or node.kind != lnPane:
     return none(DropRegion)
@@ -676,6 +803,79 @@ proc hoverAt*(interaction: Interaction; layout: Layout;
               origin: interaction.origin,
               hover: hoveredTarget(layout, interaction.source, pointer))
 
+type
+  DropIndicationKind* = enum
+    ## WHAT A FRONT-END DRAWS for the drop in flight — the logical shape of
+    ## GoldenLayout's drop zone (PLAT-47 deliverable 6), with no measurement in
+    ## it. Every front-end resolves it against its own geometry.
+    diNone = "none"
+      ## Nothing is being dragged, or the pointer is over no legal drop.
+    diSplitHalf = "splitHalf"
+      ## A split: the HALF of the node at `path` on `side`, where the dragged
+      ## pane would land (GoldenLayout tints the half, not a thin band).
+    diTabSlot = "tabSlot"
+      ## A join: the tab strip of the stack at `path`, with an insertion
+      ## caret before tab `slot` (`slot == tab count` is after the last).
+    diWholeNode = "wholeNode"
+      ## A join onto a bare pane: all of the node at `path`, which becomes a
+      ## two-tab stack.
+    diLayoutEdge = "layoutEdge"
+      ## A dock: the strip along `side` of the whole layout.
+    diRootBand = "rootBand"
+      ## PLAT-49 part B: a split of the whole layout — the band along `side`
+      ## inside it, as GoldenLayout highlights its ground side area.
+
+  DropIndication* = object
+    ## The drop in flight, as a renderer draws it.
+    kind*: DropIndicationKind
+    source*: PaneKind
+      ## What is being dragged — the ghost label follows the pointer with its
+      ## name.
+    path*: string
+    side*: LayoutEdge
+    slot*: int
+    axis*: SplitAxis
+
+proc dropIndicationOf*(interaction: Interaction): DropIndication =
+  ## **The one mapping from the hovered drop to what is drawn.** A split
+  ## target's region is a strip along one side of the node (the zone its
+  ## pointer hit-tested to); what the drop would OCCUPY is the half on that
+  ## side, and that is what is indicated. A join names the stack's tab slot,
+  ## a bare pane's join its whole region, a dock the layout edge. Pure: no
+  ## geometry, no cell, no pixel — PLAT-5's purity law holds, and the terminal
+  ## (`tui/app/layout/binding.dropIndicationCells`) and GPUI resolve the same
+  ## value against their own layouts.
+  if interaction.kind != ikDraggingTab:
+    return DropIndication(kind: diNone)
+  result = DropIndication(kind: diNone, source: interaction.source)
+  if interaction.hover.isNone:
+    return
+  let t = interaction.hover.get
+  case t.kind
+  of dtSplitBefore, dtSplitAfter:
+    result.kind = diSplitHalf
+    result.path = t.region.path
+    result.axis = t.axis
+    result.side =
+      case t.axis
+      of saRow: (if t.kind == dtSplitBefore: leLeft else: leRight)
+      of saColumn: (if t.kind == dtSplitBefore: leTop else: leBottom)
+  of dtIntoStack:
+    case t.region.kind
+    of drTabSlot:
+      result.kind = diTabSlot
+      result.path = t.region.path
+      result.slot = t.region.slot
+    else:
+      result.kind = diWholeNode
+      result.path = t.region.path
+  of dtDockEdge:
+    result.kind = diLayoutEdge
+    result.side = t.edge
+  of dtSplitRoot:
+    result.kind = diRootBand
+    result.side = t.edge
+
 proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =
   ## Start resizing the region holding `pane` against its siblings.
   ##
@@ -694,19 +894,133 @@ proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =
   var weights: seq[float] = @[]
   for c in parent.children:
     weights.add(effectiveWeight(c))
-  some(Interaction(kind: ikResizingSplit, node: path.get, proposed: weights))
+  some(Interaction(kind: ikResizingSplit, node: path.get, proposed: weights,
+                   divider: none(SplitSide)))
+
+proc beginResizeDivider*(layout: Layout; containerPath: string;
+                         divider: int): Option[Interaction] =
+  ## Start dragging ONE DIVIDER: the one between children `divider` and
+  ## `divider + 1` of the row or column at `containerPath`.
+  ##
+  ## This is the gesture a pointer on a divider actually makes, and it is what
+  ## `beginResize` is not: there, one node's share moves against ALL its
+  ## siblings, so in a row of three, dragging the edge between the second and
+  ## third pane would also shrink the first. Here exactly two weights move and
+  ## their sum does not, so every other sibling keeps its share — and the two
+  ## sides may be any nodes, a stack or a whole nested row included, not only
+  ## panes.
+  ##
+  ## Named by the CONTAINER's path and a divider index because that is what a
+  ## front-end's hit-test on a divider resolves to; the command `commit`
+  ## issues is pane-named (`cmdSetDivider`), as every command is.
+  ##
+  ## `none` when there is no such divider: the path names nothing, a pane, or
+  ## a STACK (tabs share one region), or `divider` is not in
+  ## `0 ..< children.len - 1`.
+  let container = nodeAtPath(layout.tree, containerPath)
+  if container.isNil or container.kind notin {lnRow, lnColumn}:
+    return none(Interaction)
+  if divider < 0 or divider + 1 >= container.children.len:
+    return none(Interaction)
+  var weights: seq[float] = @[]
+  for c in container.children:
+    weights.add(effectiveWeight(c))
+  some(Interaction(kind: ikResizingSplit,
+                   node: childPathOf(containerPath, divider),
+                   proposed: weights, divider: some(ssAfter)))
+
+proc dividerPair(interaction: Interaction; parent, node: LayoutNode):
+    tuple[at, across: int] =
+  ## The two children a divider interaction trades weight between, or
+  ## `(-1, -1)`.
+  result = (-1, -1)
+  let at = node.parentIndex(parent)
+  if at < 0 or interaction.divider.isNone:
+    return
+  let across = if interaction.divider.get == ssBefore: at - 1 else: at + 1
+  if across < 0 or across >= parent.children.len:
+    return
+  result = (at, across)
+
+proc proposeDividerWeight(interaction: Interaction; parent, node: LayoutNode;
+                          wanted: float): Interaction =
+  ## The divider arm shared by `proposeShare` and `proposeDivider`: the node
+  ## takes `wanted` (an effective weight), its neighbour takes the rest of the
+  ## pair, and both are clamped to at least `MinResizeShare` of the whole axis.
+  let (at, across) = dividerPair(interaction, parent, node)
+  if at < 0:
+    return interaction
+  var weights: seq[float] = @[]
+  var total = 0.0
+  for c in parent.children:
+    weights.add(effectiveWeight(c))
+    total += effectiveWeight(c)
+  let pair = weights[at] + weights[across]
+  let floor = MinResizeShare * total
+  if pair - floor < floor:
+    # The two sides together are already thinner than two minimum shares:
+    # there is no position this divider can move to.
+    return interaction
+  var mine = wanted
+  if mine < floor:
+    mine = floor
+  if mine > pair - floor:
+    mine = pair - floor
+  weights[at] = mine
+  weights[across] = pair - mine
+  Interaction(kind: ikResizingSplit, node: interaction.node, proposed: weights,
+              divider: interaction.divider)
+
+proc proposeDivider*(interaction: Interaction; layout: Layout;
+                     position: float): Interaction =
+  ## Propose where a DIVIDER sits, as a fraction of its container's axis from
+  ## the container's start (`0.0` its left or top edge, `1.0` its right or
+  ## bottom). A fraction and not a cell or a pixel, for `LayoutPointer`'s
+  ## reason: a front-end divides its own measurement by its own extent, and
+  ## from here down there is no medium to disagree about.
+  ##
+  ## Only for a divider interaction (`beginResizeDivider`); any other
+  ## interaction is returned unchanged. The result differs from the committed
+  ## weights in EXACTLY TWO entries — the two sides of the divider — or in
+  ## none, when the position is where the divider already is.
+  if interaction.kind != ikResizingSplit or interaction.divider.isNone:
+    return interaction
+  let node = nodeAtPath(layout.tree, interaction.node)
+  if node.isNil:
+    return interaction
+  let parent = parentOf(layout.tree, node)
+  if parent.isNil or parent.kind == lnStack:
+    return interaction
+  let (at, across) = dividerPair(interaction, parent, node)
+  if at < 0:
+    return interaction
+  var total = 0.0
+  var before = 0.0
+  for i, c in parent.children:
+    total += effectiveWeight(c)
+    if i < min(at, across):
+      before += effectiveWeight(c)
+  # The divider's position is the end of the EARLIER of the two children, so
+  # the earlier one's weight is `position * total - before`. The node is the
+  # earlier one when the divider is after it.
+  let earlier = position * total - before
+  let pair = effectiveWeight(parent.children[at]) +
+             effectiveWeight(parent.children[across])
+  let wanted = if at < across: earlier else: pair - earlier
+  proposeDividerWeight(interaction, parent, node, wanted)
 
 proc proposeShare*(interaction: Interaction; layout: Layout;
                    share: float): Interaction =
   ## Propose that the resized node take `share` of its parent's axis, as a
-  ## fraction. Returns a new interaction whose `proposed` differs from the
-  ## committed weights in EXACTLY ONE entry.
+  ## fraction.
   ##
-  ## One entry and not two, because `lcSetWeight` changes one node's share and
-  ## `commit` yields one command. The siblings keep their weights and
-  ## therefore their proportions relative to each other, which is what a
-  ## divider drag means when there are exactly two of them and is the
-  ## documented generalisation when there are more.
+  ## For `beginResize`'s interaction the result differs from the committed
+  ## weights in EXACTLY ONE entry: `lcSetWeight` changes one node's weight,
+  ## so the siblings keep theirs and therefore their proportions relative to
+  ## each other — the node's share moves against all of them. For a divider
+  ## interaction (`beginResizeDivider`) it differs in the two entries either
+  ## side of the divider, and only there: the neighbour absorbs the
+  ## difference, which is what dragging that one divider means.
   if interaction.kind != ikResizingSplit:
     return interaction
   let leaf = nodeAtPath(layout.tree, interaction.node)
@@ -715,6 +1029,13 @@ proc proposeShare*(interaction: Interaction; layout: Layout;
   let parent = parentOf(layout.tree, leaf)
   if parent.isNil or parent.children.len < 2:
     return interaction
+  if interaction.divider.isSome:
+    if parent.kind == lnStack:
+      return interaction
+    var total = 0.0
+    for c in parent.children:
+      total += effectiveWeight(c)
+    return proposeDividerWeight(interaction, parent, leaf, share * total)
   var clamped = share
   if clamped < MinResizeShare:
     clamped = MinResizeShare
@@ -733,7 +1054,8 @@ proc proposeShare*(interaction: Interaction; layout: Layout;
   for c in parent.children:
     weights.add(effectiveWeight(c))
   weights[at] = clamped / (1.0 - clamped) * others
-  Interaction(kind: ikResizingSplit, node: interaction.node, proposed: weights)
+  Interaction(kind: ikResizingSplit, node: interaction.node, proposed: weights,
+              divider: none(SplitSide))
 
 proc beginReveal*(layout: Layout; pane: PaneKind): Option[Interaction] =
   ## Reveal a docked pane as an overlay. `none` when the pane is not docked.
@@ -757,6 +1079,56 @@ proc isRevealed*(interaction: Interaction; pane: PaneKind): bool =
 # §4.3 — commit and cancel
 # ---------------------------------------------------------------------------
 
+proc builtInPaneBelow(node: LayoutNode; depth: int;
+                      found: var PaneKind; level: var int): bool =
+  ## A BUILT-IN pane somewhere under `node`, and how many levels below it the
+  ## pane's leaf sits — the `(pane, level)` pair `cmdSetDivider` names a node
+  ## by. A contributed leaf is skipped: every command but the contributed
+  ## pair is typed on `PaneKind` (PLAT-9), so it cannot anchor one.
+  if node.isNil:
+    return false
+  if node.kind == lnPane:
+    if node.isContributed:
+      return false
+    found = node.pane
+    level = depth
+    return true
+  for c in node.children:
+    if builtInPaneBelow(c, depth + 1, found, level):
+      return true
+  false
+
+proc dividerCommand(layout: Layout;
+                    interaction: Interaction): Option[LayoutCommand] =
+  ## The ONE command a divider drag commits: `cmdSetDivider`, naming the
+  ## node by a pane beneath it and the level it sits above that pane's leaf.
+  ##
+  ## If the node holds no built-in pane (a region of contributed panes only),
+  ## the SAME divider is named from the other side — the neighbour, with the
+  ## side reversed and the neighbour's proposed weight — which moves the same
+  ## two weights to the same place.
+  let node = nodeAtPath(layout.tree, interaction.node)
+  if node.isNil:
+    return none(LayoutCommand)
+  let parent = parentOf(layout.tree, node)
+  if parent.isNil or parent.kind == lnStack or
+     parent.children.len != interaction.proposed.len:
+    return none(LayoutCommand)
+  let (at, across) = dividerPair(interaction, parent, node)
+  if at < 0:
+    return none(LayoutCommand)
+  var anchor = PaneKind.low
+  var level = 0
+  if builtInPaneBelow(node, 0, anchor, level):
+    return some(cmdSetDivider(anchor, interaction.proposed[at],
+                              interaction.divider.get, level))
+  let other = parent.children[across]
+  if builtInPaneBelow(other, 0, anchor, level):
+    let reversed = if interaction.divider.get == ssBefore: ssAfter else: ssBefore
+    return some(cmdSetDivider(anchor, interaction.proposed[across], reversed,
+                              level))
+  none(LayoutCommand)
+
 proc pendingCommand*(layout: Layout;
                      interaction: Interaction): Option[LayoutCommand] =
   ## The command this gesture WOULD issue, before asking whether it would do
@@ -771,6 +1143,8 @@ proc pendingCommand*(layout: Layout;
     else:
       commandFor(layout, interaction.source, interaction.hover.get)
   of ikResizingSplit:
+    if interaction.divider.isSome:
+      return dividerCommand(layout, interaction)
     let leaf = nodeAtPath(layout.tree, interaction.node)
     if leaf.isNil or leaf.kind != lnPane:
       return none(LayoutCommand)

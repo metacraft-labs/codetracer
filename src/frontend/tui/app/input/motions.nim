@@ -138,17 +138,17 @@ proc edgeTick*(edge: SeekEdge; minTick, maxTick: uint64): uint64 =
 # ---------------------------------------------------------------------------
 
 proc directSelectPane*(action: KeyAction): (bool, PaneKind) =
-  ## §4.2: "Focus Call Stack (1), Source (2), Variables (3), Timeline (4)".
+  ## §4.2: "Focus Call Stack (1), Source (2), Variables (3), Event Log (4)"
+  ## (`4` was the Timeline until the panel's removal, 2026-10-05).
   ##
-  ## A pane the current profile does not show cannot be focused, and
+  ## A pane the current layout does not show cannot be focused, and
   ## `focusPaneKind` below reports that rather than silently focusing something
-  ## else — the Compact profile shows the timeline only as a tab, so `4` there
-  ## is a real question rather than an oversight.
+  ## else.
   case action
   of kaSelectCallStack: (true, paneCalltrace)
   of kaSelectSource: (true, paneEditor)
   of kaSelectVariables: (true, paneState)
-  of kaSelectTimeline: (true, paneTimeline)
+  of kaSelectEventLog: (true, paneEventLog)
   else: (false, paneEditor)
 
 # ---------------------------------------------------------------------------

@@ -941,6 +941,369 @@ proc renderRewriteConfig*(contract: DeploymentContract): string =
     result.add rule.prefix & "/*  " & entryDocumentAddress & "  200\n"
     result.add rule.prefix & "  " & entryDocumentAddress & "  200\n"
 
+proc frontDoorDynamicPrefixes*(contract: DeploymentContract): seq[string] =
+  ## Which paths the front door hands to a SESSION rather than to the static
+  ## bundle, derived from the contract's own rewrite rules.
+  ##
+  ## **Derived, never re-spelled — WD4.** `web_entry.classifyPath` is where
+  ## "which prefixes exist" is decided; `rewritePrefixes` reads it and
+  ## `deploymentContract` carries the answer. A hand-written list in the edge
+  ## function is a second implementation of that question, and the failure mode
+  ## is the one `web_entry.nim` warns about: a form reaches the SPA in code and
+  ## 404s at the CDN. Here it would be worse, because the CDN would answer with
+  ## the STATIC page — 200, no error anywhere — and the session the visitor is
+  ## entitled to would simply not happen.
+  ##
+  ## `/` is deliberately absent: it is the one path that FORKS on
+  ## signed-in-ness rather than being classified. §3.1a of
+  ## `Hosted-Session-Allocation.md` settles that the edge forks on
+  ## signed-in-ness and nothing else, so this list is not a per-project lookup
+  ## and must not become one.
+  for rule in contract.rewrites:
+    if rule.servesEntryDocument: result.add rule.prefix
+
+const
+  DefaultApiOrigin* = "https://api.codetracer.com"
+    ## Where the front door forwards the API, the sign-in pages and share-link
+    ## landing pages when the deployment sets no `API_ORIGIN`.  Baked into the
+    ## generated function so a deployment with no extra configuration still
+    ## reaches the API origin; a non-empty `API_ORIGIN` variable overrides it.
+    ##
+    ## This is NOT the session platform.  The session platform (WD4's
+    ## `PLATFORM_ORIGIN`) answers the product's dynamic prefixes and a
+    ## signed-in `/`; the API origin answers those paths 404, so the two are
+    ## separate settings and the session platform has no default at all.
+
+  FrontDoorApiPrefixes* = ["/api/v1", "/auth"]
+    ## The API origin's surfaces, forwarded whether or not a session cookie is
+    ## present: the HTTP API, and the sign-in pages (`ct login` opens
+    ## `/auth/desktop`).  Clients released before the API moved to its own
+    ## origin talk to this host, and keep working through these.
+    ##
+    ## These are NOT derived from `web_entry.classifyPath`, and must not be:
+    ## that function names the product's own client-side routes, which are
+    ## answered by the entry document.  These are not product routes at all —
+    ## nothing in the static bundle can answer them.
+
+proc isShareLinkPath*(path: string): bool =
+  ## `/{org}/{uuid}/download` (optionally with a trailing slash): the landing
+  ## page a share link opens, served by the API origin.  The id must be a
+  ## canonical 8-4-4-4-12 hex UUID, so any other three-segment path stays
+  ## static.  The Nim twin of the generated function's `SHARE_LINK_PATH`.
+  var parts = path.split('/')
+  if parts.len > 0 and parts[0].len == 0: parts.delete(0)
+  if parts.len == 4 and parts[3].len == 0: parts.setLen(3)
+  if parts.len != 3 or parts[0].len == 0 or parts[2] != "download":
+    return false
+  let id = parts[1]
+  if id.len != 36: return false
+  for i, c in id:
+    if i in [8, 13, 18, 23]:
+      if c != '-': return false
+    elif c notin HexDigits:
+      return false
+  true
+
+proc renderFrontDoorFunction*(contract: DeploymentContract;
+                              cookieName = "session_id";
+                              apiOrigin = DefaultApiOrigin): string =
+  ## The Cloudflare Pages Function that decides, per request, whether
+  ## `ide.codetracer.com` serves the static WASM bundle or a
+  ## substrate-allocated session — SS-M5's *"a signed-in user gets a
+  ## substrate-allocated session, and an anonymous visitor still gets the
+  ## static bundle"*.
+  ##
+  ## ## Mirrored from `isonim-web-site/functions/_middleware.js`, not shared
+  ##
+  ## Different Pages project, different tree; a shared file would need a
+  ## publishing step neither repo has. What is mirrored INCLUDING the parts that
+  ## were paid for there:
+  ##
+  ## * the cookie is parsed BY NAME (`other_session_id=x` otherwise flips the
+  ##   branch for a visitor who never signed in);
+  ## * seven cache headers are DELETED rather than overridden, because
+  ##   `Cache-Control` is not the only header that can admit a response to a
+  ##   cache;
+  ## * `Set-Cookie` is rebuilt from `getSetCookie()` rather than copied,
+  ##   because `new Headers(other)` folds repeated names and a folded
+  ##   `Set-Cookie` is one a browser cannot split — a sign-in through the front
+  ##   door would end with no session;
+  ## * `Vary: Cookie`, because the two states of one URL differ on exactly that
+  ##   header;
+  ## * a POSITIVE dynamic allow-list, so a route added to the platform and
+  ##   forgotten here fails as a static 404 rather than leaking;
+  ## * a proxied request whose origin does not answer fails CLOSED (502), and
+  ##   so does an API request when the API origin is unconfigured (503), rather
+  ##   than being answered by the application shell.
+  ##
+  ## ## Two origins, and they must not be conflated
+  ##
+  ## * **The API origin** (`apiOrigin`, default `DefaultApiOrigin`, overridden
+  ##   by a NON-EMPTY `API_ORIGIN` variable; an empty one is ignored) receives
+  ##   `FrontDoorApiPrefixes` (`/api/v1/*`, `/auth/*`) and the share-link
+  ##   landing page `/{org}/{uuid}/download` (`isShareLinkPath`), with or
+  ##   without a cookie.
+  ## * **The session platform** (`PLATFORM_ORIGIN`, WD4) receives the
+  ##   contract's dynamic prefixes and a signed-in `/`. It has NO default:
+  ##   while none is configured those paths are served from the static bundle
+  ##   (`context.next()`), exactly as a deployment without this function serves
+  ##   them, tagged `X-CodeTracer-Front-Door: static` and otherwise untouched.
+  ##   That response is the same for every visitor and carries no user data.
+  ##   Once a session platform is configured, WD4's behaviour applies unchanged.
+  ##   The API origin is not a session platform — it answers those paths 404 —
+  ##   which is why falling back to it would break the studio.
+  ##
+  ## ## Why this is GENERATED rather than committed as a `.js` file
+  ##
+  ## The allow-list. It is `frontDoorDynamicPrefixes` above, emitted from the
+  ## contract, so a prefix added to `web_entry.classifyPath` reaches the edge
+  ## without anybody editing a second file — the same argument `_headers` and
+  ## `_redirects` are generated on.
+  # Built with two placeholders and `replace`, rather than by interrupting the
+  # literal below. A `"""` literal that has to be closed and reopened around an
+  # interpolation is one `"` away from swallowing the rest of the file, and the
+  # symptom is a JS syntax error in generated output nobody reads.
+  var prefixes = ""
+  for prefix in frontDoorDynamicPrefixes(contract):
+    prefixes.add "  " & escapeJson(prefix) & ",\n"
+  var apiPrefixes = ""
+  for prefix in FrontDoorApiPrefixes:
+    apiPrefixes.add "  " & escapeJson(prefix) & ",\n"
+
+  result = """/* ide.codetracer.com — the front door. GENERATED from
+ * viewmodel/platform/web_deployment.nim. Do not edit.
+ *
+ * WHERE THIS FILE HAS TO LIVE, and it is NOT where isonim's lives. wrangler
+ * resolves Functions from `./functions` RELATIVE TO THE CURRENT WORKING
+ * DIRECTORY. isonim's workflow runs wrangler from its repo root, so its file
+ * sits beside `dist/`. THIS product's deploy workflow does `cd "$RUNNER_TEMP"`
+ * and passes the staged directory as an argument, so this file belongs at
+ * `$RUNNER_TEMP/functions/` — in the repo, or inside the staged bundle, is the
+ * shimmed case: wrangler logs `No Functions. Shimming...` and every signed-in
+ * request is answered by the static page, 200, with no error anywhere.
+ *
+ * A Pages Function and not a Worker route because this account's Cloudflare
+ * tokens lack Workers/WAF scope. That is a constraint, not a preference.
+ */
+
+const SESSION_COOKIE = @@COOKIE@@;
+
+/* THE DYNAMIC ALLOW-LIST — generated from the deployment contract, which reads
+ * `web_entry.classifyPath`. Everything not named here is static,
+ * unconditionally: an unknown path can only be answered by the static artifact,
+ * which carries no user data, so a route added to the product and forgotten
+ * here fails VISIBLY instead of leaking. `/` is deliberately absent — it is the
+ * one path that forks.
+ */
+const DYNAMIC_PREFIXES = [
+@@PREFIXES@@];
+
+/* THE API ORIGIN'S SURFACES — the HTTP API and the sign-in pages. Not product
+ * routes, so not in the list above: nothing in the static bundle answers them.
+ * Clients that use this host as their API base reach the API origin through
+ * these. */
+const API_PREFIXES = [
+@@API_PREFIXES@@];
+
+/* The landing page a share link opens: `/{org}/{uuid}/download`, optionally
+ * with a trailing slash. The id must be a canonical UUID, so no other
+ * three-segment path leaves the static bundle. */
+const SHARE_LINK_PATH =
+  /^\/[^\/]+\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/download\/?$/;
+
+/* THE API ORIGIN when the deployment configures none. A NON-EMPTY `API_ORIGIN`
+ * overrides it; an empty one is ignored, never used.
+ *
+ * THE SESSION PLATFORM (`PLATFORM_ORIGIN`) HAS NO DEFAULT, deliberately. The
+ * API origin is not a session platform and answers the dynamic prefixes 404,
+ * so defaulting one to the other would break the studio. With no session
+ * platform configured, the paths it would serve come from the static bundle. */
+const DEFAULT_API_ORIGIN = @@API_ORIGIN@@;
+
+function underPrefix(pathname, prefixes) {
+  for (const prefix of prefixes) {
+    if (pathname === prefix || pathname.startsWith(prefix + "/")) return true;
+  }
+  return false;
+}
+
+function isApiPath(pathname) {
+  return underPrefix(pathname, API_PREFIXES) || SHARE_LINK_PATH.test(pathname);
+}
+
+function isSessionPath(pathname) {
+  return underPrefix(pathname, DYNAMIC_PREFIXES);
+}
+
+/* A Pages variable, trimmed; an empty or absent one is "". */
+function configured(env, name) {
+  return env && typeof env[name] === "string" ? env[name].trim() : "";
+}
+
+function apiOrigin(env) {
+  return configured(env, "API_ORIGIN") || DEFAULT_API_ORIGIN;
+}
+
+/* No default: "" means no session platform is configured. */
+function sessionPlatform(env) {
+  return configured(env, "PLATFORM_ORIGIN");
+}
+
+/* Read ONE cookie BY NAME. A substring test over the whole Cookie header also
+ * matches a cookie whose name merely ENDS with the one being looked for, which
+ * would put the front door into its authenticated branch for a visitor who has
+ * never signed in. Parse the header the way a browser wrote it: `; `
+ * separated, name before the first `=`. */
+function readCookie(header, name) {
+  if (!header) return "";
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    if (trimmed.slice(0, eq) === name) return trimmed.slice(eq + 1);
+  }
+  return "";
+}
+
+function markPrivate(response, branch) {
+  const headers = new Headers(response.headers);
+  /* Set-Cookie is REBUILT, not copied: `new Headers(other)` folds repeated
+   * names, a cookie value may contain a comma (`Expires=Wed, 09 Jun 2021`), and
+   * a folded Set-Cookie is one a browser cannot split back apart. */
+  const cookies = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : [];
+  if (cookies.length > 0) {
+    headers.delete("Set-Cookie");
+    for (const c of cookies) headers.append("Set-Cookie", c);
+  }
+  /* DELETED rather than overridden: `Cache-Control` is not the only header that
+   * can admit a response to a cache. */
+  headers.delete("Cache-Control");
+  headers.delete("Expires");
+  headers.delete("Pragma");
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
+  headers.delete("Age");
+  headers.delete("CDN-Cache-Control");
+  headers.delete("Cloudflare-CDN-Cache-Control");
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("Vary", "Cookie");
+  headers.set("X-CodeTracer-Front-Door", branch);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function refuse(status, message) {
+  return markPrivate(
+    new Response(message + "\n", {
+      status,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    }),
+    "origin-unavailable",
+  );
+}
+
+/* THE SUBSTRATE'S REFUSALS, SURFACED RATHER THAN RE-DERIVED. The platform
+ * answers an allocation it will not make with one of these; the front door
+ * passes the status and the reason through instead of turning them all into a
+ * 502, because "you are out of budget" and "that image does not exist" are
+ * different things for the person reading the page. */
+const KNOWN_REFUSALS = [
+  "concurrency",
+  "budget",
+  "flavour_not_allowed",
+  "snapshot_expired",
+  "not_entitled",
+  "unknown_image",
+];
+
+async function proxyTo(request, origin, branch) {
+
+  const url = new URL(request.url);
+  const target = origin.replace(/\/+$/, "") + url.pathname + url.search;
+
+  const headers = new Headers(request.headers);
+  headers.set("X-Forwarded-Host", url.host);
+  headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+  headers.delete("Accept-Encoding");
+
+  const init = { method: request.method, headers, redirect: "manual" };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = request.body;
+  }
+
+  try {
+    const upstream = await fetch(target, init);
+    const refusal = upstream.headers.get("X-Session-Refusal") || "";
+    if (refusal && KNOWN_REFUSALS.indexOf(refusal) >= 0) {
+      return markPrivate(upstream, "refused:" + refusal);
+    }
+    return markPrivate(upstream, branch);
+  } catch (err) {
+    return refuse(502, "The origin did not answer: " + String(err));
+  }
+}
+
+/* THE SESSION BRANCH WHILE NO SESSION PLATFORM IS CONFIGURED: the static bundle,
+ * exactly as a deployment without this function serves it. The response is
+ * COPIED and only the branch header is added — no cache header is touched, so
+ * tagging it changes neither its caching nor its privacy. It is the same for
+ * every visitor and carries no user data, so it needs neither. */
+async function serveStaticTagged(context) {
+  const response = await context.next();
+  const tagged = new Response(response.body, response);
+  tagged.headers.set("X-CodeTracer-Front-Door", "static");
+  return tagged;
+}
+
+export async function onRequest(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const cookieName = (env && env.SESSION_COOKIE_NAME) || SESSION_COOKIE;
+  const session = readCookie(request.headers.get("Cookie"), cookieName);
+
+  /* THE API ORIGIN'S SURFACES, whether or not a cookie is present: an API call
+   * with no session has to reach the API so the API can refuse it, and the
+   * sign-in endpoints have to work for someone who by definition has no
+   * session yet. This file routes; it does not authorize. Checked first, so a
+   * share link is the API origin's even when its first segment happens to
+   * spell a product prefix. */
+  if (isApiPath(url.pathname)) {
+    const origin = apiOrigin(env);
+    if (!origin) {
+      /* FAIL CLOSED. The static bundle would answer an API call with the
+       * application shell — HTML with a 200. */
+      return refuse(
+        503,
+        "This deployment has no API origin configured (API_ORIGIN).",
+      );
+    }
+    return proxyTo(request, origin, "origin");
+  }
+
+  /* THE SESSION PLATFORM'S PATHS: the dynamic prefixes, and THE FORK — a
+   * signed-in `/`. The fork is signed-in-ness and nothing else —
+   * Hosted-Session-Allocation.md §3.1a. Nothing above this line looked at the
+   * User-Agent and nothing below it does: a crawler is a visitor with no
+   * cookie, so there is no branch to cloak on. */
+  if (isSessionPath(url.pathname) || (url.pathname === "/" && session)) {
+    const platform = sessionPlatform(env);
+    if (!platform) return serveStaticTagged(context);
+    return proxyTo(request, platform, "origin");
+  }
+
+  return context.next();
+}
+"""
+  result = result.replace("@@COOKIE@@", escapeJson(cookieName))
+  result = result.replace("@@API_PREFIXES@@", apiPrefixes)
+  result = result.replace("@@API_ORIGIN@@", escapeJson(apiOrigin))
+  result = result.replace("@@PREFIXES@@", prefixes)
+
 proc rewriteTargets*(contract: DeploymentContract): seq[string] =
   ## Every target `renderRewriteConfig` emits, as a value.
   ##

@@ -82,6 +82,10 @@
 
 import std/[algorithm, os, strutils, unittest]
 
+# The one module that knows where a published specification document is
+# (`CT_SPECS_DIR`, or the workspace sibling, at the `spec/` layout).
+import ../../../test_support/spec_documents
+
 import ../commands/interpreter
 import ../views/command_line
 
@@ -106,7 +110,7 @@ type
 
 const
   SpecSectionHeading = "### 4.3 GDB-Compatible Command Surface"
-  SpecRelativePath = "codetracer-specs/Front-Ends/CodeTracer-TUI.md"
+  SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
   ExpectedSpecCommands = 16
     ## §4.3's command count, counted from the document on 2026-09-06. Asserted
@@ -156,7 +160,40 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 82
+  ExpectedAppModules = 100
+    ## 2026-10-06 (PLAT-51): 101 → 100. The Timeline pane is removed:
+    ## `views/timeline_bar.nim` and its pure suite
+    ## `tests/test_timeline_scrubber_quantization.nim` went (−2), and
+    ## `views/scrubber_track.nim`, the list panes' scrollbar scrubber, came
+    ## (+1).
+    ## 2026-10-06 (PLAT-52): 100 → 101. `views/terminal_output_pane.nim`,
+    ## the terminal's Terminal Output pane (the line view, the screen view and
+    ## their scrubbers).
+    ## 2026-10-04 (PLAT-50 review): 99 → 100. `views/scratchpad_pane.nim`,
+    ## the terminal's Scratchpad pane (pinned values and their close buttons).
+    ## 2026-10-03 (PLAT-50): 98 → 99. `views/context_menu.nim`, the
+    ## terminal's right-click menus and the event-content overlay.
+    ##
+    ## RE-COUNTED ON 2026-09-30 (PLAT-48): 97 → 98. `views/top_bar.nim`, the
+    ## terminal's top bar: the shared menu, the debugger controls, the
+    ## omnibar field and the session tabs on row 0, and their drop-downs.
+    ##
+    ## RE-COUNTED ON 2026-09-29 (PLAT-47 part B): 91 → 97. The desktop's Monaco
+    ## tokenizers (`syntax/lexical.nim`, `syntax/monarch.nim`,
+    ## `syntax/js_regex.nim`, `syntax/json_tokens.nim`), the VCS pane
+    ## (`views/vcs_pane.nim`) and the drop overlay (`views/frame_overlay.nim`).
+    ##
+    ## RE-COUNTED ON 2026-09-26 (PLAT-45): 86 → 88. `layout/cells.nim` (the
+    ## terminal's cell vocabulary, split out of `profile.nim` so the fold can
+    ## project) and `tests/plat45_old_profiles.nim` (the old three profile trees,
+    ## kept as a comparison fixture).
+    ##
+    ## RE-COUNTED ON 2026-09-26: 82 → 86. PLAT-46 painted the terminal from the
+    ## design system and added four `app/theme/` modules: `roles.nim` (every
+    ## role and the token it paints with), `cell_style.nim` (the role-carrying
+    ## `CellStyle`, moved out of `views/styled_row.nim`), `colour_math.nim`
+    ## (OKLab, WCAG) and `palette.nim` (the derived rungs).
+    ##
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -225,7 +262,58 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 192
+  ExpectedStyleLiterals = 239
+    ## 2026-10-06 (PLAT-51): 244 → 239, measured. `views/timeline_bar.nim`'s
+    ## literals went with the pane; `views/scrubber_track.nim` holds the
+    ## scrubber styles moved out of `terminal_output_pane.nim`; the
+    ## omnibox's field and results took the editor's roles (`top_bar.nim`);
+    ## the `[MOD]` badge's style went from `tree_node.nim`, the value
+    ## controls' came.
+    ## 2026-10-06 (PLAT-52): +10 in ONE new painting file,
+    ## `views/terminal_output_pane.nim` (a run's literal colours, the future
+    ## muted, the header, the scrubbers' track, thumb and marks), so 32 → 33
+    ## styled files.
+    ## 2026-10-04 (PLAT-50 review): +3 in ONE new painting file,
+    ## `views/scratchpad_pane.nim` (the empty note, a pinned value's name and
+    ## its close button), so 31 → 32 styled files.
+    ## 2026-10-03 (PLAT-50): +10 — the top bar's border lines (menu button and
+    ## omnibox edges), its controls on the bar's ground, the dropdown frame,
+    ## the divider in a strip row, and the context menu's and content
+    ## overlay's entries (`views/context_menu.nim`).
+    ## 2026-10-03 (PLAT-49 part B review): +2 — the call trace's current row
+    ## on its own ground (`call_trace.CurrentRowFill`, and the toggle's two
+    ## styles in `segmentStyle`).
+    ## 2026-10-02 (PLAT-49 part B): +5 net — the call trace's two row styles
+    ## became its semantic parts' four (`call_trace.segmentStyle`: callee and
+    ## index, toggle, arguments, return), the event log's column header
+    ## (`event_log.HeaderStyle`), and the session tab's agent glyph and close
+    ## control (`top_bar`).
+    ## 2026-10-01 (PLAT-49): -4 net — the in-pane title styles went with the
+    ## titles (the shell's title row, the build and VCS panes' headings and
+    ## rules, `vcs_pane.VcsRuleStyle`), and the variables row's category tag, the omnibar field's
+    ## surface, the control tooltip and the editor strip's source statement
+    ## came in.
+    ## 2026-09-30 (PLAT-48): +20, all roles — seventeen in the new
+    ## `views/top_bar.nim` (the menu titles and button, the controls, the
+    ## omnibar field and its results, the session tabs, the menu's
+    ## drop-downs) and three in `views/shell.nim` (the auto-hide strips'
+    ## vertical labels and the revealed pane's focused top edge).
+    ## 2026-09-29 (PLAT-47 part B): +21, all roles — the eight scopes the
+    ## other Monaco tokenizers colour on their own (`source_pane.TokenStyles`),
+    ## the VCS pane's styles (`views/vcs_pane.nim`, a new file) and the drop
+    ## overlay's ghost label (`views/frame_overlay.nim`/`shell.nim`, a new
+    ## file).
+    ## 2026-09-28: +4, all roles — the three syntax classes the desktop's
+    ## Monaco Python tokenizer colours on their own (`source_pane.TokenStyles`)
+    ## and the call trace's not-yet-loaded row (`call_trace.CallTraceLoadingStyle`).
+    ## RE-COUNTED ON 2026-09-26: 192 → 166 and 24 → 26, PLAT-46. Every literal
+    ## is now a ROLE (`CellStyle(role: …)`), and the count moved for three
+    ## reasons, none of them a colour: `degradation.nim` lost its four
+    ## hand-written tint tables and `roleFor`, `cell_style.nim` and
+    ## `palette.nim` are two new files that name the type, and the shell
+    ## paints its title rows, tab strips and status indicators with roles of
+    ## its own.
+    ##
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
@@ -268,7 +356,11 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 24
+  ExpectedStyledFiles = 33
+    ## 2026-10-03 (PLAT-50): +1, `views/context_menu.nim`.
+    ## 2026-09-30 (PLAT-48): +1, `views/top_bar.nim`.
+    ## 2026-09-29 (PLAT-47 part B): +2, `views/vcs_pane.nim` and
+    ## `views/frame_overlay.nim`.
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour
@@ -292,6 +384,10 @@ const
     ##
     ## Both numbers are asserted so the report stops being true — and this
     ## suite says so — the day a theme registry arrives.
+    ##
+    ## 2026-09-26: every literal now names a design-system ROLE, and `:theme`
+    ## switches the design-system MODE through a host seam
+    ## (`TuiRuntime.themeService`) rather than through a registry.
 
   Garbage = [
     "", "   ", ":", "  :  ", ":teleport", ":nex", ":NEXT", ":n3xt",
@@ -311,10 +407,7 @@ proc specPath(): string =
   ## Where the published block lives, resolved from THIS FILE rather than from
   ## the working directory, so the suite answers the same way however it is
   ## invoked. Same walk as `test_keymap_no_conflicts.specPath`.
-  var dir = currentSourcePath().parentDir()
-  for _ in 0 ..< 5:
-    dir = dir.parentDir()
-  dir.parentDir() / SpecRelativePath
+  specDocumentPath("Front-Ends/CodeTracer-TUI.md")
 
 proc parseAlias(comment: string): (string, string) =
   ## `(summary, alias)` from a §4.3 comment. `(alias: s)` is the document's own
@@ -754,9 +847,12 @@ suite "CTUI-10: §4.3's command surface is the published one":
     ck byNothing.message.contains("no_such_function")
     ck log.breakpoints.len == 2                  # the refusal sent nothing
 
-    # AND THE TWO §4.3 PUBLISHES THAT NOTHING IN THIS WORKSPACE IMPLEMENTS.
-    # Accepted, dispatched, and REPORTED as unsupported — never silent, and
-    # never a green pass over a stub. See `interpreter.nim`'s header table.
+    # A HOST WITH NO MODE SWITCH, AND THE ONE §4.3 PUBLISH NOTHING IN THIS
+    # WORKSPACE IMPLEMENTS. Accepted, dispatched, and REPORTED as unsupported
+    # — never silent, and never a green pass over a stub. See
+    # `interpreter.nim`'s header table. (The shipped host DOES install a
+    # `:theme` switch — `TuiRuntime.themeService`, read back off a real
+    # terminal by `tests/real_terminal/test_plat46_design_tokens.nim`.)
     let noTheme = runCommand(bareDispatcher(), ctx, ":theme dark")
     checkpoint(":theme with no host -> " & noTheme.message)
     ck noTheme.invocation.status == csOk
@@ -775,12 +871,13 @@ suite "CTUI-10: §4.3's command surface is the published one":
     # resolved tier — that pass is the theme hook, and a theme is a different
     # tint table behind it.
     #
-    # So what `:theme` still lacks is not a palette. It is a way to change
-    # `TerminalCapabilities.theme` on a LIVE session and repaint, which is a
-    # host act: the capability set is resolved once, before the first paint,
-    # and `app/` is handed the answer. That is why this arm still reads
-    # `unsupported` while §6.2's flag works, and the day it stops is the day a
-    # host seam exists — not the day a literal count moves.
+    # So what `:theme` lacked was not a palette. It was a way to change
+    # the capabilities on a LIVE session and repaint, which is a host act.
+    # 2026-09-26: that seam exists (`TuiRuntime.themeService` →
+    # `host/terminal_probe.switchTheme`), because the terminal is now painted
+    # from design-system ROLES resolved per mode; a bare dispatcher still has
+    # no host and still reads `unsupported`. The counts below stay as the
+    # measurement of the literal surface; `ThemeRegistry` stays unused.
     var styleLiterals = 0
     var filesWithStyles = 0
     var themeReferences = 0

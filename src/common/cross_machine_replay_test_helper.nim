@@ -82,7 +82,8 @@ import "../ct/trace/ctfs_sources"
 
 const
   CtfsMagic = "\xC0\xDE\x72\xAC\xE2"
-  CtfsVersion = 3
+  CtfsVersion = SupportedCtfsVersion
+  CtfsDirect = 1'u64 shl 63
   CtmdMagic = "CTMD"
   MetaDatVersion: uint16 = SupportedMetaDatVersion
     ## Taken from the reader rather than written as a literal: this is a
@@ -141,10 +142,13 @@ proc buildMetaDat(recordingId, program, workdir, recorderId: string;
   ## required fields and no extended-block flags set.  Field order
   ## matches the spec at
   ## ``codetracer-trace-format-spec/internal-files.md`` § Metadata
-  ## (recording_id → program → args → workdir → recorder_id → paths).
+  ## (flags, flags_ext → recording_id → program → args → workdir →
+  ## recorder_id).  ``meta.dat`` carries no path list: ``srcPaths`` go into
+  ## ``paths.dat`` (see ``pathsTable``).
   result.add CtmdMagic
   result.putU16Le(MetaDatVersion)
   result.putU16Le(0)  # flags=0 (no extended blocks).
+  result.putU32Le(0)  # flags_ext
   result.putVarString(recordingId)
   result.putVarString(program)
   result.putLeb128(uint64(args.len))
@@ -152,18 +156,24 @@ proc buildMetaDat(recordingId, program, workdir, recorderId: string;
     result.putVarString(a)
   result.putVarString(workdir)
   result.putVarString(recorderId)
-  result.putLeb128(uint64(srcPaths.len))
+
+proc pathsTable(srcPaths: seq[string]): (string, string) =
+  ## ``paths.dat`` + ``paths.off``: the records, then their u64 offsets
+  ## with the trailing sentinel.
+  var dat = ""
+  var off = ""
+  off.putU64Le(0)
   for p in srcPaths:
-    result.putVarString(p)
+    dat.add p
+    off.putU64Le(uint64(dat.len))
+  (dat, off)
 
 proc writeMinimalCtfsContainer(path: string; files: openArray[(string, string)]) =
-  ## Minimal CTFS layout: one mapping block + one data block per
-  ## internal file, all ``BlockSize`` bytes.  Matches the
-  ## ``write_minimal_ctfs`` writer in
-  ## ``src/backend-manager/src/meta_dat.rs`` and the
-  ## ``writeMinimalCtfs`` helper in ``ctfs_sources_test.nim``.  Use only
-  ## for short inputs (<= ``BlockSize`` per file); both readers
-  ## (Nim/Rust) accept this shape.
+  ## Minimal version 5 CTFS layout (``ctfs-container.md`` §2): each file of
+  ## at most ``BlockSize`` bytes is one data block with its ``MapBlock``
+  ## tagged, and an empty file owns no block.  Matches the
+  ## ``write_minimal_ctfs`` writer in ``src/backend-manager/src/meta_dat.rs``
+  ## and the ``writeMinimalCtfs`` helper in ``ctfs_sources_test.nim``.
   doAssert files.len <= MaxEntries
   var root = ""
   root.add CtfsMagic
@@ -172,9 +182,17 @@ proc writeMinimalCtfsContainer(path: string; files: openArray[(string, string)])
   root.add char(0)
   root.putU32Le(uint32(BlockSize))
   root.putU32Le(uint32(MaxEntries))
-  for i, file in files:
+  var blocks = ""
+  var nextBlock = 1'u64
+  for file in files:
     doAssert file[1].len <= BlockSize, "file " & file[0] & " too big for test fixture"
-    let mapBlock = uint64(1 + i * 2)
+    var mapBlock = 0'u64
+    if file[1].len > 0:
+      mapBlock = CtfsDirect or nextBlock
+      inc nextBlock
+      var payload = file[1]
+      payload.setLen(BlockSize)
+      blocks.add payload
     root.putU64Le(uint64(file[1].len))
     root.putU64Le(mapBlock)
     root.putU64Le(base40Encode(file[0]))
@@ -183,17 +201,7 @@ proc writeMinimalCtfsContainer(path: string; files: openArray[(string, string)])
     root.putU64Le(0)
     root.putU64Le(0)
   root.setLen(BlockSize)
-  var data = root
-  for i, file in files:
-    let dataBlock = uint64(2 + i * 2)
-    var mapping = ""
-    mapping.putU64Le(dataBlock)
-    mapping.setLen(BlockSize)
-    data.add mapping
-    var payload = file[1]
-    payload.setLen(BlockSize)
-    data.add payload
-  writeFile(path, data)
+  writeFile(path, root & blocks)
 
 # ---------------------------------------------------------------------------
 # Scenarios
@@ -221,8 +229,11 @@ proc writeRecordingFolder(folder, recordingId, program: string) =
     recorderId = "m-rec-10-test",
     args = @["--demo"],
     srcPaths = @["main.nim"])
+  let (pathsDat, pathsOff) = pathsTable(@["main.nim"])
   writeMinimalCtfsContainer(folder / "trace.ct",
-                            [("meta.dat", metaDatBytes)])
+                            [("meta.dat", metaDatBytes),
+                             ("paths.dat", pathsDat),
+                             ("paths.off", pathsOff)])
   # Defensive: re-read what we just wrote and verify it parses through
   # the production CTFS reader path.  Catches encoder/decoder drift at
   # the *first* point of failure rather than letting host B blame

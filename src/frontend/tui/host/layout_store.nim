@@ -57,12 +57,13 @@
 ## itself. Remove the obstruction and the same session's same plan writes and
 ## renames. Arm `M58` is the collapse; `S27` is its control.
 ##
-## ## NOTHING IS WRITTEN AND NOTHING IS READ WITH THE FLAG OFF
+## ## NOTHING IS WRITTEN AND NOTHING IS READ WITHOUT A BINDING
 ##
 ## Both entry points below refuse on `runtime.layoutPersistenceEnabled`, which
-## is false whenever there is no layout binding — so a session without
-## `--layout-binding` neither opens nor creates a file, and `main.nim` does not
-## have to remember that.
+## is false whenever there is no layout binding — so a runtime a host built
+## without one neither opens nor creates a file. Since PLAT-45 the shipped
+## binary always enables the binding (the layout is the user's by default),
+## so this guard is what keeps Tier-1 hosts and `--headless` off the disk.
 ##
 ## ## THE DECISION THIS MODULE CARRIES OUT IS ENUMERATED ELSEWHERE
 ##
@@ -108,13 +109,13 @@ type
     lpoDisabled = "disabled"
       ## Persistence was off for this session — no binding, or no document was
       ## ever named. **Nothing was opened, created or removed**, which is the
-      ## claim the flag-off arm of every suite here asserts.
+      ## claim the unbound arm of every suite here asserts.
     lpoQuarantined = "quarantined"
       ## The session started from a document it could not read, and it was left
       ## byte for byte as it was found.
     lpoWritten = "written"
     lpoRemoved = "removed"
-      ## The arrangement was the profile's own, so a stale document was deleted
+      ## The arrangement was the shared default's own, so a stale document was deleted
       ## rather than left to be restored next launch. `:reset-layout` is what
       ## reaches this on purpose.
     lpoFailed = "failed"
@@ -133,40 +134,26 @@ proc layoutStateRoot*(): string =
   ## keymap preference (PLAT-43) so the two cannot drift apart.
   nativeStateRoot()
 
-proc canonicalTraceFolder*(traceFolder: string): string =
-  ## The path the document is keyed by: absolute and normalised, so two
-  ## spellings of one recording key to one file.
-  ##
-  ## THE FILESYSTEM IS ASKED HERE AND NOWHERE ELSE, which is why
-  ## `persistence.layoutDocumentFileName` takes a canonical path rather than
-  ## canonicalising one. A failure falls back to the string as given: a
-  ## recording that cannot be resolved is one this session is about to fail to
-  ## open anyway, and keying it by its literal path is a worse key rather than
-  ## a wrong answer.
-  try:
-    result = absolutePath(traceFolder).normalizedPath
-  except CatchableError:
-    result = traceFolder
-  while result.len > 1 and (result[^1] == '/' or result[^1] == '\\'):
-    result.setLen(result.len - 1)
+proc layoutDocumentPath*(): string =
+  ## THE terminal product's document, under this host's state root. One file
+  ## for the product — PLAT-45 deliverable 8 — not one per recording; see
+  ## `app/layout/persistence.nim`'s header, decision 3.
+  layoutStateRoot() / LayoutDocumentFileName
 
-proc layoutDocumentPathFor*(traceFolder: string): string =
-  ## The document for one recording, under this host's state root.
-  layoutStateRoot() / LayoutDocumentDirName /
-    layoutDocumentFileName(canonicalTraceFolder(traceFolder))
-
-proc restoreLayoutForSession*(rt: TuiRuntime;
-                              traceFolder: string): LayoutRestoreReport =
-  ## Bind this session to its recording's document and adopt it if there is one.
+proc restoreLayoutForSession*(rt: TuiRuntime): LayoutRestoreReport =
+  ## Bind this session to the terminal's document and adopt it if there is
+  ## one.
   ##
   ## The three answers are `app/layout/persistence.LayoutRestoreStatus`'s, and
   ## the caller is expected to SHOW the message for two of them. Absent is not
   ## one of the two: a first run has nothing to say.
   if not rt.layoutBindingEnabled():
-    # WITH THE FLAG OFF NOTHING IS READ, and no path is even computed — so the
-    # state directory is not touched, not even by a `stat`.
+    # WITH NO BINDING NOTHING IS READ, and no path is even computed — so the
+    # state directory is not touched, not even by a `stat`. The shipped binary
+    # always has one since PLAT-45; a Tier-1 host that built a runtime without
+    # one is a session with nothing to restore into.
     return LayoutRestoreReport(status: lrsNoDocument, path: "", message: "")
-  let path = layoutDocumentPathFor(traceFolder)
+  let path = layoutDocumentPath()
   rt.bindLayoutDocument(path)
   if not fileExists(path):
     return LayoutRestoreReport(status: lrsNoDocument, path: path, message: "")
@@ -184,7 +171,8 @@ proc restoreLayoutForSession*(rt: TuiRuntime;
   rt.adoptLayoutDocument(path, text)
 
 proc persistLayoutForSession*(rt: TuiRuntime): LayoutPersistReport =
-  ## Carry out this session's persist plan. Called once, on the way out.
+  ## Carry out this session's persist plan. Called after every committed
+  ## layout change (the write-through, PLAT-45) and once more on the way out.
   ##
   ## Nothing here decides anything: the plan is
   ## `runtime.layoutPersistPlanOf`'s, so "write it", "delete the stale one" and

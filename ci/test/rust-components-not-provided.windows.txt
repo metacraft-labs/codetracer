@@ -1,0 +1,111 @@
+# db-backend integration tests the Windows `windows-rust-components` lane does
+# NOT provide the tools for.
+#
+# That lane runs ci/test/windows-rust-components-tests.sh with
+# CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false, so a test whose prerequisite is
+# missing there FAILS; the tests below are excluded by name and printed as NOT
+# RUN with the lane that runs them.
+#
+# What the lane provides: env.ps1's toolchain (Rust/MSVC, nim/nimble, capnp,
+# node/npx, nargo, go, gcc/clang, TTD + WinDbg), the db-backend siblings
+# (codetracer-trace-format(-nim), codetracer-native-recorder), and
+# `ct-native-replay`, built from the codetracer-native-backend sibling. So the
+# Windows recorder tests -- TTD, the recorder Language-Support-Matrix.md lists
+# for Windows -- run here: dap_ttd_windows_smoke and the Go / Nim / Rust TTD
+# flow tests. So do the Noir tests (env.ps1 builds nargo).
+#
+# What it does not, and why:
+#
+#   - The interpreted-language recorders (Python, Ruby, JavaScript, BEAM, PHP,
+#     the shell recorders), WebAssembly (wazero) and the blockchain recorders
+#     are not supported on Windows (Language-Support-Matrix.md lists Python,
+#     Ruby and JavaScript as "--" there). Their tests run on Linux. The one
+#     exception is the materialized Python value-origin suite, which
+#     origin-dap-windows runs on Windows with the locked Python recorder.
+#   - MCR flows need `ct-mcr`, which only windows-headless-test builds on
+#     Windows, and replay through ct-native-replay; they run in mcr-dap-flow.
+#   - Lean has no Windows toolchain path (Language-Support-Matrix.md); its flow
+#     test runs under rr.
+#   - The cross-process recordings are produced by
+#     scripts/materialize-recording.sh with `ct-instrument`; `ct-print` is a
+#     codetracer-trace-format-nim build product. Neither is built here.
+#   - `black` (the Python autoformat test) is not in env.ps1.
+#
+# Format and checks: as in non-gui-not-provided.linux.txt
+# (ci/test/lane-not-provided-test.sh).
+
+binary(ada_mcr_streaming_flow_test)     | ct-mcr | mcr-dap-flow (Linux)
+binary(c_mcr_streaming_flow_test)       | ct-mcr | mcr-dap-flow (Linux)
+binary(cpp_mcr_streaming_flow_test)     | ct-mcr | mcr-dap-flow (Linux)
+binary(d_mcr_streaming_flow_test)       | ct-mcr | mcr-dap-flow (Linux)
+binary(fortran_mcr_streaming_flow_test) | ct-mcr | mcr-dap-flow (Linux)
+binary(go_mcr_streaming_flow_test)      | ct-mcr | mcr-dap-flow (Linux)
+binary(nim_mcr_streaming_flow_test)     | ct-mcr | mcr-dap-flow (Linux)
+binary(pascal_mcr_streaming_flow_test)  | ct-mcr | mcr-dap-flow (Linux)
+binary(rust_mcr_streaming_flow_test)    | ct-mcr | mcr-dap-flow (Linux)
+binary(mcr_streaming_unified_reader_test) | ct-mcr | mcr-dap-flow (Linux)
+
+binary(lean_flow_integration)           | Lean toolchain (none on Windows) | rr-backend-tests (cross-repo-tests.yml, Linux)
+
+binary(python_flow_ctfs_integration)    | Python recorder | test-non-gui (Linux)
+binary(python_flow_dap_test)            | Python recorder | test-non-gui (Linux)
+binary(python_flow_integration)         | Python recorder | test-non-gui (Linux)
+binary(python_hcr_ctfs_integration)     | Python recorder | test-non-gui (Linux)
+binary(deepreview_materialized_collector_test) | Python recorder | test-non-gui (Linux)
+binary(duplicate_launch_dedup_test)     | Python recorder | test-non-gui (Linux)
+binary(flow_loop_iteration_window_test) | Python recorder | test-non-gui (Linux)
+binary(origin_chain_dump_helper)        | Python recorder | test-non-gui (Linux)
+binary(origin_python_dap_test)          | Python recorder | origin-dap-windows (Windows, locked recorder)
+binary(autoformat_minified_python)      | black | test-non-gui (Linux)
+
+binary(ruby_flow_ctfs_integration)      | Ruby recorder | test-non-gui (Linux)
+binary(ruby_flow_dap_test)              | ruby, Ruby recorder | test-non-gui (Linux)
+binary(ruby_flow_integration)           | Ruby recorder | test-non-gui (Linux)
+binary(ruby_hcr_ctfs_integration)       | Ruby recorder | test-non-gui (Linux)
+
+binary(javascript_flow_dap_test)        | JavaScript recorder | test-non-gui (Linux)
+binary(javascript_flow_integration)     | JavaScript recorder | test-non-gui (Linux)
+binary(javascript_hcr_ctfs_integration) | JavaScript recorder | test-non-gui (Linux)
+binary(javascript_locals_dap_test)      | JavaScript recorder | test-non-gui (Linux)
+binary(origin_javascript_dap_test)      | JavaScript recorder | test-non-gui (Linux)
+
+binary(erlang_flow_dap_test)            | BEAM recorder, erlc | test-non-gui (Linux)
+binary(elixir_flow_dap_test)            | BEAM recorder, elixirc | test-non-gui (Linux)
+
+binary(wasm_flow_dap_test)              | wazero | test-non-gui (Linux)
+binary(wasm_flow_integration)           | wazero | test-non-gui (Linux)
+binary(wasm_step_advance_test)          | wazero | test-non-gui (Linux)
+binary(stylus_flow_integration)         | wazero | test-non-gui (Linux)
+binary(origin_stylus_dap_test)          | wazero | test-non-gui (Linux)
+
+binary(cross_process_three_trace_dap_test) | ct-instrument (materialized recording) | test-non-gui (Linux)
+binary(m25b_event_log_test)             | ct-instrument (materialized recording) | test-non-gui (Linux)
+binary(step_over_frameless_step_test)   | ct-instrument (materialized recording) | test-non-gui (Linux)
+binary(gdh7_consumers_tell_the_truth)   | ct-print | test-non-gui (Linux)
+
+binary(bash_flow_integration)           | codetracer-shell-recorders | recorder-tests (cross-repo-tests.yml, Linux)
+binary(zsh_flow_integration)            | codetracer-shell-recorders, zsh | recorder-tests (cross-repo-tests.yml, Linux)
+binary(php_flow_dap_test)               | php, codetracer-php-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_aiken_dap_test)           | codetracer-cardano-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_cairo_dap_test)           | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_circom_dap_test)          | codetracer-circom-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_leo_dap_test)             | codetracer-leo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_solana_dap_test)          | codetracer-solana-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(origin_sway_dap_test)            | codetracer-fuel-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(cairo_fixture_gli_decode)        | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+
+binary(aiken_flow_dap_test)             | codetracer-cardano-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(cadence_flow_dap_test)           | codetracer-flow-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(cairo_flow_dap_test)             | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(circom_flow_dap_test)            | codetracer-circom-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(evm_load_calltrace_test)         | codetracer-evm-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(leo_flow_dap_test)               | codetracer-leo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(leo_search_calltrace_test)       | codetracer-leo-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(masm_flow_dap_test)              | codetracer-miden-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(move_flow_dap_test)              | codetracer-move-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(polkavm_flow_dap_test)           | codetracer-polkavm-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(solana_flow_dap_test)            | codetracer-solana-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(solidity_flow_dap_test)          | codetracer-evm-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(solidity_flow_integration)       | codetracer-evm-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(sway_flow_dap_test)              | codetracer-fuel-recorder | recorder-tests (cross-repo-tests.yml, Linux)
+binary(tolk_flow_dap_test)              | codetracer-ton-recorder | recorder-tests (cross-repo-tests.yml, Linux)

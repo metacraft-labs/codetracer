@@ -1,13 +1,13 @@
 # M0 fixture program for trace-based incremental testing.
 #
 # Three functions live here. `main` calls `used_a` and `used_b`; `unused_c`
-# is defined but never called. The recorded trace (see ../trace) therefore
-# has Call records only for main/used_a/used_b, so `readExecutedFunctions`
-# must return exactly those three and must NOT return `unused_c`.
+# is defined but never called. The recording (m0_three_funcs_trace.nim) has
+# calls only for main/used_a/used_b, so the executed-function set is exactly
+# those three and must NOT contain `unused_c`.
 #
-# Line numbers matter: the fixture trace's Function records carry the
-# definition lines below, and later milestones extract the function body from
-# this source by line. Keep the `def` lines stable:
+# Line numbers matter: each call in the recording enters at the definition
+# line below, and the engine extracts the function body from this source by
+# that line. Keep the `def` lines stable:
 #   used_a  -> line 16
 #   used_b  -> line 20
 #   unused_c-> line 24

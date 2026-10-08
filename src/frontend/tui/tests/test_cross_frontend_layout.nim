@@ -172,7 +172,7 @@ proc gpuiArrangement(layout: Layout): Arrangement =
 # ---------------------------------------------------------------------------
 
 const CommandSequence = @[
-  cmdActivateTab(paneTimeline),
+  cmdActivateTab(paneTerminalOutput),
   cmdSetWeight(paneEditor, 2.5),
   cmdAddPane(paneSearch),
   cmdSplit(paneState, paneScratchpad, saColumn, ssAfter),
@@ -188,7 +188,7 @@ const CommandSequence = @[
 proc startingLayout(): Layout =
   initLayout(
     row([column([pane(paneEditor, "Editor"), pane(paneState, "State")]),
-         stack([pane(paneEventLog, "Events"), pane(paneTimeline, "Timeline")],
+         stack([pane(paneEventLog, "Events"), pane(paneTerminalOutput, "Terminal")],
                activeIndex = 0)]))
 
 suite "PLAT-20: one command sequence, two projections, one arrangement":
@@ -279,7 +279,7 @@ suite "PLAT-20: a layout saved by one front-end restores in the other":
     # The terminal front-end's REAL persistence path: `LayoutBinding
     # .saveDocument`, which is what `app/layout/persistence.layoutPersistPlan`
     # writes to disk.
-    var b = newLayoutBinding(startingLayout(), lpStandard)
+    var b = newLayoutBinding(startingLayout(), selectProfile(120, 40))
     var moved = 0
     for cmd in CommandSequence:
       if b.dispatch(cmd).status == lasApplied:
@@ -315,7 +315,7 @@ suite "PLAT-20: a layout saved by one front-end restores in the other":
     let document = shell.saveWindowLayout(windowId)
     ck document["version"].getInt == LayoutSchemaVersion
 
-    var b = newLayoutBinding(defaultReplayLayoutValue(), lpStandard)
+    var b = newLayoutBinding(defaultReplayLayoutValue(), selectProfile(120, 40))
     var problem = none(LayoutDecodeErrorKind)
     let acted = b.restoreDocument(document, problem)
     ck acted.status == lasApplied

@@ -152,12 +152,16 @@ const
 
   TerminalEventRowGrammar* = GrammarRule(
     name: "terminal-event-row",
-    shape: "<tick> <category> <file> ':' <line> <text>",
+    shape: "<tick> [<index>] <category> [<file> ':' <line>] <text>",
     note: "PLAT-40. The shipped terminal's event pane (`TRACEPOINTS`): the " &
           "tick, a four-cell CATEGORY (`out`, `err`, `mut`, `sys`, `trc`), " &
           "the location, the text. The category is not a channel — `out` " &
           "covers stdout and stderr alike — so the row answers the TEXT " &
-          "alone, and the three front-ends are compared on the text.")
+          "alone, and the three front-ends are compared on the text. " &
+          "PLAT-49 part B: the pane shows the desktop's default columns — " &
+          "tick, the event's `#`, its kind, its output — with the location " &
+          "hidden until the user shows it, so the index and the location " &
+          "are both optional.")
 
   TransportGrammar* = GrammarRule(
     name: "transport-control",
@@ -320,14 +324,28 @@ func isVisiblePrefixOf*(visible, full: string): bool =
   v.len > 0 and f.startsWith(v)
 
 func parseEventTableRow*(line: string): tuple[ok: bool, consoleOutput: string] =
-  ## `EventLogTableGrammar`: `<n> <channel> <text>`, answered in the desktop
-  ## rule's form, `<channel>: <text>`.
+  ## `EventLogTableGrammar`: `[<tick>] <n> <channel> <text>`, answered in the
+  ## desktop rule's form, `<channel>: <text>`.
+  ##
+  ## The leading `<tick>` is optional because the native window's table grew
+  ## a `tick` column before `#` (measured on PLAT-37's windowed frames of
+  ## 2026-10-05: `38 0 stdout 2 + 3 = 5` under the header `tick # kind
+  ## output`); a row WITHOUT it is the terminal's and the earlier window's.
+  ## Both shapes need every number column to be digits and the channel to be
+  ## a known channel, so a row of free text still does not parse.
+  func digits(t: string): bool =
+    if t.len == 0: return false
+    for ch in t:
+      if not ch.isDigit: return false
+    true
   let toks = line.strip().splitWhitespace()
   if toks.len < 3: return (false, "")
-  for ch in toks[0]:
-    if not ch.isDigit: return (false, "")
-  if toks[1] notin EventChannels: return (false, "")
-  (true, toks[1] & ": " & toks[2 .. ^1].join(" "))
+  if not digits(toks[0]): return (false, "")
+  var at = 1
+  if toks.len >= 4 and digits(toks[1]) and toks[2] in EventChannels:
+    at = 2
+  if toks[at] notin EventChannels: return (false, "")
+  (true, toks[at] & ": " & toks[at + 1 .. ^1].join(" "))
 
 func eventText*(consoleOutput: string): string =
   ## The event's TEXT without its channel — what two front-ends are compared
@@ -412,14 +430,23 @@ func parsePointRow*(line: string): tuple[ok: bool, kind, fileName: string,
 func parseTerminalEventRow*(line: string): tuple[ok: bool, consoleOutput: string] =
   ## `TerminalEventRowGrammar`.
   let toks = line.strip().splitWhitespace()
-  if toks.len < 4: return (false, "")
+  if toks.len < 3: return (false, "")
   if not toks[0].allCharsInSet({'0'..'9'}): return (false, "")
-  if toks[1] notin TerminalEventCategories: return (false, "")
-  let colon = toks[2].rfind(':')
-  if colon <= 0 or not toks[2][colon + 1 .. ^1].allCharsInSet({'0'..'9'}) or
-     colon == toks[2].high:
+  var at = 1
+  # The event's `#` (the desktop's second column), when shown.
+  if toks[at].allCharsInSet({'0'..'9'}):
+    inc at
+  if at >= toks.len or toks[at] notin TerminalEventCategories:
     return (false, "")
-  (true, toks[3 .. ^1].join(" "))
+  inc at
+  # The location, when the user has shown its column: `<file>:<line>`.
+  if at < toks.len:
+    let colon = toks[at].rfind(':')
+    if colon > 0 and colon < toks[at].high and
+       toks[at][colon + 1 .. ^1].allCharsInSet({'0'..'9'}):
+      inc at
+  if at >= toks.len: return (false, "")
+  (true, toks[at .. ^1].join(" "))
 
 func compactText*(s: string): string =
   ## A row's text with every space removed — the form two readings are
@@ -450,6 +477,31 @@ func eventRowsFused*(line: string): bool =
     n += line.count(ch & ":")
   n > 1
 
+func isTruncatedName*(name: string): bool =
+  ## A name the PANE cut short and marked so: the native window's state table
+  ## draws a name wider than its column as `__packag…`. That is a visible
+  ## prefix the product chose, like a clipped value (`isVisiblePrefixOf`),
+  ## not something OCR lost.
+  name.endsWith("...") or name.endsWith("\xE2\x80\xA6")
+
+func truncatedNameStem(name: string): string =
+  if name.endsWith("..."): name[0 ..< name.len - 3]
+  elif name.endsWith("\xE2\x80\xA6"): name[0 ..< name.len - 3]
+  else: name
+
+func isStateTableName*(cell: string): bool =
+  ## The name cell of the native window's Name/Value table, as an identifier:
+  ## letters, digits and underscores, starting with a letter or underscore,
+  ## optionally ending in the pane's own ellipsis. Anything else — a stray
+  ## glyph OCR put in front (`- mul`), a space inside (`_ file__`) — is a
+  ## misreading, and the cell is read again rather than forgiven.
+  let stem = truncatedNameStem(cell)
+  if stem.len == 0: return false
+  if not (stem[0].isAlphaAscii or stem[0] == '_'): return false
+  for ch in stem:
+    if not (ch.isAlphaNumeric or ch == '_'): return false
+  stem.anyIt(it.isAlphaAscii)
+
 func variableNameKey*(name: string): string =
   ## A variable's name as two screen readings are compared: without the
   ## underscores at its ends and with inner runs collapsed. OCR drops an edge
@@ -461,15 +513,26 @@ func variableNameKey*(name: string): string =
     if ch == '_' and result.len > 0 and result[^1] == '_': continue
     result.add ch
 
+func nameKeysMatch(a, b: string): bool =
+  ## Two names agree by `variableNameKey`; a name the pane truncated
+  ## (`isTruncatedName`) agrees with any name its visible stem begins.
+  if variableNameKey(a) == variableNameKey(b): return true
+  if isTruncatedName(a) and not isTruncatedName(b):
+    let stem = variableNameKey(truncatedNameStem(a))
+    return stem.len > 0 and variableNameKey(b).startsWith(stem)
+  if isTruncatedName(b) and not isTruncatedName(a):
+    return nameKeysMatch(b, a)
+  false
+
 func namesAgree*(a, b: openArray[string]): bool =
   ## Every name the SMALLER reading holds is in the larger one, by
   ## `variableNameKey` — a pane shorter than its variable list, or a line OCR
-  ## lost, leaves a reading with fewer names, never with different ones.
-  var small, large: seq[string]
-  for n in (if a.len <= b.len: a else: b): small.add variableNameKey(n)
-  for n in (if a.len <= b.len: b else: a): large.add variableNameKey(n)
+  ## lost, leaves a reading with fewer names, never with different ones. A
+  ## name the pane drew truncated agrees with the full name it begins
+  ## (`nameKeysMatch`).
+  let (small, large) = (if a.len <= b.len: (@a, @b) else: (@b, @a))
   for n in small:
-    if n notin large: return false
+    if not large.anyIt(nameKeysMatch(n, it)): return false
   true
 
 func parseTransportLabel*(line: string): tuple[ok: bool, label: string] =

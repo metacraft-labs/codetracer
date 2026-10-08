@@ -46,10 +46,17 @@ template ck(cond: untyped) =
 
 const
   FlowScenario = "noir-declined-arm"
-  StepIns = 33
-    ## `plat42_surfaces_record.py`'s `FLOW_SCENARIOS` spells this
-    ## `stepIn=33` (it was 15 until 2026-09-24; see that file for why it moved); the case below asserts the record says the same, so the two
-    ## cannot silently be about different stops.
+  MaxStepIns = 200
+    ## A bound on the walk to the record's stop, not the stop: the terminal
+    ## steps in until it is where the GPUI record's execution pointer is (see
+    ## `recordedStop`), so the two cannot be about different stops whatever
+    ## number of steps reaches it. A COUNT used to be the link
+    ## (`plat42_surfaces_record.py`'s `stepIn=33`, asserted equal here), and a
+    ## count is the engine's: on 2026-10-04 the engine began opening a
+    ## recording in the program's entry call rather than on the trace format's
+    ## `<toplevel>` entry step — for this Noir program five steps further on —
+    ## and the same count reached a different stop. The record's own
+    ## operations stay its provenance and are named in a checkpoint.
   Cols = 120
   Rows = 40
 
@@ -68,6 +75,22 @@ proc gpuiNotTaken(rec: JsonNode): seq[int] =
     if r["flow"].getStr == "efsNotTaken":
       let line = gutterLineOf(r["text"].getStr)
       if line > 0: result.add line
+
+proc recordedStop(rec: JsonNode): tuple[line: int, code: string] =
+  ## The row the GPUI record's EXECUTION POINTER is on: its line, and the
+  ## program text the row drew there (gutter and inline comment dropped).
+  for r in rec["flowScenarios"][FlowScenario]["rows"]:
+    if r["pointer"].getStr != "eptNone":
+      let text = r["text"].getStr
+      result.line = gutterLineOf(text)
+      var code = text
+      let numberAt = code.find($result.line)
+      if numberAt >= 0: code = code[numberAt + len($result.line) .. ^1]
+      code = code.replace("\xC2\xA0", " ")
+      let comment = code.find("/*")
+      if comment >= 0: code = code[0 ..< comment]
+      result.code = code.strip()
+      return
 
 proc codeStylesOf(screen: SourcePaneScreen; model: SourcePaneModel;
                   line: int): seq[CellStyle] =
@@ -116,7 +139,12 @@ suite "PLAT-42: the terminal draws the flow overlay GPUI drew":
 
   test "the declined arm is the same lines on both media, and is painted de-emphasised":
     let rec = parseJson(readFile(recordPath))
-    ck rec["flowScenarios"][FlowScenario]["replayOps"].getStr == "stepIn=" & $StepIns
+    checkpoint("the record's own operations: " &
+               rec["flowScenarios"][FlowScenario]["replayOps"].getStr)
+    let stop = recordedStop(rec)
+    checkpoint("the record's stop: line " & $stop.line & " `" & stop.code & "`")
+    ck stop.line > 0
+    ck stop.code.len > 0
     let expected = gpuiNotTaken(rec)
     checkpoint("GPUI's not-taken lines: " & $expected)
     ck expected.len > 0
@@ -140,8 +168,19 @@ suite "PLAT-42: the terminal draws the flow overlay GPUI drew":
       # The product default reached the host.
       ck s.session.session.editorVM.showFlowOverlay.val == FlowOverlayShownByDefault
 
-      for _ in 0 ..< StepIns:
+      # TO THE RECORD'S STOP, by what it is: the first stop on the line the
+      # GPUI pointer is on, whose program text is the text the GPUI row drew.
+      var stepIns = 0
+      proc atRecordedStop(): bool =
+        let line = s.session.getCurrentLine()
+        line == stop.line and
+          readFile(s.session.getCurrentFile()).splitLines()[line - 1].strip() ==
+            stop.code
+      while stepIns < MaxStepIns and not atRecordedStop():
         s.session.stepIn()
+        inc stepIns
+      checkpoint("reached the record's stop after " & $stepIns & " step-ins")
+      ck atRecordedStop()
       s.refresh(rt)
 
       let model = rt.app.source
@@ -154,12 +193,15 @@ suite "PLAT-42: the terminal draws the flow overlay GPUI drew":
         checkpoint("line " & $line & " styles: " & $styles)
         ck styles.len > 0
         for st in styles:
-          ck st.fg == FlowNotTakenStyle.fg
+          # PLAT-46: a not-taken line's CODE is the not-taken role; an inline
+          # value annotation after it keeps the annotation's own muted role.
+          # Before roles both were `bright_black`, and this compared the colour.
+          ck st.role in [FlowNotTakenStyle.role, AnnotationStyle.role]
       # The header ran: it keeps at least one syntax colour.
       let header = codeStylesOf(screen, model, expected[0] - 1)
       var coloured = 0
       for st in header:
-        if st.fg != FlowNotTakenStyle.fg and st.fg.len > 0: inc coloured
+        if st.role != FlowNotTakenStyle.role and st.role != srNone: inc coloured
       ck coloured > 0
 
       # NEGATIVE TWIN — the overlay hidden, the same stop.
@@ -171,7 +213,7 @@ suite "PLAT-42: the terminal draws the flow overlay GPUI drew":
       var recoloured = 0
       for line in expected:
         for st in codeStylesOf(hiddenScreen, hidden, line):
-          if st.fg != FlowNotTakenStyle.fg and st.fg.len > 0: inc recoloured
+          if st.role != FlowNotTakenStyle.role and st.role != srNone: inc recoloured
       ck recoloured > 0
 
   test "CHECKS":

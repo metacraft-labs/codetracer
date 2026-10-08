@@ -13,12 +13,20 @@ fn find_db_backend() -> PathBuf {
 #[test]
 fn ruby_flow_dap_variables_and_values() {
     if !test_harness::is_command_available("ruby") {
-        eprintln!("SKIPPED: ruby is not available on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "ruby_flow_dap_variables_and_values",
+            "`ruby` is not on PATH",
+            "run inside the codetracer dev shell, which provides it",
+        );
         return;
     }
 
     if test_harness::find_ruby_recorder().is_none() {
-        eprintln!("SKIPPED: Ruby recorder not found");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "ruby_flow_dap_variables_and_values",
+            "the Ruby recorder is not found",
+            "check out and build the codetracer-ruby-recorder sibling, or set CODETRACER_RUBY_RECORDER_PATH",
+        );
         return;
     }
 

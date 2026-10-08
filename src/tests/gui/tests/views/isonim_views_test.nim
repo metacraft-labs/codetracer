@@ -27,7 +27,6 @@ import viewmodels/calltrace_vm
 import viewmodels/debug_controls_vm
 import viewmodels/event_log_vm
 import viewmodels/flow_vm
-import viewmodels/timeline_vm
 import viewmodels/search_vm
 import viewmodels/point_list_vm
 import viewmodels/scratchpad_vm
@@ -57,7 +56,6 @@ import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
 import views/isonim_event_log_view
 import views/isonim_flow_view
-import views/isonim_timeline_view
 import views/isonim_search_view
 import views/isonim_point_list_view
 import views/isonim_scratchpad_view
@@ -3458,423 +3456,6 @@ suite "IsoNim Flow Panel — active line sync":
       dispose()
 
 # ===========================================================================
-# Timeline panel tests
-# ===========================================================================
-
-# ---------------------------------------------------------------------------
-# Timeline structure tests
-# ---------------------------------------------------------------------------
-
-suite "IsoNim Timeline Panel — structure":
-
-  test "renders root with timeline-component class":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      check panel.kind == mnkElement
-      check panel.tag == "div"
-      check panel.attributes["class"] == "timeline-component"
-
-      dispose()
-
-  test "renders position indicator":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let posDiv = findByClass(panel, "timeline-position")
-      check posDiv != nil
-
-      let ticksSpan = findByClass(panel, "position-ticks")
-      check ticksSpan != nil
-      check "Tick:" in ticksSpan.textContent
-
-      dispose()
-
-  test "renders zoom controls":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let zoomBar = findByClass(panel, "timeline-zoom-controls")
-      check zoomBar != nil
-
-      let zoomOut = findByClass(panel, "zoom-out")
-      let zoomIn = findByClass(panel, "zoom-in")
-      let zoomLevel = findByClass(panel, "zoom-level")
-
-      check zoomOut != nil
-      check zoomIn != nil
-      check zoomLevel != nil
-
-      check zoomOut.tag == "button"
-      check zoomIn.tag == "button"
-
-      dispose()
-
-  test "renders timeline track":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let track = findByClass(panel, "timeline-track")
-      check track != nil
-      check track.attributes["role"] == "slider"
-      check track.attributes["data-min-rr-ticks"] == "0"
-      check track.attributes["data-max-rr-ticks"] == "0"
-      check track.attributes["data-current-rr-ticks"] == "0"
-
-      let playhead = findByClass(panel, "timeline-playhead")
-      check playhead != nil
-
-      dispose()
-
-  test "renders hover tooltip (hidden by default)":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let tooltip = findByClass(panel, "timeline-hover-tooltip")
-      check tooltip != nil
-      check tooltip.styles.getOrDefault("display", "none") == "none"
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# Timeline execution-overview tests (issue #693)
-#
-# `Front-Ends/Electron-GUI.md:151-156` obliges: extent, current position,
-# "Event markers (calls, returns, exceptions)" and drag to seek. These cases
-# cover the three of those four that a mock DOM can see. **The fourth cannot
-# be covered here**: dragging is a `mousedown`/`mousemove`/`mouseup` sequence
-# on a laid-out element with a non-zero `getBoundingClientRect().width`, and
-# the mock renderer has no layout, so the drag handler is exercised only by
-# `mountIsoNimTimeline` under a real browser. It is unrun on this host.
-#
-# THE MARKS AND THE LABELS ARE RENDERED BY `for` LOOPS, which isonim expands
-# at render time and which therefore do NOT update in place. Every case below
-# populates the store BEFORE rendering, and the last one asserts that a
-# re-render is what picks up a later change — so the loop's one-shot nature is
-# a stated property rather than a surprise.
-# ---------------------------------------------------------------------------
-
-suite "IsoNim Timeline Panel — execution overview":
-
-  test "with no extent the empty state is shown and the track is hidden":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let empty = findByClass(panel, "timeline-empty")
-      check empty.styles.getOrDefault("display", "") == "block"
-      check "timeline" in empty.textContent
-
-      let track = findByClass(panel, "timeline-track")
-      check track.styles.getOrDefault("display", "") == "none"
-
-      dispose()
-
-  test "with an extent the track is shown and the empty state is hidden":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      var tl = store.timeline.val
-      tl.minRRTicks = 0'u64
-      tl.maxRRTicks = 400'u64
-      store.timeline.val = tl
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      check findByClass(panel, "timeline-empty")
-        .styles.getOrDefault("display", "") == "none"
-      let track = findByClass(panel, "timeline-track")
-      check track.styles.getOrDefault("display", "") == "block"
-      check track.attributes["data-min-rr-ticks"] == "0"
-      check track.attributes["data-max-rr-ticks"] == "400"
-      # The extent is on the ARIA slider attributes too, not only on the
-      # `data-` ones: `role="slider"` was already there and a slider with no
-      # value range is one a screen reader reads as empty.
-      check track.attributes["aria-valuemax"] == "400"
-
-      dispose()
-
-  test "tick labels are rendered across the extent, ends included":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      var tl = store.timeline.val
-      tl.minRRTicks = 0'u64
-      tl.maxRRTicks = 400'u64
-      store.timeline.val = tl
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-      let labels = findAllByClass(panel, "timeline-tick-label")
-
-      check labels.len == 5
-      check labels[0].textContent == "0"
-      check labels[^1].textContent == "400"
-      # Placed by percentage of the track, like the playhead and the marks.
-      check labels[0].styles.getOrDefault("left", "") == "0.0%"
-      check labels[^1].styles.getOrDefault("left", "") == "100.0%"
-
-      dispose()
-
-  test "call, return and exception marks are placed on the track":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      var tl = store.timeline.val
-      tl.minRRTicks = 0'u64
-      tl.maxRRTicks = 100'u64
-      store.timeline.val = tl
-      store.calltrace.lines.val = @[
-        CallLine(name: "main", rrTicks: 0'u64, depth: 0),
-        CallLine(name: "inner", rrTicks: 20'u64, depth: 1),
-        CallLine(name: "after", rrTicks: 51'u64, depth: 1),
-      ]
-      store.eventLog.rows.val = @[
-        EventLogRow(kindId: ErrorEventKindId, kind: "error", rrTicks: 80'u64),
-      ]
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-      let marks = findAllByClass(panel, "timeline-marker")
-
-      # main@0, inner@20, inner returns@50, after@51, error@80.
-      check marks.len == 5
-      check marks[0].attributes["data-marker-kind"] == "call"
-      check marks[2].attributes["data-marker-kind"] == "return"
-      check marks[2].attributes["data-marker-rr-ticks"] == "50"
-      check marks[^1].attributes["data-marker-kind"] == "exception"
-      check marks[^1].attributes["data-marker-rr-ticks"] == "80"
-      # Each kind carries its own modifier class, so a stylesheet can tell
-      # them apart without parsing a data attribute.
-      check findAllByClass(panel, "timeline-marker-call").len == 3
-      check findAllByClass(panel, "timeline-marker-return").len == 1
-      check findAllByClass(panel, "timeline-marker-exception").len == 1
-      # Placed by the SAME tick-to-percent conversion as the playhead: the
-      # error at tick 80 of a 0..100 recording sits at 80%.
-      check marks[^1].styles.getOrDefault("left", "") == "80.0%"
-      # The track reports the real total and says the set is a window, so a
-      # reader of the DOM is not left to assume these are every event in the
-      # recording.
-      let track = findByClass(panel, "timeline-track")
-      check track.attributes["data-marker-count"] == "5"
-      check track.attributes["data-markers-are-windowed"] == "true"
-
-      dispose()
-
-  test "a recording with an extent but no loaded events has no marks":
-    ## The negative control for the case above. Without it a renderer that
-    ## drew a mark per tick label, or per anything else, would pass.
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      var tl = store.timeline.val
-      tl.minRRTicks = 0'u64
-      tl.maxRRTicks = 400'u64
-      store.timeline.val = tl
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      check findAllByClass(panel, "timeline-marker").len == 0
-      check findByClass(panel, "timeline-track")
-        .attributes["data-marker-count"] == "0"
-      # …and the tick labels ARE there, which is what makes this a control on
-      # the marks rather than on the whole render.
-      check findAllByClass(panel, "timeline-tick-label").len == 5
-
-      dispose()
-
-  test "marks appear on the next render, not in the panel already rendered":
-    ## `dsl/ui` expands a `for` at render time, so the marks in a rendered
-    ## panel are frozen. `mountIsoNimTimeline` re-renders inside a
-    ## `createEffect` for exactly this reason; this case pins the property
-    ## that makes that necessary, so a future reader does not "simplify" the
-    ## mount back to a single `appendChild`.
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      var tl = store.timeline.val
-      tl.minRRTicks = 0'u64
-      tl.maxRRTicks = 100'u64
-      store.timeline.val = tl
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let first = renderTimelinePanel(r, vm)
-      check findAllByClass(first, "timeline-marker").len == 0
-
-      store.calltrace.lines.val = @[
-        CallLine(name: "main", rrTicks: 10'u64, depth: 0),
-      ]
-      check findAllByClass(first, "timeline-marker").len == 0
-
-      let second = renderTimelinePanel(r, vm)
-      check findAllByClass(second, "timeline-marker").len == 1
-
-      dispose()
-
-  test "the playhead and the position readout track the debugger":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      var tl = store.timeline.val
-      tl.minRRTicks = 0'u64
-      tl.maxRRTicks = 200'u64
-      store.timeline.val = tl
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-      let playhead = findByClass(panel, "timeline-playhead")
-      let percent = findByClass(panel, "position-percent")
-
-      check playhead.styles.getOrDefault("left", "") == "0.0%"
-
-      var dbg = store.debugger.val
-      dbg.rrTicks = 50'u64
-      store.debugger.val = dbg
-
-      # The playhead is a style in its own render effect, so it moves without
-      # a re-render — unlike the marks above.
-      check playhead.styles.getOrDefault("left", "") == "25.0%"
-      check percent.textContent == "25.0%"
-      check findByClass(panel, "timeline-track")
-        .attributes["data-current-rr-ticks"] == "50"
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# Timeline position tests
-# ---------------------------------------------------------------------------
-
-suite "IsoNim Timeline Panel — position":
-
-  test "position ticks updates reactively":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-      let ticksSpan = findByClass(panel, "position-ticks")
-
-      check "0" in ticksSpan.textContent
-
-      # Move debugger position
-      var dbg = store.debugger.val
-      dbg.rrTicks = 500'u64
-      store.debugger.val = dbg
-
-      check "500" in ticksSpan.textContent
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# Timeline zoom tests
-# ---------------------------------------------------------------------------
-
-suite "IsoNim Timeline Panel — zoom":
-
-  test "zoom in button doubles zoom level":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let zoomIn = findByClass(panel, "zoom-in")
-      check vm.zoomLevel.val == 1.0
-
-      zoomIn.fireEvent("click")
-
-      check vm.zoomLevel.val == 2.0
-
-      dispose()
-
-  test "zoom out button halves zoom level":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let zoomOut = findByClass(panel, "zoom-out")
-      check vm.zoomLevel.val == 1.0
-
-      zoomOut.fireEvent("click")
-
-      check vm.zoomLevel.val == 0.5
-
-      dispose()
-
-  test "zoom level display updates reactively":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-
-      let zoomText = findByClass(panel, "zoom-level")
-      check "1.0x" in zoomText.textContent
-
-      vm.zoom(4.0)
-
-      check "4.0x" in zoomText.textContent
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# Timeline hover tooltip tests
-# ---------------------------------------------------------------------------
-
-suite "IsoNim Timeline Panel — hover tooltip":
-
-  test "tooltip shown when hovering":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createTimelineVM(store)
-      let r = MockRenderer()
-
-      let panel = renderTimelinePanel(r, vm)
-      let tooltip = findByClass(panel, "timeline-hover-tooltip")
-
-      check tooltip.styles["display"] == "none"
-
-      vm.hover(some(250'u64))
-      check tooltip.styles["display"] == "block"
-      check "250" in tooltip.textContent
-
-      vm.hover(none(uint64))
-      check tooltip.styles["display"] == "none"
-
-      dispose()
-
-# ===========================================================================
 # Search panel tests
 # ===========================================================================
 
@@ -4747,7 +4328,7 @@ proc makeTerminalLine(lineIndex: int;
 proc makeTerminalFragment(text: string; eventIndex: int = 0;
                           rrTicks: uint64 = 100'u64): TerminalEventFragment =
   TerminalEventFragment(
-    htmlText: text,
+    text: text,
     eventIndex: eventIndex,
     rrTicks: rrTicks,
   )
@@ -4978,6 +4559,199 @@ suite "IsoNim Terminal Output Panel — interactions":
       check req.get.args["directLocationRRTicks"].getInt == 42
       check req.get.args["kind"].getInt == 0
 
+      dispose()
+
+# ---------------------------------------------------------------------------
+# PLAT-52: the fragments carry SGR data; the screen view and its REAL-TIME
+# scrubber. The mock backend is the one stand-in: it records the
+# `ct/event-jump` requests the view's gestures send (the real engine's answer
+# is the native suites' subject), which is the whole of what is asserted here.
+# ---------------------------------------------------------------------------
+
+proc terminalEvent(content: string; ticks: uint64;
+                   index: int): TerminalOutputEvent =
+  TerminalOutputEvent(content: content, rrTicks: ticks, eventIndex: index,
+                      logIndex: index + 100, path: "/p/main.py", line: index)
+
+proc spanOf(fragNode: MockNode): MockNode =
+  ## A fragment's styled span (fragment div > content div > span).
+  fragNode.children[0].children[0]
+
+suite "IsoNim Terminal Output Panel — PLAT-52":
+
+  test "a fragment is a span styled from its SGR data, its text a text node":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[31mred\e[0m <img src=x onerror=alert(1)> " &
+                      "\e[1;48;5;4mbold on blue\e[0m\n", 10, 0)])
+      let line = findByClass(panel, "terminal-line")
+      check line.children.len == 3
+      let red = spanOf(line.children[0])
+      check red.tag == "span"
+      check red.attributes["style"] == "color:rgb(187,0,0)"
+      check red.textContent == "red"
+      # Program output is TEXT: the markup in it is a text node, no element.
+      let plain = spanOf(line.children[1])
+      check "style" notin plain.attributes
+      check plain.children.len == 1
+      check plain.children[0].kind == mnkText
+      check plain.textContent == " <img src=x onerror=alert(1)> "
+      let bold = spanOf(line.children[2])
+      check bold.attributes["style"] ==
+            "background-color:rgb(0,0,187);font-weight:bold"
+      check line.children[2].attributes["data-event-index"] == "0"
+      dispose()
+
+  test "each fragment's click goes to ITS write, not the last one's":
+    # On the JS backend a closure made inside the line loop shares the loop's
+    # variable, and every fragment went to the last write (measured on the
+    # real desktop). The vm-js lane runs this case on that backend.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[terminalEvent("first\n", 10, 0),
+                     terminalEvent("second\n", 20, 1),
+                     terminalEvent("third\n", 30, 2)])
+      let lines = findAllByClass(panel, "terminal-line")
+      check lines.len == 3
+      mock.clearReceivedCommands()
+      lines[1].children[0].fireEvent("click")
+      let jump = mock.findCommand("ct/event-jump")
+      check jump.isSome
+      check jump.get.args["directLocationRRTicks"].getInt == 20
+      check jump.get.args["eventIndex"].getInt == 101
+      dispose()
+
+  test "a line-oriented program: lines shown, no toggle, no screen":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[terminalEvent("hello\n", 10, 0)])
+      check panel.attributes["data-terminal-view"] == "lines"
+      check findByClass(panel, "terminal-view-toggle").styles["display"] ==
+            "none"
+      check findByTag(panel, "pre").styles["display"] == "block"
+      check findByClass(panel, "terminal-screen").styles["display"] == "none"
+      dispose()
+
+  test "a full-screen program opens on its screen, with the scrubber's marks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[?1049h\e[2J\e[1;1Hframe one", 10, 0),
+        terminalEvent("\e[1;1Hframe two", 20, 1),
+        terminalEvent("\e[2J\e[3;3Hcleared", 30, 2),
+        terminalEvent("\e[?1049lbye\n", 40, 3)])
+      check panel.attributes["data-terminal-view"] == "screen"
+      check findByClass(panel, "terminal-view-toggle").styles["display"] ==
+            "block"
+      vm.setCurrentRRTicks(20)
+      let grid = findByClass(panel, "terminal-screen-grid")
+      check grid.attributes["data-write"] == "1"
+      check grid.attributes["data-cols"] == "80"
+      let rows = findAllByClass(panel, "terminal-screen-row")
+      check rows.len == 24
+      check rows[0].textContent.startsWith("frame two")
+      let marks = findAllByClass(panel, "terminal-scrubber-mark")
+      var kinds: seq[string] = @[]
+      for m in marks: kinds.add m.attributes["data-kind"]
+      check kinds == @["alt-enter", "clear", "alt-leave"]
+      check findByClass(panel, "terminal-scrubber-range").attributes["max"] ==
+            "3"
+      # The toggle: the lines, remembered as the choice.
+      let linesButton = findAllByClass(panel, "terminal-view-button")[0]
+      linesButton.fireEvent("click")
+      check panel.attributes["data-terminal-view"] == "lines"
+      check vm.viewChosen
+      dispose()
+
+  test "the scrubber is REAL-TIME: each input moves the debugger":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
+        terminalEvent("\e[1;1Hb", 20, 1),
+        terminalEvent("\e[1;1Hc", 30, 2),
+        terminalEvent("\e[?1049l", 40, 3)])
+      let range = findByClass(panel, "terminal-scrubber-range")
+      mock.clearReceivedCommands()
+      # A drag: `input` events while the thumb is held, before any release.
+      r.setAttribute(range, "value", "2")
+      range.fireEvent("input")
+      var jumps = 0
+      for c in mock.receivedCommands:
+        if c.command == "ct/event-jump":
+          inc jumps
+          check c.args["directLocationRRTicks"].getInt == 30
+          check c.args["eventIndex"].getInt == 102
+      check jumps == 1
+      # The screen shows the write under the pointer while the move lands.
+      check findByClass(panel, "terminal-screen-grid").attributes[
+        "data-write"] == "2"
+      proc jumpTicks(): seq[int] =
+        for c in mock.receivedCommands:
+          if c.command == "ct/event-jump":
+            result.add c.args["directLocationRRTicks"].getInt
+      # The same write again sends nothing more.
+      range.fireEvent("input")
+      check jumpTicks() == @[30]
+      # The move lands (the engine's complete-move); the next write the
+      # pointer reaches is sent at once.
+      vm.setCurrentRRTicks(30)
+      r.setAttribute(range, "value", "1")
+      range.fireEvent("input")
+      check jumpTicks() == @[30, 20]
+      # While that move is in flight the pointer crosses two more writes:
+      # nothing is sent, and the NEWER one supersedes the older — one move
+      # queued behind the engine's, however fast the drag.
+      r.setAttribute(range, "value", "3")
+      range.fireEvent("input")
+      r.setAttribute(range, "value", "0")
+      range.fireEvent("input")
+      check jumpTicks() == @[30, 20]
+      check findByClass(panel, "terminal-screen-grid").attributes[
+        "data-write"] == "0"
+      vm.setCurrentRRTicks(20)
+      check jumpTicks() == @[30, 20, 10]
+      # The release ends the drag where it is: no further jump.
+      vm.setCurrentRRTicks(10)
+      range.fireEvent("change")
+      check jumpTicks() == @[30, 20, 10]
+      check vm.scrubPreview.val == -1
+      dispose()
+
+  test "ArrowRight on the screen steps to the next write":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setEvents(@[
+        terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
+        terminalEvent("\e[1;1Hb", 20, 1)])
+      vm.setCurrentRRTicks(10)
+      mock.clearReceivedCommands()
+      let screen = findByClass(panel, "terminal-screen")
+      let ev = MockEvent(`type`: "keydown", key: "ArrowRight")
+      screen.fireEventWith("keydown", ev)
+      check ev.defaultPrevented
+      let jump = mock.findCommand("ct/event-jump")
+      check jump.isSome
+      check jump.get.args["directLocationRRTicks"].getInt == 20
       dispose()
 
 # ===========================================================================

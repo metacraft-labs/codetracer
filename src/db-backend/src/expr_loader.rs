@@ -472,6 +472,11 @@ pub struct FileInfo {
     position_branches: HashMap<Position, Branch>,
     // active_loops: Vec<Position>,
     comment_lines: Vec<Position>,
+    /// Names the file declares as something other than a variable, which an
+    /// identifier use cannot be told apart from syntactically: C/C++ macros
+    /// and enum constants, Pascal routines (lowercased; Pascal identifiers
+    /// are case-insensitive).
+    non_variable_names: std::collections::HashSet<String>,
 }
 
 impl FileInfo {
@@ -487,8 +492,70 @@ impl FileInfo {
             position_branches: HashMap::default(),
             // active_loops: vec![],
             comment_lines: vec![],
+            non_variable_names: std::collections::HashSet::new(),
         }
     }
+}
+
+/// The names a file declares as something other than a variable, for
+/// [`FileInfo::non_variable_names`].
+#[cfg(feature = "syntax-highlight")]
+fn collect_non_variable_names(lang: Lang, tree: &Tree, source: &[u8]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let declaring_kinds: &[&str] = match lang {
+        // `#define MAX_SIZE 10`, `#define ADD(a, b) ...`, `enum { RED }`
+        Lang::C | Lang::Cpp => &["preproc_def", "preproc_function_def", "enumerator"],
+        // `function calculate_sum(...)`, `procedure p;`
+        Lang::Pascal => &["declProc"],
+        // Contract state (`uint256 storedResult;`, `uint256 constant MAX = 1;`)
+        // and every declared name that is not a value of the frame: events,
+        // errors, structs, enums, user-defined value types, contracts,
+        // interfaces, libraries, functions and modifiers.
+        Lang::Solidity => &[
+            "state_variable_declaration",
+            "constant_variable_declaration",
+            "event_definition",
+            "error_declaration",
+            "struct_declaration",
+            "enum_declaration",
+            "user_defined_type_definition",
+            "contract_declaration",
+            "interface_declaration",
+            "library_declaration",
+            "function_definition",
+            "modifier_definition",
+        ],
+        _ => return names,
+    };
+    // A local or parameter may share its name with contract state (it then
+    // shadows it); such a name stays a variable.
+    let local_declaring_kinds: &[&str] = match lang {
+        Lang::Solidity => &["variable_declaration", "parameter"],
+        _ => &[],
+    };
+    let mut local_names = std::collections::HashSet::new();
+    for node in traverse_tree(tree, Order::Pre) {
+        let is_local = local_declaring_kinds.contains(&node.kind());
+        if !is_local && !declaring_kinds.contains(&node.kind()) {
+            continue;
+        }
+        if let Some(name) = node.child_by_field_name("name")
+            && let Ok(text) = name.utf8_text(source)
+        {
+            let text = if lang == Lang::Pascal {
+                text.to_lowercase()
+            } else {
+                text.to_string()
+            };
+            if is_local {
+                local_names.insert(text);
+            } else {
+                names.insert(text);
+            }
+        }
+    }
+    names.retain(|name| !local_names.contains(name));
+    names
 }
 
 #[cfg(feature = "syntax-highlight")]
@@ -583,7 +650,7 @@ pub struct ExprLoader {
 /// case — not because the source is absent, but because there is nowhere for
 /// it to be. A Noir trace produced in the tab *carries* its own source text
 /// (`MemoryTrace::source_views[].content`), and the host writes it into the
-/// VFS at the recorded path alongside `trace.json`.
+/// VFS at the recorded path alongside `trace.ct`.
 ///
 /// Everything the engine does with source text funnels through
 /// [`ExprLoader::file_source_code`] into `processed_files`:
@@ -1726,6 +1793,18 @@ impl ExprLoader {
                     return false;
                 }
 
+                // Filter out the name half of a namespace-qualified name.
+                // AST: qualified_identifier { scope: namespace_identifier "std",
+                //                             name: identifier "cout" }
+                // A name reached through a namespace (`std::cout`, `ns::x`)
+                // has static storage; it is never a local of the frame.
+                if parent_kind == "qualified_identifier"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
+                }
+
                 // Filter out enumerator constant names in enum declarations.
                 // AST: enumerator > identifier (name field) — e.g. `enum { RED, GREEN }`
                 // Enum constants are compile-time values, not runtime variables.
@@ -2132,6 +2211,70 @@ impl ExprLoader {
                 true
             }
 
+            Lang::Solidity => {
+                // tree-sitter-solidity uses `identifier` for every name; the
+                // positions that never hold a value of the frame are:
+                //   - `member_expression { property: identifier }`: a member
+                //     (`p.x`, `msg.sender`), reached through its object.
+                //   - `user_defined_type > identifier`: a type (`Point memory p`).
+                //   - the names of event and error parameters and struct members.
+                //   - the callee of a call (`require(...)`, `Point(...)`),
+                //     the event of an `emit` and the error of a `revert`,
+                //     each wrapped in an `expression` node.
+                // Declared names used as values (`storedResult = x`) are
+                // filtered by name, through `non_variable_names`.
+                if node.kind() != "identifier" {
+                    return false;
+                }
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+                match parent.kind() {
+                    "member_expression" => field_name_in_parent(node).as_deref() != Some("property"),
+                    "user_defined_type" => false,
+                    // The named parts of an event, error or struct
+                    // (`event Computed(uint256 result)`, `struct P { uint256 x; }`)
+                    // are not values of any frame.
+                    "event_parameter" | "error_parameter" | "struct_member" => false,
+                    "expression" => {
+                        let callee_field = match parent.parent().map(|grandparent| grandparent.kind()) {
+                            Some("call_expression") => "function",
+                            Some("emit_statement") => "name",
+                            Some("revert_statement") => "error",
+                            _ => return true,
+                        };
+                        field_name_in_parent(&parent).as_deref() != Some(callee_field)
+                    }
+                    _ => true,
+                }
+            }
+
+            Lang::Pascal => {
+                // tree-sitter-pascal uses `identifier` for every name, so a
+                // variable is told from the rest by where it stands:
+                //   - `exprCall { entity: identifier "writeln", args }`: the
+                //     routine being called.
+                //   - `declProc { name: identifier }`: a routine's own name.
+                //   - `typeref > identifier`: a type (`integer`).
+                //   - `moduleName > identifier`: the program/unit name.
+                // A routine's name also appears as a plain identifier where it
+                // is assigned its result (`calculate_sum := r`) or called
+                // without arguments; those are filtered by name, through the
+                // routines the file declares (`non_variable_names`).
+                if node.kind() != "identifier" {
+                    return false;
+                }
+                let Some(parent) = node.parent() else {
+                    return true;
+                };
+                match parent.kind() {
+                    "exprCall" => field_name_in_parent(node).as_deref() != Some("entity"),
+                    "declProc" => field_name_in_parent(node).as_deref() != Some("name"),
+                    "typeref" | "moduleName" => false,
+                    _ => true,
+                }
+            }
+
             _ => NODE_NAMES[&lang].values.contains(&node.kind().to_string()),
         }
     }
@@ -2153,13 +2296,15 @@ impl ExprLoader {
         // extract variable names
         if self.is_variable_node(lang, node) {
             let value = self.extract_expr(node, path, row);
-            self.processed_files
-                .get_mut(path)
-                .unwrap()
-                .variables
-                .entry(start)
-                .or_default()
-                .push(value);
+            let lookup = if lang == Lang::Pascal {
+                value.to_lowercase()
+            } else {
+                value.clone()
+            };
+            let file = self.processed_files.get_mut(path).unwrap();
+            if !file.non_variable_names.contains(&lookup) {
+                file.variables.entry(start).or_default().push(value);
+            }
         // extract function names and positions
         } else if NODE_NAMES[&lang].functions.contains(&node.kind().to_string()) {
             if let Some(name) = self.get_method_name(node, path, row) {
@@ -2393,6 +2538,11 @@ impl ExprLoader {
     #[cfg(feature = "syntax-highlight")]
     fn process_file(&mut self, tree: &Tree, path: &PathBuf) -> Result<(), Box<dyn Error>> {
         let lang = self.get_current_language(path);
+        let non_variable_names = {
+            let source = self.processed_files[path].source_code.as_bytes();
+            collect_non_variable_names(lang, tree, source)
+        };
+        self.processed_files.get_mut(path).unwrap().non_variable_names = non_variable_names;
         let postorder: Vec<Node<'_>> = traverse_tree(tree, Order::Post).collect::<Vec<_>>();
         for node in postorder {
             debug!("node {:?}", node.to_sexp());
@@ -2548,10 +2698,20 @@ impl ExprLoader {
         updated_location
     }
 
+    /// The expressions a flow shows for `line`, or `None` when the flow
+    /// should show the recorded frame's locals instead.
+    ///
+    /// For Solidity an analysed file's list is authoritative even when it is
+    /// empty: an EVM recording's frame also carries the contract's storage
+    /// (state variables), which are not locals of the function.
     pub fn get_expr_list(&self, line: Position, location: &Location) -> Option<Vec<String>> {
-        self.processed_files
-            .get(&PathBuf::from(&location.path))
-            .and_then(|file| file.variables.get(&line).cloned())
+        let path = PathBuf::from(&location.path);
+        let file = self.processed_files.get(&path)?;
+        match file.variables.get(&line) {
+            Some(names) => Some(names.clone()),
+            None if self.get_current_language(&path) == Lang::Solidity => Some(vec![]),
+            None => None,
+        }
     }
     // pub fn load_loops(&mut self, )
 
@@ -3627,6 +3787,53 @@ console.log("Result:", result);
         fs::remove_file(&file_path).unwrap();
     }
 
+    /// Solidity: an emitted event, an event's parameter, a contract's name, a
+    /// called function's name and contract state are not variables of a
+    /// frame; a local, a parameter and a named return value are.
+    #[test]
+    fn a_solidity_event_contract_or_function_name_is_not_a_variable() {
+        use std::fs;
+
+        let code = r#"pragma solidity ^0.8.0;
+
+contract FlowTest {
+    uint256 public storedResult;
+    event Computed(uint256 indexed result);
+
+    function run(uint256 seed) public returns (uint256 out) {
+        uint256 a = seed + 10;
+        storedResult = a;
+        emit Computed(a);
+        return helper(a);
+    }
+
+    function helper(uint256 x) internal pure returns (uint256) {
+        return x;
+    }
+}
+"#;
+        let file_path = std::env::temp_dir().join(format!("sol_vars_{}.sol", std::process::id()));
+        fs::write(&file_path, code).unwrap();
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&file_path).unwrap();
+        let info = &loader.processed_files[&file_path];
+        let all_vars: Vec<String> = info.variables.values().flatten().cloned().collect();
+        fs::remove_file(&file_path).unwrap();
+
+        for not_a_variable in ["FlowTest", "Computed", "result", "run", "helper", "storedResult"] {
+            assert!(
+                !all_vars.contains(&not_a_variable.to_string()),
+                "{not_a_variable} is not a variable; got {all_vars:?}"
+            );
+        }
+        for variable in ["a", "seed", "x", "out"] {
+            assert!(
+                all_vars.contains(&variable.to_string()),
+                "{variable} is a variable; got {all_vars:?}"
+            );
+        }
+    }
+
     /// Test that JavaScript function declaration names are filtered out
     #[test]
     fn test_javascript_excludes_function_declaration_names() {
@@ -3697,5 +3904,179 @@ var y = 20;
         );
 
         fs::remove_file(&file_path).unwrap();
+    }
+}
+
+/// The flow test programs, read in place: the expressions a flow shows for a
+/// whole function are exactly what these fixtures' flow tests check, so the
+/// extraction is tested on the same sources.
+#[cfg(all(test, feature = "syntax-highlight"))]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
+mod flow_fixture_extraction_tests {
+    use super::*;
+
+    fn variables_by_line(fixture: &str) -> HashMap<usize, Vec<String>> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-programs")
+            .join(fixture);
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        loader.processed_files[&path]
+            .variables
+            .iter()
+            .map(|(position, names)| (position.0 as usize, names.clone()))
+            .collect()
+    }
+
+    fn all_names(by_line: &HashMap<usize, Vec<String>>) -> Vec<String> {
+        by_line.values().flatten().cloned().collect()
+    }
+
+    #[test]
+    fn a_c_macro_or_enum_constant_used_as_a_value_is_not_a_variable() {
+        let by_line = variables_by_line("c/c_flow_test.c");
+        let names = all_names(&by_line);
+        for constant in ["MAX_SIZE", "GREEN", "RED", "BLUE"] {
+            assert!(
+                !names.contains(&constant.to_string()),
+                "{constant} is a compile-time constant, not a variable; extracted: {by_line:?}"
+            );
+        }
+        // `int final_result = doubled + MAX_SIZE;`
+        let line = by_line.get(&27).cloned().unwrap_or_default();
+        assert!(line.contains(&"final_result".to_string()), "line 27: {line:?}");
+        assert!(line.contains(&"doubled".to_string()), "line 27: {line:?}");
+    }
+
+    #[test]
+    fn a_cpp_namespace_qualified_name_is_not_a_local_variable() {
+        let by_line = variables_by_line("cpp/cpp_flow_test.cpp");
+        let names = all_names(&by_line);
+        for qualified in ["std", "cout", "endl"] {
+            assert!(
+                !names.contains(&qualified.to_string()),
+                "{qualified} is reached through a namespace, not a frame local; extracted: {by_line:?}"
+            );
+        }
+        // `std::cout << "Sum: " << sum << std::endl;`
+        assert_eq!(by_line.get(&16).cloned().unwrap_or_default(), vec!["sum".to_string()]);
+    }
+
+    #[test]
+    fn a_solidity_state_variable_event_or_type_name_is_not_a_local_variable() {
+        let by_line = variables_by_line("solidity/solidity_flow_test.sol");
+        let names = all_names(&by_line);
+        for non_local in ["storedA", "storedResult", "Computed", "FlowTest"] {
+            assert!(
+                !names.contains(&non_local.to_string()),
+                "{non_local} is contract state or a declared name, not a local of the frame; extracted: {by_line:?}"
+            );
+        }
+        // `event Computed(uint256 indexed result);`
+        assert_eq!(by_line.get(&20).cloned().unwrap_or_default(), Vec::<String>::new());
+        // `uint256 final_result = doubled + 10;`
+        let line = by_line.get(&39).cloned().unwrap_or_default();
+        assert!(line.contains(&"final_result".to_string()), "line 39: {line:?}");
+        assert!(line.contains(&"doubled".to_string()), "line 39: {line:?}");
+        // `storedResult = final_result;`
+        assert_eq!(
+            by_line.get(&41).cloned().unwrap_or_default(),
+            vec!["final_result".to_string()]
+        );
+        // `emit Computed(final_result);`
+        assert_eq!(
+            by_line.get(&42).cloned().unwrap_or_default(),
+            vec!["final_result".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_solidity_line_without_locals_shows_none_rather_than_the_recorded_frame() {
+        // An EVM recording's frame also holds the contract's storage
+        // (`storedResult`); a line the analysis found no locals on must not
+        // fall back to that frame.
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-programs")
+            .join("solidity/solidity_flow_test.sol");
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        let location = Location {
+            path: path.to_string_lossy().to_string(),
+            ..Location::default()
+        };
+        // `function run() public returns (uint256) {`
+        assert_eq!(loader.get_expr_list(Position(34), &location), Some(vec![]));
+        assert_eq!(
+            loader.get_expr_list(Position(39), &location),
+            Some(vec!["final_result".to_string(), "doubled".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_solidity_local_named_like_a_state_variable_is_still_a_variable() {
+        let path = std::env::temp_dir().join(format!("ct_sol_shadow_{}.sol", std::process::id()));
+        fs::write(
+            &path,
+            "pragma solidity ^0.8.0;\n\
+             contract C {\n\
+             \x20   uint256 total;\n\
+             \x20   error TooBig(uint256 limit);\n\
+             \x20   struct Point { uint256 x; }\n\
+             \x20   function f(uint256 total) public pure returns (uint256) {\n\
+             \x20       Point memory p = Point(total);\n\
+             \x20       if (p.x > 5) { revert TooBig(p.x); }\n\
+             \x20       return total;\n\
+             \x20   }\n\
+             }\n",
+        )
+        .unwrap();
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        let by_line: HashMap<usize, Vec<String>> = loader.processed_files[&path]
+            .variables
+            .iter()
+            .map(|(position, names)| (position.0 as usize, names.clone()))
+            .collect();
+        fs::remove_file(&path).unwrap();
+        let names = all_names(&by_line);
+        for non_local in ["TooBig", "Point"] {
+            assert!(
+                !names.contains(&non_local.to_string()),
+                "{non_local} is a declared error/type name, not a variable; extracted: {by_line:?}"
+            );
+        }
+        // `error TooBig(uint256 limit);`, `struct Point { uint256 x; }`
+        assert_eq!(by_line.get(&4).cloned().unwrap_or_default(), Vec::<String>::new());
+        assert_eq!(by_line.get(&5).cloned().unwrap_or_default(), Vec::<String>::new());
+        // `if (p.x > 5) { revert TooBig(p.x); }`: `x` is reached through `p`.
+        assert_eq!(
+            by_line.get(&8).cloned().unwrap_or_default(),
+            vec!["p".to_string(), "p".to_string()]
+        );
+        // `return total;`: the parameter shadows the state variable.
+        assert_eq!(by_line.get(&9).cloned().unwrap_or_default(), vec!["total".to_string()]);
+    }
+
+    #[test]
+    fn a_pascal_routine_call_or_result_assignment_is_not_a_variable() {
+        let by_line = variables_by_line("pascal/pascal_flow_test.pas");
+        let names = all_names(&by_line);
+        for routine in ["writeln", "calculate_sum"] {
+            assert!(
+                !names.contains(&routine.to_string()),
+                "{routine} names a routine, not a variable; extracted: {by_line:?}"
+            );
+        }
+        // `writeln('Sum: ', sum_val);`
+        assert_eq!(
+            by_line.get(&21).cloned().unwrap_or_default(),
+            vec!["sum_val".to_string()]
+        );
+        // `calculate_sum := final_result;`
+        assert_eq!(
+            by_line.get(&24).cloned().unwrap_or_default(),
+            vec!["final_result".to_string()]
+        );
     }
 }

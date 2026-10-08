@@ -1446,7 +1446,6 @@ export const Shell = story("panel", "shell", "populated", "Shell");
 export const State = story("panel", "state", "populated", "State");
 export const StepList = story("panel", "step-list", "populated", "Step List");
 export const TerminalOutput = story("panel", "terminal-output", "populated", "Terminal Output");
-export const Timeline = story("panel", "timeline", "populated", "Timeline");
 export const TraceLog = story("panel", "trace-log", "populated", "Trace Log");
 export const Vcs = story("panel", "vcs", "populated", "VCS");
 export const WelcomeScreen = story("panel", "welcome-screen", "populated", "Welcome Screen");

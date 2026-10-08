@@ -295,9 +295,21 @@
             # package possible). `clap-markdown` and `sancov` are upstream
             # noir's own git dependencies and have nothing to do with
             # CodeTracer.
+            #
+            # The trace-format hash is that of
+            # https://github.com/metacraft-labs/codetracer-trace-format at the
+            # revision noir's Cargo.lock names (1eae589), a public URL. It was
+            # computed as `nix hash path` of `git archive <rev>`, a method
+            # checked against the previous revision's recorded hash. The URL is
+            # public. A sandboxed `fetchgit` from github.com can still fail with
+            # "could not read Username" when GitHub turns away an anonymous
+            # fetch from a stripped build environment; that happens for any
+            # public repository and says nothing about this one. Where it does,
+            # add the source with `nix-store --add-fixed --recursive sha256`
+            # and the hash above.
             outputHashes = {
-              "codetracer_trace_types-0.19.0" = "sha256-wyP96ovIqARw1uFlc0m8i4tJR8121pI0nxqclGnVERU=";
-              "codetracer_trace_writer_nim-0.1.0" = "sha256-wyP96ovIqARw1uFlc0m8i4tJR8121pI0nxqclGnVERU=";
+              "codetracer_trace_types-0.19.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
+              "codetracer_trace_writer_nim-0.1.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
               "clap-markdown-0.1.3" = "sha256-2vG7x+7T7FrymDvbsR35l4pVzgixxq9paXYNeKenrkQ=";
               "sancov-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
               "sancov-sys-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
@@ -333,9 +345,10 @@
           # ...and the same two knobs db-backend uses below: `nimble install`
           # needs network access the sandbox does not have, and
           # `requires "results" / "stew"` has to resolve without a nimble
-          # package store.
+          # package store: `results` from the standalone package, `stew/*`
+          # from the nim-stew pin (see `nim-results` in `flake.nix`).
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-stew}/stew:${inputs.nim-stew}";
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-results}:${inputs.nim-stew}";
 
           # WHAT GETS BUILT is noir's workspace `default-members` — the six CLI
           # crates `nargo_cli`, `acvm_cli`, `artifact_cli`, `ssa_cli`,
@@ -760,14 +773,13 @@
             preBuild = ''
               # Inject the codetracer/libs Nim package directories so
               # ``results`` and ``stew`` resolve when
-              # build_native_api.sh (ct_emulator) and writer_nim's
-              # build.rs (trace-format) run ``nim c``; ``$PWD`` is the
-              # unpacked codetracer source at this point.
+              # build_native_api.sh (ct_emulator) runs ``nim c``;
+              # ``$PWD`` is the unpacked codetracer source at this point.
               if [ -d "$PWD/libs/nim-stew/stew" ]; then
-                # Use ``libs/nim-stew/stew`` only -- it ships the
+                # Use ``libs/nim-stew/stew`` only -- it ships a
                 # newer ``results.nim`` with proper ``Result[void,
-                # E]`` support that trace-format-nim and ct_emulator
-                # rely on (the older standalone libs/nim-result
+                # E]`` support that ct_emulator relies on (the older
+                # standalone libs/nim-result
                 # mishandles ``?`` on void results so we
                 # deliberately leave it off the path).  The stew
                 # path also provides ``stew/byteutils``, ``stew/io2``
@@ -775,8 +787,13 @@
                 # transitively pull in.
                 NIM_PATHS_LIB="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
                 export CT_EMULATOR_EXTRA_NIM_PATHS="$NIM_PATHS_LIB"
-                export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="$NIM_PATHS_LIB"
               fi
+              # trace-format-nim itself needs the standalone `results`
+              # package: stew's copy above does not compile its
+              # `unsafeError` calls on `Result[void, E]` under upstream
+              # Nim 2.2, so its writer build takes the same flake inputs as the
+              # Python recorder in `nix/shells/ci-base.nix`.
+              export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${inputs.nim-results}:${inputs.nim-stew}"
               cd src/db-backend
             '';
 
@@ -844,12 +861,24 @@
           name = "backend-manager";
           pname = "backend-manager";
 
-          # NOTE: the source of this derivation is the CRATE, not the
-          # repository. That is deliberate (nothing else in the tree is a
-          # build input of ``session-manager``) but it means the sandbox has
-          # no ``scripts/``, no sibling repos, no browser and no network --
+          # NOTE: the source of this derivation is the CRATE plus the
+          # ``codetracer-trace-format`` workspace it reaches by path (its
+          # Cargo.toml says ``../../../codetracer-trace-format``, exactly as
+          # db-backend's does), laid out so that relative path resolves.
+          # Nothing else in the tree is a build input of ``session-manager``,
+          # so the sandbox has no ``scripts/``, no browser and no network --
           # see ``checkPhase`` below.
-          src = ../../src/backend-manager;
+          src = pkgs.runCommand "backend-manager-src" { } ''
+            mkdir -p $out/codetracer/src
+            cp -r ${../../src/backend-manager} $out/codetracer/src/backend-manager
+            cp -r ${inputs.codetracer-trace-format} $out/codetracer-trace-format
+          '';
+          sourceRoot = "backend-manager-src/codetracer/src/backend-manager";
+
+          # ``codetracer_trace_format_capnp`` (a dependency of the CTFS trace
+          # writer ``record-web`` records with) compiles its schema with
+          # ``capnp`` at build time, as it does for db-backend above.
+          nativeBuildInputs = [ pkgs.capnproto ];
 
           cargoLock = {
             lockFile = ../../src/backend-manager/Cargo.lock;
@@ -864,7 +893,7 @@
             # sandbox at all:
             #
             #   browser_stream_host::tests::
-            #     verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
+            #     a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
             #
             # It reads a *real* browser recording, and that recording is
             # deliberately not committed -- commit 5dc395c1 replaced the
@@ -1027,7 +1056,7 @@
               $cargoTestTargets -- --list)
             listed=$(printf '%s\n' "$listing" | grep -c ': test$')
 
-            excluded=browser_stream_host::tests::verify_reframing_a_real_browser_recording_reproduces_it_byte_for_byte
+            excluded=browser_stream_host::tests::a_real_browser_recording_is_a_ct_with_a_complete_boundary_log
             if ! printf '%s\n' "$listing" | grep -qx "$excluded: test"; then
               echo "ERROR: $excluded is not in this crate's test list." >&2
               echo "The exclusion below would silently filter nothing. If the test was" >&2
@@ -1272,6 +1301,95 @@
 
         };
 
+        # ------------------------------------------------------------------
+        # WD2: THE HOSTING CLOSURE, and why it is a PAIR rather than a subset.
+        #
+        # `ct host` needs two directories and they are not the same one.
+        # Measured against the built package rather than read off this
+        # expression, because the expression does not show it:
+        #
+        #   * `ct` is compiled with `-d:ctEntrypoint`, so `paths.nim` gives it
+        #     `codetracerExeDir = getAppDir().parentDir` — the CODETRACER
+        #     PACKAGE. `hostCommand` spawns `codetracerExeDir / "server_index.js"`,
+        #     and that file exists at the package root.
+        #   * the index process it spawns is `js` WITHOUT `ctEntrypoint`, so the
+        #     same name resolves from `CODETRACER_PREFIX` — the symlinkJoin
+        #     below. There `server_index.js` is under `src/`, and `public/`,
+        #     `views/`, `ui.js` and `node_modules` are what it serves.
+        #
+        # An image carrying only the prefix has every asset and no entry point
+        # to launch; one carrying only the package launches and serves nothing.
+        # Two directories behind one name, decided by a compile-time define.
+        #
+        # WHAT THIS DROPS relative to `runtimeDeps`, and why each is safe:
+        # `pkgs.electron` (the host serves a browser, it does not open a
+        # window), `pkgs.ruby` / `ruby-recorder-native` / `noir` / `wazero` /
+        # `pkgs.universal-ctags` / `cargo-stylus` (recorders and language
+        # tooling — hosting REPLAYS a trace someone else recorded), and
+        # `ctRemote`. What it keeps is the replay path (`db-backend`,
+        # `backend-manager`), the served bundle (`indexJavascript`,
+        # `uiJavascript`, `codetracer-electron`, `node-modules-derivation`,
+        # `resources-derivation`) and `staticDeps` for `node` itself, which
+        # `nodeExe()` resolves through `findTool` and which no other path
+        # supplies.
+        hostingDeps = pkgs.symlinkJoin {
+          name = "hosting-deps";
+
+          paths = [
+            resources-derivation
+            db-backend
+            backend-manager
+            node-modules-derivation
+            indexJavascript
+            uiJavascript
+
+            # `codetracer-electron` is DELIBERATELY ABSENT from this list and
+            # its files are copied below instead. Linking the derivation makes
+            # this join reference it, and it references `stdenv-linux`,
+            # `gcc-wrapper` and `gcc` — **1 GiB of C toolchain**, measured in
+            # the built image, in an artifact the substrate holds once per
+            # project. Its `installPhase` does `cp -Lr src/* $out/src/` over the
+            # whole source tree, which is where the reference comes from.
+            #
+            # Hosting needs four things out of it and none of them is a build
+            # input, so copying is both smaller and more honest about what is
+            # actually served.
+
+            # `node` AND NOTHING ELSE FROM THE TOOLCHAIN. `nodeExe()` is
+            # `findTool("node")`, so the interpreter has to be on `PATH` and
+            # nothing else supplies it — but `staticDeps.paths` was the wrong
+            # way to get it. Measured: pulling that set in left `bin/` at
+            # **380 MB** (gcc, rustup, nim, npm, webpack) and the whole closure
+            # at 751 MB against `runtimeDeps`' 853 MB — a 12% saving on a
+            # derivation whose entire purpose is to be the small one.
+            #
+            # `which` because `findTool` resolves through it.
+            pkgs.nodejs_20
+            pkgs.which
+          ];
+
+          # The same shape `runtimeDeps` builds, minus the Electron entry
+          # points. `index.js` and `subwindow.js` are the desktop window's;
+          # `server_index.js` is the one `ct host` spawns.
+          postBuild = ''
+            mkdir -p $out/src
+
+            cp -L ${indexJavascript}/bin/server_index.js $out/src/
+            ln -sf ${node-modules-derivation.out}/bin/node_modules $out/node_modules
+            cp -L ${uiJavascript}/bin/ui.js $out/
+
+            # COPIED, so this join does not reference `codetracer-electron`.
+            # See the note beside `paths`.
+            cp -L ${codetracer-electron}/src/helpers.js $out/src/helpers.js
+            cp -L ${codetracer-electron}/src/helpers.js $out/helpers.js
+            mkdir -p $out/frontend/styles $out/public $out/views
+            cp -Lr ${codetracer-electron}/styles/. $out/frontend/styles/
+            cp -Lr ${codetracer-electron}/public/. $out/public/
+            cp -Lr ${codetracer-electron}/views/. $out/views/ 2>/dev/null || true
+            chmod -R u+w $out/public $out/views $out/frontend
+          '';
+        };
+
         runtimeDeps = pkgs.symlinkJoin {
           name = "runtime-deps";
 
@@ -1320,7 +1438,7 @@
 
             ln -sf ${codetracer-electron.out}/src/helpers.js $out/src/helpers.js
 
-            # The Karax-compiled renderer (ui.js) and CSS are loaded relative
+            # The compiled renderer (ui.js) and CSS are loaded relative
             # to CODETRACER_PREFIX by the Electron renderer process via index.html.
             # ui.js uses require('./helpers') so helpers.js must also be at the root.
             cp -L ${uiJavascript}/bin/ui.js $out/
@@ -1627,7 +1745,7 @@
             # flake inputs are the only available source layout.
             export RUNQUOTA_SRC="${inputs.runquota}"
             export CODETRACER_TRACE_FORMAT_NIM_SRC="${inputs.codetracer-trace-format-nim}/src"
-            export CODETRACER_RESULTS_SRC="$PWD/libs/nim-stew/stew"
+            export CODETRACER_RESULTS_SRC="${inputs.nim-results}"
             export IO_MON_SRC="${inputs.io-mon}/src"
             export NIM_STACKABLE_HOOKS_SRC="${inputs.nim-stackable-hooks}/src"
 
@@ -1916,6 +2034,133 @@
             appimageChannelPkgs = inputs.appimage-channel.legacyPackages.${system};
           in
           appimageChannelPkgs.callPackage ./codetracer-appimage { };
+
+        # ------------------------------------------------------------------
+        # WD2: `ct host` re-pointed at the hosting closure.
+        #
+        # Not a second build of the product — the SAME `codetracer` package,
+        # with one environment variable changed. `postFixup` there sets
+        # `CODETRACER_PREFIX` with `--set`, which overrides whatever the
+        # container's environment says, so an image cannot redirect the prefix
+        # by declaring `Env`. It has to be rewrapped, and rewrapping is all
+        # this does.
+        codetracer-host = pkgs.stdenv.mkDerivation {
+          name = "codetracer-host";
+          dontUnpack = true;
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          # COPIED, NOT SYMLINKED, and the closure is the whole reason.
+          #
+          # Symlinking `${codetracer}` makes this derivation REFERENCE it, and
+          # `codetracer` references `runtimeDeps` — so the fat prefix this
+          # milestone exists to drop comes back through the side door.
+          # Measured: with symlinks, `codetracer-host`'s closure was **4.0 GiB**
+          # while `hostingDeps`' own was 1.9 GiB, and the image carried
+          # `binutils-wrapper` and `audit-tmpdir.sh`.
+          #
+          # `du` on the symlinkJoin said 529 MB and that number was worthless:
+          # it measures what the links POINT AT, not the transitive closure.
+          # `nix path-info -S` is the metric.
+          #
+          # Exactly ONE file carries the reference — `bin/ct`, the wrapper
+          # script `postFixup` wrote, whose `--set CODETRACER_PREFIX` names
+          # `runtimeDeps` literally. The `.ct-wrapped` ELF does not, and
+          # neither do `server_index.js`, `index.js` or `ui.js`; that was
+          # measured with `grep -a` over the built package rather than assumed.
+          # So copying everything and replacing that one file is enough.
+          installPhase = ''
+            mkdir -p $out/bin
+            # Everything the ENTRYPOINT context resolves by
+            # `getAppDir().parentDir` has to sit beside `bin/`: `hostCommand`
+            # spawns `$out/server_index.js`, and `ct` reads `$out/config`,
+            # `$out/views` and the rest by the same rule.
+            cp -a ${codetracer}/. $out/
+            chmod -R u+w $out
+            rm -f $out/bin/ct
+            # THE LIBRARY PATH IS NOT OPTIONAL, and dropping it is how this
+            # package shipped a `ct` that could not start.
+            #
+            # `.ct-wrapped` `dlopen`s openssl and friends BY SONAME — the
+            # desktop `ct` wrapper carries exactly this list for that reason
+            # (`postFixup`, a few hundred lines up). Re-making the wrapper from
+            # scratch to repoint `CODETRACER_PREFIX` silently dropped it, and
+            # the symptom is only visible when the binary actually RUNS:
+            #
+            #   could not load: libcrypto.so(.3|.1.1|...)
+            #
+            # Measured inside a container launched from the published image,
+            # 2026-10-01. Everything upstream of that was green — the package
+            # built, the image built, the publication imported and the substrate
+            # RESOLVED it — because nothing in that chain starts `ct`.
+            #
+            # The comment is HERE and not among the flags: these are
+            # backslash-continued lines, so a `#` between them is an argument
+            # to `makeWrapper` rather than a comment.
+            makeWrapper $out/bin/.ct-wrapped $out/bin/ct \
+              --prefix PATH : $out/bin:${hostingDeps}/bin \
+              --prefix LD_LIBRARY_PATH : ${
+                pkgs.lib.makeLibraryPath [
+                  pkgs.openssl
+                  pkgs.sqlite
+                  pkgs.pcre
+                  pkgs.glib
+                  pkgs.libzip
+                  stdenv.cc.cc.lib
+                ]
+              } \
+              --set CODETRACER_PREFIX ${hostingDeps}
+          '';
+          meta.mainProgram = "ct";
+          meta.description =
+            "codetracer with CODETRACER_PREFIX pointed at the hosting "
+            + "closure — the replay path and the served bundle, without "
+            + "Electron, Ruby, noir, wazero or ctags";
+        };
+
+        codetracer-host-image = pkgs.dockerTools.buildLayeredImage {
+          name = "codetracer-host";
+          tag = "latest";
+          # `contents` rather than a hand-built rootfs: the layered builder
+          # already computes the closure, and the closure is the point —
+          # §5 of the substrate spec makes the runtime contract an image
+          # reference, and what is IN it is this product's business.
+          contents = [
+            codetracer-host
+            pkgs.bashInteractive
+            pkgs.coreutils
+            pkgs.cacert
+            # THE TWO THE INCUS FORM NEEDS, and they are here rather than in
+            # the converter because a closure is the image's to declare.
+            #
+            # An OCI runtime starts `Entrypoint` and hands the container a
+            # configured network. An Incus container boots `/sbin/init` and
+            # gets an interface with NO address — a managed bridge hands those
+            # out over DHCP to a client INSIDE the container (D-S12, and
+            # `isonim-platform/session/src/image.nim` carries the same pair for
+            # the same reason). `ci/publish-host-image.sh` writes the init; it
+            # cannot conjure the binaries, so they travel with the image and
+            # both forms stay startable in their own runtime.
+            pkgs.iproute2
+            pkgs.dhcpcd
+          ];
+          config = {
+            # `--bind 0.0.0.0` is the EXPLICIT choice WD1a's loopback default
+            # exists to force, and inside a container it is the right one: the
+            # container is its own network namespace, so binding its own
+            # loopback would make the server unreachable by the substrate that
+            # allocated it. D-S12 is what gives it an interface at all.
+            Entrypoint = [
+              "/bin/ct"
+              "host"
+              "--bind"
+              "0.0.0.0"
+            ];
+            Env = [
+              "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+              "PATH=/bin"
+            ];
+            WorkingDir = "/workspace";
+          };
+        };
 
         default = codetracer;
       };

@@ -53,15 +53,15 @@
 ##
 ## ## The label rule, stated once
 ##
-## §3.1's Compact drawing shows `[Variables] Timeline Tracepoints`: the active
-## tab is bracketed and the inactive ones are space-padded, so EVERY label is
+## §3.1's Compact drawing showed `[Variables] Timeline Tracepoints`; since
+## PLAT-47 every tab, active or not, is space-padded (the active one is styled,
+## not bracketed — see `ActiveTabOpen`), so EVERY label is
 ## `title.len + 2` cells wide whichever one is active and the strip does not
 ## reflow when a tab is activated. One space separates neighbouring labels.
 ## That constancy is not cosmetic — it is what makes a drop caret computed on
 ## one frame land on the same column on the next.
 
 import ../views/header
-import ../views/styled_row
 
 type
   TabSpan* = object
@@ -77,25 +77,28 @@ type
       ## `textCells` of the label, including its two framing cells.
 
 const
-  PaneRuleGlyph* = "─"
-    ## What fills the rest of a title or tab row. One cell wide (U+2500), so
-    ## the row's cell count is its rune count. CTUI-3 declared this in
-    ## `app/views/shell.nim`; it moved here with `tabRow`, and `shell.nim`
-    ## re-exports it so `app/views/borders.nim`'s comment and every existing
-    ## reference still resolve.
-
   TabGapCells* = 1
     ## One cell between neighbouring labels. Named rather than spelled `" "` at
     ## three sites, because the hit-test has to know which side of the gap a
     ## column falls on and a literal cannot be asked.
 
-  ActiveTabOpen* = "["
-  ActiveTabClose* = "]"
-    ## §3.1's brackets around the active tab.
+  ActiveTabOpen* = " "
+  ActiveTabClose* = " "
+    ## The active tab's framing cells: PADDING, like every other tab's.
+    ##
+    ## §3.1 drew `[brackets]` around the active tab, and PLAT-47 retired them
+    ## (the user, 2026-09-27: "the strip's shape should come from colour and
+    ## weight alone, as the desktop's tab bar does"). What sets the active tab
+    ## apart is its ROLE — `srTabActive`: the active-tab foreground and bold
+    ## on every colour rung, reverse video + bold where colour is unavailable
+    ## (monochrome, and any rung where the two tab roles collapse) — painted
+    ## by the shell over the span `tabSpans` reports. The framing stays two
+    ## cells, so every column a hit-test or a drop caret reads is where it was.
 
 proc tabLabel*(title: string; active: bool): string =
-  ## What tab `i` reads as. Two framing cells in both states — see the module
-  ## header on why an active tab must not be wider than an inactive one.
+  ## What tab `i` reads as: its title padded by one cell on each side, in
+  ## both states — see the module header on why an active tab must not be
+  ## wider than an inactive one.
   if active: ActiveTabOpen & title & ActiveTabClose else: " " & title & " "
 
 proc tabSpans*(tabs: seq[string]; active: int): seq[TabSpan] =
@@ -153,7 +156,7 @@ proc tabSlotCaret*(tabs: seq[string]; active, slot: int): int =
   spans[slot].startCol
 
 proc tabRow*(tabs: seq[string]; active, width: int): string =
-  ## `[Variables] Timeline Tracepoints ─────` — a stack's first row.
+  ## ` Variables   Timeline   Tracepoints ` — a stack's first row.
   ##
   ## CTUI-3 wrote this in `app/views/shell.nim` and PLAT-6 moved it here beside
   ## `tabSpans` — the table the hit-test reads. **IT IS ASSEMBLED FROM THAT
@@ -171,9 +174,12 @@ proc tabRow*(tabs: seq[string]; active, width: int): string =
   ## CTUI-3's goldens and `tests/real_terminal/test_real_shell_geometry.nim`
   ## are what hold that to be true rather than this sentence.
   ##
-  ## The active tab is bracketed, which is exactly what §3.1's Compact drawing
-  ## shows. This row is the ONLY on-screen consequence of `LayoutNode.activate`,
-  ## so `test_layout_profiles.nim` asserts it moves when `activate` is called.
+  ## The active tab is NOT marked in this text (PLAT-47: the desktop's strip
+  ## has no brackets and no rule; a tab is told apart by colour and weight).
+  ## The painter styles `span.index == active` with `srTabActive`
+  ## (`views/shell.paintTabRow`), which is the on-screen consequence of
+  ## `LayoutNode.activate` that `test_layout_profiles.nim` and
+  ## `test_layout_binding.nim` assert moves when `activate` is called.
   if width <= 0:
     return ""
   var line = ""
@@ -184,9 +190,7 @@ proc tabRow*(tabs: seq[string]; active, width: int): string =
       inc cursor
     line.add tabLabel(tabs[span.index], span.index == active)
     cursor = span.startCol + span.width
-  if textCells(line) + 1 <= width:
-    line.add " "
-    # `repeatGlyph` rather than `while textCells(line) < width: line.add …` —
-    # see `styled_row.repeatGlyph` for why the obvious spelling is quadratic.
-    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
+  # NO RULE THROUGH THE STRIP (PLAT-47): the rest of the row is the strip's
+  # own surface, blank — the strip is a run of cells on the tab-bar surface,
+  # not a line with labels on it. `fitCells` pads with spaces.
   fitCells(line, width)

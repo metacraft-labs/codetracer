@@ -8,6 +8,7 @@ import
   ../ct_test/ct_test,
   codetracerconf, confutils,
   review_cli,
+  trace/record_child_argv,
   version
 
 # M4: Inline library path setup (replaces ct_wrapper.nim + ct_paths.json).
@@ -215,11 +216,21 @@ try:
   # it in any command that also declares flags (see the note on `recordArgs`
   # in codetracerconf.nim).  So POSIX `--` is honoured here instead, before
   # confutils sees argv -- the same interception `ct-complete` above uses for
-  # the same reason.  Everything left of the first `--` is ct's; everything
-  # right of it is the child's, verbatim.
+  # the same reason.  Everything right of the first `--` is the child's,
+  # verbatim.  Left of it is ct's -- and possibly the program itself:
+  #
+  #   ct record -- prog a b     the program is the first word after `--`;
+  #   ct record prog -- a b     the program was named before `--`, and
+  #                             everything after it is its arguments.
+  #
+  # Until 2026-10-01 the second form took `a` as the program and dropped
+  # `prog`.  Which form a line is cannot be told from the tokens alone (a ct
+  # flag may take a value), so confutils decides: the placeholder is
+  # appended as the next positional, and lands in `recordProgram` exactly
+  # when no program was named before `--`.
   const RecordChildProgramPlaceholder = "\0ct-record-child-program"
-  var childProgram = ""
   var childArgs: seq[string] = @[]
+  var childAfterSeparator = false
   # `ctArgv` is what confutils parses.  It defaults to the real argv so the
   # no-`--` path behaves exactly as before; only a `record ... -- ...` line
   # trims it.  (`cmdLine` defaults to `commandLineParams()`, so it must never
@@ -236,15 +247,14 @@ try:
     if sep >= 0 and ctArgv.len > 0 and ctArgv[0] == "record":
       let rest = ctArgv[sep + 1 .. ^1]
       ctArgv = ctArgv[0 ..< sep]
-      if rest.len > 0:
-        childProgram = rest[0]
-        childArgs = rest[1 .. ^1]
-        # `recordProgram` is a required argument, and it lives to the RIGHT of
-        # `--` where confutils can no longer see it.  Stand in a placeholder
-        # so the parse succeeds, then overwrite it below with the real name.
-        # A placeholder rather than `childProgram` itself: a program whose
-        # name begins with `-` would be read back as a flag.
-        ctArgv.add(RecordChildProgramPlaceholder)
+      childAfterSeparator = true
+      childArgs = rest
+      # `recordProgram` is a required argument, and it may live to the RIGHT
+      # of `--` where confutils can no longer see it.  Stand in a placeholder
+      # so the parse succeeds; below it says which form the line was.  A
+      # placeholder rather than the program's name: a name beginning with `-`
+      # would be read back as a flag.
+      ctArgv.add(RecordChildProgramPlaceholder)
 
   # TODO: When confutils gets updated with nim 2 make sure to improve on the copyright banner, as newer versions
   # support having prefix and postfix banners. The banner here is only a prefix banner
@@ -254,11 +264,14 @@ try:
     copyrightBanner = "CodeTracer - the user-friendly time-travelling debugger",
     cmdLine = ctArgv
   )
-  if childProgram.len > 0:
-    # The program named after `--` wins over anything confutils parsed, and
-    # its argv is passed through untouched.
-    conf.recordProgram = childProgram
-    conf.recordArgs = childArgs
+  if childAfterSeparator:
+    let split = resolveRecordChild(conf.recordProgram, conf.recordArgs,
+                                   childArgs, RecordChildProgramPlaceholder)
+    if split.error.len > 0:
+      stderr.writeLine(split.error)
+      quit(1)
+    conf.recordProgram = split.program
+    conf.recordArgs = split.args
   customValidateConfig(conf)
   runInitial(conf, uiSelectionValue)
 except CatchableError as ex:

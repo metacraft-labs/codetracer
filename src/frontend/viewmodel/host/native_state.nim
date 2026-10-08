@@ -45,3 +45,20 @@ proc writeStaged*(path, text: string): string =
     except CatchableError:
       discard
     path & ": " & e.msg
+
+const TerminalViewsFileName* = "terminal-views.json"
+  ## PLAT-52: which view (lines / screen) the user chose for each recording's
+  ## Terminal Output pane (Terminal-Output-Pane.md §3: "remembers the user's
+  ## choice per recording"), beside the layout and keymap preferences.
+
+proc terminalViewsPath*(): string =
+  nativeStateRoot() / TerminalViewsFileName
+
+proc readTerminalViews*(): string =
+  ## The remembered choices' JSON, "" when there are none or the file cannot
+  ## be read (a fresh choice then starts the file again).
+  let path = terminalViewsPath()
+  try:
+    if fileExists(path): readFile(path) else: ""
+  except CatchableError:
+    ""

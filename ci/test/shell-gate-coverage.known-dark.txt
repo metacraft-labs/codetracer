@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 43
+# RECORDED-DARK-CEILING: 48
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -581,7 +581,24 @@ ci/test/plat38-keystroke.sh
 # (`plat40-capture-window`, `plat41-capture-window`, `plat42-frame-budget`,
 # `plat42-frames-record`, `plat42-surfaces-record`, `plat42-surfaces-window`,
 # `plat44-edit-window`, `plat44-sequences-window`, `plat44-sequences-record`);
-# what is missing is a runner that can execute them.
+# what was missing is a runner that can execute them.
+#
+# **THE TWO CAPABILITIES NOW EXIST IN CI** (PLAT-48's review, 2026-09-30): the
+# `gpui-window-captures` job (`just gpui-window-captures`,
+# `ci/test/gpui-window-captures.sh`) builds isonim-gpui's windowed shim and
+# virtual pointer in isonim-gpui's own dev shell, builds the windowed
+# front-end against it, and runs captures on a headless sway on the
+# `[self-hosted, linux, x64]` label isonim-gpui's own headless-sway job is
+# green on. It re-takes and asserts PLAT-45's arrangement window, PLAT-47's
+# and PLAT-48's window records, whose lines were deleted when it was wired
+# (PLAT-45's `plat45-arrangement-window.sh`, PLAT-47's two scripts, PLAT-48's
+# two, and the capture library they share; 49 -> 43). The PLAT-40/41/42/44
+# captures below are NOT yet steps of that job — each needs its own record
+# step, fixtures and asserting suite
+# added to `gpui-window-captures.sh` — and are the open remainder of
+# codetracer-specs `issues/2026-09-26-window-capture-gates-recorded-blocked-
+# although-ci-can-run-them.md`. Each goes, and the ceiling drops, in the
+# commit that adds it to that job.
 #
 # THE GATES THAT READ THESE CAPTURES ARE *NOT* DARK, which is the design the
 # PLAT-37 entry describes: `ci/test/editor-model-case-floor.sh` PLAT-40
@@ -592,15 +609,14 @@ ci/test/plat38-keystroke.sh
 # `just editor-model-case-floors` runs them in the `viewmodel-tests` job. What
 # is dark is the RE-TAKING of the measurements, not the checking of them.
 #
-# `ci/lib/gpui-window-capture.sh` is the capture library the PLAT-40 and
-# PLAT-41 window scripts source. It is not a gate; it is here because every
-# script that reaches it is dark, and it becomes reachable the day they do.
+# `ci/lib/gpui-window-capture.sh`, the capture library the PLAT-40, PLAT-41
+# and PLAT-45 window scripts source, became reachable with PLAT-45's and left
+# this list with it.
 #
 # WHAT WOULD MAKE THEM GREEN: a CI job that runs `just build-gpui` against a
 # built `isonim-gpui` shim, and then — once PLAT-37's `just plat37-capture`
 # has been measured on an `eph-linux-x64` runner — one step per recipe above.
 # Each line is deleted, and the ceiling drops, in the commit that wires it.
-ci/lib/gpui-window-capture.sh
 ci/test/plat40-panes-window.sh
 ci/test/plat41-panes-window.sh
 ci/test/plat42-frame-budget.sh
@@ -610,6 +626,13 @@ ci/test/plat42-surfaces-window.sh
 ci/test/plat44-edit-window.sh
 ci/test/plat44_sequences_window_record.py
 ci/test/plat44-sequences-window.sh
+# PLAT-47 part B: `scripts/plat47-vcs-fixture.sh` builds the git repository
+# with a modified, an added and an untracked file that the VCS tests read; it
+# is run by Nim suites (`test_plat47_vcs_pane.nim`, `test_plat47_gpui_parity
+# .nim`), the Electron capture and the window driver
+# (`ci/test/plat47_gpui_window.py`, a step of `gpui-window-captures` since
+# PLAT-48's review), none of which this scan follows.
+scripts/plat47-vcs-fixture.sh
 
 # ---------------------------------------------------------------------------
 # HCR H6 — THE LAUNCH-UNDER-HCR ARMS. **BLOCKED on a sibling and two build
@@ -631,3 +654,110 @@ ci/test/plat44-sequences-window.sh
 # pinned revision, builds `gdext-hcr` and the H5 driver, and runs `just
 # test-hcr-launch-arms` in a lane that already has the prebuilt desktop app.
 scripts/hcr6-launch-arms.sh
+
+# ---------------------------------------------------------------------------
+# PLAT-35 — THE HEADLESS GPUI PIXEL CAPTURE. **BLOCKED on a shim BUILD
+# CONFIGURATION an existing job does not produce, not on a capability.**
+# ---------------------------------------------------------------------------
+# WHAT IS MISSING, re-measured 2026-10-02 at `6fa0bdd89`: a build of
+# `isonim-gpui` with **`--features gpui-headless`**.
+# `ci/test/plat35-gpui-capture.sh` runs `codetracer-gpui --pixels-out` through
+# `gpui_render_to_pixels`, which that feature and no other compiles in
+# (`ci/test/plat37-window-frame.sh`'s own words: *"A THIRD SHIM IS BUILT AND
+# IS NOT A SUBSTITUTE FOR EITHER"*).
+#
+# **THE EARLIER WORDING OF THIS ENTRY WAS FALSE AND IS CORRECTED HERE RATHER
+# THAN QUIETLY REPLACED**, because the way it went wrong is the way this file
+# goes stale. It read: *"no job in this repository builds an `isonim-gpui`
+# shim of any kind … `grep -rn 'plat37-shims\|gpui-headless\|gpui_nim_shim'`
+# over `.github/workflows/` finds NOTHING"*. The grep STILL finds nothing —
+# re-run at `6fa0bdd89`, zero hits — and the conclusion it was offered for is
+# nonetheless wrong: since PLAT-48's review the `gpui-window-captures` job
+# (`.github/workflows/codetracer.yml`, `[self-hosted, linux, x64]`) builds
+# isonim-gpui's shim on every run, and it does so from
+# `ci/test/gpui-window-captures.sh` — a shell script the workflow YAML only
+# names by its `just` recipe. A grep scoped to the YAML could not see it. The
+# measurement was green, reproducible, and about the wrong files.
+#
+# SO THE BLOCKER IS NOW SMALLER AND IS NAMED EXACTLY:
+#   * a job DOES clone `isonim-gpui` at `flake.lock`'s pin and build its shim
+#     in the sibling's own dev shell — `cargo build --features gpui-backend`,
+#     `ci/test/gpui-window-captures.sh`;
+#   * that is the WINDOWED feature. This lane needs the HEADLESS one, which is
+#     a third, separately-built configuration, and nothing builds it;
+#   * `just test-gpui-shell` — the whole `gpui-shell` Nim lane — is still
+#     called by no workflow (re-measured 2026-10-02, zero hits).
+#
+# **THIS IS BLOCKED, NOT UNWIRED**, and the distinction is the one this file
+# insists on. There IS a `just` recipe — `just plat35-capture-gpui` — and it
+# is not missing; what is missing is a job that has a headless shim. It
+# differs from the Wayland entries above in needing NO compositor and no
+# screen-capture entitlement (that is the whole point of the headless path,
+# and it is why this is the first GPUI pixel lane that runs on macOS), so it
+# is the CHEAPEST of the group to wire and is recorded separately rather than
+# folded into theirs.
+#
+# WHAT WOULD MAKE IT GREEN, concretely, so this entry is trackable and dies
+# when the blocker lifts: one more `cargo build --features gpui-headless` into
+# its own `CARGO_TARGET_DIR` inside `gpui-window-captures`' existing
+# isonim-gpui step, and one step calling `just plat35-capture-gpui` against
+# it. The sibling checkout, the pin, the dev shell and the runner are already
+# that job's. Unlike PLAT-37's entry this needs no unmeasured runner
+# capability — no `/dev/dri`, no `sway`, no `wl_seat`.
+#
+# OWNER: Zahary Karadjov <zahary@metacraft-labs.com>
+# REVIEW-BY: 2026-12-22
+# DECISION (2026-10-02, re-taken when PLAT-35 was rebased onto `6fa0bdd89`):
+# STILL RECORDED, NOT WIRED — but on a corrected and much narrower blocker,
+# and the ceiling above is 44 rather than the 48 the pre-rebase diff recorded,
+# because upstream WIRED four of this list's entries away in the same 142
+# commits (47 - 4 + 1). Wiring this one is a workflow change that cannot be
+# graded on a workstation, so it is not attempted in the rebase; the step it
+# needs is spelled out above so that the next pass touching that job can add
+# it and delete this line.
+#
+# THE GATE THAT READS THIS CAPTURE IS NOT DARK, which is the same design
+# PLAT-37's entry describes: the frames are censused by the lane itself and
+# the LEDGER written beside them
+# (`src/tests/visual/tier4-gpui-readings.json`) is graded by
+# `src/frontend/gpui/tests/test_plat35_ledger_integrity.nim`, which
+# `test-lane-coverage.sh` confirms is collected by a lane. So what is dark
+# here is the RE-TAKING of the capture, not the checking of what it produced.
+ci/test/plat35-gpui-capture.sh
+
+# =============================================================================
+# BLOCKED ON THREE CI CAPABILITIES — 2026-10-05, CEILING 44 -> 48
+# =============================================================================
+# Four gates `shell-gate-coverage.sh` reported as reachable from nothing on
+# `agents`. Each was checked against the runner fleet
+# (infra/docs/CI-Runner-Fleet-Status.md: `eph-linux-x64*` containers, the
+# `-nested` class adding nested Docker and KVM, no Incus daemon) and against
+# every workflow here: none of them can be wired to a job that would find its
+# input, so each is BLOCKED, not unwired, and names what would make it green.
+# Each blocker is a codetracer-specs issue of 2026-10-05.
+
+# Needs a reachable Incus daemon with a managed bridge, and `ct host`'s image
+# published into it (`ci/publish-host-image.sh`). No runner class provides an
+# Incus daemon to a job (the nested class gives Docker and KVM, not Incus).
+# Green when a job runs on a runner with Incus: wire `bash
+# ci/test/host-image-serves-in-a-container.sh` there and delete this line.
+# Issue: 2026-10-05-ct-host-container-gate-has-no-incus-runner.
+ci/test/host-image-serves-in-a-container.sh
+
+# Need a running local Zitadel issuer (isonim-platform's local stack, its dev
+# CA trusted) that no CI job provisions; the gate exits 2 with the remedy when
+# the stack is absent, so wiring it as-is would be a lane that never grades.
+# `just test-identity-live-device-grant` is the recipe. The `.mjs` is its
+# browser leg and lights up with it. Green when a job brings the stack up.
+# Issue: 2026-10-05-identity-live-device-grant-has-no-issuer-in-ci.
+ci/test/identity-live-device-grant.sh
+ci/test/identity-device-approve.mjs
+
+# A library: its only consumers are the WebAssembly boundary-recording fixture
+# checks (`src/db-backend/tests/fixtures/wasm-*/verify.sh`, run by `just
+# verify-wasm-recordings`), which need the wazero replayer built from the
+# `codetracer-wasm-recorder` sibling. No workflow clones or builds that
+# sibling. Green when a job does and runs `just verify-wasm-recordings`; the
+# both-directions rule then deletes this line.
+# Issue: 2026-10-05-wasm-recording-fixture-checks-have-no-wazero-in-ci.
+ci/lib/recording-dump.sh

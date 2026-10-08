@@ -21,10 +21,11 @@
 ##   1. **A vendored tree-sitter grammar** — `.nim`, `.ak`, `.cairo`, `.cdc`,
 ##      `.circom`, `.leo`, `.masm`, `.move`, `.sw`, `.tolk`. Parsed, and the
 ##      leaves' node types mapped onto `TokenClass`.
-##   2. **No grammar, but a lexer this module knows** — `.py`, `.rs`, `.nr`,
-##      `.js`, `.ts`, `.c`, `.h`, `.cpp`, `.go`, `.rb`, `.sh`, `.json`, `.toml`,
-##      `.yaml`. This is the "lexical fallback": strings, numbers, comments and
-##      the language's own keyword set, found by scanning the line. It matters
+##   2. **No grammar, but a tokenizer of the desktop's** — `.py`, `.rs`,
+##      `.nr`, `.c`, `.h`, `.cpp`, `.go`, `.js`, `.ts`, `.java`, `.rb`, `.sh`,
+##      `.json`, `.yaml`. This is the "lexical fallback", and since PLAT-47 it
+##      is not an approximation: each language is lexed by the Monaco
+##      tokenizer the desktop colours it with (Tier 2 below). It matters
 ##      because **neither fixture in this campaign's corpus has a grammar** —
 ##      `calc` is Python and `noir_space_ship` is Noir — so without it the one
 ##      pane CTUI-5 delivers would be unhighlighted on every trace the campaign
@@ -70,24 +71,21 @@ import std/[strutils, tables, unicode]
 
 import isonim_tui
 
-type
-  TokenClass* = enum
-    ## The palette a terminal source pane can actually distinguish.
-    ##
-    ## Deliberately small. §3.3.2 names "keywords, types, strings, comments,
-    ## identifiers"; operators and punctuation are added because every grammar
-    ## emits them as anonymous leaves and leaving them `tcPlain` makes a line
-    ## of code read as one undifferentiated run.
-    tcPlain
-    tcKeyword
-    tcType
-    tcString
-    tcNumber
-    tcComment
-    tcIdentifier
-    tcOperator
-    tcPunctuation
+import ./token_class
+import ./monarch
+import ./json_tokens
+import ./lexical
+import ../theme/editor_theme
 
+export lexical
+
+# `TokenClass` lives in `token_class.nim` (PLAT-47), a module with no imports,
+# because the theme (`app/theme/editor_theme.nim`) maps each class to the
+# desktop's Monaco token scope and must not pull the tree-sitter runtime in
+# with it. Re-exported, so every caller that named it here still does.
+export token_class
+
+type
   SyntaxSpan* = object
     ## One classified run of a single line, in CELL columns relative to the
     ## line's first character.
@@ -99,31 +97,6 @@ type
     startCell*: int
     endCell*: int    ## exclusive
     class*: TokenClass
-
-  GrammarId* = enum
-    ## Which of the ten vendored grammars a path selects, or neither of the two
-    ## fallbacks.
-    giNone
-    giNim
-    giAiken
-    giCairo
-    giCadence
-    giCircom
-    giLeo
-    giMasm
-    giMoveOnAptos
-    giSway
-    giTolk
-
-  LexerId* = enum
-    ## Which lexical fallback a path selects when no grammar claims it.
-    lxNone
-    lxPython
-    lxRustLike     ## Rust, Noir — `//`, `/* */`, the same literal shapes
-    lxCLike        ## C, C++, Go, JavaScript, TypeScript
-    lxRuby
-    lxShell
-    lxData         ## JSON, TOML, YAML: strings, numbers, `#` comments
 
   HighlightMode* = enum
     ## How a file's spans were produced. Reported so a test — and a
@@ -152,6 +125,9 @@ type
     firstLine*: int
     textLen*: int
     textHash*: uint32
+    entryContext*: string
+      ## The tokenizer state the window starts in (PLAT-47 B4): the same text
+      ## entered from a different state is coloured differently.
 
   HighlighterCache* = ref object
     ## `(path, generation, digest, window)` -> spans, BOUNDED.
@@ -196,7 +172,7 @@ proc tree_sitter_move_on_aptos(): ptr TSLanguage {.importc.}
 proc tree_sitter_sway(): ptr TSLanguage {.importc.}
 proc tree_sitter_tolk(): ptr TSLanguage {.importc.}
 
-proc languageFor(grammar: GrammarId): Language =
+proc languageFor*(grammar: GrammarId): Language =
   ## The `TSLanguage*` handle for a grammar. `giNone` never reaches here — the
   ## caller branches on the mode first — and a `doAssert` says so rather than
   ## returning a null handle that `ts_parser_set_language` would refuse with an
@@ -215,70 +191,6 @@ proc languageFor(grammar: GrammarId): Language =
   of giMoveOnAptos: Language(raw: tree_sitter_move_on_aptos())
   of giSway: Language(raw: tree_sitter_sway())
   of giTolk: Language(raw: tree_sitter_tolk())
-
-const GrammarExtensions*: seq[(string, GrammarId)] = @[
-  (".nim", giNim), (".nims", giNim), (".nimble", giNim),
-  (".ak", giAiken),
-  (".cairo", giCairo),
-  (".cdc", giCadence),
-  (".circom", giCircom),
-  (".leo", giLeo),
-  (".masm", giMasm),
-  (".move", giMoveOnAptos),
-  (".sw", giSway),
-  (".tolk", giTolk)]
-  ## The ten vendored grammars, by the extension each language uses. A `seq` of
-  ## pairs rather than a `case`, so `test_syntax_highlighting_ansi.nim` can
-  ## assert the COUNT of grammars reached — ten, which is the number
-  ## `scripts/build-tui-grammars.sh` archives — instead of testing whichever
-  ## ones somebody remembered.
-
-const LexerExtensions*: seq[(string, LexerId)] = @[
-  (".py", lxPython), (".pyi", lxPython),
-  (".rs", lxRustLike), (".nr", lxRustLike),
-  (".c", lxCLike), (".h", lxCLike), (".cpp", lxCLike), (".cc", lxCLike),
-  (".hpp", lxCLike), (".go", lxCLike), (".js", lxCLike), (".ts", lxCLike),
-  (".java", lxCLike),
-  (".rb", lxRuby),
-  (".sh", lxShell), (".bash", lxShell), (".zsh", lxShell),
-  (".json", lxData), (".toml", lxData), (".yaml", lxData), (".yml", lxData)]
-
-func lowerExtension(path: string): string =
-  ## The path's extension, lowercased, INCLUDING the dot; "" when it has none.
-  ##
-  ## Split on both separators, because a recorded path is whatever a recorder
-  ## interned and a Windows recording carries backslashes on a Linux replay
-  ## host — the same reason `ct/trace/ctfs_sources.safePayloadPath` splits on
-  ## both.
-  var base = path
-  for i in countdown(base.high, 0):
-    if base[i] == '/' or base[i] == '\\':
-      base = base[i + 1 .. ^1]
-      break
-  let dot = base.rfind('.')
-  if dot < 0 or dot == base.high:
-    return ""
-  base[dot .. ^1].toLowerAscii()
-
-proc grammarForPath*(path: string): GrammarId =
-  ## Which vendored grammar claims `path`, or `giNone`.
-  let ext = lowerExtension(path)
-  if ext.len == 0:
-    return giNone
-  for (candidate, grammar) in GrammarExtensions:
-    if candidate == ext:
-      return grammar
-  giNone
-
-proc lexerForPath*(path: string): LexerId =
-  ## Which lexical fallback claims `path`, or `lxNone`.
-  let ext = lowerExtension(path)
-  if ext.len == 0:
-    return lxNone
-  for (candidate, lexer) in LexerExtensions:
-    if candidate == ext:
-      return lexer
-  lxNone
 
 proc modeForPath*(path: string): HighlightMode =
   ## Which of the three tiers in this module's header `path` lands in.
@@ -489,160 +401,42 @@ proc treeSitterSpans(grammar: GrammarId; lines: seq[string]):
     result[i] = mergeSpans(perLine[i])
 
 # ---------------------------------------------------------------------------
-# Tier 2: the lexical fallback
+# Tier 2: the desktop's own tokenizers (`lexical.nim`), as cell spans
 # ---------------------------------------------------------------------------
 
-const
-  PythonKeywords = ["False", "None", "True", "and", "as", "assert", "async",
-                    "await", "break", "class", "continue", "def", "del",
-                    "elif", "else", "except", "finally", "for", "from",
-                    "global", "if", "import", "in", "is", "lambda", "nonlocal",
-                    "not", "or", "pass", "raise", "return", "try", "while",
-                    "with", "yield"]
-  RustLikeKeywords = ["as", "assert", "break", "comptime", "const",
-                      "constrain", "continue", "crate", "dep", "else", "enum",
-                      "extern", "false", "fn", "for", "global", "if", "impl",
-                      "in", "let", "loop", "match", "mod", "move", "mut",
-                      "pub", "ref", "return", "self", "static", "struct",
-                      "super", "trait", "true", "type", "unconstrained",
-                      "unsafe", "use", "where", "while"]
-  CLikeKeywords = ["break", "case", "char", "class", "const", "continue",
-                   "default", "delete", "do", "double", "else", "enum",
-                   "export", "extern", "false", "float", "for", "func",
-                   "function", "go", "if", "import", "int", "interface", "let",
-                   "long", "new", "package", "private", "public", "return",
-                   "short", "sizeof", "static", "struct", "switch", "this",
-                   "true", "type", "typedef", "union", "unsigned", "var",
-                   "void", "while"]
-  RubyKeywords = ["alias", "and", "begin", "break", "case", "class", "def",
-                  "do", "else", "elsif", "end", "ensure", "false", "for", "if",
-                  "in", "module", "next", "nil", "not", "or", "redo", "rescue",
-                  "retry", "return", "self", "super", "then", "true", "undef",
-                  "unless", "until", "when", "while", "yield"]
-  ShellKeywords = ["case", "do", "done", "elif", "else", "esac", "export",
-                   "fi", "for", "function", "if", "in", "local", "return",
-                   "then", "until", "while"]
-  DataKeywords = ["false", "null", "true"]
-
-func keywordsFor(lexer: LexerId): seq[string] =
-  case lexer
-  of lxNone: @[]
-  of lxPython: @PythonKeywords
-  of lxRustLike: @RustLikeKeywords
-  of lxCLike: @CLikeKeywords
-  of lxRuby: @RubyKeywords
-  of lxShell: @ShellKeywords
-  of lxData: @DataKeywords
-
-func lineCommentMarkers(lexer: LexerId): seq[string] =
-  case lexer
-  of lxNone: @[]
-  of lxPython, lxRuby, lxShell, lxData: @["#"]
-  of lxRustLike, lxCLike: @["//"]
-
-func isIdentStart(c: char): bool = c in {'a'..'z', 'A'..'Z', '_'}
-func isIdentChar(c: char): bool = c in {'a'..'z', 'A'..'Z', '0'..'9', '_'}
-
-proc lexicalSpansForLine(lexer: LexerId; line: string): seq[SyntaxSpan] =
-  ## Classify one line by scanning it.
-  ##
-  ## SINGLE-LINE ONLY, and deliberately: a pane holds a window, so a scanner
-  ## that carried state across lines would produce different colours for the
-  ## same line depending on how far the user had scrolled. A triple-quoted
-  ## Python docstring is therefore coloured as a string on the lines that open
-  ## and close it and as code in between — a visible limitation, written down
-  ## rather than papered over, and the reason the ten grammars exist.
-  result = @[]
-  if lexer == lxNone or line.len == 0:
-    return
-  let keywords = keywordsFor(lexer)
-  let comments = lineCommentMarkers(lexer)
+proc spansOfTokens(line: string; tokens: seq[MonarchToken]): seq[SyntaxSpan] =
   var raw: seq[SyntaxSpan] = @[]
-  var i = 0
-  while i < line.len:
-    var isComment = false
-    for marker in comments:
-      if i + marker.len <= line.len and line[i ..< i + marker.len] == marker:
-        raw.add SyntaxSpan(
-          startCell: cellOffsetAtByte(line, i),
-          endCell: cellOffsetAtByte(line, line.len),
-          class: tcComment)
-        isComment = true
-        break
-    if isComment:
-      break
-    let c = line[i]
-    if c == '"' or c == '\'':
-      let quote = c
-      let start = i
-      inc i
-      while i < line.len:
-        if line[i] == '\\' and i + 1 < line.len:
-          i += 2
-          continue
-        if line[i] == quote:
-          inc i
-          break
-        inc i
-      raw.add SyntaxSpan(
-        startCell: cellOffsetAtByte(line, start),
-        endCell: cellOffsetAtByte(line, i),
-        class: tcString)
+  for i, t in tokens:
+    let stop = if i + 1 < tokens.len: tokens[i + 1].start else: line.len
+    if stop <= t.start:
       continue
-    if c in {'0'..'9'}:
-      let start = i
-      while i < line.len and (line[i] in {'0'..'9', '.', '_'} or
-                              line[i] in {'x', 'X', 'a'..'f', 'A'..'F'}):
-        inc i
-      raw.add SyntaxSpan(
-        startCell: cellOffsetAtByte(line, start),
-        endCell: cellOffsetAtByte(line, i),
-        class: tcNumber)
+    let cls = classForMonacoToken(t.tokenType)
+    if cls == tcPlain:
       continue
-    if isIdentStart(c):
-      let start = i
-      while i < line.len and isIdentChar(line[i]):
-        inc i
-      let word = line[start ..< i]
-      var cls = tcIdentifier
-      for kw in keywords:
-        if kw == word:
-          cls = tcKeyword
-          break
-      if cls == tcIdentifier and word.len > 0 and word[0] in {'A'..'Z'}:
-        # A capitalised identifier is a TYPE in every language this lexer
-        # covers. Not a grammar rule, a convention — and it is what makes the
-        # `tcType` class reachable at all on the two fixtures in this
-        # campaign's corpus, neither of which has a vendored grammar.
-        cls = tcType
-      raw.add SyntaxSpan(
-        startCell: cellOffsetAtByte(line, start),
-        endCell: cellOffsetAtByte(line, i),
-        class: cls)
-      continue
-    let start = i
-    inc i
-    let sym = $c
-    if sym.isIn(PunctuationTokens):
-      raw.add SyntaxSpan(
-        startCell: cellOffsetAtByte(line, start),
-        endCell: cellOffsetAtByte(line, i),
-        class: tcPunctuation)
-    elif sym.isIn(OperatorTokens):
-      raw.add SyntaxSpan(
-        startCell: cellOffsetAtByte(line, start),
-        endCell: cellOffsetAtByte(line, i),
-        class: tcOperator)
-  result = mergeSpans(raw)
+    raw.add SyntaxSpan(startCell: cellOffsetAtByte(line, t.start),
+                       endCell: cellOffsetAtByte(line, min(stop, line.len)),
+                       class: cls)
+  mergeSpans(raw)
+
+proc lexicalLineSpans*(lexer: LexerId; line: string;
+                       context: var string): seq[SyntaxSpan] =
+  ## One line classified as the desktop's Monaco classifies it, starting in
+  ## `context` and leaving `context` as the line leaves it.
+  spansOfTokens(line, monacoLineTokens(lexer, line, context))
 
 # ---------------------------------------------------------------------------
 # The public entry point
 # ---------------------------------------------------------------------------
 
-proc highlightWindow*(path: string; firstLine: int;
-                      lines: seq[string]): FileHighlight =
+proc highlightWindow*(path: string; firstLine: int; lines: seq[string];
+                      entryContext = ""): FileHighlight =
   ## Classify `lines` (line `firstLine` onwards) of `path`. Never raises for a
   ## path this module does not recognise: the answer is `hmNone` and no spans.
+  ##
+  ## `entryContext` is the tokenizer state line `firstLine` starts in
+  ## (`lexerContexts`); "" means the file's initial state, which is right for
+  ## a window that starts at line 1 and the best that can be done for one
+  ## whose provider supplied no context.
   result = FileHighlight(
     mode: modeForPath(path),
     grammar: grammarForPath(path),
@@ -658,8 +452,10 @@ proc highlightWindow*(path: string; firstLine: int;
     result.lines = treeSitterSpans(result.grammar, lines)
   of hmLexical:
     result.lines = newSeq[seq[SyntaxSpan]](lines.len)
+    var context =
+      if entryContext.len > 0: entryContext else: initialContext(result.lexer)
     for i, line in lines:
-      result.lines[i] = lexicalSpansForLine(result.lexer, line)
+      result.lines[i] = lexicalLineSpans(result.lexer, line, context)
 
 proc spansForLine*(h: FileHighlight; line: int): seq[SyntaxSpan] =
   ## The spans of one 1-based line, or none when it is outside the window.
@@ -667,22 +463,11 @@ proc spansForLine*(h: FileHighlight; line: int): seq[SyntaxSpan] =
   if idx < 0 or idx >= h.lines.len: @[]
   else: h.lines[idx]
 
+
 # ---------------------------------------------------------------------------
 # The cache
 # ---------------------------------------------------------------------------
 
-func textChecksum(lines: seq[string]): uint32 =
-  ## A cheap FNV-1a over the window's bytes and its line boundaries.
-  ##
-  ## Not a cryptographic digest and not claimed to be one: its job is to make
-  ## "the window scrolled" a cache MISS, and a scroll changes both the length
-  ## and the content. `sourceDigest` — the identity triple's own field, carried
-  ## in the key beside this — is what distinguishes two BUILDS.
-  result = 2166136261'u32
-  for line in lines:
-    for ch in line:
-      result = (result xor uint32(ord(ch))) * 16777619'u32
-    result = (result xor 10'u32) * 16777619'u32
 
 const MaxCachedWindows* = 16
   ## How many parsed windows a cache keeps.
@@ -698,30 +483,33 @@ proc newHighlighterCache*(): HighlighterCache =
                    order: @[], evictions: 0, parseCount: 0, lookupCount: 0)
 
 proc highlightKey*(path: string; sourceGeneration: int; sourceDigest: string;
-                   firstLine: int; lines: seq[string]): HighlightKey =
+                   firstLine: int; lines: seq[string];
+                   entryContext = ""): HighlightKey =
   var textLen = 0
   for line in lines:
     textLen += line.len + 1
   HighlightKey(path: path, sourceGeneration: sourceGeneration,
                sourceDigest: sourceDigest, firstLine: firstLine,
-               textLen: textLen, textHash: textChecksum(lines))
+               textLen: textLen, textHash: textChecksum(lines),
+               entryContext: entryContext)
 
 proc highlight*(cache: HighlighterCache; path: string; sourceGeneration: int;
                 sourceDigest: string; firstLine: int;
-                lines: seq[string]): FileHighlight =
+                lines: seq[string]; entryContext = ""): FileHighlight =
   ## The cached spans for this window of this revision, parsing only on a miss.
   ##
   ## This is the proc CTUI-5's latency gate is measured through, and
   ## `parseCount` is what makes "measured on the cached path" checkable rather
   ## than asserted.
   if cache.isNil:
-    return highlightWindow(path, firstLine, lines)
+    return highlightWindow(path, firstLine, lines, entryContext)
   inc cache.lookupCount
-  let key = highlightKey(path, sourceGeneration, sourceDigest, firstLine, lines)
+  let key = highlightKey(path, sourceGeneration, sourceDigest, firstLine, lines,
+                         entryContext)
   if cache.entries.hasKey(key):
     return cache.entries[key]
   inc cache.parseCount
-  result = highlightWindow(path, firstLine, lines)
+  result = highlightWindow(path, firstLine, lines, entryContext)
   cache.entries[key] = result
   cache.order.add key
   while cache.order.len > MaxCachedWindows:

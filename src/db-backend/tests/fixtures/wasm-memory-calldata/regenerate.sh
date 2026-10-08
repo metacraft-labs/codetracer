@@ -5,9 +5,9 @@
 # **linear memory is imported** and whose inputs are read out of that
 # memory rather than taken as arguments:
 #
-#   ledger-settle.ct/      the browser recording, including the
-#                          `boundary_state.json` sidecar carrying spec
-#                          §3.3 initial state and §3.4 host mutations
+#   ledger-settle.ct       the browser recording, including the
+#                          host-state records carrying spec §3.3
+#                          initial state and §3.4 host mutations
 #   module/ledger_settle.wasm
 #                          the ORIGINAL, uninstrumented module — what the
 #                          offline replay is driven against (spec §6.1)
@@ -43,7 +43,7 @@ export CODETRACER_WASM_INSTRUMENTER_PATH="$WASM_INSTRUMENTER"
 
 # Where the recording lands. Nothing here is committed any more: the
 # recording and the module it describes are produced together, which is
-# what makes the pairing sound — `boundary_state.json` records the
+# what makes the pairing sound — the recorded host state holds the
 # absolute address `rust-lld` gave `LEDGER`, so a recording and a module
 # from different builds describe different programs. Committing both was
 # an attempt to freeze that pairing; producing them together removes the
@@ -82,8 +82,8 @@ CT_INSTRUMENT_BIN="${CT_INSTRUMENT_BIN:-}"
 if [ -z "$CT_INSTRUMENT_BIN" ]; then
 	CT_INSTRUMENT_BIN="$(newest_executable \
 		"$WASM_INSTRUMENTER/target/release/ct-instrument" \
-		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" \
-		|| CT_INSTRUMENT_BIN=""
+		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" ||
+		CT_INSTRUMENT_BIN=""
 fi
 if [ -z "$CT_INSTRUMENT_BIN" ] && command -v ct-instrument >/dev/null 2>&1; then
 	CT_INSTRUMENT_BIN="$(command -v ct-instrument)"
@@ -97,8 +97,8 @@ if [ -z "$RECORD_WEB_BIN" ]; then
 	RECORD_WEB_BIN="$(newest_executable \
 		"$CODETRACER_ROOT/src/backend-manager/target/release/session-manager" \
 		"$CODETRACER_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" \
-		|| RECORD_WEB_BIN=""
+		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" ||
+		RECORD_WEB_BIN=""
 fi
 if [ -z "$RECORD_WEB_BIN" ]; then
 	missing+=("- session-manager not built (cargo build in $CODETRACER_ROOT/src/backend-manager)")
@@ -223,7 +223,7 @@ RAW_WASM="$FIXTURE_DIR/wasm-src/target/wasm32-unknown-unknown/debug/ledger_settl
 }
 
 # The ORIGINAL module is what the offline replay runs (spec §6.1), and it
-# has to be *this* build: `boundary_state.json` records absolute
+# has to be *this* build: the recorded host state holds absolute
 # linear-memory offsets, so a module compiled by a different toolchain puts
 # `LEDGER` at a different address and the recording no longer describes it
 # (measured: a rebuild diverges at the first host call). It is therefore
@@ -275,18 +275,23 @@ kill -INT "$RECORD_WEB_PID" >/dev/null 2>&1 || true
 wait "$RECORD_WEB_PID" 2>/dev/null || true
 forget_pid "$RECORD_WEB_PID"
 
-if [ ! -d "$RECORD_WEB_OUT/ledger-settle.ct" ]; then
+if [ ! -f "$RECORD_WEB_OUT/ledger-settle.ct" ]; then
 	echo "[regenerate] record-web did not produce ledger-settle.ct" >&2
 	ls -la "$RECORD_WEB_OUT" >&2 || true
 	exit 1
 fi
-cp -R "$RECORD_WEB_OUT/ledger-settle.ct" "$OUT_DIR/ledger-settle.ct"
+cp "$RECORD_WEB_OUT/ledger-settle.ct" "$OUT_DIR/ledger-settle.ct"
 rm -rf "$RECORD_WEB_OUT"
 
-if [ ! -f "$OUT_DIR/ledger-settle.ct/boundary_state.json" ]; then
-	echo "[regenerate] the recording carries no boundary_state.json." >&2
+missing=()
+# shellcheck source=ci/lib/recording-dump.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$CODETRACER_ROOT/ci/lib/recording-dump.sh"
+resolve_ct_print
+if [ ${#missing[@]} -gt 0 ] || ! recording_full_json "$OUT_DIR/ledger-settle.ct" | grep -q 'wasm-host-state'; then
+	echo "[regenerate] the recording carries no host-state record (or ct-print is missing)." >&2
 	echo "[regenerate] This fixture exists to demonstrate spec §3.3/§3.4;" >&2
-	echo "[regenerate] a recording without the sidecar is not one." >&2
+	echo "[regenerate] a recording without that state is not one." >&2
 	exit 1
 fi
 

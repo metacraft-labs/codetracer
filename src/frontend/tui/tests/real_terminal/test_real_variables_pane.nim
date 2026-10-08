@@ -4,7 +4,9 @@
 ##
 ## CTUI-7: "TermAssert: asserts the `[MOD]` row's real foreground/background via
 ## `cellAt`, which is the only way to prove the highlight is visible rather than
-## merely set. Cross-tier `snap` equality."
+## merely set. Cross-tier `snap` equality." (PLAT-51: the badge is gone; the
+## changed row's VALUE carries the desktop's changed-value accent, and that
+## is what is read.)
 ##
 ## Both, plus the §3.3.4 type-formatter colours read back out of a real
 ## terminal's own cell model, and the pagination affordance on a screen a
@@ -66,11 +68,18 @@ import ../../app/views/variables
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_variables as varsApp
+import ./derived_colours
+
+const ExpanderCol = NameFieldCol - 2
+  ## PLAT-49: a top-level row starts with its CATEGORY TAG and a gap; the
+  ## expander is the cell two left of the name (`tree_node.NameFieldCol`).
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 92
+const ExpectedAssertions = 83
+  ## PLAT-51: 92 -> 83, the `[MOD]` badge's two-ended colour read became the
+  ## changed value's one cell (and its negative twin).
 
 const
   Cols = 90
@@ -83,16 +92,20 @@ const
   FrameTimeoutMs = 20000
   LabelTimeoutMs = 10000
 
-  Black = 0'u8
-  Green = 2'u8
-  Yellow = 3'u8
-  Magenta = 5'u8
-  Cyan = 6'u8
-  White = 7'u8
-  BrightBlack = 8'u8
-  BrightGreen = 10'u8
-  BrightBlue = 12'u8
-  BrightCyan = 14'u8
+
+# PLAT-46: each colour below is a ROLE's DERIVED 16-colour index
+# (`derived_colours.ansiIndexOf`), not an ANSI number a view spelled.
+let
+  ModifiedFg = ansiIndexOf(srValueModified)
+  SelectionBg = ansiIndexOf(srSurfaceSelection, background = true)
+  NameFg = ansiIndexOf(srChromeText)
+  ExpanderFg = ansiIndexOf(srChromeAccent)
+  NumberFg = ansiIndexOf(srValueNumber)
+  StringFg = ansiIndexOf(srValueString)
+  BooleanFg = ansiIndexOf(srValueBoolean)
+  NoneFg = ansiIndexOf(srValueNoneValue)
+  PointerFg = ansiIndexOf(srValuePointer)
+  CompoundFg = ansiIndexOf(srValueCompound)
 
 var countedAssertions = 0
 
@@ -176,7 +189,7 @@ template checkPaneMatchesModel(sess: var TuiTestSession;
 
 suite "CTUI-7 Tier 2: the variables pane on a real terminal":
 
-  test "the [MOD] badge, the cursor and the type colours a terminal parsed":
+  test "the changed value's accent, the cursor and the type colours a terminal parsed":
     var sess = spawnChild()
     try:
       let model = varsApp.modelFor(0)
@@ -207,72 +220,58 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       ck plainRow > 0
       ck modifiedRow != plainRow
 
-      # ---- THE `[MOD]` BADGE, ABSOLUTELY -----------------------------------
-      # CTUI-7's Tier-2 sentence, as numbers. Both ends of the five-cell field
-      # are read, because a badge whose extent was one cell off would be right
-      # where it starts and wrong where it ends.
-      let badgeStart = sess.cellAt(modifiedRow, screen.diffColumn)
-      let badgeEnd = sess.cellAt(modifiedRow,
-                                 screen.diffColumn + ModifiedTagCells - 1)
-      checkpoint("badge start " & describeCell(badgeStart) & ", end " &
-                 describeCell(badgeEnd))
-      ck $badgeStart.rune == "["
-      ck badgeStart.fg.kind == ckIndexed
-      ck badgeStart.fg.idx == Black
-      ck badgeStart.bg.kind == ckIndexed
-      ck badgeStart.bg.idx == Green
-      ck caBold in badgeStart.attrs
-      ck $badgeEnd.rune == "]"
-      ck badgeEnd.fg.idx == Black
-      ck badgeEnd.bg.idx == Green
-      ck sess.regionText(modifiedRow, screen.diffColumn, ModifiedTagCells, 1)
-             .split('\n')[0] == ModifiedTag
-
-      # …and §3.3.4's second signal, the accent on the row's NAME.
+      # ---- THE CHANGED VALUE'S ACCENT, ABSOLUTELY (PLAT-51) ----------------
+      # The `[MOD]` badge is gone (CodeTracer-TUI.md §3.3.4, amended): the
+      # changed row says so by its VALUE, in the desktop's changed-value
+      # colour (`.value-changed`, colors/ui/text/information/primary/hover),
+      # read as a NUMBER out of the terminal's own cell.
+      let changedValue = sess.cellAt(modifiedRow, valueColumn(screen))
+      checkpoint("changed value cell " & describeCell(changedValue))
+      ck changedValue.fg.kind == ckIndexed
+      ck changedValue.fg.idx == ModifiedFg
+      ck not paneRow(sess, modifiedRow).contains("[MOD]")
+      ck not paneRow(sess, modifiedRow).contains("MOD]")
+      # The NAME carries no accent: the desktop styles the value only.
       let modifiedName = sess.cellAt(modifiedRow, screen.nameColumn)
       checkpoint("changed name cell " & describeCell(modifiedName))
       ck $modifiedName.rune == $varsApp.ModifiedName[0]
-      ck modifiedName.fg.kind == ckIndexed
-      ck modifiedName.fg.idx == Green
-      ck caBold in modifiedName.attrs
+      ck modifiedName.fg.idx == NameFg
 
-      # ---- THE CURSOR'S HIGHLIGHT DOES NOT EAT THE BADGE -------------------
-      # This row is BOTH selected and changed. The cell between the badge and
-      # the name carries the cursor's own background; the badge keeps its own.
-      # The first draft of `tree_node.treeRow` failed exactly here.
+      # ---- THE CURSOR'S HIGHLIGHT DOES NOT EAT THE ACCENT ------------------
+      # This row is BOTH selected and changed: the value keeps its accent
+      # foreground over the cursor's ground, as every cell of the row does.
+      ck changedValue.bg.kind == ckIndexed
+      ck changedValue.bg.idx == SelectionBg
       let gap = sess.cellAt(modifiedRow, screen.nameColumn - 1)
-      checkpoint("gap cell between badge and name " & describeCell(gap))
+      checkpoint("gap cell before the name " & describeCell(gap))
       ck gap.bg.kind == ckIndexed
-      ck gap.bg.idx == BrightBlack
-      ck badgeStart.bg.idx != gap.bg.idx
+      ck gap.bg.idx == SelectionBg
 
       # ---- THE NEGATIVE TWIN, through the same reader ----------------------
-      # An unmodified, unselected row: the badge field is blank, uncoloured and
-      # unbolded, and its name carries no accent. "The badge is on the changed
-      # row" is only a statement if it is absent from the others.
-      let plainBadge = sess.cellAt(plainRow, screen.diffColumn)
+      # An unmodified, unselected row: its value is in its CLASS's colour and
+      # its name in the plain text colour. "The accent is on the changed
+      # value" is only a statement if it is absent from the others.
+      let plainValue = sess.cellAt(plainRow, valueColumn(screen))
       let plainName = sess.cellAt(plainRow, screen.nameColumn)
-      checkpoint("plain badge " & describeCell(plainBadge) & ", plain name " &
+      checkpoint("plain value " & describeCell(plainValue) & ", plain name " &
                  describeCell(plainName))
-      ck $plainBadge.rune == " "
-      ck plainBadge.fg.kind == ckDefault
-      ck plainBadge.bg.kind == ckDefault
-      ck caBold notin plainBadge.attrs
+      ck plainValue.fg.idx == NumberFg
+      ck plainValue.fg.idx != changedValue.fg.idx
+      ck plainValue.bg.kind == ckDefault
       ck $plainName.rune == $varsApp.UnmodifiedName[0]
-      ck plainName.fg.idx == White
+      ck plainName.fg.idx == NameFg
       ck caBold notin plainName.attrs
-      ck plainName.fg.idx != modifiedName.fg.idx
 
       # ---- THE EXPANDER, IN ITS OWN COLUMN AND ITS OWN COLOUR --------------
       let collapsedNode = bodyRowForPath(screen, "@Locals.point")
       let leafNode = plainRow
-      let expander = sess.cellAt(collapsedNode, 0)
-      let leaf = sess.cellAt(leafNode, 0)
+      let expander = sess.cellAt(collapsedNode, ExpanderCol)
+      let leaf = sess.cellAt(leafNode, ExpanderCol)
       checkpoint("expander " & describeCell(expander) & ", leaf " &
                  describeCell(leaf))
       ck $expander.rune == CollapsedGlyph
       ck expander.fg.kind == ckIndexed
-      ck expander.fg.idx == BrightCyan
+      ck expander.fg.idx == ExpanderFg
       ck caBold in expander.attrs
       ck $leaf.rune == " "
       ck leaf.fg.kind == ckDefault
@@ -280,26 +279,32 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       # ---- §3.3.4'S TYPE FORMATTERS, IN A TERMINAL'S OWN COLOURS -----------
       # Five classes, five numbers, read at the value column the LAYOUT
       # computes. Four of them have no fixture in CTUI-1's corpus.
-      checkValueColour(sess, screen, plainRow, "4", Cyan)
+      checkValueColour(sess, screen, plainRow, "4", NumberFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.label"),
-                       "\"", BrightGreen)
+                       "\"", StringFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.flag"),
-                       "t", Magenta)
+                       "t", BooleanFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.missing"),
-                       "n", BrightBlack)
+                       "n", NoneFg)
       checkValueColour(sess, screen, bodyRowForPath(screen, "@Locals.handle"),
-                       "0", BrightBlue)
-      checkValueColour(sess, screen, collapsedNode, "P", Yellow)
+                       "0", PointerFg)
+      checkValueColour(sess, screen, collapsedNode, "P", CompoundFg)
       # …and the numeric row really carries BOTH bases, which is §3.3.4's
       # "decimal and hexadecimal simultaneously upon focus" on a real screen.
       ck paneRow(sess, modifiedRow).contains("(0x")
       # THE POINT, as one assertion: the classes do not look the same.
-      var distinctColours: seq[uint8] = @[]
+      # PLAT-46: an APPEARANCE is the colour AND the weight. The 16-colour rung
+      # is derived from design-system tokens, and where it merges two hues of
+      # one group both carry their monochrome weight there
+      # (`palette.CollapsedOnRung`) — so "do not look the same" is read as
+      # colour plus attributes, off the cell.
+      var distinctColours: seq[string] = @[]
       for row in [plainRow, bodyRowForPath(screen, "@Locals.label"),
                   bodyRowForPath(screen, "@Locals.flag"),
                   bodyRowForPath(screen, "@Locals.missing"),
                   bodyRowForPath(screen, "@Locals.handle")]:
-        let idx = sess.cellAt(row, valueColumn(screen)).fg.idx
+        let cell = sess.cellAt(row, valueColumn(screen))
+        let idx = $cell.fg.idx & $cell.attrs & $cell.underline
         if idx notin distinctColours:
           distinctColours.add idx
       checkpoint("distinct value colours: " & $distinctColours)
@@ -320,7 +325,7 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       let collapsed = varsApp.modelFor(0)
       let collapsedScreen = varsApp.screenFor(collapsed, Cols, Rows)
       ck $sess.cellAt(bodyRowForPath(collapsedScreen, "@Locals.point"),
-                      0).rune == CollapsedGlyph
+                      ExpanderCol).rune == CollapsedGlyph
 
       # EXPAND, twice, with a real key. Every frame is waited for by NAME.
       sess.sendKey("f10")
@@ -329,8 +334,8 @@ suite "CTUI-7 Tier 2: the variables pane on a real terminal":
       let openedScreen = varsApp.screenFor(opened, Cols, Rows)
       checkPaneMatchesModel(sess, variablesText(opened, Cols, Rows), "opened")
       let openedRow = bodyRowForPath(openedScreen, "@Locals.point")
-      ck $sess.cellAt(openedRow, 0).rune == ExpandedGlyph
-      ck sess.cellAt(openedRow, 0).fg.idx == BrightCyan
+      ck $sess.cellAt(openedRow, ExpanderCol).rune == ExpandedGlyph
+      ck sess.cellAt(openedRow, ExpanderCol).fg.idx == ExpanderFg
       # …and the struct's two fields are on the screen, under it, indented.
       ck paneRow(sess, openedRow + 1).contains("x")
       ck paneRow(sess, openedRow + 2).contains("y")

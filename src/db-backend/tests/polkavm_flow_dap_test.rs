@@ -51,12 +51,16 @@ fn run_polkavm_dap_test(
     expected_values: HashMap<String, i64>,
     excluded: Vec<&str>,
 ) {
-    assert!(
-        find_polkavm_recorder().is_some(),
-        "PolkaVM recorder not found. \
+    if find_polkavm_recorder().is_none() {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "polkavm_flow_dap_test",
+            "PolkaVM recorder not found. \
          Set CODETRACER_POLKAVM_RECORDER_PATH or build codetracer-polkavm-recorder \
-         (run `cargo build` inside the codetracer-polkavm-recorder repo)."
-    );
+         (run `cargo build` inside the codetracer-polkavm-recorder repo).",
+            "check out the recorder sibling and build it (`just build-recorder-siblings`)",
+        );
+        return;
+    }
 
     let db_backend = find_db_backend();
     let source_path = get_polkavm_source_path();
@@ -105,7 +109,6 @@ fn run_polkavm_dap_test(
 /// The breakpoint line (16) corresponds to the last `add_32` instruction
 /// in the blob, where arg0 has been updated to the final result.
 #[test]
-#[ignore = "requires polkavm-recorder; run via: just test-polkavm-flow"]
 fn polkavm_flow_dap_variables() {
     let mut expected_values = HashMap::new();
     expected_values.insert("arg0".to_string(), 94);

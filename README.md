@@ -214,6 +214,165 @@ For Nim, the default is `NIM_WINDOWS_SOURCE_MODE=auto`: try building from pinned
 For Cap'n Proto, the default is `CAPNP_WINDOWS_SOURCE_MODE=auto`: use pinned prebuilt ZIP on Windows x64 and source mode on non-x64, with deterministic source-cache reuse. Override with `CAPNP_WINDOWS_SOURCE_MODE=source|prebuilt`.
 For Tup, the default is `TUP_WINDOWS_SOURCE_MODE=auto`: build from pinned source (`https://github.com/zah/tup.git` ref `variants-for-windows`) with deterministic source-cache reuse to preserve Windows variant support. `auto` only falls back to prebuilt when you explicitly provide both `TUP_WINDOWS_PREBUILT_URL` and `TUP_WINDOWS_PREBUILT_SHA256`; otherwise it remains source-only by design. Override with `TUP_WINDOWS_SOURCE_MODE=source|prebuilt`.
 
+## Running the terminal (TUI) and native (GPUI) front-ends
+
+Besides the Electron desktop app, CodeTracer has two native front-ends that share
+the same debugger core: a terminal UI (`codetracer-tui`) and a native GPU-rendered
+window (`codetracer-gpui`). Both open an existing recording.
+
+### Build
+
+Everything below runs at the repository root of a checkout that sits beside its
+sibling repositories (see `AGENTS.md`), inside the development environment. To run
+a single command in that environment without entering an interactive shell, prefix
+it with `repro exec . --` (the first run in a fresh checkout takes several minutes
+while the environment is built):
+
+```bash
+repro exec . -- just build-once   # ct and replay-server -> src/build-debug/bin/
+repro exec . -- just build-tui    # the terminal UI -> build/bin/codetracer-tui
+repro exec . -- just build-gpui   # the native window -> build/bin/codetracer-gpui
+```
+
+`just build-once` is the full build; you need it once so that `ct` (to record and
+launch) and `replay-server` (the debugger engine both front-ends talk to) exist.
+
+The front-ends compile against the sibling checkouts `../isonim-tui` and
+`../isonim-gpui`. These must contain the revisions this repository pins in
+`flake.lock`. Check with:
+
+```bash
+for r in isonim-tui isonim-gpui; do
+  git -C ../$r merge-base --is-ancestor "$(jq -r ".nodes[\"$r\"].locked.rev" flake.lock)" HEAD \
+    && echo "$r: ok" || echo "$r: behind the pin"
+done
+```
+
+If one is behind and you do not want to move that checkout, build against a
+detached worktree at the pinned revision instead:
+
+```bash
+for r in isonim-tui isonim-gpui; do
+  rev=$(jq -r ".nodes[\"$r\"].locked.rev" flake.lock)
+  git -C ../$r fetch -q origin
+  if [ -d ../$r-pin ]; then git -C ../$r-pin checkout -q --detach "$rev"
+  else git -C ../$r worktree add -q --detach ../$r-pin "$rev"; fi
+done
+export ISONIM_TUI_SRC=$PWD/../isonim-tui-pin/src ISONIM_GPUI_SRC=$PWD/../isonim-gpui-pin/src
+```
+
+The GPUI front-end also needs `isonim-gpui`'s Rust shim. Build it in the same
+`isonim-gpui` checkout whose sources you compile against (`../isonim-gpui`, or
+`../isonim-gpui-pin` above), through that repository's own environment:
+
+```bash
+(cd ../isonim-gpui && repro exec . -- bash -c 'cd rust && cargo build --features gpui-backend')
+```
+
+Plain `cargo build` (the `just rust-build` default) builds a shim without a window
+backend, which is what the GPUI test lanes use; with it `codetracer-gpui` renders
+nothing and exits immediately.
+
+### Get a recording
+
+```bash
+repro exec . -- ct record -o /tmp/ct-calc test-programs/calc/main.py
+```
+
+`-o` names the trace folder to create. For a Python program laid out as a package
+(`from app.util import ...` inside `app/main.py`), put the package's parent
+directory on `PYTHONPATH`, exactly as you would to run it with `python`; without it
+the recording fails with `ModuleNotFoundError`. Set it *inside* the environment
+(the development environment sets its own `PYTHONPATH`, replacing one exported
+before `repro exec`):
+
+```bash
+repro exec . -- env PYTHONPATH=$PWD/myproject ct record -o /tmp/ct-app myproject/app/main.py
+```
+
+`just test-tui` also records a small fixture corpus on its first run and caches it
+under `test-logs/tui-fixtures/<name>-<hash>/` (`calc-…`, `wide_state-…`,
+`noir_space_ship-…`); any of those folders can be opened directly.
+
+### Launch
+
+```bash
+src/build-debug/bin/ct replay --ui=tui /tmp/ct-calc    # terminal UI, via ct
+build/bin/codetracer-tui /tmp/ct-calc                 # the same, directly
+```
+
+Running a built binary does not need the development environment. `ct` finds
+`build/bin/codetracer-tui` in the checkout it was built from (`CODETRACER_TUI_BIN`
+overrides it), and the front-end finds `src/build-debug/bin/replay-server` the same
+way; set `REPLAY_SERVER_BIN=<path>` to use a different engine build.
+
+The native window needs a graphical session and its runtime libraries, which the
+development environment provides:
+
+```bash
+repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH src/build-debug/bin/ct replay --ui=gpui /tmp/ct-calc'
+```
+
+Without a display, `--report-plan` prints the window's render plan as JSON and
+exits, which is a quick way to check that a build works:
+
+```bash
+repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH build/bin/codetracer-gpui --report-plan /tmp/ct-calc'
+```
+
+With no display at all, a windowed launch currently prints nothing and waits;
+stop it with `Ctrl+c`.
+
+### Useful options (TUI)
+
+| option | effect |
+|---|---|
+| `--theme=dark\|light\|plain` | colour mode; detected from the terminal background when absent |
+| `--palette=terminal` | use only the terminal's own sixteen colours, so your terminal theme decides |
+| `--truecolor` / `--no-color` | force 24-bit colour / render without colour |
+| `--goto=TICK` | open at a given point of the recording |
+| `--headless` | print one settled screen as plain text and exit (works without a terminal; `ct replay --ui=tui --headless <trace>`) |
+
+`codetracer-tui --help` lists the rest.
+
+### In the TUI
+
+- `q` (or `Ctrl+c`) quits; `n`/`F10` steps over, `s`/`F11` steps in, `c` continues;
+  `p`, `b`, `rf`, `rc` do the same in reverse.
+- `F12` opens the menu (also a click on `≡`); `Tab` cycles panes.
+- `:` opens the command prompt. `:icons nerd|graphics|unicode|text` picks the
+  toolbar glyphs, `:theme dark|light` switches the theme, `:resize <percent>` sizes
+  the focused pane, and `:reset-layout` returns to the default layout.
+
+### Where the layout is remembered
+
+Each front-end remembers its own last layout, separately from the others:
+
+- TUI: `$XDG_STATE_HOME/codetracer/tui-layout.json` (`~/.local/state/codetracer/`
+  when `XDG_STATE_HOME` is unset), next to the `icons` choice.
+- GPUI: `gpui-layout.json` in the same directory.
+
+`CODETRACER_TUI_LAYOUT_DIR=<dir>` replaces that directory for both, which is how
+to experiment without touching your saved layout. `:reset-layout` (TUI) or
+`codetracer-gpui --reset-layout` deletes only that front-end's file.
+
+### Running the TUI in a tmux split
+
+```bash
+tmux split-window -v -c "$PWD" "build/bin/codetracer-tui /tmp/ct-calc || read"
+```
+
+The pane closes when you quit; `|| read` keeps it open if the TUI exits with an
+error, so the message stays readable. For 24-bit colour inside tmux, tmux has to
+know the outer terminal supports it. If the TUI's status line reports that tmux
+withholds 24-bit colour, add the line it suggests to your `tmux.conf`, for example:
+
+```
+set -as terminal-features ',xterm*:RGB'
+```
+
+(or start the TUI with `--truecolor`).
+
 ## The CodeTracer CLI
 
 When you launch the CodeTracer GUI, it will offer you the option to also install the CodeTracer CLI. It provides convenient ways to create and load trace files from the command-line or to integrate CodeTracer w

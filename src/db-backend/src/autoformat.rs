@@ -684,11 +684,12 @@ mod tests {
 
     #[test]
     fn autoformat_formats_minified_js_when_tool_available() {
-        // Skip-loud when prettier (or npx fallback) isn't available so
-        // the absence shows up in test output rather than silently
-        // counting as "passed".
         if !which("prettier") && !which("npx") {
-            eprintln!("SKIP autoformat_formats_minified_js: no prettier / npx on PATH");
+            crate::test_prerequisite::skip_or_fail_missing_prerequisite(
+                "autoformat_formats_minified_js_when_tool_available",
+                "neither `prettier` nor `npx` is on PATH",
+                "run inside the codetracer dev shell, which provides both",
+            );
             return;
         }
         let src = "function add(a,b){return a+b;}function main(){var x=add(1,2);console.log(x);}main();";

@@ -53,6 +53,18 @@ import
   # everything variable goes in as text, and that rule is worth being able to
   # test without loading the renderer.
   ui/hcr_live_edit_panel,
+  # THE CONTAINER DEPLOYMENT'S CLIENT — WD1b. `container_boot` performs §6.3's
+  # handshake over the socket `startIPC` opens below and installs the platform
+  # the server describes; `browser_tab` supplies the ten operations that are
+  # the TAB's rather than the container's (§6.6). Both are browser-only and
+  # link no Electron, which is what lets this arm run in a plain tab.
+  viewmodel/host/container_boot,
+  viewmodel/host/browser_tab,
+  # `setGitRefreshHook` — see the call below.
+  ui/git_cli,
+  # `installFrontendPlatform`, which is what makes the handshake's answer the
+  # front end's platform rather than a value nobody reads.
+  platform_host,
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm, point_list_vm],
@@ -254,6 +266,7 @@ import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
 import viewmodel/viewmodels/deepreview_layout
+from viewmodel/viewmodels/product_menu import productMenuTree, MenuItem, mikFolder
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
@@ -723,352 +736,39 @@ proc appendLanguageSpecificViewItems(menu: MenuNode, data: Data) =
 
   discard appendToViewFolder(menu)
 
+proc menuNodeOf(item: MenuItem): MenuNode =
+  ## PLAT-48. A `MenuNode` from the shared menu tree
+  ## (`viewmodel/viewmodels/product_menu.productMenuTree`): the node the
+  ## `defineMenu` macro used to spell by hand, field for field — the action
+  ## by its `ClientAction` name, `enabled`, the separator after it
+  ## (`isBeforeNextSubGroup`), the platform bits (`menuOs`) and the macOS
+  ## role. A folder carries the enum's zero value as its action, as the
+  ## macro's folders did.
+  result = MenuNode(
+    kind: (if item.kind == mikFolder: MenuFolder else: MenuElement),
+    name: cstring(item.label),
+    action: (if item.action.len > 0: parseEnum[ClientAction](item.action)
+             else: ClientAction.low),
+    actionData: nil,
+    enabled: item.enabled,
+    elements: @[],
+    isBeforeNextSubGroup: item.separatorAfter,
+    menuOs: item.os,
+    role: cstring(item.role))
+  for child in item.children:
+    result.elements.add menuNodeOf(child)
+
 proc webTechMenu(data: Data, program: cstring): MenuNode =
-  let config = data.config
+  ## THE PROGRAM MENU. Since PLAT-48 its tree is the shared one
+  ## (`product_menu.productMenuTree`) that the terminal and the GPUI window
+  ## put in their Menu ViewModels too, translated into the desktop's
+  ## `MenuNode`s here — which the in-page menu (through its Menu ViewModel),
+  ## the command palette and the native macOS menu all read. The run-time
+  ## additions below (launch configurations, per-language View items) stay
+  ## the desktop's.
+  result = menuNodeOf(productMenuTree($program,
+                                      shellUi = data.startOptions.shellUi))
   if not data.startOptions.shellUi:
-    result = defineMenu:
-      folder program:
-        # Needed for compliance on macOS
-        macfolder "CodeTracer", "":
-          macrole "about"
-          --sub
-          macrole "services"
-          --sub
-          macrole "hide"
-          macrole "hideOthers"
-          macrole "unhide"
-          --sub
-          macrole "quit"
-        folder "File":
-          # element "New File", newTab, false
-          # element "Preferences", preferences
-          # --sub
-          # element "Open File", openFile
-          # element "Open Folder", openFolder, false
-          # element "Open Recent", openRecent, false
-          element "Open Trace...", aOpenTrace
-          element "Open Trace in New Tab...", aOpenTraceInNewTab
-          element "Record New Trace...", aRecordNewTrace
-          element "New Trace Tab", aNewTraceTab
-          # --sub
-          # element "Save", aSave
-          # element "Save As ...", saveAs
-          # element "Save All", saveAll
-          # --sub
-          element "Close Current File", closeTab
-          element "Reopen File", reopenTab
-          element "Next File", switchTabRight
-          element "Previous File", switchTabLeft
-          element "Switch File", switchTabHistory
-          --sub
-          # element "Close All Documents", closeAllDocuments
-          mac_and_host_exclude_element "Exit CodeTracer", aExit
-        folder "Edit":
-          # element "Undo", aUndo, false
-          # element "Redo", aRedo, false
-          # --sub
-          # element "Cut", aCut
-          # element "Copy", aCopy
-          # element "Paste", aPaste
-          # --sub
-          # element "Replace", aReplace, false
-          # --sub
-          element "Find in Files", findInFiles
-          element "Find Symbol", findSymbol
-          # element "Replace in Files", replaceInFiles, false
-          --sub
-          # folder "Code folding":
-            # element "Collapse under cursor", aCollapseUnderCursor, false
-            # element "Expand under cursor", aExpandUnderCursor, false
-          element "Expand All", aExpandAll
-          element "Collapse All", aCollapseAll
-          # --sub
-          # folder "Advanced":
-          #   element "Toggle Comment", aToggleComment, false
-          #   element "Increase Indentation", aIncreaseIndentation, false
-          #   element "Decrease Indentation", aDecreaseIndentation, false
-          #   element "Make Uppercase", aMakeUppercase, false
-          #   element "Make Lowercase", aMakeLowercase, false
-          #   #* (Other suitalbe Monaco commands)
-
-            #* (Other suitable Monaco commands)
-          # element "Delete", ClientAction.del
-        folder "View":
-          # folder "Panes":
-            # folder "New"
-          element "Filesystem", aFilesystem
-          element "Calltrace", aFullCalltrace
-          element "State", aState
-          element "Event Log", aEventLog
-          element "Timeline", aTimeline
-          element "Terminal Output", aTerminal
-          element "Scratchpad", aScratchpad
-          # PLAT-40. The point list's one way in: its `makeComponent` arm was
-          # commented out (constructing the pane raised) and its entry lived
-          # only in the commented-out "Panes" folder, so no user could open it.
-          element "Breakpoints & Tracepoints", aPointList
-          element "Agent Activity", aAgentActivity
-          # VN-M5. The one reachable surface for verification and for the
-          # counterexample it produces. There is deliberately no "Counterexample"
-          # entry beside it: a counterexample is a region of this panel that
-          # exists only while a session is open, and a standing menu entry for
-          # it would promise a walk that usually is not there.
-          element "Verification", aVerification
-          element "Start Agent Worktree Session", aStartAgenticWorktreeSession
-          # NOTIFICATIONS — the history panel's only way in.
-          #
-          # `ui/status.nim` builds the full newest-first history and
-          # `views/isonim_status_view.nim` renders it with per-entry dismiss
-          # and action buttons, all of it behind `showNotifications`. That flag
-          # had NO assignment anywhere in the tree — not even a `= false` — so
-          # it sat at the `bool` default and the panel could not be opened by
-          # any means. The status-bar toggle that used to open it was already
-          # commented out at the open-sourcing commit and its now-uncalled proc
-          # was deleted by `df4d3ef2f`; this entry is the affordance that went
-          # with it.
-          #
-          # In the menu rather than back on the status bar, for the reason
-          # `aKeyboardShortcuts` gives below: one node is all three routes at
-          # once, because `ui/menu.nim`'s `generateNameMap` feeds the command
-          # palette from this tree and `index/menu.nim` builds the native macOS
-          # menu from it. Restoring the status-bar button would also re-render
-          # `.status-button`, which `tests/gui/page-objects/status-footer-contrast.ts`
-          # lists as UNREACHABLE and whose contrast is a separate, real defect —
-          # that button should come back with its contrast fixed, not before.
-          element "Notifications", aNotifications
-          element "Shell", aShell
-          # element "Step List", aStepList
-            # element "Shell", aShell
-            # element "Find Results", aFindResults, false
-            # element "Build Log", aBuildLog, false
-            # element "File Explorer", aFileExplorer, false
-          # folder "Layouts":
-            # element "Save Layout", aSaveLayout, false
-            # element "Load Layout", aLoadLayout, false
-            # element "Debug (Normal Screen)", switchDebug
-            # element "Debug (Wide Screen)", switchDebugWide, false
-            # element "Edit (Normal Screen)", switchEditNormal, false
-            # element "Edit (Wide Screen)", switchEdit
-            #element "can be also"
-            #element "Normal screen"
-            #element "Wide screen"
-            #element "Debug"
-            #element "Edit"
-          # element "New Horizontal Tab Group", aNewHorizontalTabGroup, false
-          # element "New Vertical Tab Group", aNewVerticalTabGroup, false
-          # --sub
-          # (Notifications is live, above, beside the other View entries.)
-          # element "Start Window", aStartWindow, false
-          # element "Full Screen Toggle", aFullScreen, false
-          --sub
-          folder "Theme":
-            element "Default Dark Theme", aTheme3
-            element "Default White Theme", aTheme1
-          # folder "Choose Monaco Theme":
-            # element "vs-light", aMonacoTheme0, false
-            # element "etc",
-          # --sub
-          # element "Multi-line Preview Mode", aMultiline, false
-          # element "Single-line Preview Mode", aSingleLine, false
-          # element "No Preview", aNoPreview, false
-          # --sub
-          # element "View C Code (here it depends on Lang for project)", aLowLevel0, false
-          # element "View Assembly Code (similar: can be llvm ir)", aLowLevel1, false
-          # --sub
-          # element "Zoom In", zoomIn
-          # element "Zoom Out", zoomOut
-          # element "Show Minimap", aShowMinimap, false
-        # folder "Navigate":
-        #   element "Go to File", aGotoFile, false
-        #   element "Go to Symbol", aGotoSymbol, false
-        #   --sub
-        #   element "Go to Definition", aGotoDefinition, false
-        #   element "Find References", aFindReferences, false
-        #   element "Go to Line", aGotoLine, false
-        #   --sub
-        #   element "Go to Previous Cursor Location", aGotoPreviousCursorLocation, false
-        #   element "Go to Next Cursor Location", aGotoNextCursorLocation, false
-        #   --sub
-        #   element "Go to Previous Edit Location", aGotoPrevious, false
-        #   element "Go to Next Edit Location", aGotoNextEditLocation, false
-        #   --sub
-        #   element "Go to Previous Point in Time", aGotoPreviousPointInTime, false
-        #   element "Go to Next Point in Time", aGotoNextPointInTime, false
-        #   --sub
-        #   element "Go to Next Error", aGotoNextError, false
-        #   element "Go to Previous Error", aGotoPreviousError, false
-        #   --sub
-        #   element "Go to Next Search Result", aGotoNextSearchResult, false
-        #   element "Go to Previous Search Result", aGotoPreviousSearchResult, false
-
-        folder "Build":
-          element "Rebuild/Re-record file", aReRecord, true
-          element "Rebuild/Re-record project", aReRecordProject, true
-          # The in-app apply-edit -> HCR reload command. It sits beside the two
-          # rebuild entries because it is the same verb one step further in:
-          # those re-record the program, this one changes the program that is
-          # already running. Being a menu element is also what puts it in the
-          # command palette — `getCommands` walks this very tree — so the one
-          # declaration buys both surfaces.
-          element "Apply Edit & Hot-Reload", aApplyEditAndReload, true
-          # And the panel that lets you TYPE the edit rather than supply it as
-          # an action argument or an environment variable. Same tree, so the
-          # same one declaration buys the command-palette entry.
-          element "Live Edit (HCR)…", aToggleLiveEditPanel, true
-          # And the entry that produces the program the two above edit.
-          # CodeTracer starts the session coordinator, then starts the program
-          # with its HCR agent pointed at that coordinator — the only order the
-          # wire admits, since the agent dials out once at process start.
-          element "Launch Under Live Edit (HCR)…", aLaunchUnderHcr, true
-          --sub
-          # The chord beside each label comes for free: `menu.nim:424` fills
-          # `MenuNodeRecord.shortcut` from `loadShortcut`, which reads
-          # `config.shortcutMap.actionShortcuts` — i.e. the config table only.
-          # That is exactly why these two bindings went in
-          # `default_config.yaml` and not into `ui/shortcuts.nim`'s hard-bound
-          # block: a hard-bound chord cannot be displayed here by
-          # construction, and cannot be rebound by the user.
-          element "Go to Next Error", aGotoNextError, true
-          element "Go to Previous Error", aGotoPreviousError, true
-        #   element "Build Project", aBuild, false
-        #   element "Compile Current File (Nim Check)", aCompile, false
-        #   element "Run Static Analysis (drnim)", aRunStatic, false
-        #   # element "Build tasks (nimble)", nil, false
-
-        # TODO:
-        folder "Reset":
-          element "Restart replay-server", aRestartDbBackend, true
-          element "Restart session-manager", aRestartBackendManager, true
-
-        folder "Debug":
-          # element "Trace Existing Program...", aTrace, false
-          # element "Load Existing Trace...", aLoadTrace, false
-          # folder "Panes":
-          #   folder "New":
-          #     element "Program state explorer", aNewState, false
-          #     element "Event log", aNewEventLog, false
-          #     element "Full call trace", aNewFullCalltrace, false
-          #     element "Terminal output", aNewTerminal, false
-          #   element "Breakpoints/Tracepoints", aPointList, false
-          #   element "Mixed call/stack trace", aLocalCalltrace, false
-          #   element "Full call trace", aFullCalltrace, false
-          #   element "Program state explorer", aState, false
-          #   element "Event log", aEventLog
-          #   element "Terminal output", aTerminal, false
-          # element "Options", aOptions, false
-          # --sub
-          # element "Start Debugging", aDebug, false
-          element "Continue", forwardContinue
-          element "Step Over", forwardNext
-          element "Step In", forwardStep
-          element "Step Out", forwardStepOut
-          element "Reverse Continue", reverseContinue
-          element "Reverse Step Over", reverseNext
-          element "Reverse Step In", reverseStep
-          element "Reverse Step Out", reverseStepOut
-          # STOP — the menu route the spec asks for.
-          #
-          # `codetracer-specs` `latest`
-          # `GUI/Debugging-Features/Debugger-Controls.md` § "Ending a session
-          # from inside it": "*Stop* must be discoverable by all three of the
-          # routes CodeTracer offers a command — a toolbar button, a menu entry
-          # and a chord". Commented out, it was reachable only by `SHIFT+F5`,
-          # and this node is also what feeds the command palette
-          # (`ui/menu.nim`'s `generateNameMap(self.data.ui.menuNode)`) and the
-          # native macOS menu (`index/menu.nim`), so one comment removed all
-          # three at once.
-          #
-          # The toolbar button is the one route still missing, and it is
-          # missing in the SPEC too, not just here: the same document says
-          # "neither the toolbar order nor the wireframe above yet places it.
-          # It needs a mark, which Control Marks does not have". Adding a
-          # button would mean choosing that mark, which is not this change's
-          # to make.
-          #
-          # Named "Stop" rather than "Stop Debugging" to match the name the
-          # spec, the config key and the tooltip all use.
-          element "Stop", stop
-          # TODO dynamic name
-          # element "Pause (currently using stop shortcut?)", stop, false
-          --sub
-          # KEYBOARD SHORTCUTS — the affordance that opens the preset dialog.
-          #
-          # IN THE MENU, NOT ON THE TOPBAR. `Planned-Features/Noir-Studio.md`
-          # §1a.2 settles the topbar's one addition — a Share icon beside the
-          # identity avatar — and counts "the debugger controls, the omnibar,
-          # the tabs" as already part of it. The session tab bar is therefore
-          # topbar, so a gear beside its `+` would be a second addition to the
-          # surface that section closed. §1a.2 names the alternative itself,
-          # about `Deploy`: "the command palette and a project-level menu are
-          # both better candidates" for something rare and consequential.
-          #
-          # This node is all three routes at once — `ui/menu.nim`'s
-          # `generateNameMap` feeds the command palette from it and
-          # `index/menu.nim` builds the native macOS menu from it — so one
-          # entry makes the dialog reachable by menu, by palette and, through
-          # `default_config.yaml`'s `aKeyboardShortcuts`, by chord. The chord
-          # prints beside it because `loadShortcut` reads the same resolved map
-          # the dialog lists.
-          #
-          # In the debugger folder rather than a Preferences one because the
-          # presets govern the stepping commands; `ClientAction.preferences`
-          # exists and is commented out elsewhere, and claiming it here would
-          # promise a settings surface this does not build.
-          element "Keyboard Shortcuts", aKeyboardShortcuts
-          --sub
-          element "Add a Breakpoint", aBreakpoint
-          element "Delete Breakpoint", aDeleteBreakpoint
-          element "Delete All Breakpoints", aDeleteAllBreakpoints
-          element "Enable Breakpoint", aEnableBreakpoint
-          element "Enable All Breakpoints", aEnableAllBreakpoint
-          element "Disable Breakpoint", aDisableBreakpoint
-          element "Disable All Breakpoints", aDisableAllBreakpoints
-          --sub
-          element "Add a Tracepoint", aTracepoint
-          element "Delete Tracepoint", aDeleteTracepoint
-          element "Enable Tracepoint", aEnableTracepoint
-          element "Enable All Tracepoints", aEnableAllTracepoints
-          element "Disable Tracepoint", aDisableTracepoint
-          element "Disable All Tracepoints", aDisableAllTracepoints
-          element "Run All Tracepoints", aCollectEnabledTracepointResults
-          --sub
-          element "Invite to Collaborative Session...", aCollabInvite
-
-        # The standard macOS Window menu
-        macfolder "Window", "window"
-        # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
-        # generated automatically
-        #
-        # REPORT A PROBLEM — the bug report form's only way in, and it is
-        # spelled twice because the Help folder is.
-        #
-        # The form is complete: `views/isonim_status_view.nim` renders the
-        # title and description fields and the send button, rebinds that button
-        # to `sendBugReportFromDom` so the DOM values are actually read, and
-        # `ui/status.nim`'s `sendBugReport` posts them over
-        # `CODETRACER::send-bug-report-and-logs`, which `index/ipc_utils.nim`
-        # registers and `index/online_sharing.nim` handles. All of it hung off
-        # `showBugReport`, whose ONLY assignment in the whole tree set it to
-        # `false` — so the form could not be opened by any route, and
-        # `ClientAction.aReportProblem` had existed as a live enum member with
-        # a `nil` handler and no menu entry.
-        #
-        # In Help because that is where a reader looks for it, and here rather
-        # than as one plain `folder "Help"` because the existing entry is a
-        # `macfolder`: macOS owns its Help menu (role `help`, which supplies
-        # the search field), so a second all-OS folder of the same name would
-        # give macOS two. `macfolder` carries the entry on macOS,
-        # `macexclude_folder` carries it everywhere else, and neither platform
-        # sees both.
-        #
-        # Like `aKeyboardShortcuts`, one node is three routes: menu, command
-        # palette (`ui/menu.nim`'s `generateNameMap` reads this tree) and — if
-        # `default_config.yaml` ever names `aReportProblem` — a chord.
-        macfolder "Help", "help":
-          element "Report a Problem...", aReportProblem
-        macexclude_folder "Help":
-          element "Report a Problem...", aReportProblem
-
     # Add dynamic launch configurations to Debug menu if available
     if not seqIsNil(data.ui.launchConfigs) and data.ui.launchConfigs.len > 0:
       let topLevelMenuNodes =
@@ -1108,38 +808,6 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
     # application menu, and any items not present at registration time
     # silently never appear in the OS menu bar.
     appendLanguageSpecificViewItems(result, data)
-  else:
-    result = defineMenu:
-      folder program:
-        macfolder "CodeTracer", "":
-          macrole "about"
-          --sub
-          macrole "services"
-          --sub
-          macrole "hide"
-          macrole "hideOthers"
-          macrole "unhide"
-          --sub
-          macrole "quit"
-        # element "New Terminal", aTheme0, false
-        folder "Themes":
-          element "Mac Classic Theme", aTheme0
-          element "Default White Theme", aTheme1
-          element "Default Black Theme", aTheme2
-          element "Default Dark Theme", aTheme3
-
-        # The standard macOS Window menu
-        macfolder "Window", "window":
-          macrole "minimize"
-          macrole "zoom"
-          --sub
-          macrole "front"
-          --sub
-          macrole "window"
-        # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
-        # generated automatically
-        macfolder "Help", "help"
-        macexclude_element "Exit CodeTracer", aExit, true
 
   # Register the (possibly mutated) menu with the macOS native menu
   # bar.  Previously `defineMenu`'s macro expansion did this BEFORE
@@ -1575,6 +1243,27 @@ proc reportLayoutDegraded(data: Data; sentence: string) =
     cerror "mode-layout: the degradation notice could not be shown: " &
       getCurrentExceptionMsg()
 
+proc constructDeclaredComponents(data: Data; config: js) =
+  ## Construct every component a layout config names that does not exist yet.
+  ##
+  ## GoldenLayout builds containers, not components: a layout installed after
+  ## startup names panes `renderer.createUIComponents` never made, and they
+  ## come up empty. Only the missing ones — constructing a component that
+  ## already exists makes a SECOND one, and for the menu that is a second
+  ## render-gate owner. Shared by the mode switch and the PLAT-45 reset, the
+  ## two paths that install a whole layout after startup.
+  for declared in mode_layouts.layoutComponents(config):
+    if declared.content == ord(Content.Trace): continue
+    if declared.content < 0 or declared.content > ord(Content.high): continue
+    if data.ui.componentMapping[Content(declared.content)].hasKey(declared.id):
+      continue
+    try:
+      discard data.makeComponent(Content(declared.content), declared.id)
+    except CatchableError as e:
+      cerror "layout: component " & $declared.content & ": " & e.msg
+    except:
+      cerror "layout: component " & $declared.content & " failed"
+
 proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
   ## THE LAYOUT MOVES WITH THE MODE, in both directions and every time.
   ##
@@ -1674,17 +1363,7 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
   # `renderer.createUIComponents` never made, and they come up empty. Only the
   # ones that do not exist yet — constructing a component that already exists
   # makes a SECOND one, and for the menu that is a second render-gate owner.
-  for declared in mode_layouts.layoutComponents(resolution.config):
-    if declared.content == ord(Content.Trace): continue
-    if declared.content < 0 or declared.content > ord(Content.high): continue
-    if data.ui.componentMapping[Content(declared.content)].hasKey(declared.id):
-      continue
-    try:
-      discard data.makeComponent(Content(declared.content), declared.id)
-    except CatchableError as e:
-      cerror "mode-layout: component " & $declared.content & ": " & e.msg
-    except:
-      cerror "mode-layout: component " & $declared.content & " failed"
+  data.constructDeclaredComponents(resolution.config)
 
   # A REGISTER OR STORE ENTRY IS A *RESOLVED* CONFIG; A DEFAULT IS NOT.
   #
@@ -5390,6 +5069,93 @@ proc installM5ColumnAwareServiceMethods() =
 
 installM5ColumnAwareServiceMethods()
 
+proc applySharedDefaultLayout(data: Data; config: js) =
+  ## Install `config` — the desktop's default, as the index process just
+  ## re-read it — IN PLACE, the second half of View > Reset Layout.
+  ##
+  ## In place, and not by reloading the window: the index process sends the
+  ## renderer its `CODETRACER::init` (and starts the replay) exactly once, so a
+  ## reloaded window waits for an init that never comes — measured, a blank
+  ## window. The swap is the mode switch's own mechanism (`swapLayout`,
+  ## `constructDeclaredComponents`, the editor share recomputed from the new
+  ## layout), and the editor comes back the way the first run creates it:
+  ## `showTab` finds no live container for the open source tab and re-creates
+  ## it at the root row's index 1 (`utils.openNewLayoutContainer`).
+  ##
+  ## Persistence stays off until the new arrangement is live, and is then
+  ## switched back on with one save, so the desktop's own file holds the
+  ## default from this moment on.
+  if data.ui.isNil or data.ui.layout.isNil or config.isNil or config.isUndefined:
+    if not data.ui.isNil:
+      data.ui.layoutResetPending = false
+    cerror "reset-layout: no layout to install; the workspace was left as it was"
+    return
+  # Pinned panels back into the outgoing tree first, or the default would
+  # bring a second copy of each back beside its edge tab.
+  data.unpinAllPanels()
+  var reopen: seq[cstring] = @[]
+  for name, _ in data.ui.editors:
+    reopen.add(name)
+  let active = data.services.editor.active
+  data.ui.editorAreaPercent = max(0, unclaimedTopLevelPercent(config))
+  data.constructDeclaredComponents(config)
+  try:
+    # The default is plain JSON — UNRESOLVED, which is what `loadLayout` takes
+    # (see `restoreSavedLayout`'s header on the two shapes).
+    let resolved = cast[GoldenLayoutResolvedConfig](config)
+    data.swapLayout(resolved)
+    data.ui.resolvedConfig = resolved
+  except:
+    cerror "reset-layout: GoldenLayout rejected the default layout: " &
+      getCurrentExceptionMsg()
+  # The auxiliary-panel records describe a tree that no longer exists (see the
+  # same two lines at the foot of `applyModeLayout`).
+  data.ui.editModeHiddenPanels.setLen(0)
+  data.ui.layoutBeforeAuxiliaryClose = nil
+  for name in reopen:
+    if name != active:
+      data.showTab(name)
+  if not active.isNil and active.len > 0 and data.ui.editors.hasKey(active):
+    data.showTab(active)
+  data.ui.layoutResetPending = false
+  data.saveCurrentLayoutConfig()
+
+proc resetLayoutToSharedDefault(data: Data) =
+  ## PLAT-45 deliverable 8, the desktop's `reset-layout`: return this window to
+  ## the ONE shared default arrangement (the generated
+  ## `config/default_layout.json`), deleting only the desktop's OWN saved
+  ## layout files — the terminal's and the GPUI window's remembered layouts
+  ## live under another directory and are other files.
+  ##
+  ## The index process deletes the files and re-reads the default through the
+  ## same loader the first run uses (`index/config.loadLayoutConfig`, which
+  ## copies the bundled file when the user's is absent), and hands it back on
+  ## `CODETRACER::reset-layout-done`; `applySharedDefaultLayout` installs it.
+  ## There is therefore ONE place the default comes from, the first run's.
+  ##
+  ## Persistence is switched off FIRST (`layoutResetPending`), so no
+  ## `stateChanged` write-through lands the arrangement being discarded in the
+  ## file the index process is about to delete; the per-mode stores and this
+  ## session's per-mode registers are forgotten, so a later mode switch does
+  ## not bring the old arrangement back either.
+  if data.ui.isNil:
+    return
+  data.ui.layoutResetPending = true
+  for mode in LayoutMode:
+    data.ui.modeLayouts[mode] = nil
+    try:
+      mode_layouts.forgetStoredLayoutForMode(mode)
+    except:
+      cwarn "reset-layout: could not forget the stored " & $mode & " layout"
+  if inElectron:
+    ipc.send "CODETRACER::reset-layout", js{
+      edit: mode_layouts.isEditingMode(data.ui.mode)}
+  else:
+    # A browser has no index process and no layout FILE: its default is the
+    # mode's bundled layout, installed the same way.
+    let bundled = mode_layouts.bundledLayoutForMode(data.ui.mode)
+    data.applySharedDefaultLayout(bundled)
+
 const ClientActionCount = ClientAction.high.int - ClientAction.low.int + 1
 
 # static:
@@ -5826,7 +5592,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
       cstring(cgpViewer.presetName),
       cstring(cgpDriver.presetName),
       cstring(cgpHost.presetName)]),
-  aTimeline: proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), aStartAgenticWorktreeSession: # aTimeline
+  aRetiredTimeline: proc(actionData: JsObject) = discard, aStartAgenticWorktreeSession: # aRetiredTimeline: the Timeline panel is removed
   proc(actionData: JsObject) = # aStartAgenticWorktreeSession
     agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
   videoPlayerTogglePlay: # --- M4 Visual Replay / Video Player handlers ----------------------------
@@ -5933,6 +5699,9 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     ## error (`invalid order in array constructor`) rather than a silent
     ## re-pointing of every handler after it.
     launchUnderHcr(actionData),
+  aResetLayout: proc(actionData: JsObject) = # aResetLayout
+    ## PLAT-45. View > Reset Layout — see `resetLayoutToSharedDefault`.
+    resetLayoutToSharedDefault(data),
 ]
 
 data.actions = actions
@@ -7428,7 +7197,89 @@ when not defined(ctInExtension) and not defined(ctWeb):
         configureIPC(data)
         configure(data)
 
-    startIPC()
+        # THE CONTAINER DEPLOYMENT'S PLATFORM — WD1b, §6.3.
+        #
+        # This page is a browser tab with no `require`, and until now that was
+        # the whole of what the front end knew about it: `ctPlatform()` fell
+        # through `desktop_electron`'s `electronAvailable() == false` branch to
+        # `newPlatform(webProfile)`, a profile claiming a filesystem, a process
+        # runner and a VCS over facades that refuse all three.
+        #
+        # A tab cannot tell "served by `ct host`" from "served by the
+        # browsersync dev server" by looking at itself — same bundle, same
+        # origin shape, no `require` in either. §6.3's answer is to ASK: send
+        # `hello` on the socket that is already open and see whether anything
+        # answers `welcome`. Something does exactly when there is a container
+        # endpoint on the other end, and the frame carries the profile that
+        # endpoint serves, declared by the process that will answer the calls.
+        #
+        # Silence is the dev server and is not an error: nothing is installed
+        # and the page keeps the platform it had. A version refusal (§6.5) is
+        # also not silent — it is shown, because a stale cached bundle that
+        # simply degraded would be indistinguishable from a deployment that
+        # cannot do very much.
+        discard beginContainerBoot(
+          ContainerChannel(
+            send: proc(frame: string) =
+              socket.emit(FacadeChannel.cstring, frame.cstring),
+            subscribe: proc(handler: proc(frame: string)) =
+              var captured = handler
+              socket.on(FacadeChannel.cstring, proc(frame: cstring) =
+                captured($frame))),
+          newBrowserTabBridge(),
+          proc(boot: ContainerBoot) =
+            case boot.outcome
+            of cbInstalled:
+              installFrontendPlatform(boot.platform)
+              # `ui/git_cli.nim` answers a render synchronously and re-asks
+              # when the instantiation cannot; this is what brings the panel
+              # back once the answer has arrived. Registered HERE rather than
+              # unconditionally because it is only ever needed for a remote
+              # instantiation — the desktop's git settles inside the call, and
+              # a redraw hook there would fire on nothing.
+              setGitRefreshHook(proc() = redrawAll())
+            of cbRefused, cbMalformed:
+              console.error cstring"CODETRACER::facade: ", boot.message.cstring
+              data.viewsApi.showNotification(newNotification(
+                NotificationKind.NotificationError, boot.message))
+            of cbPending:
+              discard)
+
+    # THE COORDINATES COME FROM THE DESCRIPTOR, NOT FROM THE DOCUMENT — WD1c,
+    # §7.
+    #
+    # `views/server_index.ejs` used to render `frontendSocketPort` and
+    # `frontendSocketParameters` into the page, and that is the whole reason
+    # the entry document was uncacheable: two values that change per session
+    # compiled into the artefact that does not. `GET /deployment.json` is the
+    # mutable pointer the immutable document is cacheable because of.
+    #
+    # **A failed fetch is not fatal and must not be.** The globals the
+    # document declares are the fallback — port `-1` and no parameters, which
+    # is already spelled "use this page's own origin" below — so a deployment
+    # that does not serve the descriptor connects exactly as it did before.
+    # Blocking the socket on a fetch would turn a missing endpoint into a
+    # dead page.
+    proc fetchDescriptorThen(done: proc()) {.importjs: """(function (done) {
+  try {
+    fetch('/deployment.json', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && d.connection) {
+          if (typeof d.connection.frontendSocketPort === 'number') {
+            frontendSocketPort = d.connection.frontendSocketPort;
+          }
+          if (typeof d.connection.frontendSocketParameters === 'string') {
+            frontendSocketParameters = d.connection.frontendSocketParameters;
+          }
+        }
+        done();
+      })
+      .catch(function () { done(); });
+  } catch (e) { done(); }
+})(#)""".}
+
+    fetchDescriptorThen(proc() = startIPC())
 
 when defined(ctInExtension):
   once:
@@ -7440,6 +7291,14 @@ if inElectron:
     configureIPC(data)
     configure(data)
     cast[JsObject](dom.window)["__CODETRACER_DATA__"] = data.toJs
+
+    # PLAT-45: the index process has deleted the desktop's saved layout files
+    # and re-read the default the first run installs
+    # (`index/window.onResetLayout`); put it on screen. See
+    # `resetLayoutToSharedDefault`.
+    ipc.on(cstring"CODETRACER::reset-layout-done",
+           proc(event: JsObject, payload: JsObject) =
+      data.applySharedDefaultLayout(cast[js](payload[cstring"layout"])))
 
     # THE DESKTOP TEST-RUNNER HOST, and this is the "elsewhere" the Electron
     # arm was told it may point at (`test_results_vm.nim`, "`runTests` is the

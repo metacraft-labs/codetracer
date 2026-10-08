@@ -42,7 +42,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use codetracer_trace_types::{EventLogKind, StepId};
-use num_traits::FromPrimitive;
 
 use codetracer_trace_reader::call_stream_reader::decode_chunk_records;
 use codetracer_trace_writer::event_stream::IoEventRecord;
@@ -236,7 +235,13 @@ impl SeekableEventStream {
             }
         }
         let records = &reader.cached_chunk.as_ref()?.1;
-        records.get(within).map(io_event_record_to_db_event)
+        match io_event_record_to_db_event(records.get(within)?) {
+            Ok(event) => Some(event),
+            Err(e) => {
+                log::error!("events.dat: event {index} refused: {e}");
+                None
+            }
+        }
     }
 
     /// Fetch a contiguous page of events, decompressing only the chunks the
@@ -268,28 +273,43 @@ impl SeekableEventStream {
     }
 }
 
-/// Map an `events.dat` [`IoEventRecord`] onto the db-backend's
-/// [`DbRecordEvent`].
-///
-/// The `kind` mapping is the one `open_new_format_nim` applies to the Nim
-/// FFI's `IOEventKind` ordinals — `0=stdout → Write`, `1=stderr → WriteOther`,
-/// `2=file_op → WriteFile`, `3=error → Error` — with a fall-through to the Rust
-/// enum's own discriminants for forward compatibility, so an event kind added
-/// later surfaces as itself rather than being coerced.
-pub fn io_event_record_to_db_event(record: &IoEventRecord) -> DbRecordEvent {
-    let kind = match record.kind {
+/// The `EventLogKind` an `events.dat` kind byte stands for: the recorder's
+/// exact `EventLogKind`, by ordinal (`trace-events.md` §"EventLogKind (u8
+/// enum)"). Values 14-255 are unassigned and refused, naming the value: a
+/// substitute kind would report an event as something it was not.
+pub fn event_log_kind_from_ordinal(kind: u8) -> Result<EventLogKind, String> {
+    Ok(match kind {
         0 => EventLogKind::Write,
-        1 => EventLogKind::WriteOther,
-        2 => EventLogKind::WriteFile,
-        3 => EventLogKind::Error,
-        other => EventLogKind::from_u8(other).unwrap_or(EventLogKind::Write),
-    };
-    DbRecordEvent {
-        kind,
+        1 => EventLogKind::WriteFile,
+        2 => EventLogKind::WriteOther,
+        3 => EventLogKind::Read,
+        4 => EventLogKind::ReadFile,
+        5 => EventLogKind::ReadOther,
+        6 => EventLogKind::ReadDir,
+        7 => EventLogKind::OpenDir,
+        8 => EventLogKind::CloseDir,
+        9 => EventLogKind::Socket,
+        10 => EventLogKind::Open,
+        11 => EventLogKind::Error,
+        12 => EventLogKind::TraceLogEvent,
+        13 => EventLogKind::EvmEvent,
+        other => {
+            return Err(format!(
+                "events.dat: event kind {other} is not an assigned EventLogKind (0-13)"
+            ));
+        }
+    })
+}
+
+/// Map an `events.dat` [`IoEventRecord`] onto the db-backend's
+/// [`DbRecordEvent`], refusing a record whose kind is unassigned.
+pub fn io_event_record_to_db_event(record: &IoEventRecord) -> Result<DbRecordEvent, String> {
+    Ok(DbRecordEvent {
+        kind: event_log_kind_from_ordinal(record.kind)?,
         content: String::from_utf8_lossy(&record.content).into_owned(),
         step_id: StepId(record.step_id as i64),
         metadata: String::from_utf8_lossy(&record.metadata).into_owned(),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -301,29 +321,59 @@ pub fn io_event_record_to_db_event(record: &IoEventRecord) -> DbRecordEvent {
 mod tests {
     use super::*;
 
-    /// The four Nim `IOEventKind` ordinals map to the same `EventLogKind`s the
-    /// Nim FFI path produces, so a seekable-read event is indistinguishable
-    /// from a materialised one.
+    /// The `EventLogKind` table of `trace-events.md` §"EventLogKind (u8
+    /// enum)", by ordinal. Spelled out rather than derived from the enum, so
+    /// that a reordering of the enum fails here instead of silently
+    /// relabelling every recording.
+    const SPEC_KINDS: [(u8, EventLogKind); 14] = [
+        (0, EventLogKind::Write),
+        (1, EventLogKind::WriteFile),
+        (2, EventLogKind::WriteOther),
+        (3, EventLogKind::Read),
+        (4, EventLogKind::ReadFile),
+        (5, EventLogKind::ReadOther),
+        (6, EventLogKind::ReadDir),
+        (7, EventLogKind::OpenDir),
+        (8, EventLogKind::CloseDir),
+        (9, EventLogKind::Socket),
+        (10, EventLogKind::Open),
+        (11, EventLogKind::Error),
+        (12, EventLogKind::TraceLogEvent),
+        (13, EventLogKind::EvmEvent),
+    ];
+
+    fn record(kind: u8) -> IoEventRecord {
+        IoEventRecord {
+            kind,
+            step_id: 4,
+            metadata: b"m".to_vec(),
+            content: b"c".to_vec(),
+        }
+    }
+
+    /// Every on-disk kind byte is reported as exactly the `EventLogKind` with
+    /// that ordinal, not mapped onto a coarser set.
     #[test]
-    fn kind_mapping_matches_the_nim_ffi_path() {
-        let cases = [
-            (0u8, EventLogKind::Write),
-            (1, EventLogKind::WriteOther),
-            (2, EventLogKind::WriteFile),
-            (3, EventLogKind::Error),
-        ];
-        for (raw, expected) in cases {
-            let record = IoEventRecord {
-                kind: raw,
-                step_id: 4,
-                metadata: b"m".to_vec(),
-                content: b"c".to_vec(),
-            };
-            let event = io_event_record_to_db_event(&record);
-            assert_eq!(event.kind, expected, "kind {raw}");
+    fn every_kind_is_read_as_its_exact_ordinal() {
+        for (raw, expected) in SPEC_KINDS {
+            let event = io_event_record_to_db_event(&record(raw)).unwrap();
+            assert_eq!(event.kind, expected, "kind byte {raw}");
             assert_eq!(event.step_id, StepId(4));
             assert_eq!(event.content, "c");
             assert_eq!(event.metadata, "m");
+        }
+    }
+
+    /// Values 14-255 are unassigned, and a record carrying one is refused,
+    /// naming the value, rather than given a substitute kind.
+    #[test]
+    fn an_unassigned_kind_is_refused_by_value() {
+        for raw in [14u8, 15, 99, 255] {
+            let err = io_event_record_to_db_event(&record(raw)).unwrap_err();
+            assert!(
+                err.contains(&raw.to_string()) && err.contains("EventLogKind"),
+                "the refusal of kind {raw} does not name it: {err}"
+            );
         }
     }
 
@@ -337,7 +387,7 @@ mod tests {
             metadata: b"ct-marker:abc".to_vec(),
             content: Vec::new(),
         };
-        assert_eq!(io_event_record_to_db_event(&record).metadata, "ct-marker:abc");
+        assert_eq!(io_event_record_to_db_event(&record).unwrap().metadata, "ct-marker:abc");
     }
 
     /// An `events.idx` shorter than its own header is rejected by name.

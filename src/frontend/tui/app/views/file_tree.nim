@@ -17,13 +17,34 @@
 ## `MaxProjectFiles`, and a listing missing files without saying so is one a
 ## user will conclude does not contain them.
 
+import std/strutils
+
 import ../layout/profile
 import ./styled_row
 
 export styled_row, profile
 
 type
+  FileTreeEntry* = object
+    ## One row of a REPLAY session's file tree, as the desktop's Files pane
+    ## draws it (PLAT-47): the entry's own label at its depth, folders
+    ## expanded. `path` is the entry's recording-relative path.
+    text*: string
+    depth*: int
+    isFolder*: bool
+    path*: string
+    expanded*: bool
+      ## PLAT-50: a folder whose children follow it (the VM's
+      ## `isExpanded`); a collapsed one is marked `CollapsedFolderGlyph`.
+
   FileTreeModel* = object
+    entries*: seq[FileTreeEntry]
+      ## PLAT-47: a replay session's tree — the recording's source folders,
+      ## the SAME `FilesystemEntryNode` tree the desktop's Files pane renders
+      ## (`native_host.recordingFileTree`, loaded into the session's
+      ## `FilesystemVM` by `loadRecordingPanes`) — row for row, so the two
+      ## panes list the same entries under the same labels. Empty in Edit
+      ## mode, which lists `files` (the project walk) instead.
     files*: seq[string]
       ## Project-relative paths, sorted, as `edit_host.listProjectFiles`
       ## produced them.
@@ -44,12 +65,12 @@ type
 const
   FileTreeTitle* = "FILES"
   FileTreeRule* = "─"
-  FileTreeTitleStyle* = CellStyle(fg: "bright_yellow", bold: true)
-  FileTreeRuleStyle* = CellStyle(fg: "bright_black")
-  FileTreeOpenStyle* = CellStyle(fg: "white", bold: true)
-  FileTreePlainStyle* = CellStyle(fg: "bright_black")
-  FileTreeSelectedBackground* = "black"
-  FileTreeTruncatedStyle* = CellStyle(fg: "yellow")
+  FileTreeTitleStyle* = CellStyle(role: srModeEdit, bold: true)
+  FileTreeRuleStyle* = CellStyle(role: srBorderPane)
+  FileTreeOpenStyle* = CellStyle(role: srChromeText, bold: true)
+  FileTreePlainStyle* = CellStyle(role: srChromeMuted)
+  FileTreeSelectedBackground* = srSurfaceSelection
+  FileTreeTruncatedStyle* = CellStyle(role: srChromeNotification)
   OpenMarker* = "•"
     ## Beside the file the editor holds. One cell, so the paths stay aligned.
 
@@ -59,7 +80,25 @@ proc initFileTreeModel*(files: seq[string] = @[]; selected = -1;
   FileTreeModel(files: files, selected: selected, scrollTop: scrollTop,
                 truncated: truncated, openPath: openPath)
 
-proc isEmpty*(model: FileTreeModel): bool = model.files.len == 0
+proc isEmpty*(model: FileTreeModel): bool =
+  model.files.len == 0 and model.entries.len == 0
+
+const FolderGlyph* = "▼"
+  ## Beside an expanded folder, as the desktop's twisty. One cell;
+  ## `borders.asciiFor` degrades it to `v`.
+const CollapsedFolderGlyph* = "▶"
+  ## PLAT-50: beside a COLLAPSED folder (a click opens it). `asciiFor`: `>`.
+
+proc entryText*(e: FileTreeEntry): string =
+  ## What one tree row says: indented by depth, a folder marked.
+  repeat("  ", max(0, e.depth)) &
+    (if not e.isFolder: "  "
+     elif e.expanded: FolderGlyph & " "
+     else: CollapsedFolderGlyph & " ") & e.text
+
+proc initFileTreeModel*(entries: seq[FileTreeEntry]): FileTreeModel =
+  ## A replay session's file tree.
+  FileTreeModel(entries: entries, selected: -1)
 
 proc paintFileTree*(g: var StyledGrid; area: CellArea;
                     model: FileTreeModel): FileTreeScreen =
@@ -83,6 +122,20 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
   result.rows.add title
 
   let bodyRows = area.height - 1
+  if model.entries.len > 0:
+    for i in 0 ..< bodyRows:
+      let idx = model.scrollTop + i
+      if idx < 0 or idx >= model.entries.len:
+        break
+      let e = model.entries[idx]
+      let isOpen = not e.isFolder and model.openPath.len > 0 and
+                   e.path.endsWith(model.openPath)
+      let style = if isOpen: FileTreeOpenStyle else: FileTreePlainStyle
+      let text = truncateToCells(entryText(e), area.width)
+      g.paint(area.row + 1 + i, area.col, text, style)
+      inc result.renderedRows
+      result.rows.add @[StyledSpan(text: text, style: style)]
+    return
   for i in 0 ..< bodyRows:
     let idx = model.scrollTop + i
     if idx < 0 or idx >= model.files.len:
@@ -98,7 +151,7 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
       g.restyle(row, area.col, area.width,
                 proc(s: CellStyle): CellStyle =
                   var out2 = s
-                  out2.bg = FileTreeSelectedBackground
+                  out2.surface = FileTreeSelectedBackground
                   out2)
     inc result.renderedRows
     result.rows.add @[StyledSpan(text: text, style: style)]

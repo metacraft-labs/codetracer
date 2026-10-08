@@ -64,7 +64,8 @@
 import
   std/[jsffi, options],
   ./ui_imports,
-  ../index/layout_config_repair
+  ../index/layout_config_repair,
+  ../index/mode_default_layout
 
 # ---------------------------------------------------------------------------
 # The bundled default, per mode
@@ -104,11 +105,15 @@ proc bundledLayoutForMode*(mode: LayoutMode): js =
   ## defect rather than a runtime condition — the file is `staticRead`, so it
   ## is the same bytes on every launch. Callers still check, because the
   ## alternative is a `TypeError` thirty frames away.
+  ##
+  ## The derivation itself is `index/mode_default_layout.modeDefaultLayout`,
+  ## the one function the index process's first run and the default-layout
+  ## generator also call — so this mode's default, the desktop's first screen
+  ## and the arrangement the terminal and GPUI window open with cannot differ.
   let bundled = parseLayoutJsonOrNil(cstring(bundledModeLayoutJson))
   if bundled.isNil:
     return nil
-  modeDefaultLayoutConfig(bundled, ord(Content.EditorView),
-                          modeHiddenContentIds(mode), paneHomesForMode(mode))
+  modeDefaultLayout(bundled, mode)
 
 proc layoutComponents*(layout: js): seq[tuple[content: int, id: int]] =
   ## Every `genericUiComponent` a layout config names, as (content id, dom id).

@@ -1,7 +1,7 @@
 import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, options],
   multitrace,
   native_backend_selection,
-  record_assessment, recorder_dispatch,
+  record_assessment, recorder_dispatch, portable_route, recorder_env,
   ../../common/[ lang, paths, types, trace_index, config, ct_logging ],
   ../utilities/[language_detection ],
   ../cli/build,
@@ -326,7 +326,8 @@ proc record*(lang: string,
              useInterpose: bool,
              program: string,
              args: seq[string],
-             server: bool = false): Trace =
+             server: bool = false,
+             portable: bool = false): Trace =
   # NTR-2: recognize ONCE and carry the result along this invocation's own call
   # chain.  That is ordinary parameter passing, not a cache — Q7 decided there
   # is no cache, and nothing here is persisted, so there is no invalidation
@@ -440,6 +441,27 @@ proc record*(lang: string,
       ""
     else:
       nativeRecordingBackendForHost(recordBackend)
+
+  # `--portable` (codetracer-specs CLI/ct/record.md, "Portable traces"): decided
+  # here, with the backend known and before anything is built, spawned or
+  # created, so a backend that cannot honour it refuses by name and records
+  # nothing.  See `portable_route.nim` for why MCR receives it through
+  # `CT_PORTABLE` rather than as a flag.
+  let portableDecision = portableRoute(viaDispatchTable,
+    displayName(recorderSel), nativeBackend, portable,
+    getEnv(PortableEnvVar, ""), upload)
+  if portableDecision.refusal.len > 0:
+    for line in portableDecision.refusal:
+      echo line
+    quit(1)
+  for line in portableDecision.warning:
+    stderr.writeLine(line)
+  for (k, v) in portableDecision.env:
+    putEnv(k, v)
+  if portableDecision.implied.len > 0:
+    stderr.writeLine("note: " & portableDecision.implied &
+      " implies --portable: the trace carries the files it needs to replay " &
+      "on another machine")
   var outputFolderValue = outputFolder
   var programToRecord = program
   var nimcachePath = ""
@@ -593,21 +615,15 @@ proc record*(lang: string,
       if nativeBackend == "mcr":
         nativeArgs = nativeArgs.concat(@["--backend", "mcr"])
         if useInterpose:
-          # Forwarded as a trailing recorder-side flag; db-backend-record
-          # already passes unknown ``--`` args through to the native
-          # recorder when ``--backend=mcr`` is in effect.
-          #
-          # THE RECORDER'S SPELLING IS ``--interpose``, NOT CODETRACER'S
-          # ``--use-interpose``. They are two different CLIs: `--use-interpose`
-          # is ct's own public flag (docs/book/src/reference/ct_cli.md), while
-          # the flag that reaches ct_cli must be the one its parser knows
-          # (`codetracer-native-recorder/ct_cli/src/ct_cli/arg_parser.nim:695`).
-          # ct_cli RETIRED `--use-interpose` and its parser's `else` branch
-          # returns `err("unknown option: ...")`, so sending the ct spelling
-          # here does not degrade — it fails the recording outright. This is
-          # the exact skew `src/common/target_assessment.nim:26` cites as the
-          # precedent for versioning the launcher protocol.
-          nativeArgs.add("--interpose")
+          # Forwarded through the environment (`recorder_env.nim`): appended
+          # here as `--interpose` it travelled behind `--` to the recorded
+          # program, and the recorder never saw it.
+          let fwd = recorderForwarding(["--use-interpose"])
+          if fwd.refusal.len > 0:
+            for line in fwd.refusal: echo line
+            quit(1)
+          for (k, v) in fwd.env:
+            putEnv(k, v)
       return recordInternal(
         dbBackendRecordExe,
         nativeArgs,

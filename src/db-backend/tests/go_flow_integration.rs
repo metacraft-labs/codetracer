@@ -5,9 +5,20 @@
 //! Go programs are debugged through Delve (not LLDB), which is transparent
 //! to the DAP flow infrastructure.
 //!
-//! The test is skipped if `ct-native-replay`, `rr`, or `dlv` is not available.
+//! It needs `ct-native-replay`, rr (or TTD on Windows), go and `dlv`; see the
+//! platform gate below.
 //!
 //! Go uses rr-based traces on Unix and TTD-based traces on Windows.
+//!
+//! ## Platform gate
+//!
+//! The replay backend these tests record with is rr on Linux or TTD on
+//! Windows; macOS has neither, so on macOS the target is not compiled (the
+//! `cfg` below). Everywhere else a missing tool goes through
+//! `test_harness::skip_or_fail_missing_prerequisite`: a failure under
+//! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false`, otherwise a reported skip.
+
+#![cfg(any(target_os = "linux", target_os = "windows"))]
 
 mod test_harness;
 
@@ -59,22 +70,38 @@ fn is_delve_available() -> bool {
 fn test_go_flow_integration() {
     // Check prerequisites
     if find_ct_native_replay().is_none() {
-        eprintln!("SKIPPED: ct-native-replay not found in PATH or development locations");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_go_flow_integration",
+            "ct-native-replay was not found",
+            "build it with `just ensure-ct-native-replay` (codetracer-native-backend sibling) or set CT_NATIVE_REPLAY_PATH",
+        );
         return;
     }
 
     if !is_replay_backend_available() {
-        eprintln!("SKIPPED: replay backend not available (rr on Unix, TTD on Windows)");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_go_flow_integration",
+            "no replay backend: rr (Linux) or TTD (Windows, installed and elevated)",
+            "install rr on Linux (on AMD Zen it needs the SpecLockMap workaround) or run elevated with Microsoft.TimeTravelDebugging on Windows",
+        );
         return;
     }
 
     if !is_command_available("go") {
-        eprintln!("SKIPPED: go is not available on PATH");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_go_flow_integration",
+            "go is not on PATH",
+            "run inside the codetracer dev shell, which provides it, or install it",
+        );
         return;
     }
 
     if !is_delve_available() {
-        eprintln!("SKIPPED: dlv (Delve) is not available — required for Go debugging");
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_go_flow_integration",
+            "dlv (Delve), required for Go debugging, is not on PATH",
+            "install Delve (`go install github.com/go-delve/delve/cmd/dlv@latest`)",
+        );
         return;
     }
 

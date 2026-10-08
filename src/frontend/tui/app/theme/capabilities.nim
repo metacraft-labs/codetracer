@@ -50,8 +50,12 @@
 import std/strutils
 
 import ../../../../common/terminal_graphics/tiers
+import ./colour_math
+import ./roles
 
 export tiers.ImageTier, tiers.tierName, tiers.parseTierName, tiers.tierNames
+export roles.DesignMode
+export colour_math.Rgb8, colour_math.hexOf
 
 type
   ColorDepth* = enum
@@ -72,22 +76,22 @@ type
     bmAscii = "ascii"
 
   UiTheme* = enum
-    ## §6.2's `-t, --theme=<name>`: "dark (default), light, plain, monokai" —
-    ## CTUI-14, and the four names are the published ones rather than a set this
-    ## milestone chose.
+    ## §6.2's `-t, --theme=<name>`. PLAT-46: a theme is a design-system COLOUR
+    ## MODE, not a palette of its own — `dark` and `light` select the Dark and
+    ## Light values `codetracer-design-system` publishes for every token
+    ## (`$extensions.modes`), and `plain` is the request for no colour at all.
     ##
-    ## THE ZERO VALUE IS THE PUBLISHED DEFAULT, which is what lets a theme axis
-    ## be added to `CapabilityFlags` and `TerminalCapabilities` without moving a
-    ## single existing assertion: everything that did not ask for a theme
-    ## resolves to `utDark`, and `utDark`'s tables are the ones CTUI-11 shipped.
+    ## `monokai` IS RETIRED (2026-09-26). The design system carries a complete
+    ## syntax palette in both modes (`colors/editor/syntax/*`, Dracula /
+    ## Alucard), so a second syntax theme had nothing left to provide; every
+    ## token class Monokai distinguished maps to a `colors/editor/syntax/*` role
+    ## or is filed as a design-system gap (see `app/theme/roles.nim`).
+    ## `--theme=monokai` fails with a message naming the replacement —
+    ## `RetiredThemes` below — rather than being silently ignored.
     ##
-    ## A THEME IS A PALETTE AND NEVER A DISTINCTION. `app/theme/degradation.nim`
-    ## states the contract that survives it: within a group of roles that are
-    ## states of one thing, any two the 16-colour rung tells apart are told apart
-    ## at every rung. Re-picking hues must not merge two states, and
-    ## `app/tests/test_degraded_style_tables.nim` asserts that over the whole
-    ## cross product of roles, depths AND themes rather than over the default
-    ## one.
+    ## THE ZERO VALUE IS THE DEFAULT, `dark`, and when no `--theme` is given the
+    ## mode is DETECTED from the terminal's actual background (OSC 11, then
+    ## `COLORFGBG`) — `CapabilityFlags.themePinned` says which.
     utDark = "dark"
     utLight = "light"
     utPlain = "plain"
@@ -96,8 +100,31 @@ type
       ## whatever the terminal can do — which is the same rung `--no-color`
       ## reaches, by a different door and for a different reason. Weight,
       ## underline, reverse and glyph carry every state, exactly as
-      ## `monochromeStyle` already lays out.
-    utMonokai = "monokai"
+      ## `app/theme/roles.RoleSpecs[...].mono` lays out.
+
+  PaletteKind* = enum
+    ## `--palette=<name>` — PLAT-46 deliverable 9.
+    pkDesign = "design"
+      ## The default: paint the design system's colours — 24-bit where the
+      ## terminal has it, else the 256- and 16-colour rungs DERIVED from the same
+      ## token hexes — and own every cell's background.
+    pkTerminal = "terminal"
+      ## Paint ONLY with the sixteen symbolic ANSI indices and the terminal's
+      ## DEFAULT foreground/background (SGR 39/49), so the user's own terminal
+      ## palette decides the actual colours — vim without `termguicolors`.
+
+  BackgroundSource* = enum
+    ## Where the Dark/Light decision came from. Named on the status line
+    ## (`bg: osc11 #1e1e2e -> dark`), because "why is this light?" must be
+    ## answerable from the screen.
+    bsFlag = "flag"
+      ## `--theme=dark|light|plain`.
+    bsOsc11 = "osc11"
+      ## The terminal answered `OSC 11 ; ?` with its background colour.
+    bsColorFgBg = "colorfgbg"
+      ## `$COLORFGBG` (rxvt, Konsole).
+    bsDefault = "default"
+      ## Nothing answered: Dark, vim's default.
 
   CapabilitySource* = enum
     ## WHY an axis resolved the way it did. Carried on the resolved value, and
@@ -109,6 +136,10 @@ type
     csFlag = "flag"
     csEnvironment = "environment"
     csDefault = "default"
+    csProbe = "probe"
+      ## PLAT-46: the terminal ANSWERED a start-up query (DECRQSS / XTGETTCAP
+      ## for 24-bit colour, or tmux reported its client's `RGB` feature). A
+      ## positive answer is trusted over a conservative `TERM`.
 
   TerminalEnv* = object
     ## EVERY environment variable capability resolution reads, and nothing
@@ -139,6 +170,13 @@ type
       ## Whether the process is actually drawing on a terminal. False for a
       ## pipe, a CI log or `nohup`, and it floors every axis: there is nothing
       ## to negotiate with.
+    colorFgBg*: string
+      ## `$COLORFGBG` — `fg;bg` (or `fg;default;bg`) as ANSI indices, set by
+      ## rxvt and Konsole. PLAT-46's second source for the background, after
+      ## OSC 11.
+    tmux*: string
+      ## `$TMUX`. Non-empty inside tmux, which is where a conservative `TERM`
+      ## (`screen`, `tmux-256color`) most often hides a 24-bit outer terminal.
 
   CapabilityFlags* = object
     ## §6.2's four capability flags, as a value. Parsed by `app/cli.nim`, which
@@ -154,6 +192,12 @@ type
     theme*: UiTheme
       ## `-t, --theme=<name>` — CTUI-14. `utDark` when the flag is absent, which
       ## is also what §6.2 publishes as the default.
+    themePinned*: bool
+      ## Whether `--theme` was GIVEN. PLAT-46: with no `--theme` the mode is
+      ## detected from the terminal's background, so "absent" and "`dark`" are
+      ## two different requests and the zero value must be the first.
+    palette*: PaletteKind
+      ## `--palette=design|terminal`. `pkDesign` when absent.
     imageTier*: ImageTier
       ## `--image-tier=<name>` — PLAT-14, CodeTracer-TUI-Graphics.md §2.2: "A
       ## user override exists (`--image-tier`) and always wins, per the
@@ -198,7 +242,21 @@ type
       ## asserts that a Kitty-advertising terminal is told nothing, which is a
       ## claim about a choice and not about an absence.
     theme*: UiTheme
-      ## Which palette the role tables paint in — CTUI-14.
+      ## Which theme was asked for (or `utDark` when none was) — CTUI-14.
+    mode*: DesignMode
+      ## PLAT-46: the design-system colour MODE the roles resolve in. From
+      ## `--theme` when given, else detected from the terminal's background.
+    modeFrom*: BackgroundSource
+    background*: string
+      ## The terminal background the mode was decided from, as `#rrggbb`; ""
+      ## when none was reported (a flag, or no answer).
+    palette*: PaletteKind
+    tmuxRgbWithheld*: bool
+      ## Inside tmux, and tmux reports no `RGB` feature for its client, so a
+      ## 24-bit outer terminal is being painted below its depth. The status
+      ## line names the remedy (`tmuxRgbRemedy`).
+    tmuxClientTerm*: string
+      ## tmux's `client_termname`, for the remedy's pattern. "" when unknown.
     colorsFrom*: CapabilitySource
     bordersFrom*: CapabilitySource
     mouseFrom*: CapabilitySource
@@ -232,22 +290,57 @@ const
 
 proc initTerminalEnv*(term = ""; colorterm = ""; termProgram = "";
                       lcAll = ""; lcCtype = ""; lang = "";
-                      noColor = ""; isTty = true): TerminalEnv =
+                      noColor = ""; isTty = true; colorFgBg = "";
+                      tmux = ""): TerminalEnv =
   ## A `TerminalEnv` with every field named. Written as a constructor with
   ## defaults so a test that varies one variable says which one it varied
   ## instead of listing eight positional strings.
   TerminalEnv(term: term, colorterm: colorterm, termProgram: termProgram,
               lcAll: lcAll, lcCtype: lcCtype, lang: lang, noColor: noColor,
-              isTty: isTty)
+              isTty: isTty, colorFgBg: colorFgBg, tmux: tmux)
 
 proc initCapabilityFlags*(forceTrueColor = false; noColor = false;
                           asciiBorders = false; noMouse = false;
                           theme = utDark;
                           imageTier = itAscii;
-                          imageTierPinned = false): CapabilityFlags =
+                          imageTierPinned = false;
+                          themePinned = false;
+                          palette = pkDesign): CapabilityFlags =
   CapabilityFlags(forceTrueColor: forceTrueColor, noColor: noColor,
                   asciiBorders: asciiBorders, noMouse: noMouse, theme: theme,
-                  imageTier: imageTier, imageTierPinned: imageTierPinned)
+                  imageTier: imageTier, imageTierPinned: imageTierPinned,
+                  themePinned: themePinned, palette: palette)
+
+const
+  RetiredThemes*: array[1, (string, UiTheme)] = [("monokai", utDark)]
+    ## Theme names that USED to be accepted, each with the one that replaces
+    ## it. `app/cli.nim` refuses them with `retiredThemeMessage` rather than
+    ## silently ignoring them.
+
+proc retiredThemeMessage*(name: string): string =
+  ## "" for a name that was never retired; otherwise the refusal naming the
+  ## replacement.
+  let wanted = name.toLowerAscii()
+  for (old, replacement) in RetiredThemes:
+    if old == wanted:
+      return "--theme=" & old & " was retired: the design system's syntax " &
+        "palette (Dracula / Alucard) replaces it; use --theme=" &
+        $replacement & " (or --theme=light)"
+  ""
+
+proc parsePalette*(name: string): (bool, PaletteKind) =
+  ## `--palette=<name>`'s argument, matched against the enum's spellings.
+  let wanted = name.toLowerAscii()
+  for p in PaletteKind:
+    if $p == wanted:
+      return (true, p)
+  (false, pkDesign)
+
+proc paletteNames*(): string =
+  var parts: seq[string] = @[]
+  for p in PaletteKind:
+    parts.add $p
+  parts.join(", ")
 
 proc parseTheme*(name: string): (bool, UiTheme) =
   ## `-t, --theme=<name>`'s argument, matched against the enum's own published
@@ -263,7 +356,7 @@ proc parseTheme*(name: string): (bool, UiTheme) =
   (false, utDark)
 
 proc themeNames*(): string =
-  ## The four names, for a usage message. Same source as `parseTheme`.
+  ## The theme names, for a usage message. Same source as `parseTheme`.
   var parts: seq[string] = @[]
   for theme in UiTheme:
     parts.add $theme
@@ -392,24 +485,206 @@ proc resolveKittyKeyboard(env: TerminalEnv): bool =
     return true
   env.termProgram in KittyKeyboardPrograms
 
-proc resolveCapabilities*(env: TerminalEnv;
-                          flags: CapabilityFlags): TerminalCapabilities =
+const
+  LightBackgroundLuminance* = 0.18
+    ## A background whose WCAG relative luminance is ABOVE this is light.
+    ## 0.18 is CIE L* ≈ 50, the perceptual midpoint between black and white —
+    ## mid-grey `#777777` sits on it — so the threshold is where a reader's own
+    ## "is this a dark or a light terminal" flips, not a tuned constant.
+
+proc isLightBackground*(c: Rgb8): bool =
+  relativeLuminance(c) > LightBackgroundLuminance
+
+proc modeForBackground*(c: Rgb8): DesignMode =
+  if isLightBackground(c): dmLight else: dmDark
+
+proc parseColorFgBg*(value: string): (bool, DesignMode) =
+  ## `$COLORFGBG` -> the mode its background implies. `(false, …)` when the
+  ## variable is absent or unreadable.
+  ##
+  ## The value is `fg;bg` or `fg;default;bg` (rxvt's three-field form); the
+  ## LAST field is the background's ANSI index. Indices 0-6 and 8 are dark
+  ## backgrounds and every other index is light — vim's own reading of the
+  ## variable (`:help 'background'`), kept so the two editors agree.
+  if value.len == 0:
+    return (false, dmDark)
+  let parts = value.split(';')
+  var idx = -1
+  try:
+    idx = parseInt(parts[^1].strip())
+  except ValueError:
+    return (false, dmDark)
+  if idx < 0 or idx > 15:
+    return (false, dmDark)
+  if idx in {0 .. 6, 8}: (true, dmDark) else: (true, dmLight)
+
+proc parseOsc11Reply*(reply: string): (bool, Rgb8) =
+  ## An `OSC 11` answer -> the terminal's background colour.
+  ##
+  ## xterm's form is `ESC ] 11 ; rgb:RRRR/GGGG/BBBB` terminated by BEL or ST;
+  ## each channel is 1-4 hex digits and SCALED to its own width
+  ## (https://invisible-island.net/xterm/ctlseqs/ctlseqs.html, "Operating
+  ## System Commands", and XParseColor). Anything else is `(false, …)`.
+  let at = reply.find("11;rgb:")
+  if at < 0:
+    return (false, (0, 0, 0))
+  var body = reply[at + "11;rgb:".len .. ^1]
+  var stop = body.len
+  for i, ch in body:
+    if ch notin HexDigits and ch != '/':
+      stop = i
+      break
+  body = body[0 ..< stop]
+  let channels = body.split('/')
+  if channels.len != 3:
+    return (false, (0, 0, 0))
+  var rgb: array[3, int]
+  for i, c in channels:
+    if c.len < 1 or c.len > 4:
+      return (false, (0, 0, 0))
+    let v = fromHex[int](c)
+    let maxV = (1 shl (4 * c.len)) - 1
+    rgb[i] = (v * 255 + maxV div 2) div maxV
+  (true, (rgb[0], rgb[1], rgb[2]))
+
+type
+  TerminalProbe* = object
+    ## What the start-up query round OBSERVED — data, not a decision.
+    ## `host/terminal_probe.nim` fills it by writing the queries down the tty
+    ## and reading the answers back; `applyProbe` below decides what they mean.
+    attempted*: bool
+    answered*: bool
+      ## The DA1 fence came back: the terminal is answering queries at all.
+    hasBackground*: bool
+    background*: Rgb8
+      ## From `OSC 11`.
+    truecolor*: bool
+      ## A positive DECRQSS (the terminal kept a 24-bit SGR) or XTGETTCAP
+      ## (`RGB` / `Tc`) answer.
+    truecolorVia*: string
+      ## "decrqss" / "xtgettcap" / "tmux", for the diagnostic line.
+    tmuxQueried*: bool
+    tmuxRgb*: bool
+      ## tmux's `client_termfeatures` includes `RGB`.
+    tmuxClientTerm*: string
+
+const AutoDetectSelectsLight* = false
+  ## **WHETHER BACKGROUND DETECTION MAY CHOOSE LIGHT — it may not.** A product
+  ## decision (the user, 2026-09-27, PLAT-47): the design system's Light
+  ## editor surface is poorly legible (PLAT-46's review measured every editor
+  ## glyph below 4.5:1 on it), so a terminal whose background is light still
+  ## opens in DARK until the design system fixes that surface in Figma.
+  ## `--theme=light` (and `:theme light`) still select Light: a user who asks
+  ## for it gets it. The detection itself still runs and is still REPORTED on
+  ## the status line (`backgroundNote`), so the day this becomes `true` the
+  ## only change is this constant.
+
+proc resolveMode(env: TerminalEnv; flags: CapabilityFlags;
+                 probe: TerminalProbe): (DesignMode, BackgroundSource, string) =
+  ## PLAT-46 deliverable 8, as amended by PLAT-47: `--theme` wins; else the
+  ## mode the terminal's ACTUAL background (OSC 11), else `$COLORFGBG`,
+  ## implies — which, while `AutoDetectSelectsLight` is false, is Dark
+  ## whatever the background; else Dark.
+  proc gated(m: DesignMode): DesignMode =
+    if m == dmLight and not AutoDetectSelectsLight: dmDark else: m
+  if flags.themePinned:
+    return ((if flags.theme == utLight: dmLight else: dmDark), bsFlag, "")
+  if probe.hasBackground:
+    return (gated(modeForBackground(probe.background)), bsOsc11,
+            hexOf(probe.background))
+  let (known, mode) = parseColorFgBg(env.colorFgBg)
+  if known:
+    return (gated(mode), bsColorFgBg, "")
+  (dmDark, bsDefault, "")
+
+proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
+                          probe = TerminalProbe()): TerminalCapabilities =
   ## THE whole decision, as one pure function.
   ##
   ## Every axis is independent by construction — there is no shared mutable
-  ## state and no ordering between the four calls — which is what makes the
-  ## Tier-1 sweep a cross product rather than a sequence.
-  let (colors, colorsFrom) = resolveColorDepth(env, flags)
+  ## state and no ordering between the calls — which is what makes the Tier-1
+  ## sweep a cross product rather than a sequence.
+  ##
+  ## PLAT-46: `probe` is what the start-up query round observed (the zero value
+  ## — nothing asked — before it has run). A POSITIVE 24-bit answer is trusted
+  ## over a conservative `TERM`; a flag still beats it, and so do `NO_COLOR`
+  ## and `TERM=dumb`, which are requests rather than guesses.
+  var (colors, colorsFrom) = resolveColorDepth(env, flags)
+  var tmuxWithheld = false
+  let flagDecided = flags.noColor or flags.theme == utPlain or
+                    flags.forceTrueColor
+  let envFloored = noColorRequested(env) or isDumbTerminal(env)
+  if not flagDecided and not envFloored and colors < cdTrueColor:
+    if probe.truecolor:
+      (colors, colorsFrom) = (cdTrueColor, csProbe)
+    elif env.tmux.len > 0 and probe.tmuxQueried:
+      if probe.tmuxRgb:
+        (colors, colorsFrom) = (cdTrueColor, csProbe)
+      else:
+        tmuxWithheld = true
   let (borders, bordersFrom) = resolveBorders(env, flags)
   let (mouse, mouseFrom) = resolveMouse(env, flags)
   let (sync, syncFrom) = resolveSynchronizedOutput(env)
+  let (mode, modeFrom, background) = resolveMode(env, flags, probe)
   TerminalCapabilities(
     colors: colors, borders: borders, mouse: mouse, synchronizedOutput: sync,
     kittyKeyboard: resolveKittyKeyboard(env),
     theme: flags.theme,
     colorsFrom: colorsFrom, bordersFrom: bordersFrom, mouseFrom: mouseFrom,
     syncFrom: syncFrom,
-    themeFrom: (if flags.theme == utDark: csDefault else: csFlag))
+    themeFrom: (if flags.themePinned: csFlag else: csDefault),
+    mode: mode, modeFrom: modeFrom, background: background,
+    palette: flags.palette,
+    tmuxRgbWithheld: tmuxWithheld,
+    tmuxClientTerm: probe.tmuxClientTerm)
+
+proc probeWanted*(env: TerminalEnv; flags: CapabilityFlags): bool =
+  ## Whether the start-up query round has anything to decide.
+  ##
+  ## Nothing to ask when the colour depth is a flag's AND the mode is too, or
+  ## when there is no terminal to ask.
+  if isDumbTerminal(env):
+    return false
+  let depthDecided = flags.noColor or flags.theme == utPlain or
+                     flags.forceTrueColor
+  not (depthDecided and flags.themePinned)
+
+proc backgroundNote*(caps: TerminalCapabilities): string =
+  ## `bg: osc11 #1e1e2e -> dark` — the source of the mode decision, for the
+  ## status line.
+  result = "bg: " & $caps.modeFrom
+  if caps.background.len > 0:
+    result.add " " & caps.background
+  # A light background that did NOT select Light says so, so a user on a
+  # light terminal knows the Dark screen is a decision and how to override it.
+  var detectedLight = false
+  if caps.modeFrom == bsOsc11 and caps.background.len == 7:
+    try:
+      detectedLight = isLightBackground((
+        fromHex[int](caps.background[1 .. 2]),
+        fromHex[int](caps.background[3 .. 4]),
+        fromHex[int](caps.background[5 .. 6])))
+    except ValueError:
+      detectedLight = false
+  if detectedLight and caps.mode == dmDark:
+    result.add " (light; --theme=light to use it)"
+  result.add " -> " & (if caps.mode == dmLight: "light" else: "dark")
+
+proc tmuxRgbRemedy*(caps: TerminalCapabilities): string =
+  ## The one-line remedy when tmux withholds 24-bit colour; "" otherwise.
+  if not caps.tmuxRgbWithheld:
+    return ""
+  let pattern = if caps.tmuxClientTerm.len > 0: caps.tmuxClientTerm & "*"
+                else: "xterm*"
+  "tmux withholds 24-bit colour: set -as terminal-features ',"  & pattern &
+    ":RGB'"
+
+proc capabilityNote*(caps: TerminalCapabilities): string =
+  ## What the status line says about the start-up negotiation.
+  result = backgroundNote(caps)
+  let remedy = tmuxRgbRemedy(caps)
+  if remedy.len > 0:
+    result.add " | " & remedy
 
 proc describe*(caps: TerminalCapabilities): string =
   ## One line naming every axis AND the source that decided it. Printed by
@@ -424,4 +699,7 @@ proc describe*(caps: TerminalCapabilities): string =
   "(" & $caps.syncFrom & ")" &
   " theme=" & $caps.theme & "(" & $caps.themeFrom & ")" &
   " kitty-keyboard=" & (if caps.kittyKeyboard: "advertised" else: "no") &
-  "(never enabled)"
+  "(never enabled)" &
+  " mode=" & (if caps.mode == dmLight: "light" else: "dark") &
+  "(" & $caps.modeFrom & ")" &
+  " palette=" & $caps.palette

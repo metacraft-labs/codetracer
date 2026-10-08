@@ -1,0 +1,524 @@
+{
+ "_comment": [
+  "PLAT-49 part B — the desktop's panes and session tabs, read from the real Electron app on calc.",
+  "Produced by src/tests/gui/tests/visual/plat49-panes-capture.spec.ts",
+  "(`bash scripts/plat49-capture-electron.sh`)."
+ ],
+ "calltrace": [
+  {
+   "toggle": "expanded",
+   "text": "<toplevel> #0",
+   "args": "()",
+   "returnText": "0",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "<__main__> #1",
+   "args": "()",
+   "returnText": "",
+   "selected": true,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "main #2",
+   "args": "()",
+   "returnText": "@[5, 7, 42, 17, 2]",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "evaluate #3",
+   "args": "(expression=\"2 + 3\")",
+   "returnText": "5",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "apply_op #4",
+   "args": "(symbol=\"+\", left=2, right=3)",
+   "returnText": "5",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "leaf",
+   "text": "add #5",
+   "args": "(left=2, right=3)",
+   "returnText": "5",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "evaluate #6",
+   "args": "(expression=\"10 - 4 + 1\")",
+   "returnText": "7",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "apply_op #7",
+   "args": "(symbol=\"-\", left=10, right=4)",
+   "returnText": "6",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "leaf",
+   "text": "sub #8",
+   "args": "(left=10, right=4)",
+   "returnText": "6",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "apply_op #9",
+   "args": "(symbol=\"+\", left=6, right=1)",
+   "returnText": "7",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "leaf",
+   "text": "add #10",
+   "args": "(left=6, right=1)",
+   "returnText": "7",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  },
+  {
+   "toggle": "expanded",
+   "text": "evaluate #11",
+   "args": "(expression=\"6 * 7\")",
+   "returnText": "42",
+   "selected": false,
+   "argColour": "rgb(187, 247, 208)",
+   "returnColour": "rgb(191, 219, 254)"
+  }
+ ],
+ "eventLog": {
+  "id": "eventLog-0-dense-table-0",
+  "columns": [
+   {
+    "title": "tick",
+    "visible": true
+   },
+   {
+    "title": "#",
+    "visible": true
+   },
+   {
+    "title": "location",
+    "visible": false
+   },
+   {
+    "title": "",
+    "visible": true
+   },
+   {
+    "title": "output",
+    "visible": true
+   }
+  ],
+  "header": [
+   {
+    "title": "tick",
+    "cls": "direct-location-rr-ticks eventLog-cell",
+    "shown": true
+   },
+   {
+    "title": "#",
+    "cls": "eventLog-index eventLog-cell",
+    "shown": true
+   },
+   {
+    "title": "",
+    "cls": "eventLog-event eventLog-cell",
+    "shown": true
+   },
+   {
+    "title": "output",
+    "cls": "eventLog-text eventLog-cell",
+    "shown": true
+   }
+  ]
+ },
+ "eventLogMenu": {
+  "button": true,
+  "buttonText": "Columns +",
+  "headerBefore": [
+   "tick",
+   "#",
+   "",
+   "output"
+  ],
+  "options": [
+   {
+    "column": "tick",
+    "checked": true,
+    "shown": true
+   },
+   {
+    "column": "#",
+    "checked": true,
+    "shown": true
+   },
+   {
+    "column": "location",
+    "checked": false,
+    "shown": true
+   },
+   {
+    "column": "kind",
+    "checked": true,
+    "shown": true
+   },
+   {
+    "column": "output",
+    "checked": true,
+    "shown": true
+   }
+  ],
+  "headerAfterShowLocation": [
+   "tick",
+   "#",
+   "location",
+   "",
+   "output"
+  ],
+  "optionsAfterShowLocation": [
+   {
+    "column": "tick",
+    "checked": true,
+    "shown": true
+   },
+   {
+    "column": "#",
+    "checked": true,
+    "shown": true
+   },
+   {
+    "column": "location",
+    "checked": true,
+    "shown": true
+   },
+   {
+    "column": "kind",
+    "checked": true,
+    "shown": true
+   },
+   {
+    "column": "output",
+    "checked": true,
+    "shown": true
+   }
+  ],
+  "headerAfterMoveOutputLeft": [
+   "tick",
+   "#",
+   "location",
+   "output",
+   ""
+  ],
+  "headerRestored": [
+   "tick",
+   "#",
+   "",
+   "output"
+  ],
+  "openAfterSecondClick": false
+ },
+ "cellPx": {
+  "width": 9.63,
+  "height": 22
+ },
+ "footer": {
+  "statusBox": {
+   "x": 0,
+   "y": 1368,
+   "w": 1900,
+   "h": 32
+  },
+  "stripBox": {
+   "x": 327,
+   "y": 1372,
+   "w": 957,
+   "h": 24
+  },
+  "labels": [
+   "BUILD",
+   "PROBLEMS",
+   "FIND IN FILES",
+   "REQUESTS"
+  ],
+  "statusParts": [
+   {
+    "id": "file-info-status",
+    "cls": "",
+    "x": 10,
+    "w": 317,
+    "text": "Python\nUTF-8"
+   },
+   {
+    "id": "",
+    "cls": "file-info-status-language status-inline",
+    "x": 10,
+    "w": 40,
+    "text": "Python"
+   },
+   {
+    "id": "",
+    "cls": "separate-bar",
+    "x": 59,
+    "w": 1,
+    "text": ""
+   },
+   {
+    "id": "",
+    "cls": "file-info-status-encoding status-inline",
+    "x": 69,
+    "w": 38,
+    "text": "UTF-8"
+   },
+   {
+    "id": "auto-hide-bottom-strip",
+    "cls": "auto-hide-bottom-strip has-tabs",
+    "x": 327,
+    "w": 957,
+    "text": "BUILD\nPROBLEMS\nFIND IN FILES\nREQUESTS"
+   },
+   {
+    "id": "",
+    "cls": "auto-hide-strip-tab",
+    "x": 331,
+    "w": 58,
+    "text": "BUILD"
+   },
+   {
+    "id": "",
+    "cls": "auto-hide-strip-tab",
+    "x": 393,
+    "w": 89,
+    "text": "PROBLEMS"
+   },
+   {
+    "id": "",
+    "cls": "auto-hide-strip-tab",
+    "x": 485,
+    "w": 106,
+    "text": "FIND IN FILES"
+   },
+   {
+    "id": "",
+    "cls": "auto-hide-strip-tab",
+    "x": 595,
+    "w": 86,
+    "text": "REQUESTS"
+   },
+   {
+    "id": "",
+    "cls": "test-movement",
+    "x": 1283,
+    "w": 16,
+    "text": "14"
+   },
+   {
+    "id": "",
+    "cls": "status-right",
+    "x": 1299,
+    "w": 601,
+    "text": "No certificates\n/home/zahary/m/codetracer-gui/codetracer-gre"
+   },
+   {
+    "id": "",
+    "cls": "test-certificate-status status-inline test-certificate-none",
+    "x": 1299,
+    "w": 82,
+    "text": "No certificates"
+   },
+   {
+    "id": "location-status",
+    "cls": "",
+    "x": 1389,
+    "w": 503,
+    "text": "/home/zahary/m/codetracer-gui/codetracer-green2/test-program"
+   }
+  ],
+  "overlayAfter120ms": false,
+  "overlayAfterHover": true,
+  "dockedAfterHover": false,
+  "overlayAfterLeave100ms": true,
+  "overlayAfterLeave": false,
+  "dockedAfterClick": true,
+  "overlayAfterClick": false,
+  "layoutHeightBefore": 1334,
+  "layoutHeightDocked": 1054,
+  "dockedBox": {
+   "x": 4,
+   "y": 1088,
+   "w": 1892,
+   "h": 280
+  },
+  "dockedAfterSecondClick": false,
+  "layoutHeightAfter": 1334,
+  "labelsInsideStatusBar": true
+ },
+ "dropZones": {
+  "left": {
+   "x": 0,
+   "y": 0,
+   "w": 0.5,
+   "h": 1
+  },
+  "left-top": {
+   "x": 0,
+   "y": 0,
+   "w": 0.5,
+   "h": 1
+  },
+  "right": {
+   "x": 0.89,
+   "y": -0.05,
+   "w": 0.11,
+   "h": 2.11
+  },
+  "right-bottom": {
+   "x": 0.5,
+   "y": 0,
+   "w": 0.5,
+   "h": 1
+  },
+  "top": {
+   "x": 0,
+   "y": 0,
+   "w": 1,
+   "h": 0.5
+  },
+  "top-mid": {
+   "x": 0,
+   "y": 0,
+   "w": 1,
+   "h": 0.5
+  },
+  "bottom": {
+   "x": 0,
+   "y": 0.5,
+   "w": 1,
+   "h": 0.5
+  },
+  "bottom-mid": {
+   "x": 0,
+   "y": 0.5,
+   "w": 1,
+   "h": 0.5
+  },
+  "centre-left": {
+   "x": 0,
+   "y": 0,
+   "w": 1,
+   "h": 0.5
+  },
+  "centre-right": {
+   "x": 0,
+   "y": 0.5,
+   "w": 1,
+   "h": 0.5
+  },
+  "rootBand": {
+   "layout": {
+    "x": 4,
+    "y": 34,
+    "w": 1892,
+    "h": 1334
+   },
+   "right": {
+    "x": 1847,
+    "y": 35,
+    "w": 49,
+    "h": 1333
+   },
+   "left": {
+    "x": 5,
+    "y": 35,
+    "w": 49,
+    "h": 1333
+   },
+   "top": {
+    "x": 5,
+    "y": 35,
+    "w": 1891,
+    "h": 49
+   },
+   "bottom": {
+    "x": 5,
+    "y": 1319,
+    "w": 1891,
+    "h": 49
+   }
+  },
+  "headerPlaceholderIndex": 0,
+  "rootDrop": {
+   "rootIsRow": true,
+   "children": 4,
+   "lastTabs": [
+    "EVENT LOG"
+   ],
+   "lastFullHeight": true,
+   "lastShare": 0.24
+  }
+ },
+ "sessionTabs": {
+  "barClassSingle": "session-tab-bar single-session",
+  "addTitle": "New tab",
+  "addBox": {
+   "x": 1159,
+   "y": 6,
+   "w": 26,
+   "h": 26
+  },
+  "addVisibleWithOneSession": true,
+  "tabs": [
+   {
+    "label": "main.py",
+    "active": false,
+    "close": true,
+    "x": 1159,
+    "w": 160,
+    "background": "rgb(51, 51, 51)",
+    "colour": "rgb(243, 243, 243)",
+    "radius": "6px",
+    "marginRight": "4px"
+   },
+   {
+    "label": "Trace 2",
+    "active": true,
+    "close": true,
+    "x": 1323,
+    "w": 160,
+    "background": "rgb(60, 60, 60)",
+    "colour": "rgb(255, 255, 255)",
+    "radius": "6px",
+    "marginRight": "4px"
+   }
+  ],
+  "barClassMulti": "session-tab-bar"
+ }
+}

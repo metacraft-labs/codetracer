@@ -5,6 +5,8 @@ import
   lib/[ monaco_lib, jslib ],
   rr_gdb
 
+from viewmodel/viewmodels/menu_vm import MenuVM
+
 type
   defaultstring = cstring
   langstring = cstring
@@ -841,13 +843,8 @@ type
     locals*:        seq[Variable]
     extensionRendererId*: cstring
 
-  TimelineMode* = enum TimelineVariables, TimelineRegisters
-
-  TimelineComponent* = ref object of Component
-    views*:         array[TimelineMode, Component]
-    active*:        TimelineMode
-    flow*:          FlowUpdate
-    service*:       FlowService
+  # (PLAT-51: `TimelineMode` and `TimelineComponent` stood here; the Timeline
+  # panel is removed.)
 
   # TimelineVariablesComponent* = ref object of Component
   #   timeline*:      TimelineComponent
@@ -894,6 +891,10 @@ type
     branches*: seq[cstring]
     commits*: seq[VCSCommit]
     changedFiles*: seq[VCSChangedFile]
+    workingTreeChanges*: seq[VCSChangedFile]
+      ## PLAT-47: the working tree's changed files (`git status`), each with
+      ## the one-letter state `vcs_vm.workingTreeStatusLetter` gives it — the
+      ## list the terminal's and GPUI's VCS panes draw from the same reader.
     selectedCommitIndices*: seq[int]   ## all expanded commit indices (multi-select)
     lastClickedCommitIndex*: int       ## anchor for shift-click range (-1 = none)
     commitFilesCache*: JsAssoc[int, seq[VCSChangedFile]]
@@ -1903,26 +1904,25 @@ type
     instructions*: Instructions
 
   MenuComponent* = ref object of Component
-    active*: bool
+    ## PLAT-48: the desktop's RENDERER of the program menu. Whether the menu
+    ## is open, the entered folder path, the highlighted item, whether the
+    ## highlight came from the keyboard and the menu's search all live in
+    ## `vm` (`viewmodel/viewmodels/menu_vm.MenuVM`) — the same model the
+    ## terminal and GPUI menus draw — and nowhere here. What stays here is
+    ## the DOM's: measured widths and offsets, the DOM element to refocus.
+    vm*: MenuVM
     activeDomElement*: dom.Node
     elements*: MenuData
-    activePath*: seq[int]
     activePathWidths*: JsAssoc[int, int]
     activePathOffsets*: JsAssoc[int, int]
     prepared*: seq[js]
-    searchResults*: seq[cstring]
     nameMap*: JsAssoc[cstring, ClientAction]
-    activeIndex*: int
-    activeSearchIndex*: int
-    activeLength*: int
-    searchQuery*: cstring
     debug*: DebugComponent
     service*: EditorService
     iconWidth*: int
     mainMenuWidth*: int
     folderArrowCharWidth*: int
     search*: bool
-    keyNavigation*: bool
     skipNextBlur*: bool
     focusByMouse*: bool
 
@@ -2132,6 +2132,14 @@ type
     openViewOnCompleteMove*: array[EditorView, bool]
     openComponentIds*:        array[Content, seq[int]]
     saveLayout*:     bool
+    layoutResetPending*: bool
+      ## PLAT-45. Set by View > Reset Layout between asking the index process
+      ## to delete the saved layout files and applying the shared default it
+      ## sends back (in place — the window is not reloaded). While it
+      ## is set NOTHING persists the layout — neither the `stateChanged`
+      ## write-through nor the `beforeunload` snapshot — or the arrangement
+      ## being reset would be written straight back into the file the reset
+      ## just deleted.
     isReparenting*:  bool
     isLoadingLayout*: bool
       ## Set while GoldenLayout is being handed a WHOLE new layout, so the

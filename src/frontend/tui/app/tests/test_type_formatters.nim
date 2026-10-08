@@ -33,7 +33,8 @@
 ##     unreachable from a fixture — it takes more stops than a suite should
 ##     drive — and it is the thing that decides whether a long session grows
 ##     without limit.
-##   * The `[MOD]` field's COLUMN. The Tier-2 case reads a cell there; if the
+##   * The changed VALUE's column (PLAT-51: the `[MOD]` badge is gone; the
+##     accent is on the value). The Tier-2 case reads a cell there; if the
 ##     two arithmetics drifted, that case would read the wrong cell and pass.
 ##   * The shell painting this pane into the `state` rectangle.
 ##
@@ -63,12 +64,16 @@ import ../../../../common/value_presentation
 import ../formatters/type_formatters
 import ../views/shell
 import ../views/tree_node
+import ../views/diff_highlighter
+import codetracer_embed   # `ValueTimeline.len` (the facade's value_changes)
 import ../views/variables
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 146
+const ExpectedAssertions = 155
+  ## PLAT-51: 153 -> 155, the `[MOD]` badge's seven checks became the
+  ## changed value's accent and the controls' column (nine).
 
 var countedAssertions = 0
 
@@ -172,7 +177,9 @@ suite "CTUI-7 after PLAT-2: what is still this front-end's":
     var styled = 0
     for class in PresentationClass:
       let style = valueStyle(class)
-      ck style.fg.len > 0
+      # PLAT-46: a value is painted with a ROLE, resolved to a colour on
+      # the negotiated tier by `degradeRows`.
+      ck style.role != srNone
       inc styled
     ck styled == 20
     ck valueStyle(pcInteger) == NumberStyle
@@ -255,6 +262,16 @@ suite "CTUI-7 after PLAT-2: what is still this front-end's":
     ck stringDetail("\"hello\"") == "5 chars"
     ck stringDetail("\"世界\"") == "2 chars"
 
+proc styleAtCell(row: StyledRow; col: int): CellStyle =
+  ## The style of the cell at `col` (PLAT-51: where the changed accent is).
+  var c = 0
+  for span in row:
+    let w = cellWidthOf(span.text)
+    if col >= c and col < c + w:
+      return span.style
+    c += w
+  DefaultCellStyle
+
 suite "CTUI-7: one row of the tree, and where its fields land":
 
   test "the marker columns are the same on every kind of row":
@@ -273,21 +290,39 @@ suite "CTUI-7: one row of the tree, and where its fields land":
     var deep = leaf
     deep.depth = 3
 
-    ck cellAt(rowFor(leaf), 0) == LeafGlyph
-    ck cellAt(rowFor(expandable), 0) == CollapsedGlyph
-    ck cellAt(rowFor(opened), 0) == ExpandedGlyph
-    # THE `[MOD]` FIELD IS AT THE SAME COLUMN ON EVERY ROW, blank when the row
-    # did not change. The Tier-2 case reads a real terminal cell at exactly this
-    # column, so a drift here would move that read rather than the badge.
-    ck diffFieldColumn() == 2
-    ck nameFieldColumn() == 8
-    ck rowFor(modified)[2 .. 6] == ModifiedTag
-    ck rowFor(leaf)[2 .. 6] == "     "
-    ck diffTagText(modified) == ModifiedTag
-    ck diffTagText(leaf).len == ModifiedTagCells
-    # THE INDENT MOVES THE NAME, NEVER THE ROW.
-    ck cellAt(rowFor(deep), 0) == LeafGlyph
-    ck rowFor(deep)[2 .. 6] == "     "
+    # PLAT-49: column 0 is the row's CATEGORY TAG (blank on a spec that
+    # names none), the expander sits against the name. (PLAT-51: the `[MOD]`
+    # badge at the row's end is gone; a changed VALUE takes the desktop's
+    # changed-value accent instead, and the row's end holds its controls.)
+    var tagged = leaf
+    tagged.tag = "L"
+    tagged.tagRole = srCategoryLocal
+    ck cellAt(rowFor(tagged), 0) == "L"
+    ck cellAt(rowFor(leaf), 0) == " "
+    ck cellAt(rowFor(leaf), 2) == LeafGlyph
+    ck cellAt(rowFor(expandable), 2) == CollapsedGlyph
+    ck cellAt(rowFor(opened), 2) == ExpandedGlyph
+    ck treeRow(tagged)[0].style.role == srCategoryLocal
+    # NO BADGE: the changed row says so by its VALUE's style, which is
+    # `diff_highlighter.ChangedValueStyle` there and nowhere else.
+    ck nameFieldColumn() == 4
+    ck not rowFor(modified).contains("[MOD]")
+    ck not rowFor(modified).contains("MOD")
+    let valueAt = valueFieldColumn(RowWidth)
+    ck styleAtCell(treeRow(modified), valueAt) == ChangedValueStyle
+    ck styleAtCell(treeRow(leaf), valueAt) != ChangedValueStyle
+    ck rowFor(modified) == rowFor(leaf)
+    ck rowFor(leaf).find("counter") == nameFieldColumn()
+    # THE CONTROLS ARE AT THE SAME COLUMN ON EVERY ROW (when shown).
+    let ctl = controlColumn(RowWidth)
+    ck ctl == RowWidth - tree_node.ReservedTrailingCells - ControlCells
+    var withControls = leaf
+    withControls.controls = true
+    ck cellAt(rowFor(withControls), ctl) == HistoryControlGlyph
+    ck cellAt(rowFor(withControls), ctl + 1) == OriginControlGlyph
+    # THE INDENT MOVES THE EXPANDER AND THE NAME, NEVER THE TAG OR THE VALUE.
+    ck cellAt(rowFor(deep), 0) == " "
+    ck cellAt(rowFor(deep), 2 + 2 * IndentCells) == LeafGlyph
     ck rowFor(deep).find("counter") ==
        rowFor(leaf).find("counter") + 2 * IndentCells
     # Every row is exactly the width it was asked for, whatever its kind.
@@ -307,7 +342,8 @@ suite "CTUI-7: one row of the tree, and where its fields land":
     ck wide.typ <= MaximumTypeCells
     ck wide.value >= MinimumValueCells
     ck wide.name + wide.typ + wide.value + 2 ==
-       RowWidth - nameFieldColumn() - tree_node.ReservedTrailingCells
+       RowWidth - nameFieldColumn() - tree_node.ReservedTrailingCells -
+       (ControlCells + 1)
     # A NARROW PANE DROPS THE TYPE, NOT THE VALUE: a name and a value answer
     # "what is it now", and the type is a detail the tree's own shape carries.
     let narrow = fieldWidths(22)
@@ -482,10 +518,15 @@ suite "CTUI-7: the shell paints the pane into the `state` rectangle":
       ck area.height > 1
       ck before.len == after.len
 
-      let paneTop = if stacked: area.row + 1 else: area.row
-      let paneHeight = if stacked: area.height - 1 else: area.height
-      let flushRight = area.col + area.width >= body.col + body.width
-      let inner = if flushRight: area.width else: area.width - 1
+      # The pane's own box: its rectangle minus the dividers to its right and
+      # (PLAT-47) below it — `shell.paneFrame`, the one place that says so.
+      # PLAT-49: the painter is handed the WHOLE box, stacked or not, and the
+      # tab strip takes its first row (the painter's own heading): the rows
+      # under the strip are the painter's rows 1 ..
+      let frame = paneFrame(area, body)
+      let paneTop = area.row
+      let paneHeight = frame.box.height
+      let inner = frame.box.width
       let paneRowsText = variablesText(model, inner, paneHeight)
 
       var changedRows = 0
@@ -505,7 +546,7 @@ suite "CTUI-7: the shell paints the pane into the `state` rectangle":
 
       var matched = 0
       var firstDiff = ""
-      for i in 0 ..< paneHeight:
+      for i in 1 ..< paneHeight:
         var slice = ""
         var at = 0
         for r in after[paneTop + i].runes:
@@ -520,17 +561,17 @@ suite "CTUI-7: the shell paints the pane into the `state` rectangle":
             paneRowsText[i] & "'"
       if firstDiff.len > 0:
         checkpoint(firstDiff)
-      checkpoint("pane rows matched: " & $matched & " of " & $paneHeight)
-      ck matched == paneHeight
+      checkpoint("pane rows matched: " & $matched & " of " & $(paneHeight - 1))
+      ck matched == paneHeight - 1
 
-      # …and the rectangle's first row still says what CTUI-3 put there. On the
-      # stacked shape that is the tab strip, whose title comes from the SAVED
-      # LAYOUT; on the unstacked one the pane owns the row and puts its own
-      # title there.
+      # …and the rectangle's first row is the TAB STRIP (PLAT-49): the
+      # stack's tabs, or a lone pane's one tab — never the pane's own
+      # `VARIABLES ───` heading.
       if stacked:
         ck after[area.row].contains(paneRegion.tabs[paneRegion.activeTab])
       else:
-        ck after[area.row].contains(VariablesTitle)
+        ck after[area.row].contains(paneTitle(paneState, paneRegion.title))
+      ck not after[area.row].contains(VariablesTitle)
     ck checkedGeometries == 2
 
   test "assertion count":

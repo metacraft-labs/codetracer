@@ -1,10 +1,12 @@
 import
-  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets, strtabs ],
+  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets, strtabs, sequtils ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
   session_import,
   ctfs_sources,
   source_paths,
+  trace_container,
+  trace_kind,
   ../utilities/language_detection,
   ../online_sharing/mcr_enrichment
 
@@ -89,6 +91,99 @@ proc emitReplayProblemForHostFailure(message: string) =
       "Replay storage objects could not be read from any available replica.")
     flushFile(stdout)
 
+const DefaultHostBind* = "127.0.0.1"
+  ## LOOPBACK, because `CLI/ct/host.md` says so and gives the reason: "a trace
+  ## contains the recorded program's memory and I/O". Serving that on a
+  ## routable interface has to be something the operator asked for.
+
+proc resolveHostBind*(flagValue, envValue: string): string =
+  ## The interface `ct host` tells the Electron main process to bind.
+  ##
+  ## `--bind` wins over `CODETRACER_HOST_BIND`, which wins over loopback —
+  ## the precedence `--idle-timeout` / `CODETRACER_HOST_IDLE_TIMEOUT` already
+  ## uses a few lines below, and the one that lets a shell profile widen the
+  ## default without taking the flag away from a single invocation.
+  ##
+  ## The flag's own default is the EMPTY string rather than `127.0.0.1`, which
+  ## is what makes this function possible at all: with `127.0.0.1` as the
+  ## declared default there is no value that means "the operator said nothing",
+  ## so the environment variable could never be consulted without also
+  ## overriding an explicit `--bind 127.0.0.1`.
+  ##
+  ## Whitespace-only is treated as absent. A malformed address is NOT rejected
+  ## here — the bind failure names the address and the errno, and duplicating
+  ## the platform's own address parsing would only disagree with it.
+  let flag = flagValue.strip()
+  if flag.len > 0:
+    return flag
+  let env = envValue.strip()
+  if env.len > 0:
+    return env
+  DefaultHostBind
+
+type HostPortResolution* = object
+  ## What `resolveHostPort` decided, and whether the caller must read the port
+  ## back from the listening socket.
+  port*: int
+    ## `0` means "let the kernel choose", which is what `listen(0)` does.
+  autoAssigned*: bool
+    ## True when nobody named a port. The URL is then NOT derivable before the
+    ## listen, which is the whole reason this field exists: §High-Level Rules
+    ## requires the URL on stdout "in a form a supervising process can parse
+    ## before the first client connects", and a supervisor cannot parse a port
+    ## nobody printed.
+  error*: string
+    ## Non-empty when the environment named something that is not a port. An
+    ## unparseable `CODETRACER_HOST_PORT` is REFUSED rather than ignored: a
+    ## typo that silently fell back to auto-assign would put the server on a
+    ## port the operator did not choose and did not know about.
+
+const AutoAssignPort* = 0
+  ## What goes to `listen()` when nobody named a port. `0` is the kernel's own
+  ## spelling for "any free port", so there is no scan and no race between
+  ## choosing and binding.
+
+proc resolveHostPort*(flagValue: int; envValue: string): HostPortResolution =
+  ## The port `ct host` tells the Electron main process to listen on.
+  ##
+  ## `--port` wins over `CODETRACER_HOST_PORT`, which wins over auto-assign —
+  ## the precedence `--bind` / `CODETRACER_HOST_BIND` and `--idle-timeout` /
+  ## `CODETRACER_HOST_IDLE_TIMEOUT` already use, and the one that lets a shell
+  ## profile or a container's environment supply a port without taking the flag
+  ## away from a single invocation.
+  ##
+  ## The flag's own default is `-1` rather than a port number, which is what
+  ## makes this function possible: with a real default there is no value that
+  ## means "the operator said nothing".
+  ##
+  ## **A negative flag value is an error and auto-assign is not.** `--port -1`
+  ## is what absence looks like, so it cannot also be a refusal; any OTHER
+  ## negative number is a caller mistake and is rejected by `hostCommand`,
+  ## which is where that check already lived.
+  if flagValue >= 0:
+    # `--port 0` is auto-assign SAID OUT LOUD, not a chosen port. Port 0 is not
+    # connectable, so a caller told to wait for a URL naming it would wait for
+    # something no client can reach — and `listen(0)` is exactly what
+    # auto-assign does, so the two are the same request spelled two ways.
+    return HostPortResolution(port: flagValue, autoAssigned: flagValue == 0)
+  let env = envValue.strip()
+  if env.len > 0:
+    var parsed = 0
+    try:
+      parsed = parseInt(env)
+    except ValueError:
+      return HostPortResolution(error:
+        "CODETRACER_HOST_PORT is set to '" & env & "', which is not a port")
+    if parsed < 0 or parsed > 65535:
+      return HostPortResolution(error:
+        "CODETRACER_HOST_PORT is set to '" & env &
+        "', which is outside 0-65535")
+    # A deliberate `CODETRACER_HOST_PORT=0` is auto-assign, said explicitly.
+    # Treating it as a chosen port would make the caller wait for a URL naming
+    # port 0, which no client can connect to.
+    return HostPortResolution(port: parsed, autoAssigned: parsed == 0)
+  HostPortResolution(port: AutoAssignPort, autoAssigned: true)
+
 proc parseIdleTimeoutMs*(raw: string): IdleTimeoutResult =
   ## Parse a human-friendly duration string into milliseconds.
   ## Supports suffixes: ms, s, m, h. Empty => default. 0/never/off => disabled.
@@ -170,7 +265,7 @@ proc materializeImportedTracePath(tempDir, sourcePath, payloadPath: string): boo
   let effectiveSourcePath =
     if safeFileExists(sourcePath):
       sourcePath
-    elif payloadFileName in ["trace.bin", "trace.json"] and
+    elif payloadFileName in MATERIALIZED_TRACE_EVENT_FILES and
         safeFileExists(tempDir / payloadFileName):
       tempDir / payloadFileName
     else:
@@ -224,7 +319,7 @@ proc normalizeImportedTracePaths(tempDir: string) =
       continue
 
     let rawFileName = rawPath.replace('\\', '/').extractFilename
-    if rawFileName in ["trace.bin", "trace.json"] and safeFileExists(tempDir / rawFileName):
+    if rawFileName in MATERIALIZED_TRACE_EVENT_FILES and safeFileExists(tempDir / rawFileName):
       normalizedPaths.add(rawFileName)
       continue
 
@@ -368,8 +463,8 @@ proc importTraceFolder(traceFolderPath: string): string =
   ## * a `.ct` CTFS container; metadata comes from its internal
   ##   `meta.dat` (M-REC-1.5 — the `trace_db_metadata.json` sidecar that
   ##   used to duplicate it is not accepted);
-  ## * a materialized `runtime_tracing` directory (`trace.json` /
-  ##   `trace.bin` plus its sidecars) as written by ``ct record-web``.
+  ## * a legacy materialized `runtime_tracing` directory (`trace.bin`
+  ##   plus its sidecars).
   ##
   ## If the folder contains an MCR trace (.ct file with CTFS magic),
   ## enrichment via `ct-mcr export --portable` is attempted first
@@ -528,21 +623,27 @@ proc findMaterializedTraceFolder(path: string): string =
 
 proc dirHasLegacyMaterializedTrace(dir: string): bool =
   ## A legacy `runtime_tracing` materialized trace folder carries
-  ## `trace_metadata.json` plus a `trace.json` or `trace.bin` payload.
-  ## The CTFS reader (`db-backend`) still opens these via its
-  ## `from_events` path — see `dap_server.rs` "legacy runtime_tracing
-  ## materialized trace" branch — even though the CTFS-only import
-  ## machinery (M-REC-1.5) does not.  `ct host` therefore must be able
-  ## to register such a folder so the hostable materialized-artifact
-  ## flow (Observability M29/M34) keeps working for these traces.
+  ## `trace_metadata.json` plus a `trace.bin` payload.  The db-backend
+  ## still opens these via its `from_events` path even though the
+  ## CTFS-only import machinery (M-REC-1.5) does not, so `ct host` must be
+  ## able to register such a folder for the hostable materialized-artifact
+  ## flow (Observability M29/M34).
   if not fileExists(dir / "trace_metadata.json"):
     return false
-  fileExists(dir / "trace.json") or fileExists(dir / "trace.bin")
+  MATERIALIZED_TRACE_EVENT_FILES.anyIt(fileExists(dir / it))
 
-proc findLegacyMaterializedTraceFolder(path: string): string =
+proc refuseTestOracleOutput(dir: string) =
+  ## Raise when `dir` holds test-oracle output rather than a recording, so
+  ## the user is told what the folder is instead of "not a hostable trace".
+  if fileExists(dir / TestOracleTraceFileName):
+    raise newException(ValueError, testOracleRefusal(dir))
+
+proc findLegacyMaterializedTraceFolder*(path: string): string =
   ## Resolve `path` to a directory holding a legacy materialized trace
-  ## (`trace_metadata.json` + `trace.json`/`trace.bin`).  Mirrors
+  ## (`trace_metadata.json` + `trace.bin`).  Mirrors
   ## `findMaterializedTraceFolder` but for the pre-CTFS sidecar layout.
+  ## Raises `ValueError` when the folder (or the one recording below it)
+  ## is test-oracle `trace.json` output.
   if path.len == 0:
     return ""
   let fullPath = try:
@@ -553,15 +654,17 @@ proc findLegacyMaterializedTraceFolder(path: string): string =
   if isDir:
     if dirHasLegacyMaterializedTrace(fullPath):
       return fullPath
+    refuseTestOracleOutput(fullPath)
     for entry in walkDir(fullPath):
-      if entry.kind in {pcDir, pcLinkToDir} and
-          dirHasLegacyMaterializedTrace(entry.path):
-        return entry.path
+      if entry.kind in {pcDir, pcLinkToDir}:
+        if dirHasLegacyMaterializedTrace(entry.path):
+          return entry.path
+        refuseTestOracleOutput(entry.path)
   ""
 
 proc importLegacyMaterializedFolder(traceFolderPath: string): string =
   ## Register a legacy `runtime_tracing` materialized trace folder
-  ## (`trace_metadata.json` + `trace.json`/`trace.bin` + `trace_paths.json`)
+  ## (`trace_metadata.json` + `trace.bin` + `trace_paths.json`)
   ## into `trace_index.db` so `ct host` can serve it.
   ##
   ## M-REC-1.5 retired the JSON-sidecar path inside `importTrace`, which
@@ -638,16 +741,16 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
   # container: the legacy `runtime_tracing` capnp binary format
   # (emitted as `trace.bin` by e.g. the Python recorder) shares the
   # same 5-byte `C0 DE 72 AC E2` prefix but uses version byte 0x00,
-  # whereas a real CTFS container declares version 2..4 at offset 5.
+  # whereas a CTFS container declares its version at offset 5, and the
+  # db-backend reads versions 5 and 6 (`ctfs-container.md` §1, §1a).
   # Copying a capnp-binary `trace.bin` to `trace.ct` makes the
   # db-backend's `is_codetracer_ctfs_file` reject it (unsupported CTFS
   # version) and wrongly fall through to the rr replay-worker path.
   # Require a genuine CTFS version byte before the rename.
   const ctfsMagic = "\xC0\xDE\x72\xAC\xE2"
-  const ctfsVersionMin = 2'u8
-  const ctfsVersionMax = 4'u8
+  const ctfsVersions = {5'u8, 6'u8}
   if not fileExists(outputFolder / "trace.ct"):
-    for payloadName in ["trace.bin", "trace.json"]:
+    for payloadName in MATERIALIZED_TRACE_EVENT_FILES:
       let payloadPath = outputFolder / payloadName
       if fileExists(payloadPath):
         var isCtfsContainer = false
@@ -656,7 +759,7 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
           if content.len > ctfsMagic.len and
               content[0 ..< ctfsMagic.len] == ctfsMagic:
             let version = uint8(content[ctfsMagic.len])
-            isCtfsContainer = version >= ctfsVersionMin and version <= ctfsVersionMax
+            isCtfsContainer = version in ctfsVersions
         except CatchableError:
           isCtfsContainer = false
         if isCtfsContainer:
@@ -884,7 +987,9 @@ proc materializedPayloadFileName(obj: JsonNode): string =
     if relative.len > 0: relative
     else: obj.jsonString(["objectKey", "object_key", "artifactKey", "artifact_key", "uri", "path", "object_id"])
   let fileName = raw.replace('\\', '/').splitFile.name & raw.replace('\\', '/').splitFile.ext
-  if fileName in ["trace.bin", "trace.json"]:
+  if fileName == TestOracleTraceFileName:
+    raise newException(ValueError, testOracleRefusal(raw))
+  if fileName in MATERIALIZED_TRACE_EVENT_FILES:
     return fileName
   if raw.endsWith(".ct"):
     return "materialized.ct"
@@ -1090,7 +1195,7 @@ proc resolveSharedManifest(
         result.recordingId = importTraceFolder(traceFolder)
     else:
       # No CTFS container present: fall back to a legacy `runtime_tracing`
-      # materialized folder (trace_metadata.json + trace.json/trace.bin)
+      # materialized folder (trace_metadata.json + trace.bin)
       # before reaching for the storage-protocol path, so a local
       # materialized_artifact manifest works without --storage-base-url.
       let legacyFolder = findLegacyMaterializedTraceFolder(path)
@@ -1185,6 +1290,7 @@ proc importLocalManifest(
 
 proc hostCommand*(
     port: int,
+    bindAddressFlag: string,
     backendSocketPort: Option[int],
     frontendSocketPort: Option[int],
     frontendSocketParameters: string,
@@ -1213,6 +1319,8 @@ proc hostCommand*(
   # M-REC-2: ``traceId`` is a UUIDv7 recording-id string; empty means
   # "no trace specified yet".  Was an int sentinel ``-1`` pre-M-REC-2.
   var traceId = ""
+  let bindAddress = resolveHostBind(
+    bindAddressFlag, getEnv("CODETRACER_HOST_BIND", ""))
   let envIdleTimeout = getEnv("CODETRACER_HOST_IDLE_TIMEOUT", "")
   let parsedIdleTimeout = parseIdleTimeoutMs(
     if idleTimeoutRaw.len > 0: idleTimeoutRaw else: envIdleTimeout)
@@ -1228,8 +1336,15 @@ proc hostCommand*(
     echo "ct host: error: ", e.msg
     quit(1)
 
-  if port < 0:
+  # `-1` is what `--port`'s default looks like and means "the operator said
+  # nothing"; anything else negative is a caller mistake. The resolution below
+  # turns absence into auto-assign.
+  if port < -1:
     echo fmt"ct host: error: no valid port specified: {port}"
+    quit(1)
+  let resolvedPort = resolveHostPort(port, getEnv("CODETRACER_HOST_PORT", ""))
+  if resolvedPort.error.len > 0:
+    echo "ct host: error: ", resolvedPort.error
     quit(1)
 
   if isSetBackendSocketPort and not isSetFrontendSocketPort or
@@ -1352,7 +1467,13 @@ proc hostCommand*(
       codetracerExeDir / "server_index.js",
       $traceId,
       "--port",
-      $port,
+      $resolvedPort.port,
+      # Threaded through so the DEFAULT is loopback rather than whatever Node
+      # does when the host argument is absent, which is every interface. See
+      # CLI/ct/host.md: "a trace contains the recorded program's memory and
+      # I/O", so exposing it is an explicit choice.
+      "--bind",
+      bindAddress,
       "--frontend-socket-port",
       $frontendSocketPort,
       "--frontend-socket-parameters",

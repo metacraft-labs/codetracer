@@ -424,7 +424,7 @@ test.describe("Visual Review — All Components", () => {
       await ctPage.screenshot({ path: `${DIR}/07-left-strip.png` });
 
       // Open the overlay programmatically since the strip tab click
-      // may not propagate through Karax's virtual DOM in Playwright.
+      // may not propagate through IsoNim's render cycle in Playwright.
       await ctPage.evaluate(() => {
         const state = (window as any).autoHideState;
         if (!state) return;
@@ -596,7 +596,7 @@ test.describe("Visual Review — Collapsed Mode", () => {
     await ctPage.screenshot({ path: `${DIR}/12-collapsed-icon-zone.png` });
 
     // Screenshot 13: Open overlay via clicking a status bar icon.
-    // The icon has a Karax click handler that calls showOverlay.
+    // The icon has an IsoNim click handler that calls showOverlay.
     const firstIcon = ctPage.locator(".collapsed-icon").first();
     if ((await firstIcon.count()) > 0) {
       await firstIcon.click({ force: true });

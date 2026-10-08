@@ -13,11 +13,12 @@
 //! is decoded:
 //! - `recording_id`
 //! - `program`, `args`, `workdir`
-//! - `paths`
 //! - `MCR.total_events` (when present)
 //!
 //! The CTFS container reader here is also a minimal subset: enough to
-//! locate the `meta.dat` internal file inside a `.ct` archive.  The full
+//! read an internal file (`meta.dat`, and the `paths.dat` / `paths.off`
+//! interning table that is a trace's only list of source paths) out of a
+//! version 5 `.ct` archive.  The full
 //! CTFS reader lives in `db-backend`; we don't want to drag it in just to
 //! pull one file out of one container.
 
@@ -34,8 +35,8 @@ use std::path::Path;
 /// Magic bytes identifying a `meta.dat` payload: ASCII "CTMD".
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
-/// Canonical meta.dat format version: v4 (the global line index
-/// correction).
+/// Canonical meta.dat format version: v6 (no path list after
+/// `recorder_id`; `flags_ext` always present).
 ///
 /// Pre-1.0, CodeTracer enforces a strict no-backcompat policy on the
 /// trace format: every recorder is required to track the current
@@ -57,52 +58,21 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 /// too old" into "this tool is too old" for exactly the recordings the
 /// others open — a v4 recording would open in the debugger and be
 /// refused by `ct trace info` on the same file.
-pub const META_DAT_VERSION: u16 = 4;
+pub const META_DAT_VERSION: u16 = 6;
 
-/// The set of `meta.dat` versions this parser accepts on read.  Kept
-/// as a slice (rather than a single constant) so callers that surface
-/// "unsupported version" errors can enumerate the accepted set in
-/// diagnostics.  It holds [`META_DAT_VERSION`] and
-/// [`META_DAT_VERSION_EXTENDED_FLAGS`], and nothing older.
+/// The set of `meta.dat` versions this parser accepts on read: version 6
+/// alone.
 ///
-/// v3 and below are refused even though this parser reads no step
-/// addresses and so could decode their header perfectly well.  The
-/// version is what says which line-only `global_position_index` packing
-/// the container's steps use, and at v3 that packing is one the
-/// debugger cannot resolve correctly (db-backend
-/// `ctfs_trace_reader::meta_dat::SUPPORTED_VERSIONS` has the arithmetic).
-/// Reporting on a recording that no reader in this repository can open
-/// is a worse answer than saying it must be re-recorded.
-///
-/// **GDH-M2 (2026-09-10) widened it to `&[4, 5]`.**  v5 is not a different
-/// meaning for the same bytes; it is a header with one EXTRA word in it —
-/// `[4] flags_ext u32 LE`, inserted after the u16 flags — and the version
-/// field is what says the word is there.  A writer emits v5 only when an
-/// extended flag is actually set, so a recording with no reload in it stays
-/// at [`META_DAT_VERSION`] and is byte-identical to one produced before the
-/// word existed.  A reader that did not know v5 would refuse such a
-/// container outright, which is why reader support ships before any writer
-/// sets an extended flag.
-pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS];
-
-/// [`SUPPORTED_META_DAT_VERSIONS`] as a comma-separated list, for refusals.
-fn accepted_versions() -> String {
-    SUPPORTED_META_DAT_VERSIONS
-        .iter()
-        .map(u16::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// GDH-M2 — the schema version a container carries when at least one
-/// EXTENDED flag is set.  Must match the Nim writer's `meta_dat.nim`
-/// `MetaDatVersionExtendedFlags`.
-pub const META_DAT_VERSION_EXTENDED_FLAGS: u16 = 5;
+/// Versions 5 and below wrote a path list after `recorder_id`, where
+/// version 6 has the flag-gated blocks, so neither can be read as the other;
+/// pre-1.0 there is no compatibility path, and older recordings are
+/// re-recorded (`codetracer-trace-format-spec/internal-files.md`
+/// §"Metadata (meta.dat)", "Version History").
+pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[META_DAT_VERSION];
 
 /// Extended flag bit 0 (global bit 16) — the execution stream may contain
 /// step-event tag `0x08` (`TagSourceReload`), the source-version transition
-/// marker of a GDScript hot reload.  Present only at schema version
-/// [`META_DAT_VERSION_EXTENDED_FLAGS`].
+/// marker of a GDScript hot reload.
 pub const FLAG_EXT_HAS_SOURCE_RELOAD: u32 = 1 << 0;
 
 /// Bitmask of all EXTENDED flag bits this implementation understands.  Any
@@ -153,9 +123,10 @@ const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 /// line-only global position space is laid out from those counts rather than
 /// from the 100000-addresses-per-file convention.
 ///
-/// This crate reads `meta.dat` only for the metadata fields it surfaces
-/// (`recording_id`, `program`, `workdir`, `paths`), none of which the bit
-/// changes. It is in the mask because the mask REJECTS what it does not know:
+/// This crate reads `meta.dat` for the metadata fields it surfaces
+/// (`recording_id`, `program`, `workdir`), none of which the bit changes;
+/// it selects the `paths.dat` record layout [`read_source_paths_from_ctfs`]
+/// decodes. It is in the mask because the mask REJECTS what it does not know:
 /// without the constant, every count-bearing container would be refused here
 /// and the trace would look unopenable rather than merely unfamiliar.
 const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
@@ -200,7 +171,9 @@ pub struct MetaDat {
     pub args: Vec<String>,
     pub workdir: String,
     pub recorder_id: String,
-    pub paths: Vec<String>,
+    /// The extended flag word (`flags_ext`); every bit in it is one this
+    /// reader knows.
+    pub ext_flags: u32,
     pub mcr: Option<McrFields>,
     pub replay_launch: Option<ReplayLaunchFields>,
     pub layout_snapshot: Option<LayoutSnapshotFields>,
@@ -253,13 +226,9 @@ pub enum MetaDatError {
         flags: u16,
         unknown_bits: u16,
     },
-    /// GDH-M2 — one or more EXTENDED flag bits (`flags_ext`, schema version
-    /// 5) were set that this reader does not know.  Same contract as
-    /// `UnknownFlags`: the writer is newer than this reader.
-    /// A version 5 header whose `flags_ext` word is zero: a schema version
-    /// spent on nothing, which is what an unconditional version bump produces
-    /// (`internal-files.md` §"Extended flags").
-    EmptyExtendedFlags,
+    /// GDH-M2 — one or more EXTENDED flag bits (`flags_ext`) were set that
+    /// this reader does not know.  Same contract as `UnknownFlags`: the
+    /// writer is newer than this reader.
     UnknownExtendedFlags {
         ext_flags: u32,
         unknown_bits: u32,
@@ -285,16 +254,14 @@ impl fmt::Display for MetaDatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MetaDatError::TooShort { got } => {
-                write!(f, "meta.dat too short: need at least 8 bytes, got {got}")
+                write!(f, "meta.dat too short: need at least 12 bytes, got {got}")
             }
             MetaDatError::BadMagic => write!(f, "meta.dat: bad magic bytes (expected 'CTMD')"),
-            MetaDatError::UnsupportedVersion(v) => {
-                write!(
-                    f,
-                    "meta.dat: unsupported version {v} (accepted: {})",
-                    accepted_versions()
-                )
-            }
+            MetaDatError::UnsupportedVersion(v) => write!(
+                f,
+                "meta.dat: version {v} is not readable: this reader reads version {META_DAT_VERSION} \
+                 only. Re-record the trace with a current recorder"
+            ),
             MetaDatError::UnknownFlags {
                 flags,
                 unknown_bits,
@@ -302,12 +269,10 @@ impl fmt::Display for MetaDatError {
                 f,
                 "meta.dat: unknown flag bits set (flags=0x{flags:04x}, unknown=0x{unknown_bits:04x})",
             ),
-            MetaDatError::EmptyExtendedFlags => write!(
-                f,
-                "meta.dat: schema version {META_DAT_VERSION_EXTENDED_FLAGS} with an all-zero flags_ext word; a \
-                 container with no extended flag is written at version {META_DAT_VERSION}"
-            ),
-            MetaDatError::UnknownExtendedFlags { ext_flags, unknown_bits } => write!(
+            MetaDatError::UnknownExtendedFlags {
+                ext_flags,
+                unknown_bits,
+            } => write!(
                 f,
                 "meta.dat: unknown extended flag bits set (flags_ext=0x{ext_flags:08x}, unknown=0x{unknown_bits:08x})",
             ),
@@ -415,15 +380,20 @@ pub fn is_canonical_uuid_v7(s: &str) -> bool {
 // ── meta.dat parser ─────────────────────────────────────────────────────
 
 pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
-    if input.len() < 8 {
+    if input.len() < 6 {
         return Err(MetaDatError::TooShort { got: input.len() });
     }
     if input[0..4] != META_DAT_MAGIC {
         return Err(MetaDatError::BadMagic);
     }
+    // The version is checked before the header length, so a header from
+    // another version is refused for its version and not for being short.
     let version = u16::from_le_bytes([input[4], input[5]]);
     if !SUPPORTED_META_DAT_VERSIONS.contains(&version) {
         return Err(MetaDatError::UnsupportedVersion(version));
+    }
+    if input.len() < 12 {
+        return Err(MetaDatError::TooShort { got: input.len() });
     }
     let flags = u16::from_le_bytes([input[6], input[7]]);
     let unknown_bits = flags & !KNOWN_FLAGS_MASK;
@@ -433,34 +403,15 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
             unknown_bits,
         });
     }
-    // GDH-M2: the extended flag word, present at schema version 5 only.  It
-    // is validated and its width consumed; it is deliberately not surfaced
-    // as a field, because nothing in this crate reads the marker yet and a
-    // public field would only propagate a constant 0 through every
-    // `MetaDat` literal.  `body_start` moves with it — reading the body
-    // from a fixed 8 would decode the ext word as the recording id's length
-    // prefix, and this parser is strict about trailing bytes, so the
-    // failure would surface as a confusing `TrailingBytes` rather than as
-    // anything about the version.
-    let body_start = if version == META_DAT_VERSION_EXTENDED_FLAGS {
-        if input.len() < 12 {
-            return Err(MetaDatError::TooShort { got: input.len() });
-        }
-        let ext = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
-        let unknown_ext = ext & !KNOWN_EXT_FLAGS_MASK;
-        if unknown_ext != 0 {
-            return Err(MetaDatError::UnknownExtendedFlags {
-                ext_flags: ext,
-                unknown_bits: unknown_ext,
-            });
-        }
-        if ext == 0 {
-            return Err(MetaDatError::EmptyExtendedFlags);
-        }
-        12usize
-    } else {
-        8usize
-    };
+    let ext_flags = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
+    let unknown_ext = ext_flags & !KNOWN_EXT_FLAGS_MASK;
+    if unknown_ext != 0 {
+        return Err(MetaDatError::UnknownExtendedFlags {
+            ext_flags,
+            unknown_bits: unknown_ext,
+        });
+    }
+    let body_start = 12usize;
 
     let mut pos = body_start;
     // `recording_id` (M-REC-1, v3+) is a canonical UUIDv7 directly after
@@ -484,13 +435,6 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     }
     let workdir = read_string(input, &mut pos)?;
     let recorder_id = read_string(input, &mut pos)?;
-    let paths_count_u64 = decode_varint(input, &mut pos)?;
-    let paths_count = usize::try_from(paths_count_u64)
-        .map_err(|_| MetaDatError::TooShort { got: input.len() })?;
-    let mut paths = Vec::with_capacity(paths_count);
-    for _ in 0..paths_count {
-        paths.push(read_string(input, &mut pos)?);
-    }
 
     let mcr = if flags & FLAG_HAS_MCR_FIELDS != 0 {
         let tick_source = decode_varint(input, &mut pos)?;
@@ -618,7 +562,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         args,
         workdir,
         recorder_id,
-        paths,
+        ext_flags,
         mcr,
         replay_launch,
         layout_snapshot,
@@ -664,7 +608,13 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     out.extend_from_slice(&META_DAT_MAGIC);
     out.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
 
-    let mut flags: u16 = 0;
+    // Section bits come from the blocks present; capability and
+    // stream-presence bits are written as given.
+    let section_bits = FLAG_HAS_MCR_FIELDS
+        | FLAG_HAS_REPLAY_LAUNCH_FIELDS
+        | FLAG_HAS_LAYOUT_SNAPSHOT
+        | FLAG_HAS_TRACE_FILTER_PROVENANCE;
+    let mut flags: u16 = meta.flags & KNOWN_FLAGS_MASK & !section_bits;
     if meta.mcr.is_some() {
         flags |= FLAG_HAS_MCR_FIELDS;
     }
@@ -679,6 +629,7 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
         flags |= FLAG_HAS_TRACE_FILTER_PROVENANCE;
     }
     out.extend_from_slice(&flags.to_le_bytes());
+    out.extend_from_slice(&(meta.ext_flags & KNOWN_EXT_FLAGS_MASK).to_le_bytes());
 
     write_string(&meta.recording_id, &mut out);
     write_string(&meta.program, &mut out);
@@ -688,10 +639,6 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     }
     write_string(&meta.workdir, &mut out);
     write_string(&meta.recorder_id, &mut out);
-    encode_varint(meta.paths.len() as u64, &mut out);
-    for path in &meta.paths {
-        write_string(path, &mut out);
-    }
 
     if let Some(mcr) = &meta.mcr {
         encode_varint(mcr.tick_source, &mut out);
@@ -767,10 +714,108 @@ fn read_u64_le(data: &[u8], offset: usize) -> Option<u64> {
     ]))
 }
 
+/// The container version written here (`ctfs-container.md` §1): a
+/// full-profile container with no whole-file scheme.
+const CTFS_VERSION: u8 = 5;
+
+/// Version 6: version 5's body behind a 24-byte header with `Profile` and
+/// whole-file `Compression` (§1a). Read here for the full profile with no
+/// whole-file scheme; every other value of those fields is refused (§1c).
+const CTFS_VERSION_V6: u8 = 6;
+
+/// Bit 63 of `FileEntry.MapBlock`: the rest of the word is the member's only
+/// data block (`ctfs-container.md` §2).
+const CTFS_DIRECT: u64 = 1 << 63;
+
+/// One root directory entry.
+struct CtfsEntry {
+    size: u64,
+    map_block: u64,
+}
+
+/// Validate a container header and return `(block_size, entry_start, root
+/// entry count)`.
+fn ctfs_header(data: &[u8]) -> Result<(u64, usize, usize), String> {
+    if data.len() < 16 {
+        return Err(format!("CTFS file too short ({} bytes)", data.len()));
+    }
+    if data[0..5] != CTFS_MAGIC {
+        return Err("not a valid CTFS file (bad magic)".to_string());
+    }
+    let version = data[5];
+    if version != CTFS_VERSION && version != CTFS_VERSION_V6 {
+        return Err(format!(
+            "CTFS container version {version} is not readable: this reader reads versions \
+             {CTFS_VERSION} and {CTFS_VERSION_V6}. Re-record the trace"
+        ));
+    }
+    let block_size = read_u32_le(data, 8).ok_or("CTFS header truncated at block_size")?;
+    if !matches!(block_size, 1024 | 2048 | 4096) {
+        return Err(format!("invalid CTFS block size {block_size}"));
+    }
+    let entry_start = if version == CTFS_VERSION_V6 {
+        if data.len() < 24 {
+            return Err(format!(
+                "a version 6 CTFS header is 24 bytes, but only {} are present",
+                data.len()
+            ));
+        }
+        if data[16] != 0 {
+            return Err(format!(
+                "CTFS version 6 container with profile {}: this reader reads profile 0 (full) only",
+                data[16]
+            ));
+        }
+        if data[17] != 0 {
+            return Err(format!(
+                "CTFS version 6 container with whole-file compression {}: this reader reads \
+                 compression 0 (none) only",
+                data[17]
+            ));
+        }
+        if let Some(i) = (18..24).find(|&i| data[i] != 0) {
+            return Err(format!(
+                "CTFS version 6 container with reserved byte {i} = {}; reserved bytes must be zero",
+                data[i]
+            ));
+        }
+        24
+    } else {
+        16
+    };
+    let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")? as usize;
+    // `0` fills the rest of block 0 with entries (§1, "Auto-fill").
+    let count = if max_entries == 0 {
+        (block_size as usize - entry_start) / 24
+    } else {
+        max_entries
+    };
+    Ok((u64::from(block_size), entry_start, count))
+}
+
+/// The root directory entry named `file_name`, if the container has one.
+fn ctfs_entry(data: &[u8], file_name: &str) -> Result<Option<CtfsEntry>, String> {
+    let (_, entry_start, count) = ctfs_header(data)?;
+    let encoded_name = base40_encode(file_name);
+    for i in 0..count {
+        let entry_off = entry_start + i * 24;
+        let Some(entry_name) = read_u64_le(data, entry_off + 16) else {
+            break;
+        };
+        if entry_name == encoded_name {
+            let size = read_u64_le(data, entry_off).ok_or("truncated CTFS entry size")?;
+            let map_block =
+                read_u64_le(data, entry_off + 8).ok_or("truncated CTFS entry mapBlock")?;
+            return Ok(Some(CtfsEntry { size, map_block }));
+        }
+    }
+    Ok(None)
+}
+
 /// Probe the size of an internal file in a CTFS container without
 /// resolving its data blocks.  Returns `Ok(Some(size))` when the
 /// entry table carries a non-zero matching entry, `Ok(None)` if the
-/// file is not present, and `Err` when the container header is
+/// file is not present or empty, and `Err` when the container header is
 /// malformed.
 ///
 /// Used by `trace_metadata::read_trace_metadata` to derive a
@@ -779,79 +824,145 @@ fn read_u64_le(data: &[u8], offset: usize) -> Option<u64> {
 /// (currently the case for the Nim multi-stream writer, which only
 /// fills the MCR block for native MCR recordings).
 pub fn ctfs_internal_file_size(data: &[u8], file_name: &str) -> Result<Option<u64>, String> {
-    if data.len() < 16 {
-        return Err(format!("CTFS file too short ({} bytes)", data.len()));
-    }
-    if data[0..5] != CTFS_MAGIC {
-        return Err("not a valid CTFS file (bad magic)".to_string());
-    }
-    let version = data[5];
-    if !matches!(version, 2..=4) {
-        return Err(format!("unsupported CTFS version {version}"));
-    }
-    let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")?;
-    let encoded_name = base40_encode(file_name);
-
-    let mut entry_off = 16usize;
-    for _ in 0..max_entries {
-        let size = read_u64_le(data, entry_off).ok_or("truncated CTFS entry size")?;
-        let _map_block = read_u64_le(data, entry_off + 8).ok_or("truncated CTFS entry mapBlock")?;
-        let entry_name = read_u64_le(data, entry_off + 16).ok_or("truncated CTFS entry name")?;
-        if entry_name == encoded_name && size > 0 {
-            return Ok(Some(size));
-        }
-        entry_off += 24;
-    }
-    Ok(None)
+    Ok(ctfs_entry(data, file_name)?
+        .map(|e| e.size)
+        .filter(|&size| size > 0))
 }
 
-/// Locate the bytes of an internal file inside a CTFS container.
+/// Read the internal file `file_name` out of a version 5 CTFS container:
+/// `Ok(None)` when the container has no such member.
+pub fn read_ctfs_internal_file(data: &[u8], file_name: &str) -> Result<Option<Vec<u8>>, String> {
+    let (block_size, _, _) = ctfs_header(data)?;
+    let Some(entry) = ctfs_entry(data, file_name)? else {
+        return Ok(None);
+    };
+    resolve_ctfs_file(data, file_name, entry.size, entry.map_block, block_size).map(Some)
+}
+
+/// Locate the bytes of `meta.dat` inside a CTFS container.
 ///
 /// Returns the file content on success.  Errors carry a string with
 /// enough context for the caller to surface to users.
 pub fn read_meta_dat_from_ctfs(data: &[u8]) -> Result<Vec<u8>, String> {
-    if data.len() < 16 {
-        return Err(format!("CTFS file too short ({} bytes)", data.len()));
-    }
-    if data[0..5] != CTFS_MAGIC {
-        return Err("not a valid CTFS file (bad magic)".to_string());
-    }
-    let version = data[5];
-    if !matches!(version, 2..=4) {
-        return Err(format!("unsupported CTFS version {version}"));
-    }
-    let block_size = read_u32_le(data, 8).ok_or("CTFS header truncated at block_size")?;
-    if !matches!(block_size, 1024 | 2048 | 4096) {
-        return Err(format!("invalid CTFS block size {block_size}"));
-    }
-    let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")?;
-    let encoded_name = base40_encode("meta.dat");
+    read_ctfs_internal_file(data, "meta.dat")?
+        .ok_or_else(|| "internal file not found in CTFS container: meta.dat".to_string())
+}
 
-    // Each entry: u64 size, u64 mapBlock, u64 encodedName (= 24 bytes).
-    let mut entry_off = 16usize;
-    for _ in 0..max_entries {
-        let size = read_u64_le(data, entry_off).ok_or("truncated CTFS entry size")?;
-        let map_block = read_u64_le(data, entry_off + 8).ok_or("truncated CTFS entry mapBlock")?;
-        let entry_name = read_u64_le(data, entry_off + 16).ok_or("truncated CTFS entry name")?;
-        if entry_name == encoded_name {
-            return resolve_ctfs_file(data, size, map_block, block_size);
-        }
-        entry_off += 24;
+/// The trace's source paths: the records of `paths.dat` (offsets in
+/// `paths.off`), in id order.  `paths.dat` is the only list of source paths a
+/// container carries (`internal-files.md` §"`meta.dat` carries no path
+/// list"); a container without it names none.
+///
+/// `meta_flags` selects the record layout: with bit 4 (column-aware) or
+/// bit 14 (line-count table) set, a record is `path_len: varint` + path
+/// bytes + a tail this reader does not need; otherwise it is the path bytes.
+pub fn read_source_paths_from_ctfs(data: &[u8], meta_flags: u16) -> Result<Vec<String>, String> {
+    let Some(dat) = read_ctfs_internal_file(data, "paths.dat")? else {
+        return Ok(Vec::new());
+    };
+    let off = read_ctfs_internal_file(data, "paths.off")?
+        .ok_or("paths.off missing from a container that carries paths.dat")?;
+    if off.is_empty() || off.len() % 8 != 0 {
+        return Err(format!(
+            "paths.off: length {} is not a non-zero multiple of 8",
+            off.len()
+        ));
     }
-    Err("internal file not found in CTFS container: meta.dat".to_string())
+    let offsets: Vec<u64> = off
+        .chunks_exact(8)
+        .map(|c| u64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))
+        .collect();
+    let framed = meta_flags & (FLAG_HAS_COLUMN_AWARE_STEPS | FLAG_HAS_LINE_COUNT_TABLE) != 0;
+    let mut paths = Vec::with_capacity(offsets.len() - 1);
+    for (id, w) in offsets.windows(2).enumerate() {
+        let (start, end) = (w[0] as usize, w[1] as usize);
+        let record = dat
+            .get(start..end)
+            .filter(|_| start <= end)
+            .ok_or_else(|| format!("paths.dat: record {id} [{start}, {end}) is out of range"))?;
+        let path = if framed {
+            let mut pos = 0usize;
+            let len = decode_varint(record, &mut pos)
+                .map_err(|e| format!("paths.dat: record {id}: {e}"))?
+                as usize;
+            record
+                .get(pos..pos + len)
+                .ok_or_else(|| format!("paths.dat: record {id} path extends past the record"))?
+        } else {
+            record
+        };
+        paths.push(String::from_utf8_lossy(path).into_owned());
+    }
+    Ok(paths)
+}
+
+fn ctfs_block(
+    data: &[u8],
+    name: &str,
+    block: u64,
+    block_size: u64,
+    what: &str,
+) -> Result<usize, String> {
+    if block == 0 {
+        return Err(format!(
+            "{name}: its {what} is a null block pointer (block 0 is the container header); the \
+             container is damaged"
+        ));
+    }
+    block
+        .checked_mul(block_size)
+        .and_then(|o| usize::try_from(o).ok())
+        .filter(|&o| o < data.len())
+        .ok_or_else(|| {
+            format!("{name}: its {what} is block {block}, past the end of the container")
+        })
 }
 
 fn resolve_ctfs_file(
     data: &[u8],
+    name: &str,
     size: u64,
     map_block: u64,
-    block_size: u32,
+    block_size: u64,
 ) -> Result<Vec<u8>, String> {
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    if map_block == 0 {
+        return Err(format!(
+            "{name} (size {size}): its MapBlock is a null block pointer; the container is damaged"
+        ));
+    }
     let block_size_usize = block_size as usize;
-    let usable = (block_size as u64) / 8 - 1;
+    if map_block & CTFS_DIRECT != 0 {
+        if size > block_size {
+            return Err(format!(
+                "{name}: MapBlock names a single direct data block, but the declared size {size} is \
+                 more than one block ({block_size} bytes) can hold"
+            ));
+        }
+        let off = ctfs_block(
+            data,
+            name,
+            map_block & !CTFS_DIRECT,
+            block_size,
+            "direct data block",
+        )?;
+        return data
+            .get(off..off + size as usize)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| format!("{name}: its data block is out of bounds"));
+    }
+
+    let usable = block_size / 8 - 1;
     let mut remaining = size as usize;
     let mut out: Vec<u8> = Vec::with_capacity(remaining);
     let mut block_idx: u64 = 0;
+    let read_ptr = |block: u64, slot: u64, what: &str| -> Result<u64, String> {
+        let off = ctfs_block(data, name, block, block_size, what)?;
+        read_u64_le(data, off + (slot as usize) * 8)
+            .ok_or_else(|| format!("{name}: truncated {what}"))
+    };
 
     while remaining > 0 {
         let mut idx = block_idx;
@@ -859,25 +970,16 @@ fn resolve_ctfs_file(
         let mut level: u32 = 1;
 
         loop {
-            let mut cap: u64 = 1;
-            for _ in 0..level {
-                cap *= usable;
-            }
+            let cap = usable.saturating_pow(level);
             if idx < cap {
                 break;
             }
             idx -= cap;
             level += 1;
             if level > 5 {
-                return Err("CTFS block index exceeds mapping depth".to_string());
+                return Err(format!("{name}: block index exceeds mapping depth"));
             }
-            let chain_off =
-                (current_level_block as usize) * block_size_usize + (usable as usize) * 8;
-            let chain_ptr = read_u64_le(data, chain_off).ok_or("truncated CTFS chain pointer")?;
-            if chain_ptr == 0 {
-                return Err(format!("missing CTFS chain pointer at level {level}"));
-            }
-            current_level_block = chain_ptr;
+            current_level_block = read_ptr(current_level_block, usable, "mapping block")?;
         }
 
         // Walk down `level - 1` indirections to the data-block pointer.
@@ -885,32 +987,24 @@ fn resolve_ctfs_file(
         let mut nav_level = level;
         let mut nav_idx = idx;
         while nav_level > 1 {
-            let mut sub_cap: u64 = 1;
-            for _ in 0..(nav_level - 1) {
-                sub_cap *= usable;
-            }
-            let entry_idx = nav_idx / sub_cap;
-            let sub_idx = nav_idx % sub_cap;
-            let child_off = (nav_block as usize) * block_size_usize + (entry_idx as usize) * 8;
-            let child = read_u64_le(data, child_off).ok_or("truncated CTFS child pointer")?;
-            if child == 0 {
-                return Err(format!("missing CTFS child block at level {nav_level}"));
-            }
-            nav_block = child;
-            nav_idx = sub_idx;
+            let sub_cap = usable.saturating_pow(nav_level - 1);
+            nav_block = read_ptr(nav_block, nav_idx / sub_cap, "mapping block")?;
+            nav_idx %= sub_cap;
             nav_level -= 1;
         }
 
-        let ptr_off = (nav_block as usize) * block_size_usize + (nav_idx as usize) * 8;
-        let data_block = read_u64_le(data, ptr_off).ok_or("truncated CTFS data-block pointer")?;
-        if data_block == 0 {
-            return Err(format!("null CTFS data block at index {block_idx}"));
-        }
-        let block_off = (data_block as usize) * block_size_usize;
+        let data_block = read_ptr(nav_block, nav_idx, "mapping block")?;
+        let block_off = ctfs_block(
+            data,
+            name,
+            data_block,
+            block_size,
+            &format!("data block {block_idx}"),
+        )?;
         let copy_len = remaining.min(block_size_usize);
         let slice = data
             .get(block_off..block_off + copy_len)
-            .ok_or("CTFS data block out of bounds")?;
+            .ok_or_else(|| format!("{name}: data block {block_idx} is out of bounds"))?;
         out.extend_from_slice(slice);
         remaining -= copy_len;
         block_idx += 1;
@@ -921,51 +1015,64 @@ fn resolve_ctfs_file(
 
 // ── Minimal CTFS writer (test-only) ────────────────────────────────────
 
-/// Write a minimal CTFS container containing the given internal files.
+/// Write a minimal version 5 CTFS container containing the given internal
+/// files.
 ///
 /// This is a test helper that mirrors the db-backend
-/// `ctfs_trace_reader::ctfs_container::write_minimal_ctfs` writer.  The
-/// layout is intentionally simple: one mapping block + one data block per
-/// internal file, all 1024 bytes.
+/// `ctfs_trace_reader::ctfs_container::write_minimal_ctfs` writer, with
+/// 1024-byte blocks: an empty file owns no block, a file of at most one block
+/// is that block with `MapBlock` tagged (`ctfs-container.md` §2), and a larger
+/// one has a level-1 mapping block claimed before its data blocks.
 #[cfg(test)]
 pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> std::io::Result<()> {
     const BLOCK_SIZE: usize = 1024;
     const MAX_ENTRIES: usize = 8;
+    assert!(
+        files.len() <= MAX_ENTRIES,
+        "test container holds at most {MAX_ENTRIES} files"
+    );
 
-    let mut root: Vec<u8> = Vec::new();
-    root.extend_from_slice(&CTFS_MAGIC);
-    root.push(3); // version
-    root.push(0);
-    root.push(0);
-    root.extend_from_slice(&(BLOCK_SIZE as u32).to_le_bytes());
-    root.extend_from_slice(&(MAX_ENTRIES as u32).to_le_bytes());
+    let mut out = vec![0u8; BLOCK_SIZE];
+    out[0..5].copy_from_slice(&CTFS_MAGIC);
+    out[5] = CTFS_VERSION;
+    out[8..12].copy_from_slice(&(BLOCK_SIZE as u32).to_le_bytes());
+    out[12..16].copy_from_slice(&(MAX_ENTRIES as u32).to_le_bytes());
 
-    for (i, file) in files.iter().enumerate() {
-        let map_block = (1 + i * 2) as u64;
-        root.extend_from_slice(&(file.1.len() as u64).to_le_bytes());
-        root.extend_from_slice(&map_block.to_le_bytes());
-        root.extend_from_slice(&base40_encode(file.0).to_le_bytes());
+    let alloc = |out: &mut Vec<u8>| -> u64 {
+        let block = (out.len() / BLOCK_SIZE) as u64;
+        out.resize(out.len() + BLOCK_SIZE, 0);
+        block
+    };
+    for (i, (name, bytes)) in files.iter().enumerate() {
+        let map_block = if bytes.is_empty() {
+            0
+        } else if bytes.len() <= BLOCK_SIZE {
+            let block = alloc(&mut out);
+            let off = block as usize * BLOCK_SIZE;
+            out[off..off + bytes.len()].copy_from_slice(bytes);
+            CTFS_DIRECT | block
+        } else {
+            let mapping = alloc(&mut out);
+            assert!(
+                bytes.len() <= (BLOCK_SIZE / 8 - 1) * BLOCK_SIZE,
+                "test file too large"
+            );
+            for (slot, chunk) in bytes.chunks(BLOCK_SIZE).enumerate() {
+                let block = alloc(&mut out);
+                let off = block as usize * BLOCK_SIZE;
+                out[off..off + chunk.len()].copy_from_slice(chunk);
+                let ptr = mapping as usize * BLOCK_SIZE + slot * 8;
+                out[ptr..ptr + 8].copy_from_slice(&block.to_le_bytes());
+            }
+            mapping
+        };
+        let entry = 16 + i * 24;
+        out[entry..entry + 8].copy_from_slice(&(bytes.len() as u64).to_le_bytes());
+        out[entry + 8..entry + 16].copy_from_slice(&map_block.to_le_bytes());
+        out[entry + 16..entry + 24].copy_from_slice(&base40_encode(name).to_le_bytes());
     }
-    for _ in files.len()..MAX_ENTRIES {
-        root.extend_from_slice(&0u64.to_le_bytes());
-        root.extend_from_slice(&0u64.to_le_bytes());
-        root.extend_from_slice(&0u64.to_le_bytes());
-    }
-    root.resize(BLOCK_SIZE, 0);
 
-    for (i, file) in files.iter().enumerate() {
-        let data_block = (2 + i * 2) as u64;
-        let mut mapping: Vec<u8> = Vec::new();
-        mapping.extend_from_slice(&data_block.to_le_bytes());
-        mapping.resize(BLOCK_SIZE, 0);
-        root.extend_from_slice(&mapping);
-
-        let mut data_padded = file.1.to_vec();
-        data_padded.resize(BLOCK_SIZE, 0);
-        root.extend_from_slice(&data_padded);
-    }
-
-    std::fs::write(path, root)
+    std::fs::write(path, out)
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -975,16 +1082,10 @@ pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> std::io::Resu
 mod tests {
     use super::*;
 
-    /// A REAL schema-version-5 `meta.dat`, produced by the canonical Nim
-    /// writer (`codetracer-trace-format-nim`) recording one file that is
-    /// reloaded once, and copied out of the container byte for byte.
-    ///
-    /// Captured rather than hand-built on purpose: the v5 branches here exist
-    /// so a container from THAT writer parses in THIS crate, and a fixture
-    /// this crate builds itself could only show its own serializer and its
-    /// own parser agreeing — which they would even if both put the
-    /// `flags_ext` word in the wrong place. These are the other
-    /// implementation's bytes, so a layout disagreement fails loudly.
+    /// A REAL schema-version-5 `meta.dat`, produced by the Nim writer
+    /// (`codetracer-trace-format-nim`) recording one file that is reloaded
+    /// once, and copied out of the container byte for byte. Version 6 refuses
+    /// it: its path list sits where version 6 puts the flag-gated blocks.
     ///
     ///   [0..4)  "CTMD"       [4..6)  version = 5
     ///   [6..8)  flags = 0x4f00    [8..12) flags_ext = 1 (source reload)
@@ -1000,64 +1101,27 @@ mod tests {
     ];
 
     #[test]
-    fn a_v5_header_from_the_nim_writer_parses_here() {
-        // Anti-vacuity: prove the fixture is v5 first. A v4 fixture would
-        // take the old path and satisfy everything below while saying
-        // nothing about the word this test exists for.
-        assert_eq!(
-            u16::from_le_bytes([NIM_WRITTEN_V5_META_DAT[4], NIM_WRITTEN_V5_META_DAT[5]]),
-            META_DAT_VERSION_EXTENDED_FLAGS,
-            "fixture is not a v5 header"
-        );
-
-        let m = parse_meta_dat(NIM_WRITTEN_V5_META_DAT).expect("a v5 header must parse");
-        assert_eq!(m.version, META_DAT_VERSION_EXTENDED_FLAGS);
-        assert_eq!(m.program, "rev_produce");
-        assert_eq!(m.recording_id, "01890000-0000-7000-8000-0000000091d9");
-        // TWO path entries for ONE path string is the reload. Reaching it
-        // coherently proves the body started at offset 12; a four-byte error
-        // would desynchronise every string after the header.
-        assert_eq!(m.paths, vec!["res://rev/probe.gd", "res://rev/probe.gd"]);
-        // The u16 flags are still at offset 6 — the new word went in AFTER
-        // them, which is what leaves every offset-6 reader unaffected.
-        assert_eq!(m.flags, u16::from_le_bytes([0x00, 0x4f]));
+    fn an_unknown_ext_bit_is_refused() {
+        let mut buf = v6_bytes();
+        buf[9] = 0x01; // ext bit 8 — no constant here claims it
+        assert!(matches!(
+            parse_meta_dat(&buf),
+            Err(MetaDatError::UnknownExtendedFlags { .. })
+        ));
     }
 
     #[test]
-    fn a_v5_header_with_an_unknown_ext_bit_is_refused() {
-        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
-        buf[9] = 0x01; // ext bit 8 — no constant in this crate claims it
-        match parse_meta_dat(&buf) {
-            Err(MetaDatError::UnknownExtendedFlags { .. }) => {}
-            other => panic!("expected UnknownExtendedFlags, got {other:?}"),
+    fn a_header_shorter_than_12_bytes_is_refused() {
+        let buf = v6_bytes();
+        for len in 6..12 {
+            assert!(
+                matches!(
+                    parse_meta_dat(&buf[..len]),
+                    Err(MetaDatError::TooShort { .. })
+                ),
+                "a {len}-byte header was not refused as short"
+            );
         }
-    }
-
-    /// A version 5 header whose `flags_ext` is zero is refused
-    /// (`codetracer-trace-format-spec/internal-files.md` §"Extended flags"):
-    /// it is what an unconditional version bump produces.
-    #[test]
-    fn a_v5_header_with_a_zero_ext_word_is_refused() {
-        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
-        buf[8] = 0;
-        match parse_meta_dat(&buf) {
-            Err(MetaDatError::EmptyExtendedFlags) => {}
-            other => panic!("a v5 header with flags_ext == 0 must be refused; got {other:?}"),
-        }
-        assert!(
-            MetaDatError::EmptyExtendedFlags.to_string().contains("flags_ext"),
-            "the refusal names the word"
-        );
-    }
-
-    #[test]
-    fn a_v5_header_truncated_before_its_ext_word_is_refused() {
-        // Eleven bytes: past the u16 flags, one short of the ext word.
-        let buf = NIM_WRITTEN_V5_META_DAT[..11].to_vec();
-        assert!(
-            parse_meta_dat(&buf).is_err(),
-            "a v5 header too short to hold its flags_ext word must be refused"
-        );
     }
 
     const TEST_RECORDING_ID: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
@@ -1071,7 +1135,7 @@ mod tests {
             args: vec!["a".to_owned()],
             workdir: "/tmp".to_owned(),
             recorder_id: "test".to_owned(),
-            paths: vec!["main.rs".to_owned()],
+            ext_flags: 0,
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
@@ -1145,19 +1209,15 @@ mod tests {
         );
     }
 
-    /// The refusal names every version this parser accepts, from
-    /// [`SUPPORTED_META_DAT_VERSIONS`], so a v5 recording is never told
-    /// that only 4 would have been accepted.
+    /// The refusal names the version it saw and the one this parser reads.
     #[test]
-    fn unsupported_version_message_names_the_accepted_set() {
+    fn unsupported_version_message_names_the_version_read() {
+        assert_eq!(SUPPORTED_META_DAT_VERSIONS, &[META_DAT_VERSION]);
         let msg = MetaDatError::UnsupportedVersion(99).to_string();
-        let expected: Vec<String> = SUPPORTED_META_DAT_VERSIONS.iter().map(u16::to_string).collect();
-        assert!(expected.len() > 1, "the accepted set is not a singleton");
         assert!(
-            msg.contains(&format!("accepted: {}", expected.join(", "))),
-            "the refusal must list every accepted version; got: {msg}"
+            msg.contains("version 99") && msg.contains(&format!("version {META_DAT_VERSION}")),
+            "the refusal must name both versions; got: {msg}"
         );
-        assert!(msg.contains("99"), "the refusal must name the version it saw; got: {msg}");
     }
 
     #[test]
@@ -1170,6 +1230,7 @@ mod tests {
         // passing assertion.
         buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
         let bad = "not-a-uuid";
         encode_varint(bad.len() as u64, &mut buf);
         buf.extend_from_slice(bad.as_bytes());
@@ -1213,5 +1274,250 @@ mod tests {
             "01949fcc-7d92-7e9c-caaa-bbbbbbbbbbbb"
         )); // bad variant
         assert!(!is_canonical_uuid_v7(""));
+    }
+
+    // ── meta.dat version 6, container version 5 ────────────────────────
+
+    /// A version 6 header from the specification (internal-files.md
+    /// §"Metadata (meta.dat)"): `flags_ext` always present, and nothing after
+    /// `recorder_id` but the flag-gated blocks.
+    fn v6_bytes() -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(b"CTMD");
+        buf.extend_from_slice(&6u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.push(TEST_RECORDING_ID.len() as u8);
+        buf.extend_from_slice(TEST_RECORDING_ID.as_bytes());
+        buf.extend_from_slice(&[2, b'h', b'i']);
+        buf.extend_from_slice(&[0]);
+        buf.extend_from_slice(&[2, b'/', b'w']);
+        buf.extend_from_slice(&[1, b'r']);
+        buf
+    }
+
+    #[test]
+    fn a_version_6_header_parses() {
+        let m = parse_meta_dat(&v6_bytes()).expect("a version 6 header must parse");
+        assert_eq!(m.version, 6);
+        assert_eq!(m.program, "hi");
+        assert_eq!(m.workdir, "/w");
+        assert_eq!(m.recorder_id, "r");
+    }
+
+    #[test]
+    fn a_path_list_after_recorder_id_is_not_read() {
+        let mut buf = v6_bytes();
+        buf.extend_from_slice(&[1, 1, b'x']);
+        assert!(
+            matches!(
+                parse_meta_dat(&buf),
+                Err(MetaDatError::TrailingBytes { extra: 3 })
+            ),
+            "a version 5 path list after recorder_id must not be read"
+        );
+    }
+
+    #[test]
+    fn every_meta_dat_version_but_6_is_refused_by_name() {
+        for v in [3u16, 4, 5, 7] {
+            let mut buf = v6_bytes();
+            buf[4..6].copy_from_slice(&v.to_le_bytes());
+            let err = parse_meta_dat(&buf).expect_err("another version must be refused");
+            assert_eq!(err, MetaDatError::UnsupportedVersion(v));
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&format!("version {v}")) && msg.contains('6'),
+                "the refusal names neither version: {msg}"
+            );
+        }
+        assert_eq!(
+            parse_meta_dat(NIM_WRITTEN_V5_META_DAT),
+            Err(MetaDatError::UnsupportedVersion(5))
+        );
+    }
+
+    const BIT63: u64 = 1 << 63;
+
+    /// A raw version 5 container of `blocks` 1024-byte blocks with the given
+    /// `(slot, name, size, map_block)` entries.
+    fn raw_v5(blocks: usize, entries: &[(usize, &str, u64, u64)]) -> Vec<u8> {
+        let mut buf = vec![0u8; blocks * 1024];
+        buf[0..5].copy_from_slice(&CTFS_MAGIC);
+        buf[5] = 5;
+        buf[8..12].copy_from_slice(&1024u32.to_le_bytes());
+        buf[12..16].copy_from_slice(&8u32.to_le_bytes());
+        for &(slot, name, size, map_block) in entries {
+            let off = 16 + slot * 24;
+            buf[off..off + 8].copy_from_slice(&size.to_le_bytes());
+            buf[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
+            buf[off + 16..off + 24].copy_from_slice(&base40_encode(name).to_le_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn a_container_of_another_version_is_refused_by_name() {
+        for v in [3u8, 4, 7] {
+            let mut raw = raw_v5(2, &[(0, "meta.dat", 2, BIT63 | 1)]);
+            raw[5] = v;
+            let err = read_meta_dat_from_ctfs(&raw)
+                .expect_err("another container version must be refused");
+            assert!(
+                err.contains(&format!("version {v}")) && err.contains('5'),
+                "the refusal names neither version: {err}"
+            );
+        }
+    }
+
+    /// `ctfs-container.md` §2: a tagged `MapBlock` is the member's only data
+    /// block; an untagged one is a mapping whatever `Size` says.
+    #[test]
+    fn version_5_members_are_read_in_each_form() {
+        let mut raw = raw_v5(4, &[(0, "meta.dat", 3, BIT63 | 1), (1, "paths.dat", 2, 2)]);
+        raw[1024..1027].copy_from_slice(b"abc");
+        raw[2 * 1024..2 * 1024 + 8].copy_from_slice(&3u64.to_le_bytes());
+        raw[3 * 1024..3 * 1024 + 2].copy_from_slice(b"xy");
+        assert_eq!(read_meta_dat_from_ctfs(&raw).unwrap(), b"abc");
+        assert_eq!(ctfs_internal_file_size(&raw, "paths.dat").unwrap(), Some(2));
+    }
+
+    /// `ctfs-container.md` §4, "Null block pointers on the read path".
+    #[test]
+    fn a_null_or_oversized_direct_member_is_refused() {
+        for (size, map_block, what) in [
+            (3u64, 0u64, "MapBlock 0 with a size"),
+            (3, BIT63, "a tagged block 0"),
+            (2000, BIT63 | 1, "a direct member past one block"),
+        ] {
+            let raw = raw_v5(3, &[(0, "meta.dat", size, map_block)]);
+            let err = read_meta_dat_from_ctfs(&raw).expect_err(what);
+            assert!(
+                err.contains("meta.dat") && !err.contains("truncat"),
+                "{what}: {err}"
+            );
+        }
+    }
+
+    /// The source paths are `paths.dat`'s records, in either record layout.
+    #[test]
+    fn source_paths_are_read_from_paths_dat() {
+        let dir = std::env::temp_dir().join(format!("ct-meta-dat-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ct = dir.join("trace.ct");
+
+        let (dat, off) = (
+            b"/a.rs/bb.rs".to_vec(),
+            [0u64, 5, 11].map(u64::to_le_bytes).concat(),
+        );
+        write_minimal_ctfs(&ct, &[("paths.dat", &dat), ("paths.off", &off)]).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert_eq!(
+            read_source_paths_from_ctfs(&raw, 0).unwrap(),
+            vec!["/a.rs", "/bb.rs"]
+        );
+
+        // Layout A / line-count records: `path_len` + path + a tail.
+        let mut framed = vec![5u8];
+        framed.extend_from_slice(b"/a.rs");
+        framed.push(40);
+        let off = [0u64, framed.len() as u64].map(u64::to_le_bytes).concat();
+        write_minimal_ctfs(&ct, &[("paths.dat", &framed), ("paths.off", &off)]).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert_eq!(
+            read_source_paths_from_ctfs(&raw, FLAG_HAS_LINE_COUNT_TABLE).unwrap(),
+            vec!["/a.rs"]
+        );
+
+        // A column-aware record stating `line_count = 0` (the conventional
+        // table, with no `line_lengths` after it) sits between two records
+        // with explicit tables; every path is still its own record's.
+        let mut column_aware = vec![5u8];
+        column_aware.extend_from_slice(b"/a.rs");
+        column_aware.extend_from_slice(&[2, 24, 2]);
+        let first_end = column_aware.len() as u64;
+        column_aware.push(6);
+        column_aware.extend_from_slice(b"/c.bin");
+        column_aware.push(0);
+        let second_end = column_aware.len() as u64;
+        column_aware.push(6);
+        column_aware.extend_from_slice(b"/bb.rs");
+        column_aware.extend_from_slice(&[1, 10]);
+        let off = [0u64, first_end, second_end, column_aware.len() as u64]
+            .map(u64::to_le_bytes)
+            .concat();
+        write_minimal_ctfs(&ct, &[("paths.dat", &column_aware), ("paths.off", &off)]).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert_eq!(
+            read_source_paths_from_ctfs(&raw, FLAG_HAS_COLUMN_AWARE_STEPS).unwrap(),
+            vec!["/a.rs", "/c.bin", "/bb.rs"]
+        );
+
+        write_minimal_ctfs(&ct, &[("meta.dat", b"m")]).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert!(read_source_paths_from_ctfs(&raw, 0).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The test writer lays members out as version 5 requires, and a member
+    /// past one block is read back through its mapping.
+    #[test]
+    fn the_test_writer_writes_version_5_layouts() {
+        let dir = std::env::temp_dir().join(format!("ct-meta-dat-layout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ct = dir.join("trace.ct");
+        let big: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
+        write_minimal_ctfs(&ct, &[("empty", &[]), ("small", b"abc"), ("big", &big)]).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert_eq!(raw[5], 5);
+        let entry = |slot: usize| read_u64_le(&raw, 16 + slot * 24 + 8).unwrap();
+        assert_eq!(entry(0), 0, "an empty member owns no block");
+        assert_ne!(entry(1) & BIT63, 0, "a one-block member is direct");
+        assert_eq!(entry(2) & BIT63, 0, "a larger member is mapped");
+        assert_eq!(raw.len(), 1024 * (1 + 1 + 1 + 3));
+        assert_eq!(
+            read_ctfs_internal_file(&raw, "empty").unwrap(),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            read_ctfs_internal_file(&raw, "small").unwrap(),
+            Some(b"abc".to_vec())
+        );
+        assert_eq!(read_ctfs_internal_file(&raw, "big").unwrap(), Some(big));
+        assert_eq!(read_ctfs_internal_file(&raw, "absent").unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A version 6 full container with no whole-file scheme is read, its
+    /// entries at 24; every v6 value this reader does not implement is
+    /// refused by name (`ctfs-container.md` §1a-§1c).
+    #[test]
+    fn version_6_full_containers_are_read_and_other_fields_refused() {
+        let v6 = |profile: u8, compression: u8, reserved: u8| {
+            let mut raw = vec![0u8; 2 * 1024];
+            raw[0..5].copy_from_slice(&CTFS_MAGIC);
+            raw[5] = 6;
+            raw[8..12].copy_from_slice(&1024u32.to_le_bytes());
+            raw[12..16].copy_from_slice(&8u32.to_le_bytes());
+            raw[16] = profile;
+            raw[17] = compression;
+            raw[23] = reserved;
+            raw[24..32].copy_from_slice(&3u64.to_le_bytes());
+            raw[32..40].copy_from_slice(&(BIT63 | 1).to_le_bytes());
+            raw[40..48].copy_from_slice(&base40_encode("meta.dat").to_le_bytes());
+            raw[1024..1027].copy_from_slice(b"abc");
+            raw
+        };
+        assert_eq!(read_meta_dat_from_ctfs(&v6(0, 0, 0)).unwrap(), b"abc");
+        for (p, c, r, what) in [
+            (1, 0, 0, "profile 1"),
+            (0, 1, 0, "compression 1"),
+            (0, 0, 2, "reserved"),
+        ] {
+            let err = read_meta_dat_from_ctfs(&v6(p, c, r)).unwrap_err();
+            assert!(err.contains(what), "{what}: {err}");
+        }
     }
 }

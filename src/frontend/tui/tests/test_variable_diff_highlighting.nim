@@ -3,7 +3,7 @@
 ## ## What this suite establishes
 ##
 ## CTUI-7: "steps forward over an assignment and asserts exactly the assigned
-## variable carries `[MOD]`; steps *backward* and asserts the value reverts and
+## variable carries the changed-value accent (PLAT-51; it was the `[MOD]` badge); steps *backward* and asserts the value reverts and
 ## the badge clears. Also asserts that a step which changes nothing marks
 ## nothing — a diff engine that marks every row after every step passes a
 ## forward-only test."
@@ -66,6 +66,8 @@ import headless_session
 import store/[replay_data_store, types]
 
 import ../app/variables_binding
+import ../app/views/diff_highlighter
+from viewmodels/value_changes import len   # `ValueTimeline.len`
 import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
@@ -139,6 +141,9 @@ type
     bodyHeight: int
     rows: Table[string, string]
       ## The text of every painted row that stands for a path.
+    accented: Table[string, bool]
+      ## PLAT-51: whether that row's paint carries the changed-value accent
+      ## (`diff_highlighter.ChangedValueStyle`) — the `[MOD]` badge is gone.
 
 proc frameFunction(session: HeadlessDebugSession): string =
   ## The function DAP `stackTrace` names for frame 0.
@@ -214,10 +219,15 @@ proc recordStop(session: HeadlessDebugSession;
     anchorTick: model.diff.anchorTick,
     totalRows: screen.totalRows,
     bodyHeight: screen.bodyHeight,
-    rows: initTable[string, string]())
+    rows: initTable[string, string](),
+    accented: initTable[string, bool]())
   for i, row in screen.visible:
     if row.kind in {vrkScope, vrkVariable}:
       result.rows[row.node.path] = rowText(screen.rows[1 + i])
+      var lit = false
+      for span in screen.rows[1 + i]:
+        if span.style == ChangedValueStyle: lit = true
+      result.accented[row.node.path] = lit
 
 proc rowFor(stop: Stop; name: string): string =
   if stop.rows.hasKey(localPath(name)): stop.rows[localPath(name)] else: ""
@@ -242,7 +252,8 @@ template checkExactlyOneBadge(stop: Stop; name: string) =
              ", pane badges " & $stop.modifiedRows & ", row '" &
              stop.rowFor(name) & "'")
   ck stop.modifiedRows == 1
-  ck stop.rowFor(name).contains(ModifiedTag)
+  ck stop.accented.getOrDefault(localPath(name)) and
+     not stop.rowFor(name).contains("[MOD]")
   ck stop.rowFor(name).contains(name)
 
 template checkNoBadgeFor(stop: Stop; name: string) =
@@ -253,7 +264,7 @@ template checkNoBadgeFor(stop: Stop; name: string) =
              stop.rowFor(name) & "'")
   ck name notin stop.modified
   ck stop.rowFor(name).len > 0
-  ck not stop.rowFor(name).contains(ModifiedTag)
+  ck not stop.accented.getOrDefault(localPath(name))
   ck stop.rowFor(name).contains(name)
 
 # ---------------------------------------------------------------------------

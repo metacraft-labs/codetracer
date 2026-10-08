@@ -30,9 +30,33 @@
 type
   PlatformKind* = enum
     ## The instantiations NS1 is shaped for. Three, not two — Noir-Studio.md
-    ## §3.1a. `pkContainer` is post-MVP and deliberately present anyway: a
-    ## capability whose signature only makes sense in-process is a design error
-    ## to catch now, not after `ct host` is refactored.
+    ## §3.1a. `pkContainer` was declared before it was implemented, on purpose:
+    ## a capability whose signature only makes sense in-process is a design
+    ## error to catch before `ct host` is refactored, not after.
+    ##
+    ## **`pkContainer` IS A SUPPORTED DEPLOYMENT AS OF WD1b** — codetracer
+    ## `8008eeb74`, 2026-09-30. This note used to say the opposite and the
+    ## reversal is worth keeping, because the failure it described is this
+    ## enum's own and the shape recurs.
+    ##
+    ## What it described: `pkContainer` was constructed in exactly one place in
+    ## the whole product and it was a unit test. A running `ct host` reported
+    ## `pkWeb`, because its renderer's `electronAvailable()` probe fails — the
+    ## served page sets `window.electron = undefined` — so it fell into the
+    ## branch written for the browsersync dev server and StoryBook and got
+    ## `newPlatform(webProfile)`: a profile that ADVERTISED capabilities every
+    ## facade then refused. `ui/git_cli.nim:93` passed its `capFilesystemRead`
+    ## guard and `:95` refused.
+    ##
+    ## What closed it, and the part worth remembering: the dispatcher
+    ## (`index/facade_endpoint.nim`) and the client
+    ## (`host/container_platform.nim`) had both existed for weeks, with 902
+    ## green assertions between them, and **neither was connected to anything**.
+    ## The profile now arrives in the `welcome` frame
+    ## (`Architecture/UI-Bundle-And-Endpoints.md` §6.3), declared by the process
+    ## that will answer the calls — which is what makes "may I" and "did it
+    ## work" agree structurally rather than by review, and is why a
+    ## compiled-in constant was the wrong place for it.
     pkDesktop
     pkWeb
     pkContainer

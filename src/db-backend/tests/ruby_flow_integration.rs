@@ -48,9 +48,10 @@ fn create_ruby_flow_config() -> FlowTestConfig {
 #[test]
 fn test_ruby_flow_integration() {
     if test_harness::find_ruby_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Ruby recorder not found \
-             (set CODETRACER_RUBY_RECORDER_PATH or check out sibling/submodule)"
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_ruby_flow_integration",
+            "the Ruby recorder is not found",
+            "check out and build the codetracer-ruby-recorder sibling, or set CODETRACER_RUBY_RECORDER_PATH",
         );
         return;
     }

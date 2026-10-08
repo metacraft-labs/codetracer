@@ -147,6 +147,15 @@ type
       ## Empty for every non-text status.
     totalLineCount*: int
       ## The file's length in lines, or 0 when unknown.
+    fileLines*: seq[string]
+      ## The WHOLE file `lines` was sliced from, when the provider held it
+      ## (both implementations read the whole file to slice it). Carried so a
+      ## front-end can compute what its highlighter needs to know about the
+      ## text ABOVE the window — the tokenizer state line `firstLine` starts
+      ## in, which is how a window that opens inside a docstring or a block
+      ## comment is coloured as the desktop colours it (PLAT-47 B4). The
+      ## ViewModel never keeps it: `applySourceFetch` takes the per-line
+      ## contexts the front-end derived, and `SourceVM` holds the window.
     detail*: string
       ## Human-readable diagnosis. Never the thing a pane renders — that is
       ## §14's row — but what a log or a `--verbose` surface shows.
@@ -255,9 +264,14 @@ proc fetch*(provider: SourceProvider; request: SourceLineRequest;
 # ---------------------------------------------------------------------------
 
 proc applySourceFetch*(store: ReplayDataStore; vm: SourceVM;
-                       fetch: SourceFetch): bool =
+                       fetch: SourceFetch;
+                       lineContexts: seq[string] = @[]): bool =
   ## Record the §14 axis this answer establishes, and hand the text (if any) to
   ## `SourceVM`.
+  ##
+  ## `lineContexts`, one per line of `fetch.lines`, is what the front-end's
+  ## highlighter derived from `fetch.fileLines` (the state each line starts
+  ## in); empty when it derived none.
   ##
   ## Returns whether the VM adopted the text. A degraded answer returns false
   ## AND drops whatever the VM was holding for this revision, because the one
@@ -268,7 +282,8 @@ proc applySourceFetch*(store: ReplayDataStore; vm: SourceVM;
     if fetch.revision.isEmpty or fetch.revision == vm.revision.val:
       vm.discardHeldText()
     return false
-  vm.fulfill(fetch.revision, fetch.firstLine, fetch.lines, fetch.totalLineCount)
+  vm.fulfill(fetch.revision, fetch.firstLine, fetch.lines, fetch.totalLineCount,
+             lineContexts)
 
 # ---------------------------------------------------------------------------
 # Slicing a whole file down to the requested window
@@ -682,6 +697,7 @@ when not defined(js):
       answer.firstLine = sliced.firstLine
       answer.lines = sliced.lines
       answer.totalLineCount = allLines.len
+      answer.fileLines = allLines
       answer.detail = resolved
       onResult(answer)
 
@@ -894,6 +910,7 @@ proc newDapSourceProvider*(backend: BackendService;
       answer.firstLine = sliced.firstLine
       answer.lines = sliced.lines
       answer.totalLineCount = allLines.len
+      answer.fileLines = allLines
       onResult(answer)
 
     proc onError(message: string) =

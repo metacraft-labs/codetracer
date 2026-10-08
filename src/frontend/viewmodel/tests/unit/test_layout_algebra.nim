@@ -167,7 +167,11 @@ suite "Layout algebra — apply never mutates its argument":
       cmdMergeIntoStack(paneEditor, paneState),
       cmdDock(paneEditor, leBottom),
       cmdRestoreDocked(paneShell),
-      cmdRename(paneEditor, "Renamed")]
+      cmdRename(paneEditor, "Renamed"),
+      # Both divider-drag spellings: a pane's own leaf, and a stack reached
+      # one level above a tab's leaf.
+      cmdSetDivider(paneEditor, 0.5, ssAfter),
+      cmdSetDivider(paneState, 0.5, ssBefore, level = 1)]
     for name in AllShapes:
       for cmd in commands:
         let before = shape(name)
@@ -176,6 +180,20 @@ suite "Layout algebra — apply never mutates its argument":
         checkpoint(name & " / " & $cmd)
         check $before == printed
         check $before.tree == printed.split(" +docked")[0]
+    # A DOCKED source for the two tab-strip commands: the strip is part of
+    # the input too, and it must come back untouched.
+    let docked = apply(stackedLayout(), cmdDock(paneEventLog, leBottom))
+    check docked.kind == loApplied
+    if docked.kind == loApplied:
+      for cmd in [cmdMoveTab(paneEventLog, paneState, 0),
+                  cmdMergeIntoStack(paneEventLog, paneEditor)]:
+        let before = docked.layout
+        let printed = $before
+        let o = apply(before, cmd)
+        checkpoint("docked / " & $cmd)
+        check o.kind == loApplied
+        check $before == printed
+        check before.docked.len == 1
 
   test "the outcome's layout does not alias the input's tree":
     let before = stackedLayout()
@@ -201,11 +219,23 @@ suite "Layout algebra — apply never mutates its argument":
       cmdSplit(paneEditor, paneScratchpad, saColumn),
       cmdMergeIntoStack(paneEditor, paneState),
       cmdDock(paneEditor, leBottom), cmdRestoreDocked(paneShell),
-      cmdRename(paneEditor, "Renamed")]
+      cmdRename(paneEditor, "Renamed"),
+      cmdSetDivider(paneEditor, 0.5, ssAfter),
+      cmdSetDivider(paneState, 0.5, ssBefore, level = 1)]
     var appliedArms = 0
+    var shapes: seq[(string, Layout)] = @[]
     for name in AllShapes:
-      for cmd in commands:
-        let before = shape(name)
+      shapes.add((name, shape(name)))
+    # The docked-source arms of `lcMoveTab` / `lcMergeIntoStack` need a pane
+    # on a strip; the Event Log docked beside `stacked` is that shape.
+    let docked = apply(stackedLayout(), cmdDock(paneEventLog, leBottom))
+    if docked.kind == loApplied:
+      shapes.add(("stacked, Event Log docked", docked.layout))
+    check shapes.len == AllShapes.len + 1
+    for (name, fixture) in shapes:
+      for cmd in commands & @[cmdMoveTab(paneEventLog, paneState, 0),
+                              cmdMergeIntoStack(paneEventLog, paneEditor)]:
+        let before = fixture.clone()
         var inputNodes: seq[LayoutNode] = @[]
         collectNodes(before.tree, inputNodes)
         let o = apply(before, cmd)
@@ -223,9 +253,11 @@ suite "Layout algebra — apply never mutates its argument":
         check shared == 0
     # Positive control (Verification-Harness-Traps §4b): a sweep in which
     # nothing APPLIED asserts nothing at all, and the membership here is
-    # knowable — so assert the COUNT, not that it is non-zero.
+    # knowable — so assert the COUNT, not that it is non-zero. 35 over the
+    # five shapes and ten commands, plus 23 from the two divider drags, the
+    # two docked-source tab commands and the docked shape.
     checkpoint("arms that applied: " & $appliedArms)
-    check appliedArms == 35
+    check appliedArms == 58
 
 # ---------------------------------------------------------------------------
 # §2.2 / §2.3 — every command against every shape
@@ -853,6 +885,41 @@ suite "Layout algebra — auto-hide (§3)":
         check b.layout.placement(paneEventLog) == plPlaced
         checkValid b.layout
 
+  test "pin then unpin puts every pane of a stack back at its own index":
+    # PLAT-48. With no anchor named, a restore goes back beside the pane the
+    # docked one sat next to (`DockedPane.beside`) — AFTER its previous
+    # sibling, or IN FRONT of its next one when it was the first
+    # (`besideBefore`). Only the second rule was missing: Call Trace, the
+    # first tab of the shared default's Call Trace | Agent Activity stack,
+    # came back BEHIND Agent Activity. Every position of a three-tab stack,
+    # and the restored tab is the one shown.
+    let tree = row(@[
+      pane(paneEditor, "Editor"),
+      stack(@[pane(paneState, "State"), pane(paneScratchpad, "Scratchpad"),
+              pane(paneEventLog, "Event Log")])])
+    let base = initLayout(tree)
+    for p in [paneState, paneScratchpad, paneEventLog]:
+      checkpoint($p)
+      let pinned = apply(base, cmdDock(p, leBottom))
+      checkApplied pinned
+      if pinned.kind != loApplied: continue
+      let back = apply(pinned.layout, cmdRestoreDocked(p))
+      checkApplied back
+      if back.kind != loApplied: continue
+      proc tabsOf(t: LayoutNode): seq[PaneKind] =
+        for c in t.children[1].children: result.add c.pane
+      let order = @[paneState, paneScratchpad, paneEventLog]
+      check tabsOf(back.layout.tree) == order
+      let st = back.layout.tree.children[1]
+      check st.children[st.activeIndex].pane == p
+      checkValid back.layout
+      # …and across a save/restore of the pinned document.
+      let reloaded = restoreLayoutDocument(parseJson($saveLayout(pinned.layout)))
+      let back2 = apply(reloaded, cmdRestoreDocked(p))
+      checkApplied back2
+      if back2.kind == loApplied:
+        check tabsOf(back2.layout.tree) == order
+
   test "restoring a pane that is not docked is refused by kind":
     for name in AllShapes:
       checkpoint(name)
@@ -988,6 +1055,10 @@ suite "Layout algebra — invariants (§7)":
         of lpPaneNotDocked: some(cmdRestoreDocked(paneEditor))
         of lpTargetNotAStack: some(cmdMoveTab(paneState, paneEditor, 0))
         of lpIndexOutOfRange: some(cmdMoveTab(paneEditor, paneState, 99))
+        of lpNoDivider:
+          # PLAT-5's closing pass. A divider drag on the LAST child of the
+          # root row, on its far side: there is nothing across that divider.
+          some(cmdSetDivider(paneEditor, 1.0, ssBefore))
         of lpMalformedContributedPane:
           # PLAT-9. A contributed pane id that is not namespaced is refused by
           # `apply` as well as by `validate` — the command is the second door a
@@ -1013,7 +1084,7 @@ suite "Layout algebra — invariants (§7)":
         check witness.isNone
     # A positive control: if `problemSources` declared everything structural,
     # every branch would be skipped and this test would still be green.
-    check refusalCovered == 12
+    check refusalCovered == 13
 
 # ---------------------------------------------------------------------------
 # §3A.2 — the floating-panel non-goal, asserted structurally
@@ -1066,7 +1137,14 @@ suite "Layout algebra — floating panels are not expressible (§3A.2)":
     # Positive control (Verification-Harness-Traps §4): a walk that visited
     # nothing would report no offenders too.
     # PLAT-9 added `LayoutNode.contributedPane`, so the node's arity is 7.
-    check checkedFields == 7 + 5 + 3
+    # PLAT-48 added `DockedPane.beside` (the pane it was docked from),
+    # `DockedPane.weight` (its share there) and `DockedPane.besideBefore`
+    # (which side of `beside`), so the docked pane's is 8 — where it goes
+    # back to, never where it is drawn. PLAT-49 part B added `DockedPane.open`
+    # (docked OPEN, inline at its edge: a state a command sets, like
+    # `revealed` not persisted, and no extent — the binding derives the band),
+    # so the docked pane's arity is 9.
+    check checkedFields == 7 + 9 + 3
 
   test "every visible pane occupies a distinct region of the split tree":
     # The model's half of the projection's total-and-disjoint invariant: each

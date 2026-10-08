@@ -158,6 +158,14 @@ proc onMaximizeWindow*(sender: js, response: JsObject) {.async.} =
 proc onCloseWindow*(sender: js, response: JsObject) {.async.} =
   mainWindow.close()
 
+const DesktopLayoutFiles* = [
+  "default_layout.json", "default_layout.json.broken",
+  "default_edit_layout.json", "default_edit_layout.json.broken",
+  "auto_hide_state.json"]
+  ## PLAT-45: every file the DESKTOP keeps its arrangement in, under
+  ## `userLayoutDir` — what `onResetLayout` deletes, and the same set
+  ## `just reset-layout` clears.
+
 proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, isEditMode=bool)) {.async.} =
   # Determine which layout file to save to based on mode
   let layoutFileName = if response.isEditMode:
@@ -236,6 +244,44 @@ proc onSaveAutoHideState*(sender: js,
     errorPrint "save auto-hide state error: ", errWrite
   else:
     debugPrint "index: auto-hide state saved to ", statePath
+
+proc onResetLayout*(sender: js, response: js) {.async.} =
+  ## PLAT-45 deliverable 8, the desktop's `reset-layout`: delete the DESKTOP'S
+  ## OWN saved arrangement — the debug and edit layouts, the quarantined
+  ## `.broken` copies a failed repair leaves, and the pinned-panel state — then
+  ## re-read the default through the SAME loader the first run uses, and hand
+  ## it to the renderer, which installs it in place
+  ## (`ui_js.applySharedDefaultLayout`).
+  ##
+  ## Re-read rather than reload: `init` sends the renderer its
+  ## `CODETRACER::init` once, so a reloaded window would wait forever. And
+  ## re-read through `loadLayoutConfig` / `loadEditLayoutConfig` rather than a
+  ## second reading of `config/default_layout.json`: with the user's file gone
+  ## they copy the bundled default into place exactly as a first run does, so
+  ## there is one place the default comes from.
+  ##
+  ## ONLY these files. The terminal's `tui-layout.json` and the GPUI window's
+  ## `gpui-layout.json` live under the native state root
+  ## (`$XDG_STATE_HOME/codetracer`), not under `userLayoutDir`, and each
+  ## product's reset deletes its own file and nobody else's.
+  ##
+  ## An absent file is the ordinary case (a user who never rearranged), not an
+  ## error: the unlink's answer is logged, never fatal.
+  for name in DesktopLayoutFiles:
+    let path = frontend_config.userLayoutDir / name
+    let err = await fsUnlinkWithErr(cstring(path))
+    if err.isNil:
+      infoPrint "reset-layout: removed ", path
+  let edit = not response.isNil and not response.isUndefined and
+    cast[bool](response[cstring"edit"])
+  let layout =
+    if edit:
+      await mainWindow.loadEditLayoutConfig(
+        string(frontend_config.userLayoutDir / "default_edit_layout.json"))
+    else:
+      await mainWindow.loadLayoutConfig(
+        string(frontend_config.userLayoutDir / "default_layout.json"))
+  mainWindow.webContents.send "CODETRACER::reset-layout-done", js{layout: layout}
 
 proc onRequestAutoHideState*(sender: js, response: js) =
   ## Hand the persisted auto-hide state back to the renderer, synchronously.

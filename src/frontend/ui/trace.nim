@@ -6,8 +6,9 @@ import
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
-# The TimelineVM owns the IsoNim timeline DOM while legacy handlers keep
-# feeding it replay-position updates.
+# The TimelineVM is fed replay-position updates by the legacy handlers. (It
+# owned the IsoNim Timeline pane's DOM until the panel was removed,
+# 2026-10-05.)
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -16,33 +17,11 @@ import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
   TimelineVM, createTimelineVM
 from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_timeline_view import
-  mountIsoNimTimeline
 
 # Module-level TimelineVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire.
 var timelineVMInstance: TimelineVM
 var timelineVMStore: ReplayDataStore
-
-# WAS `var isoNimTimelineMounted*: bool = false`. See `isoNimPanelMountIsLive`
-# in `ui/isonim_panel_mount.nim`.
-var mountedTimelineVM: TimelineVM
-  ## The ViewModel whose DOM the live Timeline holds, or `nil`.
-var mountedTimelineHost: dom_api.Element
-  ## The element that DOM was mounted into, asked `document.contains`.
-
-proc timelinePanelIsLive*(): bool =
-  ## Is the Timeline mounted RIGHT NOW, into an element still in the document,
-  ## with the ViewModel that is current?
-  ##
-  ## Exported because the `isoNimTimelineMounted*` it replaces was exported.
-  ## Nothing outside this module reads it today.
-  isoNimPanelMountIsLive(
-    mountedVMIsCurrent = not mountedTimelineVM.isNil and
-                         mountedTimelineVM == timelineVMInstance,
-    hostIsInDocument = isoNimPanelHostIsInDocument(mountedTimelineHost))
-
-proc tryMountIsoNimTimelinePanel*()
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -63,7 +42,8 @@ proc initTimelineVMWithStore*(store: ReplayDataStore) =
   timelineVMStore = store
   timelineVMInstance = createTimelineVM(store)
   clog "TimelineVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimTimelinePanel()
+  # No pane mounts it: the Timeline panel is removed (2026-10-05). The VM
+  # stays as the shared extent arithmetic the scrubbers and seeks read.
 
 proc initTimelineVM() =
   ## Lazily create the parallel TimelineVM backed by a stub
@@ -90,7 +70,6 @@ proc initTimelineVM() =
   timelineVMStore = createReplayDataStore(stubBackend)
   timelineVMInstance = createTimelineVM(timelineVMStore)
   clog "TimelineVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimTimelinePanel()
 
 proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int;
                                   sourceGeneration: int = 0;
@@ -107,90 +86,6 @@ proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int;
   clog fmt"TimelineVM: synced debugger rrTicks={ticks}"
 
 proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
-
-type
-  TimelineMountData = ref object
-    key: cstring
-    retryCount: int
-
-proc doMountTimelinePanel(data: TimelineMountData) {.cdecl.} =
-  if timelinePanelIsLive():
-    return
-  data.retryCount += 1
-  let container = dom_api.getElementById(dom_api.document, data.key)
-  if dom_api.isNodeNil(dom_api.Node(container)):
-    if data.retryCount mod 10 == 0:
-      # Legitimate, hence DEBUG, and it names the retry number — matching
-      # `ui/state.nim` and `ui/calltrace.nim` exactly. Without this line a log
-      # could not say how far the poll got, which is why the 25-session survey
-      # could bound state and calltrace ("ended between retry #20 and #110")
-      # and could say nothing at all about the timeline.
-      cdebug "[PIPELINE] tryMountIsoNimTimelinePanel: retry #" &
-        $data.retryCount & ", container=nil"
-    if data.retryCount > 200:
-      # WAS `clog`, WHICH IS WHY NOBODY EVER REPORTED THIS PANE.
-      #
-      # The State and Call Trace panes announce the identical give-up; the
-      # timeline announced it at DEBUG, under a message that did not even name
-      # the proc that failed ("IsoNim timeline panel: not ready after 200
-      # retries, giving up"). The three panes failed together in every desktop
-      # session examined and only two of the failures were visible, so the
-      # timeline was invisibly broken for as long as the other two were loudly
-      # broken. That is why this must never go back to `clog`/DEBUG.
-      #
-      # WARN AND NOT ERROR, AND IT ENDS THIS POLL RATHER THAN THE SESSION.
-      #
-      # This used to add "reaching this cap is terminal: nothing calls the
-      # mount again". That was true when it was written and `ui/layout.nim`
-      # made it false: the `Content.Timeline` arm is, in its own words, the
-      # timeline's FIRST caller on the component-registration path —
-      # `TimelineComponent` has no `register` method at all — and it runs
-      # after `mountComponentContainer`. It re-enters with a fresh
-      # `TimelineMountData(retryCount: 0)`, so the cap is per-attempt, and
-      # `timelinePanelIsLive()` is a mounted guard, not a failed one.
-      #
-      # The losing pollers are the two `initTimelineVM*` sites above. A
-      # populated Timeline pane after this line is the normal case.
-      cwarn "[PIPELINE] tryMountIsoNimTimelinePanel: container absent after " &
-        "200 retries; abandoning THIS poll — layout.nim's Timeline factory " &
-        "arm mounts the pane once its container exists"
-      return
-    setTimeoutWithArg(doMountTimelinePanel, 10, data)
-    return
-
-  let containerNode = dom_api.Node(container)
-  while not dom_api.isNodeNil(containerNode.firstChild):
-    discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-  mountedTimelineVM = timelineVMInstance
-  mountedTimelineHost = container
-
-  let timelineDiv = dom_api.createElement(dom_api.document, cstring"div")
-  dom_api.setAttribute(timelineDiv, cstring"id", cstring"timeline")
-  dom_api.appendChild(containerNode, dom_api.Node(timelineDiv))
-
-  mountIsoNimTimeline(timelineDiv, timelineVMInstance)
-  markIsoNimPanelContainerMounted(container)
-  clog "IsoNim timeline panel: mounted as primary renderer in #timelineComponent-0"
-
-proc tryMountIsoNimTimelinePanel*() =
-  ## Mount the IsoNim timeline panel view into the GoldenLayout-managed
-  ## timeline component container. The container is created by
-  ## GoldenLayout with the id `timelineComponent-0`. The IsoNim view
-  ## is the primary renderer — no Karax renderer is involved.
-  ##
-  ## After mounting, `timelinePanelIsLive()` answers true until the host
-  ## leaves the document or the ViewModel is replaced.
-  ##
-  ## Safe to call multiple times — mounts only once.
-  if timelinePanelIsLive() or timelineVMInstance.isNil:
-    return
-
-  let mountData = TimelineMountData(
-    key: cstring"timelineComponent-0",
-    retryCount: 0
-  )
-  doMountTimelinePanel(mountData)
 
 let
   MIN_EDITOR_WIDTH: float = 20 #%

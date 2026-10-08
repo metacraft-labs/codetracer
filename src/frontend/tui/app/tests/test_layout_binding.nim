@@ -62,11 +62,22 @@ import ../layout/profile
 import ../layout/project
 import ../layout/tab_strip
 import ../views/shell
+import ./plat45_old_profiles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
-# declaration is invisible to it.
-const ExpectedAssertions = 2053
+# declaration is invisible to it. `+ 3`: PLAT-49 part B's positive controls
+# (a lone pane's header joined; a tab's insert and append halves were seen).
+const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5 - 21
+  ## PLAT-51: -21 — the shared default lost a pane (the Timeline, a tab of
+  ## the event stack), and the per-pane / per-tab sweeps over it with it.
+  ## + 5: PLAT-49 part B review — the round trip reaches the root band.
+  ## PLAT-48: +17 — the `:pin` / `:unpin` block and the two new verbs in the
+  ## every-verb sweep. PLAT-49: +2 — a press MARKS the pane (`pendingPick`)
+  ## and picks nothing up until the pointer moves past the threshold; part B
+  ## +3 for the GoldenLayout drop rules, and +97 — every partitioned
+  ## geometry's footer strip is on the status row, one row tall (two checks
+  ## per footer), and the sweep reached the footer's cells.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -91,12 +102,24 @@ template ck(condition: untyped) =
 
 proc bodyFor(cols, rows: int): CellArea = bodyArea(cols, rows)
 
-proc compact(): Layout = initLayout(profileLayout(lpCompact))
-proc standard(): Layout = initLayout(profileLayout(lpStandard))
-proc ultraWide(): Layout = initLayout(profileLayout(lpUltraWide))
+# PLAT-45: THE GESTURE FIXTURES ARE THE OLD THREE PROFILE TREES.
+#
+# Until PLAT-45 `compact()` / `standard()` / `ultraWide()` were the product's
+# own defaults. The product's default is now the ONE shared arrangement folded
+# for the size (`profileLayout`), and the gesture cases below are about
+# GESTURES — a tab moved, a pane docked, a split dragged — on arrangements
+# whose every rectangle they name. So they keep the three trees they were
+# written against, from `plat45_old_profiles.nim`, where PLAT-45 keeps them
+# as fixtures on purpose; the cases that are about THE DEFAULT (the resize
+# re-flow, the reset) use `sharedAt`, the product's own.
+proc compact(): Layout = initLayout(oldProfileLayout(opCompact))
+proc standard(): Layout = initLayout(oldProfileLayout(opStandard))
+proc ultraWide(): Layout = initLayout(oldProfileLayout(opUltraWide))
 
-proc layoutFor(profile: LayoutProfile): Layout =
-  initLayout(profileLayout(profile))
+proc sharedAt(profile: LayoutProfile): Layout =
+  ## The product's default at a size: the shared arrangement, folded, with
+  ## the shared default's footer panels docked (PLAT-48).
+  profileLayoutValue(profile)
 
 proc allEdgesDocked(): Layout =
   ## Ultra-wide with one pane auto-hidden on each of the four edges, which
@@ -107,7 +130,7 @@ proc allEdgesDocked(): Layout =
   ## child becomes that child) are the model's and not this file's idea of
   ## them.
   var l = ultraWide()
-  for pair in [(paneTimeline, leBottom), (paneCalltrace, leLeft),
+  for pair in [(paneTerminalOutput, leBottom), (paneCalltrace, leLeft),
                (paneState, leRight), (paneEventLog, leTop)]:
     let outcome = apply(l, cmdDock(pair[0], pair[1]))
     if outcome.kind == loApplied:
@@ -119,6 +142,11 @@ proc press(row, col: int): mouse.MouseEvent =
 
 proc release(row, col: int): mouse.MouseEvent =
   mouse.MouseEvent(kind: mekRelease, button: mbLeft, row: row, col: col)
+
+proc motion(row, col: int): mouse.MouseEvent =
+  ## PLAT-49: the pointer moved with the button held — what begins a drag
+  ## once it is past the threshold from the press.
+  mouse.MouseEvent(kind: mekMotion, button: mbLeft, row: row, col: col)
 
 proc wheel(down: bool; row, col: int): mouse.MouseEvent =
   mouse.MouseEvent(kind: mekPress,
@@ -177,10 +205,10 @@ proc sliceCells(line: string; col, width: int): string =
 
 proc specStrip(tabs: seq[string]; active, width: int): string =
   ## §3.1's tab strip, WRITTEN FROM THE SPECIFICATION and from nothing in
-  ## `app/layout/tab_strip.nim`: the active tab in brackets, every other one
-  ## padded with one space on each side so the strip does not reflow when a tab
-  ## is activated, one space between neighbours, then a space and the rule glyph
-  ## out to the pane's width.
+  ## `app/layout/tab_strip.nim`: EVERY tab padded with one space on each side
+  ## (PLAT-47: no brackets — the active one is told apart by its role, which
+  ## `activeRoleOk` below checks), one space between neighbours, then blank
+  ## cells out to the pane's width (PLAT-47: no rule through the strip).
   ##
   ## **THIS IS THE ORACLE THE STRUCTURAL CHANGE MADE NECESSARY.** `tabRow` now
   ## assembles the row from `tabSpans`, so the painter and the hit-test read one
@@ -193,12 +221,8 @@ proc specStrip(tabs: seq[string]; active, width: int): string =
     return ""
   var parts: seq[string] = @[]
   for i, t in tabs:
-    parts.add(if i == active: "[" & t & "]" else: " " & t & " ")
-  var line = parts.join(" ")
-  if textCells(line) + 1 <= width:
-    line.add " "
-    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
-  fitCells(line, width)
+    parts.add " " & t & " "
+  fitCells(parts.join(" "), width)
 
 proc innerWidthOf(geom: LayoutGeometry; area: CellArea): int =
   ## The width `views/shell.paintPane` paints a pane's rows at: its whole
@@ -289,9 +313,17 @@ template ckStripsTileTheBody(l: Layout; geom: LayoutGeometry;
     ck geom.body.cellCount() > 0
     ck innerCells == geom.inner.cellCount()
     ck innerCells + stripCells == geom.body.cellCount()
+    # The BOTTOM strip is the footer's (PLAT-49 part B, finding 9): its labels
+    # sit on the status row, the row right below the body, never in it.
+    var footerCells = 0
+    for s in geom.strips:
+      if s.edge == leBottom and s.area.cellCount() > 0:
+        ck s.area.row == geom.body.row + geom.body.height
+        ck s.area.height == 1
+        footerCells += s.area.cellCount()
     # BOTH DIRECTIONS, so neither half is free: docked panes mean claimed strip
     # cells, and nothing docked means none.
-    ck (l.docked.len > 0) == (stripCells > 0)
+    ck (l.docked.len > 0) == (stripCells + footerCells > 0)
 
 template ckMessageIsNeverSilent(a: LayoutAction; label: string) =
   block:
@@ -308,10 +340,11 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # that resolved to nothing, or to two things, would make a drag behave
     # differently depending on where in a pane it started.
     var sweptCells = 0
+    var footerSwept = 0
     var resolved = 0
     var zonesSeen: set[DropZone] = {}
     for g in Geometries:
-      for l in [layoutFor(selectProfile(g.cols, g.rows)), allEdgesDocked()]:
+      for l in [sharedAt(selectProfile(g.cols, g.rows)), allEdgesDocked()]:
         let geom = geometryOf(l, bodyFor(g.cols, g.rows))
         ckPartition(geom, $g.cols & "x" & $g.rows)
         ckStripsTileTheBody(l, geom, $g.cols & "x" & $g.rows)
@@ -322,10 +355,21 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
             if p.isSome:
               inc resolved
               zonesSeen.incl p.get.zone
+        # The footer's labels (the bottom strip, on the status row).
+        for s in geom.strips:
+          if s.edge != leBottom: continue
+          for col in s.area.col ..< s.area.col + s.area.width:
+            inc sweptCells
+            inc footerSwept
+            let p = pointerAt(l, geom, s.area.row, col)
+            if p.isSome:
+              inc resolved
+              zonesSeen.incl p.get.zone
     # THE POSITIVE CONTROL. `resolved == sweptCells` is satisfied for free by a
     # sweep that visited nothing, so the number of cells is asserted too — and
     # it is knowable: three geometries, two layouts each, one body apiece.
-    var expectedCells = 0
+    var expectedCells = footerSwept
+    ck footerSwept > 0
     for g in Geometries:
       expectedCells += 2 * bodyFor(g.cols, g.rows).cellCount()
     checkpoint("swept " & $sweptCells & " cell(s), resolved " & $resolved)
@@ -369,7 +413,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # binding's two directions against the model's one — rather than the
     # binding agreeing with itself.
     var wholeNodeChecks = 0
+    var wholeNodeHeaderChecks = 0
     var nodeStripChecks = 0
+    var rootBandChecks = 0
     var tabSlotChecks = 0
     var caretsInsideTheirOwnTab = 0
     var caretsAtTheAppendSlot = 0
@@ -379,7 +425,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var noTarget = 0
     var mismatches: seq[string] = @[]
     for g in Geometries:
-      let l = layoutFor(selectProfile(g.cols, g.rows))
+      let l = sharedAt(selectProfile(g.cols, g.rows))
       let geom = geometryOf(l, bodyFor(g.cols, g.rows))
       for row in geom.inner.row ..< geom.inner.row + geom.inner.height:
         for col in geom.inner.col ..< geom.inner.col + geom.inner.width:
@@ -412,7 +458,14 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
           case hovered.get.region.kind
           of drWholeNode:
             inc wholeNodeChecks
-            if not cells.contains(row, col):
+            # PLAT-49 part B: a LONE pane's strip is its header and joins
+            # (GoldenLayout's one-tab header), so its cells resolve to the
+            # whole node whose tint is the body right BELOW that strip.
+            let onHeader = row == cells.row - 1 and col >= cells.col and
+                           col < cells.col + cells.width
+            if onHeader:
+              inc wholeNodeHeaderChecks
+            elif not cells.contains(row, col):
               mismatches.add at & " does not contain its own cell (" &
                 $cells & ")"
           of drNodeStrip:
@@ -469,6 +522,12 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
               inc caretsInsideTheirOwnTab
           of drLayoutStrip:
             mismatches.add at & " offered a dock strip from inside the tree"
+          of drRootBand:
+            # PLAT-49 part B: GoldenLayout's ground band, a root split.
+            inc rootBandChecks
+            if not cells.contains(row, col):
+              mismatches.add at & " does not contain its own cell (" &
+                $cells & ")"
     if mismatches.len > 0:
       for m in mismatches[0 ..< min(8, mismatches.len)]:
         checkpoint(m)
@@ -490,7 +549,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # reached, so `mismatches.len == 0` is not the answer to an empty question;
     # and no cell inside the tree resolved to a dock strip or to nothing.
     ck wholeNodeChecks > 0
+    ck wholeNodeHeaderChecks > 0
     ck nodeStripChecks > 0
+    ck rootBandChecks > 0
     ck tabSlotChecks > 0
     ck stripHitsInsideTheTree == 0
     ck unresolved == 0
@@ -517,23 +578,52 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # correct only because the one stack the profiles produce starts at column 0
     # with ASCII labels.
     var columnsChecked = 0
+    var insertColumns = 0
+    var appendColumns = 0
     var labelledColumns = 0
     var stripsComparedAbsolutely = 0
+    var roleCellsChecked = 0
     var disagreements: seq[string] = @[]
     for g in Geometries:
       let profile = selectProfile(g.cols, g.rows)
-      let l = layoutFor(profile)
+      let l = sharedAt(profile)
       let geom = geometryOf(l, bodyFor(g.cols, g.rows))
       for region in geom.projection.regions:
         if region.activeTab < 0 or region.tabs.len == 0:
           continue
         var model = newShellModel(g.cols, g.rows)
         model.layout = l.tree
-        let painted = shellRows(model, g.cols, g.rows)
+        let screen = shellScreen(model, g.cols, g.rows)
+        let painted = screen.rows
         let strip = painted[region.area.row]
+        # THE ACTIVE TAB IS A ROLE (PLAT-47): every cell of the active tab's
+        # visible label is in the active-tab role, and no cell of another tab
+        # is. Read off the styled row the painter wrote.
+        var at = 0
+        for sp in screen.styledRows[region.area.row]:
+          for r in sp.text.runes:
+            let rel = at - region.area.col
+            let tab = tabSpanAt(region.tabs, region.activeTab, rel)
+            if rel >= 0 and rel < innerWidthOf(geom, region.area) and
+               tab >= 0:
+              inc roleCellsChecked
+              if (sp.style.role == srTabActive) != (tab == region.activeTab):
+                disagreements.add $g.cols & "x" & $g.rows & " col " & $at &
+                  ": tab " & $tab & " painted in role " & $sp.style.role
+            inc at
         let spans = tabSpans(region.tabs, region.activeTab)
+        # PLAT-45: A STRIP NARROWER THAN ITS TABS. The shared default puts
+        # stacks in regions narrower than their labels (the 80x24 fold gives
+        # the Variables/Scratchpad stack 20 columns), so the span table runs
+        # past the region. The painter clips at the region's inner width and
+        # so must this walk: a column beyond it is the neighbour's, and a tab
+        # whose label was cut is still that tab up to the cut.
+        let clip = innerWidthOf(geom, region.area)
         for span in spans:
-          for offset in 0 ..< span.width:
+          let visible = min(span.width, clip - span.startCol)
+          if visible <= 0:
+            continue
+          for offset in 0 ..< visible:
             let col = region.area.col + span.startCol + offset
             inc columnsChecked
             let where = $g.cols & "x" & $g.rows & " col " & $col
@@ -542,21 +632,35 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
               disagreements.add where & ": tabSpanAt disagrees with tabSpans"
               continue
             let p = pointerAt(l, geom, region.area.row, col)
+            # PLAT-49 part B — GOLDENLAYOUT'S HEADER RULE, restated here
+            # rather than read from `goldenLayoutInsertsAfter`: left of a
+            # tab's middle the drop goes before it, right of the middle after
+            # it; after the LAST tab is the append (`dzCentre`).
+            let after = offset * 2 + 1 > span.width
+            let wantSlot = if after: span.index + 1 else: span.index
+            if wantSlot >= region.tabs.len:
+              inc appendColumns
+              if p.isNone or p.get.zone != dzCentre:
+                disagreements.add where & ": the last tab's right half " &
+                  "did not append"
+              continue
+            inc insertColumns
             if p.isNone or p.get.zone != dzTabStrip:
               disagreements.add where & ": the hit-test did not say tabStrip"
               continue
             if paneOfPathIn(l, p.get.path) !=
                paneOfPathIn(l, childPathOf(parentPath(p.get.path).get,
-                                           span.index)):
+                                           wantSlot)):
               disagreements.add where & ": named tab " & $p.get.path &
-                " rather than index " & $span.index
+                " rather than index " & $wantSlot
           # …and the label the painter actually wrote is at those columns.
           # BY CELL, NOT BY BYTE — see `sliceCells`.
-          let label = tabLabel(region.tabs[span.index],
-                               span.index == region.activeTab)
+          let label = sliceCells(tabLabel(region.tabs[span.index],
+                                          span.index == region.activeTab),
+                                 0, visible)
           inc labelledColumns
           let onScreen = sliceCells(strip, region.area.col + span.startCol,
-                                    span.width)
+                                    visible)
           if onScreen != label:
             disagreements.add "painted '" & onScreen & "' where tab " &
               $span.index & " should read '" & label & "'"
@@ -579,6 +683,8 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
                $disagreements.len & " disagreement(s)")
     ck disagreements.len == 0
     ck columnsChecked > 0
+    ck insertColumns > 0
+    ck appendColumns > 0
     ck labelledColumns > 0
     # THE ABSOLUTE HALF RAN. Without this, a geometry sweep that stopped
     # producing stacks would leave every "no disagreement" above true for free
@@ -591,9 +697,14 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     let sample = @["Variables", "Timeline", "Tracepoints"]
     ck specStrip(sample, 0, 40) == tabRow(sample, 0, 40)
     ck specStrip(sample, 1, 40) == tabRow(sample, 1, 40)
-    ck specStrip(sample, 0, 40) != specStrip(sample, 1, 40)
-    ck specStrip(sample, 0, 40).startsWith("[Variables]")
-    ck specStrip(sample, 1, 40).contains("[Timeline]")
+    # PLAT-47: the TEXT no longer says which tab is active — no brackets, no
+    # rule — so two strips differing only in the active tab read the same; the
+    # role check above is what tells them apart, and it ran.
+    ck specStrip(sample, 0, 40) == specStrip(sample, 1, 40)
+    ck specStrip(sample, 0, 40).startsWith(" Variables   Timeline ")
+    ck not specStrip(sample, 0, 40).contains("[")
+    ck not specStrip(sample, 0, 40).contains("─")
+    ck roleCellsChecked > 0
 
   test "every drop-target kind is reachable THROUGH the binding":
     # PLAT-6: "every drop-target kind … must be exercised through the terminal
@@ -607,6 +718,11 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       var geom = b.geometry(bodyFor(80, 24))
       let source = geom.regionOfPane(paneCalltrace)
       discard b.onMouse(geom, press(source.row, source.col))
+      # PLAT-49: a press only MARKS the pane; moving past the threshold
+      # picks it up.
+      ck b.pendingPick == some(paneCalltrace)
+      ck b.interaction.kind == ikNone
+      discard b.onMouse(geom, motion(source.row + 1, source.col + 3))
       ck b.interaction.kind == ikDraggingTab
       ck b.interaction.source == paneCalltrace
       let (tabRow, tabCol) = tabCell(geom, paneState, 1)
@@ -633,13 +749,25 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       let source = geom.regionOfPane(paneCalltrace)
       let target = geom.regionOfPane(paneState)
       discard b.onMouse(geom, press(source.row, source.col))
+      discard b.onMouse(geom, motion(source.row + 1, source.col + 3))
       ck b.interaction.kind == ikDraggingTab
+      # Clear of GoldenLayout's ground band (PLAT-49 part B) where the pane
+      # meets the layout's own edge: there a drop splits the whole layout.
+      let inner = geom.inner
+      let inL = if target.col == inner.col: rootBandDepth(leLeft) else: 0
+      let inR = if target.col + target.width == inner.col + inner.width:
+                  rootBandDepth(leRight) else: 0
+      let inT = if target.row == inner.row: rootBandDepth(leTop) else: 0
+      let inB = if target.row + target.height == inner.row + inner.height:
+                  rootBandDepth(leBottom) else: 0
       let cell = case pair[0]
-        of leLeft: (target.row + target.height div 2, target.col)
+        of leLeft: (target.row + target.height div 2, target.col + inL)
         of leRight: (target.row + target.height div 2,
-                     target.col + target.width - 1)
-        of leTop: (target.row, target.col + target.width div 2)
-        of leBottom: (target.row + target.height - 1,
+                     target.col + target.width - 1 - inR)
+        # The first row BELOW the strip: the strip itself is the pane's
+        # header and joins (PLAT-49 part B).
+        of leTop: (target.row + 1 + inT, target.col + target.width div 2)
+        of leBottom: (target.row + target.height - 1 - inB,
                       target.col + target.width div 2)
       let dropped = b.onMouse(geom, release(cell[0], cell[1]))
       checkpoint($pair[0] & " -> " & dropped.message)
@@ -707,7 +835,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     block:
       let b = bindingOn(compact(), lpCompact)
       var moved = 0
-      for pane in [paneTimeline, paneEventLog]:
+      for pane in [paneTerminalOutput, paneEventLog]:
         let geom = b.geometry(bodyFor(80, 24))
         let target = geom.regionOfPane(paneEditor)
         discard b.beginDrag(pane)
@@ -858,18 +986,22 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var projectionsChecked = 0
     var refusals = 0
     for g in Geometries:
-      for profile in LayoutProfile:
-        let b = bindingOn(layoutFor(profile), profile)
+      # The three old trees AND the product's own default at this size — four
+      # arrangements, so the gate covers the shape the product now opens with.
+      for source in [compact(), standard(), ultraWide(),
+                     sharedAt(selectProfile(g.cols, g.rows))]:
+        let profile = selectProfile(g.cols, g.rows)
+        let b = bindingOn(source, profile)
         let body = bodyFor(g.cols, g.rows)
         # Every command kind the binding can issue, over a real arrangement.
         let sweep = @[
           cmdActivateTab(paneEventLog),
           cmdSetWeight(paneEditor, 55.0),
-          cmdMoveTab(paneTimeline, paneState, 0),
+          cmdMoveTab(paneTerminalOutput, paneState, 0),
           cmdSplitMove(paneEditor, paneCalltrace, saColumn, ssAfter),
           cmdMergeIntoStack(paneEventLog, paneEditor),
-          cmdDock(paneTimeline, leBottom),
-          cmdRestoreDocked(paneTimeline, some(paneEditor)),
+          cmdDock(paneTerminalOutput, leBottom),
+          cmdRestoreDocked(paneTerminalOutput, some(paneEditor)),
           cmdDock(paneState, leLeft),
           cmdRename(paneEditor, "Source"),
           cmdSplitMove(paneEditor, paneEventLog, saRow, ssBefore),
@@ -903,7 +1035,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     checkpoint($commandsApplied & " command(s) applied, " & $refusals &
                " refused, " & $projectionsChecked & " projection(s) checked")
     # The positive control: the sweep really ran, and it really CHANGED things.
-    ck projectionsChecked == 3 * 3 * 11
+    ck projectionsChecked == 3 * 4 * 11
     ck commandsApplied > 0
     ck refusals > 0
 
@@ -915,7 +1047,8 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     let source = geom.regionOfPane(paneCalltrace)
     let target = geom.regionOfPane(paneState)
     discard b.onMouse(geom, press(source.row, source.col))
-    discard b.hoverAt(geom, target.row + target.height div 2, target.col)
+    discard b.onMouse(geom, motion(target.row + target.height div 2,
+                                   target.col))
     ck b.interaction.kind == ikDraggingTab
     ck b.interaction.hover.isSome
 
@@ -931,26 +1064,41 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     ck ldDragGhost in kinds
     ck ldDropTarget in kinds
 
+    # PLAT-47: THE DROP TARGET IS A TINT, NOT A FILL. On the composited
+    # screen every cell of the region the drop would occupy keeps the glyph
+    # the undecorated frame has there and carries a different background;
+    # the ghost's label is drawn over the frame.
     let h = newTerminalTestHarness(120, 40)
     h.mount(proc (r: TerminalRenderer): TerminalNode =
       renderShellTree(model, r, 120, 40))
-    var ghostCells = 0
+    var plainModel = model
+    plainModel.interaction = noInteraction()
+    let plain = newTerminalTestHarness(120, 40)
+    plain.mount(proc (r: TerminalRenderer): TerminalNode =
+      renderShellTree(plainModel, r, 120, 40))
     var targetCells = 0
+    var retinted = 0
+    var ghostSeen = false
     for d in screen.decorations:
-      let glyph = glyphFor(d.kind)
-      for row in d.area.row ..< d.area.row + d.area.height:
-        for col in d.area.col ..< d.area.col + d.area.width:
-          let painted = $h.cellAt(row, col).rune
-          if d.kind == ldDragGhost and painted == glyph: inc ghostCells
-          if d.kind == ldDropTarget and painted == glyph: inc targetCells
-    checkpoint("ghost cells on the composited screen: " & $ghostCells &
-               ", drop-target cells: " & $targetCells)
-    # Not "at least one": the rectangles are known, and every cell of each is
-    # the glyph except the ones the label overwrote on the first row.
-    ck ghostCells > 0
+      if d.kind == ldDropTarget:
+        for row in d.area.row ..< d.area.row + d.area.height:
+          for col in d.area.col ..< d.area.col + d.area.width:
+            inc targetCells
+            let before = plain.cellAt(row, col)
+            let after = h.cellAt(row, col)
+            if after.rune == before.rune and after.bg != before.bg:
+              inc retinted
+      if d.kind == ldDragGhost:
+        var text = ""
+        for i in 0 ..< d.label.len:
+          text.add $h.cellAt(d.area.row, d.area.col + i).rune
+        ghostSeen = text == d.label
+    checkpoint("drop-target cells: " & $targetCells & ", re-tinted with the " &
+               "glyph kept: " & $retinted)
     ck targetCells > 0
-    let hovered = b.interaction.hover.get
-    ck geom.cellsFor(hovered) ==
+    ck retinted == targetCells
+    ck ghostSeen
+    ck geom.dropIndicationCells(dropIndicationOf(b.interaction)).tint ==
        (block:
           var found = CellArea()
           for d in screen.decorations:
@@ -973,13 +1121,103 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     checkpoint("resize guides drawn: " & $guides)
     ck guides == 1
 
+  test "the mouse drags a divider between two stacks, and only that divider moves":
+    # The terminal's own divider gesture: press on the last column of the left
+    # region (its neighbour across that column is its sibling in the row),
+    # release further left. ONE command reaches the undo log, the two stacks
+    # trade weight, and the far-right pane keeps its share exactly.
+    let layout = initLayout(row([
+      stack([pane(paneEditor, "Editor"), pane(paneFlow, "Flow")],
+            activeIndex = 0, weight = 1.0),
+      stack([pane(paneState, "State"), pane(paneEventLog, "Event Log")],
+            activeIndex = 0, weight = 1.0),
+      pane(paneCalltrace, "Call Trace", weight = 1.0)]))
+    let b = bindingOn(layout, lpStandard)
+    let geom = b.geometry(bodyFor(120, 40))
+    let left = geom.regionOfPane(paneEditor)
+    let edgeCol = left.col + left.width - 1
+    let midRow = left.row + left.height div 2
+    let pressed = b.onMouse(geom, press(midRow, edgeCol))
+    checkpoint("press on the divider -> " & pressed.message)
+    ck pressed.status == lasPending
+    ck b.interaction.kind == ikResizingSplit
+    ck b.interaction.divider == some(ssAfter)
+    # A click on the divider is still just a focus.
+    let clicked = b.onMouse(geom, release(midRow, edgeCol))
+    ck clicked.status == lasNoGesture
+    ck b.interaction.kind == ikNone
+    ck b.history.log.len == 0
+    # The drag: release ten columns to the left.
+    discard b.onMouse(geom, press(midRow, edgeCol))
+    let dropped = b.onMouse(geom, release(midRow, edgeCol - 10))
+    checkpoint("release -> " & dropped.message)
+    ck dropped.status == lasApplied
+    ck dropped.command.isSome
+    ck dropped.command.get.kind == lcSetWeight
+    ck dropped.command.get.weightDivider == some(ssAfter)
+    ck b.history.log.len == 1
+    ck b.interaction.kind == ikNone
+    let after = b.geometry(bodyFor(120, 40))
+    let nowLeft = after.regionOfPane(paneEditor)
+    checkpoint("left region " & $left & " -> " & $nowLeft)
+    ck nowLeft.col + nowLeft.width - 1 == edgeCol - 10
+    # The pane NOT beside the divider is exactly where it was.
+    ck after.regionOfPane(paneCalltrace) == geom.regionOfPane(paneCalltrace)
+    # A press on a cell that is on no divider (the last column of the whole
+    # row) is a focus, as it always was.
+    let right = geom.regionOfPane(paneCalltrace)
+    let focus = b.onMouse(after, press(midRow, right.col + right.width - 1))
+    ck focus.status == lasNoGesture
+
+  test "a divider drag between two tabbed regions draws its guide at the new edge":
+    # PLAT-5's closing pass: a divider is dragged by its CONTAINER and index,
+    # so its two sides may be stacks — which `beginResize` (a pane, never a
+    # tab) cannot name. The guide is measured by the node's PATH, so it is
+    # drawn for a stack exactly as for a pane, at the edge the commit would
+    # produce.
+    let layout = initLayout(row([
+      stack([pane(paneEditor, "Editor"), pane(paneFlow, "Flow")],
+            activeIndex = 0, weight = 2.0),
+      stack([pane(paneState, "State"), pane(paneEventLog, "Event Log")],
+            activeIndex = 0, weight = 1.0)]))
+    let started = beginResizeDivider(layout, "", 0)
+    ck started.isSome
+    let gesture = started.get.proposeDivider(layout, 0.5)
+    let cmd = commit(layout, gesture)
+    ck cmd.isSome
+    let applied = apply(layout, cmd.get)
+    ck applied.kind == loApplied
+    let body = bodyFor(120, 40)
+    let beforeGeom = geometryOf(layout, body)
+    let afterGeom = geometryOf(applied.layout, body)
+    let was = beforeGeom.boundsOfPath("0")
+    let now = afterGeom.boundsOfPath("0")
+    checkpoint("left region was " & $was & ", will be " & $now)
+    ck now.width < was.width
+    var model = newShellModel(120, 40)
+    model.layout = layout.tree
+    model.interaction = gesture
+    let screen = shellScreen(model, 120, 40)
+    var guides: seq[CellArea] = @[]
+    for d in screen.decorations:
+      if d.kind == ldResizeGuide:
+        guides.add d.area
+    checkpoint("resize guides drawn: " & $guides)
+    ck guides.len == 1
+    if guides.len == 1:
+      # The right edge of the left region AFTER the commit, full height.
+      ck guides[0].width == 1
+      ck guides[0].col == now.col + now.width - 1
+      ck guides[0].row == now.row
+      ck guides[0].height == now.height
+
   test "a cancelled gesture leaves the committed layout byte-identical":
     # PLAT-5 asserts this of `cancel`; this asserts it of the BINDING, which is
     # the layer that could have committed something on the way.
     var comparisons = 0
     for g in Geometries:
       let profile = selectProfile(g.cols, g.rows)
-      let b = bindingOn(layoutFor(profile), profile)
+      let b = bindingOn(sharedAt(profile), profile)
       let before = $b.saveDocument()
       let geom = b.geometry(bodyFor(g.cols, g.rows))
       for region in geom.projection.regions:
@@ -1009,18 +1247,18 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # :move-tab — a real reorder inside the Compact stack, asserted on the
     # MODEL: the tab's index moved.
     block:
-      let b = bindingOn(compact(), lpCompact, focus = paneTimeline)
+      let b = bindingOn(compact(), lpCompact, focus = paneTerminalOutput)
       let geom = b.geometry(bodyFor(80, 24))
-      ck panePath(b.layout, paneTimeline) == some("1/1")
+      ck panePath(b.layout, paneTerminalOutput) == some("1/1")
       let moved = b.runLayoutCommand(geom, ":move-tab left")
       checkpoint(":move-tab left -> " & moved.message)
       ck moved.status == lasApplied
       ck moved.command.get.kind == lcMoveTab
-      ck panePath(b.layout, paneTimeline) == some("1/0")
+      ck panePath(b.layout, paneTerminalOutput) == some("1/0")
       verbsRun.incl lvMoveTab
       let last = b.runLayoutCommand(geom, ":move-tab last")
       ck last.status == lasApplied
-      ck panePath(b.layout, paneTimeline) == some("1/2")
+      ck panePath(b.layout, paneTerminalOutput) == some("1/2")
       let bad = b.runLayoutCommand(geom, ":move-tab sideways")
       ck bad.status == lasBadArgument
       ckMessageIsNeverSilent(bad, ":move-tab sideways")
@@ -1098,7 +1336,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
 
     # :undo-layout / :redo-layout / :reset-layout
     block:
-      let b = bindingOn(compact(), lpCompact, focus = paneTimeline)
+      let b = bindingOn(compact(), lpCompact, focus = paneTerminalOutput)
       let geom = b.geometry(bodyFor(80, 24))
       let before = $b.saveDocument()
       ck b.runLayoutCommand(geom, ":move-tab left").status == lasApplied
@@ -1114,9 +1352,37 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       verbsRun.incl lvRedoLayout
       let reset = b.runLayoutCommand(geom, ":reset-layout")
       ck reset.status == lasApplied
-      ck $b.saveDocument() == before
+      # PLAT-45: the way back is the SHARED DEFAULT at this size, not the
+      # arrangement the binding happened to start from (here a fixture).
+      ck $b.saveDocument() == $saveLayout(sharedAt(b.profile))
       ck not b.userModified
       verbsRun.incl lvResetLayout
+
+    # :pin / :unpin (PLAT-48) — PLAT-4 commands: `:pin` docks the focused
+    # pane (bottom by default), `:unpin` puts it back BESIDE the pane it left
+    # (`DockedPane.beside`), and refuses a pane on no strip.
+    block:
+      let b = bindingOn(standard(), lpStandard, focus = paneState)
+      let geom = b.geometry(bodyFor(120, 40))
+      let stackBefore = shapeOf(b.layout)
+      let pinned = b.runLayoutCommand(geom, ":pin")
+      ck pinned.status == lasApplied
+      ck b.layout.dockedIndex(paneState) >= 0
+      ck b.layout.dockedAt(leBottom)[^1].pane == paneState
+      verbsRun.incl lvPin
+      let unpinned = b.runLayoutCommand(geom, ":unpin state")
+      ck unpinned.status == lasApplied
+      ck b.layout.dockedIndex(paneState) < 0
+      # Back where it was, beside the pane it sat next to — the same
+      # container in the same place, not a new column at the root: the
+      # arrangement's shape is the one before the pin.
+      checkpoint("before " & stackBefore & " / after " & shapeOf(b.layout))
+      ck shapeOf(b.layout) == stackBefore
+      let again = b.runLayoutCommand(geom, ":unpin state")
+      ck again.status == lasRefused
+      ckMessageIsNeverSilent(again, ":unpin state when it is placed")
+      ck b.runLayoutCommand(geom, ":pin sideways").status == lasBadArgument
+      verbsRun.incl lvUnpin
 
     checkpoint("verbs exercised: " & $verbsRun)
     for v in LayoutVerb:
@@ -1176,8 +1442,8 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       checkpoint("SGR click -> " & clicked.message)
       ck clicked.status == lasApplied
       ck clicked.command.get.kind == lcActivateTab
-      ck clicked.command.get.activateTarget == paneTimeline
-      ck c.layout.tree.isVisible(paneTimeline)
+      ck clicked.command.get.activateTarget == paneTerminalOutput
+      ck c.layout.tree.isVisible(paneTerminalOutput)
       ck c.interaction.kind == ikNone
 
     # THE WHEEL, on the same protocol (buttons 64 and 65).
@@ -1192,7 +1458,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       checkpoint("wheel down on the tab strip -> " & scrolled.message)
       ck scrolled.status == lasApplied
       ck scrolled.command.get.kind == lcActivateTab
-      ck c.layout.tree.isVisible(paneTimeline)
+      ck c.layout.tree.isVisible(paneTerminalOutput)
       # A wheel over a pane BODY is not a layout gesture — that belongs to the
       # pane, and a layout that stole it would break scrolling.
       let body = c.onMouse(g2, wheel(true, region.area.row + 1,
@@ -1206,36 +1472,39 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # is re-flowed only while the user has not touched it, and `:reset-layout`
     # is the way back.
     block:
-      let b = bindingOn(compact(), lpCompact)
+      # PLAT-45: the DEFAULT is re-derived only when the size needs a
+      # different fold depth — 80x24 folds four times, 120x40 and 200x60 not at
+      # all — and the profile (the size) always tracks.
+      let b = bindingOn(sharedAt(lpCompact), lpCompact)
       ck not b.userModified
       ck b.resize(120, 40)
       ck b.profile == lpStandard
-      ck shapeOf(b.layout) == shapeOf(standard())
-      ck b.resize(200, 60)
-      ck b.profile == lpUltraWide
-      ck shapeOf(b.layout) == shapeOf(ultraWide())
-      ck not b.resize(200, 60)   ## the same profile is not a re-flow
+      ck shapeOf(b.layout) == shapeOf(sharedAt(lpStandard))
+      ck not b.resize(200, 60)   ## the same depth is not a re-flow
+      ck b.profile == selectProfile(200, 60)
+      ck shapeOf(b.layout) == shapeOf(sharedAt(selectProfile(200, 60)))
+      ck not b.resize(200, 60)
 
     block:
-      let b = bindingOn(compact(), lpCompact, focus = paneTimeline)
+      let b = bindingOn(compact(), lpCompact, focus = paneTerminalOutput)
       let geom = b.geometry(bodyFor(80, 24))
       ck b.runLayoutCommand(geom, ":move-tab left").status == lasApplied
       ck b.userModified
       let mine = shapeOf(b.layout)
       ck not b.resize(120, 40)
       checkpoint("after a modified resize the profile is " & $b.profile)
-      ck b.profile == lpStandard      ## the status bar still says Standard…
+      ck b.profile == lpStandard      ## the status bar still tracks the size…
       ck shapeOf(b.layout) == mine    ## …and the arrangement is still theirs
       ck not b.resize(200, 60)
       ck shapeOf(b.layout) == mine
       # And it is still a layout that PROJECTS at the new size.
       ckPartition(b.geometry(bodyFor(200, 60)), "user layout at 200x60")
-      # The explicit way back.
+      # The explicit way back — to the SHARED DEFAULT at this size.
       ck b.resetToProfile().status == lasApplied
       ck not b.userModified
-      ck shapeOf(b.layout) == shapeOf(layoutFor(b.profile))
+      ck shapeOf(b.layout) == shapeOf(sharedAt(b.profile))
       ck b.resize(80, 24)
-      ck shapeOf(b.layout) == shapeOf(compact())
+      ck shapeOf(b.layout) == shapeOf(sharedAt(lpCompact))
 
   test "the binding holds no LayoutNode reference, structurally":
     # PLAT-6's second handed-forward item. `nodeAtPath` hands out a live `ref`
@@ -1244,7 +1513,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # has to enforce.
     var checkedFields = 0
     var referenceFields: seq[string] = @[]
-    let sample = nodeInfoAtPath(profileLayout(lpCompact), "1/0")
+    let sample = nodeInfoAtPath(compact().tree, "1/0")
     ck sample.isSome
     ck sample.get.kind == lnPane
     ck sample.get.pane == paneState

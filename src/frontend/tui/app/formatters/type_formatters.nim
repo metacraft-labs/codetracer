@@ -51,20 +51,20 @@ import ../../../../common/value_presentation
 export PresentationClass
 
 const
-  NumberStyle* = CellStyle(fg: "cyan")
-  StringStyle* = CellStyle(fg: "bright_green")
+  NumberStyle* = CellStyle(role: srValueNumber)
+  StringStyle* = CellStyle(role: srValueString)
     ## BRIGHT green rather than plain green, deliberately: plain green + bold is
-    ## §3.3.4's diff accent (`diff_highlighter.ModifiedNameStyle`), and a string
+    ## §3.3.4's diff accent (`diff_highlighter.ChangedValueStyle`, on the value), and a string
     ## VALUE painted in the same colour as a CHANGED NAME would make the one
     ## thing this pane says loudest ambiguous on a screenshot.
-  BooleanStyle* = CellStyle(fg: "magenta")
-  PointerStyle* = CellStyle(fg: "bright_blue")
-  CompoundStyle* = CellStyle(fg: "yellow")
-  NoneStyle* = CellStyle(fg: "bright_black")
-  ErrorStyle* = CellStyle(fg: "red")
-  OpaqueStyle* = CellStyle(fg: "bright_black")
-  MediaStyle* = CellStyle(fg: "bright_magenta")
-  DefaultValueStyle* = CellStyle(fg: "white")
+  BooleanStyle* = CellStyle(role: srValueBoolean)
+  PointerStyle* = CellStyle(role: srValuePointer)
+  CompoundStyle* = CellStyle(role: srValueCompound)
+  NoneStyle* = CellStyle(role: srValueNoneValue)
+  ErrorStyle* = CellStyle(role: srValueError)
+  OpaqueStyle* = CellStyle(role: srValueOpaque)
+  MediaStyle* = CellStyle(role: srValueMedia)
+  DefaultValueStyle* = CellStyle(role: srValueDefault)
 
 const TerminalAmbiguousWidth* = awNarrow
   ## The ambiguous-width policy this front-end measures under, FIXED.

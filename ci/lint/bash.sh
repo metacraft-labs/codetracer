@@ -534,6 +534,19 @@ lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes"
 lint_step "contract suite: a worktree does not reinstall the shared git hooks" \
 	bash ci/test/git-hooks-worktree-test.sh
 
+# Its companion: core.hooksPath must never be left relative. git-hooks.nix's
+# installer writes `.git/hooks`, which a linked worktree cannot resolve, so git
+# runs no hook there at all. Real `git worktree` fixtures and real commits under
+# mktemp; pure bash + git; no nix, no network.
+lint_step "contract suite: core.hooksPath is never left relative" \
+	bash ci/test/git-hooks-path-test.sh
+
+# And: installing the pre-commit hooks must leave Reprobuild's dispatchers in
+# their slots, chaining pre-commit, rather than displacing them. Real commits
+# in mktemp repositories; pure bash + git.
+lint_step "contract suite: the dev shell keeps Reprobuild's hook dispatchers" \
+	bash ci/test/reclaim-hook-dispatchers-test.sh
+
 # The non-Nix leg of the same hooks (ci/dev/portable-pre-commit.py): what native
 # Windows runs at commit time instead of the /nix/store pre-commit shim it cannot
 # execute. Registered here because nothing else runs it -- the hosts it serves
@@ -573,6 +586,13 @@ lint_step "contract suite: recorder probes track the built artefact" \
 # refuses. Pure bash fixtures, no noir needed.
 lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling build" \
 	bash ci/test/detect-siblings-nargo-test.sh
+
+# A lane that runs with graceful skipping off excludes, by name, the tests it
+# does not provide the tools for. A misspelled or stale entry excludes nothing
+# and says nothing, so every entry must name a test binary that exists, and
+# the job that does run it: no test may be excluded everywhere (`NO LANE`).
+lint_step "contract suite: lane not-provided lists name real tests and the lane that runs each" \
+	bash ci/test/lane-not-provided-test.sh
 
 # The other half of the same defect: an honest detector reporting "not built" is
 # still a red job if no job builds it. Registered here because the check reads

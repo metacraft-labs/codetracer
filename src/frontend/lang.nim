@@ -18,7 +18,7 @@ proc langPickerOptions*(): string =
   ## distinct `toCLang` name, labelled by `toName`.  It lives here, in a leaf
   ## the `test-frontend-js` lane can import, rather than in `renderer.nim`
   ## where `langs` used to build it inline: no runnable lane can import the
-  ## renderer (`nim js` on it pulls the Karax/Monaco tree), so the rendering
+  ## renderer (`nim js` on it pulls the kdom/Monaco tree), so the rendering
   ## is asserted on THIS proc and the renderer is a one-line caller.
   ##
   ## `SUPPORTED_LANGS` is deliberately not iterated directly: it holds both

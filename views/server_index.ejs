@@ -55,8 +55,17 @@
           inElectron = false;
           loadScripts = true;
 
-          frontendSocketPort = <%= frontendSocketPort %>;
-          frontendSocketParameters = "<%= frontendSocketParameters %>";
+          // NO PER-SESSION INTERPOLATION — WD1c, §7.
+          //
+          // These two used to be rendered into the document, which is the one
+          // reason it could not be cached: two values that change per session
+          // compiled into the artefact that does not. They now come from
+          // `GET /deployment.json`, which `ui_js.nim` fetches before it opens
+          // the socket. The declarations stay so the globals exist before that
+          // fetch answers; the values are the fallbacks the `-1` path already
+          // meant, "use this page's own origin".
+          frontendSocketPort = -1;
+          frontendSocketParameters = "";
 
       </script>
 

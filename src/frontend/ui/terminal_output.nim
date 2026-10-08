@@ -19,20 +19,21 @@ import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
-  TerminalLine, TerminalEventFragment
+  TerminalLine, TerminalEventFragment, TerminalOutputEvent
 from ../viewmodel/viewmodels/terminal_output_vm import
-  TerminalOutputVM, createTerminalOutputVM, setLines, clearLines,
-  setCurrentRRTicks
+  TerminalOutputVM, createTerminalOutputVM, setEvents, clearLines,
+  setCurrentRRTicks, setRecordingKey, viewMemoryFromJson, viewMemoryToJson,
+  TerminalView
+import std/tables
+import isonim/core/signals
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_terminal_output_view import
   mountIsoNimTerminalOutput
 
-from ../lib/ansi_html import newEscapingAnsiUp, ansiToHtml
-
-# A program's stdout/stderr goes through this and into `innerHTML`.  The
-# escaping that makes that safe is stated in `lib/ansi_html`, not left to the
-# library's constructor default.
-let ansiUp {.exportc.} = newEscapingAnsiUp()
+# PLAT-52: no `ansi_up` here any more. A program's output reaches the DOM as
+# text nodes (`textContent`) inside spans whose style comes from the decoded
+# SGR attributes, so there is no markup to escape — see
+# `viewmodel/views/isonim_terminal_output_view`.
 
 # Module-level VM/store/component slots so the IsoNim mount and the
 # legacy event-bus handlers can find each other across calls. Mirrors
@@ -139,31 +140,16 @@ proc tryMountIsoNimTerminalOutputPanel*() =
   doMount()
 
 # ---------------------------------------------------------------------------
-# Legacy line-cache logic (kept verbatim — converts ANSI-decorated
-# program events into one ``TerminalEvent`` per text run, grouped by
-# line). After the cache is rebuilt we mirror the data into the VM.
+# The recorded writes, handed to the shared model.
+#
+# PLAT-52: the line cache this module built with `ansi_up` (HTML `<span>`
+# runs, split on newlines with a regular expression) is gone. The writes go
+# to `TerminalOutputVM.setEvents`, and the shared model
+# (`viewmodel/viewmodels/terminal_output_model`) splits them into lines of
+# fragments carrying their text and decoded SGR attributes — the same lines
+# the terminal and GPUI front-ends draw. The desktop's view builds its spans
+# from those attributes (`isonim_terminal_output_view`).
 # ---------------------------------------------------------------------------
-
-proc splitNewLines(text: cstring): seq[cstring] =
-  text.split("\n")
-
-proc ensureLine(self: TerminalOutputComponent) =
-  if not self.cachedLines.hasKey(self.currentLine):
-    self.cachedLines[self.currentLine] = @[]
-
-proc appendToTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: int) =
-  self.ensureLine()
-  var lineTerminalEvents = self.cachedLines[self.currentLine]
-
-  lineTerminalEvents.add(TerminalEvent(
-    text: text,
-    eventIndex: eventIndex))
-
-  self.cachedLines[self.currentLine] = lineTerminalEvents
-
-proc addTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: int) =
-  self.appendToTerminalLine(text, eventIndex)
-  self.currentLine += 1
 
 when defined(ctInExtension):
   var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent
@@ -193,129 +179,61 @@ when defined(ctInExtension):
 proc getLines(self: TerminalOutputComponent) =
   self.api.emit(CtLoadTerminal, EmptyArg())
 
-proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramEvent]) =
-  var raw = ""
-  let regExPattern = regex("(<span[^>]*>)(.*?)(<\\/span>)")
-  var nextLineStart: cstring = ""
-  self.cachedEvents = eventList
-  self.cachedLines = JsAssoc[int, seq[TerminalEvent]]{}
-  self.lineEventIndices = JsAssoc[int, int]{}
-  self.currentLine = 0
-
-  for eventIndex, event in eventList:
-    var content =
+proc terminalOutputEventsOf*(eventList: seq[ProgramEvent]):
+    seq[TerminalOutputEvent] =
+  ## The recorded writes as the shared model takes them.
+  for i, event in eventList:
+    let content =
       if event.base64Encoded:
-        cstring(decode($event.content))
+        decode($event.content)
       else:
-        event.content
-    var lines: seq[cstring] = @[]
+        $event.content
+    result.add TerminalOutputEvent(
+      content: content,
+      rrTicks: cast[uint64](event.directLocationRRTicks),
+      eventIndex: i,
+      logIndex: event.eventIndex,
+      path: $event.highLevelPath,
+      line: event.highLevelLine,
+      stdout: event.stdout)
 
-    if content.len > 0:
-      let html = ansiToHtml(ansiUp, content)
-      let matches = html.matchAll(regExPattern)
-      var startIndex = 0
+const TerminalViewsStorageKey = "codetracer.terminalViews"
+  ## Where the view the user chose for each recording (lines / screen) is
+  ## remembered (Terminal-Output-Pane.md §3), as the native front-ends keep it
+  ## in their state directory (`native_state.terminalViewsPath`).
 
-      if matches.len > 0:
-        for match in matches:
-          let preMatchText = html.slice(startIndex, match.index)
+proc readTerminalViews(key: cstring): cstring {.importjs: """
+  (function(k) {
+    try {
+      if (typeof localStorage === 'undefined' || localStorage === null) return '';
+      var v = localStorage.getItem(k);
+      return (v === null || v === undefined) ? '' : v;
+    } catch (e) { return ''; }
+  })(#)""".}
 
-          # check if there is a text before the html tag
-          if preMatchText.len > 0:
-            # split it by new line "\n" and check if there is more than one results
-            let tokens = preMatchText.split(jsNl)
-
-            if tokens.len > 1:
-              for j in 0..tokens.len - 2:
-                self.addTerminalLine(tokens[j], eventIndex)
-              nextLineStart = tokens[^1]
-            else:
-              self.appendToTerminalLine(nextLineStart & tokens[^1], eventIndex)
-
-          let startTag = match[1]
-          let endTag = match[3]
-          let text = match[2]
-          let tokens = text.split(jsNl)
-
-          if tokens.len > 1:
-            self.addTerminalLine(
-              nextLineStart & startTag & tokens[0] & endTag,
-              eventIndex)
-
-            for j in 1..tokens.len - 2:
-              self.addTerminalLine(startTag & tokens[j] & endTag, eventIndex)
-            nextLineStart = startTag & tokens[^1] & endTag
-          else:
-            self.appendToTerminalLine(
-              nextLineStart & startTag & tokens[^1] & endTag,
-              eventIndex)
-
-          startIndex = match.index + match[0].len
-
-        let postMatchText = html.slice(startIndex)
-
-        # check if there is a text after the last html tag
-        if postMatchText.len > 0:
-          # split it by new line "\n" and check if there is more than one results
-          let tokens = postMatchText.split(jsNl)
-
-          if tokens.len > 1:
-            self.addTerminalLine(nextLineStart & tokens[0], eventIndex)
-
-            for j in 1..tokens.len - 2:
-              self.addTerminalLine(tokens[j], eventIndex)
-
-            nextLineStart = tokens[^1]
-          else:
-            self.appendToTerminalLine(nextLineStart & tokens[^1], eventIndex)
-      else:
-        if html.len > 0:
-          # split it by new line "\n" and check if there is more than one results
-          let tokens = html.split(jsNl)
-
-          if tokens.len > 1:
-            self.addTerminalLine(nextLineStart & tokens[0], eventIndex)
-
-            for j in 1..tokens.len - 2:
-              self.addTerminalLine(tokens[j], eventIndex)
-
-            nextLineStart = tokens[^1]
-          else:
-            self.appendToTerminalLine(nextLineStart & tokens[^1], eventIndex)
-
-# ---------------------------------------------------------------------------
-# VM sync — convert the JS line cache into platform-neutral
-# ``TerminalLine`` values and push them through ``setLines``.
-# ---------------------------------------------------------------------------
+proc writeTerminalViews(key, value: cstring) {.importjs: """
+  (function(k, v) {
+    try {
+      if (typeof localStorage === 'undefined' || localStorage === null) return;
+      localStorage.setItem(k, v);
+    } catch (e) { }
+  })(#, #)""".}
 
 proc syncTerminalOutputVM(self: TerminalOutputComponent) =
-  ## Mirror the legacy line cache into the IsoNim ``TerminalOutputVM``.
-  ## Builds one ``TerminalLine`` per ``self.cachedLines`` row and one
-  ## ``TerminalEventFragment`` per ``TerminalEvent``. The fragment's
-  ## ``rrTicks`` is taken from the corresponding ``ProgramEvent`` so the
-  ## view's past/active/future class flips track the debugger position.
+  ## Hand the recorded writes to the ``TerminalOutputVM``, the recording's
+  ## remembered view choice first.
   if terminalOutputVMInstance.isNil:
     return
-
-  var lines: seq[TerminalLine] = @[]
-  # ``cachedLines`` is keyed by line index but stored in a JsAssoc; iterate
-  # by integer index from 0..max so output stays line-ordered. The legacy
-  # render path used the same iteration via ``self.cachedLines.len()``.
-  let maxLine = self.cachedLines.len()
-  for i in 0 ..< maxLine:
-    if not self.cachedLines.hasKey(i):
-      continue
-    let lineEvents = self.cachedLines[i]
-    var fragments: seq[TerminalEventFragment] = @[]
-    for ev in lineEvents:
-      let event = self.cachedEvents[ev.eventIndex]
-      fragments.add(TerminalEventFragment(
-        htmlText: $ev.text,
-        eventIndex: ev.eventIndex,
-        rrTicks: cast[uint64](event.directLocationRRTicks),
-      ))
-    lines.add(TerminalLine(lineIndex: i, fragments: fragments))
-
-  terminalOutputVMInstance.setLines(lines)
+  if terminalOutputVMInstance.recordingKey.len == 0 and
+     not self.data.isNil and not self.data.trace.isNil:
+    terminalOutputVMInstance.setRecordingKey(
+      $self.data.trace.outputFolder,
+      viewMemoryFromJson($readTerminalViews(cstring(TerminalViewsStorageKey))))
+    terminalOutputVMInstance.onViewChosen =
+      proc(memory: Table[string, TerminalView]) =
+        writeTerminalViews(cstring(TerminalViewsStorageKey),
+                           cstring(viewMemoryToJson(memory)))
+  terminalOutputVMInstance.setEvents(terminalOutputEventsOf(self.cachedEvents))
 
 proc syncTerminalOutputDebuggerPosition(rrTicks: int) =
   ## Mirror the debugger's rrTicks into the VM's ``currentRRTicks``
@@ -342,7 +260,7 @@ proc syncTerminalOutputDebuggerPosition(rrTicks: int) =
 
 method onLoadedTerminal*(self: TerminalOutputComponent, eventList: seq[ProgramEvent]) {.async.} =
   self.initialUpdate = false
-  self.cacheAnsiToHtmlLines(eventList)
+  self.cachedEvents = eventList
   self.syncTerminalOutputVM()
 
 
@@ -351,10 +269,15 @@ proc onTerminalEventClick(self: TerminalOutputComponent, eventElement: ProgramEv
   self.api.emit(InternalNewOperation, NewOperation(name: "event jump", stableBusy: true))
 
 method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.async.} =
-  if self.cachedLines[response].len > 0:
-    let eventElement = self.cachedEvents[self.cachedLines[response][0].eventIndex]
-
-    self.onTerminalEventClick(eventElement)
+  ## The shell asks for line `response`: go to the write that started it.
+  if terminalOutputVMInstance.isNil:
+    return
+  let lines = terminalOutputVMInstance.lines.val
+  if response >= 0 and response < lines.len and
+     lines[response].fragments.len > 0:
+    let index = lines[response].fragments[0].eventIndex
+    if index >= 0 and index < self.cachedEvents.len:
+      self.onTerminalEventClick(self.cachedEvents[index])
 
 method restart*(self: TerminalOutputComponent) =
   self.cachedLines = JsAssoc[int, seq[TerminalEvent]]{}

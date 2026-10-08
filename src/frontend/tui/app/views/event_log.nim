@@ -64,10 +64,23 @@ import std/[strutils, tables]
 
 import isonim_tui
 
+# PLAT-49 part B: the column model is the Event Log ViewModel's
+# (`EventLogColumns`), reached through the SDK facade.
+from codetracer_embed import EventLogColumn, EventLogColumns,
+  defaultEventLogColumns, visibleColumns, eventLogColumnTitle, elcTick,
+  elcIndex, elcLocation, elcKind, elcOutput, EventLogOrder,
+  RecordedEventOrder, clickedHeader
+# PLAT-51: the scrollbar scrubber's shared model.
+from codetracer_embed import ScrubberModel, scrubberModel
+
 import ../layout/profile
 import ./styled_row
+import ./scrubber_track
 
 export styled_row, profile
+export EventLogColumn, EventLogColumns, defaultEventLogColumns,
+  visibleColumns, eventLogColumnTitle, EventLogOrder, RecordedEventOrder,
+  clickedHeader
 
 type
   EventCategory* = enum
@@ -106,6 +119,10 @@ type
     atEnd*: bool
       ## The server had nothing after this window. See this module's header on
       ## why the total is discovered rather than declared.
+    total*: int = -1
+      ## PLAT-51: the WHOLE log's size when the engine said it (`ct/event-load`
+      ## carries `total` since then), -1 when it did not — the population the
+      ## scrollbar scrubber spans.
 
   EventPages* = proc(offset, limit: int): EventPage {.closure.}
     ## THE SERVER-PAGINATION SEAM. Answers one window of the recorded log.
@@ -138,6 +155,15 @@ type
       ## Where the debugger is. Marks a row; see this module's header.
     note*: string
       ## Why the log is empty, when it is empty and a reason is known.
+    columns*: EventLogColumns
+      ## PLAT-49 part B: which columns the pane draws, in which order — the
+      ## Event Log ViewModel's model (`defaultEventLogColumns`: the desktop's
+      ## tick, #, kind and output; location hidden). `:column-show`,
+      ## `:column-hide`, `:column-left` and `:column-right` change it.
+    order*: EventLogOrder
+      ## PLAT-50 (K26): the column the header click ordered the log by, and
+      ## its direction — the engine sorts (`ct/event-load`'s `sortKey`), the
+      ## pages arrive in that order; `RecordedEventOrder` is the tick order.
     held: Table[int, seq[EventRow]]
       ## Materialised pages, by page index. PRIVATE: the only way in is
       ## `ensureWindow` and the only way out is `releaseOutside`, so "released
@@ -150,6 +176,10 @@ type
       ## Page index that came back short, or -1 until one does.
     knownTotal: int
       ## -1 until `endPage` is found.
+    current*: int
+      ## PLAT-51: the row of the CURRENT recording position in the whole log
+      ## (the last event at or before the debugger's tick — the engine's
+      ## `indexAtTick`), -1 when unknown: the scrubber track's mark.
 
   EventLogScreen* = object
     ## One painted pane, plus the counts and coordinates a test asserts on.
@@ -168,9 +198,23 @@ type
       ## Screen columns of the tick and content fields' first cells. REPORTED
       ## rather than recomputed by the caller, for `frame_item.FrameItem`'s
       ## reason: a Tier-2 case reads a cell at this column and a drift between
-      ## the two arithmetics would move the read rather than the field.
+      ## the two arithmetics would move the read rather than the field. -1
+      ## when that column is hidden.
+    headerRow*: int
+      ## PLAT-49 part B: the SCREEN row of the column header, -1 when none.
+    columnCells*: seq[(EventLogColumn, int, int)]
+      ## Each visible column with its first screen column and its width, in
+      ## display order — the header's cells, for a click and for a test.
+    trackCol*: int
+      ## PLAT-51: the scrollbar scrubber's column (the pane's rightmost), -1
+      ## when the pane is too small to draw one.
+    trackTop*: int
+    trackRows*: int
+      ## The track's first screen row and its height (the body's).
 
 const
+  MinTrackedWidth* = 8
+    ## PLAT-51: the narrowest pane that gives a column to the scrubber.
   EventLogTitle* = "TRACEPOINTS"
     ## Contains the string CTUI-3's own pane title produced for `paneEventLog`
     ## in the Compact profile (`shell.paneTitle` calls that pane `Tracepoints`),
@@ -188,32 +232,39 @@ const
 
   TickFieldCells* = 8
   GapCells* = 1
+  IndexFieldCells* = 4
+    ## The `#` column: the event's number in the log.
   CategoryFieldCells* = 4
   LocationFieldCells* = 18
+  OutputFieldCells* = 24
+    ## The output column's width when it is NOT the last column; last, it
+    ## takes the rest of the row.
+  HeaderStyle* = CellStyle(role: srChromeMuted, bold: true)
+    ## The column header's titles (the desktop's `.eventLog-column-header`).
 
   PendingText* = "…"
 
-  TitleStyle* = CellStyle(fg: "white", bold: true)
-  TitleDetailStyle* = CellStyle(fg: "bright_black")
-  RuleStyle* = CellStyle(fg: "bright_black")
-  TickStyle* = CellStyle(fg: "bright_black")
-  LocationStyle* = CellStyle(fg: "bright_black")
-  ContentStyle* = CellStyle(fg: "white")
-  SelectedBackground* = "bright_black"
-  CurrentTickStyle* = CellStyle(fg: "bright_cyan", bold: true)
+  TitleStyle* = CellStyle(role: srChromeTitle)
+  TitleDetailStyle* = CellStyle(role: srChromeMuted)
+  RuleStyle* = CellStyle(role: srBorderPane)
+  TickStyle* = CellStyle(role: srChromeMuted)
+  LocationStyle* = CellStyle(role: srChromeMuted)
+  ContentStyle* = CellStyle(role: srChromeText)
+  SelectedBackground* = srSurfaceSelection
+  CurrentTickStyle* = CellStyle(role: srChromeAccent)
     ## The row at the debugger's own tick, in the SAME colour
     ## `timeline_bar.NeedleStyle` paints `▲` — one fact, one colour, on two
     ## panes.
   EmptyLogText* = "no recorded events"
-  EmptyLogStyle* = CellStyle(fg: "bright_black", italic: true)
-  PendingStyle* = CellStyle(fg: "bright_black", italic: true)
+  EmptyLogStyle* = CellStyle(role: srChromeMuted, italic: true)
+  PendingStyle* = CellStyle(role: srChromeMuted, italic: true)
 
-  OutputStyle* = CellStyle(fg: "green")
-  MutationStyle* = CellStyle(fg: "yellow")
-  SyscallStyle* = CellStyle(fg: "cyan")
-  FaultStyle* = CellStyle(fg: "red", bold: true)
-  TracepointStyle* = CellStyle(fg: "magenta")
-  UnknownStyle* = CellStyle(fg: "bright_black")
+  OutputStyle* = CellStyle(role: srEventOutput)
+  MutationStyle* = CellStyle(role: srEventMutation)
+  SyscallStyle* = CellStyle(role: srEventSyscall)
+  FaultStyle* = CellStyle(role: srEventFault)
+  TracepointStyle* = CellStyle(role: srEventTracepoint)
+  UnknownStyle* = CellStyle(role: srEventUnknown)
 
 # ---------------------------------------------------------------------------
 # The wire's event kinds
@@ -295,10 +346,21 @@ proc initEventLogModel*(pages: EventPages = nil;
     scrollTop: 0,
     currentTick: currentTick,
     note: note,
+    columns: defaultEventLogColumns(),
+    order: RecordedEventOrder,
     held: initTable[int, seq[EventRow]](),
     fetchedPages: @[],
     endPage: -1,
-    knownTotal: -1)
+    knownTotal: -1,
+    current: -1)
+
+proc scrubberOf*(model: EventLogModel; bodyHeight: int): ScrubberModel =
+  ## PLAT-51: the scrollbar scrubber over the WHOLE log (Scrollbar-Scrubbers.md
+  ## §2: the Event Log's population, not the rows held) — its total, the
+  ## view's first row and height, and the current position's row. While the
+  ## total is unknown the thumb is indeterminate (§3.1).
+  scrubberModel(max(0, model.knownTotal), model.scrollTop, bodyHeight,
+                model.current, totalKnown = model.knownTotal >= 0)
 
 proc pageOf*(model: EventLogModel; index: int): int =
   ## Which page an absolute event index falls in.
@@ -346,7 +408,13 @@ proc fetchPage(model: var EventLogModel; page: int) =
   let answer = model.pages(page * model.pageSize, model.pageSize)
   model.fetchedPages.add page
   model.held[page] = answer.rows
-  if answer.atEnd or answer.rows.len < model.pageSize:
+  if answer.total >= 0:
+    # PLAT-51: the engine said how long the whole log is — the end is KNOWN,
+    # not discovered by reading the page that comes back short.
+    model.knownTotal = answer.total
+    model.endPage = if answer.total <= 0: 0
+                    else: (answer.total - 1) div model.pageSize
+  elif answer.atEnd or answer.rows.len < model.pageSize:
     model.endPage = page
     model.knownTotal = page * model.pageSize + answer.rows.len
 
@@ -360,6 +428,29 @@ proc rowAt*(model: EventLogModel; index: int): (bool, EventRow) =
   if within < 0 or within >= rows.len:
     return (false, EventRow(index: -1))
   (true, rows[within])
+
+proc reorder*(model: var EventLogModel; order: EventLogOrder) =
+  ## PLAT-50 (K26): order the log by `order` — every held page is dropped
+  ## (its rows were cut from the old order), the cursor and the scroll go back
+  ## to the top, and the next `ensureWindow` asks the seam again.
+  model.order = order
+  model.held.clear()
+  model.fetchedPages = @[]
+  model.endPage = -1
+  model.knownTotal = -1
+  model.selected = -1
+  model.scrollTop = 0
+
+proc headerColumnAt*(screen: EventLogScreen; row, col: int):
+    (bool, EventLogColumn) =
+  ## PLAT-50 (K26): the column whose header a press at `(row, col)` is on, as
+  ## `paintEventLog` laid the header out.
+  if screen.headerRow < 0 or row != screen.headerRow:
+    return (false, elcTick)
+  for (c, at, w) in screen.columnCells:
+    if col >= at and col < at + max(1, w):
+      return (true, c)
+  (false, elcTick)
 
 proc ensureWindow*(model: var EventLogModel; first, count: int) =
   ## Materialise every page the window `[first, first+count)` touches.
@@ -504,19 +595,41 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
   let atCurrent = event.tick == model.currentTick
   let selected = row.index == model.selected
   var spans: seq[StyledSpan] = @[]
-  spans.add StyledSpan(
-    text: padLeft($event.tick, TickFieldCells),
-    style: (if atCurrent: CurrentTickStyle else: TickStyle))
-  spans.add StyledSpan(text: " ", style: DefaultCellStyle)
-  spans.add StyledSpan(text: categoryLabel(event.category),
-                       style: categoryStyle(event.category))
-  spans.add StyledSpan(
-    text: padRight(locationTextFor(event), LocationFieldCells),
-    style: LocationStyle)
-  spans.add StyledSpan(text: " ", style: DefaultCellStyle)
-  spans.add StyledSpan(text: event.content.strip(leading = false,
-                                                 trailing = true),
-                       style: ContentStyle)
+  # PLAT-49 part B: THE VISIBLE COLUMNS, in the model's order, each at the
+  # width `columnCellsOf` gives the header — one table of widths, so a
+  # header title sits over its column whatever the order.
+  let shown = model.columns.visibleColumns
+  for k, col in shown:
+    if k > 0:
+      spans.add StyledSpan(text: " ", style: DefaultCellStyle)
+    case col
+    of elcTick:
+      spans.add StyledSpan(
+        text: padLeft($event.tick, TickFieldCells),
+        style: (if atCurrent: CurrentTickStyle else: TickStyle))
+    of elcIndex:
+      # The EVENT's number in the recorded log (`EventRow.index`), not the
+      # row's position — the two differ once a header click ordered the log
+      # by another column (PLAT-50).
+      spans.add StyledSpan(text: padLeft($event.index, IndexFieldCells),
+                           style: TickStyle)
+    of elcLocation:
+      spans.add StyledSpan(
+        text: padRight(truncateToCells(locationTextFor(event),
+                                       LocationFieldCells),
+                       LocationFieldCells),
+        style: LocationStyle)
+    of elcKind:
+      spans.add StyledSpan(text: categoryLabel(event.category),
+                           style: categoryStyle(event.category))
+    of elcOutput:
+      let text = event.content.strip(leading = false, trailing = true)
+      # The output takes the rest of the row unless a column follows it.
+      spans.add StyledSpan(
+        text: (if k == shown.high: text
+               else: padRight(truncateToCells(text, OutputFieldCells),
+                              OutputFieldCells)),
+        style: ContentStyle)
   var used = 0
   for span in spans:
     if used >= width:
@@ -529,13 +642,55 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
     # CTUI-7's first draft of `tree_node.treeRow` painted the selection over
     # every span and ate the one badge the row existed to show; this pane has
     # the same shape and takes the fix rather than the defect.
-    if selected and style.bg.len == 0:
+    if selected and not style.hasOwnBackground:
       style = style.withBackground(SelectedBackground)
     result.add StyledSpan(text: fitted, style: style)
     used += cellWidthOf(fitted)
   if selected and used < width:
     result.add StyledSpan(text: repeat(' ', width - used),
-                          style: CellStyle(bg: SelectedBackground))
+                          style: CellStyle(surface: SelectedBackground))
+
+func columnCells*(col: EventLogColumn; last: bool; rest: int): int =
+  ## One column's width in cells: fixed for every column but a LAST output
+  ## column, which takes `rest`.
+  case col
+  of elcTick: TickFieldCells
+  of elcIndex: IndexFieldCells
+  of elcLocation: LocationFieldCells
+  of elcKind: CategoryFieldCells
+  of elcOutput: (if last: max(0, rest) else: OutputFieldCells)
+
+proc columnCellsOf*(model: EventLogModel; startCol, width: int):
+    seq[(EventLogColumn, int, int)] =
+  ## Every visible column with its first screen column and width — the ONE
+  ## table both the header and the rows are laid out by.
+  let shown = model.columns.visibleColumns
+  var at = startCol
+  for k, col in shown:
+    if k > 0:
+      at += GapCells
+    let w = columnCells(col, k == shown.high, startCol + width - at)
+    result.add (col, at, w)
+    at += w
+
+proc headerRowSpans*(model: EventLogModel; width: int): StyledRow =
+  ## The column header: each visible column's title over its cells, in the
+  ## model's order (the desktop's `.eventLog-column-header`).
+  var line = ""
+  for (col, at, w) in model.columnCellsOf(0, width):
+    while cellWidthOf(line) < at:
+      line.add ' '
+    # PLAT-50: the column the log is ordered by carries the desktop's sort
+    # arrow (DataTables' `dt-ordering-asc` / `-desc`) once a header click
+    # left the recorded order.
+    let title = eventLogColumnTitle(col) &
+      (if model.order != RecordedEventOrder and model.order.column == col:
+         (if model.order.ascending: " ▲" else: " ▼")
+       else: "")
+    # Numbers are right-aligned under a right-aligned title.
+    line.add (if col in {elcTick, elcIndex}: padLeft(title, w)
+              else: title)
+  @[StyledSpan(text: truncateToCells(line, width), style: HeaderStyle)]
 
 proc paintEventLog*(g: var StyledGrid; area: CellArea;
                     model: EventLogModel): EventLogScreen =
@@ -545,9 +700,16 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
   result = EventLogScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, eventRows: 0,
     pendingRows: 0, selectedRow: -1, currentRow: -1,
-    tickColumn: area.col,
-    contentColumn: area.col + TickFieldCells + GapCells + CategoryFieldCells +
-                   LocationFieldCells + GapCells)
+    tickColumn: -1, contentColumn: -1, headerRow: -1, trackCol: -1)
+  # PLAT-51: THE RIGHTMOST COLUMN IS THE SCROLLBAR SCRUBBER, inside the pane's
+  # own rectangle (Scrollbar-Scrubbers.md §4), when the pane has a body and
+  # room for it; the columns lay out in the cells left of it.
+  let tracked = area.width >= MinTrackedWidth and area.height > 2
+  let width = if tracked: area.width - ScrubberTrackCells else: area.width
+  result.columnCells = model.columnCellsOf(area.col, width)
+  for (col, at, _) in result.columnCells:
+    if col == elcTick: result.tickColumn = at
+    if col == elcOutput: result.contentColumn = at
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -561,21 +723,39 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
-  let bodyHeight = area.height - 1
+  # PLAT-49 part B: THE COLUMN HEADER, under the title row (which the shell's
+  # tab strip replaces) — the desktop's table names its columns, and with
+  # columns that can be hidden and reordered the reader has to see which are
+  # which.
+  let header = area.height > 2
+  if header:
+    result.headerRow = area.row + 1
+    var at = area.col
+    for span in headerRowSpans(model, width):
+      g.paint(area.row + 1, at, span.text, span.style)
+      at += cellWidthOf(span.text)
+  let firstBody = area.row + (if header: 2 else: 1)
+  let bodyHeight = area.row + area.height - firstBody
   result.bodyHeight = bodyHeight
   let rows = model.paneRows(model.scrollTop, bodyHeight)
+  if tracked and bodyHeight > 0:
+    result.trackCol = area.col + width
+    result.trackTop = firstBody
+    result.trackRows = bodyHeight
+    paintVerticalScrubber(g, result.trackCol, firstBody, bodyHeight,
+                          model.scrubberOf(bodyHeight))
 
   if rows.len == 0:
-    g.paint(area.row + 1, area.col,
-            truncateToCells(EmptyLogText, area.width), EmptyLogStyle)
+    g.paint(firstBody, area.col,
+            truncateToCells(EmptyLogText, width), EmptyLogStyle)
     for r in area.row ..< area.row + area.height:
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
   for i, row in rows:
-    let screenRow = area.row + 1 + i
+    let screenRow = firstBody + i
     var at = area.col
-    for span in eventRowSpans(model, row, area.width):
+    for span in eventRowSpans(model, row, width):
       g.paint(screenRow, at, span.text, span.style)
       at += cellWidthOf(span.text)
     result.visible.add row

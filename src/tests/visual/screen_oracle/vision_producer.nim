@@ -90,8 +90,11 @@ const
 
   GpuiCaptureDir* = "src/tests/visual/captures/gpui"
     ## Frames from the GPUI front-end, captured by PLAT-37's windowed lane on a
-    ## real Wayland compositor and committed as fixtures, exactly as PLAT-35
-    ## commits the Electron ones. `DIFF-8` reads both directories.
+    ## real Wayland compositor (`just plat37-capture`, which exports each
+    ## captured scenario's frame here). Gitignored, like the Electron frames
+    ## `just plat35-capture-electron` writes beside it: neither is committed,
+    ## because a committed frame would pin whichever run produced it.
+    ## `DIFF-8` reads both directories.
 
 proc cropGray*(img: GrayImage, r: Rect): GrayImage =
   ## In-memory crop. No subprocess: the frame is already decoded, and shelling
@@ -148,6 +151,36 @@ proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
   finally:
     removeFile(path)
 
+proc ocrOnGrounds*(img: GrayImage, r: Rect, scratch: string,
+                   grounds: openArray[int], psm = 7,
+                   upscale = 2.0): seq[OcrWord] =
+  ## OCR one region whose text sits on SEVERAL known backgrounds — a tab
+  ## strip since PLAT-49: inactive labels on the strip's own ground, the
+  ## selected one on a lighter ground of its own. Tesseract binarises a line
+  ## with one threshold, which falls between the dark ground and the bright
+  ## selected label and drops the dim inactive ones. So every pixel within a
+  ## few levels of a declared ground becomes white and every other one black:
+  ## dark text on white, whatever ground each label stands on.
+  let sub = cropGray(img, r)
+  if sub.width <= 0 or sub.height <= 0: return @[]
+  var masked = sub
+  for i in 0 ..< masked.pixels.len:
+    let v = ord(masked.pixels[i])
+    var ground = false
+    for g in grounds:
+      if abs(v - g) <= 6: ground = true
+    masked.pixels[i] = (if ground: char(255) else: char(0))
+  let path = scratch / ("grounds_" & $r.x & "_" & $r.y & "_" &
+                        $r.w & "x" & $r.h & ".pgm")
+  writePgm(masked, path)
+  try:
+    result = runOcrEx(path, initOcrOptions(psm = psm, upscale = upscale,
+                                           invert = oiNever))
+  except CatchableError:
+    result = @[]
+  finally:
+    removeFile(path)
+
 proc lineBands*(img: GrayImage, r: Rect): seq[Rect] =
   ## The region's TEXT LINES, found by ink projection rather than by the OCR
   ## engine: each maximal run of pixel rows carrying ink, padded by two rows.
@@ -182,15 +215,34 @@ proc lineBands*(img: GrayImage, r: Rect): seq[Rect] =
         result.add band
       start = -1
 
-proc ocrLineBands*(img: GrayImage, r: Rect, scratch: string): seq[string] =
+type BandAcceptor* = proc (line: string): bool {.nimcall, noSideEffect.}
+  ## Whether a band's line is one the caller's grammar accepts (a row, or the
+  ## pane's own chrome).
+
+proc ocrLineBands*(img: GrayImage, r: Rect, scratch: string,
+                   accept: BandAcceptor = nil): seq[string] =
   ## Each of `lineBands` OCR'd as ONE line (`psm 7`). The fallback for a
   ## region the engine's own line grouping mis-segments: measured on PLAT-40's
   ## native-window event log, whose narrow, aligned columns tesseract grouped
   ## COLUMN by column in every page-segmentation mode — `# 0 2 3 4 1 kind
   ## stdout stdout …` — while each row read alone is exact.
+  ##
+  ## **A BAND THE GRAMMAR REFUSES IS READ AGAIN AT TWICE THE SIZE**, when the
+  ## caller passes its grammar as `accept`, and the second reading is taken
+  ## only if the grammar accepts it. Measured on the frames of 2026-10-05, a
+  ## 1x band misread a glyph the 2x band reads exactly: the native window's
+  ## first event row `38 0 stdout 2+3 =5` read `38 O stdout`, and the
+  ## desktop's `> __builtins__:@[(…` read `> builtins_ _:al(…`. Re-reading is
+  ## how those rows are recovered; the grammars forgive neither misreading.
+  ## A band the 1x reading already parses is never re-read, because 2x is not
+  ## uniformly better (it split `__file__` into `_ file__` on the native
+  ## window's state pane, which 1x reads exactly).
   for band in lineBands(img, r):
-    let words = ocrRegion(img, band, scratch, psm = 7)
-    let line = words.mapIt(it.text).join(" ").strip()
+    var line = ocrRegion(img, band, scratch, psm = 7).mapIt(it.text).join(" ").strip()
+    if accept != nil and line.len > 0 and not accept(line):
+      let again = ocrRegion(img, band, scratch, psm = 7, upscale = 2.0)
+        .mapIt(it.text).join(" ").strip()
+      if accept(again): line = again
     if line.len > 0: result.add line
 
 func regionIsLegible*(words: openArray[OcrWord]): bool =
@@ -380,6 +432,63 @@ proc identifyPane*(img: GrayImage, cell: Rect, scratch: string): LocatedPane =
       result.id = again
       result.titleText = retitled
 
+func overlapsRect(a, b: Rect): bool =
+  a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
+
+proc identifyByStripAbove*(img: GrayImage; pane: LocatedPane;
+                           others: openArray[LocatedPane];
+                           scratch: string): LocatedPane =
+  ## A cell whose own top strip named no pane, identified by the strip-high
+  ## band DIRECTLY ABOVE it — or `pane` unchanged.
+  ##
+  ## **THE GPUI WINDOW DRAWS ITS TAB STRIP OUTSIDE THE CELL THE GRID FINDS.**
+  ## Measured on PLAT-37's windowed frames of 2026-10-05: the strip
+  ## (`State  Scratchpad`, `main.py`) sits on the window's own ground — the
+  ## ground the grid locator separates cells against — so the located cell
+  ## starts BELOW it, and its own top strip is the pane's first body line
+  ## (`Locals`, `the recording's source`). `plat45_window_record.nim` met the
+  ## same geometry (PLAT-50) and probes the band above the cell; this is that
+  ## probe for the oracle's reader.
+  ##
+  ## Three guards keep it from claiming what is not a strip: the band must lie
+  ## in NO other located cell (a strip is on the window ground — the band
+  ## above a cell at the bottom of the window is the status bar inside its
+  ## neighbours, and `main.py:56` there would otherwise read as an editor),
+  ## the answer must name a pane, and that pane must be one NO other cell
+  ## already claimed — so on a frame whose titles are inside their cells (the
+  ## desktop's), a leftover cell can never take a second copy of an
+  ## identified pane from the chrome above it.
+  result = pane
+  if pane.id notin {piOther, piUnknown} or pane.rect.y < TitleStripHeight:
+    return
+  let band = Rect(x: pane.rect.x, y: pane.rect.y - TitleStripHeight,
+                  w: pane.rect.w, h: TitleStripHeight)
+  for o in others:
+    if o.rect != pane.rect and overlapsRect(band, o.rect):
+      return
+  let words = ocrRegion(img, band, scratch, psm = 7)
+  let title = words.mapIt(it.text).join(" ").strip()
+  if title.len == 0:
+    return
+  let upper = title.toUpperAscii
+  var id = piOther
+  block keywords:
+    for (kid, keys) in PaneTitleKeywords:
+      for k in keys:
+        if upper.contains(k):
+          id = kid
+          break keywords
+  if id == piOther:
+    id = classifyTitle(title)
+  if id in {piOther, piUnknown}:
+    return
+  for o in others:
+    if o.id == id:
+      return
+  result = LocatedPane(id: id, titleText: title,
+                       rect: Rect(x: pane.rect.x, y: band.y, w: pane.rect.w,
+                                  h: pane.rect.h + TitleStripHeight))
+
 # ---------------------------------------------------------------------------
 # The three readers
 # ---------------------------------------------------------------------------
@@ -390,6 +499,113 @@ func isStateChrome(u: string): bool =
   ## native window draws `State` above its tabs).
   u.startsWith("LOCALS") or u.startsWith("GLOBALS") or
     u.startsWith("WATCHES") or u.contains("ENTER A WATCH") or u == "STATE"
+
+const
+  ColumnRuleMinRunFraction = 0.5
+    ## A pixel column is the Name/Value rule when an unbroken run of non-ground
+    ## pixels covers at least this fraction of the pane body's height. Measured
+    ## on the native window's frames of 2026-10-05: the rule's run is 279 of
+    ## 369 rows, its neighbours two pixels away have none, and the tallest run
+    ## any text column makes is 26 (a glyph's height) — on the desktop's frame,
+    ## which draws no rule, nothing exceeds 26 of 471.
+
+proc stateColumnRule(img: GrayImage, body: Rect): int =
+  ## The x of the state table's Name/Value rule, or -1 when the pane draws
+  ## none (the desktop and the terminal write `name: value` rows instead).
+  let sub = cropGray(img, body)
+  if sub.width <= 4 or sub.height <= 0: return -1
+  var levels = newSeq[int](sub.pixels.len)
+  for i, c in sub.pixels: levels[i] = ord(c)
+  levels.sort()
+  let bg = levels[levels.len div 2]
+  var longest = newSeq[int](sub.width)
+  for x in 0 ..< sub.width:
+    var run = 0
+    for y in 0 ..< sub.height:
+      if abs(ord(sub.pixels[y * sub.width + x]) - bg) > 8:
+        inc run
+        longest[x] = max(longest[x], run)
+      else:
+        run = 0
+  var best = -1
+  for x in 2 ..< sub.width - 2:
+    if best < 0 or longest[x] > longest[best]: best = x
+  if best < 0 or longest[best].float < ColumnRuleMinRunFraction * sub.height.float:
+    return -1
+  # A RULE, not a block of ink: the columns two pixels either side are not
+  # part of the same run.
+  if longest[best - 2] * 2 > longest[best] or longest[best + 2] * 2 > longest[best]:
+    return -1
+  body.x + best
+
+proc readStateTableName(img: GrayImage, r: Rect, scratch: string,
+                        ground: int): string =
+  ## A name cell, read on its ground mask (`ocrOnGrounds`: the names are drawn
+  ## in the link colour, which tesseract's own threshold reads as `__hame__`
+  ## and `_ file_` at 1x). 2x first, then 3x, then 1x — the first reading that
+  ## is an identifier (`isStateTableName`) is taken; measured on the frames of
+  ## 2026-10-05, 2x reads every name but `mul` (`- mul`), which 1x reads. A
+  ## cell no scale reads as an identifier yields its 2x reading, which the
+  ## caller then refuses.
+  var first = ""
+  for up in [2.0, 3.0, 1.0]:
+    let t = ocrOnGrounds(img, r, scratch, [ground], psm = 7, upscale = up)
+      .mapIt(it.text).join(" ").strip()
+    if first.len == 0: first = t
+    if isStateTableName(t): return t
+  first
+
+proc readStateTable(img: GrayImage, body: Rect, ruleX: int,
+                    scratch: string): ScreenReading[ProgramStateModel] =
+  ## **THE NATIVE WINDOW'S STATE PANE IS A NAME/VALUE TABLE** since its
+  ## column rule (codetracer `c82b8a5e2`): a header `Name | Value`, then one
+  ## row per variable, the name in its own column and no `:` between. Each
+  ## text band is split at the rule and its two cells read on their own, so a
+  ## row is `(name, value)` from pixels with no separator to infer. The value
+  ## is a VISIBLE PREFIX (the pane clips it with `…`), as everywhere in this
+  ## reader; the table has no type column, so `valueType` is empty.
+  let sub = cropGray(img, body)
+  var levels = newSeq[int](sub.pixels.len)
+  for i, c in sub.pixels: levels[i] = ord(c)
+  levels.sort()
+  let ground = levels[levels.len div 2]
+  var model = ProgramStateModel(isVisible: true, watchExpression: "")
+  var considered, refused = 0
+  var sawHeader = false
+  for band in lineBands(img, body):
+    let nameR = Rect(x: body.x, y: band.y, w: ruleX - body.x - 1, h: band.h)
+    let valueR = Rect(x: ruleX + 2, y: band.y, w: body.x + body.w - ruleX - 2,
+                      h: band.h)
+    if band.y + band.h <= body.y: continue
+    let value = ocrRegion(img, valueR, scratch, psm = 7)
+      .mapIt(it.text).join(" ").strip()
+    let plain = ocrRegion(img, nameR, scratch, psm = 7)
+      .mapIt(it.text).join(" ").strip()
+    let u = plain.toUpperAscii
+    if not sawHeader:
+      # Above the header: the scope tabs (`Locals`, `Globals`, `Watches`),
+      # drawn across the rule's column with no value cell. Chrome.
+      if u.strip(chars = {'|', ' '}) == "NAME" and
+          value.toUpperAscii.strip(chars = {'|', ' '}) == "VALUE":
+        sawHeader = true
+      continue
+    inc considered
+    let name = readStateTableName(img, nameR, scratch, ground)
+    if not isStateTableName(name):
+      inc refused
+      continue
+    model.variableStates.add VariableStateModel(name: name, valueType: "",
+                                                value: value)
+  if not sawHeader:
+    return unreadable[ProgramStateModel](urGrammarMismatch,
+      "state pane draws a column rule at x=" & $ruleX &
+      " but no `Name | Value` header row was read")
+  if considered == 0:
+    return empty[ProgramStateModel]()
+  if model.variableStates.len == 0:
+    return unreadable[ProgramStateModel](urGrammarMismatch,
+      "state table had " & $considered & " rows and no name cell read as an identifier")
+  read(model)
 
 proc readProgramState*(img: GrayImage, cell: Rect,
                        scratch: string): ScreenReading[ProgramStateModel] =
@@ -404,6 +620,11 @@ proc readProgramState*(img: GrayImage, cell: Rect,
   var matched = 0
   var considered = 0
   let allText = linesOf(words).join(" ").toUpperAscii
+  if allText.contains("NO LOCAL VARIABLES ARE PRESENT"):
+    return empty[ProgramStateModel]()
+  let ruleX = stateColumnRule(img, bodyBelowTitle(cell))
+  if ruleX >= 0:
+    return readStateTable(img, bodyBelowTitle(cell), ruleX, scratch)
   # **THE ENGINE'S LINES FIRST, THE BANDS WHEN THEY FAIL THE GRAMMAR** — the
   # event log's rule (`readEventLog`), for the same measured reason: on the
   # native window's state pane the engine fused every row into three lines.
@@ -416,7 +637,9 @@ proc readProgramState*(img: GrayImage, cell: Rect,
       if splitVariableRow(t).ok and t.count(':') <= 2: inc parsed
       else: inc unparsed
     if unparsed == 0: break retry
-    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch)
+    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch,
+      proc (line: string): bool =
+        splitVariableRow(line).ok or isStateChrome(line.toUpperAscii))
     var bandParsed = 0
     for line in banded:
       if splitVariableRow(line).ok: inc bandParsed
@@ -456,6 +679,13 @@ proc readProgramState*(img: GrayImage, cell: Rect,
       ProgramStateGrammar.shape)
   read(model)
 
+func isEventTableHeader(s: string): bool =
+  ## The event table's header row: `# kind value` (the terminal, and the
+  ## native window before its `tick` column) or `tick # kind output` (the
+  ## native window since). Chrome, not a row.
+  let toks = s.splitWhitespace()
+  toks == @["#", "kind", "value"] or toks == @["tick", "#", "kind", "output"]
+
 proc readEventLog*(img: GrayImage, cell: Rect,
                    scratch: string): ScreenReading[EventLogModel] =
   let words = ocrRegion(img, bodyBelowTitle(cell), scratch)
@@ -488,10 +718,15 @@ proc readEventLog*(img: GrayImage, cell: Rect,
         continue
       if s.toUpperAscii.contains("FIND EVENT"): continue
       if parseEventRow(s).ok or parseEventTableRow(s).ok: inc parsed
-      elif not parseFooterTotal(s).ok and
-           s.splitWhitespace() != @["#", "kind", "value"]: inc unparsed
+      elif not parseFooterTotal(s).ok and not isEventTableHeader(s):
+        inc unparsed
     if unparsed == 0: break retry
-    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch)
+    let banded = ocrLineBands(img, bodyBelowTitle(cell), scratch,
+      proc (line: string): bool =
+        (parseEventRow(line).ok and not eventRowsFused(line)) or
+          parseEventTableRow(line).ok or parseFooterTotal(line).ok or
+          isEventTableHeader(line) or
+          line.toUpperAscii.contains("FIND EVENT"))
     var bandParsed = 0
     for line in banded:
       if (parseEventRow(line).ok and not eventRowsFused(line)) or
@@ -522,7 +757,7 @@ proc readEventLog*(img: GrayImage, cell: Rect,
       model.events.add EventDataModel(consoleOutput: tableRow.consoleOutput)
       continue
     # The table's own header row is chrome.
-    if s.splitWhitespace() == @["#", "kind", "value"]: continue
+    if isEventTableHeader(s): continue
     let footer = parseFooterTotal(s)
     if footer.ok:
       model.ofRows = footer.total
@@ -638,6 +873,26 @@ proc inkClusters*(img: GrayImage; cell: Rect; band: GutterRun): seq[(int, int)] 
       lastInk = x
   if start >= 0: result.add (start, lastInk)
 
+proc maskClusters(img: GrayImage; spans: seq[(int, int)]; band: GutterRun;
+                  margin: int): GrayImage =
+  ## `img` with the band's rows (plus `margin`) over `spans` painted in the
+  ## band's own background: the ink in front of the number removed.
+  result = img
+  if spans.len == 0: return
+  let y0 = max(0, band.first - margin)
+  let y1 = min(img.height - 1, band.last + margin)
+  var hist: array[256, int]
+  for y in y0 .. y1:
+    for x in spans[0][0] .. spans[^1][1]:
+      inc hist[int(img.pixels[y * img.width + x])]
+  var bg = 0
+  for v in 1 .. 255:
+    if hist[v] > hist[bg]: bg = v
+  for (a, b) in spans:
+    for y in y0 .. y1:
+      for x in max(0, a - 1) .. min(img.width - 1, b + 1):
+        result.pixels[y * img.width + x] = char(bg)
+
 proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
                        scratch: string):
     tuple[ok: bool, line: int, text: string, right: int] =
@@ -675,10 +930,31 @@ proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
                       w: clusters[k - 1][1] - cell.x + 3,
                       h: band.last - band.first + 1 + 2 * margin)
       let words = ocrRegion(img, crop, scratch, psm = 7, upscale = upscale)
-      if words.len == 0: continue
       let text = words.mapIt(it.text).join(" ")
       let parsed = parseGutterDigits(text)
-      if parsed.ok: return (true, parsed.line, text, crop.x + crop.w)
+      # THE SAME CROP WITH THE MARKS IN FRONT OF THE NUMBER BLANKED. PLAT-51
+      # measured why: GPUI now draws the desktop's own execution arrow
+      # (`highlight_line_arrow.svg`), a small triangle set high in the row,
+      # and with it in the crop tesseract read GPUI's `44` as `a4` and `4`
+      # (the digits' pixels are identical to the frame it read as `> 44`
+      # before). With the marks painted over in the band's background, at 2x,
+      # the number is read as itself. Taken only when it reads MORE digits than
+      # the plain crop — a shorter reading of the same ink is the misread —
+      # so every reading that was right before stays byte-identical.
+      if k > 1:
+        let masked = maskClusters(img, clusters[0 ..< k - 1], band, margin)
+        # At 2x: measured on GPUI's `44` with the arrow blanked, 1x read `a4`
+        # and `24` (the open-topped 4 of its gutter face), 2x read `44` at both
+        # margins; Electron's blanked `44` read `| a4` at 2x, which does not
+        # parse, so its plain reading stands.
+        let mWords = ocrRegion(masked, crop, scratch, psm = 7, upscale = 2.0)
+        let mText = mWords.mapIt(it.text).join(" ")
+        let mParsed = parseGutterDigits(mText)
+        if mParsed.ok and
+           (not parsed.ok or len($mParsed.line) > len($parsed.line)):
+          return (true, mParsed.line, mText, crop.x + crop.w)
+      if parsed.ok:
+        return (true, parsed.line, text, crop.x + crop.w)
   # NO FIXED-WIDTH FALLBACK. It existed until the cluster rule was verified
   # on PLAT-39's own Electron corpus (all six read through clusters, the
   # record unchanged), and it was measured to be dangerous: on a GPUI frame
@@ -786,6 +1062,11 @@ proc readFrame*(framePath: string, scratch: string): FrameReading =
   createDir(scratch)
   for cell in grid.value.cells:
     result.panes.add identifyPane(img, cell, scratch)
+  # A cell whose strip is drawn above it (the GPUI window's), identified
+  # against every OTHER cell's answer — see `identifyByStripAbove`.
+  for i in 0 ..< result.panes.len:
+    result.panes[i] = identifyByStripAbove(img, result.panes[i], result.panes,
+                                           scratch)
 
   var stateCell, logCell, edCell = Rect(x: -1, y: -1, w: 0, h: 0)
   for p in result.panes:

@@ -30,7 +30,7 @@
 ##
 ## WHY THE ASSERTIONS LIVE AT `stopReplaySession` AND NOT AT `stopAction`.
 ## `renderer.nim` cannot be imported by any runnable lane — `nim js` on it
-## pulls the Karax/Monaco tree — so `renderer-electron` / `renderer-web`
+## pulls the kdom/Monaco tree — so `renderer-electron` / `renderer-web`
 ## compile-check it and no suite runs it. An empty body is invisible to a
 ## compile check, which is how this one lasted. `stopAction`'s entire body is
 ## `discard stopReplaySession(data)`, and `stopReplaySession` is a leaf.

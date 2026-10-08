@@ -113,22 +113,24 @@ const
   FixtureName = "calc"
   Cols = 120
   Rows = 40
-    ## 120x40 selects the STANDARD profile (`app/layout/profile.selectProfile`:
-    ## `lpCompact` below 35 rows whatever the width, `lpStandard` at 120
-    ## columns), so TIMELINE gets a rectangle of its own instead of being a tab
-    ## of the state stack. The same geometry CTUI-11's suite uses, so a frame
-    ## that differs between the two files differs for a reason other than size.
+    ## 120x40 is where the shared default (PLAT-45) opens UNFOLDED — every
+    ## region of it gets its cell minimum. The same geometry CTUI-11's suite
+    ## uses, so a frame that differs between the two files differs for a
+    ## reason other than size.
   NoHandlerText = "ct: no component handles 'tui'"
     ## `S_ERR_NO_HANDLER` + the command, from
     ## `codetracer-launcher/src/install.nim`'s emit block. Not importable: that
     ## string lives in C inside an `--os:standalone` module.
-  PaneTitles: array[4, string] = ["CALL STACK", "SOURCE", "VARIABLES", "TIMELINE"]
-    ## §3.1's screen, as the pane titles a real frame carries. Asserted as a
+  PaneTitles: array[4, string] = [" Call Trace ", " main.py ", " Variables ",
+                                  "Event Log"]   # PLAT-51: was the Timeline tab
+    ## §3.1's screen, as the shared default draws it: the panes' tab labels
+    ## (PLAT-49: no pane carries a title row; a lone editor's tab names its
+    ## file), and the timeline as a tab label of the events stack (PLAT-45). Asserted as a
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-09-23"
-  MeasuredBinaryBytes = 15_066_024
+  MeasurementDate = "2026-09-29"
+  MeasuredBinaryBytes = 15_855_880
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -183,8 +185,45 @@ const
     ## this binary gained, and no data: no corpus, fixture or `staticRead`
     ## table is linked in. Stripped: 14_143_088. The ceiling keeps the band's
     ## 8.02% over the new anchor.
+    ##
+    ##   15_224_400  2026-09-26: `dev` at 83a11a590, built fresh for the
+    ##               comparison below (PLAT-4/6/45 growth since 09-23, never
+    ##               re-anchored; inside the band)
+    ##   15_247_872  2026-09-26: PLAT-46, the terminal painted from the design
+    ##               system
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. PLAT-46 costs +23_472 bytes (+0.154%) over
+    ## the same `dev` built the same way: the generated token module
+    ## (`src/frontend/styles/generated/design_tokens.nim`, 137 tokens x 2
+    ## modes of `#rrggbb` strings and their enum names), the role table
+    ## (`app/theme/roles.nim`), the derived-rung cache and OKLab arithmetic
+    ## (`palette.nim`, `colour_math.nim`; ~62 KB of symbols between them, most
+    ## of it two 24 KB `.bss` tables that occupy no file bytes), and the query
+    ## round (`host/terminal_probe.nim`), less the four hand-written tint
+    ## tables and `roleFor` it deleted. The ceiling keeps 8.02% over the anchor.
+    ##
+    ##   15_371_840  2026-09-29: `agents` at 836efe206 (PLAT-47 part A),
+    ##               built fresh for the comparison below; inside the band
+    ##   15_855_880  2026-09-29: PLAT-47 part B
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. Part B costs +484_040 bytes (+3.15%) over
+    ## part A built the same way, attributed by summing `nm -S` per Nim
+    ## module: the desktop's Monaco tokenizers — the generated Monarch
+    ## definitions `staticRead` into read-only data (~87 KB,
+    ## `app/syntax/monarch_languages.json`), the Monarch engine and its
+    ## JavaScript-regex matcher (`monarch.nim`, `js_regex.nim`, ~104 KB of
+    ## code between them) and `lexical.nim`, less the hand port of Python's
+    ## tokenizer they replace (-19 KB in `highlighter.nim`); the VCS pane on
+    ## the desktop's `VCSVM` (`vcs_vm`, `platform/vcs`, `host/native_vcs`,
+    ## `views/vcs_pane`, ~85 KB); and the drop overlay (isonim-tui's
+    ## `overlay.nim` and the compositor's overlay pass, ~15 KB). A data table
+    ## this time, and said so: the Monarch definitions are the one thing linked
+    ## in as data, deliberately — they ARE the desktop's tokenizers, exported
+    ## from the pinned `monaco-editor` and gated fresh
+    ## (`ci/test/monarch-languages-fresh.sh`). The ceiling keeps 8.02% over the
+    ## anchor.
 
-  BinaryCeilingBytes = 16_274_000
+  BinaryCeilingBytes = 17_127_600
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

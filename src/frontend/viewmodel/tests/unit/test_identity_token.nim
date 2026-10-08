@@ -1,546 +1,327 @@
-## Headless tests for the identity token and its verification — ID1.
+## `token.nim` — inspection, bands and decisions, with no signature anywhere.
 ##
-## LANE: `vm-unit` AND `vm-unit-js`, both by the directory glob, and the second
-## is not incidental. `viewmodel/identity/token.nim` parses attacker-shaped
-## JSON, and CONTRIBUTING.md's portability rule is about exactly that: on the C
-## backend `parseJson` raises `JsonParsingError`, on the JS backend V8 throws a
-## raw `SyntaxError` that no Nim type matches. The malformed-token cases below
-## are the ones that would have caught that, and they only catch it if this
-## file runs on both backends — which is why `test_rejects_a_payload_that_is_not_json`
-## exists as its own case rather than as one line inside another.
+## ## What changed, and why this suite shrank
 ##
-## Compile and run:
-##   nim c  -r src/frontend/viewmodel/tests/unit/test_identity_token.nim
-##   nim js -r src/frontend/viewmodel/tests/unit/test_identity_token.nim
+## This file used to lay out a `CTI\x01` container by hand — magic, LE32 length,
+## a 64-byte signature — and assert four grace bands with licensing's numbers
+## (30 days, 14, 7) from `CodeTracer-End-User-Licensing.md` §3.3.1a. Both are
+## gone: a token is a compact JWS from the shared issuer, and offline
+## entitlement is licensing's problem, solved by licensing's own file.
 ##
-## ## The three ID1 verifications this file carries
+## Two cases went with them. `the published windows are inherited, not invented`
+## asserted three constants that no longer exist, and
+## `test_revocation_takes_effect_within_the_stated_window` asserted a revocation
+## list thresholded on licensing's renew lead — a channel the issuer does not
+## offer. OIDC delivers revocation by refusing to renew, which is the session
+## layer's business and is asserted there.
 ##
-##   test_verification_needs_no_network
-##   test_expiry_degrades_to_grace_then_prompt
-##   test_revocation_takes_effect_within_the_stated_window
+## ## The fixtures are still a SEPARATE IMPLEMENTATION from the parser
 ##
-## ## The tautology this suite is written against
+## That property is the reason the old file wrote the container out by hand, and
+## it survives the format change: the JWS below is assembled from literal field
+## names and its own base64url, importing nothing from `jwt.nim`. A parser that
+## stopped reading `exp` could not make this file agree with it.
 ##
-## The easy way to test a verifier is to build a token with the same code that
-## reads it and assert they agree. That passes over a verifier that accepts
-## everything, and it passes over one that accepts nothing if the builder is
-## broken in the mirror way.
+## ## No signature, and that is the design
 ##
-## So the fixture below is an ISSUER, not a mirror: it emits the container as
-## bytes, from the field names the spec publishes, and nothing in it imports
-## the parser. And every acceptance case is paired with a REJECTION over a
-## one-field mutation of the same bytes — if the verifier stopped reading a
-## field, its acceptance case would still pass and its rejection twin would go
-## red immediately. That pairing is the control, per
-## Testing/Verification-Harness-Traps.md 4a.
+## `token.nim` has no verification seam any more. There is nothing here for a
+## signature to be injected into, because the one place a signature is checked
+## is `session.admit`, asynchronously, and `ci/test/identity-webcrypto.sh` plus
+## `test_identity_rs256_seam.nim` are what exercise the primitive. This suite is
+## about everything decidable WITHOUT it, which is where JWT verifiers actually
+## go wrong.
 
-import std/[json, strutils, unittest]
+import std/[base64, json, strutils, unittest]
 
 import ../../identity/token
 
-# ---------------------------------------------------------------------------
-# Counted assertions. `counted` is a TEMPLATE so that `check` is inlined into
-# the `test` body where `testStatusIMPL` is in scope — inside a proc every
-# check would print and still report [OK]. Same reasoning as
-# `test_noir_wasm_delivery.nim`.
-# ---------------------------------------------------------------------------
 var countedAssertions = 0
 
 template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 120
+const ExpectedAssertions = 80
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it. A count that moves without explanation is how
   ## trap 4b's silent skip becomes visible.
 
 # ---------------------------------------------------------------------------
-# THE ISSUER FIXTURE.
-#
-# This is deliberately a separate implementation from the parser: it writes the
-# published field names as literals and lays out the container by hand. It
-# does not import anything from `token.nim` except the format constants, so a
-# parser that stopped reading `renew_after` could not make this file agree with
-# it.
+# The ISSUER, by hand. Field names are OIDC Core §2's, written as literals.
 # ---------------------------------------------------------------------------
 const
   TestKeyId = "ct-identity-2026-08"
   RotatedKeyId = "ct-identity-2026-11"
   Subject = "acct_01HQ8Z3K"
+  Issuer = "https://login.metacraft-labs.com"
+  Aud = "codetracer-desktop"
 
   # A fixed instant, so no case reads a clock. 2026-08-31T00:00:00Z.
   T0 = 1_787_875_200'i64
+  # An hour, which is the order of an ID token's life. Not a constant borrowed
+  # from anywhere: the point of the derived refresh band is that the client
+  # works for whatever lifetime the issuer chose.
+  Hour = 3600'i64
 
-proc fakeSign(message: openArray[byte]): seq[byte] =
-  ## A stand-in for Ed25519. It is not cryptography and does not pretend to be
-  ## — it is a deterministic function of every message byte, which is the only
-  ## property the tests need: change any byte of the message and the signature
-  ## no longer matches. The real primitive is injected at the same seam
-  ## (`PinnedKeyring.verify`), so these tests exercise the same code path the
-  ## product does, with a different function behind the seam.
-  result = newSeq[byte](SignatureLen)
-  var acc: uint32 = 0x9E37_79B9'u32
-  for b in message:
-    acc = (acc xor uint32(b)) * 16_777_619'u32
-  for i in 0 ..< SignatureLen:
-    acc = (acc xor uint32(i)) * 16_777_619'u32
-    result[i] = byte((acc shr 13) and 0xFF'u32)
+proc b64u(s: string): string =
+  encode(s).replace("+", "-").replace("/", "_").replace("=", "")
 
-proc verifierFor(knownKey: string): SignatureVerifier =
-  ## Verifies only for `knownKey`. A different key id yields false, which is
-  ## what lets the rotation case distinguish "unknown key" from "bad signature".
-  result = proc(keyId: string; message: openArray[byte];
-                signature: openArray[byte]): bool {.gcsafe, raises: [].} =
-    if keyId != knownKey:
-      return false
-    let expected = fakeSign(message)
-    if expected.len != signature.len:
-      return false
-    for i in 0 ..< expected.len:
-      if expected[i] != signature[i]:
-        return false
-    true
+proc jws(payload: JsonNode; kid = TestKeyId; alg = "RS256";
+         segments = 3; signature = "sig-bytes"): string =
+  ## header.payload.signature, assembled here rather than by `jwt.nim`.
+  let header = %*{"alg": alg, "kid": kid, "typ": "JWT"}
+  result = b64u($header) & "." & b64u($payload)
+  if segments >= 3:
+    result.add("." & b64u(signature))
 
-type IssuedToken = object
-  bytes: seq[byte]
+proc claimsJson(subject = Subject; issuer = Issuer; audience = Aud;
+                issuedAt = T0; expiresAt = T0 + Hour;
+                notBefore = 0'i64): JsonNode =
+  result = %*{"sub": subject, "iss": issuer, "aud": audience}
+  if issuedAt != 0: result["iat"] = %issuedAt
+  if expiresAt != 0: result["exp"] = %expiresAt
+  if notBefore != 0: result["nbf"] = %notBefore
 
-proc issue(payload: JsonNode; magic = IdentityMagic;
-           corruptSignature = false;
-           lengthDelta = 0): IssuedToken =
-  ## Lay out magic + u32le length + payload + signature, by hand.
-  let text = $payload
-  var raw: seq[byte] = @[]
-  for c in magic:
-    raw.add byte(c)
-  let declared = uint32(text.len + lengthDelta)
-  raw.add byte(declared and 0xFF'u32)
-  raw.add byte((declared shr 8) and 0xFF'u32)
-  raw.add byte((declared shr 16) and 0xFF'u32)
-  raw.add byte((declared shr 24) and 0xFF'u32)
-  for c in text:
-    raw.add byte(c)
-  var sig = fakeSign(raw)
-  if corruptSignature:
-    sig[0] = byte((uint32(sig[0]) + 1'u32) and 0xFF'u32)
-  raw.add sig
-  IssuedToken(bytes: raw)
+proc keys(kid = TestKeyId): seq[JwkKey] =
+  ## What the issuer publishes. `n` and `e` are not exercised here — nothing in
+  ## this suite verifies a signature — but `selectKey` refuses a key with an
+  ## empty modulus, so they have to be present for the key to be usable at all.
+  @[JwkKey(kid: kid, alg: "RS256", kty: "RSA", n: "AQAB", e: "AQAB")]
 
-proc claimsJson(expiresAt = T0 + DefaultLicensePeriod;
-                issuedAt = T0;
-                keyId = TestKeyId;
-                subject = Subject;
-                renewAfter = T0 + DefaultLicensePeriod - DefaultRenewLead;
-                warnAfter = T0 + DefaultLicensePeriod - DefaultWarnLead;
-                notBefore = 0'i64;
-                entitlements: seq[string] = @["replay:unlimited", "visual_replay"];
-                exceptionReason = ""): JsonNode =
-  ## Field names are the ones §3.3.1 publishes, written out here rather than
-  ## referenced from the parser.
-  result = %*{
-    "sub": subject,
-    "key_id": keyId,
-    "issued_at": issuedAt,
-    "renew_after": renewAfter,
-    "warn_after": warnAfter,
-    "expires_at": expiresAt,
-    "entitlements": entitlements
-  }
-  if notBefore != 0:
-    result["not_before"] = %notBefore
-  if exceptionReason.len > 0:
-    result["window_exception_reason"] = %exceptionReason
+proc inspect(payload: JsonNode; kid = TestKeyId; alg = "RS256";
+             published = TestKeyId; audience = Aud): TokenInspection =
+  inspectJws(jws(payload, kid = kid, alg = alg), keys(published), Issuer,
+             audience)
 
-proc keyring(known = TestKeyId; pinned: seq[string] = @[TestKeyId]): PinnedKeyring =
-  PinnedKeyring(keyIds: pinned, verify: verifierFor(known))
-
-proc decide(t: IssuedToken; nowUnix = T0;
-            revocations = emptyRevocations();
-            ring = keyring()): IdentityDecision =
-  verifyToken(t.bytes, ring, nowUnix, revocations, defaultWindowPolicy())
+proc decide(payload: JsonNode; nowUnix = T0): IdentityDecision =
+  let i = inspect(payload)
+  if not i.inspectionOk():
+    return rejectedDecision(i.inspectionKind(), i.inspectionDetail())
+  decideVerified(i.inspectionClaims(), nowUnix)
 
 suite "identity token (ID1)":
 
   # -------------------------------------------------------------------------
-  test "the published windows are inherited, not invented":
-    ## ID1's third deliverable: bounded offline grace "inheriting licensing's
-    ## windows and per-account exceptions rather than inventing new ones".
-    ## CodeTracer-End-User-Licensing.md §3.3.1a publishes 30 / 14 / 7 days.
-    counted DefaultLicensePeriod == 30 * 86_400
-    counted DefaultRenewLead == 14 * 86_400
-    counted DefaultWarnLead == 7 * 86_400
-    let p = defaultWindowPolicy()
-    counted p.licensePeriod == DefaultLicensePeriod
-    counted p.renewLead == DefaultRenewLead
-    counted p.warnLead == DefaultWarnLead
-    # The ordering the four bands need in order to all be reachable.
-    counted identityInvariantsHold(p)
-    counted not identityInvariantsHold(
-      WindowPolicy(licensePeriod: 10, renewLead: 20, warnLead: 5))
-    counted not identityInvariantsHold(
-      WindowPolicy(licensePeriod: DefaultLicensePeriod,
-                   renewLead: DefaultWarnLead, warnLead: DefaultRenewLead))
-    counted not identityInvariantsHold(
-      WindowPolicy(licensePeriod: DefaultLicensePeriod,
-                   renewLead: DefaultRenewLead, warnLead: 0))
+  test "the refresh point is derived from the token's own lifetime":
+    ## NOT CONFIGURED, AND NOT A CLAIM. The retired version read a
+    ## `renew_after` claim whose default came from licensing's
+    ## `LICENSE_RENEW_LEAD` — a field no OIDC issuer emits, so the client was
+    ## reading something only it wrote. Half the token's own lifetime scales
+    ## with whatever the issuer chose, which is the property that matters when
+    ## the issuer moves from an hour to fifteen minutes.
+    let i = inspect(claimsJson())
+    counted i.inspectionOk()
+    let c = i.inspectionClaims()
+    counted c.issuedAt() == T0
+    counted c.expiresAt() == T0 + Hour
+    counted c.renewAfter() == T0 + Hour div 2
+
+    # A fifteen-minute token refreshes at seven and a half minutes, with no
+    # constant changed anywhere.
+    let short = inspect(claimsJson(expiresAt = T0 + 900)).inspectionClaims()
+    counted short.renewAfter() == T0 + 450
+
+    # And a token whose timestamps cannot describe a lifetime has no refresh
+    # point at all, rather than one in the past.
+    let noIat = inspect(claimsJson(issuedAt = 0)).inspectionClaims()
+    counted noIat.renewAfter() == 0
 
   # -------------------------------------------------------------------------
-  test "test_verification_needs_no_network":
-    ## "A product verifies a token, checks its claims and proceeds with the
-    ## network disabled; obtaining a token needs the network, using one never
-    ## does."
+  test "the bands, and expiry is inclusive":
+    ## The boundary that matters: a token is NOT valid at the second it
+    ## expires. An exclusive test accepts it for one more second, which is the
+    ## kind of off-by-one that never shows up in a functional test.
+    let c = inspect(claimsJson()).inspectionClaims()
+
+    counted bandAt(c, T0) == ibNormal
+    counted bandAt(c, T0 + Hour div 2 - 1) == ibNormal
+    counted bandAt(c, T0 + Hour div 2) == ibRenewing
+    counted bandAt(c, T0 + Hour - 1) == ibRenewing
+    counted bandAt(c, T0 + Hour) == ibExpired
+    counted bandAt(c, T0 + Hour + 1) == ibExpired
+
+    # `nbf` is EXCLUSIVE, and is tested FIRST: a token whose `nbf` is after its
+    # `exp` reads as not-yet-valid rather than expired, because that is the
+    # more accurate thing to tell somebody.
+    let future = inspect(claimsJson(notBefore = T0 + 10)).inspectionClaims()
+    counted bandAt(future, T0) == ibNotYetValid
+    counted bandAt(future, T0 + 9) == ibNotYetValid
+    counted bandAt(future, T0 + 10) == ibNormal
+
+    let inverted = inspect(claimsJson(notBefore = T0 + Hour + 100)).inspectionClaims()
+    counted bandAt(inverted, T0 + Hour + 1) == ibNotYetValid
+
+    # THREE BANDS RENEW OR DO NOT, and only one renews. There is no second
+    # band that also renews, because there is no warning band.
+    counted shouldAttemptRenewal(ibRenewing)
+    counted not shouldAttemptRenewal(ibNormal)
+    counted not shouldAttemptRenewal(ibExpired)
+    counted not shouldAttemptRenewal(ibNotYetValid)
+
+  # -------------------------------------------------------------------------
+  test "inspection takes no clock, so expiry is decided in one place":
+    ## `inspectJws` is deliberately clock-free: `exp` and `nbf` are left to
+    ## `bandAt`. A version that also checked the window would make a token's
+    ## validity a function of two comparisons that can drift apart.
     ##
-    ## There is no network to disable here, and that is the point rather than a
-    ## weakness of the test: `verifyToken` takes the token, the keyring, the
-    ## clock and the revocation list as ARGUMENTS. The only injected callable
-    ## is the signature primitive, and this case counts its invocations so that
-    ## "nothing else was consulted" is measured rather than assumed.
-    var verifierCalls = 0
-    var callsForExpectedKeyId = 0
-    let counting = PinnedKeyring(
-      keyIds: @[TestKeyId],
-      verify: proc(keyId: string; message: openArray[byte];
-                   signature: openArray[byte]): bool {.gcsafe, raises: [].} =
-        inc verifierCalls
-        if keyId == TestKeyId:
-          inc callsForExpectedKeyId
-        let expected = fakeSign(message)
-        if expected.len != signature.len: return false
-        for i in 0 ..< expected.len:
-          if expected[i] != signature[i]: return false
-        true)
+    ## Asserted behaviourally rather than by reading the signature: an
+    ## ALREADY-EXPIRED token inspects OK. It is `decideVerified` that calls it
+    ## expired, and it still returns the claims when it does.
+    let expired = claimsJson(issuedAt = T0 - 2 * Hour, expiresAt = T0 - Hour)
+    let i = inspect(expired)
+    counted i.inspectionOk()
+    counted i.inspectionKind() == dkAccepted
 
-    let d = decide(issue(claimsJson()), ring = counting)
-    counted d.kind == dkAccepted
-    counted d.band == ibNormal
-    counted d.claims.subject == Subject
-    counted d.claims.keyId == TestKeyId
-    counted d.entitlementsAreInForce()
-    counted d.claims.hasEntitlement("visual_replay")
-    counted not d.claims.hasEntitlement("enterprise:sso")
-    # Exactly one primitive call, and it is the signature check.
-    counted verifierCalls == 1
-    counted callsForExpectedKeyId == 1
+    let d = decide(expired, nowUnix = T0)
+    counted d.kind() == dkExpired
+    counted d.band() == ibExpired
+    # CLAIMS ARE RETURNED. A product cannot write "your session ended" without
+    # knowing whose, and expiry falls back to the anonymous tier rather than
+    # refusing — refusing is not even enforceable, since a user can delete the
+    # token and get that tier anyway.
+    counted d.claims().subject() == Subject
+    counted not d.identityIsInForce()
 
-    # The paired REJECTION over the same bytes: flip one signature byte and the
-    # same path must refuse. Without this twin, the acceptance above would also
-    # pass against a verifier that ignored the signature entirely.
-    let tampered = decide(issue(claimsJson(), corruptSignature = true),
-                          ring = counting)
-    counted tampered.kind == dkBadSignature
-    counted not tampered.entitlementsAreInForce()
-    counted tampered.claims.subject.len == 0
-      # A rejected token yields NO claims. A verifier that returned the
-      # parsed subject before checking the signature would let a forged token
-      # name any account.
-    counted verifierCalls == 2
+    # ...and a token valid at the same instant is in force, which is the
+    # control that stops the above being true of a decision that refuses
+    # everything.
+    counted decide(claimsJson()).identityIsInForce()
 
   # -------------------------------------------------------------------------
-  test "test_expiry_degrades_to_grace_then_prompt":
-    ## "An expired token produces a grace window and then a prompt, never a
-    ## debugger that stops working mid-session."
-    ##
-    ## §3.3.1a's four bands, walked across one token's life. Each band asserts
-    ## BOTH its own name and the two behaviours that distinguish it — whether
-    ## renewal is attempted, and whether the user is told — because the
-    ## renewing band and the warning band differ in exactly the second one and
-    ## a test that only checked the enum would not notice them merging.
-    let expiresAt = T0 + DefaultLicensePeriod
-    let renewAfter = expiresAt - DefaultRenewLead
-    let warnAfter = expiresAt - DefaultWarnLead
-    let t = issue(claimsJson(expiresAt = expiresAt))
+  test "a key the issuer does not publish is refused, distinctly":
+    ## `dkUnknownKeyId` and `dkBadSignature` must stay different, because a
+    ## product has to be able to say "update to pick up the new key" rather
+    ## than "your token is forged". This is the rotation story, and it is now
+    ## the issuer's JWKS rather than a set pinned into the build.
+    let rotated = inspect(claimsJson(), kid = RotatedKeyId,
+                          published = TestKeyId)
+    counted not rotated.inspectionOk()
+    counted rotated.inspectionKind() == dkUnknownKeyId
+    counted RotatedKeyId in rotated.inspectionDetail()
 
-    # Band 1: normal. No network required, none attempted.
-    let normal = decide(t, nowUnix = T0)
-    counted normal.kind == dkAccepted
-    counted normal.band == ibNormal
-    counted not normal.band.shouldAttemptRenewal()
-    counted not normal.band.shouldWarnUser()
-    counted normal.entitlementsAreInForce()
-
-    # Band 2: renewing, and SILENT.
-    let renewing = decide(t, nowUnix = renewAfter + 1)
-    counted renewing.kind == dkAccepted
-    counted renewing.band == ibRenewing
-    counted renewing.band.shouldAttemptRenewal()
-    counted not renewing.band.shouldWarnUser()
-    counted renewing.entitlementsAreInForce()
-
-    # Band 3: warning. Still working, and now visible.
-    let warning = decide(t, nowUnix = warnAfter + 1)
-    counted warning.kind == dkAccepted
-    counted warning.band == ibWarning
-    counted warning.band.shouldAttemptRenewal()
-    counted warning.band.shouldWarnUser()
-    counted warning.entitlementsAreInForce()
-      # The whole point of the warning band: entitlements are STILL in force.
-
-    # Band 4: expired. Entitlements stop; the product does not.
-    let expired = decide(t, nowUnix = expiresAt)
-    counted expired.kind == dkExpired
-    counted expired.band == ibExpired
-    counted not expired.entitlementsAreInForce()
-    counted expired.claims.subject == Subject
-      # Claims ARE returned for an expired token. §3.3.1a's message "names the
-      # date, not a countdown", and a product cannot name it without them.
-      # Licensing cannot do this: `LicenseStatus` has no expired variant.
-    counted expired.claims.expiresAt == expiresAt
-    counted expired.detail.len > 0
-
-    # Expiry is INCLUSIVE, matching licensing's `>=`. The boundary second is
-    # expired, not valid; the second before it is the warning band.
-    counted decide(t, nowUnix = expiresAt - 1).band == ibWarning
-    counted decide(t, nowUnix = expiresAt).band == ibExpired
-
-    # The bands are strictly ordered across the whole life, with no gap and no
-    # overlap. Counted as one assertion per sample so a merged pair is visible.
-    var samples = 0
-    for (at, want) in [(T0, ibNormal), (renewAfter - 1, ibNormal),
-                       (renewAfter, ibRenewing), (warnAfter - 1, ibRenewing),
-                       (warnAfter, ibWarning), (expiresAt - 1, ibWarning),
-                       (expiresAt, ibExpired), (expiresAt + 999_999, ibExpired)]:
-      inc samples
-      counted decide(t, nowUnix = at).band == want
-    counted samples == 8
-
-    # A not-yet-valid token is a distinct state, and it is tested FIRST, so a
-    # token whose not_before is after its expiry reports not-yet-valid.
-    let future = issue(claimsJson(notBefore = T0 + 10))
-    counted decide(future, nowUnix = T0).band == ibNotYetValid
-    counted decide(future, nowUnix = T0 + 11).band == ibNormal
+    # The same token against a JWKS that HAS rotated is fine, with nothing
+    # rebuilt — which is the whole reason the keys are fetched.
+    let afterRotation = inspect(claimsJson(), kid = RotatedKeyId,
+                                published = RotatedKeyId)
+    counted afterRotation.inspectionOk()
 
   # -------------------------------------------------------------------------
-  test "test_revocation_takes_effect_within_the_stated_window":
-    ## "A revoked account loses entitlement within the documented window on
-    ## every product, and the window is the one the licensing spec already
-    ## publishes."
-    let t = issue(claimsJson())
-    let revoked = RevocationList(subjects: @[Subject], obtainedAt: T0)
+  test "another issuer, and another of our issuer's clients, are told apart":
+    ## Two different facts that both mean "not ours", and they need different
+    ## words. A wrong `iss` is somebody else's account system. A wrong `aud` is
+    ## our own issuer minting a token for a different client of ours — genuine,
+    ## unexpired, correctly signed, and not for us. Collapsing them would
+    ## report a configuration mistake as an attack.
+    let foreign = inspectJws(jws(claimsJson(issuer = "https://login.evil.example")),
+                             keys(), Issuer, Aud)
+    counted not foreign.inspectionOk()
+    counted foreign.inspectionKind() == dkWrongIssuer
 
-    let before = decide(t, nowUnix = T0)
-    counted before.kind == dkAccepted
-    counted before.entitlementsAreInForce()
+    let otherClient = inspect(claimsJson(audience = "some-other-client"))
+    counted not otherClient.inspectionOk()
+    counted otherClient.inspectionKind() == dkWrongAudience
 
-    let after = decide(t, nowUnix = T0, revocations = revoked)
-    counted after.kind == dkRevoked
-    counted not after.entitlementsAreInForce()
-    counted after.claims.subject == Subject
-    counted after.detail.contains("revoked")
-
-    # Another subject on the list must not revoke this one.
-    let other = RevocationList(subjects: @["acct_SOMEONE_ELSE"], obtainedAt: T0)
-    counted decide(t, nowUnix = T0, revocations = other).kind == dkAccepted
-    counted isRevoked(revoked, Subject)
-    counted not isRevoked(revoked, "acct_SOMEONE_ELSE")
-    counted not isRevoked(emptyRevocations(), Subject)
-
-    # THE WINDOW. §3.3.1a: "Revocation reaches a client at its next renewal,
-    # and no sooner ... cancellation leakage is bounded by the renewal period."
-    # The spec never writes a number in that sentence, so the bound is DERIVED,
-    # and the derivation is pinned here: a client holds a token for at most
-    # LICENSE_PERIOD, so that is the worst case.
-    counted revocationLatencyBound(defaultWindowPolicy()) == DefaultLicensePeriod
-    counted MaxRevocationLatency == DefaultLicensePeriod
-    counted MaxRevocationLatency == 30 * 86_400
-    counted revocationLatencyBound(defaultWindowPolicy()) > DefaultRenewLead
-      # The worst case is the period, NOT the renew lead. Stating the typical
-      # case as the bound is how a leak window gets understated.
-
-    # And the bound is only true because a token cannot outlive it. A token
-    # that never expires would make revocation unbounded, so it is refused.
-    let immortal = issue(%*{
-      "sub": Subject, "key_id": TestKeyId, "issued_at": T0,
-      "renew_after": T0 + 1, "warn_after": T0 + 2, "expires_at": 0,
-      "entitlements": []})
-    let immortalDecision = decide(immortal)
-    counted immortalDecision.kind == dkMalformed
-    counted immortalDecision.detail.contains("never expires")
-    counted immortalDecision.claims.subject.len == 0
-
-    # A token whose period exceeds the published default is a per-account
-    # exception and needs a recorded reason — §3.3.1a allows the exception
-    # "with a recorded reason, not a global loosening".
-    let overlong = issue(claimsJson(
-      expiresAt = T0 + DefaultLicensePeriod * 4,
-      renewAfter = T0 + DefaultLicensePeriod * 4 - DefaultRenewLead,
-      warnAfter = T0 + DefaultLicensePeriod * 4 - DefaultWarnLead))
-    let overlongDecision = decide(overlong)
-    counted overlongDecision.kind == dkMalformed
-    counted overlongDecision.detail.contains("recorded")
-
-    let excepted = issue(claimsJson(
-      expiresAt = T0 + DefaultLicensePeriod * 4,
-      renewAfter = T0 + DefaultLicensePeriod * 4 - DefaultRenewLead,
-      warnAfter = T0 + DefaultLicensePeriod * 4 - DefaultWarnLead,
-      exceptionReason = "air-gapped site, ticket OPS-4471"))
-    let exceptedDecision = decide(excepted)
-    counted exceptedDecision.kind == dkAccepted
-    counted exceptedDecision.claims.windowExceptionReason.contains("OPS-4471")
-    counted windowsExceedPolicy(exceptedDecision.claims, defaultWindowPolicy())
-
-    # Revocation outranks expiry: a revoked subject whose token also expired
-    # reports revoked, because that is the fact a product must report.
-    let expiredAndRevoked = decide(t, nowUnix = T0 + DefaultLicensePeriod,
-                                   revocations = revoked)
-    counted expiredAndRevoked.kind == dkRevoked
+    counted dkWrongIssuer != dkWrongAudience
+    counted dkWrongIssuer != dkMalformed
+    counted dkWrongAudience != dkMalformed
 
   # -------------------------------------------------------------------------
-  test "key rotation is expressible, which licensing cannot do":
-    ## Licensing's container carries no key id: `enforcement.rs` trusts exactly
-    ## one baked-in key, so a rotation cannot be signalled to a deployed binary
-    ## and the only bound on a compromised key is the 365-day binary-age gate.
-    ## A token names its key, so an old build can say "update me" instead.
-    let rotated = issue(claimsJson(keyId = RotatedKeyId))
+  test "a token that is not a token is refused, and says which part":
+    # Structure first: the parser's refusals arrive here as `dkMalformed` with
+    # the parser's own sentence, so a reader is told what was wrong.
+    let twoSegments = inspectJws(jws(claimsJson(), segments = 2), keys(),
+                                 Issuer, Aud)
+    counted not twoSegments.inspectionOk()
+    counted twoSegments.inspectionKind() == dkMalformed
+    counted "three" in twoSegments.inspectionDetail()
 
-    # A build that pins only the old key does not recognise the new one, and
-    # says so SPECIFICALLY — not "forged".
-    let oldBuild = decide(rotated)
-    counted oldBuild.kind == dkUnknownKeyId
-    counted oldBuild.kind != dkBadSignature
-    counted oldBuild.detail.contains(RotatedKeyId)
-    counted oldBuild.claims.subject.len == 0
+    # `alg` is the ISSUER's to state. `none` strips the check outright and
+    # HS256 invites verifying an RSA public key as an HMAC secret.
+    for hostile in ["none", "HS256", "ES256"]:
+      let bad = inspect(claimsJson(), alg = hostile)
+      counted not bad.inspectionOk()
+      counted bad.inspectionKind() == dkMalformed
 
-    # A build that pins both verifies the new token — this is rotation working.
-    let bothPinned = keyring(known = RotatedKeyId,
-                             pinned = @[TestKeyId, RotatedKeyId])
-    let newBuild = decide(rotated, ring = bothPinned)
-    counted newBuild.kind == dkAccepted
-    counted newBuild.claims.keyId == RotatedKeyId
-
-    # And an old token still verifies on the new build, which is the whole
-    # reason old artifacts stay verifiable across a rotation.
-    let oldToken = decide(issue(claimsJson()),
-                          ring = keyring(known = TestKeyId,
-                                         pinned = @[TestKeyId, RotatedKeyId]))
-    counted oldToken.kind == dkAccepted
-    counted oldToken.claims.keyId == TestKeyId
-
-    # A key that is PINNED but whose signature does not check out is a bad
-    # signature, not an unknown key. The two must not collapse.
-    let wrongSigner = decide(issue(claimsJson()),
-                             ring = keyring(known = "some-other-key",
-                                            pinned = @[TestKeyId]))
-    counted wrongSigner.kind == dkBadSignature
-
-  # -------------------------------------------------------------------------
-  test "test_rejects_a_payload_that_is_not_json":
-    ## THE BACKEND-PORTABILITY CASE. On C this exercises `JsonParsingError`; on
-    ## JS it exercises V8's raw `SyntaxError`, which no Nim exception type
-    ## matches. `token.nim` catches with a bare `except:` for that reason, and
-    ## if it is ever narrowed to `except CatchableError` this case passes under
-    ## `nim c` and CRASHES under `nim js` — which is the shape CONTRIBUTING.md
-    ## records as a whole class rather than an incident.
-    var raw: seq[byte] = @[]
-    for c in IdentityMagic: raw.add byte(c)
-    let junk = "this is not JSON at all {{{"
-    raw.add byte(junk.len and 0xFF)
-    raw.add 0'u8
-    raw.add 0'u8
-    raw.add 0'u8
-    for c in junk: raw.add byte(c)
-    let sig = fakeSign(raw)
-    for b in sig: raw.add b
-
-    let d = verifyToken(raw, keyring(), T0, emptyRevocations(),
-                        defaultWindowPolicy())
-    counted d.kind == dkMalformed
-    counted d.detail.contains("not valid JSON")
-    counted d.claims.subject.len == 0
-
-    # A well-formed JSON value that is not an object is a different rejection.
-    let arrayToken = issue(%*["not", "an", "object"])
-    counted decide(arrayToken).kind == dkMalformed
-    counted decide(arrayToken).detail.contains("not a JSON object")
-
-  # -------------------------------------------------------------------------
-  test "the container is refused when it is not ours":
-    ## A licence must not be usable as an identity token. They authorise
-    ## different things, and a shared magic would make substitution a parse
-    ## away.
-    let asLicence = issue(claimsJson(), magic = "CTL\x01")
-    counted asLicence.bytes.len > 0
-    let d = decide(asLicence)
-    counted d.kind == dkMalformed
-    counted d.detail.contains("magic")
-
-    # Length-field mismatches are refused rather than trusted. A declared
-    # length that does not account for the whole container is the classic
-    # way to smuggle bytes past a signature check.
-    counted decide(issue(claimsJson(), lengthDelta = 1)).kind == dkMalformed
-    counted decide(issue(claimsJson(), lengthDelta = -1)).kind == dkMalformed
-    counted decide(issue(claimsJson(), lengthDelta = 1)).detail.contains(
-      "does not account for the whole container")
-
-    # Too short to be a container at all.
-    counted verifyToken(@[byte(1), 2, 3], keyring(), T0, emptyRevocations(),
-                        defaultWindowPolicy()).kind == dkMalformed
-
-    # An absent verifier fails CLOSED. `licensing_ffi.nim` documents the same
-    # contract for a cdylib that will not load, and it is the only safe
-    # default: a verifier that cannot run must not mean "accept".
-    let noVerifier = PinnedKeyring(keyIds: @[TestKeyId], verify: nil)
-    let d2 = verifyToken(issue(claimsJson()).bytes, noVerifier, T0,
-                         emptyRevocations(), defaultWindowPolicy())
-    counted d2.kind == dkMalformed
-    counted d2.kind != dkAccepted
-    counted d2.detail.contains("verifier")
+    # A payload that is not JSON at all.
+    let notJson = inspectJws(b64u("""{"alg":"RS256","kid":"k"}""") & "." &
+                             b64u("{not json") & "." & b64u("sig"),
+                             keys(kid = "k"), Issuer, Aud)
+    counted not notJson.inspectionOk()
+    counted notJson.inspectionKind() == dkMalformed
 
   # -------------------------------------------------------------------------
   test "claims that do not hold together are refused, each by name":
-    ## Every rejection names its reason, so a refused token is diagnosable
-    ## rather than merely refused.
-    proc violation(j: JsonNode): string =
-      decide(issue(j)).detail
+    ## TWO RULES, DOWN FROM SEVEN. The five that went were windows. What is
+    ## left is what nothing upstream checks: `jwt` covers `alg`, `kid`, `iss`,
+    ## `aud`, `exp` and `nbf`, and none of it looks at `sub` or at the two
+    ## timestamps agreeing with each other.
+    let noSubject = inspect(claimsJson(subject = ""))
+    counted not noSubject.inspectionOk()
+    counted noSubject.inspectionKind() == dkMalformed
+    counted "subject" in noSubject.inspectionDetail()
 
-    counted violation(claimsJson(subject = "")).contains("no subject")
-    counted violation(claimsJson(keyId = "")).contains("no key_id")
-    counted violation(claimsJson(issuedAt = T0 + DefaultLicensePeriod + 1))
-      .contains("issued_at is not before expires_at")
+    let inverted = inspect(claimsJson(issuedAt = T0 + Hour, expiresAt = T0))
+    counted not inverted.inspectionOk()
+    counted "lifetime" in inverted.inspectionDetail()
 
-    # renew_after < warn_after < expires_at must hold, or a band is unreachable.
-    let inverted = claimsJson()
-    inverted["renew_after"] = %(T0 + DefaultLicensePeriod - 1)
-    inverted["warn_after"] = %(T0 + 1)
-    counted violation(inverted).contains("unreachable")
-
-    let missingBands = %*{
-      "sub": Subject, "key_id": TestKeyId, "issued_at": T0,
-      "expires_at": T0 + DefaultLicensePeriod, "entitlements": []}
-    counted violation(missingBands).contains("grace bands")
-
-    # And the positive twin for every one of those: the unmutated claims are
-    # accepted. Without it, a `claimRuleViolation` that returned a message for
-    # EVERYTHING would satisfy all five rejections above.
-    counted claimRuleViolation(
-      decide(issue(claimsJson())).claims, defaultWindowPolicy()).len == 0
-    counted decide(issue(claimsJson())).kind == dkAccepted
+    # THE POSITIVE TWIN, and it is what stops `claimRuleViolation` becoming a
+    # function that returns a sentence for everything.
+    counted claimRuleViolation(inspect(claimsJson()).inspectionClaims()) == ""
 
   # -------------------------------------------------------------------------
   test "claims cannot be authored by a product":
-    ## ID1: "Claims are **read** by products, never authored by them."
+    ## Enforced by the type system rather than by review. The fields are
+    ## unexported, the accessors are all `func`, and there is no exported
+    ## constructor — so a product that wants to invent a subject has to change
+    ## `token.nim` to do it.
+    counted not compiles(IdentityClaims(subjectField: "forged"))
+    counted not compiles(IdentityClaims().subjectField)
+    counted not compiles(IdentityClaims().expiresAtField)
+
+    var c = inspect(claimsJson()).inspectionClaims()
+    counted not compiles(c.subjectField = "forged")
+    counted c.subject() == Subject
+
+    # And a decision cannot be forged into an acceptance: the only exported
+    # constructor coerces `dkAccepted` away.
+    let forged = rejectedDecision(dkAccepted, "trying to manufacture one")
+    counted forged.kind() == dkMalformed
+    counted not forged.identityIsInForce()
+    counted forged.claims().subject() == ""
+
+  # -------------------------------------------------------------------------
+  test "nothing here carries an entitlement":
+    ## An identity token that also carried entitlements would re-create the
+    ## licensing/identity conflation one layer down. Identity says WHO;
+    ## entitlement is licensing's and billing's.
     ##
-    ## This is enforced by the type system rather than by review, and the proof
-    ## is a compile-time one: `IdentityClaims`'s fields are unexported and the
-    ## module exports no constructor, so the expression that would author a
-    ## subject does not compile. `compiles()` is the assertion — it is checked
-    ## at compile time and reported here.
-    counted not compiles(IdentityClaims(subjectField: "acct_FORGED"))
-    counted not compiles(block:
-      var c = decide(issue(claimsJson())).claims
-      c.subjectField = "acct_FORGED")
-    counted not compiles(block:
-      var c = decide(issue(claimsJson())).claims
-      c.entitlementsField.add "enterprise:sso")
-    # A default-constructed claims value is legal Nim and is INERT — it names
-    # nobody, so it cannot be smuggled in as an identity.
-    counted IdentityClaims().subject.len == 0
-    counted IdentityClaims().entitlements.len == 0
-    counted not IdentityClaims().hasEntitlement("visual_replay")
-    # Reading is unrestricted, which is the other half of the rule.
-    let c = decide(issue(claimsJson())).claims
-    counted c.subject == Subject
-    counted c.entitlements.len == 2
-    counted c.issuedAt == T0
+    ## Asserted as an absence, which is only meaningful because it is checked
+    ## at compile time: these names existed in this file's previous version.
+    counted not compiles(IdentityClaims().entitlementsField)
+    counted not compiles(inspect(claimsJson()).inspectionClaims().entitlements())
+    counted not compiles(hasEntitlement(
+      inspect(claimsJson()).inspectionClaims(), "replay:unlimited"))
+    counted not compiles(entitlementsAreInForce(decide(claimsJson())))
+    # The replacement says what it means.
+    counted decide(claimsJson()).identityIsInForce()
+
+  # -------------------------------------------------------------------------
+  test "nothing here inherits a licensing window":
+    ## The other half of the same claim, and the reason it is a case rather
+    ## than a comment: every one of these names was exported from this module,
+    ## and a rewrite that reintroduced one would compile silently.
+    counted not compiles(DefaultLicensePeriod)
+    counted not compiles(DefaultRenewLead)
+    counted not compiles(DefaultWarnLead)
+    counted not compiles(MaxRevocationLatency)
+    counted not compiles(defaultWindowPolicy())
+    counted not compiles(WindowPolicy())
+    counted not compiles(ibWarning)
+    counted not compiles(shouldWarnUser(ibRenewing))
+    counted not compiles(IdentityMagic)
+    counted not compiles(SignatureLen)
+    counted not compiles(PinnedKeyring())
+    counted not compiles(emptyRevocations())
 
   # -------------------------------------------------------------------------
   test "assertion count":

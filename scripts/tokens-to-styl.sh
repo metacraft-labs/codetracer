@@ -1,10 +1,50 @@
 #!/usr/bin/env bash
-# NOT-A-CI-GATE: a code generator, not a check on one.
+# A code generator, not a check on one — and it IS reachable from CI, through
+# the check on it: `ci/test/design-tokens-fresh.sh` (run by `ci/lint/nim.sh`)
+# regenerates BOTH outputs below from the pinned `libs/codetracer-design-system`
+# revision and diffs them against the committed files.
 #
-# Design tokens in, stylus out, into src/frontend/styles/generated/.
-# Whether that output is stale is a real question and a good gate to
-# have -- but it is a question ABOUT this script, not one it answers.
+# Design tokens in, TWO outputs out, from ONE resolution of the token layers:
+#
+#   * stylus, into src/frontend/styles/generated/ — the desktop's stylesheets
+#     import it. The stylus keeps its references symbolic (`a = b`) and lets
+#     stylus resolve them; its bytes are unchanged by the second emitter.
+#   * (optional, `--nim-out FILE`) a Nim module of RESOLVED token constants,
+#     every colour token of the `mapped` layer resolved through `alias` and
+#     `brand` to a `#rrggbb` hex in BOTH colour modes (Dark and Light). The
+#     terminal front-end paints from it, so the terminal and the desktop read
+#     one design-system revision through one resolver.
+#
+#   * (with `--nim-out` and `--editor-theme DIR`, PLAT-47) the EDITOR THEME in
+#     the same Nim module: the desktop's Monaco theme documents
+#     (`DIR/codetracerDark.json` for Dark, `DIR/codetracerWhite.json` for
+#     Light — the files `renderer.nim` feeds to `monaco.editor.defineTheme`)
+#     resolved to `#rrggbb` per mode, as more `DesignToken` members: every
+#     token rule's scope (`editor-theme/rule/<scope>`, resolved the way Monaco
+#     resolves a scope — the rule itself, else its longest dotted prefix, else
+#     the default rule), and the colours the desktop paints around Monaco
+#     (the file's `codetracer` block: the editor ground, line numbers, the
+#     execution line, the selection; a value is a hex or a `{token.path}`
+#     reference into the design system, resolved by the same resolver). The
+#     terminal's editor is painted from these, so it equals the desktop's.
+#
+# Usage: tokens-to-styl.sh <design-system-root> <stylus-out-dir> [<mode>]
+#                          [--nim-out <file.nim>] [--editor-theme <dir>]
 set -euo pipefail
+
+POSITIONAL=()
+NIM_OUT=""
+EDITOR_THEME_DIR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --nim-out) NIM_OUT="${2:?--nim-out needs a file path}"; shift 2 ;;
+    --nim-out=*) NIM_OUT="${1#--nim-out=}"; shift ;;
+    --editor-theme) EDITOR_THEME_DIR="${2:?--editor-theme needs a directory}"; shift 2 ;;
+    --editor-theme=*) EDITOR_THEME_DIR="${1#--editor-theme=}"; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 ROOT_DIR="${1:-.}"
 OUT_DIR="${2:-$ROOT_DIR/stylus}"
@@ -13,11 +53,12 @@ OUT_DIR="${2:-$ROOT_DIR/stylus}"
 # it falls back to its default $value. With NO mode arg the output is identical
 # to the single-value export (so existing consumers are untouched). This is the
 # consumer half of the design-system "axes" campaign (color-mode + density).
+# The mode applies to the STYLUS only: the Nim module always carries every mode.
 SELECT_MODE="${3:-}"
 
 mkdir -p "$OUT_DIR"
 
-python3 - "$ROOT_DIR" "$OUT_DIR" "$SELECT_MODE" <<'PY'
+python3 - "$ROOT_DIR" "$OUT_DIR" "$SELECT_MODE" "$NIM_OUT" "$EDITOR_THEME_DIR" <<'PY'
 import json
 import os
 import re
@@ -27,6 +68,8 @@ from pathlib import Path
 ROOT_DIR = Path(sys.argv[1]).resolve()
 OUT_DIR = Path(sys.argv[2]).resolve()
 SELECT_MODE = sys.argv[3] if len(sys.argv) > 3 else ""
+NIM_OUT = sys.argv[4] if len(sys.argv) > 4 else ""
+EDITOR_THEME_DIR = sys.argv[5] if len(sys.argv) > 5 else ""
 
 EXPECTED_FOLDERS = ["brand", "alias", "mapped"]
 
@@ -115,7 +158,11 @@ def stylus_value(value, indent=0):
 
     return quote_string(str(value))
 
-def flatten_tokens(node, path=None, out=None):
+def flatten_tokens(node, path=None, out=None, mode=None):
+    # `mode=None` means "the stylus's mode" (SELECT_MODE). The Nim emitter
+    # passes each colour mode explicitly; the stylus path is unchanged.
+    if mode is None:
+        mode = SELECT_MODE
     if path is None:
         path = []
     if out is None:
@@ -127,10 +174,10 @@ def flatten_tokens(node, path=None, out=None):
             # Mode selection (additive): if a mode was requested and this token
             # carries $extensions.modes[<mode>], use that per-mode value; else
             # fall back to the default $value. No mode → always $value.
-            if SELECT_MODE:
+            if mode:
                 modes = (node.get("$extensions") or {}).get("modes") or {}
-                if SELECT_MODE in modes:
-                    value = modes[SELECT_MODE]
+                if mode in modes:
+                    value = modes[mode]
             out[tuple(path)] = {
                 "type": node.get("$type"),
                 "value": value,
@@ -140,7 +187,7 @@ def flatten_tokens(node, path=None, out=None):
         for key, value in node.items():
             if key.startswith("$"):
                 continue
-            flatten_tokens(value, path + [key], out)
+            flatten_tokens(value, path + [key], out, mode)
 
     return out
 
@@ -205,7 +252,10 @@ for name in OPTIONAL_LAYERS:
     if (ROOT_DIR / name).is_dir():
         layers.append(name)
 
-flats = {name: flatten_tokens(load_json(find_single_json(ROOT_DIR / name))) for name in layers}
+# ONE LOAD of the layers. Both emitters below read these documents; neither
+# re-reads the design system.
+documents = {name: load_json(find_single_json(ROOT_DIR / name)) for name in layers}
+flats = {name: flatten_tokens(documents[name]) for name in layers}
 known_vars = collect_all_vars(*flats.values())
 
 for name in layers:
@@ -285,4 +335,212 @@ for name in emitted_layers:
     print(f"[OK] wrote      : {OUT_DIR / (name + '.styl')}")
 print(f"[OK] wrote      : {OUT_DIR / 'fonts.styl'}")
 print(f"[OK] wrote      : {OUT_DIR / 'index.styl'}")
+
+# ---------------------------------------------------------------------------
+# The Nim emitter: every `mapped` colour token, resolved to a hex, per mode.
+# ---------------------------------------------------------------------------
+
+NIM_MODES = ["Dark", "Light"]
+  # The design system's two colour modes. A mode the design system stops
+  # publishing is a loud failure below, not a silent fallback to $value.
+
+def nim_ident(path_parts):
+    words = []
+    for part in path_parts:
+        for w in re.split(r"[^A-Za-z0-9]+", str(part)):
+            if w:
+                words.append(w[0].upper() + w[1:].lower())
+    return "dt" + "".join(words)
+
+def resolve_hex(var_name, stack, below=None, trail=()):
+    # Follow `{a.b.c}` references to a literal colour.
+    #
+    # `stack` is one {var: value} map per layer, in import order. A reference
+    # resolves to the LATEST layer at or below the referring token's own layer
+    # that defines it — and a token that re-exports a same-named token of an
+    # earlier layer (`alias`'s `colors.base.white = {colors.base.white}`)
+    # resolves to that earlier layer. That is the reading stylus gives the same
+    # files when index.styl imports them in this order.
+    #
+    # A dangling or cyclic reference, or a non-hex terminal value, fails the
+    # whole run rather than emitting a guess.
+    top = len(stack) - 1 if below is None else below
+    layer = next((i for i in range(top, -1, -1) if var_name in stack[i]), None)
+    if layer is None:
+        raise SystemExit(f"[ERROR] unresolved token reference: {var_name}"
+                         + (f" (from {trail[0]})" if trail else ""))
+    if (var_name, layer) in trail:
+        raise SystemExit("[ERROR] reference cycle at " + var_name)
+    value = stack[layer][var_name]
+    if isinstance(value, str) and REF_RE.fullmatch(value.strip()):
+        ref = ref_to_var(value.strip())
+        nxt = layer - 1 if ref == var_name else layer
+        return resolve_hex(ref, stack, nxt, trail + ((var_name, layer),))
+    if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value.strip()):
+        return value.strip().lower()
+    raise SystemExit(f"[ERROR] {var_name} resolves to {value!r}, which is not a #rrggbb colour")
+
+def emit_nim(out_file):
+    per_mode = {}
+    for mode in NIM_MODES:
+        per_mode[mode] = [
+            {path_to_var(tp): t["value"]
+             for tp, t in flatten_tokens(documents[name], mode=mode).items()}
+            for name in layers]
+    mapped_modes = set()
+    def collect_modes(node):
+        if isinstance(node, dict):
+            if "$value" in node:
+                mapped_modes.update(((node.get("$extensions") or {}).get("modes") or {}).keys())
+                return
+            for k, v in node.items():
+                if not k.startswith("$"):
+                    collect_modes(v)
+    collect_modes(documents["mapped"])
+    for mode in NIM_MODES:
+        if mode not in mapped_modes:
+            raise SystemExit(f"[ERROR] the mapped layer publishes no '{mode}' mode (has: {sorted(mapped_modes)})")
+    colour_paths = sorted(
+        [p for p, t in flats["mapped"].items() if t["type"] == "color"],
+        key=lambda p: [sanitize_part(x) for x in p])
+    idents = {}
+    for p in colour_paths:
+        ident = nim_ident(p)
+        # Nim identifiers are style-insensitive after the first letter.
+        key = ident[0] + ident[1:].lower().replace("_", "")
+        if key in idents:
+            raise SystemExit(f"[ERROR] tokens {'/'.join(idents[key])} and {'/'.join(p)} map to one Nim identifier {ident}")
+        idents[key] = p
+    lines = [
+        "## AUTO-GENERATED by scripts/tokens-to-styl.sh from codetracer-design-system",
+        "## (the `libs/codetracer-design-system` revision this checkout pins). DO NOT",
+        "## EDIT: `just sync-design-tokens` regenerates it together with the stylus,",
+        "## and `ci/test/design-tokens-fresh.sh` fails when either is stale.",
+        "##",
+        "## Every colour token of the `mapped` layer, resolved through `alias` and",
+        "## `brand` to a `#rrggbb` hex, in each colour mode the design system",
+        "## publishes. `$value` (what the desktop's stylus uses) equals the Dark mode.",
+        "",
+        "type",
+        "  DesignMode* = enum",
+        "    ## The design system's colour modes (`$extensions.modes`).",
+    ]
+    for mode in NIM_MODES:
+        lines.append(f"    dm{mode} = \"{mode}\"")
+    lines += ["", "  DesignToken* = enum", "    ## One member per `mapped` colour token, named by its token path."]
+    for p in colour_paths:
+        lines.append(f"    {nim_ident(p)} = \"{'/'.join(p)}\"")
+    editor = editor_theme_entries(per_mode) if EDITOR_THEME_DIR else []
+    if editor:
+        lines.append("    # ---- the EDITOR THEME (PLAT-47): the desktop's Monaco theme")
+        lines.append("    # documents, resolved per mode (see the generator's header).")
+        for ident, path, _hexes in editor:
+            lines.append(f"    {ident} = \"{path}\"")
+    lines += ["", "const", "  DesignTokenCount* = " + str(len(colour_paths)),
+              "    ## The design system's own `mapped` colour tokens; the editor-theme",
+              "    ## members follow them in the enum.",
+              "  DesignTokenHex*: array[DesignToken, array[DesignMode, string]] = ["]
+    rows = [(nim_ident(p), [resolve_hex(path_to_var(p), per_mode[m]) for m in NIM_MODES])
+            for p in colour_paths]
+    rows += [(ident, hexes) for ident, _path, hexes in editor]
+    for i, (ident, hexes) in enumerate(rows):
+        sep = "," if i + 1 < len(rows) else "]"
+        lines.append(f"    {ident}: [" + ", ".join(f'"{h}"' for h in hexes) + "]" + sep)
+    if editor:
+        rule_rows = [(path[len("editor-theme/rule/"):], ident)
+                     for ident, path, _h in editor if path.startswith("editor-theme/rule/")]
+        lines += ["",
+                  "  EditorThemeRules*: array[" + str(len(rule_rows)) +
+                  ", tuple[scope: string, token: DesignToken]] = [",
+                  "    ## Every token rule of either Monaco theme, by scope (`\"\"` is the",
+                  "    ## default rule). `editor_theme.editorScopeToken` resolves a scope",
+                  "    ## against it the way Monaco does."]
+        for i, (scope, ident) in enumerate(rule_rows):
+            sep = "," if i + 1 < len(rule_rows) else "]"
+            lines.append(f"    (scope: \"{scope}\", token: {ident}){sep}")
+    lines.append("")
+    Path(out_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_file).write_text("\n".join(lines), encoding="utf-8")
+    print(f"[OK] wrote      : {Path(out_file).resolve()}")
+
+EDITOR_THEME_FILES = {"Dark": "codetracerDark.json", "Light": "codetracerWhite.json"}
+  # Which Monaco theme document is which design-system mode: the pair
+  # `renderer.monacoThemeName` maps the desktop's dark and light themes onto.
+
+EDITOR_GROUND_ROLES = [
+    # (the `codetracer` block's key, the Nim identifier's suffix)
+    ("ground", "Ground"),
+    ("lineNumber", "LineNumber"),
+    ("activeLineNumber", "ActiveLineNumber"),
+    ("executionLine", "ExecutionLine"),
+    ("selection", "Selection"),
+]
+
+def monaco_hex(value, where):
+    v = str(value).strip()
+    if not v.startswith("#"):
+        v = "#" + v
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+        return v.lower()
+    raise SystemExit(f"[ERROR] {where}: {value!r} is not an opaque #rrggbb colour")
+
+def resolve_scope(rules, scope):
+    # Monaco's reading of a token scope against a theme's rules: the rule for
+    # the scope itself, else the rule for its longest dotted prefix, else the
+    # default rule (`""`).
+    parts = scope.split(".") if scope else []
+    while parts:
+        key = ".".join(parts)
+        if key in rules:
+            return rules[key]
+        parts.pop()
+    if "" not in rules:
+        raise SystemExit("[ERROR] an editor theme has no default ('') token rule")
+    return rules[""]
+
+def editor_theme_entries(per_mode):
+    docs = {}
+    for mode, name in EDITOR_THEME_FILES.items():
+        path = Path(EDITOR_THEME_DIR) / name
+        if not path.is_file():
+            raise SystemExit(f"[ERROR] editor theme {path} is missing")
+        docs[mode] = load_json(path)
+    rules = {}
+    scopes = set()
+    for mode, doc in docs.items():
+        rules[mode] = {}
+        for r in doc.get("rules", []):
+            if "foreground" not in r:
+                continue
+            scope = str(r.get("token", ""))
+            rules[mode][scope] = monaco_hex(r["foreground"], f"{EDITOR_THEME_FILES[mode]} rule '{scope}'")
+            scopes.add(scope)
+    entries = []
+    for key, suffix in EDITOR_GROUND_ROLES:
+        hexes = []
+        for mode in NIM_MODES:
+            block = docs[mode].get("codetracer") or {}
+            if key not in block:
+                raise SystemExit(f"[ERROR] {EDITOR_THEME_FILES[mode]} has no codetracer.{key}")
+            v = str(block[key]).strip()
+            if REF_RE.fullmatch(v):
+                hexes.append(resolve_hex(ref_to_var(v), per_mode[mode]))
+            else:
+                hexes.append(monaco_hex(v, f"{EDITOR_THEME_FILES[mode]} codetracer.{key}"))
+        entries.append(("dtEditorTheme" + suffix, "editor-theme/" + key, hexes))
+    seen = {}
+    for scope in sorted(scopes):
+        ident = "dtEditorThemeRule" + ("".join(
+            w[0].upper() + w[1:].lower()
+            for w in re.split(r"[^A-Za-z0-9]+", scope) if w) or "Default")
+        key = ident[0] + ident[1:].lower()
+        if key in seen:
+            raise SystemExit(f"[ERROR] editor scopes '{seen[key]}' and '{scope}' map to one Nim identifier {ident}")
+        seen[key] = scope
+        hexes = [resolve_scope(rules[m], scope) for m in NIM_MODES]
+        entries.append((ident, "editor-theme/rule/" + scope, hexes))
+    return entries
+
+if NIM_OUT:
+    emit_nim(NIM_OUT)
 PY

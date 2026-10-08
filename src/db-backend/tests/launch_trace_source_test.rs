@@ -120,7 +120,7 @@ fn an_unrecognised_kind_is_named_too() {
 #[test]
 fn a_local_folder_launch_is_still_accepted() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+    std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
     let (responses, ctx, result) = responses_for(json!({ "traceFolder": dir.path() }));
     assert!(result.is_ok());
     let response = responses.iter().find(|r| r.command == "launch").expect("response");
@@ -135,7 +135,7 @@ fn a_local_folder_launch_is_still_accepted() {
 #[test]
 fn a_trace_folder_wins_over_a_trace_source() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("trace.json"), "[]").unwrap();
+    std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
     let (responses, ctx, _) = responses_for(json!({
         "traceFolder": dir.path(),
         "traceSource": { "kind": "http-range", "url": "https://example.test/t.ct" },

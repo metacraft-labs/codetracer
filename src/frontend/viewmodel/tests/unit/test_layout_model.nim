@@ -361,7 +361,7 @@ suite "Layout model — validation":
           some(initLayout(row([pane(paneEditor),
                                contributedPaneNode("editor")])))
         of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack,
-           lpIndexOutOfRange:
+           lpIndexOutOfRange, lpNoDivider:
           none(Layout)
       checkpoint("witness for " & $kind)
       if lpsStructural in problemSources(kind):

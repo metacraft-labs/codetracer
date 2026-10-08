@@ -1,5 +1,5 @@
 {
-  "G1": "Check failed: topEdgeProjection.status == dpsRefused",
+  "G1": "Check failed: not placementFor(leTop)[0]",
   "G10": "Check failed: invalidProjection.status == dpsRefused",
   "G11": "Check failed: a == 900",
   "G12": "Check failed: terminal.visible == gpui.visible",

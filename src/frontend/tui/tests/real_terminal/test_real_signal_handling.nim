@@ -119,8 +119,8 @@ suite "CTUI-14 Tier 2: signals during a live session":
     # means and what makes the restore a restore rather than a no-op: the panes
     # are painted and the terminal is in raw mode on the alternate screen.
     let screen = sess.screenContents()
-    ck screen.contains("SOURCE")
-    ck screen.contains("CALL STACK")
+    ck screen.contains(" main.py ")
+    ck screen.contains(" Call Trace ")
     let before = altScreenCounts(sess)
     ck before.enters == 1
     ck before.leaves == 0

@@ -46,6 +46,89 @@ pub struct SourceLocationFiring {
     pub step_id: StepId,
 }
 
+/// The column an event list is ordered by — the event log's header click
+/// (the desktop's DataTables `order`, the native front-ends' `ct/event-load`
+/// `sortKey`). Every key orders by one field of [`ProgramEvent`]; the
+/// recorded order (tick, then event number) breaks ties, so a sort is stable
+/// and reproducible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventOrderKey {
+    Tick,
+    Index,
+    Location,
+    Kind,
+    Output,
+}
+
+impl EventOrderKey {
+    /// The key a column name selects: the event log's column titles
+    /// (`tick`, `#`, `location`, `kind`, `output` — `EventLogColumn` in the
+    /// frontend) and the desktop's dense-table data names
+    /// (`directLocationRRTicks`, `rrEventId`, `fullPath`, `kind`, `content`).
+    pub fn from_column_name(name: &str) -> Option<EventOrderKey> {
+        match name {
+            "tick" | "directLocationRRTicks" => Some(EventOrderKey::Tick),
+            "#" | "index" | "rrEventId" => Some(EventOrderKey::Index),
+            "location" | "fullPath" => Some(EventOrderKey::Location),
+            "kind" => Some(EventOrderKey::Kind),
+            "output" | "content" => Some(EventOrderKey::Output),
+            _ => None,
+        }
+    }
+}
+
+/// How an event list is ordered: a key and a direction. The recorded order
+/// is `Tick` ascending — [`EventOrder::is_recorded`] — which every reader
+/// already returns without sorting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventOrder {
+    pub key: EventOrderKey,
+    pub ascending: bool,
+}
+
+impl EventOrder {
+    pub fn is_recorded(&self) -> bool {
+        self.key == EventOrderKey::Tick && self.ascending
+    }
+}
+
+fn key_ordering(a: &ProgramEvent, b: &ProgramEvent, key: EventOrderKey) -> std::cmp::Ordering {
+    match key {
+        EventOrderKey::Tick => a.direct_location_rr_ticks.cmp(&b.direct_location_rr_ticks),
+        EventOrderKey::Index => a.rr_event_id.cmp(&b.rr_event_id),
+        EventOrderKey::Location => a
+            .high_level_path
+            .cmp(&b.high_level_path)
+            .then(a.high_level_line.cmp(&b.high_level_line)),
+        EventOrderKey::Kind => (a.kind as u8).cmp(&(b.kind as u8)),
+        EventOrderKey::Output => a.content.cmp(&b.content),
+    }
+}
+
+/// The positions of `count` events (`event_at(i)` is the i-th, in recorded
+/// order) in `order`: the direction applies to the key alone, and events the
+/// key cannot tell apart keep their recorded order (tick, then event number)
+/// whichever way the column is sorted.
+pub fn ordered_event_positions<'a, F>(count: usize, event_at: F, order: EventOrder) -> Vec<usize>
+where
+    F: Fn(usize) -> &'a ProgramEvent,
+{
+    let mut positions: Vec<usize> = (0..count).collect();
+    if order.is_recorded() {
+        return positions;
+    }
+    positions.sort_by(|&i, &j| {
+        let (a, b) = (event_at(i), event_at(j));
+        let primary = key_ordering(a, b, order.key);
+        let primary = if order.ascending { primary } else { primary.reverse() };
+        primary
+            .then(a.direct_location_rr_ticks.cmp(&b.direct_location_rr_ticks))
+            .then(a.rr_event_id.cmp(&b.rr_event_id))
+            .then(i.cmp(&j))
+    });
+    positions
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SingleTable {
     pub kind: DbEventKind,
@@ -373,8 +456,35 @@ impl EventDb {
                 self.selected_kinds = args.selected_kinds;
                 self.update_visible();
             }
-            // Table update without search
-            if args.table_args.search.value.is_empty() {
+            // The header click (DataTables' `order`): the first ordering
+            // column, by the data name its column declares. Until this was
+            // read the table sent it on every draw and got the recorded
+            // order back, so clicking a column header moved its arrow and
+            // nothing else.
+            let order = args.table_args.order.first().and_then(|o| {
+                let name = args.table_args.columns.get(o.column).map(|c| c.data.as_str())?;
+                Some(EventOrder {
+                    key: EventOrderKey::from_column_name(name)?,
+                    ascending: o.dir != "desc",
+                })
+            });
+            if let Some(order) = order.filter(|o| !o.is_recorded()) {
+                let matching: Vec<&ProgramEvent> = self
+                    .global_table
+                    .iter()
+                    .map(|(_, table_id, event_index)| self.get_program_event(table_id, event_index))
+                    .filter(|event| {
+                        args.selected_kinds[event.kind as usize]
+                            && (args.table_args.search.value.is_empty()
+                                || event.content.contains(&args.table_args.search.value))
+                    })
+                    .collect();
+                let positions = ordered_event_positions(matching.len(), |i| matching[i], order);
+                for &i in positions.iter().skip(args.table_args.start).take(args.table_args.length) {
+                    table_data.push(TableRow::new(matching[i]));
+                }
+                event_count = matching.len();
+            } else if args.table_args.search.value.is_empty() {
                 let mut start = args.table_args.start;
                 if !self.single_tables.is_empty()
                     && self.single_tables[0].events.len() != self.global_table.len()
@@ -612,5 +722,84 @@ mod tests {
         assert_eq!(rows[1].content, "recorded write");
         assert_eq!(rows[1].direct_location_rr_ticks, 1);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod event_order_tests {
+    //! PLAT-50 — the event log's order (its header click): the key, the
+    //! direction applied to the key alone, the recorded order as the tie
+    //! break whichever way, and the recorded order untouched by its own key.
+    use super::*;
+
+    fn event(ticks: i64, id: usize, content: &str, line: i64) -> ProgramEvent {
+        ProgramEvent {
+            direct_location_rr_ticks: ticks,
+            rr_event_id: id,
+            content: content.to_string(),
+            high_level_path: "/p/main.py".to_string(),
+            high_level_line: line,
+            ..Default::default()
+        }
+    }
+
+    fn order(key: EventOrderKey, ascending: bool) -> EventOrder {
+        EventOrder { key, ascending }
+    }
+
+    #[test]
+    fn a_column_orders_the_log_and_ties_keep_the_recorded_order() {
+        let events = vec![
+            event(38, 0, "2 + 3 = 5", 111),
+            event(68, 1, "10 - 4 + 1 = 7", 111),
+            event(88, 2, "6 * 7 = 42", 111),
+            event(170, 3, "checksum = 73", 118),
+            event(90, 4, "6 * 7 = 42", 111),
+        ];
+        let at = |i: usize| &events[i];
+        // The recorded order is the identity, without sorting.
+        assert!(order(EventOrderKey::Tick, true).is_recorded());
+        assert_eq!(
+            ordered_event_positions(events.len(), at, order(EventOrderKey::Tick, true)),
+            vec![0, 1, 2, 3, 4]
+        );
+        // By output, ascending: the two equal outputs keep their recorded order.
+        assert_eq!(
+            ordered_event_positions(events.len(), at, order(EventOrderKey::Output, true)),
+            vec![1, 0, 2, 4, 3]
+        );
+        // Descending reverses the KEY only: the equal pair is still 2 then 4.
+        assert_eq!(
+            ordered_event_positions(events.len(), at, order(EventOrderKey::Output, false)),
+            vec![3, 2, 4, 0, 1]
+        );
+        // The tick column clicked: the recorded order reversed.
+        assert_eq!(
+            ordered_event_positions(events.len(), at, order(EventOrderKey::Tick, false)),
+            vec![3, 4, 2, 1, 0]
+        );
+        // By location: the line, then the recorded order.
+        assert_eq!(
+            ordered_event_positions(events.len(), at, order(EventOrderKey::Location, false)),
+            vec![3, 0, 1, 2, 4]
+        );
+    }
+
+    #[test]
+    fn column_names_select_their_keys() {
+        for (name, key) in [
+            ("tick", EventOrderKey::Tick),
+            ("directLocationRRTicks", EventOrderKey::Tick),
+            ("#", EventOrderKey::Index),
+            ("rrEventId", EventOrderKey::Index),
+            ("location", EventOrderKey::Location),
+            ("fullPath", EventOrderKey::Location),
+            ("kind", EventOrderKey::Kind),
+            ("output", EventOrderKey::Output),
+            ("content", EventOrderKey::Output),
+        ] {
+            assert_eq!(EventOrderKey::from_column_name(name), Some(key), "{name}");
+        }
+        assert_eq!(EventOrderKey::from_column_name("nonsense"), None);
     }
 }

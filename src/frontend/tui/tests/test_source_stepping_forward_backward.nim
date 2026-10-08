@@ -92,7 +92,7 @@ import ./fixtures/fixture_provider
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 227
+const ExpectedAssertions = 228
 
 var countedAssertions = 0
 
@@ -144,7 +144,7 @@ const
   ChecksLatency = 3
   ChecksBytes = 2
   ChecksBreakpointGutter = 9
-  ChecksShellIntegration = 7
+  ChecksShellIntegration = 8
   ChecksSummary = 4
   ChecksSkippedFixture = 2
 
@@ -315,8 +315,8 @@ template checkFrameAgreesWithTheBackend(h: StepHarness;
   let visible = groundTruth.strip()
   ck text.contains(visible[0 ..< min(visible.len, screen.codeWidth - 4)])
   # The pointer cell really carries the accent style, in the same frame.
-  ck rowStyleAt(row, pointerFieldColumn(screen)).fg ==
-     ExecutionPointerStyle.fg
+  ck rowStyleAt(row, pointerFieldColumn(screen)).role ==
+     ExecutionPointerStyle.role
 
 template checkRetracesExactly(forward, backward: seq[(string, int)]) =
   ## Stepping back re-visits the forward trail in reverse, position for
@@ -523,9 +523,9 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
           heatWrong.add "line " & $line & ": field '" & fieldText.strip() &
             "', expected '" & want & "'"
         let style = rowStyleAt(row, GutterMarkCells)
-        if style.fg != heat.heatStyle(line).fg:
-          heatWrong.add "line " & $line & ": flame fg '" & style.fg &
-            "', expected '" & heat.heatStyle(line).fg & "'"
+        if style.role != heat.heatStyle(line).role:
+          heatWrong.add "line " & $line & ": flame role '" & $style.role &
+            "', expected '" & $heat.heatStyle(line).role & "'"
         if heat.countFor(line) > 0: inc countedVisible
         else: inc uncountedVisible
       if heatWrong.len > 0:
@@ -571,7 +571,7 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
       ck bpRow >= 1
       ck bpRow < markedScreen.rows.len
       ck rowRuneAt(markedScreen.rows[bpRow], 0) == BreakpointGlyph
-      ck rowStyleAt(markedScreen.rows[bpRow], 0).fg == BreakpointStyle.fg
+      ck rowStyleAt(markedScreen.rows[bpRow], 0).role == BreakpointStyle.role
 
       # ---- THE SHELL PAINTS THE PANE INTO THE `editor` RECTANGLE ----------
       # CTUI-3 delivered the rectangle and left it empty ("the panes are
@@ -587,20 +587,30 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
                                      bodyArea(80, 24)).regionFor(paneEditor)
       ck editorArea.width > 0
       ck editorArea.height > 0
-      let standalone = sourcePaneText(shellModel.source, editorArea.width,
+      # PLAT-45: in the shared default the editor is the SECOND column, not
+      # flush right, so the shell keeps its last column for the separator and
+      # hands the pane `width - 1` — derived exactly as `shell.paintPane`
+      # derives it.
+      let screenBody = bodyArea(80, 24)
+      let flushRight = editorArea.col + editorArea.width >=
+                       screenBody.col + screenBody.width
+      let paneWidth = if flushRight: editorArea.width else: editorArea.width - 1
+      let standalone = sourcePaneText(shellModel.source, paneWidth,
                                       editorArea.height, h.cache)
       ck standalone.len == editorArea.height
       let shellText = shellRows(shellModel, 80, 24)
       ck shellText.len == 24
       var paneRowsMatched = 0
       var paneMismatches: seq[string] = @[]
-      for i in 0 ..< editorArea.height:
+      # Row 0 is the pane's TAB STRIP (PLAT-49: it replaces the pane's own
+      # heading row); every row under it is the standalone pane's.
+      for i in 1 ..< editorArea.height:
         let screenRow = shellText[editorArea.row + i]
         var slice = ""
         var at = 0
         for r in screenRow.runes:
           let w = max(1, displayWidth($r))
-          if at >= editorArea.col and at < editorArea.col + editorArea.width:
+          if at >= editorArea.col and at < editorArea.col + paneWidth:
             slice.add $r
           at += w
         if slice == standalone[i]:
@@ -610,11 +620,15 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
             standalone[i] & "'\n  shell: '" & slice & "'"
       if paneMismatches.len > 0:
         checkpoint(paneMismatches[0 .. min(2, paneMismatches.high)].join("\n"))
-      ck paneRowsMatched == editorArea.height
+      ck paneRowsMatched == editorArea.height - 1
       # …and the OTHER panes are still there, so the source pane took its own
-      # rectangle and nobody else's.
-      ck shellText[1].contains("CALL STACK")
-      ck shellText[editorArea.row].contains(SourcePaneTitle)
+      # rectangle and nobody else's: at 80x24 the side column's first strip
+      # is the Variables stack (the call stack is a tab of it — PLAT-45's
+      # fold).
+      ck shellText[1].contains(" Variables ")
+      ck not shellText[editorArea.row].contains(SourcePaneTitle)
+      ck shellText[editorArea.row].contains(
+        " " & extractFilename(shellModel.source.path) & " ")
 
       # ---- FINE-GRAINED SUBSCRIPTION, measured ----------------------------
       # CTUI-5: "changing the execution line re-evaluates the gutter and

@@ -266,6 +266,8 @@ proc frameViewerModelFor*(frames: FrameViewerVM;
     result.sourceWidth = frames.frameWidth.val
     result.sourceHeight = frames.frameHeight.val
     result.drawCalls = frames.drawCalls.val.len
+    # PLAT-51: the scene boundaries the pane's own scrubber marks.
+    result.sceneMarks = frames.clearFrames.val
     result.selectedDrawCall =
       if frames.selectedDrawCall.val.isSome: frames.selectedDrawCall.val.get
       else: -1
@@ -354,3 +356,16 @@ proc jumpToDrawCallSource*(history: PixelHistoryVM; index: int): bool =
   if history.isNil:
     return false
   history.jumpToSourceForEntry(index)
+
+proc applyFrameSeek*(frames: FrameViewerVM; model: var FrameViewerModel;
+                     frame: int) =
+  ## PLAT-51 (CodeTracer-TUI-Graphics.md §4): the pane's OWN scrubber named
+  ## `frame` (`runtime.PaneClickRequest`'s `pcFrameSeek`) — the pane shows
+  ## its number at once and the ViewModel is asked for the frame
+  ## (`loadFrameByIndex`, whose request serial drops an answer a later
+  ## scrub has superseded, as the desktop's coalesced slider does).
+  let f = if model.frameCount > 0: max(0, min(frame, model.frameCount - 1))
+          else: max(0, frame)
+  model.frameIndex = f
+  if not frames.isNil:
+    frames.loadFrameByIndex(f)

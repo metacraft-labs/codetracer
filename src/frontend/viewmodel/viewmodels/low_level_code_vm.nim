@@ -19,7 +19,7 @@
 ##   instruction list usable from headless tests, and
 ## - mission goal #2's headless ViewModel tests can exercise the same
 ##   load / active-row / jump-to-instruction flow without depending on
-##   Karax / Monaco.
+##   kdom / Monaco.
 ##
 ## Reactive surface:
 ## - ``instructions``    — current asm instruction list (sorted by

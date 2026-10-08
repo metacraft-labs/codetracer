@@ -219,8 +219,7 @@ fn _test_backend_dap_server_socket() {
     let _ = child.wait().unwrap();
 }
 
-#[cfg(not(unix))]
-#[test]
-fn dap_server_socket_transport_is_unix_only() {
-    eprintln!("SKIPPED: Unix-domain-socket DAP server integration test is unsupported on non-Unix platforms");
-}
+// The socket transport is Unix-only, so everything above is compiled only on
+// Unix and this target has no test elsewhere. A non-Unix stub used to print
+// SKIPPED and pass, asserting nothing; a target with no test says the same
+// thing without claiming a pass.

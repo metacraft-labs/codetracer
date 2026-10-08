@@ -4,11 +4,11 @@
  *
  * This test injects data into auto-hide bottom panes (BUILD, PROBLEMS,
  * FIND IN FILES) rather than relying on real build/search operations.
- * The auto-hide panels are standalone Karax renderers created by
+ * The auto-hide panels are standalone IsoNim-mounted renderers created by
  * addStandaloneAutoHidePanel in layout.nim. Their component instances
  * are accessible via window.data.ui.componentMapping[Content.X][0],
- * and their Karax renderers can be forced to redraw by calling
- * component.kxi.redraw().
+ * and their IsoNim views can be forced to redraw via the `__ctRedrawAll` /
+ * `__ctRenderPanel` hooks.
  *
  * Content enum values (from frontend.nim):
  *   Build         = 11
@@ -180,9 +180,9 @@ async function dismissOverlay(
 }
 
 /**
- * Inject build output into the Build component and force Karax redraw.
+ * Inject build output into the Build component and force an IsoNim redraw.
  * This sets `build.output`, `build.code`, `build.running`, and triggers
- * a synchronous redraw on the component's kxi instance.
+ * the panel's direct IsoNim redraw hooks.
  */
 async function injectBuildOutput(
   page: import("@playwright/test").Page,

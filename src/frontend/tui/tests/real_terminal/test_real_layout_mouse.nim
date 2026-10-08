@@ -92,13 +92,14 @@ import headless_app/layout_model
 import ../../app/runtime
 import ../../testing/dual_snap
 import ../../testing/test_app_runtime
+import ../../testing/strip_read
 import ../apps/app_layout_gestures as gestureApp
 import ../apps/app_layout_mouse as mouseApp
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 40
+const ExpectedAssertions = 54  # PLAT-49: +2, the drag now begins on motion (the press is a click)
 
 const
   Stem = "app_layout_mouse"
@@ -106,12 +107,21 @@ const
   Rows = mouseApp.Rows
   FrameTimeoutMs = 20000
 
-  DraggedPane = paneCalltrace
-    ## The Compact profile's first projected region, and therefore the pane
-    ## `newPaneFocus` starts on. It is a BARE pane — no tab strip — which is
-    ## what makes its own title row the cell a press picks it up by.
-  DraggedPaneTitle = "Call Stack"
-  DraggedPaneTitleRow = "CALL STACK"
+  DraggedPane = paneEditor
+    ## The shared default's one BARE region at 80x24 (the Source pane, no tab
+    ## strip), which is what makes its own title row the cell a press picks it
+    ## up by — and makes the drag ghost the pane's whole rectangle, wide enough
+    ## for the decoration probe below to read a glyph cell past the ghost's
+    ## label. A stacked pane's ghost is only its tab's cells, which its label
+    ## covers entirely, so the probe would have nothing to read.
+  DraggedPaneTitle = "Source"
+  DraggedPaneTitleRow = " Source "
+    ## Its one tab on its strip row (PLAT-49: a pane has no title row; a bare
+    ## pane's strip names it).
+  FocusedAtStart = paneFileTree
+    ## Where `newPaneFocus` starts: the shared default's first region. Asserted
+    ## so a change of the default that moved it is seen here; the drag itself
+    ## does not depend on focus.
 
   DropRow = 0
   DropCol = 40
@@ -213,23 +223,33 @@ proc probeDecorationsOnTheTerminal(sess: var TuiTestSession;
     kindsProbed.incl d.kind
     if d.area.isEmptyArea:
       continue
-    let probeRow = d.area.row + d.area.height - 1
-    let probeCol = d.area.col + d.area.width - 1
+    var probeRow = d.area.row + d.area.height - 1
+    var probeCol = d.area.col + d.area.width - 1
+    # PLAT-47: the drag ghost is a LABEL over the frame that follows the
+    # pointer, its text the dragged pane's name — probed at its last
+    # character, which must be that character.
+    let ghostText = if d.kind == ldDragGhost: d.label.strip(leading = false)
+                    else: ""
+    if d.kind == ldDragGhost:
+      probeCol = d.area.col + ghostText.runeLen - 1
     var covered = false
     for j in i + 1 ..< decorations.len:
       if decorations[j].area.contains(probeRow, probeCol):
         covered = true
-    if probeRow == d.area.row and probeCol < d.area.col + labelCellsOf(d):
+    if d.kind != ldDragGhost and probeRow == d.area.row and
+       probeCol < d.area.col + labelCellsOf(d):
       covered = true
     if covered or probeRow >= Rows or probeCol >= Cols:
       inc skipped
       continue
     inc probesMade
     let rune = $sess.cellAt(probeRow, probeCol).rune
-    if rune != glyphFor(d.kind):
+    let want = if d.kind == ldDragGhost: ghostText.runeAt(
+                 ghostText.runeOffset(ghostText.runeLen - 1)).`$`
+               else: glyphFor(d.kind)
+    if rune != want:
       probeMismatches.add label & ": " & $d.kind & " at (" & $probeRow & "," &
-        $probeCol & ") reads '" & rune & "' rather than '" &
-        glyphFor(d.kind) & "'"
+        $probeCol & ") reads '" & rune & "' rather than '" & want & "'"
   probeNotes.add label & ": " & $decorations.len & " decoration(s), " &
     $skipped & " skipped"
   if decorations.len == 0:
@@ -296,30 +316,40 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       let (hadFocus, focused) = model.focus.focusedPane()
       ck hadFocus
       checkpoint("the focused pane is " & $focused)
-      ck focused == DraggedPane
+      ck focused == FocusedAtStart
 
       # ---- THE UNGESTURED SCREEN -------------------------------------------
-      ckScreenMatches(sess, model.shellScreenOf().rows, "before the gesture")
+      ckScreenMatches(sess, model.shellScreenOf().visibleRows, "before the gesture")
       let before = sess.screenContents()
-      ck not before.contains(DockStripGlyph)
+      # No TOP strip yet: the body starts right under the top bar (PLAT-48's
+      # bottom strip, the footer's, is there from the start).
+      ck model.layoutGeometry().body.row == 1
       ck before.contains(DraggedPaneTitleRow)
-      ck before.contains("[Variables]")     ## the Compact profile's tab stack
+      ck before.contains(" Variables ")     ## the shared default's Variables stack
       ck model.app.layoutBinding.interaction.kind == ikNone
 
       let source = model.layoutGeometry().regionOfPane(DraggedPane)
       checkpoint("the dragged pane is at " & $source)
       ck not source.isEmptyArea
 
-      # ---- THE PRESS: the pane is picked up --------------------------------
+      # ---- THE PRESS MARKS IT, THE MOTION PICKS IT UP (PLAT-49) -----------
       ckBothSaw(sess, model, sgrReport(0, source.row, source.col, true), 1,
-                "press on the pane's title row")
+                "press on the pane's strip row")
+      ck model.app.layoutBinding.interaction.kind == ikNone
+      # Three rows down: past the drag threshold, and below the layout's top
+      # ground band (two rows: a drop there would split the whole layout —
+      # PLAT-49 part B review), so the pointer is over the pane itself and no
+      # drop is offered.
+      ckBothSaw(sess, model, sgrReport(32, source.row + 3, source.col + 3,
+                                       true), 2,
+                "motion past the drag threshold")
       ck model.app.layoutBinding.interaction.kind == ikDraggingTab
       ck model.app.layoutBinding.interaction.source == DraggedPane
-      ckScreenMatches(sess, model.shellScreenOf().rows, "while dragging")
+      ckScreenMatches(sess, model.shellScreenOf().visibleRows, "while dragging")
       probeDecorationsOnTheTerminal(sess, model, "while dragging")
 
       # ---- THE RELEASE, ON A CELL OUTSIDE THE TREE AREA --------------------
-      ckBothSaw(sess, model, sgrReport(0, DropRow, DropCol, false), 2,
+      ckBothSaw(sess, model, sgrReport(0, DropRow, DropCol, false), 3,
                 "release on the header row")
       # THE MODEL. Only the layout can be asked whether the pane left the tree.
       ck model.app.layoutBinding.layout.dockedIndex(DraggedPane) >= 0
@@ -329,14 +359,13 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ck model.app.layoutBinding.layout.dockedAt(leTop).len == 1
 
       # THE TERMINAL, differentially…
-      ckScreenMatches(sess, model.shellScreenOf().rows, "after the drop")
+      ckScreenMatches(sess, model.shellScreenOf().visibleRows, "after the drop")
       probeDecorationsOnTheTerminal(sess, model, "after the drop")
 
-      # …AND ABSOLUTELY. The strip's cells are asserted against
-      # `DockStripGlyph` and the pane's title against the pane's own name,
-      # neither of which is read off the model's rendering. This pair is
-      # M35-IMMUNE by construction — the collapsed glyph table would still
-      # produce `·` here — which is exactly why the probe case beside it exists.
+      # …AND ABSOLUTELY. The strip's cells are asserted against the pane's own
+      # name, padded, on a blank strip (PLAT-48's strip), neither of which is
+      # read off the model's rendering. This pair is M35-IMMUNE by
+      # construction, which is exactly why the probe case beside it exists.
       var stripRow = -1
       for s in model.layoutGeometry().strips:
         if s.edge == leTop:
@@ -345,25 +374,20 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ck stripRow == 1                    ## the body's first row, below the header
       let stripText = sess.regionText(stripRow, 0, Cols, 1).split('\n')[0]
       checkpoint("strip row: '" & stripText & "'")
-      ck stripText.startsWith(DraggedPaneTitle)
-      var glyphCells = 0
-      var wrongCells: seq[string] = @[]
-      for col in textCells(DraggedPaneTitle) ..< Cols:
-        let rune = $sess.cellAt(stripRow, col).rune
-        if rune == DockStripGlyph:
-          inc glyphCells
-        else:
-          wrongCells.add "(" & $stripRow & "," & $col & ") is '" & rune & "'"
+      # EXACT (Verification-Harness-Traps §4b): the label, and nothing but
+      # blanks besides.
+      let wrongCells = stripLabelProblems(stripText, [DraggedPaneTitle])
       if wrongCells.len > 0:
         checkpoint(wrongCells[0 .. min(4, wrongCells.high)].join(", "))
-      # EXACT, not "more than none" (Verification-Harness-Traps §4b): the strip
-      # spans the body's full width and the label takes its first cells, so the
-      # number of glyph cells is knowable.
-      ck glyphCells == Cols - textCells(DraggedPaneTitle)
       ck wrongCells.len == 0
       # AND THE PANE IS GONE FROM THE BODY. A strip drawn beside a pane that was
-      # never removed would satisfy every assertion above.
-      ck not sess.screenContents().contains(DraggedPaneTitleRow)
+      # never removed would satisfy every assertion above. (Below the strip:
+      # the strip's own label is the same name.)
+      var stillInBody = false
+      for r in stripRow + 1 ..< Rows - 1:
+        if sess.regionText(r, 0, Cols, 1).contains(DraggedPaneTitleRow):
+          stillInBody = true
+      ck not stillInBody
 
       sess.send($TestAppQuitByte)
       let status = sess.waitExit(initDuration(seconds = 10))
@@ -393,12 +417,16 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
     checkpoint("frames probed: " & $framesProbed & ", terminal probes: " &
                $probesMade & ", kinds reached: " & $kindsProbed)
     ck framesProbed == 2
-    ck probesMade == 2
+    # Two per frame since PLAT-48: the drag's own decoration and the bottom
+    # strip the shared default's footer panels sit on.
+    ck probesMade == 4
     # TWO KINDS WITH TWO DIFFERENT GLYPHS, which is the property that makes the
     # probe able to see a collapsed glyph table at all. One kind, or two kinds
     # sharing a glyph, and this case would be as blind as the differential one.
     ck kindsProbed == {ldDragGhost, ldDockStrip}
-    ck glyphFor(ldDragGhost) != glyphFor(ldDockStrip)
+    # Since PLAT-47 the ghost is a label (the pane's name) and the strip a
+    # glyph: the two probes still read two different things.
+    ck ghostLabelFor(paneCalltrace).strip != glyphFor(ldDockStrip)
 
   test "the bytes this file writes are the bytes the harness writes":
     # THE POSITIVE CONTROL ON THE INPUT HELPER (Verification-Harness-Traps §9):
@@ -462,6 +490,65 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       ck wanted.contains(";" & $(probeCol + 1) & ";" & $(probeRow + 1) & "M")
       sess.terminate()
     finally:
+      sess.close()
+
+  test "a mouse drag on a DIVIDER moves it on a real terminal":
+    # PLAT-5's divider drag, through the product's own input loop: a press on
+    # the last column of a region whose neighbour across it is its sibling,
+    # then a release further left, as real SGR-1006 bytes on a real pty.
+    var sess = spawnChild()
+    try:
+      waitForCursorAt(sess, 0, mouseApp.cursorParkColumn(0, Cols),
+                      FrameTimeoutMs)
+      ck sess.screenContents().strip().len > 0
+      let model = gestureApp.newBoundRuntime(Cols, Rows)
+      let geom = model.layoutGeometry()
+      # FIND a divider cell with a scratch runtime, so the child and the twin
+      # below both see exactly one press and one release. A region's middle
+      # row, never its title row, so the press is not a pane pick-up.
+      var pressRow = -1
+      var pressCol = -1
+      for r in geom.projection.regions:
+        if pressRow >= 0:
+          break
+        let row = r.area.row + r.area.height div 2
+        let col = r.area.col + r.area.width - 1
+        if col + 1 >= Cols or r.area.width < 12:
+          continue
+        let scratch = gestureApp.newBoundRuntime(Cols, Rows)
+        discard scratch.handleToken(sgrReport(0, row, col, true), 0'i64)
+        if scratch.app.layoutBinding.interaction.kind == ikResizingSplit:
+          pressRow = row
+          pressCol = col
+      checkpoint("divider cell: (" & $pressRow & "," & $pressCol & ")")
+      ck pressRow >= 0
+      if pressRow >= 0:
+        let before = sess.screenContents()
+        let leftPane = geom.projection.regions[
+          geom.regionIndexAt(pressRow, pressCol)].pane
+        let was = geom.regionOfPane(leftPane)
+        ckBothSaw(sess, model, sgrReport(0, pressRow, pressCol, true), 1,
+                  "press on the divider")
+        ck model.app.layoutBinding.interaction.kind == ikResizingSplit
+        ckBothSaw(sess, model, sgrReport(0, pressRow, pressCol - 6, false), 2,
+                  "release six columns to the left")
+        ck model.app.layoutBinding.interaction.kind == ikNone
+        ck model.app.layoutBinding.userModified
+        ck model.app.layoutBinding.history.log.len == 1
+        let now = model.layoutGeometry().regionOfPane(leftPane)
+        checkpoint($leftPane & ": " & $was & " -> " & $now)
+        # Cell rounding may land the edge one cell either side of the release.
+        ck abs((now.col + now.width - 1) - (pressCol - 6)) <= 1
+        # The terminal, differentially against the twin, and absolutely: the
+        # screen is not the one before the drag.
+        ckScreenMatches(sess, model.shellScreenOf().visibleRows, "after the drag")
+        ck sess.screenContents() != before
+      sess.send($TestAppQuitByte)
+      let status = sess.waitExit(initDuration(seconds = 10))
+      ck status.isSome
+      ck status.get() == TestAppExitOk
+    finally:
+      sess.terminate()
       sess.close()
 
   test "assertion count":

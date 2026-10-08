@@ -110,10 +110,12 @@ import ../app/shell as gpui_shell
 import ../app/leaves
 import ../app/dock_projection
 import ../host/gpui_host
+import ../window_geometry
 import ../../view_vocabulary/editor_surface
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_layout_answers
 import ../../../common/view_vocabulary
+import ../../test_support/spec_documents
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
@@ -130,7 +132,15 @@ template ck(condition: untyped) =
 # ---------------------------------------------------------------------------
 
 const
-  SpecRel = "../codetracer-specs/Testing/Cross-Renderer-Visual-Alignment.md"
+  SpecRel = specDocumentPath("Testing/Cross-Renderer-Visual-Alignment.md")
+    ## Resolved by `test_support/spec_documents`, which is the one module that
+    ## knows where the sibling specification checkout is and how it is laid out
+    ## (see its header). Unlike the other constants here it is ABSOLUTE rather
+    ## than repo-relative, so it does not depend on this suite's own directory
+    ## the way the `../codetracer-specs/…` spelling it replaces did — four
+    ## suites held four different `..` counts and all four broke together.
+    ## `requireFile` below is unchanged and still the thing that makes an
+    ## absent document a hard red.
   ScenarioRel = "src/tests/visual/scenarios.json"
   PinRel = "src/tests/visual/corpus-pins.json"
   ThresholdRel = "src/tests/visual/thresholds.json"
@@ -349,8 +359,21 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
     "the GPUI shell refused a window for scenario " & sc.id
   discard slot.activatePane(paneDebugControls)
 
-  let sourceService = newGpuiSourceService(session, trace,
-                                           editorRowsForViewport(viewport.height))
+  # The rows the window's editor pane shows (`window_geometry.editorRowsOf`),
+  # as the shipped window asks for them — and, `PLAT35-F3`, how WIDE that
+  # pane is. Both come off one geometry, as they do in `main.nim`: a tree
+  # drawn here without the width would carry no horizontal scrollbar while
+  # the window's carries one, and this suite's whole claim is that the two
+  # are one tree.
+  let editorGeom = block:
+    let idx = shell.windows.indexOf(windowId)
+    let proj = shell.projectionFor(windowId)
+    windowGeometryOf(shell.windows.windows[idx].layout,
+                     (if proj.status == dpsRefused: nil else: proj.state),
+                     viewport.width, viewport.height)
+  let editorRows = editorRowsOf(editorGeom)
+  let editorWidthPx = editorBodyWidthOf(editorGeom)
+  let sourceService = newGpuiSourceService(session, trace, editorRows)
   defer: sourceService.close()
   sourceService.serveWindow()
 
@@ -381,7 +404,7 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
   resetCallbacks()
   var r: GpuiRenderer
   let leafSet = shell.leavesFor(windowId)
-  let drawn = renderLeaves(r, leafSet, surface)
+  let drawn = renderLeaves(r, leafSet, surface, editorWidthPx)
   doAssert leafPlanIsValid(r, drawn),
     "the GPUI render plan did not verify for scenario " & sc.id
 

@@ -37,6 +37,12 @@
 ## range: the fixture is committed precisely so the numbers are stable, and a
 ## regeneration is exactly the moment a human should look at what changed.
 ## Update the count here, and say in the commit which recording it came from.
+##
+## The exception is a row whose program itself races
+## (``contiguityRacesInTheProgram``): there the count is not a property of the
+## program, so it is not pinned.  Every row of every language with a step
+## stream is checked against the thread switches in its recorded range, which
+## holds whatever the race produced.
 
 import std/os
 
@@ -91,6 +97,13 @@ type
     requiredExtraKeys*: seq[string]
     forbiddenKeys*: seq[string]
     contiguousRows*: int
+      ## Exact count of contiguous rows; ignored when
+      ## ``contiguityRacesInTheProgram`` is set.
+    contiguityRacesInTheProgram*: bool
+      ## The test program itself races, so how many rows come out contiguous
+      ## changes from one recording to the next.  The count is not pinned;
+      ## every row's bit is still checked against the thread switches the
+      ## recording carries, which is what the bit claims.
     concurrentRows*: int
     structuralNote*: string
     slowRowFloorMs*: int
@@ -218,11 +231,17 @@ const
         "the Plug has no error hook: /boom is answered 500 by " &
         "Plug.ErrorHandler, which the middleware only ever sees as a status",
       requiredExtraKeys: BeamKeys, forbiddenKeys: @[DiscoveryModeKey],
-      contiguousRows: 5, concurrentRows: 4,
+      contiguousRows: 0, contiguityRacesInTheProgram: true, concurrentRows: 4,
+        # Whether the client driver's `$gen_call` send and reply (another BEAM
+        # process) land inside a sequential request's range races in
+        # `test-programs/elixir/plug_web/lib/plug_web.ex` (recordings gave 2,
+        # 3, 7 and 8 contiguous rows), so each row is checked against the
+        # recording's thread switches instead of counted.
       structuralNote:
         "MEASURED by the replay pass over the recorded ranges: the " &
-        "four-request rendezvous cohort genuinely overlaps, and three further " &
-        "rows have another BEAM process's events interleaved into their ranges",
+        "four-request rendezvous cohort genuinely overlaps; a sequential row " &
+        "is contiguous unless another BEAM process's events were recorded " &
+        "inside its range",
       slowRowFloorMs: 400,
       durationNote:
         "the cohort blocks ~3.3 s in the barrier and /slow sleeps ~400 ms",

@@ -27,6 +27,21 @@ portable-pre-commit-doctor:
 test-build-alignment:
   bash scripts/test-build-alignment.sh
 
+# Assert that entering the dev shell from ANOTHER git repository writes nothing
+# there (no node_modules link, no hook config, no git hooks), and that entered
+# from inside this repository it still prepares this repository's top level.
+# Runs `nix develop`, so it is slow and not part of the in-shell suites. See the
+# header of ci/test/dev-shell-writes-nothing-elsewhere-test.sh.
+test-dev-shell-writes-nothing-elsewhere:
+  bash ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+
+# Assert that build-once.sh sources the cached dev-shell profile (and so runs
+# its shellHook) inside this repository, not in the directory it is invoked
+# from. Runs the real script against a stub profile; no toolchain, a second.
+# See the header of scripts/test-build-once-profile-cwd.sh.
+test-build-once-profile-cwd:
+  bash scripts/test-build-once-profile-cwd.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `inputs.runquota-src.follows = "runquota"`
 # means reprobuild is COMPILED against whatever that input resolves to, so
@@ -831,7 +846,12 @@ test-rust:
   # ("no tests to run") which we don't want to surface as a failure
   # of the whole ``just test`` invocation.  Tolerate that specific
   # exit code while still failing on any real test failure.
-  cargo nextest run --release --bin replay-server --run-ignored ignored-only || \
+  #
+  # Tests named `manual_*` are hooks a developer runs on purpose against an
+  # input nothing in the suite produces (e.g. `just test-valid-trace <dir>`);
+  # they are ignored so they never count as passed, and fail if run without
+  # their input, so they are left out of this sweep by name.
+  cargo nextest run --release --bin replay-server --run-ignored ignored-only -E 'not test(/::manual_/)' || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in replay-server; treating as no-op)"; \
     else \
@@ -841,12 +861,21 @@ test-rust:
   # test time by scripts/materialize-recording.sh, which drives the web
   # recording through `session-manager` and refuses to record without it. Build
   # it before the integration tests rather than after them.
+  # The build lands wherever CARGO_TARGET_DIR points (the CI runners set it),
+  # not necessarily under src/backend-manager/target where the script looks,
+  # so the path cargo reports is handed to the script explicitly.
   pushd ../backend-manager
-  cargo build --release --bin session-manager
+  session_manager="$(cargo build --release --bin session-manager --message-format=json-render-diagnostics \
+    | jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' | tail -n 1)"
   popd
-  # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
-  # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
-  # and are run separately in cross-repo CI jobs.
+  if [ ! -x "$session_manager" ]; then
+    echo "error: cargo build of session-manager reported no executable" >&2
+    exit 1
+  fi
+  export CODETRACER_RECORD_WEB_BIN="$session_manager"
+  # Integration tests (tests/*.rs): DAP protocol, flow tests, etc. A test
+  # whose recorder or tool a lane does not provide is excluded through that
+  # lane's not-provided list (below), which names where it runs instead.
   #
   # The rr origin tests (`rr::` in origin_rr_dap_test) fail when rr or
   # ct-native-replay is missing; they do not skip. A lane with no rr backend
@@ -854,12 +883,19 @@ test-rust:
   # then they are excluded here, by name, and the exclusion is printed, rather
   # than run and counted as passed. They run in cross-repo-tests.yml's
   # rr-backend-tests job.
-  filter='not test(~bash_flow_integration) and not test(~zsh_flow_integration) and not test(~javascript_flow_integration)'
+  filter='all()'
   if [ "${CODETRACER_RR_BACKEND_PRESENT:-}" = "0" ]; then
     filter="$filter and not (binary(origin_rr_dap_test) and test(/^rr::/))"
     echo "NOT RUN in this lane (CODETRACER_RR_BACKEND_PRESENT=0): the rr origin tests"
     echo "  origin_rr_dap_test rr::*   -- they need rr + ct-native-replay; they run in"
     echo "  cross-repo-tests.yml rr-backend-tests (scripts/run-cross-repo-tests.sh origin-rr)"
+  fi
+  # A lane that runs with graceful skipping off names, in one file, the tests
+  # whose tools it does not provide (ci/test/non-gui-not-provided.linux.txt);
+  # each is excluded by name and listed here as NOT RUN with where it runs.
+  if [ -n "${CODETRACER_TEST_LANE_NOT_PROVIDED:-}" ]; then
+    not_provided="$(cd ../.. && realpath "$CODETRACER_TEST_LANE_NOT_PROVIDED")"
+    filter="$filter and ($(bash ../../ci/lib/not-provided-filter.sh "$not_provided"))"
   fi
   cargo nextest run --release --test '*' -E "$filter"
   popd
@@ -1380,7 +1416,7 @@ log-args pid_or_current_or_last task-id:
 
 test-valid-trace trace_dir:
   cd src/db-backend && \
-    env CODETRACER_VALID_TEST_TRACE_DIR={{trace_dir}} cargo nextest run test_valid_trace
+    env CODETRACER_VALID_TEST_TRACE_DIR={{trace_dir}} cargo nextest run --run-ignored ignored-only manual_valid_trace
 # no need to cd back: i assume and manual use shows
 # just probably runs this in a subshell(or at least it doesn't seem to affect
 # our callsite)
@@ -1677,7 +1713,7 @@ test-frontend-js:
   # *Stop* leaves Debug mode for Edit mode. `renderer.nim`'s `stopAction` was
   # `discard` from the initial open-source commit while `SHIFT+F5` dispatched
   # to it, and nothing could see that: no runnable lane can import
-  # `renderer.nim` (`nim js` on it pulls the Karax/Monaco tree), so the two
+  # `renderer.nim` (`nim js` on it pulls the kdom/Monaco tree), so the two
   # renderer lanes compile-check it and an empty body compiles fine. The
   # behaviour therefore lives in the leaf `ui/stop_command.nim`, which this
   # runs.
@@ -1741,7 +1777,7 @@ test-frontend-js:
   # The renderer's three non-Monaco `innerHTML` sinks: a workspace path in the
   # file-conflict dialog, a context-menu label, and a recorded program's own
   # output through ansi_up.  The probe is compiled WITHOUT `-d:nodejs` on
-  # purpose -- with it, karax's `kdom` binds to an in-memory DOM emulation and
+  # purpose -- with it, `kdom` binds to an in-memory DOM emulation and
   # a test of what `innerHTML` does would be a test of the emulation.  Without
   # it the code reaches for browser globals, which the `.mjs` supplies from
   # jsdom, so the parser under test is a real one.
@@ -2022,6 +2058,51 @@ test-ruby-flow:
 test-origin-dap:
   #!/usr/bin/env bash
   exec ./scripts/test-origin-dap.sh
+
+# The recorder siblings `test-recorder-siblings` records with. Each must be
+# checked out next to this repository (../<repo>).
+recorder_siblings := "codetracer-cairo-recorder codetracer-circom-recorder codetracer-leo-recorder codetracer-cardano-recorder codetracer-solana-recorder codetracer-fuel-recorder codetracer-php-recorder codetracer-evm-recorder codetracer-flow-recorder codetracer-miden-recorder codetracer-move-recorder codetracer-polkavm-recorder codetracer-ton-recorder"
+
+# Build the recorder siblings, each in its own dev shell with its own `just`
+# targets (ci/test/build-recorder-siblings.sh), and check each artefact exists.
+build-recorder-siblings:
+  bash ci/test/build-recorder-siblings.sh {{recorder_siblings}}
+
+# The db-backend tests that record through a sibling recorder this repo's dev
+# shell does not ship: the Bash and Zsh flow tests, the PHP flow test, the
+# value-origin tests for Aiken, Cairo, Circom, Leo, Solana and Sway, the Cairo
+# GLI decode regression, and the flow / calltrace tests for Aiken, Cadence,
+# Cairo, Circom, EVM / Solidity, Leo, MASM, Move, PolkaVM, Solana, Sway and
+# Tolk. Run `just build-recorder-siblings` first (and
+# `cargo build` in ../codetracer-shell-recorders for the shell recorders).
+#
+# Graceful skipping is OFF: every prerequisite is provisioned here, so a missing
+# one fails. This is the `recorder-tests` job of cross-repo-tests.yml, and the
+# lane ci/test/*-not-provided.*.txt names for these tests.
+test-recorder-siblings:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  ws="$(cd .. && pwd)"
+  export CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false
+  export CODETRACER_BASH_RECORDER_PATH="$ws/codetracer-shell-recorders/bash-recorder/launcher.sh"
+  export CODETRACER_ZSH_RECORDER_PATH="$ws/codetracer-shell-recorders/zsh-recorder/launcher.zsh"
+  # The PHP extension is built against the PHP of the recorder's own shell and
+  # loads only into that PHP, so that is the `php` the test runs.
+  php="$(direnv exec "$ws/codetracer-php-recorder" bash -c 'command -v php')"
+  export PATH="$(dirname "$php"):$PATH"
+  cd src/db-backend
+  cargo test --no-fail-fast \
+    --test bash_flow_integration --test zsh_flow_integration \
+    --test php_flow_dap_test \
+    --test origin_aiken_dap_test --test origin_cairo_dap_test --test origin_circom_dap_test \
+    --test origin_leo_dap_test --test origin_solana_dap_test --test origin_sway_dap_test \
+    --test cairo_fixture_gli_decode \
+    --test aiken_flow_dap_test --test cadence_flow_dap_test --test cairo_flow_dap_test \
+    --test circom_flow_dap_test --test evm_load_calltrace_test --test leo_flow_dap_test \
+    --test leo_search_calltrace_test --test masm_flow_dap_test --test move_flow_dap_test \
+    --test polkavm_flow_dap_test --test solana_flow_dap_test --test solidity_flow_dap_test \
+    --test solidity_flow_integration --test sway_flow_dap_test --test tolk_flow_dap_test \
+    -- --nocapture
 
 # The WebAssembly boundary-recording checks: record each demo from this
 # tree and replay it.
@@ -2886,12 +2967,36 @@ cross-test-go-flow:
 # specific sibling revision, set the RR_BACKEND_REF override or use the
 # workflow_dispatch inputs.
 
+# PLAT-45: regenerate the desktop's default layout from the ONE shared default
+# arrangement (`headless_app/layout_model.sharedDefaultLayout()`). The committed
+# `src/config/default_layout.json` is this recipe's output; never edit it by
+# hand — `ci/test/default-layout-fresh.sh` (run by `ci/lint/nim.sh`) fails when
+# the two differ.
+generate-default-layout:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    # A node program: the per-mode derivation it runs is the desktop's own
+    # JavaScript (`index/mode_default_layout.modeDefaultLayout`).
+    nim js -d:nodejs --hints:off --warnings:off --nimcache:"$scratch/nimcache" \
+      -o:"$scratch/generate_default_layout.js" \
+      src/frontend/headless_app/generate_default_layout.nim
+    node "$scratch/generate_default_layout.js" --out=.
+    echo "wrote src/config/default_layout.json and src/frontend/headless_app/shared_default_layout.generated.json"
+
+# Regenerate BOTH consumers of codetracer-design-system from the pinned
+# submodule revision, in one resolver run: the desktop's stylus and the
+# terminal front-end's resolved token module (`design_tokens.nim`).
+# `ci/test/design-tokens-fresh.sh` is the gate that says when this is owed.
 sync-design-tokens:
     rm -rf ./src/frontend/styles/generated
     mkdir -p ./src/frontend/styles/generated
     bash scripts/tokens-to-styl.sh \
       ./libs/codetracer-design-system \
-      ./src/frontend/styles/generated
+      ./src/frontend/styles/generated \
+      --nim-out ./src/frontend/styles/generated/design_tokens.nim \
+      --editor-theme ./src/public/third_party/monaco-themes/themes/customThemes/json
 
 # One-time developer machine setup. Configures the local environment for
 # iterative development of CodeTracer, including BPF script development.
@@ -3728,6 +3833,35 @@ test-web-bundle-assets:
   exec > >(tee test-logs/test-web-bundle-assets.log) 2>&1
   bash ci/test/web-bundle-assets.sh
 
+# THE FRONT DOOR'S LOGIC, LOCALLY — WD4.
+#
+# `local-development-parity.md` §4 splits this deliberately: local proves the
+# middleware LOGIC, only a real edge proves the CACHE, and shipping on a green
+# local run for the cache property is the specific mistake that section exists
+# to prevent. So this recipe proves the fork, the allow-list and the headers
+# under the real pinned wrangler; the cache-isolation gate is on the deploy.
+#
+# Needs the `.#ci` shell for wrangler. No stack, no network.
+test-web-front-door-local:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-web-front-door-local.log) 2>&1
+  bash ci/test/web-front-door-local.sh
+
+# THE `-d:ctWeb` PARTITION MAY SHRINK AND MUST NOT GROW.
+#
+# §7.5 of `UI-Bundle-And-Endpoints.md` wants one bundle across all three
+# deployments and says the item is most likely to be deferred; it was deferred
+# on 2026-10-01 with the measurement attached. This is the deferral's boundary:
+# a fifteenth compile-time fork has to be added to an inventory somebody reads,
+# rather than appearing because a define was the quickest way past a problem.
+# Costs milliseconds.
+test-ctweb-partition-inventory:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  bash ci/test/ctweb-partition-inventory.sh
+
 # THE PAGE PAINTS — the assertion whose absence let a blank product reach
 # production with every check green.
 #
@@ -4450,18 +4584,65 @@ test-renderer-pane-parity:
 # off.
 #
 # The unit suites themselves run in `vm-unit` and `vm-unit-js` by the directory
-# glob; these three are the evidence around them. M17 needs BOTH backends — it
+# glob — and `identity-suites-are-in-a-lane.sh` is what makes that sentence
+# checkable rather than assumed. Two identity suites were once written in a
+# directory no lane globs and ran only by hand for a week; the gate finds suites
+# by the identity module they IMPORT, so one written anywhere is found. M17 needs BOTH backends — it
 # asserts green on C and red on JS — so do not set CT_IDENTITY_ARMS here.
 test-identity:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-identity.log) 2>&1
+  bash ci/test/identity-suites-are-in-a-lane.sh
   bash ci/test/identity-no-escape-hatch.sh
   bash ci/test/identity-desktop-no-credential.sh
   bash ci/test/identity-desktop-no-credential-test.sh
   bash ci/test/identity-webcrypto.sh
   bash ci/test/identity-token-mutation.sh
+
+# WD3's verification, and the only thing in this repo that has ever watched a
+# RUNNING issuer accept a token the identity layer verified.
+#
+# Two real processes against one local Zitadel: the probe
+# (`ci/test/identity_live_device_grant_probe.nim` — the product's own modules,
+# native backend, real TLS) performs RFC 8628's device flow, and a real
+# headless Chromium (`ci/test/identity-device-approve.mjs`) signs in on the
+# issuer's own hosted login and presses Allow.  The password is typed into a
+# browser the CLI has no handle on; the two meet only at the issuer, which is
+# the property the device flow exists for.  Asserted at the end: the probe
+# exited 0, printed PASSED, and printed a non-empty SUBJECT — three separate
+# checks, because a probe that died before finishing is not a probe that passed.
+#
+# NOT part of `test-identity`, on purpose.  This needs a running stack that
+# nothing provisions, so it SKIPS with exit 2 and a named remedy when the stack,
+# the dev CA, the registered client, Chromium or Playwright is absent — and
+# `test-identity`'s `set -e` would turn every such honest skip into a red
+# aggregate.  Its negative controls are `CT_IDENTITY_CLIENT_ID=<unregistered>`
+# (red at the device-authorization step) and `CT_DEVICE_ACTION=deny|none` (red
+# at the poll step, and `none` is bounded by CT_DEVICE_GRANT_TIMEOUT rather than
+# left to hang).
+test-identity-live-device-grant:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-identity-live-device-grant.log) 2>&1
+  bash ci/test/identity-live-device-grant.sh
+
+# The live probe above, COMPILE-CHECKED ONLY — same arrangement, and same
+# argument, as `test-online-sharing-compile`.  It cannot run here: it needs an
+# issuer and a second agent at a browser.  But it is the only caller of
+# `oidc.nim`'s `awaitDeviceGrant` / `fetchJwks` pair outside a fake transport,
+# so a signature change in the identity layer breaks it and breaks nothing else
+# — which is precisely how `online_sharing_test.nim` came to be found rotted
+# against three signatures at once.  It is also not test-shaped, so
+# `test-lane-coverage.sh` would never have asked for a lane for it.
+test-identity-device-grant-compile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-identity-device-grant-compile.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh identity-device-grant-live --compile-only
 
 # NS7a's first verification: the development loop has no network surface, so
 # there is no request for a token to ride on. Runs the gate through its own
@@ -4708,7 +4889,7 @@ build-gpui:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p build/bin test-logs
-  shim_dir="$(cd .. 2>/dev/null && pwd)/isonim-gpui/rust/target/debug"
+  shim_dir="${ISONIM_GPUI_SHIM_DIR:-$(cd .. 2>/dev/null && pwd)/isonim-gpui/rust/target/debug}"
   if [ ! -e "${shim_dir}/libgpui_nim_shim.so" ] && \
      [ ! -e "${shim_dir}/libgpui_nim_shim.dylib" ]; then
     echo "WARNING: isonim-gpui's Rust shim is not built at ${shim_dir}." >&2
@@ -4822,9 +5003,191 @@ plat35-capture-electron *args:
       ;;
   esac
 
+# PLAT-45: the arrangement the REAL Electron front-end opens `calc` with on its
+# first-run path — once over the committed (generated) default and once over a
+# scratch build of the shared tree with one edit — written to
+# src/tests/visual/answers/plat45-default-arrangement.electron.json for
+# `src/frontend/tui/tests/test_plat45_three_media.nim`; and the desktop's
+# remember / restart / View > Reset Layout spec
+# (`tests/layout/plat45-desktop-remembers-own.spec.ts`). Both run THIS
+# checkout's desktop JavaScript (`scripts/plat45-desktop-prefix.sh`). Its own
+# Xvfb, as `plat35-capture-electron` does, when no display is set.
+plat45-capture-electron *args:
+  bash scripts/plat45-capture-electron.sh {{args}}
+
+# PLAT-45: the GPUI window's FIRST SCREEN, on a headless sway, with no
+# remembered layout — the frame `plat45-window-record` reads the arrangement
+# off. Needs the windowed binary (`-d:gpuiShimPath=<windowed shim>`,
+# `CODETRACER_WINDOW_BIN_PINS_SHIM=1`) and the `calc` recording.
+plat45-arrangement-window:
+  bash ci/test/plat45-arrangement-window.sh
+
+# Read the window's frames through PLAT-39's pixel reader and commit the
+# record `test_plat45_three_media.nim` asserts over. Needs `tesseract`.
+plat45-window-record:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --path:../GuiAssert/src \
+    --path:src/frontend --path:src/frontend/viewmodel \
+    --nimcache:nimcache/plat45rec -o:build/plat45_window_record \
+    src/tests/visual/screen_oracle/plat45_window_record.nim
+
+# PLAT-47 part B: the GPUI window driven by a REAL pointer device and a REAL
+# key on a headless sway — a divider drag, a tab dragged over the four drop
+# kinds, Esc, the VCS tab, the wheel over the call trace — framed after every
+# step (`ci/test/plat47_gpui_window.py` says what each frame is). Needs the
+# windowed binary (`-d:gpuiShimPath=<windowed shim>`,
+# `CODETRACER_WINDOW_BIN_PINS_SHIM=1`), isonim-gpui's `build/virtual-pointer`,
+# and the compositor tools of isonim-gpui's dev shell.
+plat47-gpui-window:
+  bash ci/test/plat47-gpui-window.sh
+
+# Measure those frames into the committed
+# `src/tests/visual/plat47-gpui-window.json` that
+# `src/frontend/gpui/tests/test_plat47_gpui_window.nim` asserts over. Needs
+# `tesseract`.
+plat47-gpui-window-record:
+  python3 ci/test/plat47_gpui_window.py record
+
+# PLAT-48: the top bar and the auto-hide panels in a REAL GPUI window — the
+# menu, the desktop's debugger marks, the omnibar, the footer and TOP strips,
+# pin / unpin — driven by a virtual pointer and wtype on a headless sway and
+# framed with grim (ci/test/plat48_gpui_window.py). Needs isonim-gpui's dev
+# shell tools and a windowed binary (`CODETRACER_WINDOW_BIN_PINS_SHIM=1`).
+plat48-gpui-window:
+  bash ci/test/plat48-gpui-window.sh
+
+# Measure the captured frames into `src/tests/visual/plat48-gpui-window.json`,
+# which `src/frontend/gpui/tests/test_plat48_gpui_window.nim` asserts.
+plat48-gpui-window-record:
+  python3 ci/test/plat48_gpui_window.py record
+
+# The GPUI window captures, RE-TAKEN AND ASSERTED from a checkout: build
+# isonim-gpui's windowed shim and virtual pointer (in its own dev shell), this
+# checkout's windowed front-end against it, record `calc` / `call_pages` when
+# absent, then for each of plat45 / plat47 / plat48 (default: all) capture on a
+# headless sway, measure the frames into the committed record, and run the
+# suite that asserts it. The `gpui-window-captures` CI job runs this.
+gpui-window-captures *which:
+  bash ci/test/gpui-window-captures.sh {{which}}
+
+# PLAT-46: the desktop's computed colour for every role the TUI also paints,
+# written to src/tests/visual/answers/plat46-token-parity.electron.json for
+# `tests/real_terminal/test_plat46_desktop_parity.nim`. Same Xvfb arrangement
+# as `plat35-capture-electron` (its own server, `-dpi 96`), for its reasons.
+plat46-capture-electron *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
+      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts {{args}}
+      ;;
+    *)
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 2560x1440x24 -dpi 96 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts {{args}}
+      ;;
+  esac
+
+# PLAT-47: what the desktop shows on the `calc` recording — the first-run
+# (Debug-mode) arrangement, the editor's colours as rendered, the focused
+# panel's outline, the Files pane's entries and the calltrace pane's calls —
+# written to src/tests/visual/answers/plat47-desktop-parity.electron.json for
+# the terminal's and GPUI's parity suites. Runs this checkout's desktop
+# JavaScript in a prefix of its own (scripts/plat45-desktop-prefix.sh).
+plat47-capture-electron *args:
+  bash scripts/plat47-capture-electron.sh {{args}}
+
+# PLAT-48: the desktop's menu drawn from the shared Menu ViewModel (the
+# verification gate: a ViewModel-only highlight change moves the DOM's), its
+# shortcuts, Step Over from the menu, and the footer's labels — written to
+# `src/tests/visual/answers/plat48-menu.electron.json`.
+plat48-capture-electron *args:
+  bash scripts/plat48-capture-electron.sh {{args}}
+
+# The desktop's chrome as the terminal's and GPUI's are measured against it:
+# the one root menu button and its cascade, each transport control's tooltip
+# and the omnibar's placeholder — written to
+# `src/tests/visual/answers/plat49-chrome.electron.json`.
+plat49-capture-electron *args:
+  bash scripts/plat49-capture-electron.sh {{args}}
+
+# The desktop's caption bar, strips, menu surface, right-click menus and click
+# behaviours, as the terminal's and GPUI's are measured against them —
+# written to `src/tests/visual/answers/plat50-desktop.electron.json`.
+plat50-capture-electron *args:
+  bash scripts/plat50-capture-electron.sh {{args}}
+
+# The desktop's Terminal Output pane as the terminal's and GPUI's are measured
+# against it: its lines and their computed styles, a click on a fragment, its
+# screen view with the real-time scrubber and its marks — written to
+# `src/tests/visual/answers/plat52-terminal.electron.json`.
+plat52-capture-electron *args:
+  bash scripts/plat52-capture-electron.sh {{args}}
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh
+
+# PLAT-35 — THE GPUI PIXEL CAPTURE, WITH NO COMPOSITOR.
+#
+# The methodology's capture step for the GPUI front-end: one PNG per named
+# view, at that view's declared viewport, rendered by the front-end's own
+# process through `gpui_render_to_pixels` (`--features gpui-headless`). It
+# needs no `sway`, no `grim` and no screen-recording grant, which is why it
+# runs where the nine window lanes cannot — see
+# `codetracer-specs/issues/2026-09-29-gpui-window-capture-lanes-are-wayland-only.md`.
+#
+# **An off-screen frame is NOT a window, and this recipe never claims it is.**
+# PLAT-23's G1 asks that a window has been observed; `satisfiesG1: false` is in
+# every census this lane writes. `plat37-capture` keeps G1.
+#
+# Needs the headless shim, built by the sibling that owns it:
+#
+#     cd ../isonim-gpui && nix develop --command just plat37-shims
+#
+# Target one view for a review iteration with `--only <view>`.
+plat35-capture-gpui *args:
+  bash ci/test/plat35-gpui-capture.sh {{args}}
+
+# The PNG encoder the capture writes through, round-tripped against a decoder
+# that is not it. NOT-A-VISUAL-GATE: it asserts the container and the filter,
+# which is what a reviewer looking at a wrong picture cannot tell apart from a
+# design problem.
+plat35-png-encoder:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off --nimcache:build/nimcache/plat35-png \
+    -o:build/plat35/png_test src/common/png_test.nim
+
+# THE TIER-4 LEDGER'S OWN INTEGRITY. `src/tests/visual/tier4-gpui-readings.json`
+# was read by NOTHING in the tree until 2026-10-02, while `tier4-review.json`
+# beside it is graded in both directions — so the GPUI arm had a ledger and no
+# gate over it. This re-derives the `gate` counts from the ledger's own
+# `findings`, checks `gate.met` against them both ways, and checks the reading
+# population against `scenarios.json`.
+#
+# NOT A SCORE GATE: it quarantines no reading. See the suite's header for why
+# gating these scores would be a gate holding ten of twelve exceptions.
+#
+# Reads two JSON files and links no shim, so it needs no capture and no
+# compositor; the `gpui-shell` lane compiles it with the rest of that
+# directory.
+plat35-ledger-integrity:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  nim c -r --hints:off --warnings:off \
+    --nimcache:build/nimcache/plat35-ledger \
+    -o:build/plat35/ledger_integrity \
+    src/frontend/gpui/tests/test_plat35_ledger_integrity.nim
 
 # The gate. Runs the GPUI arm live (real recording, real replay-server, real
 # shadow tree) and compares it against the recorded Electron arm.
@@ -5881,7 +6244,10 @@ ensure-ct-native-replay:
 
 # Run the DAP-flow integration tests (Ada / C / C++ / D / Fortran / Go /
 # Pascal / Nim / Rust) under
-# ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``.
+# ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``, and
+# ``mcr_streaming_unified_reader_test.rs``, which reads a real ct-mcr
+# recording through the unified follow reader and needs the same two
+# binaries.
 #
 # The ``ensure-*`` prerequisites build the sibling binaries; this recipe
 # then makes them discoverable to the Rust tests:
@@ -5934,4 +6300,11 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
     fi
     export PATH="${extra_path}${PATH}"
 
-    cd src/db-backend && cargo test --test '*_mcr_streaming_flow_test'
+    cd src/db-backend && cargo test --no-fail-fast --test '*_mcr_streaming_flow_test' --test mcr_streaming_unified_reader_test
+
+# PLAT-51: the real Electron app's share of the milestone and the reference
+# the terminal and GPUI are measured against (no Timeline, the list panes'
+# scrollbar scrubbers, the changed-value style) — writes
+# `src/tests/visual/answers/plat51-desktop.electron.json`.
+plat51-capture-electron *args:
+  bash scripts/plat51-capture-electron.sh {{args}}

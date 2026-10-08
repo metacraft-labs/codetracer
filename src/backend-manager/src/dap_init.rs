@@ -77,6 +77,19 @@ pub enum DapInitError {
     BackendError { step: &'static str, message: String },
     /// Failed to send a message to the backend.
     SendFailed { step: &'static str },
+    /// The backend ANSWERED, and what it answered was that the launch it had
+    /// already acknowledged cannot succeed.
+    ///
+    /// This is a distinct state from [`Self::Timeout`] and the distinction is
+    /// the whole point of the variant. `launch` is acknowledged `success: true`
+    /// before any trace is opened, so a load that fails afterwards can only be
+    /// reported out of band — the backend emits it as a `ct/notification` of
+    /// kind `Error`. That event used to be collected as one more uninteresting
+    /// message while the handshake waited out its full 120-second budget for a
+    /// `stopped` event that was never coming, and the daemon then reported a
+    /// timeout: "we could not look" delivered as "it never answered", with the
+    /// reason the backend had already stated discarded on the way.
+    LaunchRefused { message: String },
 }
 
 impl std::fmt::Display for DapInitError {
@@ -92,7 +105,40 @@ impl std::fmt::Display for DapInitError {
             Self::SendFailed { step } => {
                 write!(f, "failed to send DAP message at step: {step}")
             }
+            Self::LaunchRefused { message } => write!(f, "{message}"),
         }
+    }
+}
+
+/// The DAP event the backend uses to report a failure for a `launch` it has
+/// already acknowledged — `db-backend`'s
+/// `dap_server::LAUNCH_FAILED_EVENT`, spelled here rather than imported
+/// because this crate does not depend on `db-backend`.
+///
+/// NOT `ct/notification`. That event also carries kind-`Error` notifications
+/// for traces that opened perfectly well — `dap_handler::complete_move` emits
+/// one when the first step has a recorded error event — so keying on it would
+/// abort working launches.
+const LAUNCH_FAILED_EVENT: &str = "ct/launch-failed";
+
+/// The refusal text carried by a `ct/launch-failed` event, or `None` for every
+/// other message.
+fn launch_refusal_text(msg: &Value) -> Option<String> {
+    if msg.get("type").and_then(Value::as_str) != Some("event") {
+        return None;
+    }
+    if msg.get("event").and_then(Value::as_str) != Some(LAUNCH_FAILED_EVENT) {
+        return None;
+    }
+    let text = msg
+        .get("body")?
+        .get("message")
+        .and_then(Value::as_str)?
+        .trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
     }
 }
 
@@ -218,6 +264,16 @@ async fn wait_for_stopped_event(
             }
         }
 
+        // THE WAIT ENDS ON A STATED REFUSAL, not only on the clock. The
+        // backend has already answered `launch` `success: true`, so this event
+        // is the only form its "and then the trace would not open" can take;
+        // collecting it and waiting out the remaining budget turns a named
+        // cause into a timeout. See [`DapInitError::LaunchRefused`].
+        if let Some(message) = launch_refusal_text(&msg) {
+            events_out.push(msg);
+            return Err(DapInitError::LaunchRefused { message });
+        }
+
         // Not the stopped event — collect it and keep waiting.
         events_out.push(msg);
     }
@@ -295,9 +351,11 @@ pub async fn run_dap_init(
     //   1. `trace.bin`              (legacy materialized binary)
     //   2. `<program>.ct` CTFS      (current materialized convention —
     //                                only when not a replay-worker bundle)
-    //   3. `trace.json`             (legacy JSON; default fallback so
-    //                                the error path reports a canonical
-    //                                name)
+    //   3. `trace.ct`               (default fallback so the error path
+    //                                reports the canonical name; a
+    //                                folder holding test-oracle
+    //                                `trace.json` output is refused by
+    //                                the db-backend whatever is sent)
     //
     // For CTFS we send the actual filename rather than a hard-coded
     // `trace.ct` because recorders such as the Ruby native gem name
@@ -328,7 +386,7 @@ pub async fn run_dap_init(
     let trace_file = if trace_folder.join("trace.bin").is_file() {
         "trace.bin"
     } else {
-        ctfs_file.as_deref().unwrap_or("trace.json")
+        ctfs_file.as_deref().unwrap_or("trace.ct")
     };
 
     let mut launch_args = json!({

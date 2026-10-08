@@ -495,6 +495,9 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
     layOutRow(head)
     for ci, c in v.columns:
       let th = r.createElement("th")
+      # PLAT-50: a header cell's column, for its click (an element handle
+      # names no position of its own).
+      r.setAttribute(th, "data-column-index", $ci)
       layOutCell(th, ci)
       r.appendChild(th, r.createTextNode(c))
       r.appendChild(head, th)
@@ -505,6 +508,7 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
       r.setAttribute(tr, "data-row-index", $ri)
       for ci, cell in row:
         let td = r.createElement("td")
+        r.setAttribute(td, "data-column-index", $ci)
         layOutCell(td, ci)
         r.setAttribute(td, "data-cell",
           (if ri == v.cursor and ci == v.column: "cursor" else: ""))

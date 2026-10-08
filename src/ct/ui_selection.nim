@@ -624,7 +624,7 @@ func planUiSelection*(args: openArray[string];
       # only the tokens `replay` spells for a trace, by name — so the flag is
       # what tells `codetracer-gpui` the positional is a project rather than a
       # recording. Without it the front-end would resolve the folder as a trace
-      # and refuse it for having no `trace.json`, which is a true diagnosis of
+      # and refuse it for not being a recording, which is a true diagnosis of
       # the wrong question.
       #
       # WHAT THIS FRONT-END CANNOT YET DO IS REPORTED BY THE FRONT-END, NOT
@@ -689,7 +689,7 @@ func planUiSelection*(args: openArray[string];
       # whole translation for this command is prepending the flag that tells
       # `codetracer-tui` the positional is a project rather than a recording.
       # Without it the front-end would resolve the folder as a trace and refuse
-      # it for having no `trace.json`, which is a true diagnosis of the wrong
+      # it for not being a recording, which is a true diagnosis of the wrong
       # question.
       let translatedEdit = translateArgs(scan.command, scan.strippedArgs, atTui)
       if not translatedEdit.ok:

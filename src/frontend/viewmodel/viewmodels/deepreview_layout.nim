@@ -62,12 +62,11 @@ const
   ## older build is recognisably stale rather than mysterious.
   RetiredDeepReviewContentId* = 36
 
-  ## ``Content.Scratchpad``, ``Content.AgentActivity``, ``Content.Timeline``
-  ## and ``Content.TerminalOutput`` — exported so tests can assert the full
+  ## ``Content.Scratchpad``, ``Content.AgentActivity`` and
+  ## ``Content.TerminalOutput`` (PLAT-51: the Timeline is removed) — exported so tests can assert the full
   ## standard panel set survives a review.
   ScratchpadContentId* = 17
   AgentActivityContentId* = 35
-  TimelineContentId* = 19
   TerminalOutputContentId* = 24
   VcsContentId* = 41
 

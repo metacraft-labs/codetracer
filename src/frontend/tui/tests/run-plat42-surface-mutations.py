@@ -43,7 +43,10 @@ HERE = Path(__file__).resolve().parent
 CONTROL = HERE / "plat42-surface-mutation-control.sha256"
 BECAUSE = HERE / "plat42-surface-mutation-because.json"
 NIMCACHE = Path(os.environ.get("TMPDIR", "/tmp")) / "plat42-mutations"
-SHIM = REPO.parent / "isonim-gpui/rust/target/debug"
+# The windowed shim the GPUI suites load: `$ISONIM_GPUI_SHIM_DIR` when set (a
+# worktree whose isonim-gpui is a `-pin` checkout), else the sibling's.
+SHIM = Path(os.environ.get("ISONIM_GPUI_SHIM_DIR",
+                           str(REPO.parent / "isonim-gpui/rust/target/debug")))
 TIMEOUT = 3600
 
 SURFACE = "src/frontend/view_vocabulary/editor_surface.nim"
@@ -72,8 +75,8 @@ ARMS = [
      "      if held:", [EDITING],
      "inline values drawn on every held row, not only the execution line"),
     ("B1", LEAVES,
-     "  if row.pointer == eptExecution:\n    r.setStyle(el, \"background\", ExecutionRowBand)",
-     "  if true:\n    r.setStyle(el, \"background\", ExecutionRowBand)",
+     "  if row.pointer == eptExecution:\n    r.setStyle(column, \"background\", ExecutionRowBand)",
+     "  if true:\n    r.setStyle(column, \"background\", ExecutionRowBand)",
      [LAWS], "the execution band drawn on every row"),
     ("F1", RULE, "      return true\n", "      return true\n  return true\n",
      [FACTS], "every line of the function dimmed as a declined arm"),
@@ -89,8 +92,8 @@ ARMS = [
      "          g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)",
      "          g.paint(row, codeCol, span.text, span.style)",
      [LAWS], "the terminal paints the value at a fixed column over the code"),
-    ("E3", LEAVES, "    r.appendChild(el, ann)",
-     "    r.setStyle(ann, \"position\", \"absolute\")\n    r.appendChild(el, ann)",
+    ("E3", LEAVES, "    r.appendChild(column, ann)",
+     "    r.setStyle(ann, \"position\", \"absolute\")\n    r.appendChild(column, ann)",
      [LAWS], "GPUI draws the value absolutely positioned: no reflow"),
     ("W1", LEAVES, '  r.setStyle(el, "white-space", "nowrap")', "  discard",
      [LAWS], "GPUI rows soft-wrap again: one line takes the rows below it"),
@@ -99,7 +102,15 @@ ARMS = [
      "the host passes no breakpoints to the pane again"),
     # MOVED 2026-09-23: PLAT-40 moved the terminal's breakpoint toggle into
     # the session both native front-ends share, so the arm follows it there.
-    ("L2", SESSION, "  for l in lines:\n", "  for l in [line]:\n", [LINE_TERM],
+    # RE-AIMED 2026-10-05: `toggleBreakpoint` builds `anchors` (every held
+    # breakpoint, column breakpoints keep their column) and hands them to
+    # `sendBreakpoints` since PLAT-50; the `sendBreakpointLines(path, lines,
+    # …)` line this needle named is gone, and the scan said so.
+    ("L2", SESSION,
+     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, anchors, disabled)\n",
+     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, "
+     "(if removing: @[] else: @[(line, 0)]), disabled)\n",
+     [LINE_TERM],
      "a toggle sends only its own line: setBreakpoints clears the others"),
     ("L3", RUNTIME,
      "    outcome.awaitsMove = movesTheDebugger(outcome.action)",
@@ -231,7 +242,16 @@ def run_suite(suite):
     return "RED", failures[0] if failures else ""
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
+from harness_guard import refuse_undeclared_arms  # noqa: E402
+
+
 def main():
+    # AN UNDECLARED ARM ID, OR AN EMPTY `--only=`, IS REFUSED before anything
+    # is touched (`ci/lib/harness_guard.py`).
+    refused = refuse_undeclared_arms(sys.argv[1:], globals())
+    if refused:
+        return refused
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--needle-scan", action="store_true")

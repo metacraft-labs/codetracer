@@ -242,24 +242,6 @@ proc wasmSpec*(): SmartHarnessSpec =
       "The sibling is a wazero checkout with examples, not a CodeTracer " &
       "recorder CLI exposing record --out-dir.")
 
-proc wasmiSpec*(): SmartHarnessSpec =
-  SmartHarnessSpec(providerId: "smart-wasmi", language: "wasm",
-    framework: "wasmi", displayName: "Wasmi Harness Notes",
-    recorderRepo: "codetracer-wasmi-recorder",
-    recorderBinary: "codetracer-wasmi-recorder",
-    envCommand: "CODETRACER_WASMI_RECORDER_CMD",
-    fixtureRoots: @["crates/cli/tests", "crates/wasmi/tests",
-        "crates/wasi/tests"],
-    fixtureExtensions: @[".wasm", ".wat", ".rs"],
-    ignoredPathFragments: @["/target/"],
-    preferredFixtureNames: @[],
-    recordMode: shrmUnsupported,
-    stableTestCommand: "cargo test",
-    dependencies: @["cargo"],
-    limitations:
-      "The sibling is a wasmi runtime checkout without a CodeTracer " &
-      "recorder CLI exposing record --out-dir.")
-
 proc smartHarnessSpecs*(): seq[SmartHarnessSpec] =
   @[
     cairoSpec(),
@@ -274,8 +256,7 @@ proc smartHarnessSpecs*(): seq[SmartHarnessSpec] =
     tonSpec(),
     cardanoSpec(),
     flowSpec(),
-    wasmSpec(),
-    wasmiSpec()
+    wasmSpec()
   ]
 
 proc newSmartContractHarnessM13Providers*(): seq[M1Provider] =

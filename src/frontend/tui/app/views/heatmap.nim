@@ -67,12 +67,12 @@ const
     ## `heatLevel` returns `0 ..< HeatLevels`. Level 0 is "never ran".
 
   HeatPalette*: array[HeatLevels, CellStyle] = [
-    CellStyle(fg: "bright_black"),           ## 0 — never executed
-    CellStyle(fg: "red"),                    ## 1 — coldest of the hot
-    CellStyle(fg: "bright_red"),             ## 2
-    CellStyle(fg: "yellow"),                 ## 3
-    CellStyle(fg: "bright_yellow"),          ## 4
-    CellStyle(fg: "bright_white", bold: true)]  ## 5 — the hottest line
+    CellStyle(role: srHeat0),               ## 0 — never executed
+    CellStyle(role: srHeat1),               ## 1 — coldest of the hot
+    CellStyle(role: srHeat2),               ## 2
+    CellStyle(role: srHeat3),               ## 3
+    CellStyle(role: srHeat4),               ## 4
+    CellStyle(role: srHeat5)]  ## 5 — the hottest line
     ## Six DISTINCT styles, and their distinctness is asserted rather than
     ## assumed: a palette with a repeat would make two heat levels
     ## indistinguishable on screen while every count-based assertion stayed

@@ -1,0 +1,798 @@
+{
+  "generated": {
+    "takenAt": "2026-10-06T20:14:56.738Z",
+    "prefixDefaultSha256": "57fffb7554a326a4023980fa44ee64fb9ebee962a1cc0576a62f801b6613dc2d",
+    "loadedConfig": {
+      "root": {
+        "type": "row",
+        "content": [
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "filesystemComponent",
+                      "content": 9
+                    }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "vCSComponent-0",
+                      "content": 41
+                    }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "testResultsComponent-0",
+                      "content": 48
+                    }
+                  }
+                ],
+                "size": 100,
+                "sizeUnit": "%",
+                "minSizeUnit": "px",
+                "id": "",
+                "isClosable": true,
+                "maximised": false,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": 17.777777777777782,
+            "sizeUnit": "%",
+            "minSizeUnit": "px",
+            "id": "",
+            "isClosable": true
+          },
+          {
+            "type": "stack",
+            "content": [
+              {
+                "type": "component",
+                "content": [],
+                "size": 1,
+                "sizeUnit": "fr",
+                "minSize": 200,
+                "minSizeUnit": "px",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "reorderEnabled": true,
+                "title": "editorComponent",
+                "componentType": "editorComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "content": 2,
+                  "fullPath": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "name": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "editorView": 0,
+                  "isEditor": true,
+                  "noInfoMessage": "",
+                  "lang": 0,
+                  "isReparenting": false
+                }
+              }
+            ],
+            "size": 33.33333333333333,
+            "sizeUnit": "%",
+            "minSizeUnit": "px",
+            "id": "",
+            "isClosable": true,
+            "maximised": false,
+            "activeItemIndex": 0
+          },
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "row",
+                "content": [
+                  {
+                    "type": "stack",
+                    "content": [
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "stateComponent-0",
+                          "content": 4
+                        }
+                      },
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "scratchpadComponent-0",
+                          "content": 17
+                        }
+                      }
+                    ],
+                    "size": 50,
+                    "sizeUnit": "%",
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "isClosable": true,
+                    "maximised": false,
+                    "activeItemIndex": 0
+                  },
+                  {
+                    "type": "stack",
+                    "content": [
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "calltraceComponent-0",
+                          "content": 6
+                        }
+                      },
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "agentActivityComponent-0",
+                          "content": 35
+                        }
+                      }
+                    ],
+                    "size": 50,
+                    "sizeUnit": "%",
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "isClosable": true,
+                    "maximised": false,
+                    "activeItemIndex": 0
+                  }
+                ],
+                "size": 50,
+                "sizeUnit": "%",
+                "minSizeUnit": "px",
+                "id": "",
+                "isClosable": true
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "eventLogComponent-0",
+                      "content": 8
+                    }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "terminalComponent-0",
+                      "content": 24
+                    }
+                  }
+                ],
+                "size": 50,
+                "sizeUnit": "%",
+                "minSizeUnit": "px",
+                "id": "",
+                "isClosable": true,
+                "maximised": false,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": 48.88888888888889,
+            "sizeUnit": "%",
+            "minSizeUnit": "px",
+            "id": "",
+            "isClosable": true
+          }
+        ],
+        "size": 100,
+        "sizeUnit": "%",
+        "minSizeUnit": "px",
+        "id": "",
+        "isClosable": false
+      },
+      "openPopouts": [],
+      "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "closePopoutsOnUnload": true,
+        "responsiveMode": "always",
+        "tabOverlapAllowance": 2,
+        "reorderOnTabMenuClick": true,
+        "tabControlOffset": 0,
+        "popInOnClose": false
+      },
+      "dimensions": {
+        "borderWidth": 4,
+        "borderGrabWidth": 8,
+        "defaultMinItemHeight": 0,
+        "defaultMinItemHeightUnit": "px",
+        "defaultMinItemWidth": 10,
+        "defaultMinItemWidthUnit": "px",
+        "headerHeight": 32,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+      },
+      "header": {
+        "show": "top",
+        "popout": "open in new window",
+        "dock": "dock",
+        "close": "close",
+        "maximise": "maximise",
+        "minimise": "minimise",
+        "tabDropdown": "additional tabs"
+      },
+      "resolved": true
+    },
+    "stacks": [
+      {
+        "x": 4,
+        "y": 34,
+        "w": 335,
+        "h": 1334,
+        "contents": [
+          9,
+          41,
+          48
+        ],
+        "active": 0
+      },
+      {
+        "x": 343,
+        "y": 34,
+        "w": 628,
+        "h": 1334,
+        "contents": [
+          2
+        ],
+        "active": 0
+      },
+      {
+        "x": 975,
+        "y": 34,
+        "w": 459,
+        "h": 665,
+        "contents": [
+          4,
+          17
+        ],
+        "active": 0
+      },
+      {
+        "x": 1438,
+        "y": 34,
+        "w": 458,
+        "h": 665,
+        "contents": [
+          6,
+          35
+        ],
+        "active": 0
+      },
+      {
+        "x": 975,
+        "y": 703,
+        "w": 921,
+        "h": 665,
+        "contents": [
+          8,
+          24
+        ],
+        "active": 0
+      }
+    ],
+    "viewport": {
+      "w": 1900,
+      "h": 1400
+    }
+  },
+  "scratch": {
+    "takenAt": "2026-10-06T20:15:09.208Z",
+    "prefixDefaultSha256": "a3b7ebadb1c27fe69eeb111ae71bf0a72bec46842ce3290a2ea769478e3182d0",
+    "loadedConfig": {
+      "root": {
+        "type": "row",
+        "content": [
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "filesystemComponent",
+                      "content": 9
+                    }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "vCSComponent-0",
+                      "content": 41
+                    }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "testResultsComponent-0",
+                      "content": 48
+                    }
+                  }
+                ],
+                "size": 100,
+                "sizeUnit": "%",
+                "minSizeUnit": "px",
+                "id": "",
+                "isClosable": true,
+                "maximised": false,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": 17.777777777777782,
+            "sizeUnit": "%",
+            "minSizeUnit": "px",
+            "id": "",
+            "isClosable": true
+          },
+          {
+            "type": "stack",
+            "content": [
+              {
+                "type": "component",
+                "content": [],
+                "size": 1,
+                "sizeUnit": "fr",
+                "minSize": 200,
+                "minSizeUnit": "px",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "reorderEnabled": true,
+                "title": "editorComponent",
+                "componentType": "editorComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "content": 2,
+                  "fullPath": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "name": "/home/zahary/m/codetracer-gui/codetracer-plat50/test-programs/calc/main.py",
+                  "editorView": 0,
+                  "isEditor": true,
+                  "noInfoMessage": "",
+                  "lang": 0,
+                  "isReparenting": false
+                }
+              }
+            ],
+            "size": 33.33333333333333,
+            "sizeUnit": "%",
+            "minSizeUnit": "px",
+            "id": "",
+            "isClosable": true,
+            "maximised": false,
+            "activeItemIndex": 0
+          },
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "row",
+                "content": [
+                  {
+                    "type": "stack",
+                    "content": [
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "calltraceComponent-0",
+                          "content": 6
+                        }
+                      },
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "agentActivityComponent-0",
+                          "content": 35
+                        }
+                      }
+                    ],
+                    "size": 50,
+                    "sizeUnit": "%",
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "isClosable": true,
+                    "maximised": false,
+                    "activeItemIndex": 0
+                  },
+                  {
+                    "type": "stack",
+                    "content": [
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "stateComponent-0",
+                          "content": 4
+                        }
+                      },
+                      {
+                        "type": "component",
+                        "content": [],
+                        "size": 1,
+                        "sizeUnit": "fr",
+                        "minSize": 200,
+                        "minSizeUnit": "px",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "genericUiComponent",
+                        "componentType": "genericUiComponent",
+                        "componentState": {
+                          "id": 0,
+                          "label": "scratchpadComponent-0",
+                          "content": 17
+                        }
+                      }
+                    ],
+                    "size": 50,
+                    "sizeUnit": "%",
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "isClosable": true,
+                    "maximised": false,
+                    "activeItemIndex": 0
+                  }
+                ],
+                "size": 50,
+                "sizeUnit": "%",
+                "minSizeUnit": "px",
+                "id": "",
+                "isClosable": true
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "eventLogComponent-0",
+                      "content": 8
+                    }
+                  },
+                  {
+                    "type": "component",
+                    "content": [],
+                    "size": 1,
+                    "sizeUnit": "fr",
+                    "minSize": 200,
+                    "minSizeUnit": "px",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "genericUiComponent",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "terminalComponent-0",
+                      "content": 24
+                    }
+                  }
+                ],
+                "size": 50,
+                "sizeUnit": "%",
+                "minSizeUnit": "px",
+                "id": "",
+                "isClosable": true,
+                "maximised": false,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": 48.88888888888889,
+            "sizeUnit": "%",
+            "minSizeUnit": "px",
+            "id": "",
+            "isClosable": true
+          }
+        ],
+        "size": 100,
+        "sizeUnit": "%",
+        "minSizeUnit": "px",
+        "id": "",
+        "isClosable": false
+      },
+      "openPopouts": [],
+      "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "closePopoutsOnUnload": true,
+        "responsiveMode": "always",
+        "tabOverlapAllowance": 2,
+        "reorderOnTabMenuClick": true,
+        "tabControlOffset": 0,
+        "popInOnClose": false
+      },
+      "dimensions": {
+        "borderWidth": 4,
+        "borderGrabWidth": 8,
+        "defaultMinItemHeight": 0,
+        "defaultMinItemHeightUnit": "px",
+        "defaultMinItemWidth": 10,
+        "defaultMinItemWidthUnit": "px",
+        "headerHeight": 32,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+      },
+      "header": {
+        "show": "top",
+        "popout": "open in new window",
+        "dock": "dock",
+        "close": "close",
+        "maximise": "maximise",
+        "minimise": "minimise",
+        "tabDropdown": "additional tabs"
+      },
+      "resolved": true
+    },
+    "stacks": [
+      {
+        "x": 4,
+        "y": 34,
+        "w": 335,
+        "h": 1334,
+        "contents": [
+          9,
+          41,
+          48
+        ],
+        "active": 0
+      },
+      {
+        "x": 343,
+        "y": 34,
+        "w": 628,
+        "h": 1334,
+        "contents": [
+          2
+        ],
+        "active": 0
+      },
+      {
+        "x": 975,
+        "y": 34,
+        "w": 459,
+        "h": 665,
+        "contents": [
+          6,
+          35
+        ],
+        "active": 0
+      },
+      {
+        "x": 1438,
+        "y": 34,
+        "w": 458,
+        "h": 665,
+        "contents": [
+          4,
+          17
+        ],
+        "active": 0
+      },
+      {
+        "x": 975,
+        "y": 703,
+        "w": 921,
+        "h": 665,
+        "contents": [
+          8,
+          24
+        ],
+        "active": 0
+      }
+    ],
+    "viewport": {
+      "w": 1900,
+      "h": 1400
+    }
+  }
+}

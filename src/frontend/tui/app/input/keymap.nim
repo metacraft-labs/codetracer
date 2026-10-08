@@ -151,7 +151,7 @@ type
     kaSelectCallStack = "select-call-stack"
     kaSelectSource = "select-source"
     kaSelectVariables = "select-variables"
-    kaSelectTimeline = "select-timeline"
+    kaSelectEventLog = "select-event-log"
     kaMaximizePane = "maximize-pane"
 
     # ---- §4.2 Omniscient Stepping -----------------------------------------
@@ -225,6 +225,15 @@ type
       ## toggle is bound in both modes, or the transition is one-way from the
       ## keyboard."*
 
+    # ---- CodeTracer-TUI.md §3.3.1, not §4.2 --------------------------------
+    kaNextSessionTab = "next-session-tab"
+      ## `g t` / `Ctrl+Tab`. §3.3.1 (Session Header and Info Bar): *"When
+      ## multiple trace sessions are loaded, tabs along the top bar allow
+      ## instant switching via `Ctrl+Tab` or `gt`/`gT`."* The strip is
+      ## `headless_app/session_tabs`; this steps it, wrapping.
+    kaPrevSessionTab = "previous-session-tab"
+      ## `g T` / `Ctrl+Shift+Tab`, the same row read backwards.
+
   Binding* = object
     ## One row of the table, for one mode.
     mode*: ModalMode
@@ -249,6 +258,11 @@ type
       ## `test_product_mode_dimensions.nim` asserts that count, on the same
       ## rule `test_keymap_no_conflicts.nim` applies to the §4.1 three: a
       ## fourth source of bindings must arrive announced.
+    ssSpec331 = "§3.3.1"
+      ## The session tabs' two steps, named in CodeTracer-TUI.md §3.3.1's
+      ## prose rather than in §4.2's table. Asserted to be EXACTLY those two
+      ## by `test_keymap_no_conflicts.nim`, on the rule the other two extra
+      ## sources are held to.
 
   ActionScope* = enum
     ## WHICH PRODUCT MODES AN ACTION MEANS ANYTHING IN.
@@ -393,6 +407,7 @@ proc specSectionOf*(action: KeyAction): SpecSection =
   case action
   of kaEnterInspect, kaCommitPrompt, kaPromptBackspace: ssSpec41
   of kaToggleProductMode: ssModeTransitions
+  of kaNextSessionTab, kaPrevSessionTab: ssSpec331
   else: ssSpec42
 
 proc scopeOf*(action: KeyAction): ActionScope =
@@ -478,7 +493,7 @@ proc specAction*(action: KeyAction): string =
   of kaNone: ""
   of kaFocusNextPane, kaFocusPrevPane: "Next / Previous Pane"
   of kaFocusLeft, kaFocusDown, kaFocusUp, kaFocusRight: "Directional Focus"
-  of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectTimeline:
+  of kaSelectCallStack, kaSelectSource, kaSelectVariables, kaSelectEventLog:
     "Direct Pane Select"
   of kaMaximizePane: "Maximize / Restore Pane"
   of kaStepOver: "Step Over (Forward)"
@@ -516,6 +531,8 @@ proc specAction*(action: KeyAction): string =
   # Mode-Transitions.md, so no §4.2 row exists either. Same empty string, and
   # `specSectionOf` is what tells the two apart.
   of kaToggleProductMode: ""
+  # §3.3.1's prose, not §4.2's table.
+  of kaNextSessionTab, kaPrevSessionTab: ""
 
 proc modalEventFor*(action: KeyAction): (bool, ModalEvent) =
   ## Which `modal_state` event an action raises, if any.
@@ -558,7 +575,7 @@ proc defaultKeymap*(): Keymap =
   r.add b(mmNormal, "1", kaSelectCallStack)
   r.add b(mmNormal, "2", kaSelectSource)
   r.add b(mmNormal, "3", kaSelectVariables)
-  r.add b(mmNormal, "4", kaSelectTimeline)
+  r.add b(mmNormal, "4", kaSelectEventLog)
   r.add b(mmNormal, "z", kaMaximizePane)
   # Omniscient Stepping
   r.add b(mmNormal, "n", kaStepOver)
@@ -629,6 +646,16 @@ proc defaultKeymap*(): Keymap =
   # `test_keymap_no_conflicts.nim`'s duplicate sweep is what proves the fourth
   # modifier was free rather than this comment.
   r.add b(mmNormal, "Ctrl+F5", kaToggleProductMode)
+  # CodeTracer-TUI.md §3.3.1: the session tabs, `gt` / `gT` (a second `g`
+  # prefix row beside `g g`) and `Ctrl+Tab` / `Ctrl+Shift+Tab`. A terminal
+  # sends the latter two only with modified-key reporting on (xterm's
+  # `modifyOtherKeys`, the `CSI u` convention; `key_names.keyName` decodes
+  # both); without it `Ctrl+Tab` arrives as `Tab`, which is why `g t` is
+  # here too.
+  r.add b(mmNormal, "g t", @["g", "t"], kaNextSessionTab)
+  r.add b(mmNormal, "g T", @["g", "T"], kaPrevSessionTab)
+  r.add b(mmNormal, "Ctrl+Tab", kaNextSessionTab)
+  r.add b(mmNormal, "Ctrl+Shift+Tab", kaPrevSessionTab)
 
   # ---- COMMAND -----------------------------------------------------------
   # A text field: every printable key is a character, so only the three

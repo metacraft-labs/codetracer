@@ -21,7 +21,7 @@ mod origin_dap_gate;
 use db_backend::task::{OriginKind, TerminatorKind};
 use origin_dap::{
     OriginQueryConfig, QueryOutcome, assert_hop_count, assert_hop_kinds, assert_min_confidence, assert_terminator_kind,
-    fixture_source, load_fixture_and_query_or_skip,
+    fixture_line, fixture_source, load_fixture_and_query_or_skip,
 };
 use origin_dap_gate::{required_mode, unavailable};
 use test_harness::Language;
@@ -61,19 +61,31 @@ fn test_origin_solana_sbf_canonical_chain() {
     let Some(version) = require_solana_recorder() else {
         return;
     };
-    // `main.rs` line 14 returns `c`; the chain for `c` is
-    //   c -> b (TrivialCopy) -> a (TrivialCopy) -> Literal(10).
-    let config = solana_config("simple_trivial_chain", &version, 14, "c");
+    // The query is at the trailing `black_box(c)`. The chain for `c` is
+    //   c -> b (TrivialCopy) -> a (TrivialCopy) -> black_box(10) (call),
+    // ending as `Computational`. The fixture's header says why `a` is
+    // `black_box(10)` and not the literal `10`: with a literal the SBF binary
+    // holds no copy to record, and the chain cannot get past `b`.
+    let line = fixture_line("solana", "simple_trivial_chain", "main.rs", "core::hint::black_box(c)");
+    let config = solana_config("simple_trivial_chain", &version, line, "c");
     let Some(result) = run_or_skip("simple_trivial_chain", &config) else {
         return;
     };
     let chain = &result.chain;
 
-    assert_terminator_kind(chain, TerminatorKind::Literal, "solana simple_trivial_chain terminator");
+    assert_terminator_kind(
+        chain,
+        TerminatorKind::Computational,
+        "solana simple_trivial_chain terminator",
+    );
     assert_hop_count(chain, 3, "solana simple_trivial_chain hops");
     assert_hop_kinds(
         chain,
-        &[OriginKind::TrivialCopy, OriginKind::TrivialCopy, OriginKind::Literal],
+        &[
+            OriginKind::TrivialCopy,
+            OriginKind::TrivialCopy,
+            OriginKind::FunctionCall,
+        ],
         "solana simple_trivial_chain hop kinds",
     );
     assert_min_confidence(chain, 0.7, "solana simple_trivial_chain confidence");

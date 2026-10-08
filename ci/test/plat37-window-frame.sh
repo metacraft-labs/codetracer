@@ -106,7 +106,9 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${root}" || exit 1
 
 WS="$(cd "${root}/.." && pwd)"
-ISONIM_GPUI="${WS}/isonim-gpui"
+# `ISONIM_GPUI_DIR` names a differently placed isonim-gpui checkout (a
+# worktree beside this one); the default is the workspace sibling.
+ISONIM_GPUI="${ISONIM_GPUI_DIR:-${WS}/isonim-gpui}"
 GUI_ASSERT="${WS}/GuiAssert"
 OUT="${root}/build/plat37"
 BIN="${root}/build/bin/codetracer-gpui"
@@ -934,6 +936,48 @@ PY
 else
 	fail "the manifest did not assemble"
 fi
+
+# ---------------------------------------------------------------------------
+# The screen oracle's GPUI frames
+# ---------------------------------------------------------------------------
+#
+# PLAT-39's `DIFF-8` (`src/tests/visual/screen_oracle/test_screen_oracle.nim`)
+# and `plat39_record.nim` read the GPUI half of their comparison from
+# `src/tests/visual/captures/gpui/<scenario>.png` — gitignored, like the
+# Electron half `just plat35-capture-electron` writes. THIS lane takes those
+# frames (the full 1920x1080 output of the headless sway, the window inside
+# it), and until it exported them nothing wrote that directory: the oracle
+# read frames placed by hand, or none. Only a `captured` windowed run is
+# exported, and a stale frame from an earlier run is removed first, so a
+# scenario that did not paint this time leaves NO frame for the oracle to
+# read rather than an old one.
+oracle_dir="${root}/src/tests/visual/captures/gpui"
+mkdir -p "${oracle_dir}"
+python3 - "${OUT}/windowed.records.jsonl" <<'PY' >"${OUT}/oracle-frames.tsv" ||
+import json, sys
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    r = json.loads(line)
+    if r.get("productMode", "debug") != "debug":
+        continue
+    print(f"{r['scenario']}\t{r['outcome']}\t{r['frame']}")
+PY
+	fail "the windowed records did not parse"
+exported=0
+while IFS=$'\t' read -r id outcome frame; do
+	[ -n "${id}" ] || continue
+	rm -f "${oracle_dir}/${id}.png"
+	if [ "${outcome}" = captured ] && [ -n "${frame}" ]; then
+		ffmpeg -loglevel error -y -i "${frame}" "${oracle_dir}/${id}.png" ||
+			fail "converting ${frame} for the screen oracle failed"
+		exported=$((exported + 1))
+	else
+		echo "screen oracle: ${id} was ${outcome}; no GPUI frame exported"
+	fi
+done <"${OUT}/oracle-frames.tsv"
+echo "screen oracle: ${exported} GPUI frame(s) in ${oracle_dir}"
 
 echo
 echo "OK: PLAT-37's captures are in ${OUT}. The GATE is"

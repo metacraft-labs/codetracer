@@ -21,7 +21,7 @@
 #   1. A TRACE THAT LOADS AND REPORTS SUCCESS CARRYING ZERO STEPS. An artifact
 #      compiled without debug instrumentation traces to one event and no
 #      steps; both wasm modules answer `ok` and the engine accepts the
-#      `trace.json`. So `stepCount` and the number of DISTINCT positions the
+#      container. So `stepCount` and the number of DISTINCT positions the
 #      session visited are both asserted.
 #   2. A SESSION THAT "RESOLVES" POSITIONS THAT ARE ALL `missingPath`. In a
 #      browser every recorded path is that case unless the trace's own source
@@ -316,11 +316,11 @@ ck "$([ "${engine_fetched}" = true ] && echo ok || echo no)" \
 
 vfs_writes="$(field "${control}" '.vfsWrites | length')"
 source_views="$(field "${control}" '.sourceViewsWritten')"
-# AT LEAST FOUR: `trace.json`, `trace_metadata.json`, and both spellings of at
-# least one source file. Asserted as a count because a boot that wrote the
+# AT LEAST THREE: the `trace.ct` container and both spellings of at least one
+# source file. Asserted as a count because a boot that wrote the
 # trace and forgot the source reaches `ready` just as happily and then resolves
 # every position to `missingPath`.
-ck "$([ "${vfs_writes}" -ge 4 ] && echo ok || echo no)" \
+ck "$([ "${vfs_writes}" -ge 3 ] && echo ok || echo no)" \
 	"the trace AND its source were written into the engine's VFS (${vfs_writes} writes)"
 ck "$([ "${source_views}" -ge 1 ] && echo ok || echo no)" \
 	"the trace carried ${source_views} embedded source view(s)"
