@@ -1,0 +1,42 @@
+# Ratchet ceilings for `facade-graph-no-style-payload` in
+# ci/test/sdk-facade-boundary.sh. One line per SDK-graph module that still
+# carries a style payload, as `<repo-relative path> = <count>`.
+#
+# WHAT IS BEING COUNTED
+# ---------------------
+# Non-comment lines in the facade's transitive import graph that match one of
+# the STYLE_RULES: a CSS class name bound to a constant, a routine named
+# `*Class*`, a hex colour, a CSS dimension or property spelled in a string
+# literal, a `*Px`/`*Rem` identifier, or a reference to a stylesheet file.
+#
+# WHY THERE IS A BACKLOG AT ALL
+# -----------------------------
+# CodeTracer-Embed-SDK.md §3.2 row 1 bans "any rendering, ANY CSS, any
+# component" from this package, and these lines are CSS. They are not an
+# oversight and they are not sloppiness — every one of them is a helper that
+# is renderer-AGNOSTIC but visually OPINIONATED, and until there is a
+# CodeTracer UI components package to hold such a thing, the only two places
+# to put it were the desktop renderer (which the SDK may not import) or here.
+#
+# `origin_chain_types.ariaLabelForSummary` states the mechanism outright in
+# its own docstring: it lives here "so that the renderer-agnostic IsoNim views
+# can call it without pulling `ui/origin_badge` (which imports `std/dom` on the
+# JS target)". That is the missing middle layer speaking. The import-graph
+# rules above cannot see any of it, precisely because dodging them is what put
+# it here.
+#
+# So the backlog is evidence for the UI-components package, not an excuse. It
+# is enumerated rather than exempted so that it can only shrink.
+#
+# THE RATCHET TURNS ONE WAY, AND IS EXACT
+# ---------------------------------------
+# A count ABOVE its ceiling fails: new CSS entered the headless core.
+# A count BELOW its ceiling ALSO fails, with the edit that fixes it: a ceiling
+# left above reality is room for a regression to hide in. A module that
+# reaches 0 must be deleted from this file, not left at `= 0`.
+#
+# A module NOT listed here has a ceiling of 0 and no grace at all.
+
+src/frontend/viewmodel/viewmodels/origin_chain_types.nim = 10
+src/frontend/viewmodel/viewmodels/request_panel_vm.nim = 1
+src/frontend/viewmodel/viewmodels/calltrace_vm.nim = 6
