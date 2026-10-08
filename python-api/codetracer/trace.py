@@ -751,8 +751,23 @@ class Trace:
         """Set a watchpoint that triggers when the expression's value changes.
 
         The daemon translates this into a DAP ``setDataBreakpoints``
-        command.  When execution continues, it will stop at the point
-        where the watched expression's value changes.
+        command, and waits for the backend to say whether the watchpoint
+        was accepted.
+
+        A returned ID therefore means the backend accepted the
+        watchpoint, not merely that the request was sent.  (It used to
+        return an ID regardless; the following :meth:`continue_forward`
+        then ran to the end of the trace and raised ``StopIteration``
+        with nothing to explain why.)
+
+        .. warning::
+
+           The replay backend does **not** currently implement
+           ``setDataBreakpoints`` at all, so against a real recording
+           this raises :class:`TraceError` carrying the backend's own
+           refusal.  That is the truthful answer: watchpoints have never
+           worked, and this method used to hide that behind a plausible
+           ID.  Use :meth:`add_breakpoint` instead.
 
         Parameters:
             expression: The expression to watch (e.g., ``"counter"``).
@@ -762,7 +777,8 @@ class Trace:
             :meth:`remove_watchpoint`.
 
         Raises:
-            TraceError: If the daemon reports an error.
+            TraceError: If the daemon reports an error, or if the
+                backend did not accept the watchpoint.
         """
         response = self._connection.send_request("ct/py-add-watchpoint", {
             "tracePath": self._path,
