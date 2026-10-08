@@ -97,7 +97,6 @@ proc buildM1Fixture*(outPath: string;
   let vnX = vnRes.get()
   let tRes = w.registerType("int")
   if tRes.isErr: return err("registerType: " & tRes.error)
-  let tInt = tRes.get()
 
   # Emit a run with 4 calls, each entering at a distinct line, separated by
   # filler steps so the step stream spans several 8-event chunks.  The call's
@@ -112,13 +111,13 @@ proc buildM1Fixture*(outPath: string;
     # only the call-entry chunks is strictly fewer inflations than a
     # whole-stream scan, making the bounded-decompression assertion meaningful.
     for f in 0 ..< 16:
-      let vals = @[VariableValue(varnameId: vnX, typeId: tInt,
+      let vals = @[VariableValue(varnameId: vnX,
         data: encodeInt(stepIdx))]
       let sr = w.registerStep(p0, uint64(100 + stepIdx), vals)
       if sr.isErr: return err("registerStep filler: " & sr.error)
       inc stepIdx
     # The call-entry step sits on the function's definition line.
-    let entryVals = @[VariableValue(varnameId: vnX, typeId: tInt,
+    let entryVals = @[VariableValue(varnameId: vnX,
       data: encodeInt(stepIdx))]
     let esr = w.registerStep(p0, callLines[ci], entryVals)
     if esr.isErr: return err("registerStep entry: " & esr.error)
