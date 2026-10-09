@@ -62,19 +62,17 @@ use crate::trace_reader::TraceReader;
 ///     means rewriting the flow preloader to not need a resident `Db` — a larger
 ///     refactor scoped out of this milestone.
 ///   - **Cell / compound history** (`cell_changes_for`, `compound_at`,
-///     `cells_at`, `variable_cells_at`) — served from the materialized `Db`
-///     ONLY for the legacy `events.log` path (`open_old_format` /
-///     `TraceProcessor::postprocess`), which is the only producer of
-///     `Cell*`/`Assign*` events. M23e-2 resolved this for the PRODUCTION
-///     split-stream path: the Nim `MultiStreamTraceWriter` records INLINE FULL
+///     `cells_at`, `variable_cells_at`) — served from the materialized `Db`,
+///     populated only by `TraceProcessor::postprocess` of a bare event stream,
+///     the only producer of `Cell*`/`Assign*` events. M23e-2 resolved this for
+///     the PRODUCTION split-stream path: the Nim `MultiStreamTraceWriter` records INLINE FULL
 ///     VALUES per step (no `Cell`/`Assign` references — its cell/compound
 ///     writer methods are deliberate no-ops), so a split-only bundle's cell
 ///     history is LEGITIMATELY EMPTY and every local is served from the
 ///     per-step variable snapshot (`variables_at`, made seekable by M22). The
 ///     cell machinery is just the value-loading fallback for `ValueRecord::Cell`
 ///     references that split bundles never emit. Verified by
-///     `tests/ctfs_split_only_full_db_test.rs` (full-Db + cell-history + A/B
-///     parity vs an `events.log` bundle).
+///     `tests/ctfs_split_only_full_db_test.rs` (full-Db + cell-history).
 #[derive(Debug, Clone)]
 pub struct InMemoryTraceReader {
     pub db: Db,

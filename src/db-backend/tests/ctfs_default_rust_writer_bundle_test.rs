@@ -11,9 +11,8 @@
 //! old-tag disposition table records the old `Event` variant as *moved to
 //! `events.dat`*. The Rust writer therefore writes no `events.log`.
 //!
-//! With no `events.log` present, `CTFSTraceReader::open` recognises the bundle
-//! as the split format (`is_new_format`: `steps.dat` present, `events.log`
-//! absent) and serves it through the Nim FFI reader — the same path as a
+//! `CTFSTraceReader::open` recognises the bundle as the split format
+//! (`steps.dat` present) and serves it through the Nim FFI reader — the same path as a
 //! Nim-written production bundle. That this works is itself asserted: the
 //! execution streams the two writers produce are byte-compatible, so a Rust
 //! split bundle yields its steps, calls and values through that reader. The

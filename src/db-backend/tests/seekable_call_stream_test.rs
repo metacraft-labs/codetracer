@@ -10,16 +10,12 @@
 //!     decompression is BOUNDED (only the needed chunk is inflated), proven by
 //!     the `SeekableCallStream` chunk-decompression counter.
 //!  2. Multiple concurrent readers can read the same `.ct` independently.
-//!  3. Backward compat: a legacy (flag-off) `.ct` exposes NO seekable stream and
-//!     still reads through the existing fully-materialized path, unchanged.
+//!  3. A `.ct` with no `calls.dat` exposes NO seekable stream.
 //!
-//! The fixtures are written in-test with the M17a writer
-//! (`CtfsTraceWriter` / a legacy twin without `calls.dat`), so the tests
-//! are self-contained and do not depend on an external bundle.
+//! The fixtures are written in-test with the M17a writer (`CtfsTraceWriter`),
+//! so the tests are self-contained and do not depend on an external bundle.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-
-mod common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -272,9 +268,7 @@ fn concurrent_readers_over_same_ct() {
 
 /// Deliverable test #3a (seekable layer): a `.ct` with no `calls.dat` exposes
 /// NO seekable call stream — `SeekableCallStream::open` returns `None`, so the
-/// caller falls back to the materialized call tree. A container carrying
-/// `events.log` is not such a container: the trace-format reader refuses it by
-/// name rather than reporting it as one without a call stream.
+/// caller falls back to the materialized call tree.
 #[test]
 fn flag_off_trace_exposes_no_seekable_stream() {
     let dir = tempfile::tempdir().unwrap();
@@ -286,69 +280,6 @@ fn flag_off_trace_exposes_no_seekable_stream() {
     assert!(
         SeekableCallStream::open(&no_calls).expect("open ok").is_none(),
         "a container with no calls.dat exposes no seekable call stream"
-    );
-
-    let src = std::path::PathBuf::from("/test/prog.rs");
-    let legacy = common::legacy_events_log::write_legacy_events_log_bundle(
-        dir.path(),
-        "trace",
-        &[
-            TraceLowLevelEvent::Path(src),
-            TraceLowLevelEvent::Step(StepRecord {
-                path_id: PathId(0),
-                line: Line(1),
-            }),
-        ],
-    );
-    let err = match SeekableCallStream::open(&legacy) {
-        Err(err) => err,
-        Ok(stream) => panic!(
-            "an events.log container must be refused, got a stream: {}",
-            stream.is_some()
-        ),
-    };
-    assert!(err.contains("events.log"), "the refusal names the member: {err}");
-}
-
-/// Deliverable test #3b (backward compat, full reader): a REAL legacy `.ct`
-/// recorded WITHOUT the call-stream split (the reprobuild `ruby.ct` fixture —
-/// a complete flag-off bundle with a full `meta.dat`) still opens through the
-/// existing path, exposes NO seekable stream, and serves its call tree from the
-/// fully-materialized `Db` exactly as before.
-///
-/// The fixture is the flag-OFF twin of `ruby_split.ct` used by the M17a engine
-/// tests.
-///
-/// PENDING, and ignored so the runner reports it as not run. The fixture lived
-/// in the reprobuild sibling and was deleted there with `repro_ct_incremental`
-/// in 4036237a (2026-06-24); since then this test returned early and passed in
-/// every run. It cannot simply be restored: that `ruby.ct` is meta.dat schema
-/// 3, which predates the global line index correction and is refused by the
-/// current reader, and its split twin has no `calls.idx`. The flag-off case is
-/// covered by `flag_off_trace_exposes_no_seekable_stream` above with an
-/// in-test container; this one needs a current real recording.
-#[test]
-#[ignore = "pending: its reprobuild fixture (ruby.ct) was deleted in 4036237a (2026-06-24) and predates the readable format; needs a current real bundle"]
-fn real_legacy_ct_reads_unchanged_with_no_seekable_stream() {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../reprobuild/libs/repro_ct_incremental/tests/fixtures/m12_ctfs/ruby.ct");
-    assert!(
-        fixture.exists(),
-        "the real bundle {} is missing: reprobuild deleted it with repro_ct_incremental in 4036237a \
-         (2026-06-24), and nothing produces it now",
-        fixture.display()
-    );
-
-    let reader = CTFSTraceReader::open(&fixture).expect("open real legacy ruby.ct");
-    assert!(
-        reader.seekable_call_count().is_none(),
-        "legacy ruby.ct (flag off) exposes no seekable stream"
-    );
-    // The materialized path still serves a non-trivial call tree.
-    assert!(reader.call_count() >= 1, "legacy call tree materialized");
-    assert!(
-        reader.call(CallKey(0)).is_some(),
-        "legacy call_key 0 present on the materialized path"
     );
 }
 
@@ -404,7 +335,7 @@ fn real_split_ct_serves_calls_seekably_with_bounded_decompression() {
 }
 
 /// Cross-check: the seekable call tree (from `calls.dat`) and the fully
-/// materialized call tree (postprocessed from `events.log`) agree on the tree
+/// materialized call tree agree on the tree
 /// STRUCTURE for the same split bundle — proving the seekable path is not a
 /// divergent re-derivation but the same tree, loaded on demand.
 #[test]

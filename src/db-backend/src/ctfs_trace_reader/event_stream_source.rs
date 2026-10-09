@@ -2,12 +2,10 @@
 //!
 //! M0 deliverable 4 ("a seekable path for `events()`") in the BlockTracer
 //! "Browser Replay Gate": until now the only way to get a trace's I/O events
-//! into `Db::events` was to materialise them all at open — either through the
-//! legacy `events.log` postprocessing, or through the Nim FFI's
-//! `event_fields(i)` loop in `open_new_format_nim`. Neither is reachable from
-//! the browser (`events.log` bundles are whole-file by construction, and the
-//! Nim reader needs a filesystem path and is not in the wasm build), and
-//! neither is bounded by anything but trace size.
+//! into `Db::events` was to materialise them all at open, through the Nim FFI's
+//! `event_fields(i)` loop in `open_new_format_nim`. That is not reachable from
+//! the browser (the Nim reader needs a filesystem path and is not in the wasm
+//! build), and it is bounded by nothing but trace size.
 //!
 //! This module is the third sibling of [`super::call_stream_source`] and
 //! [`super::step_value_stream_source`], for the M23c `events.dat` /

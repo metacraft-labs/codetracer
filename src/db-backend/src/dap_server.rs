@@ -1791,7 +1791,7 @@ fn is_legacy_materialized_trace(folder: &Path, trace_file: &Path) -> bool {
 ///
 /// For CTFS, this reduces to detecting whether the folder (or the resolved
 /// trace file) is a CodeTracer DB CTFS container with materialized contents
-/// (`steps.dat` or `events.log`).
+/// (`steps.dat`).
 /// Native MCR traces also use CTFS magic but their stream layout is handled
 /// by ct-native-replay; `is_codetracer_ctfs_file` distinguishes the two by
 /// looking for the DB stream files inside the container.
@@ -1845,28 +1845,24 @@ fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), ContainerVersionRef
 }
 
 /// Classify a CTFS container as a DB (materialized) trace this backend can
-/// serve.
+/// serve: one that carries `steps.dat`, the split-stream format every recorder
+/// writes, and is not a native MCR recording.
 ///
-/// A container qualifies if it carries EITHER stream layout:
-///   - `steps.dat` — the PRODUCTION split-stream format. Every live recorder
-///     (Ruby/Python/JS/shell, via the Nim `MultiStreamTraceWriter` FFI) emits
-///     this and NEVER `events.log`; `CTFSTraceReader::open` serves it through
-///     `open_new_format_nim` (the split streams are read directly, `events.log`
-///     is never consulted). This is the canonical path.
-///   - `events.log` — the LEGACY/secondary fallback layout: the secondary Rust
-///     `CtfsTraceWriter`'s combined stream and test fixtures. It is NOT produced
-///     by live recording. We still accept it here so legacy/test bundles open;
-///     `CTFSTraceReader::open` routes them through `open_old_format`
-///     (`TraceProcessor::postprocess`). See `M23e` in
-///     `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
+/// A container carrying a member that is not part of the trace format
+/// (`events.log`, `events.fmt`) is classified as a DB trace too, whatever else
+/// it carries: `CTFSTraceReader::open` refuses it, naming the member, which is
+/// the answer the user needs.
 fn is_codetracer_ctfs_file(path: &Path) -> bool {
     let Ok(mut reader) = CtfsReader::open(path) else {
         return false;
     };
+    if crate::ctfs_trace_reader::retired_members::refuse_retired_members(&reader).is_err() {
+        return true;
+    }
     if is_mcr_ctfs_container(&mut reader) {
         return false;
     }
-    reader.has_file("steps.dat") || reader.has_file("events.log")
+    reader.has_file("steps.dat")
 }
 
 /// Find the single CTFS container inside a trace *directory*.
@@ -3843,7 +3839,35 @@ mod tests {
         );
     }
 
-    /// Negative case: a materialised trace (legacy DB-trace layout)
+    /// A container carrying a member that is not part of the trace format
+    /// (`events.log`, `events.fmt`) is sent to the DB trace path — whatever
+    /// else it carries, MCR fields included — so that opening it refuses it
+    /// by name instead of starting a replay worker that cannot read it either.
+    #[test]
+    fn ctfs_carrying_a_retired_member_is_routed_to_its_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        for (meta, label) in [(non_mcr_meta_dat_bytes(), "plain"), (mcr_meta_dat_bytes(), "mcr")] {
+            for member in ["events.log", "events.fmt"] {
+                let name = format!("{label}-{member}.ct");
+                let ct_path = dir.path().join(&name);
+                write_minimal_ctfs(&ct_path, &[("meta.dat", &meta), (member, b"")]).unwrap();
+                assert!(
+                    is_db_trace(dir.path(), Path::new(&name)),
+                    "{name}: a container carrying {member} must reach the DB reader's refusal",
+                );
+                let err = match crate::ctfs_trace_reader::CTFSTraceReader::open(&ct_path) {
+                    Ok(_) => panic!("{name}: the DB reader opened a container carrying {member}"),
+                    Err(e) => e.to_string(),
+                };
+                assert!(
+                    err.contains(member),
+                    "{name}: the refusal does not name {member}: {err}"
+                );
+            }
+        }
+    }
+
+    /// Negative case: a materialised trace
     /// with `meta.dat` but no MCR fields must NOT be classified as MCR
     /// — otherwise we would regress every existing browser-replay user.
     #[test]
@@ -3852,7 +3876,7 @@ mod tests {
         let ct_path = dir.path().join("materialized.ct");
 
         let dat = non_mcr_meta_dat_bytes();
-        write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", b"placeholder")]).unwrap();
+        write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("steps.dat", b"placeholder")]).unwrap();
 
         let mut ctfs = read_ctfs(&ct_path);
         assert!(

@@ -156,7 +156,7 @@ impl SeekableCallStream {
     /// `depth`, and the entry `step_id` come straight from the `calls.dat`
     /// record (the same fields the fully-materialized `Db` call tree carries).
     /// Argument and return values are best-effort decoded from the record's CBOR
-    /// payloads (byte-identical to the `events.log` `Call`/`Return` payloads); a
+    /// payloads; a
     /// decode failure degrades to an empty/`None` value rather than failing the
     /// whole call, because the call-tree STRUCTURE is what the seekable path
     /// must serve.
