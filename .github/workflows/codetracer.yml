@@ -7600,6 +7600,102 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  ct-test-certificates:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job
+    # NO GREEN SAMPLE: the job is new. The lane itself compiles and runs six
+    # small Nim suites (about 12 s warm, a few minutes cold); the bound is
+    # dominated by Nix setup, the same setup `viewmodel-tests` does. 30m is
+    # chosen structurally. Revisit once it has run green.
+    timeout-minutes: 30
+    name: ct-test certificates and conformance vectors
+    env:
+      # A fixed nimcache root so the step after the lane can find the
+      # conformance walker it built (ci/lib/run-nim-test-lane.sh, `cache_root`).
+      CT_NIM_CACHE_ROOT: ${{ github.workspace }}/../ct-test-certificates-nimcache
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # libs/nim-result and libs/nim-stew are submodules the certificate
+          # suites compile against.
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone test-certificates-spec sibling
+        # The conformance-vector walker reads the standard's vectors at the
+        # revision in src/ct_test/certificate_vectors.pin, with `git archive`
+        # from this clone's OBJECT STORE -- never from its checkout. So the
+        # ref here only has to be one whose history contains the pin: `latest`
+        # does, and `clone-repo` makes a full (not shallow) clone. A pin the
+        # clone lacks fails the lane by name; it is never skipped.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/test-certificates-spec
+          ref: latest
+          path: ${{ github.workspace }}/../test-certificates-spec
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # certificate_issuance_test.nim reaches the CTFS reader through
+        # `ct_test`'s incremental engine.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        # src/ct_test/process_exec.nim opens with `import runquota_process`,
+        # and every certificate suite reaches it.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+
+      - name: Run the ct-test-certificates lane
+        # No CT_TEST_CERTIFICATE_VECTORS: setting it would walk an exported
+        # tree UNPINNED, which is exactly what this job exists to rule out.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-ct-test-certificates
+
+      - name: Show the pinned conformance walk
+        # The lane prints one headline per suite; this re-runs the walker the
+        # lane already built, so the log names the pin it walked and its case
+        # count. Runs after a red lane too, where it is the useful half.
+        if: always()
+        run: |
+          set -euo pipefail
+          walker="${CT_NIM_CACHE_ROOT}/ct-test-certificates-certificate_vectors_test/certificate_vectors_test"
+          if [ ! -x "${walker}" ]; then
+            echo "::error::the conformance walker was not built (${walker}); see the lane step"
+            exit 1
+          fi
+          nix develop .#devShells.x86_64-linux.default --command "${walker}"
+
   push-to-attic:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # NO SAMPLE OF ANY KIND: 0 success, 0 failure, and 7 cancellations of zero
@@ -8606,6 +8702,7 @@ jobs:
       - visual-replay-regression-gate
       - ct-test-release-gate
       - ct-test-providers
+      - ct-test-certificates
       - windows-bootstrap-smoke
       - windows-named-pipe-tests
       - windows-rust-components
