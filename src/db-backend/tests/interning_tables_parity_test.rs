@@ -301,25 +301,19 @@ fn a_production_bundle_uses_the_structured_record_layout() {
     );
 }
 
-/// A LEGACY container with no interning tables yields `Ok(None)` rather than an
-/// error, so such a bundle still opens and falls back to its own interning.
-///
-/// The subject is the committed `stylus-fund` fixture — a real old-format
-/// `events.log` bundle. If it is missing this FAILS rather than skipping.
+/// A container with no interning tables yields `Ok(None)` rather than an
+/// error, so such a container still opens and falls back to its own interning.
 #[test]
-fn a_legacy_container_without_tables_yields_none() {
-    let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct");
-    assert!(
-        fixture.is_file(),
-        "the legacy fixture {} is required by this case; without it there is nothing to test",
-        fixture.display()
-    );
+fn a_container_without_tables_yields_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("no_tables.ct");
+    db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs(&path, &[("meta.dat", b"metadata")])
+        .expect("write a container with no interning tables");
 
-    let mut ctfs = CtfsReader::open(&fixture).expect("the legacy fixture must open as a CTFS container");
+    let mut ctfs = CtfsReader::open(&path).expect("the container must open");
     assert!(
         !ctfs.has_file("paths.dat"),
-        "the fixture must genuinely lack the binary tables, or this case has no subject"
+        "the container must genuinely lack the binary tables, or this case has no subject"
     );
     assert!(
         InterningTables::open_from_ctfs(&mut ctfs).expect("no error").is_none(),

@@ -32,8 +32,8 @@
 //!
 //! `tests/fixtures/xos/xos_hello.ct` (a `ct_cli record` capture whose thread
 //! stream carries no per-line steps), `tests/fixtures/stylus-fund-trace`
-//! (a legacy `events.log` bundle whose steps carry `(path_id, line)` directly
-//! rather than a packed global index) and `tests/fixtures/gdscript` (produced
+//! (repacked from a recorded event stream, whose steps the Stylus DAP tests
+//! assert) and `tests/fixtures/gdscript` (produced
 //! by the patched Godot fork, which is an unstarted deliverable) have no
 //! line-only step stream for this assertion to measure.
 //!
