@@ -71,8 +71,16 @@
 # report a missing module for one that is present — a check that lies is worse
 # than one that is absent, so an unknown interpreter is a usage error.
 #
+# A CALLER THAT IS NOT A LINT STAGE sets `CT_REQUIRE_TOOLS_CONTEXT` to the
+# remedy paragraph that fits it, and the `devShells.lint` one is replaced
+# rather than printed beside it. `deploy-web-codetracer.yml` does this: it
+# needs the naming half of this script and would otherwise point a reader at
+# `nix/shells/lint.nix` for a tool it expects from `nix/shells/ci-base.nix`.
+# Unset, the output is byte-for-byte what it has always been.
+#
 # Usage:
 #   bash ci/lib/require-tools.sh <tool|python3:module> [...]
+#   CT_REQUIRE_TOOLS_CONTEXT="<remedy>" bash ci/lib/require-tools.sh <tool> [...]
 
 set -uo pipefail
 
@@ -128,12 +136,35 @@ missing=("${deduped[@]}")
 {
 	echo
 	echo "###############################################################################"
-	echo "This lint stage cannot run: ${#missing[@]} requirement(s) it invokes are absent."
+	if [ -n "${CT_REQUIRE_TOOLS_CONTEXT:-}" ]; then
+		echo "This step cannot run: ${#missing[@]} requirement(s) it invokes are absent."
+	else
+		echo "This lint stage cannot run: ${#missing[@]} requirement(s) it invokes are absent."
+	fi
 	echo "###############################################################################"
 	for tool in "${missing[@]}"; do
 		echo "  MISSING  ${tool}"
 	done
 	echo
+	if [ -n "${CT_REQUIRE_TOOLS_CONTEXT:-}" ]; then
+		# A CALLER THAT IS NOT A LINT STAGE SAYS SO, AND THE REMEDY BELOW
+		# IS THE REASON THIS KNOB EXISTS RATHER THAN A SECOND COPY OF THE
+		# SCRIPT. The naming half of this file -- every absence, by name,
+		# de-duplicated -- is useful to anything that needs a tool; the
+		# paragraph after it is about `devShells.lint` and nothing else.
+		# Printed at a deploy job it would send the reader to
+		# `nix/shells/lint.nix` for a tool the deploy expects from
+		# `nix/shells/ci-base.nix`, which is a remedy that wastes the
+		# round trip this script exists to save.
+		#
+		# Unset, every byte of output is what it always was: the lint
+		# stages that call this are the reason it reads the way it does.
+		echo "Nothing after this has run. This is an environment that is missing"
+		echo "something, not a finding about the code."
+		echo
+		printf '%s\n' "${CT_REQUIRE_TOOLS_CONTEXT}"
+		exit 1
+	fi
 	echo "Nothing has been linted. This is a shell that is missing something, not a"
 	echo "finding about the code."
 	echo
