@@ -103,6 +103,7 @@
       url = "github:metacraft-labs/codetracer-ruby-recorder";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.codetracer-trace-format-nim.follows = "codetracer-trace-format-nim";
+      inputs.codetracer-trace-format.follows = "codetracer-trace-format";
       flake = true;
     };
 
@@ -131,6 +132,7 @@
       url = "github:metacraft-labs/codetracer-js-recorder";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.codetracer-trace-format-nim.follows = "codetracer-trace-format-nim";
+      inputs.codetracer-trace-format.follows = "codetracer-trace-format";
       flake = true;
     };
 
@@ -138,6 +140,7 @@
       url = "github:metacraft-labs/codetracer-shell-recorders";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.codetracer-trace-format-nim.follows = "codetracer-trace-format-nim";
+      inputs.codetracer-trace-format.follows = "codetracer-trace-format";
       flake = true;
     };
 
