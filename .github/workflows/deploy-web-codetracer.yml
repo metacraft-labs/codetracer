@@ -384,6 +384,46 @@ jobs:
             nim-acp=bb5b8a2c5c3805946847270c9eea39d718747c5e
             nim-agent-harbor=0a1e06125daa5e33e09e1bab98edb6b811179a4e
             nim-agents=31f88a36a8e65e0846e62b15515d3686bd78de5a
+            # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
+            # locked reprobuild (flake.lock `reprobuild`, 3850ec25) is tested
+            # against: its own `.github/sibling-repos` pins
+            # `reprobuild-packages=eed38ecc…`. `repro.nim`'s `uses:` names
+            # `shellcheck`, which that reprobuild no longer bundles; the
+            # catalog defines it from eed38ec on. The flake input
+            # `reprobuild-packages` tracks the catalog's `dev`, which does not
+            # define it yet, so the `.#ci` shell's REPROBUILD_PACKAGES_ROOT
+            # cannot evaluate `repro.nim` ("no reachable catalog defines it").
+            # The bundle build points REPROBUILD_PACKAGES_ROOT here instead.
+            reprobuild-packages=eed38eccb797876e43517ac62c40fd1ea0b5b5c7
+
+      - name: Remove sibling checkouts this job did not clone
+        # Persistent runners keep earlier jobs' sibling clones beside the
+        # checkout (io-mon, runquota, nim-stackable-hooks, other recorders, at
+        # whatever revision those jobs used). The flake-overrides machinery in
+        # `.envrc` and in `repro exec` overrides EVERY flake input that has a
+        # same-named sibling directory, so those leftovers silently replaced
+        # locked inputs: a weeks-old `runquota` sibling changed the reprobuild
+        # derivation the dev shell needs and it failed to compile (2026-10-09).
+        # Keep only the checkout and the siblings setup-dev-env cloned above
+        # (CT_SIBLING_PATHS); everything else falls back to flake.lock.
+        run: |
+          set -euo pipefail
+          : "${CT_SIBLING_PATHS:?setup-dev-env did not export CT_SIBLING_PATHS}"
+          parent="$(cd .. && pwd)"
+          self="$(pwd)"
+          for dir in "$parent"/*/; do
+            [ -d "$dir" ] || continue
+            dir="${dir%/}"
+            [ "$dir" = "$self" ] && continue
+            keep=0
+            for entry in $CT_SIBLING_PATHS; do
+              [ "${entry#*=}" = "$dir" ] && keep=1
+            done
+            if [ "$keep" = 0 ]; then
+              echo "removing stale sibling: $dir"
+              rm -rf "$dir"
+            fi
+          done
 
       - name: Assert the siblings that were cloned are the ones this commit pins
         # The pins above are only a declaration until something compares them
@@ -421,23 +461,24 @@ jobs:
               bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
 
       - name: Build browser-replay bundle
-        # Produces browser-replay/dist/. build-dist.sh internally re-enters the
-        # repo + recorder dev shells via `direnv exec`, so run it under `.#ci`
-        # (which provides direnv, wasm-pack, the rust wasm32 target, clang/llvm
-        # and nim). This is the exact command validated locally end-to-end
-        # (wasm-pack ~11–35s warm, a few minutes cold; ~18 MB db_backend_bg.wasm).
+        # Produces browser-replay/dist/. build-dist.sh enters the repo and
+        # recorder environments itself through `repro exec` (which activates
+        # the flake dev shell), so it runs directly under `.#ci` (which
+        # provides `repro`, wasm-pack, the rust wasm32 target, clang/llvm and
+        # nim) with no outer `direnv exec`.
         #
-        # Its `repro exec` needs the reprobuild-packages catalog. `.#ci`
-        # exports the flake-locked one (nix/shells/ci-base.nix), but
-        # `direnv exec` re-enters the default shell, which looks for a
-        # `../reprobuild-packages` sibling this job never clones, and the build
-        # stopped with "Provide the catalog" (2026-10-09). Carry the locked
-        # catalog across explicitly.
+        # `repro exec` evaluates `repro.nim`, whose `uses:` needs the
+        # reprobuild-packages catalog. The one `.#ci` exports (the flake input,
+        # tracking the catalog's `dev`) does not define `shellcheck` yet, so
+        # point REPROBUILD_PACKAGES_ROOT at the sibling cloned above at the
+        # revision the locked reprobuild is tested against.
         run: |
           nix develop .#ci --command bash -c '
-            catalog="${REPROBUILD_PACKAGES_ROOT:?the .#ci shell did not export REPROBUILD_PACKAGES_ROOT}"
-            direnv exec "$(pwd)" env REPROBUILD_PACKAGES_ROOT="$catalog" \
-              bash browser-replay/build-dist.sh
+            set -euo pipefail
+            REPROBUILD_PACKAGES_ROOT="$(cd ../reprobuild-packages && pwd)"
+            export REPROBUILD_PACKAGES_ROOT
+            test -f "$REPROBUILD_PACKAGES_ROOT/packages/interfaces/shellcheck/repro.nim"
+            bash browser-replay/build-dist.sh
           '
 
       - name: Verify bundle contents
