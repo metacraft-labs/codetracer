@@ -480,7 +480,11 @@ impl EventDb {
                     })
                     .collect();
                 let positions = ordered_event_positions(matching.len(), |i| matching[i], order);
-                for &i in positions.iter().skip(args.table_args.start).take(args.table_args.length) {
+                for &i in positions
+                    .iter()
+                    .skip(args.table_args.start)
+                    .take(args.table_args.length)
+                {
                     table_data.push(TableRow::new(matching[i]));
                 }
                 event_count = matching.len();
@@ -749,7 +753,7 @@ mod event_order_tests {
 
     #[test]
     fn a_column_orders_the_log_and_ties_keep_the_recorded_order() {
-        let events = vec![
+        let events = [
             event(38, 0, "2 + 3 = 5", 111),
             event(68, 1, "10 - 4 + 1 = 7", 111),
             event(88, 2, "6 * 7 = 42", 111),
