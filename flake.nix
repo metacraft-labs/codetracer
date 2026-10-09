@@ -223,7 +223,7 @@
       # single pin: a second `nim-fork-src` pin here would be two pins for one
       # thing with nothing keeping them equal — the failure mode
       # `scripts/test-flake-pin-alignment.sh` exists to catch for `runquota`.)
-      url = "github:metacraft-labs/reprobuild/3850ec25b371e706b7923dcf56430af0ea895fc1";
+      url = "github:metacraft-labs/reprobuild/9ceb532d068c75659b76d05f5f2f1027f145b413";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
