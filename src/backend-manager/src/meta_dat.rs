@@ -823,6 +823,11 @@ fn ctfs_entry(data: &[u8], file_name: &str) -> Result<Option<CtfsEntry>, String>
 /// stream when `meta.dat::mcr::total_events` is unavailable
 /// (currently the case for the Nim multi-stream writer, which only
 /// fills the MCR block for native MCR recordings).
+/// Whether the container in `data` has a member named `file_name`, empty or not.
+pub fn ctfs_has_member(data: &[u8], file_name: &str) -> Result<bool, String> {
+    Ok(ctfs_entry(data, file_name)?.is_some())
+}
+
 pub fn ctfs_internal_file_size(data: &[u8], file_name: &str) -> Result<Option<u64>, String> {
     Ok(ctfs_entry(data, file_name)?
         .map(|e| e.size)

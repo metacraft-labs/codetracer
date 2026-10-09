@@ -128,6 +128,10 @@ fn detect_language(program: &str) -> String {
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Members that are not part of the trace format; a container carrying
+/// either is not a recording.
+const RETIRED_MEMBERS: [&str; 2] = ["events.log", "events.fmt"];
+
 /// Reads metadata from a trace's CTFS `.ct` container.
 ///
 /// `trace_dir` is either a `.ct` container itself (a native recording or
@@ -139,13 +143,29 @@ fn detect_language(program: &str) -> String {
 /// # Errors
 ///
 /// Returns [`TraceMetadataError`] if `trace.ct` is missing, cannot be
-/// opened, or carries a malformed/legacy `meta.dat`.
+/// opened, carries a malformed/legacy `meta.dat`, or carries a member that
+/// is not part of the trace format (`events.log`, `events.fmt`).
 pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetadataError> {
     let ct_path = locate_ct_file(trace_dir)?;
     let bytes = std::fs::read(&ct_path).map_err(|source| TraceMetadataError::Io {
         file: ct_path.clone(),
         source,
     })?;
+
+    for name in RETIRED_MEMBERS {
+        let present = meta_dat::ctfs_has_member(&bytes, name).map_err(|message| {
+            TraceMetadataError::Ctfs {
+                file: ct_path.clone(),
+                message,
+            }
+        })?;
+        if present {
+            return Err(TraceMetadataError::RetiredMember {
+                file: ct_path.clone(),
+                name,
+            });
+        }
+    }
 
     let meta_dat_bytes =
         meta_dat::read_meta_dat_from_ctfs(&bytes).map_err(|message| TraceMetadataError::Ctfs {
@@ -190,22 +210,16 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
     // but the current Nim multi-stream writer only fills the MCR block
     // for native MCR recordings — materialized traces (Noir, Ruby
     // native, JS, Python, …) leave it empty.  As a stand-in we probe
-    // the CTFS container for the byte size of the materialized event
-    // streams (`steps.dat`, then `events.log` for the old format).
-    // The size is a coarse proxy for event count, but it is non-zero
-    // whenever the recorder produced any events, which is enough to
-    // satisfy the daemon's "has the trace got events?" contract.
+    // the CTFS container for the byte size of its step stream
+    // (`steps.dat`).  The size is a coarse proxy for event count, but it
+    // is non-zero whenever the recorder produced any events, which is
+    // enough to satisfy the daemon's "has the trace got events?" contract.
     let total_events = if let Some(mcr) = parsed.mcr.as_ref() {
         mcr.total_events
     } else {
         meta_dat::ctfs_internal_file_size(&bytes, "steps.dat")
             .ok()
             .flatten()
-            .or_else(|| {
-                meta_dat::ctfs_internal_file_size(&bytes, "events.log")
-                    .ok()
-                    .flatten()
-            })
             .unwrap_or(0)
     };
 
@@ -314,6 +328,12 @@ pub enum TraceMetadataError {
         file: std::path::PathBuf,
         source: MetaDatError,
     },
+    /// The container carries a member that is not part of the trace format
+    /// (`events.log`, `events.fmt`); it is not a recording.
+    RetiredMember {
+        file: std::path::PathBuf,
+        name: &'static str,
+    },
 }
 
 impl std::fmt::Display for TraceMetadataError {
@@ -341,6 +361,11 @@ impl std::fmt::Display for TraceMetadataError {
             Self::MetaDat { file, source } => {
                 write!(f, "cannot parse meta.dat in {}: {source}", file.display())
             }
+            Self::RetiredMember { file, name } => write!(
+                f,
+                "{} carries `{name}`, which is not part of the trace format; it is refused",
+                file.display()
+            ),
         }
     }
 }
@@ -387,6 +412,19 @@ mod tests {
         args: &[&str],
         paths: &[&str],
     ) -> PathBuf {
+        make_trace_dir_with_members(test_name, program, workdir, args, paths, &[])
+    }
+
+    /// [`make_trace_dir`], with `extra` members stored in the container
+    /// after `meta.dat` and the paths table.
+    fn make_trace_dir_with_members(
+        test_name: &str,
+        program: &str,
+        workdir: &str,
+        args: &[&str],
+        paths: &[&str],
+        extra: &[(&str, &[u8])],
+    ) -> PathBuf {
         let dir = std::env::temp_dir()
             .join("ct-trace-meta-test")
             .join(format!("{}-{}", test_name, std::process::id()));
@@ -411,15 +449,10 @@ mod tests {
         let dat = meta_dat::serialize_meta_dat(&meta);
         let (paths_dat, paths_off) = paths_table(paths);
         let ct_path = dir.join("trace.ct");
-        meta_dat::write_minimal_ctfs(
-            &ct_path,
-            &[
-                ("meta.dat", &dat),
-                ("paths.dat", &paths_dat),
-                ("paths.off", &paths_off),
-            ],
-        )
-        .expect("write minimal ctfs");
+        let mut members: Vec<(&str, &[u8])> =
+            vec![("meta.dat", &dat), ("paths.dat", &paths_dat), ("paths.off", &paths_off)];
+        members.extend_from_slice(extra);
+        meta_dat::write_minimal_ctfs(&ct_path, &members).expect("write minimal ctfs");
 
         dir
     }
@@ -580,6 +613,30 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A container carrying `events.log` or `events.fmt` is not a recording:
+    /// neither member is part of the trace format, so its metadata is refused,
+    /// naming the member, rather than reported with an event count.
+    #[test]
+    fn test_container_with_a_retired_member_is_refused_by_name() {
+        for (i, name) in ["events.log", "events.fmt"].into_iter().enumerate() {
+            let dir = make_trace_dir_with_members(
+                &format!("retired-{i}"),
+                "app.py",
+                "/w",
+                &[],
+                &["/w/app.py"],
+                &[(name, b"payload")],
+            );
+            match read_trace_metadata(&dir) {
+                Err(err @ TraceMetadataError::RetiredMember { .. }) => {
+                    assert!(err.to_string().contains(name), "{name}: {err}");
+                }
+                other => panic!("{name}: expected RetiredMember, got {other:?}"),
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     /// A program name with no extension falls back to the first `paths.dat`
