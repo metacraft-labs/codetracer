@@ -341,9 +341,15 @@ if [ "${hits:-0}" -gt 0 ]; then
 else
 	ck fail "no line-flow-hit markers — the flow view painted nothing"
 fi
-# The third pass RETURNING the outlier at index 3 — the slot `median_of` reads.
-# This is step 7 of the path in Noir-Studio.md §1b.7: the moment a visitor SEES
-# the bug happen rather than being told about it.
+# The third pass SWAPPING the outlier into index 3 — the slot `median_of`
+# reads. This is step 7 of the path in Noir-Studio.md §1b.7: the moment a
+# visitor SEES the bug happen rather than being told about it.
+#
+# ON THE SWAP ROW, not on the pass's whole returned array: the flow chip is
+# truncated to the flow budget (30 cells, Component-Architecture.md), which
+# cannot hold the fourth slot of seven six-digit prices. The probe's note on
+# `showsSwapIntoMedian` says why the old whole-array match only ever passed on
+# text the browser had clipped from view.
 #
 # IT IS NOT A BUG DETECTOR, stated here because the label reads like one. A
 # mutation applying the one-line repair leaves this arm GREEN, and that is
@@ -352,10 +358,10 @@ fi
 # that discriminate are C's frame count and D's settled price, and both were
 # measured reddening under exactly that mutation — 6 frames instead of 3, and
 # `settled price: 243180` with no refusal.
-if [ "$(q flow.showsOutlierAtMedian)" = "True" ]; then
-	ck ok "and the third pass returns 242990 at index 3 — the outlier reaching the median slot"
+if [ "$(q flow.showsSwapIntoMedian)" = "True" ]; then
+	ck ok "and at i = 3 the third pass swaps 242990 into the median slot — out[3] changes to the outlier on screen"
 else
-	ck fail "the flow view does not show the outlier reaching the median slot"
+	ck fail "the flow view does not show the swap that moves the outlier into the median slot"
 	note "rows: $(q flow.sample | cut -c1-260)"
 fi
 

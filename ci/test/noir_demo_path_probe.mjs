@@ -263,15 +263,31 @@ out.flow = await page.evaluate(() => {
   return {
     hitLines: document.querySelectorAll('.line-flow-hit').length,
     rowCount: rows.length,
-    // The third pass RETURNING the low outlier at index 3 — the slot
-    // `median_of` reads. This is the moment the demo is about, and it is what
-    // makes step 7 of the path (Noir-Studio.md §1b.7) something a visitor can
-    // see rather than be told.
+    // The SWAP that puts the low outlier into index 3 — the slot
+    // `median_of` reads. This is step 7 of the path (Noir-Studio.md §1b.7:
+    // "per-iteration values, and the swap that puts the outlier at the
+    // median's index"), and it is what a visitor can see rather than be told.
+    //
+    // ASSERTED ON THE ROW, NOT ON A WHOLE ARRAY IN ONE CHIP. This used to
+    // require the third pass's RETURN chip to read `@[a, b, c, 242990…`. That
+    // was satisfiable only while the flow chip carried the whole rendering and
+    // CSS clipped it at 30ch: the regex matched text the browser had hidden.
+    // Since PLAT-2 the chip is truncated by the presenter to the flow budget
+    // (`FLOW_VALUE_LIMIT` = 30 cells, spec/Architecture/Component-
+    // Architecture.md), and a seven-slot array of six-digit prices cannot show
+    // its fourth slot in 30 cells — so the old field demanded something the
+    // spec forbids the pane to paint.
+    //
+    // What the pane DOES paint, and what a reader follows, is the swap row of
+    // `out[i] = smaller`: the loop index is 3, the value moved down is the
+    // outlier, and `out` changes there from a fourth slot that is NOT the
+    // outlier to one that starts with its digits. All three on one row is the
+    // swap itself; any one alone is not.
     //
     // IT IS NOT A BUG DETECTOR, and saying so is the point of this note. A
     // mutation applying the one-line repair leaves it GREEN, and that is
     // CORRECT rather than a hole: passes 1 to 3 are identical whatever
-    // `SETTLE_PASSES` is, so the third frame returns the same array in both
+    // `SETTLE_PASSES` is, so the third pass makes the same swap in both
     // circuits. The repair does not change this pass; it adds three more
     // AFTER it.
     //
@@ -281,13 +297,12 @@ out.flow = await page.evaluate(() => {
     // the flow view still PAINTS, with values a reader can follow. Do not
     // rewrite it into a bug check; there is nothing at this position to
     // detect.
-    //
-    // Matched on `return` and on position: requiring exactly three values
-    // before 242990 pins it to index 3, so a flow view rendering some other
-    // array cannot satisfy it.
-    showsOutlierAtMedian: rows.some(
-      (r) => /return\s*@\[\s*\d+,\s*\d+,\s*\d+,\s*242990\b/.test(r)),
-    sample: rows.slice(0, 8),
+    showsSwapIntoMedian: rows.some((r) =>
+      /(^|\s)i 3(\s|$)/.test(r)
+      && /smaller 242990\b/.test(r)
+      && /out @\[\s*\d+,\s*\d+,\s*\d+,\s*(?!242)\d/.test(r)
+      && /=> @\[\s*\d+,\s*\d+,\s*\d+,\s*242/.test(r)),
+    sample: rows.slice(-8),
   };
 });
 out.openTabs = await page.evaluate(() =>
