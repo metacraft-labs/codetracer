@@ -6983,3 +6983,65 @@ Two traps in the same area, both live:
   Alt chord the runtime does not bind (`caretTakesAltChord`) as the character
   alone, which is what the framer delivered before. Only a real-PTY suite
   (`test_plat51_pty`) can see framing.
+- 2026-10-08 (PLAT-51 part B): GOLDENLAYOUT'S DROP ZONES ARE A PORT, and four
+  behaviours of the real thing only showed up in the pointer-trace differential
+  (`test_plat51_dropzones_reference.nim` over
+  `src/tests/visual/answers/plat51-dropzones.electron.json`):
+  (1) `DragProxy` REMOVES the dragged item before `calculateItemAreas`, so the
+  native front-ends draw and hit-test `dragLayoutFor(layout, source)` while a
+  tab is carried; (2) the header placeholder (100 px) makes a FLEX strip
+  SHRINK its tabs, so the capture records the tabs per placeholder slot
+  (`tabsAt`) and the port reads those — computing the shift from the tab
+  widths gives ~5 % header mismatches; (3) `constrainDragToContainer` rounds
+  the right / bottom edges ONTO `x2` / `y2`, which `getArea`'s half-open test
+  excludes, so past them a fresh drag finds NOTHING (a drag in flight keeps its
+  last area) — GPUI's `pointerAt` returns none there; (4) every segment test
+  is STRICT, so a pointer exactly on a boundary changes nothing — a test that
+  picks a sample from a box must use the BOX (pane minus its divider column:
+  `binding.boxOfRegion`), not the projected region, or it lands on a boundary.
+- 2026-10-08: THE TERMINAL'S CELL SIZE IS SNAPPED TO 1/64 PX (dyadic) in
+  `app/input/mouse`, so an odd-width tab's middle cell centre is EXACTLY its
+  midpoint and resolves "after" as GoldenLayout's `>` does; without the snap
+  the default 9.63 px cell made float noise decide.
+- 2026-10-08: INJECTING A TERMINAL'S PROBE ANSWERS INTO A PTY CHILD: write
+  them only AFTER the query is in the child's output (poll
+  `sess.transcriptBytes()` for `ESC [ ? 1016 $ p`). Bytes written before the
+  product switched the pty to raw mode are discarded by that switch. And the
+  probe only runs when `capabilities.probeWanted` — which used to say "nothing
+  to ask" whenever `--truecolor`-style flags and `--theme` pinned the colours,
+  dropping the pointer's 1016 / `CSI 16 t` questions with them.
+- 2026-10-08: `runtime.routeTopBarMouse` built a WHOLE shell frame
+  (`shellScreenOf`) for every mouse report, motion included — half of a live
+  divider drag's frame cost (23 → 12 ms at 200x70). A left-button motion now
+  returns before that; the top bar has nothing to do with a held button.
+- 2026-10-08: A WELCOME TAB'S `ct record` NEEDS A `ct` THAT WRITES THE CTFS
+  VERSION THIS CHECKOUT'S replay-server READS. `native_host.findCtBinary`
+  prefers `CT_BIN`, then the `ct` beside `REPLAY_SERVER_BIN`, then
+  `src/build-debug/bin/ct`, then PATH; an old `ct` on PATH records a trace the
+  engine refuses ("unsupported CTFS version"). The PTY / plan suites set
+  `CT_BIN` to the checkout's own.
+- 2026-10-08: A GPUI PANE DOCKED WHEN THE WINDOW OPENS HAS NO ELEMENT
+  (`gShell.leavesFor` walks the dock PROJECTION, and a top-docked pane is the
+  window's own strip, not in it): its label hover "previews" and draws nothing.
+  Filed (codetracer-specs issues/2026-10-08-gpui-pane-docked-at-start-...).
+- 2026-10-09: A MUTATION HARNESS KILLED MID-ARM (the shared host's disk filled
+  to 99%, and long chains were killed outright) can leave its subject EMPTIED
+  — `run-plat14-image-mutations.py` left `tui/app/theme/image_capability.nim`
+  at 0 bytes and every later build failed with "undeclared identifier
+  ImageCapability". After any interrupted grade: compare the touched files
+  against the harness's own `*-mutation-control.sha256` (or `git diff` for
+  files you did not change) before trusting the next run, and check `df`.
+- 2026-10-09: A TUI DIVIDER CELL'S FILL IS WHAT LIES RIGHT OF ITS LEFT-ALIGNED
+  `▏`, so it belongs to the pane on its RIGHT. Painting the focused strip's
+  ring cells on the focus ground leaked the focus colour one cell into the next
+  pane (and drew the line in its own ground). `shell.paintDividers`: left of
+  the focused pane = focused ground + strip-colour line; right of it = that
+  pane's own ground + focus-colour line. `test_plat51b_pty`'s edges case reads
+  both cells for every focus position. GPUI has no shared divider cell (the
+  strip is a child of its own pane box).
+- 2026-10-09: An answers file over 500 KB is refused by the pre-commit hook
+  (`check-added-large-files`); the PLAT-51 drop-zone capture is one file per
+  window size. Reference suites that read `src/tests/visual/answers` must
+  build the path from parts (`"src" / "tests" / "visual" / "answers"`), or
+  `ci/test/plat35-answer-independence.sh` takes them for an ungraded answer
+  producer.
