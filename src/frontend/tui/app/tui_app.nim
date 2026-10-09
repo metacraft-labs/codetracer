@@ -53,7 +53,8 @@ import isonim_tui
 import ./edit_binding
 import ./views/shell
 # PLAT-48: the top bar's shared models come through `codetracer_embed`.
-import headless_app/session_tabs
+import headless_app/welcome_tabs   # exports `session_tabs`
+import ./views/welcome_view
 import headless_app/footer_info
 import ./views/status_bar   # `productIndicator`, for the status row's room
 import ./views/header       # `textCells`
@@ -137,6 +138,10 @@ type
       ## the answer to the last command survives until the next one.
     dividers*: DividerChoice
       ## PLAT-50: `--dividers` — the colour a pane divider is drawn in.
+    focusHighlightOff*: bool
+      ## PLAT-51 (Native-Front-End-Parity.md §2): the focus highlight is off
+      ## (`--focus-highlight=off`, `:set focus-highlight off`, the remembered
+      ## preference). The zero value is ON, the default.
     contextMenu*: ContextMenuState
       ## PLAT-50: the open right-click menu, if any.
     content*: ContentOverlay
@@ -278,6 +283,20 @@ type
     recordings*: seq[OmnibarEntry]
       ## PLAT-49 part B: the recordings the host can see (`omRecording`
       ## entries), what the "+"'s `:open ` lists.
+    welcomeTabs*: WelcomeTabs
+      ## PLAT-51 deliverable 8: the tabs the "+" opened that are not (yet)
+      ## replay sessions — the Welcome Screen, or an Edit-mode folder.
+    welcomes*: seq[NativeWelcome]
+      ## Each welcome tab's screen (`viewmodels/native_welcome`), parallel to
+      ## `welcomeTabs.tabs`.
+    recentFolders*: seq[string]
+      ## PLAT-51: the folders opened in this process, newest first — the
+      ## Welcome Screen's "Recent folders".
+    welcomeHost*: proc(tab: int; intent: NativeWelcomeIntent): string {.closure.}
+      ## PLAT-51: the HOST performs a welcome tab's choice — opens the
+      ## recording in that tab, starts `ct record`, or roots Edit mode at the
+      ## folder — "" when it did (or started to), else why not. Nil when the
+      ## host cannot; the strip then draws no "+".
     hoveredTooltip*: string
       ## PLAT-49: the hovered control's tooltip, from
       ## `debug_controls_vm.transportTooltip`.
@@ -375,6 +394,23 @@ proc sourceWithCaret*(app: TuiApp): SourcePaneModel =
     result.caretLine = app.caret.line
     result.caretColumn = app.caret.column
 
+proc shownWelcome*(app: TuiApp): NativeWelcome =
+  ## PLAT-51: the Welcome Screen being shown — the shown tab is a welcome
+  ## tab that has not become a session — or nil.
+  let w = app.welcomeTabs
+  if not w.welcomeShown or w.shownTab.kind != wtkWelcome or
+     w.active >= app.welcomes.len:
+    return nil
+  app.welcomes[w.active]
+
+proc welcomeViewOf*(app: TuiApp): WelcomeView =
+  let w = app.shownWelcome()
+  if w.isNil:
+    return WelcomeView(shown: false)
+  WelcomeView(shown: true, rows: w.rowsOf(), focus: w.focus, form: w.form,
+              input: w.input, placeholder: w.placeholder,
+              message: w.message)
+
 proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   ## The CTUI-3 screen model for this application at this terminal size.
   ##
@@ -405,7 +441,11 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # the session's node win here would throw away every gesture on the next
   # repaint, which is the same divergence CTUI-3 refused for `activate`.
   let bound = not app.layoutBinding.isNil
-  let boundLayout = if bound: app.layoutBinding.layout else: initLayout(nil)
+  # PLAT-51: the arrangement DRAWN — during a tab drag without the dragged
+  # pane (GoldenLayout's drag proxy), during a live divider drag with the
+  # proposed weights (Layout-ViewModel §4.3a) — `binding.presentedLayout`.
+  let boundLayout = if bound: app.layoutBinding.presentedLayout
+                    else: initLayout(nil)
   # PLAT-16: THE REGISTER WINS WHEN IT HOLDS A TREE FOR THE CURRENT MODE.
   #
   # It holds one only after a `Ctrl+F5` has been made, and what it holds for
@@ -428,6 +468,9 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   result = ShellModel(
     header: header,
     dividers: app.dividers,
+    focusHighlightOff: app.focusHighlightOff,
+    tabPlaceholder: (if bound: app.layoutBinding.placeholderOf()
+                     else: (false, "", -1, 0)),
     contextMenu: app.contextMenu,
     content: app.content,
     topBar: TopBarModel(menu: app.menu, omnibar: app.omnibar,
@@ -436,9 +479,11 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                         hoveredControl: app.hoveredControl,
                         hoverTooltip: app.hoveredTooltip,
                         hoveredTab: app.hoveredTab,
-                        canAddTab: not app.recordingOpener.isNil,
+                        canAddTab: not app.welcomeHost.isNil or
+                                   not app.recordingOpener.isNil,
                         hoveredTabAdd: app.hoveredTabAdd,
-                        tabs: app.shell.tabsOf(), tabScroll: app.tabScroll,
+                        tabs: app.shell.stripTabsOf(app.welcomeTabs),
+                        tabScroll: app.tabScroll,
                         caretDrawn: app.caretDrawn),
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification,
@@ -466,6 +511,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                           app.layoutBinding.pointerCol))
                   else: none((int, int))),
     profile: selected,
+    welcome: app.welcomeViewOf(),
     source: app.sourceWithCaret(),
     highlighting: app.highlighting,
     callStack: app.callStack,

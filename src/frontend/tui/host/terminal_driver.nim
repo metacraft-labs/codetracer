@@ -460,6 +460,8 @@ type
     altScreen: AltScreen
     mouseCapture: MouseCapture
     mouseOwned: bool
+    pixelMouseOwned: bool
+      ## PLAT-51: `?1016h` was sent (`enablePixelMouse`).
     altOwned: bool
     rawOwned: bool
 
@@ -547,6 +549,21 @@ proc start*(d: TerminalDriver) =
   # their key handling.
   d.started = true
 
+const
+  PixelMouseOnBytes* = "\x1b[?1016h"
+  PixelMouseOffBytes* = "\x1b[?1016l"
+    ## PLAT-51: SGR-pixel mouse reporting (DECSET 1016) — the same reports as
+    ## SGR-1006, in pixels.
+
+proc enablePixelMouse*(d: TerminalDriver) =
+  ## PLAT-51 (Layout-ViewModel §4.2.2): switch the mouse's reports to PIXELS,
+  ## on a terminal the start-up round found recognising 1016 and saying its
+  ## cell size (`terminal_probe.mouseMetricsOf`). Only while the mouse is
+  ## ours; undone by `stop`.
+  if d.mouseOwned and not d.pixelMouseOwned:
+    writeAll(d.outFd, PixelMouseOnBytes)
+    d.pixelMouseOwned = true
+
 proc stop*(d: TerminalDriver) =
   ## Give the terminal back. Idempotent, and safe to call after a failed
   ## `start`.
@@ -554,6 +571,9 @@ proc stop*(d: TerminalDriver) =
   ## The same order `nim-termctl`'s signal handler uses, so a clean exit and a
   ## SIGTERM leave the terminal in the same state: mouse off, alternate screen
   ## left, cursor shown, termios restored last.
+  if d.pixelMouseOwned:
+    writeAll(d.outFd, PixelMouseOffBytes)
+    d.pixelMouseOwned = false
   if d.mouseOwned:
     writeAll(d.outFd, MotionTrackingOffBytes)
     disableMouseCapture(d.mouseCapture)

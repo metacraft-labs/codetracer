@@ -78,7 +78,9 @@ type
       ## (ui/surface/input/default).
     crFocusOutline = "focus.outline"
       ## PLAT-47. The focused pane's 1px outline: the desktop's selected-panel
-      ## stroke (`SELECTED_PANEL_BORDER_COLOR`, ui/border/primary).
+      ## stroke (`SELECTED_PANEL_BORDER_COLOR`, ui/border/primary). PLAT-51:
+      ## subtler (ui/border/secondary), and the focused pane's tab strip's
+      ## ground.
     crMenuBackground = "menu.background"
       ## PLAT-50. An open dropdown's ground — the menu, the omnibar's results,
       ## a right-click menu: the desktop's dropdown surface.
@@ -87,6 +89,12 @@ type
     crFieldBorder = "field.border"
       ## PLAT-50. The omnibox's and the menu button's 1px border, and the
       ## `--dividers=subtle` line (ui/border/secondary).
+    crTabFocusedForeground = "tab.focused.foreground"
+      ## PLAT-51. An inactive tab on the FOCUSED pane's strip: the disabled
+      ## tier reads 2.36:1 / 2.44:1 on the focus colour, under the floor, so
+      ## the subdued body tier (ui/text/primary/body-subtle) — still apart
+      ## from the active tab's headings and bold. The terminal's
+      ## `srTabBarFocused`.
 
 const
   WindowChrome*: array[ChromeRole, string] = [
@@ -114,12 +122,17 @@ const
     DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark],
     DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark],
     DesignTokenHex[dtColorsUiSurfaceInputDefault][dmDark],
-    DesignTokenHex[dtColorsUiBorderPrimary][dmDark],
+    # PLAT-51 (Native-Front-End-Parity.md §2): the focus colour SUBTLER — one
+    # step closer to the ground on the border ramp, ui/border/secondary
+    # (the terminal's `srBorderFocused`); the focused pane's tab strip takes
+    # it as its ground too.
+    DesignTokenHex[dtColorsUiBorderSecondary][dmDark],
     # PLAT-50: the desktop's dropdown surface (`dropdown-surface-chrome()`)
     # and its border, and the field / menu button border.
     DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark],
     DesignTokenHex[dtColorsUiBorderPrimary][dmDark],
     DesignTokenHex[dtColorsUiBorderSecondary][dmDark],
+    DesignTokenHex[dtColorsUiTextPrimaryBodySubtle][dmDark],
   ]
 
   FocusOutlinePx* = 1
@@ -326,7 +339,7 @@ func paneWidthPx*(viewportWidth, paneCount: int): int =
   let usable = viewportWidth - 2 * ChromePaddingPx - (paneCount - 1) * ChromeGapPx
   max(1, usable div paneCount)
 
-func tabStyle*(active: bool): seq[(string, string)] =
+func tabStyle*(active: bool; focused = false): seq[(string, string)] =
   ## PLAT-47 deliverable 8, revisited by PLAT-49's finding 4 (the user,
   ## 2026-10-01, over PLAT-47's "follow the desktop's single #282828"): how
   ## one tab of a strip is styled. Shaped by colour and weight alone — no
@@ -334,15 +347,25 @@ func tabStyle*(active: bool): seq[(string, string)] =
   ## foreground of its own, bold; every other tab sits on the strip's own
   ## ground (`stripStyle`) in the disabled tier. The window's chrome applies
   ## exactly this list (`main.paintWindowChrome`).
+  ##
+  ## PLAT-51: on the FOCUSED pane's strip every tab sits on the focus colour
+  ## (the strip's ground there), the active one keeping its foreground and
+  ## weight, the others in `crTabFocusedForeground` (the disabled tier is
+  ## under the contrast floor there).
   if active:
     @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold"),
-      ("background-color", chromeOf(crTabActiveBackground))]
+      ("background-color",
+       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]
   else:
-    @[("color", chromeOf(crTabInactiveForeground))]
+    @[("color", chromeOf(if focused: crTabFocusedForeground
+                         else: crTabInactiveForeground))]
 
-func stripStyle*(): seq[(string, string)] =
+func stripStyle*(focused = false): seq[(string, string)] =
   ## PLAT-49: a tab strip's own ground, distinct from the pane body under it.
-  @[("background-color", chromeOf(crTabStripBackground))]
+  ## PLAT-51 (Native-Front-End-Parity.md §2): the FOCUSED pane's strip takes
+  ## the focus colour (`crFocusOutline`) as its ground.
+  @[("background-color",
+     chromeOf(if focused: crFocusOutline else: crTabStripBackground))]
 
 func paneOutlineStyle*(focused: bool): seq[(string, string)] =
   ## PLAT-47 deliverable 9, GPUI's half: every pane box's 1px BORDER — the

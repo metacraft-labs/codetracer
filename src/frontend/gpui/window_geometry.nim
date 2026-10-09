@@ -24,18 +24,15 @@
 ## back into its own measurement. Nothing here decides whether a drop is
 ## legal — `layout_interaction.dropTargetsFor` / `hoverAt` do, from the
 ## pointer this answers — exactly as the terminal's `binding.pointerAt` hands
-## cells to the same functions. The resolution order is the terminal's:
-##
-##   0. an auto-hide strip: the dock of its edge (`dzOutside<edge>`);
-##   1. outside the layout area: the nearest DOCK edge — all four since
-##      PLAT-48 (gpui-kit's dock has no top placement, so the window draws
-##      the top strip and its reveal itself, outside the dock document);
-##   2. a stack's tab strip: the tab under the pointer (`dzTabStrip` on that
-##      tab's path), or past the last label `dzCentre` ("append");
-##   3. the pane's body by GoldenLayout's proportions
-##      (`layout_interaction.goldenLayoutZone`): a quarter on the left and
-##      right, full height; a quarter at the top and bottom between them;
-##      the centre joins (PLAT-49 part B).
+## cells to the same functions. Since PLAT-51 part B the decision is
+## GoldenLayout's own, PORTED (`headless_app/golden_layout_hit`,
+## Layout-ViewModel §4.2.2): the window is described as GoldenLayout measures
+## it (`goldenHitOf`: every pane box a stack, its strip the header, its body
+## the content, its tabs), a pointer outside the tree is constrained onto it
+## (no drop docks — the auto-hide strips are outside the tree too), the
+## smallest area under it wins (the ground's 50 px side bands, a stack, a
+## header), and a stack's segment or header index is GoldenLayout's — with
+## the user's one deviation, the smaller middle that joins.
 ##
 ## A divider is the GAP between two siblings of a row or a column: a press
 ## there begins `beginResizeDivider(container, index)`, and the pointer's
@@ -431,13 +428,6 @@ proc slotAt*(g: WindowGeometry; x, y: int): tuple[strip, slot: int] =
           return (i, j)
   (-1, -1)
 
-proc stripAt*(g: WindowGeometry; x, y: int): int =
-  ## The strip under a pixel (on a label or not), or -1.
-  for i, st in g.strips:
-    if st.rect.contains(x, y):
-      return i
-  -1
-
 proc revealRectOf*(g: WindowGeometry; edge: LayoutEdge): PxRect =
   ## Where a docked pane is drawn while REVEALED: over the tree, against its
   ## own edge, a third of the tree area deep (`RevealShareDenominator`) —
@@ -493,8 +483,8 @@ func dropBodyOf(n: GeomNode): PxRect =
   ## below its strip — a stack's or a bare pane's one-tab strip alike. Every
   ## pane box has a strip (PLAT-49 part A), and since part B a bare pane's
   ## strip is its HEADER, a join zone as a one-tab GoldenLayout stack's
-  ## header is (`pointerAt`); the edge zones are a quarter of the body
-  ## (`goldenLayoutZone`).
+  ## header is (`pointerAt`); the edge zones are GoldenLayout's quarters of
+  ## the body (`golden_layout_hit.glStackAreas`).
   n.body
 
 proc dropAreaOf*(g: WindowGeometry; path: string): PxRect =
@@ -595,105 +585,111 @@ proc editorBodyWidthOf*(g: WindowGeometry): int =
 # §5 obligation 2, first direction: PIXELS -> `LayoutPointer`
 # ---------------------------------------------------------------------------
 
+type
+  WindowGoldenHit = object
+    ## PLAT-51 deliverable 10 (Layout-ViewModel §4.2.2): the window as
+    ## GoldenLayout would measure it — every pane box a STACK (its box, its
+    ## strip as the header, its body as the content, its tabs) in the order
+    ## the boxes were laid out (depth first, `getAllContentItems`' order),
+    ## the tree's area as the ground — for the ported `golden_layout_hit`.
+    geom*: GlGeometry
+    areas*: seq[GlArea]
+    paths*: seq[string]
+      ## Per stack, its layout path (`GeomNode.path`).
+    nodes*: seq[int]
+      ## Per stack, its index in `WindowGeometry.nodes`.
+
+func glOf(r: PxRect): GlRect =
+  glRect(float(r.x), float(r.y), float(r.w), float(r.h))
+
+func pxOfGl(r: GlRect): PxRect =
+  PxRect(x: int(r.x1), y: int(r.y1), w: int(r.x2) - int(r.x1),
+         h: int(r.y2) - int(r.y1))
+
+proc goldenHitOf*(g: WindowGeometry): WindowGoldenHit =
+  result.geom = GlGeometry(ground: glOf(g.inner),
+                           placeholderPx: GlPlaceholderPx)
+  if g.root >= 0:
+    result.geom.rootIsStack = g.nodes[g.root].kind == gnTabs
+  for i, n in g.nodes:
+    if n.kind != gnTabs:
+      continue
+    var st = GlStack(element: glOf(n.rect), header: glOf(n.strip),
+                     content: glOf(n.body))
+    for t in n.tabs:
+      st.tabs.add glOf(t)
+    result.geom.stacks.add st
+    result.paths.add n.path
+    result.nodes.add i
+  result.areas = glItemAreas(result.geom)
+
 func rootBandOf*(g: WindowGeometry; side: LayoutEdge): PxRect =
-  ## PLAT-49 part B: GoldenLayout's ground side area along `side` — a band
-  ## `GoldenLayoutRootBandPx` deep INSIDE the tree's area (never more than
-  ## half of it), where a drop splits the whole layout; and the rectangle
-  ## its indication tints.
-  let a = g.inner
-  if a.isEmpty:
+  ## GoldenLayout's ground side area along `side` (`createSideAreas`, 50 px
+  ## inside the tree's area) — where a drop splits the whole layout, and the
+  ## rectangle its indication tints.
+  if g.inner.isEmpty:
     return PxRect()
-  let dw = min(goldenLayoutRootBand(1.0), max(1, a.w div 2))
-  let dh = min(goldenLayoutRootBand(1.0), max(1, a.h div 2))
-  case side
-  of leLeft: PxRect(x: a.x, y: a.y, w: dw, h: a.h)
-  of leRight: PxRect(x: a.x + a.w - dw, y: a.y, w: dw, h: a.h)
-  of leTop: PxRect(x: a.x, y: a.y, w: a.w, h: dh)
-  of leBottom: PxRect(x: a.x, y: a.y + a.h - dh, w: a.w, h: dh)
+  let wanted = case side
+    of leTop: gsTop
+    of leLeft: gsLeft
+    of leBottom: gsBottom
+    of leRight: gsRight
+  for a in glSideAreas(glOf(g.inner)):
+    if a.side == wanted:
+      return pxOfGl(a.rect)
+  PxRect()
+
+proc pointerOfDrop*(g: WindowGeometry; hit: WindowGoldenHit;
+                    drop: GoldenDrop): Option[LayoutPointer] =
+  ## A decision of the port in the model's pointer vocabulary.
+  case drop.kind
+  of gdNone:
+    return none(LayoutPointer)
+  of gdRootSide:
+    return some(LayoutPointer(path: "", zone: rootZoneOf(drop.edge)))
+  else:
+    discard
+  var at = -1
+  for k, p in hit.paths:
+    if p == drop.stackPath:
+      at = hit.nodes[k]
+  if at < 0:
+    return none(LayoutPointer)
+  let n = g.nodes[at]
+  let active = n.panePathOf(n.active)
+  case drop.kind
+  of gdSplit:
+    let zone = case drop.edge
+      of leLeft: dzLeftEdge
+      of leRight: dzRightEdge
+      of leTop: dzTopEdge
+      of leBottom: dzBottomEdge
+    some(LayoutPointer(path: active, zone: zone))
+  of gdHeader:
+    if n.stacked and drop.index < n.panes.len:
+      some(LayoutPointer(path: n.panePathOf(drop.index), zone: dzTabStrip))
+    else:
+      some(LayoutPointer(path: active, zone: dzCentre))
+  else:
+    some(LayoutPointer(path: active, zone: dzCentre))
 
 proc pointerAt*(g: WindowGeometry; x, y: int): Option[LayoutPointer] =
-  ## **The hit-test.** A window pixel, in the layout's own vocabulary. See
-  ## the module header for the order.
+  ## **The hit-test, one sample**: GoldenLayout's decision at window pixel
+  ## `(x, y)` (Layout-ViewModel §4.2.2, the port in `golden_layout_hit`) from
+  ## a fresh drag, constrained onto the tree's area first
+  ## (`constrainDragToContainer`) — so past the layout it is the ground's
+  ## band, a ROOT split, never a dock (docking is on the menus and `:dock`,
+  ## as on the desktop). The drags themselves carry GoldenLayout's state from
+  ## sample to sample (`window_gestures`).
   if g.root < 0:
     return none(LayoutPointer)
-  # An auto-hide strip is the dock of its edge: dropping on it docks there.
-  let strip = g.stripAt(x, y)
-  if strip >= 0:
-    let zone =
-      case g.strips[strip].edge
-      of leLeft: dzOutsideLeft
-      of leRight: dzOutsideRight
-      of leTop: dzOutsideTop
-      of leBottom: dzOutsideBottom
-    return some(LayoutPointer(path: "", zone: zone))
-  let a = g.area
-  if not a.contains(x, y):
-    # The nearest dock edge — all four since PLAT-48: the window draws a top
-    # strip itself (gpui-kit's dock has no top placement; see
-    # `dock_projection.projectDock`), so the top margin docks to the top as
-    # the terminal's row above the body and the desktop's top drop do.
-    let dl = x - a.x
-    let dr = a.x + a.w - 1 - x
-    let db = a.y + a.h - 1 - y
-    let dt = y - a.y
-    var best = dl
-    var zone = dzOutsideLeft
-    if dr < best:
-      best = dr
-      zone = dzOutsideRight
-    if dt < best:
-      best = dt
-      zone = dzOutsideTop
-    if db < best:
-      zone = dzOutsideBottom
-    return some(LayoutPointer(path: "", zone: zone))
-  let i = g.tabsNodeAt(x, y)
-  if i < 0:
+  let hit = goldenHitOf(g)
+  if hit.geom.stacks.len == 0:
     return none(LayoutPointer)
-  let n = g.nodes[i]
-  # PLAT-49 part B: GOLDENLAYOUT'S GROUND BANDS (`rootBandOf`), with its
-  # `getArea` rule: the smallest area under the pointer wins — of the bands
-  # (two at a corner), the stack's whole area and, on its strip, its header.
-  var bandSide = leLeft
-  var bandSurface = high(int)
-  for side in [leLeft, leRight, leTop, leBottom]:
-    let band = g.rootBandOf(side)
-    if not band.isEmpty and band.contains(x, y) and band.w * band.h < bandSurface:
-      bandSide = side
-      bandSurface = band.w * band.h
-  if bandSurface < high(int):
-    let rival =
-      if not n.strip.isEmpty and n.strip.contains(x, y): n.strip.w * n.strip.h
-      else: n.rect.w * n.rect.h
-    if goldenLayoutWins(bandSurface, rival):
-      return some(LayoutPointer(path: "", zone: rootZoneOf(bandSide)))
-  if n.stacked and not n.strip.isEmpty and n.strip.contains(x, y):
-    for t, r in n.tabs:
-      if r.contains(x, y):
-        # GoldenLayout's header rule (PLAT-49 part B): left of a tab's
-        # middle inserts before it, right of it after it; after the last
-        # tab is the append the strip's filler answers.
-        let slot = if goldenLayoutInsertsAfter(x - r.x, r.w): t + 1 else: t
-        if slot >= n.tabs.len:
-          return some(LayoutPointer(path: n.panePathOf(n.active),
-                                    zone: dzCentre))
-        return some(LayoutPointer(path: n.panePathOf(slot), zone: dzTabStrip))
-    return some(LayoutPointer(path: n.panePathOf(n.active), zone: dzCentre))
-  let path = n.panePathOf(n.active)
-  # A BARE pane's one-tab strip is its header: a drop there joins it
-  # (PLAT-49 part B — a one-tab GoldenLayout stack's header joins too).
-  if not n.stacked and not n.strip.isEmpty and n.strip.contains(x, y):
-    return some(LayoutPointer(path: path, zone: dzCentre))
-  let b = dropBodyOf(n)
-  if not b.contains(x, y):
-    # The border pixel: the centre, as the terminal answers for a cell
-    # outside the drop area.
-    return some(LayoutPointer(path: path, zone: dzCentre))
-  # GOLDENLAYOUT'S ZONES (PLAT-49 part B, finding 11): a quarter of the body
-  # on each side splits there, the centre joins — the rule the terminal's
-  # cell hit-test applies too.
-  some(LayoutPointer(path: path,
-                     zone: goldenLayoutZone(x - b.x, y - b.y, b.w, b.h)))
+  var state = glDragState(hit.geom)
+  let (cx, cy) = glClamp(hit.geom, float(x), float(y))
+  let d = glPointerStep(hit.geom, hit.areas, state, cx, cy, NativeCentreShare)
+  g.pointerOfDrop(hit, goldenDropOf(d, hit.paths))
 
 # ---------------------------------------------------------------------------
 # §5 obligation 2, second direction: the drop indication -> PIXELS
@@ -714,7 +710,8 @@ func halfOf*(r: PxRect; side: LayoutEdge): PxRect =
 const DropCaretPx* = 3
   ## The insertion caret's width on a tab strip.
 
-proc dropIndicationRects*(g: WindowGeometry; ind: DropIndication):
+proc dropIndicationRects*(g: WindowGeometry; ind: DropIndication;
+                          placeholderPx = 0):
     tuple[tint, caret: PxRect] =
   ## **The drop indication, resolved against the window's geometry** — the
   ## pixel twin of the terminal's `binding.dropIndicationCells`, from the
@@ -752,9 +749,17 @@ proc dropIndicationRects*(g: WindowGeometry; ind: DropIndication):
     if i < 0 or g.nodes[i].kind != gnTabs or g.nodes[i].strip.isEmpty:
       return (tint: PxRect(), caret: PxRect())
     let n = g.nodes[i]
+    if n.tabs.len == 0:
+      return (tint: n.strip, caret: PxRect())
     let cx =
       if ind.slot < n.tabs.len: n.tabs[max(0, ind.slot)].x
       else: n.tabs[^1].x + n.tabs[^1].w
+    if placeholderPx > 0:
+      # PLAT-51: GoldenLayout's placeholder is open there — the caret IS the
+      # gap the tabs moved apart for (GoldenLayout highlights it).
+      return (tint: n.strip,
+              caret: PxRect(x: cx, y: n.strip.y, w: placeholderPx,
+                            h: n.strip.h))
     (tint: n.strip,
      caret: PxRect(x: max(n.strip.x, cx - DropCaretPx div 2), y: n.strip.y,
                    w: DropCaretPx, h: n.strip.h))

@@ -71,6 +71,65 @@ type
     shift*, alt*, ctrl*: bool
       ## PLAT-50: the modifiers held (SGR's bits 4, 8 and 16) — the desktop's
       ## Ctrl+click on a line is "Jump to line" (`ui/editor`'s `onMouseDown`).
+    px*, py*: float
+      ## PLAT-51 (Layout-ViewModel §4.2.2): where the pointer is in PIXELS
+      ## from the screen's top-left — what the terminal reported under
+      ## SGR-pixel mode (DECSET 1016), else the CENTRE of the reported cell
+      ## through the measured cell size (`mouseMetrics`). GoldenLayout's drop
+      ## zones are decided on these; everything else reads `row` / `col`.
+    pixel*: bool
+      ## The report carried pixels (1016), not a cell.
+
+  MouseMetrics* = object
+    ## PLAT-51: how this terminal's mouse reports map to pixels, decided once
+    ## by the host after the start-up query round (CSI 16 t, DECRQM 1016) —
+    ## `host/terminal_driver` enables 1016 only when the terminal answered
+    ## that it supports it AND said how big a cell is.
+    pixels*: bool
+      ## Reports are SGR-pixel (1016): divide by the cell to get a cell.
+    cellW*, cellH*: float
+      ## One cell in pixels: the terminal's `CSI 16 t` answer, else the
+      ## desktop's character cell (`DesktopCellWidthPx` x `DesktopCellHeightPx`).
+    measured*: bool
+      ## The cell size is the terminal's own answer.
+
+const
+  DesktopCellWidthPx* = 9.63
+    ## PLAT-49 part B: how wide one terminal cell stands for on the desktop —
+    ## a character of its editor's monospace at the default size (measured,
+    ## `plat49-panes-capture.spec.ts`, `cellPx`). The cell size a terminal
+    ## that does not say its own is taken to have.
+  DesktopCellHeightPx* = 22.0
+    ## …and how tall: the editor's line height.
+
+func snapPx(v: float): float =
+  ## A cell size on a 1/64 px grid. Every pixel this front-end computes is a
+  ## cell index times a cell size (plus a half for a centre), so on a dyadic
+  ## grid each is EXACT in binary floating point — and the middle cell of an
+  ## odd-width tab lands exactly on the tab's midpoint, where GoldenLayout's
+  ## `x < halfX` decides "after", every time, instead of by rounding error.
+  if v <= 0.0: v else: float(int(v * 64.0 + 0.5)) / 64.0
+
+var gMouseMetrics = MouseMetrics(pixels: false,
+                                 cellW: snapPx(DesktopCellWidthPx),
+                                 cellH: snapPx(DesktopCellHeightPx),
+                                 measured: false)
+  ## One terminal per process; set by the host once, read by every decode.
+
+proc mouseMetrics*(): MouseMetrics = gMouseMetrics
+
+proc setMouseMetrics*(m: MouseMetrics) =
+  ## The host's answer (`main.nim`, after the query round). A cell size that
+  ## is not positive keeps the desktop's.
+  var v = m
+  if v.cellW <= 0.0 or v.cellH <= 0.0:
+    v.cellW = DesktopCellWidthPx
+    v.cellH = DesktopCellHeightPx
+    v.measured = false
+    v.pixels = false
+  v.cellW = snapPx(v.cellW)
+  v.cellH = snapPx(v.cellH)
+  gMouseMetrics = v
 
 proc decodeMouse*(token: string): (bool, MouseEvent) =
   ## Decode one SGR-1006 report. `(false, _)` when `token` is not one.
@@ -114,6 +173,18 @@ proc decodeMouse*(token: string): (bool, MouseEvent) =
   event.alt = (code and 8) != 0
   event.ctrl = (code and 16) != 0
   # 1-BASED ON THE WIRE. See this module's header.
-  event.row = row - 1
-  event.col = col - 1
+  let m = gMouseMetrics
+  if m.pixels:
+    # SGR-PIXELS (DECSET 1016): the same report, in pixels, also 1-based. The
+    # cell is the one the pixel lies in; the pixel is kept for the drop zones.
+    event.pixel = true
+    event.px = float(max(0, col - 1))
+    event.py = float(max(0, row - 1))
+    event.col = int(event.px / m.cellW)
+    event.row = int(event.py / m.cellH)
+  else:
+    event.row = row - 1
+    event.col = col - 1
+    event.px = (float(event.col) + 0.5) * m.cellW
+    event.py = (float(event.row) + 0.5) * m.cellH
   (true, event)

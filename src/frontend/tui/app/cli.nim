@@ -58,6 +58,9 @@ import std/strutils
 
 import ./theme/capabilities
 import ./theme/roles
+import codetracer_embed   # `layout_settings` (PLAT-51)
+
+export layout_settings
 
 # The product's own version, not a second one. `src/ct/version.nim` imports
 # `strutils` and nothing else, so reaching it costs nothing and cannot drag a
@@ -122,6 +125,11 @@ type
       dividers*: DividerChoice
         ## PLAT-50: `--dividers=strip|subtle` — the colour a pane divider is
         ## drawn in (`roles.DividerChoice`); `strip` when absent.
+      focusHighlight*: SettingOverride
+        ## PLAT-51: `--focus-highlight=on|off` for this session, beating the
+        ## remembered preference; `soUnset` when absent.
+      liveResize*: SettingOverride
+        ## PLAT-51: `--live-resize=on|off`, likewise.
       noFlowOverlay*: bool
         ## `--no-flow-overlay` — the flow overlay hidden for this session.
         ## PLAT-42 built the overlay on both native front-ends and shows it by
@@ -318,6 +326,12 @@ options:
   --no-flow-overlay  do not dim the lines the run did not reach
   --dividers=NAME    strip (default: pane dividers in the tab strips' ground,
                      as the desktop's splitters) or subtle (a distinct line)
+  --focus-highlight=on|off
+                     the focused pane's tab strip and outline in the focus
+                     colour (default on; remembered by :set focus-highlight)
+  --live-resize=on|off
+                     panes reflow while a divider is dragged (default on);
+                     off draws a guide and reflows on release
   --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
@@ -423,6 +437,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var layoutBinding = false
   var noFlowOverlay = false
   var dividers = dcStrip
+  var settingOverrides: array[LayoutSetting, SettingOverride]
   var editProject = ""
   var editRequested = false
   var i = first
@@ -498,6 +513,13 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                                 message: themeRefusal(themeName))
             flags.theme = theme
             flags.themePinned = true
+            break options
+          # PLAT-51: the two layout preferences, for this session.
+          let flag = parseSettingFlag(arg)
+          if flag.isFlag:
+            if not flag.ok:
+              return TuiCommand(kind: tckUsageError, message: flag.message)
+            settingOverrides[flag.setting] = flag.value
             break options
           # PLAT-50: the divider colour, the user's open choice.
           let (isDividers, dividersName) = optionValue(arg, "--dividers")
@@ -754,9 +776,13 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
     TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
-               noFlowOverlay: noFlowOverlay, dividers: dividers)
+               noFlowOverlay: noFlowOverlay, dividers: dividers,
+               focusHighlight: settingOverrides[lsFocusHighlight],
+               liveResize: settingOverrides[lsLiveResize])
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
-               noFlowOverlay: noFlowOverlay, dividers: dividers)
+               noFlowOverlay: noFlowOverlay, dividers: dividers,
+               focusHighlight: settingOverrides[lsFocusHighlight],
+               liveResize: settingOverrides[lsLiveResize])

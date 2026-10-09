@@ -55,6 +55,15 @@ type
     italic*: bool
     underline*: bool
     reverse*: bool
+    dim*: bool
+      ## The foreground at HALF STRENGTH over the cell's own ground — the
+      ## desktop's `opacity: 0.5` (a Terminal Output fragment written after
+      ## the current position, `.future`). Resolved by
+      ## `palette.resolveRoles`: on a colour rung the foreground is BLENDED
+      ## halfway toward the resolved background (a terminal has no opacity),
+      ## so each colour keeps its hue at reduced strength; where either colour
+      ## is the terminal's own (monochrome, `--palette=terminal`, a cell with
+      ## no ground) it is SGR 2, faint.
 
 const DefaultCellStyle* = CellStyle()
   ## No role, no surface, the terminal's own colours and no attributes.
@@ -71,6 +80,7 @@ func attrNames*(s: CellStyle): seq[string] =
   if s.italic: result.add "italic"
   if s.underline: result.add "underline"
   if s.reverse: result.add "reverse"
+  if s.dim: result.add "dim"
 
 func describe*(s: CellStyle): string =
   ## One line for a failure message. Never used to make a decision.

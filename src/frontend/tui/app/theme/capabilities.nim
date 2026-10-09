@@ -567,6 +567,15 @@ type
     tmuxRgb*: bool
       ## tmux's `client_termfeatures` includes `RGB`.
     tmuxClientTerm*: string
+    pixelMouseAnswered*: bool
+      ## PLAT-51 (Layout-ViewModel §4.2.2): the terminal answered DECRQM for
+      ## SGR-pixel mouse reporting (`CSI ? 1016 $ p`).
+    pixelMouse*: bool
+      ## …and said it RECOGNISES the mode (set, reset or permanently set) —
+      ## so `?1016h` will make its reports pixels.
+    cellWidthPx*, cellHeightPx*: int
+      ## PLAT-51: the terminal's cell in pixels, from `CSI 16 t`
+      ## (`CSI 6 ; height ; width t`); 0 when it did not say.
 
 const AutoDetectSelectsLight* = false
   ## **WHETHER BACKGROUND DETECTION MAY CHOOSE LIGHT — it may not.** A product
@@ -641,13 +650,15 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
 proc probeWanted*(env: TerminalEnv; flags: CapabilityFlags): bool =
   ## Whether the start-up query round has anything to decide.
   ##
-  ## Nothing to ask when the colour depth is a flag's AND the mode is too, or
-  ## when there is no terminal to ask.
+  ## Nothing to ask when the colour depth is a flag's AND the mode is too AND
+  ## the mouse is off — PLAT-51: with the mouse on, whether it reports pixels
+  ## (DECRQM 1016) and how big a cell is are asked whatever the colour flags
+  ## say (Layout-ViewModel §4.2.2) — or when there is no terminal to ask.
   if isDumbTerminal(env):
     return false
   let depthDecided = flags.noColor or flags.theme == utPlain or
                      flags.forceTrueColor
-  not (depthDecided and flags.themePinned)
+  not (depthDecided and flags.themePinned and flags.noMouse)
 
 proc backgroundNote*(caps: TerminalCapabilities): string =
   ## `bg: osc11 #1e1e2e -> dark` — the source of the mode decision, for the

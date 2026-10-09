@@ -35,7 +35,7 @@
 ## catches a defect introduced on either side; an agreement CONSTRUCTED from
 ## one table is blind to a defect IN that table, exactly as the two directions
 ## of `binding.pointerAt` / `binding.cellsFor` are blind to a change in the
-## `edgeBandCells` they share. So `app/tests/test_layout_binding.nim` carries
+## GoldenLayout areas they share (`golden_layout_hit.glStackAreas`). So `app/tests/test_layout_binding.nim` carries
 ## both halves:
 ##
 ##   * the column-by-column walk of a REAL PAINTED strip against the hit-test,

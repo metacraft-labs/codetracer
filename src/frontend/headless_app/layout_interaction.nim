@@ -54,6 +54,9 @@
 import std/[options, strutils]
 
 import ./layout_model
+import ./golden_layout_hit
+
+export golden_layout_hit
 
 type
   InteractionKind* = enum
@@ -443,90 +446,12 @@ proc `$`*(i: Interaction): string =
 # §4.2 — the drop-target model
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# GoldenLayout's drop zones, as proportions (PLAT-49 part B, finding 11)
-# ---------------------------------------------------------------------------
-
-const
-  GoldenLayoutEdgeShare* = 0.25
-    ## How far into a pane's body an EDGE zone reaches, as a share of the
-    ## body's extent on that axis. Measured in the desktop's GoldenLayout
-    ## 2.6.0 (`dist/cjs/ts/items/stack.js`, `Stack.getArea`): the left hover
-    ## area is `x1 .. x1 + contentWidth * 0.25` over the body's full height,
-    ## the right one `x1 + contentWidth * 0.75 .. x2`; the top and bottom ones
-    ## lie between those two, in the middle half of the width. A drop there
-    ## SPLITS the pane on that side and the new pane takes HALF of it (the
-    ## `highlightArea`, `contentWidth * 0.5`; `onDrop` halves the target's
-    ## size) — `dropIndicationOf`'s `diSplitHalf`.
-    ##
-    ## ONE DEVIATION, BY THE USER'S DIRECTION (2026-10-01, finding 11: "the
-    ## centre joins the stack"). GoldenLayout's top and bottom zones are the
-    ## whole upper and lower HALVES of that middle column, so a non-empty
-    ## stack's body has no centre and a join happens only on its header. Here
-    ## the top and bottom zones are the same quarter deep as the left and
-    ## right ones, and the middle — the centre half of the body on both axes
-    ## — JOINS the stack (`dzCentre`). The edge zones keep GoldenLayout's
-    ## proportion on both axes.
-
-func goldenLayoutZone*(dx, dy, width, height: int): DropZone =
-  ## **The zone of a body point**, for every front-end: `dx`, `dy` is the
-  ## pointer's offset inside a pane's drop body of `width` x `height`, in the
-  ## front-end's OWN unit (a terminal's cells, a window's pixels). Pure
-  ## arithmetic on the binding's measurement — nothing measured is kept, so
-  ## PLAT-5's purity law holds: the Interaction still carries only the zone.
-  ##
-  ## Judged at the UNIT'S CENTRE (`dx + 0.5`), so a body two units wide has a
-  ## left and a right zone and nothing between, one unit wide only a centre.
-  ## Left and right are tested first (GoldenLayout's left and right areas run
-  ## the body's full height); then top, bottom, and the centre.
-  if width <= 0 or height <= 0:
-    return dzCentre
-  let fx = (float(dx) + 0.5) / float(width)
-  let fy = (float(dy) + 0.5) / float(height)
-  if fx <= GoldenLayoutEdgeShare: dzLeftEdge
-  elif fx >= 1.0 - GoldenLayoutEdgeShare: dzRightEdge
-  elif fy <= GoldenLayoutEdgeShare: dzTopEdge
-  elif fy >= 1.0 - GoldenLayoutEdgeShare: dzBottomEdge
-  else: dzCentre
-
-const
-  GoldenLayoutRootBandPx* = 50
-    ## How deep GoldenLayout's GROUND side areas are, in pixels
-    ## (`dist/cjs/ts/items/ground-item.js`, `GroundItem.createSideAreas`:
-    ## `areaSize = 50`): four bands INSIDE the layout along its outer edges.
-    ## `LayoutManager.getArea` picks the SMALLEST area under the pointer, so
-    ## over the band a stack's body loses to it (its area is the whole stack)
-    ## and a drop there splits the WHOLE LAYOUT on that side
-    ## (`GroundItem.onDrop`, `lcSplit`'s `splitRoot`); a stack's header,
-    ## smaller than the band along the edge, keeps its own drop. Measured on
-    ## the desktop (`plat49-panes-capture.spec.ts`, `rootBand`).
-
-func goldenLayoutRootBand*(unitPx: float): int =
-  ## The band's depth in a front-end's own unit of `unitPx` pixels — a
-  ## window's pixel (1.0) or, for a terminal, the desktop's character cell
-  ## along that axis. At least one unit.
-  if unitPx <= 0.0: 1
-  else: max(1, int(float(GoldenLayoutRootBandPx) / unitPx + 0.5))
-
 func rootZoneOf*(edge: LayoutEdge): DropZone =
   case edge
   of leLeft: dzRootLeft
   of leRight: dzRootRight
   of leTop: dzRootTop
   of leBottom: dzRootBottom
-
-func goldenLayoutWins*(bandSurface, areaSurface: int): bool =
-  ## `LayoutManager.getArea`'s rule between two areas under the pointer: the
-  ## SMALLER surface wins, and on a tie the one considered first (the
-  ## ground's side areas are listed before the stacks' — `calculateItemAreas`).
-  bandSurface <= areaSurface
-
-func goldenLayoutInsertsAfter*(dx, tabWidth: int): bool =
-  ## Over a tab of a stack's strip, whether the insertion point is AFTER that
-  ## tab: GoldenLayout's `Stack.highlightHeaderDropZone` puts the drop
-  ## placeholder before a tab when the pointer is left of the tab's middle
-  ## and after it otherwise. `dx` is the offset into the tab.
-  tabWidth > 0 and 2 * dx + 1 > tabWidth
 
 proc edgeOfZone(zone: DropZone): Option[LayoutEdge] =
   case zone
@@ -1187,3 +1112,173 @@ proc cancel*(interaction: Interaction): Interaction =
   ## statement: a cancelled drag cannot have changed the committed layout
   ## because this routine has no layout to change.
   Interaction(kind: ikNone)
+
+# ---------------------------------------------------------------------------
+# PLAT-51 deliverable 10: GoldenLayout's own decision, turned into a target
+# ---------------------------------------------------------------------------
+#
+# Layout-ViewModel §4.2.2. The front-ends hit-test with the PORT of
+# GoldenLayout 2.6.0 (`golden_layout_hit`), over the geometry they drew. What
+# that answers — a side area, or a stack and its segment / header index — is
+# named here in the model's vocabulary: a `GoldenDrop` names the stack by its
+# PATH IN THE DRAG LAYOUT (`dragLayoutFor`, the arrangement with the dragged
+# pane taken out, as GoldenLayout's `DragProxy` takes it out before it
+# measures), and `targetOfGolden` turns it into a `DropTarget` whose command
+# names panes — so it commits against the COMMITTED layout exactly as every
+# other drop does, and `apply` stays the one authority on legality.
+
+type
+  GoldenDropKind* = enum
+    gdNone = "none"
+      ## No area was ever under the pointer, or the stack never highlighted.
+    gdRootSide = "rootSide"
+      ## A ground side area: split the whole layout on `edge`.
+    gdSplit = "split"
+      ## A stack's left / right / top / bottom segment: split it on `edge`.
+    gdHeader = "header"
+      ## A stack's header: a tab at `index` (counted in the drag layout).
+    gdCentre = "centre"
+      ## The user's smaller middle: join the stack, after its last tab.
+
+  GoldenDrop* = object
+    kind*: GoldenDropKind
+    edge*: LayoutEdge
+    stackPath*: string
+      ## The stack (or bare pane) in the DRAG layout.
+    index*: int
+
+proc dragLayoutFor*(layout: Layout; source: PaneKind): Layout =
+  ## The arrangement while `source` is dragged: GoldenLayout's `DragProxy`
+  ## removes the dragged item from its parent BEFORE `calculateItemAreas`,
+  ## so the stack it left closes up (or, when it was the stack's only tab,
+  ## goes and its siblings take the room). A docked pane is not in the tree
+  ## and leaves it as it is; the last pane of a layout cannot be removed, and
+  ## then the committed layout is the answer.
+  if layout.placement(source) != plPlaced:
+    return layout
+  let o = apply(layout, cmdRemovePane(source))
+  if o.kind == loApplied: o.layout else: layout
+
+func splitOfEdge(edge: LayoutEdge): (SplitAxis, DropTargetKind) =
+  case edge
+  of leLeft: (saRow, dtSplitBefore)
+  of leRight: (saRow, dtSplitAfter)
+  of leTop: (saColumn, dtSplitBefore)
+  of leBottom: (saColumn, dtSplitAfter)
+
+proc targetOfGolden*(layout, dragLayout: Layout; source: PaneKind;
+                     drop: GoldenDrop): Option[DropTarget] =
+  ## The drop target GoldenLayout's decision names, or `none` when it names
+  ## nothing or `apply` would refuse it (a highlighted target is always one
+  ## that can be dropped on — `isLegal`, as for every candidate). Regions are
+  ## paths in `dragLayout`, the arrangement the front-end draws during the
+  ## drag; the target's command names panes.
+  var target: DropTarget
+  case drop.kind
+  of gdNone:
+    return none(DropTarget)
+  of gdRootSide:
+    target = DropTarget(kind: dtSplitRoot, edge: drop.edge,
+                        region: DropRegion(kind: drRootBand, path: "",
+                                           side: drop.edge))
+  of gdSplit, gdHeader, gdCentre:
+    let node = nodeAtPath(dragLayout.tree, drop.stackPath)
+    if node.isNil or node.kind notin {lnStack, lnPane}:
+      return none(DropTarget)
+    let isStack = node.kind == lnStack and node.children.len > 0
+    let active =
+      if isStack: node.children[max(0, min(node.activeIndex,
+                                           node.children.high))]
+      else: node
+    if active.kind != lnPane:
+      return none(DropTarget)
+    let tabs = if isStack: node.children.len else: 1
+    case drop.kind
+    of gdSplit:
+      let (axis, kind) = splitOfEdge(drop.edge)
+      let panePathHere =
+        if isStack: childPathOf(drop.stackPath,
+                                max(0, min(node.activeIndex,
+                                           node.children.high)))
+        else: drop.stackPath
+      let region = DropRegion(kind: drNodeStrip, path: panePathHere,
+                              side: drop.edge)
+      target =
+        if kind == dtSplitBefore:
+          DropTarget(kind: dtSplitBefore, splitTarget: active.pane,
+                     axis: axis, region: region)
+        else:
+          DropTarget(kind: dtSplitAfter, splitTarget: active.pane,
+                     axis: axis, region: region)
+    else:
+      let index = if drop.kind == gdCentre: tabs
+                  else: max(0, min(drop.index, tabs))
+      let anchor = if isStack: node.children[0].pane else: node.pane
+      target = DropTarget(kind: dtIntoStack, stackAnchor: anchor,
+                          index: (if isStack: index else: 1),
+                          region: DropRegion(kind: drTabSlot,
+                                             path: drop.stackPath,
+                                             slot: index))
+  if not isLegal(layout, source, target):
+    return none(DropTarget)
+  some(target)
+
+proc hoverGolden*(interaction: Interaction; layout, dragLayout: Layout;
+                  drop: GoldenDrop): Interaction =
+  ## `hoverAt`, for a decision GoldenLayout's port made: the hover becomes
+  ## the target it names (or none). Not a drag: unchanged.
+  if interaction.kind != ikDraggingTab:
+    return interaction
+  Interaction(kind: ikDraggingTab, source: interaction.source,
+              origin: interaction.origin,
+              hover: targetOfGolden(layout, dragLayout, interaction.source,
+                                    drop))
+
+proc goldenStackPaths*(layout: Layout): seq[string] =
+  ## Every node GoldenLayout would hold as a STACK — a stack, or a pane that
+  ## is not in one (GoldenLayout wraps every component in a stack) — by path,
+  ## in `getAllContentItems`' depth-first order. Both front-ends list their
+  ## `GlStack`s in this order, so a tie between equal surfaces breaks the
+  ## same way on both.
+  result = @[]
+  proc walk(n: LayoutNode; path: string; inStack: bool;
+            acc: var seq[string]) =
+    if n.isNil:
+      return
+    case n.kind
+    of lnStack:
+      acc.add path
+    of lnPane:
+      if not inStack:
+        acc.add path
+    of lnRow, lnColumn:
+      for i, c in n.children:
+        walk(c, (if path.len == 0: $i else: path & "/" & $i), false, acc)
+  walk(layout.tree, "", false, result)
+
+proc goldenDropOf*(d: GlDecision; stackPaths: openArray[string]): GoldenDrop =
+  ## A decision of the port, named by the stack's path.
+  if not d.found:
+    return GoldenDrop(kind: gdNone)
+  case d.area.kind
+  of gakSide:
+    let edge = case d.area.side
+      of gsTop: leTop
+      of gsLeft: leLeft
+      of gsBottom: leBottom
+      of gsRight: leRight
+    GoldenDrop(kind: gdRootSide, edge: edge)
+  of gakStack, gakHeader:
+    if d.area.stack < 0 or d.area.stack >= stackPaths.len:
+      return GoldenDrop(kind: gdNone)
+    let path = stackPaths[d.area.stack]
+    case d.segment
+    of segLeft: GoldenDrop(kind: gdSplit, edge: leLeft, stackPath: path)
+    of segRight: GoldenDrop(kind: gdSplit, edge: leRight, stackPath: path)
+    of segTop: GoldenDrop(kind: gdSplit, edge: leTop, stackPath: path)
+    of segBottom: GoldenDrop(kind: gdSplit, edge: leBottom, stackPath: path)
+    of segHeader:
+      if d.headerIndex < 0: GoldenDrop(kind: gdNone)
+      else: GoldenDrop(kind: gdHeader, stackPath: path, index: d.headerIndex)
+    of segCentre, segBody: GoldenDrop(kind: gdCentre, stackPath: path)
+    of segNone: GoldenDrop(kind: gdNone)

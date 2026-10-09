@@ -26,6 +26,8 @@
 ## OKLab arithmetic uses `cbrt`/`pow`, which is cheaper to run once than to
 ## trust to the VM) and is a cache of the function, never a second source.
 
+import std/strutils
+
 import ./capabilities
 import ./cell_style
 import ./colour_math
@@ -173,8 +175,8 @@ proc addAttrs(s: var CellStyle; attrs: set[RoleAttr]) =
   if raUnderline in attrs: s.underline = true
   if raReverse in attrs: s.reverse = true
 
-proc resolveRoles*(style: CellStyle; depth: ColorDepth; mode: DesignMode;
-                   palette = pkDesign): CellStyle =
+proc resolvePlain(style: CellStyle; depth: ColorDepth; mode: DesignMode;
+                  palette = pkDesign): CellStyle =
   ## A painted style with its ROLES put onto a tier: `role` and `surface`
   ## become `fg`/`bg` spellings and attributes, and are cleared.
   ##
@@ -217,3 +219,54 @@ proc resolveRoles*(style: CellStyle; depth: ColorDepth; mode: DesignMode;
     if s.hasFg and result.fg.len == 0 and not spec(style.role).hasFg:
       result.fg = fg
     result.addAttrs(s.attrs)
+
+proc rgbOfSpelling(spelling: string; ok: var bool): Rgb8 =
+  ## A resolved colour spelling as RGB: `#rrggbb` or `indexed:N`. Anything
+  ## else (an ANSI name, "" for the terminal's own colour) is not known here.
+  ok = false
+  if spelling.len == 7 and spelling[0] == '#':
+    result = parseHexColour(spelling, ok)
+  elif spelling.startsWith("indexed:"):
+    try:
+      let i = parseInt(spelling["indexed:".len .. ^1])
+      if i >= 0 and i <= 255:
+        ok = true
+        result = xterm256Rgb(i)
+    except ValueError:
+      discard
+
+func blendHalf*(fg, bg: Rgb8): Rgb8 =
+  ## `fg` at opacity 0.5 over `bg` — the desktop's `opacity: 0.5`, composited
+  ## as a browser composites it (per sRGB channel, rounded half up).
+  (r: (fg.r + bg.r + 1) div 2, g: (fg.g + bg.g + 1) div 2,
+   b: (fg.b + bg.b + 1) div 2)
+
+proc resolveRoles*(style: CellStyle; depth: ColorDepth; mode: DesignMode;
+                   palette = pkDesign): CellStyle =
+  ## `resolvePlain`, and then `dim` (see `CellStyle.dim`): on a colour rung of
+  ## the design palette the foreground is blended halfway toward the cell's
+  ## resolved background, computed at 24 bits and then put on the rung (the
+  ## nearest xterm-256 entry, or of the sixteen); where either colour is the
+  ## terminal's own, the cell is SGR 2 instead.
+  var plain = style
+  plain.dim = false
+  result = resolvePlain(plain, depth, mode, palette)
+  if not style.dim:
+    return
+  if depth == cdMonochrome or palette == pkTerminal:
+    result.dim = true
+    return
+  let tc = resolvePlain(plain, cdTrueColor, mode, palette)
+  var okFg, okBg = false
+  let fg = rgbOfSpelling(tc.fg, okFg)
+  let bg = rgbOfSpelling(tc.bg, okBg)
+  if not (okFg and okBg):
+    result.dim = true
+    return
+  let mixed = blendHalf(fg, bg)
+  result.fg =
+    case depth
+    of cdTrueColor: hexOf(mixed)
+    of cdAnsi256: indexedSpelling(nearestXterm256(mixed))
+    of cdAnsi16: AnsiNames[nearestAnsi16Family(mixed)]
+    of cdMonochrome: ""
