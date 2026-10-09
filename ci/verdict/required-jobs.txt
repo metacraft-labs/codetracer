@@ -60,6 +60,7 @@ visual-replay-regression-gate
 # they are skipped or missing is reported as lost coverage, not as a pass.
 ct-test-release-gate
 ct-test-providers
+ct-test-certificates
 
 # --- platform lanes --------------------------------------------------
 windows-bootstrap-smoke

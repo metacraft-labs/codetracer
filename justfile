@@ -3620,16 +3620,20 @@ test-ct-test-incremental-e2e:
   bash ci/lib/run-nim-test-lane.sh ct-test-incremental-e2e
 
 # `ct test`'s test-certificate producer and verifier, plus the walker over the
-# vendor-neutral conformance vectors.  The walker needs the
-# `test-certificates-spec` sibling repo (or CT_TEST_CERTIFICATE_VECTORS
-# pointing at its `vectors` directory) and FAILS rather than skipping without
-# it — a conformance suite that quietly passes when it found nothing to check
-# is worse than no suite.
+# vendor-neutral conformance vectors.  The walker reads the vectors at the
+# revision pinned in src/ct_test/certificate_vectors.pin, with `git archive`
+# from the `test-certificates-spec` sibling repo's object store, whatever that
+# sibling has checked out.  It FAILS rather than skipping when the sibling is
+# absent or does not contain the pin — a conformance suite that quietly passes
+# when it found nothing to check is worse than no suite.
+# (CT_TEST_CERTIFICATE_VECTORS, pointing at an exported `vectors` directory,
+# walks UNPINNED; this recipe and CI never set it.)
 test-ct-test-certificates:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p test-logs
   exec > >(tee test-logs/test-ct-test-certificates.log) 2>&1
+  echo "conformance vectors pin: $(cat src/ct_test/certificate_vectors.pin) (src/ct_test/certificate_vectors.pin)"
   bash ci/lib/run-nim-test-lane.sh ct-test-certificates
 
 # GUI ViewModel suites that spawn a real backend process (`headless_session` /

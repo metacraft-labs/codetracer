@@ -2,7 +2,11 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-ah_root="${AGENT_HARBOR_REPO:-$repo_root/../agent-harbor}"
+# The metacraft workspace keeps agent-harbor under ah/ (the directory that
+# selects the agent-harbor identity); a flat sibling checkout still works.
+ah_default="$repo_root/../ah/agent-harbor"
+[ -d "$ah_default" ] || ah_default="$repo_root/../agent-harbor"
+ah_root="${AGENT_HARBOR_REPO:-$ah_default}"
 scenario="${AGENT_HARBOR_M7_SCENARIO:-$ah_root/tests/scenarios/e2e/codetracer_m7_worktree_feature.yaml}"
 artifact_root="${CODETRACER_M7_ARTIFACT_ROOT:-$repo_root/test-results/agentic-worktree-runner}"
 log_dir="$artifact_root/agent-harbor"

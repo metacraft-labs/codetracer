@@ -36,6 +36,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=ci/lib/nim-cache-root.sh
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "${repo_root}/ci/lib/nim-cache-root.sh"
+# shellcheck source=ci/lib/sha256.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/sha256.sh"
 cd "${repo_root}" || exit 2
 
 cache="$(ct_nim_cache_root "${repo_root}")/noir-demo-in-browser"
@@ -96,8 +99,24 @@ fi
 # The digest below is of the file this run is about to serve, and the probe
 # fetches from that same tree over a loopback server with no cache in front of
 # it.
+#
+# AND IT IS A PRECONDITION, NOT A DECORATION, which is why a failure here ends
+# the suite. This line used to read `$(shasum -a 256 ...)`; `shasum` is perl's
+# and the CI runner images carry `sha256sum` instead, so every CI run of this
+# gate printed
+#
+#     ci/test/noir-demo-in-browser.sh: line 100: shasum: command not found
+#     ui.js:   20160375 bytes, sha256
+#
+# (run 37894032724). A `$(...)` whose tool is missing manufactures an empty
+# string rather than failing, so the one line that says WHICH renderer the
+# seventeen assertions below measured went blank and the suite carried on
+# measuring an unnamed subject. See ci/lib/sha256.sh.
 ui_bytes="$(wc -c <"${bundle}/ui.js" | tr -d ' ')"
-ui_digest="$(shasum -a 256 "${bundle}/ui.js" | cut -c1-16)"
+ui_digest="$(ct_sha256_short "${bundle}/ui.js")" || die_unstarted \
+	"cannot digest ${bundle}/ui.js (see above). Without it nothing in this
+output names the renderer the assertions below are about, and a pass would be
+a pass over an unidentified build."
 note "bundle:  ${bundle}"
 note "ui.js:   ${ui_bytes} bytes, sha256 ${ui_digest}"
 

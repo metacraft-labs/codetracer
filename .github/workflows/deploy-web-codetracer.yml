@@ -441,6 +441,97 @@ jobs:
         # true and would look identical to a real pass.
         run: bash scripts/sibling-pins.sh --verify "$(cd .. && pwd)"
 
+      - name: Give every sibling its history, while the token is young
+        # TWO FAILURES, ONE CAUSE, AND THE SECOND ONE IS WHY THIS STEP IS HERE
+        # RATHER THAN FURTHER DOWN.
+        #
+        # `clone-siblings` clones each sibling SHALLOW (it is handed an explicit
+        # 40-hex sha, so one commit is all it needs for a checkout). Nix needs
+        # more than a checkout. `.envrc`'s flake-overrides plugin rewrites every
+        # flake input that has a same-named sibling directory to
+        # `git+file:///<that directory>`, and an override forces Nix to UPDATE
+        # the flake's lock — at which point it must record `revCount` for the
+        # overridden input, and a shallow repository has no commit graph to
+        # count. Measured, in run 37938206801:
+        #
+        #   error:
+        #      … while updating the lock file of flake
+        #        'git+file:///…/codetracer-native-recorder?rev=44121c91…'
+        #      error: '/…/codetracer-trace-format-nim' is a shallow Git
+        #             repository, so 'revCount' is not available
+        #
+        # ON ITS OWN THAT IS NOT FATAL, and assuming it was is the wrong read:
+        # run 37878284130 printed it four times and still built the bundle.
+        # `direnv` reports the failed `use flake` and carries on with whatever
+        # the outer `.#ci` shell provides, so the step above it finishes 0 with
+        # the recorder's dev shell never activated.
+        #
+        # WHAT IT COSTS IS THE WARM-UP, AND THAT IS WHAT KILLED THE DEPLOY. With
+        # the early evaluation failing, nothing is realised ahead of time, so
+        # `repro exec <recorder>` inside `browser-replay/build-dist.sh` is the
+        # FIRST thing that resolves those inputs — and it fetches them from
+        # api.github.com, authenticated, with this job's installation token.
+        # That token is minted once in this job's first step and a GitHub App
+        # installation token expires 60 MINUTES LATER; `ci/test/
+        # sibling-provisioning-test.sh` asserts "no job mints more than one
+        # installation token", so refreshing it mid-job is not available here.
+        # In run 37938206801 the token was minted at 13:44:45, the bundle build
+        # started at 14:28:31 and the fetch answered at 15:12:03 with
+        #
+        #       "documentation_url": "https://docs.github.com/rest",
+        #       "status": "401"
+        #
+        # — 27 minutes after expiry, and the post-job step agrees ("Token
+        # expired, skipping token revocation"). A 401 on a fetch that would
+        # succeed unauthenticated is a BAD credential being sent, not a missing
+        # one. Run 37878284130 did the same fetch and passed for one reason
+        # only: it reached the build at +7 minutes instead of +44.
+        #
+        # So the remedy is the one commit 2e13393c3 recorded for the same
+        # expiry in `viewmodel-tests` — move the authenticated work above the
+        # hour, not refresh the credential. Un-shallowing here does both halves
+        # at once: the git fetch itself runs at ~+9 minutes, and it removes the
+        # `revCount` refusal so the two steps below genuinely realise the
+        # recorder's flake while the token is still valid, leaving the build
+        # with nothing left to fetch.
+        #
+        # It is ASSERTED, not attempted: a sibling that is still shallow
+        # afterwards fails this step. `--unshallow` on a complete repository is
+        # an error rather than a no-op, so each one is tested first.
+        run: |
+          set -euo pipefail
+          : "${CT_SIBLING_PATHS:?setup-dev-env did not export CT_SIBLING_PATHS}"
+          deepened=0
+          checked=0
+          for entry in $CT_SIBLING_PATHS; do
+            name="${entry%%=*}"
+            dir="${entry#*=}"
+            [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || {
+              echo "::error::sibling $name is not a git checkout at $dir" >&2
+              exit 1
+            }
+            checked=$((checked + 1))
+            if [ "$(git -C "$dir" rev-parse --is-shallow-repository)" = true ]; then
+              started=$SECONDS
+              git -C "$dir" fetch --unshallow --no-tags origin
+              echo "unshallowed $name in $((SECONDS - started))s"
+              deepened=$((deepened + 1))
+            fi
+            if [ "$(git -C "$dir" rev-parse --is-shallow-repository)" != false ]; then
+              echo "::error::$name is still shallow after --unshallow; Nix cannot" \
+                   "compute revCount for it and the bundle build will fetch its" \
+                   "flake inputs from GitHub instead, on a token that may have expired" >&2
+              exit 1
+            fi
+          done
+          # Verifying 0 siblings is a failure, for the reason the step above
+          # states: a universal claim over an empty set looks exactly like a pass.
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::0 siblings examined; CT_SIBLING_PATHS named none" >&2
+            exit 1
+          fi
+          echo "$checked sibling(s) have full history ($deepened deepened here)"
+
       - name: Allow direnv in this checkout and the recorder sibling
         # build-dist.sh runs `direnv exec <repo> bash build_wasm.sh`, which in
         # turn runs `direnv exec <recorder> bash ct_emulator/build_wasm_api.sh`.

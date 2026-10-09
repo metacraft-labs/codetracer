@@ -73,6 +73,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && cd .. && pwd)"
 # shellcheck source=ci/lib/nim-cache-root.sh
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "${repo_root}/ci/lib/nim-cache-root.sh"
+# shellcheck source=ci/lib/sha256.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/sha256.sh"
 cd "${repo_root}" || exit 2
 
 # shellcheck source=ci/lib/published-asset.sh
@@ -135,6 +138,10 @@ for tool in node python3 jq; do
 		exit 2
 	}
 done
+# The digest tool, named here for the same reason: the SUBJECT note below used
+# a bare `shasum`, which the CI runner images do not carry, so it printed
+# `sha256 ` and the renderer went unnamed. See ci/lib/sha256.sh.
+ct_sha256_require || exit 2
 node -e "require('playwright')" >/dev/null 2>&1 || {
 	echo "noir-mode-roundtrip.sh: playwright is not installed." >&2
 	echo "  remedy: npm install, inside the dev shell" >&2
@@ -199,7 +206,8 @@ note "bundle:   ${bundle}"
 note "engine:   ${engine_rel} ($(wc -c <"${bundle}/${engine_rel}" | tr -d ' ') bytes)"
 note "compiler: ${compiler_rel} ($(wc -c <"${bundle}/${compiler_rel}" | tr -d ' ') bytes)"
 if [ -n "${renderer_rel}" ]; then
-	note "renderer: ${renderer_rel} ($(wc -c <"${bundle}/${renderer_rel}" | tr -d ' ') bytes, sha256 $(shasum -a 256 "${bundle}/${renderer_rel}" | cut -c1-16))"
+	renderer_digest="$(ct_sha256_short "${bundle}/${renderer_rel}")" || exit 2
+	note "renderer: ${renderer_rel} ($(wc -c <"${bundle}/${renderer_rel}" | tr -d ' ') bytes, sha256 ${renderer_digest})"
 fi
 note "trips:    ${trips}"
 echo
