@@ -3221,13 +3221,19 @@ fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<Strin
 /// If `raw` looks like an HTTP(S) URL it is treated as an observability
 /// dive-in URL: the recording bytes are fetched (or read from cache)
 /// and the function returns the on-disk path to the cached directory.
-/// Otherwise it is returned as-is.
+/// Otherwise it is a local path (a trace directory, a `.ct` container or a
+/// `--split` slice of one), returned absolute, resolved against this
+/// server's working directory: the daemon that opens it and the script
+/// process it starts do not share that directory, so a relative path would
+/// name a different file there.
 ///
 /// All four trace tools delegate to this helper so the URL pathway is
 /// uniform — the rest of the pipeline never has to think about URLs.
 async fn resolve_trace_path_or_url(raw: &str) -> Result<String, String> {
     if !observability_fetch::looks_like_url(raw) {
-        return Ok(raw.to_string());
+        return std::path::absolute(raw)
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|e| format!("cannot resolve trace path {raw:?}: {e}"));
     }
     let fetched = observability_fetch::fetch_recording_from_dive_in_url(raw)
         .await
@@ -3460,6 +3466,38 @@ async fn handle_find_recording_by_id(id: &Value, arguments: Option<&Value>) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A relative local trace path comes back absolute, joined to this
+    /// process's working directory (the daemon and the script process do not
+    /// share it); an absolute one is unchanged and an empty one is refused.
+    /// The relative-path case end to end, through `backend-manager trace mcp`
+    /// started in another directory, is `test_real_custom_mcp_exec_script_relative_trace_path`
+    /// in `tests/real_recording_integration.rs`.
+    #[tokio::test]
+    async fn test_resolve_trace_path_makes_a_local_path_absolute() {
+        let cwd = std::env::current_dir().expect("current dir");
+        let resolved = resolve_trace_path_or_url("traces/run-1/trace.ct")
+            .await
+            .expect("relative path resolves");
+        assert_eq!(
+            std::path::PathBuf::from(&resolved),
+            cwd.join("traces").join("run-1").join("trace.ct")
+        );
+
+        let absolute = cwd.join("elsewhere.ct");
+        let absolute = absolute.to_string_lossy();
+        assert_eq!(
+            resolve_trace_path_or_url(&absolute)
+                .await
+                .expect("absolute path resolves"),
+            absolute
+        );
+
+        let err = resolve_trace_path_or_url("")
+            .await
+            .expect_err("an empty path is refused");
+        assert!(err.contains("cannot resolve trace path"), "{err}");
+    }
 
     #[test]
     fn test_jsonrpc_result_structure() {

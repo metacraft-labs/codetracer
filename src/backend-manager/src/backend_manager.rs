@@ -6540,35 +6540,43 @@ impl BackendManager {
 
         // --- Determine the Python API path ---
         //
-        // The `CODETRACER_PYTHON_API_PATH` environment variable points to the
-        // directory containing the `codetracer` Python package.  If not set we
-        // try a relative path from the session-manager binary that works in
-        // the standard repository layout.
-        let python_api_path = std::env::var("CODETRACER_PYTHON_API_PATH").unwrap_or_else(|_| {
-            // Attempt to resolve from the binary location:
-            // <repo>/src/backend-manager/target/<profile>/session-manager
-            //  -> <repo>/python-api/
-            if let Ok(exe) = std::env::current_exe()
-                && let Some(repo) = exe
-                    .parent() // target/<profile>/
-                    .and_then(|p| p.parent()) // target/
-                    .and_then(|p| p.parent()) // src/backend-manager/
-                    .and_then(|p| p.parent()) // src/
-                    .and_then(|p| p.parent())
-            // <repo>/
-            {
-                let api = repo.join("python-api");
-                if api.exists() {
-                    return api.to_string_lossy().to_string();
+        // `CODETRACER_PYTHON_API_PATH` wins when set; otherwise the package
+        // is looked for in the known layouts around this binary (an install
+        // prefix, or a build directory inside a checkout) and, in debug
+        // builds, in the checkout it was compiled from, each subject to an
+        // ownership and permission check.  See
+        // `script_executor::resolve_python_api_path`.  A wrong explicit value
+        // is refused here, before a Python process is spawned, so the caller
+        // sees which setting to fix.
+        let python_api = match script_executor::resolve_python_api_path(
+            std::env::var(script_executor::PYTHON_API_PATH_ENV)
+                .ok()
+                .as_deref(),
+            std::env::current_exe().ok().as_deref(),
+            script_executor::COMPILED_CHECKOUT.map(std::path::Path::new),
+        ) {
+            Ok(lookup) => {
+                for refused in &lookup.refused {
+                    warn!("exec_script: ignored an untrusted Python API copy: {refused}");
                 }
+                lookup
             }
-            // Last resort: assume it is installed or on PYTHONPATH already.
-            String::new()
-        });
+            Err(message) => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/exec-script",
+                    "message": message,
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
 
         info!(
             "Executing script for trace={trace_path_str}, timeout={timeout_secs}s, \
-             socket={socket_path}, python_api={python_api_path}"
+             socket={socket_path}, python_api={python_api:?}"
         );
 
         // --- Clone the response sender so the spawned task can send the
@@ -6608,7 +6616,7 @@ impl BackendManager {
                 &script,
                 &trace_path_str,
                 &socket_path,
-                &python_api_path,
+                &python_api,
                 timeout_secs,
                 session_id.as_deref(),
             )
