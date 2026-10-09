@@ -17,17 +17,13 @@
 //!     seekable line equals the materialized `step(id).{path_id,line}` — so the
 //!     debugger shows identical data.
 //!  3. Multiple concurrent readers can read the same `.ct` independently.
-//!  4. Backward compat: a legacy (flag-off) `.ct` exposes NO seekable stream and
-//!     still reads through the existing fully-materialized path, unchanged.
+//!  4. A `.ct` with no `steps.dat` / `values.dat` exposes NO seekable stream.
 //!
-//! The fixtures are written in-test — the seekable one with the M23a/M23b writer
-//! (`CtfsTraceWriter`, which always writes both streams), the
-//! legacy twin with `common::legacy_events_log` — so the tests are
+//! The fixtures are written in-test with the M23a/M23b writer
+//! (`CtfsTraceWriter`, which always writes both streams), so the tests are
 //! self-contained and do not depend on an external bundle.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-
-mod common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -139,21 +135,10 @@ fn fixture_events() -> Vec<TraceLowLevelEvent> {
     events
 }
 
-/// Write the fixture trace to a `.ct`. With `with_streams` on, the writer emits
-/// the seekable `steps.dat`/`values.dat` (chunk size 2 ⇒ the {TOTAL_STEPS}-record
-/// streams span multiple chunks, so a single lookup must inflate only one
-/// chunk). With it off, the legacy twin is written — the same events in the
-/// combined `events.log` layout with no split streams — used for the
-/// backward-compatibility test.
-///
-/// The legacy twin comes from `common::legacy_events_log` rather than from the
-/// writer with its streams switched off: since codetracer-trace-format `ac413d7`
-/// the writer emits no `events.log`, so switching its streams off now produces a
-/// container with no execution data at all, not a legacy recording.
-fn write_trace(dir: &tempfile::TempDir, with_streams: bool) -> PathBuf {
-    if !with_streams {
-        return common::legacy_events_log::write_legacy_events_log_bundle(dir.path(), "trace", &fixture_events());
-    }
+/// Write the fixture trace to a `.ct`. The writer emits the seekable
+/// `steps.dat`/`values.dat` (chunk size 2 ⇒ the {TOTAL_STEPS}-record streams
+/// span multiple chunks, so a single lookup must inflate only one chunk).
+fn write_trace(dir: &tempfile::TempDir) -> PathBuf {
     let path_buf = dir.path().join("trace");
     let mut writer = CtfsTraceWriter::new("test_program", &[])
         .with_steps_chunk_size(2)
@@ -173,7 +158,7 @@ fn write_trace(dir: &tempfile::TempDir, with_streams: bool) -> PathBuf {
 #[test]
 fn fetch_step_line_decompresses_only_its_chunk() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
 
     let stream = SeekableStepStream::open(&ct)
         .expect("open seekable step stream")
@@ -232,7 +217,7 @@ fn fetch_step_line_decompresses_only_its_chunk() {
 #[test]
 fn fetch_step_values_decompresses_only_its_chunk() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
 
     let stream = SeekableValueStream::open(&ct)
         .expect("open seekable value stream")
@@ -287,7 +272,7 @@ fn fetch_step_values_decompresses_only_its_chunk() {
 #[test]
 fn seekable_step_value_streams_open_from_block_source() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
     let bytes = std::fs::read(&ct).unwrap();
     std::fs::remove_file(&ct).unwrap();
 
@@ -324,7 +309,7 @@ fn seekable_step_value_streams_open_from_block_source() {
 #[test]
 fn seekable_and_materialized_steps_values_agree() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
 
     // Seekable side: the on-demand streams over the written `.ct`.
     let step_stream = SeekableStepStream::open(&ct).unwrap().expect("step stream present");
@@ -395,7 +380,7 @@ fn seekable_and_materialized_steps_values_agree() {
 #[test]
 fn concurrent_readers_over_same_ct() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, true);
+    let ct = write_trace(&dir);
 
     let step_stream = Arc::new(SeekableStepStream::open(&ct).unwrap().unwrap());
     let value_stream = Arc::new(SeekableValueStream::open(&ct).unwrap().unwrap());
@@ -429,10 +414,9 @@ fn concurrent_readers_over_same_ct() {
 
 /// Deliverable test #4: a `.ct` with no `steps.dat` / `values.dat` exposes NO
 /// seekable step/value stream — `SeekableStepStream::open` /
-/// `SeekableValueStream::open` return `Ok(None)`. A legacy (flag-off) bundle
-/// carrying `events.log` is refused by name by those trace-format readers,
-/// while `CTFSTraceReader`'s seekable hooks return `None` for it and its
-/// materialized path serves the trace.
+/// `SeekableValueStream::open` return `Ok(None)`, and so do their
+/// `open_from_ctfs` twins — the entries `CTFSTraceReader` actually reaches the
+/// streams through, over the container it already has open.
 #[test]
 fn flag_off_trace_exposes_no_seekable_streams() {
     let dir = tempfile::tempdir().unwrap();
@@ -448,39 +432,17 @@ fn flag_off_trace_exposes_no_seekable_streams() {
         "a container with no values.dat exposes no seekable value stream"
     );
 
-    let ct = write_trace(&dir, false);
-    for (stream, refusal) in [
-        ("step", SeekableStepStream::open(&ct).err()),
-        ("value", SeekableValueStream::open(&ct).err()),
-    ] {
-        let err = refusal.unwrap_or_else(|| panic!("the {stream} stream of an events.log container must be refused"));
-        assert!(
-            err.contains("events.log"),
-            "the {stream} refusal names the member: {err}"
-        );
-    }
-
-    // Opened through the full reader (old-format path, since no steps.dat), the
-    // seekable hooks are None and the materialized path still serves the trace.
-    let reader = CTFSTraceReader::open(&ct).expect("open flag-off ct");
-    assert_eq!(reader.seekable_step_count(), None);
-    assert_eq!(reader.seekable_value_count(), None);
-    assert_eq!(reader.seekable_step_line(StepId(0)), None);
-    assert!(reader.seekable_variables_at(StepId(0)).is_none());
-    assert_eq!(
-        reader.step_count(),
-        TOTAL_STEPS,
-        "materialized path reads the legacy trace unchanged"
+    let mut ctfs = CtfsReader::open(&no_streams).expect("open the container with no step or value stream");
+    assert!(
+        SeekableStepStream::open_from_ctfs(&mut ctfs)
+            .expect("open_from_ctfs ok")
+            .is_none(),
+        "open_from_ctfs: a container with no steps.dat exposes no seekable step stream"
     );
-
-    // `variables_at_owned` falls back to the materialized table for legacy
-    // traces. The first user step (total index 1) has its one variable.
-    let owned = reader
-        .variables_at_owned(StepId(user_step_index(0)))
-        .expect("materialized fallback");
-    assert_eq!(
-        owned.len(),
-        1,
-        "first user step has one variable from the materialized table"
+    assert!(
+        SeekableValueStream::open_from_ctfs(&mut ctfs)
+            .expect("open_from_ctfs ok")
+            .is_none(),
+        "open_from_ctfs: a container with no values.dat exposes no seekable value stream"
     );
 }

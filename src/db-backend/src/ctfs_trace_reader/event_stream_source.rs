@@ -2,12 +2,10 @@
 //!
 //! M0 deliverable 4 ("a seekable path for `events()`") in the BlockTracer
 //! "Browser Replay Gate": until now the only way to get a trace's I/O events
-//! into `Db::events` was to materialise them all at open — either through the
-//! legacy `events.log` postprocessing, or through the Nim FFI's
-//! `event_fields(i)` loop in `open_new_format_nim`. Neither is reachable from
-//! the browser (`events.log` bundles are whole-file by construction, and the
-//! Nim reader needs a filesystem path and is not in the wasm build), and
-//! neither is bounded by anything but trace size.
+//! into `Db::events` was to materialise them all at open, through the Nim FFI's
+//! `event_fields(i)` loop in `open_new_format_nim`. That is not reachable from
+//! the browser (the Nim reader needs a filesystem path and is not in the wasm
+//! build), and it is bounded by nothing but trace size.
 //!
 //! This module is the third sibling of [`super::call_stream_source`] and
 //! [`super::step_value_stream_source`], for the M23c `events.dat` /
@@ -43,6 +41,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use codetracer_trace_types::{EventLogKind, StepId};
 
+use codetracer_trace_reader::ChunkForm;
 use codetracer_trace_reader::call_stream_reader::decode_chunk_records;
 use codetracer_trace_writer::event_stream::IoEventRecord;
 
@@ -81,10 +80,30 @@ impl EventsIndex {
     }
 }
 
+/// The records of one chunk of a compact container's `events.dat`: the
+/// chunk's content as it is, each record framed by its varint length.
+fn stored_chunk_records(content: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    let mut records = Vec::new();
+    let mut pos = 0usize;
+    while pos < content.len() {
+        let len = codetracer_trace_writer::column_aware::decode_varint(content, &mut pos)? as usize;
+        let end = pos
+            .checked_add(len)
+            .filter(|&end| end <= content.len())
+            .ok_or_else(|| format!("record {} extends past the end of its chunk", records.len()))?;
+        records.push(content[pos..end].to_vec());
+        pos = end;
+    }
+    Ok(records)
+}
+
 /// The bytes + index of an `events.dat` stream, plus the one-chunk cache.
 struct EventsReader {
     index: EventsIndex,
     dat: Vec<u8>,
+    /// Whether a chunk is a zstd frame (full container) or its content
+    /// (compact container, `ctfs-container.md` §1f).
+    form: ChunkForm,
     record_count: u64,
     cached_chunk: Option<(usize, Vec<IoEventRecord>)>,
 }
@@ -108,8 +127,12 @@ impl EventsReader {
                 self.dat.len()
             ));
         }
-        let raw_records = decode_chunk_records(&self.dat[start..end])
-            .map_err(|e| format!("events.dat: chunk {chunk_number}: {e}"))?;
+        let chunk = &self.dat[start..end];
+        let raw_records = match self.form {
+            ChunkForm::Framed => decode_chunk_records(chunk),
+            ChunkForm::Stored => stored_chunk_records(chunk),
+        }
+        .map_err(|e| format!("events.dat: chunk {chunk_number}: {e}"))?;
         let mut records = Vec::with_capacity(raw_records.len());
         for (within, raw) in raw_records.iter().enumerate() {
             records.push(
@@ -179,6 +202,7 @@ impl SeekableEventStream {
         let mut reader = EventsReader {
             index,
             dat,
+            form: ctfs.chunk_form(),
             record_count: 0,
             cached_chunk: None,
         };

@@ -70,6 +70,7 @@ import ./variables
 import ./context_menu
 import ./scratchpad_pane
 import ./terminal_output_pane
+import ./welcome_view
 
 export header, status_bar, profile, project, source_pane, styled_row
 # PLAT-48: the top bar is painted by this module from a `ShellModel` field.
@@ -235,6 +236,19 @@ type
       ## `bvIdle`, which is what a project nobody has built is in.
     focused*: PaneKind
     hasFocus*: bool
+    focusHighlightOff*: bool
+      ## PLAT-51 (Native-Front-End-Parity.md §2): the focus highlight — the
+      ## focused pane's strip on the ring's colour, and the ring — is OFF
+      ## (`--focus-highlight=off`, `:set focus-highlight off`, the
+      ## remembered preference). The zero value is ON.
+    welcome*: WelcomeView
+      ## PLAT-51 deliverable 8: a new tab's Welcome Screen, painted over the
+      ## whole body in place of the panes when `shown`.
+    tabPlaceholder*: tuple[found: bool; stackPath: string; index: int;
+                           cells: int]
+      ## PLAT-51: during a drag, GoldenLayout's tab-drop placeholder
+      ## (`binding.placeholderOf`): the gap the strip of the stack at
+      ## `stackPath` opens before tab `index`.
     dividers*: DividerChoice
       ## PLAT-50: which colour a pane divider is drawn in (`--dividers`).
     contextMenu*: ContextMenuState
@@ -303,6 +317,9 @@ type
       ## PLAT-49: the top bar's model as painted (the header folded in), so
       ## the host can place the omnibar's caret without rebuilding it.
     menuDropdowns*: seq[MenuDropdown]
+    welcomeLayout*: WelcomeLayout
+      ## PLAT-51: where the Welcome Screen's rows were painted, when shown —
+      ## what a click on it is hit-tested against.
     contextMenuArea*: CellArea
       ## PLAT-50: where the open right-click menu was painted.
     contentArea*: CellArea
@@ -540,22 +557,42 @@ const
     ## colour is gone, CTUI-11); the ASCII tier draws `|`.
 
 proc paintTabRow(g: var StyledGrid; row, col: int; tabs: seq[string];
-                 active, width: int) =
+                 active, width: int; focused = false;
+                 gapAt = -1; gapCells = 0) =
   ## A tab strip: the strip on its own surface, the active tab lifted onto the
   ## pane's surface and every other tab on the strip's — PLAT-46 deliverable 4,
   ## the desktop's GoldenLayout strip in cells. The TEXT is `tabRow`'s,
   ## unchanged, so every column the hit-test reads is where it was.
-  let text = tabRow(tabs, active, width)
-  g.fillSurface(row, col, width, 1, srTabBar)
-  g.paint(row, col, text, CellStyle(role: srTabBar))
+  ##
+  ## PLAT-51: `focused` — the FOCUSED pane's strip takes the ring's colour as
+  ## its ground, every cell of it, tabs included (Native-Front-End-Parity.md
+  ## §2); the active tab keeps its foreground and weight. `gapAt` — during a
+  ## drag, GoldenLayout's tab-drop PLACEHOLDER is in this strip before tab
+  ## `gapAt` (`tabs.len`: after the last): `gapCells` blank cells open there
+  ## and the tabs after it move right, as GoldenLayout's do.
+  let barRole = if focused: srTabBarFocused else: srTabBar
+  let activeRole = if focused: srTabActiveFocused else: srTabActive
+  let inactiveRole = if focused: srTabBarFocused else: srTabInactive
+  g.fillSurface(row, col, width, 1, barRole)
+  if gapAt < 0 or gapCells <= 0:
+    let text = tabRow(tabs, active, width)
+    g.paint(row, col, text, CellStyle(role: barRole))
+  else:
+    g.paint(row, col, spaces(width), CellStyle(role: barRole))
+  let shift = if gapAt >= 0 and gapCells > 0: gapCells + TabGapCells else: 0
   for span in tabSpans(tabs, active):
-    let start = col + span.startCol
+    let start = col + span.startCol + (if span.index >= gapAt and shift > 0:
+                                         shift else: 0)
     let w = min(span.width, col + width - start)
     if w <= 0:
       continue
-    let tabRole = if span.index == active: srTabActive else: srTabInactive
+    let tabRole = if span.index == active: activeRole else: inactiveRole
+    if shift > 0:
+      g.paint(row, start,
+              fitCells(tabLabel(tabs[span.index], span.index == active), w),
+              CellStyle(role: barRole))
     g.fillSurface(row, start, w, 1, tabRole)
-    g.restyleRole(row, start, w, srTabBar, tabRole)
+    g.restyleRole(row, start, w, barRole, tabRole)
 
 type
   PaneFrame* = object
@@ -662,6 +699,17 @@ proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
     # outline is drawn even where the neighbour's strip begins (a pane whose
     # side faces two stacked panes meets the lower one's strip mid-side).
     # Only the focused pane's own strip row keeps the strip's ground.
+    # PLAT-51: the focused strip's row. A divider cell's fill is what lies
+    # RIGHT of its left-aligned line, so the cell belongs to the pane on its
+    # right: the cell LEFT of the focused pane is on the focused strip's
+    # ground, its line in the strip colour (the divider rule); the cell
+    # RIGHT of it is the next pane's, an ordinary strip-row divider below.
+    # (The user, 2026-10-09: the focus ground leaked one cell into the next
+    # pane, and the line was drawn in its own ground.)
+    if cell in ring and row == focused.row and col < focused.col:
+      g.paint(row, col, DividerGlyph,
+              CellStyle(role: srDividerStrip, surface: srTabBarFocused))
+      continue
     let focusSide = cell in ring and row != focused.row
     let stripBeside = (row, col - 1) in strips or (row, col + 1) in strips
     if stripBeside and not focusSide:
@@ -674,7 +722,8 @@ proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
     g.paint(row, col, DividerGlyph, CellStyle(role: role, surface: ground))
 
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
-               body: CellArea) =
+               body: CellArea; focusedStrip = false;
+               gapAt = -1; gapCells = 0) =
   ## One pane, into its own rectangle and no other.
   ##
   ## THE RECTANGLE'S LAST COLUMN IS A DIVIDER when another pane is beyond it
@@ -812,7 +861,8 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
           break
         g.paint(content.row + line, a.col, fitCells(piece, inner))
         inc line
-  paintTabRow(g, a.row, a.col, stripTabs, stripActive, inner)
+  paintTabRow(g, a.row, a.col, stripTabs, stripActive, inner,
+              focused = focusedStrip, gapAt = gapAt, gapCells = gapCells)
   # THE EDITOR SAYS WHICH SOURCE IT SHOWS, ALWAYS (CodeTracer-TUI-Edit-Mode
   # §2's Requirement; Mode-Transitions §7): with no title row to carry it, the
   # mode's source statement (`product_mode.sourceStatementFor` — "the working
@@ -827,8 +877,11 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     let tabEnd = if spans.len > 0: spans[^1].startCol + spans[^1].width else: 0
     let w = textCells(statement) + 1
     if statement.len > 0 and tabEnd + 2 + w <= inner:
+      # PLAT-51: on the focused strip's ground when the editor has focus.
       g.paint(a.row, a.col + inner - w, statement & " ",
-              CellStyle(role: srTabInactive, surface: srTabBar))
+              if focusedStrip:
+                CellStyle(role: srTabBarFocused, surface: srTabBarFocused)
+              else: CellStyle(role: srTabInactive, surface: srTabBar))
 
   # THE DIVIDER is settled once every pane is painted (`paintDividers`):
   # its ground and line depend on the NEIGHBOURS — a strip beside it, the
@@ -952,7 +1005,9 @@ proc shellScreen*(model: ShellModel; width, height: int;
   let decorations = decorationsFor(
     composed, geometry, model.interaction, policy,
     pointerRow = (if model.dragPointer.isSome: model.dragPointer.get[0] else: -1),
-    pointerCol = (if model.dragPointer.isSome: model.dragPointer.get[1] else: -1))
+    pointerCol = (if model.dragPointer.isSome: model.dragPointer.get[1] else: -1),
+    placeholderCells = (if model.tabPlaceholder.found: model.tabPlaceholder.cells
+                        else: 0))
   result = ShellScreen(rows: @[], styledRows: @[], body: body,
                        projection: projection,
                        overlay: (if model.tracepoints.open:
@@ -983,17 +1038,39 @@ proc shellScreen*(model: ShellModel; width, height: int;
   result.topBar = bar
   paintTopBar(g, bar, barLayout)
 
+  # PLAT-51: THE FOCUS HIGHLIGHT is the focused pane's strip on the ring's
+  # colour as well as the ring, and a runtime flag turns both off
+  # (`focusHighlightOff`: `--focus-highlight=off`, `:set focus-highlight
+  # off`, the remembered preference) — focus is then shown by the cursor and
+  # where the keys go, not by colour.
+  let highlight = model.hasFocus and not model.focusHighlightOff
   for region in projection.regions:
-    paintPane(g, region, model, geometry.inner)
+    var gapAt = -1
+    var gapCells = 0
+    if model.tabPlaceholder.found:
+      let p = geometry.pathOfPane(region.pane)
+      if p.isSome:
+        let stacked = region.activeTab >= 0 and region.tabs.len > 0
+        let stackPath = if stacked: parentPath(p.get).get("") else: p.get
+        if stackPath == model.tabPlaceholder.stackPath:
+          gapAt = model.tabPlaceholder.index
+          gapCells = model.tabPlaceholder.cells
+    paintPane(g, region, model, geometry.inner,
+              focusedStrip = highlight and region.pane == model.focused,
+              gapAt = gapAt, gapCells = gapCells)
   var focusedArea = CellArea()
-  if model.hasFocus:
+  if highlight:
     for region in projection.regions:
       if region.pane == model.focused:
         focusedArea = region.area
   paintDividers(g, projection.regions, geometry.inner, focusedArea,
-                model.hasFocus, model.dividers)
+                highlight, model.dividers)
   if projection.status != prOk and body.height > 0:
     g.paint(body.row, body.col, degradedBanner(projection.status, width))
+  # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN takes the whole body —
+  # the panes belong to a session, and this tab has none yet.
+  if model.welcome.shown:
+    result.welcomeLayout = paintWelcome(g, model.welcome, body)
 
   # THE TRACEPOINT DIALOG IS AN OVERLAY, painted AFTER every pane and over
   # whichever ones it covers. It is deliberately not one of `projectLayout`'s
@@ -1022,11 +1099,12 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # than a share of it. `decorations` is empty when nothing is docked and no
   # gesture is in flight, so this call paints nothing on a screen CTUI-3 would
   # have painted and the goldens do not move.
-  paintDecorations(g, decorations)
+  if not model.welcome.shown:
+    paintDecorations(g, decorations)
   # PLAT-49 part B: A DOCKED PANE SHOWN OPEN, in the band the tree gave up
   # (`geometry.openDock`) — a pane of the tiled screen, painted as a placed
   # pane is, with its one-tab strip.
-  if not geometry.openDock.isEmptyArea:
+  if not geometry.openDock.isEmptyArea and not model.welcome.shown:
     let open = PaneRegion(pane: geometry.openDockPane,
                           title: geometry.openDockTitle,
                           area: geometry.openDock, tabs: @[], activeTab: -1)
@@ -1035,8 +1113,10 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # revealed dock as the docked pane itself, over the body. (The bottom
   # strip is on the status row since PLAT-49 part B and is painted with it,
   # below.)
-  paintDockStrips(g, geometry)
-  if geometry.revealing and not geometry.reveal.isEmptyArea:
+  if not model.welcome.shown:
+    paintDockStrips(g, geometry)
+  if geometry.revealing and not geometry.reveal.isEmptyArea and
+     not model.welcome.shown:
     paintRevealedPane(g, geometry, model)
 
   # PLAT-48: the menu's dropdowns and the omnibar's results are over

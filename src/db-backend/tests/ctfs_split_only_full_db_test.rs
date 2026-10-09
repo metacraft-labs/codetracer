@@ -1,5 +1,5 @@
 //! M23e-2 — VERIFY the db-backend fully serves a PRODUCTION split-only `.ct`
-//! bundle (no `events.log`), and BOUND the legacy `events.log` reader.
+//! bundle.
 //!
 //! ## What this proves
 //!
@@ -14,8 +14,7 @@
 //! These tests assert, against a GENUINELY `events.log`-free split bundle:
 //!
 //!  1. The bundle really is split-only — `steps.dat` present, `events.log`
-//!     ABSENT — so `CTFSTraceReader::open` takes the new-format (split) path,
-//!     not the legacy `events.log` fallback.
+//!     ABSENT — so `CTFSTraceReader::open` takes the split-stream path.
 //!  2. The full `Db` is correctly populated: steps, calls, and per-step
 //!     variable values all surface through the `TraceReader` trait.
 //!  3. The CELL / COMPOUND HISTORY accessors (`compound_at`, `cells_at`,
@@ -31,18 +30,8 @@
 //!     CORRECT, complete answer here, and M22's `[~]` remainder is RESOLVED for
 //!     split bundles: the debugger's locals view (`full_value_locals`) is fully
 //!     served without any cell history.
-//!  4. PARITY (A/B): the same logical recording as a LEGACY `events.log`
-//!     bundle (read through `open_old_format` → `TraceProcessor::postprocess`)
-//!     yields the SAME steps and per-step variable values as the split-only
-//!     bundle — so the debugger shows identical data on either format.
-//!
-//! ## Where the legacy bundle comes from
-//!
-//! No writer emits `events.log` any more — the spec defines no such stream and
-//! the Rust writer stopped writing it in codetracer-trace-format `ac413d7` — but
-//! recordings made before that still carry it and the reader still opens them.
-//! The legacy bundle is therefore produced byte-for-byte by
-//! `common::legacy_events_log`, not by a writer switch.
+//!  4. Every user step serves exactly the local the recording gave it, found
+//!     by its source line.
 //!
 //! ## The call tree is rooted at `<toplevel>`
 //!
@@ -56,8 +45,6 @@
 
 #![cfg(feature = "nim-reader")]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-
-mod common;
 
 use std::path::{Path, PathBuf};
 
@@ -135,72 +122,6 @@ fn write_split_only_bundle(dir: &Path) -> PathBuf {
 
     assert!(ct_path.exists(), ".ct should be produced at {}", ct_path.display());
     ct_path
-}
-
-/// Produce the EQUIVALENT recording as a legacy `events.log` bundle, which
-/// `CTFSTraceReader::open` serves through `open_old_format` →
-/// `TraceProcessor::postprocess` (see `common::legacy_events_log`).
-///
-/// The event sequence mirrors `write_split_only_bundle`'s user-visible content:
-/// one wrapping call, a leading step, then `USER_STEPS` steps each with
-/// `var_i = i*100` recorded as a `Value` event (the materialized-path analogue
-/// of the split path's inline `StepValues`).
-fn write_events_log_bundle(dir: &Path) -> PathBuf {
-    use codetracer_trace_types::{
-        CallRecord, FullValueRecord, FunctionId, FunctionRecord, PathId, ReturnRecord, StepRecord, TraceLowLevelEvent,
-        TypeRecord, TypeSpecificInfo, VariableId,
-    };
-
-    let int_type = TypeId(1);
-    let mut events: Vec<TraceLowLevelEvent> = vec![
-        TraceLowLevelEvent::Path(PathBuf::from(SRC)),
-        TraceLowLevelEvent::Type(TypeRecord {
-            kind: TypeKind::None,
-            lang_type: "None".to_string(),
-            specific_info: TypeSpecificInfo::None,
-        }),
-        TraceLowLevelEvent::Type(TypeRecord {
-            kind: TypeKind::Int,
-            lang_type: "Int".to_string(),
-            specific_info: TypeSpecificInfo::None,
-        }),
-        TraceLowLevelEvent::Function(FunctionRecord {
-            path_id: PathId(0),
-            line: Line(1),
-            name: "main".to_string(),
-        }),
-        // The wrapping call MUST precede the first Step: TraceProcessor asserts
-        // a call is active (`current_call_key >= 0`) before processing any step.
-        TraceLowLevelEvent::Call(CallRecord {
-            function_id: FunctionId(0),
-            args: vec![],
-        }),
-        TraceLowLevelEvent::Step(StepRecord {
-            path_id: PathId(0),
-            line: Line(1),
-        }),
-    ];
-
-    for i in 0..USER_STEPS {
-        events.push(TraceLowLevelEvent::Step(StepRecord {
-            path_id: PathId(0),
-            line: Line(10 + i as i64),
-        }));
-        events.push(TraceLowLevelEvent::VariableName(format!("var_{i}")));
-        events.push(TraceLowLevelEvent::Value(FullValueRecord {
-            variable_id: VariableId(i),
-            value: ValueRecord::Int {
-                i: (i * 100) as i64,
-                type_id: int_type,
-            },
-        }));
-    }
-
-    events.push(TraceLowLevelEvent::Return(ReturnRecord {
-        return_value: ValueRecord::None { type_id: TypeId(0) },
-    }));
-
-    common::legacy_events_log::write_legacy_events_log_bundle(dir, "events_log_prog", &events)
 }
 
 /// Collect a step's `(var_name, int_value)` locals from a reader, projecting the
@@ -353,50 +274,21 @@ fn split_only_bundle_cell_history_is_correctly_empty() {
     );
 }
 
-/// Deliverable #4 (PARITY / A/B) — the split-only bundle and the equivalent
-/// legacy `events.log` bundle yield the SAME steps and per-step variable
-/// values, so the debugger shows identical data whichever format it reads.
+/// Deliverable #4 — every user step, found by its source line, serves exactly
+/// the local the recording gave it.
 #[test]
-fn split_only_and_events_log_bundles_agree() {
+fn split_only_bundle_serves_each_user_steps_local() {
     let dir = tempfile::tempdir().unwrap();
     let split_ct = write_split_only_bundle(dir.path());
-    let log_ct = write_events_log_bundle(dir.path());
-
-    // Confirm the two bundles genuinely take different reader paths.
-    {
-        let split = CtfsReader::open(&split_ct).expect("open split");
-        assert!(split.has_file("steps.dat") && !split.has_file("events.log"));
-        let mut log = CtfsReader::open(&log_ct).expect("open log");
-        assert!(
-            !log.has_file("steps.dat"),
-            "events.log bundle must NOT carry steps.dat (so it takes the legacy path)"
-        );
-        assert!(
-            log.read_file("events.log").is_ok(),
-            "events.log bundle must carry events.log"
-        );
-    }
-
     let split = CTFSTraceReader::open(&split_ct).expect("open split reader");
-    let log = CTFSTraceReader::open(&log_ct).expect("open events.log reader");
 
-    // For every user step, both readers resolve the SAME `(var_name, value)`.
     for i in 0..USER_STEPS {
         let line = 10 + i as i64;
         let split_sid = step_index_for_line(&split, line).unwrap_or_else(|| panic!("split: no step at line {line}"));
-        let log_sid = step_index_for_line(&log, line).unwrap_or_else(|| panic!("events.log: no step at line {line}"));
-
-        let split_locals = locals_at(&split, split_sid);
-        let log_locals = locals_at(&log, log_sid);
-
         assert_eq!(
-            split_locals, log_locals,
-            "split and events.log bundles must serve identical locals at line {line}"
-        );
-        assert_eq!(
-            split_locals,
+            locals_at(&split, split_sid),
             vec![(format!("var_{i}"), (i * 100) as i64)],
-            "both bundles serve var_{i} = {} at line {line}",
+            "the split bundle serves var_{i} = {} at line {line}",
             i * 100
         );
     }

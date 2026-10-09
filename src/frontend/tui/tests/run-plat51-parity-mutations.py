@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PLAT-51 Part A — the mutation harness for the user's 2026-10-04/05
+"""PLAT-51 Parts A and B — the mutation harness for the user's 2026-10-04/05
 decisions on the desktop, the terminal and GPUI: the Timeline panel removed
 (and a saved layout that held it migrated), list-pane scrollbars as
 scrubbers over the whole population, the `[MOD]` badge replaced by the
@@ -38,6 +38,16 @@ ONE ARM PER CLAIM, each naming the case that must die:
   | the omnibox on the editor's colours | T11 (the field on the input surface), G8 (GPUI's field on the input surface) |
   | the current-line mark | T12 (`▶` is the mark), T13 (no ASCII `>` for it), G3 (GPUI draws a glyph, not the desktop's mark) |
   | the frame viewer's own scrubber | F1 (the pane has no scrubber row), F2 (the release is not sent) |
+
+PART B (deliverables 8-11, and the future-output issue):
+
+  | claim | arms |
+  |---|---|
+  | the drop zones are GoldenLayout's, ported | H1 (a surface tie goes to the later area), H2 / H6 (a tab's left half is its first third), H3 (the joining middle is half the body), H4 / H5 (the drag measures with the pane still in), B6 / B7 (1016 never adopted), B17 (a pixel decided half a cell off), B13 (pinned colour flags skip the pointer's questions), W3 (no placeholder in the window) |
+  | the focus highlight | B3 / B14 (no focused strip), B4 (the louder token), B5 (a bare flag taken), B16 (a remembered preference ignored), W1 (the window's focused strip on the unfocused ground), W2 (a press moves no focus) |
+  | live reflow | B1 / B15 (nothing re-laid-out while held), B2 (every motion commits), W5 (the window draws the committed arrangement) |
+  | the Welcome Screen on a new tab | B10 (the + opens the omnibar), B11 (Record new trace refused), B12 (a recording made outside the state root), W4 (the window's + opens nothing) |
+  | the future keeps its colour, dimmed | B8 (future output at full strength), B9 (not the desktop's 0.5 composite) |
 
 THREE VERDICTS (Verification-Harness-Traps §1): `killed` (the named case
 reported [FAILED], or the named gate failed), `SURVIVED`, `HARNESS-FAILURE`
@@ -105,6 +115,22 @@ DEVLOG = "src/frontend/ui/event_log.nim"
 DCONFIG = "src/frontend/index/config.nim"
 DSTATE = "src/frontend/viewmodel/views/isonim_state_view.nim"
 ENGINE = "src/db-backend/src/dap_handler.rs"
+# Part B (deliverables 8-11, and the future-output issue).
+GLHITS = "src/frontend/headless_app/golden_layout_hit.nim"
+LINTER = "src/frontend/headless_app/layout_interaction.nim"
+TBINDING = "src/frontend/tui/app/layout/binding.nim"
+TSHELL = "src/frontend/tui/app/views/shell.nim"
+TROLES = "src/frontend/tui/app/theme/roles.nim"
+TPALETTE = "src/frontend/tui/app/theme/palette.nim"
+TCAPS = "src/frontend/tui/app/theme/capabilities.nim"
+TPROBE = "src/frontend/tui/host/terminal_probe.nim"
+TOUTPANE = "src/frontend/tui/app/views/terminal_output_pane.nim"
+TMAIN = "src/frontend/tui/main.nim"
+LSETTINGS = "src/frontend/viewmodel/viewmodels/layout_settings.nim"
+WELCOMEVM = "src/frontend/viewmodel/viewmodels/welcome_screen_vm.nim"
+GCHROME = "src/frontend/gpui/chrome.nim"
+LPREFS = "src/frontend/viewmodel/host/layout_preferences.nim"
+TMOUSE = "src/frontend/tui/app/input/mouse.nim"
 ISONIM_GPUI_DIR = Path(os.environ.get(
     "ISONIM_GPUI_DIR", str(ROOT.parent / "isonim-gpui")))
 if os.environ.get("ISONIM_GPUI_SRC"):
@@ -121,6 +147,14 @@ PRODUCERS = "src/frontend/tui/tests/test_plat40_producers.nim"
 FRAMEV = "src/frontend/tui/app/tests/test_frame_viewer_pane.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat51_pty.nim"
 GPLAN = "src/frontend/gpui/tests/test_plat51_gpui_plan.nim"
+GLHIT = "src/frontend/viewmodel/tests/unit/test_golden_layout_hit.nim"
+DROPREF = "src/frontend/tui/tests/test_plat51_dropzones_reference.nim"
+PARITYB = "src/frontend/tui/tests/test_plat51b_parity.nim"
+TOUT = "src/frontend/tui/tests/test_plat52_terminal_output.nim"
+CAPRES = "src/frontend/tui/app/tests/test_capability_resolution.nim"
+PTYB = "src/frontend/tui/tests/real_terminal/test_plat51b_pty.nim"
+TOUTPTY = "src/frontend/tui/tests/real_terminal/test_plat52_terminal_output_pty.nim"
+GPLANB = "src/frontend/gpui/tests/test_plat51b_gpui_plan.nim"
 CAPTURE = "scripts/plat51-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat51-desktop-capture.spec.ts"
 DE_EVENTLOG = CAPTURE + "#scrubber.spans.the.whole.log"
@@ -130,9 +164,12 @@ DE_CHANGED = CAPTURE + "#carries..value-changed.in.the.accent"
 SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, KEYMAP, RUNTIME, TSESSION, TEVENT,
             TCALL, TTRACK, TTREE, TGUTTER, TBORDERS, TTOPBAR, TCTX, TFRAME,
             TDRIVER,
-            READER, GMAIN, GLEAVES, GLIST, DEVLOG, DCONFIG, DSTATE, ENGINE]
+            READER, GMAIN, GLEAVES, GLIST, DEVLOG, DCONFIG, DSTATE, ENGINE,
+            GLHITS, LINTER, TBINDING, TSHELL, TROLES, TPALETTE, TCAPS, TPROBE,
+            TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE]
 SUITES = [LAYU, MODELU, SCRUBT, PARITY, PRODUCERS, FRAMEV, PTY, GPLAN,
-          DE_EVENTLOG, DE_SAVED, DE_CHANGED]
+          DE_EVENTLOG, DE_SAVED, DE_CHANGED,
+          GLHIT, DROPREF, PARITYB, TOUT, CAPRES, PTYB, TOUTPTY, GPLANB]
 
 
 def suite_file(path: str) -> str:
@@ -159,9 +196,17 @@ SUITE_KIND = {
     DE_EVENTLOG: ("electron", "scrubber.spans.the.whole.log"),
     DE_SAVED: ("electron", "Timeline.tab.is.dropped.on.load"),
     DE_CHANGED: ("electron", "carries..value-changed.in.the.accent"),
+    GLHIT: ("c", "vm-unit"),
+    DROPREF: ("c", "tui"),
+    PARITYB: ("c", "tui"),
+    TOUT: ("c", "tui"),
+    CAPRES: ("c", "tui"),
+    PTYB: ("c", "tui-real-terminal"),
+    TOUTPTY: ("c", "tui-real-terminal"),
+    GPLANB: ("c", "gpui-shell"),
 }
-BINARY_SUITES = {PTY}
-GPUI_BINARY_SUITES = {GPLAN}
+BINARY_SUITES = {PTY, PTYB, TOUTPTY}
+GPUI_BINARY_SUITES = {GPLAN, GPLANB}
 ENGINE_SUBJECTS = {ENGINE}
 UNISOLATED_SUITES: set = set()
 UNFILTERED_CONTROL: set = {DE_EVENTLOG, DE_SAVED, DE_CHANGED}
@@ -207,6 +252,34 @@ G_CARET = "a click in the code places the caret, apart from the pointer"
 G_MENU = "Shift + right-click opens the same menu, with no hint row"
 G_OMNIBOX = "the omnibox is on the editor's ground and foreground in every state"
 G_POINTER = "the execution pointer is the desktop's arrow, never ▶"
+# Part B's killer cases.
+H_SURFACE = "the SMALLEST surface under the point wins; x2 / y2 are outside"
+H_MIDDLE = "the user's smaller middle joins, and is carved out of top and bottom only"
+H_PROXY = "the drag proxy lifts the pane out before anything is measured"
+H_HEADER = "left of a tab's middle before it, right of it after it; past the last, the end"
+X_IDENTICAL = "GoldenLayout's algorithm (no centre): IDENTICAL at every sample"
+B_STRIP = "the focused pane's strip takes the ring's colour; Tab moves strip and ring"
+B_TOKEN = "the subtler token, its contrasts, and a strip told apart on every rung"
+B_FLAGS = "the flags parse; a bare flag needs a value"
+B_PREF = "the preference is a file beside the remembered layout, and is read back"
+B_LIVE = "mid-drag every pane is drawn at its proposed size; one commit, one undo"
+B_LIFT = "the dragged pane leaves its stack; the outer band splits the root; no dock"
+B_PIXEL = "SGR-pixel (1016) is decided at its pixel; a cell report at the cell's centre"
+B_ANSWERS = "the terminal's answers: DECRQM 1016 and the cell size, and what they mean"
+B_WELCOME = "the + opens it: the six options in the desktop's order, the recent panels"
+B_FUTURE = "the pane paints each run in its attributes; the future is muted"
+B_PROBE = "PLAT-46: a positive 24-bit answer beats a conservative TERM"
+Z_FOCUS = "one strip on the focus colour, moving with Tab; :set off is remembered; the flag"
+Z_EDGES = ("the focused pane's edges: its ground stops at its own cells; the "
+           "lines are the dividers'")
+Z_LIVE = "mid-drag the panes are re-laid-out; the release writes; one undo restores"
+Z_PIXEL = "without 1016 a report is its cell's centre; with 1016 it is its pixel"
+Z_RECORD = "Record new trace runs a real ct record and opens the recording in the tab"
+Z_COMPOSITE = "the desktop's colours, a click landing at the desktop's tick"
+W_FOCUS = "one strip on the focus colour; a press moves it; the command turns it off, remembered"
+W_LIVE = "held 80 px along, the panes have moved; nothing is written until the release"
+W_DROP = "the carried pane is out of the arrangement; the placeholder; the outer band"
+W_WELCOME = "the + opens it: the desktop's start options in its order, the recent panels"
 D_EVENTLOG = "gate:" + DE_EVENTLOG
 D_SAVED = "gate:" + DE_SAVED
 D_CHANGED = "gate:" + DE_CHANGED
@@ -223,6 +296,15 @@ CASE_SUITE = {
     G_EVENTS: GPLAN, G_CALLS: GPLAN, G_CHANGED: GPLAN, G_HISTORY: GPLAN,
     G_CARET: GPLAN, G_MENU: GPLAN, G_OMNIBOX: GPLAN, G_POINTER: GPLAN,
     D_EVENTLOG: DE_EVENTLOG, D_SAVED: DE_SAVED, D_CHANGED: DE_CHANGED,
+    H_SURFACE: GLHIT, H_MIDDLE: GLHIT, H_PROXY: GLHIT, H_HEADER: GLHIT,
+    X_IDENTICAL: DROPREF,
+    B_STRIP: PARITYB, B_TOKEN: PARITYB, B_FLAGS: PARITYB, B_PREF: PARITYB,
+    B_LIVE: PARITYB, B_LIFT: PARITYB, B_PIXEL: PARITYB, B_ANSWERS: PARITYB,
+    B_WELCOME: PARITYB,
+    B_FUTURE: TOUT, B_PROBE: CAPRES,
+    Z_FOCUS: PTYB, Z_EDGES: PTYB, Z_LIVE: PTYB, Z_PIXEL: PTYB, Z_RECORD: PTYB,
+    Z_COMPOSITE: TOUTPTY,
+    W_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
 }
 NAMED_CASES = list(CASE_SUITE)
 
@@ -412,6 +494,134 @@ ARMS = [
         "                \"markers\": marker_rows,\n                \"total\": total,\n",
         "                \"markers\": marker_rows,\n                \"total\": page_events.len(),\n",
         S_EVENTS, "the engine reports the page it sent as the log's size"),
+]
+
+# --- Part B: the port of GoldenLayout's hit-testing ------------------------
+ARMS += [
+    Arm("H1", GLHITS,
+        "    if a.rect.containsHalfOpen(x, y) and smallest > a.surface:\n",
+        "    if a.rect.containsHalfOpen(x, y) and smallest >= a.surface:\n",
+        H_SURFACE, "a tie of surfaces goes to the LATER area, not GoldenLayout's first"),
+    Arm("H2", GLHITS,
+        "  let halfX = r.x1 + r.width / 2.0\n",
+        "  let halfX = r.x1 + r.width / 3.0\n",
+        X_IDENTICAL, "a header drop inserts after a tab a third of the way in"),
+    Arm("H3", GLHITS,
+        "  NativeCentreShare* = 1.0 / 3.0\n",
+        "  NativeCentreShare* = 1.0 / 2.0\n",
+        H_MIDDLE, "the joining middle is half the body, not the smaller third"),
+    Arm("H4", LINTER,
+        "  let o = apply(layout, cmdRemovePane(source))\n  if o.kind == loApplied: o.layout else: layout\n",
+        "  layout\n",
+        H_PROXY, "the drag measures the arrangement with the dragged pane still in it"),
+    Arm("H5", LINTER,
+        "  let o = apply(layout, cmdRemovePane(source))\n  if o.kind == loApplied: o.layout else: layout\n",
+        "  layout\n",
+        B_LIFT, "the terminal draws and hit-tests the drag with the pane still in place"),
+    Arm("H6", GLHITS,
+        "  let halfX = r.x1 + r.width / 2.0\n",
+        "  let halfX = r.x1 + r.width / 3.0\n",
+        H_HEADER, "the port's header index takes a tab's first third as its left half"),
+    # --- Part B: the terminal ------------------------------------------------
+    Arm("B16", LPREFS,
+        "  if decoded.ok:\n    result.status = lpsLoaded\n    result.settings = decoded.settings\n",
+        "  if decoded.ok:\n    result.status = lpsLoaded\n",
+        B_PREF, "a remembered preference is read and ignored"),
+    Arm("B17", TMOUSE,
+        "    event.px = float(max(0, col - 1))\n",
+        "    event.px = float(max(0, col - 1)) + m.cellW / 2.0\n",
+        B_PIXEL, "a pixel report is decided half a cell to the right of its pixel"),
+    Arm("B1", TBINDING,
+        "    if b.liveResize and b.interaction.divider.isSome:\n",
+        "    if false and b.interaction.divider.isSome:\n",
+        B_LIVE, "a held divider re-lays-out nothing until the release"),
+    Arm("B2", TBINDING,
+        "          return b.previewDivider(geom, event.row, event.col)\n",
+        "          return b.dropDivider(geom, event.row, event.col)\n",
+        B_LIVE, "every motion of a held divider commits (one undo step per motion)"),
+    Arm("B3", TSHELL,
+        "              focusedStrip = highlight and region.pane == model.focused,\n",
+        "              focusedStrip = false,\n",
+        B_STRIP, "the focused pane's strip keeps the unfocused ground"),
+    Arm("B4", TROLES,
+        "    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderSecondary,\n",
+        "    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderPrimary,\n",
+        B_TOKEN, "the ring stays on the old, louder token"),
+    Arm("B5", LSETTINGS,
+        "    if arg == \"--\" & $which:\n",
+        "    if false:\n",
+        B_FLAGS, "a bare `--focus-highlight` is taken instead of refused"),
+    Arm("B6", TPROBE,
+        "  result.pixels = mouseOn and probe.pixelMouse and result.measured\n",
+        "  result.pixels = false\n",
+        B_ANSWERS, "a terminal that answers for 1016 is never put in pixel mode"),
+    Arm("B7", TPROBE,
+        "  result.pixels = mouseOn and probe.pixelMouse and result.measured\n",
+        "  result.pixels = false\n",
+        Z_PIXEL, "the shipped binary never switches SGR-pixel reporting on"),
+    Arm("B8", TOUTPANE,
+        "    result.dim = true\n",
+        "    discard\n",
+        B_FUTURE, "future output is drawn at full strength"),
+    Arm("B9", TPALETTE,
+        "  (r: (fg.r + bg.r + 1) div 2, g: (fg.g + bg.g + 1) div 2,\n",
+        "  (r: (fg.r * 3 + bg.r + 2) div 4, g: (fg.g * 3 + bg.g + 2) div 4,\n",
+        Z_COMPOSITE, "the future's blend is not the desktop's 0.5 composite"),
+    Arm("B10", RUNTIME,
+        "    if not rt.app.welcomeHost.isNil:\n      rt.openWelcomeTab(outcome)\n",
+        "    if false:\n      rt.openWelcomeTab(outcome)\n",
+        B_WELCOME, "the strip's + opens the omnibar, not the Welcome Screen"),
+    Arm("B11", WELCOMEVM,
+        "    {wsoOpenFolder, wsoRecordNewTrace, wsoOpenLocalTrace}\n",
+        "    {wsoOpenFolder, wsoOpenLocalTrace}\n",
+        B_WELCOME, "Record new trace is refused on the native front-ends"),
+    Arm("B12", TMAIN,
+        "      let output = nativeStateRoot() / \"recordings\" /\n",
+        "      let output = getTempDir() / \"recordings\" /\n",
+        Z_RECORD, "a welcome tab records outside the product's state root"),
+    Arm("B13", TCAPS,
+        "  not (depthDecided and flags.themePinned and flags.noMouse)\n",
+        "  not (depthDecided and flags.themePinned)\n",
+        B_PROBE, "colour flags that decide everything skip the pointer's questions"),
+    Arm("B14", TSHELL,
+        "              focusedStrip = highlight and region.pane == model.focused,\n",
+        "              focusedStrip = false,\n",
+        Z_FOCUS, "the shipped binary paints no focused strip"),
+    # The user, 2026-10-09: the focused strip's ground leaked one cell into
+    # the next pane, and the divider line was drawn in its own ground.
+    Arm("B18", TSHELL,
+        "    if cell in ring and row == focused.row and col < focused.col:\n",
+        "    if cell in ring and row == focused.row:\n",
+        Z_EDGES, "the focused ground leaks into the next pane's divider cell"),
+    Arm("B19", TSHELL,
+        "              CellStyle(role: srDividerStrip, surface: srTabBarFocused))\n",
+        "              CellStyle(role: srBorderFocused, surface: srTabBarFocused))\n",
+        Z_EDGES, "the left edge's line is drawn in the focused ground (invisible)"),
+    Arm("B15", TBINDING,
+        "    if b.liveResize and b.interaction.divider.isSome:\n",
+        "    if false and b.interaction.divider.isSome:\n",
+        Z_LIVE, "the shipped binary re-lays-out nothing while a divider is held"),
+    # --- Part B: the GPUI window ---------------------------------------------
+    Arm("W1", GCHROME,
+        "     chromeOf(if focused: crFocusOutline else: crTabStripBackground))]\n",
+        "     chromeOf(crTabStripBackground))]\n",
+        W_FOCUS, "the window's focused strip keeps the unfocused ground"),
+    Arm("W2", GMAIN,
+        "    if pressedPane.len > 0 and pressedPane != gFocusPane:\n",
+        "    if false:\n",
+        W_FOCUS, "a press in the window moves no focus"),
+    Arm("W3", GMAIN,
+        "      let gapAt = if ph.found and ph.stackPath == n.path: ph.index else: -1\n",
+        "      let gapAt = -1\n",
+        W_DROP, "the window opens no placeholder in the strip"),
+    Arm("W4", GMAIN,
+        "    gHoverTabAdd = false\n    openWelcomeTab(r)\n",
+        "    gHoverTabAdd = false\n",
+        W_WELCOME, "the window's + opens nothing"),
+    Arm("W5", GMAIN,
+        "  var layout = gGestures.previewLayout(committedLayout(),\n",
+        "  var layout = committedLayout()\n  discard gGestures.previewLayout(committedLayout(),\n",
+        W_LIVE, "the window draws the committed arrangement while a divider is held"),
 ]
 
 DECLARED_SURVIVORS: list = []

@@ -1,11 +1,9 @@
-//! Write a PRODUCTION split-stream (`events.log`-free) `.ct` container for the
-//! M0 browser-replay runtime probe.
+//! Write a PRODUCTION split-stream `.ct` container for the M0 browser-replay
+//! runtime probe.
 //!
-//! The committed fixtures under `tests/fixtures/` are legacy `events.log`
-//! bundles, so none of them can exercise the M0 browser constructor — that
-//! constructor's whole point is opening the NEW format. Rather than commit a
-//! binary blob that nobody can regenerate, this example produces one on demand
-//! through the exact Nim FFI write path every live recorder drives.
+//! Rather than commit a binary blob that nobody can regenerate, this example
+//! produces one on demand through the exact Nim FFI write path every live
+//! recorder drives.
 //!
 //! It is deliberately an `example` rather than a `bin`: the crate's binaries
 //! all require the `io-transport` feature, and this needs only `nim-reader`.

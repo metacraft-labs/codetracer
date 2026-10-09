@@ -62,6 +62,13 @@ fn nim_mcr_streaming_flow_variables_and_values() {
 
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
+    // Linux: db-backend replays the trace through `ct-mcr debugserver`,
+    // whose trace mode refuses it until HS-M2 U4b4, which returns this test
+    // to replay; the refusal is asserted on the trace by name.
+    if test_harness::mcr_linux_trace_mode_refused("nim_mcr_streaming_flow_variables_and_values", &recording.trace_dir) {
+        return;
+    }
+
     // --- configure expected flow data ---
     // Breakpoint at line 13 (`return final`) inside calculateSum().
     // At this point all locals should be in scope:

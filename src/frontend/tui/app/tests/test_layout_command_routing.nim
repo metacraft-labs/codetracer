@@ -90,10 +90,13 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 475
+const ExpectedAssertions = 470
 # PLAT-48: 421 → 474 — the footer strip checks (one decoration, a strip, per
 # geometry: +40), the footer row before and after `:dock bottom`, and the
 # top strip counted apart from the bottom one.
+# PLAT-51 part B: 475 → 470 — a drop no longer docks (Layout-ViewModel
+# §4.2.2): the strip-count checks after a docking drop went, the root split's
+# shape and the hidden tab's ring checks came.
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -503,13 +506,19 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     checkpoint("mouse tokens delivered with no binding: " & $tokensChecked)
     ck tokensChecked == 4 * Geometries.len
 
-  test "a mouse DRAG docks the pane it picked up, through handleToken":
+  test "a mouse DRAG moves the pane it picked up, through handleToken — never to a dock":
     # **THE ROW PLAT-6 STAYED `partial` FOR.** `binding.onMouse`, `beginDrag`,
     # `hoverAt` and `dropDrag` had no caller outside their own module and its
     # own suite: `handleToken` routed the twelve `:` verbs and no mouse report,
     # so with `--layout-binding` on a typed command rearranged a terminal and a
     # drag did nothing. This is the gesture, driven the way the product drives
     # it — the exact bytes a terminal delivers, through `handleToken`.
+    #
+    # PLAT-51 (Layout-ViewModel §4.2.2): the drop is GoldenLayout's — the
+    # drag is constrained onto the layout, so a release past it (the status
+    # row) is the last valid decision, here the ground's bottom band the
+    # pointer crossed: the pane becomes the bottom of the WHOLE layout. A
+    # drop never docks; `:dock` and the tab's menu do.
     # At 120x40, where the call stack is a region of its own (PLAT-45).
     let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
@@ -540,38 +549,29 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
         inc ghosts
     ck ghosts == 1
 
-    # RELEASE outside the tree area — the header row — docks it.
-    let dropped = rt.handleToken(sgrReport(0, 0, 40, false), 0'i64)
-    checkpoint("release on the header row -> " & dropped.detail)
+    # THROUGH the bottom band (the body's last row), then RELEASE on the
+    # status row, below the layout.
+    let body = rt.layoutGeometry().inner
+    discard rt.handleToken(
+      sgrReport(32, body.row + body.height - 1, 40, true), 0'i64)
+    let dropped = rt.handleToken(sgrReport(0, 39, 40, false), 0'i64)
+    checkpoint("release on the status row -> " & dropped.detail)
     ck dropped.repaint
-    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) >= 0
-    ck not rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
+    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
+    ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
     ck rt.app.layoutBinding.userModified
     ck rt.app.layoutBinding.interaction.kind == ikNone
-    let (docked, edge) = rt.dockedEdgeOf(paneCalltrace)
-    ck docked
-    ck edge == leTop
-    # THE SCREEN. A top strip exists, one row deep, carrying the pane's title
-    # — beside the bottom one the shared default's footer panels sit on
-    # (PLAT-48), so two strips in all.
-    var strips = 0
-    var topStrips = 0
-    let topRow = rt.layoutGeometry().body.row
-    for d in rt.shellScreenOf().decorations:
-      if d.kind == ldDockStrip:
-        inc strips
-        ck d.area.height == DockStripThickness
-        if d.area.row == topRow:
-          inc topStrips
-    ck strips == 2
-    ck topStrips == 1
+    # THE WHOLE LAYOUT'S BOTTOM: the root is a column whose last child is it.
+    let root = rt.app.layoutBinding.layout.tree
+    ck root.kind == lnColumn
+    ck root.children[^1].kind == lnPane and
+       root.children[^1].pane == paneCalltrace
 
     # …AND `:undo-layout`, through the prompt, puts it back — which says the
     # gesture went onto the SAME undo log a typed verb uses rather than beside
     # it.
     discard rt.typeLine("undo-layout")
-    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
-    ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
+    ck rt.layoutGeometry().regionOfPane(paneCalltrace) == source
 
   test "a mouse press moves the focus RING, not only the binding's focus":
     # THE RETURN LEG OF THE FOCUS SYNCHRONISATION. `runPromptLine` only has to
@@ -604,17 +604,19 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.app.layoutBinding.layout.dockedIndex(paneEditor) >= 0
     ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
 
-  test "a mouse DROP rebuilds the focus ring, so Tab cannot offer a docked pane":
+  test "a mouse DROP rebuilds the focus ring, so Tab cannot offer a pane it hid":
     # **A PROPERTY THE MOUSE PATH HAD AND NOBODY MEASURED.** PLAT-6's own
     # verification pass found it by mutation: deleting `rt.rebuildFocus()` from
     # `routeMouseReport` SURVIVED the whole harness. M34 deletes the RETURN LEG
     # on the line below it and nothing covered the rebuild itself, so the ring
-    # was left holding a pane a drop had just docked away and `Tab` would have
-    # offered a pane that is not on screen. The `:` path asserts exactly this —
-    # "the pane a verb acts on is the one Tab moved to" ends with `offered == 0`
-    # after a `:dock right` — and the mouse path did not. It does now, and
-    # `run-plat6-mutations.py`'s M37 is the arm (control: S10).
-    # At 120x40, where the call stack is a region of its own (PLAT-45).
+    # was left holding a pane a drop had just taken off the screen and `Tab`
+    # would have offered a pane that is not on screen. `run-plat6-mutations.py`'s
+    # M37 is the arm (control: S10).
+    #
+    # PLAT-51: a drop never docks (Layout-ViewModel §4.2.2), so the pane taken
+    # off the screen here is the one a drop HIDES: the call stack dropped on
+    # the event stack's strip becomes its active tab, and the tab that was
+    # active there goes behind it. At 120x40 (PLAT-45).
     let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
     ck rt.focus.focusPaneKind(paneCalltrace)
@@ -622,46 +624,59 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck dragged == paneCalltrace
     let source = rt.layoutGeometry().regionOfPane(dragged)
     ck not source.isEmptyArea
+    # The event stack, and the tab that is active in it now.
+    var hidden = PaneKind.low
+    var stripRow = -1
+    var stripCol = -1
+    for r in rt.layoutGeometry().projection.regions:
+      if r.activeTab >= 0 and r.tabs.len >= 2 and r.pane != dragged:
+        hidden = r.pane
+        stripRow = r.area.row
+        stripCol = r.area.col + tabSpans(r.tabs, r.activeTab)[0].startCol + 1
+        break
+    checkpoint("dropping on the strip of the stack showing " & $hidden)
+    ck stripRow >= 0
 
-    # THE POSITIVE TWIN, before anything moves: the ring DOES offer this pane
-    # now. Without it, `offered == 0` below is satisfied by a ring that offers
-    # nothing at all — trap 4's empty set, arriving through a focus ring.
+    # THE POSITIVE TWIN, before anything moves: the ring DOES offer the pane
+    # the drop will hide. Without it, `offered == 0` below is satisfied by a
+    # ring that offers nothing at all.
     var offeredBefore = 0
     for pane in rt.focus.focusOrder():
-      if pane == dragged:
+      if pane == hidden:
         inc offeredBefore
     let ringBefore = rt.focus.focusOrder().len
-    checkpoint("before the drop the ring is " & $rt.focus.focusOrder() &
-               " and offers " & $dragged & " " & $offeredBefore & " time(s)")
+    checkpoint("before the drop the ring is " & $rt.focus.focusOrder())
     ck offeredBefore == 1
     ck ringBefore >= 2
 
-    # PRESS on the pane's strip, MOVE past the threshold, RELEASE on the
-    # header row: the drop docks it, which is what takes it off the screen.
+    # PRESS on the call stack's strip, MOVE past the threshold, then onto the
+    # left half of the stack's first tab, and RELEASE there: the call stack
+    # becomes that stack's first, active tab.
     discard rt.handleToken(sgrReport(0, source.row, source.col, true), 0'i64)
     discard rt.handleToken(
       sgrReport(32, source.row + 1, source.col + 3, true), 0'i64)
     ck rt.app.layoutBinding.interaction.kind == ikDraggingTab
-    let dropped = rt.handleToken(sgrReport(0, 0, 40, false), 0'i64)
-    checkpoint("release on the header row -> " & dropped.detail)
-    ck rt.app.layoutBinding.layout.dockedIndex(dragged) >= 0
-    ck not rt.app.layoutBinding.layout.tree.contains(dragged)
+    # Aimed in the frame the drag draws (the call stack lifted out).
+    var aimRow = stripRow
+    var aimCol = stripCol
+    for r in rt.layoutGeometry().projection.regions:
+      if r.pane == hidden:
+        aimRow = r.area.row
+        aimCol = r.area.col + tabSpans(r.tabs, max(0, r.activeTab))[0].startCol + 1
+    discard rt.handleToken(sgrReport(32, aimRow, aimCol, true), 0'i64)
+    let dropped = rt.handleToken(sgrReport(0, aimRow, aimCol, false), 0'i64)
+    checkpoint("release on the strip -> " & dropped.detail)
+    ck rt.layoutGeometry().regionOfPane(hidden).isEmptyArea
+    ck not rt.layoutGeometry().regionOfPane(dragged).isEmptyArea
 
     # THE RING WAS REBUILT FROM THE ARRANGEMENT THE NEXT FRAME WILL PAINT.
     var offeredAfter = 0
     for pane in rt.focus.focusOrder():
-      if pane == dragged:
+      if pane == hidden:
         inc offeredAfter
     checkpoint("after the drop the ring is " & $rt.focus.focusOrder())
     ck offeredAfter == 0
-    ck rt.focusedPaneOf() != dragged
-    # …AND IT IS NOT EMPTY, which is the second half of the same control: a
-    # rebuild that produced nothing would satisfy `offeredAfter == 0` too.
-    # PLAT-45: the call stack was the first TAB of its stack, so its region
-    # stays — Agent Activity takes it — and the ring keeps its length with a
-    # different pane in that slot.
-    ck rt.focus.focusOrder().len == ringBefore
-    ck paneAgentActivity in rt.focus.focusOrder()
+    ck dragged in rt.focus.focusOrder()
     # Every pane the ring still offers has a rectangle on this screen, which is
     # the property "Tab offers a pane that is on screen" actually means.
     var offScreen = 0
@@ -670,9 +685,9 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
         inc offScreen
         checkpoint("the ring offers " & $pane & ", which has no rectangle")
     ck offScreen == 0
-    # And `Tab` really lands on one of them rather than on the docked pane.
+    # And `Tab` really lands on one of them rather than on the hidden pane.
     discard rt.handleToken("\t", 0'i64)
-    ck rt.focusedPaneOf() != dragged
+    ck rt.focusedPaneOf() != hidden
     ck not rt.layoutGeometry().regionOfPane(rt.focusedPaneOf()).isEmptyArea
 
   test "a click activates a tab and a wheel scrolls the strip, through handleToken":
@@ -750,50 +765,41 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck rt.app.layoutBinding.interaction.kind == ikDraggingTab
     discard rt.handleToken(sgrReport(0, 0, 40, false), 0'i64)
     ck rt.prompt.buffer == "dock bo"
-    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) >= 0
+    # PLAT-51: the gesture ended (a drop never docks; GoldenLayout's port).
+    ck rt.app.layoutBinding.interaction.kind == ikNone
 
-  test "which dock edges a real drag can reach, measured rather than argued":
-    # **PLAT-6's MEDIUM CLAIM, RECHECKED NOW THAT THE GESTURE IS REACHABLE.**
-    # The milestone recorded, as a property of the medium rather than a gap in
-    # the model, that a mouse drop can reach only the TOP and the BOTTOM dock
-    # edges until something is docked left or right — a drop docks when it
-    # lands outside the tree area, and a terminal has no column left of column
-    # 0. That was written about a gesture no input path reached. It is swept
-    # here over every cell of the screen and then COMMITTED for real.
-    # The pane dragged is the Variables stack's own (the state pane): at
-    # 80x24 the shared default folds the call stack into that stack's tabs
-    # (PLAT-45), and a drag picks up the tab under the pointer.
+  test "no drag docks, anywhere on the screen; `:dock` is how a pane docks":
+    # **PLAT-6's MEDIUM CLAIM, SUPERSEDED BY PLAT-51.** A drop past the tree
+    # used to DOCK (the top and bottom edges first, left and right once a
+    # strip was there). Layout-ViewModel §4.2.2 (the user, 2026-10-05) makes
+    # the drop zones GoldenLayout's: the drag is constrained onto the layout,
+    # past it is the ground's band — a split of the whole layout — and docking
+    # stays on the menus and `:dock`, as on the desktop. Swept over every
+    # cell of the screen and committed for real.
     let rt = newRuntime(80, 24)
     discard rt.enableLayoutBinding()
     let reached = rt.dockEdgesADropCanReach(paneState, 80, 24)
     checkpoint("with nothing docked, a drop reaches: " & $reached)
-    # EXACT, not "does not contain left" — trap 4's rule: a sweep that resolved
-    # nothing would satisfy every negative assertion over it, and the set's
-    # membership is knowable.
-    ck reached == @["bottom", "top"]
+    ck reached.len == 0
 
-    # COMMITTED THROUGH `handleToken`, so the sweep above is not the only
-    # witness. Four aimed drags: the two rows outside the body dock, and the
-    # two columns a user would aim at for `left` and `right` do not.
+    # COMMITTED THROUGH `handleToken`: four aimed drags past the layout and
+    # along its edges, and none docks.
     var dragsMade = 0
-    for probe in [(0, 40, true, "the header row"),
-                  (23, 40, true, "the status row"),
-                  (12, 0, false, "column 0, mid-height"),
-                  (12, 79, false, "the last column, mid-height")]:
+    for probe in [(0, 40, "the header row"), (23, 40, "the status row"),
+                  (12, 0, "column 0, mid-height"),
+                  (12, 79, "the last column, mid-height")]:
       inc dragsMade
       let r = newRuntime(80, 24)
       discard r.enableLayoutBinding()
       let src = r.layoutGeometry().regionOfPane(paneState)
       discard r.handleToken(sgrReport(0, src.row, src.col, true), 0'i64)
       let o = r.handleToken(sgrReport(0, probe[0], probe[1], false), 0'i64)
-      checkpoint("a drag onto " & probe[3] & " -> " & o.detail)
-      ck (r.app.layoutBinding.layout.dockedIndex(paneState) >= 0) == probe[2]
+      checkpoint("a drag onto " & probe[2] & " -> " & o.detail)
+      ck r.app.layoutBinding.layout.dockedIndex(paneState) < 0
     ck dragsMade == 4
 
-    # THE CLAIM'S SECOND HALF, and it is the positive twin that stops the first
-    # from being a statement about a sweep that reaches nothing: `:dock left` is
-    # how that edge is first reached, and once a strip is there a drop onto it
-    # works like any other.
+    # THE POSITIVE TWIN: `:dock left` docks — and with a strip there, a drop
+    # onto it still does not (it is outside the tree: constrained onto it).
     let after = newRuntime(80, 24)
     discard after.enableLayoutBinding()
     discard after.typeLine("dock left")
@@ -801,7 +807,16 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     ck after.app.layoutBinding.layout.dockedAt(leLeft).len == 1
     let now = after.dockEdgesADropCanReach(paneEditor, 80, 24)
     checkpoint("with one pane docked left, a drop reaches: " & $now)
-    ck now == @["bottom", "left", "top"]
+    ck now.len == 0
+    # Docking is the commands' now, so the redock rule is asserted here: a
+    # pane moved from one strip onto another that has panes goes AFTER them
+    # (the footer's first pane, bottom order 0, onto the left strip whose
+    # pane holds order 0 — keeping its order would collide).
+    let bottom = after.app.layoutBinding.layout.dockedAt(leBottom)
+    require bottom.len > 0
+    let moved = after.app.layoutBinding.layout.apply(
+      cmdDock(bottom[0].pane, leLeft))
+    ck moved.kind == loApplied and moved.layout.dockedAt(leLeft).len == 2
 
   test "assertion count":
     checkpoint("CHECKS: " & $countedAssertions)

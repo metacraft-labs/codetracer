@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3389
+const ExpectedAssertions = 3445
   ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
   ## current-line and inspection triangles, the role table traded the `[MOD]`
   ## tag for the editor-text role, and one permitted merge was added.
@@ -83,7 +83,9 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 128
+  ExpectedRoleCount = 130
+    ## PLAT-51: +2, the focused pane's strip (`srTabBarFocused`) and its
+    ## active tab (`srTabActiveFocused`).
     ## PLAT-52: +4, the scrubbers' group (`srScrubberTrack`,
     ## `srScrubberThumb`, `srScrubberThumbGround`, `srScrubberMark`).
     ## PLAT-50: +4 — `srBorderMenu` (a dropdown's frame), `srDividerStrip`
@@ -260,7 +262,9 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # background and in a foreground of its own.
     const Fg = [(srSyntaxKeyword, dtEditorThemeRuleKeyword),
                 (srBorderPane, dtColorsUiBorderSecondary),
-                (srBorderFocused, dtColorsUiBorderPrimary),
+                # PLAT-51 (the user: both focus contrasts SUBTLER): the ring
+                # moved from ui/border/primary to ui/border/secondary.
+                (srBorderFocused, dtColorsUiBorderSecondary),
                 (srChromeTitle, dtColorsUiTextPrimaryLabel),
                 (srChromeMuted, dtColorsUiTextPrimaryCaptionSubtle),
                 (srTabActive, dtColorsUiTextPrimaryHeadings),

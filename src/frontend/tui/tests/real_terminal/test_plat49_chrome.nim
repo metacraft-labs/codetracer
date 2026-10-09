@@ -57,7 +57,7 @@ from ../../../viewmodel/viewmodels/state_vm import VariableCategory,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 566
+const ExpectedAssertions = 571
 
 var countedAssertions = 0
 
@@ -266,8 +266,13 @@ suite "PLAT-49 on a real terminal: a click is a click":
     ck s3.text(1).cellFind(" Files ") == filesAt - 1
     ck sess.status().saysNothingOfDrags()
     # PAST the threshold: a drag — the tint over the editor and the ghost.
+    # PLAT-51: aimed at the editor's LEFT quarter (GoldenLayout's left
+    # segment, a split that tints the pane's left half); its middle third now
+    # joins, tinting the strip where the tab would land.
+    let editorAt = strip.cellFind(" main.py ") + 1
+    ck editorAt > filesAt
     sess.mouse(0, 1, filesAt + 1)
-    for c in [filesAt + 5, filesAt + 20, 60]:
+    for c in [filesAt + 5, filesAt + 20, editorAt + 2]:
       sess.mouse(32, 20, c)
     sleep(400)
     let s4 = sess.snap()
@@ -304,24 +309,30 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     let strip = dark(dtColorsUiSurfacePrimaryDefault)
     let activeBg = dark(dtColorsUiSurfacePrimaryTertiary)
     let activeFg = dark(dtColorsUiTextPrimaryHeadings)
-    let inactiveFg = dark(dtColorsUiTextPrimaryDisabled)
     let panel = dark(dtColorsUiSurfaceBasePanel)
+    # PLAT-51 (Native-Front-End-Parity.md §2): the Files stack holds the
+    # focus at start, so ITS strip is on the focus colour (ui/border/
+    # secondary), the selected tab keeping its foreground and weight, the
+    # others in the subdued body tier; every other strip keeps its own.
+    let focusGround = dark(dtColorsUiBorderSecondary)
+    let focusInactiveFg = dark(dtColorsUiTextPrimaryBodySubtle)
     let row1 = s.text(1)
     let filesAt = row1.cellFind(" Files ") + 1
     let vcsAt = row1.cellFind(" VCS ") + 1
     let editorAt = row1.cellFind(" main.py ") + 1
     ck filesAt > 0 and vcsAt > 0 and editorAt > 0
-    # 4. The strip's own ground, distinct from the pane body below it.
-    ck hexOfColor(s[1][vcsAt + 6].bg) == strip
+    # 4. The strip's own ground, distinct from the pane body below it — the
+    # focused one on the focus colour.
+    ck hexOfColor(s[1][vcsAt + 6].bg) == focusGround
     ck hexOfColor(s[3][vcsAt + 6].bg) == panel
-    ck strip != panel
-    # The selected tab: its own background AND foreground, bold.
-    ck hexOfColor(s[1][filesAt + 1].bg) == activeBg
+    ck strip != panel and focusGround != strip
+    # The selected tab: its foreground, bold — on the focused strip's ground.
+    ck hexOfColor(s[1][filesAt + 1].bg) == focusGround
     ck hexOfColor(s[1][filesAt + 1].fg) == activeFg
     ck caBold in s[1][filesAt + 1].attrs
-    # An inactive tab: on the strip, in the disabled tier, not bold.
-    ck hexOfColor(s[1][vcsAt + 1].bg) == strip
-    ck hexOfColor(s[1][vcsAt + 1].fg) == inactiveFg
+    # An inactive tab of the focused strip: the subdued tier, not bold.
+    ck hexOfColor(s[1][vcsAt + 1].bg) == focusGround
+    ck hexOfColor(s[1][vcsAt + 1].fg) == focusInactiveFg
     ck caBold notin s[1][vcsAt + 1].attrs
     ck activeBg != strip
     # …and the strip's EMPTY RUN past its last tab (the Variables stack's,
@@ -337,14 +348,17 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     let emptyAt = s.text(varRow).cellFind(" Scratchpad ") + 14
     ck varRow > 0 and $s[varRow][emptyAt].rune == " " and
        hexOfColor(s[varRow][emptyAt].bg) == strip
-    # A LONE pane (the editor) has a one-tab strip naming its file.
+    # A LONE pane (the editor) has a one-tab strip naming its file — an
+    # UNFOCUSED strip's selected tab: its own background AND foreground, bold.
     ck hexOfColor(s[1][editorAt + 1].bg) == activeBg
+    ck hexOfColor(s[1][editorAt + 1].fg) == activeFg
+    ck caBold in s[1][editorAt + 1].attrs
     # 13. Every divider cell on the panes' own ground. PLAT-50: a divider is
     # the edge line `▏` in the default (`--dividers=strip`) colour — the
     # strip's ground, the desktop's splitters' — or the focused pane's
     # border tier; in a tab-strip row it is the strip's own ground, glyph
     # and cell alike, so strips connect. No box-drawing divider is left.
-    let focused = dark(dtColorsUiBorderPrimary)
+    let focused = dark(dtColorsUiBorderSecondary)   # PLAT-51: the ring, subtler
     var dividers = 0
     var onPanel = 0
     var inStrip = 0
@@ -365,7 +379,9 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
           let bg = hexOfColor(s[r][c].bg)
           let fg = hexOfColor(s[r][c].fg)
           if bg == panel: inc onPanel
-          if bg == strip and fg == strip: inc inStrip
+          if (bg == strip and fg == strip) or
+             (bg == focusGround and fg == focusGround):
+            inc inStrip
           if fg in [strip, focused]: inc lineFg
     ck dividers > 50
     ck onPanel + inStrip == dividers
@@ -391,6 +407,11 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     ck caReverse in s[1][filesAt + 1].attrs
     ck caBold in s[1][filesAt + 1].attrs
     ck caReverse notin s[1][vcsAt + 1].attrs
+    # PLAT-51: the Files strip is the FOCUSED one; an unfocused strip's
+    # selected tab (the editor's lone tab) is reverse + bold too.
+    let editorAt = row1.cellFind(" main.py ") + 1
+    ck editorAt > 0
+    ck caReverse in s[1][editorAt + 1].attrs and caBold in s[1][editorAt + 1].attrs
     sess.quit()
 
 suite "PLAT-49 on a real terminal: tooltips and the omnibar":

@@ -1338,6 +1338,16 @@ impl CtfsReader {
         self.profile
     }
 
+    /// How this container stores the chunks of its chunked streams: a full
+    /// container as one zstd frame per chunk, a compact one as the chunk's
+    /// content (`ctfs-container.md` §1f).
+    pub fn chunk_form(&self) -> codetracer_trace_reader::ChunkForm {
+        match self.profile {
+            CtfsProfile::Full => codetracer_trace_reader::ChunkForm::Framed,
+            CtfsProfile::Compact => codetracer_trace_reader::ChunkForm::Stored,
+        }
+    }
+
     /// Whether this container was opened through the compact loader.
     pub fn is_compact(&self) -> bool {
         self.profile == CtfsProfile::Compact

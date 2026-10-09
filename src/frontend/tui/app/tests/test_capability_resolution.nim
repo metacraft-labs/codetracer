@@ -55,7 +55,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 428
+const ExpectedAssertions = 435
 
 const
   LandedThroughMilestone = 14
@@ -847,8 +847,11 @@ suite "CTUI-11 Tier 1: capability resolution":
     # every acceptance check below for free. Sixteen tokens over thirteen
     # lines: `-h/--help`, `-v/--version` and `-t/--theme` are each written as
     # a pair, PLAT-6 added `--layout-binding` and PLAT-42 `--no-flow-overlay`.
-    # PLAT-46 added `--palette`: seventeen.
-    ck options.len == 17
+    # PLAT-46 added `--palette`: seventeen. PLAT-51 `--focus-highlight` and
+    # `--live-resize`: nineteen.
+    ck options.len == 19
+    ck "--focus-highlight" in options
+    ck "--live-resize" in options
     ck "--palette" in options
     ck "--layout-binding" in options
     ck "--no-flow-overlay" in options
@@ -1127,8 +1130,13 @@ suite "CTUI-11 Tier 1: capability resolution":
     # OUTSIDE tmux, nothing is ever "withheld".
     ck not resolveCapabilities(xterm, initCapabilityFlags(),
       TerminalProbe(attempted: true, tmuxQueried: true)).tmuxRgbWithheld
-    # NOTHING TO ASK when the depth and the mode are both flags.
+    # NOTHING TO ASK when the depth and the mode are both flags and the
+    # mouse is off; with the mouse on (PLAT-51) the pixel-mouse question
+    # (DECRQM 1016, the cell size) is still asked.
     ck not probeWanted(xterm, initCapabilityFlags(
+      forceTrueColor = true, theme = utDark, themePinned = true,
+      noMouse = true))
+    ck probeWanted(xterm, initCapabilityFlags(
       forceTrueColor = true, theme = utDark, themePinned = true))
     ck probeWanted(xterm, initCapabilityFlags(forceTrueColor = true))
     ck not probeWanted(initTerminalEnv(term = "dumb"), initCapabilityFlags())

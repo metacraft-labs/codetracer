@@ -36,6 +36,7 @@ import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import headless_app/layout_model
 import headless_app/arrangement_relation
 import gpui/chrome
+import styles/generated/design_tokens
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -219,15 +220,20 @@ suite "PLAT-47: the GPUI window at desktop parity":
     for (k, v) in active & inactive:
       # No glyph anywhere: a tab is styled, never framed.
       ck k in ["color", "font-weight", "background-color"]
-    # B2: a 1px BORDER of the desktop's outline colour around the focused
-    # pane, the same width — invisible — around every other.
-    ck ("border-color", desk{"focus"}{"outline"}.getStr) in
+    # B2: a 1px BORDER of the focus colour around the focused pane, the same
+    # width — invisible — around every other. PLAT-51 (the user: SUBTLER):
+    # the focus colour is one step down the border ramp from the desktop's
+    # measured outline (ui/border/secondary under ui/border/primary), and the
+    # focused strip's ground; a declared deviation.
+    ck desk{"focus"}{"outline"}.getStr ==
+       DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
+    ck ("border-color", DesignTokenHex[dtColorsUiBorderSecondary][dmDark]) in
        paneOutlineStyle(true)
     ck ("border-width", desk{"focus"}{"outlineWidth"}.getStr) in
        paneOutlineStyle(true)
     ck ("border-width", desk{"focus"}{"outlineWidth"}.getStr) in
        paneOutlineStyle(false)
-    ck ("border-color", desk{"focus"}{"outline"}.getStr) notin
+    ck ("border-color", chromeOf(crFocusOutline)) notin
        paneOutlineStyle(false)
     ck ("border-color", chromeOf(crWindowBackground)) in
        paneOutlineStyle(false)
@@ -257,8 +263,9 @@ suite "PLAT-47: the GPUI window at desktop parity":
       else:
         ck not any
     ck outlined == 1
-    # The record's outline gray is the desktop's measured colour.
-    ck desk{"focus"}{"outline"}.getStr == chromeOf(crFocusOutline)
+    # The record's outline gray is the focus colour the recorder searches
+    # for (`plat45_window_record.FocusOutlineHex`, PLAT-51's subtler token).
+    ck chromeOf(crFocusOutline) == DesignTokenHex[dtColorsUiBorderSecondary][dmDark]
 
   test "B1: the editor's colours are the desktop's Monaco colours, class by class":
     let ed = desk["editor"]

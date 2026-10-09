@@ -15,16 +15,17 @@
 //! # The threshold figure
 //!
 //! `DefaultRawByteThreshold` is 1 MiB = 1,048,576 RAW member bytes (CCP-4). The
-//! at-threshold fixture below is grown event by event to the largest payload
-//! that still fits, and is asserted to be within ONE EVENT of the limit — so it
-//! is a boundary container rather than merely an admissible one.
+//! at-threshold fixture below is the recording with the most steps whose
+//! payload still fits, and is asserted to be within ONE STEP of the limit — so
+//! it is a boundary container rather than merely an admissible one.
 //!
 //! # No mocks
 //!
-//! Both containers are real: genuinely RAW members (no per-member compression
-//! anywhere, which is what §1d requires of a compact container and what makes
-//! the raw-byte threshold the thing being measured) behind a real §1d
-//! directory, opened by the production `CTFSTraceReader`.
+//! Both containers are real recordings written by the Rust `CtfsTraceWriter`
+//! and converted by the format library: genuinely RAW members (no per-member
+//! compression anywhere, which is what §1d requires of a compact container and
+//! what makes the raw-byte threshold the thing being measured) behind a real
+//! §1d directory, opened by the production `CTFSTraceReader`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,13 +36,12 @@ use codetracer_trace_types::{
     TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
 };
 
+use codetracer_trace_writer::compact_profile::{compact_members_of, encode_compact, raw_member_bytes};
+use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
+use codetracer_trace_writer::trace_writer::TraceWriter;
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
-use db_backend::ctfs_trace_reader::ctfs_container::{CtfsProfile, CtfsReader, write_compact_ctfs};
-use db_backend::ctfs_trace_reader::meta_dat::{META_DAT_VERSION, MetaDat, serialize_meta_dat};
+use db_backend::ctfs_trace_reader::ctfs_container::{CtfsProfile, CtfsReader};
 use db_backend::trace_reader::TraceReader;
-
-/// `codetracer_trace_format_cbor_zstd::HEADERV1`.
-const EVENTS_HEADER_V1: [u8; 8] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2, 0x01, 0x00, 0x00];
 
 /// CCP-4's `DefaultRawByteThreshold`: 1 MiB of RAW member bytes.
 const RAW_BYTE_THRESHOLD: u64 = 1 << 20;
@@ -95,22 +95,20 @@ fn step_events(i: usize) -> Vec<TraceLowLevelEvent> {
     ]
 }
 
-fn meta_dat_bytes(program: &str, workdir: &str) -> Vec<u8> {
-    serialize_meta_dat(&MetaDat {
-        version: META_DAT_VERSION,
-        flags: 0,
-        recording_id: "01949fcc-7d92-7e9c-bccc-dddddddddddd".to_owned(),
-        program: program.to_owned(),
-        args: vec![],
-        workdir: workdir.to_owned(),
-        recorder_id: "ccp5".to_owned(),
-        ext_flags: 0,
-        mcr: None,
-        replay_launch: None,
-        layout_snapshot: None,
-        filter_provenance: vec![],
-        has_filter_provenance: false,
-    })
+/// The compact members of a recording of `steps` user steps.
+fn compact_recording(dir: &Path, name: &str, steps: usize) -> Vec<(String, Vec<u8>)> {
+    let stem = dir.join(name);
+    let mut writer = CtfsTraceWriter::new(name, &[]);
+    TraceWriter::set_workdir(&mut writer, dir);
+    TraceWriter::begin_writing_trace_events(&mut writer, &stem).expect("begin the recording");
+    let mut events = preamble_events();
+    for i in 0..steps {
+        events.extend(step_events(i));
+    }
+    TraceWriter::append_events(&mut writer, &mut events);
+    TraceWriter::finish_writing_trace_events(&mut writer).expect("finish the recording");
+    let full = fs::read(stem.with_extension("ct")).expect("read the recording");
+    compact_members_of(&full).expect("the recording converts to the compact profile")
 }
 
 /// Build a compact container whose RAW member payload is as close to `budget`
@@ -119,43 +117,43 @@ fn meta_dat_bytes(program: &str, workdir: &str) -> Vec<u8> {
 /// Returns `(path, user_step_count, raw_member_payload_bytes, bytes_one_more_step_would_add)`.
 ///
 /// "Raw member payload" is the sum of the member payloads the compact container
-/// carries — `events.log` plus `meta.dat` — which is the quantity CCP-4's
-/// threshold is defined on. The 76 bytes of header and directory are container
-/// overhead and are deliberately NOT counted, because the threshold answers
-/// "can the streams be resident", not "how big is the file".
+/// carries, which is the quantity CCP-4's threshold is defined on. The header
+/// and directory are container overhead and are deliberately NOT counted,
+/// because the threshold answers "can the streams be resident", not "how big
+/// is the file".
+///
+/// The payload grows with the step count, so the step count is found by
+/// bisection rather than by writing every recording in between.
 fn build_compact_at_budget(dir: &Path, name: &str, budget: u64) -> (PathBuf, usize, u64, u64) {
-    let meta = meta_dat_bytes(name, dir.to_string_lossy().as_ref());
-    let path = dir.join(format!("{name}.ct"));
-
-    let encode = |events: Vec<TraceLowLevelEvent>| {
-        let mut buf = Vec::new();
-        for event in &events {
-            buf = cbor4ii::serde::to_vec(buf, event).expect("a TraceLowLevelEvent always CBOR-encodes");
-        }
-        buf
-    };
-
-    let mut body = encode(preamble_events());
-    let payload = |body_len: usize| (EVENTS_HEADER_V1.len() + body_len + meta.len()) as u64;
+    let payload = |steps: usize| raw_member_bytes(&compact_recording(dir, &format!("{name}_probe"), steps));
     assert!(
-        payload(body.len()) < budget,
+        payload(0) < budget,
         "the preamble alone is {} bytes, which does not fit a {budget}-byte budget",
-        payload(body.len())
+        payload(0)
     );
-
-    let mut steps = 0usize;
-    loop {
-        let next = encode(step_events(steps));
-        if payload(body.len() + next.len()) > budget {
-            let mut log = EVENTS_HEADER_V1.to_vec();
-            log.extend_from_slice(&body);
-            write_compact_ctfs(&path, &[("events.log", &log), ("meta.dat", &meta)])
-                .expect("the compact encoder writes");
-            return (path, steps, payload(body.len()), next.len() as u64);
-        }
-        body.extend_from_slice(&next);
-        steps += 1;
+    let mut fits = 0usize;
+    let mut over = 1usize;
+    while payload(over) <= budget {
+        fits = over;
+        over *= 2;
     }
+    while over - fits > 1 {
+        let mid = fits + (over - fits) / 2;
+        if payload(mid) <= budget {
+            fits = mid;
+        } else {
+            over = mid;
+        }
+    }
+    let members = compact_recording(dir, name, fits);
+    let at = raw_member_bytes(&members);
+    let path = dir.join(format!("{name}.ct"));
+    fs::write(
+        &path,
+        encode_compact(&members).expect("the compact encoder lays it out"),
+    )
+    .expect("write it");
+    (path, fits, at, payload(fits + 1) - at)
 }
 
 // ── Peak measurement ────────────────────────────────────────────────────
@@ -253,7 +251,7 @@ fn test_peak_memory_is_bounded_by_the_threshold() {
     );
     assert!(
         at_payload + next_event_bytes > RAW_BYTE_THRESHOLD,
-        "the at-threshold container is {} bytes short of the threshold and one more event would \
+        "the at-threshold container is {} bytes short of the threshold and one more step would \
          add only {next_event_bytes} — this is an admissible container, not a BOUNDARY one",
         RAW_BYTE_THRESHOLD - at_payload
     );
@@ -307,7 +305,7 @@ fn test_peak_memory_is_bounded_by_the_threshold() {
     println!(
         "steps materialised: {under_loaded} (well under) vs {at_loaded} (at threshold); \
          threshold = {RAW_BYTE_THRESHOLD} raw bytes, at-threshold container is {} bytes short and \
-         one more event would add {next_event_bytes}",
+         one more step would add {next_event_bytes}",
         RAW_BYTE_THRESHOLD - at_payload
     );
 

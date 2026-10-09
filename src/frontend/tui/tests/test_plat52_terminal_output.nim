@@ -41,6 +41,8 @@ import ../app/runtime
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/theme/roles
+import ../app/theme/palette
+import ../app/theme/colour_math
 import ../app/views/shell
 import ../app/views/styled_row
 import ../app/layout/profile
@@ -49,7 +51,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 105
+const ExpectedAssertions = 112
 
 var countedAssertions = 0
 
@@ -189,7 +191,26 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     # At the program's entry nothing has been written: every line is future.
     var row = rt.rowWith("red plain bold green")
     ck row > 0
-    ck rt.styleAtText(row, "red").role == srChromeMuted
+    # The future keeps each colour at HALF STRENGTH (the desktop's `.future`,
+    # opacity 0.5): the fragment's own colour, dimmed, and white where the
+    # program set none — resolved by blending toward the pane's ground.
+    let futureRed = rt.styleAtText(row, "red")
+    checkpoint("future red: " & describe(futureRed))
+    ck futureRed.fg == "#bb0000" and futureRed.dim
+    ck futureRed.role != srChromeMuted
+    let futurePlain = rt.styleAtText(row, "plain")
+    ck futurePlain.fg == "#ffffff" and futurePlain.dim
+    let futureGreen = rt.styleAtText(row, "bold green")
+    ck futureGreen.fg == "#00bb00" and futureGreen.bold and futureGreen.dim
+    let resolved = resolveRoles(futureRed, cdTrueColor, dmDark)
+    let ground = resolveRoles(CellStyle(surface: futureRed.surface),
+                              cdTrueColor, dmDark).bg
+    checkpoint("resolved " & describe(resolved) & " on " & ground)
+    ck ground.len == 7
+    ck resolved.fg == hexOf(blendHalf(parseHexColour("#bb0000"),
+                                      parseHexColour(ground)))
+    ck not resolved.dim
+    ck resolveRoles(futureRed, cdMonochrome, dmDark).dim
     # Go to the end: everything is past, drawn as written.
     s.send(rt, "G")
     rt.app.terminalOutput.follow = false

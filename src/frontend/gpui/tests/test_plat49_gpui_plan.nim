@@ -53,7 +53,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 183
+  ExpectedAssertions = 184
     ## PLAT-51: 186 -> 183, measured — the View menu lost its Timeline entry
     ## (the per-entry sweep), and the omnibox's ground became the editor's.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
@@ -266,19 +266,29 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
     let stripBg = chromeOf(crTabStripBackground)
     ck stripBg != chromeOf(crPaneBackground)
     ck chromeOf(crTabActiveBackground) != stripBg
+    # PLAT-51 (Native-Front-End-Parity.md §2): the FOCUSED pane's strip is
+    # on the focus colour, its selected tab too (foreground and weight kept),
+    # its other tabs in `crTabFocusedForeground`; exactly one strip is.
+    var focusedStrips = 0
     for s in plan.nodesWith("data-ct-tabs"):
-      ck s.style("bg") == stripBg
+      let focused = s.attr("data-ct-strip-focused") == "true"
+      if focused: inc focusedStrips
+      ck s.style("bg") == (if focused: chromeOf(crFocusOutline) else: stripBg)
       var active = 0
       for t in s{"children"}.getElems:
         if t.attr("data-ct-tab-active") == "true":
           inc active
-          ck t.style("bg") == chromeOf(crTabActiveBackground)
+          ck t.style("bg") == (if focused: chromeOf(crFocusOutline)
+                               else: chromeOf(crTabActiveBackground))
           ck t.style("text_color") == chromeOf(crTabActiveForeground)
           ck t.style("font_weight") == "bold"
         else:
           ck t.style("bg") == ""
-          ck t.style("text_color") == chromeOf(crTabInactiveForeground)
+          ck t.style("text_color") ==
+             chromeOf(if focused: crTabFocusedForeground
+                      else: crTabInactiveForeground)
       ck active == 1
+    ck focusedStrips == 1
 
   test "a press on a tab is a click until it moves; past the slop it is a drag":
     var geom: JsonNode

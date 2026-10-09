@@ -213,7 +213,10 @@ suite "PLAT-50 on a real terminal: the top bar":
 suite "PLAT-50 on a real terminal: tab strips and dividers":
 
   test "strips on the desktop's ground; no rule above a strip; strips connect across a divider":
-    var sess = open()
+    # PLAT-51 part B: the FOCUSED pane's strip (the Files stack's, at start)
+    # takes the focus colour; these are the unfocused strips' rules, so the
+    # highlight is off here (`test_plat51b_pty` reads the focused strip).
+    var sess = open(@["--focus-highlight=off"])
     let (re, ce) = sess.waitFor(" Event Log ")
     let s = sess.snap()
     # The inactive tabs and the strip: #1b1b1b, not the old #161616.
@@ -251,7 +254,7 @@ suite "PLAT-50 on a real terminal: tab strips and dividers":
     ck s[row][c].fgHex == StripGround
     ck s[row][c].bgHex == PanelGround
     sess.quit()
-    var sub = open(@["--dividers=subtle"])
+    var sub = open(@["--dividers=subtle", "--focus-highlight=off"])
     discard sub.waitFor(" Event Log ")
     let t = sub.snap()
     let cols2 = t.dividerCols(row)

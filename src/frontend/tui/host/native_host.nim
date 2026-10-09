@@ -42,7 +42,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[algorithm, json, os, posix, sets, strutils]
+import std/[algorithm, json, os, osproc, posix, sets, streams, strutils]
 
 import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
 
@@ -109,6 +109,115 @@ proc findReplayServer*(): string =
     if fileExists(candidate):
       return candidate
   ""
+
+proc traceFolderProblem*(path: string): string
+  ## Forward-declared; defined below.
+
+proc findCtBinary*(): string =
+  ## PLAT-51: where `ct` is, for a welcome tab's "Record new trace" — `CT_BIN`,
+  ## then beside `replay-server` (an installed suite ships them together), then
+  ## this checkout's debug build, then `PATH`. "" when there is none.
+  let envBin = getEnv("CT_BIN", "")
+  if envBin.len > 0 and fileExists(envBin):
+    return envBin
+  let rs = findReplayServer()
+  if rs.len > 0 and fileExists(rs.parentDir / "ct"):
+    return rs.parentDir / "ct"
+  let candidate = repoRoot() / "src" / "build-debug" / "bin" / "ct"
+  if fileExists(candidate):
+    return candidate
+  findExe("ct")
+
+type
+  NativeRecordJob* = ref object
+    ## PLAT-51 deliverable 8: a welcome tab's `ct record`, running. The host
+    ## polls it (`pollRecordJob`) from the loop that reads its input, so the
+    ## screen keeps answering while the program is recorded.
+    process*: Process
+    outputFolder*: string
+    logPath*: string
+    program*: string
+    done*: bool
+    ok*: bool
+    message*: string
+
+proc startRecordJob*(program: string; args: seq[string];
+                     outputFolder: string): NativeRecordJob =
+  ## `ct record -o <outputFolder> <program> -- <args>`, in the background,
+  ## its output to a log beside the recording. Refused (done, not ok, with
+  ## why) when there is no `ct` or the program is not there.
+  result = NativeRecordJob(outputFolder: outputFolder, program: program)
+  let ct = findCtBinary()
+  if ct.len == 0:
+    result.done = true
+    result.message = "no ct found to record with; set CT_BIN"
+    return
+  let target = absolutePath(program.expandTilde())
+  if not fileExists(target) and not dirExists(target):
+    result.done = true
+    result.message = "no such program: " & target
+    return
+  try:
+    createDir(outputFolder.parentDir)
+  except CatchableError:
+    discard
+  result.logPath = outputFolder & ".log"
+  var argv = @["record", "-o", outputFolder, target]
+  if args.len > 0:
+    argv.add "--"
+    argv.add args
+  try:
+    result.process = startProcess(ct, workingDir = target.parentDir,
+                                  args = argv,
+                                  options = {poStdErrToStdOut})
+  except CatchableError as e:
+    result.done = true
+    result.message = "could not start ct record: " & e.msg
+    result.process = nil
+
+proc pollRecordJob*(job: NativeRecordJob): bool =
+  ## Whether the job FINISHED on this poll (once): `ok` and `message` say
+  ## how. The recorder's output is drained so a chatty program cannot fill
+  ## the pipe and stall it.
+  if job.isNil or job.done:
+    return false
+  if job.process.isNil:
+    job.done = true
+    return true
+  var chunk = ""
+  try:
+    let outp = job.process.outputStream
+    while job.process.hasData:
+      var line = ""
+      if not outp.readLine(line):
+        break
+      chunk.add line & "\n"
+  except CatchableError:
+    discard
+  if chunk.len > 0:
+    try:
+      let f = open(job.logPath, fmAppend)
+      f.write(chunk)
+      f.close()
+    except CatchableError:
+      discard
+  let code = job.process.peekExitCode()
+  if code == -1:
+    return false
+  job.done = true
+  job.ok = code == 0 and traceFolderProblem(job.outputFolder).len == 0
+  job.process.close()
+  if not job.ok:
+    var last = ""
+    try:
+      for l in readFile(job.logPath).splitLines():
+        if l.strip.len > 0:
+          last = l.strip
+    except CatchableError:
+      discard
+    job.message = "recording " & job.program & " failed (exit " & $code &
+                  ")" & (if last.len > 0: ": " & last else: "")
+  true
 
 proc replayServerRemedy*(): string =
   ## What to tell a user whose `replay-server` is missing. One string, so the

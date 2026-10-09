@@ -127,6 +127,7 @@ CALLVM = "src/frontend/viewmodel/viewmodels/calltrace_vm.nim"
 EVLOGVM = "src/frontend/viewmodel/viewmodels/event_log_vm.nim"
 STORE = "src/frontend/viewmodel/store/replay_data_store.nim"
 INTERACT = "src/frontend/headless_app/layout_interaction.nim"
+GLHIT = "src/frontend/headless_app/golden_layout_hit.nim"
 LAYMODEL = "src/frontend/headless_app/layout_model.nim"
 HOVER = "src/frontend/headless_app/auto_hide_hover.nim"
 SESSTABS = "src/frontend/headless_app/session_tabs.nim"
@@ -174,7 +175,7 @@ SUBJECTS = [TOPBAR, SHELL, BINDING, RUNTIME, ROLES, STATUS, VARS, TUIMAIN,
             CALLVM, EVLOGVM, STORE, INTERACT, LAYMODEL, HOVER, SESSTABS,
             CALLVIEW, EVLOGVIEW, TUISESSION, NATIVEHOST, GPUILEAVES,
             GESTURES, DESKEVLOG, DESKCALL, OMNISRC,
-            FOOTERINFO, TUIAPP, DESKEVLOGVIEW, GPUISHELL]
+            FOOTERINFO, TUIAPP, DESKEVLOGVIEW, GPUISHELL, GLHIT]
 SUITES = [VMU, T1, REF, PROF, PTY, GPLAN, DESKTOP_GATE,
           VMU2, T2, REF2, PTY2, GPLAN2, DESKTOP_GATE_B]
 
@@ -274,7 +275,7 @@ V2_WIRE = "the wire's arguments and return values decode to the row's parts"
 V2_COLDEF = "the desktop's set, its order, location hidden by default"
 V2_COLHIDE = "show, hide, and the last visible column stays"
 V2_COLMOVE = "reorder along the visible order; hidden columns keep their places"
-V2_ZONES = "a quarter on each side, the centre joins"
+V2_ZONES = "a quarter on each side, the SMALLER centre joins (PLAT-51)"
 V2_HALVES = "a tab's left half inserts before it, its right half after it"
 V2_OPEN = "open, one at a time, close; never persisted"
 V2_HOVER = "a preview after the delay; leaving closes it after the grace"
@@ -308,7 +309,7 @@ G2_FOOTER = "the labels are in the footer, the window's status bar"
 G2_HOVER = "a hover previews after the delay; leaving closes it after the grace"
 G2_DOCK = ("a click docks the pane open — a band the tree gives up — and a "
            "second closes it")
-G2_ZONES = "a quarter on each side, the centre joins; a tab's halves"
+G2_ZONES = "a quarter on each side, the SMALLER centre joins; a tab's halves"
 G2_TABS = ("each tab its own box with a gap, the close control, the agent's "
            "progress")
 V2_LOGCMD = "the omnibar's column commands: show / hide and move, every column"
@@ -436,8 +437,8 @@ ARMS = [
         P_STRIPS,
         "the call trace's own heading shows under its strip"),
     Arm("TI2", SHELL,
-        "  paintTabRow(g, a.row, a.col, stripTabs, stripActive, inner)\n",
-        "  discard stripTabs\n",
+        "  paintTabRow(g, a.row, a.col, stripTabs, stripActive, inner,\n",
+        "  discard stripTabs\n  if false: paintTabRow(g, a.row, a.col, stripTabs, stripActive, inner,\n",
         S_STRIPS,
         "no strip is painted over a pane: the painters' headings show"),
     Arm("TI3", GPUIMAIN,
@@ -501,13 +502,13 @@ ARMS = [
         P_MONO,
         "monochrome: the selected tab without reverse video"),
     Arm("TC5", CHROME,
-        '      ("background-color", chromeOf(crTabActiveBackground))]\n',
-        '      ("background-color", chromeOf(crTabStripBackground))]\n',
+        '       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]\n',
+        '       chromeOf(if focused: crFocusOutline else: crTabStripBackground))]\n',
         G_STRIPS,
         "GPUI's selected tab on the strip's own ground"),
     Arm("TC6", GPUIMAIN,
-        "      for (key, value) in stripStyle():\n        r.setStyle(strip, key, value)\n",
-        "      discard stripStyle()\n",
+        "      for (key, value) in stripStyle(focusedHere):\n        r.setStyle(strip, key, value)\n",
+        "      discard stripStyle(focusedHere)\n",
         G_STRIPS,
         "GPUI's strip without its own ground"),
 
@@ -766,31 +767,33 @@ ARMS = [
         "GPUI's omnibar column command shows and hides nothing"),
 
     # --- 11. GoldenLayout's drop zones ----------------------------------------
-    Arm("DZ1", INTERACT,
-        "  GoldenLayoutEdgeShare* = 0.25\n",
-        "  GoldenLayoutEdgeShare* = 0.125\n",
+    # PLAT-51 part B: the zones are the shared PORT of GoldenLayout's
+    # hit-testing (`golden_layout_hit`); these arms aim at it.
+    Arm("DZ1", GLHIT,
+        "  GlEdgeShare* = 0.25\n",
+        "  GlEdgeShare* = 0.125\n",
         V2_ZONES,
         "the edge zones an eighth of the body deep, not GoldenLayout's quarter"),
-    Arm("DZ2", INTERACT,
-        "  elif fy <= GoldenLayoutEdgeShare: dzTopEdge\n",
-        "  elif fy <= 0.5: dzTopEdge\n",
+    Arm("DZ2", GLHIT,
+        "  NativeCentreShare* = 1.0 / 3.0\n",
+        "  NativeCentreShare* = 0.0\n",
         V2_ZONES,
-        "the upper half of the middle splits on top: no centre to join"),
-    Arm("DZ3", INTERACT,
-        "  tabWidth > 0 and 2 * dx + 1 > tabWidth\n",
-        "  false\n",
+        "no centre to join: the middle splits top / bottom"),
+    Arm("DZ3", GLHIT,
+        "  if x < halfX: tabIndex\n",
+        "  if true: tabIndex\n",
         V2_HALVES,
         "a drop on a tab's right half still inserts before it"),
     Arm("DZ4", BINDING,
-        "                     zone: goldenLayoutZone(col - area.col, row - area.row,\n                                            area.width, area.height)))",
-        "                     zone: goldenLayoutZone(col - area.col, row - area.row,\n                                            area.height, area.width)))",
+        "                     content: pxOf(CellArea(col: box.col, row: box.row + 1,\n                                            width: box.width,\n                                            height: max(0, box.height - 1)),\n",
+        "                     content: pxOf(CellArea(col: box.col, row: box.row + 1,\n                                            width: max(0, box.height - 1),\n                                            height: box.width),\n",
         S2_SWEEP,
         "the terminal measures the zones against the body's transposed extent"),
     Arm("DZ5", BINDING,
-        "              slot = at + 1\n",
-        "              slot = at\n",
+        "        st.tabs.add pxOf(CellArea(col: box.col + span.startCol, row: box.row,\n",
+        "        st.tabs.add pxOf(CellArea(col: box.col + span.startCol + span.width div 2, row: box.row,\n",
         S2_HALVES,
-        "the terminal's tab right half inserts before the tab"),
+        "the terminal's tabs measured half a tab right: a right half inserts before"),
     Arm("DZ6", BINDING,
         "    if region.area.row == bounds.row and bounds.height > 1:\n",
         "    if false:\n",
@@ -802,15 +805,15 @@ ARMS = [
         S2_HALVES,
         "a click on a tab activates its neighbour"),
     Arm("DZ8", WINGEOM,
-        "                     zone: goldenLayoutZone(x - b.x, y - b.y, b.w, b.h)))",
-        "                     zone: goldenLayoutZone(x - b.x, y - b.y, b.h, b.w)))",
+        "                     content: glOf(n.body))\n",
+        "                     content: glOf(PxRect(x: n.body.x, y: n.body.y, w: n.body.h, h: n.body.w)))\n",
         G2_ZONES,
         "GPUI measures the zones against the body's transposed extent"),
     Arm("DZ9", WINGEOM,
-        "        let slot = if goldenLayoutInsertsAfter(x - r.x, r.w): t + 1 else: t\n",
-        "        let slot = t\n",
+        "      st.tabs.add glOf(t)\n",
+        "      st.tabs.add glOf(PxRect(x: t.x + t.w div 2, y: t.y, w: t.w, h: t.h))\n",
         G2_ZONES,
-        "GPUI's tab right half inserts before the tab"),
+        "GPUI's tabs measured half a tab right: a right half inserts before"),
 
     # --- 9. the footer's auto-hide panels -------------------------------------
     Arm("FT1", BINDING,
@@ -962,19 +965,25 @@ ARMS = [
         "the file info names no language"),
 
     # --- review: GoldenLayout's ground bands split the whole layout ----------
-    Arm("RB1", INTERACT,
-        "  GoldenLayoutRootBandPx* = 50\n",
-        "  GoldenLayoutRootBandPx* = 25\n",
+    Arm("RB1", GLHIT,
+        "  GlSideAreaPx* = 50.0\n",
+        "  GlSideAreaPx* = 25.0\n",
         V3_BAND,
         "the ground band half as deep as GoldenLayout's"),
     Arm("RB2", BINDING,
-        "  let band = geom.rootBandAt(row, col)\n  if band.found:\n",
-        "  let band = geom.rootBandAt(row, col)\n  if false:\n",
+        "    ground: pxOf(geom.inner, cw, ch),\n",
+        "    ground: pxOf(CellArea(), cw, ch),\n",
         S3_EDGE,
         "the terminal has no ground band: an edge drop splits a pane"),
-    Arm("RB3", BINDING,
-        "      if onHeader: surfacePx(a.width, 1)\n",
-        "      if onHeader: surfacePx(a.width, a.height)\n",
+    Arm("RB10", BINDING,
+        "    ground: pxOf(geom.inner, cw, ch),\n",
+        "    ground: pxOf(CellArea(), cw, ch),\n",
+        P3_EDGE,
+        "the shipped binary has no ground band: a drag to the layout's right "
+        "edge splits the pane there"),
+    Arm("RB3", GLHIT,
+        "                      surface: s.header.surfaceOf)\n",
+        "                      surface: s.element.surfaceOf)\n",
         S3_EDGE,
         "a stack's header loses to the band (getArea's smallest-area rule)"),
     Arm("RB4", LAYMODEL,
@@ -988,8 +997,8 @@ ARMS = [
         V3_JOIN,
         "the newcomer takes a whole share, not half the end sibling's"),
     Arm("RB6", WINGEOM,
-        "  if bandSurface < high(int):\n",
-        "  if false:\n",
+        "    result.geom.rootIsStack = g.nodes[g.root].kind == gnTabs\n",
+        "    result.geom.rootIsStack = true\n",
         G2_ZONES,
         "GPUI has no ground band"),
     Arm("RB7", INTERACT,
@@ -998,9 +1007,9 @@ ARMS = [
         V3_ROOTDROP,
         "a drop on the right band puts the pane on the left"),
     Arm("RB9", BINDING,
-        "  of leLeft, leRight: goldenLayoutRootBand(DesktopCellWidthPx)\n",
-        "  of leLeft, leRight: goldenLayoutRootBand(DesktopCellWidthPx / 3.0)\n",
-        P3_EDGE,
+        "  for a in glSideAreas(ground):\n",
+        "  for a in glSideAreas(pxOf(geom.inner, m.cellW / 3.0, m.cellH / 3.0)):\n",
+        S3_EDGE,
         "the terminal's band three times GoldenLayout's 50 px: a pane's own "
         "edge zone lost to it"),
     Arm("RB8", LAYMODEL,
@@ -1058,8 +1067,8 @@ ARMS = [
         P3_ADD,
         "a closed tab's engine keeps running"),
     Arm("NT7", GPUIMAIN,
-        "    if gShell.app.activateTab(hit.index):\n      showSession(r, gShell.app.activeSessionId())\n",
-        "    discard gShell.app.activateTab(hit.index)\n",
+        "  discard gShell.app.activateTab(index)\n  showSession(r, gShell.app.activeSessionId())\n",
+        "  discard gShell.app.activateTab(index)\n",
         G3_ADD,
         "GPUI's tab click switches the strip, not the window"),
     Arm("NT8", WINTOP,

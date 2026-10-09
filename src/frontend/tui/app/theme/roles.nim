@@ -122,6 +122,13 @@ type
     srTabBar = "tab-bar"
     srTabActive = "tab-active"
     srTabInactive = "tab-inactive"
+    srTabBarFocused = "tab-bar-focused"
+      ## PLAT-51 (Native-Front-End-Parity.md §2): the FOCUSED pane's tab
+      ## strip, filled with the focus colour the ring uses.
+    srTabActiveFocused = "tab-active-focused"
+      ## …its active tab: the focus ground, the active tab's foreground and
+      ## weight unchanged. (Its other tabs are the strip's own role, as an
+      ## unfocused strip's inactive tabs are its strip's.)
     srSessionTab = "session-tab"
       ## PLAT-49 part B (finding 7): an INACTIVE session tab in the top bar —
       ## a ground of its own, so each session is a separate clickable item
@@ -378,7 +385,18 @@ const
     # saturated blue the desktop uses only for keyboard focus rings, which the
     # user reported as far louder than the desktop. Monochrome keeps bold,
     # the one attribute a divider glyph can carry there.
-    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderPrimary,
+    #
+    # PLAT-51 (the user, 2026-10-05; Native-Front-End-Parity.md §2): SUBTLER.
+    # The ring — and now the focused pane's whole tab strip, which takes the
+    # same colour as its ground — moved one step closer to the surrounding
+    # ground on the design system's border ramp: ui/border/secondary
+    # (#3a3a3a / #bfb8aa) instead of ui/border/primary (#565656 / #aca494).
+    # Measured contrast against the unfocused strip (ui/surface/primary/
+    # default) 1.51 dark / 1.83 light (was 2.35 / 2.29), against the pane
+    # body (ui/surface/base/panel) 1.30 / 1.53 (was 2.01 / 1.92) — non-zero on
+    # every rung (`tests/test_plat51b_parity.nim` re-measures them from the
+    # token table); monochrome keeps bold.
+    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderSecondary,
                             mono = {raBold}),
     # PLAT-50 (the user, 2026-10-02: "the drop-down menu needs its own
     # background ... its borders are invisible"): A DROPDOWN IS FRAMED, as
@@ -419,6 +437,22 @@ const
     # from the pane body (PLAT-49 finding 4), by the desktop's own step.
     srTabInactive: fgbg(dgTab, dtColorsUiTextPrimaryDisabled,
                         dtColorsUiSurfacePrimaryDefault, baseSurface = true),
+    # PLAT-51: THE FOCUSED PANE'S STRIP on the ring's colour
+    # (`srBorderFocused`'s token): every cell of it, tabs included; the
+    # active tab keeps its foreground and weight; the others are in the
+    # subdued body tier, because the disabled tier reads 2.36:1 (dark) /
+    # 2.44:1 (light) on the focus colour, under the chrome floor, where
+    # body-subtle reads 5.5:1 / 6.1:1 and stays apart from the active tab's
+    # headings and bold. In monochrome, and wherever a rung collapses the
+    # ground into the unfocused strip's, the strip is underlined and italic:
+    # not reverse video (the selected tab stays the only reversed tab, PLAT-49)
+    # and not underline alone (the session tab's mark).
+    srTabBarFocused: fgbg(dgTab, dtColorsUiTextPrimaryBodySubtle,
+                          dtColorsUiBorderSecondary,
+                          mono = {raUnderline, raItalic}),
+    srTabActiveFocused: fgbg(dgTab, dtColorsUiTextPrimaryHeadings,
+                             dtColorsUiBorderSecondary, attrs = {raBold},
+                             mono = {raBold, raReverse, raUnderline}),
     # PLAT-49 part B: a session tab off the bar's card (#262626 / #dbd6cc) by
     # one subtle step — ui/surface/primary/default (#1b1b1b / #f8f6f2) —
     # under the caption tier, the desktop's dimmed `.session-tab` text; the
@@ -759,4 +793,3 @@ func dividerLineRole*(choice: DividerChoice): SemanticRole =
   case choice
   of dcStrip: srDividerStrip
   of dcSubtle: srBorderPane
-

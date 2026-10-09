@@ -167,7 +167,7 @@
       # reprobuild revision's own flake.lock and mirror its `runquota-src`.
       # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
       # equality so the two pins cannot silently diverge again.
-      url = "github:metacraft-labs/runquota/4ec72e92aeaf9f6ed5caad9a8043ca703cc9df8c";
+      url = "github:metacraft-labs/runquota/bf799831a1e7898b83765784ef513e05f75135ea";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";

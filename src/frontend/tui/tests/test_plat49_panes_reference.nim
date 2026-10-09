@@ -21,12 +21,12 @@
 ##     click DOCKS (no overlay) and takes `DockedOpenSharePercent` of the
 ##     layout; a second click collapses it;
 ##  11. DROP ZONES — where the desktop's drop indicator lands at the sampled
-##     points is the HALF on the side `goldenLayoutZone` answers, at every
-##     edge sample; at the centre samples the desktop splits top / bottom
-##     and the shared rule JOINS — the one deviation, by the user's
-##     direction, asserted here so it cannot drift silently; the desktop's
-##     header insertion at a tab's left edge is "before", as
-##     `goldenLayoutInsertsAfter` says;
+##     points is the HALF on the side the shared port
+##     (`golden_layout_hit.glStackSegmentAt`) answers, at every edge sample;
+##     at the centre samples the desktop splits top / bottom and the shared
+##     rule JOINS inside its smaller middle — the one deviation, by the
+##     user's direction, asserted here so it cannot drift silently; the
+##     desktop's header insertion at a tab's left edge is "before";
 ##   * finding 7, THE SESSION TABS — the desktop's add control is named
 ##     "New tab", as the terminal's and GPUI's "+" are
 ##     (`session_tabs.NewSessionTabTitle`), and is there with one session;
@@ -41,7 +41,7 @@
 ##     status row and GPUI's footer put the same file info
 ##     (`footer_info.footerFileInfoText`) first and their labels after it;
 ##   * GOLDENLAYOUT'S GROUND BANDS — near the layout's own edge the
-##     indicator is a band of the WHOLE layout, `GoldenLayoutRootBandPx`
+##     indicator is a band of the WHOLE layout, `GlSideAreaPx`
 ##     deep; a drop there makes the event log the root row's last child,
 ##     full height — what `cmdSplitRootMove` makes of the shared default;
 ##   * THE DESKTOP'S CELL — a character of its editor's monospace and its
@@ -75,7 +75,7 @@ from ../../gpui/app/leaves import CallArgsColour, CallReturnColour
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 144
+const ExpectedAssertions = 142
 
 var countedAssertions = 0
 
@@ -213,29 +213,41 @@ suite "PLAT-49 part B: the desktop is the reference":
         if abs(h - 0.5) < 0.05 and abs(w - 1.0) < 0.05:
           return (if y < 0.25: "top" else: "bottom")
         "other"
-      proc shared(fx, fy: float): DropZone =
-        goldenLayoutZone(int(fx * 1000), int(fy * 1000), 1000, 1000)
-      for (name, fx, fy, side, zone) in [
-          ("left", 0.1, 0.5, "left", dzLeftEdge),
-          ("left-top", 0.2, 0.1, "left", dzLeftEdge),
-          ("right-bottom", 0.8, 0.9, "right", dzRightEdge),
-          ("top", 0.5, 0.1, "top", dzTopEdge),
-          ("bottom", 0.5, 0.9, "bottom", dzBottomEdge)]:
+      proc shared(fx, fy: float): GlSegment =
+        # PLAT-51: the shared port (`golden_layout_hit`) over a 1000 x 1000
+        # stack body, with the product's smaller middle.
+        let st = GlStack(element: glRect(0, -30, 1000, 1030),
+                         header: glRect(0, -30, 1000, 30),
+                         content: glRect(0, 0, 1000, 1000),
+                         tabs: @[glRect(0, -30, 100, 30)])
+        glStackSegmentAt(st, fx * 1000, fy * 1000, NativeCentreShare)
+      for (name, fx, fy, side, seg) in [
+          ("left", 0.1, 0.5, "left", segLeft),
+          ("left-top", 0.2, 0.1, "left", segLeft),
+          ("right-bottom", 0.8, 0.9, "right", segRight),
+          ("top", 0.5, 0.1, "top", segTop),
+          ("bottom", 0.5, 0.9, "bottom", segBottom)]:
         checkpoint(name & ": desktop " & half(name))
         ck half(name) == side
-        ck shared(fx, fy) == zone
+        ck shared(fx, fy) == seg
       # THE DEVIATION, BY THE USER'S DIRECTION: GoldenLayout has no centre on
       # a stack's body — its middle splits top or bottom — and the shared
-      # rule joins there ("the centre joins the stack").
+      # rule joins in the SMALLER middle (the centred third, PLAT-51);
+      # outside it the shared rule is GoldenLayout's own split.
+      var joined = 0
       for (name, fx, fy) in [("top-mid", 0.5, 0.4), ("centre-left", 0.3, 0.45),
                              ("centre-right", 0.7, 0.55),
                              ("bottom-mid", 0.5, 0.6)]:
         ck half(name) in ["top", "bottom"]
-        ck shared(fx, fy) == dzCentre
+        let ours = shared(fx, fy)
+        if ours == segCentre:
+          inc joined
+        else:
+          ck $ours == half(name)
+      ck joined == 2
       # A tab's left edge: GoldenLayout's placeholder goes BEFORE it.
       ck z["headerPlaceholderIndex"].getInt == 0
-      ck not goldenLayoutInsertsAfter(4, 100)
-      ck GoldenLayoutEdgeShare == 0.25
+      ck GlEdgeShare == 0.25
 
     test "the desktop's session tabs: named add, a close each, separate items":
       let t = a["sessionTabs"]
@@ -289,7 +301,7 @@ suite "PLAT-49 part B review: the desktop's footer order, ground bands, cell, co
       ck band["right"].kind == JObject
       let right = band["right"]
       checkpoint("desktop right band " & $right & " in " & $lay)
-      ck abs(right["w"].getInt - GoldenLayoutRootBandPx) <= 2
+      ck abs(right["w"].getInt - GlSideAreaPx.int) <= 2
       ck abs(right["h"].getInt - lay["h"].getInt) <= 2
       ck abs(right["x"].getInt + right["w"].getInt -
              (lay["x"].getInt + lay["w"].getInt)) <= 2

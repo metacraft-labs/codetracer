@@ -56,6 +56,9 @@ import std/[monotimes, os, osproc, posix, strutils, times]
 
 import ./capabilities
 import ./terminal_driver
+import ../app/input/mouse
+
+export mouse
 
 export capabilities
 
@@ -69,6 +72,11 @@ const
   DecrqssQuery* = "\x1bP$qm\x1b\\"
   SgrReset* = "\x1b[m"
   Da1Query* = "\x1b[c"
+  PixelMouseQuery* = "\x1b[?1016$p"
+    ## PLAT-51: DECRQM for SGR-pixel mouse reporting (DECSET 1016). The
+    ## answer is `CSI ? 1016 ; Ps $ y` — Ps 1 / 2 / 3 recognised, 0 / 4 not.
+  CellSizeQuery* = "\x1b[16t"
+    ## PLAT-51: the cell's size in pixels — `CSI 6 ; height ; width t`.
   StartupQueries* = Osc11Query & XtGetTcapQuery & DecrqssProbeSgr &
                     DecrqssQuery & SgrReset & Da1Query
     ## The whole round, written in ONE `write(2)` so a terminal answers it as
@@ -100,12 +108,20 @@ proc startupProbeTimeoutMs*(): int =
 proc isDa1Reply*(token: string): bool =
   token.len >= 4 and token.startsWith("\x1b[?") and token[^1] == 'c'
 
+proc isPixelMouseReply*(token: string): bool =
+  token.startsWith("\x1b[?1016;") and token.endsWith("$y")
+
+proc isCellSizeReply*(token: string): bool =
+  token.startsWith("\x1b[6;") and token.endsWith("t")
+
 proc isReplyToken*(token: string): bool =
   ## Whether an input token is a terminal's ANSWER rather than a key: an OSC,
-  ## DCS or APC string, or a DA1 report. No key produces any of these.
+  ## DCS or APC string, a DA1 report, or (PLAT-51) a DECRQM answer for 1016
+  ## or a cell-size report. No key produces any of these.
   if token.len < 2 or token[0] != '\x1b':
     return false
-  token[1] in {']', 'P', '_'} or isDa1Reply(token)
+  token[1] in {']', 'P', '_'} or isDa1Reply(token) or
+    isPixelMouseReply(token) or isCellSizeReply(token)
 
 proc decodeHex(s: string): string =
   result = ""
@@ -124,6 +140,28 @@ proc noteReply*(probe: var TerminalProbe; token: string): bool =
   probe.attempted = true
   if isDa1Reply(token):
     probe.answered = true
+    return true
+  if isPixelMouseReply(token):
+    # `CSI ? 1016 ; Ps $ y`: 1 set, 2 reset, 3 permanently set — the mode is
+    # known; 0 not recognised, 4 permanently reset.
+    probe.pixelMouseAnswered = true
+    let body = token["\x1b[?1016;".len ..< token.len - 2]
+    try:
+      probe.pixelMouse = parseInt(body) in {1, 2, 3}
+    except ValueError:
+      probe.pixelMouse = false
+    return true
+  if isCellSizeReply(token):
+    let parts = token["\x1b[6;".len ..< token.len - 1].split(';')
+    if parts.len == 2:
+      try:
+        let h = parseInt(parts[0])
+        let w = parseInt(parts[1])
+        if h > 0 and w > 0:
+          probe.cellHeightPx = h
+          probe.cellWidthPx = w
+      except ValueError:
+        discard
     return true
   if token.startsWith("\x1b]11;"):
     let (ok, rgb) = parseOsc11Reply(token)
@@ -208,6 +246,11 @@ proc queriesFor*(flags: CapabilityFlags): string =
                      flags.forceTrueColor
   if not depthDecided and flags.palette != pkTerminal:
     result.add XtGetTcapQuery & DecrqssProbeSgr & DecrqssQuery & SgrReset
+  # PLAT-51: whether the mouse can report PIXELS (1016) and how big a cell
+  # is — GoldenLayout's drop zones are decided in pixels (Layout-ViewModel
+  # §4.2.2). Not asked under `--no-mouse`.
+  if not flags.noMouse:
+    result.add PixelMouseQuery & CellSizeQuery
   result.add Da1Query
 
 proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;
@@ -318,3 +361,17 @@ proc switchTheme*(n: StartupNegotiation; d: TerminalDriver;
   n.caps = next
   d.adoptCapabilities(next)
   true
+
+proc mouseMetricsOf*(probe: TerminalProbe; mouseOn: bool): MouseMetrics =
+  ## PLAT-51: how this terminal's mouse reports map to pixels. SGR-pixel
+  ## (1016) only when the terminal recognises the mode AND said how big a cell
+  ## is (without it a pixel could not be put back into its cell); else cells,
+  ## mapped to their centres through the measured cell size — or the
+  ## desktop's when the terminal did not say.
+  result = MouseMetrics(pixels: false, cellW: DesktopCellWidthPx,
+                        cellH: DesktopCellHeightPx, measured: false)
+  if probe.cellWidthPx > 0 and probe.cellHeightPx > 0:
+    result.cellW = float(probe.cellWidthPx)
+    result.cellH = float(probe.cellHeightPx)
+    result.measured = true
+  result.pixels = mouseOn and probe.pixelMouse and result.measured

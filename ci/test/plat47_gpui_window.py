@@ -84,7 +84,11 @@ SETTLE_MAX_S = 150
 # construction, so they are the DESKTOP's measured values instead
 # (`src/tests/visual/answers/plat47-desktop-parity.electron.json`), loaded
 # in `record`.
-FOCUS_RING = (0x56, 0x56, 0x56)
+# PLAT-51 (the user: the focus contrast SUBTLER): the native front-ends'
+# focus colour is no longer the desktop's measured outline (#565656) but one
+# step down the design system's border ramp, ui/border/secondary — a
+# declared deviation (Native-Front-End-Parity.md §2), so it is named here.
+FOCUS_RING = (0x3a, 0x3a, 0x3a)
 
 
 # ---------------------------------------------------------------------------

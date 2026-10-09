@@ -2610,7 +2610,7 @@ mod tests {
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("non_mcr.ct");
-        write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", b"placeholder")]).unwrap();
+        write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("steps.dat", b"placeholder")]).unwrap();
         let bytes = std::fs::read(&ct_path).unwrap();
 
         let err = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect_err("non-MCR CTFS must be rejected");

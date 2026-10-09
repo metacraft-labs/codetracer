@@ -83,6 +83,8 @@ import ./replay_ops
 import ./layout_memory
 import ./window_geometry
 import ./window_gestures
+import ./welcome_leaf
+import headless_app/welcome_tabs
 import ./window_top_bar
 import ./window_clicks
 import ./list_scrubber
@@ -102,6 +104,8 @@ import ./app/pane_names
 import ./app/edit_arm
 import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
 import ../viewmodel/host/keymap_preference
+import ../viewmodel/host/layout_preferences
+import ../viewmodel/host/native_state
 import ./host/gpui_host
 import ./host/pixel_capture             # PLAT-35: `--pixels-out`'s capture
 import headless_app/auto_hide_hover
@@ -156,8 +160,10 @@ OPTIONS:
                       menu:<title>  control:<id> (the pointer rests on it)
                       label:<pane> (its strip label)  pin:<pane>  unpin
                       drag:<pane>:top (its tab to the top margin)
-                      hold:<pane>:<over> (its tab dragged over another
-                      pane's centre, not released)
+                      hold:<pane>:<over>[:left|:strip|:outer-right] (its
+                      tab dragged over another pane's centre — or its left
+                      quarter, its first tab, or the layout's right edge —
+                      not released)
                       hwheel:<pane>:<columns> (PLAT35-F3: a horizontal
                       wheel over a pane's centre, the delta in editor
                       columns; the editor scrolls, clamped to its content)
@@ -235,6 +241,13 @@ OPTIONS:
   --no-flow-overlay
                     Open with the flow overlay hidden (it is shown by default,
                     as `flow.enabled: true` ships).
+  --focus-highlight=on|off
+                    PLAT-51. The focused pane's tab strip and outline in the
+                    focus colour (default on; the omnibox's "Focus
+                    highlight" commands remember a choice).
+  --live-resize=on|off
+                    PLAT-51. Panes reflow while a divider is dragged (default
+                    on); off draws a guide and reflows on release.
   --frame-report=<path>
                     PLAT-42. After the window's loop returns, write the
                     frame-timing record: every frame's RENDER-PATH time (the
@@ -380,6 +393,11 @@ type
       ## reads the window's arrangement out of it (the GPUI front-end's OWN
       ## output) rather than out of the model.
     noFlowOverlay: bool
+    focusHighlight: SettingOverride
+      ## PLAT-51: `--focus-highlight=on|off` for this window, beating the
+      ## remembered preference (`gpui-preferences`).
+    liveResize: SettingOverride
+      ## PLAT-51: `--live-resize=on|off`, likewise.
     subtleDividers: bool
       ## PLAT-50. `--dividers=subtle`: a 1px ui/border/secondary line in the
       ## vertical gaps between panes; `strip` (the default) leaves the gaps
@@ -462,8 +480,9 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "tab-add", "hwheel", "click", "ctx", "label-menu",
                        # PLAT-52: the Terminal Output pane's events.
                        "term",
-                       # PLAT-51: a list pane's scrollbar scrubber.
-                       "scrub"]:
+                       # PLAT-51: a list pane's scrollbar scrubber, and
+                       # text typed key by key (a Welcome Screen's form).
+                       "scrub", "type"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -500,6 +519,15 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
           message: "codetracer-gpui: --replay-ops: " & e.msg)
     elif arg == "--no-flow-overlay":
       result.noFlowOverlay = true
+    elif parseSettingFlag(arg).isFlag:
+      # PLAT-51: the two layout preferences, for this window.
+      let flag = parseSettingFlag(arg)
+      if not flag.ok:
+        return GpuiCommand(kind: gckUsageError,
+                           message: "codetracer-gpui: " & flag.message)
+      case flag.setting
+      of lsFocusHighlight: result.focusHighlight = flag.value
+      of lsLiveResize: result.liveResize = flag.value
     elif arg.startsWith("--dividers="):
       case arg["--dividers=".len .. ^1]
       of "strip": result.subtleDividers = false
@@ -787,6 +815,13 @@ var editArmed = false
 
 proc drawArrangement(r: GpuiRenderer): bool
 
+proc shownWelcome(): NativeWelcome
+  ## PLAT-51: forward-declared; defined with the welcome tabs.
+proc drawWelcome(r: GpuiRenderer): GpuiElement
+proc folderShown(): bool
+proc welcomeKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
+proc welcomePress(r: GpuiRenderer; x, y: int): bool
+
 var
   gAutoHide = initAutoHideHover()
     ## PLAT-49 part B: the pointer's timing over the auto-hide labels.
@@ -971,10 +1006,43 @@ var
     ## PLAT-51: how many event-log windows the scrubber has read — reported
     ## for the bounded-fetch test.
   gStateResize: tuple[active: bool, startX, startPx: int]
+  gWelcomeTabs = initWelcomeTabs()
+    ## PLAT-51 deliverable 8: the tabs the "+" opened that are not (yet)
+    ## replay sessions — the Welcome Screen, or an Edit-mode folder.
+  gWelcomes: seq[NativeWelcome] = @[]
+    ## Each welcome tab's screen (`viewmodels/native_welcome`), parallel to
+    ## `gWelcomeTabs.tabs`.
+  gWelcomeLayout: WelcomeLayoutPx
+    ## Where the shown Welcome Screen's rows were drawn (the press hit-test).
+  gRecentFolders: seq[string] = @[]
+  gRecordJob: NativeRecordJob = nil
+  gRecordSerial = -1
+  gFolderArms = initTable[int, GpuiEditArm]()
+    ## A folder tab's editing core (`app/edit_arm`), by the tab's serial.
+  gLayoutSettings = defaultLayoutSettings()
+    ## PLAT-51: the focus highlight and live resize for this window — the
+    ## remembered preference, then the flags (`--focus-highlight`,
+    ## `--live-resize`), then the omnibox's commands.
+  gFocusPane = $paneEditor
+    ## PLAT-51: the FOCUSED pane — the one last pressed (the desktop's
+    ## selected panel follows its clicks), the editor until then.
     ## PLAT-51: the Variables pane's column rule held — the name column
     ## follows the pointer until the release (the desktop's column resize).
   gestureTrace = getEnv("CODETRACER_GPUI_GESTURE_TRACE", "") == "1"
     ## One stderr line per gesture step, for a window lane's record.
+
+var
+  gMainShell: GpuiShell = nil
+    ## The replay shell (its sessions, its window) — `gShell` while a session
+    ## or a welcome tab is shown.
+  gEditShell: GpuiShell = nil
+    ## A FOLDER tab's shell: one window on the shared Edit default and no
+    ## session (`GpuiShell.openWindow`'s own "window with no session" state).
+    ## A shell of its own because a pane is in one window of a set at most
+    ## (`wpPaneInTwoWindows`), and the editor is in both arrangements.
+
+proc mainShell(): GpuiShell =
+  if gMainShell.isNil: gShell else: gMainShell
 
 proc drawListScrubbers(r: GpuiRenderer)
   ## PLAT-51: forward-declared for the window's redraws.
@@ -1095,14 +1163,18 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
     # editor, where the window's keys go), invisible around the rest
     # (`chrome.paneOutlineStyle`, PLAT-47 B2).
     let box = r.createElement("div")
-    r.setAttribute(box, "data-ct-focus-frame", $isEditor)
+    # PLAT-51: the focused pane — the one last pressed — when the focus
+    # highlight is on: its outline AND its tab strip in the focus colour.
+    let focusedHere = gLayoutSettings.focusHighlight and
+                      activePane == gFocusPane
+    r.setAttribute(box, "data-ct-focus-frame", $focusedHere)
     r.setStyle(box, "flex-direction", "column")
     r.setStyle(box, "width", $n.rect.w & "px")
     r.setStyle(box, "height", $n.rect.h & "px")
     r.setStyle(box, "background-color",
                if isEditor: EditorGround else: chromeOf(crPaneBackground))
     r.setStyle(box, "rounded", "4px")
-    for (key, value) in paneOutlineStyle(isEditor):
+    for (key, value) in paneOutlineStyle(focusedHere):
       r.setStyle(box, key, value)
     if not n.strip.isEmpty:
       let strip = r.createElement("div")
@@ -1112,15 +1184,29 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
       r.setStyle(strip, "padding-left", $StripInsetPx & "px")
       r.setStyle(strip, "height", $TabStripPx & "px")
       r.setStyle(strip, "items", "center")
-      # PLAT-49: the strip on its own ground, distinct from the pane body.
-      for (key, value) in stripStyle():
+      # PLAT-49: the strip on its own ground, distinct from the pane body —
+      # PLAT-51: the focus colour's, on the focused pane.
+      r.setAttribute(strip, "data-ct-strip-focused", $focusedHere)
+      for (key, value) in stripStyle(focusedHere):
         r.setStyle(strip, key, value)
+      # PLAT-51: GOLDENLAYOUT'S TAB-DROP PLACEHOLDER — during a drag over
+      # this strip, a `GlPlaceholderPx` gap before the tab the drop would
+      # land at; the tabs after it move right, as GoldenLayout's do.
+      let ph = gGestures.placeholderOf()
+      let gapAt = if ph.found and ph.stackPath == n.path: ph.index else: -1
+      proc gapEl(r: GpuiRenderer): GpuiElement =
+        result = r.createElement("div")
+        r.setAttribute(result, "data-ct-tab-placeholder", $gapAt)
+        r.setStyle(result, "width", $int(GlPlaceholderPx) & "px")
+        r.setStyle(result, "flex-shrink", "0")
       # A TAB STRIP SHAPED BY COLOUR AND WEIGHT (PLAT-47), no brackets, no
       # rule — and, by the user's direction (PLAT-49), the selected tab on a
       # background and in a foreground of its own, the others on the strip's.
       # Each tab is exactly as wide as the geometry says, so a click and a
       # drop caret land where the tab is drawn.
       for t, label in n.labels:
+        if t == gapAt:
+          r.appendChild(strip, gapEl(r))
         let tab = r.createElement("div")
         r.setAttribute(tab, "data-ct-tab-active", $(t == n.active))
         # PLAT-50: which pane the tab is, for its right-click menu.
@@ -1131,10 +1217,12 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
         r.setStyle(tab, "padding-left", $TabPadPx & "px")
         r.setStyle(tab, "white-space", "nowrap")
         r.setStyle(tab, "overflow", "hidden")
-        for (key, value) in tabStyle(t == n.active):
+        for (key, value) in tabStyle(t == n.active, focusedHere):
           r.setStyle(tab, key, value)
         r.appendChild(tab, r.createTextNode(label))
         r.appendChild(strip, tab)
+      if gapAt >= n.labels.len:
+        r.appendChild(strip, gapEl(r))
       r.appendChild(box, strip)
     if not leaf.isNil:
       stylePaneBox(r, leaf, n.body.w, n.body.h)
@@ -1321,7 +1409,9 @@ proc drawOverlay(r: GpuiRenderer) =
   let ind = gGestures.indication()
   let action = DesignTokenHex[dtColorsUiBorderAction][dmDark]
   if ind.kind != diNone:
-    let (tint, caret) = gGeom.dropIndicationRects(ind)
+    let ph = gGestures.placeholderOf()
+    let (tint, caret) = gGeom.dropIndicationRects(
+      ind, (if ph.found: int(GlPlaceholderPx) else: 0))
     if not tint.isEmpty:
       let q = quad(r, tint, action & DropTintAlpha)
       r.setAttribute(q, "data-ct-drop", $ind.kind)
@@ -1330,6 +1420,14 @@ proc drawOverlay(r: GpuiRenderer) =
       let c = quad(r, caret, action & DropCaretAlpha)
       r.setAttribute(c, "data-ct-drop-caret", $ind.slot)
       gOverlay.add c
+  # PLAT-51 (Layout-ViewModel §4.3a): with live resize OFF, the arrangement
+  # stays until the release and a GUIDE shows where the divider would land.
+  if gGestures.kind == gkResize and not gLayoutSettings.liveResize:
+    let guide = gGestures.resizeGuideOf(gGeom)
+    if not guide.isEmpty:
+      let g = quad(r, guide, action & DropCaretAlpha)
+      r.setAttribute(g, "data-ct-resize-guide", "1")
+      gOverlay.add g
   if gGestures.kind == gkDragTab and gGestures.moved:
     # GoldenLayout's drag proxy: the dragged tab's label beside the pointer.
     let label = labelOf($gGestures.source)
@@ -1452,7 +1550,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   ## resize applied (`previewLayout`, the model's own `pendingCommand` and
   ## `apply`) — and draw the gesture's overlay over it. Answers whether an
   ## arrangement was drawn (a refused projection leaves the last one).
-  var layout = gGestures.previewLayout(committedLayout())
+  var layout = gGestures.previewLayout(committedLayout(),
+                                      gLayoutSettings.liveResize)
   # PLAT-50 (K7): a maximised container is drawn alone.
   if gMaximised.isSome:
     layout = maximisedLayout(layout, gMaximised.get)
@@ -1475,6 +1574,10 @@ proc drawArrangement(r: GpuiRenderer): bool =
     r.removeChild(gContainer, gTop)
   gTop = drawWindowBody(r, (if gGestures.revealing: some(gGestures.reveal.pane)
                             else: none(PaneKind)))
+  # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN takes the layout's
+  # place — the panes belong to a session, and this tab has none yet.
+  if not shownWelcome().isNil:
+    gTop = drawWelcome(r)
   r.appendChild(gContainer, gTop)
   # PLAT-52: the Terminal Output pane is laid out from the box it now has.
   drawTerminalPane(r)
@@ -1495,7 +1598,9 @@ proc applyGestureCommand(r: GpuiRenderer; cmd: LayoutCommand) =
     traceGesture("refused " & $cmd & ": " & $applied.problem.kind)
     return
   traceGesture("applied " & $cmd)
-  if gRemember:
+  # PLAT-51: a folder tab's Edit arrangement is never this product's
+  # remembered (Debug) layout.
+  if gRemember and (gMainShell.isNil or gShell == gMainShell):
     let failed = saveGpuiLayoutDocument(gShell.saveWindowLayout(gWindow))
     if failed.len > 0:
       stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
@@ -2028,6 +2133,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-48: the top bar, its popovers and the pin / unpin buttons first.
     if handleTopPress(r, x, y):
       return
+    # PLAT-51: A PRESS FOCUSES THE PANE UNDER IT (the desktop's selected
+    # panel follows its clicks) — whatever the pane then does with the press
+    # (a call row, a scrubber, the terminal output): its strip and outline
+    # take the focus colour when the highlight is on.
+    let pressedPane = gGeom.activePaneAt(x, y)
+    if pressedPane.len > 0 and pressedPane != gFocusPane:
+      gFocusPane = pressedPane
+      traceGesture("focus " & pressedPane)
+      discard drawArrangement(r)
     # PLAT-51: a list pane's scrollbar scrubber BEFORE the pane's rows: the
     # track is drawn over the rows' right edge, and a press on it moves the
     # view — never the debugger, which a press on the call row under it
@@ -2038,6 +2152,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     # PLAT-52: the Terminal Output pane's presses.
     if pressTerminalOutput(r, x, y):
+      return
+    # PLAT-51: a new tab's Welcome Screen owns the body.
+    if welcomePress(r, x, y):
       return
     step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
   of gekPointerMove:
@@ -2115,6 +2232,13 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   else:
     return
   traceGesture(step.status)
+  if step.relayout:
+    # PLAT-51: the drag lifted its pane out (GoldenLayout's drag proxy): the
+    # window is laid out without it, and this sample is decided against
+    # that arrangement.
+    discard drawArrangement(r)
+    step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
+    traceGesture(step.status)
   if step.changed:
     discard drawArrangement(r)
 
@@ -2139,6 +2263,12 @@ proc windowKey(key: string; mods: seq[string]) =
   ## all), then `Esc` cancels a layout gesture.
   var r: GpuiRenderer
   if handleTopKey(r, key, mods):
+    return
+  # PLAT-51: a new tab's Welcome Screen, and a folder tab's editor.
+  if welcomeKey(r, key, mods):
+    return
+  if folderShown() and not openArm.isNil:
+    editKey(key, mods)
     return
   # PLAT-51: the read-only editor's caret, once placed.
   if caretKey(r, key, mods):
@@ -2364,7 +2494,8 @@ proc drawTopBar(r: GpuiRenderer) =
   for e in gTopEls:
     r.removeChild(gRoot, e)
   gTopEls = @[]
-  let tabs = if gShell.isNil: @[] else: gShell.app.tabsOf()
+  let tabs = if gShell.isNil: @[]
+             else: mainShell().app.stripTabsOf(gWelcomeTabs)
   gTopLayout = gpuiTopBarLayout(gMenu, gOmnibar, tabs, pendingViewportWidth,
                                 canAddTab = gSessionsOpened.len > 0)
   # PLAT-50: the band is the desktop's caption bar — the window's own ground
@@ -2854,6 +2985,376 @@ proc closeSessionTab(r: GpuiRenderer; index: int) =
   traceGesture("closed tab " & $id)
   showSession(r, gShell.app.activeSessionId())
 
+# ---------------------------------------------------------------------------
+# PLAT-51 deliverable 8: a new tab's Welcome Screen
+# ---------------------------------------------------------------------------
+
+
+proc shownWelcome(): NativeWelcome =
+  ## The Welcome Screen being shown, or nil.
+  let w = gWelcomeTabs
+  if not w.welcomeShown or w.shownTab.kind != wtkWelcome or
+     w.active >= gWelcomes.len:
+    return nil
+  gWelcomes[w.active]
+
+proc folderShown(): bool =
+  gWelcomeTabs.welcomeShown and gWelcomeTabs.shownTab.kind == wtkFolder
+
+proc drawWelcome(r: GpuiRenderer): GpuiElement =
+  ## The shown Welcome Screen over the layout area, from the shared model's
+  ## rows (`welcome_leaf.welcomeLayoutPx` places them).
+  let w = shownWelcome()
+  let area = gGeom.area
+  let root = absBox(r, area, chromeOf(crPaneBackground))
+  result = root
+  r.setAttribute(root, "data-ct-welcome", "shown")
+  r.setStyle(root, "rounded", "4px")
+  r.setStyle(root, "flex-direction", "column")
+  if w.isNil:
+    return
+  let rows = w.rowsOf()
+  gWelcomeLayout = welcomeLayoutPx(rows, area)
+  let lay = gWelcomeLayout
+  proc place(rect: PxRect; text, colour: string; bg = ""): GpuiElement =
+    let e = r.createElement("div")
+    r.setStyle(e, "position", "absolute")
+    r.setStyle(e, "left", $(rect.x - area.x) & "px")
+    r.setStyle(e, "top", $(rect.y - area.y) & "px")
+    r.setStyle(e, "width", $max(1, rect.w) & "px")
+    r.setStyle(e, "height", $max(1, rect.h) & "px")
+    r.setStyle(e, "items", "center")
+    r.setStyle(e, "white-space", "nowrap")
+    r.setStyle(e, "overflow", "hidden")
+    r.setStyle(e, "color", colour)
+    if bg.len > 0:
+      r.setStyle(e, "background-color", bg)
+    if text.len > 0:
+      r.appendChild(e, r.createTextNode(text))
+    r.appendChild(root, e)
+    e
+  let heading = place(lay.heading, NativeWelcomeHeading,
+                      chromeOf(crPaneTitleForeground))
+  r.setStyle(heading, "justify", "center")
+  r.setStyle(heading, "font-weight", "bold")
+  r.setStyle(heading, "font-size", "20px")
+  var anyFolder, anyTrace = false
+  for row in rows:
+    if row.kind == nwrRecentFolder: anyFolder = true
+    if row.kind == nwrRecentTrace: anyTrace = true
+  for (panel, title, any, empty) in [
+      (lay.foldersPanel, RecentFoldersHeading, anyFolder, RecentFoldersEmpty),
+      (lay.tracesPanel, RecentTracesHeading, anyTrace, RecentTracesEmpty)]:
+    discard place(panel, "", chromeOf(crWindowForeground),
+                  chromeOf(crTabStripBackground))
+    let t = place(PxRect(x: panel.x + 8, y: panel.y + 4, w: panel.w - 16,
+                         h: WelcomeRowPx), title, chromeOf(crPaneTitleForeground))
+    r.setStyle(t, "font-weight", "bold")
+    if not any:
+      discard place(PxRect(x: panel.x + 8, y: panel.y + 4 + WelcomeRowPx,
+                           w: panel.w - 16, h: WelcomeRowPx), empty,
+                    chromeOf(crTabInactiveForeground))
+  for i, row in rows:
+    let rect = lay.rowRects[i]
+    if rect.isEmpty:
+      continue
+    let focused = i == w.focus and w.form == nwfNone
+    let colour =
+      if row.kind == nwrOption and not row.enabled:
+        chromeOf(crTabInactiveForeground)
+      else: chromeOf(crTabActiveForeground)
+    let bg =
+      if focused: chromeOf(crFocusOutline)
+      elif row.kind == nwrOption and row.enabled: chromeOf(crTabActiveBackground)
+      else: ""
+    let text = if row.kind == nwrOption: row.label
+               else: row.label & "   " & row.detail
+    let e = place(rect, text, colour, bg)
+    if row.kind == nwrOption:
+      r.setStyle(e, "justify", "center")
+      r.setStyle(e, "rounded", "4px")
+    else:
+      r.setStyle(e, "padding-left", "6px")
+    r.setAttribute(e, "data-ct-welcome-row", $row.kind & ":" & row.key)
+    r.setAttribute(e, "data-ct-welcome-enabled", $row.enabled)
+    r.setAttribute(e, "data-ct-welcome-focus", $focused)
+  if w.form != nwfNone:
+    let prompt = formPrompt(w.form)
+    let shownText = if w.input.len == 0 and w.placeholder.len > 0:
+                      prompt & w.placeholder
+                    else: prompt & w.input & "▏"
+    let field = place(lay.line, shownText,
+                      chromeOf(crWindowForeground), chromeOf(crInputBackground))
+    r.setAttribute(field, "data-ct-welcome-input", w.input)
+    r.setAttribute(field, "data-ct-welcome-form", $w.form)
+    r.setStyle(field, "padding-left", "6px")
+    if w.message.len > 0:
+      let m = place(PxRect(x: lay.line.x, y: lay.line.y + WelcomeRowPx + 6,
+                           w: lay.line.w, h: WelcomeRowPx), w.message,
+                    chromeOf(crTabActiveForeground))
+      r.setAttribute(m, "data-ct-welcome-message", w.message)
+  elif w.message.len > 0:
+    let m = place(lay.line, w.message, chromeOf(crTabActiveForeground))
+    r.setAttribute(m, "data-ct-welcome-message", w.message)
+  elif w.focus >= 0 and w.focus < rows.len and rows[w.focus].kind == nwrOption and
+       not rows[w.focus].enabled:
+    discard place(lay.line, rows[w.focus].detail,
+                  chromeOf(crTabInactiveForeground))
+
+proc armRecordTick()
+  ## Forward-declared; defined with the shim's tick below.
+
+proc runWelcomeIntent(r: GpuiRenderer; index: int)
+
+proc showFolderTab(r: GpuiRenderer; index: int): string =
+  ## A FOLDER tab shown: the window's Edit default (a shell window of its
+  ## own with no session), its editor writing the folder's first file
+  ## through the editing core (`app/edit_arm`), keys to it — Edit mode over
+  ## the folder, as the terminal's folder tab is.
+  if index < 0 or index >= gWelcomeTabs.tabs.len:
+    return "that tab is gone"
+  let tab = gWelcomeTabs.tabs[index]
+  var arm = gFolderArms.getOrDefault(tab.serial)
+  if arm.isNil:
+    let problem = editProjectProblem(tab.folder)
+    if problem.len > 0:
+      return problem
+    let listing = listProjectFiles(tab.folder)
+    if listing.files.len == 0:
+      return "no source files under " & tab.folder
+    let preference = loadKeymapPreference()
+    arm = newGpuiEditArm(tab.folder, listing.files[0],
+                         readProjectFile(tab.folder, listing.files[0]),
+                         preference.model)
+    gFolderArms[tab.serial] = arm
+  if gMainShell.isNil:
+    gMainShell = gShell
+  if gEditShell.isNil:
+    gEditShell = newGpuiShell(gMainShell.viewport)
+    discard gEditShell.openWindow(WindowId(0),
+                                  initLayout(sharedEditLayout().tree))
+  gWelcomeTabs.active = index
+  gShell = gEditShell
+  gWindow = WindowId(0)
+  var leafSet = gShell.leavesFor(gWindow)
+  attachVcs(leafSet, tab.folder)
+  gLeafSet = leafSet
+  openArm = arm
+  if editViewportRows <= 0:
+    editViewportRows = max(1, editorRowsOf(gGeom))
+  gEditorSurface = arm.surfaceOf(editViewportRows)
+  gEditorTab = editorTabLabel(arm.path, arm.isDirty)
+  # The editor leaf is drawn again for this surface (`adoptNewLeaves`).
+  for id in [$paneEditor, $paneFileTree, $paneVcs]:
+    if gPanes.hasKey(id):
+      let pane = gPanes[id]
+      let parent = r.parentNode(pane)
+      if not parent.isNil:
+        r.removeChild(parent, pane)
+      gPanes.del(id)
+  discard drawArrangement(r)
+  editPane = gPanes.getOrDefault($paneEditor)
+  redrawEditor()
+  drawTopBar(r)
+  traceGesture("folder tab " & tab.folder)
+  ""
+
+proc leaveFolder(r: GpuiRenderer) =
+  ## Back from a folder tab: the replay window and its session's editor.
+  if gMainShell.isNil or gShell == gMainShell:
+    return
+  openArm = nil
+  editPane = nil
+  gShell = gMainShell
+  gWindow = WindowId(0)
+  for id in [$paneEditor, $paneFileTree, $paneVcs]:
+    if gPanes.hasKey(id):
+      let pane = gPanes[id]
+      let parent = r.parentNode(pane)
+      if not parent.isNil:
+        r.removeChild(parent, pane)
+      gPanes.del(id)
+
+proc showWelcomeTab(r: GpuiRenderer; index: int) =
+  if index < 0 or index >= gWelcomeTabs.tabs.len:
+    return
+  if gWelcomeTabs.tabs[index].kind == wtkFolder:
+    let why = showFolderTab(r, index)
+    if why.len > 0:
+      traceGesture("folder refused: " & why)
+    return
+  leaveFolder(r)
+  gWelcomeTabs.active = index
+  traceGesture("welcome tab " & $index)
+  discard drawArrangement(r)
+  drawTopBar(r)
+
+proc showSessionTab(r: GpuiRenderer; index: int) =
+  leaveFolder(r)
+  gWelcomeTabs.active = -1
+  discard gShell.app.activateTab(index)
+  showSession(r, gShell.app.activeSessionId())
+  drawTopBar(r)
+
+proc openWelcomeTab(r: GpuiRenderer) =
+  ## The strip's "+" (Multi-Window-Tab-Management.md rule 3): a new tab
+  ## showing the Welcome Screen, from the shared model.
+  var traces: seq[string] = @[]
+  for e in gRecordings:
+    traces.add e.target
+  leaveFolder(r)
+  discard gWelcomeTabs.addWelcomeTab()
+  gWelcomes.add newNativeWelcome(gRecentFolders, traces)
+  traceGesture("new welcome tab " & $gWelcomeTabs.active)
+  discard drawArrangement(r)
+  drawTopBar(r)
+
+proc closeWelcomeTabAt(r: GpuiRenderer; index: int) =
+  if index < 0 or index >= gWelcomeTabs.tabs.len:
+    return
+  let wasShown = gWelcomeTabs.active == index
+  gWelcomeTabs.closeWelcomeTab(index)
+  if index < gWelcomes.len:
+    gWelcomes.delete(index)
+  if wasShown:
+    leaveFolder(r)
+    showSession(r, gShell.app.activeSessionId())
+  discard drawArrangement(r)
+  drawTopBar(r)
+
+proc runWelcomeIntent(r: GpuiRenderer; index: int) =
+  ## The welcome tab's choice, performed — the tab turns into the session
+  ## it starts (the terminal's `welcomeHost`, the same three flows).
+  if index < 0 or index >= gWelcomes.len:
+    return
+  let w = gWelcomes[index]
+  let intent = w.takeIntent()
+  case intent.kind
+  of niNone:
+    discard
+  of niOpenTrace:
+    let path = absolutePath(intent.path.expandTilde())
+    let problem = traceFolderProblem(path)
+    if problem.len > 0:
+      w.message = path & ": " & problem
+    else:
+      let before = gShell.app.tabsOf().len
+      leaveFolder(r)
+      gWelcomeTabs.active = -1
+      openRecordingInTab(r, path)
+      if gShell.app.tabsOf().len > before:
+        gWelcomeTabs.closeWelcomeTab(index)
+        gWelcomes.delete(index)
+        var known = false
+        for e in gRecordings:
+          if e.target == path: known = true
+        if not known:
+          gRecordings.insert(OmnibarEntry(kind: OmnibarMode.omRecording,
+                                          label: extractFilename(path),
+                                          detail: path.parentDir,
+                                          target: path), 0)
+      else:
+        gWelcomeTabs.active = index
+        w.message = "could not open " & path
+  of niRecord:
+    if not gRecordJob.isNil and not gRecordJob.done:
+      w.message = "a recording is already running: " & gRecordJob.program
+    else:
+      let stamp = now().format("yyyyMMdd-HHmmss")
+      let output = nativeStateRoot() / "recordings" /
+                   (extractFilename(intent.program).changeFileExt("") & "-" &
+                    stamp)
+      gRecordJob = startRecordJob(intent.program, intent.args, output)
+      gRecordSerial = gWelcomeTabs.tabs[index].serial
+      if gRecordJob.done:
+        w.message = gRecordJob.message
+      else:
+        traceGesture("recording " & intent.program & " -> " & output)
+        armRecordTick()
+  of niOpenFolder:
+    let path = absolutePath(intent.path.expandTilde())
+    let problem = editProjectProblem(path)
+    if problem.len > 0:
+      w.message = problem
+    else:
+      gWelcomeTabs.turnIntoFolder(index, path)
+      let at = gRecentFolders.find(path)
+      if at >= 0: gRecentFolders.delete(at)
+      gRecentFolders.insert(path, 0)
+      let why = showFolderTab(r, index)
+      if why.len > 0:
+        w.message = why
+  discard drawArrangement(r)
+  drawTopBar(r)
+
+proc pollWelcomeRecording(r: GpuiRenderer): bool =
+  ## The background `ct record`, once it finishes: its recording opened in
+  ## the tab that asked, or the failure on that tab's screen.
+  if not pollRecordJob(gRecordJob):
+    return false
+  var at = -1
+  for i, t in gWelcomeTabs.tabs:
+    if t.serial == gRecordSerial: at = i
+  if at < 0 or at >= gWelcomes.len:
+    return true
+  if gRecordJob.ok:
+    gWelcomes[at].vm.loadRecentTrace(gRecordJob.outputFolder)
+    let wasActive = gWelcomeTabs.active
+    gWelcomeTabs.active = at
+    runWelcomeIntent(r, at)
+    if gWelcomeTabs.active < 0 and wasActive != at:
+      discard
+  else:
+    gWelcomes[at].message = gRecordJob.message
+    traceGesture(gRecordJob.message)
+    discard drawArrangement(r)
+  true
+
+proc welcomeKeyName(key: string; mods: seq[string]): string =
+  ## A window key in the shared model's names.
+  case key.toLowerAscii
+  of "up", "arrowup": "Up"
+  of "down", "arrowdown": "Down"
+  of "left", "arrowleft": "Left"
+  of "right", "arrowright": "Right"
+  of "tab": (if "shift" in mods: "Shift+Tab" else: "Tab")
+  of "enter", "return": "Enter"
+  of "escape", "esc": "Esc"
+  of "backspace": "Backspace"
+  of "space": "Space"
+  else:
+    if key.len == 1 and "control" notin mods and "ctrl" notin mods: key
+    else: ""
+
+proc welcomeKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
+  ## PLAT-51: a key while a Welcome Screen is shown — its form, the arrows,
+  ## Enter. True when the screen took it.
+  let w = shownWelcome()
+  if w.isNil:
+    return false
+  let name = welcomeKeyName(key, mods)
+  if name.len == 0:
+    return false
+  let folderDefault = getCurrentDir()
+  if not w.applyKey(name, folderDefault):
+    return false
+  runWelcomeIntent(r, gWelcomeTabs.active)
+  discard drawArrangement(r)
+  true
+
+proc welcomePress(r: GpuiRenderer; x, y: int): bool =
+  ## PLAT-51: a press on the shown Welcome Screen. The body is the screen's.
+  let w = shownWelcome()
+  if w.isNil or not gGeom.area.contains(x, y):
+    return false
+  let at = gWelcomeLayout.welcomeRowAtPx(x, y)
+  if at >= 0:
+    w.activate(at, getCurrentDir())
+    traceGesture("welcome row " & $at)
+    runWelcomeIntent(r, gWelcomeTabs.active)
+  discard drawArrangement(r)
+  true
+
 proc performControl(r: GpuiRenderer; id: string) =
   ## A debugger control (or its menu item), through the transport
   ## ViewModel the desktop's toolbar calls (`DebugControlsVM`), then the
@@ -2914,6 +3415,16 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
 
 proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   traceGesture("menu action " & action)
+  # PLAT-51: the omnibox's layout-setting commands — the focus highlight and
+  # live resize, for this window and remembered (`gpui-preferences`).
+  let setting = parseSettingCommandTarget(action)
+  if setting.ok:
+    gLayoutSettings.assign(setting.setting, setting.on)
+    let saved = saveLayoutPreference(lpGpui, setting.setting, setting.on)
+    traceGesture("setting " & describe(setting.setting, setting.on) &
+                 (if saved.len > 0: " (" & saved & ")" else: ""))
+    discard drawArrangement(r)
+    return
   # PLAT-49 part B (finding 14): the omnibar's event-log column commands,
   # over the session's `EventLogVM.columns`, then the event log drawn again.
   let col = parseEventLogColumnCommand(action)
@@ -3221,19 +3732,26 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
       openOmnibar(r)
       return true
   of gtTab:
-    if gShell.app.activateTab(hit.index):
-      showSession(r, gShell.app.activeSessionId())
+    # PLAT-51: a welcome tab (or the folder it became) is shown the same way
+    # a session tab is.
+    let at = mainShell().app.stripTabAt(gWelcomeTabs, hit.index)
+    if at.isWelcome: showWelcomeTab(r, at.welcomeIndex)
+    else: showSessionTab(r, at.sessionIndex)
   of gtTabClose:
     # PLAT-49 part B: the desktop's `.session-tab-close` — closing a tab
     # stops its session (Multi-Window-Tab-Management.md, rule 4).
-    closeSessionTab(r, hit.index)
+    let at = mainShell().app.stripTabAt(gWelcomeTabs, hit.index)
+    if at.isWelcome: closeWelcomeTabAt(r, at.welcomeIndex)
+    else:
+      leaveFolder(r)
+      closeSessionTab(r, at.sessionIndex)
     gHoverTab = -1
   of gtTabAdd:
-    # PLAT-49 part B: the desktop's "New tab" — the omnibar on `:open `,
-    # listing the recordings beside this one; the one chosen (or a typed
-    # path) opens in a new tab (`acceptOmnibar`).
+    # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
+    # desktop's "New tab" opens a tab showing the WELCOME SCREEN. (PLAT-49
+    # part B opened the omnibar on `:open ` here.)
     gHoverTabAdd = false
-    openOmnibar(r, OpenRecordingQuery)
+    openWelcomeTab(r)
     return true
   drawTopBar(r)
   true
@@ -3264,6 +3782,9 @@ proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
 
 proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
+proc recordTick() {.cdecl.}
+const RecordPollMs = 200
+  ## PLAT-51: how often a welcome tab's running `ct record` is polled.
 var gVcsDirectory = ""
   ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
   ## by `vcsTick`; "" when the window has no VCS pane.
@@ -3278,6 +3799,12 @@ proc armHoverTick() =
   ## Wake the loop when the hover machine has something due (a preview, a
   ## dismissal) — the shim's one tick, shared with the VCS refresh.
   let due = gAutoHide.nextDueMs
+  # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
+  # `RecordPollMs`, while it runs.
+  if due < 0 and not gRecordJob.isNil and not gRecordJob.done:
+    gArmedTick = (due: -3'i64, vcs: false)
+    gpui_set_tick(uint32(RecordPollMs), recordTick)
+    return
   let want = (due: due, vcs: due < 0 and gVcsDirectory.len > 0)
   if want == gArmedTick:
     return
@@ -3360,6 +3887,17 @@ proc attachVcs(leafSet: var GpuiLeafSet; directory: string) =
     if leaf.kind == glkBuiltin and leaf.builtin == paneVcs:
       leaf.vm = ViewModel(openGpuiVcs(directory))
       gVcsDirectory = directory
+
+proc armRecordTick() =
+  armHoverTick()
+
+proc recordTick() {.cdecl.} =
+  ## PLAT-51: the welcome tab's recording, polled; when it finishes its
+  ## recording opens in the tab that asked (`pollWelcomeRecording`).
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  discard pollWelcomeRecording(r)
+  armHoverTick()
 
 proc hoverTick() {.cdecl.} =
   ## The hover machine's due moment arrived (`armHoverTick`): run it, then
@@ -4503,6 +5041,12 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # replay window's, its top bar and gestures.
       if openArm.isNil: windowKey(key, mods)
       else: editKey(key, mods)
+    of "type":
+      # PLAT-51: `type:<text>` — each character as its own key, as a user
+      # types it (a new tab's Welcome Screen form: a folder, a program).
+      for ch in op["type:".len .. ^1]:
+        if openArm.isNil: windowKey($ch, @[])
+        else: editKey($ch, @[])
     of "term":
       # PLAT-52: the Terminal Output pane, aimed from the geometry it was
       # drawn with (`terminal_output_leaf.terminalLayout`):
@@ -4770,6 +5314,14 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # has no loop to wait in) and run what fell due.
       gHoverClockOffsetMs += int64(at(1))
       applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
+      # PLAT-51: and a welcome tab's running `ct record` — REALLY waited
+      # for, up to `ms`, polled as the window's tick polls it.
+      if not gRecordJob.isNil and not gRecordJob.done:
+        let deadline = epochTime() + float(at(1)) / 1000.0
+        while epochTime() < deadline:
+          if pollWelcomeRecording(r):
+            break
+          sleep(RecordPollMs)
       return ""
     of "label", "label-menu":
       for st in gGeom.strips:
@@ -4806,7 +5358,22 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       let (sx, sy) =
         if n.tabs.len > 0: centreOf(n.tabs[n.panes.find(parts[1])])
         else: (n.body.x + 40, n.body.y + 12)
-      let (tx, ty) = centreOf(gGeom.nodes[dst].body)
+      # `hold:<pane>:<target>[:left|:strip|:outer-right]` — the target's
+      # middle (a join, PLAT-51: the smaller middle), its left quarter (a
+      # split), the start of its first tab (a header drop), or the layout's
+      # own right edge (GoldenLayout's ground band).
+      let tn = gGeom.nodes[dst]
+      let tb = tn.body
+      let side = if parts.len > 3: parts[3] else: ""
+      let (tx, ty) =
+        case side
+        of "left": (tb.x + tb.w div 8, tb.y + tb.h div 2)
+        of "strip":
+          if tn.tabs.len > 0: (tn.tabs[0].x + 3, tn.tabs[0].y + tn.tabs[0].h div 2)
+          else: (tn.strip.x + 3, tn.strip.y + tn.strip.h div 2)
+        of "outer-right": (gGeom.inner.x + gGeom.inner.w - 10,
+                           tb.y + tb.h div 2)
+        else: centreOf(tb)
       windowPointer(r, gekPointerDown, sx, sy)
       for k in 1 .. 6:
         windowPointer(r, gekPointerMove, sx + (tx - sx) * k div 6,
@@ -4828,7 +5395,7 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     else:
       return "unknown event '" & op & "'"
   except ValueError, IndexDefect:
-    return "malformed event '" & op & "'"
+    return "malformed event '" & op & "': " & getCurrentExceptionMsg()
   ""
 
 proc reportWindowPlan(cmd: GpuiCommand; outcome: LeafRenderOutcome;
@@ -5266,6 +5833,14 @@ proc runOpen(cmd: GpuiCommand): int =
   gSessionsOpened[int(slot.id)] = session
   gRecordings = recordingsBeside(cmd.traceFolder)
   gOpenCmd = cmd
+  # PLAT-51: the remembered layout preferences, then this window's flags.
+  block:
+    let stored = loadLayoutPreferences(lpGpui)
+    if stored.status == lpsRefused:
+      stderr.writeLine("codetracer-gpui: " & stored.message)
+    gLayoutSettings = stored.settings
+    gLayoutSettings.applyOverride(lsFocusHighlight, cmd.focusHighlight)
+    gLayoutSettings.applyOverride(lsLiveResize, cmd.liveResize)
   let windowId = WindowId(0)
   let opened = shell.openWindowForSession(windowId, slot.id)
   if opened.kind == wsRefused:

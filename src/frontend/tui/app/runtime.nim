@@ -51,6 +51,8 @@ import ./theme/degradation
 import ./tui_app
 import ./views/command_line
 import ./views/shell
+import ./views/welcome_view
+import headless_app/welcome_tabs
 import ./views/event_log
 import ./views/vcs_pane
 
@@ -336,6 +338,15 @@ type
       ## shipped binary; nil in a host that does not persist, where nothing
       ## happens. A hook rather than a call, because `app/` may not open a
       ## file.
+    layoutCommits*: int
+      ## PLAT-51: how many layout changes have committed. The host compares
+      ## it across a token to know a committed arrangement may have resized
+      ## a pane — the ONE moment a pane fetches for its new size (Layout-
+      ## ViewModel §4.3a: never mid-drag).
+    savePreference*: proc(name: string; on: bool): string {.closure.}
+      ## PLAT-51: the HOST's write of a layout preference (`:set
+      ## focus-highlight` / `:set live-resize`), "" on success, else why not.
+      ## Nil in a host that keeps no state.
     saveIcons*: proc(mode: IconsMode): string {.closure.}
       ## PLAT-48: the HOST's write of the `icons` setting (`:icons`), "" on
       ## success. Nil in a host that keeps no state.
@@ -558,6 +569,7 @@ proc afterLayoutCommit(rt: TuiRuntime) =
   let slot = rt.app.shell.activeSlot()
   if not slot.isNil:
     slot.layout = rt.app.layoutBinding.layout.clone()
+  inc rt.layoutCommits
   if not rt.layoutCommitted.isNil:
     rt.layoutCommitted(rt)
 
@@ -659,6 +671,26 @@ proc runColumnVerb*(rt: TuiRuntime; verb, arg: string): string =
   rt.app.eventLog.columns = c
   describeColumns(c)
 
+proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
+                         remember = true): string =
+  ## PLAT-51 deliverables 9 and 11: turn the focus highlight or live resize
+  ## on or off for this session and — from a command, not a CLI flag —
+  ## REMEMBER it (`savePreference`, beside the remembered layout). Answers
+  ## the status line's text.
+  case which
+  of lsFocusHighlight:
+    rt.app.focusHighlightOff = not on
+  of lsLiveResize:
+    if not rt.app.layoutBinding.isNil:
+      rt.app.layoutBinding.liveResize = on
+  result = describe(which, on)
+  if remember:
+    let saved =
+      if rt.savePreference.isNil: "not remembered: this session keeps no state"
+      else: rt.savePreference($which, on)
+    if saved.len > 0:
+      result.add " (" & saved & ")"
+
 proc runPromptLine(rt: TuiRuntime; line: string;
                    outcome: var RuntimeOutcome) =
   ## A committed prompt line, through CTUI-10's interpreter.
@@ -675,6 +707,20 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   if line.strip().len == 0:
     rt.note("")
     return
+
+  # PLAT-51: `:set focus-highlight on|off`, `:set live-resize on|off` — the
+  # two layout preferences (`layout_settings.parseSetLine`), remembered. A
+  # separate surface from §4.3 for the reason the layout verbs below give.
+  block:
+    let sl = parseSetLine(line)
+    if sl.isSet:
+      outcome.repaint = true
+      if not sl.ok:
+        rt.note(sl.message)
+      else:
+        rt.note(rt.applyLayoutSetting(sl.setting, sl.on))
+      outcome.detail = rt.app.notification
+      return
 
   # PLAT-48's TWO TOP-BAR VERBS, `:icons` and `:keys`. A separate surface
   # from §4.3 for the reason the layout verbs below give (its sixteen
@@ -2742,6 +2788,138 @@ proc omnibarHit(rt: TuiRuntime; screen: ShellScreen;
   omnibarHitAt(bar, screen.topBarLayout, rt.width, rt.height, event.row,
                event.col)
 
+proc welcomeFolderDefault(rt: TuiRuntime): string =
+  ## What "Open folder" offers first: this process's project root.
+  if rt.app.projectRoot.len > 0: rt.app.projectRoot else: "."
+
+proc runWelcomeIntent*(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## PLAT-51 deliverable 8: the shown welcome tab's choice, handed to the
+  ## host (`welcomeHost`) — which turns the tab into the session it starts.
+  ## A refusal stays on the screen, in its message line.
+  let w = rt.app.shownWelcome()
+  if w.isNil:
+    return
+  let intent = w.takeIntent()
+  if intent.kind == niNone:
+    return
+  outcome.repaint = true
+  if rt.app.welcomeHost.isNil:
+    w.message = "this terminal cannot " & $intent.kind
+    return
+  let why = rt.app.welcomeHost(rt.app.welcomeTabs.active, intent)
+  if why.len > 0:
+    w.message = why
+
+proc setProductMode(rt: TuiRuntime; product: ProductMode;
+                    outcome: var RuntimeOutcome) =
+  ## Bring the session to `product` (Debug or Edit) through the same toggle
+  ## `Ctrl+F5` performs, when it is not there already.
+  if rt.app.modes.product != product:
+    discard rt.applyLocalAction(kaToggleProductMode, outcome)
+
+proc enterProductMode*(rt: TuiRuntime; product: ProductMode) =
+  ## The host's door to `setProductMode` (a welcome tab that became a
+  ## folder arrives in Edit mode); the arrival's own furnishing runs.
+  var o = RuntimeOutcome()
+  if rt.app.modes.product != product:
+    rt.setProductMode(product, o)
+  elif product == pmEdit:
+    discard rt.ensureEditWorkspace()
+
+proc showWelcomeTab*(rt: TuiRuntime; index: int; outcome: var RuntimeOutcome) =
+  ## Show welcome tab `index`: its Welcome Screen, or — a tab that became an
+  ## Edit-mode session over a folder — Edit mode at that folder (the host
+  ## re-roots the workspace when another folder was shown).
+  if index < 0 or index >= rt.app.welcomeTabs.tabs.len:
+    return
+  rt.app.welcomeTabs.active = index
+  outcome.repaint = true
+  let tab = rt.app.welcomeTabs.tabs[index]
+  if tab.kind == wtkFolder and not rt.app.welcomeHost.isNil:
+    let why = rt.app.welcomeHost(index, NativeWelcomeIntent(kind: niOpenFolder,
+                                                            path: tab.folder))
+    if why.len > 0:
+      rt.note(why)
+    rt.setProductMode(pmEdit, outcome)
+
+proc showSessionTab*(rt: TuiRuntime; index: int; outcome: var RuntimeOutcome) =
+  ## Show session tab `index` — the welcome tabs step back, and a session is
+  ## a replay: Debug mode.
+  let wasFolder = rt.app.welcomeTabs.welcomeShown and
+                  rt.app.welcomeTabs.shownTab.kind == wtkFolder
+  rt.app.welcomeTabs.active = -1
+  discard rt.app.shell.activateTab(index)
+  if wasFolder:
+    rt.setProductMode(pmDebug, outcome)
+  outcome.repaint = true
+
+proc openWelcomeTab*(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## The strip's "+" (Multi-Window-Tab-Management.md rule 3): a new tab
+  ## showing the Welcome Screen, from the shared model, with the folders and
+  ## recordings this process knows.
+  var traces: seq[string] = @[]
+  for e in rt.app.recordings:
+    traces.add e.target
+  let wasFolder = rt.app.welcomeTabs.welcomeShown and
+                  rt.app.welcomeTabs.shownTab.kind == wtkFolder
+  discard rt.app.welcomeTabs.addWelcomeTab()
+  rt.app.welcomes.add newNativeWelcome(rt.app.recentFolders, traces)
+  if wasFolder:
+    rt.setProductMode(pmDebug, outcome)
+  rt.note("new tab: open a folder, record a program or open a recording")
+  outcome.repaint = true
+
+proc closeWelcomeTabAt*(rt: TuiRuntime; index: int;
+                        outcome: var RuntimeOutcome) =
+  if index < 0 or index >= rt.app.welcomeTabs.tabs.len:
+    return
+  let wasShownFolder = rt.app.welcomeTabs.active == index and
+                       rt.app.welcomeTabs.tabs[index].kind == wtkFolder
+  rt.app.welcomeTabs.closeWelcomeTab(index)
+  if index < rt.app.welcomes.len:
+    rt.app.welcomes.delete(index)
+  if wasShownFolder:
+    rt.setProductMode(pmDebug, outcome)
+  outcome.repaint = true
+
+proc routeWelcomeKey(rt: TuiRuntime; token: string;
+                     outcome: var RuntimeOutcome): bool =
+  ## PLAT-51: a key while a Welcome Screen is shown. Its form takes every
+  ## printable key; the screen takes the arrows, Tab and Enter; anything else
+  ## (`q`, `:`, the chords) is the terminal's as everywhere.
+  let w = rt.app.shownWelcome()
+  if w.isNil or rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open:
+    return false
+  let name = keyName(token)
+  var key = name
+  if isTextKey(name):
+    key = keyCharacter(name)
+  if w.form == nwfNone and key.len == 1 and key notin [" "]:
+    return false
+  if not w.applyKey(key, rt.welcomeFolderDefault()):
+    return false
+  outcome.repaint = true
+  rt.runWelcomeIntent(outcome)
+  true
+
+proc routeWelcomeMouse(rt: TuiRuntime; event: MouseEvent;
+                       outcome: var RuntimeOutcome): bool =
+  ## PLAT-51: a press on the Welcome Screen's rows — a recent entry opens, an
+  ## option opens its form (or says why it is refused). The body is the
+  ## screen's; nothing under it is a layout gesture.
+  let w = rt.app.shownWelcome()
+  if w.isNil or event.row == 0 or event.row >= rt.height - 1:
+    return false
+  if event.kind != mekPress or event.button != mbLeft:
+    return event.kind != mekMotion
+  let screen = rt.shellScreenOf()
+  let at = screen.welcomeLayout.welcomeRowAt(event.row, event.col)
+  if at >= 0:
+    w.activate(at, rt.welcomeFolderDefault())
+    rt.runWelcomeIntent(outcome)
+  outcome.repaint = true
+  true
+
 proc openOmnibar*(rt: TuiRuntime; query = "") =
   if rt.app.menu.isOpen:
     rt.app.menu.close()
@@ -2790,6 +2968,13 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
 proc runMenuAction*(rt: TuiRuntime; action: string;
                     outcome: var RuntimeOutcome) =
   ## A chosen menu item (or omnibar command), in the terminal's terms.
+  # PLAT-51: the omnibox's layout-setting commands (`:set …` without the
+  # prompt, `omnibar_sources.layoutSettingCommands`).
+  let setting = parseSettingCommandTarget(action)
+  if setting.ok:
+    rt.note(rt.applyLayoutSetting(setting.setting, setting.on))
+    outcome.repaint = true
+    return
   # PLAT-49 part B: the omnibar's event-log column commands
   # (`omnibar_sources.eventLogColumnCommands`), the `:column-*` verbs.
   let col = parseEventLogColumnCommand(action)
@@ -3003,14 +3188,19 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
   ##     closes;
   ##   * a press on the row: `≡` / a folder title opens the menu, a control
   ##     runs its action, the omnibar opens, a tab is activated.
-  let screen = shellScreenOf(rt)
-  let lay = screen.topBarLayout
   let vm = rt.app.menu
   if event.kind == mekRelease:
     if rt.topBarPressConsumed:
       rt.topBarPressConsumed = false
       return true
     return false
+  if event.kind == mekMotion and event.button == mbLeft:
+    # A drag: the binding's. Decided BEFORE the frame is built (PLAT-51): a
+    # live divider drag reports every motion, and a whole screen per report
+    # just to answer "not mine" doubled the cost of each reflowed frame.
+    return false
+  let screen = shellScreenOf(rt)
+  let lay = screen.topBarLayout
   if event.kind == mekMotion:
     if event.button == mbLeft:
       return false   # a drag: the binding's
@@ -3094,7 +3284,8 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     return false
   rt.topBarPressConsumed = true
   outcome.repaint = true
-  let hit = lay.topBarHitAt(event.col, rt.app.shell.tabsOf())
+  let hit = lay.topBarHitAt(event.col, rt.app.shell.stripTabsOf(
+    rt.app.welcomeTabs))
   case hit.kind
   of thMenuButton:
     if vm.isOpen: vm.close() else: vm.open(keyboard = false)
@@ -3112,25 +3303,36 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
       rt.openOmnibar()
   of thTab:
     # A click on a session tab switches to it; the switch is on the screen,
-    # so nothing is echoed (PLAT-49 part B).
-    discard rt.app.shell.activateTab(hit.index)
+    # so nothing is echoed (PLAT-49 part B). PLAT-51: a welcome tab (or a
+    # folder it became) is shown the same way.
+    let at = rt.app.shell.stripTabAt(rt.app.welcomeTabs, hit.index)
+    if at.isWelcome: rt.showWelcomeTab(at.welcomeIndex, outcome)
+    else: rt.showSessionTab(at.sessionIndex, outcome)
   of thTabClose:
     # PLAT-49 part B: the tab's close control — the desktop's
     # `.session-tab-close` (Multi-Window-Tab-Management.md, rule 4: "Closing
     # a tab stops its backend and removes it"). The HOST closes a session it
     # opened — its engine with it (`sessionCloser`).
-    let closed =
-      if not rt.app.sessionCloser.isNil: rt.app.sessionCloser(hit.index)
-      else: rt.app.shell.closeTab(hit.index)
-    if closed:
+    let at = rt.app.shell.stripTabAt(rt.app.welcomeTabs, hit.index)
+    if at.isWelcome:
+      rt.closeWelcomeTabAt(at.welcomeIndex, outcome)
       rt.app.hoveredTab = -1
+    else:
+      let closed =
+        if not rt.app.sessionCloser.isNil: rt.app.sessionCloser(at.sessionIndex)
+        else: rt.app.shell.closeTab(at.sessionIndex)
+      if closed:
+        rt.app.hoveredTab = -1
   of thTabAdd:
-    # PLAT-49 part B: the strip's "+" — the desktop's "New tab" opens an
-    # empty tab whose welcome screen picks the recording; here the omnibar
-    # opens on `:open `, listing the recordings the host can see, and the
-    # one chosen (or a typed path) opens in a new tab (`acceptOmnibar`).
+    # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
+    # strip's "+" opens a new tab showing the WELCOME SCREEN, as the
+    # desktop's does. (PLAT-49 part B opened the omnibar on `:open ` here; a
+    # host with no welcome flow still does.)
     rt.app.hoveredTabAdd = false
-    rt.openOmnibar(OpenRecordingQuery)
+    if not rt.app.welcomeHost.isNil:
+      rt.openWelcomeTab(outcome)
+    else:
+      rt.openOmnibar(OpenRecordingQuery)
   of thTabMore:
     rt.app.tabScroll = max(0, rt.app.tabScroll + hit.index)
   of thNone:
@@ -3217,6 +3419,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         return
       if rt.routeTopBarMouse(event, result):
         return
+      # PLAT-51: a new tab's Welcome Screen owns the body.
+      if rt.routeWelcomeMouse(event, result):
+        return
       if event.kind == mekMotion and event.button != mbLeft:
         return
   if rt.layoutBindingEnabled():
@@ -3238,6 +3443,11 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       result.detail = cancelled.message
       result.repaint = true
       return
+
+  # PLAT-51: a new tab's Welcome Screen takes its keys (its form, the
+  # arrows, Enter); everything else falls through.
+  if rt.routeWelcomeKey(token, result):
+    return
 
   if rt.prompt.open:
     let before = rt.prompt.buffer

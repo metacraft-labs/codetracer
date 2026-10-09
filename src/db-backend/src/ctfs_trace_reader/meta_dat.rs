@@ -200,12 +200,11 @@ pub const FLAG_SUPPORTS_COLUMN_MOTIONS: u16 = 1 << 7;
 
 /// Flag bit 8 — `FLAG_HAS_CALL_STREAM` (M17a/M17b).  When set the container
 /// ships a dedicated, SEEKABLE `calls.dat` call stream (+ its `calls.idx`
-/// companion index) alongside the unified `events.log`, so the call tree can be
-/// read on demand without scanning the step/value events
-/// (`trace-events.md` §"Call Stream (`calls.dat`)").  The bit is purely
-/// additive: a reader that ignores it still reads the unified stream unchanged,
-/// but the db-backend's seekable `CTFSTraceReader` honors it to serve the call
-/// tree from `calls.dat` (see `call_stream_source`).  Must match
+/// companion index), so the call tree can be read on demand without scanning
+/// the step/value events (`trace-events.md` §"Call Stream (`calls.dat`)").
+/// Stream presence is structural: the bit is a hint, and the db-backend's
+/// seekable `CTFSTraceReader` serves the call tree from `calls.dat` when the
+/// file is present (see `call_stream_source`).  Must match
 /// `codetracer_trace_writer::meta_dat::FLAG_HAS_CALL_STREAM` and the canonical
 /// Nim writer's `meta_dat.nim` bit 8.
 pub const FLAG_HAS_CALL_STREAM: u16 = 1 << 8;
@@ -213,14 +212,10 @@ pub const FLAG_HAS_CALL_STREAM: u16 = 1 << 8;
 /// Flag bit 9 — `FLAG_HAS_STEP_STREAM` (M23a).  When set the container ships a
 /// dedicated, SEEKABLE `steps.dat` compact execution stream
 /// (AbsoluteStep/DeltaStep + Raise/Catch/ThreadSwitch, +  its `steps.idx`
-/// companion index) alongside the unified `events.log`, so the step timeline
-/// can be read on demand without scanning the unified stream
-/// (`trace-events.md` §"Execution Stream (`steps.dat`)").  The bit is purely
-/// additive: a reader that ignores it still reads the unified stream unchanged.
-/// The consumer migration (the db-backend reading steps from `steps.dat`) is a
-/// later milestone (M22); for now this reader only needs to RECOGNISE the bit so
-/// a step-split bundle's meta.dat parses cleanly (not rejected as a "newer
-/// writer") and the GUI can still open the trace.  Must match
+/// companion index), so the step timeline can be read on demand
+/// (`trace-events.md` §"Execution Stream (`steps.dat`)").  This parser
+/// RECOGNISES the bit so the meta.dat parses cleanly (not rejected as a "newer
+/// writer"); stream presence itself is structural.  Must match
 /// `codetracer_trace_writer::meta_dat::FLAG_HAS_STEP_STREAM` and the canonical
 /// Nim writer's `meta_dat.nim` bit 9.
 pub const FLAG_HAS_STEP_STREAM: u16 = 1 << 9;
@@ -228,18 +223,14 @@ pub const FLAG_HAS_STEP_STREAM: u16 = 1 << 9;
 /// Flag bit 10 — `FLAG_HAS_VALUE_STREAM` (M23b).  When set the container ships a
 /// dedicated, SEEKABLE `values.dat` parallel value stream (StepValues /
 /// BindVariable / Cell / Assign… per step, + its `values.idx` companion index)
-/// alongside the unified `events.log`.  The value stream is parallel-indexed to
+/// The value stream is parallel-indexed to
 /// the execution stream — value record N ↔ step N, with an empty record for
 /// steps that have no variable activity — so a step's variable values can be
-/// read on demand without scanning the unified stream
-/// (`trace-events.md` §"Value Stream").  The value stream lives in its OWN CTFS
+/// read on demand (`trace-events.md` §"Value Stream").  The value stream lives in its OWN CTFS
 /// file pair (NOT `steps.dat`) because value records are large (50-500B) with
-/// different Zstd chunk sizing than the tiny execution records.  The bit is
-/// purely additive: a reader that ignores it still reads the unified stream
-/// unchanged.  The consumer migration (the db-backend reading values from
-/// `values.dat`) is a later milestone (M22); for now this reader only needs to
-/// RECOGNISE the bit so a value-split bundle's meta.dat parses cleanly (not
-/// rejected as a "newer writer") and the GUI can still open the trace.  Must
+/// different Zstd chunk sizing than the tiny execution records.  This parser
+/// RECOGNISES the bit so the meta.dat parses cleanly (not rejected as a "newer
+/// writer"); stream presence itself is structural.  Must
 /// match `codetracer_trace_writer::meta_dat::FLAG_HAS_VALUE_STREAM` and the
 /// canonical Nim writer's `meta_dat.nim` bit 10.
 pub const FLAG_HAS_VALUE_STREAM: u16 = 1 << 10;
@@ -247,34 +238,24 @@ pub const FLAG_HAS_VALUE_STREAM: u16 = 1 << 10;
 /// Flag bit 11 — `FLAG_HAS_IO_EVENT_STREAM` (M23c).  When set the container
 /// ships a dedicated, SEEKABLE `events.dat` I/O event stream (the
 /// `EventLogKind`-tagged stdout/stderr/file/network/error/log events, + its
-/// `events.idx` companion index) alongside the unified `events.log`.  Each
+/// `events.idx` companion index).  Each
 /// record carries `kind` (u8) / `step_id` (varint cross-reference to the
 /// execution stream) / `metadata` / `content`, so the event-log pane can
-/// paginate it directly without scanning the unified stream
-/// (`trace-events.md` §"IO Event Stream (`events.dat`)").  NOTE the file naming
-/// — the legacy combined stream is `events.log`; this NEW I/O stream is the
-/// distinct `events.dat`.  The bit is purely additive: a reader that ignores it
-/// still reads the unified stream unchanged.  The consumer migration (the
-/// event-log pane reading from `events.dat`) is a later milestone; for now this
-/// reader only needs to RECOGNISE the bit so an io-event-split bundle's meta.dat
-/// parses cleanly (not rejected as a "newer writer") and the GUI can still open
-/// the trace.  Must match
+/// paginate it directly (`trace-events.md` §"IO Event Stream (`events.dat`)").
+/// This parser RECOGNISES the bit so the meta.dat parses cleanly (not rejected
+/// as a "newer writer"); stream presence itself is structural.  Must match
 /// `codetracer_trace_writer::meta_dat::FLAG_HAS_IO_EVENT_STREAM` and the
 /// canonical Nim writer's `meta_dat.nim` bit 11.
 pub const FLAG_HAS_IO_EVENT_STREAM: u16 = 1 << 11;
 
 /// Flag bit 12 — `FLAG_HAS_INTERNING_TABLES` (M23d).  When set the container
 /// ships the binary varint interning tables (`paths.dat`+`paths.off`,
-/// `funcs.dat`+`funcs.off`, `types.dat`+`types.off`, `varnames.dat`+`varnames.off`)
-/// alongside the legacy `events.log` / `paths.json` interning.  These use the
+/// `funcs.dat`+`funcs.off`, `types.dat`+`types.off`, `varnames.dat`+`varnames.off`).
+/// These use the
 /// Variable-Size Record Table (`.dat` + `.off`) pattern — a `.dat` of serialized
 /// records plus a `u64`-LE offset index for O(1) random access by id
-/// (`internal-files.md` §"Interning Tables").  The bit is purely additive: a
-/// reader that ignores it still resolves ids via the legacy interning unchanged.
-/// The consumer migration off the legacy interning is a later milestone; for now
-/// this reader only needs to RECOGNISE the bit so an interning-tables bundle's
-/// meta.dat parses cleanly (not rejected as a "newer writer") and the GUI can
-/// still open the trace.  Must match
+/// (`internal-files.md` §"Interning Tables").  This parser RECOGNISES the bit
+/// so the meta.dat parses cleanly (not rejected as a "newer writer").  Must match
 /// `codetracer_trace_writer::meta_dat::FLAG_HAS_INTERNING_TABLES` and the
 /// canonical Nim writer's `meta_dat.nim` bit 12.
 pub const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;

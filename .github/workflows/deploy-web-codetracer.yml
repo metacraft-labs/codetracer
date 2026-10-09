@@ -284,7 +284,47 @@ jobs:
     # of a redundant deploy is a wasted build, and the cost of a skipped one is
     # a stale product nobody is told about.
     if: always() && needs.freshness.outputs.fresh != 'false'
-    runs-on: [self-hosted, linux, x64]  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
+    # THE LABEL ARRAY IS RIGHT; THE COMMENT THAT USED TO SIT HERE WAS NOT. It
+    # read "CIP-5: nix job (setup-dev-env) → eph-linux-x64", naming an alias
+    # that ACQUIRES NO RUNNER: 0 of 27 sampled jobs naming it were ever
+    # served, 26 were cancelled at the 24-hour awaiting-runner maximum, and
+    # the guidelines say a job naming it "queues forever". The org's runner
+    # list agrees — on 2026-10-10 no online x64 Linux runner carries that
+    # label at all; the only `eph-*` aliases present are `eph-linux-arm64`
+    # and `eph-macos-arm64`, both offline. A pointer to a dead alias in a
+    # comment is how the next person mistakes it for the thing to use.
+    #
+    # WHAT THIS ARRAY SELECTS IS TWO CLASSES AT ONCE, AND THEY ARE NOT
+    # INTERCHANGEABLE FOR THIS JOB. Both match `self-hosted, linux, x64`:
+    #
+    #   gpu-server-00{1,2}-mcl-00{1..4}  also carry `bare-metal` and `nixos`,
+    #       are persistent, and keep a WARM nix store.
+    #   garm-*                           also carry `ephemeral`, `incus`,
+    #       `nested`, and start from a COLD store every time.
+    #
+    # Measured, same commit range, same steps:
+    #
+    #   37955560500  mcl-001 (warm)   `nix develop .#ci` 0s   job 37 min
+    #                                 reached step 30 of 34
+    #   37989873647  garm-… (cold)    `nix develop .#ci` 55m  job 79 min
+    #                                 726 paths from cache.nixos.org plus a
+    #                                 tree-sitter-nim build; died at step 12
+    #
+    # That difference decides whether the rest of the job fits inside the
+    # installation token's 60 minutes, and `ci/test/sibling-provisioning-
+    # test.sh` forbids minting a second one. Adding `bare-metal` (or `nixos`)
+    # to the array above would select only the warm class and is ONE LINE —
+    # it is deliberately NOT done here, because that pool is eight shared
+    # machines on a loaded fleet and no measurement of its queue depth has
+    # been taken. Trading a 401 for a 24-hour queue is precisely the failure
+    # the paragraph above describes, and guessing at it is how `eph-linux-x64`
+    # got written down in the first place. Pull that lever deliberately, with
+    # a queue measurement, not as a reflex.
+    #
+    # The cold path is instead made to WORK: see "Realise the .#ci shell"
+    # below, which removes the last authenticated GitHub fetch from
+    # everything after minute 60.
+    runs-on: [self-hosted, linux, x64]
     environment:
       name: cloud
       url: ${{ steps.deploy.outputs.url }}
@@ -388,7 +428,7 @@ jobs:
             nim-agent-harbor=3753c7267834902c3bd292a42e1c9f770988c003
             nim-agents=3809eba4b658f35939a25b34bd291fa57cd1ce5b
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
-            # locked reprobuild (flake.lock `reprobuild`, 3850ec25) is tested
+            # locked reprobuild (flake.lock `reprobuild`, 9ceb532d) is tested
             # against: its own `.github/sibling-repos` pins
             # `reprobuild-packages=eed38ecc…`. `repro.nim`'s `uses:` names
             # `shellcheck`, which that reprobuild no longer bundles; the
@@ -532,66 +572,55 @@ jobs:
           fi
           echo "$checked sibling(s) have full history ($deepened deepened here)"
 
-      - name: Every tool these steps reach for, before the forty-minute build
-        # WALKING DOWN ONE MISSING TOOL PER FORTY-MINUTE RUN IS HOW THIS DEPLOY
-        # SPENT THREE DAYS, AND THIS STEP IS THE END OF THAT LOOP.
+      - name: Every tool the runner's own PATH must have
+        # ONE SECOND, AND THE FIRST VERSION OF THIS STEP COST FIFTY-FIVE
+        # MINUTES. Both numbers are measured and the difference is the whole
+        # lesson, so it is recorded here rather than summarised.
         #
-        # Two absences, two runs, same family, both discovered at the far end
-        # of a build:
+        # Two tools went missing at the far end of a build on consecutive days:
+        # `shasum` (perl's, absent from these images) in run 37894032724, and
+        # `python3` in run 37955560500, which reached step 30 of 34 and then
+        # exited 127 having published nothing. A precondition is the right
+        # answer to that.
         #
-        #   * run 37894032724 — `shasum` is perl's, the runner images have no
-        #     perl, and four gates printed `sha256 ` and then measured an
-        #     unnamed subject anyway (a `$(...)` whose tool is missing
-        #     manufactures an empty string; `set -e` cannot see it).
-        #   * run 37955560500 — the images have no python either. It reached
-        #     step 30 of 34 with every demo gate green, then
-        #     `line 42: python3: command not found`, exit 127: forty minutes
-        #     spent, nothing published.
+        # THE FIRST ATTEMPT AT IT ALSO ASSERTED THE `.#ci` TOOLS, and declared
+        # `shell: nix develop .#ci --command bash -e {0}` to do so — which
+        # means it realised the entire dev shell before it could assert
+        # anything. Measured in run 37989873647 on a cold ephemeral guest:
         #
-        # Both were two-minute fixes found four hours apart. A tool that is
-        # going to be absent is absent NOW, and the entire cost of knowing
-        # that is this step.
+        #     21:24:50 -> 22:19:34   this step                    54m 44s
+        #     22:19:34 -> 22:20:28   "Allow direnv" after it          54s
         #
-        # THE REPOSITORY ALREADY KNEW. `scripts/sibling-pins.sh:164` says, of
-        # this very runner image, "not always ship python3", and falls back to
-        # the flake-pinned interpreter through Nix. That knowledge sat two
-        # steps above the one that died of it. Which is the argument for a
-        # precondition rather than another fix at another site: the next step
-        # to reach for an absent tool will be written by someone who has not
-        # read that comment either.
+        # 726 store paths from cache.nixos.org and a ten-minute
+        # tree-sitter-nim build. The comment it carried said "a tool that goes
+        # missing costs two minutes instead of forty"; it cost forty, and a
+        # sentence describing a check doing something other than what the
+        # check does is the defect this deploy has now produced five times.
         #
-        # IT CHECKS TWO DIFFERENT PATHS, BECAUSE THIS JOB HAS TWO.
+        # WHAT THAT MEASUREMENT ACTUALLY SHOWS, though, is that the 55 minutes
+        # was RELOCATED and not added: "Allow direnv" below is also
+        # `nix develop .#ci`, and it fell from 55 minutes to 54 seconds
+        # because this step had already paid. Without this step that run would
+        # have spent the same 55 minutes one step later and reached the build
+        # at the same 22:21, with the token dead since 22:03:38 — the identical
+        # 401. The cost is a property of realising `.#ci` on a cold guest, not
+        # of checking for tools.
         #
-        #   (a) THE RUNNER'S OWN PATH — bash, git, nix and the GNU userland.
-        #       The list is every external command the steps that run DIRECTLY
-        #       on the runner reach for, including the ones inside
-        #       `scripts/sibling-pins.sh`, which runs bare twice. It
-        #       deliberately does NOT name python3 or any interpreter: after
-        #       2026-10-09 nothing on this path uses one, and a list that
-        #       asserts more than the steps need is a red run waiting to
-        #       happen for a tool nobody wanted.
-        #   (b) THE `.#ci` DEV SHELL, where every gate and every publish step
-        #       now runs. `nix/shells/ci-base.nix` DECLARES these; this checks
-        #       the declaration is true on this machine, which is a different
-        #       claim and the only one that can fail at 03:00.
+        # So the split below is by COST, not by tidiness: this step asserts
+        # only what costs nothing to ask about, and the `.#ci` half moved into
+        # the step that was already paying for that shell. Nothing is checked
+        # later than it was, and nothing is paid for twice.
         #
-        # Entering `.#ci` here is deliberate twice over: it is the only way to
-        # measure (b) at all, and it realises the shell at ~+10 minutes rather
-        # than inside the build — the same reasoning as the un-shallow step
-        # above.
+        # `ci/lib/require-tools.sh` does the reporting and names EVERY missing
+        # tool rather than the first.
         #
-        # `ci/lib/require-tools.sh` does the reporting, and it names EVERY
-        # missing tool rather than the first, because finding them one CI round
-        # trip at a time is the precise cost this step exists to remove.
-        #
-        # THE LISTS ARE A HAND-MAINTAINED CONTRACT, not a scan of the steps
-        # below. A text scanner over inline `run:` blocks would be a check that
-        # reports confidently and measures approximately — the defect shape
-        # this repository has spent a campaign removing. The rule instead is
-        # one sentence: a command a step invokes on the runner's PATH belongs
-        # in (a), a command it invokes inside `.#ci` belongs in (b), and a step
-        # that needs something in neither list is a step this check was wrong
-        # about.
+        # THE LIST IS WHAT THE STEPS ON THIS PATH REACH FOR, including the
+        # commands inside `scripts/sibling-pins.sh`, which runs bare twice.
+        # Every one of them already ran green in 37955560500, so this is a
+        # list that is known satisfiable rather than a hope. It names NO
+        # interpreter on purpose: nothing on the runner's own PATH uses one any
+        # more, and a precondition that reds the deploy over a tool nobody
+        # wanted is worse than no precondition.
         run: |
           set -euo pipefail
 
@@ -601,72 +630,128 @@ jobs:
           # unset, that script's output is byte-for-byte what the lint stages
           # have always seen.
           CT_REQUIRE_TOOLS_CONTEXT="$(printf '%s\n' \
-            "A tool missing on the RUNNER's own PATH means a step of this job" \
-            "must either move into the .#ci dev shell -- give it" \
+            "A tool missing here means a step of this job must either move" \
+            "into the .#ci dev shell -- give it" \
             "" \
             "    shell: nix develop .#ci --command bash -e {0}" \
             "" \
-            "as five publish steps now do -- or stop reaching for that tool." \
-            "The NixOS runner images carry bash, coreutils, findutils, the GNU" \
-            "userland, curl, git and nix, and NO perl and NO python; the" \
+            "as five publish steps do -- or stop reaching for that tool." \
+            "The NixOS runner images carry bash, coreutils, findutils, the" \
+            "GNU userland, curl, git and nix, and NO perl and NO python; the" \
             "comment at scripts/sibling-pins.sh:164 has said so since before" \
-            "this check existed." \
-            "" \
-            "A tool missing inside .#ci is a shell DECLARATION to fix: add the" \
-            "package to nix/shells/ci-base.nix.")"
+            "this check existed.")"
           export CT_REQUIRE_TOOLS_CONTEXT
 
-          # (a) Reached directly on the runner: `scripts/sibling-pins.sh`
-          # (cut, dirname, head, tr, wc), the un-shallow step above (git),
-          # the bundle verification (wc), the tailwind seed (ls, mkdir) and
-          # the Cloudflare publish (cp, rm, tee, grep, sed, tail).
-          echo "--- (a) the runner's own PATH ---"
+          # `scripts/sibling-pins.sh` (cut, dirname, head, tr, wc), the
+          # un-shallow step above (git), the bundle verification (wc), the
+          # tailwind seed (ls, mkdir) and the Cloudflare publish (cp, rm, tee,
+          # grep, sed, tail).
           bash ci/lib/require-tools.sh \
             bash git nix \
             cp cut dirname grep head ls mkdir rm sed tail tee tr wc
 
-          # (b) Reached inside `.#ci`: the five publish steps that read the
-          # descriptor with python3 and probe the deployment with curl/awk,
-          # plus the gates -- node for the browser probes and the ESM
-          # renderer probe, sha256sum because ci/lib/sha256.sh prefers it and
-          # four gates refuse without it, jq, nim/nimble/cargo/wasm-pack for
-          # the bundle, repro and direnv for the build, and wrangler because
-          # it is what publishes.
-          #
-          # `nargo` is DELIBERATELY ABSENT. It arrives through `ourPkgs.noir`
-          # and the only thing that runs it -- `noir-template-toolchain.sh` --
-          # already refuses by name without it, inside the environment that
-          # actually invokes it. Asserting it from here would be asserting a
-          # binary name this file has not verified, and a precondition that
-          # reds the deploy over a tool nothing on this path needs is worse
-          # than no precondition at all.
-          #
-          # THE LIST IS AN ARRAY RATHER THAN BACKSLASH CONTINUATIONS, and that
-          # is not a style choice. `ci/test/direnv-provenance-test.sh` joins
-          # backslash-continued lines and counts every `nix develop ...
-          # direnv` as a direnv CALL SITE against an exact expected total. With
-          # the tools continued onto the `nix develop` line, the word `direnv`
-          # below -- a string argument, not an invocation -- made that count
-          # 20 where 19 is correct. Bumping the constant would have recorded a
-          # call site that does not exist and sent the next reader looking for
-          # it; keeping the invocation on one line keeps the scanner honest.
-          ci_tools=(bash git curl jq node python3
-            awk cut find grep sed sha256sum sort tr wc xargs
-            cargo direnv nim nimble repro wasm-pack wrangler)
-          echo "--- (b) the .#ci dev shell ---"
-          nix develop .#ci --command bash ci/lib/require-tools.sh "${ci_tools[@]}"
+          echo "the runner's own PATH carries every tool this job asks it for"
 
-          echo "every declared tool resolved on both paths"
-
-      - name: Allow direnv in this checkout and the recorder sibling
-        # build-dist.sh runs `direnv exec <repo> bash build_wasm.sh`, which in
-        # turn runs `direnv exec <recorder> bash ct_emulator/build_wasm_api.sh`.
-        # A fresh clone's .envrc is "blocked" until whitelisted. direnv itself
-        # is provided by the `.#ci` shell (nix/shells/ci-base.nix).
+      - name: Realise the .#ci shell — direnv, the tool contract, repro's compiler
+        # THIS IS THE STEP THAT PAYS FOR `.#ci`, AND EVERYTHING THAT NEEDS
+        # THAT SHELL REALISED IS DONE HERE SO IT IS PAID FOR ONCE.
+        #
+        # It used to be only `direnv allow`. On a warm persistent runner that
+        # took 0 seconds (run 37955560500); on a cold ephemeral guest the same
+        # step is 55 minutes, because `nix develop .#ci` copies ~726 store
+        # paths from cache.nixos.org and builds tree-sitter-nim. That cost is
+        # unavoidable and it is not what this step is FOR — but it is where it
+        # lands, so the two other things that need the shell are folded in
+        # rather than each realising it again somewhere else.
+        #
+        # 1. `direnv allow`, as before. build-dist.sh runs
+        #    `direnv exec <repo> bash build_wasm.sh`, which runs
+        #    `direnv exec <recorder> bash ct_emulator/build_wasm_api.sh`, and a
+        #    fresh clone's .envrc is "blocked" until whitelisted. direnv itself
+        #    comes from the `.#ci` shell (nix/shells/ci-base.nix).
+        #
+        # 2. THE `.#ci` HALF OF THE TOOL CONTRACT. The step above asserts the
+        #    runner's own PATH for a second; this asserts the shell the gates
+        #    and the five publish steps actually run in. ci-base.nix DECLARES
+        #    these — this checks the declaration is true on the machine, which
+        #    is a different claim and the only one that can fail at 03:00. It
+        #    runs here because here the shell is already realised: asserting
+        #    it in its own step cost 55 minutes for nothing.
+        #
+        #    `nargo` is deliberately absent: it arrives through `ourPkgs.noir`
+        #    and `noir-template-toolchain.sh` already refuses by name without
+        #    it, inside the environment that invokes it. Asserting a binary
+        #    name this file has not verified would red the deploy over nothing.
+        #
+        # 3. REPRO'S BOOTSTRAP C COMPILER, RESOLVED WHILE IT IS FREE, which is
+        #    what unblocks the build on a cold guest. `repro exec` compiles its
+        #    recipe with a C compiler, and by default provisions a PINNED one:
+        #
+        #      repro exec: error: could not provision the C compiler that
+        #        compiles the recipe
+        #        route: the pinned nixpkgs gcc (nixpkgs#gcc at addf7cf5…)
+        #        failure: unable to download
+        #          'https://api.github.com/repos/NixOS/nixpkgs/tarball/addf7cf5…'
+        #          HTTP error 401 { "message": "Bad credentials", … }
+        #        remedy: Set REPRO_BOOTSTRAP_CC to the absolute path of a
+        #          working C compiler for this host, or unset it to use the
+        #          pinned bootstrap compiler reprobuild provisions …
+        #
+        #    (run 37989873647, step 12.) NixOS/nixpkgs is PUBLIC and that
+        #    tarball fetch needs no credential at all — it fails only because
+        #    Nix sends `access-tokens = github.com=$GH_TOKEN` and that token
+        #    died 18 minutes earlier. A 401 on a fetch that would succeed
+        #    unauthenticated is a BAD credential being sent, not a missing one.
+        #
+        #    IT CANNOT BE FIXED BY HOISTING, which is the remedy that worked
+        #    for the sibling clones two steps up. On a cold guest the shell
+        #    that provides `repro` is not realised until ~+75 minutes, and the
+        #    installation token dies at +60; `ci/test/sibling-provisioning-
+        #    test.sh` asserts "no job mints more than one installation token",
+        #    so there is no second credential to reach for. The fetch has to
+        #    stop happening, and reprobuild's own documented escape is the way:
+        #    point it at a compiler that is already here. `.#ci` carries gcc
+        #    and clang (ci-base.nix), both already realised by the line above,
+        #    so this costs nothing and removes the last authenticated GitHub
+        #    fetch from everything after this step.
+        #
+        #    IT DOES NOT CHANGE A PUBLISHED BYTE. This compiler builds repro's
+        #    RECIPE, not the product: db_backend_bg.wasm is produced by cargo
+        #    and wasm-pack with the dev shell's own clang
+        #    (`CC_wasm32_unknown_unknown=clang`, src/db-backend/build_wasm.sh).
+        #
+        # Exported through `$GITHUB_ENV` rather than re-derived per step,
+        # because `command -v cc` only answers correctly INSIDE `.#ci` and the
+        # build step runs `repro` from there anyway.
         run: |
+          set -euo pipefail
           nix develop .#ci --command bash -c '
+            set -euo pipefail
+
             direnv allow "$(pwd)"
             direnv allow "$(pwd)/../codetracer-native-recorder"
+
+            ci_tools=(bash git curl jq node python3
+              awk cut find grep sed sha256sum sort tr wc xargs
+              cargo direnv nim nimble repro wasm-pack wrangler)
+            CT_REQUIRE_TOOLS_CONTEXT="A tool missing inside .#ci is a shell DECLARATION to fix: add the package to nix/shells/ci-base.nix." \
+              bash ci/lib/require-tools.sh "${ci_tools[@]}"
+
+            cc_path="$(command -v cc || command -v gcc || true)"
+            if [ -z "$cc_path" ]; then
+              echo "::error::.#ci provides neither cc nor gcc, so repro would fall back" \
+                   "to provisioning the pinned nixpkgs compiler over an authenticated" \
+                   "GitHub fetch -- which 401s once this job passes 60 minutes" >&2
+              exit 1
+            fi
+            "$cc_path" --version >/dev/null 2>&1 || {
+              echo "::error::$cc_path does not answer --version; it is not a working compiler" >&2
+              exit 1
+            }
+            echo "REPRO_BOOTSTRAP_CC=$cc_path" >>"$GITHUB_ENV"
+            echo "repro bootstrap cc: $cc_path"
+
+            echo "the .#ci shell carries every tool this job asks of it"
           '
 
       - name: Resolve ct_emulator nimble dependencies

@@ -624,7 +624,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "6ebbd97262e85563724b7bdd0a293cdbf45762e3",
+        "rev": "a095cfa2bf410572191ccbb33c3c7de7c943cd7f",
         "type": "github"
       },
       "original": {
@@ -699,11 +699,9 @@
         "pre-commit-hooks": "pre-commit-hooks_4"
       },
       "locked": {
-        "lastModified": 1791105020,
-        "narHash": "sha256-c6Z+Oc2hSyREPjeFyPuoj9seC5mnTPNzxhipj2rDRHo=",
         "owner": "metacraft-labs",
         "repo": "codetracer-shell-recorders",
-        "rev": "95583b4fdf98d028b51bb7ea0be3802d2dc219d0",
+        "rev": "b9ee79be515414ccbedc81233498b5267a21033f",
         "type": "github"
       },
       "original": {
@@ -805,11 +803,9 @@
     "codetracer-trace-format-nim": {
       "flake": false,
       "locked": {
-        "lastModified": 1791473481,
-        "narHash": "sha256-+3Q3qbwb2/EiLjzLynPGkXLXMwZBLEV8//KD/OIuAaM=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "051efd22b00ec3b88676fb07755a65c5a4ca8fde",
+        "rev": "7b8b587c72ec31f6825ae124ab89ad7954f6dca7",
         "type": "github"
       },
       "original": {
@@ -4010,7 +4006,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "1e7e50f8e11d8749a173bbc99810df0647a99583",
+        "rev": "0b0476ad55e97f1f96a77367f205fae5fac47a16",
         "type": "github"
       },
       "original": {
@@ -4567,7 +4563,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "5afbfd17817076c9f5d7da9e20ec8a4664c7683e",
+        "rev": "4aa8892844a43ac59d4be74a4f992161b09491fe",
         "type": "github"
       },
       "original": {
@@ -7614,17 +7610,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1791039972,
-        "narHash": "sha256-whxsMfdBQU/jzM3fFCSGrZmJt7iL9OHMSR+J7HVWbqM=",
+        "lastModified": 1791399039,
+        "narHash": "sha256-j1Dog8bWR4IOL2bfnPVivUq/R86+Zrp6ONk9dcf6sWk=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "4ec72e92aeaf9f6ed5caad9a8043ca703cc9df8c",
+        "rev": "bf799831a1e7898b83765784ef513e05f75135ea",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "4ec72e92aeaf9f6ed5caad9a8043ca703cc9df8c",
+        "rev": "bf799831a1e7898b83765784ef513e05f75135ea",
         "type": "github"
       }
     },

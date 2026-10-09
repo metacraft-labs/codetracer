@@ -446,6 +446,14 @@ import viewmodels/[menu_vm, product_menu, omnibar_vm, omnibar_sources,
 export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
        filesystem_vm
 
+# PLAT-51 part B: the native front-ends' Welcome Screen of a new tab
+# (`native_welcome`, over the desktop's `WelcomeScreenVM` and a store that
+# answers nothing) and the layout settings both native products read from
+# their command lines and the omnibox (`layout_settings`, also re-exported by
+# `omnibar_sources`). Plain Nim over the ViewModels above: no renderer, no I/O.
+import viewmodels/[native_welcome, layout_settings]
+export native_welcome, layout_settings
+
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"
     ## The one module name a consumer may import from this SDK. The import

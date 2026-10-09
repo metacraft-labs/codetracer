@@ -20,7 +20,9 @@ import std/[sets, strutils]
 import isonim/core/signals
 
 import ../store/[replay_data_store, types]
-import ./[filesystem_vm, menu_vm, omnibar_vm]
+import ./[filesystem_vm, layout_settings, menu_vm, omnibar_vm]
+
+export layout_settings
 from ./event_log_vm import EventLogColumn, eventLogColumnTitle,
   parseEventLogColumn
 
@@ -115,6 +117,9 @@ proc parseEventLogColumnCommand*(target: string):
     return (false, "", EventLogColumn.low)
   (true, rest[0], col)
 
+proc layoutSettingCommands*(): seq[OmnibarEntry]
+  ## Forward-declared; defined at the end of this module.
+
 proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
                      menu: MenuVM): seq[OmnibarEntry] =
   ## The whole index, in a fixed order (files, symbols, commands — the
@@ -123,3 +128,15 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add symbolsOf(store)
   result.add commandsOf(menu)
   result.add eventLogColumnCommands()
+  result.add layoutSettingCommands()
+
+proc layoutSettingCommands*(): seq[OmnibarEntry] =
+  ## PLAT-51: the two layout preferences as omnibox commands, on and off —
+  ## `:set focus-highlight …` and `:set live-resize …` without the prompt, on
+  ## both native front-ends (`layout_settings`).
+  for which in LayoutSetting:
+    for on in [true, false]:
+      result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                              label: settingCommandLabel(which, on),
+                              detail: ":set " & describe(which, on),
+                              target: settingCommandTarget(which, on))

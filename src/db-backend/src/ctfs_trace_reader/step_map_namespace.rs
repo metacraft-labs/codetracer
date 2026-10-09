@@ -273,7 +273,18 @@ impl StepMapNamespace {
     /// Returns a fully-resident [`StepMapNamespace`] on success, or a
     /// [`StepMapError`] naming what is wrong. Callers treat any error as "no
     /// usable prepopulated table" and fall back to the whole-table build.
+    ///
+    /// The chunks are read as zstd frames, the form a full container and a
+    /// standalone member store them in; [`Self::parse_as`] reads a compact
+    /// container's member.
     pub fn parse(buf: &[u8]) -> Result<Self, StepMapError> {
+        Self::parse_as(buf, codetracer_trace_reader::ChunkForm::Framed)
+    }
+
+    /// [`Self::parse`] over a member whose chunks are stored in `form`: one
+    /// zstd frame per chunk, or the chunk's content as it is (a compact
+    /// container, `ctfs-container.md` §1f).
+    pub fn parse_as(buf: &[u8], form: codetracer_trace_reader::ChunkForm) -> Result<Self, StepMapError> {
         if buf.len() < 6 {
             return Err(StepMapError::TooShort);
         }
@@ -337,7 +348,10 @@ impl StepMapNamespace {
             if end < start {
                 return invalid(format!("chunk {c}'s frame ends before it starts"));
             }
-            let content = inflate_chunk(&buf[start..end], c)?;
+            let content = match form {
+                codetracer_trace_reader::ChunkForm::Framed => inflate_chunk(&buf[start..end], c)?,
+                codetracer_trace_reader::ChunkForm::Stored => buf[start..end].to_vec(),
+            };
             let mut pos = 0usize;
             let (mut path, mut line) = (first_path, 0u64);
             let mut first_record = true;

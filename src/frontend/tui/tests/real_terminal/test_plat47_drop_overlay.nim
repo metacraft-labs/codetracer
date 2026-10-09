@@ -5,23 +5,23 @@
 ## The shipped `codetracer-tui` on the `calc` recording at 200x50, in a real
 ## PTY; the gesture is a real mouse — a press on the Variables tab, motion
 ## reports with the button held (the terminal asks for `?1002`), then a
-## release or `Esc`. For each of the four drop kinds the cells are read back
-## through libvterm and compared with the same screen before the drag:
+## release or `Esc`. PLAT-51: the drag lifts the tab out of its stack
+## (GoldenLayout's drag proxy), so a tint is measured as the DIFFERENCE
+## between two hovers of the same drag, read back through libvterm:
 ##
-##   * SPLIT      — the pointer on the Source pane's right edge band: exactly
-##                  the right HALF of the Source pane is tinted;
-##   * WHOLE PANE — the pointer on the Source pane's body (a bare pane): the
-##                  whole pane is tinted;
-##   * TAB SLOT   — the pointer on the Call Trace stack's tab strip: exactly
-##                  that strip row is tinted (the caret is a cell of it);
-##   * DOCK EDGE  — the pointer above the body: the top strip of the layout.
+##   * SPLIT  — the Source pane's right edge band, then its left quarter:
+##              exactly the two halves' difference changed colour, glyphs
+##              kept;
+##   * JOIN   — the Source pane's centre (the user's smaller middle): the tint
+##              leaves the right half for the pane's tab strip and nothing
+##              else changes;
+##   * GROUND — the layout's right edge: GoldenLayout's 50 px band, the
+##              layout's full height.
 ##
-## In each case: every tinted cell keeps its glyph (except the ghost label's
-## own cells), no cell outside the region changed colour, and the ghost label
-## ` Variables ` is drawn beside the pointer. Releasing performs the indicated
-## command (the status line names it applied; `:undo-layout` puts the
-## arrangement back for the next case); `Esc` cancels and every cell returns
-## to exactly its colour before the drag.
+## The ghost label ` Variables ` is drawn beside the pointer. Releasing
+## performs the indicated command (the status line names it applied;
+## `:undo-layout` puts the arrangement back for the next case); `Esc` cancels
+## and every cell returns to exactly its colour before the drag.
 ##
 ## The expected regions are derived from the screen itself — the dividers
 ## the terminal drew — not from the binding's own geometry, so the test does
@@ -39,7 +39,7 @@ import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 17
+const ExpectedAssertions = 21
 
 const
   Cols = 200
@@ -180,66 +180,86 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     sess.clickTab(1, varCol + 1)
     let base = sess.snap()
 
-    var dragStartStatus = ""
+    var lastStatus = ""
 
     proc startDrag() =
       # PLAT-49: a press only marks the tab; the drag begins once the pointer
       # has moved past the threshold (`binding.DragThresholdCols`), so the
       # press is followed by a motion report three columns along the strip.
-      # The drag is then over the Variables stack's own strip, so the status
-      # line names that drop (`would intoStack(state, …)`) rather than
-      # `dragging`.
+      # PLAT-51: the drag LIFTS the Variables tab out of its stack
+      # (GoldenLayout's drag proxy), so the pointer is then over that stack's
+      # strip with the Scratchpad left in it, and the status line names that
+      # drop.
       sess.mouse(0, 1, varCol + 1, 'M')
       sess.mouse(32, 1, varCol + 4, 'M')
-      dragStartStatus = sess.waitStatus("would intoStack(state")
+      lastStatus = sess.waitStatus("would ")
 
     proc hover(row, col: int): Snapshot =
       sess.mouse(32, row, col, 'M')
-      # The status line already names the drop under the drag's start
-      # (`dragStartStatus`): wait for it to name the NEW target.
+      # Wait for the status line to name the NEW target.
       let deadline = getMonoTime() + initDuration(milliseconds = 20000)
       while getMonoTime() < deadline:
         discard sess.drainOutput(40)
         let st = sess.regionText(StatusRow, 0, Cols, 1)
-        if st.contains("would ") and st != dragStartStatus:
+        if st.contains("would ") and st != lastStatus:
+          lastStatus = st
           break
       sess.snap()
 
+    proc ghostStart(col: int): int = min(col, Cols - 12)
+
     proc ghostAt(s: Snapshot; row, col: int): bool =
-      s.rowText(row).runeSubStr(col + 1, 11) == " Variables "
+      s.rowText(row).runeSubStr(ghostStart(col) + 1, 11) == " Variables "
 
-    proc tintedExactly(s: Snapshot; region: Rect; pointerRow, pointerCol: int):
-        bool =
-      ## Every cell of `region` changed colour and kept its glyph; nothing
-      ## outside `region` changed — apart from the ghost label's own cells.
-      var ghost: HashSet[(int, int)]
-      ghost.init()
+    proc ghostCells(row, col: int): HashSet[(int, int)] =
+      result.init()
       for i in 0 ..< 11:
-        ghost.incl (pointerRow, pointerCol + 1 + i)
-      let changed = changedCells(base, s) - ghost
-      let want = rectCells(region) - ghost
-      var glyphsKept = true
-      for (r, c) in want:
-        if base[r][c].rune != s[r][c].rune:
-          glyphsKept = false
-      if changed != want:
-        checkpoint("changed outside the region: " & $((changed - want).len) &
-                   ", region cells not changed: " & $((want - changed).len))
-      changed == want and glyphsKept
+        result.incl (row, ghostStart(col) + 1 + i)
 
-    # ---- SPLIT: the right edge band of the Source pane -> its right half.
-    startDrag()
-    let splitRow = 20
-    let splitCol = sourceRight - 1
-    let split = hover(splitRow, splitCol)
+    proc glyphsSame(a, b: Snapshot; skip: HashSet[(int, int)]): bool =
+      for r in 0 ..< StatusRow:
+        for c in 0 ..< Cols:
+          if (r, c) notin skip and a[r][c].rune != b[r][c].rune:
+            checkpoint("glyph differs at " & $r & "," & $c)
+            return false
+      true
+
+    proc tintMoved(a, b: Snapshot; want, skip: HashSet[(int, int)]): bool =
+      ## THE TINT, MEASURED AS A DIFFERENCE between two hovers of ONE drag
+      ## (the arrangement the drag draws is the same for both): exactly the
+      ## cells in `want` changed colour, apart from the ghost labels' cells.
+      let changed = changedCells(a, b) - skip
+      let w = want - skip
+      if changed != w:
+        checkpoint("changed but not expected: " & $((changed - w).len) &
+                   ", expected but unchanged: " & $((w - changed).len))
+      changed == w
+
     let half = (source.width + 1) div 2
-    ck tintedExactly(split, Rect(row: source.row,
-                                 col: source.col + source.width - half,
-                                 width: half, height: source.height),
-                     splitRow, splitCol)
-    ck split.ghostAt(splitRow, min(splitCol, Cols - 12))
-    # Release: the split is committed.
-    sess.mouse(0, splitRow, splitCol, 'm')
+    let rightHalf = rectCells(Rect(row: source.row,
+                                   col: source.col + source.width - half,
+                                   width: half, height: source.height))
+    let leftHalf = rectCells(Rect(row: source.row, col: source.col,
+                                  width: half, height: source.height))
+    let splitRow = 20
+    let rightCol = sourceRight - 1
+    let leftCol = source.col + 1
+
+    # ---- SPLIT: the right edge band of the Source pane -> its right half;
+    # the left quarter -> its left half. Between the two hovers EXACTLY the
+    # two halves' difference changed colour, and every glyph stayed.
+    startDrag()
+    let right = hover(splitRow, rightCol)
+    ck lastStatus.contains("would splitAfter(")
+    let left = hover(splitRow, leftCol)
+    ck lastStatus.contains("would splitBefore(")
+    let ghosts = ghostCells(splitRow, rightCol) + ghostCells(splitRow, leftCol)
+    ck tintMoved(right, left, (rightHalf - leftHalf) + (leftHalf - rightHalf),
+                 ghosts)
+    ck glyphsSame(right, left, ghosts)
+    ck right.ghostAt(splitRow, rightCol) and left.ghostAt(splitRow, leftCol)
+    # Release on the right band: the split is committed.
+    sess.mouse(0, splitRow, rightCol, 'm')
     ck sess.waitStatus("applied").contains("split")
     let afterSplit = sess.snap()
     ck afterSplit.dividerCols(2).len > divs.len
@@ -247,39 +267,55 @@ suite "PLAT-47 deliverable 6: the drop indication on a real terminal":
     discard sess.waitStatus("layout undone")
     sess.clickTab(1, varCol + 1)
 
-    # ---- WHOLE PANE: the Source pane's body -> all of it.
+    # ---- THE SMALLER MIDDLE: the Source pane's centre JOINS it — the tint
+    # leaves the right half and goes onto the pane's tab strip, where the
+    # tab would land (GoldenLayout highlights the header for a join).
     startDrag()
-    let midRow = 25
+    let fromRight = hover(splitRow, rightCol)
+    let midRow = source.row + source.height div 2
     let midCol = source.col + source.width div 2
-    let whole = hover(midRow, midCol)
-    ck tintedExactly(whole, source, midRow, midCol)
-    ck whole.ghostAt(midRow, midCol)
+    let mid = hover(midRow, midCol)
+    ck lastStatus.contains("would intoStack(")
+    let midGhosts = ghostCells(splitRow, rightCol) + ghostCells(midRow, midCol)
+    let moved = changedCells(fromRight, mid) - midGhosts
+    var offStrip = 0
+    var onStrip = 0
+    for (r, c) in moved:
+      if r == 1:
+        inc onStrip
+        if c < source.col or c >= source.col + source.width: inc offStrip
+      elif (r, c) notin rightHalf:
+        inc offStrip
+    checkpoint("join: " & $onStrip & " strip cells changed, " & $offStrip &
+               " outside the pane's strip and right half")
+    ck offStrip == 0 and onStrip >= source.width - 1
+    ck ((rightHalf - midGhosts) - moved).len == 0
+    ck mid.ghostAt(midRow, midCol)
     sess.mouse(0, midRow, midCol, 'm')
     ck sess.waitStatus("applied").len > 0
     sess.send(":undo-layout\r")
     discard sess.waitStatus("layout undone")
     sess.clickTab(1, varCol + 1)
 
-    # ---- TAB SLOT: the Call Trace stack's strip -> that strip row.
+    # ---- THE LAYOUT'S OWN EDGE: GoldenLayout's 50 px ground band along the
+    # right edge -> a band of the WHOLE layout's height there.
     startDrag()
-    let slotCol = callTraceCol + 1
-    let slot = hover(1, slotCol)
-    ck tintedExactly(slot, Rect(row: 1, col: callLeft,
-                                width: Cols - callLeft, height: 1),
-                     1, slotCol)
-    sess.mouse(0, 1, slotCol, 'm')
-    ck sess.waitStatus("applied").len > 0
-    sess.send(":undo-layout\r")
-    discard sess.waitStatus("layout undone")
-    sess.clickTab(1, varCol + 1)
-
-    # ---- DOCK EDGE: above the body -> the layout's top strip (row 1).
-    startDrag()
-    let dockCol = 100
-    let dock = hover(0, dockCol)
-    ck tintedExactly(dock, Rect(row: 1, col: 0, width: Cols, height: 1),
-                     0, dockCol)
-    ck dock.ghostAt(0, dockCol)
+    let fromLeft = hover(splitRow, leftCol)
+    let edgeCol = Cols - 2
+    let edge = hover(splitRow, edgeCol)
+    ck lastStatus.contains("would splitRoot(right)")
+    let band = changedCells(fromLeft, edge) - ghostCells(splitRow, leftCol) -
+               ghostCells(splitRow, edgeCol) - leftHalf
+    var bandCols: HashSet[int]
+    bandCols.init()
+    var bandRows: HashSet[int]
+    bandRows.init()
+    for (r, c) in band:
+      bandCols.incl c
+      bandRows.incl r
+    checkpoint("band columns " & $bandCols.len & ", rows " & $bandRows.len)
+    ck bandCols.len >= 4 and bandCols.len <= 6 and Cols - 1 in bandCols
+    ck bandRows.len >= StatusRow - 2
     # ---- ESC cancels: every cell is back to its colour before the drag.
     sess.send("\x1b")
     discard sess.waitStatus("gesture cancelled")

@@ -4,8 +4,7 @@
 //! [`Seek-Based-CTFS-Reader`](../../../../../codetracer-specs/Trace-Files/Seek-Based-CTFS-Reader.md)
 //! §5.6 design calls for: *one* decode pipeline reading the *same* split streams
 //! (`steps.dat` / `values.dat` / `calls.dat` plus their companion `.idx` files)
-//! as the final-file case, parameterised by a [`BlockSource`] plus a follow flag,
-//! instead of the separate legacy `events.log`-tailing `StreamingCtfsReader`.
+//! as the final-file case, parameterised by a [`BlockSource`] plus a follow flag.
 //!
 //! ## Generalised chunk-table-extension core (M1b, §7)
 //!

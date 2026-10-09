@@ -191,7 +191,8 @@ impl SeekableStepStream {
         // did.
         let line_space = super::line_position_space::container_line_space(ctfs).map(Arc::new);
 
-        match StepStreamReader::from_files(&super::structural_presence_meta(), dat, idx)? {
+        let form = ctfs.chunk_form();
+        match StepStreamReader::from_member_as(&super::structural_presence_meta(), dat.into(), &idx, form)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -444,7 +445,8 @@ impl SeekableValueStream {
             .read_file("values.idx")
             .map_err(|e| format!("values.idx missing despite values.dat presence: {e}"))?;
 
-        match ValueStreamReader::from_files(&super::structural_presence_meta(), dat, idx)? {
+        let form = ctfs.chunk_form();
+        match ValueStreamReader::from_member_as(&super::structural_presence_meta(), dat.into(), &idx, form)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -533,7 +535,7 @@ fn open_step_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<StepStream
     let idx = ctfs
         .read_file("steps.idx")
         .map_err(|e| format!("steps.idx missing despite steps.dat presence: {e}"))?;
-    StepStreamReader::from_files(&super::structural_presence_meta(), dat, idx)
+    StepStreamReader::from_member_as(&super::structural_presence_meta(), dat.into(), &idx, ctfs.chunk_form())
 }
 
 fn open_value_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<ValueStreamReader>, String> {
@@ -549,7 +551,7 @@ fn open_value_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<ValueStre
     let idx = ctfs
         .read_file("values.idx")
         .map_err(|e| format!("values.idx missing despite values.dat presence: {e}"))?;
-    ValueStreamReader::from_files(&super::structural_presence_meta(), dat, idx)
+    ValueStreamReader::from_member_as(&super::structural_presence_meta(), dat.into(), &idx, ctfs.chunk_form())
 }
 
 /// Reconstruct the per-step `Vec<FullValueRecord>` (the materialized
@@ -562,8 +564,8 @@ fn open_value_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<ValueStre
 /// production split bundle's cell history is legitimately empty and locals come
 /// entirely from this snapshot (M23e-2; see the module docs and
 /// `tests/ctfs_split_only_full_db_test.rs`). The cell/compound accessors
-/// (`cell_changes_for` / `compound_at`) are only populated on the legacy
-/// `events.log` path. The builder emits at most one `StepValues` per step, but
+/// (`cell_changes_for` / `compound_at`) are only populated by postprocessing a
+/// bare event stream. The builder emits at most one `StepValues` per step, but
 /// we iterate defensively to tolerate any future shape.
 pub fn step_values_to_full_records(events: &[ValueStreamEvent]) -> Vec<FullValueRecord> {
     let mut out = Vec::new();

@@ -19,7 +19,7 @@ import ../window_top_bar
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 87
+const ExpectedAssertions = 88
 
 var countedAssertions = 0
 
@@ -177,9 +177,16 @@ suite "PLAT-48 GPUI: the TOP dock edge":
     # A reveal from it is a third of the tree, against the top.
     let rr = g.revealRectOf(leTop)
     ck rr.y == g.inner.y and rr.h == g.inner.h div 3
-    # The margin above the layout area names the top dock.
+    # PLAT-51: the margin above the layout area is constrained onto the
+    # tree's edge (GoldenLayout's `constrainDragToContainer`) — no drop
+    # docks; docking is the menus' and `:dock`'s, as on the desktop.
     let above = g.pointerAt(g.area.x + 400, g.area.y - 2)
-    ck above.isSome and above.get.zone == dzOutsideTop
+    ck above.isSome and above.get.zone notin {dzOutsideTop, dzOutsideLeft,
+                                             dzOutsideRight, dzOutsideBottom}
+    # Left of the tree, at its middle height: the ground's left band — a
+    # split of the whole layout, not the left dock.
+    let left = g.pointerAt(g.inner.x - 2, g.inner.y + g.inner.h div 2)
+    ck left.isSome and left.get.zone == dzRootLeft
 
   test "a layout document with a TOP-docked pane, written as the terminal writes it, opens":
     var layout = initLayout(sharedDefaultLayout().tree,

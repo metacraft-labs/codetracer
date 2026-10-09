@@ -503,7 +503,12 @@ pub struct SpanStreamReader {
     cached_chunk_idx: Option<usize>,
     /// The cached chunk's raw (still-encoded) records.
     cached_records: Vec<Vec<u8>>,
-    /// TEST SEAM.  Counts zstd frame decompressions performed by this reader.
+    /// How `spans.dat` stores its chunks: one zstd frame each (a full
+    /// container), or the chunk's content as it is (a compact container,
+    /// `ctfs-container.md` §1f).
+    form: codetracer_trace_reader::ChunkForm,
+    /// TEST SEAM.  Counts chunk decodes performed by this reader: zstd frame
+    /// decompressions, or, in a compact container, stored chunks split.
     ///
     /// The whole point of the `spans.idx` cumulative column is that opening a
     /// stream, counting its records and addressing a record all cost ZERO chunk
@@ -558,7 +563,9 @@ impl SpanStreamReader {
         let idx = ctfs
             .read_file(SPANS_INDEX_FILE_NAME)
             .map_err(|e| format!("{SPANS_INDEX_FILE_NAME} missing despite {SPANS_DATA_FILE_NAME} presence: {e}"))?;
-        Ok(Some(SpanStreamReader::from_files(dat, &idx)?))
+        Ok(Some(
+            SpanStreamReader::from_files(dat, &idx)?.with_chunk_form(ctfs.chunk_form()),
+        ))
     }
 
     /// Build a reader from the raw `spans.dat` and `spans.idx` bytes.
@@ -595,6 +602,14 @@ impl SpanStreamReader {
     /// and corruption is never a reason to wait.
     pub fn from_partial_files(dat: Vec<u8>, data_base: u64, idx: &[u8]) -> Result<SpanStreamReader, String> {
         SpanStreamReader::build(dat, data_base, idx, false)
+    }
+
+    /// Read the chunks in `form`. [`Self::from_files`] and
+    /// [`Self::from_partial_files`] read zstd frames, the form of a full
+    /// container; a compact container's chunks are their content.
+    pub fn with_chunk_form(mut self, form: codetracer_trace_reader::ChunkForm) -> Self {
+        self.form = form;
+        self
     }
 
     fn build(
@@ -672,6 +687,7 @@ impl SpanStreamReader {
             cumulative,
             cached_chunk_idx: None,
             cached_records: Vec::new(),
+            form: codetracer_trace_reader::ChunkForm::Framed,
             chunk_decompressions: 0,
         })
     }
@@ -741,7 +757,9 @@ impl SpanStreamReader {
     /// while the container is still being written, `spans.dat` may already hold
     /// the leading bytes of the next, not-yet-sealed chunk.  We ask zstd for the
     /// exact frame length instead, so a tailing read decodes the same bytes a
-    /// finalized read would.
+    /// finalized read would. A stored (compact) chunk is not a frame, and a
+    /// compact container is never written in place, so its last chunk ends
+    /// where `spans.dat` does.
     fn chunk_byte_range(&self, chunk_number: usize) -> Result<(usize, usize), String> {
         if chunk_number >= self.offsets.len() {
             return Err(format!(
@@ -777,6 +795,9 @@ impl SpanStreamReader {
         if start_off == self.data.len() {
             return Ok((start_off, start_off));
         }
+        if self.form == codetracer_trace_reader::ChunkForm::Stored {
+            return Ok((start_off, self.data.len()));
+        }
         let frame_len = first_frame_compressed_size(&self.data[start_off..])?;
         let end_off = start_off + frame_len;
         if end_off > self.data.len() {
@@ -802,18 +823,27 @@ impl SpanStreamReader {
         self.chunk_byte_range(chunk_number).is_ok()
     }
 
-    /// Decompress one chunk and split it into its length-prefixed records.
+    /// Decompress one chunk (or, stored, take it as it is) and split it into
+    /// its length-prefixed records.
     fn decode_chunk(&mut self, chunk_number: usize) -> Result<Vec<Vec<u8>>, String> {
         let (start_off, end_off) = self.chunk_byte_range(chunk_number)?;
         if start_off == end_off {
             return Ok(Vec::new());
         }
         self.chunk_decompressions += 1;
-        let raw = decode_zstd_chunk(&self.data[start_off..end_off])?;
+        let chunk = &self.data[start_off..end_off];
+        let inflated;
+        let raw: &[u8] = match self.form {
+            codetracer_trace_reader::ChunkForm::Framed => {
+                inflated = decode_zstd_chunk(chunk)?;
+                &inflated
+            }
+            codetracer_trace_reader::ChunkForm::Stored => chunk,
+        };
         let mut records = Vec::new();
         let mut pos = 0usize;
         while pos < raw.len() {
-            let rec_len_u64 = decode_varint(&raw, &mut pos)?;
+            let rec_len_u64 = decode_varint(raw, &mut pos)?;
             let rec_len = usize::try_from(rec_len_u64)
                 .map_err(|_| format!("span record length {rec_len_u64} does not fit in usize"))?;
             if raw.len() - pos < rec_len {

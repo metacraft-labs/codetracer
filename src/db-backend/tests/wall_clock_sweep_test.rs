@@ -77,7 +77,7 @@ const EXEMPTIONS: &[Exemption] = &[
     },
     Exemption {
         path: "src/ctfs_trace_reader/mod.rs",
-        occurrences: 6,
+        occurrences: 5,
         reason: "all inside the `#[cfg(test)]` performance-bench module, which is \
                  never part of a `cargo build --target wasm32-unknown-unknown`",
     },

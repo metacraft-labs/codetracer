@@ -44,6 +44,7 @@ pub mod linehits_namespace;
 pub mod materialization_cache;
 pub mod memwrites_namespace;
 pub mod meta_dat;
+pub mod retired_members;
 pub mod server_prep_encoding;
 pub mod snapshot_payload;
 pub mod span_stream;
@@ -82,23 +83,11 @@ use ctfs_container::CtfsReader;
 
 /// A [`TraceReader`] backed by a `.ct` CTFS container file.
 ///
-/// Supports two container layouts:
+/// A container's events live in its split streams. A container carrying
+/// `events.log` or `events.fmt` — members that are not part of the trace
+/// format — is refused by name ([`retired_members`]).
 ///
-/// ## Old format (events-based, requires postprocessing)
-///
-/// Contains raw `TraceLowLevelEvent` values in `events.log` plus JSON
-/// metadata in `meta.json`. These events must be processed by
-/// [`TraceProcessor::postprocess`] at startup to build the in-memory `Db`.
-/// This is the format produced by current recorders (Python, Ruby, JS,
-/// blockchain VMs).
-///
-/// | File | Purpose |
-/// |------|---------|
-/// | `meta.json` | Trace metadata (workdir, program, args) |
-/// | `events.log` | Encoded `TraceLowLevelEvent` stream (chunked Zstd or legacy CBOR) |
-/// | `events.fmt` | Serialization format marker (`"split-binary"` or absent for CBOR) |
-///
-/// ## New format (pre-processed, no postprocessing needed)
+/// ## Split-stream format (pre-processed, no postprocessing needed)
 ///
 /// Contains pre-computed data structures written by the seek-based writer.
 /// The recorder (or a post-recording finalization step) builds the same
@@ -106,12 +95,11 @@ use ctfs_container::CtfsReader;
 /// separate CTFS internal files. The reader loads these directly into
 /// `Db`, skipping the expensive event-by-event postprocessing entirely.
 ///
-/// The new format is detected by the presence of `steps.dat` in the
-/// container. See `Seek-Based-CTFS-Reader.md` for the full file layout.
+/// A container is read this way when it carries `steps.dat`. See `Seek-Based-CTFS-Reader.md` for the full file layout.
 ///
 /// | File | Purpose |
 /// |------|---------|
-/// | `meta.dat` | Binary metadata (replaces `meta.json`) |
+/// | `meta.dat` | Binary metadata |
 /// | `steps.dat` + `steps.idx` | Pre-computed step records with variable values |
 /// | `calls.dat` | Pre-computed call tree records |
 /// | `events.dat` | Pre-computed I/O event records with step cross-references |
@@ -120,8 +108,8 @@ use ctfs_container::CtfsReader;
 /// | `types.dat` + `types.off` | Interned type records with offset index |
 /// | `varnames.dat` + `varnames.off` | Interned variable names with offset index |
 ///
-/// See [`crate::trace_processor`] for how `TraceLowLevelEvent` values are
-/// processed into the `Db` struct (old format path only).
+/// See [`crate::trace_processor`] for how a bare `TraceLowLevelEvent` stream
+/// ([`CTFSTraceReader::from_events`]) is processed into the `Db` struct.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ColumnAwareCapabilities {
     /// Recorder advertised support for per-column breakpoints
@@ -194,8 +182,8 @@ pub struct CTFSTraceReader {
     /// synthesize, so the first caller that really wants the whole vector gets
     /// it built once here. `Some` ONLY when `event_stream` is attached AND
     /// `db.events` is empty (i.e. nothing materialized the events at open);
-    /// a legacy `events.log` bundle keeps its eagerly-built `db.events` and
-    /// leaves this `None`, so that path is bit-for-bit unchanged.
+    /// a container whose events were loaded at open (a native event log)
+    /// keeps its eagerly-built `db.events` and leaves this `None`.
     lazy_events_full: Option<std::sync::OnceLock<Vec<DbRecordEvent>>>,
     /// M24c — the LAZY per-step value cache backing the borrowing
     /// `variables_at()` accessor on a PRODUCTION split bundle.
@@ -205,8 +193,8 @@ pub struct CTFSTraceReader {
     /// i.e. exactly when a step's values can be served on-demand. When present,
     /// `db.variables` is EMPTY (not materialized at open) and `variables_at()`
     /// borrows through this cache, decompressing only the requested step's chunk
-    /// on first access. `None` on every other path (legacy `events.log`,
-    /// Rust-writer combined bundles, `from_*` constructors, or a corrupt value
+    /// on first access. `None` on every other path (containers without
+    /// `steps.dat`, `from_*` constructors, or a corrupt value
     /// stream), where the fully-materialized `db.variables` serves the borrow —
     /// so those paths stay bit-for-bit unchanged.
     lazy_values: Option<step_value_stream_source::LazyValueCache>,
@@ -220,8 +208,8 @@ pub struct CTFSTraceReader {
     /// is byte-identical to the eager result and `DbStep.column` is `None`). When
     /// present, `db.steps` is EMPTY (not materialized at open) and `step()`
     /// borrows through this cache, filling only the requested step's chunk-aligned
-    /// RANGE on first access. `None` on every other path (legacy `events.log`,
-    /// Rust-writer combined bundles, column-aware traces, `from_*` constructors,
+    /// RANGE on first access. `None` on every other path (containers without
+    /// `steps.dat`, column-aware traces, `from_*` constructors,
     /// or a corrupt step stream), where the fully-materialized `db.steps` serves
     /// the borrow — so those paths stay bit-for-bit unchanged.
     lazy_steps: Option<step_value_stream_source::LazyStepCache>,
@@ -324,8 +312,7 @@ impl CTFSTraceReader {
             db.step_map.clear();
             db.step_map.items.extend_from_slice(&full.step_map);
             // Re-create the per-step parallel scaffolding the eager loop pushed
-            // (empty on a production split bundle — only the legacy `events.log`
-            // path populates these), so a cloned `Db`'s parallel vectors line up
+            // (empty on a production split bundle), so a cloned `Db`'s parallel vectors line up
             // with `db.steps`.
             db.instructions.clear();
             db.compound.clear();
@@ -651,12 +638,10 @@ impl CTFSTraceReader {
     ///
     /// CTFS is the canonical materialized-trace container, and the
     /// production recorders, `nargo trace` among them, write `.ct`.  A
-    /// bare `Vec<TraceLowLevelEvent>` stream — the same payload CTFS
-    /// stores (CBOR-encoded) in `events.log` — still reaches the
-    /// db-backend from pre-CTFS `trace.bin` recordings, and from tests that
-    /// build an event list directly.  Those run the very same
-    /// postprocessing pipeline `open()` uses so the resulting reader is
-    /// indistinguishable from a CTFS-loaded one.  A `trace.json` event
+    /// bare `Vec<TraceLowLevelEvent>` stream still reaches the db-backend
+    /// from pre-CTFS `trace.bin` recordings, and from tests that build an
+    /// event list directly; it is run through `TraceProcessor::postprocess`
+    /// to build the `Db`.  A `trace.json` event
     /// stream is test-oracle output and is never handed here
     /// (`materialized_source::TEST_ORACLE_OUTPUT_ERROR`).
     pub fn from_events(events: Vec<TraceLowLevelEvent>, workdir: &Path) -> Result<Self, Box<dyn Error>> {
@@ -699,46 +684,6 @@ impl CTFSTraceReader {
     }
 }
 
-/// Returns `true` if the CTFS container uses the new pre-processed split-stream
-/// format that must be read via the Nim FFI ([`CTFSTraceReader::open_new_format_nim`]),
-/// meaning postprocessing can be skipped entirely.
-///
-/// This is the PRODUCTION format: the Nim `MultiStreamTraceWriter` that every
-/// live recorder (Ruby/Python/JS/shell) drives via FFI emits ONLY the split
-/// per-kind streams (`steps.dat`/`calls.dat`/`values.dat`/`events.dat` +
-/// interning) and NO `events.log`. Such bundles are served via
-/// [`CTFSTraceReader::open_new_format_nim`], which reads the split streams
-/// directly and never consults `events.log`.
-///
-/// Detection: `steps.dat` present AND `events.log` ABSENT.
-///
-/// The `events.log`-presence guard is the M23e-4 interop boundary. The
-/// SECONDARY Rust `CtfsTraceWriter` now also DEFAULT-emits the split streams
-/// (M23e-4) — but ADDITIVELY, alongside `events.log` — and its split wire
-/// formats are NOT byte-compatible with the Nim FFI reader for the
-/// step/value/io-event streams (only the `calls.dat` (M20) and the binary
-/// interning tables (M23d) were cross-matched; the Rust `steps.idx`/`values.idx`/
-/// `events.idx` carry a bare `[chunk_size][offsets…]` index and a header-less
-/// chunk layout, whereas the Nim exec/value/event readers expect a
-/// `total_events` header+trailer and a per-chunk u32 count, and the Rust zstd
-/// frames omit the pledged content size the Nim decompressor requires). Routing
-/// such a Rust-writer bundle through the Nim reader yields zero steps/calls. So a
-/// bundle that carries BOTH `steps.dat` and `events.log` is the Rust-writer
-/// combined format: we read it via the LEGACY `events.log` postprocessing path
-/// (which builds the correct full `Db`), and the Rust-side SEEKABLE readers
-/// (`calls.dat`/`steps.dat`/`values.dat`, all written by and matched to the same
-/// Rust crate) still attach for on-demand reads. Only a split-ONLY bundle (the
-/// production Nim writer's `events.log`-free layout) takes the Nim FFI path.
-///
-/// Returns `false` for old-format containers that store raw events in
-/// `events.log` and require [`TraceProcessor::postprocess`]. That path is the
-/// LEGACY/secondary-Rust-writer/test fallback only — NOT produced by live
-/// recording. See the `M23e` audit in
-/// `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
-fn is_new_format(ctfs: &CtfsReader) -> bool {
-    ctfs.has_file("steps.dat") && !ctfs.has_file("events.log")
-}
-
 /// The `meta.dat` buffer handed to the format-level
 /// `{Call,Step,Value}StreamReader::from_files` constructors when THIS crate has
 /// already resolved stream presence STRUCTURALLY — i.e. it read the internal
@@ -768,9 +713,8 @@ fn is_new_format(ctfs: &CtfsReader) -> bool {
 /// such call returned `Ok(None)` unconditionally. For `steps.dat` that is fatal:
 /// `open_new_format_rust` reports "new-format container advertises steps.dat but
 /// no seekable step stream could be opened", and every container that carries
-/// split streams and no `events.log` — which is every recording that publishes
-/// source — is refused. Old-format containers were unaffected because they never
-/// reach this path.
+/// split streams — which is every recording that publishes source — is
+/// refused.
 ///
 /// The container is NOT at fault and nothing about it changes: this restores the
 /// reader's ability to open images that are already published and genuinely
@@ -894,31 +838,21 @@ impl CTFSTraceReader {
     /// Open a `.ct` CTFS trace file, parse its contents, and build the
     /// in-memory database.
     ///
-    /// Automatically detects the container format:
-    /// - **New format** (`steps.dat` present, `events.log` ABSENT): the
-    ///   PRODUCTION split-stream format emitted by every live recorder (the Nim
-    ///   `MultiStreamTraceWriter`). Loads pre-processed data directly via
-    ///   [`open_new_format_nim`](Self::open_new_format_nim), skipping
-    ///   [`TraceProcessor::postprocess`]. Startup is bounded by I/O and
-    ///   decompression, not by trace size. `events.log` is never read on this
-    ///   path.
-    /// - **Old/combined format** (`events.log` present): the LEGACY/secondary-
-    ///   Rust-writer/test fallback (NOT produced by live recording). Deserializes
-    ///   events and runs [`TraceProcessor::postprocess`] to build the `Db`. This
-    ///   includes the M23e-4 secondary Rust-writer combined bundle, which ALSO
-    ///   ships the split streams additively but whose split wire formats are not
-    ///   Nim-FFI-readable for steps/values/events — see [`is_new_format`] for the
-    ///   interop boundary. The Rust-side seekable streams still attach below for
-    ///   on-demand reads. See the `M23e` audit in
-    ///   `Trace-Based-Incremental-Testing.milestones.org`.
+    /// A container carrying `steps.dat` is the split-stream format every
+    /// recorder writes: its pre-processed data is loaded directly via
+    /// [`open_new_format_nim`](Self::open_new_format_nim), so startup is bounded
+    /// by I/O and decompression, not by trace size. A container without
+    /// `steps.dat` has no execution to show; it opens with its metadata and any
+    /// native terminal output it carries.
     ///
     /// # Errors
     ///
     /// Returns an error if:
     /// - The file cannot be opened or is not a valid CTFS container
+    /// - The container carries a member that is not part of the trace format
+    ///   (`events.log`, `events.fmt`); the refusal names it
     /// - Metadata is missing or malformed
     /// - The trace data cannot be deserialized
-    /// - (Old format only) The `TraceProcessor` fails during postprocessing
     pub fn open(path: &Path) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::open(path)?;
         Self::open_with_ctfs(path, &mut ctfs, false).map(|mut reader| {
@@ -943,16 +877,16 @@ impl CTFSTraceReader {
         // `runtime_session.jsonl`) that the Nim seek-based reader cannot
         // parse. Detect those first so we route them through the dedicated
         // sidecar path rather than the new-format CTFS code.
+        retired_members::refuse_retired_members(ctfs)?;
         if let Some(reader) = Self::open_elixir_sidecar_format(ctfs, path)? {
             return Ok(reader);
         }
 
-        let reader = if is_new_format(ctfs) {
-            info!("CTFS new format detected — skipping postprocessing");
+        let reader = if ctfs.has_file("steps.dat") {
             Self::open_new_format(ctfs, path, follow)?
         } else {
-            info!("CTFS old format detected — running postprocessing");
-            Self::open_old_format(ctfs)?
+            info!("CTFS: container carries no steps.dat — opening its metadata only");
+            Self::open_without_step_stream(ctfs)?
         };
 
         // The native path materializes column-aware steps eagerly (via the Nim
@@ -982,8 +916,7 @@ impl CTFSTraceReader {
     /// `steps.dat` source attached below decodes a `Step` record's `u64` one of
     /// two incompatible ways depending on it, so a decoder that is dropped here
     /// gives this reader a step stream that disagrees with its own lazy step
-    /// cache about where every step is. `None` — every old-format and line-only
-    /// container, including the instruction-level chain traces that legitimately
+    /// cache about where every step is. `None` — every line-only container, including the instruction-level chain traces that legitimately
     /// report `Line(pc)` — keeps the legacy decode untouched.
     fn attach_seekable_sources(
         mut reader: Self,
@@ -1130,10 +1063,8 @@ impl CTFSTraceReader {
             }
         };
         // Only take the lazy events path when the eager `db.events` is EMPTY.
-        // A legacy `events.log` bundle materialises its events during
-        // postprocessing AND may additively ship `events.dat`; serving the same
-        // events twice from two sources would be a behaviour change, so the
-        // materialised vector keeps priority there.
+        // Events loaded at open (a native event log) keep priority, so the same
+        // events are never served from two sources.
         reader.lazy_events_full = if reader.event_stream.is_some() && reader.db.events.is_empty() {
             Some(std::sync::OnceLock::new())
         } else {
@@ -1185,9 +1116,11 @@ impl CTFSTraceReader {
         path: Option<&Path>,
     ) -> Option<step_map_namespace::StepMapNamespace> {
         // 1. Container-internal `step-map.ns`.
+        // The container's member stores its chunks in the container's form;
+        // a sidecar is a standalone member, framed.
         let internal = if ctfs.has_file(step_map_namespace::STEP_MAP_FILE) {
             match ctfs.read_file(step_map_namespace::STEP_MAP_FILE) {
-                Ok(bytes) => Some(bytes),
+                Ok(bytes) => Some((bytes, ctfs.chunk_form())),
                 Err(e) => {
                     info!(
                         "CTFS: step-map.ns present but unreadable ({e}); falling back to whole-table breakpoint build"
@@ -1207,11 +1140,13 @@ impl CTFSTraceReader {
             // failure (absent file, permission, etc.) collapses to `None` and we
             // stay on the whole-table fallback.
             let sidecar = sidecar_step_map_path(path?);
-            std::fs::read(&sidecar).ok()
+            std::fs::read(&sidecar)
+                .ok()
+                .map(|bytes| (bytes, codetracer_trace_reader::ChunkForm::Framed))
         });
 
-        let bytes = bytes?;
-        match step_map_namespace::StepMapNamespace::parse(&bytes) {
+        let (bytes, form) = bytes?;
+        match step_map_namespace::StepMapNamespace::parse_as(&bytes, form) {
             Ok(ns) => {
                 info!(
                     "CTFS: prepopulated step-map.ns attached ({} (path,line) entries) — breakpoint resolution served from the index",
@@ -1255,16 +1190,12 @@ impl CTFSTraceReader {
     ///
     /// # M0/1 — new-format seekable containers
     ///
-    /// This used to reject new-format (split-stream) containers outright and
-    /// to hard-code every seekable stream to `None`, which meant a browser tab
-    /// could open ONLY legacy `events.log` bundles — whole-file postprocessed
-    /// by construction — and could never serve anything on demand. Both holes
-    /// are closed:
+    /// A split-stream container is served on demand here:
     ///
-    /// * a new-format container is opened by
+    /// * it is opened by
     ///   [`open_new_format_rust`](Self::open_new_format_rust), a pure-Rust path
     ///   that needs neither the Nim FFI nor a filesystem path, and
-    /// * both formats then run through
+    /// * every container then runs through
     ///   [`attach_seekable_sources`](Self::attach_seekable_sources), exactly as
     ///   [`open`](Self::open) does, so the `calls.dat` / `steps.dat` /
     ///   `values.dat` / `events.dat` streams and the container-internal
@@ -1272,16 +1203,14 @@ impl CTFSTraceReader {
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::from_bytes(data)?;
 
-        let (reader, position_decoder) = if is_new_format(&ctfs) {
-            info!("CTFS from_bytes: new (split-stream) format detected — opening via the pure-Rust reader");
+        retired_members::refuse_retired_members(&ctfs)?;
+        let (reader, position_decoder) = if ctfs.has_file("steps.dat") {
             Self::open_new_format_rust(&mut ctfs)?
         } else {
-            info!("CTFS from_bytes: old format detected — running postprocessing");
-            // Old-format containers store raw events and are postprocessed into
-            // a materialized `Db`; they carry no `global_position_index` address
-            // space at all, so there is nothing to decode and nothing here
-            // changes for them.
-            (Self::open_old_format(&mut ctfs)?, None)
+            // No step stream, so no `global_position_index` address space to
+            // decode either.
+            info!("CTFS from_bytes: container carries no steps.dat — opening its metadata only");
+            (Self::open_without_step_stream(&mut ctfs)?, None)
         };
 
         Self::attach_seekable_sources(reader, &mut ctfs, None, false, position_decoder)
@@ -1350,7 +1279,7 @@ impl CTFSTraceReader {
         let meta = meta_dat::parse_meta_dat(&meta_bytes).map_err(|e| format!("meta.dat is malformed: {e}"))?;
 
         // Refuse ONLY a container that carries NO materialized execution stream
-        // at all — no `steps.dat` and no legacy `events.log`. Such a container is
+        // at all — no `steps.dat`. Such a container is
         // a pure-MCR checkpoint bundle: it carries per-thread checkpoint streams
         // the emulator replays, and this materialized reader would produce a trace
         // with zero steps (which reads to a user as "the program did nothing").
@@ -1363,7 +1292,7 @@ impl CTFSTraceReader {
         // structural presence below and simply ignores the native tNNN/cp0
         // checkpoint streams (those are the emulator's altitude). See the
         // trace-format spec, "Stream presence is structural, not flag-gated".
-        let has_materialized_execution = ctfs.has_file("steps.dat") || ctfs.has_file("events.log");
+        let has_materialized_execution = ctfs.has_file("steps.dat");
         if !has_materialized_execution && meta.flags & meta_dat::FLAG_HAS_MCR_FIELDS != 0 {
             return Err(
                 "this is an MCR (live-recording) container; it needs the emulator replay session, \
@@ -1512,7 +1441,7 @@ impl CTFSTraceReader {
         let step_source = step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs)
             .map_err(|e| format!("steps.dat unreadable: {e}"))?;
         let Some(step_source) = step_source else {
-            // `is_new_format` keyed off `steps.dat` being present, so a
+            // This path is taken only when `steps.dat` is present, so a
             // container that reaches here without a readable step stream is
             // internally inconsistent.
             return Err(
@@ -2907,28 +2836,14 @@ impl CTFSTraceReader {
         })
     }
 
-    /// Open an old-format CTFS container by deserializing raw events from
-    /// `events.log` and running `TraceProcessor::postprocess` to build
-    /// the in-memory `Db`.
-    ///
-    /// LEGACY / NON-PRODUCTION PATH (M23e bounding). This `events.log` reader is
-    /// NOT the production path. Production `.ct` bundles are split-stream-only
-    /// (`steps.dat` present) and served by [`open_new_format_nim`] — they never
-    /// reach here. `events.log` survives ONLY as: (a) the secondary Rust
-    /// `CtfsTraceWriter`'s combined stream (not used by live recording),
-    /// (b) test fixtures, and (c) possibly the streaming/follow-mode reader
-    /// (assessed separately in M23e-5). It is deliberately retained — NOT
-    /// removed — so those legacy/test bundles keep opening. See `M23e` in
-    /// `Trace-Based-Incremental-Testing.milestones.org`. The parity between this
-    /// path and the split path is verified by
-    /// `tests/ctfs_split_only_full_db_test.rs`.
+    /// Open a container that carries no `steps.dat`: there is no execution to
+    /// show, so the reader holds the trace's metadata and the terminal output
+    /// of a native event log (`eventlog.dat`) when the container has one.
     ///
     /// Trace metadata is read from `meta.dat` — the canonical binary
     /// format defined in `codetracer-specs/Trace-Files/CTFS-Binary-Format.md`
-    /// §8.  M-REC-1.5 (pre-1.0) retired the legacy `meta.json` fallback;
-    /// the reader rejects any `.ct` container that does not carry a
-    /// `meta.dat`.
-    fn open_old_format(ctfs: &mut CtfsReader) -> Result<Self, Box<dyn Error>> {
+    /// §8; a container without it is refused.
+    fn open_without_step_stream(ctfs: &mut CtfsReader) -> Result<Self, Box<dyn Error>> {
         // 1. Read and parse trace metadata from the canonical `meta.dat`
         //    payload.  M-REC-1.5 retired the legacy `meta.json` fallback.
         let meta_bytes = ctfs
@@ -2955,42 +2870,24 @@ impl CTFSTraceReader {
             meta.workdir.clone()
         };
 
-        // 2. Read the trace events from the container.
-        //    Old format: CBOR-encoded TraceLowLevelEvent sequence in
-        //    `events.log`, optionally with split-binary encoding indicated
-        //    by `events.fmt`.
-        let events = Self::load_events(ctfs)?;
-
-        // 3. Run the postprocessing pipeline to populate a Db struct from
-        //    the raw events. This is the expensive O(n) step that the new
-        //    format eliminates.
         let mut db = Db::new(&workdir);
-        let mut processor = TraceProcessor::new(&mut db);
-        processor.postprocess(&events)?;
-        if !db.events.iter().any(|event| event.kind == EventLogKind::Write) {
-            match Self::load_native_terminal_events(ctfs) {
-                Ok(native_events) if !native_events.is_empty() => {
-                    info!(
-                        "old-format reader: loaded {} terminal events from native event log fallback",
-                        native_events.len()
-                    );
-                    db.events.extend(native_events);
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    log::warn!("native event log fallback failed: {e}");
-                }
+        match Self::load_native_terminal_events(ctfs) {
+            Ok(native_events) if !native_events.is_empty() => {
+                info!(
+                    "CTFS: loaded {} terminal events from the native event log",
+                    native_events.len()
+                );
+                db.events.extend(native_events);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                log::warn!("native event log unreadable: {e}");
             }
         }
 
-        // Old-format traces *can* carry the capability bits because
-        // meta.dat is the same wire format on both paths — read them
-        // out of the Rust meta_dat parser the same way the Nim path
-        // does via the FFI.  The parser's own `KNOWN_FLAGS_MASK`
-        // recognises the bits (see this module's accompanying
-        // `meta_dat.rs`); a clear bit (e.g. on truly legacy traces)
-        // surfaces as `false` which is the safe "no per-column UI"
-        // default for the GUI.
+        // The capability bits are read out of the Rust meta_dat parser the
+        // same way the Nim path reads them via the FFI. A clear bit surfaces
+        // as `false`, the safe "no per-column UI" default for the GUI.
         let column_capabilities = ColumnAwareCapabilities {
             supports_column_breakpoints: (parsed.flags & meta_dat::FLAG_SUPPORTS_COLUMN_BREAKPOINTS) != 0,
             supports_column_motions: (parsed.flags & meta_dat::FLAG_SUPPORTS_COLUMN_MOTIONS) != 0,
@@ -3021,94 +2918,6 @@ impl CTFSTraceReader {
             nim_reader: None,
             call_ranges: Vec::new(),
         })
-    }
-
-    /// Extract `TraceLowLevelEvent` values from the CTFS container's
-    /// `events.log`.
-    ///
-    /// LEGACY / NON-PRODUCTION PATH (M23e bounding). `events.log` is the
-    /// legacy combined event stream — the secondary Rust `CtfsTraceWriter`
-    /// format, test fixtures, and the streaming/follow-mode reader. It is NOT
-    /// emitted by live recorders (whose split-stream bundles route through
-    /// [`open_new_format_nim`] and never call this). Retained for back-compat
-    /// per `M23e`; do not treat it as the canonical event source.
-    ///
-    /// Supports three data layouts, detected automatically:
-    ///
-    /// 1. **Chunked split-binary** (new default): `events.fmt` contains
-    ///    `"split-binary"` and `events.log` uses inline 16-byte chunk
-    ///    headers with Zstd-compressed payloads. Decompressed via
-    ///    [`codetracer_ctfs::ChunkedReader`], then decoded via
-    ///    [`codetracer_trace_writer::split_binary::decode_events`].
-    ///
-    /// 2. **Chunked CBOR**: `events.log` uses chunk headers but
-    ///    `events.fmt` is absent or does not say `"split-binary"`.
-    ///    Decompressed via `ChunkedReader`, then deserialized as CBOR.
-    ///
-    /// 3. **Legacy CBOR streaming**: No chunk headers (e.g. older zeekstd
-    ///    frames). Falls back to sequential `cbor4ii::serde::from_reader`.
-    ///
-    /// If `events.log` is missing entirely, an empty event list is
-    /// returned so that the reader can still be constructed (useful for
-    /// metadata-only traces or tests).
-    fn load_events(ctfs: &mut CtfsReader) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-        // The 8-byte CodeTracer events.log magic prefix written by the
-        // streaming `CtfsTraceWriter` (and by the legacy CBOR+Zstd writer).
-        // Mirrors `codetracer_trace_format_cbor_zstd::HEADERV1` — duplicated
-        // here to avoid an extra workspace dependency.  Layout:
-        //   [0..5] : "C0DE72ACE2"   magic / l33t-spelling of "CodeTracer"
-        //   [5]    : 0x01           file format version 1
-        //   [6..8] : 0x00 0x00      reserved
-        const EVENTS_HEADER_V1: [u8; 8] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2, 0x01, 0x00, 0x00];
-
-        let event_bytes = match ctfs.read_file("events.log") {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                // No events file — return an empty trace. This allows opening
-                // minimal .ct files that only contain metadata (e.g. in tests).
-                return Ok(Vec::new());
-            }
-        };
-
-        if event_bytes.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Strip the optional 8-byte `HEADERV1` magic prefix.  The current
-        // streaming writer always emits it; older test fixtures and the
-        // legacy in-memory `NonStreamingTraceWriter` do not.  The chunked
-        // and CBOR readers below both expect chunk/CBOR data starting at
-        // byte zero, so we skip the magic when present.
-        let payload: &[u8] = if event_bytes.len() >= EVENTS_HEADER_V1.len()
-            && event_bytes[..EVENTS_HEADER_V1.len()] == EVENTS_HEADER_V1
-        {
-            &event_bytes[EVENTS_HEADER_V1.len()..]
-        } else {
-            &event_bytes
-        };
-
-        // Detect the serialization format. The presence of `events.fmt`
-        // with the content `"split-binary"` indicates the new split-binary
-        // encoding; otherwise we fall back to CBOR.
-        let is_split_binary = match ctfs.read_file("events.fmt") {
-            Ok(fmt) => fmt == b"split-binary",
-            Err(_) => false, // Legacy: no format marker means CBOR
-        };
-
-        // Try the chunked format first (new writer produces inline 16-byte
-        // chunk headers followed by Zstd-compressed payloads).
-        if let Ok(decompressed) = codetracer_ctfs::ChunkedReader::decompress_all(payload) {
-            if is_split_binary {
-                return Ok(codetracer_trace_writer::split_binary::decode_events(&decompressed));
-            } else {
-                // Chunked CBOR — decompress, then parse CBOR from the buffer
-                return Self::deserialize_cbor_from_buffer(&decompressed);
-            }
-        }
-
-        // Fallback: legacy CBOR streaming (zeekstd frames, no chunk headers).
-        // This path handles older `.ct` files that pre-date the chunked format.
-        Self::deserialize_cbor_from_buffer(payload)
     }
 
     fn load_native_terminal_events(ctfs: &mut CtfsReader) -> Result<Vec<DbRecordEvent>, Box<dyn Error>> {
@@ -3253,64 +3062,13 @@ impl CTFSTraceReader {
             .ok_or_else(|| format!("u64 read at {offset} is out of bounds for {} bytes", bytes.len()))?;
         Ok(u64::from_le_bytes(slice.try_into()?))
     }
-
-    /// Deserialize a sequence of individually-encoded CBOR
-    /// `TraceLowLevelEvent` values from an in-memory buffer.
-    ///
-    /// Uses `cbor4ii::serde::from_reader` in a loop, the same approach as
-    /// `codetracer_trace_reader` for the standalone binary trace format.
-    /// A parse error after at least one successful event is treated as a
-    /// truncated stream (common during streaming recording when the
-    /// recorder has not flushed completely).
-    fn deserialize_cbor_from_buffer(data: &[u8]) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-        use std::io::BufRead;
-
-        let mut events = Vec::new();
-        let mut buf_reader = std::io::BufReader::new(data);
-
-        loop {
-            // Check for EOF before attempting to deserialize
-            let buf = buf_reader.fill_buf()?;
-            if buf.is_empty() {
-                break;
-            }
-
-            match cbor4ii::serde::from_reader::<TraceLowLevelEvent, _>(&mut buf_reader) {
-                Ok(event) => {
-                    events.push(event);
-                }
-                Err(e) => {
-                    // If we have already read some events, treat a parse error
-                    // at the tail as a truncated stream (common during streaming
-                    // recording — the recorder may not have flushed completely).
-                    if !events.is_empty() {
-                        log::warn!(
-                            "CTFS: stopped reading events after {count} events: {e}. \
-                             Treating as truncated stream.",
-                            count = events.len()
-                        );
-                        break;
-                    } else {
-                        return Err(format!("failed to deserialize any events from events.log: {e}").into());
-                    }
-                }
-            }
-        }
-
-        Ok(events)
-    }
 }
 
 // ── TraceReader implementation ─────────────────────────────────────────
 //
 // All methods delegate to the inner `Db`, exactly like
-// `InMemoryTraceReader`. The difference is how the Db is populated:
-//
-// - Old format: events.log -> load_events -> TraceProcessor::postprocess -> Db
-// - New format: steps.dat + calls.dat + ... -> direct Db load (no postprocess)
-//
-// Both formats produce the same Db, so the TraceReader implementation is
-// identical regardless of which loading path was used.
+// `InMemoryTraceReader`, or to the lazy caches over the split streams
+// (steps.dat + calls.dat + ...) where those are attached.
 
 impl TraceReader for CTFSTraceReader {
     // ── Interning tables ────────────────────────────────────────────
@@ -3350,9 +3108,9 @@ impl TraceReader for CTFSTraceReader {
         // table is NOT materialized at open; a step is reconstructed LAZILY from
         // the seekable `steps.dat` stream (filling only its chunk-aligned RANGE on
         // first access, then memoized). `db.steps` is empty on this path, so we
-        // serve the borrow from the lazy cache. Every other path (legacy
-        // `events.log`, Rust-writer combined bundles, column-aware traces, value-
-        // less / pre-M24a bundles) leaves `lazy_steps` `None` and serves the
+        // serve the borrow from the lazy cache. Every other path (containers
+        // without `steps.dat`, column-aware traces, value-less / pre-M24a
+        // bundles) leaves `lazy_steps` `None` and serves the
         // fully-materialized `db.steps` — bit-for-bit unchanged.
         if let Some(lazy) = self.lazy_steps.as_ref() {
             return lazy.get(id);
@@ -3374,9 +3132,8 @@ impl TraceReader for CTFSTraceReader {
         // at open; a step's values are borrowed LAZILY from the seekable
         // `values.dat` stream (decompressing only that step's chunk on first
         // access, then memoized). `db.variables` is empty on this path, so we
-        // serve the borrow from the lazy cache. Every other path (legacy
-        // `events.log`, Rust-writer combined bundles, value-less / pre-M24a-2
-        // bundles) leaves `lazy_values` `None` and serves the fully-materialized
+        // serve the borrow from the lazy cache. Every other path (containers
+        // without `steps.dat`, value-less / pre-M24a-2 bundles) leaves `lazy_values` `None` and serves the fully-materialized
         // `db.variables` — bit-for-bit unchanged.
         if let Some(lazy) = self.lazy_values.as_ref() {
             return lazy.get(step_id);
@@ -3623,8 +3380,8 @@ impl TraceReader for CTFSTraceReader {
     /// a trace larger than a tab's memory budget now costs one chunk, not the
     /// trace.
     ///
-    /// Off the lazy path (legacy `events.log` bundles, Rust-writer combined
-    /// bundles, column-aware traces) `db.steps` is already fully materialized,
+    /// Off the lazy path (containers without `steps.dat`, column-aware
+    /// traces) `db.steps` is already fully materialized,
     /// so this walks it directly — identical to the inherited default, without
     /// its redundant re-slicing.
     fn scan_steps_from(&self, start_id: StepId, forward: bool, visit: &mut dyn FnMut(&DbStep) -> bool) {
@@ -3755,6 +3512,26 @@ mod tests {
         })
     }
 
+    /// Write `events` as a split-stream `.ct` with the Rust `CtfsTraceWriter`
+    /// and return its path: `<stem>.ct`.
+    fn write_split_bundle(
+        stem: &std::path::Path,
+        program: &str,
+        workdir: &str,
+        events: Vec<codetracer_trace_types::TraceLowLevelEvent>,
+    ) -> std::path::PathBuf {
+        use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
+        use codetracer_trace_writer::trace_writer::TraceWriter;
+
+        let mut writer = CtfsTraceWriter::new(program, &[]);
+        TraceWriter::set_workdir(&mut writer, std::path::Path::new(workdir));
+        TraceWriter::begin_writing_trace_events(&mut writer, stem).unwrap();
+        let mut events = events;
+        TraceWriter::append_events(&mut writer, &mut events);
+        TraceWriter::finish_writing_trace_events(&mut writer).unwrap();
+        stem.with_extension("ct")
+    }
+
     fn put_varint(mut value: u64, out: &mut Vec<u8>) {
         loop {
             let mut byte = (value & 0x7F) as u8;
@@ -3843,10 +3620,9 @@ mod tests {
         assert_eq!(reader.workdir().to_str().unwrap(), "/tmp");
     }
 
-    /// Verify that a .ct file without `events.log` opens successfully
-    /// (metadata-only trace).
+    /// A .ct file without `steps.dat` opens as a metadata-only trace.
     #[test]
-    fn test_ctfs_trace_reader_missing_events_log() {
+    fn test_ctfs_trace_reader_metadata_only() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("no-events.ct");
 
@@ -3988,21 +3764,6 @@ mod tests {
 
         let result = CTFSTraceReader::open(&ct_path);
         assert!(result.is_err());
-    }
-
-    /// Verify that old-format detection works: a container with only
-    /// `meta.dat` (no `steps.dat`) uses the old postprocessing path.
-    #[test]
-    fn test_ctfs_old_format_detected_without_steps_dat() {
-        let dir = tempfile::tempdir().unwrap();
-        let ct_path = dir.path().join("old-format.ct");
-
-        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).unwrap();
-
-        // Old format should work fine (goes through postprocess path)
-        let reader = CTFSTraceReader::open(&ct_path).unwrap();
-        assert_eq!(reader.step_count(), 0);
     }
 
     /// Verify that new-format detection works: a container with `steps.dat`
@@ -4173,21 +3934,9 @@ mod tests {
             }),
         ];
 
-        // Serialize events as sequential CBOR (legacy format).
-        // cbor4ii::serde::to_vec takes ownership of the buffer and returns
-        // the extended buffer, so we chain through each event.
-        let mut cbor_buf = Vec::new();
-        for event in &events {
-            cbor_buf = cbor4ii::serde::to_vec(cbor_buf, event).expect("CBOR encode failed");
-        }
-
-        // Build the .ct container
         let dir = tempfile::tempdir().unwrap();
-        let ct_path = dir.path().join("pipeline.ct");
-        let dat = meta_dat_bytes("/tmp/hello.py", &[], "/tmp");
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
+        let ct_path = write_split_bundle(&dir.path().join("pipeline"), "/tmp/hello.py", "/tmp", events);
 
-        // Open with CTFSTraceReader (exercises the full old-format pipeline)
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
 
         // --- Verify step count and navigation ---
@@ -4215,11 +3964,10 @@ mod tests {
         assert_eq!(steps_on_line6[0].step_id, StepId(1));
 
         // --- Verify variable inspection ---
-        // Step 0 has x=42 from the Value event plus name="world" from the
-        // Call(greet) args (the processor pushes call args onto the current
-        // step's variable list before the callee's first step is recorded).
+        // Step 0 has x=42 from the Value event. greet's argument belongs to
+        // greet's call record, not to the caller's step.
         let vars0 = reader.variables_at(StepId(0)).expect("step 0 should have variables");
-        assert_eq!(vars0.len(), 2, "step 0 should have 2 variables (x + greet arg)");
+        assert_eq!(vars0.len(), 1, "step 0 should have exactly x");
         assert_eq!(vars0[0].variable_id, VariableId(0));
         match &vars0[0].value {
             ValueRecord::Int { i, .. } => assert_eq!(*i, 42),
@@ -4248,6 +3996,12 @@ mod tests {
         assert_eq!(call1.function_id, FunctionId(1));
         assert_eq!(call1.depth, 1, "greet should be at depth 1");
         assert_eq!(call1.parent_key, CallKey(0), "greet's parent should be main");
+        assert!(
+            call1.args.iter().any(|a| a.variable_id == VariableId(1)
+                && matches!(&a.value, ValueRecord::String { text, .. } if text == "world")),
+            "greet's call record should carry its argument name=\"world\", got {:?}",
+            call1.args
+        );
 
         // Verify main has greet as a child
         assert!(
@@ -4290,13 +4044,12 @@ mod tests {
     /// the M0 [`BlockSource`] seam) and serves a known step + variable
     /// identically to the pre-refactor behaviour.
     ///
-    /// The fixture is a self-contained old-format trace built by the container
-    /// writer: opening it drives `CtfsReader::read_file` (now routed through an
-    /// `InMemoryBlockSource`) for `meta.dat` and `events.log`, then the full
-    /// trace pipeline.  A block misrouted by the seam would corrupt the CBOR
-    /// event stream and break the step/variable assertions below, so this test
-    /// genuinely exercises the seam end-to-end rather than asserting a trivial
-    /// fact.
+    /// The fixture is a split-stream trace written by the Rust writer and
+    /// opened from bytes: every stream is read through `CtfsReader::read_file`
+    /// (routed through an `InMemoryBlockSource`). A block misrouted by the seam
+    /// would corrupt a stream and break the step/variable assertions below, so
+    /// this test genuinely exercises the seam end-to-end rather than asserting
+    /// a trivial fact.
     #[test]
     fn e2e_db_backend_open_materialized_unchanged() {
         use codetracer_trace_types::{
@@ -4336,18 +4089,11 @@ mod tests {
             }),
         ];
 
-        let mut cbor_buf = Vec::new();
-        for event in &events {
-            cbor_buf = cbor4ii::serde::to_vec(cbor_buf, event).expect("CBOR encode failed");
-        }
-
         let dir = tempfile::tempdir().unwrap();
-        let ct_path = dir.path().join("materialized.ct");
-        let dat = meta_dat_bytes("/tmp/prog.py", &[], "/tmp");
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
+        let ct_path = write_split_bundle(&dir.path().join("materialized"), "/tmp/prog.py", "/tmp", events);
 
         // Open through the db-backend reader (default InMemoryBlockSource seam).
-        let reader = CTFSTraceReader::open(&ct_path).unwrap();
+        let reader = CTFSTraceReader::from_bytes(std::fs::read(&ct_path).unwrap()).unwrap();
 
         // Known step served identically: step 0 is line 2 of prog.py.
         assert_eq!(reader.step_count(), 1, "expected exactly 1 step");
@@ -4371,42 +4117,6 @@ mod tests {
         assert_eq!(reader.function(FunctionId(0)).unwrap().name, "main");
         assert_eq!(reader.variable_name(VariableId(0)).unwrap(), "x");
         assert_eq!(reader.workdir().to_str().unwrap(), "/tmp");
-    }
-
-    /// Verify the `is_new_format` helper function directly.
-    #[test]
-    fn test_is_new_format_detection() {
-        let dir = tempfile::tempdir().unwrap();
-        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
-
-        // Old format: no steps.dat
-        let old_path = dir.path().join("old.ct");
-        ctfs_container::write_minimal_ctfs(&old_path, &[("meta.dat", &dat)]).unwrap();
-        let old_ctfs = CtfsReader::open(&old_path).unwrap();
-        assert!(!is_new_format(&old_ctfs));
-
-        // New (production Nim) format: has steps.dat, NO events.log.
-        let new_path = dir.path().join("new.ct");
-        ctfs_container::write_minimal_ctfs(&new_path, &[("meta.dat", &dat), ("steps.dat", b"data")]).unwrap();
-        let new_ctfs = CtfsReader::open(&new_path).unwrap();
-        assert!(is_new_format(&new_ctfs));
-
-        // M23e-4 combined (secondary Rust-writer) format: has BOTH steps.dat AND
-        // events.log. This MUST take the legacy events.log path — the Rust split
-        // wire formats are not Nim-FFI-readable for steps/values/events — so
-        // `is_new_format` is false.
-        let combined_path = dir.path().join("combined.ct");
-        ctfs_container::write_minimal_ctfs(
-            &combined_path,
-            &[("meta.dat", &dat), ("steps.dat", b"data"), ("events.log", b"data")],
-        )
-        .unwrap();
-        let combined_ctfs = CtfsReader::open(&combined_path).unwrap();
-        assert!(
-            !is_new_format(&combined_ctfs),
-            "a bundle with both steps.dat and events.log is the Rust-writer combined format \
-             and must read via the legacy events.log path"
-        );
     }
 
     // ── M43: GUI latency benchmarks ────────────────────────────────────
@@ -4472,17 +4182,7 @@ mod tests {
             return_value: ValueRecord::None { type_id: TypeId(0) },
         }));
 
-        // Serialize as CBOR
-        let mut cbor_buf = Vec::new();
-        for event in &events {
-            cbor_buf = cbor4ii::serde::to_vec(cbor_buf, event).expect("CBOR encode failed");
-        }
-
-        let ct_path = dir.join("bench_trace.ct");
-        let dat = meta_dat_bytes("/tmp/bench.py", &[], "/tmp");
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
-
-        ct_path
+        write_split_bundle(&dir.join("bench_trace"), "/tmp/bench.py", "/tmp", events)
     }
 
     /// Compute the median of a sorted duration slice.
@@ -4744,14 +4444,7 @@ mod tests {
             return_value: ValueRecord::None { type_id: TypeId(0) },
         }));
 
-        let mut cbor_buf = Vec::new();
-        for event in &events {
-            cbor_buf = cbor4ii::serde::to_vec(cbor_buf, event).expect("CBOR encode failed");
-        }
-
-        let ct_path = dir.path().join("event_bench.ct");
-        let dat = meta_dat_bytes("/tmp/main.py", &[], "/tmp");
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
+        let ct_path = write_split_bundle(&dir.path().join("event_bench"), "/tmp/main.py", "/tmp", events);
 
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
         assert_eq!(reader.event_count(), 200);
@@ -4800,40 +4493,6 @@ mod tests {
             median.as_micros() < 1000,
             "event log page load median latency too high: {}us (threshold: 1000us)",
             median.as_micros()
-        );
-    }
-
-    /// M37 — Verify that the old-format postprocessing path correctly builds
-    /// the `Db` from a 1000-step trace. This is not a startup time benchmark
-    /// (the old format always requires O(n) postprocessing); it verifies
-    /// correctness of the existing path that M37 preserves.
-    ///
-    /// The new-format startup time benchmark (`bench_new_format_startup_time`)
-    /// requires the `nim-reader` feature because `open_new_format` delegates
-    /// to the Nim seek-based reader. Without that feature, the new-format
-    /// path returns an error, so the benchmark is feature-gated.
-    #[test]
-    fn bench_old_format_postprocess_1000_steps() {
-        use std::time::Instant;
-
-        let dir = tempfile::tempdir().unwrap();
-        let ct_path = build_trace_with_steps(dir.path(), 1000);
-
-        let start = Instant::now();
-        let reader = CTFSTraceReader::open(&ct_path).unwrap();
-        let elapsed = start.elapsed();
-
-        assert_eq!(reader.step_count(), 1000);
-        println!(
-            "{{\"benchmark\":\"old_format_postprocess_1000\",\"startup_ms\":{}}}",
-            elapsed.as_millis()
-        );
-
-        // Old format with 1000 steps should complete well under 1 second.
-        assert!(
-            elapsed.as_millis() < 1000,
-            "old-format postprocessing took too long: {}ms (threshold: 1000ms)",
-            elapsed.as_millis()
         );
     }
 
@@ -4938,7 +4597,7 @@ mod tests {
     // ── meta.dat metadata-loading tests ───────────────────────────────
     //
     // These tests pin the canonical metadata-loading behavior:
-    // `open_old_format` loads from the binary `meta.dat` file inside the
+    // `open_without_step_stream` loads from the binary `meta.dat` file inside the
     // CTFS container.  M-REC-1.5 (pre-1.0) removed the legacy `meta.json`
     // fallback, so any trace that lacks `meta.dat` is rejected outright.
 
@@ -4964,7 +4623,7 @@ mod tests {
 
     /// A trace with `meta.dat` loads using the canonical binary metadata.
     #[test]
-    fn open_old_format_reads_meta_dat_when_present() {
+    fn open_without_step_stream_reads_meta_dat_when_present() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("meta-dat-only.ct");
 
@@ -4983,14 +4642,14 @@ mod tests {
     /// M-REC-1.5: a trace that lacks `meta.dat` is rejected.  Previously
     /// such traces fell back to a JSON sidecar; that path is gone.
     #[test]
-    fn open_old_format_rejects_trace_without_meta_dat() {
+    fn open_without_step_stream_rejects_trace_without_meta_dat() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("no-meta-dat.ct");
 
-        // Container with only events.log (no meta.dat); used to fall back
-        // to `meta.json`, now an error.
-        let placeholder_events: &[u8] = b"";
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("events.log", placeholder_events)]).unwrap();
+        // Container with no meta.dat; used to fall back to `meta.json`, now an
+        // error.
+        let placeholder: &[u8] = b"";
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("paths.dat", placeholder)]).unwrap();
 
         let err = CTFSTraceReader::open(&ct_path)
             .expect_err("open must fail when meta.dat is missing")
@@ -5004,7 +4663,7 @@ mod tests {
     /// If `meta.dat` is present but corrupted, the open must error rather
     /// than producing nonsense metadata.
     #[test]
-    fn open_old_format_propagates_meta_dat_parse_errors() {
+    fn open_without_step_stream_propagates_meta_dat_parse_errors() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("bad-meta-dat.ct");
 
@@ -5040,9 +4699,9 @@ mod tests {
     }
 
     #[test]
-    fn open_old_format_uses_native_eventlog_when_events_log_has_no_writes() {
+    fn open_without_step_stream_reads_native_eventlog_terminal_writes() {
         let dir = tempfile::tempdir().unwrap();
-        let ct_path = dir.path().join("old-format-native-eventlog.ct");
+        let ct_path = dir.path().join("no-steps-native-eventlog.ct");
         let meta = meta_dat::serialize_meta_dat(&test_meta_dat_v3("/tmp/program", vec![], "/tmp"));
         let dat = native_eventlog_dat(b"TRACE:x=5\n");
         let idx = native_eventlog_idx(1);
@@ -5128,12 +4787,10 @@ mod tests {
     /// (steps / values / calls + binary interning), then read every internal file
     /// back out.
     ///
-    /// Returns `(meta_bytes, other_files)` where `other_files` EXCLUDES `meta.dat`
-    /// AND `events.log`. Callers re-stamp their own `meta.dat` to control the
-    /// stream-presence bits / MCR bit, and the dropped `events.log` makes the
-    /// repackaged container `events.log`-free so `is_new_format` routes it through
-    /// `open_new_format_rust` (the new-format materialized reader). Nothing is
-    /// mocked: these are the exact bytes the writer produced.
+    /// Returns `(meta_bytes, other_files)` where `other_files` EXCLUDES
+    /// `meta.dat`. Callers re-stamp their own `meta.dat` to control the
+    /// stream-presence bits / MCR bit. Nothing is mocked: these are the exact
+    /// bytes the writer produced.
     fn real_split_bundle_files() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
         use codetracer_trace_types::{
             CallRecord, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, ReturnRecord, StepRecord,
@@ -5215,8 +4872,6 @@ mod tests {
             let bytes = reader.read_file(&name).unwrap();
             if name == "meta.dat" {
                 meta_bytes = bytes;
-            } else if name == "events.log" {
-                // Dropped on purpose — see the doc comment.
             } else {
                 others.push((name, bytes));
             }
@@ -5308,7 +4963,7 @@ mod tests {
     }
 
     /// PURE-MCR: a container with `FLAG_HAS_MCR_FIELDS` and NO materialized
-    /// execution stream (no `steps.dat`, no legacy `events.log`) must STILL be
+    /// execution stream (no `steps.dat`) must STILL be
     /// refused with the emulator message — the refusal is driven by structural
     /// absence of a materialized stream, not by the MCR bit. Exercised through
     /// the (crate-private) `open_new_format_rust`, the only site that produces
@@ -5333,7 +4988,7 @@ mod tests {
         let dat = meta_dat::serialize_meta_dat(&md);
         let dir = tempfile::tempdir().unwrap();
         let ct = dir.path().join("pure_mcr.ct");
-        // A placeholder native thread stream, but NO steps.dat / events.log.
+        // A placeholder native thread stream, but NO steps.dat.
         ctfs_container::write_minimal_ctfs(&ct, &[("meta.dat", &dat), ("t00000000000", b"")]).unwrap();
 
         let mut ctfs = CtfsReader::open(&ct).unwrap();

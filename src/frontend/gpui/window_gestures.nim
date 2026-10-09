@@ -65,6 +65,16 @@ type
       ## `ikNone`. It OUTLIVES the gesture that opened it — a click reveals,
       ## and the pane stays shown after the button comes up — so every entry
       ## point below carries it across.
+    dragLayout*: Layout
+      ## PLAT-51: once a tab drag has moved, the arrangement WITHOUT the
+      ## dragged pane (`dragLayoutFor`) — GoldenLayout's `DragProxy` takes
+      ## the item out before it measures; the window draws this
+      ## (`previewLayout`) and the hit-test measures it.
+    glState*: GlDragState
+    glPaths*: seq[string]
+      ## PLAT-51: GoldenLayout's state between two samples of the drag (each
+      ## stack's segment and index, the placeholder, the last valid area) and
+      ## the stack paths it indexes.
 
   GestureStep* = object
     changed*: bool
@@ -74,6 +84,10 @@ type
       ## shell's one door (`GpuiShell.applyIn`).
     status*: string
       ## What happened, in words — a `--gesture-trace` line.
+    relayout*: bool
+      ## PLAT-51: the drawn arrangement changed SHAPE (the drag just lifted
+      ## its pane out): the host lays the window out again and hands this
+      ## sample back (`pointerMove`) against the new geometry.
 
 const ClickSlopPx* = 4
   ## How far a pointer may wander between press and release and still be a
@@ -181,20 +195,36 @@ proc pointerMove*(g: var WindowGestures; layout: Layout;
   of gkDragTab:
     g.pointerX = x
     g.pointerY = y
-    if abs(x - g.pressX) > ClickSlopPx or abs(y - g.pressY) > ClickSlopPx:
-      g.moved = true
     if not g.moved:
+      if abs(x - g.pressX) > ClickSlopPx or abs(y - g.pressY) > ClickSlopPx:
+        # THE DRAG BEGINS (PLAT-51): GoldenLayout's `DragProxy` lifts the
+        # pane out of its stack before anything is measured, so the window
+        # is laid out again without it and this sample is decided against
+        # THAT geometry (`relayout`: the host redraws and calls again).
+        g.moved = true
+        g.dragLayout = dragLayoutFor(layout, g.source)
+        g.glState = GlDragState(placeholderStack: -1, placeholderIndex: -1,
+                                lastValid: -1)
+        g.glPaths = @[]
+        # A pane picked up from a strip is no longer shown over the tree.
+        g.reveal = noInteraction()
+        return GestureStep(changed: true, relayout: true,
+                           status: "dragging " & $g.source)
       return GestureStep(status: "")
-    let pointer = geom.pointerAt(x, y)
-    if pointer.isSome:
-      # A pane picked up from a strip is no longer shown over the tree.
-      g.reveal = noInteraction()
-      g.interaction = hoverAt(g.interaction, layout, pointer.get)
-    else:
-      g.interaction = Interaction(kind: ikDraggingTab,
-                                  source: g.interaction.source,
-                                  origin: g.interaction.origin,
-                                  hover: none(DropTarget))
+    # GOLDENLAYOUT'S `setDropPosition`, PORTED (Layout-ViewModel §4.2.2):
+    # constrained onto the tree, `getArea`, the stack's segment or header
+    # index and the placeholder, carried from the previous sample; a pointer
+    # over no area (a gap between boxes) keeps the last valid one.
+    let shown = if g.dragLayout.tree.isNil: layout else: g.dragLayout
+    let hit = goldenHitOf(geom)
+    if hit.paths != g.glPaths or g.glState.stacks.len != hit.geom.stacks.len:
+      g.glState = glDragState(hit.geom)
+      g.glPaths = hit.paths
+    let (cx, cy) = glClamp(hit.geom, float(x), float(y))
+    let d = glPointerStep(hit.geom, hit.areas, g.glState, cx, cy,
+                          NativeCentreShare)
+    g.interaction = hoverGolden(g.interaction, layout, shown,
+                                goldenDropOf(d, hit.paths))
     let after = dropIndicationOf(g.interaction)
     # The ghost follows the pointer, so every move while dragging redraws.
     GestureStep(changed: true,
@@ -273,10 +303,28 @@ proc cancelGesture*(g: var WindowGestures): GestureStep =
   GestureStep(changed: was != gkNone,
               status: (if was != gkNone: "gesture cancelled" else: ""))
 
-proc previewLayout*(g: WindowGestures; layout: Layout): Layout =
-  ## What the window draws: the committed layout, or — while a divider is
-  ## dragged — the committed layout with the pending resize applied.
-  if g.kind != gkResize:
+proc placeholderOf*(g: WindowGestures): tuple[found: bool; stackPath: string;
+                                             index: int] =
+  ## PLAT-51: where GoldenLayout's tab-drop PLACEHOLDER is during a drag —
+  ## the pane box (its path) and the tab it sits before. The window opens a
+  ## `GlPlaceholderPx` gap there, as GoldenLayout's strip does.
+  if g.kind != gkDragTab or not g.moved or g.glState.placeholderStack < 0 or
+     g.glState.placeholderStack >= g.glPaths.len:
+    return (false, "", -1)
+  (true, g.glPaths[g.glState.placeholderStack], g.glState.placeholderIndex)
+
+proc previewLayout*(g: WindowGestures; layout: Layout;
+                    liveResize = true): Layout =
+  ## What the window draws: the committed layout; during a tab drag that has
+  ## moved, the layout WITHOUT the dragged pane (`dragLayout`, GoldenLayout's
+  ## drag proxy); while a divider is dragged with live resize on (PLAT-51,
+  ## Layout-ViewModel §4.3a, the default), the committed layout with the
+  ## pending resize applied — every pane at its proposed size. With live
+  ## resize off the arrangement stays and a guide marks the divider
+  ## (`resizeGuideOf`).
+  if g.kind == gkDragTab and g.moved and not g.dragLayout.tree.isNil:
+    return g.dragLayout
+  if g.kind != gkResize or not liveResize:
     return layout
   let cmd = pendingCommand(layout, g.interaction)
   if cmd.isNone:
@@ -290,3 +338,17 @@ proc indication*(g: WindowGestures): DropIndication =
   if g.kind != gkDragTab or not g.moved:
     return DropIndication(kind: diNone)
   dropIndicationOf(g.interaction)
+
+proc resizeGuideOf*(g: WindowGestures; geom: WindowGeometry): PxRect =
+  ## PLAT-51: with live resize OFF, where the dragged divider would land —
+  ## a band the gap's thickness across its container at the pointer's
+  ## position (the committed arrangement does not move until release).
+  if g.kind != gkResize:
+    return PxRect()
+  let d = g.divider
+  if d.horizontal:
+    let x = max(d.start, min(d.start + d.extent, g.pointerX - g.grab))
+    PxRect(x: x, y: d.rect.y, w: max(2, d.rect.w), h: d.rect.h)
+  else:
+    let y = max(d.start, min(d.start + d.extent, g.pointerY - g.grab))
+    PxRect(x: d.rect.x, y: y, w: d.rect.w, h: max(2, d.rect.h))

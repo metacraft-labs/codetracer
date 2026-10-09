@@ -1676,6 +1676,77 @@ pub fn is_mcr_available() -> bool {
     find_on_path("ct-mcr").is_some() || find_on_path("ct_cli").is_some()
 }
 
+/// The start of the line `ct-mcr debugserver <trace>` prints, before it
+/// exits 1 without listening, for a same-platform interpose recording on
+/// Linux (codetracer-specs `spec/CLI/ct-mcr/debugserver.md`, Planned
+/// Changes).  Trace mode used to relaunch the recorded program as a new live
+/// recording, a re-execution in which no position of the recording can be
+/// reached; it refuses the trace until the stage0 emulator serves the replay,
+/// and `ct-native-replay` positions in it from HS-M2 U4b4, which also
+/// returns the MCR flow tests here to replay.
+pub const MCR_LINUX_TRACE_MODE_REFUSAL: &str = "error: trace mode does not serve a Linux interpose recording yet: ";
+
+/// The `ct-mcr` binary the MCR backend uses: `CODETRACER_CT_MCR_CMD`, else
+/// `ct-mcr` or `ct_cli` on `PATH` (the lookup of [`is_mcr_available`]).
+pub fn find_ct_mcr() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_CT_MCR_CMD") {
+        let p = PathBuf::from(path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    find_on_path("ct-mcr").or_else(|| find_on_path("ct_cli"))
+}
+
+/// For an MCR flow test on Linux: assert that `ct-mcr debugserver`, which
+/// `ct-native-replay` starts for the trace, refuses `trace` by name (exit 1,
+/// the refusal line, no `Listening on`), and return `true`; the caller ends
+/// the test there.  `false` on other hosts.  Panics when the server serves
+/// the trace (the relaunch is back) or fails some other way.
+pub fn mcr_linux_trace_mode_refused(test_name: &str, trace: &Path) -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
+    let ct_mcr = find_ct_mcr().unwrap_or_else(|| panic!("{test_name}: ct-mcr not found"));
+    let mut child = Command::new(&ct_mcr)
+        .arg("debugserver")
+        .arg("--port")
+        .arg("0")
+        .arg(trace)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("{test_name}: could not run {}: {e}", ct_mcr.display()));
+    // A refusal is immediate; a server that listens waits for a client
+    // forever, so it is killed at this bound and the test fails.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            Err(e) => panic!("{test_name}: waiting for ct-mcr debugserver: {e}"),
+        }
+    };
+    let output = child.wait_with_output().map(|o| o.stdout).unwrap_or_default();
+    let stdout = String::from_utf8_lossy(&output);
+    let named = stdout.lines().any(|l| l.starts_with(MCR_LINUX_TRACE_MODE_REFUSAL));
+    assert!(
+        status.map(|s| s.code() == Some(1)).unwrap_or(false) && named && !stdout.contains("Listening on"),
+        "{test_name}: on Linux `ct-mcr debugserver` must refuse the MCR recording {} \
+         (exit 1, the named error, no port) until HS-M2 U4b4; got status {status:?}, \
+         stdout:\n{stdout}",
+        trace.display()
+    );
+    println!("{test_name}: Linux: ct-mcr debugserver refused the recording by name, as it must until HS-M2 U4b4");
+    true
+}
+
 /// Check if a replay backend is available (rr on Unix, TTD on Windows).
 pub fn is_replay_backend_available() -> bool {
     if cfg!(unix) {

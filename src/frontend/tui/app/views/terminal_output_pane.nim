@@ -50,6 +50,7 @@ import ../layout/project
 import ./header
 import ./styled_row
 import ./scrubber_track
+import ../../../styles/generated/design_tokens
 
 export scrubber_track
 
@@ -205,6 +206,14 @@ proc scrubberOf*(m: TerminalOutputPaneModel; rows: int): ScrubberModel =
 # Painting
 # ---------------------------------------------------------------------------
 
+const
+  TerminalFutureForeground* = DesignTokenHex[dtColorsUiBorderContrast][dmDark]
+    ## The desktop's `.future` colour for a fragment with no SGR foreground
+    ## (`styles/components/terminal.styl`'s `color: white`; GPUI's
+    ## `TerminalFutureColour`): white in both modes, which is the design
+    ## system's contrast border token (#ffffff Dark and Light) — named through
+    ## the token table, never hand-written here (`tui-design-tokens-boundary`).
+
 proc literalStyle*(a: TermAttrs): CellStyle =
   ## A run's SGR attributes as a cell style: the colours as LITERALS (content,
   ## not chrome — the frame viewer's rule), through the desktop's palette —
@@ -220,12 +229,19 @@ proc literalStyle*(a: TermAttrs): CellStyle =
 proc fragmentStyle*(f: TerminalEventFragment;
                     currentTicks: uint64): CellStyle =
   ## A fragment's cell style: as written in the past and at the current
-  ## position, muted in the future (the desktop's `.future`).
+  ## position; in the future the desktop's `.future { color: white;
+  ## opacity: 0.5 }` — the fragment's OWN colour (white where the program
+  ## set none) at half strength over the pane's ground (`CellStyle.dim`,
+  ## blended by `palette.resolveRoles`), so every colour stays recognisable,
+  ## as on the desktop and in GPUI (`terminal_output_leaf.styleRun`).
+  result = literalStyle(f.style)
   case fragmentTense(currentTicks, f.rrTicks)
-  of ttPast, ttActive: literalStyle(f.style)
+  of ttPast, ttActive: discard
   of ttFuture:
-    CellStyle(role: srChromeMuted, bold: f.style.bold,
-              italic: f.style.italic, underline: f.style.underline)
+    if result.fg.len == 0:
+      result.role = srNone
+      result.fg = TerminalFutureForeground
+    result.dim = true
 
 proc clipNote*(m: TerminalOutputPaneModel; geo: TerminalPaneGeometry;
                area: CellArea): string =

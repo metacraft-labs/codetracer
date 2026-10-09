@@ -61,6 +61,7 @@ import ../layout/binding
 import ../layout/profile
 import ../layout/project
 import ../layout/tab_strip
+import ../layout/cells
 import ../views/shell
 import ./plat45_old_profiles
 
@@ -68,9 +69,12 @@ import ./plat45_old_profiles
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it. `+ 3`: PLAT-49 part B's positive controls
 # (a lone pane's header joined; a tab's insert and append halves were seen).
-const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5 - 21
+const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5 - 21 + 4
   ## PLAT-51: -21 — the shared default lost a pane (the Timeline, a tab of
   ## the event stack), and the per-pane / per-tab sweeps over it with it.
+  ## PLAT-51 part B: +4 — the four dock zones a pointer no longer produces
+  ## (asserted absent), the placeholder closed before a tab is aimed at, the
+  ## band crossed on the way out, and its root split's axis and side.
   ## + 5: PLAT-49 part B review — the round trip reaches the root band.
   ## PLAT-48: +17 — the `:pin` / `:unpin` block and the two new verbs in the
   ## every-verb sweep. PLAT-49: +2 — a press MARKS the pane (`pendingPick`)
@@ -333,6 +337,50 @@ template ckMessageIsNeverSilent(a: LayoutAction; label: string) =
 
 # ---------------------------------------------------------------------------
 
+
+proc inTabGap(geom: LayoutGeometry; row, col: int): bool =
+  ## PLAT-51: a cell of a tab strip that is over NO tab — the one-cell gap
+  ## between two labels, or the strip past the last label of a narrow one.
+  ## GoldenLayout's `highlightHeaderDropZone` gives up there (over no tab,
+  ## left of the last one) and decides nothing, so a single sample from a
+  ## fresh drag resolves to no pointer; a drag keeps its last decision.
+  for region in geom.projection.regions:
+    if region.area.row != row or not region.area.contains(row, col):
+      continue
+    let tabs = if region.activeTab >= 0 and region.tabs.len > 0: region.tabs
+               else: @[terminalPaneName(region.pane)]
+    let active = max(0, region.activeTab)
+    let rel = col - region.area.col
+    let spans = tabSpans(tabs, active)
+    if spans.len == 0:
+      return false
+    if rel < spans[^1].startCol and tabSpanAt(tabs, active, rel) < 0:
+      return true
+  false
+
+proc onDivider(geom: LayoutGeometry; row, col: int): bool =
+  ## PLAT-51: a pane's divider column — GoldenLayout's splitter, in no
+  ## stack's area: a fresh drag decides nothing over it.
+  let idx = geom.regionIndexAt(row, col)
+  if idx < 0:
+    return false
+  let a = geom.projection.regions[idx].area
+  col == a.col + a.width - 1 and
+    a.col + a.width < geom.inner.col + geom.inner.width
+
+proc onSegmentBoundary(l: Layout; geom: LayoutGeometry; row, col: int): bool =
+  ## PLAT-51: a cell whose centre lies exactly on a GoldenLayout hover-area
+  ## boundary — strict containment matches no segment there.
+  let hit = goldenHitOf(l, geom)
+  let m = mouseMetrics()
+  let x = (float(col) + 0.5) * m.cellW
+  let y = (float(row) + 0.5) * m.cellH
+  let at = glAreaAt(hit.areas, x, y)
+  if at < 0 or hit.areas[at].kind == gakSide:
+    return false
+  glStackSegmentAt(hit.geom.stacks[hit.areas[at].stack], x, y,
+                   NativeCentreShare) == segNone
+
 suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
 
   test "the hit-test partitions the body: every cell resolves to exactly one zone":
@@ -342,6 +390,7 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var sweptCells = 0
     var footerSwept = 0
     var resolved = 0
+    var givenUp = 0
     var zonesSeen: set[DropZone] = {}
     for g in Geometries:
       for l in [sharedAt(selectProfile(g.cols, g.rows)), allEdgesDocked()]:
@@ -355,6 +404,15 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
             if p.isSome:
               inc resolved
               zonesSeen.incl p.get.zone
+            elif geom.inTabGap(row, col) or geom.onDivider(row, col) or
+                 l.onSegmentBoundary(geom, row, col) or
+                 not geom.inner.contains(row, col):
+              # GoldenLayout decides nothing there (PLAT-51): a strip's gap,
+              # a splitter, a boundary — or a cell past the layout, which is
+              # constrained onto its edge (`x2` / `y2` are outside every area).
+              inc resolved
+              inc givenUp
+
         # The footer's labels (the bottom strip, on the status row).
         for s in geom.strips:
           if s.edge != leBottom: continue
@@ -365,6 +423,11 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
             if p.isSome:
               inc resolved
               zonesSeen.incl p.get.zone
+            else:
+              # PLAT-51: the footer is below the layout — constrained onto
+              # its bottom edge, outside every area: no fresh decision.
+              inc resolved
+              inc givenUp
     # THE POSITIVE CONTROL. `resolved == sweptCells` is satisfied for free by a
     # sweep that visited nothing, so the number of cells is asserted too — and
     # it is knowable: three geometries, two layouts each, one body apiece.
@@ -379,9 +442,17 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # the four `dzOutside*` need the four dock strips, and the rest need a pane
     # wide enough to have a centre — all of which the two layouts above have
     # between them.
-    checkpoint("zones reached: " & $zonesSeen)
+    checkpoint("zones reached: " & $zonesSeen & "; given up (a strip's gap, " &
+               "a boundary): " & $givenUp)
+    # PLAT-51 (Layout-ViewModel §4.2.2): A POINTER NEVER DOCKS. GoldenLayout
+    # constrains the drag onto the layout, so past it — and over a dock strip,
+    # which is outside the tree — is the ground's band: a root split. Every
+    # other zone is reachable.
     for z in DropZone:
-      ck z in zonesSeen
+      if z in {dzOutsideLeft, dzOutsideRight, dzOutsideTop, dzOutsideBottom}:
+        ck z notin zonesSeen
+      else:
+        ck z in zonesSeen
 
   test "cells -> pointer -> region -> cells is a round trip":
     # The two directions of the hit-test are the SAME table read twice, and
@@ -431,7 +502,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
         for col in geom.inner.col ..< geom.inner.col + geom.inner.width:
           let p = pointerAt(l, geom, row, col)
           if p.isNone:
-            inc unresolved
+            if not (geom.inTabGap(row, col) or geom.onDivider(row, col) or
+                    l.onSegmentBoundary(geom, row, col)):
+              inc unresolved
             continue
           if p.get.zone in {dzOutsideLeft, dzOutsideRight, dzOutsideTop,
                             dzOutsideBottom}:
@@ -633,16 +706,20 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
               continue
             let p = pointerAt(l, geom, region.area.row, col)
             # PLAT-49 part B — GOLDENLAYOUT'S HEADER RULE, restated here
-            # rather than read from `goldenLayoutInsertsAfter`: left of a
+            # rather than read from the port (`glHeaderIndexAt`): left of a
             # tab's middle the drop goes before it, right of the middle after
             # it; after the LAST tab is the append (`dzCentre`).
-            let after = offset * 2 + 1 > span.width
+            # A cell's CENTRE against the tab's midpoint, as GoldenLayout's
+            # `x < halfX` is strict (PLAT-51): the middle cell of an odd tab
+            # inserts after it.
+            let after = offset * 2 + 1 >= span.width
             let wantSlot = if after: span.index + 1 else: span.index
             if wantSlot >= region.tabs.len:
               inc appendColumns
               if p.isNone or p.get.zone != dzCentre:
                 disagreements.add where & ": the last tab's right half " &
-                  "did not append"
+                  "did not append: " & $p & " (region " & $region.area &
+                  " span " & $span & " offset " & $offset & ")"
               continue
             inc insertColumns
             if p.isNone or p.get.zone != dzTabStrip:
@@ -652,7 +729,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
                paneOfPathIn(l, childPathOf(parentPath(p.get.path).get,
                                            wantSlot)):
               disagreements.add where & ": named tab " & $p.get.path &
-                " rather than index " & $wantSlot
+                " rather than index " & $wantSlot & " (region " &
+                $region.area & " span " & $span & " offset " & $offset &
+                " tabs " & $region.tabs & ")"
           # …and the label the painter actually wrote is at those columns.
           # BY CELL, NOT BY BYTE — see `sliceCells`.
           let label = sliceCells(tabLabel(region.tabs[span.index],
@@ -725,6 +804,14 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       discard b.onMouse(geom, motion(source.row + 1, source.col + 3))
       ck b.interaction.kind == ikDraggingTab
       ck b.interaction.source == paneCalltrace
+      # PLAT-51: aimed from the frame DURING the drag — the pane was lifted
+      # out (GoldenLayout's drag proxy) and the arrangement closed up — and
+      # from a body first, so no tab-drop placeholder is open in a strip
+      # (one would move the tabs after it, as GoldenLayout's does).
+      geom = b.geometry(bodyFor(80, 24))
+      let ed = geom.regionOfPane(paneEditor)
+      discard b.onMouse(geom, motion(ed.row + ed.height div 2, ed.col + 2))
+      ck not b.placeholderOf().found
       let (tabRow, tabCol) = tabCell(geom, paneState, 1)
       ck tabRow >= 0
       let dropped = b.onMouse(geom, release(tabRow, tabCol))
@@ -741,35 +828,42 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       ck parent.get.kind == lnStack
       ck b.userModified
 
-    # dtSplitBefore and dtSplitAfter — drag onto the edge strips of a pane.
+    # dtSplitBefore and dtSplitAfter — drag onto the edge segments of a pane.
+    # PLAT-51 (Layout-ViewModel §4.2.2): GoldenLayout's DragProxy lifts the
+    # pane out before anything is measured, so the target is aimed from the
+    # frame DURING the drag (`b.geometry` draws the drag layout), clear of the
+    # ground's bands along the layout's own edges, and a top / bottom drop is
+    # in the middle column above / below the joining centre.
     for pair in [(leLeft, ssBefore, saRow), (leRight, ssAfter, saRow),
                  (leTop, ssBefore, saColumn), (leBottom, ssAfter, saColumn)]:
       let b = bindingOn(standard(), lpStandard)
       let geom = b.geometry(bodyFor(120, 40))
       let source = geom.regionOfPane(paneCalltrace)
-      let target = geom.regionOfPane(paneState)
       discard b.onMouse(geom, press(source.row, source.col))
       discard b.onMouse(geom, motion(source.row + 1, source.col + 3))
       ck b.interaction.kind == ikDraggingTab
-      # Clear of GoldenLayout's ground band (PLAT-49 part B) where the pane
-      # meets the layout's own edge: there a drop splits the whole layout.
-      let inner = geom.inner
-      let inL = if target.col == inner.col: rootBandDepth(leLeft) else: 0
+      let dragGeom = b.geometry(bodyFor(120, 40))
+      let target = dragGeom.regionOfPane(paneState)
+      let inner = dragGeom.inner
+      let inL = if target.col == inner.col:
+                  dragGeom.rootBandAreaOf(leLeft).width else: 0
       let inR = if target.col + target.width == inner.col + inner.width:
-                  rootBandDepth(leRight) else: 0
-      let inT = if target.row == inner.row: rootBandDepth(leTop) else: 0
+                  dragGeom.rootBandAreaOf(leRight).width else: 0
+      let inT = if target.row == inner.row:
+                  dragGeom.rootBandAreaOf(leTop).height else: 0
       let inB = if target.row + target.height == inner.row + inner.height:
-                  rootBandDepth(leBottom) else: 0
+                  dragGeom.rootBandAreaOf(leBottom).height else: 0
+      let box = boxOfRegion(dragGeom, target)
       let cell = case pair[0]
-        of leLeft: (target.row + target.height div 2, target.col + inL)
+        of leLeft: (target.row + target.height div 2, box.col + inL)
         of leRight: (target.row + target.height div 2,
-                     target.col + target.width - 1 - inR)
+                     box.col + box.width - 1 - inR)
         # The first row BELOW the strip: the strip itself is the pane's
-        # header and joins (PLAT-49 part B).
-        of leTop: (target.row + 1 + inT, target.col + target.width div 2)
+        # header and joins.
+        of leTop: (target.row + 1 + inT, box.col + box.width div 2)
         of leBottom: (target.row + target.height - 1 - inB,
-                      target.col + target.width div 2)
-      let dropped = b.onMouse(geom, release(cell[0], cell[1]))
+                      box.col + box.width div 2)
+      let dropped = b.onMouse(dragGeom, release(cell[0], cell[1]))
       checkpoint($pair[0] & " -> " & dropped.message)
       ck dropped.status == lasApplied
       ck dropped.command.isSome
@@ -780,23 +874,36 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       ck dropped.command.get.splitTarget == paneState
       ck dropped.command.get.splitNewPane == paneCalltrace
 
-    # dtDockEdge — release above the body, which is the only cell outside the
-    # tree area a terminal has before anything is docked. See `onMouse`'s
-    # header on why left and right are a keyboard gesture until then.
+    # PLAT-51: A RELEASE PAST THE BODY DOES NOT DOCK. GoldenLayout
+    # constrains the drag to its container (`constrainDragToContainer`): a
+    # pointer below the layout is put on its bottom edge, which is outside
+    # every area (`y2` is excluded), so the drop is the LAST VALID decision —
+    # here the ground's bottom band the pointer crossed, which splits the
+    # WHOLE layout. Docking is on the menus and `:dock` (Layout-ViewModel
+    # §4.2.2), as on the desktop.
     block:
       let b = bindingOn(compact(), lpCompact)
       let geom = b.geometry(bodyFor(80, 24))
       let source = geom.regionOfPane(paneCalltrace)
       discard b.onMouse(geom, press(source.row, source.col))
-      let dropped = b.onMouse(geom, release(0, 40))
-      checkpoint("dockEdge -> " & dropped.message)
+      # Through the bottom band (the body's last row: inside the band's
+      # 50 px, and the band is smaller than the stack there)...
+      discard b.onMouse(geom, motion(geom.inner.row + geom.inner.height - 1,
+                                     40))
+      ck b.interaction.hover.isSome
+      ck b.interaction.hover.get.kind == dtSplitRoot
+      # ...and out onto the status row, below the body.
+      discard b.onMouse(geom, motion(23, 40))
+      let dropped = b.onMouse(geom, release(23, 40))
+      checkpoint("below the body -> " & dropped.message)
       ck dropped.status == lasApplied
       ck dropped.command.isSome
-      ck dropped.command.get.kind == lcSetAutoHide
-      ck dropped.command.get.autoHideDirection == ahDock
-      ck dropped.command.get.autoHideEdge == leTop
-      ck b.layout.dockedIndex(paneCalltrace) >= 0
-      ck not b.layout.tree.contains(paneCalltrace)
+      ck dropped.command.get.kind == lcSplit
+      ck dropped.command.get.splitRoot
+      ck dropped.command.get.splitAxis == saColumn
+      ck dropped.command.get.splitSide == ssAfter
+      ck b.layout.dockedIndex(paneCalltrace) < 0
+      ck b.layout.tree.contains(paneCalltrace)
 
   test "the collapse rules fire through the binding, not only through apply":
     # §2.4's rules, each reached by a GESTURE. The model's own suite asserts
@@ -810,7 +917,11 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       let geom = b.geometry(bodyFor(80, 24))
       let source = geom.regionOfPane(paneCalltrace)
       discard b.onMouse(geom, press(source.row, source.col))
-      let (tabRow, tabCol) = tabCell(geom, paneState, 1)
+      # PLAT-51: aimed at the arrangement the drag will draw — the pane
+      # lifted out (GoldenLayout's drag proxy).
+      let dragGeom = geometryOf(dragLayoutFor(b.layout, paneCalltrace),
+                                bodyFor(80, 24))
+      let (tabRow, tabCol) = tabCell(dragGeom, paneState, 1)
       let dropped = b.onMouse(geom, release(tabRow, tabCol))
       ck dropped.status == lasApplied
       # The row is gone: `editor` is now a direct child of the root column.
@@ -836,11 +947,13 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       let b = bindingOn(compact(), lpCompact)
       var moved = 0
       for pane in [paneTerminalOutput, paneEventLog]:
+        discard b.beginDrag(pane)
+        # The editor's right segment, in the frame the drag draws.
         let geom = b.geometry(bodyFor(80, 24))
         let target = geom.regionOfPane(paneEditor)
-        discard b.beginDrag(pane)
+        let box = boxOfRegion(geom, target)
         discard b.hoverAt(geom, target.row + target.height div 2,
-                          target.col + target.width - 1)
+                          box.col + box.width - 2)
         let dropped = b.dropDrag()
         checkpoint("moving " & $pane & " out -> " & dropped.message)
         if dropped.status == lasApplied:
@@ -857,11 +970,12 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       ck validate(b.layout, {}).len == 0
 
       # Rule 2: the last tab leaves and the emptied stack is removed.
+      discard b.beginDrag(paneState)
       let geom = b.geometry(bodyFor(80, 24))
       let target = geom.regionOfPane(paneEditor)
-      discard b.beginDrag(paneState)
+      let box = boxOfRegion(geom, target)
       discard b.hoverAt(geom, target.row + target.height div 2,
-                        target.col + target.width - 1)
+                        box.col + box.width - 2)
       let last = b.dropDrag()
       checkpoint("moving the last tab out -> " & last.message)
       ck last.status == lasApplied
@@ -1043,18 +1157,24 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # §5's third obligation, asserted on the COMPOSITED SCREEN through the real
     # harness — so this is the compositor's answer, not `shellRows`'s.
     let b = bindingOn(standard(), lpStandard)
+    let first = b.geometry(bodyFor(120, 40))
+    let source = first.regionOfPane(paneCalltrace)
+    discard b.onMouse(first, press(source.row, source.col))
+    discard b.onMouse(first, motion(source.row + 1, source.col + 3))
+    # PLAT-51: the frame the drag draws (the pane lifted out), and the
+    # state pane's left segment in it, clear of the ground's band.
     let geom = b.geometry(bodyFor(120, 40))
-    let source = geom.regionOfPane(paneCalltrace)
     let target = geom.regionOfPane(paneState)
-    discard b.onMouse(geom, press(source.row, source.col))
+    let band = if target.col == geom.inner.col:
+                 geom.rootBandAreaOf(leLeft).width else: 0
     discard b.onMouse(geom, motion(target.row + target.height div 2,
-                                   target.col))
+                                   target.col + band + 1))
     ck b.interaction.kind == ikDraggingTab
     ck b.interaction.hover.isSome
 
     var model = newShellModel(120, 40)
-    model.layout = b.layout.tree
-    model.docked = b.layout.docked
+    model.layout = b.presentedLayout.tree
+    model.docked = b.presentedLayout.docked
     model.interaction = b.interaction
     let screen = shellScreen(model, 120, 40)
     var kinds: set[LayoutDecorationKind] = {}

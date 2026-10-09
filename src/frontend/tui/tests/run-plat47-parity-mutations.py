@@ -522,11 +522,12 @@ ARMS = [
         "in monochrome the active tab loses its reverse video"),
     # --- focus -----------------------------------------------------------------
     Arm("K1", ROLES,
-        "    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderPrimary,",
+        # PLAT-51 part B: the ring is the SUBTLER ui/border/secondary now.
+        "    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderSecondary,",
         "    srBorderFocused: fgOnly(dgBorder, dtColorsUiBorderFocus,",
         C_RING,
         "the focus ring back on the design system's `border/focus` instead of "
-        "the desktop's measured outline"),
+        "the subtler border tier"),
     Arm("K2", SHELL,
         "  for row in box.row ..< box.row + box.height:\n    result.incl (row, left)\n",
         "  for row in box.row ..< box.row:\n    result.incl (row, left)\n",
@@ -714,11 +715,12 @@ ARMS += [
         "  discard\n",
         C_G_ESC,
         "Esc leaves GPUI's drag in flight, its drop still indicated"),
-    # PLAT-49 part B: the bands are GoldenLayout's quarters, the shared
-    # `goldenLayoutZone`; mirroring its x turns the left band into the right.
+    # PLAT-51 part B: the bands are GoldenLayout's own (the shared port,
+    # `golden_layout_hit`), sampled by `pointerAt`; mirroring the pointer's x
+    # turns the left band into the right.
     Arm("O7", WINGEOM,
-        "                     zone: goldenLayoutZone(x - b.x, y - b.y, b.w, b.h)))",
-        "                     zone: goldenLayoutZone(b.w - 1 - (x - b.x), y - b.y, b.w, b.h)))",
+        "  let (cx, cy) = glClamp(hit.geom, float(x), float(y))\n",
+        "  let (cx, cy) = glClamp(hit.geom, float(2 * g.inner.x + g.inner.w - x), float(y))\n",
         C_G_HIT,
         "GPUI's left edge band hit-tests as the right one"),
     # --- GPUI's divider drag ----------------------------------------------------
@@ -729,7 +731,7 @@ ARMS += [
         "the pointer's fraction measured a gap off: the divider lands 8 px "
         "from where it was dropped"),
     Arm("R2", WINGEST,
-        "  if g.kind != gkResize:\n    return layout\n",
+        "  if g.kind != gkResize or not liveResize:\n    return layout\n",
         "  if true:\n    return layout\n",
         C_G_DIVIDER,
         "no live preview: the window shows the old split until the release"),

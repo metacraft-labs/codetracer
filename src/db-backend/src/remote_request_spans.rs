@@ -585,7 +585,8 @@ impl RemoteRequestSpanTail {
         // can still lose data.
         let complete = bytes.len() as u64 == want;
 
-        let mut reader = SpanStreamReader::from_partial_files(bytes, base, index.as_bytes())?;
+        let mut reader = SpanStreamReader::from_partial_files(bytes, base, index.as_bytes())?
+            .with_chunk_form(self.ctfs.chunk_form());
         let mut records = Vec::new();
         let mut consumed = from;
         for chunk in from..head {

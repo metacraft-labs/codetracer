@@ -54,7 +54,7 @@
 ## constructed without a `TerminalCapabilities`, and the paint is a method on
 ## the driver.
 
-import std/[os, strutils, tables]
+import std/[os, strutils, tables, times]
 
 from isonim_tui import caretSupportFor, caretBytes, TextCaret, CaretSupport,
   caretShapes, caretDrawn, ckBar, ckBlock
@@ -86,6 +86,10 @@ import ./host/vcs_source
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
+import headless_app/welcome_tabs
+import ./app/views/welcome_view
+import ../viewmodel/host/native_state
+from ../viewmodel/viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode
 from backend/stdio_backend import toBackendService
 from ./app/views/file_tree import FileTreeModel
 import ./host/control_icons
@@ -93,6 +97,7 @@ import ./host/image_probe
 import ./app/theme/palette
 import ../viewmodel/host/keymap_preference
 import ../viewmodel/host/icons_preference
+import ../viewmodel/host/layout_preferences
 
 const
   IdlePollMs = 200
@@ -146,20 +151,25 @@ proc wireEditServices(rt: TuiRuntime; root: string;
   ## before it claims the terminal and the other must not walk it at all until
   ## asked.
   let state = EditHostState()
+  # PLAT-51: THE ROOT IS READ AT EACH CALL — a welcome tab's "Open folder"
+  # re-roots the session's Edit mode (`app.projectRoot`), and every service
+  # follows it.
+  proc rootOf(): string =
+    if rt.app.projectRoot.len > 0: rt.app.projectRoot else: root
   rt.editServices.readFile = proc(relative: string): EditReadResult =
     try:
-      EditReadResult(ok: true, text: readProjectFile(root, relative))
+      EditReadResult(ok: true, text: readProjectFile(rootOf(), relative))
     except TuiHostError as e:
       EditReadResult(ok: false, message: e.msg)
   rt.editServices.writeFile = proc(relative, text: string): EditWriteResult =
     try:
-      writeProjectFile(root, relative, text)
+      writeProjectFile(rootOf(), relative, text)
       EditWriteResult(ok: true)
     except TuiHostError as e:
       EditWriteResult(ok: false, message: e.msg)
   rt.editServices.readConfig = proc(spelled: string): EditReadResult =
     try:
-      EditReadResult(ok: true, text: readUserConfigFile(root, spelled))
+      EditReadResult(ok: true, text: readUserConfigFile(rootOf(), spelled))
     except TuiHostError as e:
       EditReadResult(ok: false, message: e.msg)
   rt.editServices.listFiles = listFiles
@@ -179,7 +189,7 @@ proc wireEditServices(rt: TuiRuntime; root: string;
     saveKeymapPreference(model)
   rt.editServices.startBuild = proc(kind: BuildKind;
                                     cmd: string): BuildStartResult =
-    state.running = startBuild(kind, cmd, root, nowMonoMs())
+    state.running = startBuild(kind, cmd, rootOf(), nowMonoMs())
     rt.app.build = state.running.session
     if state.running.session.verdict == bvRunning:
       BuildStartResult(ok: true, message: $kind & " started: " & cmd)
@@ -212,6 +222,40 @@ proc wireTopBar(rt: TuiRuntime) =
                     getEnv("TERM_PROGRAM", ""), getEnv("KITTY_FONT", "")):
       rt.app.notification = NerdSuggestion
   rt.saveIcons = proc(mode: IconsMode): string = saveIconsPreference(mode)
+
+proc wireLayoutPreferences(rt: TuiRuntime;
+                           focusFlag, liveFlag: SettingOverride) =
+  ## PLAT-51 deliverables 9 and 11: the remembered `focus-highlight` and
+  ## `live-resize` (`host/layout_preferences`, beside the remembered layout)
+  ## and then this session's flags, which beat them; `:set` remembers a new
+  ## choice through `savePreference`. A stored value that is not a setting is
+  ## refused by name on the status line, and the defaults stay.
+  let product: LayoutProduct = lpTerminal
+  let stored = loadLayoutPreferences(product)
+  var settings = stored.settings
+  if stored.status == lpsRefused:
+    rt.app.notification = stored.message
+  settings.applyOverride(lsFocusHighlight, focusFlag)
+  settings.applyOverride(lsLiveResize, liveFlag)
+  discard rt.applyLayoutSetting(lsFocusHighlight, settings.focusHighlight,
+                                remember = false)
+  discard rt.applyLayoutSetting(lsLiveResize, settings.liveResize,
+                                remember = false)
+  rt.savePreference = proc(name: string; on: bool): string =
+    let (known, which) = parseSettingName(name)
+    if not known: "unknown setting " & name
+    else: saveLayoutPreference(product, which, on)
+
+proc adoptMouseMetrics(driver: TerminalDriver; n: StartupNegotiation) =
+  ## PLAT-51 (Layout-ViewModel §4.2.2): what the start-up round said about
+  ## the pointer — SGR-pixel reports (DECSET 1016) on a terminal that
+  ## recognises the mode and said its cell size, else cells mapped to their
+  ## centres through that size (or the desktop's) — installed for every
+  ## decode, and 1016 switched on when it applies. Re-run on a late reply.
+  let m = mouseMetricsOf(n.probe, n.caps.mouse)
+  setMouseMetrics(m)
+  if m.pixels:
+    driver.enablePixelMouse()
 
 var gIconState: ControlIconState
   ## What the terminal already holds of the controls' pictures (one terminal
@@ -332,6 +376,16 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
       TextCaret(row: caret.row, col: caret.col, visible: true,
                 shape: (if caret.overwrite: ckBlock else: ckBar)),
       gCaretSupport)
+  # PLAT-51: A WELCOME TAB'S FORM owns the caret when it is open (the
+  # omnibar's and the prompt's win, being over it).
+  if not prompting and not caret.shown:
+    let wv = rt.app.welcomeViewOf()
+    if wv.shown:
+      let wc = welcomeCursor(wv, screen.welcomeLayout)
+      if wc.on:
+        epilogue.add caretBytes(
+          TextCaret(row: wc.row, col: wc.col, visible: true, shape: ckBar),
+          gCaretSupport)
   # PLAT-50: TEXT A CLICK COPIED (the editor menu's Copy) goes to the
   # terminal's clipboard — OSC 52 (`ESC ] 52 ; c ; <base64> BEL`, xterm's
   # "Manipulate Selection Data",
@@ -417,6 +471,7 @@ proc interactive(command: TuiCommand): int =
   # `RGB`) — in raw mode, before frame 0, bounded by one short wait. Late
   # replies are taken by the loop below.
   let negotiation = driver.negotiateOnTerminal(command.flags)
+  adoptMouseMetrics(driver, negotiation)
 
   var size = driver.size()
   let app = newTuiApp()
@@ -461,7 +516,7 @@ proc interactive(command: TuiCommand): int =
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
   rt.themeService = themeSwitch(negotiation, driver, rt)
   let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =
-    let listing = listProjectFiles(projectRoot)
+    let listing = listProjectFiles(rt.app.projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
@@ -470,7 +525,7 @@ proc interactive(command: TuiCommand): int =
   defer: highlights.stop()
   # Declared AFTER the highlight worker, so it is stopped FIRST (defers run in
   # reverse) — its pending writes finish while the shared wake pipe is open.
-  let files = startFiles(rt, projectRoot, highlights)
+  var files = startFiles(rt, projectRoot, highlights)
   defer: files.stop()
   # PLAT-45: THE LAYOUT IS THE USER'S BY DEFAULT, AND IT IS REMEMBERED.
   #
@@ -490,6 +545,7 @@ proc interactive(command: TuiCommand): int =
   # The binding is enabled before the first frame, seeded from the arrangement
   # this session would have painted anyway, so frame 0 is unchanged by it.
   discard rt.enableLayoutBinding()
+  wireLayoutPreferences(rt, command.focusHighlight, command.liveResize)
   rt.layoutCommitted = proc(rt: TuiRuntime) =
     # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
     # know about, on the status line, and is not fatal: the arrangement is
@@ -662,10 +718,117 @@ proc interactive(command: TuiCommand): int =
     true
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
-  let vcs = newVcsSource(projectRoot)
+  var vcs = newVcsSource(projectRoot)
   defer: vcs.close()
   vcs.refresh(rt)
   app.notification = describe(session)
+
+  # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN, performed. The "+"
+  # opens it (`runtime.openWelcomeTab`); a choice there is handed here, and
+  # turns the tab into the session it starts:
+  #   * a recording — opened as a session tab (`recordingOpener`) in the
+  #     welcome tab's place;
+  #   * a program to record — `ct record` in the background
+  #     (`native_host.startRecordJob`), polled from the idle tick below, and
+  #     its recording opened the same way when it finishes;
+  #   * a folder — the session's Edit mode re-rooted there (the edit
+  #     services, the file worker and the VCS pane follow `app.projectRoot`),
+  #     and the tab becomes that folder's.
+  var recordJob: NativeRecordJob = nil
+  var recordSerial = -1
+  proc welcomeIndexOf(serial: int): int =
+    for i, t in app.welcomeTabs.tabs:
+      if t.serial == serial:
+        return i
+    -1
+  proc rootAt(path: string) =
+    if path == app.projectRoot:
+      return
+    app.projectRoot = path
+    files.stop()
+    files = startFiles(rt, path, highlights)
+    vcs.close()
+    vcs = newVcsSource(path)
+    vcs.refresh(rt)
+    # A new workspace: the next arrival in Edit mode furnishes it from the
+    # new root (`ensureEditWorkspace`), never over unsaved buffers.
+    var unsaved = false
+    if not app.editSession.isNil:
+      for buf in app.editSession.buffers:
+        if buf.isDirty:
+          unsaved = true
+    if not unsaved:
+      app.editSession = nil
+  app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
+    if tab < 0 or tab >= app.welcomeTabs.tabs.len:
+      return "that tab is gone"
+    case intent.kind
+    of niNone:
+      return ""
+    of niOpenTrace:
+      let path = absolutePath(intent.path.expandTilde())
+      let problem = traceFolderProblem(path)
+      if problem.len > 0:
+        return path & ": " & problem
+      let why = app.recordingOpener(path)
+      if why.len > 0:
+        return why
+      # THE TAB BECAME THAT SESSION: the welcome tab gives its place up.
+      app.welcomeTabs.closeWelcomeTab(tab)
+      if tab < app.welcomes.len:
+        app.welcomes.delete(tab)
+      var known = false
+      for e in app.recordings:
+        if e.target == path:
+          known = true
+      if not known:
+        app.recordings.insert(OmnibarEntry(kind: OmnibarMode.omRecording,
+                                           label: extractFilename(path),
+                                           detail: path.parentDir,
+                                           target: path), 0)
+      ""
+    of niRecord:
+      if not recordJob.isNil and not recordJob.done:
+        return "a recording is already running: " & recordJob.program
+      let stamp = now().format("yyyyMMdd-HHmmss")
+      let output = nativeStateRoot() / "recordings" /
+                   (extractFilename(intent.program).changeFileExt("") & "-" &
+                    stamp)
+      recordJob = startRecordJob(intent.program, intent.args, output)
+      recordSerial = app.welcomeTabs.tabs[tab].serial
+      if recordJob.done:
+        return recordJob.message
+      ""
+    of niOpenFolder:
+      let path = absolutePath(intent.path.expandTilde())
+      let problem = editProjectProblem(path)
+      if problem.len > 0:
+        return problem
+      rootAt(path)
+      app.welcomeTabs.turnIntoFolder(tab, path)
+      app.welcomeTabs.active = tab
+      let at = app.recentFolders.find(path)
+      if at >= 0:
+        app.recentFolders.delete(at)
+      app.recentFolders.insert(path, 0)
+      rt.enterProductMode(pmEdit)
+      ""
+  proc pollRecording(): bool =
+    ## The background `ct record`, once it finishes: its recording opened
+    ## in the tab that asked, or the failure on that tab's screen.
+    if not pollRecordJob(recordJob):
+      return false
+    let at = welcomeIndexOf(recordSerial)
+    if at < 0:
+      return true
+    if recordJob.ok:
+      let why = app.welcomeHost(at, NativeWelcomeIntent(
+        kind: niOpenTrace, path: recordJob.outputFolder))
+      if why.len > 0 and at < app.welcomes.len:
+        app.welcomes[at].message = why
+    elif at < app.welcomes.len:
+      app.welcomes[at].message = recordJob.message
+    true
   if negotiation.caps.tmuxRgbWithheld:
     # THE ONE CAPABILITY FINDING THAT OUTLIVES FRAME 0: a user whose tmux is
     # painting their 24-bit terminal at 256 colours needs the remedy, and it
@@ -699,6 +862,8 @@ proc interactive(command: TuiCommand): int =
 
   var running = true
   var frameOwed = false
+  var commitsSeen = rt.layoutCommits
+  var viewRows = rt.sourcePaneRows()
   while running:
     # §6.2's `--replay-keys`: "replay input events from file and exit". The
     # journal REPLACES the keyboard rather than being merged with it, so a
@@ -731,11 +896,13 @@ proc interactive(command: TuiCommand): int =
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
+      # PLAT-51: a welcome tab's recording, when it finishes.
+      let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs())
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged or frameOwed:
+         hoverChanged or frameOwed or recorded:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -745,7 +912,8 @@ proc interactive(command: TuiCommand): int =
       # changed the profile changed the editor's rectangle, and a `SourceVM`
       # still holding the old height would scroll the execution line off the
       # pane — see `runtime.sourcePaneRows`.
-      session.setViewportHeight(rt.sourcePaneRows())
+      viewRows = rt.sourcePaneRows()
+      session.setViewportHeight(viewRows)
       session.refresh(rt)
       paint(driver, rt)
     of dekToken:
@@ -764,6 +932,7 @@ proc interactive(command: TuiCommand): int =
       # It re-decides the capabilities and repaints; it is never journalled.
       let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
       if wasReply:
+        adoptMouseMetrics(driver, negotiation)
         if changed:
           rt.caps = negotiation.caps
           app.notification = capabilityNote(negotiation.caps)
@@ -785,6 +954,17 @@ proc interactive(command: TuiCommand): int =
         # PLAT-50: a click in the VCS pane is the VCS source's.
         if not vcs.applyClick(rt, outcome.paneClick):
           session.applyOutcome(rt, outcome)
+        # PLAT-51 (Layout-ViewModel §4.3a): A COMMITTED ARRANGEMENT MAY HAVE
+        # RESIZED THE SOURCE PANE — it fetches for its new height now, once,
+        # after the release; never while a divider is still held (the frames
+        # of a live drag re-lay-out what the pane holds).
+        if rt.layoutCommits != commitsSeen:
+          commitsSeen = rt.layoutCommits
+          let rows = rt.sourcePaneRows()
+          if rows > 0 and rows != viewRows:
+            viewRows = rows
+            session.setViewportHeight(rows)
+            session.refresh(rt)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         # `report = false`: the line the key just wrote is the user's own.
@@ -899,6 +1079,7 @@ proc editInteractive(command: TuiCommand): int =
   driver.start()
   defer: driver.stop()
   let negotiation = driver.negotiateOnTerminal(command.editFlags)
+  adoptMouseMetrics(driver, negotiation)
 
   var size = driver.size()
   let app = newTuiApp()
@@ -924,6 +1105,7 @@ proc editInteractive(command: TuiCommand): int =
   let edit = wireEditServices(rt, root, proc(): EditListResult =
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
+  wireLayoutPreferences(rt, soUnset, soUnset)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -974,6 +1156,7 @@ proc editInteractive(command: TuiCommand): int =
     of dekToken:
       let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
       if wasReply:
+        adoptMouseMetrics(driver, negotiation)
         if changed:
           rt.caps = negotiation.caps
           app.notification = capabilityNote(negotiation.caps)

@@ -129,8 +129,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-09-29"
-  MeasuredBinaryBytes = 15_855_880
+  MeasurementDate = "2026-10-08"
+  MeasuredBinaryBytes = 17_282_128
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -222,8 +222,27 @@ const
     ## from the pinned `monaco-editor` and gated fresh
     ## (`ci/test/monarch-languages-fresh.sh`). The ceiling keeps 8.02% over the
     ## anchor.
+    ##
+    ##   17_011_664  2026-10-08: `agents` at 35b08e67e (PLAT-51 part A), built
+    ##               fresh; inside the band (PLAT-48…52 growth, never
+    ##               re-anchored: 7.29% over the 15_855_880 anchor)
+    ##   17_282_128  2026-10-08: PLAT-51 part B
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. Part B costs +270_464 bytes (+1.59%) over
+    ## part A, which tripped the band. Attributed by summing `nm -S` per Nim
+    ## module: the Welcome Screen of a new tab — `welcome_screen_vm` linked
+    ## into the terminal for the first time (~60 KB, the desktop's own
+    ## ViewModel and the store types it brings), `native_welcome` (~14 KB),
+    ## `welcome_view` (~8 KB), `welcome_tabs` (~5 KB); the port of
+    ## GoldenLayout's hit-testing (`golden_layout_hit`, ~10 KB); the layout
+    ## settings and their remembered preference (`layout_settings`,
+    ## `layout_preferences`, ~15 KB); and growth in `binding`, `runtime`,
+    ## `main`, `native_host` (the `ct record` job), `terminal_probe` (the 1016
+    ## and cell-size answers), `shell` and `palette` (the focused strip, the
+    ## dimmed future), ~44 KB between them. No data table is linked in. The
+    ## ceiling keeps 8.02% over the anchor.
 
-  BinaryCeilingBytes = 17_127_600
+  BinaryCeilingBytes = 18_668_200
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

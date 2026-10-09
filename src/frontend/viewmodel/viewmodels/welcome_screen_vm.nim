@@ -552,6 +552,24 @@ const
     ## and a standing line that does not name it leaves the reader hunting for
     ## the single button that is not grey.
 
+  # -- The native arm (the terminal and the GPUI window) -------------------
+  NativeHandledStartOptions*: set[WelcomeStartOptionKind] =
+    {wsoOpenFolder, wsoRecordNewTrace, wsoOpenLocalTrace}
+    ## PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3, the user,
+    ## 2026-10-05): a new session tab on the terminal and in the GPUI window
+    ## opens THIS screen, from these same records, and these three are what
+    ## its host performs (`native_welcome.NativeWelcomeIntent`): open a
+    ## folder (Edit mode over it), record a program (`ct record`, then open
+    ## the recording), open a recording on disk. Same strip shape as every
+    ## arm; the other three are refused with their reasons.
+
+  NativeNewFileReason* =
+    "New file opens an untitled editor, which the terminal and the GPUI " &
+    "window do not have yet. Open a folder to edit its files."
+  NativeOnlineTraceReason* =
+    "Downloading a shared trace is not available in the terminal and the " &
+    "GPUI window yet."
+
 proc startOptionName*(kind: WelcomeStartOptionKind): string =
   StartOptionNames[kind]
 
@@ -605,6 +623,15 @@ proc desktopWelcomeStartOptions*(showTraceSharing: bool):
   reasons[wsoOpenOnlineTrace] = DesktopTraceSharingOffReason
   reasons[wsoCodetracerShell] = DesktopShellUnavailableReason
   welcomeStartOptionRecords(active, reasons)
+
+proc nativeWelcomeStartOptions*(): seq[WelcomeStartOptionRecord] =
+  ## PLAT-51: the native arm's strip — the terminal's and the GPUI window's
+  ## new tab. The active set IS `NativeHandledStartOptions`.
+  var reasons: StartOptionDisabledReasons
+  reasons[wsoNewFile] = NativeNewFileReason
+  reasons[wsoOpenOnlineTrace] = NativeOnlineTraceReason
+  reasons[wsoCodetracerShell] = DesktopShellUnavailableReason
+  welcomeStartOptionRecords(NativeHandledStartOptions, reasons)
 
 proc webWelcomeStartOptions*(): seq[WelcomeStartOptionRecord] =
   ## The web arm's strip.  The active set IS `WebHandledStartOptions`, the
