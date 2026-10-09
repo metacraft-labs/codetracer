@@ -47,7 +47,7 @@
 ## be about this checkout rather than about the fixture. Asserted, loudly, in
 ## the first case.
 
-import std/[exitprocs, json, options, os, osproc, streams, strutils, unittest]
+import std/[json, options, os, osproc, streams, strutils, unittest]
 
 import contracts
 import certificate
@@ -261,7 +261,13 @@ proc muteRunner(argv: seq[string]; cwd: string): CapturedRun {.gcsafe.} =
     seenArgv = argv
   CapturedRun(output: "fatal: not a git repository", exitCode: 128)
 
-addExitProc proc() =
+proc removeScratchRoot() =
+  ## Remove every scratch directory this run created. Called at module level
+  ## once the suite has run — deliberately NOT from an exit hook.
+  ## ``scratchRoot`` is a module-level ``let``: under ORC its destructor runs
+  ## at the end of the module's top-level code, which is BEFORE exit hooks
+  ## run, so an ``addExitProc`` closure reading it would be reading freed
+  ## memory and handing whatever had reused it to ``removeDir``.
   try: removeDir(scratchRoot)
   except CatchableError: discard
 
@@ -615,5 +621,7 @@ suite "CTC-2: the default certificate store":
       # even when an assertion above fails.
       setFilePermissions(repo / CtTestStoreDir,
                          {fpUserRead, fpUserWrite, fpUserExec})
+
+removeScratchRoot()
 
 echo "CHECKS: ", checksRun

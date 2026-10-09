@@ -58,7 +58,7 @@
 ## ``ct-test-certificates`` lane nor CI sets it, and under CI (``CI`` or
 ## ``GITHUB_ACTIONS`` set) the override is refused and the suite fails.
 
-import std/[algorithm, exitprocs, json, options, os, osproc, sets, streams,
+import std/[algorithm, json, options, os, osproc, sets, streams,
             strtabs, strutils, tempfiles, unittest]
 
 import certificate
@@ -629,6 +629,29 @@ proc locateVectors(): VectorsSource =
   VectorsSource(root: extraction.vectors, pinned: true, pin: pin,
                 extraction: extraction)
 
+proc walkAndDiscard(source: VectorsSource): VectorsWalk =
+  ## Walk ``source`` and, when the tree is a pinned extraction, remove the
+  ## temporary directory before returning — whether or not the walk raised.
+  ##
+  ## Every case reads the returned ``VectorsWalk``; nothing touches the tree
+  ## after this, so the extraction lives exactly as long as this call.
+  ##
+  ## That is deliberately NOT an exit hook. The suite used to register
+  ## ``addExitProc proc() = discardVectors(source.extraction)`` from inside
+  ## the ``suite`` block, where ``source`` is a block-scoped variable: the
+  ## closure did not keep it alive, ORC destroyed it at the end of the block,
+  ## and the hook later read freed memory as the directory to delete. When
+  ## that garbage happened to be a path with an embedded NUL, ``removeDir``
+  ## recursed until "call depth limit reached" and the binary exited 1 after
+  ## every case had passed; garbage spelling an existing directory would
+  ## have been deleted.
+  if source.root.len == 0:
+    return VectorsWalk()
+  try:
+    result = walkVectors(source.root)
+  finally:
+    discardVectors(source.extraction)
+
 proc reportGroup(label: string; walk: GroupWalk) =
   echo "    walking ", walk.cases.len, " ", label, " cases: ",
        walk.cases.join(", ")
@@ -641,8 +664,7 @@ proc reportGroup(label: string; walk: GroupWalk) =
 
 suite "test-certificate conformance vectors":
   let source = locateVectors()
-  addExitProc proc() = discardVectors(source.extraction)
-  let walk = if source.root.len > 0: walkVectors(source.root) else: VectorsWalk()
+  let walk = walkAndDiscard(source)
 
   test "the conformance vectors are present at the pin":
     ## A missing sibling or an unfetched pin fails here, once, loudly — rather
@@ -684,10 +706,19 @@ suite "test-certificate conformance vectors":
     check walk.verify.cases.len > 0
     check walk.verify.failures.len == 0
 
+  test "the extracted vectors are removed once walked, leaving no cleanup for exit":
+    ## The temporary directory is gone before the first case reads the walk,
+    ## so nothing has to outlive this block to remove it (see
+    ## ``walkAndDiscard`` for the use-after-free an exit hook caused).
+    require source.root.len > 0
+    if source.pinned:
+      check source.extraction.scratch.len > 0
+      check not dirExists(source.extraction.scratch)
+      check not dirExists(source.root)
+
   if source.root.len > 0:
     echo "    ", walk.caseCount, " conformance cases walked",
          (if source.pinned: " at " & source.pin else: " (UNPINNED)")
-  discardVectors(source.extraction)
 
 suite "the vectors pin":
   ## These exercise the pin mechanism itself, against the real sibling's

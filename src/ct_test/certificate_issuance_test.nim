@@ -46,9 +46,9 @@
 ## ``getTempDir()`` MUST NOT be inside a git repository, or the "not a
 ## repository" cases would find the enclosing one. The fixture helper checks
 ## that and fails with an actionable message rather than mis-asserting. Scratch
-## directories are removed on exit.
+## directories are removed once the suite has run.
 
-import std/[exitprocs, options, os, osproc, streams, strutils, tables,
+import std/[options, os, osproc, streams, strutils, tables,
             unittest]
 
 import results
@@ -253,7 +253,13 @@ proc passingItems(files: openArray[string] = OneTest): seq[TestItem] =
   for i, file in files:
     result.add fixtureItem(file, "case" & $i, foPass)
 
-addExitProc proc() =
+proc removeScratchRoot() =
+  ## Remove every scratch directory this run created. Called at module level
+  ## once the suite has run — deliberately NOT from an exit hook.
+  ## ``scratchRoot`` is a module-level ``let``: under ORC its destructor runs
+  ## at the end of the module's top-level code, which is BEFORE exit hooks
+  ## run, so an ``addExitProc`` closure reading it would be reading freed
+  ## memory and handing whatever had reused it to ``removeDir``.
   try: removeDir(scratchRoot)
   except CatchableError: discard
 
@@ -934,3 +940,5 @@ suite "ct test certificate issuance":
     check outcome.issuance.reason == wrAttestationDisabled
     check outcome.issuance.remedy.len > 0
     check not outcome.issuance.vcs.probed
+
+removeScratchRoot()
