@@ -18,10 +18,21 @@
 //
 // ## What it prints, and why each line is separate
 //
-//   events <n> / steps <n> / calls <n>   the trace's size
-//   nontrivial yes|no                    events > 1 && steps > 0 && calls > 0
-//   wrongprice yes|no                    the event log carries the wrong price
-//   assertion yes|no                     the event log carries the refusal
+//   container <n> / steps <n> / calls <n>  the recording's size
+//   nontrivial yes|no                      a CTFS `.ct` && steps > 0 && calls > 0
+//   wrongprice yes|no                      the recording carries the wrong price
+//   assertion yes|no                       the recording carries the refusal
+//
+// ## The answer is a `.ct` container
+//
+// The tracer answers `{container, paths, source_views, steps, calls, ...}`:
+// the recording as a base64 CTFS `.ct` container, with step and call counts
+// beside it (the same shape `noir-wasm-worker/compare.mjs` reads). The source
+// text travels in `source_views`, NOT in the container, so a string found in
+// the container's bytes was recorded by the run, not read from the program's
+// source. The container's streams are zstd frames, so the strings are looked
+// for in every frame the container's bytes hold, decompressed (a frame magic
+// that turns up inside compressed data simply fails to decode and is skipped).
 //
 // The last two are the ones a caller must check. Non-triviality is satisfied
 // by ANY program that runs, so on its own it cannot tell this demo's trace
@@ -33,6 +44,7 @@
 //     node ci/test/noir-demo-trace.mjs <project-dir> <package-name>
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { zstdDecompressSync } from 'node:zlib';
 
 const compiler = process.env.CT_NOIR_WASM_COMPILER;
 const tracer = process.env.CT_NOIR_WASM_TRACER;
@@ -105,22 +117,27 @@ const raw = new TextDecoder().decode(
 // TRACER could not answer.
 if (t.ct_result_is_error() !== 0) refuse(`the tracer could not answer: ${raw.slice(0, 400)}`);
 
+const CTFS_MAGIC = [0xc0, 0xde, 0x72, 0xac, 0xe2];
 const trace = JSON.parse(raw);
-const events = trace.events ?? [];
-let steps = 0, calls = 0;
-const text = [];
-for (const e of events) {
-  if ('Step' in e) steps++;
-  if ('Call' in e) calls++;
-  const recorded = e.Event;
-  if (recorded && typeof recorded.content === 'string') text.push(recorded.content);
+const bytes = typeof trace.container === 'string'
+  ? Buffer.from(trace.container, 'base64') : Buffer.alloc(0);
+const isContainer = CTFS_MAGIC.every((b, i) => bytes[i] === b);
+const steps = trace.steps ?? 0;
+const calls = trace.calls ?? 0;
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+const frames = [];
+if (isContainer) {
+  for (let at = bytes.indexOf(ZSTD_MAGIC); at >= 0; at = bytes.indexOf(ZSTD_MAGIC, at + 1)) {
+    try { frames.push(zstdDecompressSync(bytes.subarray(at))); } catch { /* not a frame */ }
+  }
 }
-const log = text.join('\n');
+const log = frames.map((f) => f.toString('latin1')).join('\n');
 
-console.log(`events ${events.length}`);
+console.log(`container ${bytes.length}`);
+console.log(`frames ${frames.length}`);
 console.log(`steps ${steps}`);
 console.log(`calls ${calls}`);
-console.log(`nontrivial ${events.length > 1 && steps > 0 && calls > 0 ? 'yes' : 'no'}`);
+console.log(`nontrivial ${isContainer && steps > 0 && calls > 0 ? 'yes' : 'no'}`);
 console.log(`wrongprice ${log.includes('settled price: 242990') ? 'yes' : 'no'}`);
 console.log(
   `assertion ${log.includes('the published price is not the median of this round') ? 'yes' : 'no'}`);

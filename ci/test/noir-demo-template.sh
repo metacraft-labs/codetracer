@@ -487,7 +487,7 @@ if [ -n "${CT_NOIR_WASM_COMPILER:-}" ] && [ -f "${CT_NOIR_WASM_COMPILER}" ] &&
 	if grep -q '^nontrivial yes$' "${cache}/trace.out"; then
 		ck ok "arm W: and the trace has calls and steps in it, not one event and zero steps"
 	else
-		ck fail "arm W: the trace is trivial: $(grep -E '^(events|steps|calls) ' "${cache}/trace.out" | tr '\n' ' ')"
+		ck fail "arm W: the trace is trivial: $(grep -E '^(container|steps|calls) ' "${cache}/trace.out" | tr '\n' ' ')"
 	fi
 	# AND IT IS THIS PROGRAM'S TRACE. Non-triviality is satisfied by any
 	# program; the recorded output is what says the browser's Run reaches the
@@ -499,7 +499,7 @@ if [ -n "${CT_NOIR_WASM_COMPILER:-}" ] && [ -f "${CT_NOIR_WASM_COMPILER}" ] &&
 		ck fail "arm W: the trace does not carry the demo's wrong price and assertion"
 		sed 's/^/      /' "${cache}/trace.out" | head -10
 	fi
-	sed 's/^/      /' "${cache}/trace.out" | grep -E 'events|steps|calls' | head -4
+	sed 's/^/      /' "${cache}/trace.out" | grep -E 'container|steps|calls' | head -4
 else
 	note "SKIPPED: CT_NOIR_WASM_COMPILER / CT_NOIR_WASM_TRACER (or node) is absent,"
 	note "         so the browser's compile-and-trace path was NOT exercised."
