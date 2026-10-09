@@ -373,17 +373,20 @@ jobs:
             #     same siblings it built against the first time, which `=dev`
             #     cannot promise.
             #
-            # TO REFRESH: `git ls-remote https://github.com/metacraft-labs/<repo>
-            # refs/heads/dev`. Resolved 2026-08-31.
-            isonim=2a24d9549543c2a894525f65c4e608f9881b7373
-            isonim-tui=229cf0e5fa3e1276a4f7259ef3b7032069bb2ce8
-            isonim-gpui=010b175d67333575385bd472425530238f89edd7
-            nim-everywhere=f15e23f02cd0d715a32877f77d97318397232117
-            nim-termctl=2600f444535e278aab564fd59400fcb6d19f2ccf
-            nim-pty=4efd335466dc28015445d78c134b97ff245e1c74
-            nim-acp=bb5b8a2c5c3805946847270c9eea39d718747c5e
-            nim-agent-harbor=0a1e06125daa5e33e09e1bab98edb6b811179a4e
-            nim-agents=31f88a36a8e65e0846e62b15515d3686bd78de5a
+            # TO REFRESH: copy each input's `locked.rev` from this commit's
+            # flake.lock (which `repro.lock` agrees with), so the renderer is
+            # compiled against the same siblings the Nix lane uses. Refreshed
+            # 2026-10-09: the 2026-08-31 pins predated APIs the renderer now
+            # calls (`selection.nim` no longer compiled against them).
+            isonim=45673bbabb207773d307ddc39041b46dc79ce751
+            isonim-tui=6ad4903fa9654d3cdbe0b14a947eb9d25233fe70
+            isonim-gpui=76b2a2cdd49d55d1af57dd5bce375841f844cec9
+            nim-everywhere=b4e2b6aad6858e0494fdfc200ddfe715e2367071
+            nim-termctl=2d3969412ce9bf1d94894929261163cebdfc4f29
+            nim-pty=50cccb5aab9f11134a4fa87dbfa14fc57026f61c
+            nim-acp=d894960d22c7174ec71808669fd986871a376b5f
+            nim-agent-harbor=3753c7267834902c3bd292a42e1c9f770988c003
+            nim-agents=3809eba4b658f35939a25b34bd291fa57cd1ce5b
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock `reprobuild`, 3850ec25) is tested
             # against: its own `.github/sibling-repos` pins
