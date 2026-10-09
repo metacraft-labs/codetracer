@@ -1349,8 +1349,14 @@ jobs:
           # recorder (TTD) tests below. Bare: clone-siblings resolves it from
           # this commit's repro.lock.
           siblings: |
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
             codetracer-native-recorder=dev
             codetracer-native-backend
 
@@ -1635,8 +1641,14 @@ jobs:
           env-ps1-path: ./env.ps1
           siblings: |
             codetracer-native-recorder=dev
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
 
       - name: Install Nim dependencies
         shell: bash
@@ -2022,8 +2034,14 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
             codetracer-native-recorder=dev
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
@@ -4793,8 +4811,14 @@ jobs:
           env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
           siblings: |
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
             codetracer-native-recorder=dev
 
       - name: Remove WSL bash stub from System32
@@ -6345,8 +6369,14 @@ jobs:
           attic-cache: ${{ vars.ATTIC_CACHE }}
           nix-develop-args: '.?submodules=1'
           siblings: |
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
             codetracer-native-recorder=dev
             nim-stackable-hooks=dev
             codetracer-visual-replay=dev
@@ -6913,8 +6943,14 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -7248,8 +7284,14 @@ jobs:
             nim-acp=dev
             nim-agent-harbor=dev
             nim-agents=dev
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
             io-mon=3b6196efc2021ba202add54a21b25f0268d70c79
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
@@ -7547,8 +7589,14 @@ jobs:
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
             nim-everywhere=dev
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
             io-mon=3b6196efc2021ba202add54a21b25f0268d70c79
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f

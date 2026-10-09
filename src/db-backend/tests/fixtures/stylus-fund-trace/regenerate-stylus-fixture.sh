@@ -31,9 +31,9 @@
 # This script repacks that committed data into the canonical
 # `stylus_fund_tracking_demo.ct` container the DAP tests load. It
 # routes through the M27 `stylus_fixture_rebuild` test harness — a
-# deterministic packer that produces byte-equivalent output across
-# reruns (fixed UUIDv7 recording_id, CBOR-streamed events with no
-# wall-clock timestamps).
+# deterministic packer that replays the events through the production
+# trace writer and produces byte-equivalent output across reruns (fixed
+# UUIDv7 recording_id, no wall-clock timestamps).
 #
 # This script needs no devnode and no blockchain toolchain — it is
 # purely offline.

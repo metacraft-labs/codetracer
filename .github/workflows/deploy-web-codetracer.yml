@@ -532,6 +532,132 @@ jobs:
           fi
           echo "$checked sibling(s) have full history ($deepened deepened here)"
 
+      - name: Every tool these steps reach for, before the forty-minute build
+        # WALKING DOWN ONE MISSING TOOL PER FORTY-MINUTE RUN IS HOW THIS DEPLOY
+        # SPENT THREE DAYS, AND THIS STEP IS THE END OF THAT LOOP.
+        #
+        # Two absences, two runs, same family, both discovered at the far end
+        # of a build:
+        #
+        #   * run 37894032724 — `shasum` is perl's, the runner images have no
+        #     perl, and four gates printed `sha256 ` and then measured an
+        #     unnamed subject anyway (a `$(...)` whose tool is missing
+        #     manufactures an empty string; `set -e` cannot see it).
+        #   * run 37955560500 — the images have no python either. It reached
+        #     step 30 of 34 with every demo gate green, then
+        #     `line 42: python3: command not found`, exit 127: forty minutes
+        #     spent, nothing published.
+        #
+        # Both were two-minute fixes found four hours apart. A tool that is
+        # going to be absent is absent NOW, and the entire cost of knowing
+        # that is this step.
+        #
+        # THE REPOSITORY ALREADY KNEW. `scripts/sibling-pins.sh:164` says, of
+        # this very runner image, "not always ship python3", and falls back to
+        # the flake-pinned interpreter through Nix. That knowledge sat two
+        # steps above the one that died of it. Which is the argument for a
+        # precondition rather than another fix at another site: the next step
+        # to reach for an absent tool will be written by someone who has not
+        # read that comment either.
+        #
+        # IT CHECKS TWO DIFFERENT PATHS, BECAUSE THIS JOB HAS TWO.
+        #
+        #   (a) THE RUNNER'S OWN PATH — bash, git, nix and the GNU userland.
+        #       The list is every external command the steps that run DIRECTLY
+        #       on the runner reach for, including the ones inside
+        #       `scripts/sibling-pins.sh`, which runs bare twice. It
+        #       deliberately does NOT name python3 or any interpreter: after
+        #       2026-10-09 nothing on this path uses one, and a list that
+        #       asserts more than the steps need is a red run waiting to
+        #       happen for a tool nobody wanted.
+        #   (b) THE `.#ci` DEV SHELL, where every gate and every publish step
+        #       now runs. `nix/shells/ci-base.nix` DECLARES these; this checks
+        #       the declaration is true on this machine, which is a different
+        #       claim and the only one that can fail at 03:00.
+        #
+        # Entering `.#ci` here is deliberate twice over: it is the only way to
+        # measure (b) at all, and it realises the shell at ~+10 minutes rather
+        # than inside the build — the same reasoning as the un-shallow step
+        # above.
+        #
+        # `ci/lib/require-tools.sh` does the reporting, and it names EVERY
+        # missing tool rather than the first, because finding them one CI round
+        # trip at a time is the precise cost this step exists to remove.
+        #
+        # THE LISTS ARE A HAND-MAINTAINED CONTRACT, not a scan of the steps
+        # below. A text scanner over inline `run:` blocks would be a check that
+        # reports confidently and measures approximately — the defect shape
+        # this repository has spent a campaign removing. The rule instead is
+        # one sentence: a command a step invokes on the runner's PATH belongs
+        # in (a), a command it invokes inside `.#ci` belongs in (b), and a step
+        # that needs something in neither list is a step this check was wrong
+        # about.
+        run: |
+          set -euo pipefail
+
+          # The remedy paragraph `require-tools.sh` prints by default is about
+          # `devShells.lint`, which would send a reader of THIS failure to the
+          # wrong file. `CT_REQUIRE_TOOLS_CONTEXT` replaces that paragraph;
+          # unset, that script's output is byte-for-byte what the lint stages
+          # have always seen.
+          CT_REQUIRE_TOOLS_CONTEXT="$(printf '%s\n' \
+            "A tool missing on the RUNNER's own PATH means a step of this job" \
+            "must either move into the .#ci dev shell -- give it" \
+            "" \
+            "    shell: nix develop .#ci --command bash -e {0}" \
+            "" \
+            "as five publish steps now do -- or stop reaching for that tool." \
+            "The NixOS runner images carry bash, coreutils, findutils, the GNU" \
+            "userland, curl, git and nix, and NO perl and NO python; the" \
+            "comment at scripts/sibling-pins.sh:164 has said so since before" \
+            "this check existed." \
+            "" \
+            "A tool missing inside .#ci is a shell DECLARATION to fix: add the" \
+            "package to nix/shells/ci-base.nix.")"
+          export CT_REQUIRE_TOOLS_CONTEXT
+
+          # (a) Reached directly on the runner: `scripts/sibling-pins.sh`
+          # (cut, dirname, head, tr, wc), the un-shallow step above (git),
+          # the bundle verification (wc), the tailwind seed (ls, mkdir) and
+          # the Cloudflare publish (cp, rm, tee, grep, sed, tail).
+          echo "--- (a) the runner's own PATH ---"
+          bash ci/lib/require-tools.sh \
+            bash git nix \
+            cp cut dirname grep head ls mkdir rm sed tail tee tr wc
+
+          # (b) Reached inside `.#ci`: the five publish steps that read the
+          # descriptor with python3 and probe the deployment with curl/awk,
+          # plus the gates -- node for the browser probes and the ESM
+          # renderer probe, sha256sum because ci/lib/sha256.sh prefers it and
+          # four gates refuse without it, jq, nim/nimble/cargo/wasm-pack for
+          # the bundle, repro and direnv for the build, and wrangler because
+          # it is what publishes.
+          #
+          # `nargo` is DELIBERATELY ABSENT. It arrives through `ourPkgs.noir`
+          # and the only thing that runs it -- `noir-template-toolchain.sh` --
+          # already refuses by name without it, inside the environment that
+          # actually invokes it. Asserting it from here would be asserting a
+          # binary name this file has not verified, and a precondition that
+          # reds the deploy over a tool nothing on this path needs is worse
+          # than no precondition at all.
+          #
+          # THE LIST IS AN ARRAY RATHER THAN BACKSLASH CONTINUATIONS, and that
+          # is not a style choice. `ci/test/direnv-provenance-test.sh` joins
+          # backslash-continued lines and counts every `nix develop ...
+          # direnv` as a direnv CALL SITE against an exact expected total. With
+          # the tools continued onto the `nix develop` line, the word `direnv`
+          # below -- a string argument, not an invocation -- made that count
+          # 20 where 19 is correct. Bumping the constant would have recorded a
+          # call site that does not exist and sent the next reader looking for
+          # it; keeping the invocation on one line keeps the scanner honest.
+          ci_tools=(bash git curl jq node python3
+            awk cut find grep sed sha256sum sort tr wc xargs
+            cargo direnv nim nimble repro wasm-pack wrangler)
+          echo "--- (b) the .#ci dev shell ---"
+          nix develop .#ci --command bash ci/lib/require-tools.sh "${ci_tools[@]}"
+
+          echo "every declared tool resolved on both paths"
+
       - name: Allow direnv in this checkout and the recorder sibling
         # build-dist.sh runs `direnv exec <repo> bash build_wasm.sh`, which in
         # turn runs `direnv exec <recorder> bash ct_emulator/build_wasm_api.sh`.
@@ -1085,6 +1211,30 @@ jobs:
         # applies every matching rule and a plain copy would have silently
         # dropped the engine's CORS — breaking a different repository's deploy
         # from this one.
+        # RUNS INSIDE `.#ci`, AND THAT IS NOT STYLE — IT IS WHY THIS STEP EXISTS
+        # AT ALL AFTER 2026-10-09.
+        #
+        # This step used to run on the runner's bare PATH, and the NixOS runner
+        # images carry bash, coreutils and git but NO perl and NO python. So
+        # run 37955560500 reached step 30 of 34 — every demo gate green, the
+        # bundle built and staged — and died with
+        #
+        #     line 42: python3: command not found
+        #     ##[error]Process completed with exit code 127
+        #
+        # publishing nothing, after forty minutes. Twenty-four of this job's
+        # thirty-five steps already enter `.#ci`, which carries
+        # `pythonWithRecorder`, curl, gawk, jq and findutils; the ones that did
+        # not were the ones that broke. Expressed as a custom `shell:` rather
+        # than by wrapping the body in `bash -c '...'` so that not one
+        # character of the script below has to be re-quoted — a heredoc of
+        # Python inside single quotes inside YAML is a defect waiting to be
+        # introduced.
+        #
+        # The absence is also now caught by "Every tool these steps reach for"
+        # near the top of this job, so a tool that goes missing costs two
+        # minutes instead of forty.
+        shell: nix develop .#ci --command bash -e {0}
         run: |
           set -euo pipefail
           rm -rf site && mkdir -p site
@@ -1265,7 +1415,30 @@ jobs:
         # window shows up as a number rather than as a flake. `curl --retry`
         # cannot do this: it retries transport and HTTP errors, and a stale
         # edge answers 200 with the wrong body.
-        shell: bash
+        # RUNS INSIDE `.#ci`, AND THAT IS NOT STYLE — IT IS WHY THIS STEP EXISTS
+        # AT ALL AFTER 2026-10-09.
+        #
+        # This step used to run on the runner's bare PATH, and the NixOS runner
+        # images carry bash, coreutils and git but NO perl and NO python. So
+        # run 37955560500 reached step 30 of 34 — every demo gate green, the
+        # bundle built and staged — and died with
+        #
+        #     line 42: python3: command not found
+        #     ##[error]Process completed with exit code 127
+        #
+        # publishing nothing, after forty minutes. Twenty-four of this job's
+        # thirty-five steps already enter `.#ci`, which carries
+        # `pythonWithRecorder`, curl, gawk, jq and findutils; the ones that did
+        # not were the ones that broke. Expressed as a custom `shell:` rather
+        # than by wrapping the body in `bash -c '...'` so that not one
+        # character of the script below has to be re-quoted — a heredoc of
+        # Python inside single quotes inside YAML is a defect waiting to be
+        # introduced.
+        #
+        # The absence is also now caught by "Every tool these steps reach for"
+        # near the top of this job, so a tool that goes missing costs two
+        # minutes instead of forty.
+        shell: nix develop .#ci --command bash -e {0}
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
         run: |
@@ -1790,7 +1963,30 @@ jobs:
         # 200 and carry the shell, not a 404). Observations 1 and 4, and the
         # `/api/v1/` -> `origin` assertion, hold either way.
         if: steps.deploy.outputs.url != ''
-        shell: bash
+        # RUNS INSIDE `.#ci`, AND THAT IS NOT STYLE — IT IS WHY THIS STEP EXISTS
+        # AT ALL AFTER 2026-10-09.
+        #
+        # This step used to run on the runner's bare PATH, and the NixOS runner
+        # images carry bash, coreutils and git but NO perl and NO python. So
+        # run 37955560500 reached step 30 of 34 — every demo gate green, the
+        # bundle built and staged — and died with
+        #
+        #     line 42: python3: command not found
+        #     ##[error]Process completed with exit code 127
+        #
+        # publishing nothing, after forty minutes. Twenty-four of this job's
+        # thirty-five steps already enter `.#ci`, which carries
+        # `pythonWithRecorder`, curl, gawk, jq and findutils; the ones that did
+        # not were the ones that broke. Expressed as a custom `shell:` rather
+        # than by wrapping the body in `bash -c '...'` so that not one
+        # character of the script below has to be re-quoted — a heredoc of
+        # Python inside single quotes inside YAML is a defect waiting to be
+        # introduced.
+        #
+        # The absence is also now caught by "Every tool these steps reach for"
+        # near the top of this job, so a tool that goes missing costs two
+        # minutes instead of forty.
+        shell: nix develop .#ci --command bash -e {0}
         run: |
           set -euo pipefail
           host="https://ide.codetracer.com"
@@ -1922,7 +2118,12 @@ jobs:
         # size sweep above wrote at length: a hand-written set of hosts cannot
         # be made to agree with the product, and `noirstudio.dev` was missing
         # from exactly such a list while serving a stale worker.
-        shell: bash
+        # RUNS INSIDE `.#ci`, for the reason "Stage the publish directory" records
+        # above: this step reads the descriptor with `python3` on the shell's own
+        # PATH, and the NixOS runner images have no python. The inner
+        # `nix develop .#ci --command` calls further down are now redundant
+        # rather than wrong, and are left as they are.
+        shell: nix develop .#ci --command bash -e {0}
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
@@ -2012,7 +2213,12 @@ jobs:
         # broken. But that is decided by probing the host, not by which name it
         # has: the moment a declared domain resolves it becomes a required
         # assertion with no edit here. `skippable` as a per-host label is gone.
-        shell: bash
+        # RUNS INSIDE `.#ci`, for the reason "Stage the publish directory" records
+        # above: this step reads the descriptor with `python3` on the shell's own
+        # PATH, and the NixOS runner images have no python. The inner
+        # `nix develop .#ci --command` calls further down are now redundant
+        # rather than wrong, and are left as they are.
+        shell: nix develop .#ci --command bash -e {0}
         run: |
           set -uo pipefail
           mkdir -p deployed-shots

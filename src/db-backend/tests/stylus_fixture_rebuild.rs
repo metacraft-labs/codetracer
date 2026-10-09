@@ -29,17 +29,16 @@
 //! DAP tests load.
 //!
 //! Strategy: read the committed `trace.events.json` (a JSON array of
-//! `TraceLowLevelEvent`), serialize every event as one CBOR value into a
-//! sequential `events.log`, pair it with a binary `meta.dat` carrying
-//! the recorded program/args/workdir plus a fixed canonical UUIDv7
-//! `recording_id`, and emit a CTFS `.ct` via the production
-//! `write_minimal_ctfs` helper.
+//! `TraceLowLevelEvent`) and replay every event, in order, through the
+//! production `CtfsTraceWriter`, which writes the container's split
+//! streams, interning tables and `meta.dat` (the recorded
+//! program/args/workdir plus a fixed canonical UUIDv7 `recording_id`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::TraceLowLevelEvent;
-use db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
-use db_backend::ctfs_trace_reader::meta_dat::{META_DAT_VERSION, MetaDat, serialize_meta_dat};
+use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
+use codetracer_trace_writer::trace_writer::TraceWriter;
 
 /// The committed Stylus fixture directory.
 fn fixture_dir() -> PathBuf {
@@ -84,50 +83,21 @@ fn rebuild_stylus_ctfs_fixture() {
         std::fs::read_to_string(dir.join("trace_metadata.json")).expect("read committed trace_metadata.json");
     let legacy: LegacyMeta = serde_json::from_str(&meta_json).expect("parse trace_metadata.json");
 
-    // The source paths need no list of their own: `meta.dat` carries none
-    // (`paths.dat` is the only list), and a legacy `events.log` names each
-    // path in a `Path` event, rewritten to this checkout above.
-
-    // 3. Build the canonical binary `meta.dat`. M-REC-1.5 made `meta.dat`
-    //    the only metadata form a `.ct` may carry; it requires a
-    //    canonical UUIDv7 `recording_id`. The recording is deterministic,
-    //    so a fixed id keeps the regenerated fixture reproducible.
-    let meta = MetaDat {
-        version: META_DAT_VERSION,
-        flags: 0,
-        recording_id: "01949fcc-7d92-7e9c-aaaa-5747591d0001".to_string(),
-        program: legacy.program,
-        args: legacy.args,
-        workdir: env!("CARGO_MANIFEST_DIR").to_string(),
-        recorder_id: "evm".to_string(),
-        ext_flags: 0,
-        mcr: None,
-        replay_launch: None,
-        layout_snapshot: None,
-        filter_provenance: Vec::new(),
-        has_filter_provenance: false,
-    };
-    let meta_bytes = serialize_meta_dat(&meta);
-
-    // 4. Serialize the events as a sequential CBOR `events.log` — the same
-    //    legacy CBOR-streaming layout `CTFSTraceReader::load_events`
-    //    accepts (no chunk headers).
-    let mut events_log: Vec<u8> = Vec::new();
-    for event in &events {
-        events_log = cbor4ii::serde::to_vec(events_log, event).expect("CBOR-encode event");
+    // 3. Replay the events through the production writer. The recording
+    //    is deterministic, so a fixed `recording_id` keeps the regenerated
+    //    fixture reproducible.
+    let mut writer = CtfsTraceWriter::new(&legacy.program, &legacy.args);
+    writer.set_recording_id("01949fcc-7d92-7e9c-aaaa-5747591d0001");
+    TraceWriter::set_workdir(&mut writer, Path::new(env!("CARGO_MANIFEST_DIR")));
+    TraceWriter::begin_writing_trace_events(&mut writer, &dir.join("stylus_fund_tracking_demo"))
+        .expect("open the stylus .ct fixture for writing");
+    let event_count = events.len();
+    for event in events {
+        TraceWriter::add_event(&mut writer, event);
     }
-
-    // 5. Pack into the canonical CTFS `.ct` container.
+    TraceWriter::finish_writing_trace_events(&mut writer).expect("write stylus .ct fixture");
     let ct_path = dir.join("stylus_fund_tracking_demo.ct");
-    write_minimal_ctfs(
-        &ct_path,
-        &[
-            ("meta.dat", meta_bytes.as_slice()),
-            ("events.log", events_log.as_slice()),
-        ],
-    )
-    .expect("write stylus .ct fixture");
 
     let size = std::fs::metadata(&ct_path).expect("stat .ct fixture").len();
-    eprintln!("wrote {} ({} bytes, {} events)", ct_path.display(), size, events.len());
+    eprintln!("wrote {} ({} bytes, {} events)", ct_path.display(), size, event_count);
 }

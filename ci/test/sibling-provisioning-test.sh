@@ -230,7 +230,25 @@ echo "siblings: entries pin a reproducible revision"
 # The ceiling had been exceeded (67 > 59) on `dev` for some time without ever
 # being reported, because this suite ran inside `ci-verdict` behind steps that
 # aborted first, and no `Codetracer CI` run on `dev` reached it.
-readonly BRANCH_TIP_CEILING=53
+#
+# 53 -> 30: the twenty-three `codetracer-trace-format=dev` /
+# `codetracer-trace-format-nim=dev` entries across eleven `siblings:` blocks
+# now name the commit `flake.lock` locks each input at. Same conversion, same
+# reason, as the io-mon / nim-shm pair above -- these two are flake INPUTS of
+# this repo, so a rev for each already existed and `=dev` was the same pin
+# spelled a second way with nothing keeping the two spellings equal. Here the
+# two spellings had actually diverged: trace-format's `dev` tip is 051a298
+# (2026-09-30) and its `/agents` input rev is 3fada0b, and every API
+# `src/db-backend/src/ctfs_trace_reader` has called since 2026-10-03 landed in
+# between. Every job that cloned the sibling at `dev` and ran cargo against
+# src/db-backend failed to compile -- recorder-tests and rr-backend-tests in
+# cross-repo-tests.yml, lint-rust and visual-replay-regression-gate in
+# codetracer.yml, on `dev` as well as on `agents`.
+#
+# The agreement between those spellings is now asserted below rather than
+# merely intended, so a flake.lock bump that leaves a workflow behind is a
+# failure here instead of a compile error two jobs later.
+readonly BRANCH_TIP_CEILING=30
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
@@ -254,6 +272,9 @@ sibling_blocks=0
 bad_entries=()
 entry_count=0
 branch_tip_entries=()
+# Every `name=<40-hex>` entry seen, as `<file>:<line>:<name>=<sha>`, for the
+# flake.lock-agreement assertion below.
+sha_entries=()
 # Per-block record of which repos each `siblings:` block provisions, used by
 # the matched-pair assertion further down. One space-delimited entry per block.
 declare -a BLOCK_REPOS=()
@@ -305,7 +326,7 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 				esac
 				case "$kind" in
 				bare | empty) ;;
-				sha) ;;
+				sha) sha_entries+=("$wf_name:$line_no:$stripped") ;;
 				expr)
 					# An expression-valued ref must supply a fallback. Without
 					# one it evaluates to the empty string on a push, which is
@@ -597,6 +618,79 @@ else
 		"an explicit 40-hex commit SHA. This ceiling is lowered as blocks are" \
 		"converted and is never raised." \
 		"${branch_tip_entries[@]}"
+fi
+
+# ---------------------------------------------------------------------------
+# 1d. A SHA pin for a flake INPUT must be the revision flake.lock locks.
+#
+# Converting `name=dev` to `name=<sha>` buys reproducibility and nothing else.
+# It does NOT by itself make the cloned sibling the same revision the Nix lane
+# and reprobuild compile against -- that is still one pin spelled in two
+# places, and the second spelling can now be wrong in a way `=dev` could not
+# be: silently, forever, rather than only on the days the branch had moved.
+#
+# That is not hypothetical. The twenty-three trace-format entries converted
+# above were `=dev` while `flake.nix` declared the same two inputs at
+# `/agents`, and when the two spellings diverged on 2026-10-02 every job that
+# clones the sibling and runs cargo against `src/db-backend` stopped
+# compiling, with no gate in this file noticing: the `=dev` entries were
+# counted against a ceiling, which says nothing about WHICH commit `dev` is.
+#
+# So the agreement is asserted, per entry and counted. Scoped to the two
+# trace-format halves deliberately: elsewhere a SHA that deliberately differs
+# from the flake input is documented as such (`reprobuild-packages` in
+# deploy-web-codetracer.yml pins a catalog revision the flake input does not
+# track yet), and turning those into failures here would be a different
+# change with a different argument behind it.
+# ---------------------------------------------------------------------------
+readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim'
+
+flake_rev() { # $1 = root input name -> its locked.rev, or '' when absent
+	python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    key = d["nodes"][d["root"]]["inputs"][sys.argv[2]]
+    print(d["nodes"][key if isinstance(key, str) else key[0]]["locked"]["rev"])
+except Exception:
+    pass
+' "$REPO_ROOT/flake.lock" "$1" 2>/dev/null
+}
+
+flake_pin_mismatches=()
+flake_pin_checked=0
+for name in $FLAKE_PINNED_SIBLINGS; do
+	want="$(flake_rev "$name")"
+	if [ "${#want}" -ne 40 ] || [ -n "${want//[0-9a-f]/}" ]; then
+		flake_pin_mismatches+=("flake.lock has no 40-hex locked.rev for root input '$name' ('${want:-<none>}'); this is a parse/declaration failure, not a statement about any workflow")
+		continue
+	fi
+	for rec in "${sha_entries[@]}"; do
+		entry="${rec##*:}"
+		[ "${entry%%=*}" = "$name" ] || continue
+		flake_pin_checked=$((flake_pin_checked + 1))
+		[ "${entry#*=}" = "$want" ] || flake_pin_mismatches+=("${rec%:*}: ${entry} but flake.lock locks $name at $want")
+	done
+done
+
+# The vacuity arm. Nothing above forces these two to appear in any
+# `siblings:` block, so "no mismatches" is also what a run that found no
+# entries at all reports. A conversion that is silently reverted to `=dev`
+# must redden here, not go quiet: every block that provisions them is one
+# that compiles src/db-backend against them.
+if [ "$flake_pin_checked" -eq 0 ]; then
+	fail "the flake-pinned siblings are named by SHA somewhere" \
+		"found 0 '<name>=<40-hex>' entries for: $FLAKE_PINNED_SIBLINGS" \
+		"so the agreement assertion below quantifies over an empty set. If these" \
+		"blocks went back to a branch ref, the branch-tip ceiling is the only thing" \
+		"still looking at them, and it does not check WHICH commit the branch is."
+elif [ "${#flake_pin_mismatches[@]}" -eq 0 ]; then
+	ok "all $flake_pin_checked SHA-pinned trace-format entries equal their flake.lock locked.rev"
+else
+	fail "every SHA-pinned flake-input sibling equals its flake.lock locked.rev" \
+		"the sibling checkout and the Nix lane would compile different revisions;" \
+		"'bash scripts/sibling-pins.sh' prints the lines these blocks should carry" \
+		"${flake_pin_mismatches[@]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1724,7 +1818,11 @@ echo
 # 29 -> 30: assertion 1b adds the build-input subset of the develop set (the
 # lock's develop set grew to name the test-lane siblings, and the action
 # clones only the members the build compiles from source).
-readonly EXPECTED_ASSERTIONS=30
+# 30 -> 31: assertion 1d ("every SHA-pinned flake-input sibling equals its
+# flake.lock locked.rev"), added with the trace-format conversion. It reports
+# exactly once, either as the agreement or as the vacuity refusal, so this
+# number grows by one and not by two.
+readonly EXPECTED_ASSERTIONS=31
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

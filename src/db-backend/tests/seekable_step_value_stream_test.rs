@@ -427,23 +427,38 @@ fn concurrent_readers_over_same_ct() {
     }
 }
 
-/// Deliverable test #4 (backward compat): a legacy (flag-off) `.ct` exposes NO
-/// seekable step/value stream, so the reader falls back to the materialized
-/// path exactly as before. `SeekableStepStream::open` / `SeekableValueStream::open`
-/// return `Ok(None)`, and `CTFSTraceReader`'s seekable hooks return `None`.
+/// Deliverable test #4: a `.ct` with no `steps.dat` / `values.dat` exposes NO
+/// seekable step/value stream — `SeekableStepStream::open` /
+/// `SeekableValueStream::open` return `Ok(None)`. A legacy (flag-off) bundle
+/// carrying `events.log` is refused by name by those trace-format readers,
+/// while `CTFSTraceReader`'s seekable hooks return `None` for it and its
+/// materialized path serves the trace.
 #[test]
 fn flag_off_trace_exposes_no_seekable_streams() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_trace(&dir, false);
+    let no_streams = dir.path().join("no_streams.ct");
+    db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs(&no_streams, &[("meta.dat", b"metadata")])
+        .expect("write a container with no step or value stream");
+    assert!(
+        SeekableStepStream::open(&no_streams).expect("open ok").is_none(),
+        "a container with no steps.dat exposes no seekable step stream"
+    );
+    assert!(
+        SeekableValueStream::open(&no_streams).expect("open ok").is_none(),
+        "a container with no values.dat exposes no seekable value stream"
+    );
 
-    assert!(
-        SeekableStepStream::open(&ct).expect("open ok").is_none(),
-        "flag-off trace must expose no seekable step stream"
-    );
-    assert!(
-        SeekableValueStream::open(&ct).expect("open ok").is_none(),
-        "flag-off trace must expose no seekable value stream"
-    );
+    let ct = write_trace(&dir, false);
+    for (stream, refusal) in [
+        ("step", SeekableStepStream::open(&ct).err()),
+        ("value", SeekableValueStream::open(&ct).err()),
+    ] {
+        let err = refusal.unwrap_or_else(|| panic!("the {stream} stream of an events.log container must be refused"));
+        assert!(
+            err.contains("events.log"),
+            "the {stream} refusal names the member: {err}"
+        );
+    }
 
     // Opened through the full reader (old-format path, since no steps.dat), the
     // seekable hooks are None and the materialized path still serves the trace.

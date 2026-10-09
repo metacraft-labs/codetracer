@@ -133,8 +133,9 @@ impl SeekableStepStream {
     /// Open the seekable step stream for a `.ct` path. Returns `Ok(None)` when
     /// the container carries no dedicated `steps.dat` stream (the file is
     /// structurally absent) — the caller then falls back to the fully-materialized
-    /// `Db` step table, so backward compatibility is preserved. Existence is
-    /// decided by structural presence, not the `has_step_stream` hint bit.
+    /// `Db` step table. Existence is decided by structural presence, not the
+    /// `has_step_stream` hint bit. A container carrying `events.log` or
+    /// `events.fmt` is refused by name.
     pub fn open(path: &Path) -> Result<Option<SeekableStepStream>, String> {
         match open_step_stream(path)? {
             Some(reader) => {
@@ -409,7 +410,8 @@ impl std::fmt::Debug for SeekableValueStream {
 impl SeekableValueStream {
     /// Open the seekable value stream for a `.ct` path. Returns `Ok(None)` when
     /// the container carries no dedicated `values.dat` stream — the caller falls
-    /// back to the fully-materialized `db.variables`, preserving backward compat.
+    /// back to the fully-materialized `db.variables`. A container carrying
+    /// `events.log` or `events.fmt` is refused by name.
     pub fn open(path: &Path) -> Result<Option<SeekableValueStream>, String> {
         match open_value_stream(path)? {
             Some(reader) => {

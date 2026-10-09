@@ -103,8 +103,14 @@ jobs:
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
             codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || 'dev' }}
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
             codetracer-native-recorder=dev
 
       - name: Unfold native-backend submodules into parent index

@@ -91,18 +91,50 @@ runs:
   using: composite
   steps:
     - name: Setup dev env (clone db-backend siblings + materialise the dev env)
-      # setup-dev-env clones each sibling to ../<name> at its pinned `dev`
-      # ref. The refs are explicit because a bare entry resolves through a
+      # setup-dev-env clones each sibling to ../<name> at the ref named
+      # below. The refs are explicit because a bare entry resolves through a
       # per-commit workspace lock in the shared manifests repo, which has
       # published nothing since 2026-08-02 -- see the note at the top of
-      # .github/workflows/codetracer.yml. This composite is used by six jobs,
-      # and every one of them died in this step until the refs were pinned.
+      # .github/workflows/codetracer.yml. Two of the three are named by
+      # commit rather than by branch, for the reason set out below. This
+      # composite is used by six jobs, and every one of them died in this
+      # step until the refs were pinned.
       # codetracer-native-recorder /
       # codetracer-trace-format / codetracer-trace-format-nim have no
       # .gitmodules; the recursive-submodule update is best-effort and a
       # no-op for them. The bespoke "direnv allow" fixup that used to live
       # here is left to the calling jobs (only the db-backend build.rs path
       # needs it, and those jobs already perform it).
+      #
+      # THE TWO TRACE-FORMAT HALVES ARE NAMED BY COMMIT, NOT BY `dev`, AND
+      # THAT IS THE WHOLE POINT. They used to say `=dev`, while `flake.nix`
+      # declares the same two inputs at `/agents` and `flake.lock` /
+      # `repro.lock` record the commit each resolves to. One pin spelled in
+      # two places with nothing keeping the two spellings equal -- and they
+      # stopped being equal on 2026-10-02, when
+      # `codetracer-trace-format@agents` be682b8 ("feat(ctfs): the
+      # conventional column table is written as line_count 0") and ac2d1fa
+      # ("feat(nim-adapter): a path's table kind is explicit through the Nim
+      # reader") added `column_aware::FileTable`,
+      # `GlobalPositionDecoder::from_file_tables`, the `FileTable` re-export
+      # in `global_position_decoder`, `PathTableKind` and
+      # `NimTraceReaderHandle::path_table_kind`. Neither commit is on
+      # trace-format's `dev`, whose tip is still 051a298 (2026-09-30).
+      #
+      # `src/db-backend/src/ctfs_trace_reader` started calling all five the
+      # next day (fde50d689, "fix(db-backend): read line_count 0 as the
+      # conventional column table"), so from 2026-10-03 every job that
+      # cloned the sibling at `dev` and ran cargo against src/db-backend
+      # failed to compile with seven errors -- three E0432, one E0433 and
+      # three E0599. rustc said so precisely, pointing at the sibling
+      # checkout's own `global_position_decoder.rs:197` and offering
+      # `from_line_lengths`, which is what that line holds on `dev`.
+      #
+      # TO REFRESH: `bash scripts/sibling-pins.sh` prints these lines. Its
+      # output is read out of this commit's `flake.lock`, which `repro.lock`
+      # agrees with, so the sibling checkout and the Nix lane compile the
+      # same revision by construction. `ci/test/sibling-provisioning-test.sh`
+      # fails when a spelling here drifts from `flake.lock`.
       uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
       with:
         env-flavor: ${{ inputs.env-flavor }}
@@ -114,8 +146,11 @@ runs:
         # `clone-siblings` tokenises this value on whitespace after stripping
         # `#` comments, so an empty `extra-siblings` contributes nothing and a
         # multi-line one needs no particular indentation.
+        #
+        # The two trace-format halves are named by COMMIT, not by `dev`; the
+        # reason, and the refresh rule, are above the `uses:` line.
         siblings: |
-          codetracer-trace-format=dev
-          codetracer-trace-format-nim=dev
+          codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
+          codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
           codetracer-native-recorder=dev
           ${{ inputs.extra-siblings }}

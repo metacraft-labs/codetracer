@@ -1178,9 +1178,8 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 /// event-loading pipelines.
 ///
 /// `nargo trace` requires `--out-dir <DIR>` and produces a single
-/// CTFS `<package>.ct` container with internal `events.log`,
-/// `meta.dat` (UUIDv7 `recording_id`, M-REC-1) and `paths.dat`
-/// streams.  Legacy `trace.json` / `trace_metadata.json` /
+/// CTFS `<package>.ct` container with its split event streams,
+/// `meta.dat` (UUIDv7 `recording_id`, M-REC-1) and `paths.dat`.  Legacy `trace.json` / `trace_metadata.json` /
 /// `trace_paths.json` sidecars are no longer emitted — see
 /// `codetracer-specs/Trace-Files/CTFS-Migration-Guide.md`.
 ///
