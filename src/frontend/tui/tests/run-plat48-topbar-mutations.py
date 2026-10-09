@@ -202,7 +202,7 @@ G_POPOVER = "the first level drops below the button; a folder opens to its right
 G_BINDINGS = "the desktop's default bindings, spelled as its menu spells them"
 B_VERBS = "every keyboard gesture has a spelling, and none of them is silent"
 R_UNBOUND = "enabling it changes NOTHING on screen, compared as rendered rows"
-R_EDGES = "which dock edges a real drag can reach, measured rather than argued"
+R_EDGES = "no drag docks, anywhere on the screen; `:dock` is how a pane docks"
 E_LATE = ("a sequence already waiting behind its ESC is one token, however "
           "late the reader")
 T_TABKEYS = ("g t / g T and Ctrl+Tab / Ctrl+Shift+Tab step the tabs, "
@@ -215,8 +215,7 @@ W_BAND = ("the band: the shared menu's root button, the desktop's nine marks, "
 W_POPOVER = "an open menu's popover is drawn over every pane's pin button"
 W_HOVER = "the pointer on a control: its tooltip and the desktop's chord, below it"
 W_REVEAL = "Ctrl+O reveals the first docked pane ITSELF over the tree, with Unpin"
-W_TOP = ("the TOP edge: a tab dragged to the top margin docks there and "
-         "reveals from it")
+W_TOP = "the TOP edge: a pane docked there is a label on the top strip"
 W_PIN = "pin docks a pane to the footer; Unpin puts it back beside where it was"
 G_DESKTOP = "gate:" + DESKTOP_GATE
 
@@ -467,17 +466,26 @@ ARMS = [
         "  let topDocked = false\n",
         G_TOP,
         "a layout with a top-docked pane is refused by the GPUI window again"),
+    Arm("GT4", DOCKPROJ,
+        "  let topDocked = dockGroupsOf(layout, leTop).len > 0\n",
+        "  if dockGroupsOf(layout, leTop).len > 0:\n"
+        "    return DockProjection(status: dpsRefused)\n"
+        "  let topDocked = false\n",
+        W_TOP,
+        "the shipped window cannot open a layout with a top-docked pane"),
     Arm("GT2", WINGEOM,
         "      of leTop: PxRect(x: area.x + lw, y: area.y, w: max(1, area.w - lw - rw),\n",
         "      of leTop: PxRect(x: area.x + lw, y: area.y + 40, w: max(1, area.w - lw - rw),\n",
         G_TOP,
         "the top strip is drawn inside the tree, not above it"),
+    # REVERSED BY PLAT-51 PART B: the margin above the layout is constrained
+    # onto the tree (GoldenLayout's `constrainDragToContainer`) and NO drop
+    # docks; the defect is the margin naming a dock again.
     Arm("GT3", WINGEOM,
-        "    if dt < best:\n      best = dt\n      zone = dzOutsideTop\n",
-        "    if false:\n      best = dt\n      zone = dzOutsideTop\n",
+        "    return some(LayoutPointer(path: \"\", zone: rootZoneOf(drop.edge)))\n",
+        "    return some(LayoutPointer(path: \"\", zone: dzOutsideTop))\n",
         G_TOP,
-        "the margin above the layout never names the top dock: a drag cannot "
-        "reach it"),
+        "a pointer past the layout names the top dock again: a drag docks"),
     Arm("GM1", WINTOP,
         "      x = px + w\n",
         "      x = px\n",
@@ -574,9 +582,11 @@ ARMS = [
         "    if not pinButtonShown(pr, covers):\n"
         "      continue\n",
         "    discard covers\n",
-        W_TOP,
-        "the window draws the tree's pin buttons over a pane revealed from "
-        "the top strip"),
+        # PLAT-51 part B: graded on the footer's reveal (Ctrl+O) — the top
+        # strip's reveal is not reachable from a scripted run since a drag no
+        # longer docks (and a pane docked at start has no element: filed).
+        W_REVEAL,
+        "the window draws the tree's pin buttons over a revealed pane"),
     Arm("GW10", GPUIMAIN,
         "          applyGestureCommand(r, cmdDock(k, leBottom))\n",
         "          applyGestureCommand(r, cmdDock(k, leRight))\n",

@@ -127,11 +127,14 @@ proc labelsIn(text: string): seq[string] =
     if matched.len > 0: result.add matched
     inc i
 
-const FocusOutlineHex = "#565656"
-  ## PLAT-47: the desktop's selected-panel outline, measured
+const FocusOutlineHex = "#3a3a3a"
+  ## The colour the GPUI window outlines its focused region in. PLAT-47: the
+  ## desktop's selected-panel outline, measured
   ## (`src/tests/visual/answers/plat47-desktop-parity.electron.json`,
-  ## `focus.outline`) — what the GPUI window must outline its focused region
-  ## in. Read as a GRAY level, because the frame is decoded to gray.
+  ## `focus.outline`, #565656); PLAT-51 (the user: the focus contrast
+  ## SUBTLER) one step down the border ramp, ui/border/secondary
+  ## (`chrome.crFocusOutline`). Read as a GRAY level, because the frame is
+  ## decoded to gray.
 
 proc grayOf(hex: string): int =
   ## The 8-bit luma ffmpeg's `gray` conversion gives an sRGB colour (BT.601).

@@ -459,16 +459,17 @@ suite "PLAT-47: the focused pane is outlined as the desktop outlines it":
     let desk = answers()
     ck desk.kind == JObject
     require desk.kind == JObject
-    let focusHex = desk["focus"]["outline"].getStr
-    let deskEdge = desk["focus"]["unfocusedEdge"].getStr
+    let deskHex = desk["focus"]["outline"].getStr
     # PLAT-49: dividers sit on the panes' own ground, the panel.
     let canvas = DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark]
-    let unfocused = DesignTokenHex[dtColorsUiBorderSecondary][dmDark]
-    # The colour relationship: the terminal's focus colour IS the desktop's,
-    # and it stands off an unfocused divider no more than the desktop's
-    # outline stands off an unfocused panel's edge.
-    ck DesignTokenHex[dtColorsUiBorderPrimary][dmDark] == focusHex
-    ck contrastOf(focusHex, unfocused) <= contrastOf(focusHex, deskEdge)
+    # The colour relationship. The desktop's outline is ui/border/primary
+    # (measured); PLAT-51 (the user: both focus contrasts SUBTLER) moved the
+    # native front-ends' one step down the border ramp, ui/border/secondary —
+    # a declared deviation (Native-Front-End-Parity.md §2): it stands off
+    # the panel by less than the desktop's does, and is still a ring.
+    let focusHex = DesignTokenHex[dtColorsUiBorderSecondary][dmDark]
+    ck DesignTokenHex[dtColorsUiBorderPrimary][dmDark] == deskHex
+    ck contrastOf(focusHex, canvas) < contrastOf(deskHex, canvas)
     for (cols, rows) in Sizes:
       var sess = spawnTui(@["--theme=dark"], cols, rows)
       settleOnDebugger(sess, cols, rows)

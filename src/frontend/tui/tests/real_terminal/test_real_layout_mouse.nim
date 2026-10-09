@@ -99,7 +99,7 @@ import ../apps/app_layout_mouse as mouseApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 54  # PLAT-49: +2, the drag now begins on motion (the press is a click)
+const ExpectedAssertions = 52  # PLAT-49: +2, the drag begins on motion; PLAT-51: -2, the drop docks nothing
 
 const
   Stem = "app_layout_mouse"
@@ -125,11 +125,11 @@ const
 
   DropRow = 0
   DropCol = 40
-    ## THE HEADER ROW. A drop docks a pane when it lands on a cell OUTSIDE the
-    ## tree area, and with nothing docked yet the only such cells a terminal has
-    ## are the header and the status rows — which is the medium property
-    ## `test_layout_command_routing.nim` re-measures over every cell of the
-    ## screen. This one docks to `leTop`.
+    ## THE HEADER ROW, a cell OUTSIDE the tree area. Until PLAT-51 a drop
+    ## there docked the pane; since the drop zones are GoldenLayout's, ported
+    ## (Layout-ViewModel §4.2.2), a pointer outside the layout is constrained
+    ## onto its edge (`constrainDragToContainer`) and NO drop docks — docking
+    ## is the menus' and `:dock`'s, as on the desktop.
 
 var
   countedAssertions = 0
@@ -220,9 +220,15 @@ proc probeDecorationsOnTheTerminal(sess: var TuiTestSession;
   let decorations = model.shellScreenOf().decorations
   var skipped = 0
   for i, d in decorations:
-    kindsProbed.incl d.kind
     if d.area.isEmptyArea:
       continue
+    # PLAT-51: since the drop zones are GoldenLayout's, a drag over the tree
+    # always has a drop target, and its tint is COLOUR ONLY (`foTint`, glyphs
+    # kept): there is no glyph of its own to probe. Its cells are measured by
+    # colour in `test_plat47_drop_overlay.nim`.
+    if d.kind == ldDropTarget:
+      continue
+    kindsProbed.incl d.kind
     var probeRow = d.area.row + d.area.height - 1
     var probeCol = d.area.col + d.area.width - 1
     # PLAT-47: the drag ghost is a LABEL over the frame that follows the
@@ -299,7 +305,7 @@ template ckBothSaw(sess: var TuiTestSession; model: TuiRuntime;
 
 suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
 
-  test "a mouse DRAG typed as real bytes docks a pane on a real terminal":
+  test "a mouse DRAG typed as real bytes drops a pane on a real terminal":
     var sess = spawnChild()
     try:
       # STEP 0's BARRIER, which is not `(rows-1, cols-1)`. See the header.
@@ -351,43 +357,28 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
       # ---- THE RELEASE, ON A CELL OUTSIDE THE TREE AREA --------------------
       ckBothSaw(sess, model, sgrReport(0, DropRow, DropCol, false), 3,
                 "release on the header row")
-      # THE MODEL. Only the layout can be asked whether the pane left the tree.
-      ck model.app.layoutBinding.layout.dockedIndex(DraggedPane) >= 0
-      ck not model.app.layoutBinding.layout.tree.contains(DraggedPane)
-      ck model.app.layoutBinding.userModified
+      # THE MODEL. Only the layout can be asked whether the pane left the tree:
+      # it did not — the release above the layout is constrained onto its top
+      # edge, which is a place IN the tree, and nothing docks.
+      ck model.app.layoutBinding.layout.dockedIndex(DraggedPane) < 0
+      ck model.app.layoutBinding.layout.tree.contains(DraggedPane)
+      ck model.app.layoutBinding.layout.dockedAt(leTop).len == 0
       ck model.app.layoutBinding.interaction.kind == ikNone
-      ck model.app.layoutBinding.layout.dockedAt(leTop).len == 1
 
       # THE TERMINAL, differentially…
       ckScreenMatches(sess, model.shellScreenOf().visibleRows, "after the drop")
       probeDecorationsOnTheTerminal(sess, model, "after the drop")
 
-      # …AND ABSOLUTELY. The strip's cells are asserted against the pane's own
-      # name, padded, on a blank strip (PLAT-48's strip), neither of which is
-      # read off the model's rendering. This pair is M35-IMMUNE by
-      # construction, which is exactly why the probe case beside it exists.
-      var stripRow = -1
-      for s in model.layoutGeometry().strips:
-        if s.edge == leTop:
-          stripRow = s.area.row
-      checkpoint("the top dock strip is on row " & $stripRow)
-      ck stripRow == 1                    ## the body's first row, below the header
-      let stripText = sess.regionText(stripRow, 0, Cols, 1).split('\n')[0]
-      checkpoint("strip row: '" & stripText & "'")
-      # EXACT (Verification-Harness-Traps §4b): the label, and nothing but
-      # blanks besides.
-      let wrongCells = stripLabelProblems(stripText, [DraggedPaneTitle])
-      if wrongCells.len > 0:
-        checkpoint(wrongCells[0 .. min(4, wrongCells.high)].join(", "))
-      ck wrongCells.len == 0
-      # AND THE PANE IS GONE FROM THE BODY. A strip drawn beside a pane that was
-      # never removed would satisfy every assertion above. (Below the strip:
-      # the strip's own label is the same name.)
-      var stillInBody = false
-      for r in stripRow + 1 ..< Rows - 1:
+      # …AND ABSOLUTELY. No top strip: the body still starts right under the
+      # top bar, and the pane is drawn in it exactly once — its own name on
+      # its strip, read off the terminal, not off the model's rendering.
+      ck model.layoutGeometry().body.row == 1
+      var titleRows = 0
+      for r in 1 ..< Rows - 1:
         if sess.regionText(r, 0, Cols, 1).contains(DraggedPaneTitleRow):
-          stillInBody = true
-      ck not stillInBody
+          inc titleRows
+      checkpoint("rows naming the dragged pane: " & $titleRows)
+      ck titleRows == 1
 
       sess.send($TestAppQuitByte)
       let status = sess.waitExit(initDuration(seconds = 10))
@@ -417,9 +408,10 @@ suite "PLAT-6 Tier 2: a mouse gesture through a real pty":
     checkpoint("frames probed: " & $framesProbed & ", terminal probes: " &
                $probesMade & ", kinds reached: " & $kindsProbed)
     ck framesProbed == 2
-    # Two per frame since PLAT-48: the drag's own decoration and the bottom
-    # strip the shared default's footer panels sit on.
-    ck probesMade == 4
+    # While dragging: the ghost and the bottom strip the shared default's
+    # footer panels sit on (PLAT-48); after the drop the bottom strip alone
+    # (PLAT-51: the drop docks nothing, so no top strip).
+    ck probesMade == 3
     # TWO KINDS WITH TWO DIFFERENT GLYPHS, which is the property that makes the
     # probe able to see a collapsed glyph table at all. One kind, or two kinds
     # sharing a glyph, and this case would be as blind as the differential one.

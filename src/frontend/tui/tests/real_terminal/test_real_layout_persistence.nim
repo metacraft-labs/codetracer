@@ -114,11 +114,12 @@ const
     ## The Files stack's strip in its 12-cell region (`VCS` cut at the edge);
     ## PLAT-47: padded labels, no brackets.
 
-  DropRow = 0
-  DropCol = 40
-    ## THE HEADER ROW — a cell outside the tree area, which is what makes a drop
-    ## dock rather than move. `test_layout_command_routing.nim` measures over
-    ## every cell of the screen that `{top, bottom}` is the whole reachable set.
+  DockLine = ":dock top\r"
+    ## THE GESTURE. Until PLAT-51 part B a drag released on the header row
+    ## docked the pane; since the drop zones are GoldenLayout's no drag docks
+    ## (Layout-ViewModel §4.2.2), so the pane is docked as the desktop docks
+    ## one — by its command, typed into the product's own `:` prompt, byte by
+    ## byte. The focused pane at start is the Files stack, `DraggedPane`.
 
 var countedAssertions = 0
 
@@ -156,6 +157,16 @@ proc paneRow(sess: var TuiTestSession; row: int): string =
   ## `test_real_command_mode.nim`.
   strutils.strip(sess.regionText(row, 0, Cols, 1).split('\n')[0],
                  leading = false)
+
+proc typeDock(sess: var TuiTestSession) =
+  ## `DockLine`, one byte per frame: each key asks for a repaint, so each has
+  ## its own cursor barrier (`step + 1`).
+  var step = 0
+  for ch in DockLine:
+    sess.send($ch)
+    inc step
+    waitForCursorAt(sess, 0, persistApp.cursorParkColumn(step, Cols),
+                    FrameTimeoutMs)
 
 proc filesUnder(root: string): seq[string] =
   ## Every file below `root`, relative to it, sorted. THE WHOLE STATE ROOT,
@@ -321,12 +332,7 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
         # freeze bug `app/layout/persistence.nim`'s header names.
         ck filesUnder(rec.root).len == 0
 
-        first.send(sgrReport(0, source.row, source.col, true))
-        waitForCursorAt(first, 0, persistApp.cursorParkColumn(1, Cols),
-                        FrameTimeoutMs)
-        first.send(sgrReport(0, DropRow, DropCol, false))
-        waitForCursorAt(first, 0, persistApp.cursorParkColumn(2, Cols),
-                        FrameTimeoutMs)
+        typeDock(first)
         ckArrangementIsDocked(first, "process 1 after the drop")
         # STILL NOTHING ON DISK. The save is once per session, not once per
         # gesture, and this is what says so rather than a comment.
@@ -443,12 +449,8 @@ suite "PLAT-6 Tier 2: an arrangement survives a restart, on a real terminal":
       var planting = spawnChild(rec, withBinding = true)
       try:
         ckFirstFrame(planting, "the planting child")
-        planting.send(sgrReport(0, source.row, source.col, true))
-        waitForCursorAt(planting, 0, persistApp.cursorParkColumn(1, Cols),
-                        FrameTimeoutMs)
-        planting.send(sgrReport(0, DropRow, DropCol, false))
-        waitForCursorAt(planting, 0, persistApp.cursorParkColumn(2, Cols),
-                        FrameTimeoutMs)
+        discard source
+        typeDock(planting)
         ckQuitsCleanly(planting, "the planting child")
       finally:
         planting.terminate()

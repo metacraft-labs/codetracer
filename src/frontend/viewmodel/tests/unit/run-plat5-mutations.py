@@ -172,9 +172,13 @@ MUTATIONS = [
     # --- never touching the committed layout -------------------------------
     Mutation(
         "P3", INTER,
+        # PLAT-51 part B: `hoverGolden` has the same shape; the needle is
+        # `hoverAt`'s, by the end of its doc comment.
+        "  ## written as a mutation, so it is the one most worth having as a value.\n"
         "  if interaction.kind != ikDraggingTab:\n"
         "    return interaction\n"
         "  Interaction(kind: ikDraggingTab, source: interaction.source,",
+        "  ## written as a mutation, so it is the one most worth having as a value.\n"
         "  if interaction.kind != ikDraggingTab:\n"
         "    return interaction\n"
         '  layout.tree.title = layout.tree.title & "!"\n'

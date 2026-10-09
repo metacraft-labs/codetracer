@@ -48,7 +48,7 @@ import ../app/views/variables
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 350
+const ExpectedAssertions = 351
 
 var countedAssertions = 0
 
@@ -127,10 +127,16 @@ suite "PLAT-49: a press marks a tab; only motion past the threshold drags":
     let (b, geom) = sharedBinding(200, 50)
     let (row, col) = tabCell(geom, paneFileTree, 1)
     discard b.onMouse(geom, press(row, col))
-    # Released on the header row: a dock, with no motion report in between.
+    # Released on the header row, with no motion report in between: the
+    # whole drag, not a click. PLAT-51: GoldenLayout clamps a pointer outside
+    # the layout onto its edge (`constrainDragToContainer`); at this column
+    # that is the dragged tab's own header, so — GoldenLayout's answer — the
+    # tab goes back where it was and nothing changes; and no drop docks.
     let dropped = b.onMouse(geom, release(0, 100))
-    ck dropped.status == lasApplied
-    ck b.layout.dockedIndex(paneVcs) >= 0
+    checkpoint("dropped: " & dropped.message)
+    ck dropped.status == lasNoOp
+    ck b.interaction.kind == ikNone
+    ck b.layout.dockedIndex(paneVcs) < 0
     # A click in a pane body: a focus, nothing picked up, no drag spoken of.
     let geom2 = b.geometry(bodyArea(200, 50))
     let body = geom2.regionOfPane(paneEditor)

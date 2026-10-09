@@ -436,5 +436,48 @@
    "clientHeight": 562,
    "rowHeight": 24
   }
+ },
+ "newTab": {
+  "heading": "Welcome toCodeTracerVersion 26.10.1",
+  "options": [
+   {
+    "label": "New file",
+    "inactive": false,
+    "title": ""
+   },
+   {
+    "label": "Open folder",
+    "inactive": false,
+    "title": ""
+   },
+   {
+    "label": "Record new trace",
+    "inactive": false,
+    "title": ""
+   },
+   {
+    "label": "Open local trace",
+    "inactive": false,
+    "title": ""
+   },
+   {
+    "label": "Open online trace",
+    "inactive": false,
+    "title": ""
+   },
+   {
+    "label": "CodeTracer shell",
+    "inactive": true,
+    "title": "The CodeTracer shell is not available in this build yet."
+   }
+  ],
+  "panels": [
+   "Recent folders",
+   "Recent traces"
+  ],
+  "tabs": [
+   "main.py",
+   "Trace 2"
+  ]
  }
 }

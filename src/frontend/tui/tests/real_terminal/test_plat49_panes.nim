@@ -28,9 +28,10 @@
 ## file info — `Python | UTF-8` — first, then the labels, then the mode);
 ## the call the debugger is in on the active-row ground; a drag over the
 ## layout's own right edge splitting the WHOLE layout (GoldenLayout's ground
-## band); and the strip's "+" — the omnibar on `:open `, a second recording
-## opened in its own tab with its own engine, a tab click switching the
-## panes, its close control stopping that engine.
+## band); and the strip's "+" — since PLAT-51 a Welcome Screen whose recent
+## traces are the recordings beside calc — a second recording opened in its
+## own tab with its own engine, a tab click switching the panes, its close
+## control stopping that engine.
 ##
 ## No mocks: the real binary, a real recording, a real engine, a real pty.
 
@@ -446,14 +447,15 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     # One session: no tab drawn, the "+" alone (the desktop's single-session).
     ck not row0.contains(" × ")
     let before = replayServerPids().len
+    # PLAT-51 (Multi-Window-Tab-Management.md rule 3): the "+" opens a tab
+    # showing the WELCOME SCREEN; the recordings beside calc are its recent
+    # traces, and a click on one opens it in that tab.
     sess.click(0, plus + 1)
-    discard sess.waitFor(":open", timeoutMs = 5000, below = 1)
-    discard sess.waitFor("call_pages-", timeoutMs = 5000)
-    ck sess.rowText(StatusRow).contains("new tab: choose a recording")
-    # Type the recording's own name: the list narrows to it.
-    for ch in "call_pages": sess.send($ch)
-    discard sess.waitFor(":open call_pages", timeoutMs = 5000, below = 1)
-    sess.send("\r")
+    discard sess.waitFor("Welcome to CodeTracer", timeoutMs = 5000)
+    discard sess.waitFor("Recent traces", timeoutMs = 5000)
+    let (pr, pc) = sess.snap().findRow("call_pages-d6745afd1e2e")
+    ck pr > 1 and pc >= 0
+    sess.click(pr, pc + 2)
     # Its own tab, its own engine, its own panes.
     discard sess.waitFor("call_pages-d6745afd1e2e ×", timeoutMs = 30000,
                          below = 1)

@@ -25,6 +25,7 @@
 import std/[algorithm, json, os, sequtils, strutils, unittest]
 
 import gpui/window_top_bar   # `GpuiTopBandPx`: the band above the layout (PLAT-48)
+import gpui/chrome          # `crFocusOutline` (PLAT-51)
 from gpui/window_geometry import TabStripPx, FooterPx
   # the pane's tab strip, and the window's footer (PLAT-49 part B)
 
@@ -36,7 +37,7 @@ template ck(cond: untyped) =
 const
   Record = "src/tests/visual/plat47-gpui-window.json"
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
-  ExpectedAssertions = 103
+  ExpectedAssertions = 104
     ## PLAT-50: +1, the docked reveal is read by the span of its change.
   GhostBoxPx = 160 * 32
   EditorRowPx = 26
@@ -63,8 +64,12 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
       inc n
     ck n == 19
 
-  test "B2: the focused pane is closed in a 1px border of the desktop's outline colour":
+  test "B2: the focused pane is closed in a 1px border of the focus colour":
+    # The desktop's outline is #565656; PLAT-51 made the native focus colour
+    # subtler (ui/border/secondary, `crFocusOutline`), which the recorder
+    # searches the frame for.
     ck desk["focus"]["outline"].getStr == "#565656"
+    ck chromeOf(crFocusOutline) == "#3a3a3a"
     let ring = rec["focusRing"]
     ck ring["bbox"].kind == JArray
     for side in ["top", "bottom", "left", "right"]:

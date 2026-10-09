@@ -944,7 +944,9 @@ ARMS = [
         "    let role = if focusSide: srBorderFocused else: srBorderPane\n",
         C_BODY, "body dividers ignore the choice"),
     Arm("SH3", SHELL,
+        "    let ground = if (row, col + 1) in strips: srTabBar\n"
         "                 else: groundOf(regions, row, col + 1)\n",
+        "    let ground = if (row, col + 1) in strips: srTabBar\n"
         "                 else: srSurfaceCanvas\n",
         C_BODY, "body dividers on the canvas, not the pane's fill"),
     Arm("SH5", SHELL,

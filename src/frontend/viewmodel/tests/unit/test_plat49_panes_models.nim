@@ -10,8 +10,8 @@
 ##     the desktop's set and order, location hidden by default, show / hide /
 ##     reorder;
 ##   * finding 11 — GoldenLayout's drop-zone proportions
-##     (`layout_interaction.goldenLayoutZone`) and its header insertion rule
-##     (`goldenLayoutInsertsAfter`);
+##     (`golden_layout_hit.glStackSegmentAt`, PLAT-51's port) and its root
+##     side bands;
 ##   * finding 9 — a docked pane docked OPEN (`cmdOpenDocked` /
 ##     `cmdCloseDocked`, one at a time, not persisted) and the desktop's hover
 ##     timing (`auto_hide_hover`): a preview after the delay, a dismissal after
@@ -39,7 +39,7 @@ import headless_app/footer_info
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 221
+const ExpectedAssertions = 217
 
 var countedAssertions = 0
 
@@ -183,49 +183,63 @@ suite "PLAT-49 part B: the event log's columns are the ViewModel's":
 
 suite "PLAT-49 part B: GoldenLayout's drop zones":
 
-  test "a quarter on each side, the centre joins":
-    # A 100 x 40 body, judged at each unit's centre.
-    ck goldenLayoutZone(0, 20, 100, 40) == dzLeftEdge
-    ck goldenLayoutZone(24, 20, 100, 40) == dzLeftEdge
-    ck goldenLayoutZone(25, 20, 100, 40) == dzCentre
-    ck goldenLayoutZone(99, 20, 100, 40) == dzRightEdge
-    ck goldenLayoutZone(75, 20, 100, 40) == dzRightEdge
-    ck goldenLayoutZone(74, 20, 100, 40) == dzCentre
-    ck goldenLayoutZone(50, 0, 100, 40) == dzTopEdge
-    ck goldenLayoutZone(50, 9, 100, 40) == dzTopEdge
-    ck goldenLayoutZone(50, 10, 100, 40) == dzCentre
-    ck goldenLayoutZone(50, 39, 100, 40) == dzBottomEdge
-    ck goldenLayoutZone(50, 30, 100, 40) == dzBottomEdge
-    ck goldenLayoutZone(50, 29, 100, 40) == dzCentre
+  test "a quarter on each side, the SMALLER centre joins (PLAT-51)":
+    # PLAT-49's quarters, restated through the shared port of GoldenLayout's
+    # hit-testing (`golden_layout_hit`): a 100 x 40 body, judged at each
+    # unit's centre; the middle that joins is the centred THIRD.
+    let st = GlStack(element: glRect(0, -3, 100, 43),
+                     header: glRect(0, -3, 100, 3),
+                     content: glRect(0, 0, 100, 40),
+                     tabs: @[glRect(0, -3, 10, 3)])
+    proc at(x, y: int): GlSegment =
+      glStackSegmentAt(st, x.float + 0.5, y.float + 0.5, NativeCentreShare)
+    ck at(0, 20) == segLeft
+    ck at(24, 20) == segLeft
+    ck at(25, 20) == segBottom       # PLAT-49 joined here; GoldenLayout splits
+    ck at(34, 20) == segCentre
+    ck at(99, 20) == segRight
+    ck at(75, 20) == segRight
+    ck at(65, 20) == segCentre
+    ck at(50, 0) == segTop
+    ck at(50, 12) == segTop
+    ck at(50, 13) == segCentre
+    ck at(50, 39) == segBottom
+    ck at(50, 27) == segBottom
+    ck at(50, 26) == segCentre
     # The left and right zones run the body's full height (GoldenLayout's).
-    ck goldenLayoutZone(5, 0, 100, 40) == dzLeftEdge
-    ck goldenLayoutZone(95, 39, 100, 40) == dzRightEdge
-    # A body one unit wide is all centre; two units, left and right.
-    ck goldenLayoutZone(0, 0, 1, 1) == dzCentre
-    ck goldenLayoutZone(0, 0, 2, 1) == dzLeftEdge
-    ck goldenLayoutZone(1, 0, 2, 1) == dzRightEdge
-    ck GoldenLayoutEdgeShare == 0.25
+    ck at(5, 0) == segLeft
+    ck at(95, 39) == segRight
+    ck GlEdgeShare == 0.25
 
   test "a tab's left half inserts before it, its right half after it":
-    ck not goldenLayoutInsertsAfter(0, 10)
-    ck not goldenLayoutInsertsAfter(4, 10)
-    ck goldenLayoutInsertsAfter(5, 10)
-    ck goldenLayoutInsertsAfter(9, 10)
-    ck not goldenLayoutInsertsAfter(1, 3)
-    ck goldenLayoutInsertsAfter(2, 3)
+    # `Stack._highlightHeaderDropZone`, through the port: two 10-wide tabs.
+    let st = GlStack(element: glRect(0, -3, 100, 43),
+                     header: glRect(0, -3, 100, 3),
+                     content: glRect(0, 0, 100, 40),
+                     tabs: @[glRect(0, -3, 10, 3), glRect(10, -3, 10, 3)])
+    ck glHeaderIndexAt(st, 0.5, -1, 0) == 0
+    ck glHeaderIndexAt(st, 4.5, -1, 0) == 0
+    ck glHeaderIndexAt(st, 5.5, -1, 0) == 1
+    ck glHeaderIndexAt(st, 9.5, -1, 0) == 1
+    ck glHeaderIndexAt(st, 14.0, -1, 0) == 1
+    ck glHeaderIndexAt(st, 16.0, -1, 0) == 2
+    # Past the last tab: the end of the strip.
+    ck glHeaderIndexAt(st, 60.0, -1, 0) == 2
 
 suite "PLAT-49 part B: GoldenLayout's ground drop splits the whole layout":
 
   test "the band is GoldenLayout's 50 px, in any front-end's unit":
-    ck GoldenLayoutRootBandPx == 50
-    ck goldenLayoutRootBand(1.0) == 50          # a window's pixels
-    ck goldenLayoutRootBand(9.63) == 5          # a terminal column
-    ck goldenLayoutRootBand(22.0) == 2          # a terminal row
-    ck goldenLayoutRootBand(0.0) == 1
+    ck GlSideAreaPx == 50
+    let sides = glSideAreas(glRect(0, 0, 800, 600))
+    ck sides.len == 4 and sides[1].side == gsLeft
+    ck sides[1].rect.x2 == 50.0
     ck rootZoneOf(leLeft) == dzRootLeft and rootZoneOf(leBottom) == dzRootBottom
-    # `getArea`: the smaller surface wins, the band on a tie.
-    ck goldenLayoutWins(100, 101) and goldenLayoutWins(100, 100)
-    ck not goldenLayoutWins(101, 100)
+    # `getArea`: the smaller surface wins; a tie keeps the earlier area.
+    let geom = GlGeometry(ground: glRect(0, 0, 800, 600), stacks: @[GlStack(
+      element: glRect(0, 0, 800, 600), header: glRect(0, 0, 800, 30),
+      content: glRect(0, 30, 800, 570), tabs: @[glRect(0, 0, 80, 30)])])
+    let areas = glItemAreas(geom)
+    ck areas[glAreaAt(areas, 10, 300)].kind == gakSide
 
   test "the root is wrapped half and half when it runs the other way":
     # editor | (state over calltrace), a ROW: a drop on the bottom band.

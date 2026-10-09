@@ -36,7 +36,7 @@ import gpui/chrome
 const
   W = 1440
   H = 900
-  ExpectedAssertions = 124
+  ExpectedAssertions = 130
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -131,14 +131,17 @@ suite "PLAT-47: the window's geometry is total and exact":
     ck g0.pointerAt(cx, max(b.y, g0.inner.y + 50) + 2).get.zone == dzTopEdge
     ck g0.pointerAt(cx, min(b.y + b.h, g0.inner.y + g0.inner.h - 50) - 3).get.zone ==
        dzBottomEdge
-    ck g0.pointerAt(3, H div 2).get.zone == dzOutsideLeft
-    ck g0.pointerAt(W - 3, H div 2).get.zone == dzOutsideRight
-    ck g0.pointerAt(W div 2, H - 3).get.zone == dzOutsideBottom
-    # PLAT-48: the window draws a TOP strip itself (gpui-kit's dock has no
-    # top placement), so the margin above the layout names the top dock, as
-    # the terminal's row above the body and the desktop's top drop do.
+    # PLAT-51 (GoldenLayout's hit-testing, ported): a pointer outside the
+    # layout is constrained onto its edge (`constrainDragToContainer`) — the
+    # margins are the ground's side bands, and no drop docks. GoldenLayout
+    # rounds the right / bottom edge ONTO `x2` / `y2`, which its half-open
+    # `getArea` excludes: past them a fresh drag finds nothing (a drag in
+    # flight keeps its last valid area) — its asymmetry, kept.
+    ck g0.pointerAt(3, H div 2).get.zone == dzRootLeft
+    ck g0.pointerAt(W - 3, H div 2).isNone
+    ck g0.pointerAt(W div 2, H - 3).isNone
     let above = g0.pointerAt(W div 2, 3)
-    ck above.isSome and above.get.zone == dzOutsideTop
+    ck above.isSome and above.get.zone in {dzRootTop, dzTabStrip}
 
 suite "the editor pane shows whole rows":
 
@@ -202,26 +205,40 @@ suite "PLAT-47 deliverable 6: dragging a tab — the drop indication":
 
   let state = g0.nodeOf("state")
   let (sx, sy) = centre(state.tabs[0])      # the Variables tab
-  let editor = g0.nodeOf("editor")
-  # A BARE pane's drop area is its one-tab strip and its body together
-  # (PLAT-49: every pane box has a strip; a bare pane's is not a join zone).
-  let eb = PxRect(x: editor.body.x, y: editor.strip.y, w: editor.body.w,
-                  h: editor.strip.h + editor.body.h)
+
+  proc lift(gest: var WindowGestures): WindowGeometry =
+    ## Pick the Variables tab up and move past the slop. PLAT-51:
+    ## GoldenLayout's drag proxy lifts the pane out before anything is
+    ## measured, so the window is laid out again without it — the frame
+    ## every later sample is aimed in and decided against.
+    discard gest.pointerDown(start, g0, sx, sy)
+    doAssert gest.kind == gkDragTab and gest.source == paneState
+    let step = gest.pointerMove(start, g0, sx + 12, sy + 12)
+    doAssert step.relayout
+    geometryOf(gest.previewLayout(start))
+
+  test "the drag lifts the pane: the window is laid out without it":
+    var gest = idle()
+    let gd = gest.lift()
+    ck gd.tabsNodeOfPane("state") < 0
+    ck gd.tabsNodeOfPane("editor") >= 0
 
   test "a split: the half of the target pane on the drop's side":
     var gest = idle()
-    discard gest.pointerDown(start, g0, sx, sy)
-    ck gest.kind == gkDragTab and gest.source == paneState
-    discard gest.pointerMove(start, g0, eb.x + eb.w - 3, eb.y + eb.h div 2)
+    let gd = gest.lift()
+    let editor = gd.nodeOf("editor")
+    let eb = editor.body
+    let (px, py) = (eb.x + eb.w - 3, eb.y + eb.h div 2)
+    discard gest.pointerMove(start, gd, px, py)
     let ind = gest.indication()
     ck ind.kind == diSplitHalf and ind.side == leRight
-    let (tint, caret) = g0.dropIndicationRects(ind)
+    let (tint, caret) = gd.dropIndicationRects(ind)
     # The tint is the half of the pane's CONTENT (below its strip), as
     # GoldenLayout highlights half of a stack's content area.
     ck tint == halfOf(editor.body, leRight)
     ck caret.isEmpty
     # Release: the split the indication named is what is committed.
-    let up = gest.pointerUp(start, g0, eb.x + eb.w - 3, eb.y + eb.h div 2)
+    let up = gest.pointerUp(start, gd, px, py)
     ck up.command.isSome
     let applied = apply(start, up.command.get)
     ck applied.kind == loApplied
@@ -232,50 +249,66 @@ suite "PLAT-47 deliverable 6: dragging a tab — the drop indication":
     ck st.x > ed.x and abs(st.y - ed.y) <= 1
     ck st.x + st.w <= editor.rect.x + editor.rect.w + 1
 
-  test "a join onto a bare pane: all of it":
+  test "a join onto a bare pane: the SMALLER middle of its body":
     var gest = idle()
-    discard gest.pointerDown(start, g0, sx, sy)
-    let (cx, cy) = centre(eb)
-    discard gest.pointerMove(start, g0, cx, cy)
+    let gd = gest.lift()
+    let editor = gd.nodeOf("editor")
+    let (cx, cy) = centre(editor.body)
+    discard gest.pointerMove(start, gd, cx, cy)
     let ind = gest.indication()
-    ck ind.kind == diWholeNode
-    ck g0.dropIndicationRects(ind).tint == editor.body
+    # The user's middle joins after the last tab — the bare pane's one-tab
+    # strip, slot 1 — and is highlighted on the strip, where the tab goes.
+    ck ind.kind == diTabSlot and ind.slot == 1
+    ck gd.dropIndicationRects(ind).tint == editor.strip
+    # Outside the centred third, GoldenLayout's own split (top / bottom).
+    discard gest.pointerMove(start, gd, cx, editor.body.y +
+                                            editor.body.h div 5)
+    let above = gest.indication()
+    ck above.kind == diSplitHalf and above.side == leTop
 
-  test "a join into a stack: its tab strip, and a caret at the slot":
+  test "a join into a stack: its tab strip, and the placeholder at the slot":
     var gest = idle()
-    discard gest.pointerDown(start, g0, sx, sy)
-    let ct = g0.nodeOf("calltrace")
+    let gd = gest.lift()
+    let ct = gd.nodeOf("calltrace")
     # The LEFT half of tab 1: GoldenLayout inserts before a tab whose
-    # midpoint the pointer has not passed (`goldenLayoutInsertsAfter`).
+    # midpoint the pointer has not passed.
     let tx = ct.tabs[1].x + ct.tabs[1].w div 4
     let ty = ct.tabs[1].y + ct.tabs[1].h div 2
-    discard gest.pointerMove(start, g0, tx, ty)
+    discard gest.pointerMove(start, gd, tx, ty)
     let ind = gest.indication()
     ck ind.kind == diTabSlot and ind.slot == 1
-    let (tint, caret) = g0.dropIndicationRects(ind)
+    let ph = gest.placeholderOf()
+    ck ph.found and ph.stackPath == ct.path and ph.index == 1
+    let (tint, caret) = gd.dropIndicationRects(ind, GlPlaceholderPx.int)
     ck tint == ct.strip
     ck not caret.isEmpty
-    ck caret.x <= ct.tabs[1].x and caret.x + caret.w >= ct.tabs[1].x
-    let up = gest.pointerUp(start, g0, tx, ty)
+    ck caret.x == ct.tabs[1].x and caret.w == GlPlaceholderPx.int
+    let up = gest.pointerUp(start, gd, tx, ty)
     ck up.command.isSome
     let applied = apply(start, up.command.get)
     ck applied.kind == loApplied
     let joined = geometryOf(applied.layout).nodeOf("calltrace")
     ck joined.panes == @["calltrace", "state", "agentActivity"]
 
-  test "a dock: a band along the layout's edge":
+  test "the window's margin: GoldenLayout's ground band, a split of the whole layout":
     var gest = idle()
-    discard gest.pointerDown(start, g0, sx, sy)
-    discard gest.pointerMove(start, g0, 4, H div 2)
+    let gd = gest.lift()
+    discard gest.pointerMove(start, gd, 4, H div 2)
     let ind = gest.indication()
-    ck ind.kind == diLayoutEdge and ind.side == leLeft
-    let tint = g0.dropIndicationRects(ind).tint
-    ck tint.x == g0.area.x and tint.h == g0.area.h and tint.w == DockBandPx
+    ck ind.kind == diRootBand and ind.side == leLeft
+    let tint = gd.dropIndicationRects(ind).tint
+    ck tint == gd.rootBandOf(leLeft)
+    let up = gest.pointerUp(start, gd, 4, H div 2)
+    ck up.command.isSome
+    let applied = apply(start, up.command.get)
+    ck applied.kind == loApplied
+    ck applied.layout.dockedAt(leLeft).len == 0
 
   test "Esc cancels: nothing is indicated and the committed layout is the start":
     var gest = idle()
-    discard gest.pointerDown(start, g0, sx, sy)
-    discard gest.pointerMove(start, g0, eb.x + eb.w - 3, eb.y + eb.h div 2)
+    let gd = gest.lift()
+    let eb = gd.nodeOf("editor").body
+    discard gest.pointerMove(start, gd, eb.x + eb.w - 3, eb.y + eb.h div 2)
     ck gest.indication().kind == diSplitHalf
     let step = gest.cancelGesture()
     ck step.changed
@@ -302,13 +335,10 @@ suite "a docked pane stays on screen: its strip, its reveal, its way back":
   let state = g0.nodeOf("state")
   let (sx, sy) = centre(state.tabs[0])      # the Variables tab
 
-  # Dock the Variables pane on the left edge, by the gesture a user makes.
-  var dockGest = idle()
-  discard dockGest.pointerDown(start, g0, sx, sy)
-  discard dockGest.pointerMove(start, g0, 4, H div 2)
-  let dockUp = dockGest.pointerUp(start, g0, 4, H div 2)
-  let docked = (if dockUp.command.isSome: apply(start, dockUp.command.get)
-                else: LayoutOutcome(kind: loRefused))
+  # Dock the Variables pane on the left edge. PLAT-51: GoldenLayout docks
+  # nothing on a drop, so the dock is the pane menu's command.
+  discard (sx, sy)
+  let docked = apply(start, cmdDock(paneState, leLeft))
   let dl = if docked.kind == loApplied: docked.layout else: start
   let gd = geometryOf(dl)
 
@@ -329,9 +359,10 @@ suite "a docked pane stays on screen: its strip, its reveal, its way back":
         ck n.rect.x >= gd.inner.x
     # A left strip's label reads down: one character per row.
     ck st.slots[0].rect.h == slotExtentPx(leLeft, st.slots[0].label)
-    # Dropping onto the strip docks on its edge.
+    # PLAT-51: a pointer over the strip is outside the tree, constrained onto
+    # its edge — GoldenLayout's ground band; no drop docks.
     let (lx, ly) = centre(st.slots[0].rect)
-    ck gd.pointerAt(lx, ly).get.zone == dzOutsideLeft
+    ck gd.pointerAt(lx, ly).get.zone == dzRootLeft
 
   test "a click on the label docks the pane open; a second closes it; a hover previews it":
     # PLAT-49 part B (the user's direction): A CLICK DOCKS THE PANE OPEN —
@@ -395,12 +426,15 @@ suite "a docked pane stays on screen: its strip, its reveal, its way back":
 
   test "dragging the label back into the tree places the pane there again":
     let (lx, ly) = centre(gd.strips[0].slots[0].rect)
-    let eb = gd.nodeOf("editor").body
     var gest = idle()
     discard gest.pointerDown(dl, gd, lx, ly)
-    discard gest.pointerMove(dl, gd, eb.x + eb.w - 3, eb.y + eb.h div 2)
+    discard gest.pointerMove(dl, gd, lx + 12, ly + 12)
+    # The frame the drag draws: the label lifted out of its strip.
+    let gl = geometryOf(gest.previewLayout(dl))
+    let eb = gl.nodeOf("editor").body
+    discard gest.pointerMove(dl, gl, eb.x + eb.w - 3, eb.y + eb.h div 2)
     ck gest.indication().kind == diSplitHalf
-    let up = gest.pointerUp(dl, gd, eb.x + eb.w - 3, eb.y + eb.h div 2)
+    let up = gest.pointerUp(dl, gl, eb.x + eb.w - 3, eb.y + eb.h div 2)
     ck up.command.isSome
     let back = apply(dl, up.command.get)
     ck back.kind == loApplied

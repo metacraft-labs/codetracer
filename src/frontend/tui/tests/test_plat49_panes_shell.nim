@@ -69,7 +69,7 @@ import ../app/theme/capabilities
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 207
+const ExpectedAssertions = 206
   ## PLAT-51: +3, measured — the call trace's rows end in their scrollbar
   ## scrubber's cell, one more span per row the selected-row sweeps visit,
   ## and the scrubber cell's own role check.
@@ -104,18 +104,22 @@ proc roleAt(screen: ShellScreen; row, col: int): CellStyle =
   CellStyle()
 
 proc oracleZone(dx, dy, w, h: int): DropZone =
-  ## GoldenLayout's body zones, RESTATED here from `Stack.getArea` (left /
-  ## right hover areas `0 .. 0.25` / `0.75 .. 1` of the width over the full
-  ## height) and the user's centre (the middle joins; top and bottom the
-  ## outer quarters of the height between left and right), judged at the
-  ## cell's centre. Reads nothing the binding reads.
+  ## GoldenLayout's body segments, RESTATED here from `Stack.getArea` /
+  ## `highlightDropZone` (PLAT-51, Layout-ViewModel §4.2.2): left = x within
+  ## the first quarter of the content's width, right = the last quarter, both
+  ## over its full height; between them top = the upper half, bottom = the
+  ## lower half — except the user's smaller middle (the centred third on both
+  ## axes) that JOINS. Judged at the cell's centre; reads nothing the binding
+  ## reads. A cell on a boundary (none of GoldenLayout's strict tests) is
+  ## skipped by the caller (the hit-test resolves no pointer there).
   let fx = (dx.float + 0.5) / w.float
   let fy = (dy.float + 0.5) / h.float
-  if fx <= 0.25: dzLeftEdge
-  elif fx >= 0.75: dzRightEdge
-  elif fy <= 0.25: dzTopEdge
-  elif fy >= 0.75: dzBottomEdge
-  else: dzCentre
+  if fx < 0.25: dzLeftEdge
+  elif fx > 0.75: dzRightEdge
+  elif fx > 1.0 / 3.0 and fx < 2.0 / 3.0 and fy > 1.0 / 3.0 and
+       fy < 2.0 / 3.0: dzCentre
+  elif fy < 0.5: dzTopEdge
+  else: dzBottomEdge
 
 proc oracleRootZone(inner, region: CellArea; row, col: int):
     Option[DropZone] =
@@ -133,11 +137,11 @@ proc oracleRootZone(inner, region: CellArea; row, col: int):
       (dzRootTop, inner.col, inner.row, inner.width, dh),
       (dzRootBottom, inner.col, inner.row + inner.height - dh, inner.width, dh)]:
     if col >= c0 and col < c0 + w and row >= r0 and row < r0 + h:
-      let surface = w.float * 9.63 * h.float * 22.0
+      let surface = w.float * 9.625 * h.float * 22.0
       if surface < best:
         best = surface
         result = some(zone)
-  let rival = region.width.float * 9.63 * region.height.float * 22.0
+  let rival = region.width.float * 9.625 * region.height.float * 22.0
   if result.isSome and best > rival:
     result = none(DropZone)
 
@@ -152,7 +156,12 @@ suite "PLAT-49 part B: GoldenLayout's drop zones":
       let path = geom.pathOfPane(region.pane)
       if path.isNone:
         continue
-      let a = geom.dropAreaOfPath(path.get)
+      # GoldenLayout's content area: the pane's box (its divider column is a
+      # splitter, in no stack's area) below its strip.
+      let below = geom.dropAreaOfPath(path.get)
+      let box = boxOfRegion(geom, region.area)
+      let a = CellArea(col: below.col, row: below.row, width: box.width,
+                       height: below.height)
       if a.width < 8 or a.height < 8:
         continue
       for row in a.row ..< a.row + a.height:
@@ -172,14 +181,14 @@ suite "PLAT-49 part B: GoldenLayout's drop zones":
     for w in wrong: checkpoint(w)
     ck wrong.len == 0
     ck swept > 1000
-    # The quarters, the centre, and — along the layout's outer edges — the
-    # root split.
+    # The segments, the smaller centre, and — along the layout's outer edges
+    # — the root split.
     ck seen == toHashSet([dzLeftEdge, dzRightEdge, dzTopEdge, dzBottomEdge,
                           dzCentre, dzRootLeft, dzRootRight, dzRootTop,
                           dzRootBottom])
-    # A quarter of an 80-column body is twenty columns, not three.
-    ck edgeBandCells(80) == 20
-    ck edgeBandCells(2) == 1 and edgeBandCells(1) == 0
+    # PLAT-51: the middle is a third on each axis — a ninth of a body, where
+    # PLAT-49's was a quarter of it.
+    ck NativeCentreShare > 0.3 and NativeCentreShare < 0.34
 
   test "the centre joins the stack, an edge splits on its side":
     # Inside the quarters but clear of the layout's ground bands (the state
@@ -190,12 +199,14 @@ suite "PLAT-49 part B: GoldenLayout's drop zones":
                                      (0.95, 0.5, lcSplit, ssAfter),
                                      (0.5, 0.2, lcSplit, ssBefore),
                                      (0.5, 0.95, lcSplit, ssAfter)]:
-      let (b, geom) = sharedBinding(200, 50)
-      let src = geom.regionOfPane(paneCalltrace)
-      let target = geom.dropAreaOfPath(geom.pathOfPane(paneState).get)
-      discard b.onMouse(geom, press(src.row, src.col + 2))
-      discard b.onMouse(geom, motion(src.row + 2, src.col + 8))
+      let (b, first) = sharedBinding(200, 50)
+      let src = first.regionOfPane(paneCalltrace)
+      discard b.onMouse(first, press(src.row, src.col + 2))
+      discard b.onMouse(first, motion(src.row + 2, src.col + 8))
       ck b.interaction.kind == ikDraggingTab
+      # PLAT-51: aimed in the frame the drag draws (the call stack lifted out).
+      let geom = b.geometry(bodyArea(200, 50))
+      let target = geom.dropAreaOfPath(geom.pathOfPane(paneState).get)
       let row = target.row + int(fy * target.height.float)
       let col = target.col + int(fx * target.width.float)
       discard b.onMouse(geom, motion(row, col))
@@ -217,7 +228,12 @@ suite "PLAT-49 part B: GoldenLayout's drop zones":
                                        (leRight, saRow, ssAfter),
                                        (leLeft, saRow, ssBefore),
                                        (leBottom, saColumn, ssAfter)]:
-      let (b, geom) = sharedBinding(200, 50)
+      let (b, first) = sharedBinding(200, 50)
+      let srcFirst = first.regionOfPane(paneCalltrace)
+      discard b.onMouse(first, press(srcFirst.row, srcFirst.col + 2))
+      discard b.onMouse(first, motion(srcFirst.row + 2, srcFirst.col + 8))
+      # PLAT-51: the frame the drag draws.
+      let geom = b.geometry(bodyArea(200, 50))
       let band = geom.rootBandAreaOf(edge)
       ck not band.isEmptyArea
       ck (if edge in {leLeft, leRight}: band.width == 5 else: band.height == 2)
@@ -237,9 +253,6 @@ suite "PLAT-49 part B: GoldenLayout's drop zones":
       ck not onStrip(row) and band.contains(row, col)
       checkpoint($edge & " (" & $row & "," & $col & ") -> " &
                  $pointerAt(b.layout, geom, row, col))
-      let src = geom.regionOfPane(paneCalltrace)
-      discard b.onMouse(geom, press(src.row, src.col + 2))
-      discard b.onMouse(geom, motion(src.row + 2, src.col + 8))
       discard b.onMouse(geom, motion(row, col))
       ck b.interaction.kind == ikDraggingTab
       let ind = dropIndicationOf(b.interaction)

@@ -160,7 +160,9 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 100
+  ExpectedAppModules = 101
+    ## 2026-10-08 (PLAT-51 part B): 100 → 101. `views/welcome_view.nim`, the
+    ## Welcome Screen a new tab opens.
     ## 2026-10-06 (PLAT-51): 101 → 100. The Timeline pane is removed:
     ## `views/timeline_bar.nim` and its pure suite
     ## `tests/test_timeline_scrubber_quantization.nim` went (−2), and
@@ -262,7 +264,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 239
+  ExpectedStyleLiterals = 255
+    ## 2026-10-08 (PLAT-51 part B): 239 → 255, measured. The Welcome Screen's
+    ## styles (`views/welcome_view.nim`), and the focused strip's in
+    ## `views/shell.nim`.
     ## 2026-10-06 (PLAT-51): 244 → 239, measured. `views/timeline_bar.nim`'s
     ## literals went with the pane; `views/scrubber_track.nim` holds the
     ## scrubber styles moved out of `terminal_output_pane.nim`; the
@@ -356,7 +361,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 33
+  ExpectedStyledFiles = 34
+    ## 2026-10-08 (PLAT-51 part B): +1, `views/welcome_view.nim`.
     ## 2026-10-03 (PLAT-50): +1, `views/context_menu.nim`.
     ## 2026-09-30 (PLAT-48): +1, `views/top_bar.nim`.
     ## 2026-09-29 (PLAT-47 part B): +2, `views/vcs_pane.nim` and

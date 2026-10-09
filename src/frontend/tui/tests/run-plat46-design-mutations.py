@@ -113,7 +113,7 @@ ARMS = [
      "  g.fillSurface(full.row, full.col, full.width, full.height, srSurfacePanel)",
      "  discard", TABLES, "panes are no longer filled with the panel surface"),
     ("S3", SHELL,
-     "    g.restyleRole(row, start, w, srTabBar, tabRole)",
+     "    g.restyleRole(row, start, w, barRole, tabRole)",
      "    discard", TABLES, "tabs lose their active/inactive roles"),
     ("S4", SHELL,
      "    g.fillSurface(a.row + 1, a.col, inner, a.height - 1, srSurfaceEditor)",

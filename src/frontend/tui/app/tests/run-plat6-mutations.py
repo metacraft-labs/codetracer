@@ -143,6 +143,7 @@ MOUSE = "src/frontend/tui/app/input/mouse.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 STORE = "src/frontend/tui/host/layout_store.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
+GLHIT = "src/frontend/headless_app/golden_layout_hit.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
 SHELL = "src/frontend/tui/app/views/shell.nim"
 
@@ -197,7 +198,8 @@ HARNESS = [DUAL, APPRT, APP_GEST, APP_MOUSE, APP_PERSIST, APP_TRANS]
 #     behaving oddly with no local edit to explain it, those three are where to
 #     look.
 TOUCHED = [SUITE, ROUTE, PERSIST, MATRIX, GEST, TRANS, MOUSE_SUITE, RELAUNCH,
-           BIND, TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL, SHELL] + HARNESS
+           BIND, TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL, SHELL,
+           GLHIT] + HARNESS
 
 # THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
 # real pty, so an arm against one costs a compile, a CHILD compile and a
@@ -246,12 +248,13 @@ R_RESIZE = "a resize re-flows an untouched arrangement and leaves a gestured one
 # mouse reports into the binding — the row PLAT-6 stayed `partial` for a second
 # time.
 R_MOUSEOFF = "OFF BY DEFAULT: a mouse report is the inert token it always was"
-R_MOUSEDRAG = "a mouse DRAG docks the pane it picked up, through handleToken"
+R_MOUSEDRAG = ("a mouse DRAG moves the pane it picked up, through handleToken "
+               "\u2014 never to a dock")
 R_MOUSEFOCUS = "a mouse press moves the focus RING, not only the binding's focus"
 R_CLICKWHEEL = ("a click activates a tab and a wheel scrolls the strip, "
                 "through handleToken")
 R_PROMPT = "a mouse report does not disturb an open prompt"
-R_EDGES = "which dock edges a real drag can reach, measured rather than argued"
+R_EDGES = "no drag docks, anywhere on the screen; `:dock` is how a pane docks"
 
 # THE PROPERTY THE MOUSE PATH HAD AND NOBODY MEASURED. PLAT-6's verification of
 # the mouse pass found by mutation that deleting `rt.rebuildFocus()` from
@@ -260,7 +263,7 @@ R_EDGES = "which dock edges a real drag can reach, measured rather than argued"
 # the return leg on the line below it and nothing covered the rebuild. M37 is
 # the arm; this is the case that kills it.
 R_MOUSERING = ("a mouse DROP rebuilds the focus ring, so Tab cannot offer a "
-               "docked pane")
+               "pane it hid")
 
 ROUTE_CASES = [R_OFF, R_SAME, R_DOCK, R_FOCUS, R_SPEC43, R_VERBS, R_RESIZE,
                R_MOUSEOFF, R_MOUSEDRAG, R_MOUSEFOCUS, R_MOUSERING,
@@ -388,7 +391,7 @@ TRANS_CASES = [T_EQUAL, T_MODEL, T_ARM, C_COUNT]
 
 # The mouse suite (Tier 2) — a real drag on a real pty, and beside it the
 # absolute probe that survives both tiers being wrong together.
-M_DRAG = "a mouse DRAG typed as real bytes docks a pane on a real terminal"
+M_DRAG = "a mouse DRAG typed as real bytes drops a pane on a real terminal"
 M_MODEL = "the decorations a mouse gesture draws are what the MODEL says"
 M_BYTES = "the bytes this file writes are the bytes the harness writes"
 
@@ -424,43 +427,41 @@ class Mutation:
 MUTATIONS = [
     # --- the hit-test is total, and every zone is reachable ----------------
     Mutation(
+        # PLAT-51 part B: a cell past the tree (a dock strip, the margins) is
+        # constrained onto the layout's edge — GoldenLayout's ground band, a
+        # ROOT split — so the pointer that names it is the root band's.
         "M1", BIND,
-        '    return some(LayoutPointer(path: "", zone: zone))',
-        "    return none(LayoutPointer)",
+        '    some(LayoutPointer(path: "", zone: rootZoneOf(drop.edge)))',
+        "    none(LayoutPointer)",
         C_ZONES,
-        "a cell on a dock strip resolves to nothing",
+        "a cell in a ground band resolves to nothing",
     ),
     Mutation(
-        # PLAT-49 part B: the body's zones are GoldenLayout's proportions,
-        # computed by the shared rule (`layout_interaction.goldenLayoutZone`)
-        # the binding's hit-test calls — the top band lives there now.
-        "M2", INTER,
-        "  elif fy <= GoldenLayoutEdgeShare: dzTopEdge\n",
-        "  elif false: dzTopEdge\n",
+        # PLAT-51 part B: the body's zones are GoldenLayout's own, PORTED
+        # (`golden_layout_hit.glStackAreas`) — the top segment lives there.
+        "M2", GLHIT,
+        "                  x2: c.x1 + w * (1.0 - GlEdgeShare), y2: c.y1 + h * 0.5),\n",
+        "                  x2: c.x1 + w * (1.0 - GlEdgeShare), y2: c.y1),\n",
         C_ZONES,
         "the top edge band is unreachable, so dzTopEdge is never produced",
     ),
     # --- the two directions of the hit-test are one table ------------------
     Mutation(
         "M3", BIND,
-        "  of drNodeStrip:\n"
-        "    stripOf(geom.dropAreaOfPath(region.path), region.side)",
-        "  of drNodeStrip:\n"
-        "    stripOf(geom.boundsOfPath(region.path), region.side)",
+        # PLAT-51 part B: the split region's cells are GoldenLayout's hover
+        # area over the pane's CONTENT (below its strip).
+        "    let body = geom.dropAreaOfPath(region.path)\n",
+        "    let body = geom.boundsOfPath(region.path)\n",
         C_ROUND,
         "the inverse direction stops excluding the tab strip; the forward one "
         "still does",
     ),
     Mutation(
+        # PLAT-51 part B: a split region's cells are GoldenLayout's hover area
+        # for that segment of the pane's stack (`cellsFor(drNodeStrip)`).
         "M4", BIND,
-        "  of leRight:\n"
-        "    let w = edgeBandCells(area.width)\n"
-        "    CellArea(col: area.col + area.width - w, row: area.row, width: w,\n"
-        "             height: area.height)",
-        "  of leRight:\n"
-        "    let w = edgeBandCells(area.width)\n"
-        "    CellArea(col: area.col, row: area.row, width: w,\n"
-        "             height: area.height)",
+        "      of leRight: segRight\n",
+        "      of leRight: segLeft\n",
         C_ROUND,
         "the right-hand strip is drawn on the left",
     ),
@@ -491,8 +492,8 @@ MUTATIONS = [
     ),
     Mutation(
         "M6", SHELL,
-        "    let tabRole = if span.index == active: srTabActive else: srTabInactive",
-        "    let tabRole = srTabInactive",
+        "    let tabRole = if span.index == active: activeRole else: inactiveRole",
+        "    let tabRole = inactiveRole",
         C_STRIP,
         # SINCE PLAT-47 a tab is shaped by colour and weight alone — the
         # desktop's strip has no brackets, so `tabLabel` pads the active tab
@@ -543,8 +544,8 @@ MUTATIONS = [
     ),
     Mutation(
         "M8", BIND,
-        "      if region.activeTab < 0 and event.row == region.area.row:",
-        "      if false and event.row == region.area.row:",
+        "      if region.activeTab < 0 and event.row == region.area.row and\n",
+        "      if false and event.row == region.area.row and\n",
         C_KINDS,
         "a pane with no tab strip can no longer be picked up at all",
     ),
@@ -630,15 +631,13 @@ MUTATIONS = [
     Mutation(
         "M17", BIND,
         # RE-POINTED BY PLAT-47: the cancel also forgets the drag's pointer.
-        "  b.interaction = b.interaction.cancel()\n"
-        "  b.pointerRow = -1\n"
-        "  b.pointerCol = -1\n"
-        "  action(lasCancelled, \"gesture cancelled\")",
+        # (PLAT-51 part B: it also drops the drag layout and the port's paths;
+        # the needle is the head of `cancelGesture`.)
+        "    return action(lasNoGesture, \"no gesture in flight\")\n"
+        "  b.interaction = b.interaction.cancel()\n",
+        "    return action(lasNoGesture, \"no gesture in flight\")\n"
         "  discard b.dropDrag()\n"
-        "  b.interaction = b.interaction.cancel()\n"
-        "  b.pointerRow = -1\n"
-        "  b.pointerCol = -1\n"
-        "  action(lasCancelled, \"gesture cancelled\")",
+        "  b.interaction = b.interaction.cancel()\n",
         C_CANCEL,
         "cancelling commits the drag first",
     ),
@@ -685,10 +684,11 @@ MUTATIONS = [
     ),
     Mutation(
         "M21", MOUSE,
-        "  event.row = row - 1\n"
-        "  event.col = col - 1",
-        "  event.row = row\n"
-        "  event.col = col",
+        # PLAT-51 part B: the cell branch of the decoder (1016 off).
+        "    event.row = row - 1\n"
+        "    event.col = col - 1\n",
+        "    event.row = row\n"
+        "    event.col = col\n",
         C_SGR,
         "SGR's one-based wire coordinates are read as zero-based",
     ),
@@ -823,8 +823,8 @@ MUTATIONS = [
     ),
     Mutation(
         "M34", RUNTIME,
-        "  discard rt.focus.focusPaneKind(binding.focus)",
-        "  discard binding.focus",
+        "  rt.rebuildFocus()\n  discard rt.focus.focusPaneKind(binding.focus)",
+        "  rt.rebuildFocus()\n  discard binding.focus",
         R_MOUSEFOCUS,
         "the RETURN LEG of the focus synchronisation goes. A mouse press moves "
         "the binding's focus and the ring never hears about it, so `Tab` "
@@ -853,30 +853,20 @@ MUTATIONS = [
         suite=MOUSE_SUITE,
     ),
     Mutation(
-        "M36", BIND,
-        "  var best = dl\n"
-        "  var zone = dzOutsideLeft\n"
-        "  if dr < best:\n"
-        "    best = dr\n"
-        "    zone = dzOutsideRight\n"
-        "  if dt < best:\n"
-        "    best = dt\n"
-        "    zone = dzOutsideTop\n"
-        "  if db < best:\n"
-        "    zone = dzOutsideBottom\n"
-        "  zone",
-        "  var best = dl\n"
-        "  var zone = dzOutsideLeft\n"
-        "  discard best\n"
-        "  discard dr\n"
-        "  discard dt\n"
-        "  discard db\n"
-        "  zone",
+        # REVERSED BY PLAT-51 PART B (the user, 2026-10-05: the drop zones are
+        # GoldenLayout's, and GoldenLayout docks nothing on a drop): the claim
+        # is now that NO drag docks. The defect is a drop past the layout that
+        # docks again — the root band's target spelled as the dock edge.
+        "M36", INTER,
+        "    target = DropTarget(kind: dtSplitRoot, edge: drop.edge,\n"
+        "                        region: DropRegion(kind: drRootBand, path: \"\",\n"
+        "                                           side: drop.edge))\n",
+        "    target = DropTarget(kind: dtDockEdge, edge: drop.edge,\n"
+        "                        region: DropRegion(kind: drLayoutStrip, path: \"\",\n"
+        "                                           side: drop.edge))\n",
         R_EDGES,
-        "every cell outside the tree area resolves to the LEFT dock edge. The "
-        "arm for the medium claim PLAT-6 recorded and this pass re-measured: "
-        "a sweep that reported the wrong set of reachable edges would be "
-        "indistinguishable from one that reported the right one without it",
+        "a drop on the ground's band docks the pane on that edge instead of "
+        "splitting the whole layout: a drag docks again",
         suite=ROUTE,
     ),
     # --- the property the MOUSE path had and nobody measured ---------------
@@ -1312,13 +1302,13 @@ DECLARED_SURVIVORS = [
         suite=ROUTE,
     ),
     Mutation(
-        "S7", BIND,
-        "  let db = body.row + body.height - 1 - row",
-        "  let db = (body.row + body.height) - (row + 1)",
+        "S7", INTER,
+        "  if not isLegal(layout, source, target):\n    return none(DropTarget)\n  some(target)\n",
+        "  if isLegal(layout, source, target):\n    return some(target)\n  none(DropTarget)\n",
         "",
-        "The bottom distance re-associated — the same integer for every input. "
-        "IT MUST SURVIVE, and it is THE CONTROL FOR M36, which rewrites the "
-        "comparison chain these four distances feed.",
+        "The legality test's two branches swapped — the same answer for every "
+        "input. IT MUST SURVIVE, and it is THE CONTROL FOR M36, which edits the "
+        "target this test judges (PLAT-51 part B).",
         suite=ROUTE,
     ),
     Mutation(

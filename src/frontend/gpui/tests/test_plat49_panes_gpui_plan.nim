@@ -42,7 +42,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 137
+  ExpectedAssertions = 139
     ## 128 -> 136 (2026-10-04): the call-trace cases find their rows by what
     ## the call is rather than by number (+5 in the first case: the row
     ## indices are asserted, and the selected row is checked to be the only
@@ -394,16 +394,25 @@ suite "PLAT-49 part B: the GPUI window's footer auto-hide panels":
 
 suite "PLAT-49 part B: the GPUI window's drop zones are GoldenLayout's":
 
-  proc oracle(dx, dy, w, h: int): DropZone =
-    ## GoldenLayout's quarters (`Stack.getArea`) and the user's centre,
-    ## restated here, at the pixel's centre.
-    let fx = (dx.float + 0.5) / w.float
-    let fy = (dy.float + 0.5) / h.float
-    if fx <= 0.25: dzLeftEdge
-    elif fx >= 0.75: dzRightEdge
-    elif fy <= 0.25: dzTopEdge
-    elif fy >= 0.75: dzBottomEdge
-    else: dzCentre
+  proc oracle(b: PxRect; x, y: int): Option[DropZone] =
+    ## GoldenLayout's body segments (`Stack.getArea` / `highlightDropZone`),
+    ## RESTATED here (PLAT-51, Layout-ViewModel §4.2.2): left = the first
+    ## quarter of the content's width, right = the last, both full height;
+    ## between them top = the upper half, bottom = the lower — except the
+    ## user's smaller middle (the centred third on both axes), which joins.
+    ## GoldenLayout's tests are STRICT, so a pixel on a boundary is in no
+    ## segment: `none`, and the sweep skips it.
+    let (fx, fy) = (float(x - b.x) / float(b.w), float(y - b.y) / float(b.h))
+    if fx <= 0.0 or fx >= 1.0 or fy <= 0.0 or fy >= 1.0:
+      return none(DropZone)
+    if fx < 0.25: return some(dzLeftEdge)
+    if fx > 1.0 / 3.0 + 1e-9 and fx < 2.0 / 3.0 - 1e-9 and
+       fy > 1.0 / 3.0 + 1e-9 and fy < 2.0 / 3.0 - 1e-9:
+      return some(dzCentre)
+    if fx > 0.25 and fx < 0.75 and fy < 0.5: return some(dzTopEdge)
+    if fx > 0.75: return some(dzRightEdge)
+    if fx > 0.25 and fx < 0.75 and fy > 0.5: return some(dzBottomEdge)
+    none(DropZone)
 
   proc rootOracle(inner, stack: PxRect; x, y: int): Option[DropZone] =
     ## GoldenLayout's GROUND side areas, restated (`GroundItem
@@ -424,7 +433,7 @@ suite "PLAT-49 part B: the GPUI window's drop zones are GoldenLayout's":
     if result.isSome and best > stack.w * stack.h:
       result = none(DropZone)
 
-  test "a quarter on each side, the centre joins; a tab's halves":
+  test "a quarter on each side, the SMALLER centre joins; a tab's halves":
     let shared = sharedDefaultLayout()
     let layout = initLayout(shared.tree, shared.docked)
     let proj = projectDock(layout, DockViewport(width: W, height: H,
@@ -446,9 +455,13 @@ suite "PLAT-49 part B: the GPUI window's drop zones are GoldenLayout's":
             inc swept
             seen.incl p.get.zone
             let root = rootOracle(g.inner, n.rect, x, y)
-            let want = if root.isSome: root.get
-                       else: oracle(x - b.x, y - b.y, b.w, b.h)
-            if p.get.zone != want: inc wrong
+            let want = if root.isSome: root
+                       else: oracle(b, x, y)
+            if want.isSome and p.get.zone != want.get:
+              inc wrong
+              if wrong <= 5:
+                checkpoint("(" & $x & ", " & $y & ") in " & n.path & ": " &
+                           $p.get.zone & ", GoldenLayout " & $want.get)
           x += 7
         y += 7
     ck wrong == 0
@@ -502,6 +515,11 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     for ch in text:
       result.add ",key:" & $ch
 
+  proc moves(fromRow, toRow: int): string =
+    ## The arrow keys that walk the welcome screen's focus between two rows.
+    for _ in 0 ..< abs(toRow - fromRow):
+      result.add (if toRow > fromRow: ",key:down" else: ",key:up")
+
   test "the + with one session; a recording chosen opens beside it; a tab switches; a close stops it":
     let pages = repo / "test-logs/tui-fixtures/call_pages-d6745afd1e2e"
     if not dirExists(pages):
@@ -512,19 +530,35 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     let add = one.nodesWith("data-ct-session-tab-add")
     ck add.len == 1 and add[0].textOf == NewSessionTabGlyph
     ck add[0].attr("data-ct-session-tab-add") == NewSessionTabTitle
-    # The "+" opens the omnibar on `:open `, the recordings beside calc in it.
+    # PLAT-51 (Multi-Window-Tab-Management.md rule 3): the "+" opens a tab
+    # showing the WELCOME SCREEN — the recordings beside calc are its recent
+    # traces, and "Open local trace" is one of its start options.
     var g: JsonNode
     let opened = windowPlan("tab-add", g)
-    var omni = ""
-    for o in opened.nodesWith("data-ct-omnibar"): omni = o.textOf
-    ck omni.contains(OpenRecordingQuery.strip)
-    var listed = ""
-    for n in opened.nodesWith("data-ct-omnibar-result"): listed.add n.textOf & "\n"
-    checkpoint("listed: " & listed)
-    ck listed.contains("call_pages-d6745afd1e2e")
-    ck listed.contains("calc-2f0db4f45192")
-    # A typed path, Enter: a second session, its own tab, its panes.
-    let two = windowPlan("tab-add" & typed(pages) & ",key:enter")
+    ck opened.nodesWith("data-ct-welcome").len == 1
+    var rows: seq[string] = @[]
+    var labels: seq[string] = @[]
+    var focusAt = -1
+    for n in opened.nodesWith("data-ct-welcome-row"):
+      if n.attr("data-ct-welcome-focus") == "true": focusAt = rows.len
+      rows.add n.attr("data-ct-welcome-row")
+      labels.add n.textOf.strip
+    checkpoint("rows: " & $rows)
+    var pagesAt, calcAt, localAt = -1
+    for i, k in rows:
+      if k.startsWith("recent-trace:") and k.contains("call_pages-d6745afd1e2e"):
+        pagesAt = i
+      if k.startsWith("recent-trace:") and k.contains("calc-2f0db4f45192"):
+        calcAt = i
+      if k.startsWith("option:") and labels[i] == "Open local trace":
+        localAt = i
+    ck pagesAt >= 0 and calcAt >= 0 and localAt >= 0
+    # The focus starts on the first live start option ("Open folder").
+    ck rows[focusAt] == "option:open-folder"
+    let toPages = moves(focusAt, pagesAt)
+    let toLocal = moves(focusAt, localAt)
+    # The recent recording, chosen: a second session, its own tab, its panes.
+    let two = windowPlan("tab-add" & toPages & ",key:enter")
     var titles: seq[string] = @[]
     var active = ""
     for t in two.nodesWith("data-ct-session-tab"):
@@ -536,20 +570,26 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     ck two.nodesWith("data-ct-session-tab-add").len == 1
     let pagesRows = two.callRows.len
     ck pagesRows > one.callRows.len          # call_pages's trace is long
+    # The same through "Open local trace" and a typed path.
+    let typedOpen = windowPlan("tab-add" & toLocal & ",key:enter" &
+                               typed(pages) & ",key:enter")
+    ck typedOpen.callRows.len == pagesRows
     # The first tab: calc's panes again.
-    let back = windowPlan("tab-add" & typed(pages) & ",key:enter,tab:0")
+    let back = windowPlan("tab-add" & toPages & ",key:enter,tab:0")
     ck back.callRows.len == one.callRows.len
     let backEv = back.callRowOf("evaluate", "(expression=\"2 + 3\")")
     ck backEv.textOf == "▾ evaluate #" & $backEv.indexOf & "(expression=\"2 + 3\") => 5"
     # Closing the second tab: one session, no tabs, the "+" stays.
-    let closed = windowPlan("tab-add" & typed(pages) & ",key:enter,tab-close:1")
+    let closed = windowPlan("tab-add" & toPages & ",key:enter,tab-close:1")
     ck closed.nodesWith("data-ct-session-tab").len == 0
     ck closed.nodesWith("data-ct-session-tab-add").len == 1
     ck closed.callRows.len == one.callRows.len
-    # A folder that is not a recording opens nothing.
-    let refused = windowPlan("tab-add" & typed("/no/such/recording") &
-                             ",key:enter")
-    ck refused.nodesWith("data-ct-session-tab").len == 0
+    # A folder that is not a recording opens nothing: the welcome tab stays,
+    # and says why.
+    let refused = windowPlan("tab-add" & toLocal & ",key:enter" &
+                             typed("/no/such/recording") & ",key:enter")
+    ck refused.nodesWith("data-ct-welcome").len == 1
+    ck refused.nodesWith("data-ct-welcome-message").len == 1
 
 suite "PLAT-49 part B GPUI: assertion count":
   test "every assertion ran":

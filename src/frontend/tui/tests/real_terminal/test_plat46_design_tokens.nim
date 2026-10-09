@@ -66,7 +66,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 159
+const ExpectedAssertions = 161
 
 var countedAssertions = 0
 
@@ -449,13 +449,28 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       settleOnDebugger(sess, Wide.cols, Wide.rows)
       let f = readWide(sess)
       checkpoint(modeName & " read back: " & $f)
-      # PLAT-47: the editor is the desktop's Monaco theme, and the focused
-      # pane's outline is the desktop's selected-panel colour.
+      # PLAT-47: the editor is the desktop's Monaco theme. PLAT-51 (the user:
+      # both focus contrasts SUBTLER): the focused pane's outline moved from
+      # the desktop's selected-panel colour (ui/border/primary) one step down
+      # the border ramp, to ui/border/secondary.
       ck f.keywordFg == hexT(dtEditorThemeRuleKeyword, mode)
       ck hexT(dtColorsUiBorderSecondary, mode) in f.ruleFgs
-      ck hexT(dtColorsUiBorderPrimary, mode) in f.ruleFgs
+      ck hexT(dtColorsUiBorderPrimary, mode) notin f.ruleFgs
       ck focusedBorders(sess, Wide.cols, Wide.rows,
-                        hexT(dtColorsUiBorderPrimary, mode)) > 0
+                        hexT(dtColorsUiBorderSecondary, mode)) > 0
+      # PLAT-51: the focused pane's TAB STRIP takes the focus colour as its
+      # ground — one strip row's worth of cells, and nothing else does.
+      var focusGround = 0
+      var focusRows: seq[int] = @[]
+      for r in 0 ..< Wide.rows:
+        for c in 0 ..< Wide.cols:
+          if hexOfColor(sess.cellAt(r, c).bg) ==
+             hexT(dtColorsUiBorderSecondary, mode):
+            inc focusGround
+            if r notin focusRows: focusRows.add r
+      checkpoint(modeName & ": " & $focusGround & " cell(s) on the focus " &
+                 "colour, rows " & $focusRows)
+      ck focusGround >= 10 and focusRows.len == 1
       ck f.statusBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
       ck f.modeFg == hexT(dtColorsUiTextSuccessPrimary, mode)
       ck f.currentLineBg == hexT(dtEditorThemeExecutionLine, mode)

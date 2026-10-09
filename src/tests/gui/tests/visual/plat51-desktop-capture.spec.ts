@@ -455,3 +455,313 @@ test.describe("PLAT-51: the desktop's changed-value style", () => {
     writeAnswers("changedValues", out);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PLAT-51 part B, deliverable 10: GOLDENLAYOUT'S OWN DROP DECISIONS, for the
+// pointer-trace differential (Layout-ViewModel §4.2.2). A tab is picked up
+// with the real mouse (GoldenLayout's own DragProxy lifts it out and measures
+// the layout), then:
+//   * the GEOMETRY GoldenLayout measured is read back — the ground, every
+//     stack in `getAllContentItems` order (element, header, content, tabs
+//     with the placeholder taken out), and the placeholder's own push;
+//   * a DENSE GRID over the layout is put through GoldenLayout's own
+//     `getArea` and the chosen item's `highlightDropZone` — the two calls
+//     `DragProxy.setDropPosition` makes — and each sample's decision is read
+//     back: the area's index in `_itemAreas`, the stack's `_dropSegment` and
+//     `_dropIndex`, and where the placeholder now is;
+//   * RECORDED DRAG PATHS (tab -> edge, tab -> header slot, tab -> another
+//     stack's middle, tab -> outer band) are walked with the REAL mouse, and
+//     each step's decision read the same way (the clamped point
+//     `setDropPosition` used is recorded by a wrapper on `getArea`).
+// At three window sizes. Written one file per size,
+// `plat51-dropzones-<width>x<height>.electron.json` (one file would exceed the
+// repository's 500 KB limit on added files);
+// `viewmodel/tests/unit/test_golden_layout_hit.nim` replays every sample
+// through the shared port and requires the SAME decision at each.
+// ---------------------------------------------------------------------------
+
+const dropAnswersFile = (size: { width: number; height: number }) =>
+  path.join(answersDir, `plat51-dropzones-${size.width}x${size.height}.electron.json`);
+
+test.describe("PLAT-51: GoldenLayout's drop decisions, for the pointer-trace differential", () => {
+  test.use({
+    sourcePath: recording("calc"),
+    launchMode: "trace-folder",
+    noUserLayout: true,
+    codetracerPrefixOverride: prefix,
+  });
+
+  test("PLAT-51: GoldenLayout's area, segment and header index at every sample", async ({ ctPage }) => {
+    const page = ctPage;
+    await page.waitForSelector(".calltrace-view .call-text", { timeout: 120_000 });
+    await page.waitForTimeout(2_000);
+    const sizes = [
+      { width: 1400, height: 900 },
+      { width: 1100, height: 760 },
+      { width: 1720, height: 1020 },
+    ];
+    const runs: unknown[] = [];
+    for (const size of sizes) {
+      await page.setViewportSize(size);
+      await page.waitForTimeout(1_500);
+      // The source: the event log's tab, picked up with the real mouse past
+      // GoldenLayout's drag threshold.
+      const src = await page.locator(".lm_tab", { hasText: /event log/i }).first().boundingBox();
+      if (!src) throw new Error("PLAT-51: no Event Log tab");
+      const sx = src.x + src.width / 2;
+      const sy = src.y + src.height / 2;
+      await page.mouse.move(sx, sy);
+      await page.mouse.down();
+      await page.mouse.move(sx + 15, sy + 15, { steps: 4 });
+      await page.mouse.move(sx + 40, sy + 60, { steps: 4 });
+      await page.waitForTimeout(400);
+      // Record every `getArea` call (the point `setDropPosition` used,
+      // clamped) — how a real move's decision is found again.
+      const geometry = await page.evaluate(() => {
+        const lm = (globalThis as any).data?.ui?.layout;
+        if (!lm) return null;
+        const w = globalThis as any;
+        if (!w.__glWrapped) {
+          const orig = lm.getArea.bind(lm);
+          lm.getArea = (x: number, y: number) => {
+            const a = orig(x, y);
+            w.__glLast = { x, y, area: a };
+            return a;
+          };
+          w.__glWrapped = true;
+        }
+        const rect = (e: Element) => {
+          const r = e.getBoundingClientRect();
+          return { x1: r.left, y1: r.top, x2: r.left + r.width, y2: r.top + r.height };
+        };
+        const ph = lm.tabDropPlaceholder as HTMLElement;
+        const phParent = ph.parentElement;
+        const phNext = ph.nextSibling;
+        // GoldenLayout's STATE before the first grid sample: where the
+        // placeholder is, and each stack's segment and index — what the
+        // replay starts from.
+        let phStack0 = -1;
+        let phIndex0 = -1;
+        const allStacks = lm.getAllContentItems().filter((i: any) => i.isStack);
+        if (phParent) {
+          allStacks.forEach((s: any, i: number) => {
+            if (s._header.tabsContainerElement === phParent) {
+              phStack0 = i;
+              phIndex0 = Array.from(phParent.children)
+                .filter((c) => c.classList.contains("lm_tab") || c === ph).indexOf(ph);
+            }
+          });
+        }
+        if (phParent) ph.remove();
+        const stacks = lm.getAllContentItems().filter((i: any) => i.isStack).map((s: any) => {
+          const header = s._header;
+          const visible = header.lastVisibleTabIndex + 1;
+          const tabEls = header.tabs.slice(0, visible).map((t: any) => t.element as HTMLElement);
+          // THE STRIP WITH THE PLACEHOLDER IN EACH SLOT: GoldenLayout reads
+          // the tabs where the browser lays them out, and a flex strip
+          // SHRINKS them to make room (it does not just push them right) —
+          // so the port is handed the strip as drawn for every slot.
+          const tabsAt: unknown[] = [];
+          for (let p = 0; p <= tabEls.length; p++) {
+            if (tabEls.length === 0) break;
+            if (p < tabEls.length) tabEls[p].insertAdjacentElement("beforebegin", ph);
+            else tabEls[tabEls.length - 1].insertAdjacentElement("afterend", ph);
+            tabsAt.push(tabEls.map((e: HTMLElement) => rect(e)));
+            ph.remove();
+          }
+          return {
+            element: rect(s.element),
+            header: rect(header.element),
+            content: rect(s._childElementContainer),
+            tabs: header.tabs.slice(0, visible).map((t: any) => rect(t.element)),
+            tabsAt,
+            titles: s.contentItems.map((c: any) => String(c.title ?? "")),
+            empty: s.contentItems.length === 0,
+            segment0: String(s._dropSegment ?? ""),
+            dropIndex0: Number(s._dropIndex ?? -1),
+          };
+        });
+        // The placeholder's push: before the first tab of a stack with a tab.
+        let placeholderPx = 100;
+        const first = lm.getAllContentItems().find((i: any) => i.isStack && i._header.tabs.length > 0);
+        if (first) {
+          const tabEl = first._header.tabs[0].element as HTMLElement;
+          const before = tabEl.getBoundingClientRect().left;
+          tabEl.insertAdjacentElement("beforebegin", ph);
+          placeholderPx = tabEl.getBoundingClientRect().left - before;
+          ph.remove();
+        }
+        if (phParent) phParent.insertBefore(ph, phNext);
+        const ground = rect(lm._groundItem.element);
+        const rootIsStack = !!lm._groundItem.contentItems[0]?.isStack;
+        return {
+          ground, rootIsStack, placeholderPx, stacks, phStack0, phIndex0,
+          areas: lm._itemAreas.map((a: any) => ({
+            x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, surface: a.surface,
+            side: a.side ?? "", stack: a.contentItem?.isStack ? true : false,
+          })),
+        };
+      });
+      if (!geometry) throw new Error("PLAT-51: no GoldenLayout at window.data.ui.layout");
+      // What GoldenLayout decided for the sample just taken.
+      const readDecision = () => page.evaluate(() => {
+        const lm = (globalThis as any).data.ui.layout;
+        const last = (globalThis as any).__glLast;
+        const ph = lm.tabDropPlaceholder as HTMLElement;
+        const stacks = lm.getAllContentItems().filter((i: any) => i.isStack);
+        let phStack = -1;
+        let phIndex = -1;
+        if (ph.parentElement) {
+          stacks.forEach((s: any, i: number) => {
+            if (s._header.tabsContainerElement === ph.parentElement) {
+              phStack = i;
+              phIndex = Array.from(ph.parentElement!.children)
+                .filter((c) => c.classList.contains("lm_tab") || c === ph).indexOf(ph);
+            }
+          });
+        }
+        const a = last?.area ?? null;
+        const idx = a ? lm._itemAreas.indexOf(a) : -1;
+        const stack = a && a.contentItem?.isStack ? stacks.indexOf(a.contentItem) : -1;
+        return {
+          x: last?.x ?? -1, y: last?.y ?? -1, area: idx, stack,
+          segment: stack >= 0 ? String(a.contentItem._dropSegment ?? "") : "",
+          dropIndex: stack >= 0 ? Number(a.contentItem._dropIndex ?? -1) : -1,
+          phStack, phIndex,
+        };
+      });
+      // The DENSE GRID, through GoldenLayout's own two calls.
+      const grid = await page.evaluate((g: any) => {
+        const lm = (globalThis as any).data.ui.layout;
+        const out: unknown[] = [];
+        const stepX = Math.max(7, (g.ground.x2 - g.ground.x1) / 61);
+        const stepY = Math.max(7, (g.ground.y2 - g.ground.y1) / 41);
+        const stacks = lm.getAllContentItems().filter((i: any) => i.isStack);
+        const ph = lm.tabDropPlaceholder as HTMLElement;
+        for (let y = g.ground.y1 + 0.37; y < g.ground.y2; y += stepY) {
+          for (let x = g.ground.x1 + 0.53; x < g.ground.x2; x += stepX) {
+            const a = lm.getArea(x, y);
+            if (a) a.contentItem.highlightDropZone(x, y, a);
+            let phStack = -1;
+            let phIndex = -1;
+            if (ph.parentElement) {
+              stacks.forEach((s: any, i: number) => {
+                if (s._header.tabsContainerElement === ph.parentElement) {
+                  phStack = i;
+                  phIndex = Array.from(ph.parentElement!.children)
+                    .filter((c) => c.classList.contains("lm_tab") || c === ph).indexOf(ph);
+                }
+              });
+            }
+            const stack = a && a.contentItem?.isStack ? stacks.indexOf(a.contentItem) : -1;
+            out.push({
+              x, y, area: a ? lm._itemAreas.indexOf(a) : -1, stack,
+              segment: stack >= 0 ? String(a.contentItem._dropSegment ?? "") : "",
+              dropIndex: stack >= 0 ? Number(a.contentItem._dropIndex ?? -1) : -1,
+              phStack, phIndex,
+            });
+          }
+        }
+        return out;
+      }, geometry);
+      // RECORDED PATHS with the real mouse. The targets from the geometry:
+      // the first stack's header (a slot), another stack's middle, its left
+      // edge, and the ground's right band.
+      const paths: Record<string, unknown[]> = {};
+      const st = (geometry as any).stacks as any[];
+      const g = (geometry as any).ground;
+      const mid = (r: any) => ({ x: (r.x1 + r.x2) / 2, y: (r.y1 + r.y2) / 2 });
+      const targets: Record<string, { x: number; y: number }> = {};
+      const withTabs = st.find((s) => s.tabs.length > 1) ?? st[0];
+      targets.headerSlot = { x: withTabs.tabs[withTabs.tabs.length - 1].x1 + 3, y: mid(withTabs.header).y };
+      const big = [...st].sort((a, b) => (b.content.x2 - b.content.x1) * (b.content.y2 - b.content.y1) -
+        (a.content.x2 - a.content.x1) * (a.content.y2 - a.content.y1))[0];
+      targets.middle = mid(big.content);
+      targets.leftEdge = { x: big.content.x1 + (big.content.x2 - big.content.x1) * 0.12, y: mid(big.content).y };
+      targets.outerBand = { x: g.x2 - 20, y: (g.y1 + g.y2) / 2 };
+      targets.outside = { x: g.x2 + 60, y: g.y2 + 40 };
+      for (const [name, t] of Object.entries(targets)) {
+        const samples: unknown[] = [];
+        const from = await page.evaluate(() => (globalThis as any).__glLast) ?? { x: sx + 40, y: sy + 60 };
+        const n = 14;
+        for (let k = 1; k <= n; k++) {
+          const px = from.x + (t.x - from.x) * k / n;
+          const py = from.y + (t.y - from.y) * k / n;
+          await page.mouse.move(px, py);
+          await page.waitForTimeout(30);
+          samples.push(await readDecision());
+        }
+        paths[name] = samples;
+      }
+      // Put the tab back: released over its own stack's header.
+      await page.mouse.move(sx, sy, { steps: 6 });
+      await page.waitForTimeout(200);
+      await page.mouse.up();
+      await page.waitForTimeout(1_500);
+      runs.push({ size, geometry, grid, paths });
+    }
+    fs.mkdirSync(answersDir, { recursive: true });
+    for (const run of runs as any[]) {
+      fs.writeFileSync(dropAnswersFile(run.size), JSON.stringify({
+        _comment: [
+          "PLAT-51 part B — GoldenLayout 2.6.0's own drop decisions in the real Electron app.",
+          "Produced by src/tests/gui/tests/visual/plat51-desktop-capture.spec.ts",
+          "(`bash scripts/plat51-capture-electron.sh`); replayed through the shared port by",
+          "src/frontend/tui/tests/test_plat51_dropzones_reference.nim.",
+        ],
+        runs: [run],
+      }) + "\n");
+    }
+    // Every run measured something and decided somewhere.
+    for (const run of runs as any[]) {
+      expect(run.geometry.stacks.length).toBeGreaterThan(2);
+      expect(run.grid.length).toBeGreaterThan(1000);
+      expect(run.grid.some((s: any) => s.segment === "header")).toBe(true);
+      expect(run.grid.some((s: any) => s.area >= 0 && s.stack < 0)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PLAT-51 part B, deliverable 8: the desktop's NEW TAB — its Welcome Screen's
+// start options, in order, with which are live — the reference the native
+// front-ends' new tab is asserted against.
+// ---------------------------------------------------------------------------
+
+test.describe("PLAT-51: the desktop's new tab opens the Welcome Screen", () => {
+  test.use({
+    sourcePath: recording("calc"),
+    launchMode: "trace-folder",
+    noUserLayout: true,
+    codetracerPrefixOverride: prefix,
+  });
+
+  test("PLAT-51: the + opens a tab showing the Welcome Screen's start options", async ({ ctPage }) => {
+    const page = ctPage;
+    await page.waitForSelector(".calltrace-view .call-text", { timeout: 120_000 });
+    // The pointer away first: a value tooltip over the bar takes the press.
+    await page.mouse.move(5, 300);
+    await page.waitForTimeout(500);
+    await page.locator(".session-tab-add").first().click({ force: true });
+    await page.waitForTimeout(3_000);
+    const out = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll(".start-options > *"))
+        .filter((e) => (e as HTMLElement).offsetParent !== null);
+      return {
+        heading: (document.querySelector(".welcome-title, .welcome-screen h1, .welcome-text")?.textContent ?? "").trim(),
+        options: buttons.map((b) => ({
+          label: (b.textContent ?? "").trim(),
+          inactive: b.classList.contains("inactive") || (b as HTMLButtonElement).disabled === true ||
+            b.getAttribute("aria-disabled") === "true",
+          title: (b as HTMLElement).title ?? "",
+        })),
+        panels: Array.from(document.querySelectorAll(".recent-traces-title, .recent-folders-title, .welcome-panel-title"))
+          .map((e) => (e.textContent ?? "").trim()),
+        tabs: Array.from(document.querySelectorAll("#session-tab-bar > .session-tab .session-tab-label"))
+          .map((e) => (e.textContent ?? "").trim()),
+      };
+    });
+    writeAnswers("newTab", out);
+    expect((out.options as any[]).length).toBe(6);
+  });
+});

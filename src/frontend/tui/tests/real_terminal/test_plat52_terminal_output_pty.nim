@@ -20,7 +20,7 @@
 ## No mocks: the binary, the engine, the recordings and the desktop's
 ## measurements are real. State in a scratch directory.
 
-import std/[json, monotimes, os, strutils, times, unicode, unittest]
+import std/[json, math, monotimes, os, strutils, times, unicode, unittest]
 
 import term_assert
 import nim_libvterm
@@ -31,7 +31,7 @@ import ../../app/theme/colour_math
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 38
+const ExpectedAssertions = 45
 
 var countedAssertions = 0
 
@@ -127,6 +127,17 @@ proc fgHex(c: Cell): string =
 proc bgHex(c: Cell): string =
   if c.bg.kind == ckRgb: hexOf((c.bg.r.int, c.bg.g.int, c.bg.b.int)) else: ""
 
+proc composite(colour, ground: string; opacity: float): string =
+  ## `colour` at `opacity` over `ground`, as a browser composites it — the
+  ## desktop's `.future`. An independent statement of the rule, not the
+  ## product's blend.
+  if colour.len != 7 or ground.len != 7:
+    return "?"
+  let a = parseHexColour(colour)
+  let b = parseHexColour(ground)
+  proc ch(x, y: int): int = int(round(float(x) * opacity + float(y) * (1.0 - opacity)))
+  hexOf((ch(a.r, b.r), ch(a.g, b.g), ch(a.b, b.b)))
+
 proc tick(sess: var TuiTestSession): int =
   ## The debugger's tick, as the top bar says it (`tick: 1,168 / …`).
   let line = sess.snap().text(0)
@@ -180,9 +191,29 @@ suite "PLAT-52: the Terminal Output pane on a real terminal — lines":
     defer: sess.quit()
     sess.showTerminalOutput()
     var (row, col) = sess.waitFor("red plain bold green")
-    # At the program's entry every line is still to come: muted.
+    # At the program's entry every line is still to come: each fragment in
+    # ITS colour at the desktop's opacity over the cell's ground — the
+    # desktop's `.future` composited, measured against its capture.
     var s = sess.snap()
     ck s[row][col].fgHex != "#bb0000"
+    require answers.hasKey("lines")
+    let startLine = answers["lines"]["linesAtStart"][0]
+    var fc = col
+    var futureCompared = 0
+    for f in startLine["fragments"]:
+      let t = f["text"].getStr
+      if t.len == 0: continue
+      let cell = s[row][fc]
+      let op = parseFloat(f["opacity"].getStr)
+      let expected = composite(f["color"].getStr, cell.bgHex, op)
+      checkpoint("future '" & t & "': terminal " & cell.fgHex & " on " &
+                 cell.bgHex & ", desktop " & f["color"].getStr & " @" & $op &
+                 " -> " & expected)
+      ck f["tense"].getStr == "future"
+      ck cell.fgHex == expected
+      inc futureCompared
+      fc += t.runeLen
+    ck futureCompared == 3
     # K32: press the fragment of the line "row   2".
     let (r2, c2) = sess.waitFor("row   2 ")
     let before = sess.tick()
