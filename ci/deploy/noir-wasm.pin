@@ -71,7 +71,21 @@
 
 NOIR_REPO=https://github.com/metacraft-labs/noir
 NOIR_REF=codetracer
-# WHAT THIS BUMP BUYS: the CONSTRAINTS pane, for a live visitor.
+# WHAT THIS BUMP BUYS: a browser recording the current readers open.
+#
+# The tracer at `fe4b3429` builds against `codetracer-trace-format`@235e377e,
+# whose writer still stores a combined `events.log` (and its `events.fmt`
+# marker) beside the split streams. The trace-format readers refuse a
+# container carrying either member, by name, so every recording the deployed
+# tracer produced would be refused by the replay it is handed to. `6cd1b51b`
+# moves the noir workspace's git dependencies to `codetracer-trace-format`
+# @3fada0b0, the revision this repository's own readers are built from, so
+# the browser writes the same container layout the desktop reads.
+#
+# THIS REVISION CONTAINS THE ONE IT REPLACES: `fe4b3429` is an ancestor of
+# `6cd1b51b`, two commits back, and neither touches `compiler/wasm`.
+#
+# WHAT AN EARLIER BUMP BOUGHT: the CONSTRAINTS pane, for a live visitor.
 #
 # `src/frontend/ui_js.nim`'s `noirConstraintsSink` has a branch for an empty
 # listing whose comment reads "a compiler module older than
@@ -214,7 +228,7 @@ NOIR_REF=codetracer
 # resolves in an empty clone that had never seen this machine, and
 # `tooling/tracer_wasm/src/memory_sink.rs` at the fetched commit pushes the
 # `Call` before the `Step`.
-NOIR_REV=fe4b3429788e91aa2727d916ea4ac817fbef52d7
+NOIR_REV=6cd1b51bdeea258ae6c77b26bc58c00363d5ee47
 
 # NO TRACE-FORMAT SIBLING. `NOIR_REV` descends from `codetracer`@ca080a58, so
 # the noir workspace reaches `codetracer-trace-format` through git dependencies
@@ -293,8 +307,16 @@ NOIR_REV=fe4b3429788e91aa2727d916ea4ac817fbef52d7
 # The compiler's few kilobytes are the line's other commits since `6eb7d024`.
 # Host differs from the previous figures (arm64-darwin), so part of either
 # delta is path and platform noise as described above.
-EXPECT_COMPILER_BYTES=15366137
-EXPECT_TRACER_BYTES=4599728
+# MEASURED at `codetracer`@6cd1b51b (2026-10-09, x86_64-linux), both of them,
+# by `bash ci/deploy/build-noir-wasm.sh` inside this checkout's dev shell:
+#
+#   noir_wasm.wasm         15366089  (-48 against the figure it replaces)
+#   noir_tracer_wasm.wasm   4785108  (+185380)
+#
+# The compiler is unchanged in source; its 48 bytes are build-directory noise.
+# The tracer links the trace writer of the newer trace-format revision.
+EXPECT_COMPILER_BYTES=15366089
+EXPECT_TRACER_BYTES=4785108
 
 # WHICH COMPILER PRODUCED THE TWO FIGURES ABOVE. Recorded, for the first time,
 # and copied verbatim from the run that produced them rather than assembled by
@@ -314,7 +336,7 @@ EXPECT_TRACER_BYTES=4599728
 # `nargo` appear under `not-verified:` because this run never ran them; the
 # stamp keeps them visible rather than dropping them, so the scope of the
 # claim is legible from the claim itself.
-MEASURED_TOOLCHAIN='rustc=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] cargo=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] | lock: toolchains=942c995a fenix=dd2c80d0 noir=ca080a58 | host x86_64-linux | not-verified: nim=2.3.1[hh6kjy1y1piz1150yg00xpb3vk5sh3jn-nim-fork-2.3.1-codetracer] nargo=1.0.0-beta.26[6yqdklnhwsrr96cahxygmnp3mhvkjpqm-Noir]'
+MEASURED_TOOLCHAIN='rustc=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] cargo=1.96.0[3g58bql12fv8qpkyxixf778gxfwcx27q-rust-mixed] | lock: toolchains=942c995a fenix=dd2c80d0 noir=c008e890 | host x86_64-linux | not-verified: nim=2.3.1@6a53fd13[worktree codetracer-nim@6a53fd13] nargo=1.0.0-beta.26[976py3q8kb44125kzpzyk3ym2jlwq2wd-Noir]'
 #
 # THE NEXT BUMP KEEPS DOING THIS. Copy the `TOOLCHAIN: …` line the build script
 # prints, alongside the new figures — it is the sentence that makes "the number
