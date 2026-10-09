@@ -153,6 +153,9 @@
 //! - `list_source_files` returns file paths from real traces.
 //! - `read_source_file` returns actual source code content from real traces.
 //! - Both RR-based and custom trace format modes are covered.
+//! - A relative `trace_path` resolves against the MCP server's working
+//!   directory, not the daemon's, and the daemon finds the Python API by
+//!   itself (no `CODETRACER_PYTHON_API_PATH`).
 //!
 //! ## M11 — MCP Server Enhancements (real-recording)
 //!
@@ -10364,6 +10367,20 @@ async fn start_mcp_server_with_real_backend(
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
 ) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
+    start_mcp_server_with_real_backend_in(test_dir, log_path, db_backend_path, extra_env, None)
+        .await
+}
+
+/// [`start_mcp_server_with_real_backend`], with the MCP server started in
+/// `mcp_cwd` when one is given (the daemon keeps this test's working
+/// directory), so a test can tell the two apart.
+async fn start_mcp_server_with_real_backend_in(
+    test_dir: &Path,
+    log_path: &Path,
+    db_backend_path: &Path,
+    extra_env: &[(&str, &str)],
+    mcp_cwd: Option<&Path>,
+) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
     // Start the real daemon first.
     let (daemon, socket_path) =
         start_daemon_with_real_backend(test_dir, log_path, db_backend_path, extra_env).await;
@@ -10394,6 +10411,9 @@ async fn start_mcp_server_with_real_backend(
     // CODETRACER_PYTHON_API_PATH, CODETRACER_CT_NATIVE_REPLAY_CMD).
     for (key, value) in extra_env {
         cmd.env(key, value);
+    }
+    if let Some(cwd) = mcp_cwd {
+        cmd.current_dir(cwd);
     }
 
     let mcp = cmd.spawn().expect("cannot spawn MCP server");
@@ -11217,6 +11237,153 @@ async fn test_real_custom_mcp_exec_script() {
     }
 
     report("test_real_custom_mcp_exec_script", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// M10-CUSTOM-2b. `exec_script` with a RELATIVE `trace_path`, through an MCP
+/// server whose working directory differs from the daemon's.
+///
+/// The MCP server runs in the test directory, where `ruby-trace/` (a real Ruby
+/// recording) is; the daemon runs in this test's working directory, where it
+/// is not.  The path has to be resolved by the MCP server before it reaches the
+/// daemon, which opens the trace and starts the script process.  The script
+/// prints the recorded program's file name, read from the trace, so a trace
+/// that failed to open cannot pass.
+///
+/// `CODETRACER_PYTHON_API_PATH` must be absent from the daemon's environment,
+/// so the daemon has to find the Python API itself (`resolve_python_api_path`):
+/// at a known layout beside its binary, or, in this debug build, in the
+/// checkout it was compiled from when the build directory is elsewhere
+/// (`CARGO_TARGET_DIR`), and only if that copy passes the ownership check.
+///
+/// No mocks: real recorder, daemon, replay-server, MCP server and Python.
+#[tokio::test]
+async fn test_real_custom_mcp_exec_script_relative_trace_path() {
+    let (test_dir, log_path) = setup_test_dir("real_custom_mcp_exec_script_relative_trace_path");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = match find_db_backend() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: db-backend not found");
+                println!(
+                    "test_real_custom_mcp_exec_script_relative_trace_path: SKIP (db-backend not found)"
+                );
+                return Ok(());
+            }
+        };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_mcp_exec_script_relative_trace_path: SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
+        let relative = trace_dir
+            .strip_prefix(&test_dir)
+            .map_err(|e| format!("trace dir is not under the test dir: {e}"))?
+            .to_path_buf();
+        assert!(relative.is_relative(), "{}", relative.display());
+        let daemon_cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
+        assert!(
+            !daemon_cwd.join(&relative).exists(),
+            "the relative path must not also name a trace from the daemon's directory"
+        );
+
+        // `start_daemon_with_real_backend` inherits this process's
+        // environment; an inherited CODETRACER_PYTHON_API_PATH would bypass
+        // the lookup this test exercises.
+        if std::env::var_os("CODETRACER_PYTHON_API_PATH").is_some() {
+            return Err("unset CODETRACER_PYTHON_API_PATH to run this test: the \
+                        daemon must find the Python API on its own"
+                .to_string());
+        }
+
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend_in(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[],
+            Some(&test_dir),
+        )
+        .await;
+
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        // The exchange and its checks return a Result so the MCP server and
+        // the daemon are shut down whatever the outcome; a panic here would
+        // leave the daemon running.
+        let exchange: Result<(), String> = async {
+            mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+            let req = json!({
+                "jsonrpc": "2.0",
+                "id": 13011,
+                "method": "tools/call",
+                "params": {
+                    "name": "exec_script",
+                    "arguments": {
+                        "trace_path": relative.to_string_lossy(),
+                        "script": "import os\nprint('recorded:', os.path.basename(trace.location.path))"
+                    }
+                }
+            });
+            mcp_send(&mut stdin, &req).await?;
+            let resp = mcp_read(&mut reader, Duration::from_secs(90), &log_path).await?;
+            log_line(&log_path, &format!("exec_script response: {resp}"));
+
+            if resp["id"] != 13011 {
+                return Err(format!("M10-CUSTOM-2b: response to another request: {resp}"));
+            }
+            if resp["result"]["isError"] == Value::Bool(true) {
+                return Err(format!(
+                    "M10-CUSTOM-2b: exec_script on a relative path should succeed, got: {resp}"
+                ));
+            }
+            let text = resp["result"]["content"][0]["text"]
+                .as_str()
+                .ok_or_else(|| format!("no text in {resp}"))?;
+            if !text.contains("recorded: test.rb") {
+                return Err(format!(
+                    "M10-CUSTOM-2b: the script should read the recorded program from the \
+                     trace, got: {text}"
+                ));
+            }
+            Ok(())
+        }
+        .await;
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        exchange
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_custom_mcp_exec_script_relative_trace_path",
+        &log_path,
+        success,
+    );
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }

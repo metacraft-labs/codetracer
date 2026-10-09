@@ -1081,6 +1081,19 @@ func defaultViewFor*(offered: bool): TerminalView =
   ## a plain line-oriented one in the line view (§3 "When it is offered").
   if offered: tvScreen else: tvLines
 
+proc recordingKeyOf*(outputFolder: cstring): string =
+  ## The key a recording's remembered view choice is filed under: its output
+  ## folder, or "" when it has none.
+  ##
+  ## A recording made in a browser tab has NO output folder — it lives in the
+  ## page, not on a disk — so its `Trace.outputFolder` arrives as `null`.
+  ## Converting that with `$` raises under the JS backend, and the raise
+  ## happened inside the terminal pane's load handler, so every in-browser
+  ## Run reported an uncaught "Cannot read properties of null (reading
+  ## 'length')". "" is the VM's own spelling of "no recording to remember
+  ## for": `setView` still applies the choice, it only does not file it.
+  if outputFolder.isNil: "" else: $outputFolder
+
 proc viewMemoryFromJson*(text: string): Table[string, TerminalView] =
   ## The remembered choices, `{ "<recording>": "lines" | "screen" }`; none for
   ## an empty or unreadable store. Checked BEFORE parsing: on the JavaScript

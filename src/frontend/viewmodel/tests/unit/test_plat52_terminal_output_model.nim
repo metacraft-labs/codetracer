@@ -36,7 +36,7 @@ import viewmodels/scrollbar_scrubber
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 154
+const ExpectedAssertions = 158
 
 var countedAssertions = 0
 
@@ -336,6 +336,20 @@ suite "PLAT-52: the screen over time — snapshots, marks, the scrubber":
     ck viewMemoryFromJson("").len == 0
     ck viewMemoryFromJson("  ").len == 0
     ck viewMemoryFromJson("{\"/a\": ").len == 0
+
+  test "a recording with no output folder is keyed by nothing, not a raise":
+    # A recording made in a browser tab has no folder, so its
+    # `Trace.outputFolder` is null. Converting that with `$` raised under the
+    # JS backend inside the pane's load handler — an uncaught error on every
+    # in-browser Run. It is "no key", which `setView` already reads as "apply
+    # the choice, do not file it".
+    let noFolder: cstring = nil
+    ck recordingKeyOf(noFolder) == ""
+    ck recordingKeyOf(cstring"") == ""
+    ck recordingKeyOf(cstring"/home/u/.local/share/codetracer/trace-7") ==
+       "/home/u/.local/share/codetracer/trace-7"
+    ck viewMemoryFromJson(viewMemoryToJson(
+         {recordingKeyOf(cstring"/r"): tvScreen}.toTable))["/r"] == tvScreen
 
 suite "PLAT-52: the scrollbar scrubber model (Scrollbar-Scrubbers.md §5)":
 
