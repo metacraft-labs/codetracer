@@ -22,7 +22,8 @@ from ../viewmodel/store/types as vmtypes import
   TerminalLine, TerminalEventFragment, TerminalOutputEvent
 from ../viewmodel/viewmodels/terminal_output_vm import
   TerminalOutputVM, createTerminalOutputVM, setEvents, clearLines,
-  setCurrentRRTicks, setRecordingKey, viewMemoryFromJson, viewMemoryToJson,
+  setCurrentRRTicks, setRecordingKey, recordingKeyOf, viewMemoryFromJson,
+  viewMemoryToJson,
   TerminalView
 import std/tables
 import isonim/core/signals
@@ -224,10 +225,14 @@ proc syncTerminalOutputVM(self: TerminalOutputComponent) =
   ## remembered view choice first.
   if terminalOutputVMInstance.isNil:
     return
-  if terminalOutputVMInstance.recordingKey.len == 0 and
-     not self.data.isNil and not self.data.trace.isNil:
+  let recordingKey =
+    if self.data.isNil or self.data.trace.isNil: ""
+    else: recordingKeyOf(self.data.trace.outputFolder)
+  # A recording without an output folder (one made in a browser tab) has no
+  # key to remember a view choice under; the choice still applies, unfiled.
+  if terminalOutputVMInstance.recordingKey.len == 0 and recordingKey.len > 0:
     terminalOutputVMInstance.setRecordingKey(
-      $self.data.trace.outputFolder,
+      recordingKey,
       viewMemoryFromJson($readTerminalViews(cstring(TerminalViewsStorageKey))))
     terminalOutputVMInstance.onViewChosen =
       proc(memory: Table[string, TerminalView]) =
