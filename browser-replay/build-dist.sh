@@ -10,22 +10,69 @@ DIST_DIR="$SCRIPT_DIR/dist"
 echo "=== Building Browser Replay Distribution ==="
 
 # Step 1: Build WASM module
+#
+# THE WHOLE ACCOUNT OF THIS BUILD USED TO BE `| tail -5`, AND THAT COST A DAY.
+#
+# This step is the long one: ~15 minutes warm and 44 minutes cold, spanning a
+# cargo clean, the private emulator's C generator under `repro exec`, a
+# wasm32 cargo build and wasm-pack. When it failed in the deploy workflow's
+# run 37938206801 (2026-10-09), the ENTIRE diagnostic the log carried was the
+# last five lines of forty-four minutes:
+#
+#                     "documentation_url": "https://docs.github.com/rest",
+#                     "status": "401"
+#                   })
+#
+# — three lines of a JSON body with no sentence anywhere saying what had asked
+# GitHub for what, or which of the four nested builds was speaking. The cause
+# (a GitHub App installation token minted at job start, 60-minute life, reached
+# by an authenticated fetch at +87 minutes) was recoverable only from the job's
+# own timestamps, and WHICH fetch is still unknown because these five lines are
+# all that was kept.
+#
+# So the full output is kept, on disk, always; the terse five lines still go to
+# the terminal on success, and a failure prints a generous tail plus the path.
+# `tail -5` was a reasonable choice for a log nobody reads when it passes. It is
+# not a reasonable choice for the only record of a forty-minute failure.
 echo ">>> Building replay-server WASM module..."
 cd "$REPO_ROOT/src/db-backend"
-repro exec "$REPO_ROOT" -- bash -c 'cd src/db-backend && exec bash build_wasm.sh' 2>&1 | tail -5
+WASM_BUILD_LOG="${CT_WASM_BUILD_LOG:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/browser-replay-wasm-build.log}"
+mkdir -p "$(dirname "$WASM_BUILD_LOG")"
+echo "    full build log: $WASM_BUILD_LOG"
+set +e
+repro exec "$REPO_ROOT" -- bash -c 'cd src/db-backend && exec bash build_wasm.sh' \
+	2>&1 | tee "$WASM_BUILD_LOG" | tail -5
+wasm_build_rc=${PIPESTATUS[0]}
+set -e
 cd "$REPO_ROOT"
 
+if [ "$wasm_build_rc" -ne 0 ]; then
+	echo "" >&2
+	echo "ERROR: the replay-engine WASM build failed (exit $wasm_build_rc)." >&2
+	echo "       Last 300 lines of $WASM_BUILD_LOG:" >&2
+	echo "       ---------------------------------------------------------" >&2
+	tail -300 "$WASM_BUILD_LOG" | sed 's/^/       | /' >&2
+	echo "       ---------------------------------------------------------" >&2
+	echo "       full log ($(wc -l <"$WASM_BUILD_LOG" | tr -d ' ') lines): $WASM_BUILD_LOG" >&2
+	exit "$wasm_build_rc"
+fi
+
 if [ ! -f "src/db-backend/wasm-testing/pkg/db_backend_bg.wasm" ]; then
-	echo "ERROR: WASM build failed — no .wasm file produced"
+	echo "ERROR: WASM build failed — no .wasm file produced" >&2
+	echo "       (it reported exit 0; see $WASM_BUILD_LOG)" >&2
 	exit 1
 fi
 
-# `build_wasm.sh` above pipes through `tail -5`, so this script never sees its
-# exit status. "A .wasm file is present" therefore proves only that SOME build
-# once succeeded here — which, on a dev machine where dist/ and pkg/ are both
-# gitignored and survive every branch switch, can be a build from another
-# branch entirely. Assert the engine is this tree's before bundling it for
-# deployment.
+# THE EXIT STATUS IS READ, which the `| tail -5` above left to `set -o
+# pipefail` and a comment here used to say was impossible. It is read
+# explicitly now, from `PIPESTATUS`, so a `tail` that succeeds over a failed
+# build cannot stand in for the build.
+#
+# The presence check above is still not enough on its own: "a .wasm file is
+# present" proves only that SOME build once succeeded here — which, on a dev
+# machine where dist/ and pkg/ are both gitignored and survive every branch
+# switch, can be a build from another branch entirely. Assert the engine is
+# this tree's before bundling it for deployment.
 # shellcheck source=ci/lib/wasm-engine-freshness.sh
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "$REPO_ROOT/ci/lib/wasm-engine-freshness.sh"

@@ -116,6 +116,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=ci/lib/nim-cache-root.sh
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "${repo_root}/ci/lib/nim-cache-root.sh"
+# shellcheck source=ci/lib/sha256.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/sha256.sh"
 cd "${repo_root}"
 
 checks=0
@@ -142,6 +145,10 @@ for tool in ${required_tools}; do
 		exit 2
 	}
 done
+# The digest tool is a precondition too: the SUBJECT note below used a bare
+# `shasum`, absent from the CI runner images, and printed `sha256 ` — the only
+# line that says which renderer answered. See ci/lib/sha256.sh.
+ct_sha256_require || exit 2
 if [ ! -d node_modules/playwright ] && ! node -e "require('playwright')" >/dev/null 2>&1; then
 	echo "editor-resize-follows-pane.sh: node_modules/playwright is missing;" >&2
 	echo "  remedy: npm install, or run inside the dev shell." >&2
@@ -224,7 +231,8 @@ fi
 echo "SUBJECT"
 note "tree: ${tree}"
 if [ -f "${tree}/ui.js" ]; then
-	note "renderer: ui.js ($(wc -c <"${tree}/ui.js" | tr -d ' ') bytes, sha256 $(shasum -a 256 "${tree}/ui.js" | cut -c1-16))"
+	renderer_digest="$(ct_sha256_short "${tree}/ui.js")" || exit 2
+	note "renderer: ui.js ($(wc -c <"${tree}/ui.js" | tr -d ' ') bytes, sha256 ${renderer_digest})"
 fi
 echo
 

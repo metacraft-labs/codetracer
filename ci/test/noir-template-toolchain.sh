@@ -153,6 +153,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=ci/lib/nim-cache-root.sh
 # shellcheck disable=SC1091 # resolved at runtime from the checkout root
 source "${repo_root}/ci/lib/nim-cache-root.sh"
+# shellcheck source=ci/lib/sha256.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/sha256.sh"
 cd "${repo_root}" || exit 2
 
 cache="$(ct_nim_cache_root "${repo_root}")/noir-template-toolchain"
@@ -217,6 +220,14 @@ require_tool() {
 
 require_tool nargo 'run inside the dev shell.'
 require_tool nim 'run inside the dev shell.'
+# The digest tool, by the same rule and in the same place. The module note
+# below used a bare `shasum`, which the CI runner images do not carry, so it
+# printed `sha256 ` and named nothing — see ci/lib/sha256.sh.
+ct_sha256_require || {
+	printf '\nRESULT: FAILED — 0 assertion(s) ran; the suite never started.\n'
+	printf 'An assertion that did not run is not an assertion that passed.\n'
+	exit 1
+}
 
 # THE ORACLE NAMES ITSELF, beside every verdict it is about to produce.
 #
@@ -229,7 +240,8 @@ nargo_path="$(command -v nargo)"
 note "nargo:  ${nargo_path}"
 nargo --version 2>/dev/null | sed 's/^/    /'
 if [ -n "${CT_NOIR_WASM_COMPILER:-}" ] && [ -f "${CT_NOIR_WASM_COMPILER}" ]; then
-	note "module: ${CT_NOIR_WASM_COMPILER} ($(wc -c <"${CT_NOIR_WASM_COMPILER}" | tr -d ' ') bytes, sha256 $(shasum -a 256 "${CT_NOIR_WASM_COMPILER}" | cut -c1-16))"
+	compiler_digest="$(ct_sha256_short "${CT_NOIR_WASM_COMPILER}")" || exit 1
+	note "module: ${CT_NOIR_WASM_COMPILER} ($(wc -c <"${CT_NOIR_WASM_COMPILER}" | tr -d ' ') bytes, sha256 ${compiler_digest})"
 fi
 echo
 
