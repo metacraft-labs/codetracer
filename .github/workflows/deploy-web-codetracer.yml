@@ -388,7 +388,7 @@ jobs:
             nim-agent-harbor=3753c7267834902c3bd292a42e1c9f770988c003
             nim-agents=3809eba4b658f35939a25b34bd291fa57cd1ce5b
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
-            # locked reprobuild (flake.lock `reprobuild`, 3850ec25) is tested
+            # locked reprobuild (flake.lock `reprobuild`, 9ceb532d) is tested
             # against: its own `.github/sibling-repos` pins
             # `reprobuild-packages=eed38ecc…`. `repro.nim`'s `uses:` names
             # `shellcheck`, which that reprobuild no longer bundles; the
