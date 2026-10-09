@@ -117,7 +117,8 @@ impl SeekableCallStream {
             .read_file("calls.idx")
             .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
 
-        match CallStreamReader::from_files(&super::structural_presence_meta(), dat, idx)? {
+        let form = ctfs.chunk_form();
+        match CallStreamReader::from_member_as(&super::structural_presence_meta(), dat.into(), &idx, form)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -231,7 +232,7 @@ fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStream
     let idx = ctfs
         .read_file("calls.idx")
         .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
-    CallStreamReader::from_files(&super::structural_presence_meta(), dat, idx)
+    CallStreamReader::from_member_as(&super::structural_presence_meta(), dat.into(), &idx, ctfs.chunk_form())
 }
 
 /// Convert a `calls.dat` [`CallStreamRecord`] into the db-backend's [`DbCall`].

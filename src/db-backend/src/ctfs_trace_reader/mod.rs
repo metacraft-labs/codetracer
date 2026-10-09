@@ -1185,9 +1185,11 @@ impl CTFSTraceReader {
         path: Option<&Path>,
     ) -> Option<step_map_namespace::StepMapNamespace> {
         // 1. Container-internal `step-map.ns`.
+        // The container's member stores its chunks in the container's form;
+        // a sidecar is a standalone member, framed.
         let internal = if ctfs.has_file(step_map_namespace::STEP_MAP_FILE) {
             match ctfs.read_file(step_map_namespace::STEP_MAP_FILE) {
-                Ok(bytes) => Some(bytes),
+                Ok(bytes) => Some((bytes, ctfs.chunk_form())),
                 Err(e) => {
                     info!(
                         "CTFS: step-map.ns present but unreadable ({e}); falling back to whole-table breakpoint build"
@@ -1207,11 +1209,13 @@ impl CTFSTraceReader {
             // failure (absent file, permission, etc.) collapses to `None` and we
             // stay on the whole-table fallback.
             let sidecar = sidecar_step_map_path(path?);
-            std::fs::read(&sidecar).ok()
+            std::fs::read(&sidecar)
+                .ok()
+                .map(|bytes| (bytes, codetracer_trace_reader::ChunkForm::Framed))
         });
 
-        let bytes = bytes?;
-        match step_map_namespace::StepMapNamespace::parse(&bytes) {
+        let (bytes, form) = bytes?;
+        match step_map_namespace::StepMapNamespace::parse_as(&bytes, form) {
             Ok(ns) => {
                 info!(
                     "CTFS: prepopulated step-map.ns attached ({} (path,line) entries) — breakpoint resolution served from the index",

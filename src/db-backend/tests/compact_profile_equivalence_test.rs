@@ -16,8 +16,8 @@
 //! # No mocks
 //!
 //! Every container here is produced by a real writer and read by the
-//! production `CTFSTraceReader`. The two legacy-`events.log` bundles are
-//! written by `common::legacy_events_log` (the retired writer's own bytes) and
+//! production `CTFSTraceReader`. The full containers are written by the Rust
+//! `CtfsTraceWriter` (split streams, as every recording carries them) and
 //! the compact ones by `ctfs_container::write_compact_ctfs`, which is the §1d
 //! encoder. Nothing is stubbed, and the only injected behaviour is the
 //! deliberately-broken conversion the control requires, which is applied to
@@ -39,15 +39,13 @@ use db_backend::expr_loader::ExprLoader;
 use db_backend::task::CoreTrace;
 use db_backend::trace_reader::TraceReader;
 
-mod common;
-
 /// The source file every fixture recording registers.
 const SRC: &str = "/tmp/ccp5/program.rs";
 
-/// User steps in the equivalence fixture. Large enough that the legacy
-/// `events.log` spans several zstd chunks (the helper chunks every 4 events),
-/// so the compact container carries a multi-chunk member rather than a single
-/// one.
+/// User steps in the equivalence fixture. Large enough that `steps.dat` and
+/// `values.dat` span several zstd chunks (the fixtures chunk every
+/// [`STREAM_CHUNK`] records), so the compact container carries multi-chunk
+/// members rather than single ones.
 const USER_STEPS: usize = 40;
 
 // ── The query surface, enumerated FROM the API ──────────────────────────
@@ -785,6 +783,39 @@ fn fixture_events() -> Vec<TraceLowLevelEvent> {
     one_path_recording()
 }
 
+/// Records per `steps.dat` / `values.dat` chunk in the fixtures.
+const STREAM_CHUNK: usize = 4;
+
+/// Write `events` as a FULL split-stream container at `dir/<name>.ct` with the
+/// Rust `CtfsTraceWriter`, and return its path.
+///
+/// The writer's `step-map.ns` is left out, so a load of the container
+/// MATERIALISES its breakpoint index: that is the branch the equivalence arm
+/// measures, and the arm that stores the index adds it back itself.
+fn write_full_recording(dir: &Path, name: &str, events: &[TraceLowLevelEvent]) -> PathBuf {
+    use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
+    use codetracer_trace_writer::trace_writer::TraceWriter;
+
+    let stem = dir.join(name);
+    let mut writer = CtfsTraceWriter::new(name, &[])
+        .with_steps_chunk_size(STREAM_CHUNK)
+        .with_values_chunk_size(STREAM_CHUNK);
+    TraceWriter::set_workdir(&mut writer, dir);
+    TraceWriter::begin_writing_trace_events(&mut writer, &stem).expect("begin the recording");
+    let mut events = events.to_vec();
+    TraceWriter::append_events(&mut writer, &mut events);
+    TraceWriter::finish_writing_trace_events(&mut writer).expect("finish the recording");
+    let written = stem.with_extension("ct");
+    let members: Vec<(String, Vec<u8>)> = members_of(&written)
+        .into_iter()
+        .filter(|(n, _)| n != "step-map.ns")
+        .collect();
+    let path = dir.join(format!("{name}_no_index.ct"));
+    let refs: Vec<(&str, &[u8])> = members.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+    write_minimal_ctfs(&path, &refs).expect("the full writer writes");
+    path
+}
+
 /// Read every member of a FULL container, in its own directory order.
 fn members_of(path: &Path) -> Vec<(String, Vec<u8>)> {
     let mut ctfs = CtfsReader::open(path).expect("the full container opens");
@@ -804,6 +835,15 @@ fn members_of(path: &Path) -> Vec<(String, Vec<u8>)> {
             (name, bytes)
         })
         .collect()
+}
+
+/// The members a COMPACT container of the full container at `path` carries:
+/// the same members, in the same order, with every zstd-framed chunk replaced
+/// by its content (`ctfs-container.md` §1f), as the format library's
+/// converting writer lays them out.
+fn compact_members_of(path: &Path) -> Vec<(String, Vec<u8>)> {
+    let full = std::fs::read(path).expect("read the full container");
+    codetracer_trace_writer::compact_profile::compact_members_of(&full).expect("the full container converts")
 }
 
 /// Write a COMPACT container carrying `members` verbatim.
@@ -873,15 +913,12 @@ fn test_compact_and_full_answer_every_query_identically() {
     for recording in corpus() {
         let label = recording.name;
         // (2) One recording, two containers. The FULL one is written by the
-        //     retired writer's own bytes; the COMPACT one carries the SAME
-        //     member bytes behind a §1d directory, so a difference below is a
-        //     difference in the LOADER and not in the recording.
-        let full_path = common::legacy_events_log::write_legacy_events_log_bundle(
-            dir.path(),
-            &format!("ccp5_{label}_full"),
-            &recording.events,
-        );
-        let members = members_of(&full_path);
+        //     trace writer; the COMPACT one carries the SAME members, their
+        //     chunks stored as their content, behind a §1d directory, so a
+        //     difference below is a difference in the LOADER and not in the
+        //     recording.
+        let full_path = write_full_recording(dir.path(), &format!("ccp5_{label}_full"), &recording.events);
+        let members = compact_members_of(&full_path);
         let compact_path = write_compact(dir.path(), &format!("ccp5_{label}_compact"), &members);
 
         let full_len = std::fs::metadata(&full_path).expect("full size").len();
@@ -959,34 +996,30 @@ fn test_compact_and_full_answer_every_query_identically() {
 
         // (6) THE CONTROL — a deliberately broken conversion must be CAUGHT.
         //
-        //     The fault is chosen to be the SILENT one: `events.log` is cut at
-        //     a CHUNK BOUNDARY, so the container is well-formed under every
-        //     §1d check, the chunked reader walks the surviving chunks without
-        //     complaint, and the trace opens cleanly carrying fewer events.
-        //     Only the equivalence comparison can tell. A cut in the MIDDLE of
-        //     a chunk would be refused by the chunk reader and would prove
-        //     nothing about the comparison — it would be testing the chunk
-        //     reader.
-        let full_log = members
-            .iter()
-            .find(|(n, _)| n == "events.log")
-            .map(|(_, d)| d.clone())
-            .expect("the fixture carries events.log");
-        let cut = chunk_boundary_near(&full_log, full_log.len() * 2 / 3);
-        if cut >= full_log.len() {
+        //     The fault is chosen to be the SILENT one: the step stream loses
+        //     its tail at a CHUNK BOUNDARY, `steps.dat` and `steps.idx` cut
+        //     consistently, so the container is well-formed under every §1d
+        //     check, the step reader walks the surviving chunks without
+        //     complaint, and the trace opens cleanly carrying fewer steps. Only
+        //     the equivalence comparison can tell. A cut in the MIDDLE of a
+        //     chunk would be refused by the step reader and would prove nothing
+        //     about the comparison — it would be testing the step reader.
+        let Some((cut_dat, cut_idx)) = drop_last_step_chunk(&members) else {
             // The `minimal` shape fits in ONE chunk, so there is no interior
             // boundary and no silent cut to make. Said out loud rather than
             // skipped quietly, and the other shapes carry the control.
             println!("  control: {label} spans a single chunk — no interior boundary, control not applicable");
             continue;
-        }
+        };
+        let full_dat_len = member(&members, "steps.dat").len();
         let mut broken = members.clone();
-        broken
-            .iter_mut()
-            .find(|(n, _)| n == "events.log")
-            .expect("the fixture carries events.log")
-            .1
-            .truncate(cut);
+        for (name, data) in broken.iter_mut() {
+            if name == "steps.dat" {
+                *data = cut_dat.clone();
+            } else if name == "steps.idx" {
+                *data = cut_idx.clone();
+            }
+        }
         let broken_path = write_compact(dir.path(), &format!("ccp5_{label}_broken"), &broken);
         let broken_ctfs = CtfsReader::open(&broken_path).expect("the broken container is still well-formed §1d");
         assert_eq!(broken_ctfs.profile(), CtfsProfile::Compact);
@@ -1003,35 +1036,19 @@ fn test_compact_and_full_answer_every_query_identically() {
              vacuous",
             broken_reader.step_count()
         );
-        if broken_reader.step_count() == 0 {
-            // MEASURED, and stated rather than papered over: the `minimal`
-            // shape is six events in two chunks, and its only interior chunk
-            // boundary falls BEFORE its single Step — so there is no cut that
-            // removes some steps and keeps some. A one-step recording cannot
-            // carry a "silently lost part of the trace" fault, which is a
-            // property of the recording and not a gap in the control. The two
-            // larger shapes carry it, and the assertion at the end of this arm
-            // requires at least two of them to.
-            println!(
-                "  control: {label} has {} step(s) and its only chunk boundary precedes them — no \
-                 cut both removes and keeps steps, control not applicable",
-                full_reader.step_count()
-            );
-            continue;
-        }
         let broken_diffs = surface_differences(&broken_reader, &full_reader);
         assert!(
             !broken_diffs.is_empty(),
-            "{label}: a compact container missing part of its event stream compared EQUAL to the \
+            "{label}: a compact container missing part of its step stream compared EQUAL to the \
              full one over all {} methods — the comparison cannot fail and is therefore not \
              evidence",
             declared.len()
         );
         total_controls += 1;
         println!(
-            "  control: cutting events.log from {} to {cut} bytes at a chunk boundary leaves {} of \
+            "  control: cutting steps.dat from {full_dat_len} to {} bytes at a chunk boundary leaves {} of \
              {} steps and is caught on {} of {} methods (first: {})",
-            full_log.len(),
+            cut_dat.len(),
             broken_reader.step_count(),
             full_reader.step_count(),
             broken_diffs.len(),
@@ -1047,36 +1064,42 @@ fn test_compact_and_full_answer_every_query_identically() {
     );
 }
 
-/// The 8-byte `events.log` magic the legacy writer emits before the chunks.
-const EVENTS_HEADER_V1: [u8; 8] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2, 0x01, 0x00, 0x00];
+/// The bytes of member `name`.
+fn member<'a>(members: &'a [(String, Vec<u8>)], name: &str) -> &'a [u8] {
+    members
+        .iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, d)| d.as_slice())
+        .unwrap_or_else(|| panic!("the fixture carries no {name}"))
+}
 
-/// The largest chunk boundary in `log` at or below `target` bytes.
+/// `steps.dat` and `steps.idx` without the step stream's last chunk, or `None`
+/// when the stream is a single chunk.
 ///
-/// A chunked stream is a sequence of `[compressed_size: u32][events: u32]
-/// [first_geid: u64]` headers each followed by `compressed_size` bytes, so the
-/// boundaries are walked rather than guessed. Returns `log.len()` if no
-/// interior boundary is below `target`.
-fn chunk_boundary_near(log: &[u8], target: usize) -> usize {
-    let header = EVENTS_HEADER_V1.len();
-    assert_eq!(
-        &log[..header],
-        &EVENTS_HEADER_V1,
-        "the fixture's events.log lost its magic"
+/// `steps.idx` is `[chunk_size: u32 LE]` followed by one `u64 LE` byte offset
+/// into `steps.dat` per chunk (locating the chunk's content in a compact
+/// container), so the cut is read off the index rather than
+/// guessed: `steps.dat` ends where its last chunk begins, and the index loses
+/// that chunk's offset.
+fn drop_last_step_chunk(members: &[(String, Vec<u8>)]) -> Option<(Vec<u8>, Vec<u8>)> {
+    let dat = member(members, "steps.dat");
+    let idx = member(members, "steps.idx");
+    assert!(
+        idx.len() >= 4 && (idx.len() - 4).is_multiple_of(8),
+        "steps.idx is not [chunk_size][offsets]: {} bytes",
+        idx.len()
     );
-    let mut offset = header;
-    let mut best = log.len();
-    while offset + 16 <= log.len() {
-        let size = u32::from_le_bytes([log[offset], log[offset + 1], log[offset + 2], log[offset + 3]]) as usize;
-        let end = offset + 16 + size;
-        if end > log.len() {
-            break;
-        }
-        if end <= target && end < log.len() {
-            best = end;
-        }
-        offset = end;
+    let chunks = (idx.len() - 4) / 8;
+    if chunks < 2 {
+        return None;
     }
-    best
+    let last = 4 + 8 * (chunks - 1);
+    let offset = u64::from_le_bytes(idx[last..last + 8].try_into().expect("eight bytes")) as usize;
+    assert!(
+        offset > 0 && offset < dat.len(),
+        "the last chunk offset {offset} is not interior"
+    );
+    Some((dat[..offset].to_vec(), idx[..last].to_vec()))
 }
 
 /// CCP-5 deliverable 2, the OTHER branch: CCP-3 (store nothing derivable) is
@@ -1105,7 +1128,7 @@ fn chunk_boundary_near(log: &[u8], target: usize) -> usize {
 fn test_a_compact_container_that_carries_its_derived_index_is_loaded_not_rebuilt() {
     let dir = tempfile::tempdir().expect("tempdir");
     let events = fixture_events();
-    let oracle_path = common::legacy_events_log::write_legacy_events_log_bundle(dir.path(), "ccp5_idx_src", &events);
+    let oracle_path = write_full_recording(dir.path(), "ccp5_idx_src", &events);
     let oracle = CTFSTraceReader::open(&oracle_path).expect("the oracle opens");
     assert!(
         !oracle.has_prepopulated_step_map(),
@@ -1139,15 +1162,18 @@ fn test_a_compact_container_that_carries_its_derived_index_is_loaded_not_rebuilt
     );
     let index = db_backend::ctfs_trace_reader::step_map_namespace::serialize_step_map(&entries);
 
-    // One member list, two containers.
-    let mut members = members_of(&oracle_path);
-    members.push(("step-map.ns".to_owned(), index.clone()));
-    let compact_path = write_compact(dir.path(), "ccp5_idx_compact", &members);
+    // One member list, two containers: the full one carries the chunks as
+    // the writer framed them, the compact one — converted from it — as their
+    // content.
+    let mut full_members = members_of(&oracle_path);
+    full_members.push(("step-map.ns".to_owned(), index.clone()));
     let full_path = dir.path().join("ccp5_idx_full.ct");
     {
-        let refs: Vec<(&str, &[u8])> = members.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+        let refs: Vec<(&str, &[u8])> = full_members.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
         write_minimal_ctfs(&full_path, &refs).expect("the full writer writes");
     }
+    let members = compact_members_of(&full_path);
+    let compact_path = write_compact(dir.path(), "ccp5_idx_compact", &members);
 
     let ctfs = CtfsReader::open(&compact_path).expect("it opens");
     assert_eq!(ctfs.profile(), CtfsProfile::Compact);
@@ -1202,9 +1228,17 @@ fn test_a_compact_container_that_carries_its_derived_index_is_loaded_not_rebuilt
     let mut perturbed = entries.clone();
     let dropped = perturbed[victim].2.pop().expect("the victim line has a step to drop");
     let bad_index = db_backend::ctfs_trace_reader::step_map_namespace::serialize_step_map(&perturbed);
-    let mut bad_members = members_of(&oracle_path);
-    bad_members.push(("step-map.ns".to_owned(), bad_index));
-    let bad_path = write_compact(dir.path(), "ccp5_idx_bad", &bad_members);
+    let mut bad_full_members = members_of(&oracle_path);
+    bad_full_members.push(("step-map.ns".to_owned(), bad_index));
+    let bad_full_path = dir.path().join("ccp5_idx_bad_full.ct");
+    {
+        let refs: Vec<(&str, &[u8])> = bad_full_members
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        write_minimal_ctfs(&bad_full_path, &refs).expect("the full writer writes");
+    }
+    let bad_path = write_compact(dir.path(), "ccp5_idx_bad", &compact_members_of(&bad_full_path));
 
     let bad = CTFSTraceReader::open(&bad_path).expect("the perturbed container opens cleanly");
     assert!(bad.has_prepopulated_step_map(), "the perturbed index is still an index");
@@ -1243,8 +1277,8 @@ fn test_a_compact_container_that_carries_its_derived_index_is_loaded_not_rebuilt
 fn test_a_compact_container_loads_from_bytes_with_no_path() {
     let dir = tempfile::tempdir().expect("tempdir");
     let events = fixture_events();
-    let full_path = common::legacy_events_log::write_legacy_events_log_bundle(dir.path(), "ccp5_bytes", &events);
-    let members = members_of(&full_path);
+    let full_path = write_full_recording(dir.path(), "ccp5_bytes", &events);
+    let members = compact_members_of(&full_path);
     let compact_path = write_compact(dir.path(), "ccp5_bytes_compact", &members);
 
     let image = std::fs::read(&compact_path).expect("read the compact image");
