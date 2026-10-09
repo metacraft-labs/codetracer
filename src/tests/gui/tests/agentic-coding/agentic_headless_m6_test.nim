@@ -210,7 +210,7 @@ proc launchConfig(worktree: string): CodeTracerAgentLaunchConfig =
     context: @["Scenario format: Agent Harbor acp-client-runs-scenario"],
     acpBinary: "mock-agent-acp",
     acpArgs: @["--scenario",
-      "../agent-harbor/tests/scenarios/e2e/codetracer_contract_worktree_file_edges.yaml"],
+      "../ah/agent-harbor/tests/scenarios/e2e/codetracer_contract_worktree_file_edges.yaml"],
     model: "llm-api-proxy-scenario",
     tenantId: "tenant-m6",
     projectId: "project-m6",

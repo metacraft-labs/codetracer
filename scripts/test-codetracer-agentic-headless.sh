@@ -48,7 +48,11 @@ run_rust() {
 }
 
 run_agent_harbor_contracts() {
-	local ah_root="${AGENT_HARBOR_REPO:-$repo_root/../agent-harbor}"
+	# The metacraft workspace keeps agent-harbor under ah/; a flat sibling
+	# checkout still works.
+	local ah_default="$repo_root/../ah/agent-harbor"
+	[ -d "$ah_default" ] || ah_default="$repo_root/../agent-harbor"
+	local ah_root="${AGENT_HARBOR_REPO:-$ah_default}"
 	if [ ! -d "$ah_root" ]; then
 		echo "Agent Harbor repo not found at $ah_root" >&2
 		exit 1

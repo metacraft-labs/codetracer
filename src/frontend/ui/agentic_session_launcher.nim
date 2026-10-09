@@ -30,7 +30,7 @@ const
   CaptionId* = 7901
   ProductLauncherName* = "CodeTracerAgenticSessionLauncher"
   DefaultM7Scenario* =
-    "../agent-harbor/tests/scenarios/e2e/codetracer_m7_worktree_feature.yaml"
+    "../ah/agent-harbor/tests/scenarios/e2e/codetracer_m7_worktree_feature.yaml"
 
 type
   AgenticSessionExternalAction* =
