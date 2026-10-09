@@ -75,10 +75,10 @@ impl std::fmt::Debug for SeekableCallStream {
 impl SeekableCallStream {
     /// Open the seekable call stream for a `.ct` path. Returns `Ok(None)` when
     /// the container carries no dedicated `calls.dat` stream (the file is
-    /// structurally absent) — the caller then falls back to the legacy
-    /// fully-materialized call tree, so backward compatibility is preserved.
-    /// Existence is decided by structural presence, not the `has_call_stream`
-    /// hint bit.
+    /// structurally absent) — the caller then falls back to the
+    /// fully-materialized call tree. Existence is decided by structural
+    /// presence, not the `has_call_stream` hint bit. A container carrying
+    /// `events.log` or `events.fmt` is refused by name.
     pub fn open(path: &Path) -> Result<Option<SeekableCallStream>, String> {
         match open_call_stream(path)? {
             Some(reader) => {

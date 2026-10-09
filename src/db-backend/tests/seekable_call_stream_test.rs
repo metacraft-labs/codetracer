@@ -270,17 +270,26 @@ fn concurrent_readers_over_same_ct() {
     assert_eq!(seen, (0..8).collect::<Vec<_>>(), "all readers completed");
 }
 
-/// Deliverable test #3a (backward compat, seekable layer): a flag-off `.ct`
-/// exposes NO seekable call stream — `SeekableCallStream::open` returns `None`,
-/// so the caller transparently falls back to the materialized call tree.
+/// Deliverable test #3a (seekable layer): a `.ct` with no `calls.dat` exposes
+/// NO seekable call stream — `SeekableCallStream::open` returns `None`, so the
+/// caller falls back to the materialized call tree. A container carrying
+/// `events.log` is not such a container: the trace-format reader refuses it by
+/// name rather than reporting it as one without a call stream.
 #[test]
 fn flag_off_trace_exposes_no_seekable_stream() {
     let dir = tempfile::tempdir().unwrap();
     // The trace-format writer always writes `calls.dat`: it has no switch to
     // leave it out, because each event kind has exactly one stream to live in.
-    // A container without one is a legacy bundle, built by the shared helper.
+    let no_calls = dir.path().join("no_calls.ct");
+    db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs(&no_calls, &[("meta.dat", b"metadata")])
+        .expect("write a container with no calls.dat");
+    assert!(
+        SeekableCallStream::open(&no_calls).expect("open ok").is_none(),
+        "a container with no calls.dat exposes no seekable call stream"
+    );
+
     let src = std::path::PathBuf::from("/test/prog.rs");
-    let ct = common::legacy_events_log::write_legacy_events_log_bundle(
+    let legacy = common::legacy_events_log::write_legacy_events_log_bundle(
         dir.path(),
         "trace",
         &[
@@ -291,11 +300,14 @@ fn flag_off_trace_exposes_no_seekable_stream() {
             }),
         ],
     );
-
-    assert!(
-        SeekableCallStream::open(&ct).expect("open ok").is_none(),
-        "flag-off trace exposes no seekable calls.dat (no has_call_stream flag)"
-    );
+    let err = match SeekableCallStream::open(&legacy) {
+        Err(err) => err,
+        Ok(stream) => panic!(
+            "an events.log container must be refused, got a stream: {}",
+            stream.is_some()
+        ),
+    };
+    assert!(err.contains("events.log"), "the refusal names the member: {err}");
 }
 
 /// Deliverable test #3b (backward compat, full reader): a REAL legacy `.ct`
