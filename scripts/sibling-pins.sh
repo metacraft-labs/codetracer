@@ -159,9 +159,24 @@ die() {
 # Failure to parse is reported as a parse failure and never as a statement
 # about a pin. A guard that answers "flake.lock has no rev for X" when python3
 # is simply absent sends the reader to edit the very pin it was protecting.
+# The interpreter. Callers run before any dev shell is entered (the web
+# deploy resolves pins first, on the bare runner image), and that image does
+# not always ship python3. Fall back to the flake-pinned one through Nix,
+# which every such runner has, rather than failing with zero pins.
+if command -v python3 >/dev/null 2>&1; then
+	PY=(python3)
+elif command -v nix >/dev/null 2>&1; then
+	# Resolve the interpreter's store path once, quietly, so nix's own
+	# diagnostics ("Git tree ... is dirty") never mix into the parser output
+	# below, which is merged with stderr and read line by line.
+	PY=("$(nix build --no-link --print-out-paths --inputs-from "$(dirname "$LOCK")" nixpkgs#python3 2>/dev/null | head -n1)/bin/python3")
+else
+	PY=(python3)
+fi
+
 resolve_pins() {
 	local out rc
-	out="$(python3 -c '
+	out="$("${PY[@]}" -c '
 import json, re, sys
 
 path = sys.argv[1]
