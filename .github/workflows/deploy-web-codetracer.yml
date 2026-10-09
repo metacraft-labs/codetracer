@@ -426,9 +426,18 @@ jobs:
         # (which provides direnv, wasm-pack, the rust wasm32 target, clang/llvm
         # and nim). This is the exact command validated locally end-to-end
         # (wasm-pack ~11–35s warm, a few minutes cold; ~18 MB db_backend_bg.wasm).
+        #
+        # Its `repro exec` needs the reprobuild-packages catalog. `.#ci`
+        # exports the flake-locked one (nix/shells/ci-base.nix), but
+        # `direnv exec` re-enters the default shell, which looks for a
+        # `../reprobuild-packages` sibling this job never clones, and the build
+        # stopped with "Provide the catalog" (2026-10-09). Carry the locked
+        # catalog across explicitly.
         run: |
           nix develop .#ci --command bash -c '
-            direnv exec "$(pwd)" bash browser-replay/build-dist.sh
+            catalog="${REPROBUILD_PACKAGES_ROOT:?the .#ci shell did not export REPROBUILD_PACKAGES_ROOT}"
+            direnv exec "$(pwd)" env REPROBUILD_PACKAGES_ROOT="$catalog" \
+              bash browser-replay/build-dist.sh
           '
 
       - name: Verify bundle contents
