@@ -268,7 +268,10 @@ fn concurrent_readers_over_same_ct() {
 
 /// Deliverable test #3a (seekable layer): a `.ct` with no `calls.dat` exposes
 /// NO seekable call stream — `SeekableCallStream::open` returns `None`, so the
-/// caller falls back to the materialized call tree.
+/// caller falls back to the materialized call tree. The same holds for
+/// `SeekableCallStream::open_from_ctfs`, the entry `CTFSTraceReader` actually
+/// reaches the stream through: it reads the container it already has open, so
+/// it is checked on its own rather than assumed from the path-based entry.
 #[test]
 fn flag_off_trace_exposes_no_seekable_stream() {
     let dir = tempfile::tempdir().unwrap();
@@ -280,6 +283,14 @@ fn flag_off_trace_exposes_no_seekable_stream() {
     assert!(
         SeekableCallStream::open(&no_calls).expect("open ok").is_none(),
         "a container with no calls.dat exposes no seekable call stream"
+    );
+
+    let mut ctfs = CtfsReader::open(&no_calls).expect("open the container with no calls.dat");
+    assert!(
+        SeekableCallStream::open_from_ctfs(&mut ctfs)
+            .expect("open_from_ctfs ok")
+            .is_none(),
+        "open_from_ctfs: a container with no calls.dat exposes no seekable call stream"
     );
 }
 

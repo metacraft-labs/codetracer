@@ -414,7 +414,9 @@ fn concurrent_readers_over_same_ct() {
 
 /// Deliverable test #4: a `.ct` with no `steps.dat` / `values.dat` exposes NO
 /// seekable step/value stream — `SeekableStepStream::open` /
-/// `SeekableValueStream::open` return `Ok(None)`.
+/// `SeekableValueStream::open` return `Ok(None)`, and so do their
+/// `open_from_ctfs` twins — the entries `CTFSTraceReader` actually reaches the
+/// streams through, over the container it already has open.
 #[test]
 fn flag_off_trace_exposes_no_seekable_streams() {
     let dir = tempfile::tempdir().unwrap();
@@ -428,5 +430,19 @@ fn flag_off_trace_exposes_no_seekable_streams() {
     assert!(
         SeekableValueStream::open(&no_streams).expect("open ok").is_none(),
         "a container with no values.dat exposes no seekable value stream"
+    );
+
+    let mut ctfs = CtfsReader::open(&no_streams).expect("open the container with no step or value stream");
+    assert!(
+        SeekableStepStream::open_from_ctfs(&mut ctfs)
+            .expect("open_from_ctfs ok")
+            .is_none(),
+        "open_from_ctfs: a container with no steps.dat exposes no seekable step stream"
+    );
+    assert!(
+        SeekableValueStream::open_from_ctfs(&mut ctfs)
+            .expect("open_from_ctfs ok")
+            .is_none(),
+        "open_from_ctfs: a container with no values.dat exposes no seekable value stream"
     );
 }
