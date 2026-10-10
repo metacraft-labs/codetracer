@@ -51,9 +51,46 @@ collapse into one low rating:
 - A **debug-controls strip** across the top, with the nine transport buttons
   (run-to-entry, continue, reverse-continue, step-out, reverse-step-out,
   step-in, reverse-step-in, next, reverse-next) as distinct icons.
-- A **source editor** occupying the left three-quarters of the body, showing
-  the recorded program's text with **line numbers in a gutter**.
-- A **call-trace pane** and a **state pane** on the right.
+- **Three columns across the body**, left to right. This is the shared default
+  every CodeTracer product opens with, published in
+  `codetracer-specs/spec/GUI/Layout-And-Navigation/Layout-System.md`
+  ("Default Layout") and read from `shared_default_layout.generated.json` by
+  `layout_model.sharedDefaultLayout()`:
+  `Files | VCS | Tests ‖ Editor ‖ (State | Scratchpad ‖ Calltrace | Agent
+  Activity) over Event Log | Terminal Output`, at weights **20 / 25 / 55**.
+  - a **files panel** (FILES, with VCS and TESTS as tabs of it) at 20%;
+  - the **source editor** at 25%, showing the recorded program's text with
+    **line numbers in a gutter**;
+  - the 55% right region: a **state pane** (tabbed with SCRATCHPAD) beside a
+    **call-trace pane** (tabbed with AGENT ACTIVITY), over an **event-log**
+    row (tabbed with TERMINAL OUTPUT).
+
+  **There is no TIMELINE tab, and its absence is the correct picture.**
+  PLAT-51 deliverable 1 has landed: at `agents` `847c4630e` the generated
+  layout (`shared_default_layout.generated.json`, blob `74eb47cc`) spells
+  `timeline` nowhere, `PaneKind` no longer has a `paneTimeline`
+  (`layout_model.nim`), and `test_shared_default_layout.nim` asserts both —
+  *"No `PaneKind` spells 'timeline' any more"* — against the canonical
+  relation `stack[eventLog*,terminalOutput]`. The removal is published in
+  `codetracer-specs/spec/GUI/Layout-And-Navigation/Layout-System.md`, "The
+  Timeline panel is removed (2026-10-05)".
+
+  A TIMELINE tab drawn by any front-end is therefore a **finding**, not the
+  expected picture. An earlier revision of this block told reviewers to
+  expect one, on the reading that the brief grades what ships and the removal
+  was then still `:status: planned`; that had become false by the time the
+  removal landed. Expecting a tab the product does not draw is the same
+  grade-against-the-brief defect as `PLAT35-F8` below, in the other
+  direction.
+
+  So the editor is about a **quarter** of the width and is **not leftmost** —
+  the files panel is left of it. At 1920 the three columns are 384 / 480 /
+  1056 px; at 1440, 288 / 360 / 792 px. **Report a finding only against THIS
+  arrangement.** An earlier revision of this block asked for an editor
+  "occupying the left three-quarters of the body", which no front-end has ever
+  drawn and no spec has ever published; reading against it produced
+  `PLAT35-F8`, a finding against the brief rather than the product. Do not
+  restore that wording.
 - **The state pane is legitimately sparse here**: this scenario is *not*
   stepped, and a program at its entry point genuinely has no locals. An empty
   variable list is the correct picture. Report it as a finding only if the pane
