@@ -118,6 +118,10 @@ type
     pdcUnknownPresentation
     pdcUnknownMediaType
     pdcUnknownDiffAlgorithm
+    pdcUnknownUntrackedMode
+      ## `test.toml`'s `[certificate] untracked` names no mode this build
+      ## implements (CTC-3g). Refused, never read as the default: a gate that
+      ## silently relaxes because of a typo is the failure it exists to stop.
     pdcBadTemplate
       ## A summary template with an unterminated or over-long placeholder, or
       ## more placeholders than the bound. Templating is total by
@@ -223,7 +227,7 @@ func isUnknownToThisBuild*(c: ProjectDefinitionCode): bool =
   ## typo" are different sentences and only one of them is the user's problem.
   c in {pdcUnknownSchemaVersion, pdcUnknownKey,
         pdcUnknownPointKind, pdcUnknownMatchKind, pdcUnknownPresentation,
-        pdcUnknownMediaType, pdcUnknownDiffAlgorithm}
+        pdcUnknownMediaType, pdcUnknownDiffAlgorithm, pdcUnknownUntrackedMode}
 
 func codeText*(c: ProjectDefinitionCode): string =
   ## The human half of the code. Written here rather than at each raise site
@@ -247,6 +251,7 @@ func codeText*(c: ProjectDefinitionCode): string =
   of pdcUnknownPresentation: "unknown presentation"
   of pdcUnknownMediaType: "unknown media type"
   of pdcUnknownDiffAlgorithm: "unknown diff algorithm"
+  of pdcUnknownUntrackedMode: "unknown untracked-files mode"
   of pdcBadTemplate: "malformed summary template"
   of pdcBadNumber: "malformed number"
   of pdcAnchorMissing: "a point located by line number alone"

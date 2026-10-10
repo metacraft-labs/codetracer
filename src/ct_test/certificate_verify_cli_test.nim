@@ -596,7 +596,15 @@ suite "ct test verify (CTC-3f)":
       writeConfig(repo, broken)
       discard gitOk(repo, "add", "-A")
       discard gitOk(repo, "commit", "-q", "-m", "config " & $checkedBroken)
-      discard testRun(repo)
+      # `ct test run` reads the same file for its untracked mode (CTC-3g):
+      # the tests run and pass, and the certificate is withheld, naming the
+      # file; `--untracked` makes the file unnecessary, so the certificate
+      # this case needs is still issued.
+      let unresolved = ct(repo, @["test", "run", "--workspace", repo])
+      check unresolved.code == 0
+      check ".codetracer/test.toml" in unresolved.stderr
+      check "no certificate issued" in unresolved.stderr
+      discard testRun(repo, "--untracked=reads")
       for state in [@["--worktree"], @["--staged"], @["--commit", "HEAD"]]:
         let ran = verify(repo, state)
         check ran.code == VerifyUndecided

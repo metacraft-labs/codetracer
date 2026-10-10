@@ -51,7 +51,7 @@ import std/[sets, strutils, unittest]
 import ./project_definitions
 import ./toml_subset
 
-const ExpectedAssertions = 1791
+const ExpectedAssertions = 1856
   ## Written from a run, and asserted against the tally at the end of the
   ## file. `ci/lib/run-nim-test-lane.sh` reads this name.
 
@@ -613,11 +613,12 @@ KEY = "/bin/sh"
            "media", "mediaFrom"]
     ckEq AcceptedKeys[tiDiff], @["match", "matchKind", "algorithm", "tolerance"]
     # 2026-10-10 (CTC-3f): `test.toml`'s two tables, three keys.
+    # 2026-10-11 (CTC-3g): four — `[certificate] untracked`, a closed mode.
     ckEq AcceptedKeys[tiRootTest], @["schema", "certificate"]
-    ckEq AcceptedKeys[tiTestCertificate], @["targets"]
+    ckEq AcceptedKeys[tiTestCertificate], @["targets", "untracked"]
     var total = 0
     for t in TableId: total += AcceptedKeys[t].len
-    ckEq total, 32
+    ckEq total, 33
 
   test "no accepted key is spelled like something that runs":
     # A second, INDEPENDENT statement of the same property, over the data
@@ -1691,6 +1692,67 @@ suite "CTC-3f: ct test's committed configuration":
     let mine = loadProjectDefinitions([], [testFile(GoodTest, origin = doUser)])
     ckEq mine.project.tests.len, 0
     ckEq mine.user.tests.len, 1
+
+suite "CTC-3g: the untracked-files mode in ct test's configuration":
+
+  test "the untracked mode is read from .codetracer/test.toml":
+    # The parsing half of the CTC-3g case of this name; the issuing half is
+    # in certificate_cli_test.nim, through the real `ct test run`.
+    const Head = "schema = \"codetracer.test.v1\"\n[certificate]\n"
+    var checkedModes = 0
+    for mode in UntrackedMode:
+      inc checkedModes
+      let (defs, problems) = parseOne(testFile(
+        Head & "untracked = \"" & $mode & "\"\n"))
+      ckEq problems.len, 0
+      ckEq defs.tests.len, 1
+      ck defs.tests[0].untrackedModeDeclared
+      ckEq defs.tests[0].untrackedMode, mode
+      # It is independent of the target list: neither implies the other.
+      ck not defs.tests[0].certificateTargetsDeclared
+    ckEq checkedModes, 2
+    ckEq $umReads, "reads"
+    ckEq $umStrict, "strict"
+    # Both keys together.
+    let (both, bothProblems) = parseOne(testFile(GoodTest &
+                                                 "untracked = \"strict\"\n"))
+    ckEq bothProblems.len, 0
+    ckEq both.tests[0].untrackedMode, umStrict
+    ckEq both.tests[0].certificateTargets,
+         @["tests/a_test.nim", "tests/b_test.py"]
+    # Not written: not declared, and the value is the default.
+    let (absent, absentProblems) = parseOne(testFile(GoodTest))
+    ckEq absentProblems.len, 0
+    ck not absent.tests[0].untrackedModeDeclared
+    ckEq absent.tests[0].untrackedMode, umReads
+
+  test "an unknown untracked mode refuses the whole file":
+    const Head = "schema = \"codetracer.test.v1\"\n[certificate]\n"
+    let cases = @[
+      ("an unknown mode", Head & "untracked = \"lenient\"\n",
+       pdcUnknownUntrackedMode),
+      ("a mode in the wrong case", Head & "untracked = \"Strict\"\n",
+       pdcUnknownUntrackedMode),
+      ("an empty mode", Head & "untracked = \"\"\n", pdcUnknownUntrackedMode),
+      ("a boolean", Head & "untracked = true\n", pdcWrongType),
+      ("a list", Head & "untracked = [\"strict\"]\n", pdcWrongType)]
+    var checkedCases = 0
+    for (name, text, code) in cases:
+      inc checkedCases
+      checkpoint(name)
+      let (defs, problems) = parseOne(testFile(text))
+      ckRefused problems, code
+      ckEq defs.tests.len, 0
+      let loaded = loadProjectDefinitions([testFile(text)])
+      ck not loaded.isOk
+      ck not testConfigurationFor(loaded.project, "").found
+    ckEq checkedCases, 5
+    # A mode a later build may add is "newer than this build", not a typo.
+    ck isUnknownToThisBuild(pdcUnknownUntrackedMode)
+    let (_, unknown) = parseOne(testFile(Head & "untracked = \"lenient\"\n"))
+    ck unknown[0].detail.contains("lenient")
+    ck unknown[0].detail.contains("\"reads\"")
+    ck unknown[0].detail.contains("\"strict\"")
 
 suite "PLAT-11: the loader has no way to reach a machine":
 

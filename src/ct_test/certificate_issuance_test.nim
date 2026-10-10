@@ -963,9 +963,10 @@ suite "ct test certificate issuance":
   test "untracked files are reported and are outside the content":
     ## Standard.md §3.2: `untracked` files are not part of `content`, and are
     ## reported honestly. An untracked scratch file yields untracked = true
-    ## and the SAME content as the run without it. (Withholding when a run is
-    ## known to have READ an untracked file is not this run path's: it
-    ## captures no read set.)
+    ## and the SAME content as the run without it, in the default untracked
+    ## mode. (Withholding when a run is known to have READ an untracked file
+    ## needs a read set, and this run path captures none: CTC-3g's cases
+    ## below.)
     let repo = committedRepo("untracked")
     writeFile(repo / "a.txt", "a tracked edit\n")
     let without = attest(repo, passingItems(), unsignedOptions()).issuance
@@ -996,6 +997,108 @@ suite "ct test certificate issuance":
     require ignored.issued
     check not ignored.certificate.vcs.untracked
     check ignored.certificate.vcs.content == without.certificate.vcs.content
+
+  test "strict mode withholds on any untracked file in scope":
+    ## CTC-3g, operator decision 5: `strict` withholds whenever an untracked,
+    ## non-ignored file exists in scope (the whole repository), naming them,
+    ## and needs no read set. An ignored file does not withhold; the default
+    ## mode issues the same run with untracked = true.
+    let repo = committedRepo("untracked-strict")
+    writeFile(repo / "a.txt", "a tracked edit\n")
+    var strict = unsignedOptions()
+    strict.untrackedMode = umStrict
+
+    # Control: with no untracked file, strict mode issues exactly what the
+    # default does.
+    let clean = attest(repo, passingItems(), strict).issuance
+    checkpoint clean.message
+    require clean.issued
+    check not clean.certificate.vcs.untracked
+    check clean.untracked.mode == umStrict
+    check clean.untracked.offending.len == 0
+    let content = clean.certificate.vcs.content
+    check content == workingTreeId(repo)
+
+    writeFile(repo / "scratch.log", "not tracked\n")
+    createDir(repo / "notes")
+    writeFile(repo / "notes" / "todo.md", "not tracked either\n")
+    let withheld = attest(repo, passingItems(), strict).issuance
+    check not withheld.issued
+    check withheld.reason == wrUntrackedInput
+    check withheld.document.len == 0
+    # Named: the file, and the untracked directory as git lists it.
+    check withheld.untracked.offending == @["notes/", "scratch.log"]
+    check "scratch.log" in withheld.message
+    check "notes/" in withheld.message
+    check "strict" in withheld.message
+    check "git add" in withheld.remedy
+    check ".gitignore" in withheld.remedy
+    # The evidence is still reported: the content, unchanged by the files.
+    check withheld.vcs.determined
+    check withheld.vcs.untracked
+    check withheld.vcs.content == content
+    check withheld.vcs.untrackedPaths == @["notes/", "scratch.log"]
+
+    # The default mode issues the SAME state, reporting untracked = true.
+    let default = attest(repo, passingItems(), unsignedOptions()).issuance
+    checkpoint default.message
+    require default.issued
+    check default.untracked.mode == umReads
+    check default.certificate.vcs.untracked
+    check default.certificate.vcs.content == content
+
+    # An ignored file is neither content nor untracked, so strict issues.
+    removeFile(repo / "scratch.log")
+    removeDir(repo / "notes")
+    writeFile(repo / ".git" / "info" / "exclude", "*.tmp\nbuild/\n")
+    writeFile(repo / "cache.tmp", "ignored\n")
+    createDir(repo / "build")
+    writeFile(repo / "build" / "out.o", "ignored too\n")
+    let ignored = attest(repo, passingItems(), strict).issuance
+    checkpoint ignored.message
+    require ignored.issued
+    check not ignored.certificate.vcs.untracked
+    check ignored.certificate.vcs.content == content
+
+    # An untracked file present only when the run STARTED was present during
+    # it: strict withholds for it too.
+    writeFile(repo / "scratch.log", "removed by the test\n")
+    let removed = attest(repo,
+      @[fixtureItem("tests/a_test.nim", "case0", foRemoveUntracked)],
+      strict).issuance
+    check not fileExists(repo / "scratch.log")
+    check not removed.issued
+    check removed.reason == wrUntrackedInput
+    check removed.untracked.offending == @["scratch.log"]
+
+  test "the default mode issues with untracked reported when no read set was captured":
+    ## CTC-3g: `test run` captures no read set, so in the default mode an
+    ## untracked file cannot be judged. The run issues — never guessing which
+    ## files were read — the record carries untracked = true, and the report
+    ## says that no read set was captured.
+    let repo = committedRepo("untracked-no-read-set")
+    let without = attest(repo, passingItems(), unsignedOptions()).issuance
+    require without.issued
+    check not without.untracked.readSetCaptured
+    # Nothing to judge, so nothing to say.
+    check without.untracked.note.len == 0
+
+    writeFile(repo / "fixture-input.txt", "untracked input\n")
+    let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
+    checkpoint issuance.message
+    require issuance.issued
+    check issuance.untracked.mode == umReads
+    check not issuance.untracked.withhold
+    check not issuance.untracked.readSetCaptured
+    check issuance.untracked.offending.len == 0
+    check "no read set was captured" in issuance.untracked.note
+    check NoReadSetOnRunPath in issuance.untracked.note
+    check "could not be judged" in issuance.untracked.note
+    check issuance.certificate.vcs.untracked
+    check "untracked = true" in issuance.document
+    check issuance.vcs.untrackedPaths == @["fixture-input.txt"]
+    # The untracked file is outside the content: the same id as without it.
+    check issuance.certificate.vcs.content == without.certificate.vcs.content
 
   test "untracked files present only when the run started are reported":
     ## Standard.md §3.2: `untracked` says whether untracked files were present
@@ -1296,7 +1399,15 @@ suite "ct test certificate issuance":
     for name, _ in IssuanceOptions().fieldPairs:
       optionNames.add name
     check optionNames == @["disabled", "issuer", "signingKeyPath", "keyId",
-                           "issuedAt", "gitCaptureLimit"]
+                           "issuedAt", "untrackedMode", "untrackedModeProblem",
+                           "gitCaptureLimit"]
+    # CTC-3g: the read set is the run's own. No option carries one, and the
+    # one in a run record is private.
+    check not compiles(IssuanceOptions(readSet: ReadSet(captured: true)))
+    check not compiles((block:
+      var forged = beginAttestedRun("/tmp", "project", "linux/amd64")
+      forged.readSet = ReadSet(captured: true)
+      forged))
     check not compiles(IssuanceOptions(gitRunner: nil))
     check not compiles(IssuanceOptions(content: "git-tree-sha1:00"))
     check not compiles(IssuanceOptions(base: "00"))
@@ -1370,6 +1481,11 @@ suite "ct test certificate issuance":
       # the workspace store's `git check-ignore` report, which went with that
       # store; the local certificate store is outside the repository.
       "probeVcs",               # reads repository state
+      # 2026-10-11 (CTC-3g): two pure helpers of the untracked-files rule.
+      # Neither runs a test nor reaches the signing routine, and neither can
+      # put a read set into a run: that field is private to `AttestedRun`.
+      "readSetFromProjection",  # reads a capture's projection file
+      "judgeUntracked",         # a decision over values
       "runAndAttest"]           # the ONLY route to a signature — and it runs
                                 # the tests itself, so it takes no results
 

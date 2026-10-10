@@ -110,7 +110,7 @@ const
     # tiRootTest
     @["schema", "certificate"],
     # tiTestCertificate
-    @["targets"],
+    @["targets", "untracked"],
   ]
     ## THE WHOLE GRAMMAR, in one place a reader can audit in ten seconds.
     ##
@@ -121,13 +121,15 @@ const
     ## the "unrecognised, ignored" arm this file exists not to have, arriving
     ## through the table name instead of through a key.
     ##
-    ## Thirty-two keys. Not one of them takes a program name, a command line,
+    ## Thirty-three keys. Not one of them takes a program name, a command line,
     ## an interpreter, a shell, a library, a URL, or a path to anything that
     ## is loaded rather than displayed. `path` is a SOURCE file a breakpoint
     ## goes in; `mediaFrom` is a field name inside a recorded value; `targets`
     ## (`test.toml`, CTC-3f) are test file names a certificate's `targets` are
     ## compared with as strings — `ct test` runs what DISCOVERY finds, never
     ## what this list names, so the list cannot make anything run.
+    ## `untracked` (CTC-3g) selects one of two closed modes, `reads` or
+    ## `strict`, for how untracked files affect issuance; it names nothing.
     ##
     ## `project_definitions_test` asserts this array against a literal copy.
     ## That is deliberately a second copy of the data — the one place in this
@@ -837,6 +839,28 @@ proc readTest(r: var FileReader; root: TomlNode;
         seen[target] = true
         config.certificateTargets.add target
       config.certificateTargetsDeclared = true
+    let untracked = certificate.field("untracked")
+    if untracked != nil:
+      # CTC-3g: how untracked files are treated. Refused when unknown rather
+      # than read as the default, which would be a mode nobody wrote.
+      if untracked.kind != tomlString:
+        r.note(pdcWrongType,
+          "[certificate]'s 'untracked' must be a string: \"reads\" or " &
+          "\"strict\"")
+        return
+      var known = false
+      for mode in UntrackedMode:
+        if untracked.strVal == $mode:
+          config.untrackedMode = mode
+          known = true
+      if not known:
+        r.note(pdcUnknownUntrackedMode,
+          "[certificate]'s 'untracked' is '" & untracked.strVal & "'; this " &
+          "build implements \"reads\" (withhold only when the run's captured " &
+          "read set names an untracked file) and \"strict\" (withhold on " &
+          "any untracked, non-ignored file)")
+        return
+      config.untrackedModeDeclared = true
   into.add config
 
 # ---------------------------------------------------------------------------

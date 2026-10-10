@@ -229,6 +229,18 @@ type
     file*: string
     order*: int
 
+  UntrackedMode* = enum
+    ## How `ct test` treats untracked (and not ignored) files when it issues
+    ## a certificate (CTC-3g; CTC-3 operator decision 5). A closed set: a
+    ## value outside it is `pdcUnknownUntrackedMode`, never a silently chosen
+    ## mode.
+    umReads = "reads"
+      ## The default. Withhold only when a read set the run CAPTURED names an
+      ## untracked file; otherwise issue and report `untracked = true`.
+    umStrict = "strict"
+      ## Withhold whenever any untracked, non-ignored file exists in scope,
+      ## whether or not the run read it.
+
   TestConfiguration* = object
     ## `test.toml` — `ct test`'s committed configuration (§6; CTC-3f).
     ##
@@ -250,6 +262,11 @@ type
       ## (`containment.pathProblem`), none repeated, never empty when
       ## declared. Compared with a certificate's `targets` as strings; never
       ## opened.
+    untrackedModeDeclared*: bool
+      ## Whether `[certificate] untracked` was WRITTEN (CTC-3g). `false`
+      ## leaves the choice to the command line, else the default `reads`.
+    untrackedMode*: UntrackedMode
+      ## The declared mode; `umReads` when not declared.
     origin*: DefinitionOrigin
     scope*: string
     file*: string

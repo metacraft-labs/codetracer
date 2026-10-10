@@ -84,7 +84,7 @@ proc ctTestUsageMessage*(): string =
   "[--scope auto|vcs|walk|unscoped] [--unscoped] " &
   "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
   "[--threads N] [--json] [--summary <path>] " &
-  "[--no-certificate] " &
+  "[--no-certificate] [--untracked reads|strict] " &
   "[--sign-key <path> --key-id <id>] " &
   "| verify (--staged | --worktree | --commit <rev>) [--workspace <path>] " &
   "[--targets <t>[,<t>...]] [--platform <p>[,<p>...]] [--json]); " &
@@ -108,8 +108,17 @@ proc ctTestUsageMessage*(): string =
   "it is withheld, saying why and what to do, when tracked files change " &
   "during the run or when the tree has no content id (unmerged entries, " &
   "assume-unchanged or skip-worktree entries git does not look at, a " &
-  "submodule with uncommitted changes); withholding never changes the exit " &
-  "status; " &
+  "submodule with uncommitted changes), and for untracked files as the " &
+  "untracked mode says — `--untracked`, else `[certificate] untracked` in " &
+  "the workspace's `.codetracer/test.toml`, else `reads`: `reads` withholds " &
+  "only when a read set the run captured shows a test read an untracked " &
+  "file (`test run` captures none today, so it issues with " &
+  "`untracked = true` and the summary says no read set was captured), " &
+  "`strict` withholds whenever an untracked, non-ignored file exists; an " &
+  "unknown `--untracked` value is an error before any test runs; an " &
+  "unusable `.codetracer/test.toml` is reported before the tests run, " &
+  "which still run, and the certificate is withheld; withholding never " &
+  "changes the exit status; " &
   "`--no-certificate` suppresses issuance entirely, so nothing is written; " &
   "signing is OPTIONAL and OFF " &
   "unless `--sign-key` is passed; " &
@@ -178,7 +187,22 @@ type
     noCertificate: bool          ## suppress issuance entirely
     signKeyPath: string          ## OpenSSH ed25519 private key; empty ⇒ unsigned
     keyId: string                ## which key signed, for a consumer's key store
+    untrackedGiven: bool         ## ``--untracked`` was passed (CTC-3g)
+    untracked: UntrackedMode     ## its value; wins over the configuration
     errors: seq[string]
+
+proc parseUntrackedMode(value: string; into: var RunOptions) =
+  ## ``--untracked reads|strict`` (CTC-3g). An unknown value is an error
+  ## before anything runs, never a silently chosen mode.
+  for mode in UntrackedMode:
+    if value == $mode:
+      into.untrackedGiven = true
+      into.untracked = mode
+      return
+  into.errors.add "invalid --untracked value '" & value & "': expected " &
+    "\"reads\" (withhold only when a captured read set shows a test read " &
+    "an untracked file) or \"strict\" (withhold on any untracked, " &
+    "non-ignored file)"
 
 proc parseRunArgs(args: seq[string]): RunOptions =
   ## Parse the ``test run`` argument vector:
@@ -217,8 +241,16 @@ proc parseRunArgs(args: seq[string]): RunOptions =
       else: result.keyId = args[i + 1]; inc i
     of "--json":
       result.jsonOutput = true
+    of "--untracked":
+      if i + 1 >= args.len: result.errors.add "missing value for --untracked"
+      else:
+        parseUntrackedMode(args[i + 1], result)
+        inc i
     else:
-      result.errors.add "unknown run argument: " & args[i]
+      if args[i].startsWith("--untracked="):
+        parseUntrackedMode(args[i]["--untracked=".len .. ^1], result)
+      else:
+        result.errors.add "unknown run argument: " & args[i]
     inc i
   if result.workspaceRoot.len == 0:
     result.errors.add "missing required --workspace <path>"
@@ -323,10 +355,23 @@ proc certificateReport(issuance: Issuance;
         conditions.add %*{"condition": $state.condition, "paths": state.paths}
       result["no_content_id"] = conditions
     result["untracked"] = %issuance.vcs.untracked
+    if issuance.vcs.untrackedPaths.len > 0:
+      result["untracked_paths"] = %issuance.vcs.untrackedPaths
     if issuance.vcs.base.len > 0:
       result["base"] = %issuance.vcs.base
   elif issuance.vcs.probed:
     result["vcs_undetermined_reason"] = %issuance.vcs.undeterminedReason
+  if issuance.reason != wrAttestationDisabled:
+    # CTC-3g: the mode in force, and whether the run had a read set to judge
+    # untracked files by. Stated, not implied: in the default mode a run
+    # with no read set issues, and the summary says why it could not judge.
+    result["untracked_mode"] = %($issuance.untracked.mode)
+    result["read_set"] =
+      %(if issuance.untracked.readSetCaptured: "captured" else: "not-captured")
+    if issuance.untracked.note.len > 0:
+      result["untracked_note"] = %issuance.untracked.note
+    if issuance.reason == wrUntrackedInput:
+      result["untracked_inputs"] = %issuance.untracked.offending
   if issuance.issued:
     result["signed"] = %issuance.certificate.isSigned
     result["document"] = %issuance.document
@@ -363,6 +408,25 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
     except ValueError as err:
       return emitRunError(@[err.msg])
 
+  # The untracked-files mode (CTC-3g), resolved BEFORE any test runs, so an
+  # unusable `.codetracer/test.toml` is reported up front. It does not stop
+  # the run: the file decides only whether a certificate may be issued, so
+  # the tests run, the exit status is theirs, and the certificate is withheld
+  # (`wrUntrackedModeUnresolved`) rather than issued under a mode nobody
+  # chose. `--no-certificate` means attestation reads nothing, this
+  # configuration included.
+  var untrackedMode = umReads
+  var untrackedModeProblem = ""
+  if not opts.noCertificate:
+    let resolved = resolveUntrackedMode(opts.workspaceRoot,
+                                        opts.untrackedGiven, opts.untracked)
+    if resolved.ok:
+      untrackedMode = resolved.mode
+    else:
+      untrackedModeProblem = resolved.problem
+      stderr.writeLine "ct test: warning — " & resolved.problem &
+        "; the tests will run, but no certificate will be issued"
+
   # Discover the candidate tests via the providers (workspace- or file-scoped).
   let request =
     if opts.file.len > 0:
@@ -394,7 +458,9 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
       disabled: opts.noCertificate,
       issuer: issuerIdentity(),
       signingKeyPath: opts.signKeyPath,
-      keyId: opts.keyId))
+      keyId: opts.keyId,
+      untrackedMode: untrackedMode,
+      untrackedModeProblem: untrackedModeProblem))
   let summary = outcome.summary
   var summaryJson = summaryToJson(summary)
 
@@ -431,6 +497,15 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
       pruneErrors = published.pruned.errors
     summaryJson["certificate"] =
       certificateReport(issuance, writtenTo, writeError, pruneErrors)
+    if untrackedModeProblem.len > 0:
+      # No mode was in force, whichever gate withheld first: say so rather
+      # than report the default nobody chose.
+      summaryJson["certificate"]["untracked_mode"] = %"unresolved"
+      summaryJson["certificate"]["untracked_mode_problem"] =
+        %untrackedModeProblem
+      for key in ["read_set", "untracked_note"]:
+        if summaryJson["certificate"].hasKey(key):
+          summaryJson["certificate"].delete(key)
 
     if not issuance.issued:
       # stderr, so a machine consumer parsing the summary on stdout is

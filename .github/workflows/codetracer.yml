@@ -7714,6 +7714,48 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
+      - name: Clone io-mon sibling
+        # certificate_untracked_reads_test.nim builds the io-mon CLI and
+        # interpose shim from this sibling and captures a real read set with
+        # them (CTC-3g). Without it the suite fails by name; it never skips.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/io-mon
+          ref: dev
+          path: ${{ github.workspace }}/../io-mon
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone nim-stackable-hooks sibling
+        # io-mon's shim and CLI build on it (io-mon config.nims).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/nim-stackable-hooks
+          ref: dev
+          path: ${{ github.workspace }}/../nim-stackable-hooks
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone nim-shm-queue sibling
+        # io-mon's shim and CLI build on it (io-mon config.nims).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/nim-shm-queue
+          ref: dev
+          path: ${{ github.workspace }}/../nim-shm-queue
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone nim-shm-gset sibling
+        # io-mon's shim and CLI build on it (io-mon config.nims).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/nim-shm-gset
+          ref: dev
+          path: ${{ github.workspace }}/../nim-shm-gset
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:

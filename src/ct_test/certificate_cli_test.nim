@@ -35,6 +35,7 @@ import std/[json, options, os, osproc, posix, streams, strutils, unittest]
 import contracts
 import certificate
 import certificate_issuance
+import certificate_verify_cli
 import ct_test
 import discovery
 import run_orchestration
@@ -566,6 +567,164 @@ suite "calc":
     let probe = probeVcs(workspace)
     check not probe.determined
     check "not inside a git repository" in probe.undeterminedReason
+
+proc untrackedWorkspace(name: string; config = ""; editing = false): string =
+  ## A real repository holding the fixture test, a tracked `notes.txt` and,
+  ## when given, a COMMITTED `.codetracer/test.toml`; then an untracked
+  ## scratch file. With ``editing`` the fixture test appends to `notes.txt`
+  ## while it runs, so an unchanged `notes.txt` proves that no test ran.
+  result = scratchDir(name)
+  createDir(result / "tests")
+  writeFile(result / FixtureTestFile,
+            if editing: "adds\n" & EditingMarker & "\n" else: "adds\n")
+  writeFile(result / "notes.txt", "notes\n")
+  if config.len > 0:
+    createDir(result / ".codetracer")
+    writeFile(result / ".codetracer" / "test.toml", config)
+  git(result, ["init", "--initial-branch=main", "."])
+  git(result, ["config", "user.email", "ct-test@example.invalid"])
+  git(result, ["config", "user.name", "ct test suite"])
+  git(result, ["config", "commit.gpgsign", "false"])
+  git(result, ["add", "-A"])
+  git(result, ["commit", "-m", "initial"])
+  writeFile(result / "scratch.log", "untracked\n")
+
+proc runFixture(workspace, name: string; extra: seq[string] = @[]):
+    tuple[exitCode: int; report: JsonNode] =
+  ## `ct test run` through the shipped CLI over the fixture provider, with
+  ## the summary read back from `--summary`. `report` is nil when the run was
+  ## refused before it ran (no summary is written then).
+  let summaryPath = scratchDir(name & "-summary") / "summary.json"
+  result.exitCode = runCtTest(
+    @["test", "run", "--workspace", workspace, "--threads", "1",
+      "--summary", summaryPath] & extra, fixtureRegistry(), newDiscoveryCache())
+  if fileExists(summaryPath):
+    result.report = parseJson(readFile(summaryPath)){"certificate"}
+    checkpoint name & ": " & $result.report
+
+const StrictConfig = "schema = \"codetracer.test.v1\"\n[certificate]\n" &
+                     "untracked = \"strict\"\n"
+
+suite "ct test run: the untracked-files mode (CTC-3g)":
+
+  test "the untracked mode is read from .codetracer/test.toml":
+    ## `untracked = "strict"` in the committed file selects strict mode with
+    ## no flag; `--untracked=reads` overrides it; an unknown value is a named
+    ## configuration error reported before any test runs, and no certificate
+    ## is written (the tests still run).
+    let strict = untrackedWorkspace("untracked-config-strict", StrictConfig)
+    let before = storeFileCount()
+    let fromFile = runFixture(strict, "config-strict")
+    check fromFile.exitCode == 0          # withholding never changes it
+    check not fromFile.report{"issued"}.getBool
+    check fromFile.report{"withheld_reason"}.getStr == $wrUntrackedInput
+    check fromFile.report{"untracked_mode"}.getStr == "strict"
+    check fromFile.report{"untracked_inputs"}.getElems.len == 1
+    check fromFile.report{"untracked_inputs"}[0].getStr == "scratch.log"
+    check "scratch.log" in fromFile.report{"message"}.getStr
+    check "git add" in fromFile.report{"remedy"}.getStr
+    check storeFileCount() == before      # withheld: nothing published
+
+    # The command line wins, in both spellings.
+    for (spelling, name) in [(@["--untracked=reads"], "flag-equals"),
+                             (@["--untracked", "reads"], "flag-separate")]:
+      let overridden = runFixture(strict, name, spelling)
+      check overridden.exitCode == 0
+      check overridden.report{"issued"}.getBool
+      check overridden.report{"untracked_mode"}.getStr == "reads"
+      check overridden.report{"untracked"}.getBool
+      check overridden.report{"read_set"}.getStr == "not-captured"
+      check "no read set was captured" in
+            overridden.report{"untracked_note"}.getStr
+    check storeFileCount() > before
+
+    # And the flag can select strict over a file that says nothing.
+    let silent = untrackedWorkspace("untracked-config-none")
+    let byFlag = runFixture(silent, "flag-strict", @["--untracked=strict"])
+    check byFlag.report{"withheld_reason"}.getStr == $wrUntrackedInput
+    check byFlag.report{"untracked_mode"}.getStr == "strict"
+    let byDefault = runFixture(silent, "default")
+    check byDefault.report{"issued"}.getBool
+    check byDefault.report{"untracked_mode"}.getStr == "reads"
+
+    # An unknown value in the file: reported before the tests run, which
+    # still run with their own exit status; the certificate is withheld, naming the file and the value, and
+    # nothing is published. A broken configuration decides the claim, never
+    # whether the tests run.
+    const LenientConfig = "schema = \"codetracer.test.v1\"\n" &
+                          "[certificate]\nuntracked = \"lenient\"\n"
+    let storeBefore = storeFileCount()
+    let still = untrackedWorkspace("untracked-config-unknown-still",
+                                   LenientConfig)
+    let unresolved = runFixture(still, "config-unknown")
+    check unresolved.exitCode == 0
+    check not unresolved.report.isNil
+    check not unresolved.report{"issued"}.getBool
+    check unresolved.report{"withheld_reason"}.getStr ==
+          $wrUntrackedModeUnresolved
+    check unresolved.report{"untracked_mode"}.getStr == "unresolved"
+    check not unresolved.report.hasKey("read_set")
+    check ".codetracer/test.toml" in unresolved.report{"message"}.getStr
+    check "lenient" in unresolved.report{"message"}.getStr
+    check "--untracked" in unresolved.report{"remedy"}.getStr
+    check ".codetracer/test.toml" in
+          unresolved.report{"untracked_mode_problem"}.getStr
+    # The tests did run: this fixture's test edits notes.txt (which then
+    # withholds for changed content first; the mode is still reported as
+    # unresolved, never as a default nobody chose).
+    let unknown = untrackedWorkspace("untracked-config-unknown",
+                                     LenientConfig, editing = true)
+    let ranAnyway = runFixture(unknown, "config-unknown-editing")
+    check ranAnyway.exitCode == 0
+    check readFile(unknown / "notes.txt") != "notes\n"
+    check ranAnyway.report{"untracked_mode"}.getStr == "unresolved"
+    check storeFileCount() == storeBefore
+    writeFile(unknown / "notes.txt", "notes\n")
+    let resolved = resolveUntrackedMode(unknown, false, umReads)
+    check not resolved.ok
+    check ".codetracer/test.toml" in resolved.problem
+    check "lenient" in resolved.problem
+    check "no untracked-files mode is assumed" in resolved.problem
+    # The flag makes the file unnecessary, as `verify --targets` does: the
+    # mode is the flag's, and the file is not consulted.
+    let flagged = runFixture(unknown, "config-unknown-flag",
+                             @["--untracked=strict"])
+    check flagged.exitCode == 0
+    check not flagged.report.isNil
+    check flagged.report{"untracked_mode"}.getStr == "strict"
+    check not flagged.report.hasKey("untracked_mode_problem")
+    check readFile(unknown / "notes.txt") != "notes\n"
+
+    # An unknown value on the command line is a usage error, like any bad
+    # flag value: exit 1 before anything runs.
+    let editingStrict = untrackedWorkspace("untracked-flag-unknown",
+                                           StrictConfig, editing = true)
+    let badFlag = runFixture(editingStrict, "flag-unknown",
+                             @["--untracked=lenient"])
+    check badFlag.exitCode == 1
+    check badFlag.report.isNil
+    check readFile(editingStrict / "notes.txt") == "notes\n"
+
+    # The file is read from the working tree, the state a run certifies: an
+    # uncommitted edit to it is what applies.
+    createDir(silent / ".codetracer")
+    writeFile(silent / ".codetracer" / "test.toml", StrictConfig)
+    let edited = resolveUntrackedMode(silent, false, umReads)
+    check edited.ok
+    check edited.mode == umStrict
+    check edited.source == usConfiguration
+    check edited.file == ".codetracer/test.toml"
+
+    # `--no-certificate` reads no configuration at all.
+    check runCtTest(@["test", "run", "--workspace", unknown, "--threads", "1",
+                      "--no-certificate"], fixtureRegistry(),
+                    newDiscoveryCache()) == 0
+
+  test "the usage text documents the untracked mode":
+    let usage = ctTestUsageMessage()
+    check "--untracked reads|strict" in usage
+    check "[certificate] untracked" in usage
+    check "no read set was captured" in usage
 
 # Module level, not an exit hook (see 5175da85f).
 try: removeDir(storeScratch)

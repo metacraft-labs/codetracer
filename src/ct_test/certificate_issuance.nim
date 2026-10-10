@@ -90,10 +90,16 @@
 ##   file the tests actually read yields a certificate that is formally clean
 ##   and substantively false. It gets its own milestone.
 ##
-## * **Withholding because the run READ an untracked file.** Standard.md §3.2
-##   binds a producer that knows its tests consumed one; this run path
-##   collects no read set, so it does not know, and reports ``untracked``
-##   honestly instead.
+## * **A read set on the ``test run`` path.** Standard.md §3.2 binds a
+##   producer that KNOWS its tests consumed an untracked file. The check is
+##   here (``judgeUntracked``, below), but ``runAndAttest`` drives providers
+##   that report test events and nothing about the files a test opened, so
+##   no read set reaches it today: in the default mode a run with untracked
+##   files issues with ``untracked = true`` and its report says that no read
+##   set was captured, so they could not be judged. The read-file evidence
+##   that does exist is the incremental engine's (``incremental_cli``, its
+##   ``native_readfiles.json`` projection), and that path issues no
+##   certificate. See "UNTRACKED FILES" below.
 ##
 ## ============================================================================
 ## WHAT A CERTIFICATE IS BOUND TO, AND WHEN THAT IS MEASURED
@@ -125,11 +131,45 @@
 ## nothing about them is configurable by a caller beyond making them FAIL (a
 ## capture bound): no caller-supplied value reaches ``content``, ``untracked``
 ## or ``base``.
+##
+## ============================================================================
+## UNTRACKED FILES (CTC-3g)
+## ============================================================================
+##
+## Untracked files are outside ``content``, so a test that read one ran
+## against something the certificate does not name. Two modes, chosen by
+## ``IssuanceOptions.untrackedMode`` (``[certificate] untracked`` in
+## ``.codetracer/test.toml``, or ``--untracked``):
+##
+## * ``reads`` (the default) withholds with ``wrUntrackedInput`` only when a
+##   read set the RUN CAPTURED names an untracked, non-ignored file. With no
+##   read set it issues and reports ``untracked = true``, and says that no
+##   read set was captured — it never guesses which files were read.
+## * ``strict`` withholds whenever any untracked, non-ignored file exists in
+##   scope (the whole repository; ``paths`` is never written), before or
+##   after the run, naming them. It needs no read set.
+##
+## When ``.codetracer/test.toml`` cannot be used and ``--untracked`` was not
+## given, there is no mode: the tests still run, and issuance withholds with
+## ``wrUntrackedModeUnresolved``, naming the file, rather than choose one.
+##
+## The mode can only make issuance withhold; it changes no field of the
+## record. The read set reaches ``judgeUntracked`` from the run alone — a
+## private field of ``AttestedRun`` — never from a caller, so §6.2's guarantee
+## is not widened. ``judgeUntracked`` itself is exported because it is a pure
+## decision over values (it neither runs nor signs), so the policy can be
+## checked against a read set the real capture code produced.
 
-import std/[options, os, strutils, tables, times]
+import std/[algorithm, options, os, sequtils, sets, strutils, tables, times]
 
 import contracts
 import certificate
+import ../common/project_definitions/model as project_model
+import incremental/native_readfiles
+
+# ``IssuanceOptions.untrackedMode``'s type, declared with the configuration
+# file that selects it.
+export project_model.UntrackedMode
 import certificate_content_id
 import certificate_content_id_native
 import discovery
@@ -192,6 +232,16 @@ type
       ## build picked up, so it is reported rather than hidden (Standard.md
       ## §3.2). In an issuance's report, ``true`` when they were present
       ## before the run or after it.
+    untrackedPaths*: seq[string]
+      ## The untracked, non-ignored entries ``git status`` listed,
+      ## repository-relative with ``/`` separators, sorted. An untracked
+      ## directory is one entry ending in ``/`` (git lists it whole), and it
+      ## covers every file below it. In an issuance's report, the entries
+      ## present before the run or after it.
+    root*: string
+      ## The repository's top-level directory, as git reports it. A read
+      ## set names absolute paths, and this is what places them in the
+      ## repository.
     base*: string
       ## ``HEAD`` when there is a commit checked out; empty on an unborn
       ## branch, where the record omits ``base`` (Standard.md §3.2.3).
@@ -220,8 +270,41 @@ type
     wrSubmoduleModified
       ## A submodule has modified content, which its gitlink does not
       ## describe (Content-Id.md §3).
+    wrUntrackedInput
+      ## Default mode: a read set the run captured names an untracked file.
+      ## Strict mode: an untracked, non-ignored file exists in scope
+      ## (CTC-3g; Standard.md §3.2).
+    wrUntrackedModeUnresolved
+      ## No untracked-files mode could be chosen: ``.codetracer/test.toml``
+      ## exists and cannot be used, and ``--untracked`` was not given
+      ## (CTC-3g). The tests still ran; only the claim is withheld, because
+      ## issuing under a mode nobody chose would be the guess this gate
+      ## exists to avoid.
     wrSigningFailed
     wrRecordNotRenderable
+
+  ReadSet* = object
+    ## The files a run read, as the run itself captured them — or the
+    ## statement that it captured none. ``captured = false`` is NOT an empty
+    ## read set: it means "unknown", and the default mode then issues rather
+    ## than guess.
+    captured*: bool
+    paths*: seq[string]
+      ## Absolute paths, as the capture recorded them.
+    source*: string
+      ## Where the set came from, or why there is none; for the report.
+
+  UntrackedJudgement* = object
+    ## What the untracked-files rule decided for one issuance.
+    withhold*: bool
+    mode*: UntrackedMode
+    readSetCaptured*: bool
+    offending*: seq[string]
+      ## Strict mode: every untracked entry. Default mode: the untracked
+      ## files the read set names (repository-relative).
+    note*: string
+      ## Default mode with untracked files and no read set: says they could
+      ## not be judged. Empty otherwise.
 
   Issuance* = object
     ## The outcome of asking a concluded run for a certificate.
@@ -240,6 +323,10 @@ type
     remedy*: string
       ## What would make this run issuable. Empty when issued.
     vcs*: VcsProbe
+    untracked*: UntrackedJudgement
+      ## The untracked-files rule's decision, when it was reached (the run
+      ## passed and the content was established); ``mode`` is always the one
+      ## in force.
 
   IssuanceOptions* = object
     ## Everything about issuance that is a deployment choice rather than a
@@ -265,6 +352,14 @@ type
     issuedAt*: string
       ## Overrides the timestamp. Empty means "now, UTC, ``Z``". Present so a
       ## test can pin the payload bytes; production leaves it empty.
+    untrackedMode*: UntrackedMode
+      ## ``umReads`` (the default) or ``umStrict`` (CTC-3g). It can only make
+      ## issuance WITHHOLD; it changes no field of the record.
+    untrackedModeProblem*: string
+      ## Non-empty when the mode could not be resolved (an unusable
+      ## ``.codetracer/test.toml``; CTC-3g): why, naming the file. Issuance
+      ## then withholds with ``wrUntrackedModeUnresolved`` rather than pick a
+      ## mode. Like ``untrackedMode`` it can only make issuance withhold.
     gitCaptureLimit*: int
       ## Per-stream capture bound for the VCS probe's git calls; ``0`` means
       ## ``ContentIdCaptureLimit``. It can only make the probe FAIL — an
@@ -449,11 +544,12 @@ proc probeVcs*(workspaceRoot: string; captureLimit = 0): VcsProbe =
     return undetermined(
       "untracked files could not be checked in '" & repoRoot & "': " &
       statusProblem)
-  var untracked = false
+  var untrackedPaths: seq[string]
   for record in status.stdout.split('\0'):
     if record.startsWith("?? "):
-      untracked = true
-      break
+      untrackedPaths.add record[3 .. ^1]
+  untrackedPaths.sort(system.cmp[string])
+  let untracked = untrackedPaths.len > 0
 
   # `content`: always computed by real git, through the one content-id recipe
   # (Content-Id.md §4.1, in a temporary index), never accepted from a caller.
@@ -466,6 +562,7 @@ proc probeVcs*(workspaceRoot: string; captureLimit = 0): VcsProbe =
                                  format.algorithm)
   result = VcsProbe(probed: true, determined: true,
                     repo: repoRoot.lastPathPart, untracked: untracked,
+                    untrackedPaths: untrackedPaths, root: repoRoot,
                     base: base)
   case content.outcome
   of cioComputed:
@@ -476,6 +573,87 @@ proc probeVcs*(workspaceRoot: string; captureLimit = 0): VcsProbe =
     return undetermined(
       "the content id of the tracked files could not be computed: " &
       content.reason)
+
+# ---------------------------------------------------------------------------
+# Untracked files: the read set and the judgement (CTC-3g)
+# ---------------------------------------------------------------------------
+
+const
+  NoReadSetOnRunPath* =
+    "the `ct test run` path does not capture the files its tests read"
+    ## Why ``runAndAttest`` has no read set today: providers report test
+    ## events, not the files a test opened.
+
+proc readSetFromProjection*(dir: string): ReadSet =
+  ## The read set in ``<dir>/native_readfiles.json`` — the projection the
+  ## incremental engine's read-file capture writes, whichever source produced
+  ## it (an MCR/rr recording, or io-mon's live capture of a materialized
+  ## recorder's run; ``incremental/io_mon_capture.nim``). This is the form a
+  ## run path that captures reads will hand ``judgeUntracked``.
+  ##
+  ## A projection that is missing or unreadable is ``captured = false``,
+  ## never an empty set: an empty set says "read nothing", and nothing here
+  ## knows that.
+  let reads = readFileDepsNative(dir)
+  if reads.isErr:
+    return ReadSet(captured: false,
+                   source: "no usable read set in '" & dir & "': " & reads.error)
+  result = ReadSet(captured: true, source: dir / NativeReadFilesFile)
+  for read in reads.get:
+    result.paths.add read.path
+
+proc canonicalPath(path: string): string =
+  ## ``path`` with symbolic links resolved where it exists, so a read
+  ## recorded through a link (``/tmp`` on macOS, a symlinked checkout) is
+  ## placed in the repository git reports by its real path.
+  try:
+    result = expandFilename(path)
+  except OSError:
+    result = normalizedPath(absolutePath(path))
+
+proc repositoryRelative(root, path: string): string =
+  ## ``path`` relative to ``root`` with ``/`` separators, or ``""`` when it
+  ## is not inside the repository.
+  let base = canonicalPath(root)
+  let full = canonicalPath(path)
+  if full.len <= base.len + 1 or not full.startsWith(base) or
+     full[base.len] notin {DirSep, AltSep}:
+    return ""
+  full[base.len + 1 .. ^1].replace(DirSep, '/')
+
+proc judgeUntracked*(mode: UntrackedMode; root: string;
+                     untrackedEntries: openArray[string];
+                     readSet: ReadSet): UntrackedJudgement =
+  ## The untracked-files rule (module header, "UNTRACKED FILES"), as a pure
+  ## decision over the repository's untracked entries (``git status``'s,
+  ## repository-relative; a directory ends in ``/`` and covers what is below
+  ## it) and the run's read set. It runs nothing and signs nothing.
+  result = UntrackedJudgement(mode: mode, readSetCaptured: readSet.captured)
+  case mode
+  of umStrict:
+    result.offending = @untrackedEntries
+    result.withhold = result.offending.len > 0
+  of umReads:
+    if not readSet.captured:
+      if untrackedEntries.len > 0:
+        result.note = "no read set was captured for this run (" &
+          readSet.source & "), so whether its tests read the untracked " &
+          "files could not be judged; the certificate reports " &
+          "untracked = true"
+      return
+    var seen = initHashSet[string]()
+    for path in readSet.paths:
+      let relative = repositoryRelative(root, path)
+      if relative.len == 0:
+        continue
+      for entry in untrackedEntries:
+        let covers =
+          if entry.endsWith("/"): relative.startsWith(entry)
+          else: relative == entry
+        if covers and not seen.containsOrIncl(relative):
+          result.offending.add relative
+    result.offending.sort(system.cmp[string])
+    result.withhold = result.offending.len > 0
 
 # ---------------------------------------------------------------------------
 # The attested run — PRIVATE from here down to `runAndAttest`
@@ -522,6 +700,11 @@ type
       ## records is one the whole run executed against (Standard.md §3.2).
       ## Private like every other field: a caller cannot hand the issuance a
       ## "before" of its choosing.
+    readSet: ReadSet
+      ## The files the run read, as the run captured them (CTC-3g). Private
+      ## for the same reason: a caller cannot hand the issuance a read set
+      ## that leaves out the untracked file its tests opened. No run path
+      ## captures one today, so ``runAndAttest`` records why there is none.
 
 proc beginAttestedRun(workspaceRoot, project, platform: string): AttestedRun =
   AttestedRun(
@@ -679,8 +862,9 @@ proc signCanonicalPayload(payload, keyPath: string):
   ## produces a certificate signature. Exposing it, by any of those three
   ## spellings, would be precisely the "sign this blob" interface
   ## Standard.md §6.2 forbids and would make every certificate this producer
-  ## has ever issued worthless. Its single call site is ``issueCertificate``,
-  ## below, past the gate that requires a concluded, fully-passing run.
+  ## has ever issued worthless. Its single call site is ``recordAndSign``,
+  ## below, reached only from ``issueCertificate`` past the gates that
+  ## require a concluded, fully-passing run.
   ##
   ## Domain separation is not optional: without the namespace, a signature a
   ## developer obtained for another purpose (OpenSSH uses ``git`` for commit
@@ -802,6 +986,9 @@ proc utcNowZ(): string =
   ## (Canonical-Payload.md §2 rule 10).
   now().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
 
+proc recordAndSign(run: AttestedRun; options: IssuanceOptions;
+                   vcs: VcsProbe): Issuance
+
 proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
   ## Issue a certificate for a concluded run — or withhold one, saying why and
   ## what would make it issuable.
@@ -880,6 +1067,11 @@ proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
     vcs.contentBefore = before.content
     # Untracked files present at either point were present during the run.
     vcs.untracked = vcs.untracked or before.untracked
+    var entries = toHashSet(vcs.untrackedPaths)
+    for entry in before.untrackedPaths:
+      entries.incl entry
+    vcs.untrackedPaths = toSeq(entries)
+    vcs.untrackedPaths.sort(system.cmp[string])
   if not before.determined:
     let reason =
       if before.probed: before.undeterminedReason
@@ -912,6 +1104,51 @@ proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
       "temporary files only",
       vcs)
 
+  # ---- Gate 3: untracked files (CTC-3g) -----------------------------------
+  if options.untrackedModeProblem.len > 0:
+    return withheld(wrUntrackedModeUnresolved,
+      options.untrackedModeProblem,
+      "fix .codetracer/test.toml (`[certificate] untracked` is \"reads\" or " &
+      "\"strict\"), or pass `--untracked reads|strict`, which makes the " &
+      "file unnecessary; then run `ct test` again",
+      vcs)
+  let judgement = judgeUntracked(options.untrackedMode, vcs.root,
+                                 vcs.untrackedPaths, run.readSet)
+  if judgement.withhold:
+    var refused =
+      case judgement.mode
+      of umStrict:
+        withheld(wrUntrackedInput,
+          "untracked files exist in the repository, and the untracked mode " &
+          "is \"strict\", which withholds on any: " &
+          judgement.offending.join(", "),
+          "add each file the tests need (`git add " &
+          judgement.offending.join(" ") & "`) and ignore (.gitignore) or " &
+          "delete the rest, then run `ct test` again. The mode is " &
+          "`[certificate] untracked` in .codetracer/test.toml or " &
+          "`--untracked`; \"reads\" withholds only for untracked files a " &
+          "captured read set shows the tests read",
+          vcs)
+      of umReads:
+        withheld(wrUntrackedInput,
+          "the tests read untracked files, which are not part of the " &
+          "content a certificate names: " & judgement.offending.join(", ") &
+          " (read set: " & run.readSet.source & ")",
+          "add the file (`git add " & judgement.offending.join(" ") &
+          "`) so its content is part of what is certified, or, if it is " &
+          "generated or machine-local, ignore it (.gitignore); then run " &
+          "`ct test` again",
+          vcs)
+    refused.untracked = judgement
+    return refused
+
+  result = recordAndSign(run, options, vcs)
+  result.untracked = judgement
+
+proc recordAndSign(run: AttestedRun; options: IssuanceOptions;
+                   vcs: VcsProbe): Issuance =
+  ## The record for a run that passed every gate, signed when a key was
+  ## configured. Private, and called only from ``issueCertificate``.
   # ---- The record --------------------------------------------------------
   var cert = TestCertificate(
     schema: CertificateSchema,
@@ -1045,6 +1282,9 @@ proc runAndAttest*(registry: var ProviderRegistry;
     response.workspaceRoot, response.workspaceRoot.lastPathPart,
     currentPlatform())
   run.before = before
+  # No run path captures the files its tests read (module header), so the
+  # default untracked mode cannot judge them, and the report says so.
+  run.readSet = ReadSet(captured: false, source: NoReadSetOnRunPath)
   for argv in invocations:
     run.recordExecutedCommand(argv)
 
@@ -1057,3 +1297,4 @@ proc runAndAttest*(registry: var ProviderRegistry;
   run.concludeAttestedRun()
 
   result.issuance = issueCertificate(run, options)
+  result.issuance.untracked.mode = options.untrackedMode

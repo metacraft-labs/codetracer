@@ -242,9 +242,13 @@ type
     file: string
     declared: bool
     targets: seq[string]
+    untrackedDeclared: bool
+    untrackedMode: UntrackedMode
 
 proc readTestConfiguration(host: ContentIdHost; toplevel, scope: string;
-                           options: VerifyOptions): ConfigRead =
+                           options: VerifyOptions;
+                           consequence = "so no requirement is assumed"):
+    ConfigRead =
   ## ``<scope>/.codetracer/test.toml`` as the evaluated state has it, through
   ## the project-definitions loader. Only this one constant name is read.
   let reported = definitionPath(scope, dfkTest)
@@ -299,13 +303,75 @@ proc readTestConfiguration(host: ContentIdHost; toplevel, scope: string;
     for problem in refused:
       rendered.add render(problem)
     return ConfigRead(file: reported, problem: "the ct test configuration '" &
-      reported & "' could not be used, so no requirement is assumed: " &
+      reported & "' could not be used, " & consequence & ": " &
       rendered.join("; "))
   let found = testConfigurationFor(loaded.project, scope)
   result.ok = true
   if found.found and found.config.certificateTargetsDeclared:
     result.declared = true
     result.targets = found.config.certificateTargets
+  if found.found and found.config.untrackedModeDeclared:
+    result.untrackedDeclared = true
+    result.untrackedMode = found.config.untrackedMode
+
+type
+  UntrackedModeSource* = enum
+    usDefault = "default"
+      ## Neither the command line nor the configuration chose one.
+    usFlag = "--untracked"
+    usConfiguration = "configuration"
+      ## ``[certificate] untracked`` in ``.codetracer/test.toml``.
+
+  ResolvedUntrackedMode* = object
+    ok*: bool
+    problem*: string
+      ## Why no mode could be chosen: the configuration file exists and
+      ## cannot be used. Never answered with the default.
+    mode*: UntrackedMode
+    source*: UntrackedModeSource
+    file*: string
+      ## The configuration file consulted, repository-relative; empty when
+      ## the command line made it unnecessary.
+
+proc resolveUntrackedMode*(workspace: string; flagGiven: bool;
+                           flagMode: UntrackedMode): ResolvedUntrackedMode =
+  ## The untracked-files mode for a ``ct test run`` of ``workspace``
+  ## (CTC-3g): ``--untracked`` when given, else ``[certificate] untracked``
+  ## in the workspace's ``.codetracer/test.toml``, else ``reads``.
+  ##
+  ## The file is read as ``ct test verify --worktree`` reads it — from the
+  ## working tree, which is the state a run tests and certifies — through
+  ## the same reader, so the two commands cannot disagree about what a
+  ## configuration says or about which files are unusable. A file that
+  ## exists and cannot be used (an unknown schema, key or mode, a malformed
+  ## value) is ``ok = false`` and names the file: the caller reports it
+  ## before any test runs, and never picks a mode in its place.
+  if flagGiven:
+    return ResolvedUntrackedMode(ok: true, mode: flagMode, source: usFlag)
+  let host = nativeContentIdHost()
+  # Placed as `verify` places a workspace: the repository root and the
+  # workspace's path inside it. Outside a repository the workspace is its own
+  # root; the run withholds there anyway, but a broken file is still named.
+  var toplevel = workspace
+  var scope = ""
+  let top = git(host, workspace, ["rev-parse", "--show-toplevel"])
+  if top.exitCode == 0 and top.complete:
+    let prefixReply = git(host, workspace, ["rev-parse", "--show-prefix"])
+    if prefixReply.exitCode == 0 and prefixReply.complete:
+      toplevel = oneLine(top)
+      scope = oneLine(prefixReply)
+      if scope.endsWith("/"):
+        scope.setLen(scope.len - 1)
+  let config = readTestConfiguration(host, toplevel, scope,
+    VerifyOptions(state: vskWorktree, workspace: workspace),
+    "so no untracked-files mode is assumed")
+  if not config.ok:
+    return ResolvedUntrackedMode(problem: config.problem, file: config.file)
+  if config.untrackedDeclared:
+    return ResolvedUntrackedMode(ok: true, mode: config.untrackedMode,
+                                 source: usConfiguration, file: config.file)
+  ResolvedUntrackedMode(ok: true, mode: umReads, source: usDefault,
+                        file: config.file)
 
 # ---------------------------------------------------------------------------
 # The requirement
