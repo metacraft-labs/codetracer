@@ -186,8 +186,8 @@ proc lastPathSegment(path: string): string =
   ##
   ## Written out rather than taken from `std/os`, which does not exist on the
   ## JS backend. Trailing separators are stripped first so `/a/b/` and `/a/b`
-  ## name the same repository — otherwise a workspace root that happens to
-  ## carry one would compare unequal to every certificate ever issued for it.
+  ## name the same repository. The name is informational — it is never
+  ## compared with a record's `vcs.repo` (`certificate_indicator_vm`).
   var last = path.len - 1
   while last >= 0 and (path[last] == '/' or path[last] == '\\'):
     dec last
@@ -354,8 +354,10 @@ proc workspaceVcsState*(host: Platform; workspaceDir: string):
     known: true,
     # The repository root's directory name -- the same source the producer
     # uses for `vcs.repo` (`certificate_issuance.probeVcs`: the toplevel's
-    # last path part). Requiring the two to match is this consumer's choice
-    # (Verification.md §4.1), not the binding: content alone is.
+    # last path part). Informational: requiring the two to match would be
+    # this consumer's choice (Verification.md §4.1), and it chooses not to —
+    # content alone binds, so a clone under another directory name shares
+    # certificates (`certificate_verification.verifyCertificates`).
     repo: lastPathSegment(root.value),
     workingTree: w.oracle,
     head: factsOf(vbsHead).oracle,

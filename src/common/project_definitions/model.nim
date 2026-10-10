@@ -229,6 +229,31 @@ type
     file*: string
     order*: int
 
+  TestConfiguration* = object
+    ## `test.toml` — `ct test`'s committed configuration (§6; CTC-3f).
+    ##
+    ## ONE PER `.codetracer/`, AND NOT COMPOSED. A target is a test file named
+    ## relative to the directory holding this `.codetracer/` (the workspace
+    ## `ct test` is pointed at), so an ancestor's list names files relative to
+    ## a DIFFERENT root and inheriting it would be wrong rather than merely
+    ## surprising. Every well-formed file therefore becomes its own record,
+    ## and a consumer picks the one for its own scope
+    ## (`load.testConfigurationFor`).
+    certificateTargetsDeclared*: bool
+      ## Whether `[certificate] targets` was WRITTEN. `false` means "no
+      ## declared list" — the file is absent or does not carry the key — and
+      ## `ct test verify` then requires every discovered target that can run
+      ## on this platform. A refused file produces no record at all, so a
+      ## caller can never read a broken file as "no declared list".
+    certificateTargets*: seq[string]
+      ## The declared list, in file order, every entry a contained path
+      ## (`containment.pathProblem`), none repeated, never empty when
+      ## declared. Compared with a certificate's `targets` as strings; never
+      ## opened.
+    origin*: DefinitionOrigin
+    scope*: string
+    file*: string
+
   ProjectDefinitions* = object
     ## Everything one load produced. §6's separation is STRUCTURAL: the
     ## project's records and the user's are two fields, and there is no
@@ -237,6 +262,9 @@ type
     collections*: seq[PointCollection]
     visualisers*: seq[VisualiserRule]
     diffs*: seq[DiffSelection]
+    tests*: seq[TestConfiguration]
+      ## One per scope that carried a well-formed `test.toml`; see
+      ## `TestConfiguration` for why they are not composed.
 
   LoadedProjectDefinitions* = object
     ## The result of reading a checkout's definitions, and the user's.

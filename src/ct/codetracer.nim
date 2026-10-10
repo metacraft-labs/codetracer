@@ -146,7 +146,9 @@ try:
       # only on the two literal verbs, so `ct test --incremental …` and
       # `ct test e2e …` keep their existing behaviour byte for byte.
       # `runCtTestCli` wants the full vector including the leading "test".
-      if testArgs.len > 0 and testArgs[0] in ["discover", "run"]:
+      # `verify` (CTC-3f) joined them: `ct test verify --staged` is the line a
+      # project puts in its pre-commit hook.
+      if testArgs.len > 0 and testArgs[0] in ["discover", "run", "verify"]:
         quit(runCtTestCli(args))
       quit(runE2eTestCli(testArgs))
 

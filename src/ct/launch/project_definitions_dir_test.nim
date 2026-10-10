@@ -56,12 +56,13 @@ import std/[os, sets, strutils, unittest]
 
 import ./project_definitions_dir
 
-const ExpectedAssertions = 103
+const ExpectedAssertions = 116
   ## Verification-Harness-Traps §4c: written from a run, because a suite that
   ## stops asserting is a suite whose count moves. 99 from 2026-09-11's
   ## containment repair; 103 with 2026-09-12's segment-vs-substring case, which
   ## turned one refusal that was asserting a defect into five assertions that
-  ## assert the repair and the containment it did not loosen.
+  ## assert the repair and the containment it did not loosen; 116 with
+  ## 2026-10-10's `test.toml` single-file reader case (CTC-3f).
 
 var countedAssertions = 0
 
@@ -321,6 +322,48 @@ suite "PLAT-11: opening a repository containing definitions executes nothing":
     ck ".codetracer/session-1.trace" notin strayNames
     ck ".codetracer/config.yaml" notin strayNames
     ckEq strayNames.len, 2
+
+  test "ct test's reader opens test.toml and no other name under .codetracer/":
+    # CTC-3f: `ct test verify` reads its one file through
+    # `readCheckoutDefinition`, so a broken or hostile neighbour can neither
+    # change its answer nor make it fail. The neighbours here would each be
+    # refused if they were read; none is.
+    let root = freshRoot("ct-test-config")
+    defer: removeDir(root)
+    writeDefinition(root, "", "test.toml",
+      "schema = \"codetracer.test.v1\"\n[certificate]\n" &
+      "targets = [\"tests/a_test.nim\"]\n")
+    writeDefinition(root, "", "points.toml", HostilePoints)
+    writeDefinition(root, "", "visualisers.toml", HostileVisualisers)
+    writeFile(root / ".codetracer/tests.toml", "this is not toml at all")
+    writeFile(root / ".codetracer/visualisers.wasm", "\0asm")
+    let scan = readCheckoutDefinition(root, "", dfkTest)
+    ckEq scan.problems.len, 0
+    ckEq scan.files.len, 1
+    ckEq scan.files[0].path, ".codetracer/test.toml"
+    ckEq scan.files[0].kind, dfkTest
+    let loaded = loadProjectDefinitions(scan.files)
+    ck loaded.isOk()
+    let config = testConfigurationFor(loaded.project, "")
+    ck config.found
+    ckEq config.config.certificateTargets, @["tests/a_test.nim"]
+    # Absent: no file, no problem — "no declared list".
+    let empty = freshRoot("ct-test-config-absent")
+    defer: removeDir(empty)
+    let none = readCheckoutDefinition(empty, "", dfkTest)
+    ckEq none.files.len, 0
+    ckEq none.problems.len, 0
+    # A nested workspace reads ITS OWN file, under its scope.
+    writeDefinition(root, "packages/api", "test.toml",
+      "schema = \"codetracer.test.v1\"\n")
+    let nested = readCheckoutDefinition(root, "packages/api", dfkTest)
+    ckEq nested.files.len, 1
+    ckEq nested.files[0].path, "packages/api/.codetracer/test.toml"
+    ckEq nested.files[0].scope, "packages/api"
+    # And a scope that leaves the checkout is refused before anything is
+    # joined to the root.
+    ckRefused readCheckoutDefinition(root, "../elsewhere", dfkTest).problems,
+              pdcScopeEscapesProject
 
   test "a repository with no .codetracer/ at all is silent and ok":
     # Almost every repository. A message on every launch would be noise, and

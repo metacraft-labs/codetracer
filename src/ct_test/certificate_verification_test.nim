@@ -144,6 +144,27 @@ suite "the verifier matches by content":
       check call == "git-tree-sha1 "
     check not compiles(EvaluatedState(commit: HeadCommit))
 
+  test "vcs.repo is informational: another repository name does not stop a match":
+    ## Verification.md §4.1 makes comparing `vcs.repo` the consumer's choice;
+    ## `ct test` and the status bar decline it (2026-10-10), because the only
+    ## name they have is a clone's directory name and a sibling clone under
+    ## another name holds the same content (Transport.md §2.2).
+    var renamed = record(W)
+    renamed.vcs.repo = "a-differently-named-clone"
+    let covered = verifyCertificates(stateFor(Asked()), requirement(),
+      [candidate("renamed.toml", renamed)], KeyStore())
+    checkpoint $covered.outcome & " — " & covered.reason
+    check covered.outcome == ocCovered
+    check covered.rejected.len == 0
+    # Content still decides: the same foreign name over other content is not.
+    var elsewhere = record(OtherContent)
+    elsewhere.vcs.repo = "a-differently-named-clone"
+    let notCovered = verifyCertificates(stateFor(Asked()), requirement(),
+      [candidate("elsewhere.toml", elsewhere)], KeyStore())
+    check notCovered.outcome == ocNotCovered
+    check notCovered.rejected.names == @["elsewhere.toml"]
+    check "vcs.content" in notCovered.rejected[0].why
+
   test "a scoped record is matched against the content of its own scope":
     ## The scope is the certificate's, sorted and deduplicated, and the
     ## whole-repository id is NOT what a scoped record is compared with.

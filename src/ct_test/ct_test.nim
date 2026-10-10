@@ -6,6 +6,7 @@ import run_orchestration
 import certificate
 import certificate_issuance
 import certificate_local_store
+import certificate_verify_cli
 import frameworks/ada_fallback
 import frameworks/assembly_fallback
 import frameworks/crystal_spec
@@ -84,7 +85,9 @@ proc ctTestUsageMessage*(): string =
   "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
   "[--threads N] [--json] [--summary <path>] " &
   "[--no-certificate] " &
-  "[--sign-key <path> --key-id <id>]); " &
+  "[--sign-key <path> --key-id <id>] " &
+  "| verify (--staged | --worktree | --commit <rev>) [--workspace <path>] " &
+  "[--targets <t>[,<t>...]] [--platform <p>[,<p>...]] [--json]); " &
   "a passing run issues a test certificate (schema " & CertificateSchema &
   ", framework " & CtTestFramework & ") in the run summary and PUBLISHES it " &
   "to your local certificate store — `$TEST_CERTIFICATES_DIR` when it is an " &
@@ -117,7 +120,26 @@ proc ctTestUsageMessage*(): string =
   "`run` exits 0 when a test ran and all passed, 1 when a test ran and one " &
   "did not, and 2 when NO test ran at all — a run that executed nothing is " &
   "not a passing run, and the stderr verdict says which of the four causes " &
-  "it was"
+  "it was; " &
+  "`verify` asks whether the certificates in the local certificate store " &
+  "(both roots) cover ONE state — `--staged` (the index being committed, " &
+  "exactly the tree a commit will record, including inside a pre-commit " &
+  "hook), `--worktree` (the tracked files as they are) or `--commit <rev>` " &
+  "— evaluating only framework " & CtTestFramework & " records (others are " &
+  "reported as ignored) for this platform (`--platform` overrides) and, as " &
+  "targets, `--targets` when given, else `[certificate] targets` in the " &
+  "workspace's committed `.codetracer/test.toml` as that state has it, else " &
+  "every target `discover` reports that can run here; coverage is the " &
+  "union of every matching certificate; it exits 0 covered, 1 not covered " &
+  "(its one stderr line says whether NO certificate was found for that " &
+  "content or records were found and none matched), 2 could not decide " &
+  "(a state with no content id, a record it cannot evaluate, an unreadable " &
+  "store or `.codetracer/test.toml`); " &
+  "as an OPTIONAL pre-commit gate it is one line, `" & PreCommitHookCommand &
+  "`, placed LAST in `.git/hooks/pre-commit`: it is the early answer, not " &
+  "the enforcement point (`git commit --no-verify` skips it), and it must " &
+  "run after every hook step that rewrites staged content, because a step " &
+  "that stages a rewrite after it produces a commit the gate never saw"
 
 proc errorResponse(message: string): DiscoverResponse =
   DiscoverResponse(
@@ -460,10 +482,15 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
 
 proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
     cache: DiscoveryCache): int =
-  ## CLI entry point. Dispatches the ``test <verb>`` surface; ``discover`` and
-  ## ``run`` are implemented. Unknown verbs produce a usage diagnostic.
+  ## CLI entry point. Dispatches the ``test <verb>`` surface; ``discover``,
+  ## ``run`` and ``verify`` are implemented. Unknown verbs produce a usage
+  ## diagnostic.
   if args.len >= 2 and args[0] == "test" and args[1] == "discover":
     return runDiscover(if args.len > 2: args[2 .. ^1] else: @[], registry, cache)
+  if args.len >= 2 and args[0] == "test" and args[1] == "verify":
+    # Single-threaded (discovery at most), so unlike `run` it is safe on the
+    # `ct` binary's refc build.
+    return runVerify(if args.len > 2: args[2 .. ^1] else: @[], registry, cache)
   if args.len >= 2 and args[0] == "test" and args[1] == "run":
     # `run` executes the discovered tests on a worker pool
     # (``run_orchestration.runUnits``), and the workers share the

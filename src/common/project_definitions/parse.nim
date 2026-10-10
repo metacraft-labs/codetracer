@@ -34,10 +34,11 @@
 ##      `project_definitions_test` asserts the accepted-key set against a
 ##      literal, so ADDING a key that names a program turns the suite red
 ##      before it can turn a user's machine into someone else's.
-##   2. **No accepted value is a path to something loadable.** The only
-##      path-shaped value in the grammar is a point's `path`, which is a
-##      SOURCE file to put a breakpoint in, is `containment`-checked, and is
-##      never opened by anything in this package.
+##   2. **No accepted value is a path to something loadable.** The
+##      path-shaped values in the grammar are a point's `path`, which is a
+##      SOURCE file to put a breakpoint in, and `test.toml`'s `targets`, test
+##      file names compared as strings; both are `containment`-checked, and
+##      neither is opened by anything in this package.
 ##   3. **The file set is a constant** (`layout.nim`): nothing a definition
 ##      says can cause any other file to be opened. There is no `include`, no
 ##      `extends`, no `natvisFile`.
@@ -85,6 +86,8 @@ type
     tiCollectionPoint ## `[[collection.point]]`
     tiVisualiser      ## `[[visualiser]]`
     tiDiff            ## `[[diff]]`
+    tiRootTest        ## the top level of `test.toml` (CTC-3f)
+    tiTestCertificate ## `[certificate]` in `test.toml`
 
 const
   AcceptedKeys*: array[TableId, seq[string]] = [
@@ -104,6 +107,10 @@ const
       "mediaFrom"],
     # tiDiff
     @["match", "matchKind", "algorithm", "tolerance"],
+    # tiRootTest
+    @["schema", "certificate"],
+    # tiTestCertificate
+    @["targets"],
   ]
     ## THE WHOLE GRAMMAR, in one place a reader can audit in ten seconds.
     ##
@@ -114,10 +121,13 @@ const
     ## the "unrecognised, ignored" arm this file exists not to have, arriving
     ## through the table name instead of through a key.
     ##
-    ## Twenty-nine keys. Not one of them takes a program name, a command line,
+    ## Thirty-two keys. Not one of them takes a program name, a command line,
     ## an interpreter, a shell, a library, a URL, or a path to anything that
     ## is loaded rather than displayed. `path` is a SOURCE file a breakpoint
-    ## goes in; `mediaFrom` is a field name inside a recorded value.
+    ## goes in; `mediaFrom` is a field name inside a recorded value; `targets`
+    ## (`test.toml`, CTC-3f) are test file names a certificate's `targets` are
+    ## compared with as strings — `ct test` runs what DISCOVERY finds, never
+    ## what this list names, so the list cannot make anything run.
     ##
     ## `project_definitions_test` asserts this array against a literal copy.
     ## That is deliberately a second copy of the data — the one place in this
@@ -368,6 +378,7 @@ proc rootTableFor(k: DefinitionFileKind): TableId =
   of dfkPoints: tiRootPoints
   of dfkVisualisers: tiRootVisualisers
   of dfkScratchpad: tiRootScratchpad
+  of dfkTest: tiRootTest
   of dfkVisualiserCode, dfkDiffCode: tiRootPoints
 
 proc checkKeys(r: var FileReader; node: TomlNode; table: TableId;
@@ -757,6 +768,77 @@ proc readScratchpad(r: var FileReader; root: TomlNode;
       continue
     into.add d
 
+proc readTest(r: var FileReader; root: TomlNode;
+              into: var seq[TestConfiguration]) =
+  ## `test.toml`: `ct test`'s committed configuration (CTC-3f).
+  ##
+  ## ALL OR NOTHING, unlike the three files above. Their entries are
+  ## independent, so a refused entry leaves the rest usable; this file is ONE
+  ## answer — "which targets must a commit's certificates cover" — and a list
+  ## with one bad entry dropped is a requirement nobody wrote. So any problem
+  ## refuses the whole file, it contributes no record, and `ct test verify`
+  ## reports it and exits 2 rather than falling back to every discovered
+  ## target (a broken file read as "no declared list" would silently widen or
+  ## narrow the gate).
+  var config = TestConfiguration(origin: r.file.origin, scope: r.file.scope,
+                                 file: r.file.path)
+  let certificate = root.field("certificate")
+  if certificate != nil:
+    if certificate.kind != tomlTable:
+      r.note(pdcWrongType, "'certificate' must be a [certificate] table")
+      return
+    if not r.checkKeys(certificate, tiTestCertificate, "[certificate]"):
+      return
+    let targets = certificate.field("targets")
+    if targets != nil:
+      if targets.kind != tomlArray:
+        r.note(pdcWrongType,
+          "[certificate]'s 'targets' must be an array of test file names, " &
+          "e.g. targets = [\"tests/a_test.nim\"]")
+        return
+      if targets.items.len == 0:
+        # Refused rather than read as "require nothing": a gate that every
+        # commit passes is not a configuration anyone means to write, and
+        # leaving the key out already says "require what discovery finds".
+        r.note(pdcMissingField,
+          "[certificate]'s 'targets' is empty. Leave the key out to require " &
+          "every discovered target that can run on this platform; an empty " &
+          "list would require nothing, so every commit would pass")
+        return
+      if targets.items.len > MaxCertificateTargets:
+        r.note(pdcTooManyEntries,
+          "[certificate] declares " & $targets.items.len & " targets; the " &
+          "bound is " & $MaxCertificateTargets)
+        return
+      var seen = initTable[string, bool]()
+      for item in targets.items:
+        if item.kind != tomlString:
+          r.note(pdcWrongType,
+            "every entry of [certificate]'s 'targets' must be a string")
+          return
+        let target = item.strVal
+        if target.len > MaxContainedPathBytes:
+          r.note(pdcValueTooLong,
+            "a target in [certificate]'s 'targets' is longer than " &
+            $MaxContainedPathBytes & " bytes")
+          return
+        let pp = pathProblem(target)
+        if pp != ppOk:
+          # A target is a test file inside the workspace: a certificate names
+          # only those (`certificate_issuance.targetOfUnit`), so a target
+          # outside it could never be covered.
+          r.note(pdcPathEscapesProject,
+            "[certificate]'s 'targets': " & describe(pp, target))
+          return
+        if seen.hasKey(target):
+          r.note(pdcDuplicateName,
+            "[certificate]'s 'targets' names '" & target & "' twice")
+          return
+        seen[target] = true
+        config.certificateTargets.add target
+      config.certificateTargetsDeclared = true
+  into.add config
+
 # ---------------------------------------------------------------------------
 # One file
 # ---------------------------------------------------------------------------
@@ -868,6 +950,7 @@ proc parseDefinitionFile*(file: DefinitionFile;
   of dfkPoints: r.readPoints(root, into.collections)
   of dfkVisualisers: r.readVisualisers(root, into.visualisers)
   of dfkScratchpad: r.readScratchpad(root, into.diffs)
+  of dfkTest: r.readTest(root, into.tests)
   of dfkVisualiserCode, dfkDiffCode: discard  # refused above
 
   r.problems

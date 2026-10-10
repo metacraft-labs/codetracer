@@ -31,6 +31,12 @@
 ##      specificity and, last, by declaration order — and reports the tie.
 ##      Rules are not named, so there is no name for an override to key on;
 ##      ordering is the only coherent composition for them.
+##   5. **`test.toml` is not composed at all** (CTC-3f). Its targets are
+##      test files named relative to the directory holding that
+##      `.codetracer/`, so an ancestor's list is about a different root.
+##      Every well-formed one is kept as its own record and a consumer reads
+##      the one for its own scope (`testConfigurationFor`); an ancestor's is
+##      neither inherited nor overridden.
 ##
 ## ## THE USER'S DEFINITIONS ARE A DIFFERENT FIELD, NOT A LATER ENTRY
 ##
@@ -148,9 +154,22 @@ proc composeInto(files: openArray[DefinitionFile]; origin: DefinitionOrigin;
 
     for v in parsed.visualisers: into.visualisers.add v
     for d in parsed.diffs: into.diffs.add d
+    for t in parsed.tests: into.tests.add t
 
   for name in collectionOrder:
     into.collections.add collectionOwner[name]
+
+func testConfigurationFor*(defs: ProjectDefinitions; scope: string):
+    tuple[found: bool; config: TestConfiguration] =
+  ## Rule 5: the `test.toml` of exactly this scope, or `found = false`. No
+  ## ancestor's is consulted. `found = false` covers both an absent file and
+  ## a refused one; a caller that must tell those apart — `ct test verify`
+  ## must, since a refused file is an error and not "no declared list" —
+  ## reads the load's `problems` as well.
+  for t in defs.tests:
+    if t.scope == scope:
+      return (true, t)
+  (false, TestConfiguration())
 
 func rankVisualisers*(rules: seq[VisualiserRule]): seq[VisualiserRule] =
   ## §5.4's ordering WITHIN the project-definition tier: nearer scope first,

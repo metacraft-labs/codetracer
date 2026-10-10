@@ -329,6 +329,11 @@ proc detailRowsFor(cert: TestCertificate; name: string):
     row("Issuer", cert.issuer),
     # The binding. The certificate covers whatever state has this content id.
     row("Content", cert.vcs.content)]
+  if cert.vcs.repo.len > 0:
+    # The producer's name for its repository — its root directory's name.
+    # Never compared (a clone under another name holding the same content is
+    # covered), so labelled as informational, like `base`.
+    result.add row("Repository (informational)", cert.vcs.repo)
   if cert.vcs.base.len > 0:
     # Where the work started, and nothing else: never compared with anything
     # (Standard.md §3.2.3), and labelled so nobody reads it as the binding.
@@ -456,7 +461,7 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
   let detail = detailRowsFor(cert, stored.name)
 
   # ---- Is this record even about the state in front of the user? ---------
-  # These three reads decide RELEVANCE, which is a display question: they are
+  # These two reads decide RELEVANCE, which is a display question: they are
   # plain field comparisons, not a reimplementation of verification, and the
   # verdict below still comes from `verifyCertificates`. They exist because
   # "your last green run no longer covers what you have" and "nothing here has
@@ -476,20 +481,12 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
       detail: detail,
       certificateName: stored.name,
       searched: facts.store.searched)
-  if cert.vcs.repo != facts.vcs.repo:
-    return CertificateIndicatorModel(
-      state: cisNotCertified,
-      label: NotCertifiedLabel,
-      summary: "The newest record is for repository '" & cert.vcs.repo &
-               "', not '" & facts.vcs.repo & "'.",
-      remedy: RunTheTestsRemedy,
-      authenticity: caNotChecked,
-      authenticityNote:
-        "Authenticity was not checked: the record is about another " &
-        "repository, so its signature could not change the answer.",
-      detail: detail,
-      certificateName: stored.name,
-      searched: facts.store.searched)
+  # `vcs.repo` is deliberately NOT one of them: the indicator, like `ct test
+  # verify`, does not require it to equal this repository's directory name
+  # (Verification.md §4.1 leaves that to the consumer), so a record issued in
+  # a sibling clone or worktree under another directory name, for the same
+  # content, covers this one (Transport.md §2.2). It is shown in the detail
+  # rows, never compared.
   if cert.platform != facts.platform:
     return CertificateIndicatorModel(
       state: cisNotCertified,

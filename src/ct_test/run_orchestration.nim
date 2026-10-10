@@ -415,6 +415,22 @@ proc canRunScope*(capabilities: TestCapabilities; kind: TestScopeKind): bool =
   of tskFile: capabilities.canRunFile
   of tskSingle: capabilities.canRunSingle
 
+proc isRunnableUnit*(registry: ProviderRegistry; unit: RunUnit): bool =
+  ## Whether dispatching ``unit`` would reach a provider able to run it:
+  ## the provider is registered, has a ``run`` implementation, and declares
+  ## it can run the unit's scope. These are exactly the three refusals
+  ## ``runUnitOutcome`` records as ``unrunnable`` before it would call the
+  ## provider, asked ahead of time.
+  ##
+  ## ``ct test verify`` uses it to decide which discovered targets a default
+  ## requirement may demand: a target no provider here can run is one no run
+  ## on this platform could ever certify (CTC-3 operator decision 4).
+  for provider in registry.providers:
+    if provider.provider.info.id == unit.providerId:
+      return provider.provider.run != nil and
+        provider.provider.info.capabilities.canRunScope(unit.scope.kind)
+  false
+
 proc runUnitOutcome(
     registry: ptr ProviderRegistry; unit: RunUnit): RunUnitOutcome {.gcsafe.} =
   ## Execute one run unit by invoking the owning provider's ``run`` proc with

@@ -51,7 +51,7 @@ import std/[sets, strutils, unittest]
 import ./project_definitions
 import ./toml_subset
 
-const ExpectedAssertions = 1614
+const ExpectedAssertions = 1791
   ## Written from a run, and asserted against the tally at the end of the
   ## file. `ci/lib/run-nim-test-lane.sh` reads this name.
 
@@ -110,6 +110,10 @@ proc scratchpadFile(text: string; scope = ""; origin = doProject): DefinitionFil
   DefinitionFile(kind: dfkScratchpad, origin: origin, scope: scope,
                  path: definitionPath(scope, dfkScratchpad), text: text)
 
+proc testFile(text: string; scope = ""; origin = doProject): DefinitionFile =
+  DefinitionFile(kind: dfkTest, origin: origin, scope: scope,
+                 path: definitionPath(scope, dfkTest), text: text)
+
 proc parseOne(f: DefinitionFile): tuple[defs: ProjectDefinitions,
                                         problems: seq[ProjectDefinitionProblem]] =
   var defs = ProjectDefinitions()
@@ -156,6 +160,13 @@ summary = "{width}x{height} png"
 present = "Image"
 media = "image/png"
 mediaFrom = "bytes"
+"""
+
+const GoodTest = """
+schema = "codetracer.test.v1"
+
+[certificate]
+targets = ["tests/a_test.nim", "tests/b_test.py"]
 """
 
 const GoodScratchpad = """
@@ -313,13 +324,15 @@ suite "PLAT-11: .codetracer/ is split by concern, and the tier is per file":
       ck schemaOf(k) notin schemas
       names.incl definitionFileName(k)
       schemas.incl schemaOf(k)
-    ckEq checkedKinds, 5
+    # 2026-10-10 (CTC-3f): six, with `ct test`'s `test.toml`.
+    ckEq checkedKinds, 6
 
-  test "the tier partition is exactly three declarative and two executable":
+  test "the tier partition is exactly four declarative and two executable":
     # §2.1's whole design goal is that "the useful majority is declarative".
     # Asserted as a partition rather than as two lists, so a kind cannot be
-    # in both or in neither.
-    ckEq declarativeKinds(), @[dfkPoints, dfkVisualisers, dfkScratchpad]
+    # in both or in neither. 2026-10-10 (CTC-3f): `dfkTest` is the fourth.
+    ckEq declarativeKinds(),
+         @[dfkPoints, dfkVisualisers, dfkScratchpad, dfkTest]
     ckEq executableKinds(), @[dfkVisualiserCode, dfkDiffCode]
     ckEq declarativeKinds().len + executableKinds().len,
          ord(high(DefinitionFileKind)) + 1
@@ -333,7 +346,7 @@ suite "PLAT-11: .codetracer/ is split by concern, and the tier is per file":
       var back: DefinitionFileKind
       ck kindForSchema(schemaOf(k), back)
       ckEq back, k
-    ckEq checkedSchemas, 5
+    ckEq checkedSchemas, 6
     var nowhere: DefinitionFileKind
     ck not kindForSchema("codetracer.points.v2", nowhere)
     ck not kindForSchema("", nowhere)
@@ -599,9 +612,12 @@ KEY = "/bin/sh"
          @["match", "matchKind", "language", "summary", "hide", "present",
            "media", "mediaFrom"]
     ckEq AcceptedKeys[tiDiff], @["match", "matchKind", "algorithm", "tolerance"]
+    # 2026-10-10 (CTC-3f): `test.toml`'s two tables, three keys.
+    ckEq AcceptedKeys[tiRootTest], @["schema", "certificate"]
+    ckEq AcceptedKeys[tiTestCertificate], @["targets"]
     var total = 0
     for t in TableId: total += AcceptedKeys[t].len
-    ckEq total, 29
+    ckEq total, 32
 
   test "no accepted key is spelled like something that runs":
     # A second, INDEPENDENT statement of the same property, over the data
@@ -618,7 +634,7 @@ KEY = "/bin/sh"
                           "interpreter", "eval", "spawn", "argv", "binary",
                           "program", "dll", "so", "dylib", "url", "http"]:
           ck not lowered.contains(forbidden)
-    ckEq checkedTables, 7
+    ckEq checkedTables, 9
 
   test "a top-level table belonging to another file is refused, not ignored":
     # `points.toml` and `visualisers.toml` used to share one root key row, so
@@ -1538,6 +1554,143 @@ func codeLines(source: string): seq[string] =
     if hash >= 0: cut = cut[0 ..< hash]
     if cut.strip().len == 0: continue
     result.add cut
+
+# ---------------------------------------------------------------------------
+# 7. `test.toml` — `ct test`'s committed configuration (CTC-3f)
+# ---------------------------------------------------------------------------
+
+suite "CTC-3f: ct test's committed configuration":
+
+  test "ct test config is a constant, declarative-tier file":
+    # Operator decision 8 (CT-Test-Certificates, 2026-10-09): ONE declarative
+    # file in the constant set, read by the shared TOML subset reader. The
+    # name, the schema and the tier are all decided by the enum, so PLAT-11's
+    # file-set and trust-tier cases above cover it by iteration; these pin
+    # the three values themselves.
+    ckEq tierOf(dfkTest), dtDeclarative
+    ck dfkTest in declarativeKinds()
+    ck dfkTest notin executableKinds()
+    ckEq definitionFileName(dfkTest), "test.toml"
+    ckEq schemaOf(dfkTest), "codetracer.test.v1"
+    ckEq definitionPath("", dfkTest), ".codetracer/test.toml"
+    ckEq definitionPath("services/api", dfkTest),
+         "services/api/.codetracer/test.toml"
+    var back: DefinitionFileKind
+    ck kindForSchema("codetracer.test.v1", back)
+    ckEq back, dfkTest
+    # Nothing a test.toml says can name another file: the keys that would
+    # (`include`, `extends`, a `file`) are not keys.
+    var checkedNamers = 0
+    for namer in ["include = \"other.toml\"", "extends = \"../base.toml\"",
+                  "file = \"targets.txt\""]:
+      inc checkedNamers
+      let (defs, problems) = parseOne(testFile(
+        "schema = \"codetracer.test.v1\"\n" & namer & "\n"))
+      ckRefused problems, pdcUnknownKey
+      ckEq defs.tests.len, 0
+    ckEq checkedNamers, 3
+
+  test "a well-formed test.toml declares its target list, or declares none":
+    let (defs, problems) = parseOne(testFile(GoodTest))
+    ckEq problems.len, 0
+    ckEq defs.tests.len, 1
+    ck defs.tests[0].certificateTargetsDeclared
+    ckEq defs.tests[0].certificateTargets,
+         @["tests/a_test.nim", "tests/b_test.py"]
+    ckEq defs.tests[0].file, ".codetracer/test.toml"
+    ckEq defs.tests[0].scope, ""
+    ckEq defs.tests[0].origin, doProject
+    # The file with no `[certificate]`, and a `[certificate]` with no
+    # `targets`: a record exists — the file is well formed — and it declares
+    # no list, which is what makes `ct test verify` fall back to discovery.
+    var checkedUndeclared = 0
+    for text in ["schema = \"codetracer.test.v1\"\n",
+                 "schema = \"codetracer.test.v1\"\n[certificate]\n"]:
+      inc checkedUndeclared
+      let (undeclared, noProblems) = parseOne(testFile(text))
+      ckEq noProblems.len, 0
+      ckEq undeclared.tests.len, 1
+      ck not undeclared.tests[0].certificateTargetsDeclared
+      ckEq undeclared.tests[0].certificateTargets.len, 0
+    ckEq checkedUndeclared, 2
+
+  test "an unreadable ct test config is reported, not ignored":
+    # Every way the file can be wrong is a NAMED diagnostic, and every one
+    # leaves NO record: a caller that looks for the record finds none, and
+    # the refusal in `problems` is what tells it the file was not merely
+    # absent. `ct test verify` exits 2 on it (certificate_verify_cli_test).
+    const Head = "schema = \"codetracer.test.v1\"\n[certificate]\n"
+    var tooMany = Head & "targets = ["
+    for i in 0 .. MaxCertificateTargets:
+      if i > 0: tooMany.add ", "
+      tooMany.add "\"t" & $i & "\""
+    tooMany.add "]\n"
+    let cases = @[
+      ("an unknown schema version",
+       "schema = \"codetracer.test.v2\"\n[certificate]\ntargets = [\"a\"]\n",
+       pdcUnknownSchemaVersion),
+      ("no schema", "[certificate]\ntargets = [\"a\"]\n", pdcMissingSchema),
+      ("another file's schema",
+       "schema = \"codetracer.points.v1\"\n", pdcSchemaKindMismatch),
+      ("an unknown key", Head & "tagrets = [\"a\"]\n", pdcUnknownKey),
+      ("an unknown table",
+       "schema = \"codetracer.test.v1\"\n[run]\nthreads = \"4\"\n",
+       pdcUnknownKey),
+      ("an integer where the subset has none", Head & "targets = 3\n",
+       pdcMalformedToml),
+      ("an integer inside the list", Head & "targets = [\"a\", 1]\n",
+       pdcMalformedToml),
+      ("a string where a list belongs", Head & "targets = \"a\"\n",
+       pdcWrongType),
+      ("a boolean in the list", Head & "targets = [true]\n", pdcWrongType),
+      ("certificate as a value", "schema = \"codetracer.test.v1\"\n" &
+       "certificate = \"all\"\n", pdcWrongType),
+      ("an empty list", Head & "targets = []\n", pdcMissingField),
+      ("a repeated target", Head & "targets = [\"a\", \"a\"]\n",
+       pdcDuplicateName),
+      ("a target outside the workspace", Head & "targets = [\"../x\"]\n",
+       pdcPathEscapesProject),
+      ("an absolute target", Head & "targets = [\"/etc/passwd\"]\n",
+       pdcPathEscapesProject),
+      ("too many targets", tooMany, pdcTooManyEntries)]
+    var checkedCases = 0
+    for (name, text, code) in cases:
+      inc checkedCases
+      checkpoint(name)
+      let (defs, problems) = parseOne(testFile(text))
+      ckRefused problems, code
+      ckEq defs.tests.len, 0
+      for p in problems:
+        ckEq p.file, ".codetracer/test.toml"
+      # Through the loader too, which is how `ct test verify` reads it.
+      let loaded = loadProjectDefinitions([testFile(text)])
+      ck not loaded.isOk
+      ck not testConfigurationFor(loaded.project, "").found
+    ckEq checkedCases, 15
+
+  test "test.toml is not composed: each scope keeps its own, and none is inherited":
+    let root = testFile(GoodTest)
+    let nested = testFile("schema = \"codetracer.test.v1\"\n[certificate]\n" &
+                          "targets = [\"spec/c_spec.rb\"]\n",
+                          scope = "packages/core")
+    let loaded = loadProjectDefinitions([nested, root])
+    ck loaded.isOk
+    ckEq loaded.project.tests.len, 2
+    let atRoot = testConfigurationFor(loaded.project, "")
+    ck atRoot.found
+    ckEq atRoot.config.certificateTargets,
+         @["tests/a_test.nim", "tests/b_test.py"]
+    let atCore = testConfigurationFor(loaded.project, "packages/core")
+    ck atCore.found
+    ckEq atCore.config.certificateTargets, @["spec/c_spec.rb"]
+    ckEq atCore.config.file, "packages/core/.codetracer/test.toml"
+    # A package with no test.toml of its own does NOT inherit the root's:
+    # the root's targets are named relative to a different directory.
+    ck not testConfigurationFor(loaded.project, "packages/other").found
+    # And a user's test.toml is the user's, never the project's.
+    let mine = loadProjectDefinitions([], [testFile(GoodTest, origin = doUser)])
+    ckEq mine.project.tests.len, 0
+    ckEq mine.user.tests.len, 1
 
 suite "PLAT-11: the loader has no way to reach a machine":
 

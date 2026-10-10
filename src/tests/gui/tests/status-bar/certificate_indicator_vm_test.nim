@@ -889,16 +889,24 @@ framework = "ct-test"
     check model.remedy == EarlierDraftRemedy
     check "re-issue" in model.remedy
 
-  test "a certificate for another repository is not this workspace's business":
-    ## The record parses, is authentic-shaped and reports a pass — and says
-    ## nothing about the tree in front of the user. "Was certified" would be a
-    ## false sentence about their history.
+  test "a record issued under another repository name covers the same content":
+    ## 2026-10-10 (CTC-3f): `vcs.repo` is NOT compared. It is the producer's
+    ## root directory name, so requiring it to match would blind a clone or
+    ## worktree checked out under another name to its siblings' certificates
+    ## for the very same content (Transport.md §2.2); Verification.md §4.1
+    ## leaves the comparison to the consumer, and this one declines it. The
+    ## name is still disclosed, labelled informational.
     let world = newWorld()
     discard world.withCertificate(sampleCertificate(repo = "other-project"))
     let model = world.evaluate()
-    check model.state == cisNotCertified
-    check model.state != cisWasCertified
-    check "other-project" in model.summary
+    check model.state == cisCertified
+    check rowValue(model, "Repository (informational)") == "other-project"
+    # Control: the same foreign name over OTHER content is still not covered —
+    # it is the content, not the name, that decides.
+    let other = newWorld()
+    discard other.withCertificate(sampleCertificate(repo = "other-project",
+                                                    content = TreeB))
+    check other.evaluate().state != cisCertified
 
   test "the ViewModel starts honest and never serves a model it did not compute":
     ## A status bar renders before anything has looked at the filesystem. The

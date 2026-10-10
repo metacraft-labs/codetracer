@@ -606,7 +606,11 @@ when not defined(js):
           return StoreListing(status: srAbsent)
         try:
           var names: seq[string] = @[]
-          for kind, path in walkDir(dir):
+          # `checkDir = true`: without it `walkDir` yields NOTHING for a
+          # directory it cannot open, so an unreadable root read as an empty
+          # one — "none found" where the answer is "could not look"
+          # (Transport.md §2.4). Found by CTC-3f's real-filesystem cases.
+          for kind, path in walkDir(dir, checkDir = true):
             # `pcLinkToFile` counts: a store may legitimately symlink a
             # certificate produced elsewhere, and refusing to follow one would
             # report "no certificates" for a store that has some.

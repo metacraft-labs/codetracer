@@ -111,9 +111,11 @@ type
     ## (Verification.md §4.1.1). ``base`` is informational and is never
     ## compared with anything.
     repo*: string
-      ## This consumer's name for the repository. Matching ``vcs.repo``
-      ## against it is the consumer's choice, not part of the content binding
-      ## (Verification.md §4.1); this verifier makes that choice.
+      ## This consumer's name for the repository, INFORMATIONAL only. Matching
+      ## ``vcs.repo`` against it is the consumer's choice, not part of the
+      ## content binding (Verification.md §4.1), and this verifier chooses not
+      ## to: a clone under another directory name holding the same content is
+      ## covered by the same certificates (see ``verifyCertificates``).
     content*: ContentOracle
 
   Requirement* = object
@@ -328,17 +330,18 @@ proc verifyCertificates*(state: EvaluatedState; requirement: Requirement;
              "positive claim")
       continue
 
-    # Requiring `vcs.repo` to equal this consumer's own name for the
-    # repository is a CONSUMER'S CHOICE, not part of the binding
-    # (Verification.md §4.1): content alone decides a match, so a standard
-    # verifier MAY accept identical content issued under another name (a
-    # fork, a renamed clone). `ct test` and the status bar choose to require
-    # it, with the repository root's directory name on both sides
-    # (`certificate_issuance.probeVcs`, `certificate_indicator_source`).
-    if cert.vcs.repo != state.repo:
-      result.rejected.add CertificateNote(certificate: candidate.name,
-        why: "vcs.repo is '" & cert.vcs.repo & "', not '" & state.repo & "'")
-      continue
+    # `vcs.repo` IS NOT COMPARED. Requiring it to equal this consumer's own
+    # name for the repository is a CONSUMER'S CHOICE, not part of the binding
+    # (Verification.md §4.1): content alone decides a match. `ct test` and the
+    # status bar choose NOT to require it. The only name either side has is
+    # the repository root's directory name (`certificate_issuance.probeVcs`,
+    # `certificate_indicator_source`), so requiring it would make a clone or
+    # worktree checked out under another directory name blind to every
+    # certificate issued in its siblings — defeating the per-user,
+    # content-addressed store, whose point is that a certificate issued in one
+    # clone or worktree is found from another holding the same content
+    # (Transport.md §2.2). `vcs.repo` stays informational: it is shown in
+    # reports and disclosures, never matched.
 
     # ---- The content id's form (Content-Id.md §1) -------------------------
     # A malformed id — no `:`, a digest that is not lowercase hex, a digest of

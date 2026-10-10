@@ -681,15 +681,18 @@ suite "CTC-3e: the local certificate store":
     ck summary{"certificate"}{"issued"}.getBool
     let content = summary{"certificate"}{"content"}.getStr
 
-    # Same directory NAME, different places: the indicator also requires the
-    # record's `repo` to be this checkout's name (its own policy, not the
-    # binding), and a second clone of a project usually keeps the name.
-    let second = scratchRoot / "elsewhere" / "clone-a"
+    # Different directory NAMES (2026-10-10, CTC-3f): the record says
+    # `repo = "clone-a"`, and neither the indicator nor `ct test verify`
+    # compares that with this checkout's name — content alone binds
+    # (Transport.md §2.2), so a clone or worktree under any name is covered.
+    ck readCertificate(summary{"certificate"}{"document"}.getStr).cert.vcs.repo ==
+       "clone-a"
+    let second = scratchRoot / "elsewhere" / "clone-b"
     removeDir(second)
     createDir(second.parentDir)
     discard run("git", ["clone", "-q", first, second], scratchRoot)
     writeFile(second / FixtureTestFile, "adds, edited\n")
-    let worktree = scratchRoot / "worktrees" / "clone-a"
+    let worktree = scratchRoot / "worktrees" / "feature-wt"
     removeDir(worktree)
     createDir(worktree.parentDir)
     discard run("git", ["worktree", "add", "-q", "--detach", worktree], first)

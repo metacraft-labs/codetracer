@@ -7057,3 +7057,13 @@ content comparison of every tracked file. Test oracles that compute W must
 not use `add -u` over a plain index copy either: read the tree into a FRESH
 index (no stat data) first. Also: `git status` rewrites the real index and
 smudges racily clean entries' sizes, so take index-bytes baselines after it.
+
+`walkDir` SILENTLY YIELDS NOTHING FOR A DIRECTORY IT CANNOT OPEN (2026-10-10,
+CTC-3f). Its default is `checkDir = false`, so an unreadable directory reads
+as an EMPTY one — "none found" where the honest answer is "could not look".
+`certificate_store.nativeStoreAccess` passes `checkDir = true`; any reader
+that must tell absent, empty and unreadable apart has to as well. A pre-commit
+hook's `GIT_INDEX_FILE` is the index being committed (`.git/index.lock` for
+`commit -a`, a temporary one for `commit <paths>`); `ct test verify --staged`
+relies on child git calls INHERITING it, so never scrub it from the
+environment of the content-id host.

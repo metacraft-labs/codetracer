@@ -14,9 +14,10 @@
 ##   <root>/.codetracer/points.toml
 ##   <root>/.codetracer/visualisers.toml
 ##   <root>/.codetracer/scratchpad.toml
-##   <root>/<package>/.codetracer/<the same three>
+##   <root>/.codetracer/test.toml          (`ct test`'s, CTC-3f)
+##   <root>/<package>/.codetracer/<the same four>
 ##
-## and, for the user's own set, the same three names under a directory the
+## and, for the user's own set, the same four names under a directory the
 ## CALLER names. Every one of those names comes from
 ## `layout.definitionFileName`, which is a `case` over a closed enum, and **no
 ## definition file is parsed here at all**: this reads bytes and hands them
@@ -66,7 +67,7 @@
 ## PLAT-10's grants) and `<repo>/.codetracer/<name>.trace` is a recording.
 ## The second is the same directory as this one and the two coexist without a
 ## rule because the file set here is a constant: a `.trace` is not one of the
-## three names, so it is neither read nor reported.
+## declarative names, so it is neither read nor reported.
 
 import std/[os, strutils]
 
@@ -174,7 +175,7 @@ proc readDefinitionFile(diskPath, reportedPath: string;
 
 proc reportStrayTomlFiles(dir, scope: string;
                           outcome: var DiscoveryOutcome) =
-  ## A `.toml` in a `.codetracer/` that is not one of the three names.
+  ## A `.toml` in a `.codetracer/` that is not one of the declarative names.
   ##
   ## THE ONE PLACE THIS DESIGN COULD STILL SWALLOW SOMETHING. The file set is
   ## a constant, which is the security property; the cost of that property is
@@ -191,6 +192,8 @@ proc reportStrayTomlFiles(dir, scope: string;
   ## except this message — none of them is ever opened.
   var known: seq[string] = @[]
   for kind in DefinitionFileKind: known.add definitionFileName(kind)
+  var declarative: seq[string] = @[]
+  for kind in declarativeKinds(): declarative.add definitionFileName(kind)
   var listed = 0
   try:
     for kind, path in walkDir(dir):
@@ -209,21 +212,21 @@ proc reportStrayTomlFiles(dir, scope: string;
           "/" & name,
         0, pdnUnrecognisedDefinitionFile,
         "'" & name & "' is not a definition file this build reads. The " &
-        "declarative definitions are " & known[0] & ", " & known[1] & " and " &
-        known[2] & ". It was not opened — the set of files read here is a " &
+        "declarative definitions are " & declarative.join(", ") &
+        ". It was not opened — the set of files read here is a " &
         "constant, so nothing in a repository can name another one — and it " &
         "is reported because a one-character typo in a definition's NAME " &
         "would otherwise be completely silent")
   except CatchableError:
     # A directory that cannot be listed is not a problem worth a message: the
-    # three files either opened or did not, and that is already reported.
+    # definition files either opened or did not, and that is already reported.
     discard
 
 proc scanScope(root, scope: string; origin: DefinitionOrigin;
                outcome: var DiscoveryOutcome) =
-  ## The three declarative names and the two executable ones, in one
+  ## The four declarative names and the two executable ones, in one
   ## `.codetracer/`. DERIVED from the enum — see `layout.definitionFileName`
-  ## — so a sixth file kind is scanned the day it is declared and never a day
+  ## — so a new file kind is scanned the day it is declared and never a day
   ## before.
   for kind in DefinitionFileKind:
     let reported = definitionPath(scope, kind)
@@ -261,6 +264,27 @@ proc discoverProjectDefinitions*(root: string;
         "outside the checkout")
       continue
     scanScope(root, scope, doProject, result)
+
+proc readCheckoutDefinition*(root, scope: string;
+                             kind: DefinitionFileKind): DiscoveryOutcome =
+  ## ONE constant-named file of one scope, read exactly as a full scan reads
+  ## it (size bound before the read, executable tier never read), and
+  ## nothing else: no other name in that `.codetracer/` is opened or listed.
+  ##
+  ## For a consumer that owns one concern — `ct test verify` reads its
+  ## `test.toml` (CTC-3f) — and must not have its answer depend on, or be
+  ## refused because of, a points or visualiser file beside it. `scope` is
+  ## checked against the containment grammar like a package scope.
+  if scope.len > 0:
+    let sp = pathProblem(scope)
+    if sp != ppOk:
+      result.problems.add problem(
+        scope & "/" & ProjectDefinitionDir, 0, pdcScopeEscapesProject,
+        describe(sp, scope) & ". A package scope is a path from the " &
+        "repository root and is checked as one")
+      return
+  let reported = definitionPath(scope, kind)
+  readDefinitionFile(root / reported, reported, kind, doProject, scope, result)
 
 proc discoverUserDefinitions*(userRoot: string): DiscoveryOutcome =
   ## The user's OWN definitions, from a directory outside any checkout.
