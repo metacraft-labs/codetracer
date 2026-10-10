@@ -176,7 +176,7 @@ per-run tmp dir, Electron's profile, `ct-native-replay`'s licensing counter —
 on every OS, and every child process inherits it. Layout:
 `$CODETRACER_HOME/{data,config,state,cache,tmp,launcher}`. Resolvers:
 `src/common/ct_home.nim` (Nim) and `libs/ct-home` (Rust); unset, nothing moves.
-Full table: codetracer-specs `Architecture/Per-User-State-Locations.md`.
+Full table: codetracer-specs `spec/Architecture/Per-User-State-Locations.md`.
 
 - The harnesses set a scratch one for you: every Nim test program (force-imported
   `test_support/state_isolation.nim`), `ci/lib/run-nim-test-lane.sh` (one per

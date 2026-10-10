@@ -4,8 +4,8 @@
 ## `$CODETRACER_TUI_LAYOUT_DIR` if set, else `$CODETRACER_HOME/state`, else
 ## `$XDG_STATE_HOME/codetracer`, else `~/.local/state/codetracer`. The middle
 ## step is `common/ct_home.ctStateDir`'s rule, spelt here because nothing under
-## `viewmodel/host` imports `common/`; `src/common/ct_home_test.nim` pins that
-## the two agree. The override keeps PLAT-6's name because it is
+## `viewmodel/host` imports `common/`; `src/common/ct_home_isolation_test.nim`
+## pins that the two agree. The override keeps PLAT-6's name because it is
 ## the hook every Tier-2 suite already uses to point a spawned binary at a
 ## directory of its own; it overrides the whole root, not only the layout.
 ##

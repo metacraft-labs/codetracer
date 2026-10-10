@@ -48,7 +48,8 @@
 ## `src/common/ct_home_isolation_test.nim` fails if one stops.
 ##
 ## The Rust twin is `libs/ct-home` (crate `ct-home`). The two MUST agree on
-## the layout; `src/common/ct_home_test.nim` pins this side.
+## the layout: `src/common/ct_home_isolation_test.nim` pins this side, and the
+## crate's own tests read `CtHomeArea`'s spellings from this file.
 ##
 ## Children inherit `CODETRACER_HOME` through the ordinary environment, so
 ## nothing has to forward it: a spawned `db-backend`, `replay-server` or

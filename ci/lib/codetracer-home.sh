@@ -9,7 +9,7 @@
 # Rust (`libs/ct-home`), on every OS. Children inherit it, so a `cargo test`
 # whose tests spawn `replay-server`, `ct-native-replay` or `ct` keeps all of
 # them out of the developer's own profile. See codetracer-specs
-# `Architecture/Build-Outputs-And-Path-Resolution.md` (CODETRACER_HOME).
+# `spec/Architecture/Per-User-State-Locations.md`.
 #
 # Usage (source it, then call):
 #   source ci/lib/codetracer-home.sh
