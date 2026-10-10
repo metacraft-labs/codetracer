@@ -329,6 +329,38 @@ proc removeScratchRoot() =
   try: removeDir(scratchRoot)
   except CatchableError: discard
 
+# ---------------------------------------------------------------------------
+# Lockstep interleaving of one prune and one publish (the seams
+# ``PruneStepHook`` / ``PublishStepHook``). The pruner runs on a thread; at
+# each named point one side hands control to the other over a channel, so
+# the interleaving is exactly the one written down, whatever the scheduler
+# does — no sleeps, no timing.
+# ---------------------------------------------------------------------------
+
+var toPruner, toWriter: Channel[string]
+var lockstepLog: seq[string]            # main thread only
+
+proc pruneStep(stage: PruneStage; relative: string) {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    toWriter.send($stage & " " & relative)
+    discard toPruner.recv()
+
+proc publishStep(attempt: int) {.nimcall, gcsafe.} =
+  ## Attempt 0 (its temporary file written into the chosen directory): let
+  ## the pruner proceed until the directory has left the store. Attempt 1
+  ## (the retry's temporary file written): let the removal run to its end
+  ## before the retry renames.
+  {.cast(gcsafe).}:
+    lockstepLog.add "writer attempt " & $attempt & " before rename"
+    toPruner.send("go")
+    lockstepLog.add toWriter.recv()
+
+proc lockstepPruner(root: string) {.thread.} =
+  let outcome = pruneLocalStore(root, 0, [], pruneStep)
+  {.cast(gcsafe).}:
+    toWriter.send("prune finished: removed " & $outcome.removed.len &
+                  ", errors " & $outcome.errors.len)
+
 proc spawnSelf(env: openArray[(string, string)]): Process =
   var table = newStringTable()
   for key, value in envPairs():
@@ -567,6 +599,65 @@ suite "CTC-3e: the local certificate store":
     checkpoint output & " retries=" & $retries
     echo "    prune race: ", output.strip(), ", publishes retried: ", retries
     ck failures == 0
+
+  test "a removal in progress cannot reach the writer's retry":
+    ## The race the case above samples, pinned to the one interleaving that
+    ## broke it under load: a prune CHOOSES the directory (old, nothing being
+    ## written), the writer then writes its temporary file into it, the
+    ## prune's removal makes the first attempt fail, and the writer's retry
+    ## runs while that SAME removal is still in progress. Deleting in place
+    ## let the removal go on to unlink the retry's temporary file and remove
+    ## the directory under it, so the publish failed with the retry spent.
+    ## Removal by rename-aside must leave the retry untouchable.
+    let root = useStoreRoot("prune-lockstep")
+    let doc = sampleDocument(contentFor(10), signature = "U1NIU0lH")
+    let relative = localStoreRelativePathOf(doc).path
+    let contentDir = relative.parentDir
+    let dir = root / contentDir
+    ck publishRecord(root, relative, doc, signed = true).error == ""
+    setLastModificationTime(dir, getTime() - initDuration(days = 1))
+    toPruner.open()
+    toWriter.open()
+    lockstepLog = @[]
+    var pruner: Thread[string]
+    createThread(pruner, lockstepPruner, root)
+    # The prune has chosen the directory, and waits.
+    ck toWriter.recv() == $psChosen & " " & contentDir
+    let written = publishRecord(root, relative, doc, signed = true,
+                                beforeRename = publishStep)
+    joinThread(pruner)
+    toPruner.close()
+    toWriter.close()
+    checkpoint lockstepLog.join("\n") & "\nerror: " & written.error
+    ck lockstepLog == @[
+      "writer attempt 0 before rename",
+      $psDetached & " " & contentDir,
+      "writer attempt 1 before rename",
+      "prune finished: removed 1, errors 0"]
+    ck written.error == ""
+    ck written.retried
+    ck fileExists(root / relative) and readFile(root / relative) == doc
+    # The record, and nothing else: no temporary, nothing left aside.
+    ck storeFiles(root) == @[relative]
+
+  test "a directory left aside by an interrupted prune is deleted by the next":
+    ## A prune that died between renaming a directory aside and deleting it
+    ## leaves a dot-named directory no reader lists; the next prune deletes
+    ## it and does not count it as a content directory.
+    let root = useStoreRoot("prune-leftover")
+    let workspace = scratchDir("prune-leftover-ws")
+    let doc = sampleDocument(contentFor(12))
+    let algorithmDir = root / "v1" / "git-tree-sha1"
+    let leftover = algorithmDir / ("." & contentFor(13)[14 .. ^1] &
+                                   RemovalMarker & "1-1")
+    createDir(leftover)
+    writeFile(leftover / (repeat('a', 64) & ".toml"), doc)
+    let published = publishToLocalStore(nativeRoots(), workspace, doc)
+    ck published.written
+    ck published.pruned.removed.len == 0
+    ck published.pruned.errors.len == 0
+    ck not dirExists(leftover)
+    ck storeFiles(root) == @[localStoreRelativePathOf(doc).path]
 
   test "a signed record replaces its unsigned twin, and an unsigned one keeps the signed":
     ## §2.3: the two share a name (the signature block is outside the

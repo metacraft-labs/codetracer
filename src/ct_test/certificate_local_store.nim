@@ -41,20 +41,32 @@
 ##   which a rename into it updates) plus the directory of the current
 ##   repository's ``HEAD^{tree}`` and the one just written into. A directory a
 ##   producer is writing into — one holding a fresh temporary file, or
-##   modified in the last few seconds — is never removed. A prune racing a
-##   publish costs at most one retried rename: when the rename fails because
-##   the directory or the temporary file vanished, the writer recreates the
-##   directory and tries once more.
+##   modified in the last few seconds — is never removed. A directory is
+##   removed by first renaming it aside, within its parent, to a dot-named
+##   name no reader or pruner treats as a content directory, and only then
+##   deleting the renamed tree. The rename is the one atomic moment the
+##   directory leaves the store, so a prune racing a publish costs at most one
+##   retried rename: when the rename fails because the directory or the
+##   temporary file vanished, the writer recreates the directory — a NEW
+##   directory, which the removal in progress cannot reach — and tries once
+##   more. Deleting in place instead (unlink the entries, then the directory)
+##   is not atomic: one removal could also unlink the temporary file of the
+##   writer's retry, created in the same still-present directory, and then
+##   remove the directory under it.
 ##
 ## Nothing here signs. It is handed a rendered document and puts it somewhere;
 ## the only route to a signature remains ``certificate_issuance.runAndAttest``.
 ## It writes nothing but the store, reads nothing under ``.ct/``, and never
 ## touches the working tree or the user's index.
 
-import std/[algorithm, os, strutils, times]
+import std/[algorithm, atomics, os, strutils, times]
 
-when not defined(windows):
+when defined(windows):
+  import std/winlean
+else:
   from std/posix import fsync
+  proc c_rename(oldname, newname: cstring): cint {.
+    importc: "rename", header: "<stdio.h>".}
 
 import certificate
 import certificate_content_id
@@ -85,6 +97,12 @@ const
   TemporaryMarker* = ".tmp-"
     ## Part of every temporary name, after the leading ``.``.
 
+  RemovalMarker* = ".removing-"
+    ## Part of the name a content directory is renamed to while a prune
+    ## deletes it: ``.<digest>.removing-<pid>-<counter>``, beside the
+    ## directories of its algorithm. Begins with ``.``, so it is never a
+    ## content directory (a digest is hex) and no reader lists it.
+
 type
   LocalStorePath* = tuple[path: string; error: string]
     ## A ``/``-separated store-relative path, or why there is none.
@@ -95,6 +113,23 @@ type
     errors*: seq[string]
       ## Directories that could not be removed, with the reason. Never fatal:
       ## pruning is a matter of disk space, not of correctness (§2.5).
+
+  PruneStage* = enum
+    ## The points of one directory's removal a ``PruneStepHook`` observes.
+    psChosen
+      ## Chosen for removal — not kept, not protected, not being written —
+      ## and nothing changed yet.
+    psDetached
+      ## Renamed aside: gone from the store, its tree not yet deleted.
+
+  PruneStepHook* = proc(stage: PruneStage; relative: string) {.nimcall, gcsafe.}
+    ## A test seam: lets the suite interleave a writer with a removal at a
+    ## named point, deterministically. ``nil`` in production.
+
+  PublishStepHook* = proc(attempt: int) {.nimcall, gcsafe.}
+    ## A test seam: called with the attempt number (0, then 1 on the retry)
+    ## once the temporary file is written and flushed, just before the
+    ## rename. ``nil`` in production.
 
   PublishOutcome* = object
     ## What happened when the run tried to publish its certificate.
@@ -214,7 +249,8 @@ proc writeFlushed(path, content: string) =
   ## Write and flush to stable storage before the rename that publishes it.
   var f: File
   if not open(f, path, fmWrite):
-    raise newException(IOError, "cannot open '" & path & "' for writing")
+    raise newException(IOError, "cannot open '" & path & "' for writing: " &
+                       osErrorMsg(osLastError()))
   try:
     f.write(content)
     f.flushFile()
@@ -240,25 +276,45 @@ proc touchDirectory(dir: string) =
   except OSError:
     discard
 
-proc publishRecord*(root, relative, document: string; signed: bool):
+proc directoryIdentity(dir: string): string =
+  ## Device and file number of ``dir``, or ``""`` when there is none: tells
+  ## the directory a write went into from one recreated at the same path.
+  try:
+    let info = getFileInfo(dir)
+    $info.id.device & ":" & $info.id.file
+  except OSError:
+    ""
+
+proc publishRecord*(root, relative, document: string; signed: bool;
+                    beforeRename: PublishStepHook = nil):
     tuple[kept, retried: bool; error: string] =
   ## Steps 1-3 of §2.3, with the one retry §2.5 allows when a concurrent
   ## prune removed the directory between creating it and renaming into it.
   ## The bare write: no root resolution, no working-tree guard, no prune —
   ## ``publishToLocalStore`` is the entry point; this is exported so the
   ## retry can be raced in a tight loop by the suite.
+  ##
+  ## One retry is enough because a prune removes a directory by renaming it
+  ## aside first (``pruneLocalStore``): a failure here means that rename has
+  ## already happened, so the retry writes into a directory created after
+  ## it, which that removal can no longer touch — and which no later prune
+  ## takes, since it is modified within ``FreshDirectoryAge`` and then holds
+  ## a fresh temporary file.
   let final = root / toNative(relative)
   let dir = final.parentDir
   let contentDir = relative[0 ..< relative.rfind('/')]
   for attempt in 0 .. 1:
-    # A prune that passed this directory over a moment before the temporary
-    # file appeared can still remove it: it deletes the entries, then the
-    # directory. A failure while the directory is gone, OR after the
-    # temporary file the writer created was removed under it, is that race,
-    # and gets the retry; the directory may not be gone YET.
+    # A prune that chose this directory a moment before the temporary file
+    # appeared can still remove it: it renames the directory aside, taking
+    # the temporary file with it. A failure after the temporary file the
+    # writer created vanished from its path, or while the directory is gone
+    # or is no longer the one this attempt wrote into (another producer may
+    # already have recreated it), is that race, and gets the retry.
     var temporaryVanished = false
+    var identity = directoryIdentity(dir)
     try:
       createOwnerOnlyDirs(root, contentDir)
+      identity = directoryIdentity(dir)
       if not signed and fileExists(final):
         touchDirectory(dir)
         return (true, attempt > 0, "")
@@ -267,6 +323,8 @@ proc publishRecord*(root, relative, document: string; signed: bool):
       try:
         writeFlushed(temporary, document)
         created = true
+        if beforeRename != nil:
+          beforeRename(attempt)
         renameInto(temporary, final)
       except CatchableError:
         temporaryVanished = created and not fileExists(temporary)
@@ -275,7 +333,9 @@ proc publishRecord*(root, relative, document: string; signed: bool):
         raise
       return (false, attempt > 0, "")
     except CatchableError as err:
-      if attempt == 0 and (temporaryVanished or not dirExists(dir)):
+      let now = directoryIdentity(dir)
+      if attempt == 0 and (temporaryVanished or now.len == 0 or
+                           now != identity):
         continue
       return (false, attempt > 0, err.msg)
   (false, true, "the content directory disappeared twice while it was written")
@@ -308,8 +368,29 @@ proc beingWritten(dir: string; now: Time): bool =
     return true
   false
 
+var removalCounter: Atomic[int]
+  ## Process-wide, not per thread: two prunes on two threads of one process
+  ## must never pick the same aside name for the same digest.
+
+proc removalName(digest: string): string =
+  "." & digest & RemovalMarker & $getCurrentProcessId() & "-" &
+    $(removalCounter.fetchAdd(1) + 1)
+
+proc renameAside(path, aside: string) =
+  ## One ``rename(2)`` / ``MoveFileExW`` of a directory within its parent,
+  ## and nothing else. ``moveDir`` would fall back to copying and deleting
+  ## when the rename is refused, which is neither atomic nor wanted: Windows
+  ## refuses exactly when a file inside is open — when a writer is in it.
+  when defined(windows):
+    if moveFileExW(newWideCString(path), newWideCString(aside), 0'i32) == 0:
+      raiseOSError(osLastError(), path)
+  else:
+    if c_rename(path.cstring, aside.cstring) != 0:
+      raiseOSError(osLastError(), path)
+
 proc pruneLocalStore*(root: string; keep: int;
-                      protected: openArray[string]): PruneOutcome =
+                      protected: openArray[string];
+                      onStep: PruneStepHook = nil): PruneOutcome =
   ## Remove whole content directories from one root, keeping the ``keep``
   ## most recently written (directory modification time; ties broken by
   ## name, newest-looking first) plus every directory in ``protected``
@@ -317,6 +398,13 @@ proc pruneLocalStore*(root: string; keep: int;
   ##
   ## Never removes a directory a producer is writing into. Never fails the
   ## publish: a directory that cannot be removed is reported in ``errors``.
+  ##
+  ## A directory leaves the store in ONE atomic step — renamed aside within
+  ## its parent (``RemovalMarker``) — and is deleted only after that. A
+  ## writer that entered it between the check and the rename loses its
+  ## rename and retries into a fresh directory, which this removal cannot
+  ## reach. Directories left aside by a prune that died mid-delete are
+  ## deleted by the next prune.
   let layout = root / LocalStoreLayout
   if not dirExists(layout):
     return
@@ -327,6 +415,19 @@ proc pruneLocalStore*(root: string; keep: int;
         continue
       for digestKind, digestPath in walkDir(algorithmPath):
         if digestKind != pcDir:
+          continue
+        let digestName = digestPath.extractFilename
+        if digestName.startsWith("."):
+          if RemovalMarker in digestName:
+            # Renamed aside by a prune that has not finished deleting it, or
+            # never will. Another prune deleting it at the same time is
+            # harmless: each tolerates entries the other already removed.
+            try:
+              removeDir(digestPath)
+            except OSError as err:
+              if dirExists(digestPath):
+                result.errors.add "'" & digestPath &
+                  "' could not be removed: " & err.msg
           continue
         let relative = LocalStoreLayout & "/" &
           algorithmPath.extractFilename & "/" & digestPath.extractFilename
@@ -351,11 +452,24 @@ proc pruneLocalStore*(root: string; keep: int;
     let path = root / toNative(entry.relative)
     if beingWritten(path, now):
       continue
+    if onStep != nil:
+      onStep(psChosen, entry.relative)
+    let aside = path.parentDir / removalName(path.extractFilename)
     try:
-      removeDir(path)
-      result.removed.add entry.relative
+      renameAside(path, aside)
     except OSError as err:
-      result.errors.add "'" & path & "' could not be removed: " & err.msg
+      if dirExists(path):
+        # Windows refuses to rename a directory with a file open inside:
+        # a writer is in it, and it stays.
+        result.errors.add "'" & path & "' could not be removed: " & err.msg
+      continue                          # else another prune took it first
+    result.removed.add entry.relative
+    if onStep != nil:
+      onStep(psDetached, entry.relative)
+    try:
+      removeDir(aside)
+    except OSError as err:
+      result.errors.add "'" & aside & "' could not be removed: " & err.msg
 
 # ---------------------------------------------------------------------------
 # Publishing
