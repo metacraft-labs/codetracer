@@ -485,6 +485,11 @@ type
     makeTempDir*: proc(): HostFileResult {.closure, gcsafe.}
       ## A new, empty, private directory OUTSIDE the repository.
     copyFile*: proc(source, destination: string): HostFileResult {.closure, gcsafe.}
+    setModificationTime*: proc(path: string; unixSeconds: int64): HostFileResult
+                                {.closure, gcsafe.}
+      ## Set the modification time of the file at ``path`` (whole seconds
+      ## since the Unix epoch). Used on the temporary index only — see
+      ## ``StatDistrustTime``.
     pathExists*: proc(path: string): bool {.closure, gcsafe.}
       ## Whether anything — file, directory or symlink, dangling or not — is
       ## at ``path``.
@@ -533,6 +538,41 @@ type
     stdout: string
     failure: string
 
+const StatDistrustTime* = 1'i64
+  ## The modification time, in seconds since the Unix epoch, given to the
+  ## temporary index before ``git add --update`` runs in it.
+  ##
+  ## WHY. ``add --update`` skips reading a file whose stat data (size, mtime,
+  ## ctime, inode, ...) matches its index entry, and re-reads one that
+  ## matches only when the entry is "racily clean": its recorded mtime is
+  ## not older than the mtime of the INDEX FILE being read
+  ## (https://git-scm.com/docs/racy-git, ``is_racy_timestamp`` in git's
+  ## ``read-cache.c``). A copy of the user's index carries the copy's fresh
+  ## mtime, so a same-size edit made in the same second as the last write of
+  ## the real index — which git, reading the REAL index, would re-read — was
+  ## taken as clean, and the content id named the OLD content: a certificate
+  ## could name content its tests never ran, and a changed tree could read
+  ## Certified (CTC-3b, 2026-10-10).
+  ##
+  ## Preserving the real index's mtime on the copy would only restore git's
+  ## own heuristic, which still trusts stat data: a rewrite that leaves size,
+  ## mtime and inode unchanged (``cp -p``, ``rsync -t``, a restore, or a
+  ## coarse-mtime filesystem) and whose ctime git does not compare
+  ## (``core.trustctime=false``, ``core.checkStat=minimal``) is invisible to
+  ## it. Dating the copy at the epoch instead makes EVERY entry with a real
+  ## mtime racily clean, so git compares every tracked file's CONTENT with
+  ## its indexed blob, whatever the clocks, the skew between them or the
+  ## filesystem's timestamp granularity. It is still ``add --update`` doing
+  ## the work, so filters, ``autocrlf`` and every other rule apply exactly as
+  ## Content-Id §4.1 spells them; only the stat shortcut is gone. The cost is
+  ## reading every tracked file once per computation, as on a fresh clone's
+  ## first ``git status``.
+  ##
+  ## ``1``, not ``0``: git takes an index timestamp of zero to mean "unknown"
+  ## and then treats NO entry as racy. The one entry this leaves to the stat
+  ## check is a file whose mtime is exactly the epoch (0), with every other
+  ## compared stat field unchanged.
+
 proc runGit(host: ContentIdHost; cwd: string; args: openArray[string];
             indexFile = ""): GitStep =
   ## Run one git command and turn every way it can fail into a sentence.
@@ -544,6 +584,11 @@ proc runGit(host: ContentIdHost; cwd: string; args: openArray[string];
     # a `sharedindex.*` file into the repository's git directory (and expire
     # old ones there). A temporary index is always written whole instead.
     argv.add ["-c", "core.splitIndex=false"]
+    # A filesystem monitor lets git skip the stat check entirely for entries
+    # it last reported unchanged, and a monitor that has not yet delivered an
+    # event is exactly the race `StatDistrustTime` closes. With it off, git
+    # drops the monitor's "valid" marks it read from the copy.
+    argv.add ["-c", "core.fsmonitor=false"]
   let reply = host.git(GitCall(argv: argv & @args, cwd: cwd, env: env))
   let shown = "`git " & args.join(" ") & "`"
   if reply.exitCode < 0:
@@ -755,7 +800,8 @@ proc computeContentId*(host: ContentIdHost; repository: string;
   ## * a working tree — the user's index is COPIED into a temporary directory
   ##   and, in the copy only: the §3 conditions are looked for (and reported
   ##   instead of an id), ``git add --update`` takes every tracked entry's
-  ##   working-tree content and drops deleted ones while adding nothing
+  ##   working-tree content — re-reading every file, never trusting stat
+  ##   data (``StatDistrustTime``) — and drops deleted ones while adding nothing
   ##   untracked, and ``git write-tree`` gives ``T`` (§4.1). A repository with
   ##   no index tracks nothing and its content is the empty tree;
   ## * the index being committed — the same copy, unmerged entries reported,
@@ -842,6 +888,16 @@ proc computeContentId*(host: ContentIdHost; repository: string;
         return noContentId(algorithm, detected.states)
 
       if state.kind == cskWorkingTree:
+        # Every entry racily clean, so `add --update` reads every tracked
+        # file's content rather than trusting stat data — see
+        # `StatDistrustTime`. Done here, after the §3 detection, so a
+        # `git status` that detection runs does not hash the tree as well.
+        # (A missing index was replaced by an empty one above; dating it is
+        # harmless.)
+        let aged = host.setModificationTime(temporaryIndex, StatDistrustTime)
+        if not aged.ok:
+          return failed("could not set the temporary index's modification " &
+                        "time: " & aged.error)
         # No pathspec: since git 2.0 `add --update` without one covers the
         # whole tree, which is what `-- :/` in §4.1 spells, and it stays so
         # under an inherited GIT_LITERAL_PATHSPECS that would make `:/` a

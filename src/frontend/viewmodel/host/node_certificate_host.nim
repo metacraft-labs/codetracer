@@ -70,6 +70,8 @@ proc nodePathJoin(a, b: cstring): cstring {.importjs: "require('path').join(#, #
 proc nodeExists(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
 proc nodeCopyFile(source, destination: cstring)
   {.importjs: "require('fs').copyFileSync(#, #)".}
+proc nodeUtimes(path: cstring; accessed, modified: float)
+  {.importjs: "require('fs').utimesSync(#, #, #)".}
 proc nodeLstat(path: cstring) {.importjs: "require('fs').lstatSync(#)".}
 proc nodeRemoveTree(path: cstring)
   {.importjs: "require('fs').rmSync(#, { recursive: true, force: true })".}
@@ -148,6 +150,15 @@ proc nodeContentIdHost*(tempRoot = "";
         if not nodeExists(cstring(source)):
           return HostFileResult(missing: true)
         nodeCopyFile(cstring(source), cstring(destination))
+        HostFileResult(ok: true)
+      except:
+        HostFileResult(error: getCurrentExceptionMsg()),
+    setModificationTime: proc(path: string; unixSeconds: int64): HostFileResult
+                             {.closure, gcsafe.} =
+      # `utimesSync` takes seconds; access and modification time alike (git
+      # reads only the modification time).
+      try:
+        nodeUtimes(cstring(path), float(unixSeconds), float(unixSeconds))
         HostFileResult(ok: true)
       except:
         HostFileResult(error: getCurrentExceptionMsg()),

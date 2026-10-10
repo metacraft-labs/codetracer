@@ -7045,3 +7045,15 @@ Two traps in the same area, both live:
   build the path from parts (`"src" / "tests" / "visual" / "answers"`), or
   `ci/test/plat35-answer-independence.sh` takes them for an ungraded answer
   producer.
+
+A COPY OF A GIT INDEX TRUSTS STAT DATA THE REAL INDEX WOULD RE-CHECK
+(2026-10-10, CTC-3b). git re-reads a file whose stat data matches its index
+entry only when the entry is "racily clean" (mtime not older than the INDEX
+FILE's mtime). A freshly copied index has a fresh mtime, so `git add -u` in
+the copy misses a same-size edit made in the second the real index was
+written. `ct_test/certificate_content_id.nim` dates its temporary index at
+epoch+1 (`StatDistrustTime`) and runs with `core.fsmonitor=false`, forcing a
+content comparison of every tracked file. Test oracles that compute W must
+not use `add -u` over a plain index copy either: read the tree into a FRESH
+index (no stat data) first. Also: `git status` rewrites the real index and
+smudges racily clean entries' sizes, so take index-bytes baselines after it.

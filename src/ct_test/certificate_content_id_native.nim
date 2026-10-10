@@ -5,7 +5,7 @@
 ## API and every other host (Electron, a facade endpoint) drives the same
 ## code. This module only answers the host's questions; it decides nothing.
 
-import std/[os, tempfiles]
+import std/[os, tempfiles, times]
 
 import runquota_process
 
@@ -58,6 +58,13 @@ proc nativeContentIdHost*(captureLimit = ContentIdCaptureLimit): ContentIdHost =
         return HostFileResult(missing: true)
       try:
         copyFile(source, destination)
+        HostFileResult(ok: true)
+      except CatchableError as err:
+        HostFileResult(error: err.msg),
+    setModificationTime: proc(path: string; unixSeconds: int64): HostFileResult
+                             {.closure, gcsafe.} =
+      try:
+        setLastModificationTime(path, fromUnix(unixSeconds))
         HostFileResult(ok: true)
       except CatchableError as err:
         HostFileResult(error: err.msg),

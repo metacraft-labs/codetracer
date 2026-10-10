@@ -16,7 +16,7 @@
 ## is always the real native host; the incomplete-output case uses the same
 ## host with a deliberately tiny capture bound rather than a fake reply.
 
-import std/[algorithm, os, osproc, random, sequtils, streams, strutils,
+import std/[algorithm, os, osproc, random, sequtils, streams, strutils, times,
             tempfiles, unittest]
 
 import certificate_content_id
@@ -684,6 +684,118 @@ suite "content ids (Content-Id.md)":
     check gitDirListing() == listingBefore
     discard git(repo, "commit", "-q", "-a", "-m", "the tested state")
     check worktree == "git-tree-sha1:" & git(repo, "rev-parse", "HEAD^{tree}")
+
+  # -------------------------------------------------------------------------
+  # Stat data is never trusted for content (CTC-3b, 2026-10-10)
+  #
+  # The working-tree recipe runs `git add --update` in a COPY of the user's
+  # index. git skips re-reading a file whose stat data (size, mtime, ctime,
+  # inode, ...) matches its index entry, and re-reads one only when the entry
+  # is "racily clean": its mtime not older than the INDEX FILE's own mtime
+  # (https://git-scm.com/docs/racy-git). A copy has a fresh mtime, so a
+  # same-size edit made in the same second as the last write of the real
+  # index looked clean in the copy and the id named the OLD content. These
+  # cases build each such state from explicit timestamps rather than by
+  # racing the clock, so they fail deterministically against that recipe.
+  #
+  # `core.trustctime=false` (a real, documented setting, and git's advice on
+  # filesystems with unreliable ctimes) takes the inode change time out of
+  # git's stat comparison; the kernel sets ctime on every write and it
+  # cannot be set back, so this is what makes "stat data unchanged"
+  # reproducible from a test instead of from a one-second race.
+  # -------------------------------------------------------------------------
+
+  const StatTime = 1_700_000_000'i64
+    ## An arbitrary, fixed mtime (2023-11-14) for the files and indexes below.
+
+  proc setMtime(path: string; seconds: int64) =
+    setLastModificationTime(path, fromUnix(seconds))
+
+  proc treeWithBlob(repo, path, content: string): string =
+    ## The id of HEAD's tree with ``path`` holding ``content``, built WITHOUT
+    ## any stat data or working-tree read: the blob is hashed from the bytes,
+    ## and a fresh index is assembled from HEAD's tree plus that blob. An
+    ## oracle independent of the recipe under test.
+    let blobFile = suiteDir / "oracle-blob"
+    writeFile(blobFile, content)
+    let blob = git(repo, "hash-object", "-w", "--no-filters", blobFile)
+    let index = suiteDir / "oracle-index"
+    removeFile(index)
+    discard shell(repo, "GIT_INDEX_FILE=" & quoteShell(index) &
+      " git read-tree HEAD && " &
+      "GIT_INDEX_FILE=" & quoteShell(index) &
+      " git update-index --cacheinfo 100644," & blob & "," & quoteShell(path))
+    result = "git-tree-sha1:" &
+      shell(repo, "GIT_INDEX_FILE=" & quoteShell(index) & " git write-tree")
+    removeFile(index)
+
+  proc statCleanRewrite(splitIndex: bool; indexMtime: int64): string =
+    ## A repository whose committed ``a.txt`` ("aaaa\n", mtime ``StatTime``)
+    ## has been rewritten in place to "bbbb\n" — same size, same inode, mtime
+    ## set back to ``StatTime`` — with the real index's mtime ``indexMtime``.
+    let repo = newRepo()
+    discard git(repo, "config", "core.trustctime", "false")
+    if splitIndex:
+      discard git(repo, "config", "core.splitIndex", "true")
+    put(repo, "a.txt", "aaaa\n")
+    put(repo, "other.txt", "other\n")
+    setMtime(repo / "a.txt", StatTime)
+    commitAll(repo)
+    setMtime(repo / ".git/index", indexMtime)
+    writeFile(repo / "a.txt", "bbbb\n")         # in place: same inode
+    setMtime(repo / "a.txt", StatTime)
+    repo
+
+  test "a same-size edit in the second of the last index write is seen":
+    ## The real index's mtime EQUALS the edited file's: to git, reading the
+    ## real index, the entry is racily clean and gets its content re-read —
+    ## `git diff-files` (which writes no index) reports it. The copy must
+    ## behave no worse.
+    for split in [false, true]:
+      checkpoint "core.splitIndex=" & $split
+      let repo = statCleanRewrite(split, indexMtime = StatTime)
+      check git(repo, "diff-files", "--name-only") == "a.txt"
+      let expected = treeWithBlob(repo, "a.txt", "bbbb\n")
+      check expected != "git-tree-sha1:" & git(repo, "rev-parse", "HEAD^{tree}")
+      check idOf(repo) == expected
+      check idOf(repo, scope = ["a.txt"]) == idOf(repo, scope = ["a.txt"])
+      check computeContentId(host, repo, workingTreeState(),
+                             caManifestV1Sha256).outcome == cioComputed
+      # The fixture is what it says: after the id the file is unchanged and
+      # still reads as modified, and committing it yields the same tree.
+      check readFile(repo / "a.txt") == "bbbb\n"
+      discard git(repo, "commit", "-q", "-a", "-m", "the tested state")
+      check "git-tree-sha1:" & git(repo, "rev-parse", "HEAD^{tree}") == expected
+
+  test "a rewrite that restored every stat field is seen":
+    ## The real index is NEWER than the file, as after any later `git add`:
+    ## to git's stat check (and so to `git status`) the edit is invisible —
+    ## exactly what an mtime-preserving tool (`cp -p`, `rsync -t`, `tar x`, a
+    ## restore) leaves behind. Preserving the index's mtime on the copy would
+    ## not see it either; a content id must, because a certificate names the
+    ## content the tests ran on, not what the stat cache believes.
+    let repo = statCleanRewrite(false, indexMtime = StatTime + 500)
+    check git(repo, "diff-files", "--name-only") == ""   # git is fooled
+    let expected = treeWithBlob(repo, "a.txt", "bbbb\n")
+    check idOf(repo) == expected
+
+  test "a filesystem monitor is not trusted for content":
+    ## With `core.fsmonitor` set, git skips the stat check for entries the
+    ## monitor last called unchanged. A monitor that lags (or, here, lies:
+    ## it never reports a change) must not decide the content id.
+    let repo = newRepo()
+    put(repo, "a.txt", "aaaa\n")
+    commitAll(repo)
+    let hook = suiteDir / "silent-fsmonitor"
+    writeFile(hook, "#!/bin/sh\nprintf 'token\\0'\n")
+    setFilePermissions(hook, {fpUserRead, fpUserWrite, fpUserExec})
+    discard git(repo, "config", "core.fsmonitor", hook)
+    discard git(repo, "config", "core.fsmonitorHookVersion", "2")
+    discard git(repo, "update-index", "--fsmonitor")
+    discard git(repo, "status", "--porcelain")       # records the token
+    writeFile(repo / "a.txt", "a different size\n")
+    check git(repo, "status", "--porcelain") == ""   # the monitor hides it
+    check idOf(repo) == treeWithBlob(repo, "a.txt", "a different size\n")
 
   test "no temporary directory is left behind":
     check hostLitter().len == 0
