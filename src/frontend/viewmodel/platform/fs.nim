@@ -19,8 +19,11 @@
 
 import ./outcome
 import ./capabilities
+import ../../../ct_test/certificate_store_roots
 
 export outcome
+export certificate_store_roots.CertificateStoreRoots,
+       certificate_store_roots.noLocalStore
 
 type
   FsEntryKind* = enum
@@ -115,6 +118,18 @@ type
                 ): PlatformFuture[PlatformOutcome[FsWatchHandle]]
     unwatch*: proc(handle: FsWatchHandle): PlatformFuture[PlatformOutcome[Nothing]]
 
+    certificateStoreRoots*: proc(): PlatformFuture[PlatformOutcome[CertificateStoreRoots]]
+      ## Where this host's local certificate store is: its user root and this
+      ## account's system root, resolved by the HOST from its own environment,
+      ## platform family and account (test-certificates-spec Transport §2.1;
+      ## `ct_test/certificate_store_roots` is the one resolver). The roots are
+      ## then read through the operations above, like any other directory.
+      ##
+      ## A host with no local store at all — a browser tab — answers
+      ## `available = false` rather than refusing: "there is no store here"
+      ## is an ordinary answer, and Status-Bar.md requires the absence of a
+      ## store to render as an ordinary state, never as an error.
+
 proc `==`*(a, b: FsWatchHandle): bool {.borrow.}
 proc `$`*(handle: FsWatchHandle): string {.borrow.}
 
@@ -171,4 +186,7 @@ proc unavailableFileSystem*(profile: PlatformProfile): FileSystemFacade =
     watch: proc(path: string; recursive: bool;
                 onEvent: proc(event: FsWatchEvent)): auto =
       resolvedUnsupported[FsWatchHandle]("watching the filesystem"),
-    unwatch: proc(handle: FsWatchHandle): auto = resolvedUnsupported[Nothing]("watching the filesystem"))
+    unwatch: proc(handle: FsWatchHandle): auto = resolvedUnsupported[Nothing]("watching the filesystem"),
+    certificateStoreRoots: proc(): auto =
+      resolvedOk(noLocalStore(profile.displayName &
+        " has no filesystem of its own, so it has no local certificate store")))

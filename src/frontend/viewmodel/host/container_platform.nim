@@ -252,6 +252,13 @@ proc newContainerPlatform*(transport: RemoteTransport;
     callRemote[Nothing](transport, "fs.unwatch",
                         %*{"handle": encodeFsWatchHandle(handle)},
                         decodeNothing)
+  result.fs.certificateStoreRoots = proc(): auto =
+    # The CONTAINER's store, resolved by the container process from its own
+    # environment and account: that is where its test runs wrote. The tab's
+    # machine has no say in it.
+    callRemote[CertificateStoreRoots](transport, "fs.certificateStoreRoots",
+                                      newJObject(),
+                                      decodeCertificateStoreRoots)
 
   # -- process ------------------------------------------------------------
   result.process.run = proc(spec: ProcessSpec): auto =
@@ -317,6 +324,22 @@ proc newContainerPlatform*(transport: RemoteTransport;
                           "paths": encodeTextSeq(paths), "staged": staged,
                           "contextLines": contextLines},
                        decodeText)
+  result.vcs.contentId = proc(repository: string; state: VcsBlobSource;
+                              algorithm: string; scope: seq[string]
+                             ): PlatformFuture[PlatformOutcome[VcsContentId]] =
+    # Refused HERE, without a round trip, when the profile this client was
+    # built from lacks `capVcsRead`: that profile is the server's declaration
+    # (§6.3), so a call it does not cover would be refused there too, and
+    # this side can name the capability without asking. The endpoint gates
+    # the verb as well, for a client that does not.
+    if not profile.hasAll(ContentIdRequires):
+      return resolved(contentIdRefusal(profile))
+    callRemote[VcsContentId](transport, "vcs.contentId",
+                             %*{"repository": repository,
+                                "state": encodeVcsBlobSource(state),
+                                "algorithm": algorithm,
+                                "scope": encodeTextSeq(scope)},
+                             decodeVcsContentId)
   result.vcs.stage = proc(repository: string; paths: seq[string]): auto =
     callRemote[Nothing](transport, "vcs.stage",
                         %*{"repository": repository,

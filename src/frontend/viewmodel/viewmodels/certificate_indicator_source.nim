@@ -192,13 +192,13 @@ proc workspaceVcsState*(host: Platform; workspaceDir: string):
   ## determine cleanliness must not behave as though it had. Here that surfaces
   ## as **unverifiable**, not as "not certified".
   ##
-  ## `tree` is deliberately left unknown. A modified-worktree certificate is
-  ## matched by canonical content id (Verification.md §4.1.1), and the facade
-  ## exposes no operation that computes one — so the indicator says it cannot
-  ## tell rather than guessing, and the ViewModel turns that into
-  ## *unverifiable*. No shipped producer emits such a record today (CTC-1
-  ## defers the modified-worktree form outright), so this costs nothing now and
-  ## is honest the day it does not.
+  ## `tree` is deliberately left unknown here. A modified-worktree certificate
+  ## is matched by content id (Verification.md §4.1.1); the facade now computes
+  ## one (`VcsFacade.contentId`, the facts W, H and S), but moving the
+  ## indicator onto it changes what the indicator decides and is a separate
+  ## step from making the facts available. Until then the indicator says it
+  ## cannot tell rather than guessing, and the ViewModel turns that into
+  ## *unverifiable*.
   if not host.can(capVcsRead):
     return WorkspaceVcsState(known: false)
 

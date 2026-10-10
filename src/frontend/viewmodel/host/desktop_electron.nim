@@ -42,6 +42,7 @@ import ../platform/download
 import ../platform/shell
 import ../platform/platform
 import ../platform/paths
+import ./node_certificate_host
 
 # ---------------------------------------------------------------------------
 # Node and Electron bindings
@@ -302,6 +303,17 @@ proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
     do:
       resolvedErr[string](pkFailed, "cannot create a temporary directory", errorText())
 
+  result.certificateStoreRoots = proc(
+      ): PlatformFuture[PlatformOutcome[CertificateStoreRoots]] =
+    # Resolved from the renderer's own `process.env`, which Electron gives the
+    # renderer from the process that launched it — the same environment the
+    # producer that wrote the certificates resolved against.
+    jsGuard:
+      resolvedOk(nodeCertificateStoreRoots())
+    do:
+      resolvedErr[CertificateStoreRoots](pkFailed,
+        "cannot resolve the local certificate store", errorText())
+
 # ---------------------------------------------------------------------------
 # Process
 # ---------------------------------------------------------------------------
@@ -463,6 +475,21 @@ proc electronVcs(profile: PlatformProfile): VcsFacade =
       for p in paths: args.add p
     let res = git(repository, args)
     if res.ok: resolvedOk(res.value) else: resolved(failed[string](res.error))
+
+  # The content-id recipe through node's `spawnSync`, its temporary index
+  # under the OS temporary directory. `node_certificate_host` returns every
+  # failure as a value; `jsGuard` is the facade's own contract on top, so even
+  # a lapse there arrives as an outcome rather than on `window.onerror`.
+  let contentHost = nodeContentIdHost()
+  result.contentId = proc(repository: string; state: VcsBlobSource;
+                          algorithm: string; scope: seq[string]
+                         ): PlatformFuture[PlatformOutcome[VcsContentId]] =
+    jsGuard:
+      resolved(contentIdOver(contentHost, profile, repository, state,
+                             algorithm, scope))
+    do:
+      resolvedErr[VcsContentId](pkFailed, "computing a content id failed",
+                                errorText())
 
   result.stage = proc(repository: string;
                       paths: seq[string]): PlatformFuture[PlatformOutcome[Nothing]] =

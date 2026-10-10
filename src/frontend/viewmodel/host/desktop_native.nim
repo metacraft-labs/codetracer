@@ -43,6 +43,7 @@ import ../platform/download
 import ../platform/shell
 import ../platform/platform
 import ./native_vcs
+import ../../../ct_test/certificate_store_roots_native
 
 # ---------------------------------------------------------------------------
 # Filesystem
@@ -199,6 +200,10 @@ proc desktopFileSystem(profile: PlatformProfile): FileSystemFacade =
     try: resolvedOk(createTempDir(prefix, ""))
     except CatchableError as err:
       resolved(osErrorOutcome[string]("create a temporary directory", prefix, err))
+
+  result.certificateStoreRoots = proc(
+      ): PlatformFuture[PlatformOutcome[CertificateStoreRoots]] =
+    resolvedOk(nativeCertificateStoreRoots())
 
   # `watch` is deliberately left as the refusal `unavailableFileSystem` supplies
   # even though `capFilesystemWatch` is in the desktop profile. The desktop

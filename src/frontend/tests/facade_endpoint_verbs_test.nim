@@ -67,7 +67,7 @@ import ../viewmodel/platform/browser_facades
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
 
-const ExpectedAssertions = 941
+const ExpectedAssertions = 1002
 var counted = 0
 var failedChecks = 0
 
@@ -153,7 +153,7 @@ discard payloadOf("fs.createDir", %*{"path": scratch})
 suite "the dispatch table is complete and self-consistent":
 
   test "every verb is a dotted name, declared once":
-    ck facadeVerbs.len == 61
+    ck facadeVerbs.len == 63
     var seen: seq[string] = @[]
     for entry in facadeVerbs:
       ck entry.verb.contains('.')
@@ -170,7 +170,7 @@ suite "the dispatch table is complete and self-consistent":
       else:
         inc servedCount
         ck entry.unservedBecause.len == 0
-    ck servedCount == 35
+    ck servedCount == 37
     ck refusedCount == 26
 
   test "the served capability set is the table's, not a constant":
@@ -779,6 +779,170 @@ suite "vcs is served by running git, and reads back what git wrote":
     ck nowhere.errorKind == pkNotFound
 
 # ---------------------------------------------------------------------------
+# 5b. vcs.contentId — SB-2a: the content facts W, H and S, and the store roots
+# ---------------------------------------------------------------------------
+
+let contentRepo = workspace & "/content-repo"
+
+proc sh(dir, script: string): string =
+  ## A script that must succeed; its stdout, trimmed.
+  let ran = runScript(dir, script)
+  doAssert ran.exit.exitCode == 0, script & " failed: " & ran.stderr
+  ran.stdout.strip()
+
+proc contentIdReply(ep: FacadeEndpoint; state, algorithm: string;
+                    repo = contentRepo; scope = newJArray()): ReplyFrame =
+  inc nextCallId
+  decodeReply(ep.handleFrame(encodeCall(CallFrame(
+    id: nextCallId, verb: "vcs.contentId",
+    args: %*{"repository": repo, "state": state, "algorithm": algorithm,
+             "scope": scope}))))
+
+proc repoSnapshot(): string =
+  ## Every ref, HEAD, a checksum of the index FILE, and status. Status runs
+  ## with GIT_OPTIONAL_LOCKS=0 so the snapshot does not itself refresh the
+  ## index it checksums.
+  sh(contentRepo,
+     "git for-each-ref --format='%(refname) %(objectname)'; cat .git/HEAD; " &
+     "cksum < .git/index; " &
+     "GIT_OPTIONAL_LOCKS=0 git status --porcelain=v1 --untracked-files=all")
+
+suite "vcs.contentId round-trips over the facade endpoint":
+
+  test "W, H and S are git's own trees, and nothing the user sees moved":
+    discard sh(workspace,
+      "git init -q content-repo && cd content-repo && " &
+      "git config user.name 'Facade Suite' && " &
+      "git config user.email facade@example.invalid && " &
+      "printf 'base\n' > f.txt && printf 'g\n' > g.txt && " &
+      "git add -A && git commit -q -m base && " &
+      "printf 'staged\n' > f.txt && git add f.txt && " &
+      "printf 'staged\nedited\n' > f.txt && printf 'u\n' > untracked.txt")
+    let before = repoSnapshot()
+    let w = decodeVcsContentId(contentIdReply(endpoint, "vbsWorkingTree",
+                                              "git-tree-sha1").payload)
+    let s = decodeVcsContentId(contentIdReply(endpoint, "vbsIndex",
+                                              "git-tree-sha1").payload)
+    let h = decodeVcsContentId(contentIdReply(endpoint, "vbsHead",
+                                              "git-tree-sha1").payload)
+    ck repoSnapshot() == before
+    ck w.kind == vcikComputed and s.kind == vcikComputed and h.kind == vcikComputed
+    ck h.id == "git-tree-sha1:" & sh(contentRepo, "git rev-parse 'HEAD^{tree}'")
+    ck s.id == "git-tree-sha1:" & sh(contentRepo,
+      "cp .git/index ../index-copy && GIT_INDEX_FILE=../index-copy " &
+      "git write-tree; rm -f ../index-copy")
+    # W is what `git commit -a` would record, measured on a throwaway clone.
+    ck w.id == "git-tree-sha1:" & sh(workspace,
+      "rm -rf w-clone && git clone -q content-repo w-clone && " &
+      "cp content-repo/f.txt w-clone/f.txt && cd w-clone && " &
+      "git -c user.name=x -c user.email=x@x.invalid commit -q -a -m w && " &
+      "git rev-parse 'HEAD^{tree}' && cd .. && rm -rf w-clone")
+    ck w.id != s.id
+    ck s.id != h.id
+    ck repoSnapshot() == before
+
+  test "a state with no content id arrives as its condition, by name":
+    discard sh(contentRepo, "git update-index --assume-unchanged g.txt")
+    let reply = contentIdReply(endpoint, "vbsWorkingTree", "git-tree-sha1")
+    ck reply.ok
+    ck reply.payload["conditions"][0]["condition"].getStr == "ncAssumeUnchanged"
+    let decoded = decodeVcsContentId(reply.payload)
+    ck decoded.kind == vcikNoContentId
+    ck decoded.id == ""
+    ck decoded.conditions.len == 1
+    ck decoded.conditions[0].condition == ncAssumeUnchanged
+    ck decoded.conditions[0].paths == @["g.txt"]
+    discard sh(contentRepo, "git update-index --no-assume-unchanged g.txt")
+
+  test "cannot-compute is a value, a failure is an error, a bad scope is invalid":
+    let other = decodeVcsContentId(contentIdReply(endpoint, "vbsHead",
+                                                  "git-tree-sha256").payload)
+    ck other.kind == vcikCannotCompute
+    ck other.id == ""
+    let unknown = decodeVcsContentId(contentIdReply(endpoint, "vbsHead",
+                                                    "no-such-algorithm").payload)
+    ck unknown.kind == vcikCannotCompute
+    let outside = contentIdReply(endpoint, "vbsWorkingTree", "git-tree-sha1",
+                                 repo = scratch)
+    ck not outside.ok
+    ck outside.errorKind == pkFailed
+    ck outside.errorMessage.contains("not inside a git working tree")
+    let badScope = contentIdReply(endpoint, "vbsHead", "git-tree-sha1",
+                                  scope = %"src")
+    ck not badScope.ok
+    ck badScope.errorKind == pkInvalidArgument
+    let scoped = decodeVcsContentId(contentIdReply(endpoint, "vbsHead",
+      "git-tree-sha1", scope = %*["g.txt"]).payload)
+    ck scoped.kind == vcikComputed
+    ck scoped.id != decodeVcsContentId(contentIdReply(endpoint, "vbsHead",
+      "git-tree-sha1").payload).id
+
+  test "a caller holding capVcsRead gets an id; one without it is refused, by name":
+    # Two endpoints over the SAME repository, differing only in what they
+    # were granted. The one with capVcsRead alone — no write, no remote —
+    # computes; the one with every other served capability is refused, and
+    # the refusal names the capability it lacks.
+    let readOnly = newFacadeEndpoint(settingsRoot = workspace & "/settings",
+                                     tempRoot = workspace,
+                                     granted = {capVcsRead})
+    let granted = contentIdReply(readOnly, "vbsHead", "git-tree-sha1")
+    ck granted.ok
+    ck decodeVcsContentId(granted.payload).kind == vcikComputed
+
+    let withoutRead = newFacadeEndpoint(settingsRoot = workspace & "/settings",
+                                        tempRoot = workspace,
+                                        granted = servedCapabilities() - {capVcsRead})
+    let refused = contentIdReply(withoutRead, "vbsHead", "git-tree-sha1")
+    ck not refused.ok
+    ck refused.errorKind == pkNotSupported
+    ck refused.errorMessage.contains("capVcsRead")
+    ck refused.errorMessage.contains("vcs.contentId")
+    # It does not advertise what it refuses, and still explains the absence.
+    let narrowed = withoutRead.welcomeFrame()
+    ck capVcsRead notin narrowed.profile.capabilities
+    ck undeclaredDegradations(narrowed.profile).len == 0
+
+    # A client built from that welcome refuses WITHOUT a round trip, naming
+    # the capability too.
+    var sent = 0
+    let counting: RemoteTransport = proc(request: RemoteRequest
+                                        ): PlatformFuture[RemoteResponse] =
+      inc sent
+      newCompletedFuture(remoteErr(pkFailed, "must not be reached"))
+    let narrowClient = newContainerPlatform(counting, narrowed)
+    let local = awaitSync(narrowClient.vcs.contentId(contentRepo, vbsHead,
+                                                     "git-tree-sha1", @[]))
+    ck not local.ok
+    ck local.error.kind == pkNotSupported
+    ck local.error.message.contains("capVcsRead")
+    ck sent == 0
+
+    # The narrowing is per capability, not per endpoint: what it WAS granted
+    # it still serves.
+    inc nextCallId
+    let stat = decodeReply(withoutRead.handleFrame(encodeCall(CallFrame(
+      id: nextCallId, verb: "fs.stat", args: %*{"path": contentRepo}))))
+    ck stat.ok
+
+  test "fs.certificateStoreRoots is the container process's own, per Transport §2.1":
+    setEnv(cstring"TEST_CERTIFICATES_DIR", cstring(workspace & "/store"))
+    let roots = decodeCertificateStoreRoots(payloadOf("fs.certificateStoreRoots",
+                                                      newJObject()))
+    ck roots.available
+    ck roots.user == workspace & "/store"
+    ck roots.system.len > 0
+    setEnv(cstring"TEST_CERTIFICATES_DIR", cstring"relative/store")
+    let ignored = decodeCertificateStoreRoots(payloadOf("fs.certificateStoreRoots",
+                                                        newJObject()))
+    ck ignored.user != "relative/store"
+    var said = false
+    for problem in ignored.problems:
+      if problem.contains("TEST_CERTIFICATES_DIR") and problem.contains("ignored"):
+        said = true
+    ck said
+    setEnv(cstring"TEST_CERTIFICATES_DIR", cstring(workspace & "/store"))
+
+# ---------------------------------------------------------------------------
 # 6. Settings
 # ---------------------------------------------------------------------------
 
@@ -957,6 +1121,10 @@ suite "the client and the server agree, verb by verb":
     ck record("fs.remove", client.fs.remove(clientDir & "/e.txt", false)).ok
     ck record("fs.realPath", client.fs.realPath(clientDir)).value.len > 0
     ck record("fs.makeTempDir", client.fs.makeTempDir("client-")).ok
+    let roots = record("fs.certificateStoreRoots", client.fs.certificateStoreRoots())
+    ck roots.ok
+    ck roots.value.available
+    ck roots.value.user == workspace & "/store"
 
     # `exists` is `stat` read through the facade's own helper, which is where
     # a `pkNotFound` for a missing path would have shown up as a false error.
@@ -994,6 +1162,12 @@ suite "the client and the server agree, verb by verb":
     ck record("vcs.readBlobAt",
               client.vcs.readBlobAt(repository, "a.txt", "HEAD")).value == "one\n"
     ck record("vcs.diff", client.vcs.diff(repository, @[], false, 3)).ok
+    let head = record("vcs.contentId", client.vcs.contentId(
+      repository, vbsHead, "git-tree-sha1", @[]))
+    ck head.ok
+    ck head.value.kind == vcikComputed
+    ck head.value.id == "git-tree-sha1:" & runScript(repository,
+      "git rev-parse 'HEAD^{tree}'").stdout.strip()
 
     ck record("fs.writeText",
               client.fs.writeText(repository & "/c.txt", "third\n")).ok

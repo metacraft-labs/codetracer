@@ -402,6 +402,37 @@ suite "capability and refusal never disagree — the web profile":
     check awaitOutcome(p.vcs.commit(".", "m", "a", "e")).error.kind ==
       pkNotSupported
 
+  test "the web host cannot compute a content id: cannot-compute, never an id, never an error":
+    ## SB-2a. The certificate indicator asks every host for W, H and S
+    ## (Status-Bar.md). With no git in the tab there is no content id, and
+    ## Content-Id §5 reads that as unverifiable — so the answer is a VALUE
+    ## saying so, for every state and every algorithm, not a refusal the
+    ## indicator would have to translate.
+    let p = web.platform
+    for state in [vbsWorkingTree, vbsIndex, vbsHead]:
+      for algorithm in ["git-tree-sha1", "git-tree-sha256",
+                        "manifest-v1-sha256", "an-unknown-algorithm"]:
+        let outcome = awaitOutcome(p.vcs.contentId(".", state, algorithm, @[]))
+        check outcome.ok
+        if outcome.ok:
+          check outcome.value.kind == vcikCannotCompute
+          check outcome.value.id == ""
+          check outcome.value.algorithm == algorithm
+          check "no version control" in outcome.value.reason
+
+  test "the web host has no local certificate store, and says so as an answer":
+    ## Transport §2's store is a per-user directory on a machine; a tab has
+    ## neither. "No local store" is an ordinary answer (Status-Bar.md: the
+    ## absence of a store renders as an ordinary state, never an error).
+    let p = web.platform
+    let outcome = awaitOutcome(p.fs.certificateStoreRoots())
+    check outcome.ok
+    if outcome.ok:
+      check not outcome.value.available
+      check outcome.value.user == ""
+      check outcome.value.system == ""
+      check outcome.value.problems == @[webNoLocalCertificateStore]
+
   test "capFilesystemTemp is absent, and the sentence says where staging goes":
     let p = web.platform
     check not p.can(capFilesystemTemp)

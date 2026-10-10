@@ -58,7 +58,7 @@ export certificate_indicator_source, status_certificate_projection
 
 when defined(js):
   from ../platform_host import
-    ctPlatform, Platform, can, capFilesystemWatch, FsWatchEvent, fs
+    ctPlatform, ctAwaitSync, Platform, can, capFilesystemWatch, FsWatchEvent, fs
 
   # `process.platform` / `process.arch` are node's names for this machine, read
   # AT RUN TIME. `hostOS` / `hostCPU` would be the machine that COMPILED the
@@ -201,3 +201,73 @@ when defined(js):
     indicator.toggleDisclosure()
     if not onIndicatorChanged.isNil:
       onIndicatorChanged()
+
+  # ---------------------------------------------------------------------------
+  # The in-Electron verification seam for the content facts (SB-2a)
+  # ---------------------------------------------------------------------------
+  #
+  # `window.__ctCertificateFacts` calls the INSTALLED platform's facade —
+  # `ctPlatform()`, which in the shipped window is `desktop_electron` — and
+  # hands back each outcome as JSON. It exists because the Electron
+  # instantiation is compiled only into the renderer bundle, so no Nim lane can
+  # run it: `certificate-content-facts-electron.spec.ts` drives it through this
+  # object, from inside the real app.
+  #
+  # Deliberately NO try/except here. The facade's contract is that failures
+  # are values; a facade operation that throws must make the spec's
+  # `page.evaluate` reject, which is what lets the spec catch `jsGuard`
+  # losing its bare `except:` arm (SB-1's fix, which had no in-Electron test).
+
+  import std/[enumutils, json]
+  import ../viewmodel/platform/platform
+
+  proc errorJson(error: PlatformError): JsonNode =
+    %*{"ok": false, "errorKind": $error.kind, "errorMessage": error.message}
+
+  proc contentIdJson(repository, state, algorithm: cstring;
+                     scope: seq[cstring]): cstring =
+    var source = vbsWorkingTree
+    case $state
+    of "W": source = vbsWorkingTree
+    of "S": source = vbsIndex
+    of "H": source = vbsHead
+    else: return cstring($(%*{"ok": false, "errorKind": "pkInvalidArgument",
+                               "errorMessage": "state must be W, S or H"}))
+    var paths: seq[string] = @[]
+    for path in scope: paths.add $path
+    let outcome = ctAwaitSync(ctPlatform().vcs.contentId(
+      $repository, source, $algorithm, paths))
+    if not outcome.ok:
+      return cstring($errorJson(outcome.error))
+    var conditions = newJArray()
+    for state in outcome.value.conditions:
+      conditions.add %*{"condition": symbolName(state.condition),
+                        "paths": state.paths}
+    cstring($(%*{"ok": true, "kind": $outcome.value.kind,
+                 "id": outcome.value.id, "algorithm": outcome.value.algorithm,
+                 "reason": outcome.value.reason, "conditions": conditions}))
+
+  proc storeRootsJson(): cstring =
+    let outcome = ctAwaitSync(ctPlatform().fs.certificateStoreRoots())
+    if not outcome.ok:
+      return cstring($errorJson(outcome.error))
+    cstring($(%*{"ok": true, "available": outcome.value.available,
+                 "user": outcome.value.user, "system": outcome.value.system,
+                 "problems": outcome.value.problems}))
+
+  proc listDirJson(path: cstring): cstring =
+    let outcome = ctAwaitSync(ctPlatform().fs.listDir($path))
+    if not outcome.ok:
+      return cstring($errorJson(outcome.error))
+    var names: seq[string] = @[]
+    for entry in outcome.value: names.add entry.name
+    cstring($(%*{"ok": true, "names": names}))
+
+  proc installCertificateFactsProbe(
+      contentId: proc(repository, state, algorithm: cstring;
+                      scope: seq[cstring]): cstring;
+      storeRoots: proc(): cstring;
+      listDir: proc(path: cstring): cstring)
+    {.importjs: "(typeof window !== 'undefined') && (window.__ctCertificateFacts = {contentId: #, storeRoots: #, listDir: #})".}
+
+  installCertificateFactsProbe(contentIdJson, storeRootsJson, listDirJson)

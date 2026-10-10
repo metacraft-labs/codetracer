@@ -1078,7 +1078,16 @@ test_lane_files() {
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
 				'/test_every_status_surface_has_an_entry_point\.nim$' \
-				'/test_vcs_working_tree\.nim$'
+				'/test_vcs_working_tree\.nim$' \
+				'/test_vcs_content_id\.nim$'
+		# `test_vcs_content_id` (SB-2a) is `test_vcs_working_tree`'s twin: its
+		# claim is the NATIVE facade computing W, H and S against real
+		# repositories it builds with the system git (`std/osproc`), which a
+		# JS target cannot run. The JS instantiations of the same operation are
+		# covered where they run: the endpoint's in `main-process`
+		# (`facade_endpoint_verbs_test.nim`), the web's here
+		# (`test_platform_web.nim`), Electron's in the GUI suite
+		# (`status-bar/certificate-content-facts-electron.spec.ts`).
 		# `test_every_mountable_pane_has_a_factory_arm` and
 		# `test_every_status_surface_has_an_entry_point` (both 2026-09-04) are
 		# the same shape as `test_pane_mount_markers_are_released` below: their
@@ -1317,8 +1326,12 @@ test_lane_files() {
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_plugin_source_admission\.nim$' \
 				'/test_vcs_working_tree\.nim$' \
+				'/test_vcs_content_id\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
 				'/test_project_action_runner\.nim$'
+		# NINE entries since SB-2a: `test_vcs_content_id` runs the system git
+		# through `std/osproc` exactly as `test_vcs_working_tree` below does,
+		# so it dies on the same `posix_spawnp` link line.
 		# EIGHT entries since 2026-10-04: `test_vcs_working_tree` (PLAT-47)
 		# runs the SYSTEM `git` through `std/osproc`, the same reason it is
 		# rejected from `vm-unit-js` above, and it dies on the same line as

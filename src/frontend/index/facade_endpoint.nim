@@ -98,6 +98,7 @@ import ../viewmodel/platform/process
 import ../viewmodel/platform/vcs
 import ../viewmodel/platform/settings
 import ../viewmodel/platform/endpoint_codec
+import ../viewmodel/host/node_certificate_host
 
 export endpoint_codec
 
@@ -318,6 +319,15 @@ type
     deployment*: JsonNode
       ## §6.3's opaque half, echoed into `welcome`. WD1c owns its shape (§7);
       ## this module carries it and reads nothing in it.
+    granted*: CapabilitySet
+      ## The capabilities this endpoint may exercise for its caller. A verb
+      ## whose capabilities (`FacadeVerb.serves`) are not all granted is
+      ## refused with `pkNotSupported` NAMING the missing ones, and is not
+      ## advertised in `welcome`. Defaults to everything the table serves, so
+      ## an endpoint nobody narrowed behaves exactly as the table says; a
+      ## deployment that must not, say, read version control starts one
+      ## without `capVcsRead`, and `vcs.contentId` — which writes loose objects
+      ## into `.git/objects` — is then refused rather than run.
 
 proc defaultSettingsRoot(): string =
   let base =
@@ -328,12 +338,26 @@ proc defaultSettingsRoot(): string =
   joinPath(base, "codetracer", "endpoint")
 
 proc newFacadeEndpoint*(settingsRoot = ""; tempRoot = "";
-                        deployment: JsonNode = nil): FacadeEndpoint =
+                        deployment: JsonNode = nil;
+                        granted: CapabilitySet = allCapabilities
+                       ): FacadeEndpoint =
+  ## `granted` defaults to EVERY capability, which the dispatcher reads as
+  ## "everything the table serves": the table, not this default, is what
+  ## bounds an un-narrowed endpoint.
   FacadeEndpoint(
     settingsRoot: if settingsRoot.len > 0: settingsRoot
                   else: defaultSettingsRoot(),
     tempRoot: if tempRoot.len > 0: tempRoot else: $(nos.tmpdir().to(cstring)),
-    deployment: if deployment.isNil: newJObject() else: deployment)
+    deployment: if deployment.isNil: newJObject() else: deployment,
+    granted: granted)
+
+proc grantedProfile(ep: FacadeEndpoint): PlatformProfile =
+  ## The profile a handler that drives a shared facade implementation
+  ## (`vcs.contentIdOver`) checks against: the container class, narrowed to
+  ## what this endpoint was granted.
+  result = containerProfile.withCapabilities(
+    containerProfile.capabilities * ep.granted, containerProfile.degradations)
+  result.displayName = "container (ct host endpoint)"
 
 # ---------------------------------------------------------------------------
 # Filesystem handlers.
@@ -480,6 +504,12 @@ proc hFsMakeTempDir(ep: FacadeEndpoint; args: JsonNode): VerbReply =
   let a = attempt(proc(): JsObject = nfs.mkdtempSync(cstring stem))
   if not a.ok: return replyFromNode("create a temporary directory", prefix, a)
   replyOk(encodeText($(a.value.to(cstring))))
+
+proc hFsCertificateStoreRoots(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+  ## The local certificate store's two roots (Transport §2.1), as THIS process
+  ## resolves them: the container's environment and account, which is where
+  ## the container's test runs wrote.
+  replyOk(encodeCertificateStoreRoots(nodeCertificateStoreRoots()))
 
 # ---------------------------------------------------------------------------
 # Processes — and, through them, git.
@@ -710,6 +740,30 @@ proc hVcsDiff(ep: FacadeEndpoint; args: JsonNode): VerbReply =
     for p in paths: arguments.add p
   replyOk(encodeText(gitText git(repository, arguments)))
 
+proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): VerbReply =
+  ## `vcs.contentId` — the content id of W, H or S (Status-Bar.md), by the ONE
+  ## recipe (`ct_test/certificate_content_id`, through `vcs.contentIdOver`)
+  ## with node's `spawnSync` as its git and the endpoint's temp root for its
+  ## temporary index.
+  ##
+  ## REQUIRES `capVcsRead` (`vcs.ContentIdRequires`). WHAT IT WRITES: loose,
+  ## content-addressed blob and tree objects into the repository's
+  ## `.git/objects`, and nothing else — no ref, no index (only a copy of it,
+  ## outside the repository, is written), no working-tree file.
+  let repository = argText(args, "repository")
+  let state = decodeVcsBlobSource(jrequire(args, "state"))
+  let algorithm = argText(args, "algorithm")
+  let scopeField = jrequire(args, "scope")
+  if scopeField.kind != JArray:
+    raise newException(ProtocolError, "'scope' must be a list of paths")
+  let scope = decodeTextSeq(scopeField)
+  let outcome = contentIdOver(nodeContentIdHost(ep.tempRoot), ep.grantedProfile(),
+                              repository, state, algorithm, scope)
+  if not outcome.ok:
+    return replyErr(outcome.error.kind, outcome.error.message,
+                    outcome.error.detail)
+  replyOk(encodeVcsContentId(outcome.value))
+
 proc hVcsStage(ep: FacadeEndpoint; args: JsonNode): VerbReply =
   let repository = argText(args, "repository")
   let paths = decodeTextSeq(jrequire(args, "paths"))
@@ -925,6 +979,7 @@ let facadeVerbs*: seq[FacadeVerb] = @[
   served("fs.makeTempDir", {capFilesystemTemp}, hFsMakeTempDir),
   refused("fs.watch", {capFilesystemWatch}, NoClientEventRegistry),
   refused("fs.unwatch", {capFilesystemWatch}, NoClientEventRegistry),
+  served("fs.certificateStoreRoots", {capFilesystemRead}, hFsCertificateStoreRoots),
 
   # -- process ------------------------------------------------------------
   #
@@ -950,6 +1005,11 @@ let facadeVerbs*: seq[FacadeVerb] = @[
   served("vcs.readBlob", {capVcsRead}, hVcsReadBlob),
   served("vcs.readBlobAt", {capVcsRead}, hVcsReadBlobAt),
   served("vcs.diff", {capVcsRead}, hVcsDiff),
+  # REQUIRES capVcsRead, and WRITES: computing a content id stores loose,
+  # content-addressed blob and tree objects in the repository's `.git/objects`
+  # (that is how git computes a tree id), and nothing else — no ref, no index,
+  # no working-tree file. A read in the facade's sense; see `vcs.contentId`.
+  served("vcs.contentId", ContentIdRequires, hVcsContentId),
   served("vcs.stage", {capVcsWrite}, hVcsStage),
   served("vcs.unstage", {capVcsWrite}, hVcsUnstage),
   served("vcs.discardChanges", {capVcsWrite}, hVcsDiscardChanges),
@@ -995,7 +1055,7 @@ let facadeVerbs*: seq[FacadeVerb] = @[
   refused("shell.openSessionWindow", {capMultiWindow}, BelongsToTheTab)]
 
 proc findVerb*(verb: string): int =
-  ## The index of `verb` in the table, or -1. A linear scan over sixty-one
+  ## The index of `verb` in the table, or -1. A linear scan over sixty-three
   ## entries, once per call frame, against a filesystem or a subprocess on the
   ## other side of it: a hash table here would be optimising the wrong end.
   for i, entry in facadeVerbs:
@@ -1107,11 +1167,19 @@ proc welcomeFrame*(ep: FacadeEndpoint; session = ""): WelcomeFrame =
   ## server that assigned the name instead would have to be consulted before a
   ## client could address anything, and a client driving several sessions would
   ## have no way to tell two welcomes apart until after it had acted on one.
+  var profile = servedProfile()
+  # Narrowed to what this endpoint was GRANTED, so the welcome never
+  # advertises a capability `dispatch` would then refuse.
+  for capability in profile.capabilities - ep.granted:
+    profile.capabilities.excl capability
+    profile.degradations.add DegradationRule(capability: capability,
+      behaviour: "this deployment does not grant it, so every verb that " &
+                 "needs it is refused")
   WelcomeFrame(
     session: session,
     contractMin: ServedContractMin,
     contractMax: ServedContractMax,
-    profile: servedProfile(),
+    profile: profile,
     deployment: ep.deployment)
 
 # ---------------------------------------------------------------------------
@@ -1154,6 +1222,18 @@ proc dispatch*(ep: FacadeEndpoint; call: CallFrame): ReplyFrame =
       session: call.session, id: call.id, ok: false, errorKind: pkNotSupported,
       errorMessage: entry.verb & " is declared by the contract and not " &
         "served here: " & entry.unservedBecause)
+
+  let ungranted = entry.serves - ep.granted
+  if ungranted.len > 0:
+    # Declared and implemented, but this endpoint was not granted what it
+    # needs. Named, so the caller can tell "this deployment withholds
+    # capVcsRead" from "this build does not have the verb".
+    var names: seq[string] = @[]
+    for capability in ungranted: names.add $capability
+    return ReplyFrame(
+      session: call.session, id: call.id, ok: false, errorKind: pkNotSupported,
+      errorMessage: entry.verb & " requires " & names.join(", ") &
+        ", which this endpoint was not granted")
 
   var reply: VerbReply
   try:

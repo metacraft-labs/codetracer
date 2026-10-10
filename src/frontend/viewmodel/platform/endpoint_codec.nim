@@ -36,7 +36,7 @@
 ## server can mint them and the client can only quote them back. They encode as
 ## the string they are, and nothing here interprets one.
 
-import std/[base64, json]
+import std/[base64, enumutils, json]
 
 import ./fs
 import ./process
@@ -103,6 +103,20 @@ enumCodec(ProcessSignal, encodeProcessSignal, decodeProcessSignal)
 enumCodec(VcsFileStatus, encodeVcsFileStatus, decodeVcsFileStatus)
 enumCodec(VcsBlobSource, encodeVcsBlobSource, decodeVcsBlobSource)
 enumCodec(SettingsScope, encodeSettingsScope, decodeSettingsScope)
+enumCodec(VcsContentIdKind, encodeVcsContentIdKind, decodeVcsContentIdKind)
+
+# `NoContentIdCondition` carries a SENTENCE as its string value (it is the
+# recipe's message text), so `$` would put prose on the wire. It travels by
+# its identifier like every other enum here, through `symbolName`.
+func encodeNoContentIdCondition*(v: NoContentIdCondition): JsonNode =
+  %symbolName(v)
+
+func decodeNoContentIdCondition*(n: JsonNode): NoContentIdCondition =
+  let text = if n.isNil or n.kind != JString: "" else: n.getStr
+  for candidate in NoContentIdCondition:
+    if symbolName(candidate) == text: return candidate
+  raise newException(ProtocolError,
+    "'" & text & "' is not a value of NoContentIdCondition")
 
 # ---------------------------------------------------------------------------
 # Bytes.
@@ -128,6 +142,21 @@ func decodeBytes*(n: JsonNode): seq[byte] =
 # ---------------------------------------------------------------------------
 # Filesystem.
 # ---------------------------------------------------------------------------
+func encodeCertificateStoreRoots*(v: CertificateStoreRoots): JsonNode =
+  %*{"available": v.available, "user": v.user, "system": v.system,
+     "problems": jstrArray(v.problems)}
+
+proc decodeCertificateStoreRoots*(n: JsonNode): CertificateStoreRoots =
+  # `available` is REQUIRED: defaulting it would turn a reply this build cannot
+  # read into "there is no store here", which is an answer, not a refusal.
+  let available = jrequire(n, "available")
+  if available.kind != JBool:
+    raise newException(ProtocolError, "'available' must be a boolean")
+  CertificateStoreRoots(
+    available: available.getBool,
+    user: jstr(n, "user"), system: jstr(n, "system"),
+    problems: jstrSeq(n, "problems"))
+
 func encodeFsStat*(v: FsStat): JsonNode =
   %*{"kind": encodeFsEntryKind(v.kind), "size": v.size,
      "modifiedMs": v.modifiedMs, "readOnly": v.readOnly}
@@ -213,6 +242,29 @@ proc decodeProcessOutputChunk*(n: JsonNode): ProcessOutputChunk =
 # ---------------------------------------------------------------------------
 # Version control.
 # ---------------------------------------------------------------------------
+func encodeVcsContentId*(v: VcsContentId): JsonNode =
+  result = %*{"kind": encodeVcsContentIdKind(v.kind), "id": v.id,
+              "algorithm": v.algorithm, "reason": v.reason,
+              "conditions": newJArray()}
+  for state in v.conditions:
+    result["conditions"].add %*{
+      "condition": encodeNoContentIdCondition(state.condition),
+      "paths": jstrArray(state.paths)}
+
+proc decodeVcsContentId*(n: JsonNode): VcsContentId =
+  result.kind = decodeVcsContentIdKind(jrequire(n, "kind"))
+  result.id = jstr(n, "id")
+  result.algorithm = jstr(n, "algorithm")
+  result.reason = jstr(n, "reason")
+  for e in n{"conditions"}.getElems():
+    result.conditions.add NoContentIdState(
+      condition: decodeNoContentIdCondition(jrequire(e, "condition")),
+      paths: jstrSeq(e, "paths"))
+  if result.kind == vcikComputed and result.id.len == 0:
+    # A computed id with no id would read as "computed, and empty" — a value
+    # no caller could tell from a match against an empty record field.
+    raise newException(ProtocolError, "a computed content id carries no id")
+
 func encodeVcsFileChange*(v: VcsFileChange): JsonNode =
   %*{"path": v.path, "previousPath": v.previousPath,
      "indexStatus": encodeVcsFileStatus(v.indexStatus),

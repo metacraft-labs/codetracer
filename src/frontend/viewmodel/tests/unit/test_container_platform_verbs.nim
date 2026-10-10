@@ -6,7 +6,7 @@
 ## That suite's `test_a_remote_instantiation_needs_no_signature_change` asks
 ## whether the SIGNATURES survive an out-of-process instantiation, and it
 ## answers it with seven verbs. The contract
-## (`Architecture/UI-Bundle-And-Endpoints.md` §6) has sixty-one, and §6.2's
+## (`Architecture/UI-Bundle-And-Endpoints.md` §6) has sixty-three, and §6.2's
 ## change from `\x1f`-separated strings to named JSON fields moved the failure
 ## mode: a positional encoding gets its arity checked, a named one does not, so
 ## `fs.copy` sending `{"destination": src, "source": dst}` is a wire that
@@ -38,7 +38,7 @@ import ../../platform/platform
 import ../../platform/endpoint_codec
 import ../../host/container_platform
 
-const ExpectedAssertions = 365
+const ExpectedAssertions = 422
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -279,6 +279,26 @@ suite "filesystem verbs":
       # this module deliberately does not have.
       ck events == 0
 
+  test "fs.certificateStoreRoots takes no arguments and returns both roots":
+    withEndpoint:
+      nextPayload = encodeCertificateStoreRoots(CertificateStoreRoots(
+        available: true, user: "/home/u/.local/state/test-certificates",
+        system: "/var/lib/test-certificates/1000",
+        problems: @["$XDG_STATE_HOME is set to the relative path 'x'"]))
+      let outcome = awaitOutcome(remote.fs.certificateStoreRoots())
+      ck seenVerb == "fs.certificateStoreRoots"
+      ck seenArgs.kind == JObject and seenArgs.len == 0
+      ck outcome.ok
+      ck outcome.value.available
+      ck outcome.value.user == "/home/u/.local/state/test-certificates"
+      ck outcome.value.system == "/var/lib/test-certificates/1000"
+      ck outcome.value.problems.len == 1
+      # A reply without `available` is unreadable, not "no store here".
+      nextPayload = %*{"user": "/x", "system": "", "problems": []}
+      let unreadable = awaitOutcome(remote.fs.certificateStoreRoots())
+      ck not unreadable.ok
+      ck unreadable.error.kind == pkTransport
+
   test "fs.unwatch quotes the handle back":
     withEndpoint:
       let outcome = awaitOutcome(remote.fs.unwatch(FsWatchHandle("watch-7")))
@@ -478,6 +498,88 @@ suite "version-control verbs":
         ck seenArgs["source"].kind == JString
         ck decodeVcsBlobSource(jrequire(seenArgs, "source")) == source
         ck outcome.value == Awkward
+
+  test "vcs.contentId names repository, state BY NAME, algorithm and scope":
+    ## SB-2a. The state is W, S or H — `VcsBlobSource`'s three words — so it
+    ## travels by name for `vcs.readBlob`'s reason: an ordinal would compute
+    ## the index where the working tree was asked for. The scope is a LIST,
+    ## and an empty one (the whole repository) stays an empty list.
+    withEndpoint:
+      for state in VcsBlobSource:
+        nextPayload = encodeVcsContentId(VcsContentId(
+          kind: vcikComputed, algorithm: "git-tree-sha1",
+          id: "git-tree-sha1:4b825dc642cb6eb9a060e54bf8d69288fbee4904"))
+        let outcome = awaitOutcome(remote.vcs.contentId(
+          "/w", state, "git-tree-sha1", @["src", Awkward]))
+        ck seenVerb == "vcs.contentId"
+        ck jstr(seenArgs, "repository") == "/w"
+        ck seenArgs["state"].kind == JString
+        ck decodeVcsBlobSource(jrequire(seenArgs, "state")) == state
+        ck jstr(seenArgs, "algorithm") == "git-tree-sha1"
+        ck seenArgs["scope"].kind == JArray
+        ck decodeTextSeq(jrequire(seenArgs, "scope")) == @["src", Awkward]
+        ck outcome.ok
+        ck outcome.value.kind == vcikComputed
+        ck outcome.value.id ==
+          "git-tree-sha1:4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+      nextPayload = encodeVcsContentId(VcsContentId(
+        kind: vcikComputed, algorithm: "git-tree-sha1", id: "x"))
+      discard awaitOutcome(remote.vcs.contentId("/w", vbsHead, "git-tree-sha1", @[]))
+      ck seenArgs["scope"].kind == JArray
+      ck seenArgs["scope"].len == 0
+
+  test "vcs.contentId returns each Content-Id §3 condition by name, with its paths":
+    withEndpoint:
+      nextPayload = encodeVcsContentId(VcsContentId(
+        kind: vcikNoContentId, algorithm: "git-tree-sha1",
+        reason: "this state has no content id",
+        conditions: @[
+          NoContentIdState(condition: ncUnmergedEntries, paths: @["a", "b"]),
+          NoContentIdState(condition: ncSubmoduleModified, paths: @["sub"])]))
+      let outcome = awaitOutcome(remote.vcs.contentId(
+        "/w", vbsWorkingTree, "git-tree-sha1", @[]))
+      ck outcome.ok
+      ck outcome.value.kind == vcikNoContentId
+      ck outcome.value.id == ""
+      ck outcome.value.conditions.len == 2
+      ck outcome.value.conditions[0].condition == ncUnmergedEntries
+      ck outcome.value.conditions[0].paths == @["a", "b"]
+      ck outcome.value.conditions[1].condition == ncSubmoduleModified
+      ck nextPayload["conditions"][0]["condition"].getStr == "ncUnmergedEntries"
+
+  test "vcs.contentId: a computed reply with no id is pkTransport, never an empty id":
+    withEndpoint:
+      nextPayload = %*{"kind": "vcikComputed", "id": "", "algorithm": "git-tree-sha1",
+                       "reason": "", "conditions": []}
+      let outcome = awaitOutcome(remote.vcs.contentId(
+        "/w", vbsHead, "git-tree-sha1", @[]))
+      ck not outcome.ok
+      ck outcome.error.kind == pkTransport
+
+  test "vcs.contentId is refused locally, naming capVcsRead, when the profile lacks it":
+    ## And a profile that holds it sends the call: the gate is the
+    ## capability, not the verb.
+    var sent = 0
+    let counting: RemoteTransport = proc(request: RemoteRequest
+                                        ): PlatformFuture[RemoteResponse] =
+      inc sent
+      newCompletedFuture(remoteOk(encodeVcsContentId(VcsContentId(
+        kind: vcikComputed, algorithm: "git-tree-sha1", id: "git-tree-sha1:00"))))
+    block:
+      let holding = newContainerPlatform(counting, containerProfile.withCapabilities(
+        {capVcsRead}, @[]))
+      let granted = awaitOutcome(holding.vcs.contentId(
+        "/w", vbsHead, "git-tree-sha1", @[]))
+      ck sent == 1
+      ck granted.ok and granted.value.kind == vcikComputed
+      let narrow = newContainerPlatform(counting, containerProfile.withCapabilities(
+        containerProfile.capabilities - {capVcsRead}, @[]))
+      let outcome = awaitOutcome(narrow.vcs.contentId(
+        "/w", vbsHead, "git-tree-sha1", @[]))
+      ck sent == 1
+      ck not outcome.ok
+      ck outcome.error.kind == pkNotSupported
+      ck "capVcsRead" in outcome.error.message
 
   test "vcs.readBlobAt names an arbitrary revision, distinct from readBlob":
     withEndpoint:
