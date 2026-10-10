@@ -139,7 +139,12 @@ const ResolutionNeedles = [
   "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
   "\".local\"", ".local/share/codetracer", ".config/codetracer",
   "\"USERPROFILE\"", "\"LOCALAPPDATA\"", "\"APPDATA\"",
-  "Library/Caches/com.codetracer"]
+  "Library/Caches/com.codetracer",
+  # The legacy per-run tmp dir (`<temp>/codetracer`), as Rust and Nim spelt
+  # it before `ct_home::tmp_dir` / `ctTmpDir` -- a site that goes back to
+  # one of these writes sockets and run dirs into the real profile.
+  "temp_dir().join(\"codetracer", "getTempDir() / \"codetracer\"",
+  "\"TEMPDIR\""]
 
 proc generated(rel: string): bool =
   for part in rel.split({'/', '\\'}):
