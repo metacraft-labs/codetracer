@@ -92,7 +92,17 @@ proc ctTestUsageMessage*(): string =
   "/<platform>.toml` — which is where CodeTracer's status bar looks, so a " &
   "project needs no flag and no other tool to be reported as certified; " &
   "`ct test` also writes `" & WorkspaceStateDir & "/.gitignore` so its own " &
-  "record cannot make the next run report your tree as dirty; " &
+  "record never shows up as an untracked file in the next run; " &
+  "a certificate is bound to the CONTENT of the tracked files as the tests " &
+  "ran against them (`vcs.content`, computed before and after the run; " &
+  "`vcs.base` names HEAD and is informational only), so a modified working " &
+  "tree is certified as it is, with no need to commit first, and a commit " &
+  "that records exactly the tested content is covered with no second run; " &
+  "it is withheld, saying why and what to do, when tracked files change " &
+  "during the run or when the tree has no content id (unmerged entries, " &
+  "assume-unchanged or skip-worktree entries git does not look at, a " &
+  "submodule with uncommitted changes); withholding never changes the exit " &
+  "status; " &
   "`--certificate <path>` writes the record THERE INSTEAD (useful for a " &
   "destination outside the repository), and `--no-certificate` suppresses " &
   "issuance entirely; signing is OPTIONAL and OFF " &
@@ -278,11 +288,22 @@ proc certificateReport(issuance: Issuance;
     "vcs": vcsState
   }
   if issuance.vcs.determined:
-    result["commit"] = %issuance.vcs.commit
-    result["clean"] = %issuance.vcs.clean
+    # The binding is `content`; `base` is informational and absent on an
+    # unborn branch. `content_before` appears only when it differs, which is
+    # the evidence behind `wrContentChanged`.
     if issuance.vcs.content.len > 0:
       result["content"] = %issuance.vcs.content
+    if issuance.vcs.contentBefore.len > 0 and
+       issuance.vcs.contentBefore != issuance.vcs.content:
+      result["content_before"] = %issuance.vcs.contentBefore
+    if issuance.vcs.noContentId.len > 0:
+      var conditions = newJArray()
+      for state in issuance.vcs.noContentId:
+        conditions.add %*{"condition": $state.condition, "paths": state.paths}
+      result["no_content_id"] = conditions
     result["untracked"] = %issuance.vcs.untracked
+    if issuance.vcs.base.len > 0:
+      result["base"] = %issuance.vcs.base
   elif issuance.vcs.probed:
     result["vcs_undetermined_reason"] = %issuance.vcs.undeterminedReason
   if issuance.issued:

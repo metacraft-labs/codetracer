@@ -15,14 +15,84 @@
 ##
 ## The summary is read back from ``--summary <path>`` rather than from stdout,
 ## which is also the documented way a machine consumer reads a run.
+##
+## ONE SEAM, for one case: "withholding an attestation does not change the
+## run's exit code" has to reach every withholding reason, and all but one of
+## them are decided only after a test has PASSED, which no shipped provider
+## can do here without a language toolchain. That case therefore also drives
+## the same CLI entry point with an in-process fixture provider — the seam
+## ``certificate_default_store_test.nim`` justifies — which reports a pass for
+## the test it is handed and, for one fixture file, edits a tracked file while
+## it runs. Discovery, orchestration, issuance and the exit status are the
+## shipped code.
 
-import std/[json, os, osproc, streams, strutils, unittest]
+import std/[json, options, os, osproc, streams, strutils, unittest]
 
+import contracts
 import certificate
 import certificate_issuance
 import ct_test
 import discovery
 import run_orchestration
+
+const
+  FixtureProviderId = "fixture-cli"
+  FixtureTestFile = "tests/calc_test.fixture"
+  EditingMarker = "edit a tracked file while running"
+
+proc fixtureInfo(): TestProviderInfo =
+  TestProviderInfo(
+    id: FixtureProviderId, language: "fixture", framework: "inproc",
+    displayName: "In-process CLI fixture provider", version: "test",
+    capabilities: TestCapabilities(
+      canDiscoverProject: true, canDiscoverFile: true, canLocateTests: true,
+      canRunProject: true, canRunFile: true, canRunSingle: true,
+      canCapturePerTestOutput: true, emitsStructuredEvents: true))
+
+proc fixtureItem(): TestItem =
+  TestItem(
+    id: makeTestItemId(FixtureProviderId, "fixture", "inproc",
+                       FixtureTestFile, FixtureTestFile & "::adds"),
+    providerId: FixtureProviderId, language: "fixture", framework: "inproc",
+    name: "adds", kind: tikCase, file: FixtureTestFile,
+    range: SourceRange(startLine: 1, startColumn: 1, endLine: 1, endColumn: 2),
+    selector: FixtureTestFile & "::adds", tags: @["fixture"],
+    location: LocationProvenance(source: lskPattern,
+      detail: "in-process fixture", confidence: lcHigh))
+
+proc fixtureRun(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
+  ## Reports a pass for the test it was handed. When the test file asks for
+  ## it, the test first appends to the tracked `notes.txt`: an edit during
+  ## the run.
+  let testFile = scope.projectRoot / FixtureTestFile
+  if fileExists(testFile) and EditingMarker in readFile(testFile):
+    let notes = scope.projectRoot / "notes.txt"
+    writeFile(notes, readFile(notes) & "edited during the run\n")
+  ProviderResult[seq[TestEvent]](diagnostics: @[], value: @[
+    TestEvent(schemaVersion: TestEventSchemaVersion, kind: tekTestStarted,
+              providerId: FixtureProviderId, runId: scope.testId,
+              testId: scope.testId),
+    TestEvent(schemaVersion: TestEventSchemaVersion, kind: tekTestFinished,
+              providerId: FixtureProviderId, runId: scope.testId,
+              testId: scope.testId, status: some(tsPassed), durationMs: 1)])
+
+proc fixtureDetect(projectRoot: string): ProviderResult[bool] {.gcsafe.} =
+  ProviderResult[bool](value: fileExists(projectRoot / FixtureTestFile))
+
+proc fixtureDiscoverProject(projectRoot: string):
+    ProviderResult[TestCatalog] {.gcsafe.} =
+  ProviderResult[TestCatalog](value: TestCatalog(
+    schemaVersion: TestCatalogSchemaVersion, provider: fixtureInfo(),
+    items: (if fileExists(projectRoot / FixtureTestFile): @[fixtureItem()]
+            else: @[])))
+
+proc fixtureRegistry(): ProviderRegistry =
+  var provider = TestProvider(info: fixtureInfo())
+  provider.detect = fixtureDetect
+  provider.discoverProject = fixtureDiscoverProject
+  provider.run = fixtureRun
+  ProviderRegistry(providers: @[
+    M1Provider(provider: provider, relevantConfigFiles: @[])])
 
 proc scratchDir(name: string): string =
   result = getTempDir() / "ct-test-cert-cli" / name & "-" & $getCurrentProcessId()
@@ -69,6 +139,12 @@ suite "ct test run certificate CLI":
     check "--key-id" in usage
     check CertificateSchema in usage
     check CtTestFramework in usage
+    # The binding is content, and the text no longer tells anyone to commit
+    # before testing.
+    check "CONTENT of the tracked files" in usage
+    check "no need to commit first" in usage
+    check "no second run" in usage
+    check "commit your changes" notin usage
     # Signing is OPTIONAL and OFF by default, and the usage text has to say so:
     # an unsigned certificate is well-formed (Standard.md §6), and a user who
     # believes signing is automatic has a false idea of what they hold.
@@ -144,6 +220,96 @@ suite "ct test run certificate CLI":
     let withoutCertificate = runCli(@["test", "run", "--workspace", workspace,
                                       "--threads", "1", "--no-certificate"])
     check withCertificate == withoutCertificate
+
+    # EVERY reason decided after the tests passed, each produced for real:
+    # the run exits 0 with or without attestation, and the summary names the
+    # reason it withheld for.
+    proc fixtureWorkspace(name: string; testFile = "adds\n"): string =
+      result = scratchDir(name)
+      createDir(result / "tests")
+      writeFile(result / FixtureTestFile, testFile)
+      writeFile(result / "notes.txt", "notes\n")
+      git(result, ["init", "--initial-branch=main", "."])
+      git(result, ["config", "user.email", "ct-test@example.invalid"])
+      git(result, ["config", "user.name", "ct test suite"])
+      git(result, ["config", "commit.gpgsign", "false"])
+      git(result, ["add", "-A"])
+      git(result, ["commit", "-m", "initial"])
+
+    proc exitCodes(workspace, name: string): tuple[attested, disabled: int;
+                                                   reason: string;
+                                                   report: JsonNode] =
+      let summaryPath = scratchDir(name & "-summary") / "summary.json"
+      result.attested = runCtTest(
+        @["test", "run", "--workspace", workspace, "--threads", "1",
+          "--summary", summaryPath], fixtureRegistry(), newDiscoveryCache())
+      let report = parseJson(readFile(summaryPath)){"certificate"}
+      result.report = report
+      checkpoint name & ": " & $report
+      result.reason =
+        if report{"issued"}.getBool: $wrNone
+        else: report{"withheld_reason"}.getStr
+      result.disabled = runCtTest(
+        @["test", "run", "--workspace", workspace, "--threads", "1",
+          "--no-certificate"], fixtureRegistry(), newDiscoveryCache())
+
+    let issued = fixtureWorkspace("exit-issued")
+    writeFile(issued / "notes.txt", "a tracked edit\n")
+
+    let changed = fixtureWorkspace("exit-content-changed",
+                                   "adds\n" & EditingMarker & "\n")
+
+    let unmerged = fixtureWorkspace("exit-unmerged")
+    git(unmerged, ["checkout", "-q", "-b", "theirs"])
+    writeFile(unmerged / "notes.txt", "theirs\n")
+    git(unmerged, ["commit", "-q", "-a", "-m", "theirs"])
+    git(unmerged, ["checkout", "-q", "main"])
+    writeFile(unmerged / "notes.txt", "ours\n")
+    git(unmerged, ["commit", "-q", "-a", "-m", "ours"])
+    git(unmerged, ["merge", "-q", "theirs"])
+
+    let hidden = fixtureWorkspace("exit-index-hides")
+    git(hidden, ["update-index", "--assume-unchanged", "notes.txt"])
+    writeFile(hidden / "notes.txt", "behind git's back\n")
+
+    let dependency = fixtureWorkspace("exit-submodule-dep")
+    let parent = fixtureWorkspace("exit-submodule")
+    git(parent, ["-c", "protocol.file.allow=always", "submodule", "add", "-q",
+                 dependency, "vendor/dep"])
+    git(parent, ["commit", "-q", "-m", "add dependency"])
+    writeFile(parent / "vendor" / "dep" / "notes.txt", "patched\n")
+
+    let outside = scratchDir("exit-not-a-repo")
+    createDir(outside / "tests")
+    writeFile(outside / FixtureTestFile, "adds\n")
+
+    for (workspace, name, expected) in [
+        (issued, "issued", wrNone),
+        (changed, "content-changed", wrContentChanged),
+        (unmerged, "unmerged", wrUnmergedEntries),
+        (hidden, "index-hides", wrIndexHidesWorktree),
+        (parent, "submodule", wrSubmoduleModified),
+        (outside, "not-a-repo", wrVcsUndeterminable)]:
+      let codes = exitCodes(workspace, name)
+      check codes.reason == $expected
+      check codes.attested == 0
+      check codes.attested == codes.disabled
+      # The summary carries the evidence for the reason, not only its name.
+      case expected
+      of wrContentChanged:
+        check codes.report{"content_before"}.getStr.len > 0
+        check codes.report{"content_before"}.getStr !=
+              codes.report{"content"}.getStr
+      of wrUnmergedEntries, wrIndexHidesWorktree, wrSubmoduleModified:
+        check codes.report{"no_content_id"}.len > 0
+        check not codes.report.hasKey("content")
+      of wrNone:
+        check not codes.report.hasKey("content_before")
+        check codes.report{"base"}.getStr.len > 0
+      else:
+        discard
+      if expected != wrNone:
+        check codes.report{"remedy"}.getStr.len > 0
 
   test "a run that executed no test does not exit 0":
     ## **The exit code and the attestation must not contradict each other.**

@@ -256,11 +256,11 @@ proc indicatorFor(repo: string): CertificateIndicatorModel =
 # ---------------------------------------------------------------------------
 # Git runners, for the answers a real repository cannot produce
 #
-# `publishCertificate` takes an injectable runner for the same reason
-# `probeVcs` does, and these are the answers that seam exists for: a git that
-# exits neither 0 nor 1 (absent from PATH, refusing, not a repository) cannot
-# be arranged against a real checkout at test speed. They decide nothing about
-# the certificate — the runner is consulted only for `check-ignore`.
+# `publishCertificate` takes an injectable runner, and these are the answers
+# that seam exists for: a git that exits neither 0 nor 1 (absent from PATH,
+# refusing, not a repository) cannot be arranged against a real checkout at
+# test speed. They decide nothing about the certificate — the runner is
+# consulted only for `check-ignore`, and the VCS probe takes no runner.
 # ---------------------------------------------------------------------------
 var seenArgv: seq[string] = @[]
 
@@ -318,7 +318,10 @@ suite "CTC-2: the default certificate store":
     checkpoint $report
     ck report{"issued"}.getBool
     ck report{"framework"}.getStr == CtTestFramework
-    ck report{"clean"}.getBool
+    ck report{"content"}.getStr == "git-tree-sha1:" & headTree(repo)
+    ck report{"base"}.getStr == headCommit(repo)
+    ck not report.hasKey("clean")
+    ck not report.hasKey("commit")
     ck report.hasKey("written_to")
     ck report{"written_to"}.getStr == defaultCertificateRelativePath(
       currentPlatform())
@@ -339,11 +342,12 @@ suite "CTC-2: the default certificate store":
     ## is a file `git status` can see, and a producer whose own output changes
     ## the answer it reports about the user's tree has broken the thing it was
     ## measuring: `untracked = true` on every run after the first, and — once
-    ## the store is tracked — `clean = false` and a permanent withholding.
+    ## the store is tracked — a content that changes with every run, so no
+    ## commit is ever covered.
     ##
     ## So the assertion is not "the first run works". It is that the SECOND
-    ## consecutive run, with the first run's record on disk, still sees a clean
-    ## tree with no untracked files and still issues.
+    ## consecutive run, with the first run's record on disk, still sees the
+    ## same content with no untracked files and still issues.
     let repo = committedRepo("consecutive")
     ck gitStatus(repo) == ""
 
@@ -352,8 +356,8 @@ suite "CTC-2: the default certificate store":
     ck first.summary{"certificate"}{"issued"}.getBool
 
     # The tree is byte-for-byte as clean as before the run, as GIT sees it —
-    # which is the only opinion that matters, because `probeVcs` is a reader of
-    # `git status` and nothing else.
+    # which is the only opinion that matters, because `probeVcs` takes both
+    # `untracked` and `content` from git and has no list of its own.
     checkpoint "git status after run 1: '" & gitStatus(repo) & "'"
     ck gitStatus(repo) == ""
 
@@ -363,12 +367,13 @@ suite "CTC-2: the default certificate store":
     checkpoint $report
     ck report{"issued"}.getBool
     ck report{"vcs"}.getStr == "determined"
-    # Both halves. `clean = false` would have WITHHELD; `untracked = true`
-    # would have been issued but would have recorded the producer's own
+    # Both halves. A changed `content` would bind something other than the
+    # user's tree; `untracked = true` would have recorded the producer's own
     # bookkeeping as scratch work in the user's tree.
-    ck report{"clean"}.getBool
+    ck report{"content"}.getStr == "git-tree-sha1:" & headTree(repo)
+    ck report{"content"}.getStr == first.summary{"certificate"}{"content"}.getStr
     ck report{"untracked"}.getBool == false
-    ck report{"commit"}.getStr == headCommit(repo)
+    ck report{"base"}.getStr == headCommit(repo)
 
     # And the second record replaces the first rather than accumulating beside
     # it: the file is named for the platform, so a store cannot grow one file
@@ -384,8 +389,48 @@ suite "CTC-2: the default certificate store":
     let third = runCli(repo, "consecutive-3")
     ck third.code == 0
     ck third.summary{"certificate"}{"issued"}.getBool
-    ck third.summary{"certificate"}{"clean"}.getBool
+    ck third.summary{"certificate"}{"content"}.getStr ==
+       "git-tree-sha1:" & headTree(repo)
     ck gitStatus(repo) == ""
+
+  test "the second consecutive run still certifies":
+    ## The case above on CTC-3d's terms: with a tracked edit present
+    ## throughout — which a clean-tree-only producer could not certify at all
+    ## — two consecutive runs give the same content, `untracked = false`, and
+    ## between them `git status` shows the edit and nothing of the producer's.
+    let repo = committedRepo("consecutive-modified")
+    writeFile(repo / FixtureTestFile, "adds, and now subtracts\n")
+    let edited = "M " & FixtureTestFile   # `gitStatus` strips the leading blank
+    ck gitStatus(repo) == edited
+
+    let first = runCli(repo, "consecutive-modified-1")
+    ck first.code == 0
+    let firstReport = first.summary{"certificate"}
+    checkpoint $firstReport
+    ck firstReport{"issued"}.getBool
+    ck firstReport{"untracked"}.getBool == false
+    let content = firstReport{"content"}.getStr
+    ck content.startsWith("git-tree-sha1:")
+    ck content != "git-tree-sha1:" & headTree(repo)
+    ck firstReport{"base"}.getStr == headCommit(repo)
+
+    checkpoint "git status after run 1: '" & gitStatus(repo) & "'"
+    ck gitStatus(repo) == edited
+
+    let second = runCli(repo, "consecutive-modified-2")
+    ck second.code == 0
+    let secondReport = second.summary{"certificate"}
+    checkpoint $secondReport
+    ck secondReport{"issued"}.getBool
+    ck secondReport{"untracked"}.getBool == false
+    ck secondReport{"content"}.getStr == content
+    ck gitStatus(repo) == edited
+
+    # And the record is the one a commit of the edit is covered by: the
+    # content is the tree `git commit -a` records.
+    discard run("git", ["commit", "-q", "-a", "-m", "subtract"], repo)
+    ck content == "git-tree-sha1:" & headTree(repo)
+    ck indicatorFor(repo).state == cisCertified
 
   test "a reprobuild-free project reads certified after ct test":
     ## CTC-2's end-to-end proof, and the reason the standard was extracted from
@@ -535,16 +580,21 @@ suite "CTC-2: the default certificate store":
 
   test "a withheld run publishes nothing":
     ## A producer claims only what it ran, and the default destination must not
-    ## turn that rule into "write something anyway". A dirty tree withholds
-    ## (the modified-worktree form is deferred), and the store must stay empty.
+    ## turn that rule into "write something anyway". A tree git has been told
+    ## not to look at has no content id and withholds, and the store must stay
+    ## empty.
     let repo = committedRepo("withheld")
+    discard run("git", ["update-index", "--assume-unchanged", FixtureTestFile],
+                repo)
     writeFile(repo / FixtureTestFile, "adds, differently\n")
     let (code, summary) = runCli(repo, "withheld")
     ck code == 0                      # the tests still ran and still passed
     let report = summary["certificate"]
     checkpoint $report
     ck report{"issued"}.getBool == false
-    ck report{"withheld_reason"}.getStr == $wrWorktreeDirty
+    ck report{"withheld_reason"}.getStr == $wrIndexHidesWorktree
+    ck report{"no_content_id"}.len == 1
+    ck report{"no_content_id"}[0]{"paths"}[0].getStr == FixtureTestFile
     ck not report.hasKey("written_to")
     ck not fileExists(publishedRecord(repo))
     ck not dirExists(repo / CtTestStoreDir)

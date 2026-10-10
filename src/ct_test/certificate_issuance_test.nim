@@ -1,20 +1,22 @@
 ## Issuance suite for `ct test` certificates.
 ##
-## Covers the producer half of the CTC-1 verification list: a passing run
-## issues a well-formed certificate, a failing run issues none, a dirty tree is
-## reported honestly, targets are sorted and deduplicated in the *signed*
-## payload, commands keep execution order, no interface signs a caller-supplied
-## record, and "commit, then re-run" reaches a clean-tree certificate without
-## re-running any test.
+## Covers the producer half of the CTC-1 verification list — a passing run
+## issues a well-formed certificate, a failing run issues none, targets are
+## sorted and deduplicated in the *signed* payload, commands keep execution
+## order, no interface signs a caller-supplied record — and CTC-3d's: the
+## certificate binds the CONTENT of the tracked files, computed before and
+## after the run, so a modified working tree certifies, a commit of the tested
+## content is covered with no second run, an edit during the run withholds,
+## and the states with no content id are refused, each with its remedy.
 ##
 ## HOW A RUN IS PRODUCED HERE — read this before adding a case
 ## -----------------------------------------------------------
 ## Every run goes through the real ``runAndAttest``: real discovery response →
 ## real ``enumerateRunUnits`` → real worker pool → real event aggregation →
-## real ``probeVcs`` against a real git repository. Only the leaf
-## ``TestProvider.run`` is supplied by this file, exactly as a language adapter
-## supplies one, and it decides pass/fail from the scope's selector so the
-## workers stay stateless.
+## real ``probeVcs`` against a real git repository, before and after the run.
+## Only the leaf ``TestProvider.run`` is supplied by this file, exactly as a
+## language adapter supplies one, and it decides what to do from the scope's
+## selector so the workers stay stateless.
 ##
 ## **There is deliberately no helper that hands the issuance path a result.**
 ## An earlier version of this suite had one — a ``passingRun`` that called the
@@ -26,20 +28,18 @@
 ##
 ## MOCKING POLICY (CLAUDE.md requires every mock to be justified here)
 ## -------------------------------------------------------------------
-## Two seams, both narrow:
+## One seam, and it is narrow: the in-process fixture provider above. A
+## fixture, not a mock of a collaborator: nothing inside the orchestration or
+## the issuance path is stubbed out, and no toolchain is needed for the suite
+## to be deterministic. Some fixture tests write files in the workspace while
+## they run, which is how an edit during the run is produced deterministically.
 ##
-## * The in-process fixture provider above. A fixture, not a mock of a
-##   collaborator: nothing inside the orchestration or the issuance path is
-##   stubbed out, and no toolchain is needed for the suite to be deterministic.
-##
-## * ``IssuanceOptions.gitRunner``, and only for the two failure modes that
-##   decide whether a certificate may be issued at all and cannot be produced
-##   against a real repository at test speed: a ``git status`` whose output
-##   exceeds the subprocess capture bound (the listing is then a prefix,
-##   indistinguishable from a complete short answer, and accepting it is
-##   exactly the guess Standard.md §3.2 forbids), and a ``git`` that exits
-##   non-zero for an environmental reason. Both MUST withhold. Every other VCS
-##   case uses real git through the default runner.
+## There is NO git seam any more. The VCS probe used to take an injectable
+## runner, and that was a way for a caller to answer git itself and have the
+## answer signed into ``base`` and ``untracked``. Every VCS case here uses real
+## git: a corrupt index for git failing, and ``IssuanceOptions.
+## gitCaptureLimit`` (which can only make an answer incomplete, never change
+## it) for an answer cut at the capture bound.
 ##
 ## ENVIRONMENT
 ## -----------
@@ -48,20 +48,17 @@
 ## that and fails with an actionable message rather than mis-asserting. Scratch
 ## directories are removed once the suite has run.
 
-import std/[options, os, osproc, streams, strutils, tables,
-            unittest]
+import std/[options, os, osproc, streams, strutils, times, unittest]
 
-import results
 import contracts
 import certificate
+import certificate_content_id
+import certificate_content_id_native
 import certificate_issuance
 import certificate_signature
 import certificate_verification
 import discovery
-import process_exec
 import run_orchestration
-import incremental/engine
-import incremental/catalog
 
 # ---------------------------------------------------------------------------
 # In-process fixture provider
@@ -84,6 +81,21 @@ type FixtureOutcome = enum
     ## A finished PASS whose event ``testId`` names a unit the provider was
     ## never asked to run. Real providers routinely emit event ids that do not
     ## equal ``item.id``; this is the sharpest version of that.
+  foEditTracked = "edit-tracked"
+    ## A PASS from a test that appends a line to the tracked ``a.txt`` while
+    ## it runs: an edit that lands during the run, deterministically.
+  foEditAndRevert = "edit-and-revert"
+    ## A PASS from a test that rewrites ``a.txt`` and then restores its bytes.
+  foWriteIgnored = "write-ignored"
+    ## A PASS from a test that writes ``build/output.log``, an ignored file.
+  foRemoveTracked = "remove-tracked"
+    ## A PASS from a test that deletes ``a.txt`` while it runs.
+  foRemoveUntracked = "remove-untracked"
+    ## A PASS from a test that deletes the untracked ``scratch.log`` while it
+    ## runs: untracked files present when the run started and gone at its end.
+
+const
+  EditedDuringRun = "edited during the run\n"
 
 proc fixtureInfo(): TestProviderInfo =
   TestProviderInfo(
@@ -124,6 +136,24 @@ proc fixtureRun(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   result = ProviderResult[seq[TestEvent]](diagnostics: @[], value: @[
     TestEvent(schemaVersion: TestEventSchemaVersion, kind: tekRunStarted,
               providerId: FixtureProviderId, runId: scope.testId)])
+  # What the test does to the workspace while it runs.
+  let tracked = scope.projectRoot / "a.txt"
+  case outcome
+  of foEditTracked:
+    writeFile(tracked, readFile(tracked) & EditedDuringRun)
+  of foEditAndRevert:
+    let original = readFile(tracked)
+    writeFile(tracked, original & EditedDuringRun)
+    writeFile(tracked, original)
+  of foRemoveTracked:
+    removeFile(tracked)
+  of foRemoveUntracked:
+    removeFile(scope.projectRoot / "scratch.log")
+  of foWriteIgnored:
+    createDir(scope.projectRoot / "build")
+    writeFile(scope.projectRoot / "build" / "output.log", "a test's output\n")
+  else:
+    discard
   if outcome == foSilent:
     # A provider that started and produced no finished test — a crashed
     # harness, a missing toolchain. It reports a diagnostic and no verdict.
@@ -238,6 +268,50 @@ proc headCommit(dir: string): string =
 
 proc headTree(dir: string): string =
   run("git", ["rev-parse", "HEAD^{tree}"], dir).output.strip()
+
+proc git(dir: string; args: varargs[string]): string =
+  ## A git command for fixture setup that must succeed.
+  let (output, code) = run("git", args, dir)
+  doAssert code == 0, "git " & args.join(" ") & " failed in " & dir & ":\n" &
+                      output
+  output.strip()
+
+proc workingTreeId(dir: string;
+                   algorithm = caGitTreeSha1): string =
+  ## W, computed independently of the producer by the content-id recipe.
+  let computed = computeContentId(nativeContentIdHost(), dir,
+                                  workingTreeState(), algorithm)
+  doAssert computed.outcome == cioComputed, computed.reason
+  computed.id
+
+proc commitOracle(repo, revision: string): ContentOracle =
+  ## The content of ``revision`` — what a consumer evaluating that commit
+  ## computes (Content-Id.md §5), here with CTC-3b's recipe.
+  result = proc(algorithm: string; paths: seq[string]): ContentAnswer
+      {.closure.} =
+    let (known, parsed) = lookupAlgorithm(algorithm)
+    if not known:
+      return ContentAnswer(computed: false, reason: "unknown algorithm")
+    let computed = computeContentId(nativeContentIdHost(), repo,
+                                    commitState(revision), parsed, paths)
+    if computed.outcome == cioComputed:
+      ContentAnswer(computed: true, id: computed.id)
+    else:
+      ContentAnswer(computed: false, reason: computed.reason)
+
+proc coverageOf(repo, document: string; revision = "HEAD"): VerificationReport =
+  ## Does the certificate ``document`` cover ``revision``? Evaluated by the
+  ## shipped verifier, against the content of that commit's tree, with no
+  ## `ct test` run involved.
+  let read = readCertificate(document)
+  doAssert read.status == crsOk, read.detail
+  verifyCertificates(
+    EvaluatedState(repo: repo.lastPathPart,
+                   content: commitOracle(repo, revision)),
+    Requirement(frameworksImplemented: @[CtTestFramework],
+                framework: CtTestFramework, targets: read.cert.targets,
+                platforms: @[currentPlatform()]),
+    [CandidateCertificate(name: "issued.toml", text: document)], KeyStore())
 
 proc generateSigningKey(name: string): string =
   let dir = scratchDir(name)
@@ -540,42 +614,330 @@ suite "ct test certificate issuance":
     check issuance.remedy.len > 0
     check not issuance.vcs.probed
 
-  test "a dirty tree yields clean = false, honestly reported":
-    let repo = committedRepo("dirty")
-    writeFile(repo / "a.txt", "modified\n")
-
-    let probe = probeVcs(repo)
-    checkpoint probe.undeterminedReason
-    check probe.probed
-    check probe.determined
-    # Honesty first: the probe says clean = false rather than defaulting.
-    check not probe.clean
+  test "a modified working tree certifies before any commit":
+    ## Standard.md §3.2.2: the certificate binds the CONTENT of the tracked
+    ## files, so modifications relative to HEAD are simply part of it. A
+    ## tracked edit, an added (staged) file and a deleted file are all issued,
+    ## with `base` naming HEAD for information only.
+    let repo = committedRepo("modified")
+    writeFile(repo / "b.txt", "second\n")
+    writeFile(repo / "c.txt", "third\n")
+    discard git(repo, "add", "b.txt", "c.txt")
+    discard git(repo, "commit", "-m", "more files")
+    let head = headCommit(repo)
+    writeFile(repo / "a.txt", "modified\n")          # a tracked edit
+    writeFile(repo / "new.txt", "added\n")           # an added file
+    discard git(repo, "add", "new.txt")
+    removeFile(repo / "c.txt")                       # a deleted file
+    let expected = workingTreeId(repo)
+    check expected != "git-tree-sha1:" & headTree(repo)
 
     let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
-    check not issuance.issued
-    check issuance.reason == wrWorktreeDirty
-    # The withheld report still carries the truth it established.
-    check issuance.vcs.probed
-    check issuance.vcs.determined
-    check not issuance.vcs.clean
-    check "clean = false" in issuance.message
-    # Actionable: the remedy is the workflow the standard recommends, and it
-    # says why the second run is cheap (Standard.md §3.2.2).
-    check "commit" in issuance.remedy
-    check "re-runs nothing" in issuance.remedy
-    # No content id is reported for a tree this producer will not certify.
-    check issuance.vcs.content.len == 0
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    check issuance.reason == wrNone
+    check issuance.certificate.vcs.content == expected
+    check issuance.vcs.content == expected
+    check issuance.vcs.contentBefore == expected
+    check issuance.certificate.vcs.base == head
+    check not issuance.certificate.vcs.untracked
+    check "base = \"" & head & "\"" in issuance.document
+    # The withholding this replaces is gone from every corner of the report.
+    for text in [issuance.message, issuance.remedy, issuance.document]:
+      check "WorktreeDirty" notin text
+      check "commit your changes" notin text
+    check not compiles(wrWorktreeDirty)
+    # The record is what was tested: a commit of exactly this content would
+    # have this tree, which the next case proves through the verifier.
+    let read = readCertificate(issuance.document)
+    require read.status == crsOk
+    check read.cert.vcs.content == expected
 
-    # And a record with no content id has no canonical form at all, so a
-    # certificate binding nothing cannot even be rendered.
-    let unbound = TestCertificate(
-      schema: CertificateSchema, framework: CtTestFramework, project: "example",
-      platform: "linux/amd64", targets: @["t"], result: "passed",
-      issuedAt: "2026-06-23T10:14:33Z", issuer: "ct-test",
-      vcs: VcsState(repo: "example", untracked: false),
-      commands: @[@["ct", "test"]])
-    expect CertificateError:
-      discard canonicalPayload(unbound)
+  test "a commit of the tested content is covered without a second run":
+    ## The workflow Standard.md §3.2.2 recommends: test, then commit. The
+    ## certificate issued on the modified tree covers the commit that records
+    ## that content — evaluated by the shipped verifier against the content
+    ## of `HEAD^{tree}`, with NO `ct test` run between the commit and the
+    ## check.
+    let repo = committedRepo("test-then-commit")
+    writeFile(repo / "b.txt", "untouched\n")
+    discard git(repo, "add", "b.txt")
+    discard git(repo, "commit", "-m", "b")
+    writeFile(repo / "a.txt", "first change\n")
+    writeFile(repo / "b.txt", "second change\n")
+    let tested = attest(repo, passingItems(), unsignedOptions()).issuance
+    checkpoint tested.message & " / " & tested.remedy
+    require tested.issued
+    let base = headCommit(repo)
+
+    # Before the commit, HEAD is not what was tested.
+    check coverageOf(repo, tested.document).outcome == ocNotCovered
+
+    discard git(repo, "commit", "-a", "-m", "both changes")
+    check headCommit(repo) != base
+    check tested.certificate.vcs.content == "git-tree-sha1:" & headTree(repo)
+    let covered = coverageOf(repo, tested.document)
+    checkpoint covered.reason
+    check covered.outcome == ocCovered
+    # base names the commit the work started on, not the one covered — and
+    # does not stop it being covered.
+    check tested.certificate.vcs.base == base
+
+    # CONTROL: an amended message records the same tree, so it is covered.
+    discard git(repo, "commit", "--amend", "-m", "both changes, reworded")
+    check coverageOf(repo, tested.document).outcome == ocCovered
+
+    # CONTROL: committing only ONE of the two tested changes (partial
+    # staging) records content that was never tested as a whole.
+    let partial = committedRepo("test-then-partial-commit")
+    writeFile(partial / "b.txt", "untouched\n")
+    discard git(partial, "add", "b.txt")
+    discard git(partial, "commit", "-m", "b")
+    writeFile(partial / "a.txt", "first change\n")
+    writeFile(partial / "b.txt", "second change\n")
+    let partialRun = attest(partial, passingItems(), unsignedOptions()).issuance
+    require partialRun.issued
+    discard git(partial, "commit", "-m", "only a", "--", "a.txt")
+    let partialReport = coverageOf(partial, partialRun.document)
+    checkpoint partialReport.reason
+    check partialReport.outcome == ocNotCovered
+    check partialReport.rejected.len == 1
+    # ...and committing the rest afterwards is covered again, still with no
+    # second run.
+    discard git(partial, "commit", "-a", "-m", "and b")
+    check coverageOf(partial, partialRun.document).outcome == ocCovered
+
+    # CONTROL: rebasing the tested commit onto a commit that changes ANOTHER
+    # file gives a tree the tests never saw.
+    let rebased = committedRepo("test-then-rebase")
+    let start = headCommit(rebased)
+    discard git(rebased, "checkout", "-q", "-b", "upstream")
+    writeFile(rebased / "other.txt", "upstream work\n")
+    discard git(rebased, "add", "other.txt")
+    discard git(rebased, "commit", "-m", "upstream")
+    discard git(rebased, "checkout", "-q", "main")
+    check headCommit(rebased) == start
+    writeFile(rebased / "a.txt", "my change\n")
+    let rebasedRun = attest(rebased, passingItems(), unsignedOptions()).issuance
+    require rebasedRun.issued
+    discard git(rebased, "commit", "-a", "-m", "mine")
+    check coverageOf(rebased, rebasedRun.document).outcome == ocCovered
+    discard git(rebased, "rebase", "-q", "upstream")
+    check coverageOf(rebased, rebasedRun.document).outcome == ocNotCovered
+
+  test "an edit during the run withholds":
+    ## Standard.md §3.2: the content id is computed before AND after the run,
+    ## and a producer MUST NOT issue when they differ. The fixture test
+    ## appends to the tracked `a.txt` while it runs.
+    let repo = committedRepo("edit-during-run")
+    writeFile(repo / ".gitignore", "build/\n")
+    discard git(repo, "add", ".gitignore")
+    discard git(repo, "commit", "-m", "ignore build output")
+    let before = workingTreeId(repo)
+
+    let outcome = attest(repo, @[
+      fixtureItem("tests/a_test.nim", "edits a tracked file", foEditTracked)],
+      unsignedOptions())
+    # The test itself passed; only the claim is withheld.
+    check outcome.summary.passed == 1
+    let issuance = outcome.issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    check not issuance.issued
+    check issuance.reason == wrContentChanged
+    check issuance.document.len == 0
+    check "changed while the tests ran" in issuance.message
+    check before in issuance.message
+    check "before `ct test`" in issuance.remedy
+    # THE CONTROL that the after-id is taken AFTER the run rather than copied
+    # from the before-id: the report carries both, the before-id is the state
+    # the run started from, and the after-id is the edited state as it is now.
+    check readFile(repo / "a.txt").endsWith(EditedDuringRun)
+    check issuance.vcs.contentBefore == before
+    check issuance.vcs.content == workingTreeId(repo)
+    check issuance.vcs.content != before
+
+    # The same test writing an IGNORED file changes no tracked content, and
+    # issues.
+    let ignored = committedRepo("ignored-write-during-run")
+    writeFile(ignored / ".gitignore", "build/\n")
+    discard git(ignored, "add", ".gitignore")
+    discard git(ignored, "commit", "-m", "ignore build output")
+    let ignoredRun = attest(ignored, @[
+      fixtureItem("tests/a_test.nim", "writes build output", foWriteIgnored)],
+      unsignedOptions()).issuance
+    checkpoint ignoredRun.message & " / " & ignoredRun.remedy
+    require ignoredRun.issued
+    check fileExists(ignored / "build" / "output.log")
+    check not ignoredRun.certificate.vcs.untracked
+    check ignoredRun.certificate.vcs.content ==
+          "git-tree-sha1:" & headTree(ignored)
+
+    # An edit reverted before the run concludes leaves the content as it was:
+    # the comparison is of content, not of whether anything was touched.
+    let reverted = committedRepo("edit-and-revert-during-run")
+    let revertedRun = attest(reverted, @[
+      fixtureItem("tests/a_test.nim", "edits and restores", foEditAndRevert)],
+      unsignedOptions()).issuance
+    checkpoint revertedRun.message & " / " & revertedRun.remedy
+    require revertedRun.issued
+    check revertedRun.certificate.vcs.content ==
+          "git-tree-sha1:" & headTree(reverted)
+
+  test "states with no content id are refused":
+    ## Content-Id.md §3: a producer MUST NOT issue when the index has unmerged
+    ## entries, when git has been told not to look at a present file, or when
+    ## a submodule has modified content. Each withholds with its own reason
+    ## and a remedy naming the paths; each control (the condition cleared)
+    ## issues.
+
+    # Unmerged entries, from a real conflicting merge.
+    let merge = committedRepo("refuse-unmerged")
+    discard git(merge, "checkout", "-q", "-b", "theirs")
+    writeFile(merge / "a.txt", "theirs\n")
+    discard git(merge, "commit", "-q", "-a", "-m", "theirs")
+    discard git(merge, "checkout", "-q", "main")
+    writeFile(merge / "a.txt", "ours\n")
+    discard git(merge, "commit", "-q", "-a", "-m", "ours")
+    check run("git", ["merge", "-q", "theirs"], merge).code != 0
+    let unmerged = attest(merge, passingItems(), unsignedOptions()).issuance
+    checkpoint unmerged.message & " / " & unmerged.remedy
+    check not unmerged.issued
+    check unmerged.reason == wrUnmergedEntries
+    check "unmerged" in unmerged.message
+    check "a.txt" in unmerged.message
+    check "resolve the merge" in unmerged.remedy
+    check "a.txt" in unmerged.remedy
+    check unmerged.vcs.noContentId.len == 1
+    check unmerged.vcs.noContentId[0].condition == ncUnmergedEntries
+    check unmerged.vcs.content.len == 0
+    writeFile(merge / "a.txt", "resolved\n")
+    discard git(merge, "add", "a.txt")
+    check attest(merge, passingItems(), unsignedOptions()).issuance.issued
+
+    # assume-unchanged on an edited file: git would hash the indexed bytes
+    # while the tests read the edited ones.
+    let assumed = committedRepo("refuse-assume-unchanged")
+    discard git(assumed, "update-index", "--assume-unchanged", "a.txt")
+    writeFile(assumed / "a.txt", "edited behind git's back\n")
+    let hidden = attest(assumed, passingItems(), unsignedOptions()).issuance
+    checkpoint hidden.message & " / " & hidden.remedy
+    check not hidden.issued
+    check hidden.reason == wrIndexHidesWorktree
+    check "assume-unchanged" in hidden.message
+    check "git update-index --no-assume-unchanged -- a.txt" in hidden.remedy
+    discard git(assumed, "update-index", "--no-assume-unchanged", "a.txt")
+    let cleared = attest(assumed, passingItems(), unsignedOptions()).issuance
+    require cleared.issued
+    check cleared.certificate.vcs.content == workingTreeId(assumed)
+    check cleared.certificate.vcs.content != "git-tree-sha1:" & headTree(assumed)
+
+    # skip-worktree with the file present.
+    let skipped = committedRepo("refuse-skip-worktree")
+    discard git(skipped, "update-index", "--skip-worktree", "a.txt")
+    writeFile(skipped / "a.txt", "present and different\n")
+    let skip = attest(skipped, passingItems(), unsignedOptions()).issuance
+    checkpoint skip.message & " / " & skip.remedy
+    check not skip.issued
+    check skip.reason == wrIndexHidesWorktree
+    check "skip-worktree" in skip.message
+    check "git update-index --no-skip-worktree -- a.txt" in skip.remedy
+    # The condition is refused when it held at the START of the run, even
+    # if a test cleared it before the end: here the test deletes the file a
+    # skip-worktree entry hid, so only the state before the run had no
+    # content id. It is reported as that condition, not as a content change.
+    let atStart = attest(skipped, @[
+      fixtureItem("tests/a_test.nim", "removes a.txt", foRemoveTracked)],
+      unsignedOptions()).issuance
+    checkpoint atStart.message & " / " & atStart.remedy
+    check not atStart.issued
+    check atStart.reason == wrIndexHidesWorktree
+    check "when the run started" in atStart.message
+    check not fileExists(skipped / "a.txt")
+    # Control: skip-worktree with the file ABSENT is a sparse checkout, which
+    # has a content id (the indexed entry), and issues.
+    let sparse = attest(skipped, passingItems(), unsignedOptions()).issuance
+    checkpoint sparse.message & " / " & sparse.remedy
+    require sparse.issued
+    check sparse.certificate.vcs.content == "git-tree-sha1:" & headTree(skipped)
+
+    # A submodule with an uncommitted edit.
+    let dependency = committedRepo("refuse-submodule-dep")
+    let parent = committedRepo("refuse-submodule")
+    discard git(parent, "-c", "protocol.file.allow=always", "submodule", "add",
+                "-q", dependency, "vendor/dep")
+    discard git(parent, "commit", "-q", "-m", "add dependency")
+    writeFile(parent / "vendor" / "dep" / "a.txt", "patched in place\n")
+    let modified = attest(parent, passingItems(), unsignedOptions()).issuance
+    checkpoint modified.message & " / " & modified.remedy
+    check not modified.issued
+    check modified.reason == wrSubmoduleModified
+    check "vendor/dep" in modified.message
+    check "commit or revert the changes inside the submodule" in modified.remedy
+    check "git -C vendor/dep status" in modified.remedy
+    discard git(parent / "vendor" / "dep", "checkout", "--", "a.txt")
+    let reverted = attest(parent, passingItems(), unsignedOptions()).issuance
+    checkpoint reverted.message & " / " & reverted.remedy
+    require reverted.issued
+    check reverted.certificate.vcs.content == "git-tree-sha1:" & headTree(parent)
+
+    # None of the refusals is reported as "could not determine": each state
+    # WAS determined, and has no content id.
+    for refused in [unmerged, hidden, skip, modified]:
+      check refused.vcs.probed
+      check refused.vcs.determined
+      check refused.vcs.noContentId.len > 0
+      check refused.document.len == 0
+
+  test "the first commit of a repository is certifiable":
+    ## Standard.md §3.2.3: `base` is omitted, never emitted empty, when there
+    ## is no commit to name — the first commit is certified on top of nothing.
+    let repo = scratchDir("unborn-branch")
+    initRepo(repo)
+    writeFile(repo / "a.txt", "content\n")
+    discard git(repo, "add", "a.txt")
+    check run("git", ["rev-parse", "--verify", "-q", "HEAD"], repo).code != 0
+
+    let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    check issuance.vcs.base == ""
+    check issuance.certificate.vcs.base == ""
+    check "\nbase =" notin issuance.document
+    check "base = \"\"" notin issuance.document
+    check issuance.certificate.vcs.content == workingTreeId(repo)
+    let read = readCertificate(issuance.document)
+    check read.status == crsOk
+
+    # And the first commit is covered by it, with no second run.
+    discard git(repo, "commit", "-q", "-m", "first")
+    check issuance.certificate.vcs.content == "git-tree-sha1:" & headTree(repo)
+    check coverageOf(repo, issuance.document).outcome == ocCovered
+
+  test "a SHA-256 repository issues git-tree-sha256":
+    ## Content-Id.md §4: the algorithm follows the repository's object format.
+    let repo = scratchDir("sha256-repo")
+    discard git(repo, "init", "-q", "--object-format=sha256",
+                "--initial-branch=main", ".")
+    discard git(repo, "config", "user.email", "ct-test@example.invalid")
+    discard git(repo, "config", "user.name", "ct test suite")
+    discard git(repo, "config", "commit.gpgsign", "false")
+    writeFile(repo / "a.txt", "content\n")
+    discard git(repo, "add", "a.txt")
+    discard git(repo, "commit", "-q", "-m", "initial")
+    writeFile(repo / "a.txt", "modified\n")
+
+    let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    let content = issuance.certificate.vcs.content
+    check content.startsWith("git-tree-sha256:")
+    check content.len == "git-tree-sha256:".len + 64
+    check content == workingTreeId(repo, caGitTreeSha256)
+    check issuance.certificate.vcs.base.len == 64
+
+    discard git(repo, "commit", "-q", "-a", "-m", "modified")
+    check content == "git-tree-sha256:" & headTree(repo)
+    check coverageOf(repo, issuance.document).outcome == ocCovered
 
   test "a clean-tree run issues the content HEAD records":
     ## The record carries the content id of the tested files — on a clean
@@ -598,27 +960,106 @@ suite "ct test certificate issuance":
     for earlier in ["commit =", "clean =", "worktree"]:
       check earlier notin issuance.document
 
-  test "untracked files are reported separately from cleanliness":
-    ## `clean` and `untracked` mean different things and both must be honest
-    ## (Standard.md §3.2): untracked scratch work does not stop issuance, but
-    ## it must not be silently reported as absent either.
+  test "untracked files are reported and are outside the content":
+    ## Standard.md §3.2: `untracked` files are not part of `content`, and are
+    ## reported honestly. An untracked scratch file yields untracked = true
+    ## and the SAME content as the run without it. (Withholding when a run is
+    ## known to have READ an untracked file is not this run path's: it
+    ## captures no read set.)
     let repo = committedRepo("untracked")
-    writeFile(repo / "scratch.log", "not tracked\n")
+    writeFile(repo / "a.txt", "a tracked edit\n")
+    let without = attest(repo, passingItems(), unsignedOptions()).issuance
+    require without.issued
+    check not without.certificate.vcs.untracked
 
+    writeFile(repo / "scratch.log", "not tracked\n")
+    createDir(repo / "notes")
+    writeFile(repo / "notes" / "todo.md", "not tracked either\n")
     let probe = probeVcs(repo)
     check probe.determined
-    check probe.clean
     check probe.untracked
+    check probe.content == without.certificate.vcs.content
 
     let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
-    check issuance.issued
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
     check issuance.certificate.vcs.untracked
     check "untracked = true" in issuance.document
+    check issuance.certificate.vcs.content == without.certificate.vcs.content
 
-  test "a producer that cannot determine cleanliness issues nothing":
-    ## Standard.md §3.2: a producer MUST NOT issue `clean = true` when it did
-    ## not check, and if it cannot determine cleanliness it MUST NOT issue at
-    ## all. Four ways of not being able to tell, each withholding.
+    # An ignored file is neither content nor untracked.
+    removeFile(repo / "scratch.log")
+    removeDir(repo / "notes")
+    writeFile(repo / ".git" / "info" / "exclude", "*.tmp\n")
+    writeFile(repo / "cache.tmp", "ignored\n")
+    let ignored = attest(repo, passingItems(), unsignedOptions()).issuance
+    require ignored.issued
+    check not ignored.certificate.vcs.untracked
+    check ignored.certificate.vcs.content == without.certificate.vcs.content
+
+  test "untracked files present only when the run started are reported":
+    ## Standard.md §3.2: `untracked` says whether untracked files were present
+    ## when the commands executed. A file present when the first test was
+    ## dispatched was present while the run executed, even if a test deleted
+    ## it before the last one concluded, so the record says `true` although
+    ## the state after the run has none.
+    let repo = committedRepo("untracked-removed-during-run")
+    writeFile(repo / "scratch.log", "not tracked\n")
+    check probeVcs(repo).untracked
+    let issuance = attest(repo, @[
+      fixtureItem("tests/a_test.nim", "removes scratch.log", foRemoveUntracked)],
+      unsignedOptions()).issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    check not fileExists(repo / "scratch.log")
+    check not probeVcs(repo).untracked
+    check issuance.vcs.untracked
+    check issuance.certificate.vcs.untracked
+    check "untracked = true" in issuance.document
+    check issuance.certificate.vcs.content == "git-tree-sha1:" & headTree(repo)
+
+  test "a run does not rewrite the user's index":
+    ## The probe reads the user's index through `git status`, which by
+    ## default refreshes stale stat information and writes the index back.
+    ## `GIT_OPTIONAL_LOCKS=0` turns that off: a run is read-only with respect
+    ## to the index, byte for byte and by modification time.
+    let repo = committedRepo("index-untouched")
+    # Stale stat data with unchanged bytes: exactly what a refresh rewrites.
+    setLastModificationTime(repo / "a.txt", fromUnix(1_600_000_000))
+    let indexPath = repo / ".git" / "index"
+    let bytesBefore = readFile(indexPath)
+    let mtimeBefore = getLastModificationTime(indexPath)
+    let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    check readFile(indexPath) == bytesBefore
+    check getLastModificationTime(indexPath) == mtimeBefore
+    # CONTROL: the same `git status` without the variable does rewrite it,
+    # so the assertions above can fail.
+    discard git(repo, "status", "--porcelain=v1")
+    check readFile(indexPath) != bytesBefore
+
+  test "a submodule with only untracked files is not refused":
+    ## Content-Id.md §3 refuses a submodule with MODIFIED content. Untracked
+    ## files inside a submodule change nothing its gitlink describes, so the
+    ## run issues, with the content HEAD records.
+    let dependency = committedRepo("submodule-untracked-dep")
+    let parent = committedRepo("submodule-untracked")
+    discard git(parent, "-c", "protocol.file.allow=always", "submodule", "add",
+                "-q", dependency, "vendor/dep")
+    discard git(parent, "commit", "-q", "-m", "add dependency")
+    writeFile(parent / "vendor" / "dep" / "scratch.log", "untracked\n")
+    let issuance = attest(parent, passingItems(), unsignedOptions()).issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    check issuance.vcs.noContentId.len == 0
+    check issuance.certificate.vcs.content == "git-tree-sha1:" & headTree(parent)
+
+  test "a producer that cannot determine the repository state issues nothing":
+    ## Standard.md §3.2: a producer MUST NOT issue a binding it did not
+    ## establish, and if it cannot establish one it MUST NOT issue at all.
+    ## Three ways of not being able to tell, each withholding, all against
+    ## real git.
     let notARepo = scratchDir("not-a-repo")
     let outsideProbe = probeVcs(notARepo)
     check outsideProbe.probed
@@ -628,44 +1069,34 @@ suite "ct test certificate issuance":
     check not outside.issued
     check outside.reason == wrVcsUndeterminable
     check "must not issue at all" in outside.remedy
+    check "not inside a git repository" in outside.message
 
-    let unborn = scratchDir("unborn-head")
-    initRepo(unborn)
-    writeFile(unborn / "a.txt", "content\n")
-    let unbornProbe = probeVcs(unborn)
-    check not unbornProbe.determined
-    check "no commits yet" in unbornProbe.undeterminedReason
-    check not attest(unborn, passingItems(), unsignedOptions()).issuance.issued
-
-    # A truncated `git status` is a PREFIX of the real answer and is
-    # indistinguishable from a complete short one, so treating it as an answer
-    # is precisely the guess the standard forbids. See the mocking policy at
-    # the top of this file for why this branch is reached through the seam.
+    # An answer cut at the capture bound is a PREFIX of the real one and is
+    # indistinguishable from a complete short answer, so treating it as an
+    # answer is precisely the guess the standard forbids. Many untracked
+    # files make `git status` outgrow a small bound.
     let repo = committedRepo("undeterminable")
-    let truncatingGit = proc(argv: seq[string]; cwd: string): CapturedRun {.gcsafe.} =
-      if argv.len > 1 and argv[1] == "status":
-        CapturedRun(output: "", exitCode: 0, outputBytes: 1_000_000,
-                    truncated: true)
-      else:
-        defaultGitRunner(argv, cwd)
+    for i in 0 ..< 40:
+      writeFile(repo / ("untracked-file-with-a-long-name-" & $i & ".txt"), "x\n")
     var truncatedOptions = unsignedOptions()
-    truncatedOptions.gitRunner = truncatingGit
+    truncatedOptions.gitCaptureLimit = 512
     let truncated = attest(repo, passingItems(), truncatedOptions).issuance
+    checkpoint truncated.message
     check not truncated.issued
     check truncated.reason == wrVcsUndeterminable
     check "capture bound" in truncated.message
+    # The control: the same repository with the default bound issues.
+    check attest(repo, passingItems(), unsignedOptions()).issuance.issued
 
-    let failingGit = proc(argv: seq[string]; cwd: string): CapturedRun {.gcsafe.} =
-      if argv.len > 1 and argv[1] == "status":
-        CapturedRun(output: "fatal: detected dubious ownership", exitCode: 128)
-      else:
-        defaultGitRunner(argv, cwd)
-    var failingOptions = unsignedOptions()
-    failingOptions.gitRunner = failingGit
-    let failed = attest(repo, passingItems(), failingOptions).issuance
+    # A git that fails: a corrupt index makes every git call that reads it
+    # exit non-zero.
+    let broken = committedRepo("corrupt-index")
+    writeFile(broken / ".git" / "index", "this is not an index\n")
+    let failed = attest(broken, passingItems(), unsignedOptions()).issuance
+    checkpoint failed.message
     check not failed.issued
     check failed.reason == wrVcsUndeterminable
-    check "dubious ownership" in failed.message
+    check "failed (exit" in failed.message
 
   test "targets are sorted and deduplicated in the signed payload":
     let repo = committedRepo("targets")
@@ -839,6 +1270,73 @@ suite "ct test certificate issuance":
     check "-Y\", \"sign\"" notin
           readFile(sourceDir / "certificate_verification.nim")
 
+  test "no caller-supplied value reaches content, untracked or base":
+    ## CTC-1's guarantee, extended to the content binding: the vcs field
+    ## values are read out of real git inside `runAndAttest`, before and after
+    ## the run, and a caller has no field, parameter or seam through which to
+    ## supply them — nor a content-id host or git runner that would answer
+    ## for git.
+    ##
+    ## Positive controls first, so a `compiles()` that is false for an
+    ## unrelated reason cannot pass vacuously.
+    check compiles(IssuanceOptions(issuer: "x", gitCaptureLimit: 1))
+    check compiles(probeVcs("/tmp", 1))
+    for field in ["content", "contentBefore", "untracked", "base", "repo",
+                  "paths", "vcs", "probe", "before", "gitRunner", "host",
+                  "contentHost", "contentId"]:
+      checkpoint field
+      var named = false
+      for name, _ in IssuanceOptions().fieldPairs:
+        if name == field:
+          named = true
+      check not named
+    # The whole set of options is the reviewed one: each is a deployment
+    # choice or can only make issuance fail.
+    var optionNames: seq[string]
+    for name, _ in IssuanceOptions().fieldPairs:
+      optionNames.add name
+    check optionNames == @["disabled", "issuer", "signingKeyPath", "keyId",
+                           "issuedAt", "gitCaptureLimit"]
+    check not compiles(IssuanceOptions(gitRunner: nil))
+    check not compiles(IssuanceOptions(content: "git-tree-sha1:00"))
+    check not compiles(IssuanceOptions(base: "00"))
+    check not compiles(IssuanceOptions(untracked: false))
+    # No route accepts a probe, a content id or a host: `runAndAttest`'s six
+    # parameters are the run's, and the before-state lives in the private
+    # `AttestedRun`.
+    var registry = fixtureRegistry()
+    let response = fixtureResponse("/tmp", @[])
+    check compiles(runAndAttest(registry, response, emptyPartition(), 1,
+                                DefaultInvocation, unsignedOptions()))
+    check not compiles(runAndAttest(registry, response, emptyPartition(), 1,
+                                    DefaultInvocation, unsignedOptions(),
+                                    VcsProbe(determined: true)))
+    check not compiles(runAndAttest(registry, response, emptyPartition(), 1,
+                                    DefaultInvocation, unsignedOptions(),
+                                    nativeContentIdHost()))
+    check not compiles((block:
+      var forged = beginAttestedRun("/tmp", "project", "linux/amd64")
+      forged.before = VcsProbe(determined: true, content: "git-tree-sha1:00")
+      forged))
+
+    # THE SOURCE: the issuance module computes content ids only through the
+    # native host, and builds that host in exactly one place.
+    let source = readFile(currentSourcePath().parentDir / "certificate_issuance.nim")
+    check source.count("nativeContentIdHost(") == 1
+    check source.count("computeContentId(") == 1
+    check "gitRunner" notin source
+
+    # BEHAVIOURALLY: what is issued is what real git says, field by field.
+    let repo = committedRepo("no-caller-values")
+    writeFile(repo / "a.txt", "edited\n")
+    writeFile(repo / "scratch.txt", "untracked\n")
+    let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
+    require issuance.issued
+    check issuance.certificate.vcs.content == workingTreeId(repo)
+    check issuance.certificate.vcs.untracked
+    check issuance.certificate.vcs.base == headCommit(repo)
+    check issuance.certificate.vcs.repo == repo.lastPathPart
+
   test "the exported surface of the issuance module is the reviewed one":
     ## A companion to the case above, aimed at the change that would break it:
     ## someone adding a convenient exported helper that reaches the signing
@@ -872,86 +1370,6 @@ suite "ct test certificate issuance":
       "probeVcs",               # reads repository state
       "runAndAttest"]           # the ONLY route to a signature — and it runs
                                 # the tests itself, so it takes no results
-
-  test "re-running after a commit re-runs no tests and issues a clean-tree certificate":
-    ## The workflow Standard.md §3.2.2 recommends, and the reason it is cheap:
-    ## committing changes no file content, so a framework with content-based
-    ## incremental testing finds every per-test hash unchanged and re-runs
-    ## nothing. This exercises the real incremental engine and a real git
-    ## repository together, because the claim is about how the two interact.
-    let repo = committedRepo("commit-then-certify")
-    createDir(repo / "src")
-    let sourcePath = repo / "src" / "calc.nim"
-    writeFile(sourcePath, "proc add(a, b: int): int = a + b\n")
-    discard run("git", ["add", "-A"], repo)
-    discard run("git", ["commit", "-m", "add calc"], repo)
-
-    const testId = "tests/calc_test.nim::add"
-    let cachePath = repo / ".ct-incremental" / "cache.json"
-
-    proc contentHash(): string =
-      ## Stands in for the catalog's compile-time deep hash, using the engine's
-      ## own hasher over the real file. What matters for this case is the one
-      ## property it shares with the real hash: it is derived from **file
-      ## content** and from nothing else.
-      deepHash(@[("add", readFile(sourcePath))])
-
-    # First run: the tree is dirty — the file has been edited, not committed.
-    writeFile(sourcePath,
-              "proc add(a, b: int): int = a + b\nproc sub(a, b: int): int = a - b\n")
-    var cache = initCache(cachePath)
-    cache.recordBodyHash(testId, contentHash())
-    let saved = saveCache(cache)
-    checkpoint (if saved.isErr: saved.error else: "")
-    require saved.isOk
-
-    let beforeCommit = probeVcs(repo)
-    check beforeCommit.determined
-    check not beforeCommit.clean
-    let withheldRun = attest(
-      repo, passingItems(["tests/calc_test.nim"]), unsignedOptions()).issuance
-    check not withheldRun.issued
-    check withheldRun.reason == wrWorktreeDirty
-
-    # Commit. No file content changes; only git's index and refs do.
-    let contentBefore = readFile(sourcePath)
-    let hashBefore = contentHash()
-    discard run("git", ["add", "-A"], repo)
-    discard run("git", ["commit", "-m", "add sub"], repo)
-    check readFile(sourcePath) == contentBefore
-    check contentHash() == hashBefore
-
-    # The second run re-runs NOTHING: every per-test hash is unchanged.
-    let reloaded = loadCache(cachePath)
-    require reloaded.isOk
-    var catalog = initBodyHashCatalog()
-    catalog.entries[testId] = contentHash()
-    let decision = decideByCatalog(testId, catalog, reloaded.get)
-    checkpoint "decision after commit: " & $decision.kind
-    check decision.kind == idSkipUnchanged
-    check not isRerun(decision)
-
-    # The skip is not vacuous: editing the file — which a commit does not do —
-    # flips the same comparison to a re-run.
-    writeFile(sourcePath, contentBefore & "proc mul(a, b: int): int = a * b\n")
-    var editedCatalog = initBodyHashCatalog()
-    editedCatalog.entries[testId] = contentHash()
-    check isRerun(decideByCatalog(testId, editedCatalog, reloaded.get))
-    writeFile(sourcePath, contentBefore)
-
-    # And the certificate it can now issue is the clean-tree form.
-    let afterCommit = probeVcs(repo)
-    check afterCommit.determined
-    check afterCommit.clean
-    check afterCommit.commit == headCommit(repo)
-    check afterCommit.commit != beforeCommit.commit
-
-    let issuance = attest(
-      repo, passingItems(["tests/calc_test.nim"]), unsignedOptions()).issuance
-    checkpoint issuance.message & " / " & issuance.remedy
-    check issuance.issued
-    check issuance.certificate.vcs.content == "git-tree-sha1:" & headTree(repo)
-    check issuance.certificate.vcs.base == headCommit(repo)
 
   test "attestation can be disabled without changing what ran":
     let repo = committedRepo("disabled")

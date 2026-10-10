@@ -10,12 +10,11 @@
 ## That is the mild form. The severe one is worse and is the one this module
 ## exists to prevent: if the record ends up **tracked** — a user runs
 ## ``git add -A`` once, or commits the store on purpose so it travels with the
-## repository — then every subsequent run rewrites a tracked file, ``git
-## status`` reports it modified, ``probeVcs`` returns ``clean = false``, and
-## ``issueCertificate`` withholds with *"commit your changes and run `ct test`
-## again"*. Committing the certificate produces a new one, which is modified
-## again. The producer's own bookkeeping has made the workspace permanently
-## unattestable, and the remedy it prints makes it worse.
+## repository — then every run rewrites a tracked file AFTER its content id
+## was taken, so the certificate it issues binds content that no longer
+## exists by the time the user commits: committing the certificate produces a
+## tree with the new record in it, which the certificate does not cover. The
+## producer's own bookkeeping would keep every commit uncovered.
 ##
 ## The placement, and why it does not dirty the next run
 ## ----------------------------------------------------
@@ -31,11 +30,11 @@
 ## guard to hold. This is the same shape `cargo` writes into ``target/``.
 ##
 ## Note what is deliberately **not** done: ``probeVcs`` is not taught to skip
-## the store. Filtering the producer's own paths out of `git status` would be a
-## second, weaker theory of cleanliness sitting beside git's own, and it would
-## be invisible to every other consumer — reprobuild, CI, the user's own
-## ``git status``. Making git itself ignore the store keeps exactly one answer
-## to "is this tree clean", and it is git's.
+## the store. Filtering the producer's own paths out of the content or out of
+## `git status` would be a second, weaker theory of what the tree contains
+## sitting beside git's own, and it would be invisible to every other
+## consumer — reprobuild, CI, the user's own ``git status``. Making git itself
+## ignore the store keeps exactly one answer, and it is git's.
 ##
 ## What the guard cannot fix, and therefore reports
 ## ------------------------------------------------
@@ -217,9 +216,9 @@ proc publishCertificate*(workspaceRoot, platform, document: string;
   ## ``.ct/`` behind.
   ##
   ## ``runner`` reaches git only for the ``check-ignore`` report and is
-  ## injectable for the same reason ``probeVcs``'s is: the interesting answers
-  ## (git absent, git refusing) cannot be produced against a real repository at
-  ## test speed. It decides nothing about the certificate.
+  ## injectable because the interesting answers (git absent, git refusing)
+  ## cannot be produced against a real repository at test speed. It decides
+  ## nothing about the certificate: the VCS probe that does takes no runner.
   result.path = defaultCertificateRelativePath(platform)
 
   let guard = ensureStoreIgnored(workspaceRoot)

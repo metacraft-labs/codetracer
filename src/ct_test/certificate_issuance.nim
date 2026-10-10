@@ -90,16 +90,41 @@
 ##   file the tests actually read yields a certificate that is formally clean
 ##   and substantively false. It gets its own milestone.
 ##
-## * **Certifying a modified working tree** (Standard.md §3.2.2). The
-##   certificate is bound to the CONTENT of the tracked files (``vcs.content``,
-##   a Content-Id.md content id), never to a commit — ``vcs.base`` names the
-##   commit checked out at issuance and is informational only. So a modified
-##   tree is certifiable in principle; this producer does not do it yet. For
-##   now it still issues only for a tree with no tracked modification, so
-##   every record it emits has ``content`` equal to ``HEAD^{tree}``, and a
-##   modified tree is reported honestly and **withheld** (``wrWorktreeDirty``).
-##   Computing the content id before AND after the run, and certifying the
-##   working tree as it is, is the next step (CTC-3d).
+## * **Withholding because the run READ an untracked file.** Standard.md §3.2
+##   binds a producer that knows its tests consumed one; this run path
+##   collects no read set, so it does not know, and reports ``untracked``
+##   honestly instead.
+##
+## ============================================================================
+## WHAT A CERTIFICATE IS BOUND TO, AND WHEN THAT IS MEASURED
+## ============================================================================
+##
+## The certificate is bound to the CONTENT of the tracked files
+## (``vcs.content``, a Content-Id.md content id), never to a commit;
+## ``vcs.base`` names the commit checked out at issuance and is informational
+## only (Standard.md §3.2.3). So a modified working tree is certified as it is
+## — tracked edits, added files and deleted files are simply part of the
+## content — and a commit that records exactly that content is covered with no
+## second run (Standard.md §3.2.2). An unborn branch is certifiable too, with
+## ``base`` omitted.
+##
+## Standard.md §3.2 requires the content id to be computed from the state the
+## commands actually executed against, so ``runAndAttest`` computes it TWICE:
+## immediately before the first unit is dispatched and immediately after the
+## last one concludes. If the two differ, an edit landed during the run and
+## there is no single tested state, so the certificate is withheld
+## (``wrContentChanged``). A state with no content id (Content-Id.md §3) is
+## refused with its own reason, whichever of the two computations found it:
+## unmerged entries (``wrUnmergedEntries``), an entry the index hides from git
+## (``wrIndexHidesWorktree``), or a submodule with modified content
+## (``wrSubmoduleModified``). ``untracked`` is ``true`` when untracked files
+## were present at either point.
+##
+## Both computations happen inside ``runAndAttest`` through the one
+## content-id recipe (``certificate_content_id``) and its native host, and
+## nothing about them is configurable by a caller beyond making them FAIL (a
+## capture bound): no caller-supplied value reaches ``content``, ``untracked``
+## or ``base``.
 
 import std/[options, os, strutils, tables, times]
 
@@ -125,18 +150,19 @@ const
 
 type
   GitCommandRunner* = proc(argv: seq[string]; cwd: string): CapturedRun {.closure, gcsafe.}
-    ## How the VCS probe reaches git.
+    ## How the default certificate store's ``git check-ignore`` report reaches
+    ## git (``certificate_default_store``).
     ##
-    ## Injectable so the failure modes that decide *whether a certificate may
-    ## be issued at all* can be tested. Two of them cannot be produced against
-    ## a real repository at test speed — a `git status` whose output exceeds
-    ## the process capture bound, and a git that exits non-zero for an
-    ## environmental reason — and both MUST withhold rather than guess. Every
-    ## other case in the suite uses a real git repository in a temporary
-    ## directory against the default runner.
+    ## **Not** how the VCS probe reaches git. The probe used to take one of
+    ## these through ``IssuanceOptions``, and that was a way for an in-process
+    ## caller to answer ``git rev-parse HEAD`` or ``git status`` itself and
+    ## have the answer signed into ``base`` and ``untracked``. The probe now
+    ## runs git only through the content-id recipe's native host, which no
+    ## caller can replace.
 
   VcsProbe* = object
-    ## What the producer could establish about the repository state.
+    ## What the producer could establish about the repository state at one
+    ## point in time.
     ##
     ## ``determined`` is the field the whole feature turns on. A producer MUST
     ## NOT issue a ``content`` it did not compute from the state the tests ran
@@ -146,35 +172,41 @@ type
     ## So ``determined = false`` is never quietly converted into a default; it
     ## withholds.
     probed*: bool
-      ## Whether the probe was *reached* at all. Distinct from ``determined``:
-      ## a run that failed its own gate (no tests executed, tests failed) never
-      ## touches git, and reporting that as "could not determine the repository
-      ## state" would send an operator after a VCS problem that does not exist.
+      ## Whether the binding was EVALUATED. A run that failed its own gate (no
+      ## tests executed, tests failed) reports ``false`` even though the state
+      ## before the run was taken: the binding never came into question, and
+      ## reporting "could not determine the repository state" would send an
+      ## operator after a VCS problem that does not exist.
     determined*: bool
     undeterminedReason*: string
       ## Empty when ``determined``. Otherwise says what could not be
       ## established, in terms an operator can act on.
     repo*: string
-    commit*: string
-      ## ``HEAD`` when probed. Recorded in the certificate as ``vcs.base``,
-      ## which is informational only (Standard.md §3.2.3) — the binding is
-      ## ``content``.
-    clean*: bool
-      ## ``true`` when no *tracked* file differed from ``commit``. Not part of
-      ## the record any more; it decides whether this producer issues at all
-      ## until it certifies modified working trees (``wrWorktreeDirty``).
     content*: string
-      ## The content id of the tracked files as the tests ran against them
-      ## (Content-Id.md §4.1, computed by ``certificate_content_id`` in a
-      ## temporary index), in the ``git-tree-*`` algorithm matching the
-      ## repository's object format. Computed only for a clean tree, where it
-      ## equals ``HEAD^{tree}``; empty otherwise.
+      ## The content id of the tracked files (Content-Id.md §4.1, computed by
+      ## ``certificate_content_id`` in a temporary index; the user's index is
+      ## neither read as the tested state nor written), in the ``git-tree-*``
+      ## algorithm of the repository's object format. Empty when the state has
+      ## no content id (``noContentId``) or was not determined.
+    contentBefore*: string
+      ## In an issuance's report: the content id computed immediately before
+      ## the first unit was dispatched. ``content`` is the one computed after
+      ## the last unit concluded; a certificate is issued only when the two
+      ## are equal. Empty on a probe taken on its own.
+    noContentId*: seq[NoContentIdState]
+      ## The Content-Id.md §3 conditions that leave this state with no content
+      ## id, each with its paths. Non-empty means ``content`` is empty and no
+      ## certificate may be issued.
     untracked*: bool
-      ## ``true`` when untracked files were present. Reported separately from
-      ## ``clean`` because they mean different things: a modified tracked file
-      ## means the tests ran against something other than ``commit``, while
-      ## untracked files usually mean scratch work — but can mean a file the
-      ## build picked up (Standard.md §3.2).
+      ## ``true`` when untracked (and not ignored) files were present. They are
+      ## outside ``content``: usually scratch work, but possibly a file the
+      ## build picked up, so it is reported rather than hidden (Standard.md
+      ## §3.2). In an issuance's report, ``true`` when they were present
+      ## before the run or after it.
+    base*: string
+      ## ``HEAD`` when there is a commit checked out; empty on an unborn
+      ## branch, where the record omits ``base`` (Standard.md §3.2.3).
+      ## Informational only — the binding is ``content``.
 
   WithheldReason* = enum
     ## Why a certificate was not issued. Every value except ``wrNone`` carries
@@ -188,7 +220,17 @@ type
     wrNoTargets
     wrNoCommands
     wrVcsUndeterminable
-    wrWorktreeDirty
+      ## Not a git repository, or git could not answer.
+    wrContentChanged
+      ## The content id before the run differs from the one after it.
+    wrUnmergedEntries
+      ## The index has unmerged entries (Content-Id.md §3).
+    wrIndexHidesWorktree
+      ## An entry is ``assume-unchanged``, or ``skip-worktree`` with its file
+      ## present, so git does not see what the tests read (Content-Id.md §3).
+    wrSubmoduleModified
+      ## A submodule has modified content, which its gitlink does not
+      ## describe (Content-Id.md §3).
     wrSigningFailed
     wrRecordNotRenderable
 
@@ -196,8 +238,9 @@ type
     ## The outcome of asking a concluded run for a certificate.
     ##
     ## ``vcs`` is populated whether or not a certificate was issued, so a
-    ## withheld run still reports the truth it established — in particular
-    ## ``clean = false`` — rather than reporting nothing.
+    ## withheld run still reports the truth it established — the content ids
+    ## before and after, or the condition that left the state without one —
+    ## rather than reporting nothing.
     issued*: bool
     certificate*: TestCertificate
     document*: string
@@ -233,8 +276,13 @@ type
     issuedAt*: string
       ## Overrides the timestamp. Empty means "now, UTC, ``Z``". Present so a
       ## test can pin the payload bytes; production leaves it empty.
-    gitRunner*: GitCommandRunner
-      ## ``nil`` means the default runner.
+    gitCaptureLimit*: int
+      ## Per-stream capture bound for the VCS probe's git calls; ``0`` means
+      ## ``ContentIdCaptureLimit``. It can only make the probe FAIL — an
+      ## answer cut by the bound is incomplete and withholds — and never
+      ## changes a value, which is why it is the one VCS knob a caller has.
+      ## Present so the truncation path can be tested against a real
+      ## repository.
 
   AttestedRunOutcome* = object
     ## Everything ``runAndAttest`` produced: the run, its summary, and the
@@ -319,26 +367,50 @@ proc redactSecrets*(argv: openArray[string]): seq[string] =
 # ---------------------------------------------------------------------------
 
 proc defaultGitRunner*(argv: seq[string]; cwd: string): CapturedRun {.gcsafe.} =
-  ## Run git through the shared process bridge, so certificate issuance goes
-  ## through the same launch/capture path as every other ct_test subprocess.
+  ## Run git through the shared process bridge. Used by the default
+  ## certificate store's ``check-ignore`` report; the VCS probe does not use
+  ## it (see ``GitCommandRunner``).
   execCaptured(argv, cwd = cwd)
 
 proc undetermined(reason: string): VcsProbe =
   VcsProbe(probed: true, determined: false, undeterminedReason: reason)
 
-proc probeVcs*(workspaceRoot: string;
-               runner: GitCommandRunner = nil): VcsProbe =
-  ## Establish ``repo``, ``commit``, ``clean``, ``content`` and ``untracked``
-  ## for ``workspaceRoot`` — or report, precisely, that it could not.
+proc probeGit(host: ContentIdHost; cwd: string;
+              args: openArray[string]): GitReply =
+  ## One read-only git call. ``GIT_OPTIONAL_LOCKS=0`` stops ``git status``
+  ## from opportunistically rewriting the user's index while it reads it.
+  host.git(GitCall(argv: @["git"] & @args, cwd: cwd,
+                   env: @[("GIT_OPTIONAL_LOCKS", "0")]))
+
+proc replyProblem(args: openArray[string]; reply: GitReply): string =
+  ## Why ``reply`` is not an answer, or ``""`` when it is one.
+  let shown = "`git " & args.join(" ") & "`"
+  if reply.exitCode < 0:
+    return "could not run " & shown & ": " & reply.stderr.strip()
+  if not reply.complete:
+    # A listing cut at the capture bound is indistinguishable from a complete
+    # shorter one, so treating it as an answer would be exactly the guess
+    # Standard.md §3.2 forbids.
+    return shown & " produced more output than the capture bound allows, or " &
+           "timed out, so its answer is incomplete"
+  if reply.exitCode != 0:
+    return shown & " failed (exit " & $reply.exitCode & "): " &
+           reply.stderr.strip()
+  ""
+
+proc probeVcs*(workspaceRoot: string; captureLimit = 0): VcsProbe =
+  ## Establish ``repo``, ``content`` (or the condition that leaves the state
+  ## with no content id), ``untracked`` and ``base`` for ``workspaceRoot`` —
+  ## or report, precisely, that it could not.
   ##
   ## Every failure path here returns ``determined = false``. None of them
-  ## returns a default: Standard.md §3.2 forbids issuing ``clean = true``
-  ## without having checked, and the only safe behaviour when the check itself
-  ## did not answer is to withhold.
+  ## returns a default: Standard.md §3.2 forbids issuing a binding the
+  ## producer did not establish, and the only safe behaviour when git did not
+  ## answer is to withhold.
   ##
-  ## This always shells out to real git, and no caller-supplied value reaches
-  ## ``[certificate.vcs]``: the commit and the cleanliness are read out of the
-  ## repository, never accepted as arguments.
+  ## Every value is read out of real git, through the content-id recipe's
+  ## native host — never accepted as an argument. ``captureLimit`` (``0``:
+  ## the host's default) bounds each answer and can only make the probe fail.
   ##
   ## Be precise about the scope of that, though — **the field values are
   ## unforgeable; the choice of which repository is probed is not.** This
@@ -346,75 +418,62 @@ proc probeVcs*(workspaceRoot: string;
   ## that root. Through the CLI the question does not arise, because
   ## ``--workspace`` drives discovery and this probe alike, so the tests that
   ## ran and the repository that was probed are the same tree.
-  let git = if runner == nil: GitCommandRunner(defaultGitRunner) else: runner
+  let host = nativeContentIdHost(
+    if captureLimit > 0: captureLimit else: ContentIdCaptureLimit)
 
-  let toplevel = git(@["git", "rev-parse", "--show-toplevel"], workspaceRoot)
+  let toplevelArgs = ["rev-parse", "--show-toplevel"]
+  let toplevel = probeGit(host, workspaceRoot, toplevelArgs)
+  if toplevel.exitCode < 0 or not toplevel.complete:
+    return undetermined(replyProblem(toplevelArgs, toplevel))
   if toplevel.exitCode != 0:
     return undetermined(
-      "'" & workspaceRoot & "' is not inside a git repository, so there is " &
-      "no commit to attest and no way to establish whether the tree was clean")
-  let repoRoot = toplevel.output.strip()
+      "'" & workspaceRoot & "' is not inside a git repository, so there are " &
+      "no tracked files whose content could be attested")
+  var repoRoot = toplevel.stdout
+  repoRoot.stripLineEnd()
   if repoRoot.len == 0:
     return undetermined("git reported no repository root for '" & workspaceRoot & "'")
 
-  let head = git(@["git", "rev-parse", "HEAD"], repoRoot)
-  if head.exitCode != 0:
-    return undetermined(
-      "the repository at '" & repoRoot & "' has no commits yet, so there is " &
-      "no commit the tested state can be expressed relative to")
-  let commit = head.output.strip()
-  if commit.len == 0:
-    return undetermined("git reported an empty HEAD commit for '" & repoRoot & "'")
+  # `base`: HEAD's commit, or nothing on an unborn branch. `--verify -q` exits
+  # 1 quietly when HEAD names no commit; that is an unborn branch only when
+  # HEAD is a symbolic ref, and anything else (a detached HEAD naming a
+  # missing object, say) is a repository git cannot describe.
+  var base = ""
+  let headArgs = ["rev-parse", "--verify", "-q", "HEAD^{commit}"]
+  let head = probeGit(host, repoRoot, headArgs)
+  if head.exitCode == 0 and head.complete:
+    base = head.stdout.strip()
+    if base.len == 0:
+      return undetermined("git reported an empty HEAD commit for '" & repoRoot & "'")
+  elif head.exitCode == 1 and head.complete:
+    let symbolicArgs = ["symbolic-ref", "-q", "HEAD"]
+    let symbolic = probeGit(host, repoRoot, symbolicArgs)
+    let problem = replyProblem(symbolicArgs, symbolic)
+    if problem.len > 0:
+      return undetermined(
+        "HEAD in '" & repoRoot & "' names no commit and is not an unborn " &
+        "branch: " & problem)
+  else:
+    return undetermined(replyProblem(headArgs, head))
 
-  # `--porcelain=v1` pins the output format across git versions; `-z` is
-  # deliberately NOT used, because NUL-separated records make the truncation
-  # check below harder to reason about and paths are only classified here, not
-  # consumed.
-  let status = git(
-    @["git", "status", "--porcelain=v1", "--untracked-files=normal"], repoRoot)
-  if status.exitCode != 0:
+  # `untracked`: `--no-renames` keeps every record one path long, so a record
+  # starting `?? ` is an untracked path and nothing else.
+  let statusArgs = ["status", "--porcelain=v1", "-z", "--no-renames",
+                    "--untracked-files=normal"]
+  let status = probeGit(host, repoRoot, statusArgs)
+  let statusProblem = replyProblem(statusArgs, status)
+  if statusProblem.len > 0:
     return undetermined(
-      "`git status` failed in '" & repoRoot & "' (exit " & $status.exitCode &
-      "), so cleanliness could not be determined: " & status.output.strip())
-  if status.timedOut:
-    return undetermined(
-      "`git status` timed out in '" & repoRoot &
-      "', so cleanliness could not be determined")
-  if status.truncated:
-    # A truncated status listing is indistinguishable from a complete short
-    # one, so treating it as an answer would be exactly the guess §3.2 forbids.
-    return undetermined(
-      "`git status` produced more output than the capture bound allows (" &
-      $status.outputBytes & " bytes), so the listing is a prefix and " &
-      "cleanliness could not be determined")
+      "untracked files could not be checked in '" & repoRoot & "': " &
+      statusProblem)
+  var untracked = false
+  for record in status.stdout.split('\0'):
+    if record.startsWith("?? "):
+      untracked = true
+      break
 
-  result = VcsProbe(
-    probed: true,
-    determined: true,
-    repo: repoRoot.lastPathPart,
-    commit: commit,
-    clean: true,
-    untracked: false)
-  for rawLine in status.output.splitLines():
-    if rawLine.len < 2:
-      continue
-    if rawLine.startsWith("??"):
-      result.untracked = true
-    else:
-      result.clean = false
-
-  if not result.clean:
-    # Withheld as `wrWorktreeDirty` before any content id would be used.
-    return
-
-  # The content id of what the tests ran against — always computed by real
-  # git, through the one content-id recipe (Content-Id.md §4.1, in a temporary
-  # index; the user's index is neither read as the tested state nor written),
-  # and never accepted from a caller. A state with no content id (an
-  # assume-unchanged entry, say, which `git status` cannot see through) or a
-  # computation that fails is undetermined: a guess here is exactly what
-  # Standard.md §3.2 forbids.
-  let host = nativeContentIdHost()
+  # `content`: always computed by real git, through the one content-id recipe
+  # (Content-Id.md §4.1, in a temporary index), never accepted from a caller.
   let format = repositoryTreeAlgorithm(host, repoRoot)
   if not format.ok:
     return undetermined(
@@ -422,11 +481,18 @@ proc probeVcs*(workspaceRoot: string;
       "can be computed: " & format.failure)
   let content = computeContentId(host, repoRoot, workingTreeState(),
                                  format.algorithm)
-  if content.outcome != cioComputed:
+  result = VcsProbe(probed: true, determined: true,
+                    repo: repoRoot.lastPathPart, untracked: untracked,
+                    base: base)
+  case content.outcome
+  of cioComputed:
+    result.content = content.id
+  of cioNoContentId:
+    result.noContentId = content.states
+  of cioCannotCompute, cioFailed:
     return undetermined(
-      "the content id of the tested files could not be computed: " &
+      "the content id of the tracked files could not be computed: " &
       content.reason)
-  result.content = content.id
 
 # ---------------------------------------------------------------------------
 # The attested run — PRIVATE from here down to `runAndAttest`
@@ -466,6 +532,13 @@ type
       ## Counted only so the withheld message can say *why* nothing executed.
       ## It is never evidence.
     concluded: bool
+    before: VcsProbe
+      ## The repository state taken immediately before the first unit was
+      ## dispatched, inside ``runAndAttest``. ``issueCertificate`` takes the
+      ## state after the run itself and compares the two, so the content id it
+      ## records is one the whole run executed against (Standard.md §3.2).
+      ## Private like every other field: a caller cannot hand the issuance a
+      ## "before" of its choosing.
 
 proc beginAttestedRun(workspaceRoot, project, platform: string): AttestedRun =
   AttestedRun(
@@ -681,6 +754,63 @@ proc withheld(reason: WithheldReason; message, remedy: string;
   Issuance(issued: false, reason: reason, message: message, remedy: remedy,
            vcs: vcs)
 
+const VcsUndeterminableRemedy =
+  "run the tests inside a git repository, with git working: a producer " &
+  "that cannot compute the content id of the files its tests ran against, " &
+  "or cannot check for untracked files, must not issue at all, because a " &
+  "wrong binding invalidates everything downstream"
+
+proc withheldNoContentId(states: seq[NoContentIdState]; whenFound: string;
+                         vcs: VcsProbe): Issuance =
+  ## Refuse a state with no content id (Content-Id.md §3), naming the
+  ## condition, its paths and how to clear it. When several conditions hold,
+  ## the reason is the first in this order and the message lists them all:
+  ## an unmerged index first, because resolving a merge can change what the
+  ## other two report.
+  var described: seq[string]
+  for state in states:
+    described.add $state.condition & " (" & state.paths.join(", ") & ")"
+  let message = "the tracked files have no content id " & whenFound & ": " &
+                described.join("; ")
+  proc pathsOf(conditions: set[NoContentIdCondition]): seq[string] =
+    for state in states:
+      if state.condition in conditions:
+        result.add state.paths
+  let unmerged = pathsOf({ncUnmergedEntries})
+  if unmerged.len > 0:
+    return withheld(wrUnmergedEntries, message,
+      "resolve the merge and run `ct test` again: a conflicted path has no " &
+      "single content to certify. Edit " & unmerged.join(", ") &
+      " to the content you mean and `git add` it, or abandon the merge " &
+      "(`git merge --abort`)",
+      vcs)
+  let assumed = pathsOf({ncAssumeUnchanged})
+  let skipped = pathsOf({ncSkipWorktreePresent})
+  if assumed.len > 0 or skipped.len > 0:
+    var steps: seq[string]
+    if assumed.len > 0:
+      steps.add "`git update-index --no-assume-unchanged -- " &
+                assumed.join(" ") & "`"
+    if skipped.len > 0:
+      steps.add "`git update-index --no-skip-worktree -- " &
+                skipped.join(" ") & "`"
+    return withheld(wrIndexHidesWorktree, message,
+      "clear the flag and run `ct test` again: git has been told not to look " &
+      "at these files, so a content id would describe the indexed bytes " &
+      "while the tests read different ones. Run " & steps.join(" and "),
+      vcs)
+  let submodules = pathsOf({ncSubmoduleModified})
+  if submodules.len > 0:
+    return withheld(wrSubmoduleModified, message,
+      "commit or revert the changes inside the submodule and run `ct test` " &
+      "again: a submodule is recorded by its checked-out commit alone, so " &
+      "uncommitted changes in it are not part of the content. See `git -C " &
+      submodules[0] & " status`",
+      vcs)
+  # `ncUnrepresentablePath` belongs to `manifest-v1-sha256`, which this
+  # producer never computes; reported rather than assumed impossible.
+  withheld(wrVcsUndeterminable, message, VcsUndeterminableRemedy, vcs)
+
 proc utcNowZ(): string =
   ## RFC 3339, UTC, in the ``Z`` spelling.
   ##
@@ -758,28 +888,45 @@ proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
   # ---- Gate 2: the VCS binding ------------------------------------------
   # Content is the whole binding: a certificate names the content id of the
   # tracked files the tests ran against, and covers every commit whose tree
-  # has that content (Standard.md §2). Until this producer certifies modified
-  # working trees, it issues only for a clean one, so that content is
-  # `HEAD^{tree}`.
-  let vcs = probeVcs(run.workspaceRoot, options.gitRunner)
+  # has that content (Standard.md §2). It is computed before the run (in
+  # `runAndAttest`) and after it (here), and issued only when both exist and
+  # agree.
+  let before = run.before
+  var vcs = probeVcs(run.workspaceRoot, options.gitCaptureLimit)
+  if vcs.determined and before.determined:
+    vcs.contentBefore = before.content
+    # Untracked files present at either point were present during the run.
+    vcs.untracked = vcs.untracked or before.untracked
+  if not before.determined:
+    let reason =
+      if before.probed: before.undeterminedReason
+      else: "it was not taken"
+    return withheld(wrVcsUndeterminable,
+      "the repository state before the run could not be determined: " & reason,
+      VcsUndeterminableRemedy, vcs)
   if not vcs.determined:
     return withheld(wrVcsUndeterminable,
-      "the repository state could not be determined: " & vcs.undeterminedReason,
-      "run the tests inside a git repository that has at least one commit, " &
-      "with `git status` working; a producer that cannot determine " &
-      "cleanliness must not issue at all, because a wrong `clean` invalidates " &
-      "everything downstream",
-      vcs)
-  if not vcs.clean:
-    # Reported honestly — `vcs.clean` is false in the returned probe — and
-    # withheld, because certifying a modified working tree by its content is
-    # the next step and not this one (see the module header).
-    return withheld(wrWorktreeDirty,
-      "tracked files differ from " & vcs.commit &
-      ", so the tests did not run against that commit (clean = false)",
-      "commit your changes and run `ct test` again: committing changes no " &
-      "file content, so the incremental runner re-runs nothing and the " &
-      "second run is a hash comparison rather than a second suite",
+      "the repository state after the run could not be determined: " &
+      vcs.undeterminedReason,
+      VcsUndeterminableRemedy, vcs)
+  if before.noContentId.len > 0:
+    if vcs.noContentId.len == 0:
+      vcs.noContentId = before.noContentId
+    return withheldNoContentId(before.noContentId,
+                               "when the run started", vcs)
+  if vcs.noContentId.len > 0:
+    return withheldNoContentId(vcs.noContentId, "when the run concluded", vcs)
+  if before.content != vcs.content:
+    return withheld(wrContentChanged,
+      "the tracked files changed while the tests ran: their content id was " &
+      before.content & " when the first test was dispatched and " &
+      vcs.content & " when the last one concluded, so no single state was " &
+      "tested",
+      "keep tracked files unchanged while the tests run, and run `ct test` " &
+      "again: finish the edit first, run steps that rewrite tracked files " &
+      "(a formatter, a code generator, a lock-file refresh) before `ct test` " &
+      "rather than from inside a test, and have tests write ignored or " &
+      "temporary files only",
       vcs)
 
   # ---- The record --------------------------------------------------------
@@ -797,7 +944,7 @@ proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
       paths: @[],          # whole-repository claim; scoping is deferred
       content: vcs.content,
       untracked: vcs.untracked,
-      base: vcs.commit),   # informational only (Standard.md §3.2.3)
+      base: vcs.base),     # informational only, omitted when empty (§3.2.3)
     commands: run.commands)
 
   # ---- Signing — OPTIONAL, and OFF unless a key was configured -----------
@@ -895,6 +1042,12 @@ proc runAndAttest*(registry: var ProviderRegistry;
   ## never affects the run: the tests execute identically whether a certificate
   ## is issued, withheld, or disabled outright.
   let units = enumerateRunUnits(response, registry)
+  # The state BEFORE the run, taken immediately before the first unit is
+  # dispatched (Standard.md §3.2). Not taken when attestation is disabled:
+  # `--no-certificate` means attestation does not touch git at all.
+  var before = VcsProbe()
+  if not options.disabled:
+    before = probeVcs(response.workspaceRoot, options.gitCaptureLimit)
   result.runResult = runUnits(registry, units, partition, threads)
   result.summary = summarize(result.runResult)
 
@@ -908,6 +1061,7 @@ proc runAndAttest*(registry: var ProviderRegistry;
   var run = beginAttestedRun(
     response.workspaceRoot, response.workspaceRoot.lastPathPart,
     currentPlatform())
+  run.before = before
   for argv in invocations:
     run.recordExecutedCommand(argv)
 
