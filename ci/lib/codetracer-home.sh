@@ -45,7 +45,7 @@ ct_export_scratch_codetracer_home() {
 		fi
 		;;
 	esac
-	CODETRACER_HOME="$(mktemp -d "${tmp}/ct-home-${label}.XXXXXX")" || return 1
-	ct_scratch_home_created="${CODETRACER_HOME}"
-	export CODETRACER_HOME
+	ct_scratch_home_created="$(mktemp -d "${tmp}/ct-home-${label}.XXXXXX")" || return 1
+	# The line that matters: ct_home_isolation_test pins it verbatim.
+	export CODETRACER_HOME="${ct_scratch_home_created}"
 }

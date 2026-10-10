@@ -291,7 +291,9 @@ suite "CODETRACER_HOME — the sweeps":
       ("src/frontend/viewmodel/tests/config.nims", "state_isolation.nim\")"),
       ("src/frontend/test_support/state_isolation.nim", "putEnv(CodetracerHomeVar, dir)"),
       ("ci/lib/run-nim-test-lane.sh", "export CODETRACER_HOME=\"${_ct_lane_home}/${name}\""),
-      ("ci/lib/codetracer-home.sh", "export CODETRACER_HOME"),
+      # The export of the directory it CREATES, not the early returns'
+      # re-export of an inherited one: dropping it leaves every child unset.
+      ("ci/lib/codetracer-home.sh", "export CODETRACER_HOME=\"${ct_scratch_home_created}\""),
       ("justfile", "ct_export_scratch_codetracer_home rust-tests"),
       ("justfile", "ct_export_scratch_codetracer_home frontend-js"),
       ("ci/test/windows-rust-components-tests.sh", "ct_export_scratch_codetracer_home windows-rust-components"),
