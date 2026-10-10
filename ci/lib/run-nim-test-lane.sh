@@ -152,8 +152,21 @@ fi
 # test program also isolates itself (`state_isolation.nim`); this is the
 # lane's belt to that brace. `src/common/ct_home_isolation_test.nim` fails if
 # this block goes away.
+#
+# "Scratch" is the rule every test program applies (state_isolation.nim,
+# libs/ct-home): inside the temp directory, or marked with a
+# `.codetracer-test-home` file. A CODETRACER_HOME the developer exported for
+# their own use is NOT reused — the per-file directories would be created in it.
 _ct_lane_home_owned=""
-if [ -n "${CODETRACER_HOME:-}" ]; then
+_ct_lane_tmp="${TMPDIR:-/tmp}"
+_ct_lane_tmp="${_ct_lane_tmp%/}"
+case "${CODETRACER_HOME:-}" in
+"") _ct_lane_home_scratch="" ;;
+"${_ct_lane_tmp}"/*) _ct_lane_home_scratch=1 ;;
+*) [ -f "${CODETRACER_HOME}/.codetracer-test-home" ] &&
+	_ct_lane_home_scratch=1 || _ct_lane_home_scratch="" ;;
+esac
+if [ -n "${_ct_lane_home_scratch}" ]; then
 	_ct_lane_home="${CODETRACER_HOME}"
 else
 	_ct_lane_home="$(mktemp -d "${TMPDIR:-/tmp}/ct-lane-home.XXXXXX")"

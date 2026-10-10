@@ -16,7 +16,8 @@
 #   ct_export_scratch_codetracer_home <label>
 #
 # A caller that already exported a SCRATCH `CODETRACER_HOME` (inside the temp
-# directory) keeps it, so a lane started by another lane shares its root. The
+# directory, or marked with a `.codetracer-test-home` file — the rule every
+# test program applies) keeps it, so a lane started by another lane shares its root. The
 # directory it CREATES is named in `ct_scratch_home_created` (empty when an
 # inherited one was kept), so a lane removes only what it made:
 #   trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
@@ -32,9 +33,16 @@ ct_export_scratch_codetracer_home() {
 	tmp="${tmp%/}"
 	ct_scratch_home_created=""
 	case "${CODETRACER_HOME:-}" in
+	"") ;;
 	"${tmp}"/*)
 		export CODETRACER_HOME
 		return 0
+		;;
+	*)
+		if [ -f "${CODETRACER_HOME}/.codetracer-test-home" ]; then
+			export CODETRACER_HOME
+			return 0
+		fi
 		;;
 	esac
 	CODETRACER_HOME="$(mktemp -d "${tmp}/ct-home-${label}.XXXXXX")" || return 1
