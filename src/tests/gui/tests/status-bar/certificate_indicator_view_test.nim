@@ -271,6 +271,47 @@ suite "SB-1: the indicator in the status bar's DOM":
     let opened = baseShell(modelFor(cisCertified, disclosed = true))
     check statusStructureSignature(opened) != statusStructureSignature(certified)
 
+  test "SB-2b's labels patch in place and carry their tooltips":
+    ## "Certified, uncommitted" and "Changed since certified" are labels of
+    ## SB-1's existing states, so moving between them — a commit of the tested
+    ## content, an edit — changes no `statusStructureSignature`: the bar
+    ## patches the label and the title in place. The staged-content warning
+    ## and the "changed since" sentence reach the hover.
+    proc labelled(state: CertificateIndicatorState; label, summary,
+                  remedy: string): StatusCertificateModel =
+      let vm = newCertificateIndicatorVm(nil)
+      vm.model = CertificateIndicatorModel(
+        state: state, label: label, summary: summary, remedy: remedy,
+        authenticityNote: NoKeysRegisteredNote)
+      statusCertificateModel(vm)
+
+    let committed = labelled(cisCertified, CertifiedLabel,
+                             CommittedCertifiedSummary, "")
+    let uncommitted = labelled(cisCertified, CertifiedUncommittedLabel,
+      UncommittedCertifiedSummary & " " & StagedDiffersWarning, "")
+    let changed = labelled(cisWasCertified, WasCertifiedLabel,
+      ChangedSinceCertifiedSummary, ChangedSinceCertifiedRemedy)
+    let none = labelled(cisNoCertificates, NoCertificatesLabel,
+      NoCertificatesFoundSummary, RunTheTestsRemedy)
+    for other in [uncommitted, changed, none]:
+      check statusStructureSignature(baseShell(committed)) ==
+            statusStructureSignature(baseShell(other))
+
+    for (model, text) in [(uncommitted, "Certified, uncommitted"),
+                          (changed, "Changed since certified")]:
+      let r = MockRenderer()
+      let shell = renderStatusShell(r, baseShell(model))
+      let node = findByClass(shell, "test-certificate-status")
+      check textOf(findByClass(node, "test-certificate-label")) == text
+      let title = node.attributes.getOrDefault("title")
+      checkpoint title
+      check model.title == title
+    check StagedDiffersWarning in uncommitted.title
+    check "`git commit` without `-a` will not be covered" in uncommitted.title
+    check changed.title.startsWith(ChangedSinceCertifiedSummary)
+    check changed.title.endsWith(ChangedSinceCertifiedRemedy)
+    check uncommitted.stateClass == committed.stateClass
+
   test "every field of the certificate model is either in the signature or patched":
     ## `statusStructureSignature`'s own rule, applied to the fields SB-1 added:
     ## "EVERY field of `StatusShellModel` must appear either here or in

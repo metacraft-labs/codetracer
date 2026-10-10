@@ -26,8 +26,8 @@
 ## can compute — never enumerated, because it is shared by every repository
 ## the user works in — pooled with reprobuild's workspace directory. `ct
 ## test`'s old workspace store, `.ct/certificates`, is not read (CTC-3e).
-## How the indicator then DECIDES between W, H and S is Status-Bar SB-2b's;
-## until then it decides on W exactly as before, over the records found.
+## How the indicator then decides between W, H and S is the ViewModel's
+## (`evaluateCertificateIndicator`, Status-Bar.md's table).
 ##
 ## ## Why synchronous
 ##
@@ -39,7 +39,10 @@
 ## `pkTimeout` outcome then arrives here as a refusal — which becomes
 ## *unverifiable*, which is the correct answer for "I could not look".
 
+import std/strutils
+
 import ../platform/platform
+import ../../../ct_test/certificate_content_id
 import ../../../ct_test/certificate_store
 import certificate_indicator_vm
 
@@ -195,71 +198,139 @@ proc lastPathSegment(path: string): string =
     dec start
   path[start + 1 .. last]
 
-proc workingTreeOracle(host: Platform; root: string): ContentOracle =
-  ## W, through the facade's `contentId` (SB-2a): the content id of the
-  ## working tree's tracked files, in whatever algorithm and over whatever
-  ## scope the record being evaluated names.
+type
+  CachedContentAnswer = object
+    algorithm: string
+    paths: seq[string]
+    answer: ContentAnswer
+    conditions: seq[NoContentIdState]
+      ## The Content-Id §3 conditions, when the state has no content id.
+
+  ContentFactCache = ref object
+    ## One content state (W, H or S) of one repository, for the life of ONE
+    ## facts read — a refresh builds new ones, so nothing outlives the facts
+    ## it was computed from. Memoised per (algorithm, scope) because the
+    ## verifier asks once per record per pass and each answer runs git.
+    host: Platform
+    root: string
+    source: VcsBlobSource
+    entries: seq[CachedContentAnswer]
+
+proc stateName(source: VcsBlobSource): string =
+  case source
+  of vbsWorkingTree: "the working tree"
+  of vbsHead: "HEAD"
+  of vbsIndex: "the staged content"
+
+proc ask(cache: ContentFactCache; algorithm: string;
+         paths: seq[string]): CachedContentAnswer =
+  ## The facade's `contentId` (SB-2a) for this state.
   ##
-  ## Memoised per (algorithm, scope) for the life of ONE facts read — a
-  ## refresh builds a new oracle, so nothing outlives the facts it was
-  ## computed from — because the verifier asks once per record per pass and
-  ## each answer runs git.
-  ##
-  ## Every answer that is not an id stays "not computed", with the reason:
-  ## an algorithm this host cannot compute, a working tree with no content id
-  ## (Content-Id.md §3, each condition named), a refusal, a failure, or a host
-  ## that raised. The verifier reports each as unevaluated, so the indicator
-  ## reads *unverifiable* — never a match, and never the reassuring default
-  ## of some other state's id.
-  var cache: seq[tuple[algorithm: string; paths: seq[string];
-                       answer: ContentAnswer]] = @[]
+  ## Every answer that is not an id stays "not computed", with the reason: an
+  ## algorithm this host cannot compute, a state with no content id (each
+  ## condition named), a refusal, a failure, or a host that raised. The
+  ## verifier reports each as unevaluated — never a match, and never the
+  ## reassuring default of some other state's id.
+  for entry in cache.entries:
+    if entry.algorithm == algorithm and entry.paths == paths:
+      return entry
+  result = CachedContentAnswer(algorithm: algorithm, paths: paths)
+  let name = stateName(cache.source)
+  try:
+    let outcome = awaitSync(cache.host.vcs.contentId(cache.root, cache.source,
+                                                     algorithm, paths))
+    if not outcome.ok:
+      result.answer = ContentAnswer(computed: false,
+        reason: name & "'s content id could not be computed: " &
+                $outcome.error)
+    else:
+      let id = outcome.value
+      case id.kind
+      of vcikComputed:
+        result.answer = ContentAnswer(computed: true, id: id.id)
+      of vcikNoContentId:
+        result.answer = ContentAnswer(computed: false,
+          reason: name & " has no content id: " & id.reason)
+        result.conditions = id.conditions
+      of vcikCannotCompute:
+        result.answer = ContentAnswer(computed: false, reason: id.reason)
+  except CatchableError as err:
+    result.answer = ContentAnswer(computed: false,
+      reason: "computing " & name & "'s content id raised: " & err.msg)
+  except:
+    result.answer = ContentAnswer(computed: false,
+      reason: "computing " & name & "'s content id raised: " &
+              getCurrentExceptionMsg())
+  cache.entries.add result
+
+proc oracle(cache: ContentFactCache): ContentOracle =
   result = proc(algorithm: string; paths: seq[string]): ContentAnswer
       {.closure.} =
-    for entry in cache:
-      if entry.algorithm == algorithm and entry.paths == paths:
-        return entry.answer
-    var answer: ContentAnswer
-    try:
-      let outcome = awaitSync(host.vcs.contentId(root, vbsWorkingTree,
-                                                 algorithm, paths))
-      if not outcome.ok:
-        answer = ContentAnswer(computed: false,
-          reason: "the working tree's content id could not be computed: " &
-                  $outcome.error)
-      else:
-        let id = outcome.value
-        case id.kind
-        of vcikComputed:
-          answer = ContentAnswer(computed: true, id: id.id)
-        of vcikNoContentId:
-          answer = ContentAnswer(computed: false,
-            reason: "the working tree has no content id: " & id.reason)
-        of vcikCannotCompute:
-          answer = ContentAnswer(computed: false, reason: id.reason)
-    except CatchableError as err:
-      answer = ContentAnswer(computed: false,
-        reason: "computing the working tree's content id raised: " & err.msg)
-    except:
-      answer = ContentAnswer(computed: false,
-        reason: "computing the working tree's content id raised: " &
-                getCurrentExceptionMsg())
-    cache.add (algorithm, paths, answer)
-    answer
+    cache.ask(algorithm, paths).answer
+
+const LocalStoreAlgorithms = ["git-tree-sha1", "git-tree-sha256"]
+  ## The tree algorithms a repository computes one of; the host answers
+  ## "cannot compute" for the other, cheaply.
+
+proc describeConditions*(conditions: seq[NoContentIdState]): string =
+  ## Each Content-Id §3 condition with its paths, as a user reads it.
+  var parts: seq[string] = @[]
+  for state in conditions:
+    parts.add $state.condition & " (" & state.paths.join(", ") & ")"
+  parts.join("; ")
+
+proc noContentIdRemedy*(conditions: seq[NoContentIdState]): string =
+  ## How to clear each Content-Id §3 condition present (Status-Bar.md:
+  ## "naming the condition and its remedy"), in the order the producer
+  ## names them — an unmerged index first, because resolving a merge can
+  ## change what the others report. The same remedies `ct test` gives when it
+  ## withholds a certificate for such a tree (`certificate_issuance`); running
+  ## the tests is not one of them, because a producer refuses this tree too.
+  proc pathsOf(wanted: set[NoContentIdCondition]): seq[string] =
+    for state in conditions:
+      if state.condition in wanted:
+        result.add state.paths
+  var steps: seq[string] = @[]
+  let unmerged = pathsOf({ncUnmergedEntries})
+  if unmerged.len > 0:
+    steps.add "Resolve the merge: edit " & unmerged.join(", ") &
+      " to the content you mean and `git add` it, or abandon the merge " &
+      "(`git merge --abort`)."
+  let assumed = pathsOf({ncAssumeUnchanged})
+  if assumed.len > 0:
+    steps.add "Clear the flag: `git update-index --no-assume-unchanged -- " &
+      assumed.join(" ") & "`."
+  let skipped = pathsOf({ncSkipWorktreePresent})
+  if skipped.len > 0:
+    steps.add "Clear the flag: `git update-index --no-skip-worktree -- " &
+      skipped.join(" ") & "`."
+  let submodules = pathsOf({ncSubmoduleModified})
+  if submodules.len > 0:
+    steps.add "Commit or revert the changes inside the submodule " &
+      submodules.join(", ") & " — a submodule is recorded by its checked-out " &
+      "commit alone."
+  let unrepresentable = pathsOf({ncUnrepresentablePath})
+  if unrepresentable.len > 0:
+    steps.add "Rename " & unrepresentable.join(", ") &
+      " so the path can be represented."
+  steps.join(" ")
 
 proc workspaceVcsState*(host: Platform; workspaceDir: string):
     WorkspaceVcsState =
-  ## Establish the repository, or report honestly that it could not be.
+  ## Establish the repository and its three content facts, or report honestly
+  ## that it could not be.
   ##
   ## `known = false` is returned for every failure, and never a default. This
   ## mirrors `certificate_issuance.probeVcs` on the producing side: a consumer
   ## that could not establish the repository must not behave as though it
   ## had. Here that surfaces as **unverifiable**, not as "not certified".
   ##
-  ## The state under evaluation is the working tree's CONTENT (W), and it is
-  ## not computed here: `workingTree` computes it on demand, in the algorithm
-  ## and over the scope of each record (Verification.md §4.1.1). No commit is
-  ## read, because none is compared — a repository with no commits yet has a
-  ## perfectly good W.
+  ## W, H and S are computed on demand, in the algorithm and over the scope
+  ## of each record (Verification.md §4.1.1). No commit is read, because none
+  ## is compared — a repository with no commits yet has a perfectly good W.
+  ## The one thing computed up front is whether W has a content id at all,
+  ## asked whole-repository in each tree algorithm: a Content-Id §3 state is
+  ## a property of the tree, not of a record, and it is reported by name.
   if not host.can(capVcsRead):
     return WorkspaceVcsState(known: false)
 
@@ -276,18 +347,25 @@ proc workspaceVcsState*(host: Platform; workspaceDir: string):
   except:
     return WorkspaceVcsState(known: false)
 
-  WorkspaceVcsState(
+  proc factsOf(source: VcsBlobSource): ContentFactCache =
+    ContentFactCache(host: host, root: root.value, source: source)
+  let w = factsOf(vbsWorkingTree)
+  result = WorkspaceVcsState(
     known: true,
     # The repository root's directory name -- the same source the producer
     # uses for `vcs.repo` (`certificate_issuance.probeVcs`: the toplevel's
     # last path part). Requiring the two to match is this consumer's choice
     # (Verification.md §4.1), not the binding: content alone is.
     repo: lastPathSegment(root.value),
-    workingTree: workingTreeOracle(host, root.value))
-
-const LocalStoreAlgorithms = ["git-tree-sha1", "git-tree-sha256"]
-  ## The algorithms whose directories are looked up. A repository computes
-  ## one of them; the host answers "cannot compute" for the other, cheaply.
+    workingTree: w.oracle,
+    head: factsOf(vbsHead).oracle,
+    index: factsOf(vbsIndex).oracle)
+  for algorithm in LocalStoreAlgorithms:
+    let asked = w.ask(algorithm, @[])
+    if asked.conditions.len > 0:
+      result.workingTreeProblem = describeConditions(asked.conditions)
+      result.workingTreeRemedy = noContentIdRemedy(asked.conditions)
+      break
 
 proc storeRoots(host: Platform): CertificateStoreRoots =
   ## The local store's roots as this host resolves them (SB-2a's facade
@@ -307,40 +385,23 @@ proc storeRoots(host: Platform): CertificateStoreRoots =
 
 proc localStoreQuery*(host: Platform; workspaceDir: string;
                       vcs: WorkspaceVcsState): LocalStoreQuery =
-  ## Which content directories of the local store to read: W's (through the
-  ## same memoised oracle the verifier then uses), H's and S's, in each
-  ## `git-tree-*` algorithm the host can compute here. A state with no
-  ## content id contributes no directory. No repository, no lookup.
+  ## Which content directories of the local store to read: W's, H's and S's
+  ## (Status-Bar.md: "every record found for the content ids of W, H and S"),
+  ## whole-repository, in each tree algorithm the host can compute here —
+  ## through the SAME memoised oracles the verifier then uses, so a refresh
+  ## computes each id once. A state with no content id contributes no
+  ## directory. No repository, no lookup. The store is never enumerated: it
+  ## is shared by every repository the user works in.
   result.roots = storeRoots(host)
   if not vcs.known:
     return
-  for algorithm in LocalStoreAlgorithms:
-    let w = vcs.workingTree(algorithm, @[])
-    if w.computed and w.id notin result.contentIds:
-      result.contentIds.add w.id
-  var root = ""
-  try:
-    let outcome = awaitSync(host.vcs.repositoryRoot(workspaceDir))
-    if outcome.ok:
-      root = outcome.value
-  except CatchableError:
-    discard
-  except:
-    discard
-  if root.len == 0:
-    return
-  for source in [vbsHead, vbsIndex]:
+  for state in [vcs.workingTree, vcs.head, vcs.index]:
+    if state.isNil:
+      continue
     for algorithm in LocalStoreAlgorithms:
-      try:
-        let outcome = awaitSync(host.vcs.contentId(root, source, algorithm,
-                                                   @[]))
-        if outcome.ok and outcome.value.kind == vcikComputed and
-           outcome.value.id notin result.contentIds:
-          result.contentIds.add outcome.value.id
-      except CatchableError:
-        discard
-      except:
-        discard
+      let answer = state(algorithm, @[])
+      if answer.computed and answer.id notin result.contentIds:
+        result.contentIds.add answer.id
 
 proc platformCertificateFacts*(host: Platform; workspaceDir: string;
                                platformTriple: string;
@@ -362,9 +423,21 @@ proc platformCertificateFacts*(host: Platform; workspaceDir: string;
   ## cannot be checked at all, which is *undecidable* and lands as
   ## unverifiable. It is never silently read as valid.
   let vcs = workspaceVcsState(host, workspaceDir)
+  let query = localStoreQuery(host, workspaceDir, vcs)
+  var store = readCertificateStore(platformStoreAccess(host), workspaceDir,
+                                   query)
+  if not query.roots.available and not store.unreadable:
+    # A HOST WITH NO LOCAL STORE (a browser tab) has not looked, and "no
+    # certificates" would claim it had (SB-2b: the web host reads
+    # unverifiable). The reader only reaches this when a content id is looked
+    # up, and a host with no version control has none to look up.
+    store.unreadable = true
+    store.unreadableReason = "this host has no local certificate store, so " &
+      "it cannot look for certificates" &
+      (if query.roots.problems.len > 0: ": " & query.roots.problems.join("; ")
+       else: "")
   CertificateIndicatorFacts(
-    store: readCertificateStore(platformStoreAccess(host), workspaceDir,
-                                localStoreQuery(host, workspaceDir, vcs)),
+    store: store,
     vcs: vcs,
     platform: platformTriple,
     signatureVerifier: verifier)

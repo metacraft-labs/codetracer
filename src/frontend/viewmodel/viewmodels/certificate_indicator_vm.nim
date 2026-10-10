@@ -53,13 +53,16 @@
 ##
 ## ## What "the state in front of you" is
 ##
-## The WORKING TREE's content, W (Status-Bar.md): a certificate is bound to
-## the content of the tracked files, never to a commit (Verification.md
-## §4.1.1), so a record covers what the user has exactly when its content id
-## equals W's computed in the record's own algorithm over its own scope.
-## ``base`` is informational and is never compared. Deciding on HEAD's and the
-## index's content as well, with the labels that brings, is SB-2b's; until
-## then this indicator speaks SB-1's labels over W.
+## Content, never a commit (Status-Bar.md, "Requirements"): a certificate is
+## bound to the content of the tracked files (Verification.md §4.1.1), so a
+## record covers a state exactly when its content id equals that state's,
+## computed in the record's own algorithm over its own scope. ``base`` is
+## informational and is never compared. Three states are evaluated, each
+## through its own oracle (``WorkspaceVcsState``): **W**, the working tree;
+## **H**, HEAD's content; **S**, the staged content ``git commit`` would
+## record. The decision is made on W first, because the indicator answers
+## "is what is in front of me tested?" — the table is written out at
+## ``evaluateCertificateIndicator``.
 ##
 ## ## What this indicator does NOT check, stated rather than implied
 ##
@@ -85,6 +88,7 @@
 import std/strutils
 
 import ../../../ct_test/certificate
+import ../../../ct_test/certificate_content_id
 import ../../../ct_test/certificate_store
 import ../../../ct_test/certificate_verification
 
@@ -115,20 +119,28 @@ type
     ## not certified → ``cisNoCertificates`` or ``cisNotCertified``; was
     ## certified → ``cisWasCertified``; unverifiable → ``cisUnverifiable``.
     cisNoCertificates
-      ## No store, or a store with nothing in it. **Never an error** — a
-      ## project that does not use certificates is an ordinary project
-      ## (Transport.md §4).
+      ## Neither W nor H is covered and no record was found for W's, H's or
+      ## S's content (Transport.md §5: "none found" is not "none matched").
+      ## Also no store at all. **Never an error** — a project that does not
+      ## use certificates is an ordinary project.
     cisCertified
-      ## A certificate binds to the current state. Read the honesty rule in
-      ## the module header before making this label say more.
+      ## A certificate binds W. Two labels: *Certified* when W = H, and
+      ## *Certified, uncommitted* when it does not — the same state, because
+      ## the certificate is valid for what is in front of the user and the
+      ## commit that records it will be covered. Read the honesty rule in the
+      ## module header before making either label say more.
     cisNotCertified
-      ## Certificates exist and none of them is even *about* this state — a
-      ## different repository, a different platform, or a record that is
-      ## decidably invalid. The remedy is to run the tests.
+      ## Neither W nor H is covered, and records WERE found for W's, H's or
+      ## S's content: the one that speaks is for another platform or another
+      ## repository, reports no pass, is not accepted as authentic, or is
+      ## decidably invalid (an earlier-draft record among them). The remedy is
+      ## to run the tests.
     cisWasCertified
-      ## The last produced certificate is a passing run for this repository on
-      ## this platform, and no longer binds: the tree moved on. The
-      ## informative state, and the reason a boolean is not enough.
+      ## *Changed since certified*: no certificate covers W and one covers H.
+      ## HEAD is certified and the working-tree changes are not. The
+      ## informative state, and the reason a boolean is not enough. Its only
+      ## form (operator decision 2026-10-09): when neither W nor H is covered
+      ## the indicator reads not certified, never "was certified".
     cisUnverifiable
       ## Evaluation itself broke down. **MUST NOT be collapsed into
       ## "not certified"** (Verification.md §7): one means run the tests, the
@@ -190,7 +202,9 @@ type
       ## to be actionable.
 
   WorkspaceVcsState* = object
-    ## The repository state the indicator evaluates against.
+    ## The repository state the indicator evaluates against: three content
+    ## facts, each an oracle answering "the content id in this algorithm over
+    ## this scope", or why there is none (Content-Id.md §5).
     ##
     ## ``known`` is the field that keeps this honest, and it is the same
     ## distinction ``certificate_issuance.VcsProbe.determined`` draws on the
@@ -200,13 +214,27 @@ type
     known*: bool
     repo*: string
     workingTree*: ContentOracle
-      ## W — the content id of the working tree's tracked files, computed on
-      ## demand in the algorithm and over the scope of the record being
-      ## evaluated (Content-Id.md §5). An answer that is not an id — an
-      ## algorithm this host cannot compute, a working tree with no content id
-      ## (Content-Id.md §3), git failing — makes that record *unverifiable*,
-      ## and never a match or a mismatch. ``nil`` means no id can be computed
-      ## for anything.
+      ## W — the working tree's tracked files as they are. An answer that is
+      ## not an id — an algorithm this host cannot compute, a working tree
+      ## with no content id, git failing — makes a record *unverifiable*
+      ## against W, never a match and never a mismatch. ``nil`` means no id
+      ## can be computed for anything.
+    head*: ContentOracle
+      ## H — ``HEAD^{tree}``. ``nil`` (or answers that are not ids) when there
+      ## is no commit yet; H is then simply not covered.
+    index*: ContentOracle
+      ## S — the user's index, what ``git commit`` without ``-a`` would record.
+      ## Consulted only for the staged-content warning and the disclosure.
+    workingTreeProblem*: string
+      ## Non-empty when W HAS NO CONTENT ID (Content-Id.md §3: unmerged
+      ## entries, an assume-unchanged or present skip-worktree entry, a
+      ## submodule with modified content), naming the condition and its
+      ## paths. Kept apart from an oracle answer that merely failed because
+      ## the remedy differs and is named: such a tree is *unverifiable* even
+      ## when H is certified, and it is never certified.
+    workingTreeRemedy*: string
+      ## How to clear ``workingTreeProblem``: resolve the merge, clear the
+      ## flag, commit inside the submodule.
 
   CertificateIndicatorFacts* = object
     ## Everything the indicator is a function of. Gathering these is the
@@ -227,8 +255,43 @@ const
   NoCertificatesLabel* = "No certificates"
   CertifiedLabel* = "Certified"
   NotCertifiedLabel* = "Not certified"
-  WasCertifiedLabel* = "Was certified, no longer valid"
+  CertifiedUncommittedLabel* = "Certified, uncommitted"
+    ## ``cisCertified`` when W is covered and W differs from H.
+  WasCertifiedLabel* = "Changed since certified"
+    ## The only label of ``cisWasCertified`` (operator decision 2026-10-09:
+    ## SB-1's "Was certified, no longer valid" is no longer produced).
   UnverifiableLabel* = "Unverifiable"
+
+  CommittedCertifiedSummary* =
+    "The committed state in front of you is certified."
+  UncommittedCertifiedSummary* =
+    "Your working tree as it stands is certified; a commit of exactly this " &
+    "content is covered with no second run."
+  StagedDiffersWarning* =
+    "The staged content differs from what was tested, so `git commit` " &
+    "without `-a` will not be covered."
+    ## Added to the uncommitted summary when S differs from W — partial
+    ## staging is the most common way to commit something other than what
+    ## was tested (Standard.md §3.2.2).
+  UntrackedNote* =
+    "Untracked files were present when the tests ran, and they are not " &
+    "covered."
+    ## Added whenever the binding certificate reports ``untracked = true``.
+  ChangedSinceCertifiedSummary* =
+    "HEAD is certified; your working-tree changes are not."
+  ChangedSinceCertifiedRemedy* = "Run the tests to certify them."
+  NoCertificatesFoundSummary* =
+    "No certificate was found for the content in front of you — none for " &
+    "the working tree, HEAD or the staged content."
+    ## Transport.md §5: "none found" is reported differently from "none
+    ## matched". It is also what a commit or a checkout past certified content
+    ## reads: records for content that is no longer in front of the user are
+    ## not consulted.
+  EarlierDraftSummary* =
+    "The newest record predates the current certificate format: it is an " &
+    "earlier-draft record, bound to a commit rather than to content, so it " &
+    "covers nothing and is not translated."
+  EarlierDraftRemedy* = "Run the tests to re-issue it in the current format."
 
   RunTheTestsRemedy* = "Run the tests to certify this state."
   FixConfigurationRemedy* =
@@ -310,9 +373,16 @@ const
     "not a fact in the certificate."
 
 proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
-                               stored: StoredCertificate):
+                               stored: StoredCertificate;
+                               content: ContentOracle):
     CertificateIndicatorModel =
-  ## What **one** record in the store says about the state in front of the user.
+  ## What **one** record in the store says about ONE content state — W, H or
+  ## S, whichever ``content`` computes.
+  ##
+  ## The answer is per record and per state; ``cisWasCertified`` here means
+  ## only "a valid record for this repository and platform, about other
+  ## content". What the user is shown is decided over all three states by
+  ## ``evaluateCertificateIndicator``.
   ##
   ## Split out of ``evaluateCertificateIndicator`` for CTC-2, which is about a
   ## store holding several records — possibly from several frameworks — rather
@@ -354,6 +424,20 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
     # `content`, which is every certificate `ct test` wrote before the
     # 2026-10-09 revision. It is not translated; the reader's detail names
     # the remedy (run the tests, which re-issues it in the current shape).
+    if read.earlierDraft:
+      # Status-Bar.md: the tooltip names the cause and the remedy — the record
+      # predates the current format, and running the tests re-issues it.
+      return CertificateIndicatorModel(
+        state: cisNotCertified,
+        label: NotCertifiedLabel,
+        summary: EarlierDraftSummary,
+        remedy: EarlierDraftRemedy,
+        authenticity: caNotChecked,
+        authenticityNote:
+          "Nothing was checked about who produced it; a record in the " &
+          "earlier-draft shape is not evidence whoever signed it.",
+        certificateName: stored.name,
+        searched: facts.store.searched)
     return CertificateIndicatorModel(
       state: cisNotCertified,
       label: NotCertifiedLabel,
@@ -424,18 +508,15 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
 
   # ---- The verdict, from the shared verifier -----------------------------
   #
-  # THE STATE UNDER EVALUATION IS THE WORKING TREE'S CONTENT, W. The verifier
-  # asks W's oracle for the record's own algorithm over the record's own
+  # THE STATE UNDER EVALUATION IS ONE CONTENT STATE — W, H or S. The verifier
+  # asks its oracle for the record's own algorithm over the record's own
   # scope and compares content ids (Verification.md §4.1.1). No commit is
   # passed, because none is compared: a record issued on top of another
   # commit covers this tree when the content is the same, and a record whose
-  # `base` is HEAD does not when the tree has moved on — which is precisely
-  # the staleness this indicator exists to surface. An algorithm W cannot be
-  # computed in, or a working tree with no content id, comes back from the
-  # verifier as unevaluated and is reported *unverifiable* below.
-  let state = EvaluatedState(
-    repo: facts.vcs.repo,
-    content: facts.vcs.workingTree)
+  # `base` is HEAD does not when the tree has moved on. An algorithm that
+  # cannot be computed for the state, or a state with no content id, comes
+  # back from the verifier as unevaluated and is reported *unverifiable*.
+  let state = EvaluatedState(repo: facts.vcs.repo, content: content)
 
   # WHETHER SIGNATURES ARE REQUIRED IS THE DEPLOYMENT'S CALL, and the store
   # file is where the deployment makes it. A workspace that registered keys has
@@ -485,17 +566,18 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
       detail = detail, name = stored.name)
   of ocNotCovered:
     # The record is a passing run for this repository on this platform, and it
-    # does not describe the state in front of the user. That is the informative
-    # case: their last green run no longer covers what they have.
+    # does not describe this content. Whether that is "changed since
+    # certified", "not certified" or "no certificates" depends on the other
+    # states, and is decided by the caller.
     return CertificateIndicatorModel(
       state: cisWasCertified,
       label: WasCertifiedLabel,
       summary:
         if binding.rejected.len > 0:
-          "The last certificate no longer covers this state: " &
+          "The newest record does not cover this content: " &
           binding.rejected[0].why
         else:
-          "The last certificate no longer covers this state.",
+          "The newest record does not cover this content.",
       remedy: RunTheTestsRemedy,
       authenticity: caNotChecked,
       authenticityNote:
@@ -584,51 +666,139 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
       certificateName: stored.name,
       searched: facts.store.searched)
 
-proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
-    CertificateIndicatorModel =
-  ## Decide what the status bar shows.
-  ##
-  ## The order below is the standard's own, and the early returns are the cases
-  ## where this consumer genuinely **cannot tell** — each of which reports
-  ## unverifiable rather than picking the reassuring reading.
-  ##
-  ## ## Several records, and possibly several frameworks
-  ##
-  ## A workspace may hold certificates from more than one framework at once — a
-  ## `ct test` record beside a reprobuild one is the case CTC-2 exists for —
-  ## and the standard deliberately defines **no** composition rule for that:
-  ## *"A project using several frameworks composes several verifiers, one per
-  ## framework, according to its own policy"* (Verification.md §6). So this is
-  ## the status bar's policy, written where it is implemented:
+type
+  StateVerdict = object
+    ## What the records say about ONE content state (W, H or S), under the
+    ## composition policy written at ``evaluateCertificateIndicator``.
+    covered: bool
+    unverifiable: bool
+      ## A record could not be evaluated against this state, and none binds.
+    model: CertificateIndicatorModel
+      ## The record that speaks for this state: the binding one when
+      ## ``covered``, the first unevaluated one when ``unverifiable``,
+      ## otherwise the newest. Zero when there are no records.
+    binding: TestCertificate
+      ## The binding record, when ``covered``.
+
+proc composeOver(facts: CertificateIndicatorFacts; content: ContentOracle;
+                 records: openArray[StoredCertificate]): StateVerdict =
+  ## The CTC-2 composition over several records, for one content state:
   ##
   ## 1. **A record that binds wins**, whichever framework produced it and
-  ##    wherever it sits in the arrival order. This is Verification.md §7.1's
-  ##    rule 1 — *covered* wins — and it is safe for the reason §7.1 gives:
-  ##    **in v1 coverage only ever grows.** No record subtracts, none
-  ##    contradicts another, so a second record can only ever have *added* the
-  ##    coverage a first one lacked.
+  ##    wherever it sits in the arrival order (Verification.md §7.1 rule 1 —
+  ##    in v1 coverage only ever grows, so no record can subtract what another
+  ##    established). Consulting only the newest record would let a stale
+  ##    neighbour veto a certificate that covers the state.
+  ## 2. Otherwise, if any record could not be **evaluated**, the state is
+  ##    *unverifiable* (§7.1 rule 2): "run the tests" is the wrong instruction
+  ##    while an unread record might already cover it.
+  ## 3. Otherwise the **newest** record speaks.
   ##
-  ##    Consulting only the newest record — which is what this did before CTC-2
-  ##    — fails in exactly the direction that costs most: a stale neighbour
-  ##    landing last would report "was certified, run the tests" to a user whose
-  ##    state is covered by a certificate sitting in the same store. When that
-  ##    neighbour is from a framework this consumer does not implement, it is
-  ##    also §2's rule failing in the *rejecting* direction, which is the one
-  ##    the standard singles out: such a record "is not evidence for this
-  ##    consumer, and it is not evidence against anything either".
+  ## Every record is decided by ``evaluateStoredCertificate`` against its OWN
+  ## framework, targets and scope (Verification.md §2) — no framework's rules
+  ## are applied to another's record, and none borrows another's coverage.
+  var haveNewest = false
+  for stored in records:
+    let model = evaluateStoredCertificate(facts, stored, content)
+    if model.state == cisCertified:
+      result.covered = true
+      result.unverifiable = false
+      result.model = model
+      result.binding = readCertificate(stored.text).cert
+      return
+    if not haveNewest:
+      # `store.certificates` is ordered by ARRIVAL (`orderByArrival`), so the
+      # first record this loop sees is the newest one.
+      result.model = model
+      haveNewest = true
+    if not result.unverifiable and model.state == cisUnverifiable:
+      result.model = model
+      result.unverifiable = true
+
+proc answerOf(oracle: ContentOracle; algorithm: string;
+              paths: seq[string]): ContentAnswer =
+  if oracle.isNil:
+    return ContentAnswer(computed: false,
+      reason: "no content id can be computed for this state")
+  oracle(algorithm, paths)
+
+proc foundForStatesInFront(vcs: WorkspaceVcsState;
+                           stored: StoredCertificate): bool =
+  ## Whether a record counts as FOUND for W's, H's or S's content, which is
+  ## what separates *not certified* from *no certificates* (Transport.md §5).
   ##
-  ## 2. Otherwise, if any record could not be **evaluated**, the outcome is
-  ##    *unverifiable* — §7.1's rule 2. "Run the tests" is the wrong instruction
-  ##    while an unread record might already cover the state, and a decided-but-
-  ##    negative newest record must not mask it: that would be reporting the
-  ##    reassuring reading of a question this consumer never got to ask.
+  ## A record looked up in the local store is in one of those content
+  ## directories by construction (the reader rejects one whose content does
+  ## not match its directory). The test matters for reprobuild's pooled
+  ## workspace directory, which holds records for any content: one that is
+  ## decidably about OTHER content is not "found" here, exactly as a record
+  ## sitting in another content's directory of the local store is not read
+  ## at all (operator decision 2026-10-09 — the indicator consults nothing
+  ## outside W's, H's and S's content). Anything the indicator cannot place
+  ## — a record that does not parse, an earlier-draft record, an unknown
+  ## schema or algorithm, a content id no state could be computed in — counts
+  ## as found: it is not evidence that nothing is here.
+  let read = readCertificate(stored.text)
+  if read.status != crsOk:
+    return true
+  let content = read.cert.vcs.content
+  let parsed = parseContentId(content)
+  if parsed.form != cifWellFormed:
+    return true
+  let scope = sortedDeduplicated(read.cert.vcs.paths)
+  var anyComputed = false
+  for oracle in [vcs.workingTree, vcs.head, vcs.index]:
+    let answer = answerOf(oracle, parsed.algorithmName, scope)
+    if answer.computed:
+      anyComputed = true
+      if answer.id == content:
+        return true
+  not anyComputed
+
+proc coverageValue(verdict: StateVerdict; absent: string): string =
+  if absent.len > 0: absent
+  elif verdict.covered: "covered"
+  elif verdict.unverifiable: "could not be evaluated"
+  else: "not covered"
+
+proc coverageRows(vcs: WorkspaceVcsState;
+                  w, h, s: StateVerdict): seq[CertificateDetailRow] =
+  ## The disclosure's "whether W, H and S are each covered" (Status-Bar.md,
+  ## "Interaction"), by any record — not only the one that speaks.
+  @[row("Working tree (W)", coverageValue(w,
+          if vcs.workingTreeProblem.len > 0:
+            "no content id: " & vcs.workingTreeProblem
+          else: "")),
+    row("HEAD (H)", coverageValue(h,
+          if vcs.head.isNil: "no commit yet" else: "")),
+    row("Staged (S)", coverageValue(s, ""))]
+
+proc withUntrackedNote(summary: string; cert: TestCertificate): string =
+  if cert.vcs.untracked: summary & " " & UntrackedNote else: summary
+
+proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
+    CertificateIndicatorModel =
+  ## Decide what the status bar shows — Status-Bar.md's table, decided on
+  ## the working tree's content W first, because the indicator answers "is
+  ## what is in front of me tested?":
   ##
-  ## 3. Otherwise the **newest** record speaks, unchanged from SB-1 — "your last
-  ##    green run no longer covers what you have" is the sentence the user
-  ##    needs, and it is the last run that produced it.
+  ## | when | state | label |
+  ## |---|---|---|
+  ## | a certificate covers W, and W = H | certified | *Certified* |
+  ## | a certificate covers W, and W ≠ H | certified | *Certified, uncommitted* (+ the staged-content warning when S ≠ W) |
+  ## | no certificate covers W, one covers H | was certified | *Changed since certified* |
+  ## | neither; records found for W's, H's or S's content | not certified | *Not certified* |
+  ## | neither; nothing found there | not certified | *No certificates* |
   ##
-  ## For a store holding ONE record — every workspace SB-1 was built against —
-  ## all three rules return that record's verdict, so nothing there changed.
+  ## and, ahead of the table, the cases where this consumer genuinely
+  ## **cannot tell** — each *unverifiable* rather than the reassuring reading:
+  ## a store that could not be read, a repository or platform that could not
+  ## be established, **a working tree with no content id** (never certified,
+  ## even when H is), and a record that could not be evaluated against W.
+  ##
+  ## Coverage of each state is composed over every record (``composeOver``).
+  ## No commit is compared anywhere: ``base`` is informational, and "W = H"
+  ## is a comparison of content ids in the binding certificate's algorithm.
   ##
   ## What is deliberately absent, still: this applies **no framework-specific
   ## validity rule** to any record, its own included (Verification.md §4.2 —
@@ -639,26 +809,34 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
   # ---- The store could not be looked at ---------------------------------
   # Kept ahead of the emptiness check on purpose. "There is nothing here" and
   # "I could not look" are different answers and only the second is a fault
-  # (Transport.md §4); collapsing them would render "no certificates" for a
-  # store the user can see on disk.
+  # (Transport.md §5); collapsing them would render "no certificates" for a
+  # store the user can see on disk — or, on a host with no local store at all
+  # (a browser tab), for a store this host simply cannot reach.
   if facts.store.unreadable:
     return unverifiable(facts, facts.store.unreadableReason)
 
-  # ---- No store, or an empty one ----------------------------------------
+  # ---- No store, or nothing in it for this content ----------------------
   # Explicitly NOT an error, and explicitly not "unverifiable" either:
   # Verification.md §7 says "no certificates from a framework I implement" is
   # simply not covered, and unverifiable is reserved for evaluation breaking
-  # down.
+  # down. A working tree with no content id still says so here — no record
+  # could describe it — but with nothing to evaluate there is nothing that
+  # could not be verified.
   if not facts.store.present or facts.store.certificates.len == 0:
+    var summary =
+      if facts.store.present: NoCertificatesFoundSummary
+      else: "No certificate store exists yet. " & NoCertificatesFoundSummary
+    var remedy = RunTheTestsRemedy
+    if facts.vcs.known and facts.vcs.workingTreeProblem.len > 0:
+      summary.add " The working tree has no content id (" &
+        facts.vcs.workingTreeProblem & "), so no certificate could describe it."
+      if facts.vcs.workingTreeRemedy.len > 0:
+        remedy = facts.vcs.workingTreeRemedy
     return CertificateIndicatorModel(
       state: cisNoCertificates,
       label: NoCertificatesLabel,
-      summary:
-        if facts.store.present:
-          "The workspace has a certificate store and nothing in it."
-        else:
-          "This workspace has no certificate store.",
-      remedy: RunTheTestsRemedy,
+      summary: summary,
+      remedy: remedy,
       authenticity: caNotChecked,
       authenticityNote:
         "There is no record to say anything about.",
@@ -671,10 +849,6 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
   # A certificate names content and a platform. A consumer that does not know
   # its own repository, or its own platform, cannot decide either — and the
   # honest report is that it could not, not that the answer was no.
-  #
-  # Decided ONCE, ahead of any record, because neither fact is a property of a
-  # record: no certificate in the store could be evaluated without them. They
-  # name the newest record because that is the one a user would go looking for.
   if not facts.vcs.known:
     return unverifiable(facts,
       "CodeTracer could not establish which repository this workspace is, " &
@@ -687,27 +861,106 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
       "on one platform says nothing about another.",
       name = newest.name)
 
-  # ---- The records, newest first (see the policy above) ------------------
-  var
-    newestModel: CertificateIndicatorModel
-    haveNewest = false
-    unevaluated: CertificateIndicatorModel
-    haveUnevaluated = false
-  for stored in facts.store.certificates:
-    let model = evaluateStoredCertificate(facts, stored)
-    if model.state == cisCertified:
-      return model
-    if not haveNewest:
-      # `store.certificates` is ordered by ARRIVAL (`orderByArrival`), so the
-      # first record this loop sees is the newest one.
-      newestModel = model
-      haveNewest = true
-    if not haveUnevaluated and model.state == cisUnverifiable:
-      unevaluated = model
-      haveUnevaluated = true
-  if haveUnevaluated:
-    return unevaluated
-  newestModel
+  let records = facts.store.certificates
+  let w = composeOver(facts, facts.vcs.workingTree, records)
+  let h = composeOver(facts, facts.vcs.head, records)
+  let s = composeOver(facts, facts.vcs.index, records)
+  let coverage = coverageRows(facts.vcs, w, h, s)
+
+  # ---- A working tree with no content id --------------------------------
+  # Content-Id.md §3: what is in front of the user is not a state any
+  # certificate can describe, and a producer would refuse to certify it too.
+  # Never certified — not even when H is covered, which the disclosure and
+  # the summary still say. Decided BEFORE W's verdict on purpose: an oracle
+  # that defaulted an uncomputable W to H would otherwise read certified.
+  if facts.vcs.workingTreeProblem.len > 0:
+    var model = unverifiable(facts,
+      "The working tree has no content id: " & facts.vcs.workingTreeProblem &
+      ". No certificate can describe it, so it is not read as certified" &
+      (if h.covered: ", even though HEAD's content is certified."
+       else: "."),
+      detail = (if h.covered: h.model.detail else: @[]) & coverage,
+      name = (if h.covered: h.model.certificateName else: newest.name))
+    if facts.vcs.workingTreeRemedy.len > 0:
+      model.remedy = facts.vcs.workingTreeRemedy
+    return model
+
+  # ---- A certificate covers W: certified --------------------------------
+  if w.covered:
+    let algorithm = parseContentId(w.binding.vcs.content).algorithmName
+    let wId = answerOf(facts.vcs.workingTree, algorithm, @[])
+    let hId = answerOf(facts.vcs.head, algorithm, @[])
+    let sId = answerOf(facts.vcs.index, algorithm, @[])
+    # Compared as whole-repository ids in the binding record's algorithm. An
+    # H that cannot be computed (no commit yet) is not equal to anything: the
+    # content exists only on this machine until it is committed.
+    let committed = wId.computed and hId.computed and wId.id == hId.id
+    var model = w.model
+    model.detail = w.model.detail & coverage
+    if committed:
+      model.label = CertifiedLabel
+      model.summary = withUntrackedNote(CommittedCertifiedSummary, w.binding)
+    else:
+      model.label = CertifiedUncommittedLabel
+      var summary = UncommittedCertifiedSummary
+      if not (sId.computed and wId.computed and sId.id == wId.id):
+        summary.add " " & StagedDiffersWarning
+      model.summary = withUntrackedNote(summary, w.binding)
+    return model
+
+  # ---- W could not be evaluated ------------------------------------------
+  # A record that might cover W could not be read against it, so "changed
+  # since certified" — a claim that W is NOT covered — would be a guess.
+  if w.unverifiable:
+    var model = w.model
+    model.detail = w.model.detail & coverage
+    return model
+
+  # ---- W is not covered, H is: changed since certified -------------------
+  if h.covered:
+    var model = h.model
+    model.state = cisWasCertified
+    model.label = WasCertifiedLabel
+    model.summary = withUntrackedNote(ChangedSinceCertifiedSummary, h.binding)
+    model.remedy = ChangedSinceCertifiedRemedy
+    model.detail = h.model.detail & coverage
+    return model
+
+  # ---- Neither W nor H: not certified -------------------------------------
+  # Only records found for W's, H's or S's content are consulted (operator
+  # decision 2026-10-09); "the last green run" for some other content is not
+  # identified, so a tree that moved on past certified content reads "no
+  # certificates", never "was certified".
+  var found: seq[StoredCertificate] = @[]
+  for stored in records:
+    if foundForStatesInFront(facts.vcs, stored):
+      found.add stored
+  if found.len == 0:
+    return CertificateIndicatorModel(
+      state: cisNoCertificates,
+      label: NoCertificatesLabel,
+      summary: NoCertificatesFoundSummary,
+      remedy: RunTheTestsRemedy,
+      authenticity: caNotChecked,
+      authenticityNote: "There is no record to say anything about.",
+      searched: facts.store.searched)
+
+  let speaking = composeOver(facts, facts.vcs.workingTree, found).model
+  var model = speaking
+  model.state = cisNotCertified
+  model.label = NotCertifiedLabel
+  if speaking.state == cisWasCertified:
+    # A valid record for this repository and platform, about content that is
+    # in front of the user but is neither W nor H — the staged content.
+    model.summary =
+      if s.covered:
+        "A certificate covers the staged content, and neither the working " &
+        "tree nor HEAD."
+      else:
+        speaking.summary
+    model.remedy = RunTheTestsRemedy
+  model.detail = speaking.detail & coverage
+  model
 
 # ---------------------------------------------------------------------------
 # The ViewModel
@@ -724,9 +977,13 @@ type
     ## below is what a test reads to prove a trigger fired.
     citStartup
     citCommitChanged
-      ## HEAD moved: a commit, a checkout, a rebase, a branch switch.
+      ## HEAD moved: a commit, a checkout, a rebase, a branch switch. Changes
+      ## H (and, after a checkout, W and S).
+    citIndexChanged
+      ## The index was rewritten: staging or unstaging. Changes S, which
+      ## decides the staged-content warning.
     citWorktreeChanged
-      ## A tracked file was edited, staged or reverted.
+      ## A tracked file was edited or reverted. Changes W.
     citStoreChanged
       ## A certificate was written, replaced or removed.
     citManualRefresh
@@ -828,3 +1085,20 @@ proc toggleDisclosure*(self: CertificateIndicatorVm) =
   if not self.disclosed:
     self.refresh(citManualRefresh)
   self.disclosed = not self.disclosed
+
+proc gitDirTrigger*(changedPath: string): CertificateIndicatorTrigger =
+  ## Which fact a change inside ``.git`` moved, from the name of the file
+  ## that changed: ``index`` (and git's ``index.lock`` while it rewrites it)
+  ## is staging, which moves S; anything else there — ``HEAD``, a ref,
+  ## ``ORIG_HEAD``, ``MERGE_HEAD`` — is a commit, a checkout or a merge,
+  ## which moves H. Either way the indicator re-reads all three facts; the
+  ## trigger is what a test reads to prove the right watch fired.
+  var last = changedPath.len - 1
+  while last >= 0 and changedPath[last] in {'/', '\\'}:
+    dec last
+  var start = last
+  while start >= 0 and changedPath[start] notin {'/', '\\'}:
+    dec start
+  let name = if last < 0: "" else: changedPath[start + 1 .. last]
+  if name == "index" or name == "index.lock": citIndexChanged
+  else: citCommitChanged

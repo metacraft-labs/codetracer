@@ -251,27 +251,38 @@ proc workingTreeId(repo: string): string =
 
 proc nativeRoots(): CertificateStoreRoots = nativeCertificateStoreRoots()
 
-proc workingTreeOracle(repo: string): ContentOracle =
+proc stateOracle(repo: string; state: ContentState): ContentOracle =
+  ## One content state (W, H or S) computed by the content-id recipe the
+  ## platform facade drives, over the real repository.
   result = proc(algorithm: string; paths: seq[string]): ContentAnswer
       {.closure.} =
     let (known, parsed) = lookupAlgorithm(algorithm)
     if not known:
       return ContentAnswer(computed: false, reason: "unknown algorithm")
-    let computed = computeContentId(nativeContentIdHost(), repo,
-                                    workingTreeState(), parsed, paths)
+    let computed = computeContentId(nativeContentIdHost(), repo, state,
+                                    parsed, paths)
     if computed.outcome == cioComputed:
       ContentAnswer(computed: true, id: computed.id)
     else:
       ContentAnswer(computed: false, reason: computed.reason)
 
 proc indicatorFor(repo: string): CertificateIndicatorModel =
-  ## The shipped evaluator over the shipped reader, looking W up in the local
-  ## store the way the indicator source does.
+  ## The shipped evaluator over the shipped reader, looking W, H and S up in
+  ## the local store the way the indicator source does.
+  let states = [stateOracle(repo, workingTreeState()),
+                stateOracle(repo, commitState("HEAD")),
+                stateOracle(repo, indexState())]
+  var ids: seq[string] = @[]
+  for state in states:
+    let answer = state("git-tree-sha1", @[])
+    if answer.computed and answer.id notin ids:
+      ids.add answer.id
   evaluateCertificateIndicator(CertificateIndicatorFacts(
     store: readCertificateStore(nativeStoreAccess(), repo, LocalStoreQuery(
-      roots: nativeRoots(), contentIds: @[workingTreeId(repo)])),
+      roots: nativeRoots(), contentIds: ids)),
     vcs: WorkspaceVcsState(known: true, repo: repo.lastPathPart,
-                           workingTree: workingTreeOracle(repo)),
+                           workingTree: states[0], head: states[1],
+                           index: states[2]),
     platform: currentPlatform(),
     signatureVerifier: nil))
 
@@ -823,9 +834,57 @@ suite "CTC-3e: the local certificate store":
     writeFile(repo / "extra.txt", "later\n")
     discard run("git", ["add", "-A"], repo)
     discard run("git", ["commit", "-m", "move on"], repo)
-    ck indicatorFor(repo).state == cisNoCertificates
+    let moved = indicatorFor(repo)
+    ck moved.state == cisNoCertificates
+    ck moved.label == NoCertificatesLabel
     discard runCli(repo, "no-reprobuild-2")
     ck indicatorFor(repo).state == cisCertified
+
+  test "a reprobuild-free project shows certified after ct test, with no commit":
+    ## Status-Bar SB-2b: CTC-2's end-to-end case against CTC-3d's producer,
+    ## with NO commit between the run and the check. Edit, run `ct test`, and
+    ## the shipped evaluator over the shipped reader reads "Certified,
+    ## uncommitted"; partial staging adds the staged-content warning; `git
+    ## commit -a` reads "Certified" with no run in between and the store
+    ## unchanged.
+    let root = useStoreRoot("uncommitted")
+    let repo = committedRepo("uncommitted")
+    writeFile(repo / "NOTES.txt", "notes\n")
+    discard run("git", ["add", "-A"], repo)
+    discard run("git", ["commit", "-q", "-m", "notes"], repo)
+    writeFile(repo / FixtureTestFile, "adds, and now subtracts\n")
+    writeFile(repo / "NOTES.txt", "notes, revised\n")
+    let (code, summary) = runCli(repo, "uncommitted")
+    ck code == 0
+    ck summary{"certificate"}{"issued"}.getBool
+    ck summary{"certificate"}{"content"}.getStr != "git-tree-sha1:" &
+                                                   headTree(repo)
+    let tested = indicatorFor(repo)
+    checkpoint $tested.state & " — " & tested.label & " — " & tested.summary
+    ck tested.state == cisCertified
+    ck tested.label == CertifiedUncommittedLabel
+    ck tested.certificateName == summary{"certificate"}{"written_to"}.getStr
+    # Nothing staged: the staged content is HEAD's, not what was tested.
+    ck StagedDiffersWarning in tested.summary
+
+    # Stage HALF of the change: still certified (W is what was tested), and
+    # the tooltip warns that `git commit` without `-a` would not be covered.
+    discard run("git", ["add", FixtureTestFile], repo)
+    let partial = indicatorFor(repo)
+    ck partial.label == CertifiedUncommittedLabel
+    ck partial.summary == UncommittedCertifiedSummary & " " &
+                          StagedDiffersWarning
+
+    # `git commit -a`: no run in between, and the store unchanged.
+    let storeBefore = storeFiles(root)
+    discard run("git", ["commit", "-q", "-a", "-m", "subtract"], repo)
+    ck gitStatus(repo) == ""
+    let committed = indicatorFor(repo)
+    checkpoint $committed.state & " — " & committed.label
+    ck committed.state == cisCertified
+    ck committed.label == CertifiedLabel
+    ck committed.summary == CommittedCertifiedSummary
+    ck storeFiles(root) == storeBefore
 
   test "a withheld run publishes nothing":
     let root = useStoreRoot("withheld")

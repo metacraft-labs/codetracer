@@ -32,6 +32,7 @@ import ../../platform/displayed_build_identity
 import ../../platform/displayed_product
 import ../../platform/noir_template
 import ../../platform/archive
+import ../../viewmodels/certificate_indicator_source
 
 proc awaitOutcome[T](future: PlatformFuture[PlatformOutcome[T]]
                     ): PlatformOutcome[T] =
@@ -432,6 +433,22 @@ suite "capability and refusal never disagree — the web profile":
       check outcome.value.user == ""
       check outcome.value.system == ""
       check outcome.value.problems == @[webNoLocalCertificateStore]
+
+  test "the certificate indicator on the web host reads unverifiable, not no certificates":
+    ## Status-Bar SB-2b: a host with no local certificate store has not
+    ## looked, so the indicator — the shipped fact source over THIS
+    ## instantiation, and the shipped evaluator — reads *unverifiable*, never
+    ## "no certificates". It still renders (in every mode CodeTracer runs in),
+    ## and nothing about it is an error.
+    let facts = platformCertificateFacts(web.platform, ".", "linux/amd64")
+    check not facts.vcs.known
+    check facts.store.unreadable
+    let model = evaluateCertificateIndicator(facts)
+    checkpoint $model.state & " — " & model.summary
+    check model.state == cisUnverifiable
+    check model.state != cisNoCertificates
+    check model.label == UnverifiableLabel
+    check "no local certificate store" in model.summary
 
   test "capFilesystemTemp is absent, and the sentence says where staging goes":
     let p = web.platform

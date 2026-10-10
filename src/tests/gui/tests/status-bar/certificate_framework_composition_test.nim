@@ -166,8 +166,11 @@ proc facts(world: FakeWorld): CertificateIndicatorFacts =
     store: readCertificateStore(world.access, WorkspaceRoot, LocalStoreQuery(
       roots: CertificateStoreRoots(available: true, user: UserRoot),
       contentIds: @[world.workingTree])),
+    # A clean tree: H and S are W's content (SB-2b decides on all three).
     vcs: WorkspaceVcsState(known: true, repo: RepoName,
-                           workingTree: oracleAt(world.workingTree)),
+                           workingTree: oracleAt(world.workingTree),
+                           head: oracleAt(world.workingTree),
+                           index: oracleAt(world.workingTree)),
     platform: world.platform,
     signatureVerifier: nil)
 
@@ -314,10 +317,13 @@ suite "CTC-2: a workspace with more than one framework":
     let uncovered = world.evaluate()
     checkpoint $uncovered.state & " — " & uncovered.summary
     ck uncovered.state != cisCertified
-    # The reprobuild record (still pooled from the workspace carrier) speaks;
-    # the `ct test` one is in another content's directory and is not read.
-    ck uncovered.state == cisWasCertified
-    ck uncovered.certificateName == ReproDir & "/build.toml"
+    # 2026-10-10 (SB-2b): neither W nor H is covered, and no record is for
+    # the content in front of the user — the `ct test` one is in another
+    # content's directory and is not read, and the pooled reprobuild one is
+    # decidably about other content. "No certificates", never "was certified"
+    # (operator decision 2026-10-09).
+    ck uncovered.state == cisNoCertificates
+    ck uncovered.certificateName == ""
 
   test "an unrecognised framework's certificate is ignored, not rejected":
     ## Verification.md §2 at the layer the framework filter lives in, and the

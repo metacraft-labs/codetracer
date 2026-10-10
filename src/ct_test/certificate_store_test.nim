@@ -464,8 +464,12 @@ suite "the certificate indicator is read-only by construction":
       if stripped.startsWith("import "):
         imports.add stripped["import ".len .. ^1]
     checkpoint "imports: " & imports.join(" | ")
-    check imports.len == 4
+    check imports.len == 5
     check "std/strutils" in imports
     check "../../../ct_test/certificate" in imports
+    # SB-2b: the content-id parser, to read a record's algorithm for "W = H"
+    # and to tell records for other content from records it cannot place. A
+    # pure module — no process, no signing, no session.
+    check "../../../ct_test/certificate_content_id" in imports
     check "../../../ct_test/certificate_store" in imports
     check "../../../ct_test/certificate_verification" in imports

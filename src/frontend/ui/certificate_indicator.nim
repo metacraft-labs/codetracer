@@ -16,18 +16,38 @@
 ##
 ## ## What refreshes it, and what — honestly — does not
 ##
-## | trigger | wired by |
-## |---|---|
-## | first render | `ensureCertificateIndicator` |
-## | a commit, checkout, rebase, merge, stage, `git checkout -- <file>` | a watch on `<repo>/.git` |
-## | a certificate arriving, being replaced or removed | a watch on each store directory |
-## | the store directory appearing for the first time, or a root-level edit | a watch on the workspace root, not recursive |
-## | the user selecting the indicator | `selectCertificateIndicator` |
-## | anything else, every `RevalidateIntervalMs` | a `setInterval` |
+## The indicator is a function of three content facts (Status-Bar.md): W,
+## the working tree; H, HEAD's content; S, the staged content. Each trigger
+## below moves at least one of them, or the store they are looked up in.
+##
+## | trigger | moves | wired by |
+## |---|---|---|
+## | first render | — | `ensureCertificateIndicator` |
+## | a commit, checkout, rebase, merge | H (and W, S on a checkout) | a watch on `<repo>/.git`: `citCommitChanged` |
+## | staging or unstaging (`git add`, `git reset`) | S | the same watch, on `index`: `citIndexChanged` (`gitDirTrigger`) |
+## | an edit to a tracked file at the top level | W | a watch on the workspace root: `citWorktreeChanged` |
+## | a certificate arriving, being replaced or removed | the store | watches on the local store's root, layout and algorithm directories and on every content directory looked up (`citStoreChanged`), re-armed after each refresh |
+## | reprobuild's workspace store appearing or changing | the store | watches on that directory and the workspace root |
+## | the user selecting the indicator | — | `selectCertificateIndicator` |
+## | anything else, every `RevalidateIntervalMs` | W | a `setInterval` |
+##
+## **Every watch row above needs `capFilesystemWatch`, which the Electron
+## desktop profile does not grant** (`host/electron_profile.nim`: its tree
+## watcher lives in the main process). There, none of them is armed and the
+## indicator refreshes at first render, on selection and on the timer only.
 ##
 ## The `.git` watch is not recursive, and it does not need to be: `HEAD`,
 ## `index`, `ORIG_HEAD` and `MERGE_HEAD` all sit directly in that directory, and
-## every operation in the second row above rewrites at least one of them.
+## every operation in the second and third rows rewrites at least one of them.
+##
+## **The content directories move with the facts.** W, H and S are looked up
+## by content id, so after an edit, a commit or a staging the directories that
+## matter are different ones. Every refresh therefore arms a watch on each
+## directory it searched that is not watched yet (`armStoreWatches`), so a
+## record landing for the NEW content is seen without waiting for the timer.
+## A directory that does not exist yet cannot be watched; the algorithm
+## directory's watch is what notices it being created, and the attempt is
+## repeated on the next refresh.
 ##
 ## **THE PERIODIC ARM IS A TIMER, NOT A RENDER HOOK, AND THAT CORRECTION CAME
 ## FROM WATCHING THE PRODUCT.** It was first written as "revalidate at most once
@@ -57,8 +77,9 @@ import ../viewmodel/views/status_certificate_projection
 export certificate_indicator_source, status_certificate_projection
 
 when defined(js):
-  from ../platform_host import
-    ctPlatform, ctAwaitSync, Platform, can, capFilesystemWatch, FsWatchEvent, fs
+  import std/strutils
+  import ../viewmodel/platform/platform
+  from ../platform_host import ctPlatform, ctAwaitSync
 
   # `process.platform` / `process.arch` are node's names for this machine, read
   # AT RUN TIME. `hostOS` / `hostCPU` would be the machine that COMPILED the
@@ -102,27 +123,88 @@ when defined(js):
     ## The indicator, or `nil` before `ensureCertificateIndicator` has run.
     indicator
 
-  proc revalidateCertificateIndicator() =
-    ## The backstop, on its own timer. Runs whether or not anything is drawing,
-    ## which is the correction the product's own behaviour forced — see the
-    ## module header.
-    if indicator.isNil:
-      return
-    if indicator.refresh(citWorktreeChanged) and not onIndicatorChanged.isNil:
-      onIndicatorChanged()
+  var watchedDirs: seq[string] = @[]
+    ## Every directory a watch is armed on for the current workspace, so a
+    ## refresh re-arming the store's watches does not stack a second one.
+
+  proc refreshFor(trigger: CertificateIndicatorTrigger)
 
   proc watchDirectory(host: Platform; path: string;
-                      trigger: CertificateIndicatorTrigger) =
+                      trigger: proc(event: FsWatchEvent):
+                        CertificateIndicatorTrigger) =
     ## Ask the platform to tell us when `path` changes. A refusal is ignored on
     ## purpose: a missing store directory has nothing to watch yet, and a
     ## platform without `capFilesystemWatch` still has the throttled
     ## revalidation and the on-demand refresh. Failing loudly here would turn a
     ## degraded refresh into a broken status bar.
-    discard host.fs.watch(path, false, proc(event: FsWatchEvent) =
-      if indicator.isNil:
-        return
-      if indicator.refresh(trigger) and not onIndicatorChanged.isNil:
-        onIndicatorChanged())
+    ##
+    ## Only a watch that was ARMED is remembered; a directory that does not
+    ## exist yet is asked again on the next refresh.
+    if path.len == 0 or path in watchedDirs:
+      return
+    var armed = false
+    try:
+      let outcome = ctAwaitSync(host.fs.watch(path, false,
+        proc(event: FsWatchEvent) = refreshFor(trigger(event))))
+      # Remembered unless the directory is simply absent: any other answer
+      # (a refusal, a host that did not settle) is not improved by asking
+      # again on every refresh.
+      armed = outcome.ok or outcome.error.kind != pkNotFound
+    except:
+      armed = false
+    if armed:
+      watchedDirs.add path
+
+  proc always(trigger: CertificateIndicatorTrigger):
+      proc(event: FsWatchEvent): CertificateIndicatorTrigger =
+    result = proc(event: FsWatchEvent): CertificateIndicatorTrigger = trigger
+
+  proc armStoreWatches() =
+    ## Watch the local store where `ct test` publishes: its user root, the
+    ## layout directory and both algorithm directories (a content directory
+    ## being created), and every directory the last refresh SEARCHED — W's,
+    ## H's and S's content directories in both roots, which change as the
+    ## facts do. Workspace-relative entries of `searched` (reprobuild's
+    ## carrier) are watched once at start-up instead.
+    if indicator.isNil:
+      return
+    let host = ctPlatform()
+    if not host.can(capFilesystemWatch):
+      return
+    var roots: CertificateStoreRoots
+    try:
+      let outcome = ctAwaitSync(host.fs.certificateStoreRoots())
+      if outcome.ok:
+        roots = outcome.value
+    except:
+      discard
+    if roots.available and roots.user.len > 0:
+      watchDirectory(host, roots.user, always(citStoreChanged))
+      watchDirectory(host, roots.user & "/" & LocalStoreLayout,
+                     always(citStoreChanged))
+      for algorithm in ["git-tree-sha1", "git-tree-sha256"]:
+        watchDirectory(host, roots.user & "/" & LocalStoreLayout & "/" &
+                       algorithm, always(citStoreChanged))
+    for dir in indicator.model.searched:
+      if dir.startsWith("/") or (dir.len > 2 and dir[1] == ':'):
+        watchDirectory(host, dir, always(citStoreChanged))
+
+  proc refreshFor(trigger: CertificateIndicatorTrigger) =
+    ## One refresh, for any trigger: re-read, re-arm the store's watches for
+    ## the content now in front of the user, and repaint if the answer moved.
+    if indicator.isNil:
+      return
+    let changed = indicator.refresh(trigger)
+    armStoreWatches()
+    if changed and not onIndicatorChanged.isNil:
+      onIndicatorChanged()
+
+  proc revalidateCertificateIndicator() =
+    ## The backstop, on its own timer. Runs whether or not anything is drawing,
+    ## which is the correction the product's own behaviour forced — see the
+    ## module header. An edit deep in the tree changes W and touches nothing
+    ## else that is watched, so this is the trigger that carries it.
+    refreshFor(citWorktreeChanged)
 
   proc ensureCertificateIndicator*(workspaceDir: string;
                                    onChanged: proc()) =
@@ -155,6 +237,11 @@ when defined(js):
     indicator = newCertificateIndicatorVm(
       platformCertificateFactsReader(host, workspaceDir, currentHostPlatform()))
     indicatorWorkspace = workspaceDir
+    # The previous workspace's watches stay armed (the facade's handles are
+    # not kept), and every one of them refreshes whichever indicator is
+    # current, so they cost a re-read and never a wrong answer. Forgetting
+    # them here is what lets the new workspace arm its own.
+    watchedDirs = @[]
     discard indicator.refresh(citStartup)
 
     if not timerInstalled:
@@ -164,53 +251,37 @@ when defined(js):
 
     if not host.can(capFilesystemWatch):
       return
-    let vcs = workspaceVcsState(host, workspaceDir)
-    if vcs.known:
-      # EVERYTHING HERE IS RELATIVE TO THE OPENED WORKSPACE DIRECTORY, not to
-      # the repository root, and that is a stated limit rather than an
-      # oversight. `readCertificateStore` searches `<workspaceDir>/.repro`
-      # (beside the local certificate store, which is per user), so the
-      # workspace carrier this indicator speaks for is the one beside the
-      # folder the user opened; using a different root for the watch than for
-      # the store would make the two disagree.
-      #
-      # The consequence, for a project opened at a SUBDIRECTORY of its
-      # repository: `<workspaceDir>/.git` does not exist, `watchDirectory`'s
-      # refusal is ignored (see its header), and the commit trigger degrades to
-      # the periodic backstop. The VCS *facts* are still right — the facade's
-      # `repositoryRoot` resolves upwards — so the indicator is correct and
-      # merely slower to notice a commit. `WorkspaceVcsState` carries no root
-      # path to watch instead; giving it one, and pooling the store from the
-      # repository root, is a change with its own test surface.
-      watchDirectory(host, workspaceDir & "/.git", citCommitChanged)
+    # EVERYTHING HERE IS RELATIVE TO THE OPENED WORKSPACE DIRECTORY, not to
+    # the repository root, and that is a stated limit rather than an
+    # oversight. `readCertificateStore` searches `<workspaceDir>/.repro`
+    # (beside the local certificate store, which is per user), so the
+    # workspace carrier this indicator speaks for is the one beside the
+    # folder the user opened; using a different root for the watch than for
+    # the store would make the two disagree.
+    #
+    # The consequence, for a project opened at a SUBDIRECTORY of its
+    # repository: `<workspaceDir>/.git` does not exist, `watchDirectory`'s
+    # refusal is ignored (see its header), and the commit and staging
+    # triggers degrade to the periodic backstop. The content facts are still
+    # right — the facade resolves the repository upwards — so the indicator is
+    # correct and merely slower to notice a commit.
+    watchDirectory(host, workspaceDir & "/.git",
+      proc(event: FsWatchEvent): CertificateIndicatorTrigger =
+        gitDirTrigger(event.path))
     for dir in CertificateStoreDirs:
       # A store directory that does not exist yet cannot be watched; the
       # workspace-root watch below is what notices it being created.
-      watchDirectory(host, workspaceDir & "/" & dir, citStoreChanged)
-    # THE LOCAL CERTIFICATE STORE (CTC-3e), where `ct test` publishes. Watched
-    # at the user root's algorithm directories, which change when a content
-    # directory is created (the first run on a new content), and at the
-    # content directories of the states looked up now, which change when a
-    # record lands in one that exists. Not recursive, and not re-installed
-    # when W moves on: the periodic backstop covers a directory that did not
-    # exist yet, and `ct test` rewriting one that did is caught directly.
-    let query = localStoreQuery(host, workspaceDir, vcs)
-    if query.roots.available and query.roots.user.len > 0:
-      for algorithm in ["git-tree-sha1", "git-tree-sha256"]:
-        watchDirectory(host, query.roots.user & "/" & LocalStoreLayout & "/" &
-                       algorithm, citStoreChanged)
-      for contentId in query.contentIds:
-        let dir = localStoreContentDir(contentId)
-        if dir.ok:
-          watchDirectory(host, query.roots.user & "/" & dir.relative,
-                         citStoreChanged)
+      watchDirectory(host, workspaceDir & "/" & dir, always(citStoreChanged))
     # NOT RECURSIVE. One watch on the workspace root costs one inotify slot and
-    # catches the two things a root watch can catch that nothing else does: a
-    # store directory appearing for the first time (`.repro/`), and an
-    # edit to a tracked file at the top level. A recursive watch would also
+    # catches the two things a root watch can catch that nothing else does: an
+    # edit to a tracked file at the top level (W), and reprobuild's store
+    # directory appearing for the first time. A recursive watch would also
     # catch every build artefact in the tree, which is the cost this indicator
     # does not earn.
-    watchDirectory(host, workspaceDir, citStoreChanged)
+    watchDirectory(host, workspaceDir,
+      proc(event: FsWatchEvent): CertificateIndicatorTrigger =
+        if "/.repro" in event.path: citStoreChanged else: citWorktreeChanged)
+    armStoreWatches()
 
   proc selectCertificateIndicator*() =
     ## The user selected the indicator: re-read, then toggle the disclosure.
@@ -237,7 +308,6 @@ when defined(js):
   # losing its bare `except:` arm (SB-1's fix, which had no in-Electron test).
 
   import std/[enumutils, json]
-  import ../viewmodel/platform/platform
 
   proc errorJson(error: PlatformError): JsonNode =
     %*{"ok": false, "errorKind": $error.kind, "errorMessage": error.message}

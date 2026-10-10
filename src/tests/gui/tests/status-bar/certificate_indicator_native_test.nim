@@ -1,4 +1,5 @@
-## SB-1 — the certificate indicator against a real repository and a real host.
+## SB-1 and SB-2b — the certificate indicator against a real repository and a
+## real host.
 ##
 ## NO MOCKS AT ALL. The platform is the shipped native instantiation
 ## (`host/desktop_native.newDesktopNativePlatform`), the repository is a real
@@ -38,7 +39,8 @@
 ## carrier, which is still pooled and lists every record whatever its
 ## content; a lookup by content would never reach them.
 
-import std/[algorithm, options, os, osproc, streams, strutils, times, unittest]
+import std/[algorithm, options, os, osproc, streams, strtabs, strutils, times,
+            unittest]
 
 import viewmodels/certificate_indicator_source
 import viewmodel/host/desktop_native
@@ -143,6 +145,70 @@ proc writeCertificateFor(repo, content: string; base = UnrelatedBase;
   createDir(target)
   writeFile(target / name, renderCertificate(cert))
 
+proc gitWithIndex(dir, indexFile: string; args: openArray[string]): string =
+  ## git with ``GIT_INDEX_FILE`` pointed at a copy, so computing a tree here
+  ## never touches the repository's own index.
+  var env = newStringTable()
+  for key, value in envPairs():
+    env[key] = value
+  env["GIT_INDEX_FILE"] = indexFile
+  var p = startProcess("git", workingDir = dir, args = @args, env = env,
+                       options = {poUsePath, poStdErrToStdOut})
+  result = p.outputStream.readAll()
+  discard p.waitForExit()
+  p.close()
+
+proc treeOfIndexCopy(repo: string; addTracked: bool): string =
+  ## A content id computed INDEPENDENTLY of the facade, with plain git: S is
+  ## `write-tree` over a copy of the index (no stat data is involved), and W
+  ## is S's tree read into a FRESH index — whose entries carry no stat data,
+  ## so git must read every tracked file's content — with every tracked
+  ## change added (`git add -u`; untracked files are outside the content).
+  ## Not `add -u` over a copy of the index: that trusts the copy's stat data,
+  ## which is the defect CTC-3b fixed in the product (a same-size edit in the
+  ## second of the last index write read as clean), and an oracle with the
+  ## product's old defect would agree with it.
+  let dir = getTempDir() / "ct-cert-indicator"
+  let copy = dir / "index-copy-" & $getCurrentProcessId()
+  let fresh = dir / "index-fresh-" & $getCurrentProcessId()
+  copyFile(repo / ".git" / "index", copy)
+  let staged = gitWithIndex(repo, copy, ["write-tree"]).strip()
+  removeFile(copy)
+  if not addTracked:
+    return "git-tree-sha1:" & staged
+  discard gitWithIndex(repo, fresh, ["read-tree", staged])
+  discard gitWithIndex(repo, fresh, ["add", "-u"])
+  result = "git-tree-sha1:" & gitWithIndex(repo, fresh, ["write-tree"]).strip()
+  removeFile(fresh)
+
+proc workingTreeContent(repo: string): string = treeOfIndexCopy(repo, true)
+proc stagedContent(repo: string): string = treeOfIndexCopy(repo, false)
+
+proc writeRecord(repo, content: string; platform = Platform;
+                 name = "run.toml") =
+  ## A record in the local store under its content's directory, for an
+  ## arbitrary platform.
+  let cert = TestCertificate(
+    schema: CertificateSchema, framework: "ct-test",
+    project: repo.lastPathPart, platform: platform,
+    targets: @["calc_test.nim"], result: "passed",
+    issuedAt: "2026-10-10T09:00:00Z", issuer: "ct-test",
+    vcs: VcsState(repo: repo.lastPathPart, paths: @[], content: content,
+                  untracked: false, base: UnrelatedBase),
+    commands: @[@["ct", "test", "run"]])
+  let target = getEnv("TEST_CERTIFICATES_DIR") /
+    localStoreContentDir(content).relative.replace('/', DirSep)
+  createDir(target)
+  writeFile(target / name, renderCertificate(cert))
+
+proc storeSnapshot(): seq[string] =
+  result = @[]
+  let root = getEnv("TEST_CERTIFICATES_DIR")
+  if dirExists(root):
+    for path in walkDirRec(root):
+      result.add path & " " & readFile(path)
+  result.sort()
+
 proc indicatorFor(repo: string): CertificateIndicatorVm =
   newCertificateIndicatorVm(
     platformCertificateFactsReader(platform(), repo, Platform))
@@ -200,7 +266,10 @@ suite "SB-1: the indicator against a real repository":
     discard otherVm.refresh(citStartup)
     checkpoint $otherVm.model.state & " — " & otherVm.model.summary
     check otherVm.model.state != cisCertified
-    check otherVm.model.state == cisWasCertified
+    # SB-2b: the record is for content that is neither W, H nor S, so it is
+    # not "found" for this tree — and nothing was looked up in another
+    # content's directory.
+    check otherVm.model.state == cisNoCertificates
 
   test "a content id the host cannot compute reads unverifiable":
     ## `git-tree-sha256` against this SHA-1 repository: the real host answers
@@ -228,9 +297,14 @@ suite "SB-1: the indicator against a real repository":
     checkpoint $vm.model.state & " — " & vm.model.summary
     check vm.model.state == cisUnverifiable
     check "assume-unchanged" in vm.model.summary
+    check "calc.nim" in vm.model.summary
+    check "even though HEAD's content is certified" in vm.model.summary
+    check "git update-index --no-assume-unchanged -- calc.nim" in
+          vm.model.remedy
     discard git(repo, ["update-index", "--no-assume-unchanged", "calc.nim"])
     discard vm.refresh(citWorktreeChanged)
     check vm.model.state == cisWasCertified
+    check vm.model.label == WasCertifiedLabel
     discard git(repo, ["checkout", "--", "calc.nim"])
     discard vm.refresh(citWorktreeChanged)
     check vm.model.state == cisCertified
@@ -279,6 +353,7 @@ suite "SB-1: the indicator against a real repository":
     check vm.refresh(citWorktreeChanged)
     checkpoint "after edit: " & $vm.model.state & " — " & vm.model.summary
     check vm.model.state == cisWasCertified
+    check vm.model.label == "Changed since certified"
     check headCommit(repo) == first     # HEAD really did not move
 
     # (4) REVERTING the edit brings it back, so (3) was about the edit and not
@@ -409,4 +484,190 @@ suite "SB-1: the indicator against a real repository":
     check vm.model.state == cisCertified
 
     check snapshot() == before
+    check git(repo, ["status", "--porcelain=v1"]) == statusBefore
+
+# EVERY EDIT IN THIS SUITE KEEPS THE FILE'S SIZE, and most land in the same
+# second as the index write that recorded the file: the realistic edit, and
+# the one git's stat check cannot see. Before CTC-3b's fix (2026-10-10) the
+# product's W recipe trusted stat data in a COPY of the index and missed such
+# an edit about one run in three here; these edits are the regression test
+# for that in the shipped native host.
+suite "SB-2b: the indicator decides on W, H and S in a real repository":
+
+  setup:
+    discard freshStoreRoot()
+    resetPlatformForTesting()
+    installPlatform(newDesktopNativePlatform())
+
+  teardown:
+    resetPlatformForTesting()
+
+  test "a tested, uncommitted tree reads certified, uncommitted":
+    ## Edit, certify the working tree, no commit. Then stage only half of the
+    ## change — the tooltip warns that `git commit` without `-a` would not be
+    ## covered — then all of it, then `git commit`: "Certified", with the
+    ## store unchanged and no record written in between.
+    let repo = newRepository("uncommitted")
+    writeFile(repo / "notes.txt", "notes\n")
+    discard git(repo, ["add", "-A"])
+    discard git(repo, ["commit", "-m", "notes"])
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = b + a\n")
+    writeFile(repo / "notes.txt", "NOTES\n")
+    let tested = workingTreeContent(repo)
+    check tested != headContent(repo)
+    writeRecord(repo, tested)
+
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    checkpoint vm.model.label & " — " & vm.model.summary
+    check vm.model.state == cisCertified
+    check vm.model.label == CertifiedUncommittedLabel
+    check StagedDiffersWarning in vm.model.summary
+    check vm.model.summary.startsWith(UncommittedCertifiedSummary)
+
+    discard git(repo, ["add", "calc.nim"])
+    check stagedContent(repo) != tested
+    discard vm.refresh(gitDirTrigger(repo / ".git" / "index"))
+    check vm.lastTrigger == citIndexChanged
+    check vm.model.label == CertifiedUncommittedLabel
+    check vm.model.summary == UncommittedCertifiedSummary & " " &
+                              StagedDiffersWarning
+
+    discard git(repo, ["add", "notes.txt"])
+    check stagedContent(repo) == tested
+    check vm.refresh(citIndexChanged)
+    check vm.model.summary == UncommittedCertifiedSummary
+
+    let storeBefore = storeSnapshot()
+    discard git(repo, ["commit", "-m", "tested change"])
+    check headContent(repo) == tested
+    check vm.refresh(gitDirTrigger(repo / ".git" / "HEAD"))
+    check vm.lastTrigger == citCommitChanged
+    checkpoint vm.model.label & " — " & vm.model.summary
+    check vm.model.state == cisCertified
+    check vm.model.label == CertifiedLabel
+    check vm.model.summary == CommittedCertifiedSummary
+    check storeSnapshot() == storeBefore
+
+  test "an untracked file does not change the state":
+    ## Untracked files are outside W (Standard.md §3.2), in every state.
+    let repo = newRepository("untracked")
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = b + a\n")
+    writeRecord(repo, workingTreeContent(repo))
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    let before = vm.model
+    check before.label == CertifiedUncommittedLabel
+    writeFile(repo / "scratch.log", "noise\n")
+    createDir(repo / "build")
+    writeFile(repo / "build" / "out.o", "object\n")
+    check not vm.refresh(citWorktreeChanged)
+    check vm.model.label == before.label
+    check vm.model.summary == before.summary
+
+  test "a tree that moved on past its last green run reads not certified":
+    ## Certify HEAD, then commit a content change: neither W nor H is
+    ## covered while a valid record for the old content sits in the store.
+    let repo = newRepository("moved-on")
+    writeRecord(repo, headContent(repo))
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    check vm.model.label == CertifiedLabel
+
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = b + a\n")
+    discard vm.refresh(citWorktreeChanged)
+    # The control: an edit with HEAD still certified.
+    check vm.model.label == WasCertifiedLabel
+
+    discard git(repo, ["commit", "-a", "-m", "moved on"])
+    discard vm.refresh(citCommitChanged)
+    checkpoint vm.model.label & " — " & vm.model.summary
+    check vm.model.state == cisNoCertificates
+    check vm.model.label == NoCertificatesLabel
+    check vm.model.state != cisWasCertified
+
+    # A record for this platform's neighbour, in W's own directory: found,
+    # and none matched.
+    writeRecord(repo, headContent(repo), platform = "macos/arm64",
+                name = "macos.toml")
+    discard vm.refresh(citStoreChanged)
+    checkpoint vm.model.label & " — " & vm.model.summary
+    check vm.model.state == cisNotCertified
+    check vm.model.label == NotCertifiedLabel
+
+  test "an unmerged merge is unverifiable, even with HEAD certified":
+    let repo = newRepository("unmerged")
+    discard git(repo, ["checkout", "-q", "-b", "side"])
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = a - b\n")
+    discard git(repo, ["commit", "-q", "-a", "-m", "side"])
+    discard git(repo, ["checkout", "-q", "main"])
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = a * b\n")
+    discard git(repo, ["commit", "-q", "-a", "-m", "main"])
+    writeRecord(repo, headContent(repo))
+    discard git(repo, ["merge", "side"])
+    check "UU calc.nim" in git(repo, ["status", "--porcelain=v1"])
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    checkpoint vm.model.summary & " / " & vm.model.remedy
+    check vm.model.state == cisUnverifiable
+    check vm.model.state != cisCertified
+    check "unmerged" in vm.model.summary
+    check "calc.nim" in vm.model.summary
+    check "even though HEAD's content is certified" in vm.model.summary
+    check "Resolve the merge" in vm.model.remedy
+    # THE CONTROL: the condition cleared, the same repository reads by its
+    # content.
+    discard git(repo, ["merge", "--abort"])
+    discard vm.refresh(citCommitChanged)
+    check vm.model.state == cisCertified
+    check vm.model.label == CertifiedLabel
+
+  test "a submodule with modified content is unverifiable, even with HEAD certified":
+    let sub = newRepository("submodule-inner")
+    let repo = newRepository("submodule-outer")
+    discard git(repo, ["-c", "protocol.file.allow=always", "submodule", "add",
+                       "-q", sub, "inner"])
+    discard git(repo, ["commit", "-q", "-m", "add submodule"])
+    writeRecord(repo, headContent(repo))
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    check vm.model.label == CertifiedLabel
+    writeFile(repo / "inner" / "calc.nim", "proc add(a, b: int): int = b - a\n")
+    discard vm.refresh(citWorktreeChanged)
+    checkpoint vm.model.summary & " / " & vm.model.remedy
+    check vm.model.state == cisUnverifiable
+    check "nested repository has modified content" in vm.model.summary
+    check "inner" in vm.model.remedy
+    check "submodule" in vm.model.remedy
+    discard git(repo / "inner", ["checkout", "--", "calc.nim"])
+    discard vm.refresh(citWorktreeChanged)
+    check vm.model.label == CertifiedLabel
+
+  test "computing W leaves the index and the working tree untouched":
+    ## With a partially staged file present, the index file's bytes and `git
+    ## status` are identical after five refreshes. New loose objects in
+    ## `.git/objects` are expected (that is how git computes a tree id) and
+    ## are not asserted against.
+    let repo = newRepository("index-untouched")
+    writeFile(repo / "notes.txt", "notes\n")
+    discard git(repo, ["add", "-A"])
+    discard git(repo, ["commit", "-q", "-m", "notes"])
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = b + a\n")
+    writeFile(repo / "notes.txt", "NOTES\n")
+    discard git(repo, ["add", "calc.nim"])
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = a * b\n")
+    writeRecord(repo, workingTreeContent(repo))
+    # `git status` BEFORE the bytes are taken: it refreshes the index it
+    # reads and writes it back, and with calc.nim edited (same size) in the
+    # second the index was written, that write smudges the racily clean
+    # entry's recorded size (https://git-scm.com/docs/racy-git). That is
+    # git's doing, not the facade's, so it must happen before the baseline.
+    let statusBefore = git(repo, ["status", "--porcelain=v1"])
+    check "MM calc.nim" in statusBefore
+    let indexBefore = readFile(repo / ".git" / "index")
+    let vm = indicatorFor(repo)
+    for i in 0 .. 4:
+      discard vm.refresh(citManualRefresh)
+    check vm.model.label == CertifiedUncommittedLabel
+    check readFile(repo / ".git" / "index") == indexBefore
     check git(repo, ["status", "--porcelain=v1"]) == statusBefore
