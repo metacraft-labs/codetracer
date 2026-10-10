@@ -1,8 +1,11 @@
 ## native_state.nim — where a NATIVE host (the terminal, GPUI) keeps the state
 ## it writes for itself, and how it writes a small document there.
 ##
-## `$CODETRACER_TUI_LAYOUT_DIR` if set, else `$XDG_STATE_HOME/codetracer`, else
-## `~/.local/state/codetracer`. The override keeps PLAT-6's name because it is
+## `$CODETRACER_TUI_LAYOUT_DIR` if set, else `$CODETRACER_HOME/state`, else
+## `$XDG_STATE_HOME/codetracer`, else `~/.local/state/codetracer`. The middle
+## step is `common/ct_home.ctStateDir`'s rule, spelt here because nothing under
+## `viewmodel/host` imports `common/`; `src/common/ct_home_test.nim` pins that
+## the two agree. The override keeps PLAT-6's name because it is
 ## the hook every Tier-2 suite already uses to point a spawned binary at a
 ## directory of its own; it overrides the whole root, not only the layout.
 ##
@@ -11,18 +14,24 @@
 ##
 ## Native-only: it asks the environment and the filesystem.
 
-import std/os
+import std/[os, strutils]
 
 const
   NativeStateDirEnvVar* = "CODETRACER_TUI_LAYOUT_DIR"
     ## Overrides the whole state root.
   NativeStateHomeEnvVar* = "XDG_STATE_HOME"
+  NativeCodetracerHomeEnvVar* = "CODETRACER_HOME"
+    ## Relocates every per-user location (`common/ct_home`); below the
+    ## layout override, above XDG.
   StagedWriteSuffix* = ".new"
 
 proc nativeStateRoot*(): string =
   let override = getEnv(NativeStateDirEnvVar)
   if override.len > 0:
     return override
+  let ctHome = getEnv(NativeCodetracerHomeEnvVar).strip()
+  if ctHome.len > 0:
+    return absolutePath(ctHome) / "state"
   let stateHome = getEnv(NativeStateHomeEnvVar)
   if stateHome.len > 0:
     return stateHome / "codetracer"

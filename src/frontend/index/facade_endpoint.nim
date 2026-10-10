@@ -330,6 +330,13 @@ type
       ## into `.git/objects` — is then refused rather than run.
 
 proc defaultSettingsRoot(): string =
+  # `$CODETRACER_HOME/config`, else `$XDG_CONFIG_HOME/codetracer`, else
+  # `~/.config/codetracer` — `common/ct_home.ctConfigDir`'s rule, spelt with
+  # this module's own node bindings (it imports nothing from `common/`).
+  let ctHome = envValue("CODETRACER_HOME")
+  if ctHome.len > 0:
+    return joinPath($(npath.resolve(cstring ctHome).to(cstring)), "config",
+                    "endpoint")
   let base =
     if envIsSet("XDG_CONFIG_HOME") and envValue("XDG_CONFIG_HOME").len > 0:
       envValue("XDG_CONFIG_HOME")

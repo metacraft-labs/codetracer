@@ -14,11 +14,9 @@ pub struct Paths {
 
 impl Default for Paths {
     fn default() -> Self {
-        let tmpdir: PathBuf = if cfg!(target_os = "macos") {
-            PathBuf::from(env::var("HOME").unwrap_or("/".to_string())).join("Library/Caches/com.codetracer.CodeTracer/")
-        } else {
-            env::temp_dir().join("codetracer/")
-        };
+        // `$CODETRACER_HOME/tmp`, else the historical per-OS location
+        // (`ct_home::tmp_dir`, the twin of Nim's `paths.codetracerTmpPath`).
+        let tmpdir: PathBuf = ct_home::tmp_dir();
         Self {
             tmp_path: PathBuf::from(&tmpdir),
             client_socket_path: PathBuf::from(&tmpdir).join("ct_client_socket"),

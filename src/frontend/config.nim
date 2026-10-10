@@ -20,8 +20,10 @@ when not defined(ctRenderer):
 
   let
     configDir* = codetracerPrefix / "config"
-    userConfigDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
-    userLayoutDir* = getEnv("XDG_CONFIG_HOME", $home / ".config") / "codetracer"
+    # `$CODETRACER_HOME/config`, else `$XDG_CONFIG_HOME/codetracer`, else
+    # `~/.config/codetracer` (`ct_home.ctConfigDir`, which `paths` exports).
+    userConfigDir* = ctConfigDir()
+    userLayoutDir* = ctConfigDir()
 
 proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
   result = ShortcutMap(shortcutActions: JsAssoc[cstring, ClientAction]{}, conflictList: @[])

@@ -1711,6 +1711,7 @@ proc loadTrace(trace: Row, test: bool): Trace =
 
       (the db is usually saved as
         * $HOME/.local/share/codetracer/trace_index.db for normal records
+          ($CODETRACER_HOME/data/trace_index.db when that is set; ct_home)
         * <install dir>/src/tests/trace_index.db for test records
       if those are tests,
       you can re-record the tests with `tester build` after deleting the db)

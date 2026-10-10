@@ -374,9 +374,18 @@ proc desktopSettings(profile: PlatformProfile): SettingsFacade =
 
   proc scopeDir(scope: SettingsScope): string =
     case scope
-    of ssUser: getConfigDir() / "codetracer"
+    # `$CODETRACER_HOME/{config,tmp}` relocate the user and session scopes
+    # with every other per-user location (`common/ct_home`'s rule, spelt
+    # here because nothing under `viewmodel/host` imports `common/`).
+    of ssUser:
+      let ctHome = getEnv("CODETRACER_HOME").strip()
+      if ctHome.len > 0: absolutePath(ctHome) / "config"
+      else: getConfigDir() / "codetracer"
     of ssWorkspace: getCurrentDir() / ".codetracer"
-    of ssSession: getTempDir() / "codetracer-session"
+    of ssSession:
+      let ctHome = getEnv("CODETRACER_HOME").strip()
+      if ctHome.len > 0: absolutePath(ctHome) / "tmp" / "codetracer-session"
+      else: getTempDir() / "codetracer-session"
 
   proc keyPath(scope: SettingsScope; key: string): string =
     # The key is a flat name, never a path fragment: a key containing `..`

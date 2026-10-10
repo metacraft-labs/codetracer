@@ -1,5 +1,6 @@
 import
   std/[strutils, strformat, os, osproc],
+  ct_home,
   results,
   strings, filepaths,
   agent_harbor_install
@@ -24,7 +25,7 @@ proc extractExecCommand(desktopFile: string): string =
 
   return ""
 
-func rcFilesDir: string =
+proc rcFilesDir: string =
   # TODO:
   #
   # * Make an architectural decision below
@@ -46,12 +47,16 @@ func rcFilesDir: string =
   # * The documentation of CodeTracer becomes more complicated
   #   (more difficult to keep in the expert user's head)
   #
-  os.getHomeDir() / ".local" / "share" / "codetracer"
+  #
+  # `$CODETRACER_HOME/data` relocates it with every other per-user location
+  # (`ct_home.ctDataDirIgnoringXdg`); a `proc`, not a `func`, because the
+  # answer depends on the environment.
+  ctDataDirIgnoringXdg()
 
-func shellLaunchersDir*: string =
+proc shellLaunchersDir*: string =
   rcFilesDir() / "shell-launchers"
 
-func appInstallFsLocationPath*: string =
+proc appInstallFsLocationPath*: string =
   rcFilesDir() / "app-install-fs-location"
 
 const
@@ -74,19 +79,19 @@ proc createRcFile(
   writeFile(filePath, content)
   filePath
 
-func ourBashRcLocation: FilePath =
+proc ourBashRcLocation: FilePath =
   rcFilesDir() / bashrc
 
 proc createOurBashRc: CreatedFilePath =
   createRcFile ourBashRcLocation(), slurpShellIntegrationFile("bashrc")
 
-func ourZshRcLocation: FilePath =
+proc ourZshRcLocation: FilePath =
   rcFilesDir() / zshrc
 
 proc createOurZshRc: CreatedFilePath =
   createRcFile ourZshRcLocation(), slurpShellIntegrationFile("zshrc")
 
-func ourFishRcLocation: FilePath =
+proc ourFishRcLocation: FilePath =
   rcFilesDir() / fishrc
 
 proc createOurFishRc: CreatedFilePath =

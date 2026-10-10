@@ -25,6 +25,7 @@
 ## launcher relies on it.
 
 import std/[os, strutils]
+import ../../common/ct_home
 
 const
   registryEnvVar* = "CODETRACER_REGISTRY_PATH"
@@ -71,10 +72,11 @@ proc collectComponentLevels*(): seq[ComponentLevel] =
   if rootOverride.len > 0:
     result.add ComponentLevel(path: rootOverride, label: "user")
   else:
-    let home = getEnv("HOME", "")
-    if home.len > 0:
+    # `$CODETRACER_HOME/launcher`, else `$HOME/.codetracer` (ct_home).
+    let userRoot = ctLauncherUserRootDefault()
+    if userRoot.len > 0:
       result.add ComponentLevel(
-        path: home / ".codetracer" / "components" / "v1",
+        path: userRoot / "components" / "v1",
         label: "user")
   let extraPaths = getEnv(componentsPathEnvVar, "")
   if extraPaths.len > 0:

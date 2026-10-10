@@ -387,6 +387,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-home"
+version = "0.1.0"
+
+[[package]]
 name = "darling"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1506,6 +1510,7 @@ dependencies = [
  "codetracer_trace_reader",
  "codetracer_trace_types",
  "codetracer_trace_writer",
+ "ct-home",
  "flexi_logger",
  "futures-util",
  "libc",

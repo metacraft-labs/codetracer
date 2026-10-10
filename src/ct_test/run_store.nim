@@ -9,6 +9,7 @@ import std/[json, options, strutils, tables, times]
 
 when not defined(js):
   import std/os
+  import ../common/ct_home
 
 import contracts
 
@@ -117,9 +118,9 @@ proc defaultRunStoreRoot*(): string =
   when defined(js):
     ""
   else:
-    getEnv("CODETRACER_TEST_RUN_STORE",
-      getEnv("XDG_STATE_HOME", getHomeDir() / ".local" / "state") /
-        "codetracer" / "ct-test")
+    # `$CODETRACER_HOME/state`, else `$XDG_STATE_HOME/codetracer`, else
+    # `~/.local/state/codetracer` (`ct_home.ctStateDir`).
+    getEnv("CODETRACER_TEST_RUN_STORE", ctStateDir() / "ct-test")
 
 proc defaultEnvironmentFingerprint*(workspaceRoot: string;
                                     provider: TestProviderInfo): string =

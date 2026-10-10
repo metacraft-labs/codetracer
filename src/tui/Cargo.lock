@@ -211,6 +211,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-home"
+version = "0.1.0"
+
+[[package]]
 name = "ct-lang"
 version = "0.1.0"
 dependencies = [
@@ -1097,6 +1101,7 @@ name = "tui"
 version = "0.1.0"
 dependencies = [
  "crossterm 0.27.0",
+ "ct-home",
  "ct-lang",
  "env_logger",
  "futures",

@@ -69,24 +69,10 @@ const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 /// every other case we return a path, and the caller is responsible for
 /// gating on `.exists()`.
 fn personal_origin_patterns_path() -> Option<std::path::PathBuf> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
-        && !xdg.is_empty()
-    {
-        return Some(
-            std::path::PathBuf::from(xdg)
-                .join("codetracer")
-                .join("origin-patterns.toml"),
-        );
-    }
-    if let Ok(home) = std::env::var("HOME")
-        && !home.is_empty()
-    {
-        return Some(
-            std::path::PathBuf::from(home)
-                .join(".config")
-                .join("codetracer")
-                .join("origin-patterns.toml"),
-        );
+    // `$CODETRACER_HOME/config`, else `$XDG_CONFIG_HOME/codetracer`, else
+    // `$HOME/.config/codetracer` (`ct_home::config_dir`).
+    if let Some(dir) = ct_home::config_dir() {
+        return Some(dir.join("origin-patterns.toml"));
     }
     None
 }
@@ -6061,7 +6047,7 @@ impl Handler {
         }
         let catalog_path = match explicit_catalog_path {
             Some(p) => p.to_path_buf(),
-            None => mapping_catalog::catalog_path_from_env(),
+            None => crate::catalog_autoload::default_catalog_path(),
         };
         let workdir = self.reader.workdir().to_path_buf();
         let entries: Vec<String> = self.reader.path_entries_iter().map(|(p, _id)| p.to_string()).collect();

@@ -75,6 +75,16 @@ proc nodeMkdtemp(prefix: cstring): cstring
 proc nodeHomedir(): cstring {.importjs: "require('os').homedir()".}
 proc nodeEnv(name: cstring): cstring {.importjs: "process.env[#]".}
 
+proc electronUserConfigDir(): string =
+  ## `$CODETRACER_HOME/config`, else `~/.config/codetracer` —
+  ## `common/ct_home.ctConfigDir`'s rule, spelt with this module's own node
+  ## bindings because `ct_home` reads no environment in a renderer build.
+  let ctHome = nodeEnv(cstring"CODETRACER_HOME")
+  if not ctHome.isNil and ctHome.len > 0:
+    $ctHome / "config"
+  else:
+    $nodeHomedir() / ".config" / "codetracer"
+
 proc nodeExecFileSync(program: cstring; args: seq[cstring];
                       cwd: cstring; input: cstring): cstring
   {.importjs: "require('child_process').execFileSync(#, #, { cwd: (# || undefined), input: (# || undefined), encoding: 'utf8', windowsHide: true })".}
@@ -552,9 +562,9 @@ proc electronSettings(profile: PlatformProfile): SettingsFacade =
 
   proc scopeDir(scope: SettingsScope): string =
     case scope
-    of ssUser: $nodeHomedir() / ".config" / "codetracer"
+    of ssUser: electronUserConfigDir()
     of ssWorkspace: ".codetracer"
-    of ssSession: $nodeHomedir() / ".config" / "codetracer" / "session"
+    of ssSession: electronUserConfigDir() / "session"
 
   proc keyPath(scope: SettingsScope; key: string): string =
     var safe = ""

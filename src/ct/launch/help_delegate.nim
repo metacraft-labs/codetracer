@@ -50,6 +50,7 @@
 
 import
   std/[ os, osproc, streams, strutils, tables, algorithm ],
+  ../../common/ct_home,
   ../../common/paths,
   ../codetracerconf,
   ../ui_selection,
@@ -456,10 +457,11 @@ proc collectComponentLevels(): seq[ComponentLevel] =
   if rootOverride.len > 0:
     result.add ComponentLevel(path: rootOverride, label: "user")
   else:
-    let home = getEnv("HOME", "")
-    if home.len > 0:
+    # `$CODETRACER_HOME/launcher`, else `$HOME/.codetracer` (ct_home).
+    let userRoot = ctLauncherUserRootDefault()
+    if userRoot.len > 0:
       result.add ComponentLevel(
-        path: home / ".codetracer" / "components" / "v1",
+        path: userRoot / "components" / "v1",
         label: "user")
   let extraPaths = getEnv(componentsPathEnvVar, "")
   if extraPaths.len > 0:
@@ -561,9 +563,10 @@ proc registryRoot*(): string =
   let override = getEnv(registryEnvVar, "")
   if override.len > 0:
     return override
-  let home = getEnv("HOME", "")
-  if home.len == 0: return ""
-  home / ".codetracer" / "registry" / "v1"
+  # `$CODETRACER_HOME/launcher`, else `$HOME/.codetracer` (ct_home).
+  let userRoot = ctLauncherUserRootDefault()
+  if userRoot.len == 0: return ""
+  userRoot / "registry" / "v1"
 
 proc readRegistry*(path = ""): seq[RegistryEntry] =
   ## Parse the registry file. The grammar is the one emitted by the

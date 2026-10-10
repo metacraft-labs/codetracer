@@ -142,11 +142,15 @@ impl DaemonConfig {
 // Config file parsing helpers
 // ---------------------------------------------------------------------------
 
-/// Returns `~/.codetracer/daemon.conf` if `$HOME` is set.
+/// `$CODETRACER_HOME/config/daemon.conf`, else `~/.codetracer/daemon.conf` if
+/// `$HOME` is set (`ct_home::area_or`).
 fn default_config_path() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(|home| PathBuf::from(home).join(".codetracer").join("daemon.conf"))
+    ct_home::area_or(ct_home::Area::Config, || {
+        std::env::var("HOME")
+            .ok()
+            .map(|home| PathBuf::from(home).join(".codetracer"))
+    })
+    .map(|dir| dir.join("daemon.conf"))
 }
 
 /// Parses a simple `KEY = VALUE` config file.

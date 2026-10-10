@@ -32,13 +32,13 @@ impl Paths {
 
 impl Default for Paths {
     fn default() -> Self {
+        // `CODETRACER_TMP_PATH` (what the Electron main process passes), else
+        // `$CODETRACER_HOME/tmp`, else the historical per-OS location
+        // (`ct_home::tmp_dir`).
         let tmpdir: PathBuf = if let Ok(path) = env::var("CODETRACER_TMP_PATH") {
             PathBuf::from(path)
-        } else if cfg!(target_os = "macos") {
-            PathBuf::from(env::var("HOME").unwrap_or("/".to_string()))
-                .join("Library/Caches/com.codetracer.CodeTracer/")
         } else {
-            env::temp_dir().join("codetracer/")
+            ct_home::tmp_dir()
         };
         Self {
             tmp_path: PathBuf::from(&tmpdir),

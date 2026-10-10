@@ -1,5 +1,7 @@
 import std / [os, options, strformat]
 import env
+import ct_home
+export ct_home
 
 when not defined(js):
   when defined(windows):
@@ -509,22 +511,13 @@ let cTraceObjectFilePath* = env.get(
   "CODETRACER_C_TRACE_OBJECT_FILE_PATH",
   codetracerPrefix / "lib" / "trace.o")
 
-when defined(ctmacos):
-  let codetracerTmpPath* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/"
-  let codetracerCache* = env.get("HOME") / "Library/Caches/com.codetracer.CodeTracer/cache"
-else:
-  let tmpFolder = env.get("TMPDIR",
-                            env.get("TEMPDIR",
-                                    env.get("TEMP",
-                                            env.get("TMP",
-                                                    "/tmp"
-                                            )
-                                    )
-                            )
-  )
-  let
-    codetracerCache* = tmpFolder / "codetracer/cache"
-    codetracerTmpPath* = tmpFolder / "codetracer"
+# Per-run scratch and its cache: `$CODETRACER_HOME/tmp` and
+# `$CODETRACER_HOME/cache` when that is set, else the historical
+# `%TEMP%\codetracer` / `$TMPDIR/codetracer` (macOS: `~/Library/Caches/...`).
+# The rule lives in `ct_home`, the one resolver for per-user locations.
+let
+  codetracerCache* = ctTmpCacheDir()
+  codetracerTmpPath* = ctTmpDir()
 
 let
   localShellPreloadInstallPath* = codetracerTmpPath / fmt"shell_preload_{username}.so"
@@ -589,7 +582,10 @@ when not defined(ctRenderer):
     # TODO implement `/`
     let home* = $(cast[cstring](nodeOs.homedir()) & cstring"/")
 
-  let codetracerTraceDir* = home / ".local" / "share" / "codetracer"
+  # The trace index's directory: `$CODETRACER_HOME/data`, else
+  # `~/.local/share/codetracer` (which, unlike the recordings folder, has
+  # never honoured `XDG_DATA_HOME`). See `ct_home.ctDataDirIgnoringXdg`.
+  let codetracerTraceDir* = ctDataDirIgnoringXdg()
 
   proc recordingFolder*(baseDir: string, recordingId: string): string =
     ## Resolve the on-disk recording folder for ``recordingId`` under

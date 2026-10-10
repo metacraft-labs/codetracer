@@ -11,6 +11,7 @@
 ## - Base remote URL override
 
 import std/[os, strutils, uri]
+import ../../common/ct_home
 
 const
   BearerTokenKey* = "CodeTracer-Remote-BearerToken"
@@ -41,6 +42,10 @@ proc defaultConfigDir(): string =
   let envDir = getEnv("CODETRACER_REMOTE_CONFIG_DIR", "")
   if envDir.len > 0:
     return envDir
+  # `$CODETRACER_HOME/config` relocates it with every other per-user location.
+  let ctHomeConfig = ctHomeArea(chaConfig)
+  if ctHomeConfig.len > 0:
+    return ctHomeConfig
   when defined(windows):
     result = getEnv("APPDATA", getHomeDir() / "AppData" / "Roaming") / "codetracer"
   else:

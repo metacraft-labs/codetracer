@@ -76,6 +76,7 @@
 ## And the read is total: it reports unusable lines rather than raising.
 
 import std/[os, strutils]
+import ../../common/ct_home
 
 when defined(posix):
   import std/posix
@@ -113,11 +114,13 @@ proc launcherUserRoot*(): string =
   ## answer is the one a caller must handle: `envOrHome` returns false when
   ## `HOME` is unset and the launcher then refuses the command, so a store
   ## with nowhere to live says so rather than inventing a path.
+  ##
+  ## Between the two sits `$CODETRACER_HOME/launcher`, the root every
+  ## per-user location moves under when `CODETRACER_HOME` is set
+  ## (`ct_home.ctLauncherUserRootDefault`).
   let override = getEnv(userRootEnvVar, "")
   if override.len > 0: return override.strip(leading = false, chars = {'/'})
-  let home = getEnv("HOME", "")
-  if home.len == 0: return ""
-  home.strip(leading = false, chars = {'/'}) / ".codetracer"
+  ctLauncherUserRootDefault()
 
 proc grantLedgerPath*(root = ""): string =
   ## The ledger's absolute path, or "" when there is no user root.
