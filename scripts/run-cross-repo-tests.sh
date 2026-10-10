@@ -50,6 +50,14 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# A scratch CODETRACER_HOME for every cargo test below and every replay worker
+# it spawns (libs/ct-home): the trace index, recordings, licensing counter and
+# tmp/socket dir stay out of the runner's and a developer's profile.
+# shellcheck source=ci/lib/codetracer-home.sh
+# shellcheck disable=SC1091 # resolved at runtime from $REPO_ROOT
+source "$REPO_ROOT/ci/lib/codetracer-home.sh"
+ct_export_scratch_codetracer_home cross-repo
 LOG_DIR="$REPO_ROOT/target/cross-test-logs"
 CLONE_DIR="$REPO_ROOT/target/rr-backend-clone"
 

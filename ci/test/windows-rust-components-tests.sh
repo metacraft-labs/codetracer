@@ -18,6 +18,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
 export CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false
+# A scratch CODETRACER_HOME for the tests and every binary they spawn
+# (libs/ct-home): nothing lands in the runner's or a developer's profile.
+# shellcheck source=ci/lib/codetracer-home.sh
+source "$REPO_ROOT/ci/lib/codetracer-home.sh"
+ct_export_scratch_codetracer_home windows-rust-components
 if [ -z "${CT_NATIVE_REPLAY_PATH:-}" ]; then
 	replay="$WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay.exe"
 	if [ -f "$replay" ]; then

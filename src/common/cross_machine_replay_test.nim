@@ -56,6 +56,7 @@
 ##       src/common/cross_machine_replay_test.nim
 
 import std/[os, osproc, streams, strtabs, strutils, unittest, tempfiles]
+import ct_home
 
 # ---------------------------------------------------------------------------
 # Helper subprocess builder
@@ -103,27 +104,26 @@ proc readToEof(s: Stream): string =
 
 proc runScenario(bin: string, scenarioArgs: openArray[string]; homeDir: string):
     tuple[ok: bool, stdoutStr: string, stderrStr: string] =
-  ## Run the helper at ``bin`` with the env scrubbed to ``homeDir`` so
+  ## Run the helper at ``bin`` with ``CODETRACER_HOME = homeDir`` so
   ## ``paths.app`` / ``codetracerTraceDir`` resolve under that tmpdir
-  ## and not the developer's real ``$HOME``.  Splice
+  ## and not the developer's real profile.  Splice
   ## ``CT_LD_LIBRARY_PATH`` onto ``LD_LIBRARY_PATH`` so SQLite can be
   ## dlopen-ed inside the Nix dev-shell — same recipe as the sibling
   ## ``trace_index_test.nim`` orchestrator.
-  # Case-INsensitive on Windows, where `UserProfile` and `USERPROFILE` are
-  # one variable: an override must replace the inherited entry.
+  # Case-INsensitive on Windows, where the OS treats `Codetracer_Home` and
+  # `CODETRACER_HOME` as one variable: an override must replace the inherited
+  # entry, not add a second one beside it.
   var env = newStringTable(
     when defined(windows): modeCaseInsensitive else: modeCaseSensitive)
   for k, v in envPairs():
     env[k] = v
-  env["XDG_DATA_HOME"] = homeDir
-  env["TMPDIR"] = homeDir
-  env["HOME"] = homeDir
-  # WINDOWS: Nim's `getHomeDir` -- and so `paths.codetracerTraceDir` and the
-  # trace index -- reads `USERPROFILE`, not `HOME`; without these the helper
-  # wrote into the developer's REAL profile (LRS-6's review, 2026-09-24).
-  env["USERPROFILE"] = homeDir
-  env["LOCALAPPDATA"] = homeDir / "AppData" / "Local"
-  env["APPDATA"] = homeDir / "AppData" / "Roaming"
+  # EVERY per-user location the helper resolves -- the trace index, the
+  # recordings folder, `codetracerTmpPath` -- derives from `CODETRACER_HOME`
+  # (`common/ct_home`), on every OS. It replaces the OS-specific set this used
+  # to override (`HOME`, `XDG_DATA_HOME`, `TMPDIR`, and on Windows
+  # `USERPROFILE`/`LOCALAPPDATA`/`APPDATA`, whose omission wrote a developer's
+  # real trace index on 2026-09-23). Pinned by `ct_home_isolation_test`.
+  env["CODETRACER_HOME"] = homeDir
   let ctLd = getEnv("CT_LD_LIBRARY_PATH")
   if ctLd.len > 0:
     let existing = getEnv("LD_LIBRARY_PATH")
@@ -184,12 +184,10 @@ proc untarInto(archive, destParent: string) =
     raise newException(IOError, "tar -x failed extracting " & archive)
 
 proc codetracerTraceDirIn(home: string): string =
-  ## Mirror ``paths.codetracerTraceDir``'s derivation
-  ## (``$HOME/.local/share/codetracer``) from the test process so the
-  ## orchestrator can reach into the helper's working filesystem.  We
-  ## use ``$HOME`` rather than ``$XDG_DATA_HOME`` because ``paths.nim``
-  ## itself does (the helper env-points both to the same tmpdir).
-  home / ".local" / "share" / "codetracer"
+  ## ``paths.codetracerTraceDir`` as the helper resolves it when
+  ## ``runScenario`` gives it ``CODETRACER_HOME = home``:
+  ## ``$CODETRACER_HOME/data`` (``common/ct_home``).
+  home / $chaData
 
 # ---------------------------------------------------------------------------
 # Tests

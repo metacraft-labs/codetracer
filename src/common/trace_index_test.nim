@@ -94,24 +94,20 @@ proc runScenario(bin, scenario, homeDir: string):
   ## ``LD_LIBRARY_PATH``.  We splice the codetracer-specific path onto
   ## the dynamic-loader path so the dlopen in ``db_sqlite`` finds the
   ## shared object regardless of how the test was launched.
-  # Case-INsensitive on Windows, where the OS treats `UserProfile` and
-  # `USERPROFILE` as one variable: overriding it must replace the inherited
+  # Case-INsensitive on Windows, where the OS treats `Codetracer_Home` and
+  # `CODETRACER_HOME` as one variable: an override must replace the inherited
   # entry, not add a second one beside it.
   var env = newStringTable(
     when defined(windows): modeCaseInsensitive else: modeCaseSensitive)
   for k, v in envPairs():
     env[k] = v
-  env["XDG_DATA_HOME"] = homeDir
-  env["TMPDIR"] = homeDir
-  env["HOME"] = homeDir
-  # WINDOWS: Nim's `getHomeDir` -- which `paths.codetracerTraceDir`, and so
-  # the trace index, is derived from -- reads `USERPROFILE`, not `HOME`.
-  # Without these three every scenario wrote into the developer's REAL
-  # `%USERPROFILE%/.local/share/codetracer/trace_index.db` (LRS-6's review,
-  # 2026-09-24).  Pinned by the "resolves inside its scratch profile" case.
-  env["USERPROFILE"] = homeDir
-  env["LOCALAPPDATA"] = homeDir / "AppData" / "Local"
-  env["APPDATA"] = homeDir / "AppData" / "Roaming"
+  # EVERY per-user location the helper resolves -- the trace index, the
+  # recordings folder, `codetracerTmpPath` -- derives from `CODETRACER_HOME`
+  # (`common/ct_home`), on every OS. It replaces the OS-specific set this used
+  # to override (`HOME`, `XDG_DATA_HOME`, `TMPDIR`, and on Windows
+  # `USERPROFILE`/`LOCALAPPDATA`/`APPDATA`, whose omission wrote a developer's
+  # real trace index on 2026-09-23). Pinned by `ct_home_isolation_test`.
+  env["CODETRACER_HOME"] = homeDir
   let ctLd = getEnv("CT_LD_LIBRARY_PATH")
   if ctLd.len > 0:
     let existing = getEnv("LD_LIBRARY_PATH")
@@ -153,7 +149,10 @@ suite "M-REC-2 — trace_index schema and UUIDv7 newID":
     ## writes a trace index; if the child resolves it anywhere but the
     ## scratch directory `runScenario` gave it, the suite is writing into
     ## the developer's own profile.  That happened on Windows, where the
-    ## env set `HOME` and Nim's `getHomeDir` reads `USERPROFILE`.
+    ## env set `HOME` and Nim's `getHomeDir` reads `USERPROFILE`; the child
+    ## is now isolated by `CODETRACER_HOME` alone.  The source sweep that
+    ## used to sit beside this case is `ct_home_isolation_test`, widened to
+    ## every suite and every harness.
     if helperBin.len == 0:
       check false
     else:
@@ -175,47 +174,10 @@ suite "M-REC-2 — trace_index schema and UUIDv7 newID":
           resolved.normalizedPath.startsWith(home.normalizedPath)
       if not inside:
         checkpoint("the helper would write its trace index to " & resolved &
-          ", OUTSIDE its scratch profile " & home & ".  runScenario is " &
-          "missing the variable this OS derives the home directory from.")
+          ", OUTSIDE its scratch CODETRACER_HOME " & home & ".  Either " &
+          "runScenario stopped setting CODETRACER_HOME, or a resolver in " &
+          "common/ct_home stopped honouring it.")
       check inside
-
-  test "every suite that redirects a child's HOME redirects USERPROFILE too":
-    ## The same defect had four copies: this suite,
-    ## `trace_index_migration_test`, `cross_machine_replay_test` and
-    ## `recording_folder_layout_test` each spawned a helper with `HOME` /
-    ## `XDG_DATA_HOME` redirected and `USERPROFILE` inherited, so on Windows
-    ## each helper wrote the developer's real trace index.  The case above
-    ## proves THIS suite's child lands in its scratch dir; this one catches
-    ## the next suite written from the same template, on any OS, before
-    ## anyone runs it on Windows.  It is a source check, so it complements
-    ## the behavioural case rather than replacing it.
-    const homeOverride = "env[\"HOME\"] ="
-    const profileOverride = "env[\"USERPROFILE\"] ="
-    let srcRoot = currentSourcePath.parentDir.parentDir
-    var redirecting = 0
-    for path in walkDirRec(srcRoot):
-      if not path.endsWith("_test.nim"):
-        continue
-      # Sources only: a build tree (`src/build-debug`, …), a nimcache or
-      # `node_modules` can hold copies that are not this repository's suites.
-      var generated = false
-      for part in path.relativePath(srcRoot).split({'/', '\\'}):
-        if part.startsWith("build") or part == "node_modules" or
-            "nimcache" in part:
-          generated = true
-      if generated:
-        continue
-      let text = readFile(path)
-      if homeOverride in text:
-        inc redirecting
-        if profileOverride notin text:
-          checkpoint(path & " sets `" & homeOverride & " …` for a child " &
-            "process but never `" & profileOverride & " …`.  On Windows " &
-            "the child's getHomeDir() is then the developer's real " &
-            "profile, and whatever it writes lands there.")
-        check profileOverride in text
-    # Anti-vacuity: the four known suites were found.
-    check redirecting >= 4
 
   test "fresh DB has the new schema (recordings + indexes + helper tables)":
     if helperBin.len == 0:

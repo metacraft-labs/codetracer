@@ -16,7 +16,8 @@
  *      tab's × does — and the desktop's write-through persists it.
  *   2. RESTART — the saved file is left as the first run left it
  *      (`preserveUserLayout`): the arrangement comes back without VCS.
- *      Native layout files planted under `$XDG_STATE_HOME/codetracer/` are the
+ *      Native layout files planted in the native products' state root
+ *      (`$CODETRACER_HOME/state` under the fixtures; `lib/ct-home.ts`) are the
  *      terminal's and the GPUI window's; View > Reset Layout is invoked, the
  *      same window shows the shared default (VCS back, the editor
  *      re-created), the desktop's
@@ -33,8 +34,8 @@
  */
 
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
+import { ctNativeStateDir, ctUserConfigDir } from "../../lib/ct-home";
 
 import { expect, test } from "../../lib/fixtures";
 
@@ -89,14 +90,13 @@ function prefix(): string {
 }
 
 function userLayoutPath(): string {
-  const configHome = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
-  return path.join(configHome, "codetracer", "default_layout.json");
+  return path.join(ctUserConfigDir(), "default_layout.json");
 }
 
 // The native products' state root for this run — the terminal's and the GPUI
 // window's own files live here, never under the desktop's config directory.
-const nativeState = fs.mkdtempSync(path.join(os.tmpdir(), "plat45-native-state-"));
-process.env.XDG_STATE_HOME = nativeState;
+// Resolved lazily: the fixtures assign `CODETRACER_HOME` at import time, and
+// the native products' root lives under it (`lib/ct-home.ts`).
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function stackContents(page: any): Promise<number[][]> {
@@ -249,7 +249,7 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
     test("the restart restores it; Reset Layout returns the shared default and deletes only the desktop's files", async ({ ctPage }) => {
       prefix();
       // The terminal's and the GPUI window's own files, planted.
-      const nativeDir = path.join(nativeState, "codetracer");
+      const nativeDir = ctNativeStateDir();
       fs.mkdirSync(nativeDir, { recursive: true });
       const tuiFile = path.join(nativeDir, "tui-layout.json");
       const gpuiFile = path.join(nativeDir, "gpui-layout.json");

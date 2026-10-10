@@ -19,6 +19,7 @@ import recording_id
 import types
 import lang
 import trace_index
+import ct_home_test_guard
 
 proc fail(msg: string) =
   echo "FAIL: ", msg
@@ -214,6 +215,11 @@ proc scenarioReplayByRecordingId() =
 when isMainModule:
   if paramCount() < 1:
     fail("usage: recording_folder_layout_test_helper <scenario>")
+  # Fail closed BEFORE any scenario writes (src/common/ct_home_test_guard).
+  requireIsolatedCodetracerHome([
+    ("the trace index", DB_PATHS[0]),
+    ("the recordings folder", app),
+    ("the tmp dir", codetracerTmpPath)])
   case paramStr(1)
   of "recording-folder-helper": scenarioRecordingFolderHelper()
   of "simulated-recording": scenarioSimulatedRecording()

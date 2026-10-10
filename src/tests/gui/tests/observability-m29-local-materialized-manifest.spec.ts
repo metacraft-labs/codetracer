@@ -624,6 +624,9 @@ base.describe("Observability M29 local materialized manifest browser acceptance"
             cwd: codetracerInstallDir,
             env: makeCleanEnv({
               XDG_CONFIG_HOME: path.join(rootDir, "xdg-config"),
+              // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+              // and the fixtures export a shared one; this child gets its own.
+              CODETRACER_HOME: path.join(rootDir, "ct-home"),
             }),
             stdio: ["ignore", "pipe", "pipe"],
             windowsHide: true,

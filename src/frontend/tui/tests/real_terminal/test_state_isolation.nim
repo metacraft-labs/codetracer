@@ -43,7 +43,7 @@ import ../../../test_support/state_isolation
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 9
+const ExpectedAssertions = 10
 
 const
   TuiDocument = "tui-layout.json"
@@ -87,6 +87,11 @@ suite "Tests never touch the user's per-user state":
                layoutDir & " user state home=" & home)
     ck stateHome.len > 0 and not stateHome.underDir(home)
     ck layoutDir.len > 0 and not layoutDir.underDir(home)
+    # And `CODETRACER_HOME`, which relocates EVERY per-user location (trace
+    # index, recordings, config, caches; common/ct_home), is a scratch one.
+    let ctHome = getEnv("CODETRACER_HOME")
+    checkpoint("CODETRACER_HOME=" & ctHome)
+    ck codetracerHomeIsTestScratch(ctHome)
 
   test "the shipped binary, spawned with the inherited environment, writes only the private directory":
     ck fileExists(tuiBinary())

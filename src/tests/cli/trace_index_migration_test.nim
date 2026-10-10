@@ -396,25 +396,20 @@ proc readToEof(s: Stream): string =
     copyMem(addr result[start], addr buffer[0], n)
 
 proc runHelperIn(scenario, home: string): tuple[ok: bool, outp, errp: string] =
-  # Case-INsensitive on Windows, where the OS treats `UserProfile` and
-  # `USERPROFILE` as one variable: overriding it must replace the inherited
+  # Case-INsensitive on Windows, where the OS treats `Codetracer_Home` and
+  # `CODETRACER_HOME` as one variable: an override must replace the inherited
   # entry, not add a second one beside it.
   var env = newStringTable(
     when defined(windows): modeCaseInsensitive else: modeCaseSensitive)
   for k, v in envPairs():
     env[k] = v
-  env["HOME"] = home
-  env["XDG_DATA_HOME"] = home
-  env["TMPDIR"] = home
-  # WINDOWS: Nim's `getHomeDir` -- which `paths.codetracerTraceDir`, and so
-  # the trace index, is derived from -- reads `USERPROFILE`, not `HOME`.
-  # Without these three every e2e case wrote into the developer's REAL
-  # `%USERPROFILE%/.local/share/codetracer/trace_index.db` and migrated it
-  # (LRS-6, 2026-09-23; fixed by its review).  Pinned by the "resolves inside
-  # its scratch profile" case below.
-  env["USERPROFILE"] = home
-  env["LOCALAPPDATA"] = home / "AppData" / "Local"
-  env["APPDATA"] = home / "AppData" / "Roaming"
+  # EVERY per-user location the helper resolves -- the trace index, the
+  # recordings folder, `codetracerTmpPath` -- derives from `CODETRACER_HOME`
+  # (`common/ct_home`), on every OS. It replaces the OS-specific set this used
+  # to override (`HOME`, `XDG_DATA_HOME`, `TMPDIR`, and on Windows
+  # `USERPROFILE`/`LOCALAPPDATA`/`APPDATA`, whose omission wrote a developer's
+  # real trace index on 2026-09-23). Pinned by `ct_home_isolation_test`.
+  env["CODETRACER_HOME"] = home
   # The fault hook must not leak into a scenario that expects success.
   env.del(traceIndexMigrationFaultEnv)
   # In the Nix dev shell libsqlite3.so is on CT_LD_LIBRARY_PATH, not on the
@@ -1161,8 +1156,9 @@ suite "trace_index schema version 1 — lang ordinal to name":
     ## resolves the index anywhere but the scratch directory `runHelperIn`
     ## gave it is writing into the developer's own profile.  That happened on
     ## Windows, where the env set `HOME` and Nim's `getHomeDir` reads
-    ## `USERPROFILE`.  The child reports where it resolved; nothing here opens
-    ## or stats the real database.
+    ## `USERPROFILE`; the child is now isolated by `CODETRACER_HOME` alone.
+    ## The child reports where it resolved; nothing here opens or stats the
+    ## real database.
     require helperBin.len > 0
     let home = createTempDir("ct-trace-index-migration-profile-", "")
     defer: removeDir(home)
@@ -1182,8 +1178,9 @@ suite "trace_index schema version 1 — lang ordinal to name":
         resolved.normalizedPath.startsWith(home.normalizedPath)
     if not inside:
       checkpoint("the helper would write its trace index to " & resolved &
-        ", OUTSIDE its scratch profile " & home & ".  runHelperIn is " &
-        "missing the variable this OS derives the home directory from.")
+        ", OUTSIDE its scratch CODETRACER_HOME " & home & ".  Either " &
+        "runHelperIn stopped setting CODETRACER_HOME, or a resolver in " &
+        "common/ct_home stopped honouring it.")
     check inside
 
   test "e2e: recordTrace writes a language NAME and find reads it back":

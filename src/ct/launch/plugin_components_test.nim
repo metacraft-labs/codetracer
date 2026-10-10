@@ -668,6 +668,12 @@ suite "PLAT-10: the grant ledger on disk":
     delEnv(userRootEnvVar)
     let savedHome = getEnv("HOME", "")
     delEnv("HOME")
+    # `CODETRACER_HOME` (set for every test program by the isolation module)
+    # would otherwise supply `$CODETRACER_HOME/launcher` as the root.
+    let savedCtHome = getEnv("CODETRACER_HOME", "")
+    delEnv("CODETRACER_HOME")
+    defer:
+      if savedCtHome.len > 0: putEnv("CODETRACER_HOME", savedCtHome)
     ckEq launcherUserRoot(), ""
     ckEq grantLedgerPath(), ""
     let parse = loadGrantLedger()

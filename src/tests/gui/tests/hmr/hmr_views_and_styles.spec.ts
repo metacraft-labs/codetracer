@@ -369,6 +369,11 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       env2.XDG_CONFIG_HOME = join(fakeHome2, ".config");
       env2.XDG_DATA_HOME = join(fakeHome2, ".local", "share");
       env2.XDG_CACHE_HOME = join(fakeHome2, ".cache");
+      // `CODETRACER_HOME` outranks all of the above: Electron's userData (and
+      // so the SingletonLock) is `$CODETRACER_HOME/state/electron`, and the
+      // fixtures export ONE per worker, which the first instance already
+      // holds. The second instance needs its own (src/common/ct_home.nim).
+      env2.CODETRACER_HOME = join(fakeHome2, "ct-home");
       app2 = await _electron.launch({
         executablePath: CT_BIN,
         cwd: REPO_ROOT,

@@ -69,6 +69,8 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
     (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
   env[StateDirEnvVar] = root
   env["XDG_STATE_HOME"] = root / "xdg"
+  # Every other per-user location of the spawned binary (common/ct_home).
+  env["CODETRACER_HOME"] = root / "ct-home"
   let ct = repo / "src/build-debug/bin/ct"
   if fileExists(ct):
     env["CT_BIN"] = ct

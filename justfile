@@ -837,7 +837,18 @@ test-rust:
     fi
     rm -f "$skip_report"
   }
-  trap report_skips EXIT
+  # Every test, and every replay-server / ct-native-replay / session-manager
+  # it spawns, resolves its trace index, recordings, config, caches and tmp
+  # dir under a scratch CODETRACER_HOME (libs/ct-home), never the
+  # developer's profile. Not a `.cargo/config.toml` [env]: that would move a
+  # developer's own `cargo run` too.
+  source ci/lib/codetracer-home.sh
+  ct_export_scratch_codetracer_home rust-tests
+  trap 'report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  # The resolver itself (both sides of the CODETRACER_HOME contract).
+  pushd libs/ct-home
+  cargo test
+  popd
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server
@@ -1621,6 +1632,12 @@ ls-trace-folder-for-id trace_id:
 test-frontend-js:
   #!/usr/bin/env bash
   set -e
+  # A scratch CODETRACER_HOME for every suite below and anything it spawns
+  # (src/common/ct_home.nim): no suite reads or writes the developer's config,
+  # trace index or recordings. The JS backend has no force-imported isolation
+  # module, so this recipe is where the variable comes from.
+  source ci/lib/codetracer-home.sh
+  ct_export_scratch_codetracer_home frontend-js
   frontend_lang_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-frontend-lang-test.XXXXXX.js")"
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
@@ -1634,7 +1651,7 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim

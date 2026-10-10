@@ -2881,6 +2881,9 @@ function startPlatformLaunchBridge(options: {
           env: {
             ...makeCleanEnv({
               XDG_CONFIG_HOME: path.join(options.runnerRoot, "xdg-config"),
+              // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+              // and the fixtures export a shared one; this child gets its own.
+              CODETRACER_HOME: path.join(options.runnerRoot, "ct-home"),
             }),
             ...replayEnv,
             CODETRACER_WORK_DIR: path.join(options.runnerRoot, "work"),
@@ -3035,6 +3038,12 @@ function startMaterializedPlatformLaunchBridge(options: {
                 options.runnerRoot,
                 `xdg-config-${linkReady.language}`,
               ),
+              // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+              // and the fixtures export a shared one; this child gets its own.
+              CODETRACER_HOME: path.join(
+                options.runnerRoot,
+                `ct-home-${linkReady.language}`,
+              ),
             }),
             ...replayEnv,
             CODETRACER_LOCAL_STORAGE_ROOT: "",
@@ -3172,6 +3181,9 @@ function startMixedPlatformLaunchBridge(options: {
           env: {
             ...makeCleanEnv({
               XDG_CONFIG_HOME: path.join(options.runnerRoot, `xdg-config${languageSuffix}`),
+              // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+              // and the fixtures export a shared one; this child gets its own.
+              CODETRACER_HOME: path.join(options.runnerRoot, `ct-home${languageSuffix}`),
             }),
             ...replayEnv,
             CODETRACER_LOCAL_STORAGE_ROOT: "",
@@ -3654,6 +3666,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           cwd: codetracerInstallDir,
           env: makeCleanEnv({
             XDG_CONFIG_HOME: path.join(os.tmpdir(), `ct-m34-xdg-${Date.now()}`),
+            // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+            // and the fixtures export a shared one; this child gets its own.
+            CODETRACER_HOME: path.join(os.tmpdir(), `ct-m34-ct-home-${Date.now()}`),
           }),
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
@@ -3906,6 +3921,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           env: {
             ...makeCleanEnv({
               XDG_CONFIG_HOME: path.join(runnerRoot, "xdg-config"),
+              // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+              // and the fixtures export a shared one; this child gets its own.
+              CODETRACER_HOME: path.join(runnerRoot, "ct-home"),
             }),
             ...replayEnv,
             CODETRACER_WORK_DIR: path.join(runnerRoot, "work"),
@@ -4105,6 +4123,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           env: {
             ...makeCleanEnv({
               XDG_CONFIG_HOME: path.join(runnerRoot, "xdg-config"),
+              // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+              // and the fixtures export a shared one; this child gets its own.
+              CODETRACER_HOME: path.join(runnerRoot, "ct-home"),
             }),
             ...replayEnv,
             CODETRACER_WORK_DIR: path.join(runnerRoot, "work"),

@@ -334,6 +334,10 @@ suite "PLAT-1: the artefacts this suite composes":
     emptyConfigHome = scratch / "xdg"
     createDir(emptyConfigHome)
     ck dirExists(emptyConfigHome)
+    # `CODETRACER_HOME` outranks `XDG_CONFIG_HOME` for `ct`'s config
+    # (common/ct_home). Every child inherits this EMPTY one, so the
+    # default-layer cases below see no `.config.yaml` from anywhere.
+    putEnv("CODETRACER_HOME", scratch / "ct-home")
 
   test "the real packaging producers lay down both component bundles":
     componentsRoot = scratch / "components"

@@ -135,3 +135,10 @@ block:
         i += 2
       else:
         i += 1
+
+# EVERY TEST PROGRAM GETS A PRIVATE `CODETRACER_HOME` — the suites here
+# included, never the shipped `ct-test` binary (excluded by name). It has to be
+# the LAST statement of the last config file Nim evaluates; see
+# `src/frontend/test_support/force_import_isolation.nims`.
+include "../frontend/test_support/force_import_isolation.nims"
+ctForceImportStateIsolation(currentSourcePath().parentDir.parentDir.parentDir)

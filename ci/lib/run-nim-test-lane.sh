@@ -135,8 +135,31 @@ lane_timeout="${CT_LANE_TIMEOUT:-1800}"
 _ct_lane_state=""
 if [ -z "${CODETRACER_TUI_LAYOUT_DIR:-}" ]; then
 	_ct_lane_state="$(mktemp -d "${TMPDIR:-/tmp}/ct-lane-state.XXXXXX")"
-	trap 'rm -rf "${_ct_lane_state}"' EXIT
 fi
+
+# EVERY FILE GETS ITS OWN `CODETRACER_HOME`.
+#
+# `CODETRACER_HOME` relocates every per-user location CodeTracer has — the
+# trace index, the recordings, config, state, caches and the tmp/socket dir —
+# in every resolver (Nim `src/common/ct_home.nim`, Rust `libs/ct-home`), on
+# every OS, and children inherit it. Before it existed a suite had to redirect
+# HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG_* and TMPDIR and still missed
+# one: on 2026-09-23 the trace_index suites wrote a developer's real
+# `trace_index.db` on Windows. One directory per file, for the same reason as
+# the layout directory above. A caller's scratch `CODETRACER_HOME` (a harness
+# that inspects it afterwards) is kept as the root the per-file directories
+# are made under; otherwise the root is a fresh temporary directory. Every
+# test program also isolates itself (`state_isolation.nim`); this is the
+# lane's belt to that brace. `src/common/ct_home_isolation_test.nim` fails if
+# this block goes away.
+_ct_lane_home_owned=""
+if [ -n "${CODETRACER_HOME:-}" ]; then
+	_ct_lane_home="${CODETRACER_HOME}"
+else
+	_ct_lane_home="$(mktemp -d "${TMPDIR:-/tmp}/ct-lane-home.XXXXXX")"
+	_ct_lane_home_owned="${_ct_lane_home}"
+fi
+trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"} ${_ct_lane_home_owned:+"${_ct_lane_home_owned}"}' EXIT
 
 # THE GUARD: the user's own state directory is READ before the lane and after
 # it — every file's path and checksum, never written — and the lane FAILS if
@@ -150,13 +173,32 @@ fi
 # Someone else changing CodeTracer state on this machine while a lane runs
 # (using CodeTracer, or clearing stale state by hand) trips it as well; the
 # message names that possibility, and the fix is to rerun on a quiet host.
+#
+# The same guard covers the user's CONFIG directory and their trace index and
+# recordings (`~/.local/share/codetracer`), which `CODETRACER_HOME` now keeps
+# every suite out of. Recordings are compared by NAME only — one can be
+# gigabytes, and a new or vanished recording is the damage that matters; the
+# trace index itself is compared by checksum.
 _ct_user_state="${HOME:-/nonexistent}/.local/state/codetracer"
+_ct_user_config="${HOME:-/nonexistent}/.config/codetracer"
+_ct_user_data="${HOME:-/nonexistent}/.local/share/codetracer"
 _ct_user_state_snapshot() {
 	# One line per file: `<cksum> <size> <path>`, sorted by path. `cksum`
 	# rather than a GNU-only tool: this runner also runs on macOS.
-	if [ -d "${_ct_user_state}" ]; then
-		find "${_ct_user_state}" -type f -print0 2>/dev/null | sort -z |
-			xargs -0 -r cksum 2>/dev/null
+	local _dir
+	for _dir in "${_ct_user_state}" "${_ct_user_config}"; do
+		if [ -d "${_dir}" ]; then
+			find "${_dir}" -type f -print0 2>/dev/null | sort -z |
+				xargs -0 -r cksum 2>/dev/null
+		fi
+	done
+	if [ -d "${_ct_user_data}" ]; then
+		find "${_ct_user_data}" -maxdepth 1 -type f -name 'trace_index.db*' \
+			-print0 2>/dev/null | sort -z | xargs -0 -r cksum 2>/dev/null
+		# `- - <path>`: the same three columns, so the removal check below can
+		# read the path from field 3.
+		find "${_ct_user_data}" -mindepth 1 -maxdepth 1 ! -name 'trace_index.db*' \
+			-print 2>/dev/null | sort | sed 's/^/- - /'
 	fi
 }
 _ct_user_state_before="$(_ct_user_state_snapshot)"
@@ -236,6 +278,8 @@ while read -r f; do
 	files=$((files + 1))
 	name="$(basename "${f}" .nim)"
 	cache="${cache_root}/${lane}-${name}"
+	mkdir -p "${_ct_lane_home}/${name}"
+	export CODETRACER_HOME="${_ct_lane_home}/${name}"
 	if [ -n "${_ct_lane_state}" ]; then
 		mkdir -p "${_ct_lane_state}/${name}"
 		export CODETRACER_TUI_LAYOUT_DIR="${_ct_lane_state}/${name}"
@@ -639,8 +683,8 @@ if [ "${_ct_user_state_after}" != "${_ct_user_state_before}" ]; then
 		<(printf '%s\n' "${_ct_user_state_after}" | awk 'NF {print $3}' | sort) |
 		sed '/^$/d')"
 	if [ -n "${_ct_removed}" ]; then
-		echo "ERROR: lane '${lane}': these files LEFT the user's own state" \
-			"directory ${_ct_user_state} during the run — a test (or a binary" \
+		echo "ERROR: lane '${lane}': these files LEFT the user's own CodeTracer" \
+			"state (${_ct_user_state}, ${_ct_user_config}, ${_ct_user_data}) during the run — a test (or a binary" \
 			"it spawned) deleted real per-user state. (If CodeTracer state was" \
 			"cleared on this machine during the run, that is the other possible" \
 			"cause.)" >&2
@@ -650,8 +694,8 @@ if [ "${_ct_user_state_after}" != "${_ct_user_state_before}" ]; then
 		printf '%s\n' "${_ct_removed}" | sed 's/^/    /' >&2
 	fi
 	if [ -n "${_ct_written}" ]; then
-		echo "ERROR: lane '${lane}' WROTE the user's own state directory" \
-			"${_ct_user_state} — a test (or a binary it spawned) created or" \
+		echo "ERROR: lane '${lane}' WROTE the user's own CodeTracer state" \
+			"(${_ct_user_state}, ${_ct_user_config}, ${_ct_user_data}) — a test (or a binary it spawned) created or" \
 			"rewrote real per-user state. (If CodeTracer was used on this" \
 			"machine during the run, that is the other possible cause.)" >&2
 		printf '    %s\n' "${_ct_written}" >&2

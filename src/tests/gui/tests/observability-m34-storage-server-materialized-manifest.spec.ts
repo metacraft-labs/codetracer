@@ -586,6 +586,12 @@ async function runHostForFixture(
             os.tmpdir(),
             `ct-m34-materialized-xdg-${fixture.language}-${Date.now()}`,
           ),
+          // CODETRACER_HOME outranks XDG_CONFIG_HOME (src/common/ct_home.nim)
+          // and the fixtures export a shared one; this child gets its own.
+          CODETRACER_HOME: path.join(
+            os.tmpdir(),
+            `ct-m34-materialized-ct-home-${fixture.language}-${Date.now()}`,
+          ),
         }),
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,

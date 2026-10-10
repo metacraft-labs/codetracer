@@ -31,6 +31,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { ctUserConfigDir } from "../../lib/ct-home";
 
 import { expect } from "@playwright/test";
 import { test } from "../../lib/fixtures";
@@ -282,8 +283,8 @@ test.describe("PLAT-51: a saved desktop layout that held the Timeline", () => {
   // Timeline's removal (git history): a Timeline tab between Event Log and
   // Terminal Output. It must open without it, and without an empty tab.
   const saved = path.join(repoRoot, "src", "tests", "visual", "plat51-layout-with-timeline.json");
-  const dir = path.join(process.env.XDG_CONFIG_HOME ?? "", "codetracer");
-  if (process.env.XDG_CONFIG_HOME && fs.existsSync(saved)) {
+  const dir = ctUserConfigDir();
+  if (process.env.CODETRACER_HOME && fs.existsSync(saved)) {
     fs.mkdirSync(dir, { recursive: true });
     fs.copyFileSync(saved, path.join(dir, "default_layout.json"));
   }
