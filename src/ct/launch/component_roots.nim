@@ -72,8 +72,12 @@ proc collectComponentLevels*(): seq[ComponentLevel] =
   if rootOverride.len > 0:
     result.add ComponentLevel(path: rootOverride, label: "user")
   else:
-    # `$CODETRACER_HOME/launcher`, else `$HOME/.codetracer` (ct_home).
-    let userRoot = ctLauncherUserRootDefault()
+    # `$CODETRACER_HOME/launcher`, else `$HOME/.codetracer` exactly as this
+    # site always spelt it (unlike `ctLauncherUserRootDefault`, it never
+    # stripped a trailing `/`, so `HOME=/` still means `/.codetracer`).
+    let home = getEnv("HOME", "")
+    let userRoot = ctHomeAreaOr(chaLauncher,
+      if home.len > 0: home / ".codetracer" else: "")
     if userRoot.len > 0:
       result.add ComponentLevel(
         path: userRoot / "components" / "v1",
