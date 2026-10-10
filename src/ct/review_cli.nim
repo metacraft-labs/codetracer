@@ -619,7 +619,7 @@ func materializedCollectorArgs*(plan: ReviewPlan): seq[string] =
 
 when not defined(js):
   import std/[os, osproc]
-  import ../common/paths
+  import ../common/[paths, ct_state_dir]
   import review_session
 
   const
@@ -793,6 +793,14 @@ when not defined(js):
       plan.recordingsDir, surveyRecordings(plan.recordingsDir))
     if not canCollect(route):
       stderr.writeLine(route.message)
+      return 1
+    # The default output, `.ct/review`, is inside the workspace: make `.ct/`
+    # git-ignored BEFORE the collector writes there, or the dataset shows up
+    # as untracked and flips every later test certificate's `untracked`
+    # (see `common/ct_state_dir.nim`).
+    let guardError = guardCtStateWrite(plan.outputDir)
+    if guardError.len > 0:
+      stderr.writeLine("error: " & guardError)
       return 1
     if route.collector == rcvMaterialized:
       return runMaterializedReviewCollect(plan)

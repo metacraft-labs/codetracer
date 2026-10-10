@@ -100,8 +100,11 @@ const
   TreeB = "git-tree-sha1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     ## Content ids: what a record binds to and what W is compared with.
   Platform = "linux/amd64"
-  CtDir = ".ct/certificates"
   ReproDir = ".repro/workspace/certificates"
+  UserRoot = "/home/u/.local/state/test-certificates"
+    ## The local certificate store's user root. Since CTC-3e (2026-10-10) a
+    ## `ct test` record lives there, under its own content's directory, and
+    ## is found by looking W up; `.ct/certificates` is read by nothing.
   UnknownFramework = "some-other-framework"
     ## Deliberately not a real framework identifier. Two frameworks MUST NOT
     ## claim the same identifier (Standard.md §4), and a name nothing in this
@@ -137,10 +140,15 @@ proc access(world: FakeWorld): CertificateStoreAccess =
   CertificateStoreAccess(
     listFiles: proc(dir: string): StoreListing {.closure.} =
       var names: seq[string] = @[]
+      var exists = false
       for path in world.files.keys:
         if dirOf(path) == dir:
           names.add nameOf(path)
-      if names.len == 0:
+        if path.startsWith(dir & "/"):
+          # A directory exists when anything is below it, as on a real
+          # filesystem: the local store's root holds directories, not files.
+          exists = true
+      if not exists:
         return StoreListing(status: srAbsent)
       StoreListing(status: srOk, names: names)
     ,
@@ -155,7 +163,9 @@ proc access(world: FakeWorld): CertificateStoreAccess =
 
 proc facts(world: FakeWorld): CertificateIndicatorFacts =
   CertificateIndicatorFacts(
-    store: readCertificateStore(world.access, WorkspaceRoot),
+    store: readCertificateStore(world.access, WorkspaceRoot, LocalStoreQuery(
+      roots: CertificateStoreRoots(available: true, user: UserRoot),
+      contentIds: @[world.workingTree])),
     vcs: WorkspaceVcsState(known: true, repo: RepoName,
                            workingTree: oracleAt(world.workingTree)),
     platform: world.platform,
@@ -187,6 +197,15 @@ proc certificate(framework = "ct-test"; issuer = "ct-test";
 proc put(world: FakeWorld; dir, name: string; cert: TestCertificate;
          modifiedMs: int64) =
   world.files[WorkspaceRoot & "/" & dir & "/" & name] =
+    FakeFile(text: renderCertificate(cert), modifiedMs: modifiedMs)
+
+proc localPath(cert: TestCertificate; name: string): string =
+  UserRoot & "/" & localStoreContentDir(cert.vcs.content).relative & "/" & name
+
+proc putLocal(world: FakeWorld; name: string; cert: TestCertificate;
+              modifiedMs: int64) =
+  ## Where `ct test` publishes: the local store, under the record's content.
+  world.files[localPath(cert, name)] =
     FakeFile(text: renderCertificate(cert), modifiedMs: modifiedMs)
 
 proc rowValue(model: CertificateIndicatorModel; label: string): string =
@@ -261,7 +280,7 @@ suite "CTC-2: a workspace with more than one framework":
       framework = "reprobuild", issuer = "repro-daemon@build-host-7",
       targets = @["t-unit", "t-integration"], content = TreeA,
       commands = @[@["repro", "test"]]), 1000)
-    world.put(CtDir, "linux-amd64.toml", certificate(content = TreeB), 2000)
+    world.putLocal("linux-amd64.toml", certificate(content = TreeB), 2000)
     world.workingTree = TreeA
 
     let model = world.evaluate()
@@ -283,7 +302,8 @@ suite "CTC-2: a workspace with more than one framework":
     let flipped = world.evaluate()
     checkpoint $flipped.state & " — " & flipped.certificateName
     ck flipped.state == cisCertified
-    ck flipped.certificateName == CtDir & "/linux-amd64.toml"
+    ck flipped.certificateName ==
+       localPath(certificate(content = TreeB), "linux-amd64.toml")
     ck rowValue(flipped, "Framework") == "ct-test"
     ck rowValue(flipped, "Targets") == "tests/calc_test.nim"
 
@@ -294,7 +314,10 @@ suite "CTC-2: a workspace with more than one framework":
     let uncovered = world.evaluate()
     checkpoint $uncovered.state & " — " & uncovered.summary
     ck uncovered.state != cisCertified
+    # The reprobuild record (still pooled from the workspace carrier) speaks;
+    # the `ct test` one is in another content's directory and is not read.
     ck uncovered.state == cisWasCertified
+    ck uncovered.certificateName == ReproDir & "/build.toml"
 
   test "an unrecognised framework's certificate is ignored, not rejected":
     ## Verification.md §2 at the layer the framework filter lives in, and the
@@ -353,7 +376,7 @@ suite "CTC-2: a workspace with more than one framework":
     ## framework as a fault, would report a broken workspace to a user whose
     ## state is covered by the record sitting beside it.
     let world = newWorld()
-    world.put(CtDir, "linux-amd64.toml", certificate(content = TreeA), 2000)
+    world.putLocal("linux-amd64.toml", certificate(content = TreeA), 2000)
     world.put(ReproDir, "neighbour.toml", certificate(
       framework = UnknownFramework, issuer = "other-runner",
       content = TreeB), 3000)
@@ -363,7 +386,8 @@ suite "CTC-2: a workspace with more than one framework":
     ck model.state == cisCertified
     ck model.state != cisNotCertified
     ck model.state != cisUnverifiable
-    ck model.certificateName == CtDir & "/linux-amd64.toml"
+    ck model.certificateName ==
+       localPath(certificate(content = TreeA), "linux-amd64.toml")
 
     # A store holding ONLY the unrecognised record is not an error either. It
     # reads through the generic check like every other record — see this
@@ -371,7 +395,7 @@ suite "CTC-2: a workspace with more than one framework":
     # the disclosure names the framework, so the display never implies the
     # record is something it is not.
     let alone = newWorld()
-    alone.put(CtDir, "neighbour.toml", certificate(
+    alone.putLocal("neighbour.toml", certificate(
       framework = UnknownFramework, issuer = "other-runner"), 1000)
     let solo = alone.evaluate()
     checkpoint $solo.state & " — " & solo.summary
@@ -391,9 +415,10 @@ suite "CTC-2: a workspace with more than one framework":
     ## claims would differ for a reason that has nothing to do with who wrote
     ## them.
     let ctWorld = newWorld()
-    ctWorld.put(CtDir, "run.toml", certificate(
+    let ctCert = certificate(
       framework = "ct-test", issuer = "ct-test@dev-box",
-      commands = @[@["ct", "test", "run", "--workspace", "."]]), 1000)
+      commands = @[@["ct", "test", "run", "--workspace", "."]])
+    ctWorld.putLocal("run.toml", ctCert, 1000)
 
     let reproWorld = newWorld()
     reproWorld.put(ReproDir, "run.toml", certificate(
@@ -408,7 +433,7 @@ suite "CTC-2: a workspace with more than one framework":
 
     # The two documents are genuinely different bytes, or this case would be
     # comparing a rendering with itself.
-    ck ctWorld.files[WorkspaceRoot & "/" & CtDir & "/run.toml"].text !=
+    ck ctWorld.files[localPath(ctCert, "run.toml")].text !=
        reproWorld.files[WorkspaceRoot & "/" & ReproDir & "/run.toml"].text
 
     # THE INDICATOR AS THE USER MEETS IT: closed, the whole rendered element —
@@ -471,7 +496,9 @@ suite "CTC-2: a workspace with more than one framework":
       text: "schema = \"test-certificate.v2\"\n\n[certificate]\n" &
             "framework = \"reprobuild\"\n",
       modifiedMs: 1000)
-    world.put(CtDir, "linux-amd64.toml", certificate(content = TreeB), 2000)
+    # In the pooled workspace carrier, so it IS read whatever W is (a `ct
+    # test` record in the local store would be looked up only by W).
+    world.put(ReproDir, "stale.toml", certificate(content = TreeB), 2000)
 
     let model = world.evaluate()
     checkpoint $model.state & " — " & model.summary

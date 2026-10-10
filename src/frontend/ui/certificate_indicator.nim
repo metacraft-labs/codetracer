@@ -168,10 +168,11 @@ when defined(js):
     if vcs.known:
       # EVERYTHING HERE IS RELATIVE TO THE OPENED WORKSPACE DIRECTORY, not to
       # the repository root, and that is a stated limit rather than an
-      # oversight. `readCertificateStore` searches `<workspaceDir>/.ct` and
-      # `<workspaceDir>/.repro`, so the store this indicator speaks for is the
-      # one beside the folder the user opened; using a different root for the
-      # watch than for the store would make the two disagree.
+      # oversight. `readCertificateStore` searches `<workspaceDir>/.repro`
+      # (beside the local certificate store, which is per user), so the
+      # workspace carrier this indicator speaks for is the one beside the
+      # folder the user opened; using a different root for the watch than for
+      # the store would make the two disagree.
       #
       # The consequence, for a project opened at a SUBDIRECTORY of its
       # repository: `<workspaceDir>/.git` does not exist, `watchDirectory`'s
@@ -186,9 +187,26 @@ when defined(js):
       # A store directory that does not exist yet cannot be watched; the
       # workspace-root watch below is what notices it being created.
       watchDirectory(host, workspaceDir & "/" & dir, citStoreChanged)
+    # THE LOCAL CERTIFICATE STORE (CTC-3e), where `ct test` publishes. Watched
+    # at the user root's algorithm directories, which change when a content
+    # directory is created (the first run on a new content), and at the
+    # content directories of the states looked up now, which change when a
+    # record lands in one that exists. Not recursive, and not re-installed
+    # when W moves on: the periodic backstop covers a directory that did not
+    # exist yet, and `ct test` rewriting one that did is caught directly.
+    let query = localStoreQuery(host, workspaceDir, vcs)
+    if query.roots.available and query.roots.user.len > 0:
+      for algorithm in ["git-tree-sha1", "git-tree-sha256"]:
+        watchDirectory(host, query.roots.user & "/" & LocalStoreLayout & "/" &
+                       algorithm, citStoreChanged)
+      for contentId in query.contentIds:
+        let dir = localStoreContentDir(contentId)
+        if dir.ok:
+          watchDirectory(host, query.roots.user & "/" & dir.relative,
+                         citStoreChanged)
     # NOT RECURSIVE. One watch on the workspace root costs one inotify slot and
     # catches the two things a root watch can catch that nothing else does: a
-    # store directory appearing for the first time (`.ct/`, `.repro/`), and an
+    # store directory appearing for the first time (`.repro/`), and an
     # edit to a tracked file at the top level. A recursive watch would also
     # catch every build artefact in the tree, which is the cost this indicator
     # does not earn.

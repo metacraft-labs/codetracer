@@ -36,13 +36,13 @@
 ## process, Electron's child processes, a facade endpoint) drives exactly this
 ## recipe. ``certificate_content_id_native.nim`` is the native host.
 ##
-## The host's git runner is not ``certificate_issuance.GitCommandRunner``,
-## for three reasons: the recipe needs to add ``GIT_INDEX_FILE`` to git's
-## environment, it parses ``write-tree`` and ``ls-tree`` output that must not
-## have stderr warnings mixed into it, and that type is defined over the
-## native process bridge's ``CapturedRun``, which a non-native host cannot
-## import. Importing ``certificate_issuance`` would also put the signing path
-## within reach of this module, and nothing here has any business there.
+## The host's git runner is its own type, not the native process bridge's
+## ``CapturedRun``, for three reasons: the recipe needs to add
+## ``GIT_INDEX_FILE`` to git's environment, it parses ``write-tree`` and
+## ``ls-tree`` output that must not have stderr warnings mixed into it, and a
+## non-native host cannot import the bridge. Nothing here imports
+## ``certificate_issuance`` either: the signing path has no business within
+## reach of this module.
 ##
 ## What computing an id writes
 ## ---------------------------

@@ -149,17 +149,6 @@ const
     ## survives (Standard.md §3.3).
 
 type
-  GitCommandRunner* = proc(argv: seq[string]; cwd: string): CapturedRun {.closure, gcsafe.}
-    ## How the default certificate store's ``git check-ignore`` report reaches
-    ## git (``certificate_default_store``).
-    ##
-    ## **Not** how the VCS probe reaches git. The probe used to take one of
-    ## these through ``IssuanceOptions``, and that was a way for an in-process
-    ## caller to answer ``git rev-parse HEAD`` or ``git status`` itself and
-    ## have the answer signed into ``base`` and ``untracked``. The probe now
-    ## runs git only through the content-id recipe's native host, which no
-    ## caller can replace.
-
   VcsProbe* = object
     ## What the producer could establish about the repository state at one
     ## point in time.
@@ -365,12 +354,6 @@ proc redactSecrets*(argv: openArray[string]): seq[string] =
 # ---------------------------------------------------------------------------
 # The VCS probe
 # ---------------------------------------------------------------------------
-
-proc defaultGitRunner*(argv: seq[string]; cwd: string): CapturedRun {.gcsafe.} =
-  ## Run git through the shared process bridge. Used by the default
-  ## certificate store's ``check-ignore`` report; the VCS probe does not use
-  ## it (see ``GitCommandRunner``).
-  execCaptured(argv, cwd = cwd)
 
 proc undetermined(reason: string): VcsProbe =
   VcsProbe(probed: true, determined: false, undeterminedReason: reason)

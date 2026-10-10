@@ -24,14 +24,28 @@
 ## suite moves a struct; this one runs `git commit`, edits a tracked file and
 ## checks out another branch, and asserts the indicator followed. A ViewModel
 ## that reads a cached snapshot passes the first and fails this.
+##
+## ## Where the records are (2026-10-10, CTC-3e)
+##
+## `ct test` publishes to the per-user local certificate store, and the
+## indicator reads it by the content ids of W, H and S (both roots), through
+## `fs.certificateStoreRoots` — which on this host follows
+## `TEST_CERTIFICATES_DIR`, pointed at a fresh scratch root for every case.
+## `.ct/certificates` is read by nothing ("the indicator reads the local
+## store, not .ct/certificates"). Records that are about the ViewModel's
+## decision over OTHER content (a `base` that is HEAD on unrelated content,
+## an algorithm the host cannot compute) sit in reprobuild's workspace
+## carrier, which is still pooled and lists every record whatever its
+## content; a lookup by content would never reach them.
 
-import std/[algorithm, options, os, osproc, streams, strutils, unittest]
+import std/[algorithm, options, os, osproc, streams, strutils, times, unittest]
 
 import viewmodels/certificate_indicator_source
 import viewmodel/host/desktop_native
 import viewmodel/platform/platform
 
 import ../../../../ct_test/certificate
+import ../../../../ct_test/certificate_store_roots_native
 
 const
   Platform = "linux/amd64"
@@ -66,6 +80,7 @@ proc newRepository(name: string): string =
   # indicator. It cost this case a red before it was understood, so it is
   # written down rather than left as a line that looks like housekeeping.
   writeFile(result / ".gitignore", ".ct/\n.repro/\n")
+  # (`.ct/` stays ignored here because one case plants a CTC-2 record there.)
   discard git(result, ["init", "--initial-branch=main", "."])
   discard git(result, ["config", "user.email", "sb1@example.invalid"])
   discard git(result, ["config", "user.name", "sb1 suite"])
@@ -85,11 +100,28 @@ const UnrelatedBase = "cc11223344556677889900aabbccddeeff001122"
   ## A `base` naming no commit of these repositories. Informational only, so
   ## it must change nothing.
 
+const LocalStore = "<local store>"
+  ## `dir` value meaning "the local certificate store, under the record's
+  ## content", where `ct test` publishes.
+
+var storeCounter = 0
+
+proc freshStoreRoot(): string =
+  ## A new, empty local store for one case, through the variable the host's
+  ## resolver reads (Transport.md §2.1).
+  inc storeCounter
+  result = getTempDir() / "ct-cert-indicator" / "stores-" &
+           $getCurrentProcessId() / $storeCounter
+  removeDir(result)
+  putEnv("TEST_CERTIFICATES_DIR", result)
+  putEnv("TEST_CERTIFICATES_SYSTEM_DIR", result & "-system")
+
 proc writeCertificateFor(repo, content: string; base = UnrelatedBase;
-                         name = "run.toml"; dir = CtTestStoreDir;
+                         name = "run.toml"; dir = LocalStore;
                          issuer = "ct-test") =
-  ## A real certificate file, in the real store directory, produced by the
-  ## shipped canonical serializer.
+  ## A real certificate file, produced by the shipped canonical serializer,
+  ## in the local store under its content's directory (where `ct test`
+  ## publishes) or in the named workspace directory.
   let cert = TestCertificate(
     schema: CertificateSchema,
     framework: "ct-test",
@@ -102,8 +134,14 @@ proc writeCertificateFor(repo, content: string; base = UnrelatedBase;
     vcs: VcsState(repo: repo.lastPathPart, paths: @[], content: content,
                   untracked: false, base: base),
     commands: @[@["ct", "test", "run"]])
-  createDir(repo / dir)
-  writeFile(repo / dir / name, renderCertificate(cert))
+  let target =
+    if dir == LocalStore:
+      getEnv("TEST_CERTIFICATES_DIR") /
+        localStoreContentDir(content).relative.replace('/', DirSep)
+    else:
+      repo / dir
+  createDir(target)
+  writeFile(target / name, renderCertificate(cert))
 
 proc indicatorFor(repo: string): CertificateIndicatorVm =
   newCertificateIndicatorVm(
@@ -114,6 +152,7 @@ suite "SB-1: the indicator against a real repository":
   setup:
     # The shipped native instantiation, not a fake. `resetPlatformForTesting`
     # first so the suite cannot pass on a platform some earlier file installed.
+    discard freshStoreRoot()
     resetPlatformForTesting()
     installPlatform(newDesktopNativePlatform())
 
@@ -151,8 +190,12 @@ suite "SB-1: the indicator against a real repository":
     # not read certified. Together the two kill a comparison of `base` in
     # either direction.
     let other = newRepository("same-base-other-content")
+    # Its own store: content ids do not depend on the repository, and this
+    # repository's content is the one above's, whose record is in that store.
+    discard freshStoreRoot()
     writeCertificateFor(other,
-      "git-tree-sha1:" & repeat('d', 40), base = headCommit(other))
+      "git-tree-sha1:" & repeat('d', 40), base = headCommit(other),
+      dir = ReprobuildStoreDir)
     let otherVm = indicatorFor(other)
     discard otherVm.refresh(citStartup)
     checkpoint $otherVm.model.state & " — " & otherVm.model.summary
@@ -163,7 +206,8 @@ suite "SB-1: the indicator against a real repository":
     ## `git-tree-sha256` against this SHA-1 repository: the real host answers
     ## "cannot compute", which is not a mismatch (Verification.md §4.1.1).
     let repo = newRepository("sha256-on-sha1")
-    writeCertificateFor(repo, "git-tree-sha256:" & repeat('a', 64))
+    writeCertificateFor(repo, "git-tree-sha256:" & repeat('a', 64),
+                        dir = ReprobuildStoreDir)
     let vm = indicatorFor(repo)
     discard vm.refresh(citStartup)
     checkpoint $vm.model.state & " — " & vm.model.summary
@@ -213,7 +257,12 @@ suite "SB-1: the indicator against a real repository":
     check second != first
     check vm.refresh(citCommitChanged)
     checkpoint "after commit: " & $vm.model.state & " — " & vm.model.summary
-    check vm.model.state == cisWasCertified
+    # 2026-10-10 (CTC-3e): was `cisWasCertified`. The record for the old
+    # content is in the old content's directory, and the indicator looks up
+    # only W's, H's and S's (CTC-3 operator decision 10: "neither W nor H
+    # covered" reads not certified; with nothing found there, "No
+    # certificates").
+    check vm.model.state == cisNoCertificates
     check vm.revision == certifiedAt + 1
 
     # (2) A CHECKOUT back to the certified commit. The indicator must recover,
@@ -261,7 +310,7 @@ suite "SB-1: the indicator against a real repository":
 
     removeDir(repo / ReprobuildStoreDir)
     writeCertificateFor(repo, content, name = "agent.toml",
-                        dir = CtTestStoreDir, issuer = "ct-test-agent")
+                        dir = LocalStore, issuer = "ct-test-agent")
     let agentVm = indicatorFor(repo)
     discard agentVm.refresh(citStartup)
     let agent = agentVm.model
@@ -279,13 +328,47 @@ suite "SB-1: the indicator against a real repository":
       checkpoint "row: " & hook.detail[i].label
       check agent.detail[i] == hook.detail[i]
 
+  test "the indicator reads the local store, not .ct/certificates":
+    ## CTC-3e. A CTC-2 record in `.ct/certificates` that would cover W is not
+    ## read at all; the same claim in the local store, where `ct test` now
+    ## publishes, is — found through the host's own root resolution
+    ## (`TEST_CERTIFICATES_DIR`), in W's content directory.
+    let repo = newRepository("local-not-dot-ct")
+    let content = headContent(repo)
+    writeCertificateFor(repo, content, dir = AbandonedCtTestStoreDir)
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    checkpoint $vm.model.state & " — " & vm.model.summary
+    check vm.model.state == cisNoCertificates
+    for dir in vm.model.searched:
+      check AbandonedCtTestStoreDir notin dir
+
+    writeCertificateFor(repo, content, dir = LocalStore)
+    discard vm.refresh(citStoreChanged)
+    checkpoint $vm.model.state & " — " & vm.model.certificateName
+    check vm.model.state == cisCertified
+    check vm.model.certificateName.startsWith(getEnv("TEST_CERTIFICATES_DIR"))
+    check ("/v1/git-tree-sha1/" & content["git-tree-sha1:".len .. ^1] & "/") in
+          vm.model.certificateName
+
+    # The SYSTEM root is read too (Transport.md §2.4): the same record there
+    # alone also covers.
+    let systemRoot = getEnv("TEST_CERTIFICATES_SYSTEM_DIR") / nativeStoreAccount()
+    let relative = localStoreContentDir(content).relative
+    createDir(systemRoot / relative)
+    moveFile(getEnv("TEST_CERTIFICATES_DIR") / relative / "run.toml",
+             systemRoot / relative / "run.toml")
+    discard vm.refresh(citStoreChanged)
+    check vm.model.state == cisCertified
+    check vm.model.certificateName.startsWith(systemRoot)
+
   test "a directory that is not a repository is unverifiable, not uncertified":
     ## The consumer could not establish the repository, so it must not behave
     ## as though it had. Reporting "not certified" would send an operator to run
     ## tests over a VCS problem.
     let dir = scratchDir("not-a-repo")
-    createDir(dir / CtTestStoreDir)
-    writeFile(dir / CtTestStoreDir / "run.toml",
+    createDir(dir / ReprobuildStoreDir)
+    writeFile(dir / ReprobuildStoreDir / "run.toml",
       renderCertificate(TestCertificate(
         schema: CertificateSchema, framework: "ct-test", project: "x",
         platform: Platform, targets: @["t"], result: "passed",
@@ -309,12 +392,15 @@ suite "SB-1: the indicator against a real repository":
 
     proc snapshot(): seq[string] =
       result = @[]
-      for kind, path in walkDir(repo / CtTestStoreDir):
-        result.add $kind & " " & path.lastPathPart & " " &
-                   $getFileSize(path)
+      for path in walkDirRec(getEnv("TEST_CERTIFICATES_DIR"),
+                             yieldFilter = {pcFile, pcDir}):
+        result.add path & " " & $getLastModificationTime(path).toUnix
+      for path in walkDirRec(repo):
+        result.add path
       result.sort()
 
     let before = snapshot()
+    check before.len > 0
     let statusBefore = git(repo, ["status", "--porcelain=v1"])
 
     let vm = indicatorFor(repo)

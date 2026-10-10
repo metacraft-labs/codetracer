@@ -17,19 +17,31 @@
 ##
 ## What "the store" is
 ## -------------------
-## Two directories are searched, because the standard's whole point is that a
+## Two carriers are searched, because the standard's whole point is that a
 ## certificate is producer-agnostic and carriers are interchangeable
 ## (Transport.md §1):
 ##
-## * ``.repro/workspace/certificates`` — reprobuild's location, matching where
-##   it already keeps ``registered-keys.toml``
-##   (``reprobuild-specs/Test-Certificates.md``);
-## * ``.ct/certificates`` — the same layout for a workspace that uses `ct test`
-##   and no reprobuild at all, which is the case CTC-2 is about.
+## * the **local certificate store** (Transport.md §2), per user and
+##   addressed by content id: ``<root>/v1/<algorithm>/<digest>/*.toml`` in
+##   BOTH of the user's roots (§2.1, resolved by ``certificate_store_roots``).
+##   A lookup lists only the directories of the content ids the caller asks
+##   about (§2.4) — it never enumerates the store, which is shared by every
+##   repository the user works in. `ct test` writes it
+##   (``certificate_local_store``);
+## * ``.repro/workspace/certificates`` — reprobuild's workspace directory,
+##   matching where it keeps ``registered-keys.toml``
+##   (``reprobuild-specs/Test-Certificates.md``). Still pooled until
+##   reprobuild publishes to the local store.
 ##
-## A record found in either reads identically; there is no field anywhere below
-## recording which directory it came from, precisely so a hook-written
-## certificate cannot render differently from an agent-written one.
+## ``.ct/certificates`` is **not** read. `ct test` wrote one record per
+## platform there before the local store existed (CTC-2); since CTC-3e it
+## writes nothing under ``.ct/`` and nothing reads that directory, so records
+## left there are simply not seen (``AbandonedCtTestStoreDir``).
+##
+## A record found in any carrier reads identically; there is no field anywhere
+## below recording which carrier it came from beyond its display name,
+## precisely so a hook-written certificate cannot render differently from an
+## agent-written one.
 ##
 ## **The git-notes carrier is not read here.** Transport.md §2 recommends
 ## ``refs/notes/<vendor>/certificates``, and reprobuild uses it for records that
@@ -55,18 +67,29 @@
 import std/[algorithm, strutils]
 
 import certificate
+import certificate_store_roots
+
+export certificate_store_roots
 
 const
   ReprobuildStoreDir* = ".repro/workspace/certificates"
     ## reprobuild's workspace store (``reprobuild-specs/Test-Certificates.md``).
 
-  CtTestStoreDir* = ".ct/certificates"
-    ## The same layout for a workspace that uses `ct test` alone.
+  AbandonedCtTestStoreDir* = ".ct/certificates"
+    ## Where `ct test` published before CTC-3e (one ``<platform>.toml`` per
+    ## platform). **Neither read nor written any more**: certificates are
+    ## ephemeral and never live in the working tree (Transport.md §2). Named
+    ## only so a test can prove nothing here reaches a reader, and so the
+    ## records left behind in existing workspaces have a name in the docs.
 
-  CertificateStoreDirs* = [ReprobuildStoreDir, CtTestStoreDir]
-    ## Searched in this order. The order decides only which *key store* is
-    ## consulted when both directories carry one (see ``readCertificateStore``);
-    ## certificates from both are pooled and ordered by when they landed.
+  CertificateStoreDirs* = [ReprobuildStoreDir]
+    ## The workspace-relative carriers searched, in this order. The order
+    ## decides only which *key store* is consulted when several carry one
+    ## (see ``readCertificateStore``).
+
+  LocalStoreLayout* = "v1"
+    ## The layout version directory under each local-store root
+    ## (Transport.md §2.2).
 
   RegisteredKeysFile* = "registered-keys.toml"
     ## The registered-key store's name inside a store directory
@@ -144,10 +167,15 @@ type
 
   StoredCertificate* = object
     ## One record as found, with the name a report will use for it. The text
-    ## is carried verbatim; nothing here parses it.
+    ## is carried verbatim; nothing here interprets it beyond the local
+    ## store's directory check (``lookupLocalStore``).
     name*: string
-      ## Store-relative, e.g. ``.ct/certificates/linux-amd64.toml``. Shown to a
-      ## human and used as the deterministic final tiebreak in the ordering.
+      ## Workspace-relative for a workspace carrier, e.g.
+      ## ``.repro/workspace/certificates/hook.toml``; the full path for a
+      ## local-store record, e.g.
+      ## ``/home/u/.local/state/test-certificates/v1/git-tree-sha1/<digest>/<hash>.toml``.
+      ## Shown to a human and used as the deterministic final tiebreak in the
+      ## ordering.
     text*: string
     receivedAtMs*: int64
       ## When this file last changed on the host that is displaying it.
@@ -177,6 +205,45 @@ type
       ## this is the zero value, whose ``readable`` is ``false``; callers MUST
       ## test ``keyStorePath.len > 0`` before treating it as an answer, which
       ## is what ``hasKeyStore`` below is for.
+    rejected*: seq[string]
+      ## Local-store records that were found and NOT made candidates, each
+      ## with the reason: a record whose own ``content`` does not match the
+      ## directory it was found in (Transport.md §2.4: "reported and
+      ## ignored"). Empty when there were none.
+    problems*: seq[string]
+      ## Faults that did not stop the search, in words an operator can act
+      ## on: a system root that exists and cannot be read (Transport.md §2.4:
+      ## reported, and the user root is still searched), and every variable
+      ## the root resolver ignored. A fault that DID stop the search sets
+      ## ``unreadable`` instead.
+
+  LocalStoreQuery* = object
+    ## What to look up in the local certificate store (Transport.md §2.4).
+    roots*: CertificateStoreRoots
+      ## Both roots, as the host resolved them (``certificate_store_roots``).
+      ## ``available = false`` — a host with no per-user directory, such as a
+      ## browser tab — makes the whole read ``unreadable``: it could not look,
+      ## which is not the same as finding nothing.
+    contentIds*: seq[string]
+      ## The content ids whose directories are listed, e.g. the working
+      ## tree's. A reader never enumerates the store: it is shared by every
+      ## repository the user works in, and a record for some other content is
+      ## not evidence about this one. Empty: the local store is not consulted
+      ## (the state has no content id to look up).
+
+  LocalStoreLookup* = object
+    ## One content id looked up in both roots.
+    searched*: seq[string]
+      ## Every content directory listed, whether or not it existed.
+    found*: seq[StoredCertificate]
+      ## The candidates, with byte-identical copies across the two roots
+      ## collapsed into one (§2.4: "a reader may skip a copy byte-identical to
+      ## one it has evaluated"); every non-identical copy is kept.
+    rejected*: seq[string]
+    problems*: seq[string]
+    unreadable*: bool
+      ## The USER root, or a content directory in it, could not be read.
+    unreadableReason*: string
 
 proc hasKeyStore*(store: CertificateStore): bool =
   ## Whether the workspace declared a trust policy at all.
@@ -252,18 +319,12 @@ proc join(dir, name: string): string =
   elif dir.endsWith("/"): dir & name
   else: dir & "/" & name
 
-proc readCertificateStore*(access: CertificateStoreAccess;
-                           workspaceRoot: string): CertificateStore =
-  ## Discover every certificate record under ``workspaceRoot``.
-  ##
-  ## Never raises, never writes, and never reports absence as a failure. The
-  ## three outcomes it distinguishes — no store, a store, a store it could not
-  ## read — are exactly Transport.md §4's requirement that "no certificates
-  ## found" and a discovery that broke down be reported differently.
-  result.searched = @[]
+proc readWorkspaceCarriers(access: CertificateStoreAccess;
+                           workspaceRoot: string; store: var CertificateStore) =
+  ## Every record in the workspace-relative carriers (``CertificateStoreDirs``).
   for dir in CertificateStoreDirs:
     let full = join(workspaceRoot, dir)
-    result.searched.add dir
+    store.searched.add dir
 
     let listing = access.listFiles(full)
     case listing.status
@@ -272,15 +333,15 @@ proc readCertificateStore*(access: CertificateStoreAccess;
     of srUnreadable:
       # The directory is there and could not be listed. That is a fault to
       # report, not an emptiness to render.
-      result.present = true
-      if not result.unreadable:
-        result.unreadable = true
-        result.unreadableReason =
+      store.present = true
+      if not store.unreadable:
+        store.unreadable = true
+        store.unreadableReason =
           "the certificate store at '" & dir & "' could not be listed: " &
           listing.detail
       continue
     of srOk:
-      result.present = true
+      store.present = true
 
     var names = listing.names
     # Sorted before reading so the *reads* happen in a stable order too; the
@@ -293,19 +354,19 @@ proc readCertificateStore*(access: CertificateStoreAccess;
         # First store directory that carries one wins, so a workspace using
         # both carriers has exactly one trust policy rather than a union
         # nobody wrote down.
-        if result.keyStorePath.len == 0:
+        if store.keyStorePath.len == 0:
           let read = access.readText(join(full, name))
-          result.keyStorePath = join(dir, name)
+          store.keyStorePath = join(dir, name)
           case read.status
           of srOk:
-            result.keyStore = readKeyStore(read.text)
+            store.keyStore = readKeyStore(read.text)
           of srAbsent:
             # Listed and then gone: a race, not an answer.
-            result.keyStore = KeyStore(readable: false,
+            store.keyStore = KeyStore(readable: false,
               unreadableReason: "the registered-key store at '" &
                 join(dir, name) & "' disappeared between listing and reading")
           of srUnreadable:
-            result.keyStore = KeyStore(readable: false,
+            store.keyStore = KeyStore(readable: false,
               unreadableReason: "the registered-key store at '" &
                 join(dir, name) & "' could not be read: " & read.detail)
         continue
@@ -317,19 +378,214 @@ proc readCertificateStore*(access: CertificateStoreAccess;
       let read = access.readText(path)
       case read.status
       of srOk:
-        result.certificates.add StoredCertificate(
+        store.certificates.add StoredCertificate(
           name: join(dir, name),
           text: read.text,
           receivedAtMs: access.modifiedMs(path))
       of srAbsent:
         continue
       of srUnreadable:
-        if not result.unreadable:
-          result.unreadable = true
-          result.unreadableReason =
+        if not store.unreadable:
+          store.unreadable = true
+          store.unreadableReason =
             "the certificate at '" & join(dir, name) & "' could not be read: " &
             read.detail
 
+proc isSafeComponent(text: string): bool =
+  ## One path component that cannot leave the directory it is joined to.
+  if text.len == 0 or text == "." or text == "..":
+    return false
+  for c in text:
+    if c in {'/', '\\', ':', '\0'}:
+      return false
+  true
+
+proc localStoreContentDir*(contentId: string):
+    tuple[ok: bool; relative: string; problem: string] =
+  ## ``v1/<algorithm>/<digest>`` for a content id (Transport.md §2.2): the id
+  ## split at its FIRST ``:``, because ``:`` is not a legal file-name
+  ## character on Windows. ``/``-separated.
+  ##
+  ## Refused, rather than mapped somewhere, when either half could not be a
+  ## single directory name: a digest that is not lowercase hex
+  ## (Content-Id.md §1), or an algorithm that is empty or carries a
+  ## separator. A content id decides where a write lands and which directory
+  ## a read lists, so it must not be able to name ``..``.
+  let colon = contentId.find(':')
+  if colon <= 0:
+    return (false, "", "the content id `" & contentId &
+            "` has no algorithm before a `:`")
+  let algorithm = contentId[0 ..< colon]
+  let digest = contentId[colon + 1 .. ^1]
+  if not isSafeComponent(algorithm):
+    return (false, "", "the content id's algorithm `" & algorithm &
+            "` cannot be a directory name")
+  if digest.len == 0:
+    return (false, "", "the content id `" & contentId & "` has no digest")
+  for c in digest:
+    if c notin {'0'..'9', 'a'..'f'}:
+      return (false, "", "the content id's digest `" & digest &
+              "` is not lowercase hexadecimal")
+  (true, LocalStoreLayout & "/" & algorithm & "/" & digest, "")
+
+proc isLocalStoreRecordName*(name: string): bool =
+  ## Which names in a content directory are certificates (Transport.md §2.4):
+  ## ending in ``.toml`` and NOT beginning with ``.`` — the second rule is
+  ## what keeps a writer's in-flight temporary file (§2.3) out of every
+  ## reader, whatever it is named.
+  name.endsWith(".toml") and not name.startsWith(".")
+
+proc lookupLocalStore*(access: CertificateStoreAccess;
+                       roots: CertificateStoreRoots;
+                       contentId: string): LocalStoreLookup =
+  ## Look one content id up in both roots (Transport.md §2.4).
+  ##
+  ## * A missing root, a missing directory or an empty one is **none found**,
+  ##   never an error (§5).
+  ## * A USER root that cannot be read makes the lookup ``unreadable``: the
+  ##   reader could not look, which is different from finding nothing.
+  ## * A SYSTEM root that exists and cannot be read is a ``problem`` — usually
+  ##   a misconfigured install — and the user root is still searched.
+  ## * A record whose own ``content`` is not ``contentId`` is ``rejected``,
+  ##   with the reason, and is not a candidate: the directory is a hint for
+  ##   discovery, not evidence. A record that does not parse IS a candidate —
+  ##   deciding that it is malformed is the verifier's finding, not this
+  ##   reader's.
+  ## * A copy byte-identical to one already found (the same file in both
+  ##   roots) is evaluated once; every other copy is kept, so neither an
+  ##   unsigned copy nor one whose signature fails hides one that would count.
+  let dir = localStoreContentDir(contentId)
+  if not dir.ok:
+    result.problems.add "the content id `" & contentId &
+      "` was not looked up in the local certificate store: " & dir.problem
+    return
+  if not roots.available:
+    result.unreadable = true
+    result.unreadableReason = "this host has no local certificate store" &
+      (if roots.problems.len > 0: ": " & roots.problems.join("; ") else: "")
+    return
+
+  for (label, root) in [("user", roots.user), ("system", roots.system)]:
+    if root.len == 0:
+      if label == "user":
+        result.unreadable = true
+        result.unreadableReason = "the local certificate store's user root " &
+          "could not be resolved" &
+          (if roots.problems.len > 0: ": " & roots.problems.join("; ") else: "")
+        return
+      continue
+    let full = join(root, dir.relative)
+    result.searched.add full
+    # The root itself first: a root that exists and cannot be read hides
+    # every directory below it, and `listFiles` on a child of an unsearchable
+    # directory cannot tell "absent" from "forbidden".
+    let rootListing = access.listFiles(root)
+    case rootListing.status
+    of srAbsent:
+      continue
+    of srUnreadable:
+      let message = "the local certificate store's " & label & " root '" &
+        root & "' exists and could not be read: " & rootListing.detail
+      if label == "user":
+        result.unreadable = true
+        result.unreadableReason = message
+        return
+      result.problems.add message
+      continue
+    of srOk:
+      discard
+
+    let listing = access.listFiles(full)
+    case listing.status
+    of srAbsent:
+      continue
+    of srUnreadable:
+      let message = "the local certificate store directory '" & full &
+        "' could not be listed: " & listing.detail
+      if label == "user":
+        result.unreadable = true
+        result.unreadableReason = message
+        return
+      result.problems.add message
+      continue
+    of srOk:
+      discard
+
+    var names = listing.names
+    names.sort(compareBytes)
+    for name in names:
+      if not isLocalStoreRecordName(name):
+        continue
+      let path = join(full, name)
+      let read = access.readText(path)
+      case read.status
+      of srAbsent:
+        # Listed and then gone: pruned, or replaced by a concurrent writer's
+        # rename. The store is a cache (§2.5); a vanished file is not a fault.
+        continue
+      of srUnreadable:
+        let message = "the certificate at '" & path & "' could not be read: " &
+          read.detail
+        if label == "user":
+          if not result.unreadable:
+            result.unreadable = true
+            result.unreadableReason = message
+        else:
+          result.problems.add message
+        continue
+      of srOk:
+        discard
+      let parsed = readCertificate(read.text)
+      if parsed.status == crsOk and parsed.cert.vcs.content != contentId:
+        result.rejected.add "the certificate at '" & path & "' names content `" &
+          parsed.cert.vcs.content & "` but was found in the directory for `" &
+          contentId & "`, so it is ignored (Transport.md §2.4)"
+        continue
+      var duplicate = false
+      for earlier in result.found:
+        if earlier.text == read.text:
+          duplicate = true
+          break
+      if duplicate:
+        continue
+      result.found.add StoredCertificate(
+        name: path, text: read.text, receivedAtMs: access.modifiedMs(path))
+
+proc readCertificateStore*(access: CertificateStoreAccess;
+                           workspaceRoot: string;
+                           local: LocalStoreQuery): CertificateStore =
+  ## Discover every candidate record for a workspace: the local certificate
+  ## store's directories for ``local.contentIds``, in both roots, pooled with
+  ## the workspace carriers in ``CertificateStoreDirs``.
+  ##
+  ## Never raises, never writes, and never reports absence as a failure. The
+  ## three outcomes it distinguishes — no store, a store, a store it could not
+  ## read — are exactly Transport.md §5's requirement that "no certificates
+  ## found" and a discovery that broke down be reported differently.
+  result.searched = @[]
+  result.problems.add local.roots.problems
+
+  var seenIds: seq[string] = @[]
+  for contentId in local.contentIds:
+    if contentId in seenIds:
+      continue
+    seenIds.add contentId
+    let lookup = lookupLocalStore(access, local.roots, contentId)
+    result.searched.add lookup.searched
+    result.rejected.add lookup.rejected
+    for problem in lookup.problems:
+      if problem notin result.problems:
+        result.problems.add problem
+    if lookup.unreadable:
+      result.present = true
+      if not result.unreadable:
+        result.unreadable = true
+        result.unreadableReason = lookup.unreadableReason
+    if lookup.found.len > 0 or lookup.rejected.len > 0:
+      result.present = true
+    result.certificates.add lookup.found
+
+  readWorkspaceCarriers(access, workspaceRoot, result)
   orderByArrival(result.certificates)
 
 # ---------------------------------------------------------------------------

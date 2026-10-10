@@ -31,10 +31,12 @@
 ##   oracle: an algorithm or scope it does not list is one this consumer
 ##   cannot compute, never a mismatch. Its ``commit`` is informational and is
 ##   read by nothing.
-## * ``store/`` — parse ``certificate.toml`` (non-canonical renderings
-##   included), rebuild its canonical payload from the parsed fields, and
-##   derive ``v1/<algorithm>/<digest>/<sha256 of the payload>.toml``
-##   (Transport.md §2.2), compared with ``expected-path.txt``.
+## * ``store/`` — derive each ``certificate.toml``'s store path (non-canonical
+##   renderings included) with the derivation `ct test` publishes by,
+##   ``certificate_local_store.localStoreRelativePathOf``: the canonical
+##   payload rebuilt from the parsed fields, hashed, under
+##   ``v1/<algorithm>/<digest>/`` (Transport.md §2.2); compared with
+##   ``expected-path.txt``.
 ##
 ## ``index.json`` is cross-checked against what was walked, in both directions:
 ## every case a walked group lists must be on disk and vice versa, and every
@@ -78,6 +80,7 @@ import std/[algorithm, base64, json, os, osproc, sets, streams,
 import certificate
 import certificate_content_id
 import certificate_content_id_native
+import certificate_local_store
 import certificate_signature
 import certificate_verification
 
@@ -567,21 +570,13 @@ proc walkContent*(root: string): GroupWalk =
 # store/: where the local certificate store keeps a certificate
 # ---------------------------------------------------------------------------
 
-proc storePathOf*(text: string): tuple[path: string; error: string] =
-  ## ``v1/<algorithm>/<digest>/<payload-hash>.toml`` (Transport.md §2.2):
-  ## the payload rebuilt from the PARSED fields — never the file's bytes, and
-  ## never the signature block — hashed with SHA-256, and ``vcs.content``
-  ## split at its FIRST ``:``.
-  let read = readCertificate(text)
-  if read.status != crsOk:
-    return ("", "did not read: " & $read.status & " " & read.detail)
-  let payload = canonicalPayload(read.cert)
-  let content = read.cert.vcs.content
-  let colon = content.find(':')
-  if colon <= 0:
-    return ("", "vcs.content `" & content & "` has no algorithm")
-  ("v1/" & content[0 ..< colon] & "/" & content[colon + 1 .. ^1] & "/" &
-   sha256Hex(payload) & ".toml", "")
+# The derivation is the PRODUCT's: `certificate_local_store` names every
+# record `ct test` publishes with `localStoreRelativePathOf`, and this walk
+# checks that very function. The independent check is `expected-path.txt`,
+# which the standard derived by hand from `canonical.txt` (see each case's
+# `pins.md`) — so walking the product's derivation here adds no circularity,
+# and a second copy of the derivation in this file would only let the two
+# drift apart. (Moved out of this walker 2026-10-10, CTC-3e.)
 
 proc walkStore*(root: string): GroupWalk =
   ## ``store/``: derive each certificate's store path and compare it with
@@ -600,7 +595,7 @@ proc walkStore*(root: string): GroupWalk =
           ": expected-path.txt is not one LF-terminated line" & context
         continue
       let text = readFile(dir / "certificate.toml")
-      let derived = storePathOf(text)
+      let derived = localStoreRelativePathOf(text)
       if derived.error.len > 0:
         result.failures.add "store/" & name & ": " & derived.error & context
         continue

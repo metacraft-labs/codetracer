@@ -26,7 +26,14 @@
 ##   * `XDG_STATE_HOME` is replaced when it is unset or lies inside the
 ##     default `~/.local/state`;
 ##   * `CODETRACER_TUI_LAYOUT_DIR` is replaced when it is unset or lies inside
-##     the user's state home (either spelling).
+##     the user's state home (either spelling);
+##   * `TEST_CERTIFICATES_DIR` and `TEST_CERTIFICATES_SYSTEM_DIR` — the user's
+##     local certificate store (Transport.md §2.1, which `ct test` publishes
+##     to and the status bar reads) — are ALWAYS replaced: an exported value
+##     is by definition the user's own store, and the system root's default
+##     (`/var/lib/test-certificates/<uid>`) is machine state no test should
+##     read. Added 2026-10-10 (CTC-3e). A suite that needs a store sets its
+##     own scratch root after start-up.
 ##
 ## A caller that already chose a private directory (the lane runner, a harness
 ## that inspects the document afterwards, a suite that sets one per spawn with
@@ -64,13 +71,28 @@ when not defined(js) and not defined(emscripten):
 
   var isolatedRoot = ""
 
+  # The exit hook must not read `isolatedRoot`: it is a main-module global,
+  # and its heap buffer is freed when the main module ends — BEFORE exit
+  # procedures run (codetracer-pm issue 2026-10-10-exit-hooks-read-freed-
+  # module-globals-and-may-delete-the-wrong-directory). A value array has no
+  # destructor, so the hook reads the path from a copy kept here instead.
+  var cleanupPath: array[4096, char]
+  var cleanupPathLen = 0
+
   proc privateRoot(): string =
     if isolatedRoot.len == 0:
       isolatedRoot = getTempDir() / ("ct-test-state-" & $getCurrentProcessId())
       createDir(isolatedRoot)
+      if isolatedRoot.len <= cleanupPath.len:
+        for i, c in isolatedRoot:
+          cleanupPath[i] = c
+        cleanupPathLen = isolatedRoot.len
     isolatedRoot
 
   proc isolate() =
+    putEnv("TEST_CERTIFICATES_DIR", privateRoot() / "test-certificates")
+    putEnv("TEST_CERTIFICATES_SYSTEM_DIR",
+           privateRoot() / "test-certificates-system")
     let home = userStateHome()
     let inheritedStateHome = getEnv(StateHomeVar)
     if inheritedStateHome.len == 0 or inheritedStateHome.inside(home):
@@ -86,9 +108,12 @@ when not defined(js) and not defined(emscripten):
       putEnv(LayoutDirVar, dir)
 
   proc cleanup() =
-    if isolatedRoot.len > 0:
+    if cleanupPathLen > 0:
+      var path = newString(cleanupPathLen)
+      for i in 0 ..< cleanupPathLen:
+        path[i] = cleanupPath[i]
       try:
-        removeDir(isolatedRoot)
+        removeDir(path)
       except CatchableError:
         discard
 

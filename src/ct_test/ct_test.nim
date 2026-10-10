@@ -4,9 +4,8 @@ import contracts
 import discovery
 import run_orchestration
 import certificate
-import certificate_default_store
 import certificate_issuance
-import certificate_store
+import certificate_local_store
 import frameworks/ada_fallback
 import frameworks/assembly_fallback
 import frameworks/crystal_spec
@@ -84,15 +83,20 @@ proc ctTestUsageMessage*(): string =
   "[--scope auto|vcs|walk|unscoped] [--unscoped] " &
   "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
   "[--threads N] [--json] [--summary <path>] " &
-  "[--certificate <path>] [--no-certificate] " &
+  "[--no-certificate] " &
   "[--sign-key <path> --key-id <id>]); " &
   "a passing run issues a test certificate (schema " & CertificateSchema &
-  ", framework " & CtTestFramework & ") in the run summary and PUBLISHES it, " &
-  "by default, to the workspace certificate store at `" & CtTestStoreDir &
-  "/<platform>.toml` — which is where CodeTracer's status bar looks, so a " &
-  "project needs no flag and no other tool to be reported as certified; " &
-  "`ct test` also writes `" & WorkspaceStateDir & "/.gitignore` so its own " &
-  "record never shows up as an untracked file in the next run; " &
+  ", framework " & CtTestFramework & ") in the run summary and PUBLISHES it " &
+  "to your local certificate store — `$TEST_CERTIFICATES_DIR` when it is an " &
+  "absolute path, else `$XDG_STATE_HOME/test-certificates` " &
+  "(`~/.local/state/test-certificates`) on Linux, " &
+  "`~/Library/Application Support/test-certificates` on macOS, " &
+  "`%LOCALAPPDATA%\\test-certificates` on Windows — at `v1/<algorithm>/" &
+  "<digest>/<payload sha256>.toml`, keyed by the content it attests, which " &
+  "is where CodeTracer's status bar looks; nothing is written into the " &
+  "repository, and the store keeps the newest " & $DefaultRetention &
+  " contents plus HEAD's; to get a certificate as a file, copy it out of " &
+  "the store or use the test-certificates helper tool's `find`; " &
   "a certificate is bound to the CONTENT of the tracked files as the tests " &
   "ran against them (`vcs.content`, computed before and after the run; " &
   "`vcs.base` names HEAD and is informational only), so a modified working " &
@@ -103,9 +107,8 @@ proc ctTestUsageMessage*(): string =
   "assume-unchanged or skip-worktree entries git does not look at, a " &
   "submodule with uncommitted changes); withholding never changes the exit " &
   "status; " &
-  "`--certificate <path>` writes the record THERE INSTEAD (useful for a " &
-  "destination outside the repository), and `--no-certificate` suppresses " &
-  "issuance entirely; signing is OPTIONAL and OFF " &
+  "`--no-certificate` suppresses issuance entirely, so nothing is written; " &
+  "signing is OPTIONAL and OFF " &
   "unless `--sign-key` is passed; " &
   "discovery is scoped to the workspace's own files by default — " &
   "`--scope` (or the CT_TEST_SCOPE environment variable) selects the rule, " &
@@ -150,7 +153,6 @@ type
     threads: int                 ## 0 ⇒ REPRO_TEST_THREADS / CPU count
     jsonOutput: bool
     summaryPath: string          ## optional path to also write the summary to
-    certificatePath: string      ## optional path to write the certificate to
     noCertificate: bool          ## suppress issuance entirely
     signKeyPath: string          ## OpenSSH ed25519 private key; empty ⇒ unsigned
     keyId: string                ## which key signed, for a consumer's key store
@@ -183,9 +185,6 @@ proc parseRunArgs(args: seq[string]): RunOptions =
     of "--summary":
       if i + 1 >= args.len: result.errors.add "missing value for --summary"
       else: result.summaryPath = args[i + 1]; inc i
-    of "--certificate":
-      if i + 1 >= args.len: result.errors.add "missing value for --certificate"
-      else: result.certificatePath = args[i + 1]; inc i
     of "--no-certificate":
       result.noCertificate = true
     of "--sign-key":
@@ -261,18 +260,18 @@ proc issuerIdentity(): string =
     "ct-test"
 
 proc certificateReport(issuance: Issuance;
-                       writtenTo, writeError, storeNotice: string): JsonNode =
+                       writtenTo, writeError: string;
+                       pruneErrors: seq[string]): JsonNode =
   ## The ``certificate`` object attached to every run summary.
   ##
   ## Present whether or not a certificate was issued: "no certificate, and
   ## here is why, and here is what would change that" is the report a producer
   ## owes its user, and silence is what makes a withholding producer unusable.
   ##
-  ## ``storeNotice`` is the same argument applied to the *destination*: a run
-  ## that published into a store git does not ignore has left a file that will
-  ## make the NEXT run report this tree as dirty, and a producer that noticed
-  ## and said nothing would be handing its user a foot-gun it had already seen
-  ## (``certificate_default_store``).
+  ## ``written_to`` is the full path of the record in the user's local
+  ## certificate store (``certificate_local_store``); nothing is ever written
+  ## inside the repository, so there is no store notice to give (the
+  ## ``store_notice`` field CTC-2 had is gone with the workspace store).
   # `vcs` is TRI-state, not a boolean. A run that failed its own gate (no tests
   # executed, tests failed) never reaches git at all, and reporting that as
   # "could not determine the repository state" would send an operator after a
@@ -313,8 +312,8 @@ proc certificateReport(issuance: Issuance;
       result["written_to"] = %writtenTo
     if writeError.len > 0:
       result["write_error"] = %writeError
-    if storeNotice.len > 0:
-      result["store_notice"] = %storeNotice
+    if pruneErrors.len > 0:
+      result["prune_errors"] = %pruneErrors
   else:
     result["withheld_reason"] = %($issuance.reason)
     result["message"] = %issuance.message
@@ -393,41 +392,23 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
 
   if not opts.noCertificate:
     let issuance = outcome.issuance
-    var writtenTo, writeError, storeNotice, destination: string
+    var writtenTo, writeError: string
+    var pruneErrors: seq[string]
     if issuance.issued:
-      if opts.certificatePath.len > 0:
-        # AN EXPLICIT DESTINATION REPLACES THE DEFAULT rather than adding to
-        # it. That is what keeps `--certificate` usable for its one job the
-        # default cannot do — writing the record somewhere outside the
-        # repository — and it means a caller who named a path gets that path
-        # and no surprise second copy inside their tree.
-        destination = opts.certificatePath
-        try:
-          let parent = parentDir(opts.certificatePath)
-          if parent.len > 0:
-            createDir(parent)
-          writeFile(opts.certificatePath, issuance.document)
-          writtenTo = opts.certificatePath
-        except CatchableError as err:
-          writeError = err.msg
-      else:
-        # THE DEFAULT DESTINATION, and the reason CTC-2 exists: a certificate
-        # nothing can find certifies nothing. The workspace store is where
-        # `certificate_store` discovers records and therefore where the status
-        # bar reads them, so a project that runs `ct test` and nothing else is
-        # reported as certified without a flag. `publishCertificate` puts the
-        # ignore guard in front of the record; see its module header for why
-        # writing into the workspace is otherwise a foot-gun.
-        let published = publishCertificate(
-          response.workspaceRoot, issuance.certificate.platform,
-          issuance.document)
-        destination = published.path
-        if published.written:
-          writtenTo = published.path
-        writeError = published.error
-        storeNotice = published.notIgnoredNotice
+      # THE LOCAL CERTIFICATE STORE, always (Transport.md §2): the user root,
+      # keyed by the content the record attests. Never the repository — a
+      # certificate in the working tree would change the content it attests —
+      # and never a path the caller names: `--certificate <path>` was removed
+      # (CTC-3e). A user who wants a file copies it out of the store.
+      let published = publishToLocalStore(
+        nativeCertificateStoreRoots(), response.workspaceRoot,
+        issuance.document)
+      if published.written:
+        writtenTo = published.path
+      writeError = published.error
+      pruneErrors = published.pruned.errors
     summaryJson["certificate"] =
-      certificateReport(issuance, writtenTo, writeError, storeNotice)
+      certificateReport(issuance, writtenTo, writeError, pruneErrors)
 
     if not issuance.issued:
       # stderr, so a machine consumer parsing the summary on stdout is
@@ -438,11 +419,11 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
     else:
       if writeError.len > 0:
         stderr.writeLine "ct test: certificate issued but not written to " &
-                         destination & ": " & writeError
-      if storeNotice.len > 0:
-        # Not a failure: the record IS issued and the run's verdict is
-        # unaffected. It is a warning about what the next run will see.
-        stderr.writeLine "ct test: warning — " & storeNotice
+                         "the local certificate store: " & writeError
+      for problem in pruneErrors:
+        # Not a failure: pruning is a matter of disk space (Transport.md §2.5).
+        stderr.writeLine "ct test: warning — the certificate store could " &
+                         "not be pruned: " & problem
 
   echo summaryJson.pretty
   if opts.summaryPath.len > 0:

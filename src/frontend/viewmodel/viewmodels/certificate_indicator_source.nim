@@ -10,13 +10,24 @@
 ##
 ## ## Read-only, and structurally so
 ##
-## The facade operations used are `fs.listDir`, `fs.readText`, `fs.stat`, and
-## the VCS reads `repositoryRoot` and `contentId` (W, SB-2a). Nothing here
+## The facade operations used are `fs.listDir`, `fs.readText`, `fs.stat`,
+## `fs.certificateStoreRoots`, and the VCS reads `repositoryRoot` and
+## `contentId` (W, H and S, SB-2a). Nothing here
 ## writes a file, a ref or the index — computing W writes only loose,
 ## content-addressed objects into the repository's object store, which is
 ## what `vcs.contentId` documents — and `CertificateStoreAccess` (the seam
 ## this fills in) has no write operation for a future caller to reach
 ## through.
+##
+## ## Where the records come from
+##
+## The user's local certificate store (Transport.md §2), both roots, looked up
+## by the content ids of W, H and S in every `git-tree-*` algorithm the host
+## can compute — never enumerated, because it is shared by every repository
+## the user works in — pooled with reprobuild's workspace directory. `ct
+## test`'s old workspace store, `.ct/certificates`, is not read (CTC-3e).
+## How the indicator then DECIDES between W, H and S is Status-Bar SB-2b's;
+## until then it decides on W exactly as before, over the records found.
 ##
 ## ## Why synchronous
 ##
@@ -274,6 +285,63 @@ proc workspaceVcsState*(host: Platform; workspaceDir: string):
     repo: lastPathSegment(root.value),
     workingTree: workingTreeOracle(host, root.value))
 
+const LocalStoreAlgorithms = ["git-tree-sha1", "git-tree-sha256"]
+  ## The algorithms whose directories are looked up. A repository computes
+  ## one of them; the host answers "cannot compute" for the other, cheaply.
+
+proc storeRoots(host: Platform): CertificateStoreRoots =
+  ## The local store's roots as this host resolves them (SB-2a's facade
+  ## operation). A host that cannot say has no local store as far as this
+  ## read is concerned, which the reader reports as "could not look".
+  try:
+    let outcome = awaitSync(host.fs.certificateStoreRoots())
+    if outcome.ok:
+      return outcome.value
+    noLocalStore("the local certificate store's roots could not be " &
+                 "resolved: " & $outcome.error)
+  except CatchableError as err:
+    noLocalStore("resolving the local certificate store raised: " & err.msg)
+  except:
+    noLocalStore("resolving the local certificate store raised: " &
+                 getCurrentExceptionMsg())
+
+proc localStoreQuery*(host: Platform; workspaceDir: string;
+                      vcs: WorkspaceVcsState): LocalStoreQuery =
+  ## Which content directories of the local store to read: W's (through the
+  ## same memoised oracle the verifier then uses), H's and S's, in each
+  ## `git-tree-*` algorithm the host can compute here. A state with no
+  ## content id contributes no directory. No repository, no lookup.
+  result.roots = storeRoots(host)
+  if not vcs.known:
+    return
+  for algorithm in LocalStoreAlgorithms:
+    let w = vcs.workingTree(algorithm, @[])
+    if w.computed and w.id notin result.contentIds:
+      result.contentIds.add w.id
+  var root = ""
+  try:
+    let outcome = awaitSync(host.vcs.repositoryRoot(workspaceDir))
+    if outcome.ok:
+      root = outcome.value
+  except CatchableError:
+    discard
+  except:
+    discard
+  if root.len == 0:
+    return
+  for source in [vbsHead, vbsIndex]:
+    for algorithm in LocalStoreAlgorithms:
+      try:
+        let outcome = awaitSync(host.vcs.contentId(root, source, algorithm,
+                                                   @[]))
+        if outcome.ok and outcome.value.kind == vcikComputed and
+           outcome.value.id notin result.contentIds:
+          result.contentIds.add outcome.value.id
+      except CatchableError:
+        discard
+      except:
+        discard
+
 proc platformCertificateFacts*(host: Platform; workspaceDir: string;
                                platformTriple: string;
                                verifier: CertificateSignatureVerifier = nil):
@@ -293,9 +361,11 @@ proc platformCertificateFacts*(host: Platform; workspaceDir: string;
   ## renderer passes, because a browser has no `ssh-keygen` — means signatures
   ## cannot be checked at all, which is *undecidable* and lands as
   ## unverifiable. It is never silently read as valid.
+  let vcs = workspaceVcsState(host, workspaceDir)
   CertificateIndicatorFacts(
-    store: readCertificateStore(platformStoreAccess(host), workspaceDir),
-    vcs: workspaceVcsState(host, workspaceDir),
+    store: readCertificateStore(platformStoreAccess(host), workspaceDir,
+                                localStoreQuery(host, workspaceDir, vcs)),
+    vcs: vcs,
     platform: platformTriple,
     signatureVerifier: verifier)
 

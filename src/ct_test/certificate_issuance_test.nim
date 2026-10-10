@@ -1366,7 +1366,9 @@ suite "ct test certificate issuance":
     check exported == @[
       "currentPlatform",        # host os/arch; reads nothing, signs nothing
       "redactSecrets",          # pure string transformation
-      "defaultGitRunner",       # runs git; cannot sign
+      # 2026-10-10 (CTC-3e): `defaultGitRunner` removed. It existed only for
+      # the workspace store's `git check-ignore` report, which went with that
+      # store; the local certificate store is outside the repository.
       "probeVcs",               # reads repository state
       "runAndAttest"]           # the ONLY route to a signature — and it runs
                                 # the tests itself, so it takes no results

@@ -229,6 +229,31 @@ template runHookEndToEnd(nargo, collector: string) =
   check notification{"files"}[0]{"path"}.getStr() == "src/main.nr"
   check notification{"files"}[0]{"diff"}.getStr().contains("+    let doubled")
 
+  # The hook's DEFAULT output, `.ct/review`, is inside the repository. It must
+  # leave nothing untracked there: an untracked `.ct/` makes every later test
+  # certificate report `untracked = true` (`common/ct_state_dir.nim`). The
+  # `untracked` field itself is asserted from `ct test run` in
+  # `src/ct_test/certificate_cli_test.nim`; it is exactly this `git status`.
+  # (`nargo` may leave its own `target/` here, which is not ours to judge, so
+  # only `.ct` entries are looked at.)
+  let defaultRun = runCt(@["agent", "end-of-turn"], extraEnv = {
+    "CODETRACER_AGENT_SESSION_ID": "agent:acp:rv7-hook",
+    "CODETRACER_AGENT_TASK_ID": "task-rv7-hook",
+    "CODETRACER_AGENT_WORKSPACE": repo,
+    "CODETRACER_REVIEW_DIFF": "HEAD~..HEAD",
+    "CODETRACER_REVIEW_RECORDINGS": work / "recordings",
+    "CODETRACER_REPLAY_SERVER_PATH": collector}, workingDir = repo)
+  checkpoint(defaultRun.output)
+  check defaultRun.exitCode == 0
+  check fileExists(repo / ".ct" / "review" / "review.json")
+  check fileExists(repo / ".ct" / ".gitignore")
+  let status = execCmdEx("git status --porcelain=v1 --untracked-files=normal",
+    workingDir = repo)
+  check status.exitCode == 0
+  checkpoint(status.output)
+  for line in status.output.splitLines():
+    check not (line.len > 3 and line[3 .. ^1].startsWith(".ct"))
+
 
 suite "ct agent — the shipped binary":
   setup:

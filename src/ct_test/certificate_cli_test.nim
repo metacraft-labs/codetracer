@@ -21,12 +21,16 @@
 ## them are decided only after a test has PASSED, which no shipped provider
 ## can do here without a language toolchain. That case therefore also drives
 ## the same CLI entry point with an in-process fixture provider — the seam
-## ``certificate_default_store_test.nim`` justifies — which reports a pass for
+## ``certificate_local_store_test.nim`` justifies — which reports a pass for
 ## the test it is handed and, for one fixture file, edits a tracked file while
 ## it runs. Discovery, orchestration, issuance and the exit status are the
 ## shipped code.
+##
+## A run that issues PUBLISHES to the user's local certificate store, so this
+## suite points ``TEST_CERTIFICATES_DIR`` (and the system root) at scratch
+## directories before anything runs: no case may write the real store.
 
-import std/[json, options, os, osproc, streams, strutils, unittest]
+import std/[json, options, os, osproc, posix, streams, strutils, unittest]
 
 import contracts
 import certificate
@@ -34,8 +38,12 @@ import certificate_issuance
 import ct_test
 import discovery
 import run_orchestration
+import ../common/ct_state_dir
 
 const
+  DefaultHookOutputDirForTest = ".ct" / "review"
+    ## `agent_cli.DefaultHookOutputDir`, the end-of-turn hook's default
+    ## dataset directory (that module is not importable from this lane).
   FixtureProviderId = "fixture-cli"
   FixtureTestFile = "tests/calc_test.fixture"
   EditingMarker = "edit a tracked file while running"
@@ -127,13 +135,26 @@ suite "calc":
 proc runCli(args: seq[string]): int =
   runCtTest(args, newDefaultProviderRegistry(), newDiscoveryCache())
 
+let storeScratch = getTempDir() / "ct-test-cert-cli" /
+                   ("store-" & $getCurrentProcessId())
+removeDir(storeScratch)
+putEnv("TEST_CERTIFICATES_DIR", storeScratch / "user-root")
+putEnv("TEST_CERTIFICATES_SYSTEM_DIR", storeScratch / "system")
+
+proc storeFileCount(): int =
+  if dirExists(storeScratch / "user-root"):
+    for path in walkDirRec(storeScratch / "user-root"):
+      inc result
+
 suite "ct test run certificate CLI":
 
   test "the usage text documents the certificate surface":
     ## A flag that decides whether an attestation is produced, or signed, and
     ## appears in no usage text is a flag nobody finds when they need it.
     let usage = ctTestUsageMessage()
-    check "--certificate <path>" in usage
+    # 2026-10-10 (CTC-3e): `--certificate <path>` was removed (CTC-3 operator
+    # decision 9); a run always publishes to the local certificate store.
+    check "--certificate <path>" notin usage
     check "--no-certificate" in usage
     check "--sign-key" in usage
     check "--key-id" in usage
@@ -210,6 +231,158 @@ suite "ct test run certificate CLI":
                      "--no-certificate"])
     require fileExists(summaryPath)
     check not parseJson(readFile(summaryPath)).hasKey("certificate")
+
+  test "--no-certificate writes nothing to the local store":
+    ## The case above, on a run that WOULD issue: a passing fixture test in
+    ## a real repository. Without the flag it publishes one record; with it
+    ## the local store stays absent and no `written_to` appears.
+    let workspace = scratchDir("no-certificate-store")
+    createDir(workspace / "tests")
+    writeFile(workspace / FixtureTestFile, "adds\n")
+    git(workspace, ["init", "--initial-branch=main", "."])
+    git(workspace, ["config", "user.email", "ct-test@example.invalid"])
+    git(workspace, ["config", "user.name", "ct test suite"])
+    git(workspace, ["config", "commit.gpgsign", "false"])
+    git(workspace, ["add", "-A"])
+    git(workspace, ["commit", "-m", "initial"])
+    removeDir(storeScratch)
+    let summaryPath = scratchDir("no-certificate-store-summary") / "s.json"
+    check runCtTest(@["test", "run", "--workspace", workspace, "--threads",
+                      "1", "--summary", summaryPath, "--no-certificate"],
+                    fixtureRegistry(), newDiscoveryCache()) == 0
+    let suppressed = parseJson(readFile(summaryPath))
+    check not suppressed.hasKey("certificate")
+    check "written_to" notin $suppressed
+    check not dirExists(storeScratch / "user-root")
+    check storeFileCount() == 0
+    check not dirExists(workspace / ".ct")
+    # The control: the same run without the flag does publish.
+    check runCtTest(@["test", "run", "--workspace", workspace, "--threads",
+                      "1", "--summary", summaryPath],
+                    fixtureRegistry(), newDiscoveryCache()) == 0
+    let report = parseJson(readFile(summaryPath)){"certificate"}
+    check report{"issued"}.getBool
+    check report{"written_to"}.getStr.startsWith(storeScratch / "user-root")
+    check storeFileCount() == 1
+
+  test "--certificate is no longer accepted":
+    ## Removed (CTC-3 operator decision 9), and NOT silently ignored: a script
+    ## relying on it must find out. It is an unknown-flag usage error like any
+    ## other — non-zero, the message names the flag — that runs no tests and
+    ## writes nothing at the path it named.
+    let workspace = scratchDir("certificate-flag")
+    createDir(workspace / "tests")
+    writeFile(workspace / FixtureTestFile, "adds\n")
+    git(workspace, ["init", "--initial-branch=main", "."])
+    git(workspace, ["config", "user.email", "ct-test@example.invalid"])
+    git(workspace, ["config", "user.name", "ct test suite"])
+    git(workspace, ["config", "commit.gpgsign", "false"])
+    git(workspace, ["add", "-A"])
+    git(workspace, ["commit", "-m", "initial"])
+    let target = scratchDir("certificate-flag-out") / "run.toml"
+    removeDir(storeScratch)
+    let provider = fixtureRegistry()
+    let summaryPath = scratchDir("certificate-flag-summary") / "s.json"
+    # The error envelope is printed on stdout (and each message on stderr);
+    # stdout is redirected to a file around the call so the case can read it.
+    let captured = scratchDir("certificate-flag-stdout") / "stdout.json"
+    flushFile(stdout)
+    let saved = dup(1)
+    let sink = posix.open(captured.cstring, O_WRONLY or O_CREAT or O_TRUNC,
+                          0o600)
+    discard dup2(sink, 1)
+    let code = runCtTest(@["test", "run", "--workspace", workspace,
+                           "--threads", "1", "--summary", summaryPath,
+                           "--certificate", target],
+                         provider, newDiscoveryCache())
+    flushFile(stdout)
+    discard dup2(saved, 1)
+    discard posix.close(sink)
+    discard posix.close(saved)
+    let envelope = parseJson(readFile(captured))
+    checkpoint $envelope
+    check "unknown run argument: --certificate" in $envelope{"errors"}
+    check code != 0
+    check code == ExitTestsFailed
+    # Rejected before discovery: nothing dispatched, nothing executed.
+    check envelope{"dispatched"}.getInt == 0
+    check envelope{"executed"}.getInt == 0
+    check not fileExists(target)
+    check not fileExists(summaryPath)
+    check storeFileCount() == 0
+
+  test "CodeTracer's own .ct/ state never makes a certificate untracked":
+    ## Regression guard. Until CTC-3e the certificate store under `.ct/`
+    ## wrote `.ct/.gitignore` as a side effect, and every other writer of
+    ## `.ct/` relied on it. The store left the workspace; `ct agent
+    ## end-of-turn` still writes `.ct/review` (and the documented workflow
+    ## records into `.ct/runs`). Those writers now guard `.ct/` themselves
+    ## through `ct_state_dir.guardCtStateWrite` — the call `ct review
+    ## collect` and `ct record -o` make before their subprocess writes (the
+    ## end-to-end hook run is asserted in `src/tests/cli/agent_cli_test.nim`).
+    proc freshRepository(name: string): string =
+      result = scratchDir(name)
+      createDir(result / "tests")
+      writeFile(result / FixtureTestFile, "adds\n")
+      git(result, ["init", "--initial-branch=main", "."])
+      git(result, ["config", "user.email", "ct-test@example.invalid"])
+      git(result, ["config", "user.name", "ct test suite"])
+      git(result, ["config", "commit.gpgsign", "false"])
+      git(result, ["add", "-A"])
+      git(result, ["commit", "-m", "initial"])
+
+    proc porcelain(workspace: string): string =
+      let (output, code) = execCmdEx(
+        "git status --porcelain=v1 --untracked-files=normal",
+        workingDir = workspace)
+      check code == 0
+      output
+
+    proc issuedUntracked(workspace, name: string): JsonNode =
+      let summaryPath = scratchDir(name & "-summary") / "s.json"
+      check runCtTest(@["test", "run", "--workspace", workspace, "--threads",
+                        "1", "--summary", summaryPath],
+                      fixtureRegistry(), newDiscoveryCache()) == 0
+      let report = parseJson(readFile(summaryPath)){"certificate"}
+      checkpoint name & ": " & $report
+      check report{"issued"}.getBool
+      report{"untracked"}
+
+    # `ct test run` itself leaves nothing under `.ct/`, nor anything else
+    # untracked, and the certificate it issues says so.
+    let tested = freshRepository("ct-dir-after-test-run")
+    check not issuedUntracked(tested, "after-test-run").getBool(true)
+    check porcelain(tested) == ""
+    check not dirExists(tested / ".ct")
+    check not issuedUntracked(tested, "after-second-test-run").getBool(true)
+
+    # The end-of-turn hook's writes, through the guard its collector calls.
+    let hooked = freshRepository("ct-dir-after-end-of-turn")
+    for target in [hooked / DefaultHookOutputDirForTest,
+                   hooked / ".ct" / "runs" / "run-1"]:
+      check guardCtStateWrite(target) == ""
+      createDir(target)
+      writeFile(target / "review.json", "{}\n")
+    check fileExists(hooked / ".ct" / CtStateIgnoreFileName)
+    check porcelain(hooked) == ""
+    check not issuedUntracked(hooked, "after-end-of-turn").getBool(true)
+
+    # The control: the same writes WITHOUT the guard are what flipped it.
+    let unguarded = freshRepository("ct-dir-unguarded")
+    createDir(unguarded / DefaultHookOutputDirForTest)
+    writeFile(unguarded / DefaultHookOutputDirForTest / "review.json", "{}\n")
+    check porcelain(unguarded) != ""
+    check issuedUntracked(unguarded, "unguarded").getBool(false)
+
+    # A user's own `.ct/.gitignore` is theirs: never replaced.
+    let own = freshRepository("ct-dir-own-ignore")
+    createDir(own / ".ct")
+    writeFile(own / ".ct" / CtStateIgnoreFileName, "review/\n")
+    check guardCtStateWrite(own / ".ct" / "review") == ""
+    check readFile(own / ".ct" / CtStateIgnoreFileName) == "review/\n"
+    # Paths outside `.ct/` are not touched; a `*.ct` container is not `.ct/`.
+    check guardCtStateWrite(own / "out" / "trace.ct") == ""
+    check not dirExists(own / "out")
 
   test "withholding an attestation does not change the run's exit code":
     ## The tests still ran. Withholding is a statement about what the producer
@@ -393,3 +566,7 @@ suite "calc":
     let probe = probeVcs(workspace)
     check not probe.determined
     check "not inside a git repository" in probe.undeterminedReason
+
+# Module level, not an exit hook (see 5175da85f).
+try: removeDir(storeScratch)
+except CatchableError: discard

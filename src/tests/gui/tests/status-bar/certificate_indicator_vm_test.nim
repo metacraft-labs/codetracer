@@ -16,6 +16,16 @@
 ## ``readKeyStore``; and the real ``certificate_verification.verifyCertificates``
 ## deciding every verdict. Nothing about the *subject* is stubbed.
 ##
+## Where the records sit (2026-10-10, CTC-3e): most cases put them in
+## reprobuild's workspace carrier (``StoreDir``), which the reader still pools
+## and which lists every record whatever its content, so these cases keep
+## exercising the ViewModel's decision over records for other content. `ct
+## test` itself now publishes to the per-user local certificate store,
+## looked up by content id; the cases that are about a record `ct test`
+## wrote put it there (``localPath``), under its own content's directory, and
+## the facts look W up in it the way the indicator source does. `ct test`'s
+## old ``.ct/certificates`` is read by nothing.
+##
 ## The filesystem is faked for one reason, and it is a hard one: **this suite
 ## runs on both Nim backends** (`vm-native` and `vm-js`), and ``std/os`` does
 ## not exist under ``nim js``. A real-filesystem version could only ever run on
@@ -85,7 +95,10 @@ const
   TreeB = "git-tree-sha1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     ## Content ids — the binding.
   Platform = "linux/amd64"
-  StoreDir = ".ct/certificates"
+  StoreDir = ".repro/workspace/certificates"
+    ## reprobuild's workspace carrier. (`.ct/certificates` until CTC-3e.)
+  UserRoot = "/home/u/.local/state/test-certificates"
+    ## The local certificate store's user root, as a host would resolve it.
 
 proc newWorld(): FakeWorld =
   FakeWorld(
@@ -118,10 +131,15 @@ proc access(world: FakeWorld): CertificateStoreAccess =
           return StoreListing(status: srUnreadable,
                               detail: "permission denied")
       var names: seq[string] = @[]
+      var exists = false
       for path in world.files.keys:
         if dirOf(path) == dir:
           names.add nameOf(path)
-      if names.len == 0:
+        if path.startsWith(dir & "/"):
+          # A directory exists when anything is below it, as on a real
+          # filesystem: the local store's root holds directories, not files.
+          exists = true
+      if not exists:
         return StoreListing(status: srAbsent)
       StoreListing(status: srOk, names: names)
     ,
@@ -159,9 +177,15 @@ proc workspaceState(world: FakeWorld): WorkspaceVcsState =
     workingTree: proc(algorithm: string; paths: seq[string]): ContentAnswer
         {.closure.} = world.answer(algorithm, paths))
 
+proc localQuery(world: FakeWorld): LocalStoreQuery =
+  ## The local store looked up by W, as `localStoreQuery` does on a host.
+  result.roots = CertificateStoreRoots(available: true, user: UserRoot)
+  if world.known and world.workingTreeProblem.len == 0:
+    result.contentIds = @[world.workingTree]
+
 proc facts(world: FakeWorld): CertificateIndicatorFacts =
   CertificateIndicatorFacts(
-    store: readCertificateStore(world.access, WorkspaceRoot),
+    store: readCertificateStore(world.access, WorkspaceRoot, world.localQuery),
     vcs: world.workspaceState,
     platform: world.platform,
     signatureVerifier: world.verifier)
@@ -203,6 +227,10 @@ proc sampleCertificate(content = TreeA; base = CommitA; platform = Platform;
 proc document(cert: TestCertificate): string = renderCertificate(cert)
 
 proc storePath(name: string): string = WorkspaceRoot & "/" & StoreDir & "/" & name
+
+proc localPath(content, name: string): string =
+  ## Where `ct test` publishes a record for ``content`` (Transport.md §2.2).
+  UserRoot & "/" & localStoreContentDir(content).relative & "/" & name
 
 proc withCertificate(world: FakeWorld; cert: TestCertificate;
                      name = "run.toml"; modifiedMs: int64 = 1000): FakeWorld =
@@ -490,8 +518,10 @@ status = "active"
     # "no certificates found" usually means a fetch or a push was missed, and
     # a report that does not say where it looked cannot be acted on.
     check model.searched.len == 2
-    check ".ct/certificates" in model.searched
     check ".repro/workspace/certificates" in model.searched
+    check localPath(TreeA, "").strip(leading = false, chars = {'/'}) in
+          model.searched
+    check ".ct/certificates" notin model.searched
 
   test "a store that exists and cannot be listed is unverifiable, not empty":
     ## The other half of the case above, and the reason it is not enough on its
@@ -559,12 +589,12 @@ status = "active"
     let world = newWorld()
     world.put(WorkspaceRoot & "/.repro/workspace/certificates/old.toml",
               document(sampleCertificate(content = TreeA)), 1000)
-    world.put(storePath("new.toml"),
+    world.put(localPath(TreeB, "new.toml"),
               document(sampleCertificate(content = TreeB)), 2000)
     world.workingTree = TreeB
     let model = world.evaluate()
     check model.state == cisCertified
-    check model.certificateName == StoreDir & "/new.toml"
+    check model.certificateName == localPath(TreeB, "new.toml")
 
     # And the other way round, so the case cannot pass by accident of which
     # directory is searched first.
@@ -587,7 +617,7 @@ status = "active"
     ## trailing comma — which must parse to the same record).
     let agentCert = sampleCertificate()
     let agentWorld = newWorld()
-    agentWorld.put(storePath("agent.toml"), document(agentCert), 1000)
+    agentWorld.put(localPath(TreeA, "agent.toml"), document(agentCert), 1000)
 
     # The same claim, written by hand the way a shell hook would: keys out of
     # canonical order, a comment, CRLF line endings, extra whitespace, and the
