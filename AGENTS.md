@@ -136,7 +136,9 @@ The user-facing reference is README.md, "Running the terminal (TUI) and native
    they expect their own remembered layout in `$XDG_STATE_HOME/codetracer/`
    (`~/.local/state/codetracer/tui-layout.json`). When YOU drive the TUI for
    testing, always set `CODETRACER_TUI_LAYOUT_DIR=<scratch dir>` so a test never
-   rewrites the user's layout or `icons` choice.
+   rewrites the user's layout or `icons` choice — and a scratch
+   `CODETRACER_HOME` (see "Tests never touch your real CodeTracer state"), which
+   keeps the trace index, recordings and config out of their profile as well.
 8. **Stopping.** The user quits with `q`; closing the pane also ends it. Each
    running TUI owns one `replay-server` child, which exits with it. The
    orphan-sensitive pty suites (`test_real_no_orphans`, `test_real_pty_lifecycle`)
@@ -163,8 +165,35 @@ cargo build
 
 ```
 # inside src/db-backend
-cargo test
+CODETRACER_HOME="$(mktemp -d)" cargo test
 ```
+
+### Tests never touch your real CodeTracer state: `CODETRACER_HOME`
+
+`CODETRACER_HOME` relocates EVERY per-user location CodeTracer has — the trace
+index, recordings, config and layouts, native TUI/GPUI state, caches, the
+per-run tmp dir, Electron's profile, `ct-native-replay`'s licensing counter —
+on every OS, and every child process inherits it. Layout:
+`$CODETRACER_HOME/{data,config,state,cache,tmp,launcher}`. Resolvers:
+`src/common/ct_home.nim` (Nim) and `libs/ct-home` (Rust); unset, nothing moves.
+Full table: codetracer-specs `Architecture/Per-User-State-Locations.md`.
+
+- The harnesses set a scratch one for you: every Nim test program (force-imported
+  `test_support/state_isolation.nim`), `ci/lib/run-nim-test-lane.sh` (one per
+  file), `just test-rust` / `just test-frontend-js` / the Windows Rust lanes /
+  `scripts/run-cross-repo-tests.sh` (`ci/lib/codetracer-home.sh`), the
+  db-backend integration harness (`ct_home::isolate_for_tests`), and the
+  Playwright fixtures. A bare `cargo test` or `cargo nextest` does NOT — export
+  one as above.
+- When a suite gives a spawned helper a scratch directory, set
+  `CODETRACER_HOME` for it. Never redirect `HOME`/`USERPROFILE`/`XDG_*_HOME`
+  instead: `CODETRACER_HOME` outranks them, and missing `USERPROFILE` is how a
+  Windows run wrote into a real `trace_index.db` (2026-09-23).
+- When YOU drive `ct`, the TUI or the GUI to verify something, export a scratch
+  `CODETRACER_HOME` too. When launching for the user, do not.
+- `src/common/ct_home_isolation_test.nim` fails a harness that stops setting it,
+  a suite that redirects a home variable without it, and a resolver that
+  ignores it.
 
 ## Running the linter
 
