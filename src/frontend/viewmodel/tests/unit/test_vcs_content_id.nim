@@ -366,6 +366,9 @@ suite "the host resolves the local certificate store's roots":
     doAssert outcome.ok, $outcome.error
     outcome.value
 
+  # ct-home-sweep: not codetracer state -- HOME / XDG_STATE_HOME are redirected
+  # to exercise the cross-tool test-certificates store's own §2.1 rules, which
+  # CODETRACER_HOME deliberately does not override.
   let saved = @[("TEST_CERTIFICATES_DIR", getEnv("TEST_CERTIFICATES_DIR")),
                 ("TEST_CERTIFICATES_SYSTEM_DIR", getEnv("TEST_CERTIFICATES_SYSTEM_DIR")),
                 ("XDG_STATE_HOME", getEnv("XDG_STATE_HOME")),

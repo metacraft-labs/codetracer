@@ -346,11 +346,17 @@ suite "CODETRACER_HOME — the sweeps":
     ## A file that names an OS per-user variable or a home-relative CodeTracer
     ## path in CODE must also go through `ct_home` (or name `CODETRACER_HOME`
     ## in its own spelling). Text a user reads — help, an MCP tool
-    ## description — is not a resolution and is listed with its reason.
+    ## description — is not a resolution and is listed with its reason. So is
+    ## a location CodeTracer does not own: one an external specification
+    ## defines, shared with other tools, with an override of its own.
     const textOnly = [
       ("src/backend-manager/src/mcp_server.rs", "an MCP tool's description text"),
       ("src/ct/utilities/types.nim", "a help message"),
-      ("src/frontend/viewmodel/views/isonim_repl_view.nim", "a user-facing message")]
+      ("src/frontend/viewmodel/views/isonim_repl_view.nim", "a user-facing message"),
+      ("src/ct_test/certificate_store_roots.nim",
+       "the cross-tool test-certificates store (test-certificates-spec " &
+       "Transport.md §2.1); its override is TEST_CERTIFICATES_DIR, and " &
+       "CODETRACER_HOME deliberately does not move a store other producers share")]
     var scanned, resolving = 0
     for path in walkDirRec(repoRoot / "src"):
       let rel = path.relativePath(repoRoot).replace('\\', '/')

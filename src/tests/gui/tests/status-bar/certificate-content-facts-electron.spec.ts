@@ -248,6 +248,9 @@ test.describe("SB-2a: certificate content facts through the Electron facade", ()
     ctPage,
   }) => {
     await probeReady(ctPage);
+    // ct-home-sweep: not codetracer state -- HOME / XDG_STATE_HOME are
+    // redirected to exercise the cross-tool test-certificates store's own §2.1
+    // rules, which CODETRACER_HOME deliberately does not override.
     const explicit = path.join(scratch, "explicit-store");
     const state = path.join(scratch, "state");
     const home = path.join(scratch, "home");
