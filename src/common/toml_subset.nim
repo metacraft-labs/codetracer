@@ -24,10 +24,19 @@
 ## ## WHAT THE SUBSET IS
 ##
 ## Basic and literal strings, booleans, arrays, `[table]` and `[[array of
-## tables]]` headers. Everything else — integers, floats, dates, inline
-## tables, multi-line strings — is a parse ERROR, not a value this reader
-## guesses at. Strictness is the feature: a consumer that cannot read its
-## input must report it as unreadable rather than silently degrade.
+## tables]]` headers. Everything else — integers, floats, dates — is a parse
+## ERROR, not a value this reader guesses at. Strictness is the feature: a
+## consumer that cannot read its input must report it as unreadable rather
+## than silently degrade.
+##
+## Two further constructs are OPT-IN, per call (`TomlExtension`): inline
+## tables and multi-line strings. A test certificate MUST be read from any
+## rendering of its fields (Canonical-Payload.md §5), and the standard's
+## `vectors/store/` group delivers certificates written with both — an
+## `[certificate.vcs]` spelled as an inline table, a `command` array of
+## inline tables, a `framework = """…"""`. The certificate reader enables
+## them. Nothing else does, so what a project definition or a key store
+## accepts is unchanged by the certificate format's needs.
 ##
 ## ## PURITY
 ##
@@ -46,6 +55,17 @@ type
 
 
 type
+  TomlExtension* = enum
+    ## Constructs outside the base subset that a caller may opt into.
+    teInlineTables
+      ## ``{ key = value, … }``, and arrays of them. TOML 1.0's rules apply:
+      ## on one line, no trailing comma, and the table is complete as written
+      ## — no header and no dotted key may add to it afterwards.
+    teMultilineStrings
+      ## ``"""…"""`` and ``'''…'''``, with TOML's trimming of a newline
+      ## directly after the opening delimiter and, in the basic form, its
+      ## line-ending backslash. A CRLF inside one reads as LF.
+
   TomlKind* = enum
     tomlString, tomlBool, tomlArray, tomlTable
 
@@ -56,7 +76,13 @@ type
     case kind*: TomlKind
     of tomlString: strVal*: string
     of tomlBool: boolVal*: bool
-    of tomlArray: items*: seq[TomlNode]
+    of tomlArray:
+      items*: seq[TomlNode]
+      fromValue*: bool
+        ## ``true`` for an array written as a value (``k = [ … ]``), as
+        ## opposed to one built by ``[[header]]`` entries. TOML forbids a
+        ## later ``[[k]]`` from appending to a value array: accepting it would
+        ## let one document grow an array the author already closed.
     of tomlTable:
       fields*: OrderedTable[string, TomlNode]
       explicit*: bool
@@ -71,11 +97,16 @@ type
         ## later ``[header]`` from reopening such a table, and accepting it
         ## would let one document express the same field twice with different
         ## values — a disagreement a verifier would resolve silently.
+      sealed*: bool
+        ## ``true`` for an inline table (and every table inside one). TOML
+        ## makes an inline table complete as written: no header and no dotted
+        ## key may add to it later.
 
   TomlParser = object
     text: string
     pos: int
     depth: int
+    extensions: set[TomlExtension]
 
 const MaxTomlNesting* = 32
   ## How deeply arrays may nest.
@@ -96,7 +127,20 @@ const MaxTomlNesting* = 32
 
 proc newTomlTable(): TomlNode =
   TomlNode(kind: tomlTable, fields: initOrderedTable[string, TomlNode](),
-           explicit: false, dotted: false)
+           explicit: false, dotted: false, sealed: false)
+
+proc seal(node: TomlNode) =
+  ## Mark an inline table, and every table nested in it, complete.
+  case node.kind
+  of tomlTable:
+    node.sealed = true
+    node.explicit = true
+    for child in node.fields.values:
+      seal(child)
+  of tomlArray:
+    for item in node.items:
+      seal(item)
+  else: discard
 
 proc fail(p: TomlParser; message: string) {.noreturn.} =
   ## Report the byte offset: a key store is rejected for being unreadable, and
@@ -171,11 +215,92 @@ proc parseHexEscape(p: var TomlParser; digits: int): string =
     p.fail("unicode escape is not a scalar value")
   encodeUtf8(value)
 
+proc parseEscape(p: var TomlParser; into: var string) =
+  ## One escape sequence; ``p.pos`` is on the backslash.
+  inc p.pos
+  if p.atEnd:
+    p.fail("unterminated escape sequence")
+  let esc = p.text[p.pos]
+  inc p.pos
+  case esc
+  of '"': into.add '"'
+  of '\\': into.add '\\'
+  of 'b': into.add '\b'
+  of 't': into.add '\t'
+  of 'n': into.add '\n'
+  of 'f': into.add '\f'
+  of 'r': into.add '\r'
+  of 'u': into.add p.parseHexEscape(4)
+  of 'U': into.add p.parseHexEscape(8)
+  else: p.fail("unknown escape sequence: \\" & $esc)
+
+proc opensMultiline(p: TomlParser; quote: char): bool =
+  p.pos + 2 < p.text.len and p.text[p.pos + 1] == quote and
+    p.text[p.pos + 2] == quote
+
+proc skipOpeningNewline(p: var TomlParser) =
+  ## TOML trims a newline immediately after a multi-line opening delimiter.
+  if p.text.continuesWith("\r\n", p.pos):
+    p.pos += 2
+  elif p.peek == '\n':
+    inc p.pos
+
+proc closesMultiline(p: var TomlParser; quote: char; into: var string): bool =
+  ## At a ``quote``: whether it closes the string. Up to two quotes directly
+  ## before the closing three belong to the content (``"""""`` closes after
+  ## two content quotes), so the whole run is measured first.
+  var run = 0
+  while p.pos + run < p.text.len and p.text[p.pos + run] == quote:
+    inc run
+  if run < 3:
+    for _ in 0 ..< run: into.add quote
+    p.pos += run
+    return false
+  if run > 5:
+    p.fail("too many quotes closing a multi-line string")
+  for _ in 0 ..< run - 3: into.add quote
+  p.pos += run
+  true
+
+proc parseMultilineBasicString(p: var TomlParser): string =
+  p.pos += 3
+  p.skipOpeningNewline()
+  result = ""
+  while true:
+    if p.atEnd:
+      p.fail("unterminated multi-line basic string")
+    let ch = p.text[p.pos]
+    case ch
+    of '"':
+      if p.closesMultiline('"', result):
+        return
+    of '\\':
+      # A line-ending backslash trims the newline and all whitespace after it.
+      var probe = p.pos + 1
+      while probe < p.text.len and p.text[probe] in {' ', '\t'}:
+        inc probe
+      if probe < p.text.len and p.text[probe] in {'\n', '\r'}:
+        p.pos = probe
+        while not p.atEnd and p.text[p.pos] in {' ', '\t', '\r', '\n'}:
+          inc p.pos
+      else:
+        p.parseEscape(result)
+    of '\r':
+      if p.text.continuesWith("\r\n", p.pos):
+        result.add '\n'
+        p.pos += 2
+      else:
+        result.add ch
+        inc p.pos
+    else:
+      result.add ch
+      inc p.pos
+
 proc parseBasicString(p: var TomlParser): string =
-  # Multi-line basic strings would need """ handling; the standard's payload
-  # never uses one, so reject rather than half-support it.
-  if p.pos + 2 < p.text.len and p.text[p.pos + 1] == '"' and p.text[p.pos + 2] == '"':
-    p.fail("multi-line basic strings are not part of this TOML subset")
+  if p.opensMultiline('"'):
+    if teMultilineStrings notin p.extensions:
+      p.fail("multi-line basic strings are not part of this TOML subset")
+    return p.parseMultilineBasicString()
   inc p.pos                     # opening quote
   result = ""
   while true:
@@ -189,29 +314,34 @@ proc parseBasicString(p: var TomlParser): string =
     of '\n':
       p.fail("unterminated basic string")
     of '\\':
+      p.parseEscape(result)
+    else:
+      result.add ch
       inc p.pos
-      if p.atEnd:
-        p.fail("unterminated escape sequence")
-      let esc = p.text[p.pos]
-      inc p.pos
-      case esc
-      of '"': result.add '"'
-      of '\\': result.add '\\'
-      of 'b': result.add '\b'
-      of 't': result.add '\t'
-      of 'n': result.add '\n'
-      of 'f': result.add '\f'
-      of 'r': result.add '\r'
-      of 'u': result.add p.parseHexEscape(4)
-      of 'U': result.add p.parseHexEscape(8)
-      else: p.fail("unknown escape sequence: \\" & $esc)
+
+proc parseMultilineLiteralString(p: var TomlParser): string =
+  p.pos += 3
+  p.skipOpeningNewline()
+  result = ""
+  while true:
+    if p.atEnd:
+      p.fail("unterminated multi-line literal string")
+    let ch = p.text[p.pos]
+    if ch == '\'':
+      if p.closesMultiline('\'', result):
+        return
+    elif p.text.continuesWith("\r\n", p.pos):
+      result.add '\n'
+      p.pos += 2
     else:
       result.add ch
       inc p.pos
 
 proc parseLiteralString(p: var TomlParser): string =
-  if p.pos + 2 < p.text.len and p.text[p.pos + 1] == '\'' and p.text[p.pos + 2] == '\'':
-    p.fail("multi-line literal strings are not part of this TOML subset")
+  if p.opensMultiline('\''):
+    if teMultilineStrings notin p.extensions:
+      p.fail("multi-line literal strings are not part of this TOML subset")
+    return p.parseMultilineLiteralString()
   inc p.pos                     # opening quote
   result = ""
   while true:
@@ -227,6 +357,7 @@ proc parseLiteralString(p: var TomlParser): string =
     inc p.pos
 
 proc parseValue(p: var TomlParser): TomlNode
+proc parseInlineTable(p: var TomlParser): TomlNode
 
 proc parseArray(p: var TomlParser): TomlNode =
   ## Arrays may span lines and may carry a trailing comma — both appear in
@@ -237,7 +368,7 @@ proc parseArray(p: var TomlParser): TomlNode =
     p.fail("arrays nested more than " & $MaxTomlNesting & " deep")
   defer: dec p.depth
   inc p.pos                     # '['
-  result = TomlNode(kind: tomlArray, items: @[])
+  result = TomlNode(kind: tomlArray, items: @[], fromValue: true)
   while true:
     p.skipToNextToken()
     if p.atEnd:
@@ -264,6 +395,10 @@ proc parseValue(p: var TomlParser): TomlNode =
   of '"': TomlNode(kind: tomlString, strVal: p.parseBasicString())
   of '\'': TomlNode(kind: tomlString, strVal: p.parseLiteralString())
   of '[': p.parseArray()
+  of '{':
+    if teInlineTables notin p.extensions:
+      p.fail("inline tables are not part of this TOML subset")
+    p.parseInlineTable()
   else:
     if p.text.continuesWith("true", p.pos):
       p.pos += 4
@@ -298,6 +433,66 @@ proc parseKeyPath(p: var TomlParser): seq[string] =
     else:
       break
 
+proc assign(p: var TomlParser; table: TomlNode; path: seq[string];
+            value: TomlNode) =
+  ## ``a.b.c = value`` relative to ``table``: dotted keys create tables, and
+  ## no key — and no sealed (inline) table — is written twice.
+  var target = table
+  for i in 0 ..< path.high:
+    let segment = path[i]
+    if not target.fields.hasKey(segment):
+      let created = newTomlTable()
+      created.dotted = true
+      target.fields[segment] = created
+    let next = target.fields[segment]
+    if next.kind != tomlTable:
+      p.fail("'" & segment & "' is not a table")
+    if next.sealed:
+      p.fail("'" & segment & "' is an inline table and cannot be extended")
+    target = next
+  let key = path[^1]
+  if target.fields.hasKey(key):
+    p.fail("key '" & path.join(".") & "' is defined twice")
+  target.fields[key] = value
+
+proc parseInlineTable(p: var TomlParser): TomlNode =
+  ## ``{ k = v, … }`` on one line, no trailing comma (TOML 1.0).
+  inc p.depth
+  if p.depth > MaxTomlNesting:
+    p.fail("values nested more than " & $MaxTomlNesting & " deep")
+  defer: dec p.depth
+  inc p.pos                     # '{'
+  result = newTomlTable()
+  p.skipInlineSpace()
+  if p.peek == '}':
+    inc p.pos
+    seal(result)
+    return
+  while true:
+    let path = p.parseKeyPath()
+    p.skipInlineSpace()
+    if p.peek != '=':
+      p.fail("expected '=' after key in inline table")
+    inc p.pos
+    p.skipInlineSpace()
+    let value = p.parseValue()
+    p.assign(result, path, value)
+    p.skipInlineSpace()
+    if p.atEnd:
+      p.fail("unterminated inline table")
+    case p.peek
+    of ',':
+      inc p.pos
+      p.skipInlineSpace()
+      if p.peek == '}':
+        p.fail("an inline table may not end with a trailing comma")
+    of '}':
+      inc p.pos
+      seal(result)
+      return
+    else:
+      p.fail("expected ',' or '}' in inline table, got: " & $p.peek)
+
 proc descend(p: var TomlParser; root: TomlNode; path: seq[string];
              arrayOfTables: bool): TomlNode =
   ## Walk (creating as needed) to the table a ``[header]`` names.
@@ -310,6 +505,10 @@ proc descend(p: var TomlParser; root: TomlNode; path: seq[string];
       else:
         current.fields[segment] = newTomlTable()
     let child = current.fields[segment]
+    if child.kind == tomlTable and child.sealed:
+      p.fail("'" & segment & "' is an inline table and cannot be extended")
+    if child.kind == tomlArray and child.fromValue:
+      p.fail("'" & segment & "' is an array value, not an array of tables")
     if last and arrayOfTables:
       if child.kind != tomlArray:
         p.fail("'" & segment & "' is already a table, not an array of tables")
@@ -339,14 +538,16 @@ proc descend(p: var TomlParser; root: TomlNode; path: seq[string];
       current.explicit = true
   current
 
-proc parseTomlSubset*(text: string): TomlNode =
-  ## Parse the TOML subset test certificates and key stores are written in.
+proc parseTomlSubset*(text: string;
+                     extensions: set[TomlExtension] = {}): TomlNode =
+  ## Parse the TOML subset test certificates and key stores are written in,
+  ## plus the ``extensions`` the caller opts into.
   ##
   ## Raises ``TomlError`` on anything outside that subset. That is deliberate:
   ## a consumer that cannot read its key store must report **unverifiable**
   ## (Verification.md §3.1), which is only possible if the reader says so
   ## instead of returning a partially-populated document.
-  var p = TomlParser(text: text, pos: 0)
+  var p = TomlParser(text: text, pos: 0, extensions: extensions)
   result = newTomlTable()
   result.explicit = true
   var current = result
@@ -377,20 +578,7 @@ proc parseTomlSubset*(text: string): TomlNode =
       inc p.pos
       p.skipInlineSpace()
       let value = p.parseValue()
-      var target = current
-      for i in 0 ..< path.high:
-        let segment = path[i]
-        if not target.fields.hasKey(segment):
-          let created = newTomlTable()
-          created.dotted = true
-          target.fields[segment] = created
-        if target.fields[segment].kind != tomlTable:
-          p.fail("'" & segment & "' is not a table")
-        target = target.fields[segment]
-      let key = path[^1]
-      if target.fields.hasKey(key):
-        p.fail("key '" & path.join(".") & "' is defined twice")
-      target.fields[key] = value
+      p.assign(current, path, value)
     # Trailing content on the line, other than a comment, is an error.
     p.skipInlineSpace()
     p.skipComment()

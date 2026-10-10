@@ -90,19 +90,23 @@
 ##   file the tests actually read yields a certificate that is formally clean
 ##   and substantively false. It gets its own milestone.
 ##
-## * **The modified-worktree form** (``vcs.worktree``, Standard.md §3.2.2). The
-##   standard's guidance is that the clean-tree certificate is the normal
-##   output, and `ct test`'s incremental testing makes "run, commit, re-run"
-##   nearly free — committing changes no file content, so the second run
-##   re-runs nothing. Until the worktree form lands, a dirty tree is reported
-##   **honestly** (``clean = false``) and the certificate is **withheld**,
-##   because a ``clean = false`` record with no ``worktree`` table identifies
-##   no state at all and MUST be rejected by any verifier.
+## * **Certifying a modified working tree** (Standard.md §3.2.2). The
+##   certificate is bound to the CONTENT of the tracked files (``vcs.content``,
+##   a Content-Id.md content id), never to a commit — ``vcs.base`` names the
+##   commit checked out at issuance and is informational only. So a modified
+##   tree is certifiable in principle; this producer does not do it yet. For
+##   now it still issues only for a tree with no tracked modification, so
+##   every record it emits has ``content`` equal to ``HEAD^{tree}``, and a
+##   modified tree is reported honestly and **withheld** (``wrWorktreeDirty``).
+##   Computing the content id before AND after the run, and certifying the
+##   working tree as it is, is the next step (CTC-3d).
 
 import std/[options, os, strutils, tables, times]
 
 import contracts
 import certificate
+import certificate_content_id
+import certificate_content_id_native
 import discovery
 import process_exec
 import run_orchestration
@@ -135,9 +139,10 @@ type
     ## What the producer could establish about the repository state.
     ##
     ## ``determined`` is the field the whole feature turns on. A producer MUST
-    ## NOT issue ``clean = true`` when it did not check, and if it cannot
-    ## determine cleanliness it MUST NOT issue a certificate at all
-    ## (Standard.md §3.2) — a guess here invalidates everything downstream.
+    ## NOT issue a ``content`` it did not compute from the state the tests ran
+    ## against, nor an ``untracked`` it did not check, and if it cannot
+    ## establish them it MUST NOT issue a certificate at all (Standard.md
+    ## §3.2) — a guess here invalidates everything downstream.
     ## So ``determined = false`` is never quietly converted into a default; it
     ## withholds.
     probed*: bool
@@ -151,8 +156,19 @@ type
       ## established, in terms an operator can act on.
     repo*: string
     commit*: string
+      ## ``HEAD`` when probed. Recorded in the certificate as ``vcs.base``,
+      ## which is informational only (Standard.md §3.2.3) — the binding is
+      ## ``content``.
     clean*: bool
-      ## ``true`` when no *tracked* file differed from ``commit``.
+      ## ``true`` when no *tracked* file differed from ``commit``. Not part of
+      ## the record any more; it decides whether this producer issues at all
+      ## until it certifies modified working trees (``wrWorktreeDirty``).
+    content*: string
+      ## The content id of the tracked files as the tests ran against them
+      ## (Content-Id.md §4.1, computed by ``certificate_content_id`` in a
+      ## temporary index), in the ``git-tree-*`` algorithm matching the
+      ## repository's object format. Computed only for a clean tree, where it
+      ## equals ``HEAD^{tree}``; empty otherwise.
     untracked*: bool
       ## ``true`` when untracked files were present. Reported separately from
       ## ``clean`` because they mean different things: a modified tracked file
@@ -312,8 +328,8 @@ proc undetermined(reason: string): VcsProbe =
 
 proc probeVcs*(workspaceRoot: string;
                runner: GitCommandRunner = nil): VcsProbe =
-  ## Establish ``repo``, ``commit``, ``clean`` and ``untracked`` for
-  ## ``workspaceRoot`` — or report, precisely, that it could not.
+  ## Establish ``repo``, ``commit``, ``clean``, ``content`` and ``untracked``
+  ## for ``workspaceRoot`` — or report, precisely, that it could not.
   ##
   ## Every failure path here returns ``determined = false``. None of them
   ## returns a default: Standard.md §3.2 forbids issuing ``clean = true``
@@ -386,6 +402,31 @@ proc probeVcs*(workspaceRoot: string;
       result.untracked = true
     else:
       result.clean = false
+
+  if not result.clean:
+    # Withheld as `wrWorktreeDirty` before any content id would be used.
+    return
+
+  # The content id of what the tests ran against — always computed by real
+  # git, through the one content-id recipe (Content-Id.md §4.1, in a temporary
+  # index; the user's index is neither read as the tested state nor written),
+  # and never accepted from a caller. A state with no content id (an
+  # assume-unchanged entry, say, which `git status` cannot see through) or a
+  # computation that fails is undetermined: a guess here is exactly what
+  # Standard.md §3.2 forbids.
+  let host = nativeContentIdHost()
+  let format = repositoryTreeAlgorithm(host, repoRoot)
+  if not format.ok:
+    return undetermined(
+      "the repository's object format could not be read, so no content id " &
+      "can be computed: " & format.failure)
+  let content = computeContentId(host, repoRoot, workingTreeState(),
+                                 format.algorithm)
+  if content.outcome != cioComputed:
+    return undetermined(
+      "the content id of the tested files could not be computed: " &
+      content.reason)
+  result.content = content.id
 
 # ---------------------------------------------------------------------------
 # The attested run — PRIVATE from here down to `runAndAttest`
@@ -715,9 +756,11 @@ proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
       VcsProbe())
 
   # ---- Gate 2: the VCS binding ------------------------------------------
-  # The commit is the whole binding: a certificate that names a commit and
-  # attests the tree was clean has transitively bound every committed input the
-  # framework depends on (Standard.md §2).
+  # Content is the whole binding: a certificate names the content id of the
+  # tracked files the tests ran against, and covers every commit whose tree
+  # has that content (Standard.md §2). Until this producer certifies modified
+  # working trees, it issues only for a clean one, so that content is
+  # `HEAD^{tree}`.
   let vcs = probeVcs(run.workspaceRoot, options.gitRunner)
   if not vcs.determined:
     return withheld(wrVcsUndeterminable,
@@ -729,8 +772,8 @@ proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
       vcs)
   if not vcs.clean:
     # Reported honestly — `vcs.clean` is false in the returned probe — and
-    # withheld, because the modified-worktree form that would be REQUIRED to
-    # accompany `clean = false` is deferred (see the module header).
+    # withheld, because certifying a modified working tree by its content is
+    # the next step and not this one (see the module header).
     return withheld(wrWorktreeDirty,
       "tracked files differ from " & vcs.commit &
       ", so the tests did not run against that commit (clean = false)",
@@ -751,11 +794,10 @@ proc issueCertificate(run: AttestedRun; options: IssuanceOptions): Issuance =
     issuer: if options.issuer.len > 0: options.issuer else: "ct-test",
     vcs: VcsState(
       repo: vcs.repo,
-      commit: vcs.commit,
       paths: @[],          # whole-repository claim; scoping is deferred
-      clean: true,
+      content: vcs.content,
       untracked: vcs.untracked,
-      worktree: none(WorktreeClaim)),
+      base: vcs.commit),   # informational only (Standard.md §3.2.3)
     commands: run.commands)
 
   # ---- Signing — OPTIONAL, and OFF unless a key was configured -----------

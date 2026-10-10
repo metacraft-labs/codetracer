@@ -24,7 +24,8 @@ proc scratchDir(name: string): string =
   removeDir(result)
   createDir(result)
 
-proc sampleDocument(commit = "a" .repeat(40); platform = "linux/amd64";
+proc sampleDocument(content = "git-tree-sha1:" & "a".repeat(40);
+                    platform = "linux/amd64";
                     repo = "demo"; issuedAt = "2026-08-18T09:00:00Z"): string =
   renderCertificate(TestCertificate(
     schema: CertificateSchema,
@@ -35,8 +36,8 @@ proc sampleDocument(commit = "a" .repeat(40); platform = "linux/amd64";
     result: "passed",
     issuedAt: issuedAt,
     issuer: "ct-test",
-    vcs: VcsState(repo: repo, commit: commit, paths: @[], clean: true,
-                  untracked: false, worktree: none(WorktreeClaim)),
+    vcs: VcsState(repo: repo, paths: @[], content: content,
+                  untracked: false),
     commands: @[@["ct", "test", "run"]]))
 
 proc writeCertificate(root, dir, name, text: string) =
@@ -78,7 +79,7 @@ suite "the workspace certificate store, on a real filesystem":
     let root = scratchDir("both")
     writeCertificate(root, ReprobuildStoreDir, "hook.toml", sampleDocument())
     writeCertificate(root, CtTestStoreDir, "agent.toml",
-                     sampleDocument(commit = "b".repeat(40)))
+                     sampleDocument(content = "git-tree-sha1:" & "b".repeat(40)))
 
     # Real mtimes, set explicitly so the ordering assertion is about the rule
     # and not about how fast this machine writes two files.
@@ -110,7 +111,7 @@ suite "the workspace certificate store, on a real filesystem":
     writeCertificate(root, CtTestStoreDir, "skewed.toml",
                      sampleDocument(issuedAt = "2099-01-01T00:00:00Z"))
     writeCertificate(root, CtTestStoreDir, "recent.toml",
-                     sampleDocument(commit = "c".repeat(40),
+                     sampleDocument(content = "git-tree-sha1:" & "c".repeat(40),
                                     issuedAt = "2026-01-01T00:00:00Z"))
     let base = getTime()
     setLastModificationTime(root / CtTestStoreDir / "skewed.toml",

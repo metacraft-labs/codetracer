@@ -76,8 +76,18 @@ proc newRepository(name: string): string =
 proc headCommit(repo: string): string =
   git(repo, ["rev-parse", "HEAD"]).strip()
 
-proc writeCertificateFor(repo, commit: string; name = "run.toml";
-                         dir = CtTestStoreDir; issuer = "ct-test") =
+proc headContent(repo: string): string =
+  ## The content id a commit of this repository records: its tree, in the
+  ## repository's (SHA-1) object format.
+  "git-tree-sha1:" & git(repo, ["rev-parse", "HEAD^{tree}"]).strip()
+
+const UnrelatedBase = "cc11223344556677889900aabbccddeeff001122"
+  ## A `base` naming no commit of these repositories. Informational only, so
+  ## it must change nothing.
+
+proc writeCertificateFor(repo, content: string; base = UnrelatedBase;
+                         name = "run.toml"; dir = CtTestStoreDir;
+                         issuer = "ct-test") =
   ## A real certificate file, in the real store directory, produced by the
   ## shipped canonical serializer.
   let cert = TestCertificate(
@@ -89,8 +99,8 @@ proc writeCertificateFor(repo, commit: string; name = "run.toml";
     result: "passed",
     issuedAt: "2026-08-18T09:00:00Z",
     issuer: issuer,
-    vcs: VcsState(repo: repo.lastPathPart, commit: commit, paths: @[],
-                  clean: true, untracked: false, worktree: none(WorktreeClaim)),
+    vcs: VcsState(repo: repo.lastPathPart, paths: @[], content: content,
+                  untracked: false, base: base),
     commands: @[@["ct", "test", "run"]])
   createDir(repo / dir)
   writeFile(repo / dir / name, renderCertificate(cert))
@@ -121,11 +131,15 @@ suite "SB-1: the indicator against a real repository":
     check vm.model.state == cisNoCertificates
     check vm.model.label == NoCertificatesLabel
 
-  test "a certificate for the real HEAD, on a clean tree, reads certified":
-    ## The positive control, end to end: real git reports the commit, the real
-    ## filesystem holds the record, and the shipped verifier decides.
+  test "a revised record whose base is another commit reads certified when its content is W":
+    ## The positive control, end to end: the real host computes W through the
+    ## facade (a temporary index, real git), the real filesystem holds the
+    ## record, and the shipped verifier decides — by content. The record's
+    ## `base` names a commit that is not HEAD (not even in this repository),
+    ## so an indicator comparing `base` anywhere on its path reads it as stale.
     let repo = newRepository("certified")
-    writeCertificateFor(repo, headCommit(repo))
+    writeCertificateFor(repo, headContent(repo), base = UnrelatedBase)
+    check UnrelatedBase != headCommit(repo)
     let vm = indicatorFor(repo)
     discard vm.refresh(citStartup)
     checkpoint $vm.model.state & " — " & vm.model.summary
@@ -133,13 +147,57 @@ suite "SB-1: the indicator against a real repository":
     check vm.model.authenticity == caNotChecked
     check vm.model.authenticityNote == NoKeysRegisteredNote
 
+    # THE MIRROR: a record whose base IS HEAD and whose content is not W does
+    # not read certified. Together the two kill a comparison of `base` in
+    # either direction.
+    let other = newRepository("same-base-other-content")
+    writeCertificateFor(other,
+      "git-tree-sha1:" & repeat('d', 40), base = headCommit(other))
+    let otherVm = indicatorFor(other)
+    discard otherVm.refresh(citStartup)
+    checkpoint $otherVm.model.state & " — " & otherVm.model.summary
+    check otherVm.model.state != cisCertified
+    check otherVm.model.state == cisWasCertified
+
+  test "a content id the host cannot compute reads unverifiable":
+    ## `git-tree-sha256` against this SHA-1 repository: the real host answers
+    ## "cannot compute", which is not a mismatch (Verification.md §4.1.1).
+    let repo = newRepository("sha256-on-sha1")
+    writeCertificateFor(repo, "git-tree-sha256:" & repeat('a', 64))
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    checkpoint $vm.model.state & " — " & vm.model.summary
+    check vm.model.state == cisUnverifiable
+    check vm.model.remedy == FixConfigurationRemedy
+
+  test "a working tree with no content id reads unverifiable, even with HEAD certified":
+    ## An assume-unchanged entry hides an edit from `git status`; Content-Id.md
+    ## §3 says such a tree has no content id. A record for HEAD's content must
+    ## not read certified on the strength of a guess, and the control (the
+    ## flag cleared) shows the edit, then the revert, decided by content.
+    let repo = newRepository("assume-unchanged")
+    writeCertificateFor(repo, headContent(repo))
+    discard git(repo, ["update-index", "--assume-unchanged", "calc.nim"])
+    writeFile(repo / "calc.nim", "proc add(a, b: int): int = a + b + 1\n")
+    let vm = indicatorFor(repo)
+    discard vm.refresh(citStartup)
+    checkpoint $vm.model.state & " — " & vm.model.summary
+    check vm.model.state == cisUnverifiable
+    check "assume-unchanged" in vm.model.summary
+    discard git(repo, ["update-index", "--no-assume-unchanged", "calc.nim"])
+    discard vm.refresh(citWorktreeChanged)
+    check vm.model.state == cisWasCertified
+    discard git(repo, ["checkout", "--", "calc.nim"])
+    discard vm.refresh(citWorktreeChanged)
+    check vm.model.state == cisCertified
+
   test "the indicator refreshes when a real commit changes the facts":
     ## The refresh deliverable, against facts that really moved. Each step
     ## below changes the world with a real git operation or a real file write
     ## and then asks the SAME ViewModel again.
     let repo = newRepository("refresh")
     let first = headCommit(repo)
-    writeCertificateFor(repo, first)
+    writeCertificateFor(repo, headContent(repo), base = first)
 
     let vm = indicatorFor(repo)
     discard vm.refresh(citStartup)
@@ -165,9 +223,9 @@ suite "SB-1: the indicator against a real repository":
     checkpoint "after checkout: " & $vm.model.state
     check vm.model.state == cisCertified
 
-    # (3) AN EDIT, with HEAD standing still. A `clean = true` certificate's
-    # tested state IS its commit (Verification.md §4.1); a modified tracked
-    # file is that commit plus the edit, which the record does not describe.
+    # (3) AN EDIT, with HEAD standing still. The record names the content it
+    # tested (Verification.md §4.1.1); a modified tracked file changes W, which
+    # the record does not describe.
     writeFile(repo / "calc.nim", "proc add(a, b: int): int = a + b + 0\n")
     check vm.refresh(citWorktreeChanged)
     checkpoint "after edit: " & $vm.model.state & " — " & vm.model.summary
@@ -180,10 +238,10 @@ suite "SB-1: the indicator against a real repository":
     check vm.refresh(citWorktreeChanged)
     check vm.model.state == cisCertified
 
-    # (5) AN UNTRACKED FILE IS NOT AN EDIT. `vcs.clean` is about tracked files
-    # differing from the commit; untracked files get their own field precisely
-    # because they usually mean scratch work (Standard.md §3.2). An indicator
-    # that went stale on every build directory would be ignored within a day.
+    # (5) AN UNTRACKED FILE IS NOT AN EDIT. Untracked files are outside the
+    # content (Standard.md §3.2) — they get their own field precisely because
+    # they usually mean scratch work. An indicator that went stale on every
+    # build directory would be ignored within a day.
     writeFile(repo / "scratch.log", "noise\n")
     discard vm.refresh(citWorktreeChanged)
     check vm.model.state == cisCertified
@@ -193,8 +251,8 @@ suite "SB-1: the indicator against a real repository":
     ## reprobuild's store directory, one in `ct test`'s, differing in issuer and
     ## in which directory holds them. Only the record's own name may differ.
     let repo = newRepository("producers")
-    let commit = headCommit(repo)
-    writeCertificateFor(repo, commit, name = "hook.toml",
+    let content = headContent(repo)
+    writeCertificateFor(repo, content, name = "hook.toml",
                         dir = ReprobuildStoreDir, issuer = "repro-hook")
     let hookVm = indicatorFor(repo)
     discard hookVm.refresh(citStartup)
@@ -202,7 +260,7 @@ suite "SB-1: the indicator against a real repository":
     check hook.certificateName == ReprobuildStoreDir & "/hook.toml"
 
     removeDir(repo / ReprobuildStoreDir)
-    writeCertificateFor(repo, commit, name = "agent.toml",
+    writeCertificateFor(repo, content, name = "agent.toml",
                         dir = CtTestStoreDir, issuer = "ct-test-agent")
     let agentVm = indicatorFor(repo)
     discard agentVm.refresh(citStartup)
@@ -222,8 +280,8 @@ suite "SB-1: the indicator against a real repository":
       check agent.detail[i] == hook.detail[i]
 
   test "a directory that is not a repository is unverifiable, not uncertified":
-    ## The consumer could not establish the commit, so it must not behave as
-    ## though it had. Reporting "not certified" would send an operator to run
+    ## The consumer could not establish the repository, so it must not behave
+    ## as though it had. Reporting "not certified" would send an operator to run
     ## tests over a VCS problem.
     let dir = scratchDir("not-a-repo")
     createDir(dir / CtTestStoreDir)
@@ -232,9 +290,9 @@ suite "SB-1: the indicator against a real repository":
         schema: CertificateSchema, framework: "ct-test", project: "x",
         platform: Platform, targets: @["t"], result: "passed",
         issuedAt: "2026-08-18T09:00:00Z", issuer: "ct-test",
-        vcs: VcsState(repo: "x", commit: "a".repeat(40), paths: @[],
-                      clean: true, untracked: false,
-                      worktree: none(WorktreeClaim)),
+        vcs: VcsState(repo: "x", paths: @[],
+                      content: "git-tree-sha1:" & "a".repeat(40),
+                      untracked: false),
         commands: @[@["ct", "test", "run"]])))
     let vm = indicatorFor(dir)
     discard vm.refresh(citStartup)
@@ -247,7 +305,7 @@ suite "SB-1: the indicator against a real repository":
     ## as a claim about the code — the store directory's contents, and the
     ## repository's own cleanliness, are identical before and after a refresh.
     let repo = newRepository("read-only")
-    writeCertificateFor(repo, headCommit(repo))
+    writeCertificateFor(repo, headContent(repo))
 
     proc snapshot(): seq[string] =
       result = @[]

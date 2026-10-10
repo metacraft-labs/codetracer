@@ -22,8 +22,9 @@ proc minimal(): TestCertificate =
     framework: "ct-test", project: "example", platform: "linux/amd64",
     targets: @["t-unit"], result: "passed",
     issuedAt: "2026-06-23T10:14:33Z", issuer: "ct-test@host",
-    vcs: VcsState(repo: "example", commit: "a858633c", clean: true,
-                  untracked: false, worktree: none(WorktreeClaim)),
+    vcs: VcsState(repo: "example",
+                  content: "git-tree-sha1:9f8e7d6c5b4a3928170695e4d3c2b1a099887766",
+                  untracked: false),
     commands: @[@["ct", "test", "run"]])
 
 suite "canonical payload — rules with no vector":
@@ -108,30 +109,43 @@ suite "canonical payload — rules with no vector":
     check "argv = [\"ct\", \"test\", \"--selector\", \"\"]" in
           canonicalPayload(emptyArgument)
 
-  test "the worktree table is required exactly when the tree was dirty":
-    var dirtyWithout = minimal()
-    dirtyWithout.vcs.clean = false
-    expect CertificateError:
-      discard canonicalPayload(dirtyWithout)
+  test "the record carries no commit, clean or worktree":
+    ## The 2026-10-09 revision: `[certificate.vcs]` is `repo`, `paths`,
+    ## `content`, `untracked`, `base` — in that order — and nothing of the
+    ## earlier draft. `base` is omitted when absent, never emitted as `""`
+    ## (Canonical-Payload.md §2 rules 9-11).
+    let unbased = canonicalPayload(minimal())
+    check "\n[certificate.vcs]\nrepo = \"example\"\n" &
+          "content = \"git-tree-sha1:9f8e7d6c5b4a3928170695e4d3c2b1a099887766\"\n" &
+          "untracked = false\n\n[[certificate.command]]\n" in unbased
+    check "base" notin unbased
+    for earlier in ["commit", "clean", "worktree", "tree =", "patch_digest"]:
+      check earlier notin unbased
 
-    var cleanWith = minimal()
-    cleanWith.vcs.worktree = some(WorktreeClaim(tree: "9f8e7d6c"))
-    expect CertificateError:
-      discard canonicalPayload(cleanWith)
+    var based = minimal()
+    based.vcs.base = "a858633c1f4d7bb4b7c2e2b6a1c0d9e8f7a6b5c4"
+    based.vcs.paths = @["src/z", "Cargo.lock", "src/z"]
+    let payload = canonicalPayload(based)
+    # `paths` sits between `repo` and `content`; `base` is LAST.
+    check "repo = \"example\"\npaths = [\"Cargo.lock\", \"src/z\"]\n" &
+          "content = \"git-tree-sha1:9f8e7d6c5b4a3928170695e4d3c2b1a099887766\"\n" &
+          "untracked = false\n" &
+          "base = \"a858633c1f4d7bb4b7c2e2b6a1c0d9e8f7a6b5c4\"\n\n" in payload
+    # `base` is covered by the signature like everything else: a different
+    # base is a different payload.
+    check payload != unbased
 
-    var emptyWorktree = minimal()
-    emptyWorktree.vcs.clean = false
-    emptyWorktree.vcs.worktree = some(WorktreeClaim())
-    expect CertificateError:
-      discard canonicalPayload(emptyWorktree)
+    # `content` is emitted VERBATIM (rule 9): the serializer does not split,
+    # re-case or validate it — a malformed id is the verifier's finding.
+    var uppercase = minimal()
+    uppercase.vcs.content = "git-tree-sha1:9F8E"
+    check "content = \"git-tree-sha1:9F8E\"\n" in canonicalPayload(uppercase)
 
-    # `format` pins the exact diff semantics, and a digest without one cannot
-    # be compared to anything (Standard.md §3.2.2).
-    var digestWithoutFormat = minimal()
-    digestWithoutFormat.vcs.clean = false
-    digestWithoutFormat.vcs.worktree = some(WorktreeClaim(patchDigest: "blake3:4a1b"))
+    # But a record with no content binds nothing and has no canonical form.
+    var unbound = minimal()
+    unbound.vcs.content = ""
     expect CertificateError:
-      discard canonicalPayload(digestWithoutFormat)
+      discard canonicalPayload(unbound)
 
   test "an unsigned record omits key_id rather than emitting it empty":
     ## An omitted key and an empty key are different payloads
@@ -192,17 +206,55 @@ suite "reading a certificate back":
     check futureRead.status == crsUnknownSchema
     check futureRead.schema == "test-certificate.v2"
 
-  test "a dirty record with no worktree table is decidably invalid":
-    var cert = minimal()
-    cert.vcs.clean = false
-    cert.vcs.worktree = some(WorktreeClaim(tree: "9f8e7d6c"))
-    let document = renderCertificate(cert)
-    check readCertificate(document).status == crsOk
-    let stripped = document.replace(
-      "\n[certificate.vcs.worktree]\ntree = \"9f8e7d6c\"\n", "")
-    let read = readCertificate(stripped)
+  test "an earlier-draft record is malformed, named as such, and not translated":
+    ## A record `ct test` issued before the revision: `commit` + `clean`, no
+    ## `content`. Decidably invalid (Canonical-Payload.md §7.1) — never
+    ## unknown-schema, since the schema id did not change — and the reader
+    ## says what it is and what to do, rather than only "a field is missing".
+    ## No content is filled in from anything.
+    let earlier = renderCertificate(minimal()).replace(
+      "content = \"git-tree-sha1:9f8e7d6c5b4a3928170695e4d3c2b1a099887766\"\n",
+      "commit = \"a858633c1f4d7bb4b7c2e2b6a1c0d9e8f7a6b5c4\"\nclean = true\n")
+    require "commit = " in earlier
+    let read = readCertificate(earlier)
     check read.status == crsMalformed
-    check "identifies no state" in read.detail
+    check read.earlierDraft
+    check "earlier-draft" in read.detail
+    check "run the tests" in read.detail
+    check read.cert.vcs.content.len == 0
+
+    # The dirty earlier-draft spelling is the same verdict.
+    let dirtyEarlier = earlier.replace("clean = true\n", "clean = false\n") &
+      "\n[certificate.vcs.worktree]\ntree = \"9f8e7d6c\"\n"
+    check readCertificate(dirtyEarlier).earlierDraft
+
+    # A record merely missing `content`, with nothing of the earlier draft,
+    # is malformed but is not called an earlier draft.
+    let bare = renderCertificate(minimal()).replace(
+      "content = \"git-tree-sha1:9f8e7d6c5b4a3928170695e4d3c2b1a099887766\"\n", "")
+    let bareRead = readCertificate(bare)
+    check bareRead.status == crsMalformed
+    check not bareRead.earlierDraft
+    check "vcs.content" in bareRead.detail
+
+    # The current shape reads, with `base` intact and verbatim.
+    var based = minimal()
+    based.vcs.base = "cc11223344556677889900aabbccddeeff001122"
+    let current = readCertificate(renderCertificate(based))
+    check current.status == crsOk
+    check not current.earlierDraft
+    check current.cert.vcs.base == based.vcs.base
+    check canonicalPayload(current.cert) == canonicalPayload(based)
+
+  test "an empty base is refused on read, never silently dropped":
+    ## Canonical-Payload.md §2 rule 10: an absent `base` is OMITTED. One
+    ## present and empty names no commit, and rebuilding the payload from the
+    ## fields would drop a key the signer saw.
+    let document = renderCertificate(minimal()).replace(
+      "untracked = false\n", "untracked = false\nbase = \"\"\n")
+    let read = readCertificate(document)
+    check read.status == crsMalformed
+    check "base" in read.detail
 
   test "records with no canonical form are rejected on read, signed or not":
     ## Canonical-Payload.md §4: a value carrying a control character the escape
@@ -272,6 +324,64 @@ suite "reading a certificate back":
     # Defining a super-table AFTER its sub-table is legal, and
     # `vectors/payload/escapes/received.toml` relies on it.
     check parseTomlSubset("[a.b]\nx = \"1\"\n[a]\ny = \"2\"\n") != nil
+
+  test "inline tables and multi-line strings are read only where opted into":
+    ## A certificate may be rendered with any TOML spelling of its fields
+    ## (Canonical-Payload.md §5), and the standard's store vectors use inline
+    ## tables and multi-line strings. The certificate reader enables both; the
+    ## base subset — what a key store or a project definition is read with —
+    ## still refuses them.
+    let inline = "t = { a = \"1\", b.c = [\"x\"] }\n" &
+                 "arr = [ { argv = [\"p\"] }, { argv = [\"q\"] } ]\n"
+    expect TomlError:
+      discard parseTomlSubset(inline)
+    let parsed = parseTomlSubset(inline, {teInlineTables})
+    check parsed.field("t").strField("a") == "1"
+    check parsed.field("t").field("b").strSeqField("c") == @["x"]
+    check parsed.field("arr").items.len == 2
+    check parsed.field("arr").items[1].strSeqField("argv") == @["q"]
+
+    let multiline = "a = \"\"\"x\"\"\"\n" &
+                    "b = \"\"\"\nline\\\n   joined\\u0041\"\"\"\"\n" &
+                    "c = '''\r\nraw\\n\r\nend'''\n"
+    expect TomlError:
+      discard parseTomlSubset(multiline)
+    let strings = parseTomlSubset(multiline, {teMultilineStrings})
+    check strings.strField("a") == "x"
+    # The newline after the opening delimiter is trimmed, a line-ending
+    # backslash joins lines, escapes apply, and a fourth quote is content.
+    check strings.strField("b") == "linejoinedA\""
+    # Literal: no escapes, and CRLF reads as LF.
+    check strings.strField("c") == "raw\\n\nend"
+
+    # TOML 1.0's limits on inline tables hold: complete as written, one line,
+    # no trailing comma — and a value array cannot be appended to by a header.
+    for refused in ["t = { a = \"1\" }\n[t]\nb = \"2\"\n",
+                    "t = { a = \"1\" }\nt.b = \"2\"\n",
+                    "t = { a = \"1\", }\n",
+                    "t = { a = \"1\",\n b = \"2\" }\n",
+                    "t = { a = \"1\", a = \"2\" }\n",
+                    "c = [ { argv = [\"p\"] } ]\n[[c]]\nargv = [\"q\"]\n"]:
+      checkpoint refused
+      expect TomlError:
+        discard parseTomlSubset(refused, {teInlineTables})
+    # Without the extension, a value array still cannot be appended to.
+    expect TomlError:
+      discard parseTomlSubset("c = [\"p\"]\n[[c]]\nargv = [\"q\"]\n")
+
+    # And a certificate in those spellings reads to the same payload.
+    let canonical = canonicalPayload(minimal())
+    let respelled = "schema = \"\"\"test-certificate.v1\"\"\"\n" &
+      "[certificate]\n" &
+      "vcs = { repo = 'example', content = \"git-tree-sha1:9f8e7d6c5b4a3928170695e4d3c2b1a099887766\", untracked = false }\n" &
+      "command = [ { argv = [\"ct\", \"test\", \"run\"] } ]\n" &
+      "framework = \"ct-test\"\nproject = \"example\"\nplatform = \"linux/amd64\"\n" &
+      "targets = [\"t-unit\"]\nresult = \"passed\"\n" &
+      "issued_at = \"2026-06-23T10:14:33Z\"\nissuer = '''ct-test@host'''\n"
+    let read = readCertificate(respelled)
+    checkpoint read.detail
+    check read.status == crsOk
+    check canonicalPayload(read.cert) == canonical
 
   test "a key store that cannot be applied unambiguously is unreadable":
     ## A store is a trust decision, so anything that leaves "which key, with

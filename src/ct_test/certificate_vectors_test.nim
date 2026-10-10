@@ -5,7 +5,7 @@
 ## invoked, imported, ported or trusted in order to claim conformance
 ## (``vectors/README.md``). This file is CodeTracer's own thin walker over it.
 ##
-## It walks three groups:
+## It walks all five groups:
 ##
 ## * ``payload/`` — serialize ``fields.json`` and compare byte for byte with
 ##   ``canonical.txt``. Plus the one optional ``received.toml``, a deliberately
@@ -17,10 +17,24 @@
 ##   six vectors MUST fail, and one of them (``wrong-namespace``) is a genuine
 ##   signature by the right key over exactly these bytes, made under the
 ##   namespace OpenSSH uses for commit signing.
+## * ``content/`` — compute every id ``expected.json`` lists from the
+##   tracked entries in ``entries.json``, through CTC-3b's content-id library:
+##   ``manifest-v1-sha256`` directly over the entries, and ``git-tree-*`` with
+##   real git — each entry written as an object and staged into the index of
+##   a scratch repository of the matching object format, whose content id the
+##   library then computes, scoped by its own §4.1 recipe (the README's
+##   re-derivation, run rather than trusted).
 ## * ``verify/`` — the three-valued outcome, plus which certificates were
 ##   ignored / rejected / unevaluated. Those three fates are the ones an
 ##   implementation confuses, so their classification is normative even though
-##   the wording is not.
+##   the wording is not. ``state.json``'s ``content`` list is the content
+##   oracle: an algorithm or scope it does not list is one this consumer
+##   cannot compute, never a mismatch. Its ``commit`` is informational and is
+##   read by nothing.
+## * ``store/`` — parse ``certificate.toml`` (non-canonical renderings
+##   included), rebuild its canonical payload from the parsed fields, and
+##   derive ``v1/<algorithm>/<digest>/<sha256 of the payload>.toml``
+##   (Transport.md §2.2), compared with ``expected-path.txt``.
 ##
 ## ``index.json`` is cross-checked against what was walked, in both directions:
 ## every case a walked group lists must be on disk and vice versa, and every
@@ -58,10 +72,12 @@
 ## ``ct-test-certificates`` lane nor CI sets it, and under CI (``CI`` or
 ## ``GITHUB_ACTIONS`` set) the override is refused and the suite fails.
 
-import std/[algorithm, json, options, os, osproc, sets, streams,
+import std/[algorithm, base64, json, os, osproc, sets, streams,
             strtabs, strutils, tempfiles, unittest]
 
 import certificate
+import certificate_content_id
+import certificate_content_id_native
 import certificate_signature
 import certificate_verification
 
@@ -70,18 +86,9 @@ const
   PinFileName = "certificate_vectors.pin"
   VectorsOverrideVariable = "CT_TEST_CERTIFICATE_VECTORS"
 
-  WalkedGroups* = ["payload", "signature", "verify"]
+  WalkedGroups* = ["payload", "signature", "content", "verify", "store"]
     ## The ``index.json`` groups this walker understands. A group the
     ## standard declares and this list lacks fails the suite by name.
-
-  RevisionDeclaringUnwalkedGroups =
-    "d57e83746b16e7d7dc8562aabc7dec6754f4f62b"
-    ## A revision of the standard NEWER than the pin, whose ``index.json``
-    ## declares the ``content/`` and ``store/`` groups this walker does not
-    ## walk yet. The cross-check is demonstrated against it, so the gap
-    ## between the pin and the standard is stated by a test rather than
-    ## implied by the pin's age. When the walker learns a group, the test
-    ## that uses this constant fails until it is updated: that is deliberate.
 
 # ---------------------------------------------------------------------------
 # Running git without inheriting a caller's repository
@@ -310,19 +317,14 @@ proc certificateFromFields(fields: JsonNode): TestCertificate =
     keyId: certificate.str("key_id"))
 
   let vcs = if certificate != nil and certificate.hasKey("vcs"): certificate["vcs"] else: nil
+  # `paths` and `base` absent mean "does not apply"; `paths` present and
+  # empty means the same as absent (vectors/README.md, Group 1).
   result.vcs = VcsState(
     repo: vcs.str("repo"),
-    commit: vcs.str("commit"),
     paths: vcs.strSeq("paths"),
-    clean: vcs.boolean("clean"),
+    content: vcs.str("content"),
     untracked: vcs.boolean("untracked"),
-    worktree: none(WorktreeClaim))
-  if vcs != nil and vcs.hasKey("worktree"):
-    let worktree = vcs["worktree"]
-    result.vcs.worktree = some(WorktreeClaim(
-      tree: worktree.str("tree"),
-      format: worktree.str("format"),
-      patchDigest: worktree.str("patch_digest")))
+    base: vcs.str("base"))
 
   if certificate != nil and certificate.hasKey("command"):
     let commands = certificate["command"]
@@ -426,6 +428,196 @@ proc walkSignature*(root: string): GroupWalk =
       result.failures.add "signature/" & name & ": expected " & expected &
                           ", got " & $outcome.check & " (" & outcome.detail & ")"
 
+# ---------------------------------------------------------------------------
+# content/: content ids from tracked entries
+# ---------------------------------------------------------------------------
+
+proc scopeOf(node: JsonNode): seq[string] =
+  ## A scope as a certificate's ``vcs.paths`` carries it: ``null``, absent
+  ## and ``[]`` are all the whole repository; otherwise sorted and
+  ## deduplicated.
+  if node == nil or node.kind != JArray:
+    return @[]
+  var paths: seq[string] = @[]
+  for item in node.items:
+    if item.kind == JString:
+      paths.add item.getStr
+  sortedDeduplicated(paths)
+
+proc readEntries(path: string): seq[ManifestEntry] =
+  ## ``entries.json``: tracked entries in arbitrary order, content base64.
+  let entries = readJson(path)
+  if entries.kind != JArray:
+    raise newException(ValueError, path & ": not a JSON array")
+  for entry in entries.items:
+    result.add ManifestEntry(path: entry.str("path"), mode: entry.str("mode"),
+                             content: decode(entry.str("content_b64")))
+
+const RepositoryRedirects = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_COMMON_DIR", "GIT_NAMESPACE"]
+
+proc stagedRepository(scratch: string; entries: seq[ManifestEntry];
+                      format: string): tuple[repo: string; error: string] =
+  ## A scratch repository of object ``format`` (``sha1``/``sha256``) whose
+  ## INDEX holds exactly ``entries`` — the README's re-derivation: every
+  ## entry written as an object with ``git hash-object -w`` (a ``160000``
+  ## entry is not an object; its revision is used as is) and staged at its
+  ## mode and path. Nothing is checked out: the index is the state.
+  let repo = scratch / ("repo-" & format)
+  let init = runTool("git", ["init", "--quiet", "--object-format=" & format,
+                             repo])
+  if init.exitCode != 0:
+    return ("", "git init --object-format=" & format & " failed: " &
+                init.output.strip())
+  for i, entry in entries:
+    var oid = ""
+    if entry.mode == "160000":
+      oid = entry.content
+    else:
+      let blob = scratch / ("blob-" & format & "-" & $i)
+      writeFile(blob, entry.content)
+      # `--no-filters`: the entry's bytes are the object's bytes, whatever
+      # autocrlf or attributes this machine has configured.
+      let hashed = git(repo, ["hash-object", "-w", "--no-filters", "-t",
+                              "blob", blob])
+      if hashed.exitCode != 0:
+        return ("", "git hash-object failed for `" & entry.path & "`: " &
+                    hashed.output.strip())
+      oid = hashed.output.strip()
+    let staged = git(repo, ["update-index", "--add", "--cacheinfo",
+                            entry.mode & "," & oid & "," & entry.path])
+    if staged.exitCode != 0:
+      return ("", "git update-index failed for `" & entry.path & "`: " &
+                  staged.output.strip())
+  (repo, "")
+
+proc walkContentCase(dir, name: string; host: ContentIdHost): seq[string] =
+  ## One ``content/`` case; returns its failures.
+  let context = " (see " & (dir / "pins.md") & " for the rule this case pins)"
+  let entries = readEntries(dir / "entries.json")
+  let expected = readJson(dir / "expected.json")
+  if expected.kind != JArray or expected.len == 0:
+    return @["content/" & name & ": expected.json lists no ids"]
+  let scratch = createTempDir("ct-test-certificate-content-", "")
+  defer:
+    try: removeDir(scratch)
+    except OSError: discard
+  var repos: seq[(string, string)] = @[]   # object format -> repository
+  proc repositoryFor(format: string): tuple[repo: string; error: string] =
+    for (known, repo) in repos:
+      if known == format:
+        return (repo, "")
+    result = stagedRepository(scratch, entries, format)
+    if result.error.len == 0:
+      repos.add (format, result.repo)
+
+  for want in expected.items:
+    let algorithmName = want.str("algorithm")
+    let scope = scopeOf(if want.hasKey("paths"): want["paths"] else: nil)
+    let label = "content/" & name & " " & algorithmName & " over " &
+                (if scope.len == 0: "the whole repository" else: $scope)
+    let (known, algorithm) = lookupAlgorithm(algorithmName)
+    if not known:
+      result.add label & ": an algorithm this walker does not implement" &
+                 context
+      continue
+    var produced: ContentIdResult
+    case algorithm
+    of caManifestV1Sha256:
+      produced = manifestV1Sha256(entries, scope)
+    of caGitTreeSha1, caGitTreeSha256:
+      let format = if algorithm == caGitTreeSha1: "sha1" else: "sha256"
+      let staged = repositoryFor(format)
+      if staged.error.len > 0:
+        result.add label & ": " & staged.error & context
+        continue
+      produced = computeContentId(host, staged.repo, indexState(), algorithm,
+                                  scope)
+    if produced.outcome != cioComputed:
+      result.add label & ": no id (" & $produced.outcome & "): " &
+                 produced.reason & context
+    elif produced.id != want.str("id"):
+      result.add label & ": expected " & want.str("id") & ", computed " &
+                 produced.id & context
+
+proc walkContent*(root: string): GroupWalk =
+  ## ``content/``: every id in ``expected.json``, computed from
+  ## ``entries.json``. All three algorithms are implemented, so none is
+  ## skipped (a consumer that implements an algorithm and skips its vectors
+  ## has tested nothing).
+  let group = root / "content"
+  result.cases = sortedCaseDirs(group)
+  if result.cases.len == 0:
+    result.failures.add "content/: no cases found under " & group
+  # A caller's repository must not redirect the scratch repositories' git
+  # (a hook exporting GIT_INDEX_FILE would make the index state read ITS
+  # index). The library's host inherits the environment by design, so the
+  # redirects are removed from this test process before it runs.
+  for variable in RepositoryRedirects:
+    delEnv(variable)
+  let host = nativeContentIdHost()
+  for name in result.cases:
+    try:
+      result.failures.add walkContentCase(group / name, name, host)
+    except CatchableError as err:
+      result.failures.add "content/" & name & ": raised " & err.msg
+
+# ---------------------------------------------------------------------------
+# store/: where the local certificate store keeps a certificate
+# ---------------------------------------------------------------------------
+
+proc storePathOf*(text: string): tuple[path: string; error: string] =
+  ## ``v1/<algorithm>/<digest>/<payload-hash>.toml`` (Transport.md §2.2):
+  ## the payload rebuilt from the PARSED fields — never the file's bytes, and
+  ## never the signature block — hashed with SHA-256, and ``vcs.content``
+  ## split at its FIRST ``:``.
+  let read = readCertificate(text)
+  if read.status != crsOk:
+    return ("", "did not read: " & $read.status & " " & read.detail)
+  let payload = canonicalPayload(read.cert)
+  let content = read.cert.vcs.content
+  let colon = content.find(':')
+  if colon <= 0:
+    return ("", "vcs.content `" & content & "` has no algorithm")
+  ("v1/" & content[0 ..< colon] & "/" & content[colon + 1 .. ^1] & "/" &
+   sha256Hex(payload) & ".toml", "")
+
+proc walkStore*(root: string): GroupWalk =
+  ## ``store/``: derive each certificate's store path and compare it with
+  ## ``expected-path.txt`` (one line, its single LF not part of the path).
+  let group = root / "store"
+  result.cases = sortedCaseDirs(group)
+  if result.cases.len == 0:
+    result.failures.add "store/: no cases found under " & group
+  for name in result.cases:
+    let dir = group / name
+    let context = " (see " & (dir / "pins.md") & " for the rule this case pins)"
+    try:
+      let expectedPath = readFile(dir / "expected-path.txt")
+      if not expectedPath.endsWith("\n") or expectedPath.count('\n') != 1:
+        result.failures.add "store/" & name &
+          ": expected-path.txt is not one LF-terminated line" & context
+        continue
+      let text = readFile(dir / "certificate.toml")
+      let derived = storePathOf(text)
+      if derived.error.len > 0:
+        result.failures.add "store/" & name & ": " & derived.error & context
+        continue
+      if derived.path != expectedPath[0 ..< ^1]:
+        var note = ""
+        # canonical.txt is a diagnostic, not an input: it shows where a
+        # mismatch starts.
+        if fileExists(dir / "canonical.txt"):
+          let rebuilt = canonicalPayload(readCertificate(text).cert)
+          if rebuilt != readFile(dir / "canonical.txt"):
+            note = "\nthe rebuilt payload differs from canonical.txt:\n" &
+                   describeBytes(rebuilt)
+        result.failures.add "store/" & name & ": expected " &
+          expectedPath[0 ..< ^1] & ", derived " & derived.path & note & context
+    except CatchableError as err:
+      result.failures.add "store/" & name & ": raised " & err.msg
+
 proc namesOf(notes: seq[CertificateNote]): seq[string] =
   result = @[]
   for note in notes:
@@ -448,10 +640,27 @@ proc walkVerifyCase(dir, name: string): seq[string] =
     requirementJson = readJson(dir / "requirement.json")
     expected = readJson(dir / "expected.json")
 
+  # The content oracle is `state.json`'s `content` list: the ids this
+  # consumer can compute for the state, per algorithm and scope. A pair it
+  # does not list is one this consumer CANNOT compute — unevaluated, never a
+  # mismatch (Verification.md §4.1.1). `commit` is informational, and nothing
+  # here reads it.
+  var known: seq[tuple[algorithm: string; paths: seq[string]; id: string]] = @[]
+  if stateJson.hasKey("content") and stateJson["content"].kind == JArray:
+    for entry in stateJson["content"].items:
+      known.add (entry.str("algorithm"),
+                 scopeOf(if entry.hasKey("paths"): entry["paths"] else: nil),
+                 entry.str("id"))
   let state = EvaluatedState(
     repo: stateJson.str("repo"),
-    commit: stateJson.str("commit"),
-    tree: stateJson.str("tree"))
+    content: proc(algorithm: string; paths: seq[string]): ContentAnswer
+        {.closure, gcsafe.} =
+      for entry in known:
+        if entry.algorithm == algorithm and entry.paths == paths:
+          return ContentAnswer(computed: true, id: entry.id)
+      ContentAnswer(computed: false,
+        reason: "state.json lists no " & algorithm & " id over " &
+                (if paths.len == 0: "the whole repository" else: $paths)))
 
   var requirement = Requirement(
     frameworksImplemented: requirementJson.strSeq("frameworks_implemented"),
@@ -573,20 +782,23 @@ type
   VectorsWalk* = object
     ## Everything one walk of a ``vectors`` tree found.
     index*: seq[string]  ## the index cross-check's failures
-    payload*, received*, signature*, verify*: GroupWalk
+    payload*, received*, signature*, content*, verify*, store*: GroupWalk
 
 proc walkVectors*(root: string): VectorsWalk =
   VectorsWalk(index: crossCheckIndex(root, WalkedGroups),
               payload: walkPayload(root), received: walkReceived(root),
-              signature: walkSignature(root), verify: walkVerify(root))
+              signature: walkSignature(root), content: walkContent(root),
+              verify: walkVerify(root), store: walkStore(root))
 
 proc caseCount*(walk: VectorsWalk): int =
   walk.payload.cases.len + walk.received.cases.len +
-    walk.signature.cases.len + walk.verify.cases.len
+    walk.signature.cases.len + walk.content.cases.len +
+    walk.verify.cases.len + walk.store.cases.len
 
 proc failures*(walk: VectorsWalk): seq[string] =
   walk.index & walk.payload.failures & walk.received.failures &
-    walk.signature.failures & walk.verify.failures
+    walk.signature.failures & walk.content.failures & walk.verify.failures &
+    walk.store.failures
 
 # ---------------------------------------------------------------------------
 # Locating the tree this run walks
@@ -700,11 +912,29 @@ suite "test-certificate conformance vectors":
     check walk.signature.cases.len > 0
     check walk.signature.failures.len == 0
 
+  test "content-id vectors: every expected id is computed, in every algorithm":
+    ## Content-Id.md §4 through CTC-3b's library: ``manifest-v1-sha256`` over
+    ## the entries, ``git-tree-*`` by real git in scratch repositories of
+    ## each object format.
+    require source.root.len > 0
+    reportGroup("content", walk.content)
+    check walk.content.cases.len > 0
+    check walk.content.failures.len == 0
+
   test "verification vectors produce the expected three-valued outcome":
     require source.root.len > 0
     reportGroup("verification", walk.verify)
     check walk.verify.cases.len > 0
     check walk.verify.failures.len == 0
+
+  test "store-path vectors: each certificate lands at its content-addressed path":
+    ## Transport.md §2.2: the payload is hashed, not the file — so a
+    ## non-canonical rendering, and a signed record with or without its
+    ## block, land on one name.
+    require source.root.len > 0
+    reportGroup("store", walk.store)
+    check walk.store.cases.len > 0
+    check walk.store.failures.len == 0
 
   test "the extracted vectors are removed once walked, leaving no cleanup for exit":
     ## The temporary directory is gone before the first case reads the walk,
@@ -803,29 +1033,35 @@ suite "the vectors pin":
     check not dirExists(extracted.scratch)
 
   test "a group index.json declares and the walker does not walk fails the suite":
-    ## Both halves are needed: dropping a group from the walked set (the
-    ## mutation an incomplete walker amounts to) must be named, and a newer
-    ## revision of the standard that adds groups must name exactly those.
+    ## At the pin the walker walks every group the standard declares, so the
+    ## cross-check is silent. The guard is then shown for EACH group:
+    ## dropping any one of them from the walked set — the mutation an
+    ## incomplete walker amounts to — fails, naming exactly that group and
+    ## its case count. (Before CTC-3c this test instead extracted a revision
+    ## newer than the pin and asserted it named `content` and `store`; the
+    ## pin now IS that revision's successor, so there is no unwalked group
+    ## left to name.)
     require pinError.len == 0
     let atPin = extractVectorsAt(repository, pin)
     checkpoint atPin.error
     require atPin.ok
-    let withoutVerify = crossCheckIndex(atPin.vectors, ["payload", "signature"])
+    let complete = crossCheckIndex(atPin.vectors, WalkedGroups)
+    var dropped: seq[tuple[group: string; failures: seq[string]]] = @[]
+    for group in WalkedGroups:
+      var rest: seq[string] = @[]
+      for other in WalkedGroups:
+        if other != group:
+          rest.add other
+      dropped.add (group, crossCheckIndex(atPin.vectors, rest))
+    let declared = readJson(atPin.vectors / "index.json")["groups"]
     discardVectors(atPin)
-    checkpoint $withoutVerify
-    check withoutVerify.len == 1
-    check withoutVerify.len == 1 and "`verify`" in withoutVerify[0]
-
-    let ahead = extractVectorsAt(repository, RevisionDeclaringUnwalkedGroups)
-    checkpoint ahead.error
-    require ahead.ok
-    let unwalked = crossCheckIndex(ahead.vectors, WalkedGroups)
-    discardVectors(ahead)
-    var named: seq[string] = @[]
-    for failure in unwalked:
+    for failure in complete:
       checkpoint failure
-      if "this walker does not walk it" in failure:
-        named.add failure
-    check named.len == 2
-    check named.len == 2 and "`content` (7 cases)" in named[0] and
-          "`store` (7 cases)" in named[1]
+    check complete.len == 0
+    for (group, failures) in dropped:
+      checkpoint group & ": " & $failures
+      let count = declared[group].len
+      check failures.len == 1
+      check failures.len == 1 and
+            ("`" & group & "` (" & $count & " cases)") in failures[0] and
+            "this walker does not walk it" in failures[0]

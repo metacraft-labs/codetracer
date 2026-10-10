@@ -62,7 +62,16 @@ type
     ## says.
     files: Table[string, FakeFile]
     unlistableDirs: seq[string]
-    vcs: WorkspaceVcsState
+    known: bool
+      ## Whether the repository could be established at all.
+    workingTree: string
+      ## W: the whole-repository ``git-tree-sha1`` content id of the working
+      ## tree's tracked files. Moving it is a commit of other content, a
+      ## checkout, or an edit — the indicator cannot tell them apart and must
+      ## not need to (Verification.md §4.1.1).
+    workingTreeProblem: string
+      ## When non-empty, W has no content id at all (Content-Id.md §3), and
+      ## this is the reason.
     platform: string
     verifier: CertificateSignatureVerifier
 
@@ -71,6 +80,10 @@ const
   WorkspaceRoot = "/w/demo-project"
   CommitA = "1111111111111111111111111111111111111111"
   CommitB = "2222222222222222222222222222222222222222"
+    ## Values for `base`, which is informational and never compared.
+  TreeA = "git-tree-sha1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  TreeB = "git-tree-sha1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ## Content ids — the binding.
   Platform = "linux/amd64"
   StoreDir = ".ct/certificates"
 
@@ -78,9 +91,9 @@ proc newWorld(): FakeWorld =
   FakeWorld(
     files: initTable[string, FakeFile](),
     unlistableDirs: @[],
-    vcs: WorkspaceVcsState(
-      known: true, repo: RepoName, commit: CommitA, clean: true,
-      treeKnown: false, tree: ""),
+    known: true,
+    workingTree: TreeA,
+    workingTreeProblem: "",
     platform: Platform,
     verifier: nil)
 
@@ -124,10 +137,32 @@ proc access(world: FakeWorld): CertificateStoreAccess =
       if world.files.hasKey(path): world.files[path].modifiedMs else: 0'i64
     )
 
+proc answer(world: FakeWorld; algorithm: string;
+            paths: seq[string]): ContentAnswer =
+  ## W as a host computes it: the whole-repository ``git-tree-sha1`` id, and
+  ## nothing else — another algorithm is one this "host" cannot compute, and
+  ## this fake computes no scoped id.
+  if world.workingTreeProblem.len > 0:
+    return ContentAnswer(computed: false, reason: world.workingTreeProblem)
+  if algorithm != "git-tree-sha1":
+    return ContentAnswer(computed: false,
+      reason: "this host cannot compute " & algorithm)
+  if paths.len > 0:
+    return ContentAnswer(computed: false,
+      reason: "this fake computes no scoped id")
+  ContentAnswer(computed: true, id: world.workingTree)
+
+proc workspaceState(world: FakeWorld): WorkspaceVcsState =
+  if not world.known:
+    return WorkspaceVcsState(known: false)
+  WorkspaceVcsState(known: true, repo: RepoName,
+    workingTree: proc(algorithm: string; paths: seq[string]): ContentAnswer
+        {.closure.} = world.answer(algorithm, paths))
+
 proc facts(world: FakeWorld): CertificateIndicatorFacts =
   CertificateIndicatorFacts(
     store: readCertificateStore(world.access, WorkspaceRoot),
-    vcs: world.vcs,
+    vcs: world.workspaceState,
     platform: world.platform,
     signatureVerifier: world.verifier)
 
@@ -141,9 +176,9 @@ proc evaluate(world: FakeWorld): CertificateIndicatorModel =
 # Real certificate documents, produced by the shipped serializer
 # ---------------------------------------------------------------------------
 
-proc sampleCertificate(commit = CommitA; platform = Platform;
+proc sampleCertificate(content = TreeA; base = CommitA; platform = Platform;
                        repo = RepoName; framework = "ct-test";
-                       issuer = "ct-test"; clean = true;
+                       issuer = "ct-test";
                        targets = @["tests/calc_test.nim"];
                        resultValue = "passed";
                        keyId = ""; signature = ""): TestCertificate =
@@ -158,8 +193,8 @@ proc sampleCertificate(commit = CommitA; platform = Platform;
     issuer: issuer,
     keyId: keyId,
     vcs: VcsState(
-      repo: repo, commit: commit, paths: @[], clean: clean,
-      untracked: false, worktree: none(WorktreeClaim)),
+      repo: repo, paths: @[], content: content, untracked: false,
+      base: base),
     commands: @[@["ct", "test", "run"]])
   if signature.len > 0:
     result.signature = CertificateSignature(
@@ -193,7 +228,7 @@ proc alwaysInvalidSignature(payload, publicKey, signatureValue: string):
 
 suite "SB-1: the status bar's test-certificate indicator":
 
-  test "a certificate matching the current commit and platform reads certified":
+  test "a certificate matching the working tree's content and platform reads certified":
     ## Verification item 1. The positive control for every negative one below:
     ## if this did not read certified, none of the others would mean anything.
     let world = newWorld()
@@ -230,8 +265,18 @@ suite "SB-1: the status bar's test-certificate indicator":
     # the disclosure and the signed bytes cannot disagree.
     check rows.getOrDefault("Targets") == "tests/a_test.nim, tests/b_test.nim"
     check rows.getOrDefault("Issued") == "2026-08-18T09:00:00Z"
-    check rows.getOrDefault("Commit") == CommitA
+    # The binding, and the commit labelled for what it is: informational.
+    check rows.getOrDefault("Content") == TreeA
+    check rows.getOrDefault("Base (informational)") == CommitA
     check rows.getOrDefault("Scope") == "whole repository"
+    # Nothing of the earlier draft is disclosed.
+    check not rows.hasKey("Commit")
+    check not rows.hasKey("Tested state")
+    # A record with no base has no base row, rather than an empty one.
+    let unbased = newWorld()
+    discard unbased.withCertificate(sampleCertificate(base = ""))
+    for row in unbased.evaluate().detail:
+      check row.label != "Base (informational)"
 
     let vm = newCertificateIndicatorVm(world.reader)
     check not vm.disclosed
@@ -258,15 +303,37 @@ suite "SB-1: the status bar's test-certificate indicator":
     check scope == "src/lib"
     check scope != "whole repository"
 
-  test "a certificate for another commit does not read certified":
-    ## Verification item 2. `vcs.commit` must match the commit under
-    ## evaluation exactly (Verification.md §4.1).
+  test "a certificate for other content does not read certified":
+    ## Verification item 2. `vcs.content` must equal the working tree's
+    ## content id (Verification.md §4.1.1).
     let world = newWorld()
-    discard world.withCertificate(sampleCertificate(commit = CommitB))
+    discard world.withCertificate(sampleCertificate(content = TreeB))
     let model = world.evaluate()
     checkpoint "state = " & $model.state & "; summary = " & model.summary
     check model.state != cisCertified
     check model.label != CertifiedLabel
+
+  test "base is never compared: content decides, in both directions":
+    ## Verification.md §4.1.1. A record whose base is ANOTHER commit covers
+    ## this tree when its content is W; a record whose base IS the commit the
+    ## user is on does not when its content differs. A consumer comparing base
+    ## fails one of the two.
+    let world = newWorld()
+    discard world.withCertificate(sampleCertificate(content = TreeA,
+                                                    base = CommitB))
+    let otherBase = world.evaluate()
+    checkpoint "other base, same content: " & $otherBase.state
+    check otherBase.state == cisCertified
+
+    let moved = newWorld()
+    moved.workingTree = TreeB
+    discard moved.withCertificate(sampleCertificate(content = TreeA,
+                                                    base = CommitA))
+    let sameBase = moved.evaluate()
+    checkpoint "same base, other content: " & $sameBase.state & " — " &
+               sameBase.summary
+    check sameBase.state != cisCertified
+    check sameBase.state == cisWasCertified
 
   test "a certificate for another platform does not read certified":
     ## A green Linux run says nothing about macOS (Verification.md §5), and
@@ -285,29 +352,28 @@ suite "SB-1: the status bar's test-certificate indicator":
     ## Two ways a tree moves on, and both must land here rather than in
     ## "not certified" — the record IS about this repository and this platform,
     ## which is exactly what makes the sentence true.
-    block movedToANewCommit:
+    block movedToNewContent:
+      # A commit of other content, a checkout, an edit: W moved. The record
+      # still names the content it tested, which is no longer what is here.
       let world = newWorld()
-      discard world.withCertificate(sampleCertificate(commit = CommitA))
-      world.vcs.commit = CommitB
+      discard world.withCertificate(sampleCertificate(content = TreeA))
+      check world.evaluate().state == cisCertified
+      world.workingTree = TreeB
       let model = world.evaluate()
-      checkpoint "after a commit: " & $model.state & " — " & model.summary
+      checkpoint "after W moved: " & $model.state & " — " & model.summary
       check model.state == cisWasCertified
       check model.label == WasCertifiedLabel
       check model.remedy == RunTheTestsRemedy
 
-    block editedTheWorktree:
-      # A `clean = true` certificate's tested state IS its commit
-      # (Verification.md §4.1). An edited tree is that commit PLUS the edit,
-      # which no committed-tree certificate describes — so the certificate
-      # stops binding the moment a tracked file changes, without HEAD moving.
+    block movedBack:
+      # And reverting the edit makes it bind again, with no run: W is the
+      # tested content once more.
       let world = newWorld()
-      discard world.withCertificate(sampleCertificate(commit = CommitA))
+      discard world.withCertificate(sampleCertificate(content = TreeA))
+      world.workingTree = TreeB
+      check world.evaluate().state == cisWasCertified
+      world.workingTree = TreeA
       check world.evaluate().state == cisCertified
-      world.vcs.clean = false
-      let model = world.evaluate()
-      checkpoint "after an edit: " & $model.state & " — " & model.summary
-      check model.state == cisWasCertified
-      check model.label == WasCertifiedLabel
 
   test "an unreadable key store renders unverifiable, not \"not certified\"":
     ## Verification item 4, and the distinction the whole standard's
@@ -441,42 +507,38 @@ status = "active"
     check model.state == cisUnverifiable
     check model.state != cisNoCertificates
 
-  test "the indicator refreshes when the commit changes":
+  test "the indicator refreshes when the working tree's content changes":
     ## Verification item 6. The deliverable is that the indicator "cannot go on
     ## claiming validity it has lost", so the assertion is that the model MOVED
     ## — not merely that a refresh was requested.
     let world = newWorld()
-    discard world.withCertificate(sampleCertificate(commit = CommitA))
+    discard world.withCertificate(sampleCertificate(content = TreeA))
     let vm = newCertificateIndicatorVm(world.reader)
 
     check vm.refresh(citStartup)
     check vm.model.state == cisCertified
     let atStartup = vm.revision
 
-    # A commit, a checkout, a rebase — HEAD moved.
-    world.vcs.commit = CommitB
+    # A checkout of other content — HEAD moved, and W with it.
+    world.workingTree = TreeB
     check vm.refresh(citCommitChanged)
     check vm.model.state == cisWasCertified
     check vm.revision == atStartup + 1
     check vm.lastTrigger == citCommitChanged
 
-    # An edit: the tree moved without HEAD moving.
-    world.vcs.commit = CommitA
+    # An edit, and its revert: the tree moved without HEAD moving.
+    world.workingTree = TreeA
     discard vm.refresh(citWorktreeChanged)
     check vm.model.state == cisCertified
-    world.vcs.clean = false
+    world.workingTree = TreeB
     check vm.refresh(citWorktreeChanged)
     check vm.model.state == cisWasCertified
     check vm.lastTrigger == citWorktreeChanged
 
     # A certificate arriving in the store.
-    world.vcs.clean = true
-    discard vm.refresh(citWorktreeChanged)
-    world.vcs.commit = CommitB
-    discard vm.refresh(citCommitChanged)
-    check vm.model.state == cisWasCertified
     world.put(storePath("later.toml"),
-              document(sampleCertificate(commit = CommitB)), 2000)
+              document(sampleCertificate(content = TreeB, base = CommitB)),
+              2000)
     check vm.refresh(citStoreChanged)
     check vm.model.state == cisCertified
     check vm.lastTrigger == citStoreChanged
@@ -496,10 +558,10 @@ status = "active"
     ## a skewed clock cannot pin itself at the top of the list.
     let world = newWorld()
     world.put(WorkspaceRoot & "/.repro/workspace/certificates/old.toml",
-              document(sampleCertificate(commit = CommitA)), 1000)
+              document(sampleCertificate(content = TreeA)), 1000)
     world.put(storePath("new.toml"),
-              document(sampleCertificate(commit = CommitB)), 2000)
-    world.vcs.commit = CommitB
+              document(sampleCertificate(content = TreeB)), 2000)
+    world.workingTree = TreeB
     let model = world.evaluate()
     check model.state == cisCertified
     check model.certificateName == StoreDir & "/new.toml"
@@ -507,8 +569,8 @@ status = "active"
     # And the other way round, so the case cannot pass by accident of which
     # directory is searched first.
     world.put(WorkspaceRoot & "/.repro/workspace/certificates/old.toml",
-              document(sampleCertificate(commit = CommitA)), 3000)
-    world.vcs.commit = CommitA
+              document(sampleCertificate(content = TreeA)), 3000)
+    world.workingTree = TreeA
     let flipped = world.evaluate()
     check flipped.state == cisCertified
     check flipped.certificateName ==
@@ -537,8 +599,8 @@ status = "active"
       "\r\n" &
       "[certificate.vcs]\r\n" &
       "untracked   = false\r\n" &
-      "clean = true\r\n" &
-      "commit = \"" & CommitA & "\"\r\n" &
+      "base = \"" & CommitA & "\"\r\n" &
+      "content = '" & TreeA & "'\r\n" &
       "repo = \"" & RepoName & "\"\r\n" &
       "\r\n" &
       "[certificate]\r\n" &
@@ -603,7 +665,7 @@ status = "active"
     seen.add certified.evaluate().state
 
     let stale = newWorld()
-    discard stale.withCertificate(sampleCertificate(commit = CommitB))
+    discard stale.withCertificate(sampleCertificate(content = TreeB))
     seen.add stale.evaluate().state
 
     let foreign = newWorld()
@@ -630,14 +692,14 @@ status = "active"
       check stateClass(state).len > 0
     check stateClass(cisUnverifiable) != stateClass(cisNotCertified)
 
-  test "a commit this build could not establish is unverifiable":
+  test "a repository this build could not establish is unverifiable":
     ## Where the client cannot tell, it must say so. A consumer that does not
-    ## know which commit it is on cannot decide `vcs.commit` either way, and
-    ## reporting "not certified" would send an operator to run tests over a
-    ## VCS problem.
+    ## know which repository it is in cannot decide the content binding either
+    ## way, and reporting "not certified" would send an operator to run tests
+    ## over a VCS problem.
     let world = newWorld()
     discard world.withCertificate(sampleCertificate())
-    world.vcs = WorkspaceVcsState(known: false)
+    world.known = false
     let model = world.evaluate()
     check model.state == cisUnverifiable
     check model.remedy == FixConfigurationRemedy
@@ -686,21 +748,76 @@ framework = "ct-test"
     check model.state != cisUnverifiable
     check model.remedy == RunTheTestsRemedy
 
-  test "a modified-worktree claim this build cannot match reads unverifiable":
-    ## A `clean = false` certificate is matched by canonical CONTENT id
-    ## (Verification.md §4.1.1), and CodeTracer cannot compute one for the
-    ## current worktree. Reporting "was certified, no longer valid" would be a
-    ## claim it has not earned every bit as much as "certified" would.
+  test "a content id this build cannot compute reads unverifiable":
+    ## Verification.md §4.1.1: a record in an algorithm the consumer cannot
+    ## compute for the working tree — `git-tree-sha256` against a SHA-1
+    ## repository, an algorithm the standard does not define — has not been
+    ## shown to mismatch. Reporting "was certified, no longer valid" would be a
+    ## claim this build has not earned every bit as much as "certified" would.
+    for content in [
+        "git-tree-sha256:" & repeat('a', 64),
+        "blake3-manifest-v1:" & repeat('a', 64)]:
+      let world = newWorld()
+      discard world.withCertificate(sampleCertificate(content = content))
+      let model = world.evaluate()
+      checkpoint content & ": " & $model.state & " — " & model.summary
+      check model.state == cisUnverifiable
+      check model.state != cisWasCertified
+      check model.state != cisCertified
+      check model.remedy == FixConfigurationRemedy
+
+  test "a malformed content id is not evidence, and is not unverifiable":
+    ## Content-Id.md §1: an uppercase or abbreviated digest is decidably
+    ## invalid and is never repaired into the id it was probably meant to be.
+    ## The uppercase spelling of W itself must not read certified.
+    for content in [TreeA.toUpperAscii.replace("GIT-TREE-SHA1", "git-tree-sha1"),
+                    TreeA[0 ..< 26]]:
+      let world = newWorld()
+      discard world.withCertificate(sampleCertificate(content = content))
+      let model = world.evaluate()
+      checkpoint content & ": " & $model.state & " — " & model.summary
+      check model.state != cisCertified
+      check model.state != cisUnverifiable
+      check "malformed content id" in model.summary
+
+  test "a working tree with no content id reads unverifiable, never certified":
+    ## Content-Id.md §3: an unmerged index, an assume-unchanged entry, a
+    ## modified submodule — states with no honest content id. The record may
+    ## well be for this tree; nobody can tell, and the reason is named.
     let world = newWorld()
-    var cert = sampleCertificate(clean = false)
-    cert.vcs.worktree = some(WorktreeClaim(tree: "deadbeef"))
-    discard world.withCertificate(cert)
-    world.vcs.clean = false
+    discard world.withCertificate(sampleCertificate(content = TreeA))
+    world.workingTreeProblem = "the working tree has no content id: the " &
+                               "index has unmerged entries (f.txt)"
     let model = world.evaluate()
-    checkpoint "state = " & $model.state & " — " & model.summary
+    checkpoint $model.state & " — " & model.summary
     check model.state == cisUnverifiable
-    check model.state != cisWasCertified
-    check model.state != cisCertified
+    check "unmerged" in model.summary
+    # The control: the condition cleared, the same record reads by content.
+    world.workingTreeProblem = ""
+    check world.evaluate().state == cisCertified
+
+  test "an earlier-draft record in the store no longer reads certified":
+    ## The record `ct test` wrote before the content-binding revision: bound
+    ## to a commit, `clean = true`, no `content`. Before CTC-3c the shipped
+    ## verifier read it as covering HEAD, so the status bar said "Certified".
+    ## It is decidably invalid — "Not certified", never unverifiable — and
+    ## nothing translates it into the current shape.
+    let world = newWorld()
+    world.put(storePath("linux-amd64.toml"), "schema = \"test-certificate.v1\"\n" &
+      "\n[certificate]\nframework = \"ct-test\"\nproject = \"" & RepoName &
+      "\"\nplatform = \"" & Platform & "\"\n" &
+      "targets = [\"tests/calc_test.nim\"]\nresult = \"passed\"\n" &
+      "issued_at = \"2026-08-18T09:00:00Z\"\nissuer = \"ct-test\"\n" &
+      "\n[certificate.vcs]\nrepo = \"" & RepoName & "\"\n" &
+      "commit = \"" & CommitA & "\"\nclean = true\nuntracked = false\n" &
+      "\n[[certificate.command]]\nargv = [\"ct\", \"test\", \"run\"]\n", 1000)
+    let model = world.evaluate()
+    checkpoint $model.state & " — " & model.summary
+    check model.state == cisNotCertified
+    check model.label == NotCertifiedLabel
+    check model.state != cisUnverifiable
+    check model.remedy == RunTheTestsRemedy
+    check "earlier-draft" in model.summary
 
   test "a certificate for another repository is not this workspace's business":
     ## The record parses, is authentic-shaped and reports a pass — and says

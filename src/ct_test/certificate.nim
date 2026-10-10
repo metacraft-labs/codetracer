@@ -60,8 +60,8 @@ const
 type
   CertificateError* = object of CatchableError
     ## Raised when a record cannot be rendered in canonical form — an empty
-    ## ``targets`` array, a ``clean = false`` record with no ``worktree``, a
-    ## value carrying a control character the escape table cannot express.
+    ## ``targets`` array, a record with no ``content``, a value carrying a
+    ## control character the escape table cannot express.
     ## Canonical-Payload.md §2, §3, §4.
 
   # `TomlError` is `common/toml_subset`'s and arrives through the `export`
@@ -70,27 +70,29 @@ type
   # verifier (Verification.md §7), and that distinction is now shared with
   # every other consumer of the reader rather than restated per consumer.
 
-  WorktreeClaim* = object
-    ## ``[certificate.vcs.worktree]`` — identifies the exact modified state
-    ## that was tested. Standard.md §3.2.2. At least one of ``tree`` and
-    ## ``patchDigest`` must be present; ``format`` is required whenever
-    ## ``patchDigest`` is.
-    tree*: string
-    format*: string
-    patchDigest*: string
-
   VcsState* = object
-    ## ``[certificate.vcs]`` — the repository state the tests ran against.
-    ## Standard.md §3.2.
+    ## ``[certificate.vcs]`` — the repository content the tests ran against.
+    ## Standard.md §3.2, in the 2026-10-09 revision: a certificate is bound to
+    ## the CONTENT of the tracked files, never to a commit.
     repo*: string
-    commit*: string
     paths*: seq[string]
       ## Repo-relative scope. Empty means the whole repository, and is
       ## **omitted entirely** from the payload — an omitted key and an empty
       ## array are different payloads (Canonical-Payload.md §2 rule 8).
-    clean*: bool
+    content*: string
+      ## The self-describing content id of the tracked files within scope
+      ## (Content-Id.md §1), e.g. ``git-tree-sha1:<40 hex>``. Emitted
+      ## VERBATIM: the serializer does not split, re-case or validate it — a
+      ## malformed id is the verifier's finding (Canonical-Payload.md §2
+      ## rule 9), and rewriting it here would sign a value the producer never
+      ## computed.
     untracked*: bool
-    worktree*: Option[WorktreeClaim]
+    base*: string
+      ## The commit checked out when the certificate was issued. OPTIONAL and
+      ## **informational only** (Standard.md §3.2.3): no verifier compares it
+      ## with anything. Empty means absent, and an absent ``base`` is
+      ## **omitted**, never emitted as ``""`` (Canonical-Payload.md §2
+      ## rule 10).
 
   CertificateSignature* = object
     ## ``[certificate.signature]`` — OPTIONAL, and excluded from the canonical
@@ -253,25 +255,13 @@ proc validateForCanonicalisation(cert: TestCertificate) =
       raise newException(CertificateError,
         "an empty argv describes no command and MUST NOT be emitted " &
         "(Canonical-Payload.md §2 rule 7)")
-  if cert.vcs.clean:
-    if cert.vcs.worktree.isSome:
-      raise newException(CertificateError,
-        "[certificate.vcs.worktree] MUST be absent when clean = true " &
-        "(Standard.md §3.2.2)")
-  else:
-    if cert.vcs.worktree.isNone:
-      raise newException(CertificateError,
-        "[certificate.vcs.worktree] is REQUIRED when clean = false: a dirty " &
-        "certificate without it identifies no state at all (Standard.md §3.2.2)")
-    let worktree = cert.vcs.worktree.get
-    if worktree.tree.len == 0 and worktree.patchDigest.len == 0:
-      raise newException(CertificateError,
-        "at least one of worktree.tree and worktree.patch_digest MUST be " &
-        "present (Standard.md §3.2.2)")
-    if worktree.patchDigest.len > 0 and worktree.format.len == 0:
-      raise newException(CertificateError,
-        "worktree.format is REQUIRED when patch_digest is present, because " &
-        "diff output is not canonical (Standard.md §3.2.2)")
+  if cert.vcs.content.len == 0:
+    # Not a judgement of the id's FORM — rule 9 leaves that to the verifier —
+    # only of its presence: `content` is the whole binding, and a record
+    # without one identifies no tested state at all (Standard.md §3.2).
+    raise newException(CertificateError,
+      "vcs.content is required: a record with no content id identifies no " &
+      "tested state (Standard.md §3.2)")
 
   requireRepresentable("schema", cert.schema)
   requireRepresentable("framework", cert.framework)
@@ -282,7 +272,8 @@ proc validateForCanonicalisation(cert: TestCertificate) =
   requireRepresentable("issuer", cert.issuer)
   requireRepresentable("key_id", cert.keyId)
   requireRepresentable("vcs.repo", cert.vcs.repo)
-  requireRepresentable("vcs.commit", cert.vcs.commit)
+  requireRepresentable("vcs.content", cert.vcs.content)
+  requireRepresentable("vcs.base", cert.vcs.base)
   for target in cert.targets:
     requireRepresentable("targets", target)
   for path in cert.vcs.paths:
@@ -290,21 +281,16 @@ proc validateForCanonicalisation(cert: TestCertificate) =
   for argv in cert.commands:
     for arg in argv:
       requireRepresentable("command.argv", arg)
-  if cert.vcs.worktree.isSome:
-    let worktree = cert.vcs.worktree.get
-    requireRepresentable("worktree.tree", worktree.tree)
-    requireRepresentable("worktree.format", worktree.format)
-    requireRepresentable("worktree.patch_digest", worktree.patchDigest)
 
 proc canonicalPayload*(cert: TestCertificate): string =
   ## The **exact byte sequence a signature covers**: UTF-8, LF-only, BOM-free,
   ## no trailing whitespace, ending with exactly one newline
   ## (Canonical-Payload.md §1).
   ##
-  ## Key order is fixed and MUST NOT be re-sorted; tables are separated by
-  ## exactly one blank line; ``key_id``, ``paths`` and the whole
-  ## ``worktree`` table are omitted rather than emitted empty
-  ## (Canonical-Payload.md §2).
+  ## Key order is fixed and MUST NOT be re-sorted — in ``[certificate.vcs]``
+  ## it is ``repo``, ``paths``, ``content``, ``untracked``, ``base``; tables
+  ## are separated by exactly one blank line; ``key_id``, ``paths`` and
+  ## ``base`` are omitted rather than emitted empty (Canonical-Payload.md §2).
   ##
   ## Note the ordering inside this proc: ``targets`` and ``paths`` are sorted
   ## on their **raw values** and only then escaped. Escaping first and sorting
@@ -334,24 +320,17 @@ proc canonicalPayload*(cert: TestCertificate): string =
   lines.add ""
   lines.add "[certificate.vcs]"
   lines.add "repo = " & quoted(cert.vcs.repo)
-  lines.add "commit = " & quoted(cert.vcs.commit)
   let paths = sortedDeduplicated(cert.vcs.paths)
   if paths.len > 0:
     lines.add "paths = " & inlineArray(paths)
-  # Bare TOML booleans, never quoted strings (Canonical-Payload.md §2 rule 4).
-  lines.add "clean = " & (if cert.vcs.clean: "true" else: "false")
+  # Verbatim (Canonical-Payload.md §2 rule 9): no split, no re-casing.
+  lines.add "content = " & quoted(cert.vcs.content)
+  # A bare TOML boolean, never a quoted string (Canonical-Payload.md §2
+  # rule 4).
   lines.add "untracked = " & (if cert.vcs.untracked: "true" else: "false")
-
-  if cert.vcs.worktree.isSome:
-    let worktree = cert.vcs.worktree.get
-    lines.add ""
-    lines.add "[certificate.vcs.worktree]"
-    if worktree.tree.len > 0:
-      lines.add "tree = " & quoted(worktree.tree)
-    if worktree.format.len > 0:
-      lines.add "format = " & quoted(worktree.format)
-    if worktree.patchDigest.len > 0:
-      lines.add "patch_digest = " & quoted(worktree.patchDigest)
+  # Last in the table, and omitted rather than emitted empty (rule 10).
+  if cert.vcs.base.len > 0:
+    lines.add "base = " & quoted(cert.vcs.base)
 
   for argv in cert.commands:
     lines.add ""
@@ -423,6 +402,16 @@ type
     status*: CertificateReadStatus
     detail*: string
       ## Prose for a human. Never compared by anything.
+    earlierDraft*: bool
+      ## ``crsMalformed`` because the record is in the EARLIER-DRAFT shape —
+      ## bound to a ``commit`` (with ``clean`` and perhaps a ``worktree``
+      ## table) and carrying no ``content``. Every record `ct test` issued
+      ## before the 2026-10-09 revision looks like this. It is decidably
+      ## invalid, never unverifiable, and it is NOT translated: filling
+      ## ``content`` from ``commit^{tree}`` would be a payload its signer never
+      ## saw (Canonical-Payload.md §7.1). Kept as a flag so a consumer can name
+      ## the remedy — run the tests, which re-issues it in the current shape —
+      ## rather than only "a field is missing".
     schema*: string
       ## Always populated when the input parsed at all, so an unknown-schema
       ## report can name the version it did not implement.
@@ -435,10 +424,13 @@ proc readCertificate*(text: string): CertificateRead =
   ## parsed **fields**, never by slicing the received bytes
   ## (Canonical-Payload.md §5) — which is why this returns a record and never
   ## a byte range. A received file may differ from canonical form in
-  ## whitespace, key order or escaping while parsing to identical values.
+  ## whitespace, key order or escaping while parsing to identical values —
+  ## and in TOML's other spellings of the same values, inline tables and
+  ## multi-line strings among them, which the standard's ``store/`` vectors
+  ## deliver (so they are enabled here, and only here).
   var root: TomlNode
   try:
-    root = parseTomlSubset(text)
+    root = parseTomlSubset(text, {teInlineTables, teMultilineStrings})
   except TomlError as err:
     return CertificateRead(status: crsMalformed,
                            detail: "not readable as TOML: " & err.msg)
@@ -469,29 +461,46 @@ proc readCertificate*(text: string): CertificateRead =
   cert.issuer = certificate.strField("issuer")
   cert.keyId = certificate.strField("key_id")
 
-  cert.vcs.repo = vcs.strField("repo")
-  cert.vcs.commit = vcs.strField("commit")
-  cert.vcs.paths = vcs.strSeqField("paths")
-  let cleanNode = vcs.field("clean")
-  let untrackedNode = vcs.field("untracked")
-  if cleanNode == nil or cleanNode.kind != tomlBool:
+  # ---- The earlier-draft shape ------------------------------------------
+  # Before the 2026-10-09 revision `[certificate.vcs]` named a `commit` with a
+  # `clean` flag (and a `worktree` table when dirty) instead of `content`. The
+  # schema id did not change, so such a record parses; it lacks the required
+  # `content` and is decidably invalid (Canonical-Payload.md §7.1). It is
+  # reported as what it is, with the remedy, and nothing here reads `commit`,
+  # `clean` or `worktree` as a value — so no path can translate one.
+  let contentNode = vcs.field("content")
+  if contentNode == nil:
+    if vcs.field("commit") != nil or vcs.field("clean") != nil or
+       vcs.field("worktree") != nil:
+      return CertificateRead(status: crsMalformed, schema: result.schema,
+        earlierDraft: true,
+        detail: "vcs.content is required, and this is an earlier-draft " &
+                "record bound to a commit rather than to content; it is not " &
+                "translated — run the tests to re-issue it in the current shape")
     return CertificateRead(status: crsMalformed, schema: result.schema,
-                           detail: "vcs.clean is missing or not a boolean")
+                           detail: "vcs.content is required")
+  if contentNode.kind != tomlString:
+    return CertificateRead(status: crsMalformed, schema: result.schema,
+                           detail: "vcs.content is not a string")
+
+  cert.vcs.repo = vcs.strField("repo")
+  cert.vcs.paths = vcs.strSeqField("paths")
+  cert.vcs.content = contentNode.strVal
+  let untrackedNode = vcs.field("untracked")
   if untrackedNode == nil or untrackedNode.kind != tomlBool:
     return CertificateRead(status: crsMalformed, schema: result.schema,
                            detail: "vcs.untracked is missing or not a boolean")
-  cert.vcs.clean = cleanNode.boolVal
   cert.vcs.untracked = untrackedNode.boolVal
-
-  let worktree = vcs.field("worktree")
-  if worktree != nil:
-    if worktree.kind != tomlTable:
+  let baseNode = vcs.field("base")
+  if baseNode != nil:
+    # `base` is omitted when absent and never emitted empty (rule 10). An
+    # empty one names no commit, and the payload rebuilt from the fields would
+    # silently drop the key the signer saw — so it is refused, not dropped.
+    if baseNode.kind != tomlString or baseNode.strVal.len == 0:
       return CertificateRead(status: crsMalformed, schema: result.schema,
-                             detail: "vcs.worktree is not a table")
-    cert.vcs.worktree = some(WorktreeClaim(
-      tree: worktree.strField("tree"),
-      format: worktree.strField("format"),
-      patchDigest: worktree.strField("patch_digest")))
+        detail: "vcs.base is present and not a non-empty string; an absent " &
+                "base is omitted, never empty (Canonical-Payload.md §2 rule 10)")
+    cert.vcs.base = baseNode.strVal
 
   let commands = certificate.field("command")
   if commands != nil and commands.kind == tomlArray:
@@ -511,7 +520,7 @@ proc readCertificate*(text: string): CertificateRead =
       "framework": cert.framework, "project": cert.project,
       "platform": cert.platform, "result": cert.result,
       "issued_at": cert.issuedAt, "issuer": cert.issuer,
-      "vcs.repo": cert.vcs.repo, "vcs.commit": cert.vcs.commit}.items:
+      "vcs.repo": cert.vcs.repo, "vcs.content": cert.vcs.content}.items:
     if value.len == 0:
       return CertificateRead(status: crsMalformed, schema: result.schema,
                              detail: "required field '" & name & "' is missing")
@@ -521,21 +530,18 @@ proc readCertificate*(text: string): CertificateRead =
   if cert.commands.len == 0:
     return CertificateRead(status: crsMalformed, schema: result.schema,
                            detail: "at least one [[certificate.command]] is required")
-  if not cert.vcs.clean and cert.vcs.worktree.isNone:
-    return CertificateRead(status: crsMalformed, schema: result.schema,
-      detail: "clean = false with no [certificate.vcs.worktree]: the record " &
-              "identifies no state at all (Standard.md §3.2.2)")
-  if cert.vcs.clean and cert.vcs.worktree.isSome:
-    return CertificateRead(status: crsMalformed, schema: result.schema,
-      detail: "[certificate.vcs.worktree] must be absent when clean = true")
 
   # Everything else that makes a record decidably invalid is exactly the set of
   # things that leave it with **no canonical form**, so ask the serializer
   # rather than re-deriving its rules here and drifting from them: a value
   # carrying a control character the escape table cannot express
   # (Canonical-Payload.md §4 — "a verifier encountering one MUST reject the
-  # record as malformed"), an `argv = []` describing no command (§2 rule 7),
-  # and the worktree-key combinations §3.2.2 forbids.
+  # record as malformed") and an `argv = []` describing no command (§2
+  # rule 7).
+  #
+  # The content id's FORM is deliberately not judged here: the serializer
+  # emits it verbatim (rule 9), and a malformed id is the verifier's finding
+  # (Verification.md §4.1.1), which it reports as a rejection naming the id.
   #
   # Doing it HERE rather than at the signature check is deliberate. The check
   # used to live on the signature path only, so an *unsigned* unrepresentable

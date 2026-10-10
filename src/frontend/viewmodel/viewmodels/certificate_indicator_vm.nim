@@ -43,18 +43,29 @@
 ## So the model below carries ``authenticity`` as its own field, every state
 ## has a ``detail`` that says what was and was not checked, and where this
 ## consumer cannot tell it reports **unverifiable** instead of choosing the
-## reassuring reading. Five places that arises are named at their sites: a
-## store that could not be listed or read, a commit this build could not
+## reassuring reading. The places that arises are named at their sites: a
+## store that could not be listed or read, a repository this build could not
 ## establish, a platform it could not establish, a record in a schema version
-## it does not implement, a certificate that identifies its state by content
-## when the content id of the current tree is unknown, and a key store that
-## cannot be read.
+## it does not implement, a certificate whose content id cannot be computed
+## for the working tree (an algorithm this host does not implement, or a
+## working tree with no content id at all — Content-Id.md §3), and a key
+## store that cannot be read.
+##
+## ## What "the state in front of you" is
+##
+## The WORKING TREE's content, W (Status-Bar.md): a certificate is bound to
+## the content of the tracked files, never to a commit (Verification.md
+## §4.1.1), so a record covers what the user has exactly when its content id
+## equals W's computed in the record's own algorithm over its own scope.
+## ``base`` is informational and is never compared. Deciding on HEAD's and the
+## index's content as well, with the labels that brings, is SB-2b's; until
+## then this indicator speaks SB-1's labels over W.
 ##
 ## ## What this indicator does NOT check, stated rather than implied
 ##
 ## **Framework-specific validity (Verification.md §4.2).** Past the generic
 ## check, validity is the framework's own question — does *its* lock file, or
-## config, or target definition at ``vcs.commit`` agree with what the
+## config, or target definition for the tested content agree with what the
 ## certificate claims — and the standard defines none of it. This indicator
 ## implements the generic check only, for every framework, and applies no
 ## framework's rules to any certificate including its own. §4.2 is explicit
@@ -86,6 +97,7 @@ import ../../../ct_test/certificate_verification
 # `Error: invalid indentation`, the same trap `platform_host.nim` records.
 export certificate_store
 export CertificateSignatureVerifier, SignatureCheck
+export ContentOracle, ContentAnswer
 
 type
   CertificateIndicatorState* = enum
@@ -182,19 +194,19 @@ type
     ##
     ## ``known`` is the field that keeps this honest, and it is the same
     ## distinction ``certificate_issuance.VcsProbe.determined`` draws on the
-    ## producing side: a build that could not establish the commit MUST NOT
-    ## behave as though it had established one. Here that means
+    ## producing side: a build that could not establish the repository MUST
+    ## NOT behave as though it had established one. Here that means
     ## **unverifiable**, not "not certified".
     known*: bool
     repo*: string
-    commit*: string
-    clean*: bool
-      ## No tracked file differs from ``commit``.
-    treeKnown*: bool
-      ## Whether ``tree`` below is a real content id.
-    tree*: string
-      ## The canonical content id of the current state, for matching a
-      ## modified-worktree claim by content (Verification.md §4.1.1).
+    workingTree*: ContentOracle
+      ## W — the content id of the working tree's tracked files, computed on
+      ## demand in the algorithm and over the scope of the record being
+      ## evaluated (Content-Id.md §5). An answer that is not an id — an
+      ## algorithm this host cannot compute, a working tree with no content id
+      ## (Content-Id.md §3), git failing — makes that record *unverifiable*,
+      ## and never a match or a mismatch. ``nil`` means no id can be computed
+      ## for anything.
 
   CertificateIndicatorFacts* = object
     ## Everything the indicator is a function of. Gathering these is the
@@ -252,13 +264,16 @@ proc detailRowsFor(cert: TestCertificate; name: string):
     row("Targets", sortedDeduplicated(cert.targets).join(", ")),
     row("Issued", cert.issuedAt),
     row("Issuer", cert.issuer),
-    row("Commit", cert.vcs.commit)]
+    # The binding. The certificate covers whatever state has this content id.
+    row("Content", cert.vcs.content)]
+  if cert.vcs.base.len > 0:
+    # Where the work started, and nothing else: never compared with anything
+    # (Standard.md §3.2.3), and labelled so nobody reads it as the binding.
+    result.add row("Base (informational)", cert.vcs.base)
   if cert.vcs.paths.len > 0:
     result.add row("Scope", sortedDeduplicated(cert.vcs.paths).join(", "))
   else:
     result.add row("Scope", "whole repository")
-  if not cert.vcs.clean:
-    result.add row("Tested state", "a modified worktree, not the commit itself")
   if cert.vcs.untracked:
     result.add row("Untracked files", "present when the tests ran")
   result.add row("Record", name)
@@ -334,7 +349,11 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
       name = stored.name)
   of crsMalformed:
     # Decidably invalid: the consumer asked the question and got an answer.
-    # That is a rejection and never unverifiable (Verification.md §7).
+    # That is a rejection and never unverifiable (Verification.md §7) — and
+    # that includes an EARLIER-DRAFT record, bound to a commit with no
+    # `content`, which is every certificate `ct test` wrote before the
+    # 2026-10-09 revision. It is not translated; the reader's detail names
+    # the remedy (run the tests, which re-issues it in the current shape).
     return CertificateIndicatorModel(
       state: cisNotCertified,
       label: NotCertifiedLabel,
@@ -403,39 +422,20 @@ proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
       certificateName: stored.name,
       searched: facts.store.searched)
 
-  # ---- A claim this build cannot evaluate --------------------------------
-  # A `clean = false` certificate does not describe its commit; it describes
-  # the commit plus a modification, matched by CONTENT (Verification.md
-  # §4.1.1). CodeTracer has no way to compute the content id of the current
-  # worktree, so it cannot tell whether such a record matches — and saying
-  # "no longer valid" would be a claim it has not earned, exactly as much as
-  # saying "certified" would.
-  if not cert.vcs.clean and not facts.vcs.treeKnown:
-    return unverifiable(facts,
-      "The newest record identifies the state it tested by content rather " &
-      "than by commit, and CodeTracer cannot compute the content id of this " &
-      "worktree, so it cannot tell whether the two are the same state.",
-      detail = detail, name = stored.name)
-
   # ---- The verdict, from the shared verifier -----------------------------
   #
-  # THE STATE UNDER EVALUATION IS NOT ALWAYS `commit`. Verification.md §4.1:
-  # a `clean = true` certificate's tested state IS the commit, so it covers
-  # the commit and nothing else. When the working tree is dirty, what the user
-  # has is the commit *plus* their edits — a state no committed-tree
-  # certificate describes. Passing the commit anyway would report "certified"
-  # for a tree that has moved on, which is precisely the staleness this
-  # indicator exists to surface.
-  #
-  # So a dirty tree is evaluated as a state with no commit identity. Nothing
-  # can match it by commit — `readCertificate` requires a non-empty
-  # `vcs.commit`, so the empty string below is unmatchable by construction —
-  # and a modified-worktree claim can still match it by content through
-  # `tree`, which is exactly §4.1.1's rule.
+  # THE STATE UNDER EVALUATION IS THE WORKING TREE'S CONTENT, W. The verifier
+  # asks W's oracle for the record's own algorithm over the record's own
+  # scope and compares content ids (Verification.md §4.1.1). No commit is
+  # passed, because none is compared: a record issued on top of another
+  # commit covers this tree when the content is the same, and a record whose
+  # `base` is HEAD does not when the tree has moved on — which is precisely
+  # the staleness this indicator exists to surface. An algorithm W cannot be
+  # computed in, or a working tree with no content id, comes back from the
+  # verifier as unevaluated and is reported *unverifiable* below.
   let state = EvaluatedState(
     repo: facts.vcs.repo,
-    commit: (if facts.vcs.clean: facts.vcs.commit else: ""),
-    tree: facts.vcs.tree)
+    content: facts.vcs.workingTree)
 
   # WHETHER SIGNATURES ARE REQUIRED IS THE DEPLOYMENT'S CALL, and the store
   # file is where the deployment makes it. A workspace that registered keys has
@@ -668,8 +668,8 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
   result.certificateName = newest.name
 
   # ---- Facts about the world this build could not establish -------------
-  # A certificate names a commit and a platform. A consumer that does not know
-  # its own commit, or its own platform, cannot decide either field — and the
+  # A certificate names content and a platform. A consumer that does not know
+  # its own repository, or its own platform, cannot decide either — and the
   # honest report is that it could not, not that the answer was no.
   #
   # Decided ONCE, ahead of any record, because neither fact is a property of a
@@ -677,8 +677,8 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
   # name the newest record because that is the one a user would go looking for.
   if not facts.vcs.known:
     return unverifiable(facts,
-      "CodeTracer could not establish which commit this workspace is on, so " &
-      "it cannot tell whether the certificate covers it.",
+      "CodeTracer could not establish which repository this workspace is, " &
+      "so it cannot tell whether the certificate covers its content.",
       name = newest.name)
   if facts.platform.len == 0:
     return unverifiable(facts,

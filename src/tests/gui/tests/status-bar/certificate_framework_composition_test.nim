@@ -89,14 +89,16 @@ type
 
   FakeWorld = ref object
     files: Table[string, FakeFile]
-    vcs: WorkspaceVcsState
+    workingTree: string
+      ## W: the working tree's whole-repository content id.
     platform: string
 
 const
   RepoName = "demo-project"
   WorkspaceRoot = "/w/demo-project"
-  CommitA = "1111111111111111111111111111111111111111"
-  CommitB = "2222222222222222222222222222222222222222"
+  TreeA = "git-tree-sha1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  TreeB = "git-tree-sha1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ## Content ids: what a record binds to and what W is compared with.
   Platform = "linux/amd64"
   CtDir = ".ct/certificates"
   ReproDir = ".repro/workspace/certificates"
@@ -109,10 +111,19 @@ const
 proc newWorld(): FakeWorld =
   FakeWorld(
     files: initTable[string, FakeFile](),
-    vcs: WorkspaceVcsState(
-      known: true, repo: RepoName, commit: CommitA, clean: true,
-      treeKnown: false, tree: ""),
+    workingTree: TreeA,
     platform: Platform)
+
+proc oracleAt(tree: string): ContentOracle =
+  ## W as a host computes it: the whole-repository `git-tree-sha1` id and
+  ## nothing else. A top-level proc returning the closure, because a closure
+  ## literal inside a `test` body does not compile under `nim js`.
+  result = proc(algorithm: string; paths: seq[string]): ContentAnswer
+      {.closure.} =
+    if algorithm == "git-tree-sha1" and paths.len == 0:
+      ContentAnswer(computed: true, id: tree)
+    else:
+      ContentAnswer(computed: false, reason: "not computed by this fake")
 
 proc dirOf(path: string): string =
   let slash = path.rfind('/')
@@ -145,7 +156,8 @@ proc access(world: FakeWorld): CertificateStoreAccess =
 proc facts(world: FakeWorld): CertificateIndicatorFacts =
   CertificateIndicatorFacts(
     store: readCertificateStore(world.access, WorkspaceRoot),
-    vcs: world.vcs,
+    vcs: WorkspaceVcsState(known: true, repo: RepoName,
+                           workingTree: oracleAt(world.workingTree)),
     platform: world.platform,
     signatureVerifier: nil)
 
@@ -157,7 +169,7 @@ proc evaluate(world: FakeWorld): CertificateIndicatorModel =
 # ---------------------------------------------------------------------------
 
 proc certificate(framework = "ct-test"; issuer = "ct-test";
-                 commit = CommitA; targets = @["tests/calc_test.nim"];
+                 content = TreeA; targets = @["tests/calc_test.nim"];
                  commands = @[@["ct", "test", "run"]]): TestCertificate =
   TestCertificate(
     schema: CertificateSchema,
@@ -169,8 +181,7 @@ proc certificate(framework = "ct-test"; issuer = "ct-test";
     issuedAt: "2026-08-18T09:00:00Z",
     issuer: issuer,
     vcs: VcsState(
-      repo: RepoName, commit: commit, paths: @[], clean: true,
-      untracked: false, worktree: none(WorktreeClaim)),
+      repo: RepoName, paths: @[], content: content, untracked: false),
     commands: commands)
 
 proc put(world: FakeWorld; dir, name: string; cert: TestCertificate;
@@ -248,10 +259,10 @@ suite "CTC-2: a workspace with more than one framework":
     let world = newWorld()
     world.put(ReproDir, "build.toml", certificate(
       framework = "reprobuild", issuer = "repro-daemon@build-host-7",
-      targets = @["t-unit", "t-integration"], commit = CommitA,
+      targets = @["t-unit", "t-integration"], content = TreeA,
       commands = @[@["repro", "test"]]), 1000)
-    world.put(CtDir, "linux-amd64.toml", certificate(commit = CommitB), 2000)
-    world.vcs.commit = CommitA
+    world.put(CtDir, "linux-amd64.toml", certificate(content = TreeB), 2000)
+    world.workingTree = TreeA
 
     let model = world.evaluate()
     checkpoint $model.state & " — " & model.summary & " (" &
@@ -265,10 +276,10 @@ suite "CTC-2: a workspace with more than one framework":
     ck rowValue(model, "Targets") == "t-integration, t-unit"
 
     # THE CONTROL, without which the case above would pass for a build that
-    # always answers "certified": move to the commit the `ct test` record
+    # always answers "certified": move to the content the `ct test` record
     # covers and the OTHER record speaks, with its own framework and its own
     # targets.
-    world.vcs.commit = CommitB
+    world.workingTree = TreeB
     let flipped = world.evaluate()
     checkpoint $flipped.state & " — " & flipped.certificateName
     ck flipped.state == cisCertified
@@ -276,10 +287,10 @@ suite "CTC-2: a workspace with more than one framework":
     ck rowValue(flipped, "Framework") == "ct-test"
     ck rowValue(flipped, "Targets") == "tests/calc_test.nim"
 
-    # AND THE NEGATIVE CONTROL: on a commit neither record covers, neither is
+    # AND THE NEGATIVE CONTROL: on content neither record covers, neither is
     # borrowed to cover the other. "Certified" must be earned by a record that
     # actually binds.
-    world.vcs.commit = "3" & CommitA[1 .. ^1]
+    world.workingTree = "git-tree-sha1:" & repeat('c', 40)
     let uncovered = world.evaluate()
     checkpoint $uncovered.state & " — " & uncovered.summary
     ck uncovered.state != cisCertified
@@ -295,7 +306,7 @@ suite "CTC-2: a workspace with more than one framework":
       text: renderCertificate(certificate(
         framework = UnknownFramework, issuer = "other-runner",
         targets = @["tests/calc_test.nim"])))
-    let state = EvaluatedState(repo: RepoName, commit: CommitA, tree: "")
+    let state = EvaluatedState(repo: RepoName, content: oracleAt(TreeA))
     let requirement = Requirement(
       frameworksImplemented: @["ct-test"],
       framework: "ct-test",
@@ -342,10 +353,10 @@ suite "CTC-2: a workspace with more than one framework":
     ## framework as a fault, would report a broken workspace to a user whose
     ## state is covered by the record sitting beside it.
     let world = newWorld()
-    world.put(CtDir, "linux-amd64.toml", certificate(commit = CommitA), 2000)
+    world.put(CtDir, "linux-amd64.toml", certificate(content = TreeA), 2000)
     world.put(ReproDir, "neighbour.toml", certificate(
       framework = UnknownFramework, issuer = "other-runner",
-      commit = CommitB), 3000)
+      content = TreeB), 3000)
 
     let model = world.evaluate()
     checkpoint $model.state & " — " & model.summary
@@ -373,7 +384,7 @@ suite "CTC-2: a workspace with more than one framework":
     ## checked by rendering: both models go through the shipped projection and
     ## the shipped status shell, and the DOM is compared as bytes.
     ##
-    ## The two records carry the SAME claim — same repository, commit,
+    ## The two records carry the SAME claim — same repository, content,
     ## platform, targets and result — and differ in exactly the three fields a
     ## producer owns: `framework`, `issuer` and the attested `commands`. That is
     ## the comparison the deliverable asks for; two records making different
@@ -460,7 +471,7 @@ suite "CTC-2: a workspace with more than one framework":
       text: "schema = \"test-certificate.v2\"\n\n[certificate]\n" &
             "framework = \"reprobuild\"\n",
       modifiedMs: 1000)
-    world.put(CtDir, "linux-amd64.toml", certificate(commit = CommitB), 2000)
+    world.put(CtDir, "linux-amd64.toml", certificate(content = TreeB), 2000)
 
     let model = world.evaluate()
     checkpoint $model.state & " — " & model.summary
@@ -471,7 +482,7 @@ suite "CTC-2: a workspace with more than one framework":
     # THE CONTROL: once a record binds, the unread one can no longer change the
     # answer — coverage in v1 only ever grows, so a record nobody could read
     # could only have ADDED coverage that is already there (§7.1 rule 1).
-    world.vcs.commit = CommitB
+    world.workingTree = TreeB
     let covered = world.evaluate()
     checkpoint $covered.state & " — " & covered.summary
     ck covered.state == cisCertified

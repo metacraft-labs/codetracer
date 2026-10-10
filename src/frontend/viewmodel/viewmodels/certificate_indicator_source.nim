@@ -10,10 +10,13 @@
 ##
 ## ## Read-only, and structurally so
 ##
-## Four facade operations are used — `fs.listDir`, `fs.readText`, `fs.stat`,
-## and the VCS reads `repositoryRoot` / `status` / `log`. Nothing here writes,
-## creates or removes anything, and `CertificateStoreAccess` (the seam this
-## fills in) has no write operation for a future caller to reach through.
+## The facade operations used are `fs.listDir`, `fs.readText`, `fs.stat`, and
+## the VCS reads `repositoryRoot` and `contentId` (W, SB-2a). Nothing here
+## writes a file, a ref or the index — computing W writes only loose,
+## content-addressed objects into the repository's object store, which is
+## what `vcs.contentId` documents — and `CertificateStoreAccess` (the seam
+## this fills in) has no write operation for a future caller to reach
+## through.
 ##
 ## ## Why synchronous
 ##
@@ -181,31 +184,75 @@ proc lastPathSegment(path: string): string =
     dec start
   path[start + 1 .. last]
 
+proc workingTreeOracle(host: Platform; root: string): ContentOracle =
+  ## W, through the facade's `contentId` (SB-2a): the content id of the
+  ## working tree's tracked files, in whatever algorithm and over whatever
+  ## scope the record being evaluated names.
+  ##
+  ## Memoised per (algorithm, scope) for the life of ONE facts read — a
+  ## refresh builds a new oracle, so nothing outlives the facts it was
+  ## computed from — because the verifier asks once per record per pass and
+  ## each answer runs git.
+  ##
+  ## Every answer that is not an id stays "not computed", with the reason:
+  ## an algorithm this host cannot compute, a working tree with no content id
+  ## (Content-Id.md §3, each condition named), a refusal, a failure, or a host
+  ## that raised. The verifier reports each as unevaluated, so the indicator
+  ## reads *unverifiable* — never a match, and never the reassuring default
+  ## of some other state's id.
+  var cache: seq[tuple[algorithm: string; paths: seq[string];
+                       answer: ContentAnswer]] = @[]
+  result = proc(algorithm: string; paths: seq[string]): ContentAnswer
+      {.closure.} =
+    for entry in cache:
+      if entry.algorithm == algorithm and entry.paths == paths:
+        return entry.answer
+    var answer: ContentAnswer
+    try:
+      let outcome = awaitSync(host.vcs.contentId(root, vbsWorkingTree,
+                                                 algorithm, paths))
+      if not outcome.ok:
+        answer = ContentAnswer(computed: false,
+          reason: "the working tree's content id could not be computed: " &
+                  $outcome.error)
+      else:
+        let id = outcome.value
+        case id.kind
+        of vcikComputed:
+          answer = ContentAnswer(computed: true, id: id.id)
+        of vcikNoContentId:
+          answer = ContentAnswer(computed: false,
+            reason: "the working tree has no content id: " & id.reason)
+        of vcikCannotCompute:
+          answer = ContentAnswer(computed: false, reason: id.reason)
+    except CatchableError as err:
+      answer = ContentAnswer(computed: false,
+        reason: "computing the working tree's content id raised: " & err.msg)
+    except:
+      answer = ContentAnswer(computed: false,
+        reason: "computing the working tree's content id raised: " &
+                getCurrentExceptionMsg())
+    cache.add (algorithm, paths, answer)
+    answer
+
 proc workspaceVcsState*(host: Platform; workspaceDir: string):
     WorkspaceVcsState =
-  ## Establish the repository state, or report honestly that it could not be.
+  ## Establish the repository, or report honestly that it could not be.
   ##
   ## `known = false` is returned for every failure, and never a default. This
-  ## mirrors `certificate_issuance.probeVcs` on the producing side, where
-  ## Standard.md §3.2 forbids claiming `clean = true` without having checked:
-  ## the same rule read from the other end says a consumer that could not
-  ## determine cleanliness must not behave as though it had. Here that surfaces
-  ## as **unverifiable**, not as "not certified".
+  ## mirrors `certificate_issuance.probeVcs` on the producing side: a consumer
+  ## that could not establish the repository must not behave as though it
+  ## had. Here that surfaces as **unverifiable**, not as "not certified".
   ##
-  ## `tree` is deliberately left unknown here. A modified-worktree certificate
-  ## is matched by content id (Verification.md §4.1.1); the facade now computes
-  ## one (`VcsFacade.contentId`, the facts W, H and S), but moving the
-  ## indicator onto it changes what the indicator decides and is a separate
-  ## step from making the facts available. Until then the indicator says it
-  ## cannot tell rather than guessing, and the ViewModel turns that into
-  ## *unverifiable*.
+  ## The state under evaluation is the working tree's CONTENT (W), and it is
+  ## not computed here: `workingTree` computes it on demand, in the algorithm
+  ## and over the scope of each record (Verification.md §4.1.1). No commit is
+  ## read, because none is compared — a repository with no commits yet has a
+  ## perfectly good W.
   if not host.can(capVcsRead):
     return WorkspaceVcsState(known: false)
 
-  var
-    root: PlatformOutcome[string]
-    commits: PlatformOutcome[seq[VcsCommit]]
-    status: PlatformOutcome[VcsStatus]
+  var root: PlatformOutcome[string]
   # Wrapped for the reason `platformStoreAccess` is, and with the same verdict:
   # a host that raises has established NOTHING about the repository, which is
   # `known = false` and therefore *unverifiable* — never a default.
@@ -213,42 +260,19 @@ proc workspaceVcsState*(host: Platform; workspaceDir: string):
     root = awaitSync(host.vcs.repositoryRoot(workspaceDir))
     if not root.ok or root.value.len == 0:
       return WorkspaceVcsState(known: false)
-    commits = awaitSync(host.vcs.log(root.value, 1, ""))
-    if not commits.ok or commits.value.len == 0 or commits.value[0].id.len == 0:
-      # A repository with no commits yet: there is no commit the tested state
-      # could be expressed relative to, so nothing can be established.
-      return WorkspaceVcsState(known: false)
-    status = awaitSync(host.vcs.status(root.value))
-    if not status.ok:
-      return WorkspaceVcsState(known: false)
   except CatchableError:
     return WorkspaceVcsState(known: false)
   except:
     return WorkspaceVcsState(known: false)
 
-  result = WorkspaceVcsState(
+  WorkspaceVcsState(
     known: true,
+    # The repository root's directory name -- the same source the producer
+    # uses for `vcs.repo` (`certificate_issuance.probeVcs`: the toplevel's
+    # last path part). Requiring the two to match is this consumer's choice
+    # (Verification.md §4.1), not the binding: content alone is.
     repo: lastPathSegment(root.value),
-    commit: commits.value[0].id,
-    clean: true,
-    treeKnown: false,
-    tree: "")
-
-  for change in status.value.changes:
-    # UNTRACKED AND IGNORED FILES DO NOT MAKE A TREE DIRTY, and the standard
-    # says why: `vcs.clean` is about *tracked* files differing from the commit,
-    # while untracked files get their own field because they usually mean
-    # scratch work (Standard.md §3.2). Counting them here would report every
-    # workspace with a build directory as stale forever, which is the fastest
-    # way to make an indicator ignored.
-    if change.workingTreeStatus in {vfsUntracked, vfsIgnored} and
-       change.indexStatus in {vfsUnmodified, vfsUntracked, vfsIgnored}:
-      continue
-    if change.workingTreeStatus == vfsUnmodified and
-       change.indexStatus == vfsUnmodified:
-      continue
-    result.clean = false
-    break
+    workingTree: workingTreeOracle(host, root.value))
 
 proc platformCertificateFacts*(host: Platform; workspaceDir: string;
                                platformTriple: string;

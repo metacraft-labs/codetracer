@@ -1,8 +1,16 @@
 ## Verifying test certificates — the consumer half of the standard.
 ##
 ## Implements ``test-certificates-spec/Verification.md``: framework filtering,
-## authenticity against a registered-key store, the VCS/platform match, and
-## coverage as a union — reported with a **three-valued** outcome.
+## authenticity against a registered-key store, the content/platform match,
+## and coverage as a union — reported with a **three-valued** outcome.
+##
+## A certificate is matched by CONTENT, never by commit (Verification.md
+## §4.1.1). The state under evaluation is not a commit id here: it is an
+## oracle that computes, for the certificate's own algorithm and scope, the
+## content id of whatever state the consumer is looking at — a commit's tree,
+## the index a pre-commit gate is about to commit, or a working tree
+## (Content-Id.md §5). ``vcs.base`` is never read by this module, so no
+## path can compare it with anything.
 ##
 ## The third value is the point. ``covered`` and ``not-covered`` both mean the
 ## consumer *could tell*; ``unverifiable`` means it could not. They call for
@@ -27,6 +35,7 @@
 import std/[options, sets, strutils, tables]
 
 import certificate
+import certificate_content_id
 
 type
   Outcome* = enum
@@ -74,14 +83,38 @@ type
     ## Injected rather than imported so this module stays free of ``std/os``
     ## and of any process bridge. See the module header.
 
+  ContentAnswer* = object
+    ## What a ``ContentOracle`` established for one (algorithm, scope).
+    computed*: bool
+    id*: string
+      ## The full self-describing content id, when ``computed``.
+    reason*: string
+      ## Why no id, when not ``computed``: an algorithm the consumer does not
+      ## implement, ``git-tree-sha256`` against a SHA-1 repository, a state
+      ## with no content id (Content-Id.md §3), or the computation failing.
+      ## Every one of those is "could not tell", never a mismatch.
+
+  ContentOracle* = proc(algorithm: string; paths: seq[string]): ContentAnswer
+      {.closure.}
+    ## The content id of the state under evaluation, computed in
+    ## ``algorithm`` over ``paths`` (sorted, deduplicated; empty means the
+    ## whole repository) — Content-Id.md §5. ``nil`` means this consumer can
+    ## compute nothing for the state, which makes every record unevaluable
+    ## rather than mismatched.
+
   EvaluatedState* = object
     ## The world under evaluation.
+    ##
+    ## There is no commit here, and that is the point: a certificate covers a
+    ## commit only because the commit's tree has the tested content, so the
+    ## content oracle is the whole of the state a match can depend on
+    ## (Verification.md §4.1.1). ``base`` is informational and is never
+    ## compared with anything.
     repo*: string
-    commit*: string
-    tree*: string
-      ## The canonical content id of that state, used to match
-      ## modified-worktree claims by **content** rather than by commit identity
-      ## (Verification.md §4.1.1).
+      ## This consumer's name for the repository. Matching ``vcs.repo``
+      ## against it is the consumer's choice, not part of the content binding
+      ## (Verification.md §4.1); this verifier makes that choice.
+    content*: ContentOracle
 
   Requirement* = object
     ## What the consumer demands. Deliberately separate from the state: a
@@ -201,10 +234,12 @@ proc verifyCertificates*(state: EvaluatedState; requirement: Requirement;
       continue
 
     if read.status == crsMalformed:
-      # A record missing a required v1 field, or a `clean = false` record with
-      # no `worktree`, is **decidably invalid** — the consumer asked the
-      # question and got an answer, which is a rejection and never
-      # unverifiable (Verification.md §7).
+      # A record missing a required v1 field is **decidably invalid** — the
+      # consumer asked the question and got an answer, which is a rejection
+      # and never unverifiable (Verification.md §7). That includes every
+      # earlier-draft record (a `commit` and no `content`): the reader names
+      # it and its remedy, and nothing here translates it into the current
+      # shape (Canonical-Payload.md §7.1).
       result.rejected.add CertificateNote(certificate: candidate.name,
         why: "malformed: " & read.detail)
       continue
@@ -293,39 +328,31 @@ proc verifyCertificates*(state: EvaluatedState; requirement: Requirement;
              "positive claim")
       continue
 
+    # Requiring `vcs.repo` to equal this consumer's own name for the
+    # repository is a CONSUMER'S CHOICE, not part of the binding
+    # (Verification.md §4.1): content alone decides a match, so a standard
+    # verifier MAY accept identical content issued under another name (a
+    # fork, a renamed clone). `ct test` and the status bar choose to require
+    # it, with the repository root's directory name on both sides
+    # (`certificate_issuance.probeVcs`, `certificate_indicator_source`).
     if cert.vcs.repo != state.repo:
       result.rejected.add CertificateNote(certificate: candidate.name,
         why: "vcs.repo is '" & cert.vcs.repo & "', not '" & state.repo & "'")
       continue
 
-    if cert.vcs.clean:
-      if cert.vcs.commit != state.commit:
-        result.rejected.add CertificateNote(certificate: candidate.name,
-          why: "vcs.commit " & cert.vcs.commit &
-               " is not the commit under evaluation")
-        continue
-    else:
-      # A `clean = false` certificate does not describe `commit`; it describes
-      # `commit` plus the modification in `worktree`, and is matched by
-      # **content** (Verification.md §4.1.1).
-      let worktree = cert.vcs.worktree.get
-      if worktree.tree.len > 0:
-        if worktree.tree != state.tree:
-          result.rejected.add CertificateNote(certificate: candidate.name,
-            why: "worktree.tree " & worktree.tree &
-                 " does not equal the tree under evaluation")
-          continue
-      else:
-        # `patch_digest` only. Reproducing the patch requires reproducing the
-        # certificate's exact `format`, which is an opaque identifier this
-        # consumer does not implement — so the record is **unverifiable**, not
-        # invalid (Verification.md §4.1.1).
-        result.unevaluated.add CertificateNote(certificate: candidate.name,
-          why: "worktree carries only a patch_digest in format '" &
-               worktree.format & "', which this consumer cannot reproduce")
-        pending.add PendingRelevance(framework: cert.framework,
-          platform: cert.platform, targets: cert.targets)
-        continue
+    # ---- The content id's form (Content-Id.md §1) -------------------------
+    # A malformed id — no `:`, a digest that is not lowercase hex, a digest of
+    # the wrong length for a §4 algorithm — is decidably invalid and is
+    # REJECTED without repair: an uppercase digest is not lowercased, an
+    # abbreviated one is not matched as a prefix. An id in an algorithm §4
+    # does not define is NOT malformed: its digest length cannot be judged,
+    # and it is merely one this consumer cannot compute (below).
+    let parsed = parseContentId(cert.vcs.content)
+    if parsed.form == cifMalformed:
+      result.rejected.add CertificateNote(certificate: candidate.name,
+        why: "malformed content id '" & cert.vcs.content & "': " &
+             parsed.problem)
+      continue
 
     if cert.vcs.paths.len > 0:
       # A scoped certificate is not a whole-repository certificate, and
@@ -346,6 +373,41 @@ proc verifyCertificates*(state: EvaluatedState; requirement: Requirement;
         result.rejected.add CertificateNote(certificate: candidate.name,
           why: "vcs.paths does not cover the required path '" & uncovered & "'")
         continue
+
+    # ---- Matching content (Verification.md §4.1.1) ------------------------
+    # Compute THE CERTIFICATE'S algorithm, over THE CERTIFICATE'S scope, for
+    # the state under evaluation, and compare strings. Nothing else about the
+    # VCS is consulted: `base` is never read, so a record issued on top of
+    # another commit covers this one when the content is the same, and a
+    # record whose `base` IS this commit does not when the content differs.
+    let answer =
+      if parsed.form == cifUnknownAlgorithm:
+        ContentAnswer(computed: false,
+          reason: "content id algorithm '" & parsed.algorithmName &
+                  "' is not one the standard defines, so it cannot be " &
+                  "computed; its digest length is not judged")
+      elif state.content.isNil:
+        ContentAnswer(computed: false,
+          reason: "no content id can be computed for the state under " &
+                  "evaluation")
+      else:
+        state.content(parsed.algorithmName,
+                      sortedDeduplicated(cert.vcs.paths))
+    if not answer.computed:
+      # Not a mismatch: nothing was established. Unverifiable, and §7.1
+      # decides whether that affects the outcome.
+      result.unevaluated.add CertificateNote(certificate: candidate.name,
+        why: "content id algorithm '" & parsed.algorithmName &
+             "' cannot be computed by this consumer for this state: " &
+             answer.reason)
+      pending.add PendingRelevance(framework: cert.framework,
+        platform: cert.platform, targets: cert.targets)
+      continue
+    if answer.id != cert.vcs.content:
+      result.rejected.add CertificateNote(certificate: candidate.name,
+        why: "vcs.content " & cert.vcs.content & " does not equal the " &
+             "content id of the state under evaluation (" & answer.id & ")")
+      continue
 
     # Certificates for other platforms MUST NOT contribute to a platform's
     # union — a green Linux run says nothing about macOS (Verification.md §5).

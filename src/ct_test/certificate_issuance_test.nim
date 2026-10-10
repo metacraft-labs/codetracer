@@ -236,6 +236,9 @@ proc committedRepo(name: string): string =
 proc headCommit(dir: string): string =
   run("git", ["rev-parse", "HEAD"], dir).output.strip()
 
+proc headTree(dir: string): string =
+  run("git", ["rev-parse", "HEAD^{tree}"], dir).output.strip()
+
 proc generateSigningKey(name: string): string =
   let dir = scratchDir(name)
   result = dir / "signing-key"
@@ -301,8 +304,8 @@ suite "ct test certificate issuance":
     check read.cert.framework == CtTestFramework
     check read.cert.result == "passed"
     check read.cert.platform == currentPlatform()
-    check read.cert.vcs.commit == headCommit(repo)
-    check read.cert.vcs.clean
+    check read.cert.vcs.content == "git-tree-sha1:" & headTree(repo)
+    check read.cert.vcs.base == headCommit(repo)
     check not read.cert.vcs.untracked
     check read.cert.targets == OneTest
     check read.cert.commands == DefaultInvocation
@@ -560,19 +563,40 @@ suite "ct test certificate issuance":
     # says why the second run is cheap (Standard.md §3.2.2).
     check "commit" in issuance.remedy
     check "re-runs nothing" in issuance.remedy
+    # No content id is reported for a tree this producer will not certify.
+    check issuance.vcs.content.len == 0
 
-    # And the deferral is enforced, not merely intended: a `clean = false`
-    # record with no worktree table has no canonical form at all, so the
-    # dishonest certificate cannot even be rendered.
-    let dishonest = TestCertificate(
+    # And a record with no content id has no canonical form at all, so a
+    # certificate binding nothing cannot even be rendered.
+    let unbound = TestCertificate(
       schema: CertificateSchema, framework: CtTestFramework, project: "example",
       platform: "linux/amd64", targets: @["t"], result: "passed",
       issuedAt: "2026-06-23T10:14:33Z", issuer: "ct-test",
-      vcs: VcsState(repo: "example", commit: "abc", clean: false,
-                    untracked: false, worktree: none(WorktreeClaim)),
+      vcs: VcsState(repo: "example", untracked: false),
       commands: @[@["ct", "test"]])
     expect CertificateError:
-      discard canonicalPayload(dishonest)
+      discard canonicalPayload(unbound)
+
+  test "a clean-tree run issues the content HEAD records":
+    ## The record carries the content id of the tested files — on a clean
+    ## tree exactly the tree HEAD records — and HEAD only as the
+    ## informational `base`. Nothing in it names a commit as the binding.
+    let repo = committedRepo("content-of-head")
+    let issuance = attest(repo, passingItems(), unsignedOptions()).issuance
+    checkpoint issuance.message & " / " & issuance.remedy
+    require issuance.issued
+    check issuance.vcs.content == "git-tree-sha1:" & headTree(repo)
+    check issuance.certificate.vcs.content == "git-tree-sha1:" & headTree(repo)
+    check issuance.certificate.vcs.base == headCommit(repo)
+    check issuance.certificate.vcs.paths.len == 0
+    # The revised key order, and nothing of the earlier draft.
+    let vcsTable = issuance.document.split("[certificate.vcs]\n")[1].split("\n\n")[0]
+    check vcsTable == "repo = \"" & repo.lastPathPart & "\"\n" &
+      "content = \"git-tree-sha1:" & headTree(repo) & "\"\n" &
+      "untracked = false\n" &
+      "base = \"" & headCommit(repo) & "\""
+    for earlier in ["commit =", "clean =", "worktree"]:
+      check earlier notin issuance.document
 
   test "untracked files are reported separately from cleanliness":
     ## `clean` and `untracked` mean different things and both must be honest
@@ -926,9 +950,8 @@ suite "ct test certificate issuance":
       repo, passingItems(["tests/calc_test.nim"]), unsignedOptions()).issuance
     checkpoint issuance.message & " / " & issuance.remedy
     check issuance.issued
-    check issuance.certificate.vcs.clean
-    check issuance.certificate.vcs.worktree.isNone
-    check issuance.certificate.vcs.commit == headCommit(repo)
+    check issuance.certificate.vcs.content == "git-tree-sha1:" & headTree(repo)
+    check issuance.certificate.vcs.base == headCommit(repo)
 
   test "attestation can be disabled without changing what ran":
     let repo = committedRepo("disabled")

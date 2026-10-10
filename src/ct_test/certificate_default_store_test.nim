@@ -33,9 +33,10 @@
 ##   bar gathers its facts through the platform facade, which needs a Platform
 ##   installed and therefore belongs to the ViewModel lanes; the facade half is
 ##   covered by `src/tests/gui/tests/status-bar/certificate_indicator_native_test.nim`
-##   against a real repository. Here the two facts the facade would supply —
-##   the commit and whether the tree is clean — are read from the SAME real git
-##   repository with the same two commands, and everything downstream of them
+##   against a real repository. Here the one fact the facade would supply —
+##   W, the working tree's content id — is computed over the SAME real git
+##   repository by the same content-id recipe the facade drives
+##   (`certificate_content_id`, natively), and everything downstream of it
 ##   (the store discovery, the reader, the verifier, the evaluator) is the
 ##   shipped code. What this case exists to prove is that what `ct test` WROTE
 ##   is what the indicator FINDS, and no facade is involved in that.
@@ -51,6 +52,8 @@ import std/[json, options, os, osproc, streams, strutils, unittest]
 
 import contracts
 import certificate
+import certificate_content_id
+import certificate_content_id_native
 import certificate_default_store
 import certificate_issuance
 import certificate_store
@@ -177,6 +180,9 @@ proc gitStatus(repo: string): string =
   run("git", ["status", "--porcelain=v1", "--untracked-files=normal"],
       repo).output.strip()
 
+proc headTree(repo: string): string =
+  run("git", ["rev-parse", "HEAD^{tree}"], repo).output.strip()
+
 proc headCommit(repo: string): string =
   run("git", ["rev-parse", "HEAD"], repo).output.strip()
 
@@ -220,6 +226,21 @@ proc runCli(repo, name: string; extra: seq[string] = @[]):
 proc publishedRecord(repo: string): string =
   defaultCertificatePath(repo, currentPlatform())
 
+proc workingTreeOracle(repo: string): ContentOracle =
+  ## W over the real repository, by the recipe the facade's `contentId`
+  ## drives on every host (SB-2a).
+  result = proc(algorithm: string; paths: seq[string]): ContentAnswer
+      {.closure.} =
+    let (known, parsed) = lookupAlgorithm(algorithm)
+    if not known:
+      return ContentAnswer(computed: false, reason: "unknown algorithm")
+    let computed = computeContentId(nativeContentIdHost(), repo,
+                                    workingTreeState(), parsed, paths)
+    if computed.outcome == cioComputed:
+      ContentAnswer(computed: true, id: computed.id)
+    else:
+      ContentAnswer(computed: false, reason: computed.reason)
+
 proc indicatorFor(repo: string): CertificateIndicatorModel =
   ## The shipped status-bar evaluator, over the real store on disk. See the
   ## mocking-policy note in the header for what is and is not supplied here.
@@ -228,10 +249,7 @@ proc indicatorFor(repo: string): CertificateIndicatorModel =
     vcs: WorkspaceVcsState(
       known: true,
       repo: repo.lastPathPart,
-      commit: headCommit(repo),
-      clean: gitStatus(repo).len == 0,
-      treeKnown: false,
-      tree: ""),
+      workingTree: workingTreeOracle(repo)),
     platform: currentPlatform(),
     signatureVerifier: nil))
 
@@ -312,8 +330,8 @@ suite "CTC-2: the default certificate store":
     checkpoint read.detail
     ck read.status == crsOk
     ck read.cert.framework == CtTestFramework
-    ck read.cert.vcs.commit == headCommit(repo)
-    ck read.cert.vcs.clean
+    ck read.cert.vcs.content == "git-tree-sha1:" & headTree(repo)
+    ck read.cert.vcs.base == headCommit(repo)
     ck read.cert.targets == @[FixtureTestFile]
 
   test "the published record does not dirty the tree, and the next run certifies":

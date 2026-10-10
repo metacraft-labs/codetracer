@@ -280,6 +280,8 @@ proc certificateReport(issuance: Issuance;
   if issuance.vcs.determined:
     result["commit"] = %issuance.vcs.commit
     result["clean"] = %issuance.vcs.clean
+    if issuance.vcs.content.len > 0:
+      result["content"] = %issuance.vcs.content
     result["untracked"] = %issuance.vcs.untracked
   elif issuance.vcs.probed:
     result["vcs_undetermined_reason"] = %issuance.vcs.undeterminedReason
