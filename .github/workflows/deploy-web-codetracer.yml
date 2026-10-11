@@ -2452,9 +2452,13 @@ jobs:
               want="${route##*:}"
               label="$(echo "$base$path" | tr -c 'a-zA-Z0-9' '-')"
               report="deployed-shots/${label}.json"
+              # The step already runs INSIDE `.#ci` (its `shell:`). Entering it
+              # again here ran the shell hook a second time, and its notices
+              # ("tree-sitter-nim: using system tree-sitter CLI ...") went to
+              # STDOUT, i.e. into the JSON report, so every verdict failed to
+              # parse (run 38127347123) while the deployed site was healthy.
               CT_PROBE_SCREENSHOT="deployed-shots/${label}.png" \
-                nix develop .#ci --command \
-                  node ci/test/web_renderer_probe.mjs "$base$path" 12000 >"$report" || true
+                node ci/test/web_renderer_probe.mjs "$base$path" 12000 >"$report" || true
               if [ ! -s "$report" ]; then
                 echo "  the probe produced no report for $base$path" >&2
                 fail=1
