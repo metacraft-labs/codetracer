@@ -496,6 +496,9 @@ repro.paths
 # per-run temporaries with randomized suffixes and must never be committed.
 /src/tests/gui/non-nix-build/
 
+# `just test-gui` scratch: per-run `ct-tp-err-gui-*` temporaries.
+/src/tests/gui/scratch/
+
 # Run lock for the PLAT-7 boundary mutation harness. Held with flock for the
 # lifetime of a run so a second instance in the same worktree refuses to start;
 # two instances corrupt each other's in-memory restores.
