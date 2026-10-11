@@ -551,6 +551,11 @@ suite "AS-4 — one sharing flow, driven through the shipped ct binary":
     createDir(home)
     putEnv("HOME", home)
     putEnv("XDG_CONFIG_HOME", home / ".config")
+    # The one variable the shipped `ct` resolves EVERY per-user location from
+    # (common/ct_home): the trace index and downloads land in `home / "data"`.
+    # It outranks HOME / XDG_*, and every test program inherits a scratch one,
+    # so it has to name THIS case's directory.
+    putEnv("CODETRACER_HOME", home)
     datasetDir = scratch / "dataset"
     recordingDir = scratch / "recording"
     slicedRecordingDir = scratch / "recording-sliced"
@@ -563,7 +568,7 @@ suite "AS-4 — one sharing flow, driven through the shipped ct binary":
     # `ct list` on an empty scratch home creates the trace index with the
     # current schema; the fixture row goes in afterwards.
     discard runCt(["list"])
-    let traceIndexDb = home / ".local" / "share" / "codetracer" / "trace_index.db"
+    let traceIndexDb = home / "data" / "trace_index.db"
     registerRecordingRow(traceIndexDb, recordingDir)
     registerRecordingRow(traceIndexDb, slicedRecordingDir,
       recordingId = SlicedRecordingId)
@@ -876,7 +881,7 @@ suite "AS-4 — one sharing flow, driven through the shipped ct binary":
     # …and the recording really landed: `importTrace` accepted the container
     # rather than the run stopping at the "no `.ct`" refusal, so the folder it
     # allocated holds one.
-    let landed = home / ".local" / "share" / "codetracer" / locator
+    let landed = home / "data" / locator
     check dirExists(landed)
     var containers = 0
     for entry in walkDir(landed):

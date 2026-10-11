@@ -313,6 +313,10 @@ echo "facade_endpoint_over_socket_test"
 
 scratch = $makeTempDir(cstring"ct-facade-socket-")
 # Before `setupServer`, because the endpoint reads it when it is constructed.
+# `CODETRACER_HOME` outranks `XDG_CONFIG_HOME` for the settings root
+# (`$CODETRACER_HOME/config/endpoint`, common/ct_home), and a lane exports one,
+# so naming only XDG would not keep this suite's settings in `scratch`.
+setEnv(cstring"CODETRACER_HOME", (scratch & "/ct-home").cstring)
 setEnv(cstring"XDG_CONFIG_HOME", (scratch & "/config").cstring)
 
 freePort(proc(p1: int) =

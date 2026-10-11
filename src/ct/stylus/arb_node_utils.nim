@@ -5,7 +5,7 @@ const DEFAULT_NODE_URL* = "http://localhost:8547"
 
 # TODO: get name from config? Maybe use SQLite?
 let
-  CONTRACT_WASM_PATH* = getHomeDir() / ".local" / "share" / "codetracer" / "contract-debug-wasm"
+  CONTRACT_WASM_PATH* = ctDataDirIgnoringXdg() / "contract-debug-wasm"
   EVM_TRACE_DIR_PATH* = codetracerTmpPath
 
 proc jsonRpcRequest(methodParam: string, params: JsonNode): JsonNode {.raises: [IOError, ValueError].} =

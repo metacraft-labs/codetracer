@@ -3437,7 +3437,6 @@ proc onNoTrace(
   if data.startOptions.edit and response.path.len > 0:
     data.startOptions.folder = response.path
   data.homedir = response.home
-  data.startOptions.app = response.home & cstring"/.local/share" & cstring"/codetracer"
   data.services.debugger.paths = response.filenames
   data.services.debugger.functions = response.functions
   data.ui.menuNode = data.webTechMenu(baseName(response.path))

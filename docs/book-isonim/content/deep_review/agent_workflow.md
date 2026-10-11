@@ -55,8 +55,9 @@ and install it into a project's agent instructions with:
 ct agent prompt >> AGENTS.md
 ```
 
-The text teaches the pair of commands above, tells the agent to fix a failing
-suite rather than hand over evidence for it, permits collecting from a dirty
+The text teaches the pair of commands above, tells the agent to run the tests
+before committing and to commit exactly what it tested, tells it to fix a
+failing suite rather than hand over evidence for it, permits collecting from a dirty
 working tree provided it says so, and forbids hand-writing a dataset — a file an
 agent assembled itself asserts coverage and execution that never happened.
 

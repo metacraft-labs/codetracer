@@ -1,12 +1,23 @@
 import
   std/[jsffi, jsconsole, strutils],
   lib/[ jslib, electron_lib ],
-  index/[ args, ipc_utils, electron_vars, server_config, config, window ]
+  index/[ args, ipc_utils, electron_vars, server_config, config, window ],
+  ../common/ct_home
 
 data.start = now()
 parseArgs()
 
 when not defined(server):
+  # Electron's own per-user profile (`userData`: Chromium's caches, local
+  # storage, and the single-instance lock taken below) moves with every other
+  # per-user location when `CODETRACER_HOME` is set: to
+  # `$CODETRACER_HOME/state/electron` (src/common/ct_home.nim). It has to be
+  # set before the lock, which lives in `userData`, and before `ready`.
+  let ctHomeState = ctHomeArea(chaState)
+  if ctHomeState.len > 0:
+    discard electron_vars.app.js.setPath(cstring"userData",
+                                         cstring(ctHomeState & "/electron"))
+
   # --------------------------------------------------------------------------
   # Single-instance lock for the "tab" newTracePolicy.
   #

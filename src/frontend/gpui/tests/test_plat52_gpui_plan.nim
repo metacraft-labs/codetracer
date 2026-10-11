@@ -66,6 +66,9 @@ proc windowPlan(ops: string; subject: string; trace: var string): JsonNode =
     (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
+  # Every other per-user location (trace index, config, caches) of the
+  # spawned binary: its own, under this case's directory (common/ct_home).
+  env["CODETRACER_HOME"] = state / "ct-home"
   env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
   var args = @["--report-window-plan", "--width=" & $W, "--height=" & $H]
   if ops.len > 0:

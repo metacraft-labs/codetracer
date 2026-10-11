@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1759
+const ExpectedAssertions = 1762
+  ## *1759 -> 1762 on 2026-10-10 (SB-2a): one new production module under
+  ## `viewmodel/`, `host/node_certificate_host.nim` (node's git runner and
+  ## store-root resolver for the content facts) x three assertions. It calls
+  ## no `rebase(` and spells no `mapOver`.*
   ## *1750 -> 1759 on 2026-10-08 (PLAT-51 part B): three new production
   ## modules under `viewmodel/` — `viewmodels/native_welcome.nim` (the native
   ## front-ends' Welcome Screen), `viewmodels/layout_settings.nim` and

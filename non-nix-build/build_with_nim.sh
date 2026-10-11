@@ -72,6 +72,25 @@ install_name_tool \
 
 codesign -s - --force --deep "${DIST_DIR}/bin/db-backend-record"
 
+# ct-test: the ORC test runner, installed beside `ct` (CTC-3i). `ct test run`
+# hands the run to it (src/ct_test/ct_test_delegate.nim) because the parallel
+# runner is unsafe under the refc `ct` above. It links none of ct's native
+# libraries. Its own nimcache: refc and ORC C output for the same modules must
+# not share one.
+$NIM -d:release \
+	--passL:"-headerpad_max_install_names" \
+	--mm:orc --threads:on --hints:on --warnings:off \
+	--debugInfo --lineDir:on \
+	--boundChecks:on --stacktrace:on --linetrace:on \
+	--nimcache:nimcache-ct-test \
+	--out:"$DIST_DIR/bin/ct-test" c ./src/ct_test/ct_test.nim
+
+install_name_tool \
+	-add_rpath "@executable_path/../../Frameworks" \
+	"${DIST_DIR}/bin/ct-test"
+
+codesign -s - --force --deep "${DIST_DIR}/bin/ct-test"
+
 # this works    --passL:/nix/store/f6afb4jw9g5f94ixw0jn6cl0ah4liy35-sqlite-3.45.3/lib/libsqlite3.so.0 \
 
 # TODO conditional for nixos?--passL:$LIBSQLITE3_PATH

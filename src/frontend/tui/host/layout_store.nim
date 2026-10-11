@@ -18,8 +18,9 @@
 ##
 ## ## THE STATE ROOT, AND THE ONE OVERRIDE
 ##
-## `$CODETRACER_TUI_LAYOUT_DIR` if it is set, else
-## `$XDG_STATE_HOME/codetracer`, else `~/.local/state/codetracer`. The XDG
+## `$CODETRACER_TUI_LAYOUT_DIR` if it is set, else `$CODETRACER_HOME/state`,
+## else `$XDG_STATE_HOME/codetracer`, else `~/.local/state/codetracer`
+## (`viewmodel/host/native_state.nativeStateRoot`). The XDG
 ## fallback is spelled the same way `src/ct_test/run_store.defaultRunStoreRoot`
 ## spells it, which is this repository's existing answer for "state a program
 ## writes for itself".

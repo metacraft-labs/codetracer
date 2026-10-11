@@ -717,6 +717,11 @@ nim_flag_divergence_actual() {
 
 # The recorded divergence, as measured at b9677d24. See the header above for
 # what a difference from this list means and how to respond to it.
+#
+# The `ct-test` entries are by design, not drift (CTC-3i): the test runner is an
+# ORC build that links none of CodeTracer's native libraries, so neither its
+# Nix invocation nor its tup rule (`!ct_test_orc` in src/Tuprules.tup) carries
+# NIM_COMMON_FLAGS — `--mm:refc` least of all.
 nim_flag_divergence_recorded() {
 	cat <<'RECORDED'
 ./index.js -d:asyncBackend=asyncdispatch
@@ -809,6 +814,21 @@ db-backend-record --hint[CC]:off
 db-backend-record --hint[Pattern]:off
 db-backend-record --hint[XCannotRaiseY]:off
 db-backend-record --warning[CaseTransition]:off
+ct-test -d:asyncBackend=asyncdispatch
+ct-test -d:chronicles_sinks=json
+ct-test -d:chronicles_line_numbers=true
+ct-test -d:chronicles_timestamps=UnixTime
+ct-test -d:ssl
+ct-test --mm:refc
+ct-test -d:nimNoLentIterators
+ct-test -d:nimOldCaseObjects
+ct-test --hint[Processing]:off
+ct-test --hint[Conf]:off
+ct-test --hint[CC]:off
+ct-test --hint[Pattern]:off
+ct-test --hint[XDeclaredButNotUsed]:off
+ct-test --hint[XCannotRaiseY]:off
+ct-test --warning[CaseTransition]:off
 RECORDED
 }
 

@@ -517,7 +517,8 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
   var save = await getSave(trace.sourceFolders, config.test)
   data.save = save
 
-  let dir = getHomeDir() / ".config" / "codetracer"
+  # `$CODETRACER_HOME/config`, else (as always) `~/.config/codetracer`.
+  let dir = ctHomeAreaOr(chaConfig, getHomeDir() / ".config" / "codetracer")
   let configFile = dir / "dont_ask_again.txt"
 
   let dontAskAgain = fs.existsSync(configFile)

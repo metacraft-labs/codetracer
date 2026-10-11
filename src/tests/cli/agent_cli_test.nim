@@ -229,6 +229,31 @@ template runHookEndToEnd(nargo, collector: string) =
   check notification{"files"}[0]{"path"}.getStr() == "src/main.nr"
   check notification{"files"}[0]{"diff"}.getStr().contains("+    let doubled")
 
+  # The hook's DEFAULT output, `.ct/review`, is inside the repository. It must
+  # leave nothing untracked there: an untracked `.ct/` makes every later test
+  # certificate report `untracked = true` (`common/ct_state_dir.nim`). The
+  # `untracked` field itself is asserted from `ct test run` in
+  # `src/ct_test/certificate_cli_test.nim`; it is exactly this `git status`.
+  # (`nargo` may leave its own `target/` here, which is not ours to judge, so
+  # only `.ct` entries are looked at.)
+  let defaultRun = runCt(@["agent", "end-of-turn"], extraEnv = {
+    "CODETRACER_AGENT_SESSION_ID": "agent:acp:rv7-hook",
+    "CODETRACER_AGENT_TASK_ID": "task-rv7-hook",
+    "CODETRACER_AGENT_WORKSPACE": repo,
+    "CODETRACER_REVIEW_DIFF": "HEAD~..HEAD",
+    "CODETRACER_REVIEW_RECORDINGS": work / "recordings",
+    "CODETRACER_REPLAY_SERVER_PATH": collector}, workingDir = repo)
+  checkpoint(defaultRun.output)
+  check defaultRun.exitCode == 0
+  check fileExists(repo / ".ct" / "review" / "review.json")
+  check fileExists(repo / ".ct" / ".gitignore")
+  let status = execCmdEx("git status --porcelain=v1 --untracked-files=normal",
+    workingDir = repo)
+  check status.exitCode == 0
+  checkpoint(status.output)
+  for line in status.output.splitLines():
+    check not (line.len > 3 and line[3 .. ^1].startsWith(".ct"))
+
 
 suite "ct agent — the shipped binary":
   setup:
@@ -267,6 +292,45 @@ suite "ct agent — the shipped binary":
     check not run.output.contains("Install it into a project")
     check not run.output.contains("ct-agent-prompt")
     check run.output.strip().startsWith("## Recording evidence for review")
+
+  test "the agent prompt teaches test, then commit":
+    ## CT-Test-Certificates CTC-3h: a certificate is bound to the content of
+    ## the tracked files, so a passing run already covers the commit that
+    ## records exactly what was tested.  The prompt has to say so (Agent-Prompt
+    ## -Guidance §3), because an agent that believes a certificate attests a
+    ## commit will commit and re-run, or will put off testing until it has
+    ## committed -- which puts an untested commit into history.
+    let run = runCt(@["agent", "prompt"])
+    checkpoint(run.output)
+    check run.exitCode == 0
+    let text = run.output.splitWhitespace().join(" ")
+    # The order: new files tracked, then the tests, then the commit.
+    let addAt = text.find("git add <any new files>")
+    let testAt = text.find("ct test run --workspace .")
+    let commitAt = text.find("git commit -am")
+    check addAt >= 0
+    check testAt > addAt
+    check commitAt > testAt
+    check text.contains("commit exactly what you tested")
+    check text.contains("as long as that commit records exactly what was tested")
+    check text.contains("Do not run `ct test` again after committing")
+    # ...and the obsolete workflow is gone, in any of its spellings.
+    let lowered = text.toLowerAscii
+    for obsolete in ["run again after committing", "commit, then run",
+                     "commit your changes, then", "certify the commit",
+                     "re-run after commit"]:
+      check obsolete notin lowered
+    # Self-issuance is forbidden explicitly (Standard §6.2).
+    check text.contains("attempt to produce, edit or sign a certificate yourself")
+    # CTC-3i: `ct test run` hands the run to the `ct-test` every package
+    # ships beside `ct`, so the prompt teaches the one command and no
+    # fallback; it says what a missing runner means, and forbids skipping the
+    # tests.
+    check text.contains("cannot find its `ct-test` runner")
+    check text.contains("the CodeTracer installation is incomplete")
+    check text.contains("do not skip the tests")
+    check "ct-test test run" notin text
+    check "standalone runner" notin text
 
   test "evidence_resolves_the_session_from_the_environment":
     let dir = getTempDir() / "ct-agent-cli-env"

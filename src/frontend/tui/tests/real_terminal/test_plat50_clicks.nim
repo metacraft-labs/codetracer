@@ -88,6 +88,7 @@ proc open(fixture = "calc"; args: seq[string] = @[];
     .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
     .envSet("COLORTERM", "truecolor")
     .envSet("XDG_STATE_HOME", state)
+    .envSet("CODETRACER_HOME", state / "ct-home")
     .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
     .spawn()
   settleOnDebugger(result, Cols, Rows)

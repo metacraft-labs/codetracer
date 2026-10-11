@@ -1787,6 +1787,20 @@
               --passL:${pkgs.openssl.out}/lib/libcrypto.so \
               --nimcache:nimcache \
               --out:db-backend-record c ./src/ct/db_backend_record.nim
+
+            # CTC-3i: the ORC test runner, installed beside `ct`. `ct test run`
+            # hands the run to it (src/ct_test/ct_test_delegate.nim), because
+            # the parallel runner is unsafe under the refc `ct` above. Same
+            # flags as `repro build ct-test` (repro.nim) and the AppImage
+            # (appimage-scripts/build_with_nim.sh); it links none of `ct`'s
+            # native libraries. Its own nimcache: refc and ORC C output for the
+            # same modules must not share one.
+            ${nim-codetracer.out}/bin/nim2 \
+              --mm:orc --threads:on --hints:off --warnings:off \
+              --debugInfo --lineDir:on \
+              --boundChecks:on --stacktrace:on --linetrace:on \
+              --nimcache:nimcache-ct-test \
+              --out:ct-test c ./src/ct_test/ct_test.nim
           '';
 
           installPhase = ''
@@ -1841,6 +1855,8 @@
 
             cp ./ct $out/bin
             cp ./db-backend-record $out/bin
+            # Beside `ct`, which is where `ct test run` looks for it first.
+            cp ./ct-test $out/bin
             cp -L ${ctRemote}/bin/ct-remote $out/bin/
 
             cp -r src/frontend/index.html $out/

@@ -196,6 +196,9 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
     (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
+  # Every other per-user location (trace index, config, caches) of the
+  # spawned binary: its own, under this case's directory (common/ct_home).
+  env["CODETRACER_HOME"] = state / "ct-home"
   var args = @["--report-window-plan", "--width=" & $width,
                "--height=" & $height]
   if ops.len > 0:

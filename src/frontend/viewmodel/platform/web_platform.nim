@@ -168,6 +168,11 @@ proc webInstantiationProfile*(shareConfigured: bool): PlatformProfile =
 # — is how a desktop code path that was never migrated starts appearing to work
 # on the web while doing something entirely different.
 
+const webNoLocalCertificateStore* =
+  "a browser tab has no per-user directory, so there is no local " &
+  "certificate store to read here"
+  ## Why `fs.certificateStoreRoots` answers "no local store" on the web.
+
 proc buildFileSystem(web: WebPlatform; profile: PlatformProfile
                     ): FileSystemFacade =
   let store = web.store
@@ -314,7 +319,13 @@ proc buildFileSystem(web: WebPlatform; profile: PlatformProfile
       resolvedUnsupported[FsWatchHandle]("watching the filesystem"),
     unwatch: proc(handle: FsWatchHandle
                  ): PlatformFuture[PlatformOutcome[Nothing]] =
-      resolvedUnsupported[Nothing]("watching the filesystem"))
+      resolvedUnsupported[Nothing]("watching the filesystem"),
+    certificateStoreRoots: proc(
+        ): PlatformFuture[PlatformOutcome[CertificateStoreRoots]] =
+      # The local certificate store (test-certificates-spec Transport §2) is
+      # a per-user directory on a machine; a tab has neither, and the project
+      # store is not one. "No local store" is an answer, not a refusal.
+      resolvedOk(noLocalStore(webNoLocalCertificateStore)))
 
 # ---------------------------------------------------------------------------
 # Settings, over the store rather than over `localStorage`
@@ -502,6 +513,10 @@ proc buildVcs(web: WebPlatform; profile: PlatformProfile): VcsFacade =
   ## proc grows an engine and the two capabilities go back; nothing else
   ## changes, which is the test that the absence was modelled rather than
   ## papered over.
+  ##
+  ## `contentId` therefore answers `vcikCannotCompute` (from
+  ## `unavailableVcs`): with no git there is no content id, and Content-Id §5
+  ## reads that as unverifiable — never an id, and never an error.
   unavailableVcs(profile)
 
 const webNoModulesLoaded* =

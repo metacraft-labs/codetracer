@@ -104,8 +104,10 @@ let defaultLayoutPath* = "default_layout.json"
 
 let configDir* = codetracerPrefix / "config"
 
-let userConfigDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"
-let userLayoutDir* = getEnv("XDG_CONFIG_HOME", getHomeDir() / ".config") / "codetracer"
+# `$CODETRACER_HOME/config`, else `$XDG_CONFIG_HOME/codetracer`, else
+# `~/.config/codetracer` (`ct_home.ctConfigDir`).
+let userConfigDir* = ctConfigDir()
+let userLayoutDir* = ctConfigDir()
 
 proc userConfigFilePath*: string =
   ## Absolute path to the user's active configuration file.

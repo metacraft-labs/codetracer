@@ -64,7 +64,8 @@ proc onDismissCtFrontend*(sender: js, dontAskAgain: bool) {.async.} =
 
   if dontAskAgain:
     infoPrint "remembering to not ask again for installation"
-    let dir = getHomeDir() / ".config" / "codetracer"
+    # `$CODETRACER_HOME/config`, else (as always) `~/.config/codetracer`.
+    let dir = ctHomeAreaOr(chaConfig, getHomeDir() / ".config" / "codetracer")
     let configFile = dir / "dont_ask_again.txt"
     fs.writeFile(
       configFile.cstring,
@@ -179,9 +180,9 @@ proc isCtInstalled*(config: Config): bool =
         # the binary is already usable from the build directory.
         return true
       elif process.platform == "darwin".toJs:
+        # `install_utils.shellLaunchersDir`'s rule (common/ct_home).
         let ctLaunchersPath = cstring(
-          $paths.home / ".local" / "share" /
-          "codetracer" / "shell-launchers" / "ct")
+          ctDataDirIgnoringXdg() / "shell-launchers" / "ct")
         return fs.existsSync(ctLaunchersPath)
       else:
         let defaultDataHome =

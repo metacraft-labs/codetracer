@@ -44,8 +44,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { ctUserConfigDir } from "../../lib/ct-home";
 
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
@@ -690,13 +690,10 @@ test.describe("Auto-hide panes", () => {
 
 /**
  * The isolated config directory the GUI fixtures point the app at.
- * `lib/fixtures.ts` assigns `process.env.XDG_CONFIG_HOME` at import time, so
+ * `lib/fixtures.ts` assigns `process.env.CODETRACER_HOME` at import time, so
  * this is already the per-run directory by the time the spec body runs.
  */
-const userConfigDir = path.join(
-  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
-  "codetracer",
-);
+const userConfigDir = ctUserConfigDir();
 const autoHideStatePath = path.join(userConfigDir, "auto_hide_state.json");
 const editLayoutPath = path.join(userConfigDir, "default_edit_layout.json");
 const editTestFolder = path.join(codetracerInstallDir, "test-programs");

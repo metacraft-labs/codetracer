@@ -115,7 +115,17 @@ clone_at() {
 		git init -q "${dest}" || return 1
 		git -C "${dest}" remote add origin "${repo}" || return 1
 	fi
-	git -C "${dest}" fetch -q --depth 1 origin "${rev}" || return 1
+	# NOIR_REPO is public, so fetch it ANONYMOUSLY. The deploy job exports a
+	# GitHub App token as an `http.<org>.extraHeader` (GIT_CONFIG_* env) for
+	# its private siblings. That token lives about an hour, and this step runs
+	# after the long bundle build: on 2026-10-10 it started 94 minutes after
+	# the token was minted. GitHub answers an expired token with 401 even for
+	# a public repository, and git reports that as "could not read Username".
+	# Without the header the fetch does not depend on how long earlier steps
+	# took.
+	env -u GIT_CONFIG_COUNT -u GIT_CONFIG_KEY_0 -u GIT_CONFIG_VALUE_0 \
+		GIT_TERMINAL_PROMPT=0 \
+		git -C "${dest}" fetch -q --depth 1 origin "${rev}" || return 1
 	git -C "${dest}" checkout -q FETCH_HEAD || return 1
 	echo "  ${dest}: $(git -C "${dest}" rev-parse HEAD)"
 }

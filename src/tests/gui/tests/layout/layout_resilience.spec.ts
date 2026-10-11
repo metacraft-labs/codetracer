@@ -1,16 +1,13 @@
 import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { ctUserConfigDir } from "../../lib/ct-home";
 
 // Use the test-programs directory as the folder to open in edit mode
 const testFolder = path.join(codetracerInstallDir, "test-programs");
 
 // Get the user layout directory (same logic as in frontend/config.nim)
-const userLayoutDir = path.join(
-  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
-  "codetracer"
-);
+const userLayoutDir = ctUserConfigDir();
 
 const defaultLayoutPath = path.join(userLayoutDir, "default_layout.json");
 const defaultEditLayoutPath = path.join(userLayoutDir, "default_edit_layout.json");

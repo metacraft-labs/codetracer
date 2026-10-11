@@ -56,6 +56,16 @@ use state_component::StateComponent;
 use status_component::StatusComponent;
 use task::{Action, EventId, EventKind, FlowUpdate, Location, MoveState, StepArg, TaskKind};
 
+/// The trace index: `$CODETRACER_HOME/data/trace_index.db`, else (as always)
+/// `~/.local/share/codetracer/trace_index.db` — the twin of Nim's
+/// `paths.DB_PATHS[0]`. `None` when there is no home directory.
+fn trace_index_db_path() -> Option<PathBuf> {
+    ct_home::area_or(ct_home::Area::Data, || {
+        home::home_dir().map(|home| home.join(".local/share/codetracer"))
+    })
+    .map(|dir| dir.join("trace_index.db"))
+}
+
 #[derive(Debug, Default)]
 pub struct Trace {
     id: i64,
@@ -168,9 +178,7 @@ impl App {
     }
 
     fn load_trace_from_program(&self, program_pattern: &str) -> Result<Trace, Box<dyn Error>> {
-        let db_path = home::home_dir()
-            .unwrap()
-            .join(".local/share/codetracer/trace_index.db");
+        let db_path = trace_index_db_path().unwrap();
         let connection = sqlite::open(&db_path).unwrap();
         let query = "SELECT * FROM traces WHERE program LIKE ? ORDER BY id DESC LIMIT 1";
         // println!("query traces {}", db_path.display());
@@ -204,9 +212,7 @@ impl App {
     }
 
     fn register_trace_in_db(&mut self) -> Result<(), Box<dyn Error>> {
-        let db_path = home::home_dir()
-            .ok_or("no home")?
-            .join(".local/share/codetracer/trace_index.db");
+        let db_path = trace_index_db_path().ok_or("no home")?;
 
         let connection = sqlite::open(&db_path)?;
 
@@ -656,7 +662,8 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         let temp_home = base.join("home");
-        let db_dir = temp_home.join(".local/share/codetracer");
+        // `CODETRACER_HOME/data` is where `trace_index_db_path` looks.
+        let db_dir = temp_home.join("data");
         fs::create_dir_all(&db_dir).unwrap();
         let db_path = db_dir.join("trace_index.db");
         let connection = sqlite::open(&db_path).unwrap();
@@ -695,7 +702,7 @@ mod tests {
             .unwrap();
         drop(connection);
 
-        env::set_var("HOME", temp_home.to_str().unwrap());
+        env::set_var("CODETRACER_HOME", temp_home.to_str().unwrap());
 
         let trace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("trace");
         let mut app = App::default();

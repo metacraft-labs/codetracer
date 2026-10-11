@@ -131,7 +131,12 @@ when defined(ctInExtension):
           var path = require('path');
           var fs = require('fs');
           var os = require('os');
-          var storeDir = path.join(os.homedir(), '.local', 'share', 'codetracer');
+          // `$CODETRACER_HOME/data`, else (as always) `~/.local/share/codetracer`
+          // — common/ct_home's rule, spelt in JS because this is emitted verbatim.
+          var ctHome = process.env.CODETRACER_HOME;
+          var storeDir = ctHome
+            ? path.join(path.resolve(ctHome), 'data')
+            : path.join(os.homedir(), '.local', 'share', 'codetracer');
           var entries = [];
           try {
             entries = fs.readdirSync(storeDir, { withFileTypes: true })

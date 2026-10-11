@@ -341,6 +341,11 @@ pub fn cache_root() -> PathBuf {
     if let Ok(override_path) = std::env::var("CODETRACER_TRACE_CACHE_DIR") {
         return PathBuf::from(override_path);
     }
+    // `$CODETRACER_HOME/cache/traces` relocates it with every other per-user
+    // location (`ct_home`).
+    if let Some(cache) = ct_home::area(ct_home::Area::Cache) {
+        return cache.join("traces");
+    }
     let base = if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
         PathBuf::from(xdg)
     } else if let Ok(home) = std::env::var("HOME") {

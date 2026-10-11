@@ -67,14 +67,15 @@ type Run = object
 
 proc runGpui(stateDir, configHome: string; extra: seq[string] = @[]): Run =
   ## One headless `--report-plan` run on `calc`, with its own state root and
-  ## its own `XDG_CONFIG_HOME` (where the DESKTOP keeps its layout).
+  ## its own `CODETRACER_HOME` (whose `config/` is where the DESKTOP keeps its
+  ## layout; `common/ct_home`).
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
   env["LD_LIBRARY_PATH"] = shimDir &
     (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
   env[StateDirEnvVar] = stateDir
-  env["XDG_CONFIG_HOME"] = configHome
+  env["CODETRACER_HOME"] = configHome
   let errFile = genTempPath("plat45-gpui-", ".err")
   let dockFile = genTempPath("plat45-gpui-", ".dock.json")
   var args = @["--report-plan", "--width=1440", "--height=900",
@@ -163,9 +164,9 @@ proc otherProductsPlanted(stateDir, configHome: string): (string, string) =
   doAssert docked.kind == loApplied
   let tuiText = pretty(saveLayout(docked.layout)) & "\n"
   writeFile(stateDir / TuiDocument, tuiText)
-  createDir(configHome / "codetracer")
+  createDir(configHome / "config")
   let desktopText = "{\"root\": {\"type\": \"row\", \"content\": []}}\n"
-  writeFile(configHome / "codetracer" / "default_layout.json", desktopText)
+  writeFile(configHome / "config" / "default_layout.json", desktopText)
   (tuiText, desktopText)
 
 suite "PLAT-45: the GPUI window and the shared default":
@@ -232,7 +233,7 @@ suite "PLAT-45: the GPUI window and the shared default":
     let saved = restoreLayoutDocument(parseJson(readFile(state / GpuiDocument)))
     ck regionOf(saved.tree, paneTestResults) == regionOf(saved.tree, paneFileTree)
     ck readFile(state / TuiDocument) == tuiText
-    ck readFile(config / "codetracer" / "default_layout.json") == desktopText
+    ck readFile(config / "config" / "default_layout.json") == desktopText
     # THE FIRST RUN ALREADY SHOWS IT…
     ck not sameArrangement(centreArrangement(first.dock),
                            ofTree(sharedDefaultLayout().tree))
@@ -266,7 +267,7 @@ suite "PLAT-45: the GPUI window and the shared default":
     ck sameArrangement(centreArrangement(reset.dock),
                        ofTree(sharedDefaultLayout().tree))
     ck readFile(state / TuiDocument) == tuiText
-    ck readFile(config / "codetracer" / "default_layout.json") == desktopText
+    ck readFile(config / "config" / "default_layout.json") == desktopText
     # And the next start, with nothing remembered, is the default too.
     let after = runGpui(state, config)
     ck sameArrangement(centreArrangement(after.dock),

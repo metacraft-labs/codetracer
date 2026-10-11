@@ -28,6 +28,7 @@ import types
 import lang
 import paths
 import trace_index
+import ct_home_test_guard
 
 proc fail(msg: string) =
   echo "FAIL: ", msg
@@ -51,11 +52,10 @@ proc tableExists(db: DBConn; name: string): bool =
   rows.len > 0
 
 proc traceIndexDbPath(): string =
-  ## Mirror ``paths.codetracerTraceDir`` so the test can locate the DB
-  ## that ``trace_index`` just materialized.  ``paths.nim`` derives the
-  ## path from ``getHomeDir()`` (= ``$HOME/.local/share/codetracer``)
-  ## rather than ``XDG_DATA_HOME``, so we follow the same convention.
-  getEnv("HOME") / ".local" / "share" / "codetracer" / "trace_index.db"
+  ## The DB ``trace_index`` just materialized: ``DB_PATHS[0]``, i.e.
+  ## ``paths.codetracerTraceDir / "trace_index.db"`` -- under
+  ## ``$CODETRACER_HOME/data`` here, because the parent suite sets it.
+  DB_PATHS[0]
 
 proc scenarioSchema() =
   ## Fresh tmpdir → newID materializes the DB → assert every required
@@ -749,8 +749,9 @@ proc scenarioObservedAxesRoundTrip() =
 proc scenarioProfile() =
   ## Report where THIS process resolves the trace index it would write --
   ## ``DB_PATHS[0]``, the path ``trace_index`` opens for a normal (non-test)
-  ## recording -- and the home directory it was derived from.  The parent
-  ## asserts both lie inside the scratch directory it gave this process.
+  ## recording -- and the ``CODETRACER_HOME`` it was derived from.  The
+  ## parent asserts the index lies inside the scratch directory it gave
+  ## this process.
   ##
   ## This is the isolation pin.  The suites that spawn this helper used to set
   ## only ``HOME`` / ``XDG_DATA_HOME``, and on Windows Nim's ``getHomeDir``
@@ -760,13 +761,19 @@ proc scenarioProfile() =
   ## database).  Asking the child where it resolved is the portable check:
   ## it names the profile variable that was missed on any OS, and it never
   ## opens, reads or stats the real database.
-  echo "HOME-DIR ", getHomeDir()
+  echo "CODETRACER-HOME ", getEnv("CODETRACER_HOME")
   echo "TRACE-INDEX ", DB_PATHS[0]
   echo "PASS"
 
 when isMainModule:
   if paramCount() < 1:
     fail("usage: trace_index_test_helper <scenario>")
+  if paramStr(1) != "profile":
+    # Fail closed BEFORE any scenario writes (src/common/ct_home_test_guard).
+    requireIsolatedCodetracerHome([
+      ("the trace index", DB_PATHS[0]),
+      ("the recordings folder", app),
+      ("the tmp dir", codetracerTmpPath)])
   case paramStr(1)
   of "schema": scenarioSchema()
   of "old-schema": scenarioOldSchema()

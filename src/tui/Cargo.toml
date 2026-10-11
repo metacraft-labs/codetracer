@@ -22,6 +22,8 @@ num-derive = "0.4"
 # one.  `ct-lang` is a leaf crate with no build script and no path
 # dependencies, so this stays a standalone-buildable crate.
 ct-lang = { path = "../../libs/ct-lang" }
+# Every per-user location (and its CODETRACER_HOME override) resolves here.
+ct-home = { path = "../../libs/ct-home" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"

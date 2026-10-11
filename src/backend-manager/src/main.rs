@@ -2110,11 +2110,15 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 /// to stderr if file logging cannot be set up.
 fn init_daemon_logging(config: &DaemonConfig) {
     let log_path = config.log_file.clone().or_else(|| {
-        // On Windows, HOME is not set by default; prefer USERPROFILE.
-        std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .ok()
-            .map(|home| PathBuf::from(home).join(".codetracer").join("daemon.log"))
+        // `$CODETRACER_HOME/state/daemon.log`, else `~/.codetracer/daemon.log`
+        // (on Windows, HOME is not set by default; prefer USERPROFILE).
+        ct_home::area_or(ct_home::Area::State, || {
+            std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .ok()
+                .map(|home| PathBuf::from(home).join(".codetracer"))
+        })
+        .map(|dir| dir.join("daemon.log"))
     });
 
     if let Some(path) = log_path {

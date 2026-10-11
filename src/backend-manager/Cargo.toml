@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Every per-user location (and its CODETRACER_HOME override) resolves here.
+ct-home = { path = "../../libs/ct-home" }
 clap = { version = "4.5.42", features = ["derive"] }
 libc = "0.2"
 log = "0.4.27"

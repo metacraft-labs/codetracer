@@ -56,6 +56,7 @@ import recording_id
 import types
 import lang
 import trace_index
+import ct_home_test_guard
 
 # Pull in the real production importTrace plus its meta.dat reader.
 # ``storage_and_import`` lives under ``../ct/trace`` relative to this
@@ -403,6 +404,11 @@ proc scenarioMetaDatRead(args: seq[string]) =
 when isMainModule:
   if paramCount() < 1:
     fail("usage: cross_machine_replay_test_helper <scenario> [args...]")
+  # Fail closed BEFORE any scenario writes (src/common/ct_home_test_guard).
+  requireIsolatedCodetracerHome([
+    ("the trace index", DB_PATHS[0]),
+    ("the recordings folder", app),
+    ("the tmp dir", codetracerTmpPath)])
   let scenario = paramStr(1)
   var rest: seq[string] = @[]
   for i in 2 .. paramCount():

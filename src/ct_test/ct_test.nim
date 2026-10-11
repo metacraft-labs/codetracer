@@ -4,9 +4,10 @@ import contracts
 import discovery
 import run_orchestration
 import certificate
-import certificate_default_store
 import certificate_issuance
-import certificate_store
+import certificate_local_store
+import certificate_verify_cli
+import ct_test_delegate
 import frameworks/ada_fallback
 import frameworks/assembly_fallback
 import frameworks/crystal_spec
@@ -84,18 +85,43 @@ proc ctTestUsageMessage*(): string =
   "[--scope auto|vcs|walk|unscoped] [--unscoped] " &
   "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
   "[--threads N] [--json] [--summary <path>] " &
-  "[--certificate <path>] [--no-certificate] " &
-  "[--sign-key <path> --key-id <id>]); " &
+  "[--no-certificate] [--untracked reads|strict] " &
+  "[--sign-key <path> --key-id <id>] " &
+  "| verify (--staged | --worktree | --commit <rev>) [--workspace <path>] " &
+  "[--targets <t>[,<t>...]] [--platform <p>[,<p>...]] [--json]); " &
   "a passing run issues a test certificate (schema " & CertificateSchema &
-  ", framework " & CtTestFramework & ") in the run summary and PUBLISHES it, " &
-  "by default, to the workspace certificate store at `" & CtTestStoreDir &
-  "/<platform>.toml` — which is where CodeTracer's status bar looks, so a " &
-  "project needs no flag and no other tool to be reported as certified; " &
-  "`ct test` also writes `" & WorkspaceStateDir & "/.gitignore` so its own " &
-  "record cannot make the next run report your tree as dirty; " &
-  "`--certificate <path>` writes the record THERE INSTEAD (useful for a " &
-  "destination outside the repository), and `--no-certificate` suppresses " &
-  "issuance entirely; signing is OPTIONAL and OFF " &
+  ", framework " & CtTestFramework & ") in the run summary and PUBLISHES it " &
+  "to your local certificate store — `$TEST_CERTIFICATES_DIR` when it is an " &
+  "absolute path, else `$XDG_STATE_HOME/test-certificates` " &
+  "(`~/.local/state/test-certificates`) on Linux, " &
+  "`~/Library/Application Support/test-certificates` on macOS, " &
+  "`%LOCALAPPDATA%\\test-certificates` on Windows — at `v1/<algorithm>/" &
+  "<digest>/<payload sha256>.toml`, keyed by the content it attests, which " &
+  "is where CodeTracer's status bar looks; nothing is written into the " &
+  "repository, and the store keeps the newest " & $DefaultRetention &
+  " contents plus HEAD's; to get a certificate as a file, copy it out of " &
+  "the store; " &
+  "a certificate is bound to the CONTENT of the tracked files as the tests " &
+  "ran against them (`vcs.content`, computed before and after the run; " &
+  "`vcs.base` names HEAD and is informational only), so a modified working " &
+  "tree is certified as it is, with no need to commit first, and a commit " &
+  "that records exactly the tested content is covered with no second run; " &
+  "it is withheld, saying why and what to do, when tracked files change " &
+  "during the run or when the tree has no content id (unmerged entries, " &
+  "assume-unchanged or skip-worktree entries git does not look at, a " &
+  "submodule with uncommitted changes), and for untracked files as the " &
+  "untracked mode says — `--untracked`, else `[certificate] untracked` in " &
+  "the workspace's `.codetracer/test.toml`, else `reads`: `reads` withholds " &
+  "only when a read set the run captured shows a test read an untracked " &
+  "file (`test run` captures none today, so it issues with " &
+  "`untracked = true` and the summary says no read set was captured), " &
+  "`strict` withholds whenever an untracked, non-ignored file exists; an " &
+  "unknown `--untracked` value is an error before any test runs; an " &
+  "unusable `.codetracer/test.toml` is reported before the tests run, " &
+  "which still run, and the certificate is withheld; withholding never " &
+  "changes the exit status; " &
+  "`--no-certificate` suppresses issuance entirely, so nothing is written; " &
+  "signing is OPTIONAL and OFF " &
   "unless `--sign-key` is passed; " &
   "discovery is scoped to the workspace's own files by default — " &
   "`--scope` (or the CT_TEST_SCOPE environment variable) selects the rule, " &
@@ -104,7 +130,26 @@ proc ctTestUsageMessage*(): string =
   "`run` exits 0 when a test ran and all passed, 1 when a test ran and one " &
   "did not, and 2 when NO test ran at all — a run that executed nothing is " &
   "not a passing run, and the stderr verdict says which of the four causes " &
-  "it was"
+  "it was; " &
+  "`verify` asks whether the certificates in the local certificate store " &
+  "(both roots) cover ONE state — `--staged` (the index being committed, " &
+  "exactly the tree a commit will record, including inside a pre-commit " &
+  "hook), `--worktree` (the tracked files as they are) or `--commit <rev>` " &
+  "— evaluating only framework " & CtTestFramework & " records (others are " &
+  "reported as ignored) for this platform (`--platform` overrides) and, as " &
+  "targets, `--targets` when given, else `[certificate] targets` in the " &
+  "workspace's committed `.codetracer/test.toml` as that state has it, else " &
+  "every target `discover` reports that can run here; coverage is the " &
+  "union of every matching certificate; it exits 0 covered, 1 not covered " &
+  "(its one stderr line says whether NO certificate was found for that " &
+  "content or records were found and none matched), 2 could not decide " &
+  "(a state with no content id, a record it cannot evaluate, an unreadable " &
+  "store or `.codetracer/test.toml`); " &
+  "as an OPTIONAL pre-commit gate it is one line, `" & PreCommitHookCommand &
+  "`, placed LAST in `.git/hooks/pre-commit`: it is the early answer, not " &
+  "the enforcement point (`git commit --no-verify` skips it), and it must " &
+  "run after every hook step that rewrites staged content, because a step " &
+  "that stages a rewrite after it produces a commit the gate never saw"
 
 proc errorResponse(message: string): DiscoverResponse =
   DiscoverResponse(
@@ -140,11 +185,25 @@ type
     threads: int                 ## 0 ⇒ REPRO_TEST_THREADS / CPU count
     jsonOutput: bool
     summaryPath: string          ## optional path to also write the summary to
-    certificatePath: string      ## optional path to write the certificate to
     noCertificate: bool          ## suppress issuance entirely
     signKeyPath: string          ## OpenSSH ed25519 private key; empty ⇒ unsigned
     keyId: string                ## which key signed, for a consumer's key store
+    untrackedGiven: bool         ## ``--untracked`` was passed (CTC-3g)
+    untracked: UntrackedMode     ## its value; wins over the configuration
     errors: seq[string]
+
+proc parseUntrackedMode(value: string; into: var RunOptions) =
+  ## ``--untracked reads|strict`` (CTC-3g). An unknown value is an error
+  ## before anything runs, never a silently chosen mode.
+  for mode in UntrackedMode:
+    if value == $mode:
+      into.untrackedGiven = true
+      into.untracked = mode
+      return
+  into.errors.add "invalid --untracked value '" & value & "': expected " &
+    "\"reads\" (withhold only when a captured read set shows a test read " &
+    "an untracked file) or \"strict\" (withhold on any untracked, " &
+    "non-ignored file)"
 
 proc parseRunArgs(args: seq[string]): RunOptions =
   ## Parse the ``test run`` argument vector:
@@ -173,9 +232,6 @@ proc parseRunArgs(args: seq[string]): RunOptions =
     of "--summary":
       if i + 1 >= args.len: result.errors.add "missing value for --summary"
       else: result.summaryPath = args[i + 1]; inc i
-    of "--certificate":
-      if i + 1 >= args.len: result.errors.add "missing value for --certificate"
-      else: result.certificatePath = args[i + 1]; inc i
     of "--no-certificate":
       result.noCertificate = true
     of "--sign-key":
@@ -186,8 +242,16 @@ proc parseRunArgs(args: seq[string]): RunOptions =
       else: result.keyId = args[i + 1]; inc i
     of "--json":
       result.jsonOutput = true
+    of "--untracked":
+      if i + 1 >= args.len: result.errors.add "missing value for --untracked"
+      else:
+        parseUntrackedMode(args[i + 1], result)
+        inc i
     else:
-      result.errors.add "unknown run argument: " & args[i]
+      if args[i].startsWith("--untracked="):
+        parseUntrackedMode(args[i]["--untracked=".len .. ^1], result)
+      else:
+        result.errors.add "unknown run argument: " & args[i]
     inc i
   if result.workspaceRoot.len == 0:
     result.errors.add "missing required --workspace <path>"
@@ -251,18 +315,18 @@ proc issuerIdentity(): string =
     "ct-test"
 
 proc certificateReport(issuance: Issuance;
-                       writtenTo, writeError, storeNotice: string): JsonNode =
+                       writtenTo, writeError: string;
+                       pruneErrors: seq[string]): JsonNode =
   ## The ``certificate`` object attached to every run summary.
   ##
   ## Present whether or not a certificate was issued: "no certificate, and
   ## here is why, and here is what would change that" is the report a producer
   ## owes its user, and silence is what makes a withholding producer unusable.
   ##
-  ## ``storeNotice`` is the same argument applied to the *destination*: a run
-  ## that published into a store git does not ignore has left a file that will
-  ## make the NEXT run report this tree as dirty, and a producer that noticed
-  ## and said nothing would be handing its user a foot-gun it had already seen
-  ## (``certificate_default_store``).
+  ## ``written_to`` is the full path of the record in the user's local
+  ## certificate store (``certificate_local_store``); nothing is ever written
+  ## inside the repository, so there is no store notice to give (the
+  ## ``store_notice`` field CTC-2 had is gone with the workspace store).
   # `vcs` is TRI-state, not a boolean. A run that failed its own gate (no tests
   # executed, tests failed) never reaches git at all, and reporting that as
   # "could not determine the repository state" would send an operator after a
@@ -278,11 +342,37 @@ proc certificateReport(issuance: Issuance;
     "vcs": vcsState
   }
   if issuance.vcs.determined:
-    result["commit"] = %issuance.vcs.commit
-    result["clean"] = %issuance.vcs.clean
+    # The binding is `content`; `base` is informational and absent on an
+    # unborn branch. `content_before` appears only when it differs, which is
+    # the evidence behind `wrContentChanged`.
+    if issuance.vcs.content.len > 0:
+      result["content"] = %issuance.vcs.content
+    if issuance.vcs.contentBefore.len > 0 and
+       issuance.vcs.contentBefore != issuance.vcs.content:
+      result["content_before"] = %issuance.vcs.contentBefore
+    if issuance.vcs.noContentId.len > 0:
+      var conditions = newJArray()
+      for state in issuance.vcs.noContentId:
+        conditions.add %*{"condition": $state.condition, "paths": state.paths}
+      result["no_content_id"] = conditions
     result["untracked"] = %issuance.vcs.untracked
+    if issuance.vcs.untrackedPaths.len > 0:
+      result["untracked_paths"] = %issuance.vcs.untrackedPaths
+    if issuance.vcs.base.len > 0:
+      result["base"] = %issuance.vcs.base
   elif issuance.vcs.probed:
     result["vcs_undetermined_reason"] = %issuance.vcs.undeterminedReason
+  if issuance.reason != wrAttestationDisabled:
+    # CTC-3g: the mode in force, and whether the run had a read set to judge
+    # untracked files by. Stated, not implied: in the default mode a run
+    # with no read set issues, and the summary says why it could not judge.
+    result["untracked_mode"] = %($issuance.untracked.mode)
+    result["read_set"] =
+      %(if issuance.untracked.readSetCaptured: "captured" else: "not-captured")
+    if issuance.untracked.note.len > 0:
+      result["untracked_note"] = %issuance.untracked.note
+    if issuance.reason == wrUntrackedInput:
+      result["untracked_inputs"] = %issuance.untracked.offending
   if issuance.issued:
     result["signed"] = %issuance.certificate.isSigned
     result["document"] = %issuance.document
@@ -290,8 +380,8 @@ proc certificateReport(issuance: Issuance;
       result["written_to"] = %writtenTo
     if writeError.len > 0:
       result["write_error"] = %writeError
-    if storeNotice.len > 0:
-      result["store_notice"] = %storeNotice
+    if pruneErrors.len > 0:
+      result["prune_errors"] = %pruneErrors
   else:
     result["withheld_reason"] = %($issuance.reason)
     result["message"] = %issuance.message
@@ -318,6 +408,25 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
       partition = parsePartitionArg(opts.partitionArg)
     except ValueError as err:
       return emitRunError(@[err.msg])
+
+  # The untracked-files mode (CTC-3g), resolved BEFORE any test runs, so an
+  # unusable `.codetracer/test.toml` is reported up front. It does not stop
+  # the run: the file decides only whether a certificate may be issued, so
+  # the tests run, the exit status is theirs, and the certificate is withheld
+  # (`wrUntrackedModeUnresolved`) rather than issued under a mode nobody
+  # chose. `--no-certificate` means attestation reads nothing, this
+  # configuration included.
+  var untrackedMode = umReads
+  var untrackedModeProblem = ""
+  if not opts.noCertificate:
+    let resolved = resolveUntrackedMode(opts.workspaceRoot,
+                                        opts.untrackedGiven, opts.untracked)
+    if resolved.ok:
+      untrackedMode = resolved.mode
+    else:
+      untrackedModeProblem = resolved.problem
+      stderr.writeLine "ct test: warning — " & resolved.problem &
+        "; the tests will run, but no certificate will be issued"
 
   # Discover the candidate tests via the providers (workspace- or file-scoped).
   let request =
@@ -350,7 +459,9 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
       disabled: opts.noCertificate,
       issuer: issuerIdentity(),
       signingKeyPath: opts.signKeyPath,
-      keyId: opts.keyId))
+      keyId: opts.keyId,
+      untrackedMode: untrackedMode,
+      untrackedModeProblem: untrackedModeProblem))
   let summary = outcome.summary
   var summaryJson = summaryToJson(summary)
 
@@ -370,41 +481,32 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
 
   if not opts.noCertificate:
     let issuance = outcome.issuance
-    var writtenTo, writeError, storeNotice, destination: string
+    var writtenTo, writeError: string
+    var pruneErrors: seq[string]
     if issuance.issued:
-      if opts.certificatePath.len > 0:
-        # AN EXPLICIT DESTINATION REPLACES THE DEFAULT rather than adding to
-        # it. That is what keeps `--certificate` usable for its one job the
-        # default cannot do — writing the record somewhere outside the
-        # repository — and it means a caller who named a path gets that path
-        # and no surprise second copy inside their tree.
-        destination = opts.certificatePath
-        try:
-          let parent = parentDir(opts.certificatePath)
-          if parent.len > 0:
-            createDir(parent)
-          writeFile(opts.certificatePath, issuance.document)
-          writtenTo = opts.certificatePath
-        except CatchableError as err:
-          writeError = err.msg
-      else:
-        # THE DEFAULT DESTINATION, and the reason CTC-2 exists: a certificate
-        # nothing can find certifies nothing. The workspace store is where
-        # `certificate_store` discovers records and therefore where the status
-        # bar reads them, so a project that runs `ct test` and nothing else is
-        # reported as certified without a flag. `publishCertificate` puts the
-        # ignore guard in front of the record; see its module header for why
-        # writing into the workspace is otherwise a foot-gun.
-        let published = publishCertificate(
-          response.workspaceRoot, issuance.certificate.platform,
-          issuance.document)
-        destination = published.path
-        if published.written:
-          writtenTo = published.path
-        writeError = published.error
-        storeNotice = published.notIgnoredNotice
+      # THE LOCAL CERTIFICATE STORE, always (Transport.md §2): the user root,
+      # keyed by the content the record attests. Never the repository — a
+      # certificate in the working tree would change the content it attests —
+      # and never a path the caller names: `--certificate <path>` was removed
+      # (CTC-3e). A user who wants a file copies it out of the store.
+      let published = publishToLocalStore(
+        nativeCertificateStoreRoots(), response.workspaceRoot,
+        issuance.document)
+      if published.written:
+        writtenTo = published.path
+      writeError = published.error
+      pruneErrors = published.pruned.errors
     summaryJson["certificate"] =
-      certificateReport(issuance, writtenTo, writeError, storeNotice)
+      certificateReport(issuance, writtenTo, writeError, pruneErrors)
+    if untrackedModeProblem.len > 0:
+      # No mode was in force, whichever gate withheld first: say so rather
+      # than report the default nobody chose.
+      summaryJson["certificate"]["untracked_mode"] = %"unresolved"
+      summaryJson["certificate"]["untracked_mode_problem"] =
+        %untrackedModeProblem
+      for key in ["read_set", "untracked_note"]:
+        if summaryJson["certificate"].hasKey(key):
+          summaryJson["certificate"].delete(key)
 
     if not issuance.issued:
       # stderr, so a machine consumer parsing the summary on stdout is
@@ -415,11 +517,11 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
     else:
       if writeError.len > 0:
         stderr.writeLine "ct test: certificate issued but not written to " &
-                         destination & ": " & writeError
-      if storeNotice.len > 0:
-        # Not a failure: the record IS issued and the run's verdict is
-        # unaffected. It is a warning about what the next run will see.
-        stderr.writeLine "ct test: warning — " & storeNotice
+                         "the local certificate store: " & writeError
+      for problem in pruneErrors:
+        # Not a failure: pruning is a matter of disk space (Transport.md §2.5).
+        stderr.writeLine "ct test: warning — the certificate store could " &
+                         "not be pruned: " & problem
 
   echo summaryJson.pretty
   if opts.summaryPath.len > 0:
@@ -454,12 +556,26 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
 
   runExitCode(summary)
 
+proc refcRunRefusal*(lookup: CtTestLookup): string =
+  ## Why a refc build will not run `test run`, and where it looked for the
+  ## `ct-test` it would otherwise have handed the run to.
+  "`test run` needs the `ct-test` runner, which is built --mm:orc and ships " &
+  "beside `ct`: this binary was compiled with --mm:refc, whose per-thread " &
+  "heaps make the parallel runner unsafe, and it found no `ct-test` to hand " &
+  "the run to (" & describeCtTestLookup(lookup) & "). Reinstall CodeTracer, " &
+  "or put `ct-test` on PATH; `test discover` and `test verify` work here."
+
 proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
     cache: DiscoveryCache): int =
-  ## CLI entry point. Dispatches the ``test <verb>`` surface; ``discover`` and
-  ## ``run`` are implemented. Unknown verbs produce a usage diagnostic.
+  ## CLI entry point. Dispatches the ``test <verb>`` surface; ``discover``,
+  ## ``run`` and ``verify`` are implemented. Unknown verbs produce a usage
+  ## diagnostic.
   if args.len >= 2 and args[0] == "test" and args[1] == "discover":
     return runDiscover(if args.len > 2: args[2 .. ^1] else: @[], registry, cache)
+  if args.len >= 2 and args[0] == "test" and args[1] == "verify":
+    # Single-threaded (discovery at most), so unlike `run` it is safe on the
+    # `ct` binary's refc build.
+    return runVerify(if args.len > 2: args[2 .. ^1] else: @[], registry, cache)
   if args.len >= 2 and args[0] == "test" and args[1] == "run":
     # `run` executes the discovered tests on a worker pool
     # (``run_orchestration.runUnits``), and the workers share the
@@ -479,17 +595,17 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
     # producing no results at all.
     #
     # This is not hypothetical — the `ct` binary embeds this CLI and is built
-    # `--mm:refc` for the rest of CodeTracer's sake, so `ct test run` would
-    # crash where `ct test discover` (single-threaded) works fine. Refuse with
-    # the machine-readable error envelope every other `run` failure uses,
+    # `--mm:refc` for the rest of CodeTracer's sake. `ct` therefore never runs
+    # tests itself: `src/ct/codetracer.nim` hands `test run` to the ORC-built
+    # `ct-test` that every package ships beside it (`ct_test_delegate.nim`),
+    # BEFORE this procedure is reached. Arriving here on a refc build means no
+    # `ct-test` was found, so refuse with the machine-readable error envelope
+    # every other `run` failure uses, naming the places the lookup tried,
     # rather than handing the caller a core dump. Compiled out entirely on
-    # ORC/ARC builds, which is what the standalone `ct-test` binary is.
+    # ORC/ARC builds, which is what `ct-test` is — so `ct-test` can never
+    # delegate, to itself or to anything else.
     when not defined(gcOrc) and not defined(gcArc):
-      return emitRunError(@[
-        "`test run` requires an ORC/ARC build: this binary was compiled with " &
-        "--mm:refc, whose per-thread heaps make the parallel runner unsafe. " &
-        "Use the standalone `ct-test` binary (built --mm:orc) for runs; " &
-        "`test discover` is supported here."])
+      return emitRunError(@[refcRunRefusal(locateCtTest())])
     else:
       var mutableRegistry = registry
       return runRun(if args.len > 2: args[2 .. ^1] else: @[], mutableRegistry, cache)

@@ -9,14 +9,12 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { ctUserConfigDir } from "./ct-home";
 
 function currentLayoutPaths(): { userLayoutDir: string; userLayoutPath: string; backupPath: string } {
-  const userLayoutDir = path.join(
-    process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
-    "codetracer",
-  );
+  // `$CODETRACER_HOME/config` under the fixtures (lib/ct-home.ts).
+  const userLayoutDir = ctUserConfigDir();
   const userLayoutPath = path.join(userLayoutDir, "default_layout.json");
   return {
     userLayoutDir,

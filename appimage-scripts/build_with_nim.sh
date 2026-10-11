@@ -68,6 +68,20 @@ nim \
 	--nimcache:nimcache \
 	--out:"${APP_DIR}/bin/db-backend-record" c ./src/ct/db_backend_record.nim
 
+# ct-test: the ORC test runner, installed beside ct_unwrapped (CTC-3i).
+# `ct test run` hands the run to it (src/ct_test/ct_test_delegate.nim) because
+# the parallel runner is unsafe under the refc `ct` above. It links none of
+# ct's native libraries; build_appimage.sh bundles its closure and wraps it
+# with the bundled loader like every other binary in bin/. Its own nimcache:
+# refc and ORC C output for the same modules must not share one.
+nim \
+	-d:release \
+	--mm:orc --threads:on --hints:off --warnings:off \
+	--debugInfo --lineDir:on \
+	--boundChecks:on --stacktrace:on --linetrace:on \
+	--nimcache:nimcache-ct-test \
+	--out:"${APP_DIR}/bin/ct-test" c ./src/ct_test/ct_test.nim
+
 # --passL:"-lsqlite3" \
 #--passL:"${APPDIR}/lib/libcrypto.so.3" \
 #--passL:"${APPDIR}/lib/libssl.so.3" \

@@ -130,6 +130,12 @@ fn ensure_replay_license_bypass() {
     // single-threaded test bootstrap before any worker has spawned, and the
     // value we write is process-static, so the unsafe block is sound.
     unsafe { env::set_var("CODETRACER_IN_UI_TEST", "1") };
+    // And a scratch `CODETRACER_HOME`, inherited by the db-backend and every
+    // ct-native-replay it spawns: the trace index, recordings, the licensing
+    // counter (`state.db`) and the tmp/socket dir all land in it instead of
+    // the developer's own profile (`libs/ct-home`, same single-threaded
+    // bootstrap argument as above).
+    ct_home::isolate_for_tests();
 }
 
 /// Canonicalize a path, stripping the Windows `\\?\` UNC prefix if present.

@@ -26,7 +26,14 @@
 ##   * `XDG_STATE_HOME` is replaced when it is unset or lies inside the
 ##     default `~/.local/state`;
 ##   * `CODETRACER_TUI_LAYOUT_DIR` is replaced when it is unset or lies inside
-##     the user's state home (either spelling).
+##     the user's state home (either spelling);
+##   * `TEST_CERTIFICATES_DIR` and `TEST_CERTIFICATES_SYSTEM_DIR` — the user's
+##     local certificate store (Transport.md §2.1, which `ct test` publishes
+##     to and the status bar reads) — are ALWAYS replaced: an exported value
+##     is by definition the user's own store, and the system root's default
+##     (`/var/lib/test-certificates/<uid>`) is machine state no test should
+##     read. Added 2026-10-10 (CTC-3e). A suite that needs a store sets its
+##     own scratch root after start-up.
 ##
 ## A caller that already chose a private directory (the lane runner, a harness
 ## that inspects the document afterwards, a suite that sets one per spawn with
@@ -39,7 +46,25 @@
 ## of the shipped binary under this module, observed from outside) and the
 ## lane runner's before/after comparison of `~/.local/state/codetracer`.
 ##
-## It exports nothing but the two queries the guard test reads, so an implicit
+## ## `CODETRACER_HOME`, for every test program
+##
+## The same module also gives the process a private `CODETRACER_HOME` — the
+## one variable every CodeTracer resolver honours for EVERY per-user location
+## (trace index, recordings, config, state, caches, scratch; see
+## `src/common/ct_home.nim`). The repo-root `config.nims` force-imports this
+## module into every test-shaped program under `src/`, not only the trees
+## above, so a suite in `src/common` or `src/ct` that records, opens the trace
+## index or writes a config is isolated on every OS without naming a single
+## OS-specific variable.
+##
+##   * `CODETRACER_HOME` is replaced unless it already names a TEST SCRATCH
+##     directory: one inside the OS temp directory, or one holding a
+##     `.codetracer-test-home` marker file. A developer who exports
+##     `CODETRACER_HOME` for their own use therefore never has a suite write
+##     there, while a lane, a harness or a parent suite that chose a scratch
+##     directory keeps it — and its children inherit it.
+##
+## It exports nothing but the queries the guard tests read, so an implicit
 ## import cannot shadow or collide with a suite's own names.
 
 when not defined(js) and not defined(emscripten):
@@ -48,6 +73,10 @@ when not defined(js) and not defined(emscripten):
   const
     LayoutDirVar = "CODETRACER_TUI_LAYOUT_DIR"
     StateHomeVar = "XDG_STATE_HOME"
+    CodetracerHomeVar = "CODETRACER_HOME"
+    CodetracerTestHomeMarker* = ".codetracer-test-home"
+      ## A file whose presence marks a directory outside the OS temp dir as a
+      ## harness's scratch `CODETRACER_HOME`.
 
   proc userStateHome*(): string =
     ## The default XDG state home of the user running the tests — the directory
@@ -62,15 +91,40 @@ when not defined(js) and not defined(emscripten):
     let r = normalizedPath(absolutePath(root))
     p == r or p.startsWith(r & DirSep)
 
+  proc codetracerHomeIsTestScratch*(path: string): bool =
+    ## Whether `path` is a `CODETRACER_HOME` a test may use: non-empty, and
+    ## inside the OS temp directory or marked with `CodetracerTestHomeMarker`.
+    path.len > 0 and (path.inside(getTempDir()) or
+                      fileExists(path / CodetracerTestHomeMarker))
+
   var isolatedRoot = ""
+
+  # The exit hook must not read `isolatedRoot`: it is a main-module global,
+  # and its heap buffer is freed when the main module ends — BEFORE exit
+  # procedures run (codetracer-pm issue 2026-10-10-exit-hooks-read-freed-
+  # module-globals-and-may-delete-the-wrong-directory). A value array has no
+  # destructor, so the hook reads the path from a copy kept here instead.
+  var cleanupPath: array[4096, char]
+  var cleanupPathLen = 0
 
   proc privateRoot(): string =
     if isolatedRoot.len == 0:
       isolatedRoot = getTempDir() / ("ct-test-state-" & $getCurrentProcessId())
       createDir(isolatedRoot)
+      if isolatedRoot.len <= cleanupPath.len:
+        for i, c in isolatedRoot:
+          cleanupPath[i] = c
+        cleanupPathLen = isolatedRoot.len
     isolatedRoot
 
   proc isolate() =
+    putEnv("TEST_CERTIFICATES_DIR", privateRoot() / "test-certificates")
+    putEnv("TEST_CERTIFICATES_SYSTEM_DIR",
+           privateRoot() / "test-certificates-system")
+    if not codetracerHomeIsTestScratch(getEnv(CodetracerHomeVar)):
+      let dir = privateRoot() / "codetracer-home"
+      createDir(dir)
+      putEnv(CodetracerHomeVar, dir)
     let home = userStateHome()
     let inheritedStateHome = getEnv(StateHomeVar)
     if inheritedStateHome.len == 0 or inheritedStateHome.inside(home):
@@ -86,9 +140,12 @@ when not defined(js) and not defined(emscripten):
       putEnv(LayoutDirVar, dir)
 
   proc cleanup() =
-    if isolatedRoot.len > 0:
+    if cleanupPathLen > 0:
+      var path = newString(cleanupPathLen)
+      for i in 0 ..< cleanupPathLen:
+        path[i] = cleanupPath[i]
       try:
-        removeDir(isolatedRoot)
+        removeDir(path)
       except CatchableError:
         discard
 

@@ -285,7 +285,7 @@ func exportFor*(kind: DefinitionFileKind): string =
   case kind
   of dfkVisualiserCode: VisualiserExport
   of dfkDiffCode: DiffExport
-  of dfkPoints, dfkVisualisers, dfkScratchpad: ""
+  of dfkPoints, dfkVisualisers, dfkScratchpad, dfkTest: ""
 
 func hasEntryPoint*(d: ExecutableDefinition): bool =
   d.module.exportedFunction(exportFor(d.kind)) >= 0

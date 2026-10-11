@@ -6,7 +6,8 @@
 ## (`layout_model.sharedDefaultLayout()`); after that each is free, and each
 ## remembers ITS OWN last arrangement in a file that belongs to it alone:
 ##
-##   * the desktop — its GoldenLayout config under `$XDG_CONFIG_HOME/codetracer/`;
+##   * the desktop — its GoldenLayout config under `$CODETRACER_HOME/config/`,
+##     else `$XDG_CONFIG_HOME/codetracer/` (`common/ct_home.ctConfigDir`);
 ##   * the terminal — `<state root>/tui-layout.json` (`tui/host/layout_store`);
 ##   * this window — `<state root>/gpui-layout.json`, BESIDE the terminal's
 ##     (one state root, `viewmodel/host/native_state`), and never the same file.

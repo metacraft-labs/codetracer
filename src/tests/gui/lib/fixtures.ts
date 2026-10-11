@@ -33,6 +33,7 @@ import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
 import { formatErrorGroups } from "./error-grouping";
 import { requiresRR } from "./lang-support";
+import { ctUserConfigDir, ctUserDataDir } from "./ct-home";
 import {
   ensureDefaultConfig,
   ensureDefaultLayout,
@@ -84,6 +85,19 @@ const guiTestXdgConfigHome =
 const ownsGuiTestXdgConfigHome =
   process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME === undefined;
 process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
+// EVERY per-user location of every CodeTracer this worker launches — config
+// and layouts, the trace index, recordings, caches, the tmp/socket dir —
+// derives from `CODETRACER_HOME` (src/common/ct_home.nim, libs/ct-home), on
+// every OS, and it outranks `XDG_CONFIG_HOME` above. A scratch one per worker,
+// so no spec reads or writes the developer's own profile. Specs find the
+// files under it through `lib/ct-home.ts`.
+const originalCodetracerHome = process.env.CODETRACER_HOME;
+const guiTestCodetracerHome =
+  process.env.CODETRACER_GUI_TEST_CODETRACER_HOME ??
+  fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-gui-home-"));
+const ownsGuiTestCodetracerHome =
+  process.env.CODETRACER_GUI_TEST_CODETRACER_HOME === undefined;
+process.env.CODETRACER_HOME = guiTestCodetracerHome;
 
 const ctBinaryName = isWindows ? "ct.exe" : "ct";
 const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
@@ -418,16 +432,25 @@ function setupLdLibraryPath(): void {
  * first instance.
  */
 function clearElectronSingletonLocks(): void {
-  const electronUserDataDir = path.join(
-    process.env.HOME ?? process.env.USERPROFILE ?? "",
-    isWindows ? "AppData/Roaming/Electron" : ".config/Electron",
-  );
-  for (const lockFile of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
-    const lockPath = path.join(electronUserDataDir, lockFile);
-    try {
-      fs.unlinkSync(lockPath);
-    } catch {
-      // File may not exist — that's fine.
+  // Under a `CODETRACER_HOME` (which this worker always has) the app's
+  // userData — and so the lock — is `$CODETRACER_HOME/state/electron`
+  // (src/frontend/index.nim); the default location is still cleared for a
+  // launch made without one.
+  const electronUserDataDirs = [
+    path.join(guiTestCodetracerHome, "state", "electron"),
+    path.join(
+      process.env.HOME ?? process.env.USERPROFILE ?? "",
+      isWindows ? "AppData/Roaming/Electron" : ".config/Electron",
+    ),
+  ];
+  for (const electronUserDataDir of electronUserDataDirs) {
+    for (const lockFile of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
+      const lockPath = path.join(electronUserDataDir, lockFile);
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        // File may not exist — that's fine.
+      }
     }
   }
 }
@@ -593,18 +616,18 @@ function recordTestProgram(recordArg: string): string {
 }
 
 function traceFolderForId(recordingId: string): string {
-  const dataHome =
-    process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");
+  // `$CODETRACER_HOME/data` — where `ct record` under this worker put it.
+  const dataDir = ctUserDataDir();
   // M-REC-7: the on-disk recording folder name is the bare UUIDv7
   // recording id — the pre-M-REC-7 `trace-<id>` prefix was retired
   // (see src/common/paths.nim `recordingFolder`).  Fall back to the
   // legacy prefixed name only if the bare folder is absent, so older
   // local recordings keep working.
-  const bare = path.join(dataHome, "codetracer", recordingId);
+  const bare = path.join(dataDir, recordingId);
   if (fs.existsSync(bare)) {
     return bare;
   }
-  const legacy = path.join(dataHome, "codetracer", `trace-${recordingId}`);
+  const legacy = path.join(dataDir, `trace-${recordingId}`);
   if (fs.existsSync(legacy)) {
     return legacy;
   }
@@ -784,6 +807,7 @@ function makeCleanEnv(
   // itself.
   env.CT_HMR = "0";
   env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
+  env.CODETRACER_HOME = guiTestCodetracerHome;
   // Bypass the Electron single-instance lock so that concurrent test runs
   // (or stale Electron processes from previous runs) do not prevent this
   // instance from starting.  With "window" policy the new process always
@@ -1908,6 +1932,18 @@ export const test = base.extend<
         delete process.env.XDG_CONFIG_HOME;
       } else {
         process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+      }
+      if (ownsGuiTestCodetracerHome) {
+        try {
+          fs.rmSync(guiTestCodetracerHome, { recursive: true, force: true });
+        } catch (ex) {
+          console.warn(`fixtures: removing test CODETRACER_HOME failed: ${(ex as Error).message}`);
+        }
+      }
+      if (originalCodetracerHome === undefined) {
+        delete process.env.CODETRACER_HOME;
+      } else {
+        process.env.CODETRACER_HOME = originalCodetracerHome;
       }
       // Killing Electron with SIGKILL leaves Playwright's internal CDP
       // pipe handles open, preventing the worker from exiting.  Force

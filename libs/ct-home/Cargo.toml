@@ -1,0 +1,13 @@
+[package]
+name = "ct-home"
+version = "0.1.0"
+edition = "2021"
+description = "Where CodeTracer keeps a user's state: the one Rust resolver for every per-user location, and its CODETRACER_HOME override."
+license = "MIT OR Apache-2.0"
+
+# A leaf crate on purpose: no dependencies, no build script, no path
+# dependencies. Every Rust binary CodeTracer ships (db-backend, backend-manager,
+# the TUI) takes it, so it must cost nothing to depend on and must build
+# standalone. The Nim twin is `src/common/ct_home.nim`; the two must agree on
+# the layout under `$CODETRACER_HOME`.
+[dependencies]

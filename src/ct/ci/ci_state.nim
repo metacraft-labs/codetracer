@@ -9,6 +9,7 @@
 ## 2. ``$HOME/.codetracer-ci/ci-run.json``
 
 import std/[json, os]
+import ../../common/ct_home
 
 type
   CIRunState* = object
@@ -31,6 +32,10 @@ proc stateDir*(): string =
   let envDir = getEnv("CODETRACER_STATE_DIR", "")
   if envDir.len > 0:
     return envDir
+  # `$CODETRACER_HOME/state/ci` relocates it with every other per-user location.
+  let ctHomeState = ctHomeArea(chaState)
+  if ctHomeState.len > 0:
+    return ctHomeState / "ci"
   return getHomeDir() / ".codetracer-ci"
 
 proc stateFilePath(): string =

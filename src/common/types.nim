@@ -12,7 +12,10 @@ macro time*(f: untyped): untyped =
   f
 
 when not defined(js):
-  let app* = getEnv("XDG_DATA_HOME", getHomeDir() / ".local" / "share") / "codetracer"
+  import ct_home
+  # The recordings root: `$CODETRACER_HOME/data`, else
+  # `$XDG_DATA_HOME/codetracer`, else `~/.local/share/codetracer`.
+  let app* = ctDataDir()
 else:
   let app* = ""
 

@@ -15,6 +15,7 @@ import std/[os, osproc, streams, strutils]
 import ../platform/outcome
 import ../platform/capabilities
 import ../platform/vcs
+import ../../../ct_test/certificate_content_id_native
 
 export vcs
 
@@ -122,6 +123,16 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
     let res = git(repository, args)
     if res.ok: resolvedOk(res.value) else: resolved(failed[string](res.error))
 
+  # The recipe's own native host: git through the shared process bridge, the
+  # temporary index under the OS temporary directory. Built once per facade;
+  # it holds no state between calls.
+  let contentHost = nativeContentIdHost()
+  result.contentId = proc(repository: string; state: VcsBlobSource;
+                          algorithm: string; scope: seq[string]
+                         ): PlatformFuture[PlatformOutcome[VcsContentId]] =
+    resolved(contentIdOver(contentHost, profile, repository, state, algorithm,
+                           scope))
+
   result.stage = proc(repository: string;
                       paths: seq[string]): PlatformFuture[PlatformOutcome[Nothing]] =
     let res = git(repository, @["add", "--"] & paths)
@@ -182,4 +193,3 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
                      refspec: string): PlatformFuture[PlatformOutcome[Nothing]] =
     let res = git(repository, @["push", remote, refspec])
     if res.ok: resolvedOk() else: resolved(failed[Nothing](res.error))
-

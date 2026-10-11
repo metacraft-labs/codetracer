@@ -38,6 +38,19 @@ use mapping_catalog::{Catalog, CatalogEntry, catalog_path_from_env, compute_file
 
 use crate::rename_list::RenameList;
 
+/// The catalog directory when the caller names none: `$CT_CATALOG_PATH`, else
+/// `$CODETRACER_HOME/cache/mapping-catalog`, else the mapping-catalog crate's
+/// own default ([`catalog_path_from_env`]: the OS cache dir).
+pub fn default_catalog_path() -> PathBuf {
+    let explicit = std::env::var("CT_CATALOG_PATH")
+        .map(|p| !p.trim().is_empty())
+        .unwrap_or(false);
+    if !explicit && let Some(cache) = ct_home::area(ct_home::Area::Cache) {
+        return cache.join("mapping-catalog");
+    }
+    catalog_path_from_env()
+}
+
 /// Outcome of [`scan_catalog_for_matches`] — what the scanner did
 /// per candidate path.
 ///
@@ -251,7 +264,7 @@ pub fn scan_catalog_for_matches(recorded_paths: &[&Path], catalog_path: Option<&
     }
     let path = match catalog_path {
         Some(p) => p.to_path_buf(),
-        None => catalog_path_from_env(),
+        None => default_catalog_path(),
     };
 
     // Load the catalog up front so we don't re-parse it per recorded

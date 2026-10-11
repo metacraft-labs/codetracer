@@ -394,6 +394,7 @@ PATCHELF_BINARIES=(
 	"${APP_DIR}"/bin/ct_unwrapped
 	"${APP_DIR}"/bin/replay-server
 	"${APP_DIR}"/bin/db-backend-record
+	"${APP_DIR}"/bin/ct-test
 	"${APP_DIR}"/bin/session-manager
 	"${APP_DIR}"/bin/nargo
 	"${APP_DIR}"/bin/wazero

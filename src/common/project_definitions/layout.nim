@@ -20,7 +20,14 @@
 ## repository" is usually attacked by getting the host to *resolve* something
 ## and then *run* it, and both halves need the repository to be able to name a
 ## target. Here it cannot name one: the only strings that reach a filesystem
-## call are these five constants.
+## call are these six constants.
+##
+## The sixth, `test.toml`, is `ct test`'s committed configuration
+## (Project-Definitions.md §6, CT-Test-Certificates CTC-3f). It sits in the
+## same constant set rather than beside it, so it inherits the same rules —
+## declarative tier, a schema id, a closed key set, read by the one TOML
+## subset reader — and `ct test` reads no other configuration file
+## (in particular nothing of reprobuild's: the dependency is one-way).
 ##
 ## ## THE NAME COLLISION, NAMED RATHER THAN LEFT TO BE FOUND
 ##
@@ -34,7 +41,7 @@
 ##   * `<repo>/.codetracer/<name>.trace` — a recording, as the test-explorer
 ##     suites spell it. That IS the same directory as this one, and the two
 ##     coexist precisely because the file set here is a constant: a `.trace`
-##     file is not one of the five names below, so it is neither read nor
+##     file is not one of the six names below, so it is neither read nor
 ##     reported, and a definition file is not a recording.
 ##
 ## §6's "a user's own definitions are separate and not checked in" is
@@ -45,9 +52,9 @@ import ./diagnostics
 
 type
   DefinitionFileKind* = enum
-    ## The concerns, one per file. Adding a sixth is deliberately a change to
-    ## this enum — which forces a tier, a schema id and a name, and makes the
-    ## trust question unavoidable rather than defaulted.
+    ## The concerns, one per file. Adding a seventh is deliberately a change
+    ## to this enum — which forces a tier, a schema id and a name, and makes
+    ## the trust question unavoidable rather than defaulted.
     dfkPoints        ## §4 — named collections of tracepoints and breakpoints
     dfkVisualisers   ## §5 — per-type visualiser DECLARATIONS
     dfkScratchpad    ## §7 — which comparison the scratchpad should use
@@ -58,6 +65,11 @@ type
     dfkDiffCode
       ## §7 — EXECUTABLE scratchpad diff algorithms. PLAT-13's file, for the
       ## same reason.
+    dfkTest
+      ## §6 — `ct test`'s committed configuration: the target list
+      ## `ct test verify` requires by default (CTC-3f). DATA: a list of test
+      ## file names compared as strings, never opened, never run. Declared
+      ## last so the five PLAT-11 kinds keep their ordinals.
 
   DefinitionTier* = enum
     ## §2.1's two tiers. The boundary between them is the point, so it is a
@@ -130,6 +142,11 @@ const
     ## not refused as a repository — this bounds what ONE load may compose, so
     ## the merge is bounded by a constant rather than by a directory walk.
 
+  MaxCertificateTargets* = 1024
+    ## How many targets `test.toml` may declare. A target is a test FILE, and
+    ## a project with more test files than this declares a narrower list or
+    ## none (every discovered target is then required).
+
   MaxNameBytes* = 120
   MaxAnchorBytes* = 200
   MaxExpressionBytes* = 400
@@ -144,7 +161,7 @@ func tierOf*(k: DefinitionFileKind): DefinitionTier =
   ## kind the declarative tier by default, and the default that loads without
   ## asking is the wrong side to fail towards.
   case k
-  of dfkPoints, dfkVisualisers, dfkScratchpad: dtDeclarative
+  of dfkPoints, dfkVisualisers, dfkScratchpad, dfkTest: dtDeclarative
   of dfkVisualiserCode, dfkDiffCode: dtExecutable
 
 func definitionFileName*(k: DefinitionFileKind): string =
@@ -155,6 +172,7 @@ func definitionFileName*(k: DefinitionFileKind): string =
   of dfkScratchpad: "scratchpad.toml"
   of dfkVisualiserCode: "visualisers.wasm"
   of dfkDiffCode: "diffs.wasm"
+  of dfkTest: "test.toml"
 
 func schemaOf*(k: DefinitionFileKind): string =
   ## The schema id THIS BUILD implements for that file.
@@ -171,6 +189,7 @@ func schemaOf*(k: DefinitionFileKind): string =
   of dfkScratchpad: "codetracer.scratchpad.v1"
   of dfkVisualiserCode: "codetracer.visualiser-code.v1"
   of dfkDiffCode: "codetracer.diff-code.v1"
+  of dfkTest: "codetracer.test.v1"
 
 func declarativeKinds*(): seq[DefinitionFileKind] =
   ## DERIVED from `tierOf` rather than listed, so the two cannot disagree.

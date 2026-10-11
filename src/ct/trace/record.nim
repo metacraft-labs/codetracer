@@ -2,7 +2,8 @@ import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, o
   multitrace,
   native_backend_selection,
   record_assessment, recorder_dispatch, portable_route, recorder_env,
-  ../../common/[ lang, paths, types, trace_index, config, ct_logging ],
+  ../../common/[ lang, paths, types, trace_index, config, ct_logging,
+                 ct_state_dir ],
   ../utilities/[language_detection ],
   ../cli/build,
   ../online_sharing/upload,
@@ -470,6 +471,13 @@ proc record*(lang: string,
     pargs.add("--lang")
     pargs.add(lang)
   if outputFolderValue != "" and outputFolderValue != ".":
+    # `ct record -o .ct/runs/<run>` is the documented DeepReview workflow:
+    # `.ct/` must be git-ignored before the recorder writes into it (see
+    # `common/ct_state_dir.nim`).
+    let guardError = guardCtStateWrite(outputFolderValue)
+    if guardError.len > 0:
+      stderr.writeLine("error: " & guardError)
+      quit(1)
     pargs.add("-o")
     pargs.add(outputFolderValue)
   if exportFile != "":

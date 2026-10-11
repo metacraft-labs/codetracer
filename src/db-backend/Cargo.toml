@@ -24,6 +24,8 @@ num-derive = "0.4"
 # grammars — and because ct-dap-client is a dev-dependency of this package,
 # so depending on it in the other direction would be a cycle.
 ct-lang = { path = "../../libs/ct-lang", features = ["schemars"] }
+# Every per-user location (and its CODETRACER_HOME override) resolves here.
+ct-home = { path = "../../libs/ct-home" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_repr = "0.1"

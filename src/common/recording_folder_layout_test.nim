@@ -88,25 +88,23 @@ proc readToEof(s: Stream): string =
 
 proc runScenario(bin, scenario, homeDir: string):
     tuple[ok: bool, stdoutStr: string, stderrStr: string] =
-  ## Run ``bin`` with ``XDG_DATA_HOME``/``HOME``/``TMPDIR`` pointed at
-  ## ``homeDir``.  Splice ``CT_LD_LIBRARY_PATH`` onto ``LD_LIBRARY_PATH``
+  ## Run ``bin`` with ``CODETRACER_HOME`` pointed at ``homeDir``.  Splice ``CT_LD_LIBRARY_PATH`` onto ``LD_LIBRARY_PATH``
   ## so SQLite can be dlopen-ed inside the Nix dev-shell — same recipe
   ## as ``trace_index_test.nim``.
-  # Case-INsensitive on Windows, where `UserProfile` and `USERPROFILE` are
-  # one variable: an override must replace the inherited entry.
+  # Case-INsensitive on Windows, where the OS treats `Codetracer_Home` and
+  # `CODETRACER_HOME` as one variable: an override must replace the inherited
+  # entry, not add a second one beside it.
   var env = newStringTable(
     when defined(windows): modeCaseInsensitive else: modeCaseSensitive)
   for k, v in envPairs():
     env[k] = v
-  env["XDG_DATA_HOME"] = homeDir
-  env["TMPDIR"] = homeDir
-  env["HOME"] = homeDir
-  # WINDOWS: Nim's `getHomeDir` -- and so `paths.codetracerTraceDir` and the
-  # trace index -- reads `USERPROFILE`, not `HOME`; without these the helper
-  # wrote into the developer's REAL profile (LRS-6's review, 2026-09-24).
-  env["USERPROFILE"] = homeDir
-  env["LOCALAPPDATA"] = homeDir / "AppData" / "Local"
-  env["APPDATA"] = homeDir / "AppData" / "Roaming"
+  # EVERY per-user location the helper resolves -- the trace index, the
+  # recordings folder, `codetracerTmpPath` -- derives from `CODETRACER_HOME`
+  # (`common/ct_home`), on every OS. It replaces the OS-specific set this used
+  # to override (`HOME`, `XDG_DATA_HOME`, `TMPDIR`, and on Windows
+  # `USERPROFILE`/`LOCALAPPDATA`/`APPDATA`, whose omission wrote a developer's
+  # real trace index on 2026-09-23). Pinned by `ct_home_isolation_test`.
+  env["CODETRACER_HOME"] = homeDir
   let ctLd = getEnv("CT_LD_LIBRARY_PATH")
   if ctLd.len > 0:
     let existing = getEnv("LD_LIBRARY_PATH")

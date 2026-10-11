@@ -78,6 +78,9 @@ proc windowPlan(ops: string; subject: string; pre: seq[string] = @[];
     (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
+  # Every other per-user location (trace index, config, caches) of the
+  # spawned binary: its own, under this case's directory (common/ct_home).
+  env["CODETRACER_HOME"] = state / "ct-home"
   env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
   var args = pre & @["--report-window-plan", "--width=" & $W,
                      "--height=" & $H]
