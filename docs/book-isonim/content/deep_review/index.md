@@ -87,10 +87,10 @@ diff invites a stronger reading than it has earned:
   still the review.
 - **It is not a test report.** A review dataset carries no test results at all —
   no names, no statuses, no durations — so no surface reports them, and none
-  shows a zero in their place. `ct test`
-  is a separate command, and issues **no test certificates** — see
-  [Not yet available](/deep_review/not_yet_available) for exactly how far it
-  goes. Nothing in a review claims otherwise.
+  shows a zero in their place. `ct test` is a separate command: a passing run
+  of `ct test` issues a test certificate, but a review dataset carries **no test
+  certificates** — see [Not yet available](/deep_review/not_yet_available) for
+  exactly how far it goes. Nothing in a review claims otherwise.
 - **Coverage is observation, never reachability.** A recording can say a line
   was not observed. It can never say a line cannot be reached, and a review does
   not pretend the two are the same.

@@ -26,11 +26,15 @@ import ../src/docs_config
 proc contentDir(): string =
   currentSourcePath().parentDir().parentDir() / "content"
 
+proc normalizedProse(text: string): string =
+  ## `text` with every run of whitespace collapsed to one space, so a phrase
+  ## matches however the paragraph carrying it happens to be wrapped.
+  text.splitWhitespace().join(" ")
+
 proc unqualifiedCertificateClaim(page: string; allowed: seq[string];
                                  where: string): string =
   ## The first mention of a test *certificate* on `page` that is NOT one of the
-  ## `allowed` qualified phrases, as a quotable excerpt; `""` when the page is
-  ## clean.
+  ## `allowed` phrases, as a quotable excerpt; `""` when the page is clean.
   ##
   ## Returns rather than asserts, deliberately.  A `check` written inside a
   ## helper proc updates that PROC's status variable, not the enclosing
@@ -38,23 +42,29 @@ proc unqualifiedCertificateClaim(page: string; allowed: seq[string];
   ## failed — the trap RV-7 found across five `justfile` lanes.  The caller
   ## does the `check`, in the `test` block where it binds.
   ##
-  ## `ct test` ships `discover` and `run` and issues no certificates at all
-  ## (`Agent-Prompt-Guidance.md` §6).  A page that says otherwise sends a
-  ## reader looking for an artefact that does not exist, so the only mentions
-  ## permitted are the ones that state the absence.
+  ## History: until CT-Test-Certificates CTC-3h this guarded the claim that
+  ## `ct test` issues certificates at all, which it did not document.  It now
+  ## does, and certificates are bound to the CONTENT of the tracked files, so
+  ## the claims that would mislead a reader are different ones: that a review
+  ## dataset carries a certificate, or the obsolete "commit, then run the tests
+  ## again to certify the commit" workflow.  The mechanism is unchanged: every
+  ## mention is one of a few exact, reviewed phrases, and nothing is left over.
   ##
-  ## Matching is on the stem `certificat`, so `certificate`, `certificates` and
-  ## `certification` are all caught, and it is case-insensitive so a sentence
-  ## opening with the word does not slip through.  The allowed phrases are
-  ## deleted from the text first, which means a claim smuggled onto the same
-  ## line as a legitimate mention is still found.
-  var remaining = page
+  ## Matching is on the stem `certif`, so `certificate`, `certificates`,
+  ## `certify` and `certified` are all caught, and it is case-insensitive so a
+  ## sentence opening with the word does not slip through.  Page and phrases
+  ## are whitespace-normalized first (re-wrapping a paragraph is not a change
+  ## of claim), and the allowed phrases are deleted from the text before the
+  ## search, which means a claim smuggled onto the same line as a legitimate
+  ## mention is still found.
+  var remaining = normalizedProse(page)
   for phrase in allowed:
-    doAssert phrase in remaining,
+    let flat = normalizedProse(phrase)
+    doAssert flat in remaining,
       where & ": allow-listed phrase is no longer on the page: " & phrase
-    remaining = remaining.replace(phrase, "")
+    remaining = remaining.replace(flat, "")
   let lowered = remaining.toLowerAscii
-  let at = lowered.find("certificat")
+  let at = lowered.find("certif")
   if at < 0:
     return ""
   # Name the offending text, so the failure says what to delete.
@@ -62,6 +72,68 @@ proc unqualifiedCertificateClaim(page: string; allowed: seq[string];
   let finish = min(remaining.len - 1, at + 120)
   where & ": unqualified certificate claim near: ..." &
     remaining[start .. finish] & "..."
+
+const
+  RerunMarkers = ["again", "re-run", "rerun", "second run", "run twice"]
+    ## Words that say the tests are run another time.
+  Negations = ["no", "not", "never", "without", "nothing", "don't", "needn't"]
+    ## A sentence carrying one of these, as a word, is telling the reader NOT
+    ## to do what it mentions.
+
+proc obsoleteWorkflowClaim(page: string; where: string): string =
+  ## The first sentence on `page` that teaches the workflow the 2026-10-09
+  ## revision of the test-certificate standard removed — commit, then run the
+  ## tests again to obtain a certificate for the commit — as a quotable
+  ## excerpt; `""` when there is none.
+  ##
+  ## A certificate is bound to the content of the tracked files, so the first
+  ## passing run already covers a commit that records exactly the tested
+  ## content.  A page that tells a reader to re-run after committing sends
+  ## them through a ceremony that adds nothing, and teaches them that a
+  ## certificate "attests a commit", which is the misreading that leads to
+  ## testing only after committing.
+  ##
+  ## The rule, per sentence: mentions tests, says "commit" and THEN a re-run
+  ## word, and carries no negation.  The order matters: "run the tests again
+  ## before committing" is correct advice (the content changed), and "commit,
+  ## then run the tests again" is the obsolete workflow.  Returns rather than
+  ## asserts, for the reason `unqualifiedCertificateClaim` gives.
+  let flat = normalizedProse(page)
+  var sentence = ""
+  var sentences: seq[string]
+  for i, c in flat:
+    sentence.add c
+    if c in {'.', '!', '?', ';'} and (i + 1 >= flat.len or flat[i + 1] == ' '):
+      sentences.add sentence
+      sentence = ""
+  if sentence.len > 0: sentences.add sentence
+  for s in sentences:
+    let lowered = s.toLowerAscii
+    if "test" notin lowered: continue
+    let commitAt = lowered.find("commit")
+    if commitAt < 0: continue
+    var rerun = false
+    for marker in RerunMarkers:
+      if lowered.find(marker, commitAt) >= 0:
+        rerun = true
+    if not rerun: continue
+    var negated = false
+    for word in lowered.split({' ', ',', ';', ':', '(', ')', '*', '`', '"',
+                               '-', '/', '[', ']', '.', '!', '?'}):
+      if word in Negations:
+        negated = true
+    if not negated:
+      return where & ": teaches the obsolete re-run-after-commit workflow: \"" &
+        s.strip() & "\""
+  ""
+
+proc ctTestSection(cli: string): string =
+  ## The `### ct test` section of the CLI reference, up to the next `### `
+  ## heading — the one place the book documents test certificates in full.
+  let start = cli.find("\n### ct test\n")
+  doAssert start >= 0, "reference/ct_cli.md has no `### ct test` section"
+  let finish = cli.find("\n### ", start + 1)
+  result = if finish < 0: cli[start .. ^1] else: cli[start ..< finish]
 
 suite "book nav matches the book's four-section organization":
   let dir = contentDir()
@@ -233,25 +305,33 @@ suite "book nav matches the book's four-section organization":
     check page.contains("nargo") or page.contains("Noir")
     # The deferrals are named, not implied.
     check page.contains("Not yet available")
-    check page.contains("no test certificates")
-    # ...and no sentence offers certificates as something that exists.
+    # CTC-3h: `ct test` issues certificates, and a review dataset carries none.
+    # Asserted on the normalized prose so a re-wrap is not a failure.
+    check normalizedProse(page).contains(
+      "a review dataset carries **no test certificates**")
+    # ...and no sentence makes any OTHER claim about certificates.
     #
-    # This is asserted on the TOKEN, not on a list of phrasings.  The previous
-    # version checked three exact literals -- "issues a certificate", "test
+    # This is asserted on the TOKEN, not on a list of phrasings.  The original
+    # RV-8 version checked three exact literals -- "issues a certificate", "test
     # certificate is issued", "certificates are available" -- which is a test
-    # of three sentences nobody was going to write.  Appending the plausible
-    # sentence `ct test` issues test certificates for every run, and they are
-    # available to any consumer.` to the page left the suite green, so the
-    # assertion was decorative: it could not fail for the reason it existed.
+    # of three sentences nobody was going to write.  Appending a plausible
+    # false sentence to the page left the suite green, so the assertion was
+    # decorative: it could not fail for the reason it existed.
     #
-    # The rule now is: every occurrence of the token is allow-listed by an
-    # exact qualified phrase, and there is nothing left over.  Removing the
-    # allowed phrases before the search is what makes it airtight -- a false
-    # claim added to the SAME line as a true one is still caught, which a
-    # line-based check would miss.
+    # The rule is: every occurrence of the token is allow-listed by an exact
+    # reviewed phrase, and there is nothing left over.  Removing the allowed
+    # phrases before the search is what makes it airtight -- a false claim
+    # added to the SAME line as a true one is still caught, which a line-based
+    # check would miss.  Since CTC-3h the phrase states both halves of the
+    # truth: `ct test` issues a certificate, and a review does not carry it.
     check unqualifiedCertificateClaim(page,
-      allowed = @["issues **no test certificates**"],
+      allowed = @["a passing run of `ct test` issues a test certificate, but " &
+                  "a review dataset carries **no test certificates**"],
       where = "deep_review/*.md") == ""
+    # The obsolete workflow ("commit, then run ct test again to certify the
+    # commit") is the over-claim to catch now: it is what a reader who still
+    # thinks a certificate attests a commit would write.
+    check obsoleteWorkflowClaim(page, "deep_review/*.md") == ""
 
     # The usage-guide index still routes a reader to the feature, which now
     # lives one section over -- the guide is where somebody learning to record
@@ -266,12 +346,21 @@ suite "book nav matches the book's four-section organization":
     # `inspect` is native-only today; the reference must say so rather than
     # presenting it as the way to summarise any dataset.
     check cli.contains("manifest.dr")
-    # The CLI reference carries the other legitimately qualified mention, and
-    # is guarded the same way: it is the other page a reader forms an
-    # expectation about `ct test` from.
-    check unqualifiedCertificateClaim(cli,
-      allowed = @["test certificates, which `ct test` does not yet issue"],
+    # The CLI reference documents certificates in its `ct test` section and
+    # mentions them elsewhere only in the reviewed phrases below: the command
+    # table's two rows and the `ct agent prompt` paragraph.  The section itself
+    # is held by "the book does not document the removed --certificate flag"
+    # and by the obsolete-workflow rule.
+    let section = ctTestSection(cli)
+    check unqualifiedCertificateClaim(cli.replace(section, ""),
+      allowed = @[
+        "Run the tests; a passing run issues a test certificate",
+        "Ask whether your test certificates cover a state",
+        "A passing run's test certificate already covers that commit, so " &
+          "the text tells the agent not to run the tests again after " &
+          "committing."],
       where = "reference/ct_cli.md") == ""
+    check obsoleteWorkflowClaim(cli, "reference/ct_cli.md") == ""
 
     # RV-11: the worked example produces a MATERIALIZED dataset, and
     # `ct review inspect` cannot read one.  A CI reader who follows the example
@@ -281,3 +370,26 @@ suite "book nav matches the book's four-section organization":
     check page.contains("cannot be inspected")
     # ...and the `ct record` transcript must admit it shows only the tail.
     check page.contains("unused import")
+
+  test "the book does not document the removed --certificate flag":
+    ## CTC-3e removed `ct test run --certificate <path>`: every certificate
+    ## goes to the local certificate store, and nothing is ever written to a
+    ## path the caller names.  A book that still documents the flag sends a
+    ## reader to an "unknown run argument" error, and teaches them that a
+    ## certificate is a file they place, which is the thing the store
+    ## replaced.  `--no-certificate` stays and must be documented.
+    let cli = readFile(dir / "reference" / "ct_cli.md")
+    let section = ctTestSection(cli)
+    check section.contains("--no-certificate")
+    check section.contains("local certificate store")
+    check section.contains("ct test verify --staged")
+    check section.contains(".codetracer/test.toml")
+    check section.contains("--no-verify")
+    # Book-wide: once every `--no-certificate` is set aside, the string
+    # `--certificate` appears nowhere -- not in a table row, not in prose.
+    for path in walkDirRec(dir):
+      if not path.endsWith(".md"): continue
+      let text = readFile(path).replace("--no-certificate", "")
+      if "--certificate" in text:
+        echo path.relativePath(dir), ": documents the removed --certificate flag"
+      check "--certificate" notin text

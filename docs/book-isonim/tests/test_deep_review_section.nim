@@ -76,7 +76,10 @@ const deferrals = [
   ## every page of the section, because a reader forms their expectations
   ## wherever they happen to be standing -- an over-claim on the Introduction
   ## is worse than one on the page that exists to list the limits.
-  Deferral(what: "test certificates", topic: "certificat"),
+  # CTC-3h: `ct test` issues test certificates now, but a review dataset
+  # carries none, so a sentence about certificates on these pages still has to
+  # be the qualified one. The stem is `certif` so `certify` is caught too.
+  Deferral(what: "test certificates in a review", topic: "certif"),
   Deferral(what: "parallel value columns", topic: "column"),
   Deferral(what: "a dragged loop slider", topic: "slider"),
   Deferral(what: "a filtering trace-context selector", topic: "filter"),
@@ -262,8 +265,13 @@ suite "DeepReview has its own section (DS-1)":
     ## a false one anywhere else in the book.
     # Half the rule: the deferrals are STATED, on the page whose job that is.
     let stated = readFile(sectionDir() / "not_yet_available.md")
-    # `ct test` issues no certificates.
-    check stated.contains("no test certificates")
+    # A review dataset carries no test certificates (CTC-3h: `ct test` does
+    # issue them, so the old "issues no test certificates" became untrue and
+    # is replaced by the true claim, both halves of it).
+    let statedFlat = stated.splitWhitespace().join(" ")
+    check statedFlat.contains("a review dataset carries **no test certificates**")
+    check statedFlat.contains("a passing run of `ct test` issues a test certificate")
+    check not statedFlat.contains("issues **no test certificates**")
     # The trace-context selector does not filter yet.
     check stated.contains("does not filter yet")
     # `ct review inspect` cannot read a materialized dataset.

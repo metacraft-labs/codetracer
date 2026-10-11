@@ -99,7 +99,7 @@ proc ctTestUsageMessage*(): string =
   "is where CodeTracer's status bar looks; nothing is written into the " &
   "repository, and the store keeps the newest " & $DefaultRetention &
   " contents plus HEAD's; to get a certificate as a file, copy it out of " &
-  "the store or use the test-certificates helper tool's `find`; " &
+  "the store; " &
   "a certificate is bound to the CONTENT of the tracked files as the tests " &
   "ran against them (`vcs.content`, computed before and after the run; " &
   "`vcs.base` names HEAD and is informational only), so a modified working " &

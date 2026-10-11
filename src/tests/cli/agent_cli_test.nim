@@ -293,6 +293,40 @@ suite "ct agent — the shipped binary":
     check not run.output.contains("ct-agent-prompt")
     check run.output.strip().startsWith("## Recording evidence for review")
 
+  test "the agent prompt teaches test, then commit":
+    ## CT-Test-Certificates CTC-3h: a certificate is bound to the content of
+    ## the tracked files, so a passing run already covers the commit that
+    ## records exactly what was tested.  The prompt has to say so (Agent-Prompt
+    ## -Guidance §3), because an agent that believes a certificate attests a
+    ## commit will commit and re-run, or will put off testing until it has
+    ## committed -- which puts an untested commit into history.
+    let run = runCt(@["agent", "prompt"])
+    checkpoint(run.output)
+    check run.exitCode == 0
+    let text = run.output.splitWhitespace().join(" ")
+    # The order: new files tracked, then the tests, then the commit.
+    let addAt = text.find("git add <any new files>")
+    let testAt = text.find("ct test run --workspace .")
+    let commitAt = text.find("git commit -am")
+    check addAt >= 0
+    check testAt > addAt
+    check commitAt > testAt
+    check text.contains("commit exactly what you tested")
+    check text.contains("as long as that commit records exactly what was tested")
+    check text.contains("Do not run `ct test` again after committing")
+    # ...and the obsolete workflow is gone, in any of its spellings.
+    let lowered = text.toLowerAscii
+    for obsolete in ["run again after committing", "commit, then run",
+                     "commit your changes, then", "certify the commit",
+                     "re-run after commit"]:
+      check obsolete notin lowered
+    # Self-issuance is forbidden explicitly (Standard §6.2).
+    check text.contains("attempt to produce, edit or sign a certificate yourself")
+    # `ct` is built --mm:refc and refuses `test run`; the prompt names the
+    # standalone runner an agent falls back to, and forbids skipping the tests.
+    check text.contains("ct-test test run --workspace .")
+    check text.contains("do not skip the tests")
+
   test "evidence_resolves_the_session_from_the_environment":
     let dir = getTempDir() / "ct-agent-cli-env"
     removeDir(dir)

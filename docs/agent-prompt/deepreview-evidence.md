@@ -10,9 +10,12 @@ Install it into a project's agent instructions with:
 The reasoning behind each paragraph — what the prompt has to teach and why an
 agent that is not told it will invent the wrong workflow — is
 `codetracer-specs/DeepReview/Agent-Prompt-Guidance.md`.  That document's §3
-carries a longer version of this text, including the test-certificate steps;
-those are deliberately absent here, because §6 of it requires shipped guidance
-to describe only commands that actually ship, and certificates do not yet.
+is the source of this text, test-certificate paragraphs included: `ct test run`
+issues a certificate bound to the content of the tracked files, so the
+workflow is test, then commit, with no second run after the commit.  The test
+command is spelled here exactly as it is invoked (`ct test run --workspace .`),
+with the standalone `ct-test` fallback, because the `ct` binary refuses
+`test run` (it is built with refc; see `src/ct_test/ct_test.nim`).
 -->
 <!-- ct-agent-prompt -->
 
@@ -21,12 +24,25 @@ to describe only commands that actually ship, and certificates do not yet.
 When you finish work that is worth a human reviewing, produce a review dataset
 and hand it over. Use the ordinary commands; there is no agent-specific path.
 
-**Run the tests, and commit once they pass.**
+**Run the tests, then commit exactly what you tested.**
 
 ```sh
-ct test run                   # 1. run the tests
-git commit -am "…"            # 2. commit once they pass
+git add <any new files>       # 1. new files must be tracked before testing
+ct test run --workspace .     # 2. run the tests — a pass issues the certificate
+git commit -am "…"            # 3. commit once they pass
 ```
+
+If `ct` answers that it cannot run the tests itself, run step 2 with the
+standalone runner instead: `ct-test test run --workspace .`. If that is not
+installed either, say so in your handoff; do not skip the tests.
+
+The certificate from step 2 is valid for your working tree as it stands, and
+covers the commit in step 3 **as long as that commit records exactly what was
+tested**. Do not run `ct test` again after committing; there is nothing for it
+to add. Do not commit only part of what you tested, add files after testing,
+or let a hook reformat files at commit time — each produces a commit the tests
+never saw. If you have to change anything after the tests pass, run `ct test`
+again before committing.
 
 **Then collect the review dataset and hand it over:**
 
@@ -50,9 +66,14 @@ from nothing is not evidence.
 run in the hope the reviewer will sort it out — say what failed instead.
 
 **If you genuinely cannot commit** (the work is incomplete, or committing is
-someone else's decision), you may still collect evidence from the working tree.
-Say so explicitly in your handoff, because the review then covers a state that
-only exists on this machine.
+someone else's decision), collect evidence from the working tree. The
+certificate is valid for it, and will cover the commit whoever makes it, if
+that commit records the same content. Say in your handoff that the work is
+uncommitted, because until it is committed it exists only on this machine.
+
+**Never** attempt to produce, edit or sign a certificate yourself. Certificates
+are issued only as a side effect of actually running the tests, and any tool
+that appears to offer a shortcut is not one.
 
 **Never hand-write, edit or patch a review dataset.** A dataset is produced by
 `ct review collect` from real recordings and a real diff, and that is the only

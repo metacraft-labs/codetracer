@@ -39,6 +39,16 @@ ct <command> [options] [<program>] [<args>]
 
 See the [DeepReview](/deep_review) section for the workflow.
 
+#### Testing
+
+| Command                               | Description                                            |
+| ------------------------------------- | ------------------------------------------------------ |
+| `ct test discover --workspace <path>` | List the tests in a workspace                          |
+| `ct test run --workspace <path>`      | Run the tests; a passing run issues a test certificate |
+| `ct test verify <state>`              | Ask whether your test certificates cover a state       |
+
+See [ct test](#ct-test) below.
+
 #### Stylus / EVM
 
 | Command           | Description                                       |
@@ -318,8 +328,243 @@ Install it into a project's agent instructions with:
 ct agent prompt >> AGENTS.md
 ```
 
-The text describes only commands that ship. In particular it does not mention
-test certificates, which `ct test` does not yet issue.
+The text describes only commands that ship. It teaches the order *test, then
+commit*: run the tests, and commit exactly what was tested once they pass. A
+passing run's test certificate already covers that commit, so the text tells
+the agent not to run the tests again after committing.
+
+### ct test
+
+Discovers and runs a workspace's tests, and checks whether a state of the
+repository has already been tested. A passing `ct test run` issues a **test
+certificate**: a record saying which test files passed, on which platform,
+against which content of the tracked files.
+
+```
+ct test discover (--workspace <path> | --file <path>) [--json]
+ct test run --workspace <path> [options]
+ct test verify (--staged | --worktree | --commit <rev>) [options]
+```
+
+:::note
+`ct test discover` and `ct test verify` run from `ct`. `ct test run` does not:
+`ct` refuses it and says so. The tests are run by the standalone `ct-test`
+binary instead, as `ct-test test run …` with the same options. `ct-test` is not
+yet included in CodeTracer's release packages; it is built from a source
+checkout.
+:::
+
+`ct test discover` prints the tests it finds as JSON. By default it looks only
+at the workspace's own files; `--scope auto|vcs|walk|unscoped` (or the
+`CT_TEST_SCOPE` environment variable) selects the rule, and `--unscoped`, short
+for `--scope unscoped`, also includes vendored and ignored trees.
+
+#### What a certificate covers
+
+A certificate is bound to the **content of the tracked files** as the tests ran
+against them, not to a commit. Run the tests on your working tree as it is: you
+do not need to commit first, and a commit that records exactly the tested
+content is covered with no second run. A later commit with the same content (an
+amended message, a cherry-pick that lands on identical content) is covered too.
+
+A commit is covered only when it records what was tested. These do not:
+
+- committing only part of what you tested (`git add -p`);
+- a new file the tests used that was not `git add`ed before the run — untracked
+  files are not part of the content;
+- a commit hook that reformats or regenerates tracked files — run such steps
+  before `ct test run`, not at commit time.
+
+If anything changes after the tests pass, run the tests again before
+committing.
+
+#### ct test run options
+
+| Flag                              | Description                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------- |
+| `--workspace <path>`              | The workspace to discover and run tests in. Required.                                       |
+| `--file <f>`                      | Run only the tests in one file                                                              |
+| `--partition file:<path>`         | Run only the tests the allow-list file names                                                |
+| `--threads N`                     | Worker threads (default: `REPRO_TEST_THREADS`, else the CPU count)                          |
+| `--json`                          | Accepted; the run summary on stdout is JSON either way                                      |
+| `--summary <path>`                | Also write the run summary to `<path>`                                                      |
+| `--no-certificate`                | Issue no certificate and write nothing to the certificate store                             |
+| `--untracked <mode>`              | `reads` or `strict`: how untracked files affect the certificate (see below); overrides `.codetracer/test.toml` |
+| `--sign-key <path>`               | Sign the certificate with this OpenSSH ed25519 private key. Signing is off unless given.    |
+| `--key-id <id>`                   | The key id recorded with the signature. Required with `--sign-key`, and only with it.       |
+
+There is no option to write a certificate to a path of your choice: every
+certificate goes to the local certificate store (below). To have one as a file,
+copy it out of the store.
+
+`ct test run` exits `0` when tests ran and all passed, `1` when tests ran and
+one did not (or the command line was rejected), and `2` when **no test ran at
+all**. Whether a certificate was issued never changes the exit status. The run
+summary carries a `certificate` object either way: the issued record and where
+it was written, or `withheld_reason`, `message` and `remedy`.
+
+#### The local certificate store
+
+Certificates never go into your repository: a file in the working tree would
+change the very content it describes. `ct test run` writes each certificate to
+your **local certificate store**, a per-user directory outside every
+repository, which CodeTracer's status bar and `ct test verify` read.
+
+The store has two roots, and readers search both. `ct test run` writes only the
+**user root**:
+
+| Platform                   | User root                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| any                        | `$TEST_CERTIFICATES_DIR`, when set to an absolute path                                                  |
+| Linux and other Unix-likes | `$XDG_STATE_HOME/test-certificates` when `XDG_STATE_HOME` is absolute, else `~/.local/state/test-certificates` |
+| macOS                      | `~/Library/Application Support/test-certificates`                                                       |
+| Windows                    | `%LOCALAPPDATA%\test-certificates`                                                                      |
+
+The **system root** is your partition of a machine-wide directory, written by
+privileged test services that run under their own account:
+
+| Platform                   | System root                                                     |
+| -------------------------- | --------------------------------------------------------------- |
+| any                        | `$TEST_CERTIFICATES_SYSTEM_DIR/<uid>` (`<SID>` on Windows), when set to an absolute path |
+| Linux and other Unix-likes | `/var/lib/test-certificates/<uid>`                              |
+| macOS                      | `/Library/Application Support/test-certificates/<uid>`          |
+| Windows                    | `%ProgramData%\test-certificates\<SID>`                         |
+
+A relative value of any of these variables is ignored. A user root that
+resolves inside the repository being tested is refused: the certificate is
+issued but not written, and the run says so on stderr.
+
+Inside a root, a certificate is stored at
+`v1/<algorithm>/<digest>/<payload-hash>.toml`, keyed by the content it
+describes, so a certificate issued in one clone or worktree is found from
+another holding the same content. Several certificates for the same content
+(other platforms, other partial runs) sit side by side.
+
+The store is a cache. Each run that writes keeps the 20 most recently written
+content directories, plus the one for the current `HEAD`'s content, and
+removes the rest. A removed certificate is re-issued by running the tests
+again.
+
+`ct test` does not push certificates anywhere. Carrying them to another
+machine, for example as git notes, is the job of the test-certificates helper
+tools, which are not part of CodeTracer.
+
+:::note
+Earlier versions of `ct test` wrote certificates to `.ct/certificates/` inside
+the workspace. That directory is no longer read or written, and is safe to
+delete. Keep `.ct/.gitignore`: `ct review collect` and `ct record -o` write it
+so that CodeTracer's own files under `.ct/` never appear as untracked files.
+:::
+
+#### When no certificate is issued
+
+The tests still run, and the exit status is theirs; only the certificate is
+withheld. `ct test run` prints `no certificate issued — <why>` and the remedy
+on stderr, and the summary carries the same `withheld_reason`, `message` and
+`remedy`.
+
+| `withheld_reason`           | Why                                                                                     | What to do                                                                                     |
+| --------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `wrAttestationDisabled`     | `--no-certificate` was given                                                            | Leave it out                                                                                   |
+| `wrNoTestsExecuted`         | No test executed, or every test that finished was skipped                               | Check the workspace and any `--partition` list; un-skip at least one test                      |
+| `wrTestsFailed`             | A test did not pass                                                                     | Fix the failing tests and run again                                                            |
+| `wrNoTargets`               | The tests that ran had no file to attribute them to                                     | Check that the tests are discovered from test files in the workspace                           |
+| `wrVcsUndeterminable`       | Not a git repository, or git could not answer                                           | Run the tests inside a git repository, with git working                                        |
+| `wrContentChanged`          | Tracked files changed while the tests ran                                               | Finish the edit first; run formatters and code generators before the tests, not from inside them; have tests write only ignored or temporary files |
+| `wrUnmergedEntries`         | The index has unresolved merge conflicts                                                | Resolve the conflicts and `git add` the files, or `git merge --abort`                          |
+| `wrIndexHidesWorktree`      | A file is marked `assume-unchanged`, or `skip-worktree` while present                   | `git update-index --no-assume-unchanged` / `--no-skip-worktree` on the named files             |
+| `wrSubmoduleModified`       | A submodule has uncommitted changes                                                     | Commit or revert the changes inside the submodule                                              |
+| `wrUntrackedInput`          | Untracked files, as the untracked mode decides (below)                                  | `git add` the files the tests need; ignore or delete the rest                                  |
+| `wrUntrackedModeUnresolved` | `.codetracer/test.toml` exists and cannot be used, and `--untracked` was not given      | Fix the file, or pass `--untracked`                                                            |
+| `wrSigningFailed`           | `--sign-key` was given and signing failed                                               | Check that the key exists and is an OpenSSH private key, and that `ssh-keygen` is on `PATH`    |
+
+Once the cause is dealt with, run the tests again. Any other reason is a
+defect in `ct test` itself, and its remedy says so.
+
+#### Untracked files
+
+Untracked files are not part of the content a certificate describes. The
+untracked mode decides when they withhold one. It is `--untracked` when given,
+else `[certificate] untracked` in `.codetracer/test.toml`, else `reads`:
+
+- **`reads`** withholds only when the run captured the files its tests read and
+  one of them is untracked. `ct test run` does not capture reads today, so in
+  this mode it issues, records `untracked = true` when untracked files exist,
+  and its summary says `read_set = not-captured`.
+- **`strict`** withholds whenever an untracked file that git does not ignore
+  exists, and names the files.
+
+An unknown `--untracked` value is a usage error before any test runs.
+
+#### .codetracer/test.toml
+
+A project can commit `ct test`'s configuration as `.codetracer/test.toml` in the
+workspace:
+
+```toml
+schema = "codetracer.test.v1"
+
+[certificate]
+targets = ["tests/parser_test.nim", "tests/eval_test.nim"]
+untracked = "strict"
+```
+
+| Key                       | Meaning                                                                                                    |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `schema`                  | Required: `"codetracer.test.v1"`                                                                           |
+| `[certificate] targets`   | The test files `ct test verify` requires by default: workspace-relative paths, not empty, at most 1024     |
+| `[certificate] untracked` | `"reads"` (the default) or `"strict"`; see above                                                           |
+
+Both `[certificate]` keys are optional. Any other key, a missing or unknown
+schema, or a malformed value makes the file unusable: unless `--untracked` is
+given, `ct test run` warns before the tests run and withholds the certificate;
+unless `--targets` is given, `ct test verify` exits `2`. The file is data only;
+nothing in it is executed.
+
+#### ct test verify
+
+Answers one question: do the certificates in your local certificate store (both
+roots) cover this state?
+
+| Flag                                | Description                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `--staged`                          | The index being committed — exactly the tree the next commit will record, also inside a pre-commit hook |
+| `--worktree`                        | The tracked files as they are now                                                                 |
+| `--commit <rev>`                    | A commit's content                                                                                |
+| `--workspace <path>`                | The workspace (default: the current directory)                                                    |
+| `--targets <t>[,<t>...]`            | The test files that must be covered                                                               |
+| `--platform <p>[,<p>...]`           | The platforms that must be covered, as `os/arch` (default: this machine's, e.g. `linux/amd64`)   |
+| `--json`                            | Also print the full report on stdout                                                              |
+
+Exactly one of `--staged`, `--worktree` and `--commit` is required. The test
+files that must be covered are `--targets` when given; else
+`[certificate] targets` in `.codetracer/test.toml` **as the evaluated state has
+it** (the staged file for `--staged`, the commit's for `--commit`); else every
+test file `ct test discover` reports that can run on this machine. Only
+certificates `ct test` issued are considered; others are reported as ignored.
+Coverage may be split across several certificates.
+
+| Exit | Meaning                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Covered                                                                                                                                        |
+| `1`  | Not covered: no certificate exists for this content, or some exist and none covers what is required. The message says which. Run the tests.   |
+| `2`  | Could not decide: a state with no content id, a certificate it cannot evaluate that might have covered the gap, an unreadable store or `.codetracer/test.toml`, an empty requirement, or a command line it cannot act on |
+
+It always prints exactly one line on stderr saying which, and why.
+
+#### A pre-commit hook
+
+To have `git commit` refuse content the tests have not passed on, put this one
+line **last** in `.git/hooks/pre-commit`:
+
+```sh
+ct test verify --staged
+```
+
+Run it last: it must come after every hook step that rewrites or stages files,
+or the commit records content the check never saw. It is an early answer, not
+enforcement: `git commit --no-verify` skips it. `ct test` installs no hook
+itself.
 
 ### ct trace origin
 

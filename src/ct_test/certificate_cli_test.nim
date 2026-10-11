@@ -167,6 +167,22 @@ suite "ct test run certificate CLI":
     check "no need to commit first" in usage
     check "no second run" in usage
     check "commit your changes" notin usage
+    # CTC-3h: the rest of the surface the book documents is in the usage text
+    # too -- the verb, the content-keyed destination in the store, and the
+    # withholding reasons CTC-3d and CTC-3g added.
+    check "verify (--staged | --worktree | --commit <rev>)" in usage
+    check "v1/<algorithm>/<digest>/<payload sha256>.toml" in usage
+    check "keyed by the content it attests" in usage
+    check "when tracked files change during the run" in usage
+    check "unmerged entries" in usage
+    check "assume-unchanged or skip-worktree" in usage
+    check "submodule with uncommitted changes" in usage
+    check "withholding never changes the exit status" in usage
+    check PreCommitHookCommand in usage
+    check "--no-verify" in usage
+    # The helper tool is not shipped; the usage text must not send a user to
+    # a command that does not exist yet.
+    check "helper tool" notin usage
     # Signing is OPTIONAL and OFF by default, and the usage text has to say so:
     # an unsigned certificate is well-formed (Standard.md §6), and a user who
     # believes signing is automatic has a false idea of what they hold.

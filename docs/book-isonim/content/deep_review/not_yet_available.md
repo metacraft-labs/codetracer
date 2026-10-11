@@ -65,10 +65,12 @@ pull an arbitrary depth of untouched code into the review.
 
 `DeepReviewData` has no test name, status or duration field, so nothing in a
 review reports test results — and nothing invents a zero in their place.
-`ct test` ships (`ct test discover` works from `ct`; `ct test run` needs the
-standalone runner binary, which `ct` tells you when it cannot run it) but
-issues **no test certificates** — and nothing in the review surface, or in
-the text `ct agent prompt` prints, claims otherwise.
+`ct test` ships (`ct test discover` and `ct test verify` work from `ct`;
+`ct test run` needs the standalone runner binary, which `ct` tells you when it
+cannot run it), and a passing run of `ct test` issues a test certificate, but a
+review dataset carries **no test certificates**: they stay in your local
+store, and handing over a review does not hand them over. See
+[ct test](/reference/ct_cli) for what they cover.
 
 ## Sharing a review is still handing over a directory
 
