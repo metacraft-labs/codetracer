@@ -38,7 +38,7 @@
 
 import std/[options, os, strutils, tables]
 
-import codetracer_embed   # PLAT-43: `KeymapModel`, `selectKeymap`
+import codetracer_embed   # PLAT-43: `BaseKeymap`, `selectKeymap`
 import headless_app/auto_hide_hover
 
 import ./commands/interpreter
@@ -131,7 +131,7 @@ type
       ## expanded, relative paths against the project. Unlike `readFile` it
       ## may reach outside the project — see `host/edit_host
       ## .readUserConfigFile`. Nil in a session with no host filesystem.
-    saveKeymap*: proc(model: KeymapModel): string {.closure.}
+    saveKeymap*: proc(model: BaseKeymap): string {.closure.}
       ## PLAT-43. Remember the chosen keymap model for the next session; ""
       ## on success, else a one-line message naming the path. Nil in a session
       ## whose host keeps no state — the choice then holds for this session
@@ -302,10 +302,17 @@ type
       ## and wrote to another would silently keep two arrangements for one
       ## recording. `host/layout_store.nim` is what fills it, and it is the only
       ## thing in this front-end that touches a file for this purpose.
-    keymapModel*: KeymapModel
+    keymapModel*: BaseKeymap
       ## PLAT-43. The keymap model a NEW edit session starts under: the stored
       ## preference the host loaded, or the last `:keymap` choice. The product
       ## default until a host says otherwise.
+    eraseByte*: char
+      ## PLAT-68. The byte this terminal sends for Backspace (termios
+      ## `VERASE`, read by the host's driver); the other of `0x7f` / `0x08` is
+      ## Ctrl+Backspace. Every token is named through `keyOf`, which reads it.
+    keymapReason*: string
+      ## PLAT-68: why `keymapModel` is active — `flag`, `stored`, `default`
+      ## or `chosen` (a `:keymap` this session) — said by `:keymap` alone.
     keymapNotice*: string
       ## PLAT-43. A stored keymap preference the host REFUSED, by name, to be
       ## shown when Edit mode is furnished — where it wins the status line over
@@ -383,6 +390,7 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int
   ## `sourcePaneRows`.
 
 proc runFileJob(rt: TuiRuntime; job: FileJob)
+proc writeBuffers(rt: TuiRuntime; verb: string; all = false)
   ## FORWARD-DECLARED for the `:w` and `:e!` arms of `runPromptLine`; defined
   ## beside `deliverFileJob`, the answer it hands a job to.
 
@@ -408,7 +416,27 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
     context: CommandContext(),
     lastToken: "", lastKey: "",
     width: width, height: height,
-    autoHide: initAutoHideHover())
+    autoHide: initAutoHideHover(),
+    eraseByte: '\x7f')
+
+proc keyOf*(rt: TuiRuntime; token: string): string =
+  ## The canonical name of an input token on THIS terminal — `keyName` with the
+  ## terminal's own erase byte. Every token the runtime names goes through it.
+  keyName(token, rt.eraseByte)
+
+proc keyDelivery*(rt: TuiRuntime): KeyDelivery =
+  ## Base-Keymaps-And-Layer-Stack.md §4.2's three keys this front-end
+  ## supplies: the terminal, the host's platform, and the key protocol the
+  ## driver negotiated. Derived from `caps` — never stored beside it.
+  KeyDelivery(frontEnd: feTerminal, platform: hostPlatform(),
+              keyProtocol: rt.caps.keyProtocol)
+
+proc adoptCaps*(rt: TuiRuntime; caps: TerminalCapabilities) =
+  ## The host re-negotiated (a late reply, `:theme`): take the new
+  ## capabilities, and hand an open edit session the key protocol they carry.
+  rt.caps = caps
+  if not rt.app.editSession.isNil:
+    rt.app.editSession.adoptDelivery(rt.keyDelivery)
 
 proc layoutBindingEnabled*(rt: TuiRuntime): bool =
   ## Whether PLAT-6's layout binding is driving this runtime's arrangement.
@@ -691,6 +719,41 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
     if saved.len > 0:
       result.add " (" & saved & ")"
 
+proc chooseKeymap*(rt: TuiRuntime; name: string) =
+  ## PLAT-43 / PLAT-68: the base-keymap selector — `:keymap <name>` and the
+  ## palette's **Preferences: Select Base Keymap** both land here. The NAME is
+  ## decided by `keymap_selection.selectKeymap` and nowhere else — the same
+  ## function the stored preference and `--keymap` go through — so an unknown
+  ## base (including the retired `default`) is refused by name with the
+  ## accepted set rather than silently defaulted. With no name it says which
+  ## base is active and why.
+  let current =
+    if rt.app.editSession.isNil: rt.keymapModel
+    else: rt.app.editSession.model
+  if name.len == 0:
+    let sourced =
+      if rt.app.editSession.isNil or rt.app.editSession.imported.isNil: ""
+      else: " with " & rt.app.editSession.imported.source & " sourced"
+    let why = if rt.keymapReason.len == 0: "" else: " (" & rt.keymapReason & ")"
+    rt.note("keymap " & $current & why & sourced &
+            "; the accepted values are " & acceptedKeymapNamesText())
+    return
+  let selection = selectKeymap(name)
+  if not selection.ok:
+    rt.note(selection.refusal)
+    return
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession(selection.model, rt.keyDelivery)
+  rt.app.editSession.selectModel(selection.model)
+  rt.keymapModel = selection.model
+  rt.keymapReason = "chosen"
+  let saved =
+    if rt.editServices.saveKeymap.isNil:
+      "not remembered: this session keeps no state"
+    else: rt.editServices.saveKeymap(selection.model)
+  rt.note("keymap " & $selection.model &
+          (if saved.len == 0: "" else: " (" & saved & ")"))
+
 proc runPromptLine(rt: TuiRuntime; line: string;
                    outcome: var RuntimeOutcome) =
   ## A committed prompt line, through CTUI-10's interpreter.
@@ -891,34 +954,7 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     let rest = if words.len > 1: text[text.find(words[1]) .. ^1] else: ""
     case verb
     of "keymap":
-      # PLAT-43. The keymap selector. The NAME is decided by
-      # `keymap_selection.selectKeymap` and nowhere else — the same function
-      # the stored preference goes through — so an unknown model is refused
-      # by name with the accepted set rather than silently defaulted.
-      let current =
-        if rt.app.editSession.isNil: rt.keymapModel
-        else: rt.app.editSession.model
-      if rest.len == 0:
-        let sourced =
-          if rt.app.editSession.isNil or rt.app.editSession.imported.isNil: ""
-          else: " with " & rt.app.editSession.imported.source & " sourced"
-        rt.note("keymap " & $current & sourced &
-                "; the accepted values are " & acceptedKeymapNamesText())
-      else:
-        let selection = selectKeymap(rest)
-        if not selection.ok:
-          rt.note(selection.refusal)
-        else:
-          if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession(selection.model)
-          rt.app.editSession.selectModel(selection.model)
-          rt.keymapModel = selection.model
-          let saved =
-            if rt.editServices.saveKeymap.isNil:
-              "not remembered: this session keeps no state"
-            else: rt.editServices.saveKeymap(selection.model)
-          rt.note("keymap " & $selection.model &
-                  (if saved.len == 0: "" else: " (" & saved & ")"))
+      rt.chooseKeymap(rest)
       outcome.detail = rt.app.notification
       return
     of "break", "b":
@@ -967,28 +1003,14 @@ proc runPromptLine(rt: TuiRuntime; line: string;
         else:
           let sourced = sourceVimConfig(rest, read.text)
           if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession(kmVim)
+            rt.app.editSession = newEditSession(bkVim, rt.keyDelivery)
           rt.app.editSession.installImported(sourced.imported)
-          rt.keymapModel = kmVim
+          rt.keymapModel = bkVim
           rt.note(sourcedSummary(sourced))
       outcome.detail = rt.app.notification
       return
     of "w", "write":
-      let buf = if rt.app.editSession.isNil: nil
-                else: rt.app.editSession.activeBuffer()
-      if buf.isNil:
-        rt.note(":w needs an open file")
-      elif rt.editServices.writeFile.isNil and
-           rt.editServices.submitFileJob.isNil:
-        rt.note(":w has no writer in this session")
-      else:
-        # PLAT-29: a WRITE IS A PRODUCER. The bytes of this version go to the
-        # host's file worker; its acknowledgement arrives through
-        # `deliverFileJob`, which marks the buffer saved as of exactly those
-        # bytes and says "wrote …". A session with no worker runs it inline,
-        # down the same path.
-        rt.note("writing " & buf.path & "…")
-        rt.runFileJob(fileJobFor(fjWrite, buf.doc, buf.path, buf.serial))
+      rt.writeBuffers(":w")
       outcome.detail = rt.app.notification
       return
     of "e!", "edit!":
@@ -1015,7 +1037,7 @@ proc runPromptLine(rt: TuiRuntime; line: string;
         let opened = rt.editServices.readFile(rest)
         if opened.ok:
           if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession(rt.keymapModel)
+            rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
           discard rt.app.editSession.openFile(
             rest, opened.text, max(1, rt.sourcePaneRows()))
           rt.app.fileTree.openPath = rest
@@ -1366,19 +1388,19 @@ proc terminalOutputOwnsToken*(rt: TuiRuntime; token: string): bool =
   if not had or focused != paneTerminalOutput or
      not rt.app.terminalOutput.loaded:
     return false
-  keyName(token) in ["Left", "Right", "v"]
+  rt.keyOf(token) in ["Left", "Right", "v"]
 
 proc routeTokenToTerminalOutput(rt: TuiRuntime; token: string;
                                 outcome: var RuntimeOutcome) =
   let m = rt.app.terminalOutput
-  case keyName(token)
+  case rt.keyOf(token)
   of "v":
     outcome.requestClick(PaneClickRequest(
       kind: pcTerminalView,
       text: (if m.view == tvScreen: $tvLines else: $tvScreen)))
   of "Left", "Right":
     let n = if m.screen.isNil: 0 else: m.screen.writeCount
-    let delta = if keyName(token) == "Left": -1 else: 1
+    let delta = if rt.keyOf(token) == "Left": -1 else: 1
     let at = m.shownWrite
     let target = if at < 0 and delta > 0: 0 else: at + delta
     if n == 0 or target < 0 or target >= n:
@@ -1733,7 +1755,7 @@ proc handleCaretKey(rt: TuiRuntime; token: string;
   let (had, focused) = rt.focus.focusedPane()
   if not had or focused != paneEditor:
     return false
-  let name = keyName(token)
+  let name = rt.keyOf(token)
   if name in ["Alt+t", "Ctrl+Enter"]:
     rt.openTracepointEditorAt(rt.app.caret.path, rt.app.caret.line)
     outcome.repaint = true
@@ -2115,7 +2137,7 @@ proc handleContextMenuKey(rt: TuiRuntime; token: string;
                           outcome: var RuntimeOutcome) =
   ## Up / Down move, Enter chooses, Esc closes — the program menu's keys.
   outcome.repaint = true
-  case keyName(token)
+  case rt.keyOf(token)
   of "Up": rt.app.contextMenu.move(-1)
   of "Down": rt.app.contextMenu.move(1)
   of "Enter":
@@ -2124,7 +2146,7 @@ proc handleContextMenuKey(rt: TuiRuntime; token: string;
       rt.runContextAction(chosen.action, chosen.target, outcome)
   of "Escape", "Esc": rt.app.contextMenu.close()
   else:
-    if token == "\x1b":
+    if rt.keyOf(token) == "Esc":
       rt.app.contextMenu.close()
 
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
@@ -2294,26 +2316,6 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
 
 
-const EditorOwnedKeys* = [
-    "Backspace", "Delete", "Enter", "Left", "Right", "Up", "Down",
-    "Home", "End", "Ctrl+z", "Ctrl+y"]
-  ## The NON-PRINTABLE keys the editor takes when it is focused in Edit mode.
-  ##
-  ## `Tab` and `Shift+Tab` are DELIBERATELY ABSENT, and their absence is the
-  ## escape hatch: with every printable key going into the buffer, a user needs
-  ## one chord that is guaranteed to move focus off the editor, and this is it.
-  ## `edit_binding.applyEditKey` still implements indent and dedent for them —
-  ## the buffer can do it, nothing routes it — so the day an INSERT input mode
-  ## exists the behaviour is already there rather than needing to be written.
-
-const EditorEscapeKeys* = ["Tab", "Shift+Tab"]
-  ## The keys the editor NEVER owns, whatever a model binds — `EditorOwnedKeys`'
-  ## header gives the reason: a user needs one chord guaranteed to move focus
-  ## off the editor. Named separately because PLAT-43's resolver clause below
-  ## would otherwise hand `Tab` to the product default's `indent` binding —
-  ## measured: the pty suite's first run typed an indent where it meant to
-  ## leave the editor, and never reached the prompt.
-
 proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
   ## Whether this token is text for the open buffer rather than a command.
   ##
@@ -2330,18 +2332,38 @@ proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
   let (had, focused) = rt.focus.focusedPane()
   if not had or focused != paneEditor:
     return false
-  let name = keyName(token)
+  let name = rt.keyOf(token)
   if name.len == 0:
     return false
-  # PLAT-43: OR THE ACTIVE MODEL BINDS IT. `EditorOwnedKeys` is the product
-  # default's non-printable set; a Vim buffer needs `Esc` and a Kakoune one
-  # `Ctrl+x`, and a fixed list would hand those to the debugger's keymap. The
-  # model's own resolver is asked — the one `applyEditKey` then runs — so the
-  # two cannot disagree about whose key it is.
-  if name in EditorEscapeKeys:
-    return false
-  name in EditorOwnedKeys or isTextKey(name) or
-    rt.app.editSession.activeBuffer().claimsEditKey(name, 0)
+  # A PRINTABLE KEY IS TEXT, OR THE BASE KEYMAP BINDS IT. Nothing else: the
+  # buffer's own resolver is asked — the one `applyEditKey` then runs — so the
+  # two cannot disagree about whose key it is, and there is no list of keys
+  # the editor "always" or "never" takes beside the keymap (PLAT-68 deleted
+  # both: under CUA `Tab` indents, as in VS Code, and `F6` / `Shift+F6` —
+  # which no base binds in the editor — are the way out of a buffer).
+  isTextKey(name) or rt.app.editSession.activeBuffer().claimsEditKey(name, 0)
+
+proc writeBuffers(rt: TuiRuntime; verb: string; all = false) =
+  ## Write the open buffer — or, `all`, every buffer with unsaved changes —
+  ## through the host's file worker: `:w`, and the `save` / `save-all` a base
+  ## binds (`Ctrl+S` under CUA, `C-x C-s` under Emacs). ONE writer, whichever
+  ## asked.
+  let active = if rt.app.editSession.isNil: nil
+               else: rt.app.editSession.activeBuffer()
+  if active.isNil:
+    rt.note(verb & " needs an open file")
+    return
+  if rt.editServices.writeFile.isNil and rt.editServices.submitFileJob.isNil:
+    rt.note(verb & " has no writer in this session")
+    return
+  # PLAT-29: a WRITE IS A PRODUCER. The bytes of this version go to the
+  # host's file worker; its acknowledgement arrives through `deliverFileJob`,
+  # which marks the buffer saved as of exactly those bytes and says
+  # "wrote …". A session with no worker runs it inline, down the same path.
+  for buf in rt.app.editSession.buffers:
+    if buf == active or (all and buf.isDirty):
+      rt.note("writing " & buf.path & "…")
+      rt.runFileJob(fileJobFor(fjWrite, buf.doc, buf.path, buf.serial))
 
 proc routeTokenToEditor*(rt: TuiRuntime; token: string;
                          nowMs: int64): EditKeyOutcome =
@@ -2366,13 +2388,24 @@ proc routeTokenToEditor*(rt: TuiRuntime; token: string;
   ## name only and the resolver derives the character from it — one derivation
   ## instead of one per call site, which is CTUI-10's defect removed rather
   ## than re-avoided.
+  ##
+  ## A key whose operation is one only the host can perform — the file
+  ## intents (`save`, `save-all`, `save-as`; Editing-Operations §5.2) — is
+  ## performed here, by the same writer `:w` uses.
   let buf = rt.app.editSession.activeBuffer()
-  result = rt.app.editSession.applyEditKeyIn(buf, keyName(token), nowMs)
+  let applied = rt.app.editSession.applyEditKeyIn(buf, rt.keyOf(token), nowMs)
+  result = applied.outcome
   if result == ekChanged:
     rt.app.editSession.recordEdit(buf.path)
     rt.app.editSession.refreshEditedPaths()
   if result != ekIgnored:
     buf.followCaret(max(1, rt.sourcePaneRows()))
+  if "save" in applied.operations or "save-all" in applied.operations:
+    rt.writeBuffers(rt.keyOf(token), all = "save-all" in applied.operations)
+  elif "save-as" in applied.operations:
+    rt.note("Save As takes a path: `:w` writes " & buf.path &
+            " and the palette's Save As arrives with the find and palette " &
+            "overlays")
 
 proc ensureEditWorkspace*(rt: TuiRuntime): string =
   ## Give this session an Edit-mode workspace if it has not got one: the file
@@ -2416,7 +2449,7 @@ proc ensureEditWorkspace*(rt: TuiRuntime): string =
   if rt.isNil or rt.app.isNil:
     return ""
   if rt.app.editSession.isNil:
-    rt.app.editSession = newEditSession(rt.keymapModel)
+    rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
   if rt.app.editSession.furnished or rt.editServices.listFiles.isNil:
     return ""
   rt.app.editSession.furnished = true
@@ -2890,7 +2923,7 @@ proc routeWelcomeKey(rt: TuiRuntime; token: string;
   let w = rt.app.shownWelcome()
   if w.isNil or rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open:
     return false
-  let name = keyName(token)
+  let name = rt.keyOf(token)
   var key = name
   if isTextKey(name):
     key = keyCharacter(name)
@@ -2987,6 +3020,13 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
     rt.note(rt.runColumnVerb(verb, eventLogColumnTitle(col.column)))
     outcome.repaint = true
     return
+  # PLAT-68: the palette's base-keymap commands
+  # (`keymap_selection.baseKeymapCommandTargets`).
+  let base = parseBaseKeymapCommand(action)
+  if base.ok:
+    rt.chooseKeymap($base.model)
+    outcome.repaint = true
+    return
   let ka = menuKeyAction(action)
   if ka != kaNone:
     rt.performAction(ka, outcome)
@@ -3048,7 +3088,7 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
 proc handleOmnibarKey(rt: TuiRuntime; token: string;
                       outcome: var RuntimeOutcome) =
   ## Every key while the omnibar is open belongs to it.
-  let name = keyName(token)
+  let name = rt.keyOf(token)
   outcome.repaint = true
   case name
   of "Esc":
@@ -3079,7 +3119,7 @@ proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
   ## `Right` (or `Enter`) on a folder opens its submenu beside it, `Left`
   ## backs out of a submenu, `Esc` backs out and closes at the first level.
   let vm = rt.app.menu
-  let name = keyName(token)
+  let name = rt.keyOf(token)
   outcome.repaint = true
   case name
   of "Esc": vm.escape()
@@ -3366,14 +3406,14 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   result = RuntimeOutcome(repaint: false, quit: false, awaitsMove: false,
                           action: kaNone, detail: "")
   rt.lastToken = token
-  rt.lastKey = keyName(token)
-  # PLAT-51: ALT + A CHARACTER arrives as ONE `ESC <char>` token (the
-  # framer, `host/terminal_driver.feed`). The caret's Alt+T — the desktop's
-  # "Add tracepoint" chord — is the one this front-end binds; any other is the
-  # character alone, which is what the framer delivered before it framed Alt.
-  if token.len == 2 and token[0] == '\x1b' and
-     rt.lastKey.startsWith("Alt+") and
-     not rt.caretTakesAltChord(rt.lastKey):
+  rt.lastKey = rt.keyOf(token)
+  # PLAT-51: ALT + A KEY arrives as ONE `ESC <byte>` token (the framer,
+  # `host/terminal_driver.feed`). The caret's Alt+T — the desktop's "Add
+  # tracepoint" chord — and (PLAT-68) the Alt chords an open buffer's base
+  # binds (Emacs's `M-f`, CUA's `Alt+Up`) are taken as chords; any other is
+  # the key alone, which is what the framer delivered before it framed Alt.
+  if token.len == 2 and token[0] == '\x1b' and token[1] != '\x1b' and
+     not rt.caretTakesAltChord(rt.lastKey) and not rt.editorOwnsToken(token):
     return rt.handleToken(token[1 .. 1], nowMs)
 
   # PLAT-6's MOUSE HALF, ROUTED HERE AND ONLY WHEN A BINDING IS ENABLED. The
@@ -3433,7 +3473,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     # ghost go, a held divider snaps back, and nothing is committed (`cancel`
     # takes no layout). Only when one is in flight: otherwise `Esc` is the
     # mode key it has always been.
-    if token == "\x1b" and not rt.app.menu.isOpen and
+    if rt.keyOf(token) == "Esc" and not rt.app.menu.isOpen and
         not rt.app.omnibar.isOpen and
         rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
                                                   ikResizingSplit,
@@ -3452,9 +3492,17 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   if rt.prompt.open:
     let before = rt.prompt.buffer
     let candidates = rt.promptCandidates()
-    let submitted = token == "\r" or token == "\n"
+    # PLAT-68: THE PROMPT IS HANDED THE KEY'S NAME for the keys it names
+    # (`command_line.applyKey` reads both spellings), so a terminal on the
+    # Kitty protocol — `Esc` as `CSI 27 u` — and `Home` / `End` in any of
+    # xterm's spellings reach it; a printable key stays its own byte.
+    let named = rt.keyOf(token)
+    let promptKey = if named in ["Esc", "Enter", "Backspace", "Tab", "Up",
+                                 "Down", "Left", "Right", "Home", "End"]: named
+                    else: token
+    let submitted = named == "Enter"
     let line = if submitted: rt.prompt.buffer else: ""
-    let cla = rt.prompt.applyKey(token, candidates)
+    let cla = rt.prompt.applyKey(promptKey, candidates)
     case cla
     of claUnhandled:
       discard
@@ -3489,7 +3537,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     rt.handleContextMenuKey(token, result)
     return
   if rt.app.content.open:
-    case keyName(token)
+    case rt.keyOf(token)
     of "Escape", "Esc", "Enter", "q":
       rt.app.content = ContentOverlay()
       result.repaint = true
@@ -3508,7 +3556,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   if rt.app.menu.isOpen:
     rt.handleMenuKey(token, nowMs, result)
     return
-  case keyName(token)
+  case rt.keyOf(token)
   of MenuKey:
     rt.app.menu.open(keyboard = true)
     rt.note("menu: arrows to move, Enter to choose, Esc to close")
@@ -3569,7 +3617,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     return
 
   let resolution = rt.keymap.resolve(rt.modal, rt.pending, token, nowMs,
-                                     rt.app.modes.product)
+                                     rt.app.modes.product, rt.eraseByte)
   case resolution.kind
   of krNone:
     return

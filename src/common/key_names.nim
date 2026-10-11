@@ -1,67 +1,214 @@
-## key_names.nim — PLAT-31: the CANONICAL KEY NAME, and the one predicate that
-## decides whether a key stands for a character.
+## key_names.nim — THE CANONICAL KEY NAME: one modifier order, one spelling
+## function, the terminal's byte decoder, and the one predicate that decides
+## whether a key stands for a character.
 ##
-## Owns: the byte-token → canonical-name decoder (`keyName`) and the
-## text-entry predicate (`keyCharacter` / `isTextKey`) that
-## `GUI/Editing-Operations-And-Keymaps.md` §4.3 names as the fourth scope
-## dimension.
+## Owns:
 ##
-## ## WHY THIS FILE EXISTS AT ALL: §30, PERFORMED RATHER THAN CITED
+##   * `chordName` — the ONLY function that spells a key with its modifiers.
+##     Every decoder (the terminal's bytes here, GPUI's keystrokes in
+##     `gpui/app/gpui_keys.nim`, the desktop's `KeyboardEvent` in
+##     `key_event_names.nim`) and every reader of a written chord
+##     (`normalizeChord`) ends in it, so `Ctrl+Shift+Alt+Up` written in a file,
+##     decoded from `CSI 1 ; 8 A` and delivered by GPUI as `up` + three
+##     modifiers are one string.
+##   * `keyName` — the byte-token → canonical-name decoder for the terminal.
+##   * `keyCharacter` / `isTextKey` — the text-entry predicate
+##     (`GUI/Editing-Operations-And-Keymaps.md` §4.3).
 ##
-## Every line below was `src/frontend/tui/app/input/keymap.nim`'s until
-## PLAT-31, and PLAT-31's spec asks for the text-entry rule to reuse
-## *"`keymap.nim`'s existing `keyCharacter` spelling rather than
-## `isPrintableKey`"*. There were exactly two ways to obey that sentence:
+## ## THE ORDER IS VS CODE'S: Ctrl, Shift, Alt, Meta
 ##
-##   1. spell the rule again in the editing keymap, or
-##   2. move the rule into one module both keymaps call.
+## Base-Keymaps-And-Layer-Stack.md §2 measured the table this module replaced
+## (`ModifierNames`) ordering `Shift` before `Alt` in `Shift+Alt` and after it
+## in `Ctrl+Alt+Shift`, so VS Code's Linux copy-line chord `Ctrl+Shift+Alt+Up`
+## could never equal what the decoder produced. One order, one function.
 ##
-## (1) is [Verification-Harness-Traps §30a](../../../codetracer-specs/Testing/Verification-Harness-Traps.md)
-## in its worst recorded form — *"the worst instance was a whole re-derived
-## module"* — and §30a's example is precisely a second author deriving a
-## predicate from the same examples and getting it subtly narrower. The
-## predicate being copied here would have been the one whose narrower spelling
-## **already cost this product a defect**: `keyName(" ")` is the five-letter
-## name `"Space"`, `isPrintableKey` answers false for it, and under that
-## spelling a space typed at the `:` prompt resolved to nothing and `:goto 4500`
-## could not be typed at all.
+## ## LETTERS AND SHIFT
 ##
-## So (2). `tui/app/input/keymap.nim` imports and re-exports this module and its
-## call sites are unchanged; `viewmodel/keymap/editing_keymap.nim` imports the
-## same names. **One predicate, one function, and the mutation goes on the
-## function** (§30b), which is what makes the debugger keymap's arms and the
-## editing keymap's arms evidence about each other rather than two opinions
-## from one mistake.
-##
-## `src/common/` and not either front-end's tree, for `editing_key_bindings.nim`'s
-## reason one directory up: *"nothing here imports `isonim_tui` or `viewmodel/`"*,
-## so both halves can read it without either layer rule moving.
+## A terminal sends `A`, not "Shift+a", so an unmodified or Shift-only letter
+## is the letter in its case (`a`, `A`) and a shifted US symbol is the shifted
+## symbol (`?`). As soon as `Ctrl`, `Alt` or `Meta` is held the key is the
+## UNSHIFTED key and `Shift` is spelled: `Ctrl+Shift+k`, `Shift+Alt+a`,
+## `Ctrl+Shift+[`. That is the only reading under which xterm's legacy
+## `ESC A`, the Kitty protocol's `CSI 97 ; 4 u` and GPUI's `a` + alt + shift
+## are the same chord.
 ##
 ## ## NOTHING HERE READS A TERMINAL
 ##
-## This module is a pure function over a `string`. It has no `std/os`, no
-## `std/times`, no FFI — which is what lets it compile on the C, JS and wasm32
-## backends the ViewModel suites run on, and `tui/app/input/keymap.nim` kept its
-## own `std/os` (it has a `loadKeymapFile`) rather than this module gaining one.
+## A pure function over strings: no `std/os`, no clock, no FFI, so it compiles
+## on the C, JS and wasm32 backends the ViewModel suites run on. The terminal's
+## erase byte (termios `VERASE`) is a PARAMETER of `keyName`, supplied by the
+## driver that read it, rather than something this module asks a tty.
 
 import std/[strutils, tables]
 
+type
+  KeyModifier* = enum
+    ## Declared in the canonical order; `chordName` spells a set in this
+    ## order and in no other.
+    kmodCtrl = "Ctrl"
+    kmodShift = "Shift"
+    kmodAlt = "Alt"
+    kmodMeta = "Meta"
+
+  KeyModifiers* = set[KeyModifier]
+
+  KeyProtocol* = enum
+    ## How chords reach a front-end (Base-Keymaps-And-Layer-Stack.md §7): the
+    ## `keyProtocol` context key. Here, beside the decoder whose input it
+    ## describes, so the terminal's capability negotiation and the shared
+    ## keymap read ONE enum.
+    kpLegacy = "legacy"
+      ## The classic xterm encoding: modified keys that have no byte of their
+      ## own (`Ctrl+Shift+K`, `Shift+Enter`) cannot be typed.
+    kpKitty = "kitty"
+      ## The Kitty keyboard protocol, flag 1 (disambiguate escape codes).
+    kpModifyOtherKeys = "modify-other-keys"
+      ## xterm's `modifyOtherKeys` level 2.
+    kpNative = "native"
+      ## A front-end that receives keys, not bytes: GPUI and the desktop.
+
 const
-  FunctionKeyCodes* = {
-    15: "F5", 17: "F6", 18: "F7", 19: "F8", 20: "F9", 21: "F10", 23: "F11",
-    24: "F12"}.toTable
-    ## xterm's `CSI <code> ~` function keys. F1-F4 use SS3 (`ESC O P..S`) and
-    ## are handled separately, which is xterm's own split rather than this
-    ## module's — https://invisible-island.net/xterm/ctlseqs/ctlseqs.html,
-    ## "PC-Style Function Keys".
+  UsShiftedSymbols* = {
+    '`': '~', '1': '!', '2': '@', '3': '#', '4': '$', '5': '%', '6': '^',
+    '7': '&', '8': '*', '9': '(', '0': ')', '-': '_', '=': '+', '[': '{',
+    ']': '}', '\\': '|', ';': ':', '\'': '"', ',': '<', '.': '>',
+    '/': '?'}.toTable
+    ## The US layout's shifted symbols. A keystroke may arrive as the
+    ## unshifted key plus Shift (GPUI, Kitty) or as the shifted character
+    ## (a terminal's plain bytes); both spell the same name.
 
-  ModifierNames* = {2: "Shift", 3: "Alt", 4: "Shift+Alt", 5: "Ctrl",
-                    6: "Ctrl+Shift", 7: "Ctrl+Alt", 8: "Ctrl+Alt+Shift"}.toTable
-    ## xterm's modifier parameter: the value is `1 + (Shift=1 | Alt=2 | Ctrl=4)`.
-    ## Spelled in the order CodeTracer-TUI.md §4.2 writes them (`Shift+F10`,
-    ## `Alt+F5`, `Ctrl+p`).
+  NamedKeys* = [
+    "Esc", "Enter", "Tab", "Backspace", "Delete", "Insert", "Space",
+    "Home", "End", "PageUp", "PageDown", "Up", "Down", "Left", "Right",
+    "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
+    "F12"]
+    ## Every canonical non-character key name. Closed: `normalizeChord`
+    ## refuses anything that is neither one of these nor one printable
+    ## character.
 
-proc isPrintableKey*(name: string): bool =
+  KeyAliases = {
+    "escape": "Esc", "esc": "Esc", "return": "Enter", "enter": "Enter",
+    "tab": "Tab", "backspace": "Backspace", "bs": "Backspace",
+    "delete": "Delete", "del": "Delete", "insert": "Insert", "ins": "Insert",
+    "space": "Space", "spc": "Space", "home": "Home", "end": "End",
+    "pageup": "PageUp", "pgup": "PageUp", "pagedown": "PageDown",
+    "pgdn": "PageDown", "up": "Up", "uparrow": "Up", "down": "Down",
+    "downarrow": "Down", "left": "Left", "leftarrow": "Left",
+    "right": "Right", "rightarrow": "Right", "backquote": "`"}.toTable
+    ## Spellings `normalizeChord` accepts for a key, lower-cased: this
+    ## product's own, VS Code's (`escape`, `pageup`), and GPUI's.
+
+  ModifierAliases = {
+    "ctrl": kmodCtrl, "control": kmodCtrl, "ctrlcmd": kmodCtrl,
+    "shift": kmodShift, "alt": kmodAlt, "option": kmodAlt, "opt": kmodAlt,
+    "meta": kmodMeta, "cmd": kmodMeta, "win": kmodMeta, "super": kmodMeta}.toTable
+    ## `CtrlCmd` is VS Code's "Ctrl, or Cmd on macOS"; every terminal and
+    ## this decoder resolve it to `Ctrl` (Base-Keymaps §7.4).
+
+func shiftedOf(c: char): char =
+  if c in 'a'..'z': chr(ord(c) - 32)
+  elif UsShiftedSymbols.hasKey(c): UsShiftedSymbols[c]
+  else: '\0'
+
+func unshiftedOf(c: char): char =
+  ## The key that, with Shift, produces `c`; `'\0'` when `c` is not a shifted
+  ## character.
+  if c in 'A'..'Z': return chr(ord(c) + 32)
+  for k, v in UsShiftedSymbols:
+    if v == c: return k
+  '\0'
+
+func chordName*(mods: KeyModifiers; key: string): string =
+  ## **THE ONE SPELLING.** A key name with its modifiers, in the canonical
+  ## order. `key` is a `NamedKeys` member or one printable character, in
+  ## either case; "" yields "".
+  if key.len == 0:
+    return ""
+  var m = mods
+  var k = key
+  if k.len == 1:
+    var c = k[0]
+    if c < ' ' or c > '~':
+      return ""
+    if c == ' ':
+      k = "Space"
+    else:
+      # Fold a shifted character back to its key plus Shift…
+      let un = unshiftedOf(c)
+      if un != '\0':
+        c = un
+        m.incl kmodShift
+      # …then, with no command modifier, Shift is spelled by the character.
+      if (m * {kmodCtrl, kmodAlt, kmodMeta}) == {}:
+        if kmodShift in m:
+          let s = shiftedOf(c)
+          if s != '\0':
+            return $s
+        return (if kmodShift in m: "Shift+" else: "") & $c
+      k = $c
+  result = ""
+  for mo in KeyModifier:
+    if mo in m:
+      result.add $mo
+      result.add '+'
+  result.add k
+
+func normalizeChord*(text: string): string =
+  ## One written chord (`Ctrl+Shift+K`, `ctrl+shift+k`, `Escape`,
+  ## `Shift+Alt+A`) → its canonical name, or "" when it names no key.
+  ## Case-insensitive in the modifiers and the named keys. **A letter is a
+  ## KEY, whatever case it is written in, and Shift is written explicitly** —
+  ## VS Code's notation, which CUA-Keymap.md and `keybindings.json` use:
+  ## `Ctrl+K S` is the S key, `Ctrl+K Shift+O` the shifted O. (This product's
+  ## own canonical names spell a shifted letter as the capital, `G`; those are
+  ## names, already canonical, and never go through this function.)
+  if text.len == 0:
+    return ""
+  var parts: seq[string] = @[]
+  var cur = ""
+  for i, ch in text:
+    # A literal `+` key is the last token: `Ctrl++`.
+    if ch == '+' and cur.len > 0:
+      parts.add cur
+      cur = ""
+    else:
+      cur.add ch
+  parts.add cur
+  var mods: KeyModifiers = {}
+  for i in 0 ..< parts.len - 1:
+    let p = parts[i].toLowerAscii
+    if not ModifierAliases.hasKey(p):
+      return ""
+    mods.incl ModifierAliases[p]
+  var key = parts[^1]
+  if key.len == 1:
+    var c = key[0]
+    if c in 'A'..'Z':
+      c = chr(ord(c) + 32)
+    return chordName(mods, $c)
+  let lower = key.toLowerAscii
+  if KeyAliases.hasKey(lower):
+    return chordName(mods, KeyAliases[lower])
+  if lower.len >= 2 and lower[0] == 'f':
+    try:
+      let n = parseInt(lower[1 .. ^1])
+      if n >= 1 and n <= 12:
+        return chordName(mods, "F" & $n)
+    except ValueError:
+      discard
+  ""
+
+func normalizeChordSequence*(text: string): string =
+  ## A space-separated chord sequence (`Ctrl+K Ctrl+C`), each chord through
+  ## `normalizeChord`; "" when any chord names no key.
+  var parts: seq[string] = @[]
+  for c in text.splitWhitespace():
+    let n = normalizeChord(c)
+    if n.len == 0: return ""
+    parts.add n
+  parts.join(" ")
+
+func isPrintableKey*(name: string): bool =
   ## Whether a canonical key name is a single printable character.
   ##
   ## `Esc`, `Enter`, `Tab`, `F10` and `Ctrl+p` are all multi-character names,
@@ -69,179 +216,245 @@ proc isPrintableKey*(name: string): bool =
   ## the whole of the text-entry shadowing rule — see `keyCharacter`.
   name.len == 1 and name[0] >= ' ' and name[0] <= '~'
 
-proc keyCharacter*(name: string): string =
+func keyCharacter*(name: string): string =
   ## The CHARACTER a canonical key name inserts into a text field, or "".
   ##
-  ## THE PREDICATE THE TEXT-ENTRY SHADOWING RULE ACTUALLY USES, and it is not
-  ## `isPrintableKey` because of exactly one key. `keyName` answers `"Space"`
-  ## for byte `0x20`, deliberately: CodeTracer-TUI.md §4.2 binds `Space` to
-  ## "Toggle Breakpoint" and a table cell reading ` ` would be unreadable. But
-  ## `isPrintableKey` answers false for a five-letter name, so under CTUI-9's
-  ## rule a space typed at a `:` prompt resolved to `krNone` AND WAS SILENTLY
-  ## LOST — `:goto 4500` could not be typed at all.
-  ##
-  ## CTUI-9 could not have seen it: its own header records that "§4.2's table
-  ## has no key that enters INSPECT mode and no way to run or edit the `:`
-  ## prompt", so there was no text field to lose a character into. CTUI-10 has
-  ## one, and `tests/real_terminal/test_real_command_mode.nim` types
-  ## `:goto 4500` as real bytes on a real pty, which is where this was measured.
-  ##
-  ## **PLAT-31 IS THE SECOND CONSUMER AND THAT IS WHY THIS MOVED.** The editing
-  ## keymap's text-entry scope asks the same question of the same key names; a
-  ## second spelling of this five-line function is the one thing §30a says not
-  ## to write. The difference between the two spellings is still exactly one
-  ## key, and `test_editor_keymap_laws.nim` asserts it on `Space` BY NAME —
-  ## a rule whose one known counterexample is not in the suite is a rule tested
-  ## on the cases that never failed.
+  ## Not `isPrintableKey`, because of exactly one key: `Space` is a five-letter
+  ## NAME (CodeTracer-TUI.md §4.2 binds it, and a table cell reading ` ` would
+  ## be unreadable), and under the narrower spelling a space typed at a `:`
+  ## prompt was silently lost (CTUI-10, measured on a real pty). The editing
+  ## keymap's text-entry scope asks the same question of the same names, which
+  ## is why this is one function in a module both keymaps import.
   if name == "Space": " "
   elif isPrintableKey(name): name
   else: ""
 
-proc isTextKey*(name: string): bool =
-  ## Whether a text field owns this key. `keyCharacter` with the character
-  ## thrown away, named so a resolver reads as a rule rather than as a length
-  ## test.
+func isTextKey*(name: string): bool =
+  ## Whether a text field owns this key — `keyCharacter` with the character
+  ## thrown away, named so a resolver reads as a rule.
   keyCharacter(name).len > 0
 
-proc keyName*(token: string): string =
-  ## The canonical name of one complete input token — a byte, or a whole escape
-  ## sequence as `testing/test_app_runtime.nim` frames them.
-  ##
-  ## Returns "" for anything unrecognised (an SGR-1006 mouse report, a runaway
-  ## sequence), so a caller can tell "not a key" from "a key nothing is bound
-  ## to".
-  if token.len == 0:
-    return ""
-  if token.len == 1:
-    let c = token[0]
-    case c
-    of '\t': return "Tab"
-    of '\r', '\n': return "Enter"
-    # `\b` is Ctrl+H on the wire and `\x7f` is what most terminals send for
-    # Backspace. Both spell Backspace here, which costs the product a `Ctrl+h`
-    # binding it does not have and buys a Backspace that works on every
-    # terminal.
-    of '\x7f', '\b': return "Backspace"
-    of ' ': return "Space"
-    of '\x1b': return "Esc"
-    else:
-      if c >= '\x01' and c <= '\x1a':
-        return "Ctrl+" & $char(ord('a') + ord(c) - 1)
-      if c >= ' ' and c <= '~':
-        return $c
-      return ""
-  # PLAT-51: Alt + a printable character — `ESC <char>`, what a terminal
-  # sends for Alt+T (Meta sends ESC prefix). The desktop's "Add tracepoint"
-  # chord (`Editor.TracepointCreation`: Ctrl+Enter / Alt+T).
-  if token.len == 2 and token[0] == '\x1b' and token[1] > ' ' and
-     token[1] <= '~' and token[1] notin {'[', 'O'}:
-    return "Alt+" & $token[1]
-  # SS3: ESC O P..S — F1 to F4.
-  if token.len == 3 and token[0] == '\x1b' and token[1] == 'O':
-    case token[2]
-    of 'P': return "F1"
-    of 'Q': return "F2"
-    of 'R': return "F3"
-    of 'S': return "F4"
-    else: return ""
-  if token.len < 3 or token[0] != '\x1b' or token[1] != '[':
-    return ""
-  let body = token[2 .. ^1]
-  let final = body[^1]
-  let params = body[0 ..< body.len - 1]
+# ---------------------------------------------------------------------------
+# The terminal's bytes
+# ---------------------------------------------------------------------------
+
+type
+  DecodedKey = object
+    ok: bool
+    mods: KeyModifiers
+    key: string
+
+func decoded(mods: KeyModifiers; key: string): DecodedKey =
+  DecodedKey(ok: key.len > 0, mods: mods, key: key)
+
+const NoKey = DecodedKey(ok: false, mods: {}, key: "")
+
+func modifiersOfParam(param: string; ok: var bool): KeyModifiers =
+  ## xterm's and the Kitty protocol's modifier parameter: `1 + bits`, with
+  ## Shift 1, Alt 2, Ctrl 4, Super 8, Hyper 16, Meta 32, Caps Lock 64,
+  ## Num Lock 128. Super and Meta both spell `Meta`; the two lock bits are
+  ## STATE, not modifiers, and are ignored (a `Ctrl+c` typed with Num Lock on
+  ## is `Ctrl+c`). Hyper names no key this product has, so a chord carrying
+  ## it is not a key. A sub-parameter (`:event-type`) is ignored: only press
+  ## events are requested.
+  ok = true
+  var p = param
+  let colon = p.find(':')
+  if colon >= 0: p = p[0 ..< colon]
+  if p.len == 0:
+    return {}
+  var v = 0
+  try:
+    v = parseInt(p)
+  except ValueError:
+    ok = false
+    return {}
+  if v < 1:
+    ok = false
+    return {}
+  let bits = v - 1
+  if (bits and 16) != 0:
+    ok = false
+    return {}
+  if (bits and 1) != 0: result.incl kmodShift
+  if (bits and 2) != 0: result.incl kmodAlt
+  if (bits and 4) != 0: result.incl kmodCtrl
+  if (bits and (8 or 32)) != 0: result.incl kmodMeta
+
+func codepointKey(code: int): string =
+  ## A Unicode code point as the Kitty protocol and `modifyOtherKeys` report
+  ## it → a key name. The functional keys the product names; any other code
+  ## point outside printable ASCII names no key.
+  case code
+  of 9: "Tab"
+  of 13, 57414: "Enter"     # 57414: the keypad's Enter
+  of 27: "Esc"
+  of 8, 127: "Backspace"
+  of 32: "Space"
+  of 33 .. 126: $chr(code)
+  else: ""
+
+func singleByteKey(c: char; eraseByte: char): DecodedKey =
+  case c
+  of '\t': decoded({}, "Tab")
+  of '\r', '\n': decoded({}, "Enter")
+  of ' ': decoded({}, "Space")
+  of '\x1b': decoded({}, "Esc")
+  of '\0': decoded({kmodCtrl}, "Space")
+  of '\x1c': decoded({kmodCtrl}, "\\")
+  of '\x1d': decoded({kmodCtrl}, "]")
+  of '\x1f': decoded({kmodCtrl}, "/")
+  of '\x7f', '\b':
+    # THE TERMINAL'S ERASE BYTE IS BACKSPACE AND THE OTHER ONE IS
+    # Ctrl+Backspace. xterm sends `0x7f` for Backspace and `0x08` for
+    # Ctrl+Backspace; a terminal whose `VERASE` is `0x08` swaps them. Folding
+    # both into Backspace lost the one byte that tells them apart.
+    if c == eraseByte: decoded({}, "Backspace")
+    else: decoded({kmodCtrl}, "Backspace")
+  of '\x01' .. '\x07', '\x0b', '\x0c', '\x0e' .. '\x1a':
+    decoded({kmodCtrl}, $chr(ord('a') + ord(c) - 1))
+  of '!' .. '~':
+    decoded({}, $c)
+  else: NoKey
+
+func csiKey(params: string; final: char): DecodedKey =
+  ## `ESC [ <params> <final>`.
+  if params.len > 0 and params[0] in {'?', '>', '<', '=', '$'}:
+    # A REPLY (`CSI ? 1 u`, a DA report) or a mouse report — not a key.
+    return NoKey
+  let parts = params.split(';')
+  var ok = true
   case final
-  of 'A', 'B', 'C', 'D':
-    # Arrows, plain (`CSI A`) or modified (`CSI 1 ; m A`).
-    let name = case final
-               of 'A': "Up"
-               of 'B': "Down"
-               of 'C': "Right"
-               else: "Left"
+  of 'A', 'B', 'C', 'D', 'H', 'F', 'P', 'Q', 'R', 'S', 'Z':
+    # Cursor keys, Home/End, F1-F4, back-tab: plain (`CSI A`) or modified
+    # (`CSI 1 ; m A`).
+    let key = case final
+              of 'A': "Up"
+              of 'B': "Down"
+              of 'C': "Right"
+              of 'D': "Left"
+              of 'H': "Home"
+              of 'F': "End"
+              of 'P': "F1"
+              of 'Q': "F2"
+              of 'R': "F3"
+              of 'S': "F4"
+              else: "Tab"
+    var mods: KeyModifiers = if final == 'Z': {kmodShift} else: {}
     if params.len == 0:
-      return name
-    let parts = params.split(';')
+      return decoded(mods, key)
     if parts.len == 2 and parts[0] == "1":
-      try:
-        let m = parseInt(parts[1])
-        if ModifierNames.hasKey(m):
-          return ModifierNames[m] & "+" & name
-      except ValueError:
-        return ""
-    return ""
-  of 'Z':
-    # `CSI Z` is xterm's back-tab, which is what `Shift+Tab` sends.
-    if params.len == 0: return "Shift+Tab"
-    return ""
-  of 'P', 'Q', 'R', 'S':
-    # Modified F1-F4: `CSI 1 ; m P`.
-    let parts = params.split(';')
-    if parts.len == 2 and parts[0] == "1":
-      try:
-        let m = parseInt(parts[1])
-        if ModifierNames.hasKey(m):
-          let name = case final
-                     of 'P': "F1"
-                     of 'Q': "F2"
-                     of 'R': "F3"
-                     else: "F4"
-          return ModifierNames[m] & "+" & name
-      except ValueError:
-        return ""
-    return ""
+      mods = mods + modifiersOfParam(parts[1], ok)
+      if ok: return decoded(mods, key)
+    return NoKey
   of 'u':
-    # The `CSI u` convention (fixterms, kitty's keyboard protocol in its
-    # legacy-compatible form): `CSI <codepoint> ; <modifier> u`. Decoded for
-    # TAB only — `Ctrl+Tab` / `Ctrl+Shift+Tab`, which CodeTracer-TUI.md
-    # §3.3.1 binds and which a terminal can send in no other form. Anything
-    # else stays "not a key" rather than a guess.
-    let parts = params.split(';')
-    if parts.len == 2 and parts[0] in ["9", "13"]:
-      # TAB, and (PLAT-51) ENTER — `Ctrl+Enter`, the desktop's "Add
-      # tracepoint" chord, which a terminal can send in no other form.
-      try:
-        let m = parseInt(parts[1])
-        if ModifierNames.hasKey(m):
-          return ModifierNames[m] & (if parts[0] == "9": "+Tab" else: "+Enter")
-      except ValueError:
-        return ""
-    return ""
+    # The Kitty protocol: `CSI code[:alternates] [; mods[:event] [; text]] u`.
+    var codeText = parts[0]
+    let colon = codeText.find(':')
+    if colon >= 0: codeText = codeText[0 ..< colon]
+    var code = 0
+    try:
+      code = parseInt(codeText)
+    except ValueError:
+      return NoKey
+    let mods = if parts.len >= 2: modifiersOfParam(parts[1], ok) else: {}
+    if not ok: return NoKey
+    return decoded(mods, codepointKey(code))
   of '~':
-    let parts = params.split(';')
     var code = 0
     try:
       code = parseInt(parts[0])
     except ValueError:
-      return ""
-    # xterm's `modifyOtherKeys`: `CSI 27 ; <modifier> ; <codepoint> ~`.
-    # Decoded for TAB only, for the reason the `CSI u` arm above gives.
+      return NoKey
     if code == 27:
-      if parts.len == 3 and parts[2] in ["9", "13"]:
-        try:
-          let m = parseInt(parts[1])
-          if ModifierNames.hasKey(m):
-            return ModifierNames[m] & (if parts[2] == "9": "+Tab" else: "+Enter")
-        except ValueError:
-          return ""
-      return ""
-    var base = ""
-    if FunctionKeyCodes.hasKey(code):
-      base = FunctionKeyCodes[code]
-    else:
-      case code
-      of 2: base = "Insert"
-      of 3: base = "Delete"
-      of 5: base = "PageUp"
-      of 6: base = "PageDown"
-      else: return ""
-    if parts.len == 1:
-      return base
-    if parts.len == 2:
+      # xterm's `modifyOtherKeys`: `CSI 27 ; <mods> ; <code point> ~`, for
+      # every code point, not only Tab and Enter.
+      if parts.len != 3: return NoKey
+      let mods = modifiersOfParam(parts[1], ok)
+      var cp = 0
       try:
-        let m = parseInt(parts[1])
-        if ModifierNames.hasKey(m):
-          return ModifierNames[m] & "+" & base
+        cp = parseInt(parts[2])
       except ValueError:
-        return ""
-    return ""
+        return NoKey
+      if not ok: return NoKey
+      return decoded(mods, codepointKey(cp))
+    let key = case code
+              of 1, 7: "Home"
+              of 4, 8: "End"
+              of 2: "Insert"
+              of 3: "Delete"
+              of 5: "PageUp"
+              of 6: "PageDown"
+              of 11: "F1"
+              of 12: "F2"
+              of 13: "F3"
+              of 14: "F4"
+              of 15: "F5"
+              of 17: "F6"
+              of 18: "F7"
+              of 19: "F8"
+              of 20: "F9"
+              of 21: "F10"
+              of 23: "F11"
+              of 24: "F12"
+              else: ""
+    if key.len == 0: return NoKey
+    if parts.len == 1: return decoded({}, key)
+    if parts.len == 2:
+      let mods = modifiersOfParam(parts[1], ok)
+      if ok: return decoded(mods, key)
+    return NoKey
   else:
-    return ""
+    return NoKey
+
+func decodeToken(token: string; eraseByte: char): DecodedKey =
+  if token.len == 0:
+    return NoKey
+  if token.len == 1:
+    return singleByteKey(token[0], eraseByte)
+  if token[0] != '\x1b':
+    return NoKey
+  if token.len == 2:
+    # `ESC <byte>`: Alt (Meta sends an ESC prefix) on top of whatever the
+    # byte alone is — `ESC a` Alt+a, `ESC A` Shift+Alt+a, `ESC 0x01`
+    # Ctrl+Alt+a, `ESC 0x7f` Alt+Backspace, `ESC CR` Alt+Enter.
+    # `ESC ESC` is one Esc then the start of the next key, and `ESC [` is a
+    # control sequence that never finished — neither is Alt on anything.
+    if token[1] in {'\x1b', '['}:
+      return NoKey
+    var inner = singleByteKey(token[1], eraseByte)
+    if not inner.ok: return NoKey
+    inner.mods.incl kmodAlt
+    return inner
+  if token[1] == 'O' and token.len == 3:
+    # SS3: F1-F4, Home/End and the cursor keys in application mode, and the
+    # keypad's Enter.
+    let key = case token[2]
+              of 'P': "F1"
+              of 'Q': "F2"
+              of 'R': "F3"
+              of 'S': "F4"
+              of 'H': "Home"
+              of 'F': "End"
+              of 'A': "Up"
+              of 'B': "Down"
+              of 'C': "Right"
+              of 'D': "Left"
+              of 'M': "Enter"
+              else: ""
+    return decoded({}, key)
+  if token[1] != '[' or token.len < 3:
+    return NoKey
+  csiKey(token[2 ..< token.len - 1], token[^1])
+
+func keyName*(token: string; eraseByte = '\x7f'): string =
+  ## The canonical name of one complete input token — a byte, `ESC` plus a
+  ## byte, or a whole escape sequence as `host/terminal_driver.feed` frames
+  ## them — or "" for anything that is not a key (a mouse report, a reply to
+  ## a query, a runaway sequence), so a caller can tell "not a key" from "a
+  ## key nothing is bound to".
+  ##
+  ## `eraseByte` is the byte the terminal declares as Backspace (termios
+  ## `VERASE`); xterm's `0x7f` unless the driver read otherwise.
+  let d = decodeToken(token, eraseByte)
+  if not d.ok: "" else: chordName(d.mods, d.key)

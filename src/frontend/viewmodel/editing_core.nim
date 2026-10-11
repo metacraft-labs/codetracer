@@ -56,7 +56,8 @@
 ## =========================================================================
 ##
 ## Nothing here constructs a fake editor, a fake widget or a fake keymap. The
-## keymaps are `product_keymap`/`vim_keymap`/`kakoune_keymap`'s own tables and
+## keymaps are the shipped bases' own tables (`cua_keymap`, `emacs_keymap`,
+## `vim_keymap`, `kakoune_keymap`) and
 ## the operations are the shipped vocabulary.
 
 import std/[strutils, tables]
@@ -71,7 +72,9 @@ import ./editor/document_version
 import ./editor/reconcile
 
 import ./keymap/editing_keymap
-import ./keymap/product_keymap
+import ./keymap/base_rows
+import ./keymap/cua_keymap
+import ./keymap/emacs_keymap
 import ./keymap/vim_keymap
 import ./keymap/kakoune_keymap
 import ./keymap/keymap_selection
@@ -79,7 +82,8 @@ from ./keymap/vim_import import VimImport, ImportReportEntry, ImportReason,
   importVimConfig, coverageFraction, describeReport
 
 export editor_state, selection, wrap
-export editing_keymap, product_keymap, vim_keymap, kakoune_keymap
+export editing_keymap, base_rows, cua_keymap, emacs_keymap, vim_keymap,
+  kakoune_keymap
 export keymap_selection
 export document_version, reconcile
 export VimImport, ImportReportEntry, ImportReason, importVimConfig,
@@ -128,7 +132,7 @@ type
       ## **THE BUFFER.** There is no second one. `ci/test/editor-model-case-floor.sh`
       ## is not what enforces that — `test_editor_front_end_differential.nim`'s
       ## mutable-buffer scan is, with a planted positive control.
-    model*: KeymapModel
+    model*: BaseKeymap
       ## Which keymap this document resolves keys through. A document-level
       ## field rather than a global, because §4.2 makes the model the fifth
       ## scope dimension and a product that can only hold one model cannot
@@ -147,6 +151,12 @@ type
       ## acknowledgement) can name the version it was computed against and be
       ## reconciled against this document rather than applied as though it had
       ## not moved. Bounded to `TimelineDepth` change sets.
+    delivery*: KeyDelivery
+      ## PLAT-68: how keys reach this document — the front-end, the platform
+      ## and the negotiated key protocol, Base-Keymaps §4.2's three keys a
+      ## front-end supplies. A field for `settings`' reason: a document is
+      ## opened BY a front-end, and that front-end's delivery is what the
+      ## `when` of a legacy-fallback row reads.
     imported*: ImportedKeymap
       ## PLAT-36. A user's Vim configuration, imported on top of the Vim
       ## keymap (`:source <file>` in the terminal). Nil — the common case —
@@ -194,13 +204,21 @@ func terminalWrapSettings*(): WrapSettings =
   ## the one thing a debugger's source column may not do.
   WrapSettings(wrapColumn: 0, policy: DefaultColumnPolicy)
 
-func initialModeFor*(model: KeymapModel): EditingMode =
+func initialModeFor*(model: BaseKeymap): EditingMode =
   ## The mode a document opens in under `model` — see `initEditingDocument` on
-  ## why it is the model's to decide. One `case`, total over the enum, used by
-  ## both the constructor and `switchModel`.
+  ## why it is the base's to decide. One `case`, total over the enum, used by
+  ## both the constructor and `switchModel`: the modal bases open in normal,
+  ## the others ready to type (Editor-ViewModel §3.2 as amended by PLAT-68).
   case model
-  of kmProductDefault: emInsert
-  of kmVim, kmKakoune: emNormal
+  of bkCua, bkEmacs: emInsert
+  of bkVim, bkKakoune: emNormal
+
+func isModal*(model: BaseKeymap): bool =
+  ## Whether the base has modal editing — whether a printable key can be a
+  ## command. Under CUA and Emacs it never is: a printable key types, in
+  ## every editing mode (Emacs's active mark is `visual`, and typing there
+  ## still types).
+  initialModeFor(model) == emNormal
 
 proc dropImported(d: var EditingDocument) =
   ## Take an imported configuration off `d`, macros included: a macro id the
@@ -211,7 +229,7 @@ proc dropImported(d: var EditingDocument) =
     d.state.macros.del id
   d.imported = nil
 
-proc switchModel*(d: var EditingDocument; model: KeymapModel) =
+proc switchModel*(d: var EditingDocument; model: BaseKeymap) =
   ## PLAT-43. Re-key an OPEN document to `model`.
   ##
   ## The text, the selection, the registers, the marks, the undo history and
@@ -228,28 +246,31 @@ proc switchModel*(d: var EditingDocument; model: KeymapModel) =
   d.state.pending = PendingChords()
   d.state.recording = ""
 
+const TerminalLegacyDelivery* = KeyDelivery(
+    frontEnd: feTerminal, platform: hostPlatform(), keyProtocol: kpLegacy)
+  ## A terminal that negotiated no extended key reporting — the most
+  ## conservative delivery, and the one a document opened with no front-end
+  ## (a suite, a headless run) resolves under.
+
 proc initEditingDocument*(path, text: string;
-                          model = kmProductDefault;
+                          model = bkCua;
                           settings = terminalWrapSettings();
-                          viewportRows = DefaultViewportRows): EditingDocument =
+                          viewportRows = DefaultViewportRows;
+                          delivery = TerminalLegacyDelivery): EditingDocument =
   ## A document over `text`, named `path`, with the caret at the top.
   ##
-  ## **THE MODE IS `emInsert` AND THAT IS NOT A DETAIL.** `initEditorState`
-  ## opens at `emNormal` because that is the right default for a modal model,
-  ## and `product_keymap`'s thirteen rows are scoped to `{emInsert}` — see
-  ## `ProductDefaultModes`, whose reason is that *"the terminal's Edit mode
-  ## has no modal editing at all"*. A product document left at `emNormal`
-  ## resolves none of its own bindings, so `Left` does nothing and every
-  ## printable key is handed back to the debugger's keymap. The mode is set
-  ## from the MODEL rather than hardcoded, because a Vim document must open in
-  ## normal mode or `dd` is typed into the buffer.
+  ## **THE MODE IS THE BASE'S.** `initEditorState` opens at `emNormal`
+  ## because that is the right default for a modal base; a CUA or Emacs
+  ## document opens in `emInsert`, ready to type, and a Vim document must
+  ## open in normal mode or `dd` is typed into the buffer (`initialModeFor`).
   result = EditingDocument(
     path: path,
     state: initEditorState(text),
     model: model,
     settings: settings,
     viewportRows: max(1, viewportRows),
-    timeline: initVersionedDocument(text))
+    timeline: initVersionedDocument(text),
+    delivery: delivery)
   result.state.mode = initialModeFor(model)
 
 proc drainJournal*(d: var EditingDocument) =
@@ -283,11 +304,11 @@ proc applyChangeSet*(d: var EditingDocument; cs: ChangeSet;
 
 proc installImported*(d: var EditingDocument; imported: ImportedKeymap) =
   ## PLAT-36. Put `d` under an imported Vim configuration. The model becomes
-  ## `kmVim` — the import is layered on the Vim keymap, so the grammar the
+  ## `bkVim` — the import is layered on the Vim keymap, so the grammar the
   ## document is in IS Vim's — through `switchModel`, which keeps the text and
   ## history and resets a half-typed chord exactly as a `:keymap` does. A nil
   ## `imported` leaves `d` under the plain Vim keymap.
-  d.switchModel(kmVim)
+  d.switchModel(bkVim)
   if imported.isNil:
     return
   d.imported = imported
@@ -332,14 +353,21 @@ func sourcedSummary*(c: SourcedConfig): string =
     result.add "; " & $c.report.len & " not translated, first at line " &
                $first.line & ": " & $first.reason
 
-proc keymapOf*(model: KeymapModel): KeymapDefinition =
-  ## The three shipped models, by name. **ONE `case`, and it is total over the
-  ## enum**, so a fourth model does not compile rather than resolving to the
+let
+  CuaDefinition = definitionOf(bkCua, CuaRows, CuaDeferred)
+  EmacsDefinition = definitionOf(bkEmacs, EmacsRows, EmacsDeferred)
+    ## Built once from the data tables. A row the builder cannot read RAISES
+    ## here, at start-up, by name — a base with a bad row does not load.
+
+proc keymapOf*(model: BaseKeymap): KeymapDefinition =
+  ## The four shipped bases, by name. **ONE `case`, and it is total over the
+  ## enum**, so a fifth base does not compile rather than resolving to the
   ## default and looking like it works.
   case model
-  of kmProductDefault: productKeymap()
-  of kmVim: vimKeymap()
-  of kmKakoune: kakouneKeymap()
+  of bkCua: CuaDefinition
+  of bkEmacs: EmacsDefinition
+  of bkVim: vimKeymap()
+  of bkKakoune: kakouneKeymap()
 
 proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
                nowMs: int64): KeyApplication =
@@ -404,22 +432,34 @@ func followedViewportTop*(top, caretLine, rows: int): int =
 func editScopeOf*(d: EditingDocument): EditingScope =
   ## **THE SCOPE A FRONT-END'S EDITOR PANE RESOLVES KEYS IN**, for a focused
   ## editor in Edit product mode — one rule for every front-end (PLAT-44: the
-  ## terminal and GPUI both call this; §30b).
+  ## terminal and GPUI both call this; §30b). The front-end supplied only the
+  ## document's `delivery` (Base-Keymaps §4.2's three keys); the context keys
+  ## a `when` reads are `context_keys.editorContextKeys`'s.
   ##
-  ## `textEntry` follows the document's MODE: a printable key stands for
-  ## itself exactly in insert mode, whichever model put the document there.
-  ## PLAT-43 measured the alternative: the terminal passed `true`
-  ## unconditionally, and under Vim in normal mode `d` `w` typed `dw`.
+  ## `textEntry` follows the document's MODE under a modal base — a printable
+  ## key stands for itself exactly in insert mode (PLAT-43 measured the
+  ## alternative: under Vim in normal mode `d` `w` typed `dw`) — and is always
+  ## on under CUA and Emacs, which have no command mode.
   EditingScope(model: d.model, product: pmEdit, pane: epEditor,
-               mode: d.state.mode, textEntry: d.state.mode == emInsert)
+               mode: d.state.mode,
+               textEntry: not isModal(d.model) or d.state.mode == emInsert,
+               context: editorContextKeys(d.state, pmEdit, d.delivery))
 
 proc claimsKey*(d: EditingDocument; scope: EditingScope; key: string;
                 nowMs: int64): bool =
   ## PLAT-43. Would `applyKey` treat `key` as the editor's? The same resolver,
   ## asked without executing: `erNothing` is the one answer that hands the key
   ## back to the product keymap, exactly as `applyKey` reads it.
+  ##
+  ## PLAT-68: A KEY THAT FOLLOWS A PENDING PREFIX IS THE EDITOR'S, whatever it
+  ## resolves to. `Ctrl+K` waits for its continuation under CUA; a key that
+  ## does not continue it ends the prefix — VS Code's *"(Ctrl+K, X) is not a
+  ## command"* — and is consumed, not handed to the product keymap with the
+  ## prefix still hanging on the buffer for the key after it.
   if key.len == 0:
     return false
+  if d.state.pending.chords.len > 0:
+    return true
   editing_keymap.resolveKey(d.state, keymapOf(d.model).keymap, scope, key,
                             nowMs).kind != erNothing
 

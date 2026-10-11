@@ -2,11 +2,12 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48]
-#   just gpui-window-captures                 # all three
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68]
+#   just gpui-window-captures                 # all four
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
-# `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`) assert
+# `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
+# `test_plat68_cua_window.nim`) assert
 # COMMITTED records measured off a real window on a headless sway. A record
 # nobody re-takes stops describing the product the first time the window
 # changes — which is how PLAT-45's and PLAT-47's records came to predate the
@@ -51,11 +52,11 @@ fail() {
 }
 
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48)" ;;
+	plat45 | plat47 | plat48 | plat68) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68)" ;;
 	esac
 done
 
@@ -151,6 +152,15 @@ for w in "${which[@]}"; do
 		in_compositor_shell "bash ci/test/plat47-gpui-window.sh" &&
 			python3 ci/test/plat47_gpui_window.py record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat47_gpui_window.nim ||
+			failed+=("${w}")
+		;;
+	plat68)
+		# PLAT-68: the CUA editing sequence typed by `wtype` into the edit
+		# window; the record is the file on disk and every key's canonical
+		# name as the edit arm decoded it. No recording is opened.
+		in_compositor_shell "CODETRACER_PLAT68_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/plat68-cua-window.sh" &&
+			bash ci/test/plat68-cua-window.sh --record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat68_cua_window.nim ||
 			failed+=("${w}")
 		;;
 	plat45)

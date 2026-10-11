@@ -55,7 +55,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 435
+const ExpectedAssertions = 436
 
 const
   LandedThroughMilestone = 14
@@ -497,14 +497,12 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck advertised == 4
     ck compared == ExpectedCaseCount
 
-  test "the Kitty keyboard protocol is DETECTED and never negotiated":
-    # CTUI-11's own decision, asserted as one. Enabling the protocol would
-    # change every key's encoding to `CSI <unicode> ; <mods> u` and
-    # `app/input/keymap.keyName` decodes xterm's classic encoding — so the
-    # capability is resolved, and `host/terminal_driver.start` sends nothing for
-    # it. The second half is asserted from the terminal's side in
-    # `tests/real_terminal/test_real_capability_negotiation.nim`; this is the
-    # first half.
+  test "the Kitty keyboard protocol is DETECTED from the environment":
+    # PLAT-68 REVERSED CTUI-11's "detected and never negotiated": the
+    # environment's guess is still resolved here (it names the terminal in
+    # `describe`), but what the driver ENABLES is decided by asking — `CSI ? u`
+    # and its reply (`resolveKeyProtocol`, asserted by `test_plat68_keymaps_pty.nim` and from the
+    # terminal's side in `test_real_capability_negotiation.nim`).
     let kitty = resolveCapabilities(
       initTerminalEnv(term = "xterm-kitty", lang = "en_US.UTF-8"),
       initCapabilityFlags())
@@ -538,7 +536,8 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck text.contains("borders=ascii(flag)")
     ck text.contains("mouse=on(default)")
     ck text.contains("sync2026=off(default)")
-    ck text.contains("kitty-keyboard=no(never enabled)")
+    ck text.contains("kitty-keyboard=no")
+    ck text.contains("keys=modify-other-keys(environment)")
     # …and the environment-driven spelling differs, so the two sources are
     # genuinely distinguishable in the text rather than both reading "flag".
     let probed = resolveCapabilities(

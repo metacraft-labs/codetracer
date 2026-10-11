@@ -393,6 +393,9 @@ type
       ## reads the window's arrangement out of it (the GPUI front-end's OWN
       ## output) rather than out of the model.
     noFlowOverlay: bool
+    keymap: string
+      ## PLAT-68: `--keymap=<cua|emacs|vim|kakoune>`, this window only — the
+      ## terminal's flag, through the same `sessionKeymap` precedence.
     focusHighlight: SettingOverride
       ## PLAT-51: `--focus-highlight=on|off` for this window, beating the
       ## remembered preference (`gpui-preferences`).
@@ -519,6 +522,13 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
           message: "codetracer-gpui: --replay-ops: " & e.msg)
     elif arg == "--no-flow-overlay":
       result.noFlowOverlay = true
+    elif arg.startsWith("--keymap="):
+      let name = arg["--keymap=".len .. ^1]
+      let selection = selectKeymap(name, "--keymap")
+      if not selection.ok:
+        return GpuiCommand(kind: gckUsageError,
+                           message: "codetracer-gpui: " & selection.refusal)
+      result.keymap = name
     elif parseSettingFlag(arg).isFlag:
       # PLAT-51: the two layout preferences, for this window.
       let flag = parseSettingFlag(arg)
@@ -3122,10 +3132,12 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
     let listing = listProjectFiles(tab.folder)
     if listing.files.len == 0:
       return "no source files under " & tab.folder
-    let preference = loadKeymapPreference()
+    let preference = sessionKeymap(gOpenCmd.keymap)
     arm = newGpuiEditArm(tab.folder, listing.files[0],
                          readProjectFile(tab.folder, listing.files[0]),
                          preference.model)
+    if preference.status in {kplRefused, kplMigrated}:
+      arm.status = preference.message
     gFolderArms[tab.serial] = arm
   if gMainShell.isNil:
     gMainShell = gShell
@@ -3415,6 +3427,20 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
 
 proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   traceGesture("menu action " & action)
+  # PLAT-68: the palette's **Preferences: Select Base Keymap** — every open
+  # editor re-keyed (text and history kept), and the choice remembered in
+  # the preference both native hosts read.
+  let base = parseBaseKeymapCommand(action)
+  if base.ok:
+    if not openArm.isNil:
+      openArm.doc.switchModel(base.model)
+    for arm in gFolderArms.values:
+      arm.doc.switchModel(base.model)
+    let saved = saveKeymapPreference(base.model)
+    traceGesture("keymap " & $base.model &
+                 (if saved.len > 0: " (" & saved & ")" else: ""))
+    discard drawArrangement(r)
+    return
   # PLAT-51: the omnibox's layout-setting commands — the focus highlight and
   # live resize, for this window and remembered (`gpui-preferences`).
   let setting = parseSettingCommandTarget(action)
@@ -5624,11 +5650,11 @@ proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
   # `loadKeymapPreference` the terminal reads (PLAT-43's GPUI half: one
   # selector, two front-ends). A refused stored value is shown as the notice
   # and the product default runs, exactly as in the terminal.
-  let preference = loadKeymapPreference()
+  let preference = sessionKeymap(cmd.keymap)
   openArm = newGpuiEditArm(cmd.traceFolder, relative,
                            readProjectFile(cmd.traceFolder, relative),
                            preference.model)
-  if preference.status == kplRefused:
+  if preference.status in {kplRefused, kplMigrated}:
     openArm.status = preference.message
   editViewportRows = rows
   gEditorTab = editorTabLabel(openArm.path, openArm.isDirty)

@@ -131,7 +131,7 @@ type
     ## because no suite compiles this module.
     running: RunningBuild
 
-proc wireEditServices(rt: TuiRuntime; root: string;
+proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
                       listFiles: proc(): EditListResult): EditHostState =
   ## Hand `rt` the four capabilities `app/` may not have: read a file, write a
   ## file, list the project, start a process.
@@ -178,14 +178,20 @@ proc wireEditServices(rt: TuiRuntime; root: string;
   # through. A stored value that is not a model is REFUSED BY NAME on the
   # status line and the session runs the product default — never a silent
   # fallback a user cannot tell from a working preference.
-  let keymapPreference = loadKeymapPreference()
+  #
+  # PLAT-68: precedence is the `--keymap` flag (this session only, never
+  # stored), then the stored preference, then `cua` (Base-Keymaps §3.6). A
+  # stored `default` — PLAT-43's name for the product default — is read as
+  # `cua` and rewritten, and the notice says so once.
+  let keymapPreference = sessionKeymap(keymapFlag)
   rt.keymapModel = keymapPreference.model
+  rt.keymapReason = keymapPreference.reason
   if not rt.app.editSession.isNil:
-    rt.app.editSession.selectModel(keymapPreference.model)
-  if keymapPreference.status == kplRefused:
+    rt.app.editSession.selectModel(rt.keymapModel)
+  if keymapPreference.status in {kplRefused, kplMigrated}:
     rt.keymapNotice = keymapPreference.message
     rt.app.notification = keymapPreference.message
-  rt.editServices.saveKeymap = proc(model: KeymapModel): string =
+  rt.editServices.saveKeymap = proc(model: BaseKeymap): string =
     saveKeymapPreference(model)
   rt.editServices.startBuild = proc(kind: BuildKind;
                                     cmd: string): BuildStartResult =
@@ -410,8 +416,28 @@ proc themeSwitch(negotiation: StartupNegotiation; driver: TerminalDriver;
     if not known or theme == utPlain:
       return false
     discard negotiation.switchTheme(driver, theme)
-    rt.caps = negotiation.caps
+    rt.adoptCaps(negotiation.caps)
     true
+
+proc reportCapabilities(flags: CapabilityFlags): int =
+  ## PLAT-68: `--capabilities`. The negotiation a session runs — the
+  ## environment, then the start-up query round on the claimed terminal — and
+  ## its result printed after the terminal is given back: one line per
+  ## `describe`, then the status line's notes (the tmux remedies among them).
+  let caps = negotiateCapabilities(flags)
+  if not stdoutIsTerminal():
+    echo describe(caps)
+    return ExitOk
+  let driver = newTerminalDriver(caps)
+  var negotiated = caps
+  driver.start()
+  try:
+    negotiated = driver.negotiateOnTerminal(flags).caps
+  finally:
+    driver.stop()
+  echo describe(negotiated)
+  echo capabilityNote(negotiated)
+  ExitOk
 
 proc interactive(command: TuiCommand): int =
   ## Open a trace and run the loop until the user quits or the terminal goes
@@ -514,8 +540,10 @@ proc interactive(command: TuiCommand): int =
   let projectRoot = getCurrentDir()
   app.projectRoot = projectRoot
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  rt.eraseByte = driver.eraseByte()
   rt.themeService = themeSwitch(negotiation, driver, rt)
-  let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =
+  let edit = wireEditServices(rt, projectRoot, command.keymap,
+                              proc(): EditListResult =
     let listing = listProjectFiles(rt.app.projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
@@ -934,7 +962,7 @@ proc interactive(command: TuiCommand): int =
       if wasReply:
         adoptMouseMetrics(driver, negotiation)
         if changed:
-          rt.caps = negotiation.caps
+          rt.adoptCaps(negotiation.caps)
           app.notification = capabilityNote(negotiation.caps)
           paint(driver, rt)
         continue
@@ -1092,6 +1120,7 @@ proc editInteractive(command: TuiCommand): int =
   app.projectRoot = root
 
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
+  rt.eraseByte = driver.eraseByte()
   rt.themeService = themeSwitch(negotiation, driver, rt)
   rt.dispatcher.services.setTheme = rt.themeService
 
@@ -1102,7 +1131,8 @@ proc editInteractive(command: TuiCommand): int =
   # again, which is how the "before the terminal is claimed" ordering above
   # survives being routed through a function the replay loop also uses. The
   # walk happened on the ordinary screen; this hands back its answer.
-  let edit = wireEditServices(rt, root, proc(): EditListResult =
+  let edit = wireEditServices(rt, root, command.keymap,
+                              proc(): EditListResult =
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
   wireLayoutPreferences(rt, soUnset, soUnset)
@@ -1158,7 +1188,7 @@ proc editInteractive(command: TuiCommand): int =
       if wasReply:
         adoptMouseMetrics(driver, negotiation)
         if changed:
-          rt.caps = negotiation.caps
+          rt.adoptCaps(negotiation.caps)
           app.notification = capabilityNote(negotiation.caps)
           paint(driver, rt)
         continue
@@ -1225,6 +1255,8 @@ proc run(args: seq[string]): int =
     except TuiHostError as e:
       stderr.writeLine(TuiProgramName & ": " & e.msg)
       ExitUsage
+  of tckCapabilities:
+    reportCapabilities(command.flags)
 
 when isMainModule:
   # The ONLY `quit` in the entrypoint, and it is reached on every path. An

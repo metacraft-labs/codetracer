@@ -169,6 +169,10 @@ type
     caLine1Early, caDocCluster2, caTransposeCaret, caDisplayCaret
     spLine0Clusters, spCamelWord, spLine2Indented, spLines0to2
     spCommentedLine, spBlockComment
+    spNeedle
+      ## PLAT-68: the search needle (`seg(2, 2)`, which the frame writes on
+      ## lines 6, 10 and 14) selected at its line-6 occurrence — what the
+      ## match commands search for, with a next match guaranteed.
     twoCarets
 
   Prep* = enum
@@ -187,6 +191,15 @@ type
     prFolded
     prPending
     prInsertMode
+    prClipboard
+      ## PLAT-68: the clipboard register `+` holds text, so a paste has
+      ## something to insert.
+    prKill
+      ## PLAT-68: the kill ring's newest entry (`kill-0`) holds text.
+    prYanked
+      ## PLAT-68: the state right after a `yank` — the last change was a yank,
+      ## the caret is where it left it, and the ring holds two kills — so a
+      ## `yank-pop` has an older kill to rotate in.
     prSearchBackward
       ## The search direction starts BACKWARD. `search-forward` sets it
       ## forward, and from a state that is already forward it has nothing to
@@ -231,6 +244,8 @@ type
     ckUpperCased, ckLowerCased
     ckCommented, ckUncommented
     ckIndented
+    ckClipboardChanged    ## PLAT-68: the clipboard register `+` changed
+    ckKillChanged         ## PLAT-68: the kill ring's newest entry changed
 
   LandmarkKind* = enum
     lkNone, lkDocStart, lkDocEnd, lkLine2Start, lkMark, lkJumpPrev,
@@ -559,6 +574,7 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
     sp("line-uncomment", spCommentedLine, {ckDocShrank, ckUncommented}),
     sp("block-comment", spLine0Clusters, {ckDocGrew}),
     sp("block-uncomment", spBlockComment, {ckDocShrank}),
+    sp("toggle-block-comment", spLine0Clusters, {ckDocGrew}),
     sp("upper-case", spCamelWord, {ckDocChanged, ckUpperCased}),
     sp("lower-case", spCamelWord, {ckDocChanged, ckLowerCased}),
     sp("swap-case", spCamelWord, {ckDocChanged}),
@@ -601,6 +617,8 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
     sp("select-all", caLine0Mid, {ckSelectionChanged}),
     sp("select-line", caLine1Mid, {ckSelectionChanged}),
     sp("select-parent-syntax", caParensInner, {ckSelectionChanged}, {prFresh}),
+    sp("select-child-syntax", spLine0Clusters, {ckSelectionChanged}, {prFresh}),
+    sp("expand-line-selection", caLine1Mid, {ckSelectionChanged}),
     sp("simplify-selection", spLine0Clusters, {ckSelectionChanged}),
     sp("collapse-to-cursors", spLine0Clusters, {ckSelectionChanged}),
     sp("flip-selections", spLine0Clusters, {ckSelectionChanged}),
@@ -618,6 +636,14 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
        {ckSelectionChanged, ckRangeCountUp}),
     sp("remove-primary-cursor", twoCarets, {ckSelectionChanged, ckRangeCountDown}),
     sp("rotate-primary-cursor", twoCarets, {ckPrimaryMoved}),
+    sp("select-all-matches", spNeedle, {ckSelectionChanged, ckRangeCountUp}),
+    sp("move-last-cursor-to-next-match", spNeedle, {ckSelectionChanged}),
+    sp("add-cursor-at-point", caLine0Mid, {ckRangeCountUp},
+       args = OpArgs(number: 0)),
+
+    sp("clipboard-cut", spLine0Clusters, {ckDocMinusSelection, ckClipboardChanged}),
+    sp("clipboard-copy", spLine0Clusters, {ckClipboardChanged}),
+    sp("clipboard-paste", spLine0Clusters, {ckDocChanged}, {prClipboard}),
 
     sp("undo", caLine0Mid, {ckDocChanged, ckRedoGrew}, {prUndo}),
     sp("redo", caLine0Mid, {ckDocChanged, ckUndoGrew}, {prRedo}),
@@ -665,6 +691,17 @@ proc scenarioSpecs*(): seq[ScenarioSpec] =
     sp("fold-all", caLine1Mid, {ckFoldChanged}),
     sp("unfold-all", caLine1Mid, {ckFoldChanged}, {prFolded}),
     sp("toggle-fold", caLine1Mid, {ckFoldChanged}),
+    sp("fold-recursively", caLine1Mid, {ckFoldChanged}),
+    sp("unfold-recursively", caLine1Mid, {ckFoldChanged}, {prFolded}),
+
+    sp("set-mark", spLine0Clusters, {ckSelectionChanged, ckModeChanged}),
+    sp("deactivate-mark", spLine0Clusters, {ckSelectionChanged, ckModeInsert}),
+    sp("exchange-point-and-mark", spLine0Clusters, {ckSelectionChanged}),
+    sp("kill-line", caLine1Mid, {ckDocShrank, ckKillChanged}),
+    sp("kill-region", spLine0Clusters, {ckDocMinusSelection, ckKillChanged}),
+    sp("copy-region", spLine0Clusters, {ckKillChanged, ckSelectionChanged}),
+    sp("yank", caLine0Mid, {ckDocGrew}, {prKill}),
+    sp("yank-pop", caLine0Mid, {ckDocChanged, ckKillChanged}, {prYanked}),
 
     sp("toggle-breakpoint", caLine1Mid, {ckMarkerChanged}),
     sp("toggle-tracepoint", caLine1Mid, {ckMarkerChanged}),
@@ -730,6 +767,7 @@ proc selectionFor*(d: ScenarioDoc; at: CaretAt): EditorSelection =
   of spLines0to2: singleSelection(m.multiFrom, m.multiTo)
   of spCommentedLine: singleSelection(m.commentedFrom, m.commentedTo)
   of spBlockComment: singleSelection(m.blockFrom, m.blockTo)
+  of spNeedle: singleSelection(m.needleAt, m.needleAt + m.needle.len)
   of twoCarets: editorSelection(@[caret(m.line0Mid), caret(m.line2Mid)], 0)
 
 proc scenarioFor*(d: ScenarioDoc; spec: ScenarioSpec): Scenario =
@@ -748,6 +786,17 @@ proc scenarioFor*(d: ScenarioDoc; spec: ScenarioSpec): Scenario =
   if prRegister in spec.preps:
     st.setRegister("", Register(text: "PASTED", kind: rkCharwise))
   if prMacro in spec.preps: st.macros["m"] = @["insert-newline"]
+  if prClipboard in spec.preps:
+    st.setRegister(ClipboardRegister, Register(text: "CLIP", kind: rkCharwise))
+  if prKill in spec.preps:
+    st.setRegister("kill-0", Register(text: "KILLED", kind: rkCharwise))
+  if prYanked in spec.preps:
+    let at = st.selection.mainRange.head
+    st.setRegister("kill-0", Register(text: "NEWER", kind: rkCharwise))
+    st.setRegister("kill-1", Register(text: "OLDER", kind: rkCharwise))
+    st.lastChange = @["yank"]
+    st.marks["yank-start"] = at
+    st.marks["yank-end"] = at
   if prLastChange in spec.preps: st.lastChange = @["insert-newline"]
   # ==========================================================================
   # THE FOUR HISTORY PREPS ARE BUILT BY RUNNING THE HISTORY, NOT BY ASSIGNING

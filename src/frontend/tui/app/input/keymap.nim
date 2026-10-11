@@ -385,10 +385,11 @@ const
 # Canonical key names — MOVED, not deleted
 # ---------------------------------------------------------------------------
 #
-# `FunctionKeyCodes`, `ModifierNames`, `isPrintableKey`, `keyCharacter`,
-# `isTextKey` and `keyName` now live in `src/common/key_names.nim` and are
-# re-exported by the import above, so every call site here and in every
-# consumer of this module reads exactly as it did.
+# The byte decoder (`keyName`), the one modifier spelling (`chordName`, since
+# PLAT-68) and the text-entry predicate (`isPrintableKey`, `keyCharacter`,
+# `isTextKey`) live in `src/common/key_names.nim` and are re-exported by the
+# import above, so every call site here and in every consumer of this module
+# reads exactly as it did.
 #
 # WHY THEY MOVED, IN ONE SENTENCE: PLAT-31's editing keymap has to ask the same
 # text-entry question of the same key names, and the alternative to sharing the
@@ -568,6 +569,10 @@ proc defaultKeymap*(): Keymap =
   # Pane Navigation
   r.add b(mmNormal, "Tab", kaFocusNextPane)
   r.add b(mmNormal, "Shift+Tab", kaFocusPrevPane)
+  # PLAT-68: VS Code's `F6` / `Shift+F6` beside them — the way out of a
+  # buffer under the CUA base, where `Tab` indents (CUA-Keymap.md §3.7).
+  r.add b(mmNormal, "F6", kaFocusNextPane)
+  r.add b(mmNormal, "Shift+F6", kaFocusPrevPane)
   r.add b(mmNormal, "Ctrl+w h", @["Ctrl+w", "h"], kaFocusLeft)
   r.add b(mmNormal, "Ctrl+w j", @["Ctrl+w", "j"], kaFocusDown)
   r.add b(mmNormal, "Ctrl+w k", @["Ctrl+w", "k"], kaFocusUp)
@@ -626,6 +631,10 @@ proc defaultKeymap*(): Keymap =
   # Search and Palette
   r.add b(mmNormal, "Ctrl+p", kaCommandPalette)
   r.add b(mmNormal, "F1", kaCommandPalette)
+  # PLAT-68: VS Code's `Ctrl+Shift+P` beside `F1` — under the CUA base `:`
+  # types a colon, so the palette is how a buffer reaches `:w`, `:build` and
+  # `:keymap` (CodeTracer-TUI-Edit-Mode.md §3.1 as amended).
+  r.add b(mmNormal, "Ctrl+Shift+p", kaCommandPalette)
   r.add b(mmNormal, "/", kaSearchForward)
   r.add b(mmNormal, "?", kaSearchBackward)
   # Command Mode
@@ -766,7 +775,7 @@ proc hasPrefix(km: Keymap; mode: ModalMode; chords: seq[string]): bool =
 
 proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
               token: string; nowMs: int64;
-              product = pmDebug): KeyResolution =
+              product = pmDebug; eraseByte = '\x7f'): KeyResolution =
   ## Turn one input token into an action, a pending prefix, or a character.
   ##
   ## `nowMs` is passed in rather than read, which is what makes the bounded
@@ -787,7 +796,7 @@ proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
   ## what lets `test_modal_transitions.nim`'s whole (context x event) sweep
   ## stay a statement about the INPUT machine, unperturbed by a dimension it is
   ## not about.
-  let name = keyName(token)
+  let name = keyName(token, eraseByte)
   result = KeyResolution(kind: krNone, action: kaNone, reason: "",
                          spelling: "", key: name, pending: "", character: "")
   if name.len == 0:

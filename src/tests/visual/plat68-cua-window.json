@@ -1,0 +1,83 @@
+{
+ "takenAt": "2026-10-11T05:53:53.723821+00:00",
+ "host": "gpu-server-001",
+ "binary": "codetracer-gpui-window",
+ "rc": 0,
+ "elapsedMs": 23716,
+ "endedOnDeadline": false,
+ "original": "alpha\n    beta\ngamma\n",
+ "onDisk": "xyalphaalp\ngamma\n",
+ "expected": "xyalphaalp\ngamma\n",
+ "keys": [
+  {
+   "gpui": "x",
+   "name": "x",
+   "outcome": "changed"
+  },
+  {
+   "gpui": "y",
+   "name": "y",
+   "outcome": "changed"
+  },
+  {
+   "gpui": "right",
+   "name": "Shift+Right",
+   "outcome": "moved"
+  },
+  {
+   "gpui": "right",
+   "name": "Shift+Right",
+   "outcome": "moved"
+  },
+  {
+   "gpui": "right",
+   "name": "Shift+Right",
+   "outcome": "moved"
+  },
+  {
+   "gpui": "c",
+   "name": "Ctrl+c",
+   "outcome": "moved"
+  },
+  {
+   "gpui": "end",
+   "name": "End",
+   "outcome": "moved"
+  },
+  {
+   "gpui": "v",
+   "name": "Ctrl+v",
+   "outcome": "changed"
+  },
+  {
+   "gpui": "z",
+   "name": "Ctrl+z",
+   "outcome": "changed"
+  },
+  {
+   "gpui": "y",
+   "name": "Ctrl+y",
+   "outcome": "changed"
+  },
+  {
+   "gpui": "down",
+   "name": "Down",
+   "outcome": "moved"
+  },
+  {
+   "gpui": "k",
+   "name": "Ctrl+Shift+k",
+   "outcome": "changed"
+  },
+  {
+   "gpui": "s",
+   "name": "Ctrl+s",
+   "outcome": "moved"
+  },
+  {
+   "gpui": "f12",
+   "name": "F12",
+   "outcome": "ignored"
+  }
+ ]
+}

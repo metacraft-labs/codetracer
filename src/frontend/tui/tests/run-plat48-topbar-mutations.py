@@ -514,9 +514,11 @@ ARMS = [
         "  r.add b(mmNormal, \"g t\", @[\"g\", \"t\"], kaPrevSessionTab)\n",
         T_TABKEYS,
         "`g t` steps to the PREVIOUS session tab"),
+    # TK2 RE-AIMED 2026-10-11 (PLAT-68): `key_names` decodes the whole Kitty
+    # `CSI u` form now, not TAB and ENTER only; the defect is planted on TAB.
     Arm("TK2", KEYNAMES,
-        "    if parts.len == 2 and parts[0] in [\"9\", \"13\"]:\n",
-        "    if false:\n",
+        "    if not ok: return NoKey\n    return decoded(mods, codepointKey(code))\n",
+        "    if not ok or code == 9: return NoKey\n    return decoded(mods, codepointKey(code))\n",
         T_TABKEYS,
         "the `CSI u` spelling of Ctrl+Tab is not a key: the terminals that "
         "report Ctrl+Tab that way cannot step the tabs"),

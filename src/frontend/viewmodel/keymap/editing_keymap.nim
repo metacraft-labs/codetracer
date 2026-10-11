@@ -124,24 +124,30 @@ import std/[algorithm, strutils, tables]
 
 import ../editor/operations
 import ../viewmodels/product_mode
+import ./when_expr
 
 import ../../../common/key_names
 
 export operations
 export key_names
+export when_expr
 # `ProductMode` from the module that OWNS it (PLAT-16), not a second
 # two-member enum of this module's own. §4.3's first scope dimension is
 # "the existing `ActionScope`", and the existing one is this.
 export product_mode
 
 type
-  KeymapModel* = enum
-    ## §4.2: *"a keymap MODEL (Vim, Kakoune, or the product default) is a set of
-    ## defaults for that table"*. The fifth scope dimension, and the one the
-    ## differential axis is about.
-    kmProductDefault = "default"
-    kmVim = "vim"
-    kmKakoune = "kakoune"
+  BaseKeymap* = enum
+    ## Base-Keymaps-And-Layer-Stack.md §3.1: *"`BaseKeymap = cua (default) |
+    ## emacs | vim | kakoune`"* — PLAT-31's `KeymapModel` renamed and widened,
+    ## not joined by a second enum. One base is active at a time and it is
+    ## chosen whole (§3.3, no hybrids). The fifth scope dimension, and the one
+    ## the differential axis is about. CUA is first because it is the default
+    ## (`BaseKeymap.low`).
+    bkCua = "cua"
+    bkEmacs = "emacs"
+    bkVim = "vim"
+    bkKakoune = "kakoune"
 
   EditingPane* = enum
     ## §4.3's second dimension: *"the editor has focus, or another pane does"*.
@@ -162,11 +168,15 @@ type
     ## reads it off `modal_state.isTextEntry` and a web front-end off whatever
     ## its focused widget says. What this module owns is what the flag MEANS,
     ## which is `keyCharacter` and nothing else.
-    model*: KeymapModel
+    model*: BaseKeymap
     product*: ProductMode
     pane*: EditingPane
     mode*: EditingMode
     textEntry*: bool
+    context*: ContextKeys
+      ## PLAT-68: the context keys a binding's `when` reads
+      ## (`context_keys.editorContextKeys`, the one function every front-end
+      ## calls). A binding with no `when` never reads it.
 
   BindingScope* = object
     ## The scope a BINDING claims. An empty set means "every value of this
@@ -175,12 +185,21 @@ type
     modes*: set[EditingMode]
     products*: set[ProductMode]
     panes*: set[EditingPane]
+    whenText*: string
+      ## PLAT-68: the row's `when`, as written (Base-Keymaps §4.1); `""` is
+      ## always. Kept beside the parsed form because the oracle compares the
+      ## TEXT with CUA-Keymap.md's cell.
+    cond*: WhenExpr
+      ## `whenText` parsed once, when the table is built. Nil is always.
+    platforms*: set[PlatformKind]
+      ## The platforms the row holds on — a VS Code `linux:` / `win:` /
+      ## `mac:` override (CUA-Keymap.md §2). Empty means every platform.
 
   EditingBinding* = object
     ## One row. `operation` is a name from PLAT-30's 224 and is checked against
     ## it — never an enum of this module's own, which is the whole point of
     ## there being a vocabulary.
-    model*: KeymapModel
+    model*: BaseKeymap
     scope*: BindingScope
     chords*: seq[string]
     operation*: string
@@ -270,7 +289,7 @@ type
   KeymapDefinition* = object
     ## A model's bindings AND the claim they are graded against, as one value,
     ## so neither can be read without the other.
-    model*: KeymapModel
+    model*: BaseKeymap
     keymap*: EditingKeymap
     filed*: seq[FiledDeclaration]
 
@@ -298,10 +317,23 @@ type
 const
   EditingPendingTimeoutMs* = PendingTimeoutMsDefault
     ## Read from `editor_state.nim` rather than re-spelled. Vim's own
-    ## `timeoutlen`, and the same value `tui/app/input/keymap.nim` uses for the
-    ## debugger's prefixes — two prefixes with two timeouts would be a product
-    ## that waits different lengths for `Ctrl+w` and for `g`.
+    ## `timeoutlen` — the timeout the Vim and Kakoune bases carry
+    ## (`pendingTimeoutOf`), and the same value `tui/app/input/keymap.nim`
+    ## uses for the debugger's prefixes.
 
+  NoPendingTimeout* = -1'i64
+    ## A base whose prefixes wait until the next key or `Esc` (§3.7).
+
+func pendingTimeoutOf*(base: BaseKeymap): int64 =
+  ## Base-Keymaps-And-Layer-Stack.md §3.7: **the timeout is a property of the
+  ## base.** VS Code waits on `Ctrl+K` and Emacs on `C-x` until the next key;
+  ## Vim's `timeoutlen` is PLAT-31's measured 1000 ms. One `case`, total over
+  ## the enum, so a fifth base must say which it is.
+  case base
+  of bkCua, bkEmacs: NoPendingTimeout
+  of bkVim, bkKakoune: EditingPendingTimeoutMs
+
+const
   CommandBuildingOperations* = [
     ## **THE OPERATIONS THAT DO NOT COMPLETE A COMMAND**, and therefore do not
     ## clear the transient modal registers. Each one is a user part-way through
@@ -326,12 +358,20 @@ const
 # THE SCOPE
 # ===========================================================================
 
+func platformOf(c: ContextKeys): PlatformKind =
+  for p in PlatformKind:
+    if $p == c.values[ckPlatform]: return p
+  pkLinux
+
 func admits*(bs: BindingScope; scope: EditingScope): bool =
   ## Whether a binding claiming `bs` is live in `scope`. An empty set is
-  ## "every value", which is what keeps the common row one row.
+  ## "every value", which is what keeps the common row one row; a nil `cond`
+  ## is "always".
   (bs.modes == {} or scope.mode in bs.modes) and
     (bs.products == {} or scope.product in bs.products) and
-    (bs.panes == {} or scope.pane in bs.panes)
+    (bs.panes == {} or scope.pane in bs.panes) and
+    (bs.platforms == {} or platformOf(scope.context) in bs.platforms) and
+    evalWhen(bs.cond, scope.context)
 
 # **`anyScope()` AND `inModes()` WERE HERE AND ARE DELETED.** They were
 # convenience constructors for a `BindingScope` that nothing ever called: both
@@ -436,7 +476,9 @@ proc resolve*(t: EditingTrie; st: EditorState; scope: EditingScope;
   ## without a sleep.
   var pending = st.pending
   var timedOut = false
-  if pending.chords.len > 0 and nowMs - pending.startedMs > EditingPendingTimeoutMs:
+  let timeout = pendingTimeoutOf(scope.model)
+  if pending.chords.len > 0 and timeout != NoPendingTimeout and
+     nowMs - pending.startedMs > timeout:
     # CHECKED BEFORE THE KEY IS INTERPRETED, so a key that arrives late is read
     # on its own terms rather than as the second half of a prefix the user has
     # long forgotten.
@@ -675,7 +717,7 @@ const
     "cancel-operator",
   ]
 
-proc reachableOperations*(km: EditingKeymap; model: KeymapModel): seq[string] =
+proc reachableOperations*(km: EditingKeymap; model: BaseKeymap): seq[string] =
   ## Every operation name `model` can produce, ascending and distinct. The set
   ## `DIFF-4`'s sharper half compares.
   result = @[]
@@ -721,7 +763,7 @@ proc coverageOverlaps*(def: KeymapDefinition): seq[string] =
   for name in filedOperations(def):
     if name in reachable: result.add name
 
-proc unpublishedOperations*(km: EditingKeymap; model: KeymapModel): seq[string] =
+proc unpublishedOperations*(km: EditingKeymap; model: BaseKeymap): seq[string] =
   ## Every reachable operation that is NOT one of PLAT-30's 224. **A
   ## keymap-private operation is a red gate**, and this is what makes that
   ## statement mechanical rather than a promise.
@@ -748,10 +790,10 @@ proc unpublishedOperations*(km: EditingKeymap; model: KeymapModel): seq[string] 
 # for the reason the milestone gives — the loader, the reporting rule and the
 # unbind spelling already exist and would have been written twice.
 
-proc parseModelName(s: string): (bool, KeymapModel) =
-  for m in KeymapModel:
+proc parseModelName(s: string): (bool, BaseKeymap) =
+  for m in BaseKeymap:
     if cmpIgnoreCase($m, s) == 0: return (true, m)
-  (false, kmProductDefault)
+  (false, bkCua)
 
 proc parseEditingModeName(s: string): (bool, EditingMode) =
   for m in EditingMode:
@@ -790,7 +832,7 @@ proc argsFor(decl: Declaration; raw: string): (bool, OpArgs) =
     a.operator = raw
   (true, a)
 
-proc unbind(km: var EditingKeymap; model: KeymapModel; modes: set[EditingMode];
+proc unbind(km: var EditingKeymap; model: BaseKeymap; modes: set[EditingMode];
             chords: seq[string]) =
   var kept: seq[EditingBinding] = @[]
   for b in km.bindings:

@@ -69,7 +69,7 @@ type
     txRedo = "redo"
 
   KeyTx = object
-    model: KeymapModel
+    model: BaseKeymap
     arrange: seq[string]
       ## Keys applied BEFORE the before-snapshot (PLAT-34's `arrangeTx`
       ## lesson: an undo whose edit sits inside the window measures nothing).
@@ -84,32 +84,32 @@ const TxKindCount = 8
 proc keyTx(kind: TxKind): KeyTx =
   case kind
   of txInsertChar:
-    KeyTx(model: kmProductDefault, keys: @["X"],
+    KeyTx(model: bkCua, keys: @["X"],
           named: @[("insert-text", OpArgs(text: "X"))])
   of txInsertNewline:
     # Split mid-line, so the new line has text to find: at column 0 the
     # split's only visible product is an empty line (measured: the first run
     # found nothing to look for).
-    KeyTx(model: kmProductDefault, arrange: @["Right", "Right", "Right"],
+    KeyTx(model: bkCua, arrange: @["Right", "Right", "Right"],
           keys: @["Enter"], named: @[("insert-newline", OpArgs())])
   of txDeleteBackward:
-    KeyTx(model: kmProductDefault, arrange: @["Right"], keys: @["Backspace"],
+    KeyTx(model: bkCua, arrange: @["Right"], keys: @["Backspace"],
           named: @[("delete-char-backward", OpArgs())])
   of txDeleteSelection:
-    KeyTx(model: kmKakoune, keys: @["w", "d"],
+    KeyTx(model: bkKakoune, keys: @["w", "d"],
           named: @[("select-group-right", OpArgs()),
                    ("delete-selection", OpArgs())])
   of txIndentSelection:
-    KeyTx(model: kmKakoune, keys: @["X", ">"],
+    KeyTx(model: bkKakoune, keys: @["X", ">"],
           named: @[("select-line", OpArgs()), ("indent-selection", OpArgs())])
   of txUpperCaseSelection:
-    KeyTx(model: kmKakoune, keys: @["w", "~"],
+    KeyTx(model: bkKakoune, keys: @["w", "~"],
           named: @[("select-group-right", OpArgs()), ("upper-case", OpArgs())])
   of txUndo:
-    KeyTx(model: kmProductDefault, arrange: @["X"], keys: @["Ctrl+z"],
+    KeyTx(model: bkCua, arrange: @["X"], keys: @["Ctrl+z"],
           named: @[("undo", OpArgs())])
   of txRedo:
-    KeyTx(model: kmProductDefault, arrange: @["X", "Ctrl+z"],
+    KeyTx(model: bkCua, arrange: @["X", "Ctrl+z"],
           keys: @["Ctrl+y"], named: @[("redo", OpArgs())])
 
 proc gpuiSpelling(name: string): (string, seq[string]) =

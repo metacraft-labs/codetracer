@@ -1,0 +1,11 @@
+{
+  "D1": "onDisk == expected",
+  "D2": "keyName(bytes) == want",
+  "D3": "keyName(\"\\b\", '\\b') == \"Backspace\"",
+  "M1": "stored.ok",
+  "O1": "missing.len == 0",
+  "O2": "NOT REPRODUCED: \u00a73.3 linux: `Ctrl+Shift+j` -> `editor.action.deleteLines` is not VS Code's on linux (VS Code binds ['Ctrl+Shift+k'])",
+  "R1": "bytes.find(off, enabledAt) > enabledAt",
+  "T1": "pendingTimeoutOf(bkCua) == NoPendingTimeout",
+  "W1": "Error: unhandled exception: cua: duplicate Esc: keep-primary-selection / simplify-selection; duplicate Shift+Esc: keep-primary-selection / simplify-selection; duplicate Tab: insert-tab / indent-selection [BaseRowError]"
+}

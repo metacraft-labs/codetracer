@@ -72,12 +72,13 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it owns the tty.".}
 
-import std/[monotimes, os, posix, strutils, times, unicode]
+import std/[monotimes, os, posix, strutils, termios, times, unicode]
 
 import isonim_tui
 import nim_termctl
 
 import ../app/input/modal_state
+import ../../../common/key_names
 import ../app/theme/degradation
 import ../app/views/styled_row
 import ../app/views/frame_overlay
@@ -210,7 +211,12 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       # every other one as the character alone (`runtime.handleToken`), which
       # is what this framer delivered before it framed Alt at all — so a `q`
       # after a stray escape still quits.
-      if b > ' ' and b <= '~':
+      #
+      # The same holds for `ESC` + a C0 control byte or DEL: Ctrl+Alt+<letter>
+      # (`ESC 0x01`), Alt+Backspace (`ESC 0x7f`), Alt+Enter (`ESC CR`). Only
+      # `ESC ESC` keeps the old reading — one `Esc` — because a second `ESC`
+      # is the start of whatever comes next, not a modifier on it.
+      if (b >= ' ' and b <= '~') or b == '\x7f' or (b < ' ' and b != Esc):
         let alt = Esc & $b
         f.reset()
         return (true, alt)
@@ -464,6 +470,10 @@ type
       ## PLAT-51: `?1016h` was sent (`enablePixelMouse`).
     altOwned: bool
     rawOwned: bool
+    keyReporting: KeyReporting
+      ## PLAT-68: the extended key reporting `caps.keyProtocol` negotiated,
+      ## enabled on the alternate screen; `nim-termctl` undoes it on every
+      ## exit path (`stop`, a signal, `atexit`).
 
 proc newTerminalDriver*(caps: TerminalCapabilities;
                         inFd: cint = STDIN_FILENO;
@@ -478,15 +488,48 @@ proc newTerminalDriver*(caps: TerminalCapabilities;
                  started: false, mouseOwned: false, altOwned: false,
                  rawOwned: false)
 
+proc eraseByte*(d: TerminalDriver): char =
+  ## The byte this terminal sends for Backspace — termios `VERASE`, as the
+  ## driver saved it before raw mode — which `key_names.keyName` needs to tell
+  ## Backspace from Ctrl+Backspace. xterm's `0x7f` when there is no tty.
+  if d.rawOwned:
+    let b = char(d.rawMode.saved.c_cc[VERASE])
+    if b in {'\x7f', '\b'}: return b
+  '\x7f'
+
+proc applyKeyProtocol(d: TerminalDriver) =
+  ## Bring the terminal's key reporting to `caps.keyProtocol`, on a started
+  ## driver: undo what is on if it differs, then ask for what was negotiated.
+  ## Legacy asks for nothing.
+  if not d.started or not d.altOwned:
+    return
+  let want = case d.caps.keyProtocol
+             of kpKitty: 1
+             of kpModifyOtherKeys: 2
+             of kpLegacy, kpNative: 0
+  let have = if not d.keyReporting.active: 0
+             elif d.keyReporting.mode == krmKitty: 1
+             else: 2
+  if want == have:
+    return
+  if d.keyReporting.active:
+    disableKeyReporting(d.keyReporting)
+  case want
+  of 1: d.keyReporting = enableKeyReporting(krmKitty, d.outFd)
+  of 2: d.keyReporting = enableKeyReporting(krmModifyOtherKeys, d.outFd)
+  else: discard
+
 proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
   ## PLAT-46. Replace the negotiated capabilities after the start-up query
   ## round answered — a 24-bit terminal behind a conservative `TERM`, or a
   ## light background — and forget what the terminal is showing, so the next
   ## frame is a full one painted in the new colours rather than a diff against
-  ## cells painted in the old.
+  ## cells painted in the old. PLAT-68: and put the terminal's key reporting
+  ## on the protocol the round decided.
   d.caps = caps
   d.emitter.caps = caps
   d.emitter.reset()
+  d.applyKeyProtocol()
 
 proc expectReplies*(d: TerminalDriver; on: bool) =
   ## Whether `ESC ]` / `ESC P` / `ESC _` begin a terminal's reply string. On
@@ -540,14 +583,12 @@ proc start*(d: TerminalDriver) =
     # controls shows each one's tooltip and key; a report over anything else
     # is dropped without a frame.
     writeAll(d.outFd, MotionTrackingOnBytes)
-  # NOTHING IS SENT FOR THE KITTY KEYBOARD PROTOCOL OR FOR modifyOtherKeys,
-  # on a terminal that advertises either. See
-  # `app/theme/capabilities.TerminalCapabilities.kittyKeyboard`: both change
-  # every key's encoding, `app/input/keymap.keyName` decodes xterm's classic
-  # one, and a driver that switched encodings without a decoder would make
-  # §4.2's function keys unreachable on exactly the terminals users choose for
-  # their key handling.
   d.started = true
+  # PLAT-68: EXTENDED KEY REPORTING IS NOT ASKED FOR HERE. Until the start-up
+  # round has run, `caps.keyProtocol` is the environment's guess; the round
+  # (`terminal_probe.negotiateOnTerminal`) asks the terminal, and its
+  # `adoptCapabilities` turns on what the terminal answered — on the
+  # alternate screen this has just entered, which the Kitty flag stack needs.
 
 const
   PixelMouseOnBytes* = "\x1b[?1016h"
@@ -569,8 +610,12 @@ proc stop*(d: TerminalDriver) =
   ## `start`.
   ##
   ## The same order `nim-termctl`'s signal handler uses, so a clean exit and a
-  ## SIGTERM leave the terminal in the same state: mouse off, alternate screen
-  ## left, cursor shown, termios restored last.
+  ## SIGTERM leave the terminal in the same state: key reporting undone, mouse
+  ## off, alternate screen left, cursor shown, termios restored last.
+  if d.keyReporting.active:
+    # Before the alternate screen is left: the Kitty pop must reach the
+    # screen its push was made on.
+    disableKeyReporting(d.keyReporting)
   if d.pixelMouseOwned:
     writeAll(d.outFd, PixelMouseOffBytes)
     d.pixelMouseOwned = false
@@ -647,8 +692,11 @@ proc holdFrame*(d: TerminalDriver; alsoPending = false): bool =
   d.coalescer.hold(alsoPending or d.inputPending())
 
 const
-  InterruptTokens*: array[2, string] = ["\x03", "q"]
-    ## The tokens that END A WAIT the user did not ask to be in.
+  InterruptKeys*: array[2, string] = ["Ctrl+c", "q"]
+    ## The KEYS that END A WAIT the user did not ask to be in — compared as
+    ## key names, not bytes (PLAT-68): with the Kitty protocol on, `Ctrl+c`
+    ## arrives as `CSI 99 ; 5 u` and a byte comparison against `0x03` would
+    ## leave the user no way out of a stalled open.
     ##
     ## §4.2's two quit bindings and nothing else. `Ctrl+d` is deliberately
     ## absent: §4.2 binds it to "Half Page Down", and a user who reached for a
@@ -681,7 +729,7 @@ proc absorbInterruptByte*(d: TerminalDriver): bool =
   if not complete:
     return false
   d.buffered.add token
-  token in InterruptTokens
+  keyName(token, d.eraseByte) in InterruptKeys
 
 proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   ## Block until a token, a resize, a timeout or end-of-input.

@@ -7067,3 +7067,86 @@ hook's `GIT_INDEX_FILE` is the index being committed (`.git/index.lock` for
 `commit -a`, a temporary one for `commit <paths>`); `ct test verify --staged`
 relies on child git calls INHERITING it, so never scrub it from the
 environment of the content-id host.
+
+BASE KEYMAPS, ONE KEY SPELLING, AND THE TERMINAL'S KEY PROTOCOL (2026-10-11,
+PLAT-68 Phase A).
+- ONE SPELLING: `common/key_names.chordName(mods, key)` is the only place a
+  chord name is built (order Ctrl, Shift, Alt, Meta; a letter lowercased
+  under Ctrl/Alt/Meta, a shifted letter alone is the capital; `Esc`, not
+  `Escape`). Every decoder calls it: the terminal's `keyName(token,
+  eraseByte)`, GPUI's `gpui_keys.canonicalKeyOfGpui` (`platform` is Meta),
+  the DOM's `key_event_names.canonicalKeyOfDom`. Data rows written in VS Code
+  notation (`Ctrl+Shift+K`, `Ctrl+K S`) go through `normalizeChord`, where a
+  letter is a KEY and Shift is explicit — never compare a written chord with
+  a decoded name without it.
+- `0x08` vs `0x7f`: the byte the terminal's termios VERASE names is
+  `Backspace`, the other is `Ctrl+Backspace` (`TerminalDriver.eraseByte`). A
+  test that sends `\b` and expects `Backspace` is assuming a ^H terminal.
+- THE BASES ARE DATA: `viewmodel/keymap/cua_keymap.nim` / `emacs_keymap.nim`
+  are `BaseRow` lists (chords in VS Code notation, a vocabulary operation
+  with or without `editor.`, a `when` string, platforms) built by
+  `base_rows.definitionOf`, which RAISES on a bad row at module init — a typo
+  in a row crashes every suite that imports `editing_core`, not one test.
+  Rows that need a pane/overlay scope are `DeferredRow`s (Phase B) and must
+  not be bound. Vim and Kakoune stay PLAT-31's procedural tables.
+- `when` (`keymap/when_expr`) is parsed against the closed `ContextKey`
+  catalogue (`keymap/context_keys`); an unknown key is a parse error, never
+  false. The editor's keys come from `editorContextKeys(state, product,
+  delivery)`; `keyProtocol == legacy` gates the §3.10 fallback rows, so an
+  in-process test of a legacy fallback must build its document with a legacy
+  `KeyDelivery`.
+- PENDING TIMEOUT IS THE BASE'S (`pendingTimeoutOf`): none under CUA/Emacs.
+  A CUA `Ctrl+K` with no second key waits forever, and while a prefix is
+  pending `claimsKey` answers true for EVERY key — the runtime must not route
+  the next key to the debugger keymap, or the prefix is left hanging.
+- The editor owns a key iff it is text or the base claims it
+  (`runtime.editorOwnsToken`); there is no exclusion list. Under CUA `Tab`
+  indents; `F6` / `Shift+F6` leave the editor; `Ctrl+Shift+p` and `F1` open
+  the prompt. Tests that used `Tab` to leave a buffer must use `F6`.
+- THE TERMINAL'S KEY PROTOCOL: `CSI ? u` is sent before the DA1 fence; a
+  reply means Kitty (`CSI > 1 u` pushed AFTER the alt screen is entered — the
+  flag stack is per screen), else `modifyOtherKeys` 2 on an `xterm*`/`tmux*`
+  TERM, else legacy (`capabilities.resolveKeyProtocol`). Reporting is enabled
+  in `TerminalDriver.adoptCapabilities`, never in `start()` (the reply is not
+  in yet). nim-termctl's `restoreTerminalSafe` pops/resets it FIRST, also on
+  SIGSEGV/SIGBUS/SIGFPE/SIGILL/SIGABRT (chained to the previous handler). The
+  pty suites answer `CSI ? u` themselves (no Kitty emulator in CI); a pty
+  test that does not answer gets legacy (or modifyOtherKeys under
+  TERM=xterm*), so `Ctrl+Shift+K` arrives as `Ctrl+K`.
+- nim-libvterm (the TermAssert screen model) has Kitty push/pop INVERTED
+  (`>` treated as pop, `<` as push) — do not trust its kitty-flags state in
+  assertions; read the transcript bytes.
+- GPUI WINDOW LANES WITH `wtype`: a shifted symbol must be typed as its US
+  keysym (`-M shift {`, not `-M shift [`) — wtype's one-level virtual keymap
+  consumes the Shift and `Ctrl+Shift+[` arrives as `Ctrl+[`.
+- The isonim-gpui-pin's prebuilt `rust/target/{debug,windowed}` shims (Oct 1)
+  predate `gpui_write_clipboard`; binaries built against the pin die with
+  "could not import: gpui_write_clipboard". Build the shim from the pin into
+  scratch (`CARGO_TARGET_DIR=…`, windowed needs `LIBRARY_PATH=
+  $CODETRACER_GPUI_RUNTIME_LIB_PATH` for -lxcb/-lxkbcommon) and pin it with
+  `-d:gpuiShimPath=…`.
+- `run-plat68-keymaps-mutations.py` MUTATES TWO CHECKOUTS OUTSIDE THIS REPO:
+  the specification (`$CT_SPECS_DIR`, CUA-Keymap.md, arm O2) and nim-termctl
+  (`$NIM_TERMCTL_SRC`, arm R1). Do not run any lane or suite that reads
+  either while it grades — measured: a vm-unit lane run beside it read the
+  O2-mutated CUA-Keymap.md and reported a false oracle failure. An arm the
+  loader refuses (a base whose rows conflict does not LOAD, `BaseRowError`
+  at module init) is graded as a kill on that line.
+- TermAssert's IPC socket lives in `$TMPDIR`; a TMPDIR under a long scratch
+  path exceeds the 108-byte `sun_path` limit and every pty suite dies with
+  "socket path too long". Keep TMPDIR short (e.g. `/tmp/<tag>`) for harness
+  runs.
+- "RED ON A CLEAN BASE" WAS MOSTLY THE ENVIRONMENT (measured 2026-10-11 on a
+  clean agents f8781d4b5): the workspace's shared `replay-server`
+  (codetracer/src/build-debug/bin, Sep 25) predates the event log's
+  `total`/`indexAtTick` (e1ff0ced3), and the shared fixture cache
+  (codetracer/test-logs/tui-fixtures) holds CTFS container v4, which the
+  current engine refuses ("reads versions 5 and 6"). With an engine built at
+  the base's own pins (db-backend plus codetracer-trace-format /
+  codetracer-trace-format-nim at their repro.lock revisions) and v5
+  recordings, the `tui` lane is red only on test_plat40_producers (the
+  event-log footer seam, filed 2026-10-08). The fixture cache key does not
+  include the container version — check the header byte (offset 5) before
+  trusting a copied cache. `test_plat45_three_media` also needs
+  `just build-gpui` (build/bin/codetracer-gpui), or it is red for the
+  prerequisite, not the product.

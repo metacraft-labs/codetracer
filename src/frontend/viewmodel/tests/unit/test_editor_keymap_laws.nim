@@ -64,7 +64,6 @@ import std/[algorithm, sequtils, sets, strutils, tables, unittest]
 
 import ../../keymap/vim_keymap
 import ../../keymap/kakoune_keymap
-import ../../keymap/product_keymap
 
 # For `DisplayWrapA` alone. This suite asserts nothing about text and draws no
 # documents from the corpus — that is `DIFF-4`'s job next door — but the wrap
@@ -75,7 +74,11 @@ import ../generators/vocabulary_generator
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
-const ExpectedAssertions = 19311
+const ExpectedAssertions = 18556
+  ## **−755 ON 2026-10-11 (PLAT-68)**: the product default was retired for the
+  ## CUA base, so the sweep lost its third model (168 scopes → 112) and the
+  ## one case about its fourteen lifted rows; the CUA and Emacs bases are
+  ## graded by `test_plat68_base_keymaps.nim`.
 
 var countedAssertions = 0
 
@@ -101,33 +104,44 @@ const
     ## the constant and the enum are compared rather than the constant being
     ## read twice.
 
+const
+  ModalBases = [bkVim, bkKakoune]
+    ## **THE BASES THESE LAWS GRADE: PLAT-31's TWO MODAL ONES.** The third
+    ## model this suite graded, the product default (`TuiEditBindings`
+    ## lifted), was retired by PLAT-68 for the CUA base; CUA and Emacs are
+    ## data tables with `when` conditions, graded by their own laws and
+    ## oracles in `test_plat68_base_keymaps.nim` — the coverage law, the
+    ## conflict check over the closed context-key domains, and the
+    ## product-default superset law that carries the fourteen retired rows.
+
 let
   vim = vimKeymap()
   kak = kakouneKeymap()
-  prod = productKeymap()
   settings = wrapSettings(DisplayWrapA)
 
-proc allModels(): seq[KeymapDefinition] = @[vim, kak, prod]
+proc allModels(): seq[KeymapDefinition] = @[vim, kak]
 
-proc keymapOf(m: KeymapModel): EditingKeymap =
+proc keymapOf(m: BaseKeymap): EditingKeymap =
   case m
-  of kmVim: vim.keymap
-  of kmKakoune: kak.keymap
-  of kmProductDefault: prod.keymap
+  of bkVim: vim.keymap
+  of bkKakoune: kak.keymap
+  of bkCua, bkEmacs: raise newException(ValueError,
+    "PLAT-31's laws grade the modal bases; " & $m & " has its own suite")
 
-proc defOf(m: KeymapModel): KeymapDefinition =
+proc defOf(m: BaseKeymap): KeymapDefinition =
   case m
-  of kmVim: vim
-  of kmKakoune: kak
-  of kmProductDefault: prod
+  of bkVim: vim
+  of bkKakoune: kak
+  of bkCua, bkEmacs: raise newException(ValueError,
+    "PLAT-31's laws grade the modal bases; " & $m & " has its own suite")
 
 proc everyScope(): seq[EditingScope] =
-  ## THE WHOLE PRODUCT: 3 models x 2 products x 2 panes x 7 editing modes x 2
-  ## text-entry values = 168. Enumerated rather than sampled — the cardinality
-  ## is asserted below, because a nested loop that lost a dimension is a sweep
-  ## that silently halved itself.
+  ## THE WHOLE PRODUCT: 2 modal bases x 2 products x 2 panes x 7 editing
+  ## modes x 2 text-entry values = 112. Enumerated rather than sampled — the
+  ## cardinality is asserted below, because a nested loop that lost a
+  ## dimension is a sweep that silently halved itself.
   result = @[]
-  for model in KeymapModel:
+  for model in ModalBases:
     for product in ProductMode:
       for pane in EditingPane:
         for mode in EditingMode:
@@ -163,7 +177,7 @@ type ScopeDimension = enum
 
 proc valuesOf(d: ScopeDimension): seq[string] =
   case d
-  of sdModel: KeymapModel.toSeq.mapIt($it)
+  of sdModel: ModalBases.toSeq.mapIt($it)
   of sdProduct: ProductMode.toSeq.mapIt($it)
   of sdPane: EditingPane.toSeq.mapIt($it)
   of sdMode: EditingMode.toSeq.mapIt($it)
@@ -206,7 +220,7 @@ const
 
   EditorOnly = ["editor"]
     ## `erOperation` and `erPending` reach NO value of the pane dimension but
-    ## this one, because every row of all three models claims
+    ## this one, because every row of both modal bases claims
     ## `panes: {epEditor}`. **That is §4.3's second dimension doing its whole
     ## job**: a chord bound in editor scope must not fire while the call-stack
     ## pane owns the keyboard, and this is that sentence as an equality.
@@ -217,28 +231,24 @@ const
     ## tick — see the header.
 
   ModalModels = ["vim", "kakoune"]
-    ## `erPending` reaches neither value of… no: it reaches two of the three
-    ## MODELS. The product default is `TuiEditBindings` lifted, thirteen rows
-    ## of ONE chord each (`product_keymap.nim`), so it has no prefix to be
-    ## pending on. A pending prefix appearing under the default would mean the
-    ## lift had grown a multi-chord row, and §4.4's *"the default does not
-    ## move"* is exactly the claim that cannot happen silently.
+    ## `erPending` reaches both modal bases — every one has a prefix.
 
 suite "PLAT-31: the scope, and the population the sweep runs over":
   test "the scope is five dimensions and the sweep enumerates their whole product":
-    ck everyScope().len == 168
-    ck KeymapModel.toSeq.len == 3
+    ck everyScope().len == 112
+    ck BaseKeymap.toSeq.len == 4
+    ck ModalBases.len == 2
     ck ProductMode.toSeq.len == 2
     ck EditingPane.toSeq.len == 2
     ck EditingMode.toSeq.len == 7
-    # 3 * 2 * 2 * 7 * 2, spelled as the product so a dimension that changed
-    # cardinality moves this line rather than being absorbed into 168.
-    ck 3 * 2 * 2 * 7 * 2 == everyScope().len
+    # 2 * 2 * 2 * 7 * 2, spelled as the product so a dimension that changed
+    # cardinality moves this line rather than being absorbed into 112.
+    ck 2 * 2 * 2 * 7 * 2 == everyScope().len
     var distinctScopes = initHashSet[string]()
     for s in everyScope():
       distinctScopes.incl($s.model & "/" & $s.product & "/" & $s.pane & "/" &
                           $s.mode & "/" & $s.textEntry)
-    ck distinctScopes.len == 168
+    ck distinctScopes.len == 112
 
   test "the `erNothing` probe key is bound by no model in any scope":
     # A PROBE THAT SILENTLY BECAME BOUND turns twenty cases into cases about a
@@ -386,7 +396,7 @@ suite "PLAT-31: the text-entry shadow, and the one key it is about":
         ck r.character == "k"
 
   test "a NON-text key is not shadowed and resolves as the trie says":
-    let s = EditingScope(model: kmVim, product: pmEdit, pane: epEditor,
+    let s = EditingScope(model: bkVim, product: pmEdit, pane: epEditor,
                          mode: emInsert, textEntry: true)
     let r = resolve(trieFor(vim.keymap, s), initEditorState(ProbeDoc), s,
                     "Esc", 0)
@@ -397,7 +407,7 @@ suite "PLAT-31: the text-entry shadow, and the one key it is about":
     # Once `g` is pending the user is spelling a command, and a `:` prompt is
     # not open inside one. Without this rule a two-chord sequence could never
     # be completed in a text field.
-    let s = EditingScope(model: kmVim, product: pmEdit, pane: epEditor,
+    let s = EditingScope(model: bkVim, product: pmEdit, pane: epEditor,
                          mode: emNormal, textEntry: true)
     var st = initEditorState(ProbeDoc)
     st.pending = PendingChords(chords: @["g"], startedMs: 0)
@@ -406,7 +416,7 @@ suite "PLAT-31: the text-entry shadow, and the one key it is about":
     ck r.operation == "move-doc-start"
 
   test "a shadowed key leaves the pending buffer empty":
-    let s = EditingScope(model: kmVim, product: pmEdit, pane: epEditor,
+    let s = EditingScope(model: bkVim, product: pmEdit, pane: epEditor,
                          mode: emNormal, textEntry: true)
     let r = resolve(trieFor(vim.keymap, s), initEditorState(ProbeDoc), s,
                     "q", 0)
@@ -428,7 +438,7 @@ suite "PLAT-31: the text-entry shadow, and the one key it is about":
       ck "character" in kinds
 
   test "executing a character resolution runs `insert-text` and nothing else":
-    let s = EditingScope(model: kmVim, product: pmEdit, pane: epEditor,
+    let s = EditingScope(model: bkVim, product: pmEdit, pane: epEditor,
                          mode: emInsert, textEntry: true)
     let st = initEditorState("ab")
     let r = resolve(trieFor(vim.keymap, s), st, s, "Space", 0)
@@ -439,7 +449,7 @@ suite "PLAT-31: the text-entry shadow, and the one key it is about":
   test "a key that is not a key at all leaves a pending prefix standing":
     # A mouse report arriving between `d` and `w` is not the user changing
     # their mind.
-    let s = EditingScope(model: kmVim, product: pmEdit, pane: epEditor,
+    let s = EditingScope(model: bkVim, product: pmEdit, pane: epEditor,
                          mode: emNormal, textEntry: false)
     var st = initEditorState(ProbeDoc)
     st.pending = PendingChords(chords: @["g"], startedMs: 0)
@@ -454,7 +464,7 @@ suite "PLAT-31: the text-entry shadow, and the one key it is about":
 
 suite "PLAT-31: the pending prefix times out, asserted AT its bound":
   setup:
-    let s = EditingScope(model: kmVim, product: pmEdit, pane: epEditor,
+    let s = EditingScope(model: bkVim, product: pmEdit, pane: epEditor,
                          mode: emNormal, textEntry: false)
     let t = trieFor(vim.keymap, s)
     var pendingG = initEditorState(ProbeDoc)
@@ -505,11 +515,11 @@ const
   ConflictScopes = [
     ## Four scopes, named, each from a different model or mode, so the eight
     ## cases below are eight different tries rather than one trie eight times.
-    (kmVim, emNormal), (kmVim, emOperatorPending),
-    (kmKakoune, emNormal), (kmProductDefault, emInsert),
+    (bkVim, emNormal), (bkVim, emOperatorPending),
+    (bkKakoune, emNormal), (bkKakoune, emInsert),
   ]
 
-proc scopeFor(model: KeymapModel; mode: EditingMode): EditingScope =
+proc scopeFor(model: BaseKeymap; mode: EditingMode): EditingScope =
   EditingScope(model: model, product: pmEdit, pane: epEditor, mode: mode,
                textEntry: false)
 
@@ -525,7 +535,7 @@ proc aTerminalChordIn(scope: EditingScope): seq[string] =
   @[]
 
 suite "PLAT-31: conflict detection, on PLANTED conflicts, in four scopes":
-  test "the clean keymaps report NOTHING, in every one of the 168 scopes":
+  test "the clean keymaps report NOTHING, in every one of the 112 scopes":
     # THE NEGATIVE HALF, and it has to come first: a detector that finds
     # nothing passes on an empty keymap, so the planted cases below are only
     # evidence if the unplanted sweep is silent.
@@ -591,7 +601,7 @@ suite "PLAT-31: what a keymap reaches and what it files, as an equality":
       # could otherwise use to excuse a binding that exists.
       ck coverageOverlaps(def).len == 0
       ck reach.len + filed.len == operations().len
-      ck operations().len == 226
+      ck operations().len == 245
 
   test "every model: the coverage GAP is empty":
     for def in allModels():
@@ -621,8 +631,7 @@ suite "PLAT-31: what a keymap reaches and what it files, as an equality":
         ck name in reach
       # `insert-text` IS THE CHARACTER ARM AND IS BOUND BY NOBODY. §4.1's
       # third outcome is decided by `keyCharacter` under the text-entry scope,
-      # never by a row — which is exactly what makes the fourteenth row of
-      # `TuiEditBindings` not a binding.
+      # never by a row.
       ck not boundIn(def, "insert-text")
 
     # `cancel-operator` IS BOUND, BY ONE MODEL, AND THAT ASYMMETRY IS THE
@@ -637,8 +646,7 @@ suite "PLAT-31: what a keymap reaches and what it files, as an equality":
     # recorded name is in that set.
     ck boundIn(vim, "cancel-operator")
     ck not boundIn(kak, "cancel-operator")
-    ck not boundIn(prod, "cancel-operator")
-    ck "cancel-operator" in reachableOperations(kak.keymap, kmKakoune)
+    ck "cancel-operator" in reachableOperations(kak.keymap, bkKakoune)
 
   test "every filed row names a DECLARATION that exists, with a real reason":
     # A filed row against a declaration §2.2 does not publish files nothing and
@@ -728,7 +736,7 @@ suite "PLAT-31: the configuration format layers over a keymap and REPORTS":
   test "a good line binds, and its operation resolves":
     let load = loadEditingKeymap(vim.keymap, "vim/normal Ctrl+y = undo\n")
     ck load.errors.len == 0
-    let s = scopeFor(kmVim, emNormal)
+    let s = scopeFor(bkVim, emNormal)
     let r = resolve(trieFor(load.keymap, s), initEditorState(ProbeDoc), s,
                     "Ctrl+y", 0)
     ck r.kind == erOperation
@@ -737,7 +745,7 @@ suite "PLAT-31: the configuration format layers over a keymap and REPORTS":
   test "`-` unbinds, and the chord then resolves to nothing":
     let load = loadEditingKeymap(vim.keymap, "vim/normal x = -\n")
     ck load.errors.len == 0
-    let s = scopeFor(kmVim, emNormal)
+    let s = scopeFor(bkVim, emNormal)
     let before = resolve(trieFor(vim.keymap, s), initEditorState(ProbeDoc), s,
                          "x", 0)
     ck before.kind == erOperation
@@ -766,7 +774,7 @@ suite "PLAT-31: the configuration format layers over a keymap and REPORTS":
     let load = loadEditingKeymap(vim.keymap, "vim/* Ctrl+y = undo\n")
     ck load.errors.len == 0
     for mode in EditingMode:
-      let s = scopeFor(kmVim, mode)
+      let s = scopeFor(bkVim, mode)
       let r = resolve(trieFor(load.keymap, s), initEditorState(ProbeDoc), s,
                       "Ctrl+y", 0)
       ck r.kind == erOperation
@@ -782,7 +790,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     # `EditorState.count`. A keymap-private count could not be read by a
     # status line and could not be typed INSIDE operator-pending, which is
     # what `d2j` needs.
-    let s = scopeFor(kmVim, emNormal)
+    let s = scopeFor(bkVim, emNormal)
     var st = initEditorState(ProbeDoc)
     for digit in ["3", "7"]:
       let r = resolve(trieFor(vim.keymap, s), st, s, digit, 0)
@@ -800,13 +808,13 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     # mode, and lands on the same `EditorState.count` — which is the placement
     # a keymap-private count cannot express.
     var st = initEditorState(ProbeDoc)
-    var s = scopeFor(kmVim, emNormal)
+    var s = scopeFor(bkVim, emNormal)
     let (afterD, _) = applyResolution(st,
       resolve(trieFor(vim.keymap, s), st, s, "d", 0), settings, 0)
     st = afterD
     ck st.pendingOperator == "delete-selection"
     ck st.mode == emOperatorPending
-    s = scopeFor(kmVim, emOperatorPending)
+    s = scopeFor(bkVim, emOperatorPending)
     let (after2, _) = applyResolution(st,
       resolve(trieFor(vim.keymap, s), st, s, "2", 0), settings, 0)
     ck after2.count == 2
@@ -828,7 +836,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     # DEFECT is in the shared layer, below where the two arms diverge". A
     # differential can only see what differs between its sides. Everything
     # below that point needs a law, and this is it.
-    let vimScope = scopeFor(kmVim, emNormal)
+    let vimScope = scopeFor(bkVim, emNormal)
     let st = initEditorState(ProbeDoc)
     let (one, oneOps) = driveKeys(st, vim.keymap, vimScope, @["d", "w"],
                                   settings)
@@ -856,7 +864,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     # THE SAME CLAIM UNDER KAKOUNE, because the count lives in the editor and
     # the shared layer applies it — so a law that held for one model and not
     # the other would mean the count had become keymap state after all.
-    let kakScope = scopeFor(kmKakoune, emNormal)
+    let kakScope = scopeFor(bkKakoune, emNormal)
     let (kOne, _) = driveKeys(st, kak.keymap, kakScope, @["w", "d"], settings)
     let (kThree, kThreeOps) = driveKeys(st, kak.keymap, kakScope,
                                         @["3", "w", "d"], settings)
@@ -872,7 +880,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     # what makes it a function of `(trie, state, scope, key, now)`. Called
     # twice with the same arguments it answers the same thing — and the state
     # it was given is unchanged.
-    let s = scopeFor(kmVim, emNormal)
+    let s = scopeFor(bkVim, emNormal)
     let st = initEditorState(ProbeDoc)
     let t = trieFor(vim.keymap, s)
     let a = resolve(t, st, s, "g", 100)
@@ -883,7 +891,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     ck st.pending.chords.len == 0
 
   test "`applyResolution` is what puts the buffer back on the state":
-    let s = scopeFor(kmVim, emNormal)
+    let s = scopeFor(bkVim, emNormal)
     let st = initEditorState(ProbeDoc)
     let r = resolve(trieFor(vim.keymap, s), st, s, "g", 100)
     let (after, ops) = applyResolution(st, r, settings, 100)
@@ -898,7 +906,7 @@ suite "PLAT-31: the modal state is the EDITOR's, and the resolver holds none":
     # A chord that entered insert mode changes which trie the NEXT chord
     # resolves through, which is the entire reason the mode is state rather
     # than a resolver argument.
-    let s = scopeFor(kmVim, emNormal)
+    let s = scopeFor(bkVim, emNormal)
     let st = initEditorState("abc\ndef\n")
     # `k` alone, from normal mode, is a motion.
     let (moved, movedOps) = driveKeys(st, vim.keymap, s, @["k"], settings)
@@ -1025,10 +1033,10 @@ suite "PLAT-31: the trie is the structure resolution walks":
     # detector cannot see is a conflict resolution cannot hit. Asserted by
     # planting a duplicate and reading it off the TRIE rather than off
     # `conflictsIn`, which is the wrapper.
-    let s = scopeFor(kmVim, emNormal)
+    let s = scopeFor(bkVim, emNormal)
     var planted = vim.keymap
     planted.bindings.add EditingBinding(
-      model: kmVim, scope: BindingScope(modes: {emNormal}, products: {},
+      model: bkVim, scope: BindingScope(modes: {emNormal}, products: {},
                                         panes: {epEditor}),
       chords: @["x"], operation: "undo", args: OpArgs(), spelling: "x")
     let t = trieFor(planted, s)
@@ -1049,12 +1057,12 @@ suite "PLAT-31: the trie is the structure resolution walks":
     # The conflict rule is *"no chord bound twice IN A SCOPE"*, so the detector
     # is run per scope and has nothing to assume. A row scoped to visual mode
     # is absent from the normal-mode trie entirely.
-    let normal = trieFor(vim.keymap, scopeFor(kmVim, emNormal))
-    let visual = trieFor(vim.keymap, scopeFor(kmVim, emVisual))
+    let normal = trieFor(vim.keymap, scopeFor(bkVim, emNormal))
+    let visual = trieFor(vim.keymap, scopeFor(bkVim, emVisual))
     ck normal.bindings.len != visual.bindings.len
     for b in normal.bindings:
-      ck b.model == kmVim
-      ck b.scope.admits(scopeFor(kmVim, emNormal))
+      ck b.model == bkVim
+      ck b.scope.admits(scopeFor(bkVim, emNormal))
 
   test "every generated family's cardinality, asserted where the table claims it is":
     # **FOUR HEADERS IN THE KEYMAP PACKAGE SAY "ITS CARDINALITY IS ASSERTED",
@@ -1105,8 +1113,8 @@ suite "PLAT-31: the trie is the structure resolution walks":
       # …and each really is filed for the `move-` FORM only, which is what
       # `FiledDeclaration.forms` exists for: the `select-` and `extend-` forms
       # of the same declaration ARE bound.
-      ck "move-" & decl notin reachableOperations(kak.keymap, kmKakoune)
-      ck "select-" & decl in reachableOperations(kak.keymap, kmKakoune)
+      ck "move-" & decl notin reachableOperations(kak.keymap, bkKakoune)
+      ck "select-" & decl in reachableOperations(kak.keymap, bkKakoune)
 
     # The operations that do not COMPLETE a command, and so do not clear the
     # transient modal registers.
@@ -1119,19 +1127,6 @@ suite "PLAT-31: the trie is the structure resolution walks":
     ck LinewiseInnerOperatorKeys.len == 4
     for key in LinewiseAroundOperatorKeys:
       ck key notin LinewiseInnerOperatorKeys
-
-  test "the product default lifts thirteen rows and the fourteenth is the character arm":
-    # `TuiEditBindings`'s last row has the empty key and names `insert-text` —
-    # `applyEditKey`'s `else` arm. In the resolver that is not a binding at
-    # all: it is §4.1's CHARACTER outcome. A fourteenth BINDING would mean the
-    # `else` arm had been turned into a key.
-    ck prod.keymap.bindings.len == 13
-    ck TuiEditBindings.len == 14
-    for b in prod.keymap.bindings:
-      ck b.chords.len == 1
-      ck b.chords[0] != DefaultEditKey
-      ck b.operation != "insert-text"
-    ck "insert-text" in reachableOperations(prod.keymap, kmProductDefault)
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

@@ -2,9 +2,9 @@
 # subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-101418493973c5d60c203990865c9d09cbe09a0cbf3f4a90a0a9a15371007997  src/frontend/gpui/app/gpui_keys.nim
-aa45ecc1a7cd43764c64964edf127e3dccdaa501cb41b5720102d7e3b3fd4814  src/frontend/gpui/app/edit_arm.nim
-a73e2fe878a03a35ca63ae0f08e21dae6abf510a810274a2c88c36412af12b04  src/frontend/gpui/main.nim
-3e09969406731e5e0a5ad816c8b642ad9f157999891a41d5e45862392e384126  src/frontend/gpui/tests/test_gpui_edit_arm.nim
-8cde3b8ae367dfe900207bfdf4bcbeb3f67084bcc694d8a24b0482da0895ba58  src/frontend/gpui/tests/test_plat44_shipped_writes.nim
-8ac65ae8a03c5af47a9c23cd4c626a6eb610198aab2fa5f3c78697d83a1d72ee  src/frontend/tui/tests/test_plat44_both_arms_write.nim
+0b1993d8ea711e4aae2819dffad205fe54c0686757701501c8ccde3b138f8e24  src/frontend/gpui/app/gpui_keys.nim
+53554c3b6c5e89d748c4903cf30218d82251e4ce7ab90d56e5f79674b94a8bec  src/frontend/gpui/app/edit_arm.nim
+39c16f39b4c5ef14c8b89a4b8c4d0cea08f5ec393d09d570ebf295fb93268e6a  src/frontend/gpui/main.nim
+5e2ecebd37257c6a00fdbe281a00a1d94c1b125133fceed2a5daaffba7b5aae0  src/frontend/gpui/tests/test_gpui_edit_arm.nim
+645867bc999d806d52511e8c2f04d4261b42eff9fe2b46885d69018c7d221589  src/frontend/gpui/tests/test_plat44_shipped_writes.nim
+4b2956068d87cf7363f425b6ec5a71812753de69911859df42935de37a6e3fb4  src/frontend/tui/tests/test_plat44_both_arms_write.nim

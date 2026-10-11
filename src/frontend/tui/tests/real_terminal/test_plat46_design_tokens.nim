@@ -753,7 +753,14 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         let lines = capture.splitLines()
         if lines.len >= paneRows:
           status = lines[paneRows - 1]
-          if status.contains("NORMAL") and not status.contains("opening"):
+          # The two cases that read the SOURCE's colours also wait for the
+          # source: a startup remedy notice (tmux's `extended-keys` one, since
+          # the terminal is told its key protocol) replaces the "opening …"
+          # progress text before the source is drawn, and a capture taken then
+          # has no keyword to find. `default` reads the status line's notice,
+          # which the position text later crowds to the line's edge.
+          if status.contains("NORMAL") and not status.contains("opening") and
+             (name == "default" or capture.contains("def add")):
             break
       checkpoint(name & " status: " & status.substr(0, 400))
       case name
@@ -762,7 +769,10 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         ck status.contains("tmux withholds 24-bit colour")
         ck not capture.contains("38;2;")
       of "rgb":
-        ck not status.contains("tmux withholds")
+        # The COLOUR remedy is gone. (Since PLAT-68 the status line may also
+        # name tmux's `extended-keys` remedy — a different axis this session's
+        # tmux leaves at its default, off.)
+        ck not status.contains("tmux withholds 24-bit colour")
         let kw = parseHexColour(hexT(dtEditorThemeRuleKeyword, dmDark))
         ck capture.contains("38;2;" & $kw.r & ";" & $kw.g & ";" & $kw.b)
       else:

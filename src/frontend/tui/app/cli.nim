@@ -96,6 +96,11 @@ type
       ## refuses a folder that holds no recording, which is exactly what a project
       ## is — and `--goto` is meaningless for one of them. A shared branch with
       ## a boolean on it would let `--goto 500 --edit .` parse.
+    tckCapabilities
+      ## PLAT-68: `--capabilities`. Negotiate with the terminal exactly as a
+      ## session would — the start-up query round included — and print what
+      ## was decided and why, the key protocol among it
+      ## (Base-Keymaps-And-Layer-Stack.md §7.2), then exit.
     tckUsageError
       ## The arguments do not name a command. Carries the message a user reads.
 
@@ -107,8 +112,14 @@ type
     ## `tracePath` and `flags` off either without knowing which mode it got.
     ## `--help` and `--version` are NOT in that branch: a colour depth is not a
     ## property of either, and the type is what says so.
+    keymap*: string
+      ## PLAT-68: `--keymap=<cua|emacs|vim|kakoune>` — the base keymap for THIS
+      ## session only, beating the stored preference and never written to it
+      ## (Base-Keymaps-And-Layer-Stack.md §3.6); "" when absent. Validated here
+      ## by `keymap_selection.selectKeymap`, the one function a name goes
+      ## through.
     case kind*: TuiCommandKind
-    of tckOpenTrace, tckHeadless:
+    of tckOpenTrace, tckHeadless, tckCapabilities:
       tracePath*: string
       flags*: CapabilityFlags
         ## §6.2's five capability overrides, as a value — the four CTUI-11
@@ -310,6 +321,10 @@ options:
   --no-color         monochrome: weight, underline and glyph carry every state
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
+  --capabilities     negotiate with this terminal as a session would, print
+                     what was decided (colours, mouse, key protocol) and exit
+  --keymap=NAME      the base keymap for this session only: cua (default),
+                     emacs, vim, kakoune; `:keymap NAME` remembers a choice
   -t, --theme=NAME   dark, light (the design system's two colour modes;
                      detected from the terminal's background when absent),
                      plain (no colour)
@@ -440,6 +455,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var settingOverrides: array[LayoutSetting, SettingOverride]
   var editProject = ""
   var editRequested = false
+  var keymap = ""
+  var capabilitiesRequested = false
   var i = first
   while i <= high(args):
     let arg = args[i]
@@ -457,6 +474,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       flags.asciiBorders = true
     of "--no-mouse":
       flags.noMouse = true
+    of "--capabilities":
+      capabilitiesRequested = true
     of "--edit":
       # PLAT-16 / ui-selection.md §6. `ct edit --ui=tui <project>` reaches this
       # binary as `codetracer-tui --edit <project>`.
@@ -504,6 +523,14 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
             editRequested = true
             if editPath.len > 0:
               editProject = editPath
+            break options
+          let (isKeymap, keymapName) = optionValue(arg, "--keymap")
+          if isKeymap:
+            let selection = selectKeymap(keymapName, "--keymap")
+            if not selection.ok:
+              return TuiCommand(kind: tckUsageError,
+                                message: selection.refusal)
+            keymap = keymapName
             break options
           let (isTheme, themeName) = optionValue(arg, "--theme")
           if isTheme:
@@ -658,6 +685,15 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       message: "--record-keys and --replay-keys contradict each other;" &
                " a replay would only record its own input back")
 
+  # PLAT-68: `--capabilities` reports the terminal and opens nothing.
+  if capabilitiesRequested:
+    if editRequested or tracePath.len > 0 or mode == tckHeadless:
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "'--capabilities' reports what this terminal negotiates and" &
+                 " opens nothing; pass it without a trace, --edit or --headless")
+    return TuiCommand(kind: tckCapabilities, flags: flags, keymap: keymap)
+
   # PLAT-16's OWN CONTRADICTIONS, refused rather than ordered, on exactly the
   # rule the three blocks above follow.
   #
@@ -697,7 +733,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
         kind: tckUsageError,
         message: "'--edit' needs a project folder to open")
     return TuiCommand(kind: tckEditProject, projectPath: editProject,
-                      editFlags: flags)
+                      editFlags: flags, keymap: keymap)
 
   # A DISPLAY MODE WITH NOTHING TO DISPLAY is a usage error rather than a help
   # screen. `codetracer-tui --headless` with no trace reached `tckHeadless` with
@@ -778,11 +814,11 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                replayKeys: replayKeys, layoutBinding: layoutBinding,
                noFlowOverlay: noFlowOverlay, dividers: dividers,
                focusHighlight: settingOverrides[lsFocusHighlight],
-               liveResize: settingOverrides[lsLiveResize])
+               liveResize: settingOverrides[lsLiveResize], keymap: keymap)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
                noFlowOverlay: noFlowOverlay, dividers: dividers,
                focusHighlight: settingOverrides[lsFocusHighlight],
-               liveResize: settingOverrides[lsLiveResize])
+               liveResize: settingOverrides[lsLiveResize], keymap: keymap)

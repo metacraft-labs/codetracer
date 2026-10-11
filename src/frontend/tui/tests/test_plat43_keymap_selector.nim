@@ -9,7 +9,7 @@
 ## stored preference (`viewmodel/host/keymap_preference`) goes through too.
 ## This suite asserts, without a terminal:
 ##
-##   * THE MODEL PARTITION: every `KeymapModel` member is selectable by name,
+##   * THE MODEL PARTITION: every `BaseKeymap` member is selectable by name,
 ##     and every selectable name is a member, with the cardinality on both
 ##     sides;
 ##   * an unknown name REFUSED BY NAME, naming the accepted set — typed or
@@ -51,8 +51,8 @@ const
   Rows = 40
   FileA = "src/alpha.nim"
   TextA = "proc alpha() =\n  echo 1\n"
-  ModelCount = 3
-    ## `KeymapModel`'s cardinality, stated so both directions of the partition
+  ModelCount = 4
+    ## `BaseKeymap`'s cardinality, stated so both directions of the partition
     ## law are compared with a number rather than with each other.
   ExpectedScenarioDocs = 18
 
@@ -81,12 +81,12 @@ suite "PLAT-43: the model partition, and refusal by name":
 
   test "every model is selectable, and every selectable name is a model":
     let names = selectableKeymapNames()
-    var members: seq[KeymapModel] = @[]
-    for m in KeymapModel: members.add m
+    var members: seq[BaseKeymap] = @[]
+    for m in BaseKeymap: members.add m
     ck members.len == ModelCount
     ck names.len == ModelCount
     ck names.deduplicate().len == ModelCount
-    for m in KeymapModel:
+    for m in BaseKeymap:
       let s = selectKeymap($m)
       ck s.ok
       ck s.model == m
@@ -97,7 +97,7 @@ suite "PLAT-43: the model partition, and refusal by name":
       ck $s.model == n
 
   test "an unknown name is refused BY NAME, with the accepted set":
-    for bad in ["emacs", "Vim", " vim", "vim ", "", "kak"]:
+    for bad in ["default", "Vim", " vim", "vim ", "", "kak"]:
       let s = selectKeymap(bad)
       checkpoint("'" & bad & "' -> " & s.refusal)
       ck not s.ok
@@ -106,7 +106,7 @@ suite "PLAT-43: the model partition, and refusal by name":
         ck s.refusal.contains(n)
 
   test "a stored preference goes through the same selector":
-    for m in KeymapModel:
+    for m in BaseKeymap:
       let back = decodeKeymapPreference(encodeKeymapPreference(m))
       ck back.ok
       ck back.model == m
@@ -119,49 +119,51 @@ suite "PLAT-43: `:keymap` through the runtime's own prompt":
 
   test "`:keymap vim` re-keys the OPEN buffer and asks the host to remember it":
     let rt = editingRuntime()
-    var remembered: seq[KeymapModel] = @[]
-    rt.editServices.saveKeymap = proc(m: KeymapModel): string =
+    var remembered: seq[BaseKeymap] = @[]
+    rt.editServices.saveKeymap = proc(m: BaseKeymap): string =
       remembered.add m
       ""
     let buf = rt.app.editSession.activeBuffer()
-    ck buf.doc.model == kmProductDefault
+    ck buf.doc.model == bkCua
     ck buf.doc.state.mode == emInsert
     rt.runPrompt(":keymap vim")
     ck rt.app.notification == "keymap vim"
-    ck rt.app.editSession.model == kmVim
-    ck buf.doc.model == kmVim
+    ck rt.app.editSession.model == bkVim
+    ck buf.doc.model == bkVim
     ck buf.doc.state.mode == emNormal
     ck buf.text == TextA
-    ck rt.keymapModel == kmVim
-    ck remembered == @[kmVim]
+    ck rt.keymapModel == bkVim
+    ck remembered == @[bkVim]
     # A file opened AFTER the choice opens under it.
     let second = rt.app.editSession.openFile("src/beta.nim", "x\n")
-    ck rt.app.editSession.buffers[second].doc.model == kmVim
+    ck rt.app.editSession.buffers[second].doc.model == bkVim
 
-  test "`:keymap emacs` is refused by name and changes nothing":
+  test "`:keymap default` is refused by name and changes nothing":
+    # PLAT-68: `emacs` is a base now; the RETIRED name is the one a typed
+    # surface refuses (only the stored-preference decoder reads it, as `cua`).
     let rt = editingRuntime()
-    var remembered: seq[KeymapModel] = @[]
-    rt.editServices.saveKeymap = proc(m: KeymapModel): string =
+    var remembered: seq[BaseKeymap] = @[]
+    rt.editServices.saveKeymap = proc(m: BaseKeymap): string =
       remembered.add m
       ""
-    rt.runPrompt(":keymap emacs")
+    rt.runPrompt(":keymap default")
     checkpoint(rt.app.notification)
-    ck rt.app.notification.contains("'emacs'")
+    ck rt.app.notification.contains("'default'")
     ck rt.app.notification.contains("kakoune")
-    ck rt.app.editSession.model == kmProductDefault
-    ck rt.app.editSession.activeBuffer().doc.model == kmProductDefault
+    ck rt.app.editSession.model == bkCua
+    ck rt.app.editSession.activeBuffer().doc.model == bkCua
     ck remembered.len == 0
 
   test "`:keymap` alone names the current model and the accepted set":
     let rt = editingRuntime()
     rt.runPrompt(":keymap")
-    ck rt.app.notification.startsWith("keymap default")
+    ck rt.app.notification.startsWith("keymap cua")
     ck rt.app.notification.contains(acceptedKeymapNamesText())
 
   test "a host that keeps no state says the choice is not remembered":
     let rt = editingRuntime()
     rt.runPrompt(":keymap kakoune")
-    ck rt.app.editSession.model == kmKakoune
+    ck rt.app.editSession.model == bkKakoune
     ck rt.app.notification.contains("not remembered")
 
   test "switching keeps the document and its history":
@@ -172,7 +174,7 @@ suite "PLAT-43: `:keymap` through the runtime's own prompt":
     let undoDepth = buf.doc.state.history.undoDepth
     ck text.startsWith("Z")
     ck undoDepth > 0
-    rt.app.editSession.selectModel(kmVim)
+    rt.app.editSession.selectModel(bkVim)
     ck buf.text == text
     ck buf.doc.state.history.undoDepth == undoDepth
     ck buf.doc.state.mode == emNormal
@@ -182,24 +184,27 @@ suite "PLAT-43: `:keymap` through the runtime's own prompt":
 
 suite "PLAT-43: which keys the editor owns, per model":
 
-  test "Tab is never the editor's; a model's own non-printable keys are":
-    # The runtime asks the active model's resolver whether it claims a key,
-    # so Vim's `Esc` and Kakoune's `Ctrl+x` reach the buffer. `Tab` must NOT,
-    # under any model: it is the one chord guaranteed to move focus off the
-    # editor, and the product default binds it to `indent` — the pty suite's
-    # first run measured exactly that swallowing.
+  test "F6 is never the editor's; a base's own non-printable keys are":
+    # The runtime asks the active base's resolver whether it claims a key,
+    # so Vim's `Esc`, Kakoune's `Ctrl+x` and CUA's `Tab` reach the buffer.
+    # PLAT-68 deleted the exclusion list that kept `Tab` from every model:
+    # under CUA `Tab` indents, as in VS Code, and the way off the editor is
+    # `F6` / `Shift+F6`, which no base binds in the editor — so they must
+    # NOT be the editor's under any base.
     proc focusedRuntime(): TuiRuntime =
       result = editingRuntime()
       discard result.focus.focusPaneKind(paneEditor)
-    for model in KeymapModel:
+    for model in BaseKeymap:
       let rt = focusedRuntime()
       rt.app.editSession.selectModel(model)
       checkpoint($model)
-      ck not rt.editorOwnsToken("\t")
-      ck not rt.editorOwnsToken("\x1b[Z")      # Shift+Tab
+      ck not rt.editorOwnsToken("\e[17~")      # F6
+      ck not rt.editorOwnsToken("\e[17;2~")    # Shift+F6
       ck rt.editorOwnsToken("x")
+    let cua = focusedRuntime()
+    ck cua.editorOwnsToken("\t")               # CUA: Tab indents
     let vim = focusedRuntime()
-    vim.app.editSession.selectModel(kmVim)
+    vim.app.editSession.selectModel(bkVim)
     # Vim binds `Esc` in insert, visual and operator-pending modes and NOT in
     # normal mode — so in normal mode it is not the editor's, and after `i`
     # it is. Both halves, because the clause is a question about the model's
@@ -208,12 +213,13 @@ suite "PLAT-43: which keys the editor owns, per model":
     discard vim.app.editSession.activeBuffer().applyEditKey("i", 1)
     ck vim.editorOwnsToken("\x1b")             # Esc, insert mode
     let kak = focusedRuntime()
-    kak.app.editSession.selectModel(kmKakoune)
+    kak.app.editSession.selectModel(bkKakoune)
     ck kak.editorOwnsToken("\x18")             # Ctrl+x
-    # …and the product default does not claim `Ctrl+x`: the clause is the
-    # MODEL's answer, not a widened constant.
+    # …and the default base does not claim a key none of its editor rows
+    # binds: the clause is the BASE's answer, not a widened constant. `F10`
+    # is the debugger's under every base in Phase A.
     let def = focusedRuntime()
-    ck not def.editorOwnsToken("\x18")
+    ck not def.editorOwnsToken("\e[21~")       # F10
 
 suite "PLAT-43: the stored preference, on a real filesystem":
 
@@ -224,18 +230,18 @@ suite "PLAT-43: the stored preference, on a real filesystem":
     try:
       let absent = loadKeymapPreference()
       ck absent.status == kplAbsent
-      ck absent.model == kmProductDefault
-      ck saveKeymapPreference(kmKakoune) == ""
+      ck absent.model == bkCua
+      ck saveKeymapPreference(bkKakoune) == ""
       ck readFile(dir / KeymapPreferenceFileName) == "kakoune\n"
       ck not fileExists(dir / (KeymapPreferenceFileName & StagedWriteSuffix))
       let stored = loadKeymapPreference()
       ck stored.status == kplLoaded
-      ck stored.model == kmKakoune
+      ck stored.model == bkKakoune
       writeFile(dir / KeymapPreferenceFileName, "nano\n")
       let refused = loadKeymapPreference()
       checkpoint(refused.message)
       ck refused.status == kplRefused
-      ck refused.model == kmProductDefault
+      ck refused.model == bkCua
       ck refused.message.contains("'nano'")
       ck refused.message.contains(acceptedKeymapNamesText())
       ck refused.message.contains(dir)
@@ -260,8 +266,8 @@ suite "PLAT-43: DIFF-12 — a selected model is the model, not a fourth keymap":
     var mismatches: seq[string] = @[]
     for d in docs:
       for t in divergent:
-        for model in [kmVim, kmKakoune]:
-          let keys = if model == kmVim: t.vimKeys else: t.kakouneKeys
+        for model in [bkVim, bkKakoune]:
+          let keys = if model == bkVim: t.vimKeys else: t.kakouneKeys
           # SELECTED: opened under the default, then chosen BY NAME through
           # the selector and re-keyed through the session.
           let selected = newEditSession()
@@ -297,9 +303,9 @@ suite "PLAT-43: DIFF-12 — a selected model is the model, not a fourth keymap":
     var differing = 0
     for t in TaskSet:
       if t.id in CoincidentOperationTasks: continue
-      let v = newEditSession(kmVim)
+      let v = newEditSession(bkVim)
       discard v.openFile("doc", d.text)
-      let k = newEditSession(kmKakoune)
+      let k = newEditSession(bkKakoune)
       discard k.openFile("doc", d.text)
       let a = v.activeBuffer()
       let b = k.activeBuffer()

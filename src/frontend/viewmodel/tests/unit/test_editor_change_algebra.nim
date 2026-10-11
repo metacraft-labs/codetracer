@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1762
+const ExpectedAssertions = 1774
+  ## *1762 -> 1774 on 2026-10-11 (PLAT-68): five new production modules under
+  ## `viewmodel/keymap/` — `context_keys`, `when_expr`, `base_rows`,
+  ## `cua_keymap`, `emacs_keymap` — and one deleted (`product_keymap`), x three
+  ## assertions. None calls `rebase(` or spells `mapOver`.*
   ## *1759 -> 1762 on 2026-10-10 (SB-2a): one new production module under
   ## `viewmodel/`, `host/node_certificate_host.nim` (node's git runner and
   ## store-root resolver for the content facts) x three assertions. It calls

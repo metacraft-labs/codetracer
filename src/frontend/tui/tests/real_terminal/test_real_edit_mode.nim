@@ -113,7 +113,9 @@ const
     ## `1 + Ctrl(4)` = 5.
     ## https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
   QuitByte = "q"
-  Tab = "\t"
+  F6 = "\x1b[17~"
+    ## F6: `CSI 17 ~`, xterm's spelling. PLAT-68: the way off an editor whose
+    ## `Tab` indents (CUA, as in VS Code), to the next pane.
 
   FixtureName = "calc"
     ## The recording the stale-trace case replays. The same fixture
@@ -447,10 +449,11 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
 
       # ---- `:w`, which needs the focus off the editor ----------------------
       # While the editor is focused every printable key is text, `:` included —
-      # `app/runtime.handleToken`'s step 1a records why, and `Tab` is the key
-      # deliberately left as an escape. This is the ergonomic hole named in
-      # PLAT-16's status note, driven here rather than described.
-      sess.send(Tab)
+      # `app/runtime.handleToken`'s step 1a records why. Under the CUA base
+      # (PLAT-68) `Tab` indents and `F6` is the way to the next pane, as in VS
+      # Code; `Ctrl+S` would save from inside the buffer, but this case is
+      # about the prompt's `:w`.
+      sess.send(F6)
       discard waitForScreenText(sess, "focus ")
       sess.send(":w\r")
       discard waitForScreenText(sess, "wrote " & ProjectFile)

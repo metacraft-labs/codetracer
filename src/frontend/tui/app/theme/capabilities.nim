@@ -49,9 +49,12 @@
 
 import std/strutils
 
+import ../../../../common/key_names
 import ../../../../common/terminal_graphics/tiers
 import ./colour_math
 import ./roles
+
+export key_names.KeyProtocol
 
 export tiers.ImageTier, tiers.tierName, tiers.parseTierName, tiers.tierNames
 export roles.DesignMode
@@ -224,23 +227,25 @@ type
       ## Whether to bracket each frame in DEC 2026 (`CSI ? 2026 h` …
       ## `CSI ? 2026 l`).
     kittyKeyboard*: bool
-      ## Whether the terminal ADVERTISES the Kitty keyboard protocol.
-      ##
-      ## DETECTED AND DELIBERATELY NOT ENABLED, which is a product decision
-      ## rather than an omission and is asserted as one at Tier 2. Pushing a
-      ## Kitty stack frame (`CSI = 1 u`) changes every key's encoding to
-      ## `CSI <unicode> ; <mods> u`, and CTUI-9's `app/input/keymap.keyName`
-      ## decodes xterm's classic encoding — SS3 for F1-F4, `CSI <n> ~` for
-      ## F5-F12, `CSI 1 ; <mod> <final>` for modified arrows. A driver that
-      ## enabled the protocol without a decoder for it would make every
-      ## function key in §4.2 unreachable on precisely the terminals users pick
-      ## for their key handling. The same argument applies to xterm's
-      ## `modifyOtherKeys`, which the driver also never sets.
-      ##
-      ## The field is resolved anyway because the decision has to be
-      ## observable: `tests/real_terminal/test_real_capability_negotiation.nim`
-      ## asserts that a Kitty-advertising terminal is told nothing, which is a
-      ## claim about a choice and not about an absence.
+      ## Whether the environment ADVERTISES the Kitty keyboard protocol
+      ## (`$TERM` / `$TERM_PROGRAM`). A hint for the report only: what is
+      ## ENABLED is `keyProtocol`, and that is decided by asking the terminal
+      ## (Base-Keymaps-And-Layer-Stack.md §7.2 — *"ask, do not guess"*).
+    keyProtocol*: KeyProtocol
+      ## PLAT-68: the extended key reporting this session negotiated — the
+      ## Kitty protocol when the terminal answered `CSI ? u`, else xterm's
+      ## `modifyOtherKeys` on an xterm-compatible terminal, else legacy. It
+      ## was detected and deliberately NOT enabled until the decoder could
+      ## read the encodings (`key_names.keyName` reads both now), and the CUA
+      ## base needs it: `Ctrl+Shift+K`, `Shift+Enter` and `Ctrl+.` have no
+      ## legacy bytes. `host/terminal_driver.adoptCapabilities` enables it and
+      ## `nim-termctl`'s async-signal-safe restore undoes it on every exit
+      ## path. It is the `keyProtocol` context key a binding's `when` reads.
+    keyProtocolFrom*: CapabilitySource
+    tmuxExtendedKeysOff*: bool
+      ## Inside tmux, and tmux's `extended-keys` option is off, so the
+      ## protocol cannot reach this pane. The status line names the remedy
+      ## (`tmuxExtendedKeysRemedy`).
     theme*: UiTheme
       ## Which theme was asked for (or `utDark` when none was) — CTUI-14.
     mode*: DesignMode
@@ -280,9 +285,14 @@ const
 
   KittyKeyboardTerms* = ["xterm-kitty"]
   KittyKeyboardPrograms* = ["ghostty", "WezTerm"]
-    ## Terminals that advertise the Kitty keyboard protocol. See
-    ## `TerminalCapabilities.kittyKeyboard` for why detecting it is the whole
-    ## of what is done with it.
+    ## Terminals that advertise the Kitty keyboard protocol — the report's
+    ## hint; `keyProtocol` is decided by the terminal's answer.
+
+  ModifyOtherKeysTermPrefixes* = ["xterm", "tmux"]
+    ## `$TERM` prefixes of terminals that implement xterm's `modifyOtherKeys`
+    ## (tmux does, when its `extended-keys` option is on). A terminal that
+    ## does not answers nothing to `CSI > 4 ; 2 m` and keeps the legacy
+    ## encoding, which the decoder reads either way.
 
   DumbTerm* = "dumb"
     ## §6.3's floor: "`TERM=dumb` … uses monochrome styling with bold and
@@ -576,6 +586,11 @@ type
     cellWidthPx*, cellHeightPx*: int
       ## PLAT-51: the terminal's cell in pixels, from `CSI 16 t`
       ## (`CSI 6 ; height ; width t`); 0 when it did not say.
+    kittyKeyboardAnswered*: bool
+      ## PLAT-68: the terminal answered `CSI ? u` (`CSI ? <flags> u`) before
+      ## the DA1 fence — it implements the Kitty keyboard protocol.
+    tmuxExtendedKeys*: string
+      ## tmux's `extended-keys` option (`on`, `off`, `always`); "" unknown.
 
 const AutoDetectSelectsLight* = false
   ## **WHETHER BACKGROUND DETECTION MAY CHOOSE LIGHT — it may not.** A product
@@ -606,6 +621,22 @@ proc resolveMode(env: TerminalEnv; flags: CapabilityFlags;
     return (gated(mode), bsColorFgBg, "")
   (dmDark, bsDefault, "")
 
+proc resolveKeyProtocol*(env: TerminalEnv;
+                         probe: TerminalProbe): (KeyProtocol, CapabilitySource) =
+  ## Base-Keymaps-And-Layer-Stack.md §7.2: the Kitty protocol when the
+  ## terminal SAID it implements it; else `modifyOtherKeys` on an
+  ## xterm-compatible terminal; else legacy. `$TERM_PROGRAM`'s Kitty list is
+  ## not consulted — it is a hint for the report, not the decision.
+  if isDumbTerminal(env):
+    return (kpLegacy, csEnvironment)
+  if probe.kittyKeyboardAnswered:
+    return (kpKitty, csProbe)
+  let term = env.term.toLowerAscii()
+  for prefix in ModifyOtherKeysTermPrefixes:
+    if term.startsWith(prefix):
+      return (kpModifyOtherKeys, csEnvironment)
+  (kpLegacy, csDefault)
+
 proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
                           probe = TerminalProbe()): TerminalCapabilities =
   ## THE whole decision, as one pure function.
@@ -635,9 +666,13 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
   let (mouse, mouseFrom) = resolveMouse(env, flags)
   let (sync, syncFrom) = resolveSynchronizedOutput(env)
   let (mode, modeFrom, background) = resolveMode(env, flags, probe)
+  let (keyProtocol, keyProtocolFrom) = resolveKeyProtocol(env, probe)
   TerminalCapabilities(
     colors: colors, borders: borders, mouse: mouse, synchronizedOutput: sync,
     kittyKeyboard: resolveKittyKeyboard(env),
+    keyProtocol: keyProtocol, keyProtocolFrom: keyProtocolFrom,
+    tmuxExtendedKeysOff: env.tmux.len > 0 and keyProtocol != kpLegacy and
+      probe.tmuxExtendedKeys notin ["", "on", "always"],
     theme: flags.theme,
     colorsFrom: colorsFrom, bordersFrom: bordersFrom, mouseFrom: mouseFrom,
     syncFrom: syncFrom,
@@ -690,12 +725,19 @@ proc tmuxRgbRemedy*(caps: TerminalCapabilities): string =
   "tmux withholds 24-bit colour: set -as terminal-features ',"  & pattern &
     ":RGB'"
 
+proc tmuxExtendedKeysRemedy*(caps: TerminalCapabilities): string =
+  ## The one-line remedy when tmux keeps extended keys from this pane; ""
+  ## otherwise (Base-Keymaps §7.2 step 6).
+  if not caps.tmuxExtendedKeysOff:
+    return ""
+  "tmux withholds extended keys (Ctrl+Shift+…): set -s extended-keys on"
+
 proc capabilityNote*(caps: TerminalCapabilities): string =
   ## What the status line says about the start-up negotiation.
   result = backgroundNote(caps)
-  let remedy = tmuxRgbRemedy(caps)
-  if remedy.len > 0:
-    result.add " | " & remedy
+  for remedy in [tmuxRgbRemedy(caps), tmuxExtendedKeysRemedy(caps)]:
+    if remedy.len > 0:
+      result.add " | " & remedy
 
 proc describe*(caps: TerminalCapabilities): string =
   ## One line naming every axis AND the source that decided it. Printed by
@@ -709,8 +751,8 @@ proc describe*(caps: TerminalCapabilities): string =
   " sync2026=" & (if caps.synchronizedOutput: "on" else: "off") &
   "(" & $caps.syncFrom & ")" &
   " theme=" & $caps.theme & "(" & $caps.themeFrom & ")" &
+  " keys=" & $caps.keyProtocol & "(" & $caps.keyProtocolFrom & ")" &
   " kitty-keyboard=" & (if caps.kittyKeyboard: "advertised" else: "no") &
-  "(never enabled)" &
   " mode=" & (if caps.mode == dmLight: "light" else: "dark") &
   "(" & $caps.modeFrom & ")" &
   " palette=" & $caps.palette

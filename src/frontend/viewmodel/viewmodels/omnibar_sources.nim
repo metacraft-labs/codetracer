@@ -21,6 +21,7 @@ import isonim/core/signals
 
 import ../store/[replay_data_store, types]
 import ./[filesystem_vm, layout_settings, menu_vm, omnibar_vm]
+import ../keymap/keymap_selection
 
 export layout_settings
 from ./event_log_vm import EventLogColumn, eventLogColumnTitle,
@@ -118,6 +119,7 @@ proc parseEventLogColumnCommand*(target: string):
   (true, rest[0], col)
 
 proc layoutSettingCommands*(): seq[OmnibarEntry]
+proc baseKeymapCommands*(): seq[OmnibarEntry]
   ## Forward-declared; defined at the end of this module.
 
 proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
@@ -129,6 +131,16 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add commandsOf(menu)
   result.add eventLogColumnCommands()
   result.add layoutSettingCommands()
+  result.add baseKeymapCommands()
+
+proc baseKeymapCommands*(): seq[OmnibarEntry] =
+  ## PLAT-68: **Preferences: Select Base Keymap**, one entry per base, on every
+  ## front-end's palette — `:keymap <name>` without the prompt.
+  for m in BaseKeymap:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: SelectBaseKeymapLabel & " › " & $m,
+                            detail: ":keymap " & $m,
+                            target: baseKeymapCommandTarget(m))
 
 proc layoutSettingCommands*(): seq[OmnibarEntry] =
   ## PLAT-51: the two layout preferences as omnibox commands, on and off —

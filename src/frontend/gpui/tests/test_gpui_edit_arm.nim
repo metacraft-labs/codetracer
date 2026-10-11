@@ -86,9 +86,13 @@ suite "PLAT-44: GPUI keystrokes decode to the product's key names":
       ck canonicalKeyOfGpui(shifted, ["shift"]) == shifted
       ck canonicalKeyOfGpui(shifted, []) == shifted
 
-  test "Shift+Tab keeps its prefix, and a platform chord has no name":
+  test "Shift+Tab keeps its prefix, and the platform key is Meta":
     ck canonicalKeyOfGpui("tab", ["shift"]) == "Shift+Tab"
-    ck canonicalKeyOfGpui("a", ["platform"]) == ""
+    # GPUI's `platform` (Cmd / Super / Win) is the keymaps' `Meta`, in the
+    # one modifier order every front end shares (Base-Keymaps §2).
+    ck canonicalKeyOfGpui("a", ["platform"]) == "Meta+a"
+    ck canonicalKeyOfGpui("a", ["platform", "shift", "control"]) ==
+      "Ctrl+Shift+Meta+a"
     ck canonicalKeyOfGpui("mediaplay", []) == ""
 
 suite "PLAT-44: the arm writes the core, and saves through the project writer":
@@ -121,7 +125,7 @@ suite "PLAT-44: the arm writes the core, and saves through the project writer":
     let dir = createTempDir("plat44-", "-vim")
     try:
       writeFile(dir / ProjectFile, ProjectText)
-      let arm = newGpuiEditArm(dir, ProjectFile, ProjectText, kmVim)
+      let arm = newGpuiEditArm(dir, ProjectFile, ProjectText, bkVim)
       discard arm.applyGpuiKey("x", [], 1)       # delete-char-forward
       ck arm.text == ProjectText[1 .. ^1]
       let saved = arm.applyGpuiKey("s", ["control"], 2)

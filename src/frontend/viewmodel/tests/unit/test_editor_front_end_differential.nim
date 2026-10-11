@@ -91,7 +91,9 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 420
+const ExpectedAssertions = 430
+  ## (+9 on 2026-10-11, PLAT-68: four more keymap modules scanned, and the
+  ## scope rule's `context` and base-dependent text entry asserted.)
   ## Asserted by the last case against the runtime tally. Written LAST, from a
   ## run. §10.1's *"a static one cannot see a case that returned early"* is why
   ## `CHECKS:` is printed as well.
@@ -247,10 +249,15 @@ proc newEditBuffer*(path, text: string): EditBuffer =
 # ---------------------------------------------------------------------------
 
 const ScannedKeymapModules = [
-  "editing_keymap.nim", "kakoune_keymap.nim", "product_keymap.nim",
-  "vim_keymap.nim", "vim_import.nim", "keymap_selection.nim"]
+  "editing_keymap.nim", "kakoune_keymap.nim", "vim_keymap.nim",
+  "vim_import.nim", "keymap_selection.nim", "base_rows.nim",
+  "cua_keymap.nim", "emacs_keymap.nim", "context_keys.nim", "when_expr.nim"]
 
-const ScannedKeymapModuleCount = 6
+const ScannedKeymapModuleCount = 10
+  ## **TEN SINCE 2026-10-11**: PLAT-68 retired `product_keymap.nim` and added
+  ## the CUA and Emacs bases as data (`cua_keymap`, `emacs_keymap`), the one
+  ## builder that reads them (`base_rows`), and a binding's `when`
+  ## (`when_expr`, `context_keys`).
   ## **SIX SINCE 2026-09-23**: PLAT-43 added `keymap/keymap_selection.nim`,
   ## the one name→model selector, and this case went red by name — the
   ## enumeration doing its job a ninth time.
@@ -285,22 +292,26 @@ type
     armGpui = "gpui"
 
 proc terminalScope(d: EditingDocument): EditingScope =
-  ## The scope `edit_binding.editingScope` builds, and the scan below asserts
-  ## that it is the same five values. Re-spelling it here is exactly the
-  ## re-derivation §30a warns about; what makes it admissible is that the
-  ## re-derivation is itself the thing under test and a case compares the two
-  ## spellings as SOURCE.
-  EditingScope(model: d.model, product: pmEdit, pane: epEditor,
-               mode: d.state.mode, textEntry: true)
+  ## The scope `edit_binding.editingScope` builds — which is one call to
+  ## `editing_core.editScopeOf`, so this calls the same function rather than
+  ## re-spelling it (§30a). Until PLAT-68 this was a re-spelling with
+  ## `textEntry: true`, which hid the document's opening mode from every case:
+  ## a CUA document opening in normal mode typed anyway here and nowhere else.
+  ## The scan below still compares the builder's SOURCE with the rule.
+  editScopeOf(d)
 
-proc keyForOperation(name: string): string =
-  ## The product keymap's key for `name`, or "" when it binds none.
+proc keyForOperation(name: string; d: EditingDocument): string =
+  ## The default base's (CUA's) one-chord key for `name` IN `d`'s CURRENT
+  ## STATE, or "" when it binds none there.
   ##
-  ## Read out of `productKeymap()`'s own table rather than out of a list here,
-  ## so the terminal arm drives whatever the shipped default binds and a
-  ## fifteenth row needs no edit in this file.
-  for b in productKeymap().keymap.bindings:
-    if b.operation == name and b.chords.len == 1:
+  ## Read out of the shipped table rather than out of a list here, so the
+  ## terminal arm drives whatever the default binds. "In the current state"
+  ## because a CUA row carries a `when`: `Tab` is `insert-tab` or
+  ## `indent-selection` depending on the selection, and the key must be the
+  ## one that resolves to `name` NOW.
+  let scope = terminalScope(d)
+  for b in keymapOf(bkCua).keymap.bindings:
+    if b.operation == name and b.chords.len == 1 and b.scope.admits(scope):
       return b.chords[0]
   ""
 
@@ -332,7 +343,7 @@ proc runArm(arm: Arm; row: OperationSequence; doc: ScenarioDoc;
     of armTerminal:
       # The terminal's own two doors, in the order the front-end has them:
       # a key if its keymap binds the operation, the name otherwise.
-      let key = keyForOperation(step.name)
+      let key = keyForOperation(step.name, d)
       if key.len > 0:
         let applied = d.applyKey(terminalScope(d), key, nowMs)
         performed.add applied.operations
@@ -548,7 +559,8 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
     counted rule.len > 0
     counted "product: pmEdit" in rule
     counted "pane: epEditor" in rule
-    counted "textEntry: d.state.mode == emInsert" in rule
+    counted "textEntry: not isModal(d.model) or d.state.mode == emInsert" in rule
+    counted "context: editorContextKeys(d.state, pmEdit, d.delivery)" in rule
     counted "model: d.model" in rule
     counted "mode: d.state.mode" in rule
 
@@ -614,6 +626,8 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
     discard near.applyKey(terminalScope(near), "a", 1_000)
     discard near.applyKey(terminalScope(near), "b", 1_010)
     let nearText = near.text
+    # The keys TYPED: a document under the default base opens ready to type.
+    counted nearText == "abalpha\n"
     discard near.applyNamed("undo", OpArgs(), 1_010)
     checkpoint("grouped: '" & nearText & "' -> '" & near.text & "'")
     counted near.text == "alpha\n"
@@ -720,14 +734,14 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
     let src = codeOnly(RuntimeSource)
     # `newEditSession(rt.keymapModel)` since PLAT-43: a session opens under
     # the keymap the user chose (the stored preference, or `:keymap`).
-    counted "newEditSession(rt.keymapModel)" in src
+    counted "newEditSession(rt.keymapModel, rt.keyDelivery)" in src
     # AND IT PASSES THE CLOCK. The last step of PLAT-32's residual: the
     # runtime has threaded `nowMs` through `handleToken` since CTUI-2 and the
     # editing path never asked for it.
     counted "rt.routeTokenToEditor(token, nowMs)" in src
     # Through the SESSION since PLAT-28 (2026-09-23), so the file's project
     # breakpoints are carried through the edit; the clock still goes with it.
-    counted "applyEditKeyIn(buf, keyName(token), nowMs)" in src
+    counted "applyEditKeyIn(buf, rt.keyOf(token), nowMs)" in src
     counted mutableBufferSpellingsIn(src).len == 0
 
   # -------------------------------------------------------------------------

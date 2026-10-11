@@ -727,6 +727,15 @@ lint_step "Plugin reactive boundary: a plugin cannot reach a raw reactive primit
 lint_step "Editor import closure: no async, no I/O, no clock in the editor model" \
 	bash ci/test/editor-import-closure.sh
 
+# PLAT-68: the CUA base keymap is VS Code's. Every row CUA-Keymap.md cites
+# from VS Code re-extracts from VS Code 1.105.0 (monaco-editor 0.54.0's ESM and
+# the workbench sources at the same commit), and every default the extraction
+# finds is taken or declined with a reason. The data's agreement with the
+# DOCUMENT is `test_plat68_cua_oracle.nim`'s (vm-unit); this is the
+# document's agreement with VS Code — the two halves of KL-3.
+lint_step "CUA keymap: every cited VS Code binding re-extracts, every default accounted for" \
+	bash ci/test/cua-keymap-extractor.sh
+
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.
 # CodeTracer-Platform.milestones.org asks for it "in the shape

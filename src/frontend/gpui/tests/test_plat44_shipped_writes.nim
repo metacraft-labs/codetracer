@@ -49,25 +49,25 @@ const
 type
   ShippedTx = object
     name: string
-    model: KeymapModel
+    model: BaseKeymap
     keys: seq[string]
       ## Canonical names, arrangement included (no snapshot is taken inside
       ## the binary; the before-state is the file as written).
 
 let Kinds = @[
-  ShippedTx(name: "insert a character", model: kmProductDefault,
+  ShippedTx(name: "insert a character", model: bkCua,
             keys: @["X"]),
-  ShippedTx(name: "split a line", model: kmProductDefault,
+  ShippedTx(name: "split a line", model: bkCua,
             keys: @["Right", "Right", "Right", "Enter"]),
-  ShippedTx(name: "delete backward", model: kmProductDefault,
+  ShippedTx(name: "delete backward", model: bkCua,
             keys: @["Right", "Backspace"]),
-  ShippedTx(name: "delete a selection", model: kmKakoune, keys: @["w", "d"]),
-  ShippedTx(name: "indent a selection", model: kmKakoune, keys: @["X", ">"]),
-  ShippedTx(name: "upper-case a selection", model: kmKakoune,
+  ShippedTx(name: "delete a selection", model: bkKakoune, keys: @["w", "d"]),
+  ShippedTx(name: "indent a selection", model: bkKakoune, keys: @["X", ">"]),
+  ShippedTx(name: "upper-case a selection", model: bkKakoune,
             keys: @["w", "~"]),
-  ShippedTx(name: "undo", model: kmProductDefault,
+  ShippedTx(name: "undo", model: bkCua,
             keys: @["X", "Y", "Ctrl+z"]),
-  ShippedTx(name: "redo", model: kmProductDefault,
+  ShippedTx(name: "redo", model: bkCua,
             keys: @["X", "Ctrl+z", "Ctrl+y"]),
 ]
 const KindCount = 8

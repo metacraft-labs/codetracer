@@ -21,7 +21,12 @@
 ##      24-bit `SGR 48:2`       reports `48:2:…` back stored the colour it was
 ##                              given; one that approximated reports `48;5;N`.
 ##                              The SGR is reset straight after.
-##   4. DA1 (`CSI c`)           the FENCE. Every terminal and multiplexer
+##   4. `CSI ? u`               PLAT-68: does the terminal implement the Kitty
+##                              keyboard protocol? One that does answers
+##                              `CSI ? <flags> u` BEFORE the fence; one that
+##                              does not answers only the fence
+##                              (Base-Keymaps-And-Layer-Stack.md §7.2).
+##   5. DA1 (`CSI c`)           the FENCE. Every terminal and multiplexer
 ##                              answers it, and in order, so its answer says
 ##                              "everything above has been answered or never
 ##                              will be" and ends the wait early.
@@ -75,6 +80,9 @@ const
   PixelMouseQuery* = "\x1b[?1016$p"
     ## PLAT-51: DECRQM for SGR-pixel mouse reporting (DECSET 1016). The
     ## answer is `CSI ? 1016 ; Ps $ y` — Ps 1 / 2 / 3 recognised, 0 / 4 not.
+  KittyKeyboardQuery* = "\x1b[?u"
+    ## PLAT-68: query the Kitty keyboard flags. Asked on every round: whether
+    ## the CUA base's `Ctrl+Shift+…` chords can be typed depends on it.
   CellSizeQuery* = "\x1b[16t"
     ## PLAT-51: the cell's size in pixels — `CSI 6 ; height ; width t`.
   StartupQueries* = Osc11Query & XtGetTcapQuery & DecrqssProbeSgr &
@@ -114,6 +122,14 @@ proc isPixelMouseReply*(token: string): bool =
 proc isCellSizeReply*(token: string): bool =
   token.startsWith("\x1b[6;") and token.endsWith("t")
 
+proc isKittyKeyboardReply*(token: string): bool =
+  ## `CSI ? <flags> u` — the answer to `CSI ? u`.
+  if not (token.len >= 4 and token.startsWith("\x1b[?") and token[^1] == 'u'):
+    return false
+  for c in token[3 ..< token.len - 1]:
+    if c notin '0'..'9': return false
+  true
+
 proc isReplyToken*(token: string): bool =
   ## Whether an input token is a terminal's ANSWER rather than a key: an OSC,
   ## DCS or APC string, a DA1 report, or (PLAT-51) a DECRQM answer for 1016
@@ -121,7 +137,8 @@ proc isReplyToken*(token: string): bool =
   if token.len < 2 or token[0] != '\x1b':
     return false
   token[1] in {']', 'P', '_'} or isDa1Reply(token) or
-    isPixelMouseReply(token) or isCellSizeReply(token)
+    isPixelMouseReply(token) or isCellSizeReply(token) or
+    isKittyKeyboardReply(token)
 
 proc decodeHex(s: string): string =
   result = ""
@@ -140,6 +157,9 @@ proc noteReply*(probe: var TerminalProbe; token: string): bool =
   probe.attempted = true
   if isDa1Reply(token):
     probe.answered = true
+    return true
+  if isKittyKeyboardReply(token):
+    probe.kittyKeyboardAnswered = true
     return true
   if isPixelMouseReply(token):
     # `CSI ? 1016 ; Ps $ y`: 1 set, 2 reset, 3 permanently set — the mode is
@@ -203,6 +223,13 @@ proc readTmuxFeatures*(probe: var TerminalProbe) =
   var output = ""
   var code = -1
   try:
+    # PLAT-68: and whether tmux passes extended keys to the pane at all.
+    let (keys, keysCode) = execCmdEx("tmux show -sv extended-keys")
+    if keysCode == 0:
+      probe.tmuxExtendedKeys = keys.strip()
+  except CatchableError, Defect:
+    discard
+  try:
     (output, code) = execCmdEx(
       "tmux display -p '#{client_termfeatures}\t#{client_termname}'")
   except CatchableError, Defect:
@@ -251,6 +278,7 @@ proc queriesFor*(flags: CapabilityFlags): string =
   # §4.2.2). Not asked under `--no-mouse`.
   if not flags.noMouse:
     result.add PixelMouseQuery & CellSizeQuery
+  result.add KittyKeyboardQuery
   result.add Da1Query
 
 proc runStartupProbe*(d: TerminalDriver; env: TerminalEnv;

@@ -59,9 +59,12 @@ import ../input/modal_state
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 309
+const ExpectedAssertions = 316
   ## PLAT-51: +3 — Ctrl+Enter in both modified-key forms and Alt+t decode
   ## (the desktop's "Add tracepoint" chords on the read-only editor's caret).
+  ## PLAT-68: +7 — three key spellings (F6, Shift+F6, Ctrl+Shift+p), their
+  ## three bindings' chord checks, three newly decodable modifier forms, and
+  ## two junk forms fewer.
 
 var countedAssertions = 0
 
@@ -86,7 +89,7 @@ const
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 90
+  ExpectedBindingCount = 93
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -102,6 +105,10 @@ const
     ## two actions — `g t` / `g T` and `Ctrl+Tab` / `Ctrl+Shift+Tab`.
     ## `specSectionOf` answers `ssSpec331` for both, and the case below asserts
     ## that exactly those two come from that section.
+    ##
+    ## 93 SINCE PLAT-68: `F6` / `Shift+F6` (focus the next / previous pane —
+    ## the way off an editor whose `Tab` now indents) and `Ctrl+Shift+p` (the
+    ## command palette, VS Code's chord, beside `F1`), CodeTracer-TUI.md §4.2.
 
   # Real xterm byte sequences, and the canonical name each must decode to.
   # This list is the "reachability" oracle of check 4, and it is written from
@@ -117,7 +124,10 @@ const
     ("[", "["), ("]", "]"), ("{", "{"), ("}", "}"), (".", "."),
     ("/", "/"), ("?", "?"), (":", ":"), (" ", "Space"),
     ("\r", "Enter"), ("\n", "Enter"), ("\x7f", "Backspace"),
-    ("\b", "Backspace"), ("\x1b", "Esc"),
+    # PLAT-68: of `0x08` and `0x7f`, the one the tty's VERASE names is
+    # Backspace and the other is Ctrl+Backspace; `keyName`'s default VERASE is
+    # `0x7f`, every modern terminal's.
+    ("\b", "Ctrl+Backspace"), ("\x1b", "Esc"),
     ("\x1b[A", "Up"), ("\x1b[B", "Down"), ("\x1b[C", "Right"),
     ("\x1b[D", "Left"),
     ("\x15", "Ctrl+u"), ("\x04", "Ctrl+d"), ("\x10", "Ctrl+p"),
@@ -137,6 +147,11 @@ const
     # "modifyOtherKeys"), and the `CSI u` convention as `CSI 9 ; m u`.
     ("\x1b[27;5;9~", "Ctrl+Tab"), ("\x1b[27;6;9~", "Ctrl+Shift+Tab"),
     ("\x1b[9;5u", "Ctrl+Tab"), ("\x1b[9;6u", "Ctrl+Shift+Tab"),
+    # PLAT-68's pane and palette chords: `CSI 17 ~` is F6, and Ctrl+Shift+p
+    # has no legacy encoding (it is `0x10`, Ctrl+p) — the Kitty `CSI u` form
+    # carries it, which is why the palette keeps `F1` beside it.
+    ("\x1b[17~", "F6"), ("\x1b[17;2~", "Shift+F6"),
+    ("\x1b[112;6u", "Ctrl+Shift+p"),
   ]
 
 # ---------------------------------------------------------------------------
@@ -451,7 +466,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 68
+    ck decoded == 71
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0
@@ -482,13 +497,19 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
     # desktop's Ctrl+Enter "Add tracepoint" chord, which a terminal can send
     # in no other form: another codepoint, or a modifier outside xterm's
     # table, is still not a key.
-    for junk in ["", "\x1b[<0;12;5M", "\x1b[", "\x1b[99~", "\x1b[1;9P",
-                 "\x1b[15;99~", "\x1bOZ", "\x1b[0;1;2X",
-                 "\x1b[27;5;14~", "\x1b[14;5u", "\x1b[27;99;9~",
-                 "\x1b[9;99u", "\x1b[9u"]:
+    # PLAT-68 widened the modifier to the whole xterm / Kitty bit set
+    # (Shift 1, Alt 2, Ctrl 4, Super 8 and Meta 32 both `Meta`, the lock bits
+    # 64 / 128 ignored), so `CSI 1 ; 9 P` is Meta+F1 now, not junk; Hyper (16)
+    # is still not a key, nor is a modifier of 0.
+    for junk in ["", "\x1b[<0;12;5M", "\x1b[", "\x1b[99~", "\x1b[1;17P",
+                 "\x1b[15;0~", "\x1bOZ", "\x1b[0;1;2X",
+                 "\x1b[27;5;14~", "\x1b[14;5u", "\x1b[27;17;9~"]:
       checkpoint("must not decode: " & junk.escape())
       ck keyName(junk) == ""
     ck keyName("\x1b[13;5u") == "Ctrl+Enter"
+    ck keyName("\x1b[1;9P") == "Meta+F1"
+    ck keyName("\x1b[15;99~") == "Alt+Meta+F5"
+    ck keyName("\x1b[9u") == "Tab"
     ck keyName("\x1b[27;5;13~") == "Ctrl+Enter"
     # …and Alt + a printable key, the ESC-prefixed form (Alt+T, the same
     # chord's other spelling).

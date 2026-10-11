@@ -1,0 +1,18 @@
+# Control digests for run-plat68-keymaps-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# `specs:` is $CT_SPECS_DIR, `nim-termctl:` is
+# $NIM_TERMCTL_SRC. Refreshed with --record-control-hashes,
+# gated by the needle scan (§39a).
+19efc951e2ce52fdc3af20c48c2277cfcaf621038297affdc7ea39f7906699a0  src/common/key_names.nim
+5c2c7c3c56c053ccef8f08a3cfe3810479344bc1bf8680f30bf1369696bcce4e  src/frontend/viewmodel/keymap/editing_keymap.nim
+87d56b404425487fd8d6f0ac598dad1a1385ac7f5ec02fd9d2f4f41d4449ab71  src/frontend/viewmodel/keymap/keymap_selection.nim
+fc1937a56d3ab665e4fb5db6fd7edb7c2750d2ba58c4bc05e03832ca5c4ff4c8  src/frontend/viewmodel/keymap/when_expr.nim
+b5fda6aba95b87d321048cae45c7314cdd843a3c5962036a2faa67d8de42c8fc  src/frontend/viewmodel/keymap/cua_keymap.nim
+a4683b2a3a7fab9d5d69c4a911aa916a9ca48b66f1f9f5c61a83474e3f7ca7b8  specs:spec/GUI/CUA-Keymap.md
+faee4585c9cb3d80f313f91bc9d21558054a45042c1cacac97ab9dbd1515a7df  nim-termctl:nim_termctl/posix_backend.nim
+a8e9df0a2bd6733d79f217a70813e0f76f968f796b1c4c319d4ab22f9615589a  src/frontend/viewmodel/tests/unit/test_plat68_key_decoding.nim
+b2b9efca9d5bde6fa1e7e2a077616b750d76381a219286ef64b5a1bfcbd4a837  src/frontend/viewmodel/tests/unit/test_plat68_base_keymaps.nim
+6c12b104c58c18edd9c4dc81e5f4d98f421894b58e6254d7a4a06fdccedb7c49  src/frontend/viewmodel/tests/unit/test_plat68_cua_oracle.nim
+5aa5a7e4ffb20e638e77ca2130e89cbb23e83d112b2398e0d4f3e8c117f91984  src/frontend/tui/tests/real_terminal/test_plat68_keymaps_pty.nim
+8329970f0614fc19f62bd78705e8f7dece1c0ed9d639ffb82f5c88a337025597  ci/test/cua-keymap-extractor.sh
+9e01eba0a0dbb909d5ba005a1a1e4ad0c6e68359df20f5a4ac8eb530e27edc8c  tools/cua-keymap-extractor.py

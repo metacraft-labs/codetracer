@@ -11,7 +11,7 @@
 ##      preference through `keymap_preference.loadKeymapPreference`.
 ##   2. **THE SELECTOR IS NOT A SECOND RESOLVER.** The name→model mapping names
 ##      no resolver entry point, and nothing else in the product maps a name to
-##      a `KeymapModel` (`parseEnum[KeymapModel]`, the obvious second spelling).
+##      a `BaseKeymap` (`parseEnum[BaseKeymap]`, the obvious second spelling).
 ##
 ## Identifiers are compared the way Nim compares them (§35b): the first
 ## character exactly, the rest case- and underscore-insensitively — so
@@ -85,7 +85,7 @@ proc names(src: string; ident: string): bool =
   nimIdent(ident) in identifiers(src)
 
 proc mapsNameToModel(src: string): bool =
-  ## `parseEnum[KeymapModel]` — the second spelling of the selector — in any
+  ## `parseEnum[BaseKeymap]` — the second spelling of the selector — in any
   ## identifier-equal form, with any spacing inside the brackets.
   let code = codeOnly(src).multiReplace((" ", ""), ("\t", ""), ("\n", ""))
   var i = 0
@@ -96,7 +96,7 @@ proc mapsNameToModel(src: string): bool =
       if nimIdent(code[i ..< j]) == nimIdent("parseEnum") and
          j < code.len and code[j] == '[':
         let close = code.find(']', j)
-        if close > j and nimIdent(code[j + 1 ..< close]) == nimIdent("KeymapModel"):
+        if close > j and nimIdent(code[j + 1 ..< close]) == nimIdent("BaseKeymap"):
           return true
       i = j
     else:
@@ -119,10 +119,10 @@ suite "PLAT-43: the scanners find what they look for (planted controls)":
     ck not names("let s = SelectKeymap(x)", "selectKeymap")
 
   test "the second spelling of the selector is found when planted":
-    ck mapsNameToModel("let m = parseEnum[KeymapModel](name)")
-    ck mapsNameToModel("let m = parse_enum[ Keymap_model ](name)")
-    ck not mapsNameToModel("let m = parseEnum[keymapModel](name)")   # not Nim-equal
-    ck not mapsNameToModel("# parseEnum[KeymapModel] would be a second selector")
+    ck mapsNameToModel("let m = parseEnum[BaseKeymap](name)")
+    ck mapsNameToModel("let m = parse_enum[ Base_keymap ](name)")
+    ck not mapsNameToModel("let m = parseEnum[baseKeymap](name)")   # not Nim-equal
+    ck not mapsNameToModel("# parseEnum[BaseKeymap] would be a second selector")
     ck not mapsNameToModel("let m = parseEnum[ProductMode](name)")
 
 suite "PLAT-43: one selector, two front-ends":
@@ -139,8 +139,15 @@ suite "PLAT-43: one selector, two front-ends":
     ck names(sel[decodeAt .. ^1], "selectKeymap")
 
   test "both native hosts read the preference through loadKeymapPreference":
-    ck names(src("src/frontend/tui/main.nim"), "loadKeymapPreference")
-    ck names(src("src/frontend/gpui/main.nim"), "loadKeymapPreference")
+    # PLAT-68: through `sessionKeymap`, which adds the `--keymap` flag's
+    # precedence over the stored value and calls `loadKeymapPreference` for
+    # the stored half — still one reader, in the shared host module.
+    ck names(src("src/frontend/tui/main.nim"), "sessionKeymap")
+    ck names(src("src/frontend/gpui/main.nim"), "sessionKeymap")
+    let pref = src("src/frontend/viewmodel/host/keymap_preference.nim")
+    let sessionAt = pref.find("proc sessionKeymap")
+    ck sessionAt > 0
+    ck names(pref[sessionAt .. ^1], "loadKeymapPreference")
 
 suite "PLAT-43: the selector is not a second resolver":
 
@@ -152,7 +159,7 @@ suite "PLAT-43: the selector is not a second resolver":
         checkpoint(rel & " / " & entry)
         ck not names(s, entry)
 
-  test "nothing in the product maps a name to a KeymapModel on its own":
+  test "nothing in the product maps a name to a BaseKeymap on its own":
     var scanned = 0
     var offenders: seq[string] = @[]
     for dir in ["src/frontend", "src/common"]:

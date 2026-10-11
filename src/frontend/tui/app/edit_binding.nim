@@ -16,13 +16,13 @@
 ## `viewmodel/editor/editor_state.EditorState`, and while it existed:
 ##
 ##   * PLAT-31's Vim and Kakoune models were *reachable from no key the
-##     shipped binary accepts* — the terminal resolved keys through
-##     `TuiEditBindings` directly, so the resolver had no caller;
+##     shipped binary accepts* — the terminal resolved keys through a
+##     fourteen-row table of its own directly, so the resolver had no caller;
 ##   * PLAT-32's history was not the history the terminal undid through —
 ##     `Ctrl+z` popped the WIDGET's delta stack;
 ##   * PLAT-33's collaborative rebase had nothing to rebase against, because
 ##     the bytes a user was typing were not in the model at all;
-##   * and the operation name in `TuiEditBindings` was a JOIN between two
+##   * and the operation name in that table was a JOIN between two
 ##     suites rather than a call: the ViewModel oracle ran the operation, this
 ##     module ran a widget method, and nothing executed the edge between them.
 ##
@@ -67,8 +67,6 @@ import std/[algorithm, strutils]
 
 import codetracer_embed
 
-import ../../../common/editing_key_bindings
-
 import ./source_binding
 import ./syntax/highlight_producer
 import ./file_io_producer
@@ -78,10 +76,6 @@ export edit_pane
 export highlight_producer
 export file_io_producer
 export source_binding
-# The binding table is part of this module's contract now: a caller that wants
-# to know which operation a key performs asks the TABLE, and
-# `app/tests/test_edit_binding_vocabulary.nim` asks it exactly that.
-export editing_key_bindings
 
 type
   EditBuffer* = ref object
@@ -97,8 +91,7 @@ type
       ## Public for the reason the widget was public: `app/tests/` asserts
       ## against the real editor's state rather than against a summary this
       ## module computed. What changed is that the real editor is now the one
-      ## the ViewModel suites grade, so the two sides of `TuiEditBindings` are
-      ## a call rather than a join.
+      ## the ViewModel suites grade.
     loadedText*: string
       ## What is on disk, as far as this session knows — the bytes that were
       ## read, and then the bytes that were last WRITTEN (`markSaved`).
@@ -183,11 +176,14 @@ type
       ## about a file's mtime.
     staleNoticeShown*: bool
       ## §2.1: the user is told *"once"*. This is the once.
-    model*: KeymapModel
+    model*: BaseKeymap
       ## PLAT-43. The keymap model every buffer of this session resolves keys
       ## through — the one `:keymap <name>` selected, or the stored preference
       ## the host loaded. A SESSION field and not only a per-document one, so a
       ## file opened after the choice is opened under it.
+    delivery*: KeyDelivery
+      ## PLAT-68. How keys reach this terminal — the protocol the driver
+      ## negotiated at start-up — handed to every buffer the session opens.
     imported*: ImportedKeymap
       ## PLAT-36. The Vim configuration `:source` imported, or nil. Held at
       ## session level for the same reason as `model`: a file opened after the
@@ -213,7 +209,8 @@ const
 
 proc newEditBuffer*(path, text: string;
                     viewportHeight = 20;
-                    model = kmProductDefault): EditBuffer =
+                    model = bkCua;
+                    delivery = TerminalLegacyDelivery): EditBuffer =
   ## A buffer over `text`, named `path`, with the caret at the top.
   ##
   ## SOFT WRAP IS OFF, and it is off in `editing_core.terminalWrapSettings`
@@ -224,14 +221,14 @@ proc newEditBuffer*(path, text: string;
   ## the rows they number, which is the one thing a debugger's source column
   ## may not do.
   ##
-  ## `model` IS A PARAMETER AND ITS DEFAULT IS THE PRODUCT'S. PLAT-31 shipped
-  ## Vim and Kakoune as `KeymapDefinition`s and left them reachable from no
-  ## key the binary accepts, because the terminal dispatched through
-  ## `TuiEditBindings` directly. This parameter is the caller a model needs;
-  ## §4.4's *"the default does not move"* is what its default says.
+  ## `model` IS A PARAMETER AND ITS DEFAULT IS THE PRODUCT'S — CUA, the
+  ## default base (Base-Keymaps-And-Layer-Stack.md §3.1). `delivery` is the
+  ## key protocol the driver negotiated, which a legacy-fallback row's `when`
+  ## reads.
   EditBuffer(path: path,
              doc: initEditingDocument(path, text, model,
-                                      viewportRows = max(1, viewportHeight)),
+                                      viewportRows = max(1, viewportHeight),
+                                      delivery = delivery),
              loadedText: text, recordedText: text, viewportTop: 1)
 
 proc text*(buf: EditBuffer): string =
@@ -353,6 +350,13 @@ type
     ekMoved = "moved"
     ekChanged = "changed"
 
+  EditKeyResult* = object
+    ## What one key did, and the named operations it ran — which is how the
+    ## runtime learns that a key ASKED for something only the host can do (a
+    ## `save`), the way GPUI's edit arm reads it (`edit_arm.applyCanonicalKey`).
+    outcome*: EditKeyOutcome
+    operations*: seq[string]
+
 proc editingScope*(buf: EditBuffer): EditingScope =
   ## **THE FIVE DIMENSIONS §4.3 NAMES, AS THIS FRONT-END SETS THEM.**
   ##
@@ -390,7 +394,7 @@ proc claimsEditKey*(buf: EditBuffer; key: string; nowMs: int64): bool =
   ## `editing_core.claimsKey` under this front-end's scope.
   not buf.isNil and buf.doc.claimsKey(buf.editingScope, key, nowMs)
 
-proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
+proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyResult =
   ## One canonical key name (`key_names.keyName`'s vocabulary) applied to the
   ## buffer, **through PLAT-31's resolver and PLAT-30's vocabulary**.
   ##
@@ -403,11 +407,10 @@ proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
   ## operation, this module ran a widget method, and `DIFF-1` is the axis
   ## PLAT-34 added because nothing executed the edge between them.
   ##
-  ## What replaces it is ONE CALL. `product_keymap` LIFTS the same fourteen
-  ## rows into the resolver's table (it does not transcribe them), the
-  ## resolver walks the trie, and the operation that comes out is applied to
-  ## the model. The table still decides which key does what; there is no
-  ## longer a second implementation of what doing it MEANS.
+  ## What replaces it is ONE CALL: the session's base keymap's resolver walks
+  ## its trie, and the operation that comes out is applied to the model. The
+  ## table decides which key does what; there is no second implementation of
+  ## what doing it MEANS.
   ##
   ## ## `character` IS GONE FROM THE SIGNATURE, AND THAT IS A REPAIR
   ##
@@ -428,22 +431,25 @@ proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyOutcome =
   ## could not break. The runtime already threads `nowMs` through
   ## `handleToken`; this is the parameter that carries it the last step.
   if buf.isNil:
-    return ekIgnored
+    return EditKeyResult(outcome: ekIgnored, operations: @[])
   let applied = buf.doc.applyKey(buf.editingScope, key, nowMs)
-  case applied.outcome
-  of eoIgnored: ekIgnored
-  of eoMoved: ekMoved
-  of eoChanged: ekChanged
+  let outcome = case applied.outcome
+                of eoIgnored: ekIgnored
+                of eoMoved: ekMoved
+                of eoChanged: ekChanged
+  EditKeyResult(outcome: outcome, operations: applied.operations)
 
 # ---------------------------------------------------------------------------
 # The session
 # ---------------------------------------------------------------------------
 
-proc newEditSession*(model = kmProductDefault): EditSession =
+proc newEditSession*(model = bkCua;
+                     delivery = TerminalLegacyDelivery): EditSession =
   EditSession(buffers: @[], active: NoBuffer, points: @[], editedPaths: @[],
-              staleNoticeShown: false, furnished: false, model: model)
+              staleNoticeShown: false, furnished: false, model: model,
+              delivery: delivery)
 
-proc selectModel*(s: EditSession; model: KeymapModel) =
+proc selectModel*(s: EditSession; model: BaseKeymap) =
   ## PLAT-43. Make `model` this session's keymap: every OPEN buffer is re-keyed
   ## through `editing_core.switchModel` (text and history kept) and every
   ## buffer opened later opens under it.
@@ -454,20 +460,31 @@ proc selectModel*(s: EditSession; model: KeymapModel) =
   for buf in s.buffers:
     buf.doc.switchModel(model)
 
+proc adoptDelivery*(s: EditSession; delivery: KeyDelivery) =
+  ## PLAT-68: the terminal re-negotiated its key protocol (a late reply to
+  ## the start-up round). Every open buffer, and every one opened later,
+  ## resolves under the new delivery — a legacy fallback row stops applying
+  ## the moment the Kitty protocol is on.
+  if s.isNil:
+    return
+  s.delivery = delivery
+  for buf in s.buffers:
+    buf.doc.delivery = delivery
+
 proc installImported*(s: EditSession; imported: ImportedKeymap) =
   ## PLAT-36. Put every OPEN buffer, and every buffer opened later, under an
   ## imported Vim configuration — text and history kept, as `selectModel`
-  ## keeps them. The session's model becomes `kmVim`, the model the import is
+  ## keeps them. The session's model becomes `bkVim`, the model the import is
   ## layered on.
   if s.isNil:
     return
-  s.model = kmVim
+  s.model = bkVim
   s.imported = imported
   for buf in s.buffers:
     buf.doc.installImported(imported)
 
 proc applyEditKeyIn*(s: EditSession; buf: EditBuffer; key: string;
-                     nowMs: int64): EditKeyOutcome =
+                     nowMs: int64): EditKeyResult =
   ## `applyEditKey`, with the session's points on `buf`'s file CARRIED THROUGH
   ## the edit (PLAT-28 §8.2). A breakpoint belongs to the code on its line, so
   ## a line opened above it moves it down, and a deleted line takes it away —
@@ -544,7 +561,7 @@ proc openFile*(s: EditSession; path, text: string; viewportHeight = 20): int =
   if existing >= 0:
     s.active = existing
     return existing
-  s.buffers.add newEditBuffer(path, text, viewportHeight, s.model)
+  s.buffers.add newEditBuffer(path, text, viewportHeight, s.model, s.delivery)
   inc s.nextSerial
   s.buffers[^1].serial = s.nextSerial
   if not s.imported.isNil:
