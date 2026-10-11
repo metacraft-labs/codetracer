@@ -7,6 +7,7 @@ import certificate
 import certificate_issuance
 import certificate_local_store
 import certificate_verify_cli
+import ct_test_delegate
 import frameworks/ada_fallback
 import frameworks/assembly_fallback
 import frameworks/crystal_spec
@@ -555,6 +556,15 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
 
   runExitCode(summary)
 
+proc refcRunRefusal*(lookup: CtTestLookup): string =
+  ## Why a refc build will not run `test run`, and where it looked for the
+  ## `ct-test` it would otherwise have handed the run to.
+  "`test run` needs the `ct-test` runner, which is built --mm:orc and ships " &
+  "beside `ct`: this binary was compiled with --mm:refc, whose per-thread " &
+  "heaps make the parallel runner unsafe, and it found no `ct-test` to hand " &
+  "the run to (" & describeCtTestLookup(lookup) & "). Reinstall CodeTracer, " &
+  "or put `ct-test` on PATH; `test discover` and `test verify` work here."
+
 proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
     cache: DiscoveryCache): int =
   ## CLI entry point. Dispatches the ``test <verb>`` surface; ``discover``,
@@ -585,17 +595,17 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
     # producing no results at all.
     #
     # This is not hypothetical — the `ct` binary embeds this CLI and is built
-    # `--mm:refc` for the rest of CodeTracer's sake, so `ct test run` would
-    # crash where `ct test discover` (single-threaded) works fine. Refuse with
-    # the machine-readable error envelope every other `run` failure uses,
+    # `--mm:refc` for the rest of CodeTracer's sake. `ct` therefore never runs
+    # tests itself: `src/ct/codetracer.nim` hands `test run` to the ORC-built
+    # `ct-test` that every package ships beside it (`ct_test_delegate.nim`),
+    # BEFORE this procedure is reached. Arriving here on a refc build means no
+    # `ct-test` was found, so refuse with the machine-readable error envelope
+    # every other `run` failure uses, naming the places the lookup tried,
     # rather than handing the caller a core dump. Compiled out entirely on
-    # ORC/ARC builds, which is what the standalone `ct-test` binary is.
+    # ORC/ARC builds, which is what `ct-test` is — so `ct-test` can never
+    # delegate, to itself or to anything else.
     when not defined(gcOrc) and not defined(gcArc):
-      return emitRunError(@[
-        "`test run` requires an ORC/ARC build: this binary was compiled with " &
-        "--mm:refc, whose per-thread heaps make the parallel runner unsafe. " &
-        "Use the standalone `ct-test` binary (built --mm:orc) for runs; " &
-        "`test discover` is supported here."])
+      return emitRunError(@[refcRunRefusal(locateCtTest())])
     else:
       var mutableRegistry = registry
       return runRun(if args.len > 2: args[2 .. ^1] else: @[], mutableRegistry, cache)

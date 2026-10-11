@@ -1220,11 +1220,16 @@ package codeTracer:
       # not have to build and ship that closure. Hence a separate, small
       # binary from the same sources.
       #
-      # NOTE: this target is deliberately NOT added to `codetracerActions`.
-      # That list feeds the `codetracer` aggregate (the default build action),
-      # and `ct-test` is an auxiliary tool, not part of the shipped product;
-      # adding it would put a second full Nim compile on every default build.
-      # Build it explicitly with `repro build ct-test`.
+      # CTC-3i: this target IS part of the shipped product. `ct test run`
+      # hands the run to the `ct-test` installed beside `ct`
+      # (src/ct_test/ct_test_delegate.nim), so it joins `codetracerActions`
+      # below: the default `codetracer` aggregate builds it into the same
+      # `bin/` as `ct`, and `macos-app` / `windows-app`, whose `after` is
+      # `codetracerActions`, copy it into the bundle with the rest of that
+      # tree. It used to be kept out as "an auxiliary tool", which is why no
+      # package could run `ct test run`. It stays in `auxiliaryActionIds` for
+      # the source-subset graph below only, where it remains opt-in;
+      # `repro build ct-test` builds it alone.
       #
       # The `target()` call below is not what makes that selector resolve —
       # the output's basename already contributes the same implicit name, and
@@ -1243,9 +1248,9 @@ package codeTracer:
       #     source SIGSEGVs inside the worker loop on the first `test run`,
       #     before a single result exists, while `test discover`
       #     (single-threaded) survives. ORC shares one heap, so the workers run
-      #     and a summary comes out. (This is also why `ct test run` is not
-      #     usable from the `ct` binary, which is refc for the rest of
-      #     CodeTracer's sake — use this binary for runs.)
+      #     and a summary comes out. (This is also why the `ct` binary, which
+      #     is refc for the rest of CodeTracer's sake, hands `test run` to
+      #     this binary rather than running it.)
       #
       #     ORC used to be only the precondition and not the whole of it: with
       #     21 or more workers the process also aborted in the allocator while
@@ -1285,6 +1290,7 @@ package codeTracer:
           @[],
         source = "src/ct_test/ct_test.nim")
       target("ct-test", ctTest)
+      codetracerActions.add(ctTest)
       auxiliaryActionIds.add(ctTest.id)
 
     if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:

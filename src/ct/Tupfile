@@ -2,3 +2,5 @@ include_rules
 
 : codetracer.nim |> !codetracer_bpf |> ../bin/ct$(EXE_SUFFIX)
 : db_backend_record.nim |> !codetracer |> ../bin/db-backend-record$(EXE_SUFFIX)
+# CTC-3i: `ct test run` hands the run to this ORC build, found beside `ct`.
+: ../ct_test/ct_test.nim |> !ct_test_orc |> ../bin/ct-test$(EXE_SUFFIX)

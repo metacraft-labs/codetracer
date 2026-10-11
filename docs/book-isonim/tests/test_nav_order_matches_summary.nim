@@ -371,6 +371,30 @@ suite "book nav matches the book's four-section organization":
     # ...and the `ct record` transcript must admit it shows only the tail.
     check page.contains("unused import")
 
+  test "the book documents ct test run as working from the installed product":
+    ## CTC-3i: every package ships the ORC `ct-test` beside the refc `ct`, and
+    ## `ct test run` hands the run to it. The reference used to say `ct`
+    ## refuses `test run` and that `ct-test` was not in the release packages;
+    ## a reader who believes that builds CodeTracer from source to get a
+    ## certificate. The section must describe the hand-over and its lookup
+    ## order, and no page may carry the old caveat.
+    let cli = readFile(dir / "reference" / "ct_cli.md")
+    let section = normalizedProse(ctTestSection(cli))
+    check section.contains("`ct test run` hands the run to `ct-test`, the " &
+      "test runner every CodeTracer package installs beside `ct`")
+    check section.contains("next to its own executable (after resolving " &
+      "symlinks), then in the installation's `tools` directory, then on `PATH`")
+    check section.contains("it refuses the run and lists the places it looked")
+    for path in walkDirRec(dir):
+      if not path.endsWith(".md"): continue
+      let text = normalizedProse(readFile(path))
+      for stale in ["not yet included in CodeTracer's release packages",
+                    "`ct` refuses it and says so",
+                    "standalone `ct-test` binary instead"]:
+        if stale in text:
+          echo path.relativePath(dir), ": still says: ", stale
+        check stale notin text
+
   test "the book does not document the removed --certificate flag":
     ## CTC-3e removed `ct test run --certificate <path>`: every certificate
     ## goes to the local certificate store, and nothing is ever written to a

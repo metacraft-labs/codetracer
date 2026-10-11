@@ -3653,6 +3653,14 @@ test-ct-test-certificates:
   echo "conformance vectors pin: $(cat src/ct_test/certificate_vectors.pin) (src/ct_test/certificate_vectors.pin)"
   bash ci/lib/run-nim-test-lane.sh ct-test-certificates
 
+# CTC-3i: `ct test run` from the Nix package's own `bin/` — the package's
+# buildPhase compiles `ct` (refc) and `ct-test` (ORC) side by side, and the
+# wrapped `ct` hands the run to `ct-test`, publishes a certificate to a scratch
+# store and verifies it. Builds a slice of the package (its `bin/` only); see
+# ci/test/nix-package-bin-slice.nix for why. Needs nix, git, go and python3.
+test-nix-package-ct-test-run:
+  bash ci/test/nix-package-ct-test-run.sh
+
 # GUI ViewModel suites that spawn a real backend process (`headless_session` /
 # `stdio_backend`).  `test-vm-native` and `test-vm-js` both exclude them; until
 # this recipe existed those exclusions pointed at nothing, so three of the four

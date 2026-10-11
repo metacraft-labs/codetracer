@@ -13,9 +13,10 @@ agent that is not told it will invent the wrong workflow — is
 is the source of this text, test-certificate paragraphs included: `ct test run`
 issues a certificate bound to the content of the tracked files, so the
 workflow is test, then commit, with no second run after the commit.  The test
-command is spelled here exactly as it is invoked (`ct test run --workspace .`),
-with the standalone `ct-test` fallback, because the `ct` binary refuses
-`test run` (it is built with refc; see `src/ct_test/ct_test.nim`).
+command is spelled here exactly as it is invoked (`ct test run --workspace .`).
+`ct` hands `test run` to the `ct-test` runner every package installs beside it
+(`src/ct_test/ct_test_delegate.nim`), so the prompt names no second command; it
+only tells the agent what to do if `ct` reports that it cannot run the tests.
 -->
 <!-- ct-agent-prompt -->
 
@@ -32,9 +33,9 @@ ct test run --workspace .     # 2. run the tests — a pass issues the certifica
 git commit -am "…"            # 3. commit once they pass
 ```
 
-If `ct` answers that it cannot run the tests itself, run step 2 with the
-standalone runner instead: `ct-test test run --workspace .`. If that is not
-installed either, say so in your handoff; do not skip the tests.
+If `ct` answers that it cannot run the tests because it cannot find its
+`ct-test` runner, the CodeTracer installation is incomplete: say so in your
+handoff; do not skip the tests.
 
 The certificate from step 2 is valid for your working tree as it stands, and
 covers the commit in step 3 **as long as that commit records exactly what was

@@ -322,10 +322,15 @@ suite "ct agent — the shipped binary":
       check obsolete notin lowered
     # Self-issuance is forbidden explicitly (Standard §6.2).
     check text.contains("attempt to produce, edit or sign a certificate yourself")
-    # `ct` is built --mm:refc and refuses `test run`; the prompt names the
-    # standalone runner an agent falls back to, and forbids skipping the tests.
-    check text.contains("ct-test test run --workspace .")
+    # CTC-3i: `ct test run` hands the run to the `ct-test` every package
+    # ships beside `ct`, so the prompt teaches the one command and no
+    # fallback; it says what a missing runner means, and forbids skipping the
+    # tests.
+    check text.contains("cannot find its `ct-test` runner")
+    check text.contains("the CodeTracer installation is incomplete")
     check text.contains("do not skip the tests")
+    check "ct-test test run" notin text
+    check "standalone runner" notin text
 
   test "evidence_resolves_the_session_from_the_environment":
     let dir = getTempDir() / "ct-agent-cli-env"

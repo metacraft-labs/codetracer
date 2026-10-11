@@ -347,11 +347,13 @@ ct test verify (--staged | --worktree | --commit <rev>) [options]
 ```
 
 :::note
-`ct test discover` and `ct test verify` run from `ct`. `ct test run` does not:
-`ct` refuses it and says so. The tests are run by the standalone `ct-test`
-binary instead, as `ct-test test run …` with the same options. `ct-test` is not
-yet included in CodeTracer's release packages; it is built from a source
-checkout.
+`ct test run` hands the run to `ct-test`, the test runner every CodeTracer
+package installs beside `ct`, with the same options, working directory and
+environment; its output, exit status and certificate are `ct-test`'s own.
+`ct` looks for `ct-test` next to its own executable (after resolving symlinks),
+then in the installation's `tools` directory, then on `PATH`. If it finds none,
+it refuses the run and lists the places it looked. `ct test discover` and
+`ct test verify` run in `ct` itself.
 :::
 
 `ct test discover` prints the tests it finds as JSON. By default it looks only

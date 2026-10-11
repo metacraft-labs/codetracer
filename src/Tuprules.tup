@@ -476,6 +476,31 @@ $(CODETRACER_FLAGS) \
 c %f\
 |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
 
+# The ORC test runner (ct-test), installed beside `ct` (CTC-3i).
+#
+# `ct test run` hands the run to this binary (src/ct_test/ct_test_delegate.nim):
+# the parallel runner shares sequences across worker threads, which refc's
+# per-thread heaps make unsafe, so `ct` stays refc and the runner is a separate
+# ORC build of src/ct_test/ct_test.nim. It deliberately does NOT use
+# $(NIM_SELECTED): NIM_COMMON_FLAGS carries `--mm:refc` and the define set
+# CodeTracer's own binaries need, none of which the runner links. The flags are
+# the ones `repro build ct-test` (repro.nim) and the package recipes
+# (nix/packages/default.nix, appimage-scripts/build_with_nim.sh) use; only the
+# search path is shared, for runquota.
+!ct_test_orc = |> $(NIM_BIN) $(NIM_REPO_PATH_FLAGS)\
+--mm:orc \
+--threads:on \
+--hints:off \
+--warnings:off \
+--debugInfo \
+--lineDir:on \
+--boundChecks:on \
+--stacktrace:on \
+--linetrace:on \
+--nimcache:/tmp/ct-nim-cache/%B_ct_test_orc_binary\
+--out:%o\
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
+
 !nim_tester = |> ^ %f^ $(NIM_SELECTED) \
 --nimcache:/tmp/ct-nim-cache/tester \
 --warnings:on \

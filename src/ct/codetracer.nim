@@ -6,6 +6,7 @@ import
   cli/e2e_tests,
   ../ct_test/incremental_cli,
   ../ct_test/ct_test,
+  ../ct_test/ct_test_delegate,
   codetracerconf, confutils,
   review_cli,
   trace/record_child_argv,
@@ -148,6 +149,23 @@ try:
       # `runCtTestCli` wants the full vector including the leading "test".
       # `verify` (CTC-3f) joined them: `ct test verify --staged` is the line a
       # project puts in its pre-commit hook.
+      #
+      # CTC-3i: `run` is NOT executed here on a refc build (which every
+      # shipped `ct` is): the parallel runner is unsafe under refc's
+      # per-thread heaps. It is handed to the ORC-built `ct-test` that every
+      # package installs beside `ct`, found by `locateCtTest` (beside this
+      # executable's real path, then the install's `tools/`, then PATH). The
+      # argument vector `ct-test` expects is `test run …` — `args` exactly —
+      # and `execHandoff` replaces this process on POSIX (spawns and forwards
+      # the exit status on Windows), so the environment, working directory,
+      # standard streams and exit code are `ct-test`'s own and the
+      # certificate is the one `ct-test` issues. When nothing is found,
+      # `runCtTestCli` refuses and names the places tried.
+      when not defined(gcOrc) and not defined(gcArc):
+        if testArgs.len > 0 and testArgs[0] == "run":
+          let delegate = locateCtTest()
+          if delegate.found.len > 0:
+            execHandoff(delegate.found, args)
       if testArgs.len > 0 and testArgs[0] in ["discover", "run", "verify"]:
         quit(runCtTestCli(args))
       quit(runE2eTestCli(testArgs))
