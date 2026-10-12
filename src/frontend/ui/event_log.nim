@@ -716,7 +716,8 @@ const
     "trace",
     "file",
     "errors",
-    "evm events"
+    "evm events",
+    "process"
   ]
 
   EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
@@ -735,6 +736,16 @@ const
 
     "trace log event",
     "messages",
+    "write(stderr)",
+    "exec",
+    "read env",
+    "write env",
+    "stat",
+    "create dir",
+    "remove dir",
+    "remove file",
+    "rename",
+    "change dir",
   ]
 
   EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
@@ -759,7 +770,17 @@ let kindTags: array[EventLogKind, seq[EventTag]] = [
   @[EventErrorEvents],        #Error
 
   @[EventTrace],              #TraceLogEvent
-  @[EventEvm]
+  @[EventEvm],                #EvmEvent
+  @[EventWrites, EventStd],   #WriteStderr
+  @[EventProcess],            #Exec
+  @[EventReads, EventProcess],  #ReadEnv
+  @[EventWrites, EventProcess], #WriteEnv
+  @[EventReads, EventFiles],  #Stat
+  @[EventWrites, EventFiles], #CreateDir
+  @[EventWrites, EventFiles], #RemoveDir
+  @[EventWrites, EventFiles], #RemoveFile
+  @[EventWrites, EventFiles], #Rename
+  @[EventProcess],            #ChangeDir
 ]
 
 var tagKinds: array[EventTag, seq[EventLogKind]]
@@ -884,12 +905,13 @@ proc isOnlyTraceSelected(self: EventLogComponent): bool =
 
 proc isOnlyRecordedEventSelected(self: EventLogComponent): bool =
   ## True when the current selection matches the "recorded events only" preset:
-  ## EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents are
-  ## fully selected; EventTrace and EventEvm are fully deselected.
+  ## EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents,
+  ## EventProcess are fully selected; EventTrace and EventEvm are fully
+  ## deselected.
   ## This mirrors the exact tags that onlyRecordedEvent() sets so that the
   ## "Recorded events" tab correctly shows as active after clicking it.
   const selectedTags  = [EventReads, EventFiles, EventNetwork,
-                          EventWrites, EventErrorEvents]
+                          EventWrites, EventErrorEvents, EventProcess]
   const deselectedTags = [EventTrace, EventEvm]
 
   for tag in selectedTags:
@@ -909,7 +931,8 @@ proc onlyTrace(self: EventLogComponent) =
   self.switchEventTagSelection(EventTrace, true)
 
 proc onlyRecordedEvent(self: EventLogComponent) =
-  let eventTags = [EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents]
+  let eventTags = [EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents,
+                   EventProcess]
 
   self.changeAllEventKinds(false)
 
@@ -1228,6 +1251,9 @@ func reprAndLang(eventElement: ProgramEvent, index: int): (string, Lang) =
       let into = if eventElement.stdout: "stdout" else: "stderr"
       (fmt"event:write to {into} #{index}", LangUnknown)
 
+    of WriteStderr:
+      (fmt"event:write to stderr #{index}", LangUnknown)
+
     of Read:
       ("event: read from stdin #{index}", LangUnknown)
 
@@ -1253,6 +1279,17 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
     of Write:
       let into = if eventElement.stdout: "stdout" else: "stderr"
       fmt"{into}: {eventElement.content}"
+
+    of WriteStderr:
+      fmt"stderr: {eventElement.content}"
+
+    of Exec, ReadEnv, WriteEnv, Stat, CreateDir, RemoveDir, RemoveFile,
+        Rename, ChangeDir:
+      let label = EVENT_LOG_KIND_NAMES[eventElement.kind]
+      if eventElement.metadata != "":
+        fmt"{label} {eventElement.metadata}: {eventElement.content}"
+      else:
+        fmt"{label}: {eventElement.content}"
 
     of Read:
       fmt"stdin: {eventElement.content}"
@@ -1496,7 +1533,9 @@ proc events(self: EventLogComponent) =
             render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
               let text = case event.kind:
                 of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
-                  OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error, EventLogKind.EvmEvent:
+                  OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error, EventLogKind.EvmEvent,
+                  WriteStderr, Exec, ReadEnv, WriteEnv, Stat, CreateDir, RemoveDir,
+                  RemoveFile, Rename, ChangeDir:
                   cstring(eventLogDescriptionRepr(event, event.eventIndex))
 
                 of TraceLogEvent:
@@ -2407,7 +2446,7 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
     while lineIndex < lines.len and eventsIndex < component.programEvents.len:
       while true:
         if eventsIndex < component.programEvents.len:
-          if component.programEvents[eventsIndex].kind in {Write, WriteFile, WriteOther, Read, ReadFile, ReadOther}:
+          if component.programEvents[eventsIndex].kind in {Write, WriteFile, WriteOther, WriteStderr, Read, ReadFile, ReadOther}:
             component.programEvents[eventsIndex].content = lines[lineIndex]
             lineIndex += 1
           eventsIndex += 1

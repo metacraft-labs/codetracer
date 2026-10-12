@@ -174,7 +174,7 @@ const
     ## "the window moved" from "the window is the whole thing".
   WindowLength = 8
     ## Small enough that an interior page is a proper subset of the log.
-  EventKindsCount = 14
+  EventKindsCount = 24
     ## `EVENT_KINDS_COUNT` (`src/db-backend/src/task.rs`). `selected_kinds` is
     ## a fixed-size Rust array, so a shorter list is a deserialisation failure
     ## rather than a partial filter.

@@ -108,7 +108,7 @@ data.services.eventLog.onUpdatedEventsContent = proc(self: EventLogService, resp
   while lineIndex < lines.len and eventsIndex < self.events.len:
     while true:
       if eventsIndex < self.events.len:
-        if self.events[eventsIndex].kind in {Write, WriteFile, WriteOther, Read, ReadFile, ReadOther}:
+        if self.events[eventsIndex].kind in {Write, WriteFile, WriteOther, WriteStderr, Read, ReadFile, ReadOther}:
           self.events[eventsIndex].content = lines[lineIndex]
           lineIndex += 1
         eventsIndex += 1

@@ -283,10 +283,21 @@ const
   KindSocket* = 9
   KindOpen* = 10
   KindError* = 11
-  KindTrace* = 12
-  KindHistory* = 13
-    ## `EventLogKind`, `libs/ct-dap-client/src/types/common.rs:25`. Spelled out
-    ## here rather than imported because `app/` may not reach the db-backend and
+  KindTraceLogEvent* = 12
+  KindEvmEvent* = 13
+  KindWriteStderr* = 14
+  KindExec* = 15
+  KindReadEnv* = 16
+  KindWriteEnv* = 17
+  KindStat* = 18
+  KindCreateDir* = 19
+  KindRemoveDir* = 20
+  KindRemoveFile* = 21
+  KindRename* = 22
+  KindChangeDir* = 23
+    ## `EventLogKind` (`trace-events.md` §"EventLogKind (u8 enum)"), as
+    ## `libs/ct-dap-client/src/types/common.rs` decodes it. Spelled out here
+    ## rather than imported because `app/` may not reach the db-backend and
     ## because an ordinal that silently changed on the wire must show up as a
     ## row this pane calls UNKNOWN rather than as a row it miscolours.
 
@@ -298,15 +309,24 @@ func categoryFor*(kindId: int; stdout: bool): EventCategory =
   ## flag to say whether it went to a terminal or to storage. Every event in
   ## CTUI-1's corpus is `Write` with `stdout = true`; a storage write would be
   ## the same ordinal with the flag clear.
+  ##
+  ## `WriteStderr` is terminal output whatever the flag says; the kinds that
+  ## change the filesystem or the environment are mutations; the kinds that
+  ## ask about them, run a program or move the process are syscalls.
   case kindId
   of KindWrite, KindWriteFile, KindWriteOther:
     if stdout: ecOutput else: ecMutation
+  of KindWriteStderr:
+    ecOutput
+  of KindWriteEnv, KindCreateDir, KindRemoveDir, KindRemoveFile, KindRename:
+    ecMutation
   of KindRead, KindReadFile, KindReadOther, KindReadDir, KindOpenDir,
-     KindCloseDir, KindSocket, KindOpen:
+     KindCloseDir, KindSocket, KindOpen, KindExec, KindReadEnv, KindStat,
+     KindChangeDir:
     ecSyscall
   of KindError:
     ecFault
-  of KindTrace, KindHistory:
+  of KindTraceLogEvent, KindEvmEvent:
     ecTracepoint
   else:
     ecUnknown

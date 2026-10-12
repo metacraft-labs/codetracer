@@ -144,7 +144,7 @@ type
       ## `ci/test/editor-context-menu-modes.sh`): "an action whose absence
       ## cannot be explained is one whose absence was a guess".
 
-  EventTag* = enum EventStd, EventReads, EventWrites, EventNetwork, EventTrace, EventFiles, EventErrorEvents, EventEvm
+  EventTag* = enum EventStd, EventReads, EventWrites, EventNetwork, EventTrace, EventFiles, EventErrorEvents, EventEvm, EventProcess
 
   EventDropDownBox* = enum Filter, OnlyTrace, OnlyRecordedEvent, EnableDisable
 

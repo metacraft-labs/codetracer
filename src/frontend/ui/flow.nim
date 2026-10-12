@@ -1609,6 +1609,8 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       ("-error", "flow-error-box", "error")
     of EventLogKind.Write:
       ("-std", "flow-std-default-box", "stdout")
+    of EventLogKind.WriteStderr:
+      ("-std", "flow-std-default-box", "stderr")
     of EventLogKind.WriteFile:
       ("-std", "flow-std-default-box", "stdout")
     of EventLogKind.Read:

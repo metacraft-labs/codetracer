@@ -319,3 +319,6 @@ wstat
 xattr
 xrandr
 zend
+myproject
+truecolor
+worktree
