@@ -24,25 +24,49 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 /// emulator.
 pub use ct_lang::Lang;
 
-/// Kinds of I/O or log events (repr(u8), matching codetracer_trace_types).
+/// Kinds of I/O or log events: `codetracer_trace_types::EventLogKind`, by
+/// name and ordinal (`trace-events.md` §"EventLogKind (u8 enum)"). On the
+/// wire a kind is its ordinal; an unassigned ordinal (24-255) does not decode.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum EventLogKind {
+    /// Output to stdout, or a write with no more specific kind.
     #[default]
-    Write,
-    WriteFile,
-    WriteOther,
-    Read,
-    ReadFile,
-    ReadOther,
-    ReadDir,
-    OpenDir,
-    CloseDir,
-    Socket,
-    Open,
-    Error,
-    Trace,
-    History,
+    Write = 0,
+    WriteFile = 1,
+    /// A write no other kind describes.
+    WriteOther = 2,
+    /// Input from stdin, or a read with no more specific kind.
+    Read = 3,
+    ReadFile = 4,
+    /// A read no other kind describes.
+    ReadOther = 5,
+    ReadDir = 6,
+    OpenDir = 7,
+    CloseDir = 8,
+    Socket = 9,
+    Open = 10,
+    Error = 11,
+    TraceLogEvent = 12,
+    EvmEvent = 13,
+    /// Output to stderr.
+    WriteStderr = 14,
+    /// Running a program or spawning a process.
+    Exec = 15,
+    /// Reading an environment variable, or testing whether one is set.
+    ReadEnv = 16,
+    /// Setting or removing an environment variable.
+    WriteEnv = 17,
+    /// An existence or metadata query of a filesystem entry, or a PATH search.
+    Stat = 18,
+    /// Creating a directory, including copying a directory tree.
+    CreateDir = 19,
+    RemoveDir = 20,
+    RemoveFile = 21,
+    /// Renaming or moving a file or directory.
+    Rename = 22,
+    /// Changing the working directory.
+    ChangeDir = 23,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -94,4 +118,58 @@ pub struct Notification {
 pub struct Breakpoint {
     pub id: i64,
     pub enabled: bool,
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::EventLogKind;
+
+    /// The `EventLogKind` table of `trace-events.md` §"EventLogKind (u8
+    /// enum)", by ordinal, spelled out so that a reordering of the enum fails
+    /// here instead of relabelling every event the client decodes.
+    const SPEC_KINDS: [(u8, EventLogKind); 24] = [
+        (0, EventLogKind::Write),
+        (1, EventLogKind::WriteFile),
+        (2, EventLogKind::WriteOther),
+        (3, EventLogKind::Read),
+        (4, EventLogKind::ReadFile),
+        (5, EventLogKind::ReadOther),
+        (6, EventLogKind::ReadDir),
+        (7, EventLogKind::OpenDir),
+        (8, EventLogKind::CloseDir),
+        (9, EventLogKind::Socket),
+        (10, EventLogKind::Open),
+        (11, EventLogKind::Error),
+        (12, EventLogKind::TraceLogEvent),
+        (13, EventLogKind::EvmEvent),
+        (14, EventLogKind::WriteStderr),
+        (15, EventLogKind::Exec),
+        (16, EventLogKind::ReadEnv),
+        (17, EventLogKind::WriteEnv),
+        (18, EventLogKind::Stat),
+        (19, EventLogKind::CreateDir),
+        (20, EventLogKind::RemoveDir),
+        (21, EventLogKind::RemoveFile),
+        (22, EventLogKind::Rename),
+        (23, EventLogKind::ChangeDir),
+    ];
+
+    #[test]
+    fn every_kind_decodes_from_and_encodes_to_its_ordinal() {
+        for (ordinal, kind) in SPEC_KINDS {
+            let decoded: EventLogKind = serde_json::from_str(&ordinal.to_string()).unwrap();
+            assert_eq!(decoded, kind, "ordinal {ordinal}");
+            assert_eq!(serde_json::to_string(&kind).unwrap(), ordinal.to_string());
+        }
+    }
+
+    #[test]
+    fn an_unassigned_kind_does_not_decode() {
+        for ordinal in [24u16, 99, 255] {
+            let err = serde_json::from_str::<EventLogKind>(&ordinal.to_string())
+                .expect_err("an unassigned kind must not decode");
+            assert!(err.to_string().contains(&ordinal.to_string()), "{err}");
+        }
+    }
 }
