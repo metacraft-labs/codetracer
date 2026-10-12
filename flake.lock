@@ -610,7 +610,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-js-recorder",
-        "rev": "0b0be2b1c8293cb5837743bf9298141537fb86cb",
+        "rev": "e4941ab76e58f8a6492be49cc117941a18a7fbb8",
         "type": "github"
       },
       "original": {
@@ -644,7 +644,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-python-recorder",
-        "rev": "a36cc17827604451f1607e29efcaa33e1efd1634",
+        "rev": "74b65c2886b3507b7844d176c5e1247a5969922c",
         "type": "github"
       },
       "original": {
@@ -673,7 +673,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer-ruby-recorder",
-        "rev": "7690d36b2f4ddecd5d070c275d32ac3636b78b5f",
+        "rev": "a20d4d9a882d416f9ac6f11940009e3985400c03",
         "type": "github"
       },
       "original": {
