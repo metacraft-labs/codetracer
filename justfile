@@ -4902,13 +4902,30 @@ build-gpui:
     echo "  dlopens the shim. Build it with:" >&2
     echo "    cd ../isonim-gpui && just rust-build" >&2
   fi
+  # ONE definition of the compile flags, shared with the freshness gate.
+  # `bf_gpui_nim_args` is what `ci/lib/build-freshness.sh` replays to
+  # recompute the input closure, so the gate and this recipe cannot drift
+  # into compiling two different programs and agreeing about it.
+  source ci/lib/build-freshness.sh
+  gpui_args=()
+  while IFS= read -r a; do gpui_args+=("$a"); done < <(bf_gpui_nim_args)
   nim c --hints:off \
-    --mm:orc -d:release \
-    --path:src/frontend/viewmodel \
+    "${gpui_args[@]}" \
     --nimcache:build/nimcache/codetracer-gpui \
     -o:build/bin/codetracer-gpui \
     src/frontend/gpui/main.nim
   echo "built build/bin/codetracer-gpui ($(wc -c <build/bin/codetracer-gpui) bytes)"
+  # THE STAMP, as the build's last act. Without it the binary is unstamped,
+  # and `ci/test/plat37-macos-window-capture.sh` REFUSES to capture through an
+  # unstamped binary — which is how a 2026-10-07 binary came to be compared
+  # against a 2026-10-12 Electron bundle, 127 commits apart, and eleven
+  # findings were raised against the pair.
+  bf_gpui_write_stamp "$PWD" || {
+    echo "FAIL: the binary was built but could not be stamped, so no lane" >&2
+    echo "  will accept it. This is deliberate: an unstamped artefact is the" >&2
+    echo "  one that goes green against another week's build." >&2
+    exit 1
+  }
 
 # PLAT-20: the GPUI shell's own suites — the dock projection against gpui-kit's
 # committed fixtures, and the shell/leaf split through the real isonim-gpui

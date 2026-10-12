@@ -186,6 +186,72 @@ done
       ci/test/plat35-gpui-capture.sh."
 [ -x "${BIN}" ] || fail "${BIN} is not built. Run \`just build-gpui\`."
 [ -f "${SCENARIOS}" ] || fail "the scenario set is not at ${SCENARIOS}"
+
+# ---------------------------------------------------------------------------
+# THE FRESHNESS GATE — and why the line above it is not one
+# ---------------------------------------------------------------------------
+#
+# `[ -x "${BIN}" ]` asks whether the binary EXISTS. It never asks whether the
+# binary is of THIS tree, and it never builds it. On 2026-10-12 that gap
+# produced the reading this campaign has had to withdraw: this lane ran a
+# `codetracer-gpui` dated 2026-10-07 17:51 while the Electron lane ran a
+# bundle from 2026-10-12 — **127 commits apart** — and the result was
+# published as the first parity reading "against one build".
+#
+# `Cross-Renderer-Visual-Alignment.md` §2.2 rule 4 was satisfied, and that is
+# the point: rule 4 binds REVIEWER -> CAPTURE ("the review's
+# againstUiBundleMtime must equal the captured answers' own provenance"). It
+# does not bind CAPTURE -> SOURCE. Aligning when the pixels were taken is not
+# aligning what was running.
+#
+# Eleven findings were raised against two different programs and attributed to
+# one. `PARITY-S2` had the deficient renderer BACKWARDS: the stale binary
+# still drew a Timeline tab that 740d76be2 had deliberately removed, so the
+# finding read as "Electron is missing a panel" when Electron was correct to
+# lack it. Acting on it would have re-added a deleted panel against a green
+# assertion.
+#
+# THE RULE: the binary must carry a stamp recording the digest of the input
+# closure it was compiled from, and that digest must equal the one recomputed
+# from this tree right now. The closure is the COMPILER'S OWN answer
+# (`nim c --genDeps:on --compileOnly`, 238 in-tree files across four
+# repositories, 10 s), not a hand-written directory list, and store paths in
+# it cover the toolchain for free. `ci/lib/build-freshness.sh` carries the
+# full rule and — more importantly — what it does NOT cover.
+#
+# IT REFUSES; IT DOES NOT WARN. A lane that printed a warning and captured
+# anyway is the defect being fixed, not a milder form of it: the skew was
+# fully visible in two `ls -la` outputs that nobody had been given a reason to
+# run.
+#
+# FAILURE MODE, stated rather than left to be discovered: this gate is
+# FALSE-RED-biased. It refuses after any edit inside the closure, including
+# one that cannot change the rendered frame (a comment, a log string). The
+# remedy — `just build-gpui` — always clears it, because the stamp is
+# rewritten from the current tree on every build whether or not the emitted
+# bytes changed. There is no state in which running the remedy leaves the
+# assertion still failing. That is the property mtime-based freshness cannot
+# offer, and the reason this is not an mtime check.
+echo
+echo "=== the subject: is this binary of THIS tree? ==="
+# shellcheck source=ci/lib/build-freshness.sh
+. "${root}/ci/lib/build-freshness.sh"
+# Computed ONCE and reused by the manifest below. `bf_gpui_assert_fresh` would
+# recompute it, and the closure costs ~10 s of real compiler time, so the gate
+# is driven through `bf_assert_fresh` directly with the digest in hand.
+GPUI_STAMP="${root}/${BF_GPUI_STAMP}"
+GPUI_INPUT_DIGEST="$(bf_gpui_input_digest "${root}")" ||
+	fail "the GPUI input closure could not be computed, so this lane cannot
+      say what the binary it is about to photograph was built from. Refused
+      rather than captured: an unknown subject is not a subject."
+bf_assert_fresh "${GPUI_STAMP}" "${BIN}" "${GPUI_INPUT_DIGEST}" "GPUI BINARY" \
+	"  Rebuild it, which rewrites the stamp from this tree:
+      cd ${root} && nix develop --command just build-gpui" ||
+	fail "the GPUI binary this lane would have captured is not the one this
+      checkout describes. Refused rather than captured: see the reason and
+      the remedy above. This refusal is the whole point of the lane — a
+      frame of the wrong program grades just as green as a frame of the
+      right one."
 command -v timeout >/dev/null || fail "timeout(1) is not on PATH, and this
       lane will not run an unbounded capture against a window server."
 command -v ffmpeg >/dev/null || fail "ffmpeg is not on PATH; it is what
@@ -561,10 +627,62 @@ restore_shim
 # ---------------------------------------------------------------------------
 # The manifest
 # ---------------------------------------------------------------------------
-python3 - "${SCENARIOS}" "${OUT}" "${ONLY}" <<'PY' || fail "the manifest did not assemble"
-import json, os, sys
-scenarios_path, out, only = sys.argv[1], sys.argv[2], sys.argv[3]
+python3 - "${SCENARIOS}" "${OUT}" "${ONLY}" "${BIN}" "${GPUI_STAMP}" \
+	"${GPUI_INPUT_DIGEST}" "${WINDOWED_SHIM}" "${root}" "${ISONIM_GPUI}" \
+	<<'PY' || fail "the manifest did not assemble"
+import datetime, hashlib, json, os, subprocess, sys
+(scenarios_path, out, only, bin_path, stamp_path, input_digest,
+ shim_path, root, isonim_gpui) = sys.argv[1:10]
 doc = json.load(open(scenarios_path))
+
+
+def mtime(path):
+    try:
+        return (datetime.datetime.utcfromtimestamp(os.path.getmtime(path))
+                .strftime("%Y-%m-%dT%H:%M:%SZ"))
+    except OSError:
+        return None
+
+
+def sha256(path):
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def git(repo, *args):
+    try:
+        return subprocess.run(("git", "-C", repo) + args, capture_output=True,
+                              text=True, timeout=20).stdout.strip()
+    except Exception:
+        return ""
+
+
+def stamp_field(name):
+    try:
+        for line in open(stamp_path):
+            if line.startswith(name + "="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def literal_count(path, needle):
+    """How many times a byte literal occurs in the artefact. The same
+    two-polarity idiom the shim's font-kit probe uses, applied to the
+    executable — which is the artefact that had NO provenance line at all
+    when the 127-commit skew went unnoticed."""
+    try:
+        data = open(path, "rb").read()
+    except OSError:
+        return None
+    return data.count(needle.encode())
 records = []
 p = os.path.join(out, "records.jsonl")
 if os.path.exists(p):
@@ -581,6 +699,93 @@ manifest = {
     "expectedGpuiProbes": doc.get("expectedGpuiProbes", 0),
     "operationKinds": doc["operationKinds"],
     "host": json.load(open(os.path.join(out, "host.json"))),
+    # ----------------------------------------------------------------------
+    # THE PROVENANCE OF THE EXECUTABLE. This block is the fix for the defect
+    # that cost this campaign a whole reading.
+    #
+    # Before 2026-10-12 this manifest described the Rust SHIM's provenance —
+    # in both polarities, against a literal, with a measurement attached —
+    # and said NOTHING about the Nim executable whose window was being
+    # photographed. So when that executable turned out to be 127 commits
+    # behind the Electron bundle it was compared against, no artefact of the
+    # run could have shown it. The one thing nobody wrote a provenance line
+    # for is the one that was stale.
+    #
+    # `freshnessGate` records that the binary was PROVEN to be of this tree,
+    # not merely found on disk. `timelineProbe` is the content control for
+    # the specific regression that produced PARITY-S2.
+    # ----------------------------------------------------------------------
+    "subject": {
+        "executable": bin_path,
+        "sha256": sha256(bin_path),
+        "bytes": os.path.getsize(bin_path) if os.path.exists(bin_path) else None,
+        "mtimeUtc": mtime(bin_path),
+        "freshnessGate": {
+            "enforced": True,
+            "rule": "the binary must carry ci/lib/build-freshness.sh's stamp, "
+                    "and the stamp's input_digest must equal the digest "
+                    "recomputed from this tree now. The input closure is the "
+                    "COMPILER'S own (nim c --genDeps:on --compileOnly), so it "
+                    "spans every sibling repo the build actually reads, and "
+                    "/nix/store entries in it are digested by path, which "
+                    "covers the toolchain.",
+            "refusesRatherThanWarns": True,
+            "inputDigest": input_digest,
+            "stampInputDigest": stamp_field("input_digest"),
+            "stampBuiltAt": stamp_field("built_at"),
+            "stampBuiltBy": stamp_field("built_by"),
+            "failureMode": "false-red-biased. Any edit inside the closure "
+                           "refuses, including one that cannot change a "
+                           "pixel. The remedy (`just build-gpui`) always "
+                           "clears it, because the stamp is rewritten from "
+                           "the current tree on every build whether or not "
+                           "the emitted bytes changed — the property an "
+                           "mtime check cannot offer.",
+        },
+        # The two-polarity content control for PLAT-51's Timeline removal
+        # (740d76be2). The 2026-10-07 binary answered 2 / 1 / 1 here and so
+        # still DREW a Timeline tab the tree had deleted; PARITY-S2 read that
+        # as Electron missing a panel, with the deficient renderer backwards.
+        #
+        # `lpkTimeline` IS DELIBERATELY NOT A DISCRIMINATOR AND IS RECORDED
+        # TO SAY SO. Measured 2026-10-12: it is `LogicalPanelKind.lpkTimeline`
+        # in src/frontend/viewmodel/collab/types.nim:52 — the COLLAB panel
+        # enum, untouched since 2026-09-20 and present at HEAD — not a
+        # `PaneKind` spelling. It reads 1 in the stale binary, 1 in the
+        # current binary and 1 in Electron's ui.js. plat37-parity-readings.json
+        # called it "a PaneKind spelling that no longer exists"; that is an
+        # error in the record, and a control that cannot distinguish the two
+        # builds must not be counted as one.
+        "timelineProbe": {
+            "@Timeline": literal_count(bin_path, "@Timeline"),
+            "_renderTimeline__appZleaves_":
+                literal_count(bin_path, "_renderTimeline__appZleaves_"),
+            "Call Trace (POSITIVE CONTROL, must be > 0)":
+                literal_count(bin_path, "Call Trace"),
+            "ZZQQnonsense_literal_XYZZY (NEGATIVE CONTROL, must be 0)":
+                literal_count(bin_path, "ZZQQnonsense_literal_XYZZY"),
+            "@lpkTimeline (NOT A DISCRIMINATOR — see above)":
+                literal_count(bin_path, "@lpkTimeline"),
+        },
+        "shim": {
+            "path": shim_path,
+            "sha256": sha256(shim_path),
+            "mtimeUtc": mtime(shim_path),
+        },
+        "repos": {
+            name: {
+                "head": git(path, "rev-parse", "HEAD"),
+                "branch": git(path, "rev-parse", "--abbrev-ref", "HEAD"),
+                "dirtyFiles": len([
+                    ln for ln in git(path, "status", "--porcelain").splitlines()
+                    if ln.strip()]),
+            }
+            for name, path in (
+                ("codetracer", root),
+                ("isonim-gpui", isonim_gpui),
+            )
+        },
+    },
     # THE PIXEL PATHS, LABELLED, in the same shape `plat37-window-frame.sh`
     # publishes. `satisfiesG1` is the whole point of each row.
     "pixelPaths": {

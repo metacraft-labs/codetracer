@@ -481,6 +481,35 @@ if [ -n "$ct_reprobuild_host" ]; then
 	# A build that exits 0 having produced a `ct` that cannot start is the
 	# defect this check ends. See scripts/require-runtime-assets.sh.
 	"${BASH:-bash}" "$SCRIPT_DIR/require-runtime-assets.sh" "$ct_repro_out_root"
+
+	# THE FRESHNESS STAMP, as the build's last act.
+	#
+	# `require-runtime-assets.sh` above answers "can this bundle start?".
+	# This answers the other half — "is this bundle of the sources that are
+	# here now?" — and the two are not substitutes. The bundle is gitignored
+	# build-once output: it survives every branch switch, every rebase and
+	# every worktree copy, because nothing in git's model touches it. It is
+	# stale by default rather than by accident.
+	#
+	# Measured 2026-10-12: PLAT-37's two capture lanes published a parity
+	# reading over a GPUI binary and an Electron bundle **127 commits
+	# apart**, and eleven findings were raised against the pair. Neither lane
+	# could have detected it, because neither artefact carried a statement of
+	# what it was built from. `ci/test/plat37-macos-electron-capture.sh` now
+	# REFUSES to capture through an unstamped bundle, so this write is what
+	# keeps that lane runnable.
+	#
+	# A stamp failure does NOT fail the build: the bundle is good and runnable
+	# either way, and taking a working build away over a provenance record
+	# would be the wrong trade. It warns, and the lane's refusal is what
+	# carries the consequence.
+	# shellcheck source=ci/lib/build-freshness.sh
+	. "$CT_ROOT/ci/lib/build-freshness.sh"
+	bf_electron_write_stamp "$CT_ROOT" "$CT_ROOT/$ct_repro_out_root" || {
+		echo "WARNING: the bundle was built but could not be stamped." >&2
+		echo "  It will run, but ci/test/plat37-macos-electron-capture.sh" >&2
+		echo "  will refuse to capture through it, by design." >&2
+	}
 	exit 0
 fi
 

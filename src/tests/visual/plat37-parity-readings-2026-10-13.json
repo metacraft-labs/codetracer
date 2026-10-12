@@ -1,0 +1,235 @@
+{
+ "_comment": [
+  "plat37-parity-readings-2026-10-13.json — the GPUI/Electron parity re-grade,",
+  "taken through the FRESHNESS-GATED capture lanes for the first time.",
+  "",
+  "WHY THIS IS A SEPARATE FILE. plat37-parity-readings.json is the record of",
+  "the 2026-10-12 pass, in which the GPUI arm ran a binary 127 commits older",
+  "than the Electron arm. Its buildSkewContaminated flags are TRUE statements",
+  "about that pass and are left set; its three factual errors are corrected",
+  "there in place, with the wrong text kept beside each correction. A dated",
+  "record rewritten to say something else stops being a record, so the new",
+  "measurements are here instead.",
+  "",
+  "WHAT GATES THIS FILE: NOTHING, and that is stated rather than left to be",
+  "discovered. ci/lib/build-freshness.sh gates the INPUTS to a reading — both",
+  "lanes now refuse to capture through an artefact that is not of this tree —",
+  "but no check binds THIS DOCUMENT to the frames it describes, and no check",
+  "re-reads a frame to see whether a transcription is still true. Both errors",
+  "corrected in the previous file were of exactly that kind: they survived a",
+  "re-capture because a re-capture re-takes pixels without re-READING them.",
+  "Recorded as an open gap, not as a solved problem."
+ ],
+ "schemaVersion": 1,
+ "supersedes": "plat37-parity-readings.json (2026-10-12) — for the READINGS only; that file remains the record of the contaminated pass and of what the contamination cost.",
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. Both lanes need a live macOS GUI session and a kTCCServiceScreenCapture grant. A gate that cannot run is not a gate.",
+ "measuredAt": "2026-10-13",
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 build 25F84",
+  "displays": 1,
+  "displayPoints": "1728x1117",
+  "pointPixelScale": 2.0
+ },
+ "provenance": {
+  "codetracer": "df80efc8d (agents)",
+  "codetracerSpecs": "64eb07fd7 (latest)",
+  "isonimGpui": "a76a77df0 (agents)",
+  "guiAssert": "3058e0c03 (agents)",
+  "isonimTui": "c6e2e03e3",
+  "reproWhichOne": {
+   "why": "THREE different `repro` builds are reachable on this host and they are not interchangeable. Naming 'repro 0.2.5' as a host fact would be wrong: nothing answers 0.2.5 unless a directory is prepended to PATH.",
+   "ambientPath": "0.2.5 is NOT on PATH by default; /nix/store/m5si3k2vccgw6prb245q3r634r5zy0cf-reprobuild-0.2.2/bin/repro answers `repro 0.2.2`",
+   "codetracerDevShell": "/nix/store/lnyzd74bchcics7na7c0h3jn7qwfw2l9-reprobuild-0.2.10/bin/repro answers `repro 0.2.10`",
+   "whatBuiltTheBundle": "`repro 0.2.5`, the local build at reprobuild/build/bin/repro — recorded by the bundle's own stamp as built_by, not inferred"
+  },
+  "freshnessGate": {
+   "library": "ci/lib/build-freshness.sh",
+   "gpuiStampInputDigest": "ae3e0bd5e574eda54e5ce8f87a1338cb4203dcd64bb3dafb671b881e6bd2c90b",
+   "gpuiRecomputedFromTree": "ae3e0bd5e574eda54e5ce8f87a1338cb4203dcd64bb3dafb671b881e6bd2c90b (equal — gate passes, exit 0)",
+   "gpuiBuiltBy": "/nix/store/dgc3nma3m2mn6ijxii1jj9cmzb0qsmb5-nim-fork-2.3.1-codetracer/bin/nim",
+   "electronStampInputDigest": "8d04f793e12e10ca30fe1bf3651d1087f3cea56dddf0bb65f4a2d8addb0f84ea",
+   "electronRecomputedFromTree": "8d04f793e12e10ca30fe1bf3651d1087f3cea56dddf0bb65f4a2d8addb0f84ea (equal — gate passes, exit 0)",
+   "asymmetryStated": "the GPUI digest is the compiler's own closure and covers the toolchain (a /nix/store path is a content hash); the Electron digest is a tracked-source digest plus a working-tree overlay and does NOT see the compiler. Weaker, and labelled weaker."
+  },
+  "timelineProbe": {
+   "why": "the content control for the regression that produced the withdrawn PARITY-S2.",
+   "@Timeline in the rebuilt gpui binary": 0,
+   "@Timeline in the 2026-10-07 binary": 2,
+   "@lpkTimeline in the rebuilt gpui binary": 1,
+   "lpkTimeline in src/build-debug-repro/ui.js": 1,
+   "whyLpkTimelineIsNotADiscriminator": "it is LogicalPanelKind.lpkTimeline in src/frontend/viewmodel/collab/types.nim, the collab panel enum, present at HEAD and in BOTH artefacts. plat37-parity-readings.json called it 'a PaneKind spelling that no longer exists'; that is an error, corrected there.",
+   "POSITIVE CONTROL `Call Trace`": 1,
+   "NEGATIVE CONTROL `ZZQQnonsense_literal_XYZZY`": 0
+  }
+ },
+ "instrumentControls": [
+  "flipdiff refuses a size mismatch: fed 2880x1799 against a 2880x1800 buffer it exits 3 and compares nothing. Verified deliberately.",
+  "flipdiff can register agreement, not only disagreement: a buffer compared against ITSELF scores mean=0.0, fracOver0_10=0.0.",
+  "The screen oracle's paneCount and highlightedLineNumber are a SECOND instrument, independent of the frame readers, and are used below to corroborate rather than to replace them.",
+  "Every frame reading below was taken by a disposable reader that was not told what answer was expected. Where two readers disagreed, the conflict is RECORDED and the point is NOT ruled."
+ ],
+ "flip": {
+  "whatThisIsNot": "NOT A KPI AND NOT A PARITY SCORE. Do not track it as one. It is a BASELINE: the number this pair of renderers produces today, recorded so a later pass can say whether it moved. Three reasons it cannot be a parity figure are in plat37-parity-readings.json's PARITY-P1 reviewRuling and all three still hold at these revisions: the three scenarios agree to within 0.6 points so the metric is nearly blind to scenario content; the distribution is bimodal (p50 ~0.0001-0.0004 against p90 ~0.67), which is displaced structure rather than shading; and it is dominated by at least two independent structural differences.",
+  "statisticNamed": "`fracOver0_10` — the fraction of pixels whose FLIP error exceeds 0.10. EVERY number below names the statistic it is ranked by, because the ranking CHANGES WITH THE STATISTIC: see worstTile.",
+  "instrument": "NVIDIA FLIP via codetracer-image-diff, through build/plat37-parity/flipdiff, over ffmpeg-decoded RGBA at 2880x1800. GPUI's 58-device-px title bar is cropped; Electron is never cropped.",
+  "perScenario": {
+   "state": {
+    "mean": 0.1735,
+    "fracOver0_10": 0.3736,
+    "fracOver0_50": 0.1358,
+    "p50": 0.000277,
+    "p90": 0.6777
+   },
+   "calltrace": {
+    "mean": 0.1728,
+    "fracOver0_10": 0.3751,
+    "fracOver0_50": 0.1341,
+    "p50": 0.00037,
+    "p90": 0.6683
+   },
+   "editorWithMark": {
+    "mean": 0.1704,
+    "fracOver0_10": 0.369,
+    "fracOver0_50": 0.1325,
+    "p50": 0.00013,
+    "p90": 0.6654
+   }
+  },
+  "meanFracOver0_10": 0.3725,
+  "againstTheContaminatedPass": "0.3677 was the mean fracOver0_10 of the 2026-10-12 pass. Re-measured on the gated frames it is 0.3725 — the de-contaminated figure is 0.5 points WORSE, not better. Recorded because the opposite would have been assumed.",
+  "worstTile": {
+   "byFracOver0_10": {
+    "state": "dev(1080,0,360,300) fracOver0_10=0.7248",
+    "calltrace": "dev(1080,0,360,300) fracOver0_10=0.7345",
+    "editorWithMark": "dev(1080,0,360,300) fracOver0_10=0.7465"
+   },
+   "byMean": {
+    "state": "dev(2160,300,360,300) mean=0.3752",
+    "calltrace": "dev(2160,300,360,300) mean=0.3989",
+    "editorWithMark": "dev(2160,300,360,300) mean=0.3752"
+   },
+   "whyBothAreListed": "they are DIFFERENT TILES. Ranked by fracOver0_10 the worst is dev(1080,0,360,300) in all three scenarios; ranked by mean it is dev(2160,300,360,300) in all three. A worst-tile claim that does not name its statistic is not reproducible."
+  }
+ },
+ "regrade": [
+  {
+   "id": "PARITY-G1",
+   "verdict": "REPRODUCES, WITH ITS RENDERER-CONTRAST HALF WITHDRAWN",
+   "deficientSide": "GPUI (the clamp only)",
+   "reading": "The clamp reproduces and is measured, not read: at the `wide` viewport Electron's frames are 3840x2160 device px and GPUI's are 3456x2168, i.e. GPUI never reaches 1920 points on this 1728-point display. The CONTENT-LOSS half is where this changes shape. GPUI's Call Trace rows are cut mid-glyph with no ellipsis at the WINDOW EDGE, with no pane border and no scrollbar beyond them. But so are ELECTRON'S — `apply_op #4 (symbol=\"+\", left=2, r`, `evaluate #14 (expression=\"100 / 5 -`, read by a second disposable reader who was not shown the first's answer. Electron clips at a PANE BORDER carrying a vertical scrollbar with the AGENT ACTIVITY panel beyond, so its content is reachable; GPUI's is not. The old file's \"Electron's fit inside their pane\" is false and is corrected there.",
+   "whatWasNotFixed": "The queued Step-4 fix — giving GPUI's `renderCallTrace` the `text-overflow: ellipsis` affordance `stateCell` already has — was DELIBERATELY NOT MADE. Measured source asymmetry: in src/frontend/gpui/app/leaves.nim `renderCallTrace` sets overflow:hidden and flex-shrink:0 on the row and flex-shrink:0 on each segment, with NO text-overflow and NO min-width:0; `stateCell` sets white-space:nowrap, overflow:hidden, text-overflow:ellipsis and min-width:0. The asymmetry is real. The fix is still wrong, because Electron does not elide here either: adding it to GPUI alone would make GPUI the ONLY renderer that elides a Call Trace row — widening the divergence while closing a parity finding against a green assertion. The prior ruling that 'the affordance exists and Call Trace does not use it' is SUPERSEDED: it was true about the source and silent about the other renderer.",
+   "owner": "codetracer-specs/issues/2026-10-12-gpui-clamps-a-window-to-the-visible-frame-because-it-never-overrides-constrainframerect-and-electron-does-not.md"
+  },
+  {
+   "id": "PARITY-G2",
+   "verdict": "REPRODUCES",
+   "deficientSide": "GPUI",
+   "reading": "MEASURED, not read: GPUI's laptop frames are 2880x1858 device px and Electron's 2880x1800. The 58-px difference is the 29-point macOS title bar at scale 2.0; cropping exactly that makes the extents equal to the pixel. This is the only normalisation applied anywhere in this pass, and Electron is never cropped."
+  },
+  {
+   "id": "PARITY-P1",
+   "verdict": "REPRODUCES — see the `flip` block",
+   "deficientSide": "neither",
+   "reading": "Re-derived on the gated frames. The figure moved from 0.3677 to 0.3725 mean fracOver0_10. Still not a parity score; see flip.whatThisIsNot."
+  },
+  {
+   "id": "PARITY-S1",
+   "verdict": "REPRODUCES, unchanged by the rebuild",
+   "deficientSide": "GPUI",
+   "reading": "The screen oracle's pane census on the GATED frames is identical to the contaminated pass's: GPUI 5 panes in all 7 frames, Electron 7 in all 6. Measured from the lanes' own *.grade.json, not read off a picture. The rebuild did not move it, which is the useful part: this finding was never skew-dependent."
+  },
+  {
+   "id": "PARITY-S2",
+   "verdict": "WITHDRAWN — and now confirmed against the artefact",
+   "deficientSide": "neither",
+   "reading": "The withdrawal stands and is strengthened. The contaminated pass could only argue it from the SOURCES at HEAD; the rebuilt binary now answers `@Timeline` -> 0 where the 2026-10-07 binary answered 2. Electron was always correct to lack the Timeline tab. The `@lpkTimeline` leg of the original control is NOT evidence either way — it reads 1 in both artefacts — and is corrected in the old file."
+  },
+  {
+   "id": "PARITY-S3",
+   "verdict": "REPRODUCES (not re-measured this pass)",
+   "deficientSide": "neither",
+   "reading": "Column boundaries differ by 60-80 points. NOT re-read on the gated frames; carried forward from 2026-10-12. Flagged as carried-forward rather than presented as re-measured.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S4",
+   "verdict": "REPRODUCES (not re-measured this pass)",
+   "deficientSide": "GPUI",
+   "reading": "Electron draws inline value annotations on several editor rows, GPUI at most one. NOT re-read on the gated frames; carried forward.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S5",
+   "verdict": "REPRODUCES (not re-measured this pass)",
+   "deficientSide": "GPUI",
+   "reading": "Row pitch differs (~25.8-26 pt GPUI vs ~24.3-25 pt Electron), so Electron shows more rows for the same stop. NOT re-read; carried forward.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S7",
+   "verdict": "REPRODUCES — AND THE DEFICIENT SIDE IS ELECTRON",
+   "deficientSide": "Electron",
+   "reading": "Spot-checked precisely because it inverts the campaign's working assumption, and it holds. Read on the gated `state` frames by a disposable reader: GPUI elides every over-long value with a visible marker — `@[(\"__name__\", \"builtins...`, `\"calc — the small, fast, det...`, `\"/Users/zahary/m/fix-pxor-i...` — and truncates WELL BEFORE the pane edge. Electron cuts the same values mid-character with NO marker at a pane border carrying a scrollbar — `__doc__:\"calc — the small, fa`, `add:<function add at 0x1058a0`. Corroborated from source: `stateCell` in src/frontend/gpui/app/leaves.nim carries the full affordance including `min-width: 0`, whose own comment explains why it is needed ('there is nothing for the ellipsis to be an ellipsis OF')."
+  },
+  {
+   "id": "PARITY-S8",
+   "verdict": "REPRODUCES (not re-measured this pass)",
+   "deficientSide": "Electron",
+   "reading": "Browser-shell controls in Electron's toolbar with no GPUI counterpart. NOT re-read on the gated frames. The re-grade described this as 're-confirmed cheaply'; it is not reconstructible from the lanes' artefacts, which keep only a 12-string OCR sample per frame. Carried forward, and labelled so.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S9",
+   "verdict": "REPRODUCES (not re-measured this pass)",
+   "deficientSide": "neither",
+   "reading": "Labelling and affordance differences (UPPERCASE vs Title Case, pin/close icons, icons and chevrons in the file tree). NOT re-read; carried forward. Partially corroborated below by S11's reading, which saw Electron's `Find event` box.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S10",
+   "verdict": "DOWNGRADED — SUBSTANTIALLY REPRODUCES AS PARITY; THE OLD READING WAS WRONG IN BOTH HALVES",
+   "deficientSide": "neither",
+   "reading": "Three instruments agree that the two renderers mark the current row the SAME way. (1) The screen oracle reports the same highlightedLineNumber on both sides: 110/110 for calltrace, 44/44 for editorWithMark. (2) A disposable reader that PIXEL-SAMPLED the PNGs and (3) a second reader on tighter crops both report that the line-number digits sit OUTSIDE the band in BOTH renderers and that the marker triangle is AMBER/ORANGE on BOTH. The old file's 'GPUI highlights the FULL ROW WIDTH including the gutter' and its grey-vs-orange marker contrast are therefore both wrong. NOT A SKEW CASUALTY: the code-column-only band landed in 58939dbe1 on 2026-09-23, two weeks before the stale binary, so the captured stale binary already drew what is drawn now — it is a frame-reading error. DELIBERATE, and the design says so: `ExecutionRowBand` in src/frontend/gpui/app/leaves.nim is documented as drawn 'across the CODE COLUMN to the editor's right edge and NOT under the line numbers (PLAT-47 B1)', matching how Monaco — i.e. Electron — draws its current line; its token value #404040 is exactly the RGB(64,64,64) the pixel-sampling reader measured on BOTH sides.",
+   "readerConflictNotRuled": "The band's RIGHT extent is UNRESOLVED and is recorded rather than decided. Reader (2) reports Electron's band reaching the pane edge while GPUI's stops after the text; reader (3), on a narrower crop that may not reach the pane edge, reports both stopping after the text; the source predicts a full-width code column on the GPUI side (`flex-grow: 1`, 'grown to the pane's right edge'), agreeing with neither about GPUI. Three accounts, no two alike. Settling it needs a reading designed for it."
+  },
+  {
+   "id": "PARITY-S11",
+   "verdict": "REPRODUCES, WITH ITS NUANCE CONFIRMED",
+   "deficientSide": "neither",
+   "reading": "Read on the gated eventLog frames. GPUI's table has a distinct `kind` column — headers `tick | # | kind | output`, with `stdout` in its own cell — and a plain-text caption `Rows 1 to 6 of 6`. Electron has `tick | # | output` only and folds the kind into the output text as a `stdout:` PREFIX: `38 0 stdout: 2 + 3 = 5`. Electron carries a `Find event` search box; GPUI has none. ONE CLAUSE NOT CONFIRMED: the old file says Electron 'makes the row number an editable field'. The reader saw plain text with a thin coloured underline bar, not an input box, and the row-count caption was outside the crop. Recorded as unconfirmed, not as contradicted."
+  },
+  {
+   "id": "PARITY-S12",
+   "verdict": "REPRODUCES — DEFICIENT SIDE ELECTRON",
+   "deficientSide": "Electron",
+   "reading": "Re-read on the gated frames because it could NOT be re-confirmed from the artefacts: the grade JSONs keep only a 12-string OCR sample and the string 'certificates' appears nowhere in them. The re-grade's claim that this was 're-confirmed cheaply' does not hold as stated, though its conclusion does. Measured: Electron's status bar reads `48No certificates` in the calltrace frame and `14No certificates` in the editorWithMark frame — a DIFFERENT leading number butted against the 'N' each time, which is what rules out a per-frame OCR slip and makes it an Electron-side formatting defect. Electron also draws BUILD / PROBLEMS / FIND IN FILES / REQUESTS as pill buttons and shows an absolute path (`.../test-programs/calc/main.py:110#37`); GPUI draws them as plain text and shows `main.py:110  tick 37`."
+  },
+  {
+   "id": "PARITY-I1",
+   "verdict": "SYMPTOM GONE, MECHANISM INTACT — THE ISSUE STAYS OPEN, AND WIDENS",
+   "deficientSide": "Electron (lane instrumentation)",
+   "reading": "The observed symptom has disappeared: shell.route.json now reads trajectory ['entry=1@1'], line 1, a resolved path and `busy: false`, where the contaminated pass recorded entry=0@0, line 0, empty path and `busy: true`. It agrees with its pin and with its frame. But the settle logic was not touched and the assertion is still vacuous: `drivenOperations: []`, `movesPerformed: 0`, and `editorSettledBetweenOperations: true` — true because nothing happened, which is an assertion a broken state also satisfies. A RACE WON, NOT A MECHANISM FIXED. MEASURED THIS PASS AND NOT PREVIOUSLY REPORTED, and it makes the disposition stronger rather than weaker: every OTHER scenario reports `editorSettledBetweenOperations: FALSE` — calltrace, editor, editorWithMark, eventLog and state — while all five nonetheless settle correctly (`busy: false`, resolved path, correct line). So across all six scenarios the flag is true exactly where nothing was driven and false everywhere something was. INFERRED, NOT MEASURED: that the flag therefore carries no information about settling anywhere. What is measured is the six values; that reading of them is an inference and is labelled one.",
+   "owner": "codetracer-specs/issues/2026-10-12-the-electron-capture-lanes-entry-shell-samples-the-debugger-location-before-the-session-settles.md — keep open; it should be widened beyond entry-shell."
+  },
+  {
+   "id": "PARITY-O1",
+   "verdict": "REPRODUCES EXACTLY",
+   "deficientSide": "Electron (oracle instrumentation)",
+   "reading": "Re-derived from the lanes' own grade JSONs on the gated frames, not taken on report: the oracle fails to read the stopped line from 2 of 6 ELECTRON frames (`shell` and `state`) and 0 of 7 GPUI frames. Corroborated independently: Electron's state frame is exactly the one whose `highlightedLineNumber` is null, while both renderers' calltrace and editorWithMark frames read 110 and 44."
+  },
+  {
+   "id": "PARITY-S13",
+   "verdict": "NOT RE-MEASURED",
+   "deficientSide": "GPUI",
+   "reading": "Whether GPUI still omits the bottom status bar at the clamped `wide` viewport was not re-read this pass. The GPUI status bar WAS read at the `laptop` viewport (`Python | UTF-8 … main.py:110 tick 37`), which is the half that was never in doubt. Left open.",
+   "measuredThisPass": false
+  }
+ ],
+ "whatThisPassChangesAboutMethod": [
+  "A RE-RUN THAT RE-CAPTURES WITHOUT RE-READING INHERITS EVERY READING ERROR IT HAD. Both errors corrected in the previous file — S10's band extent and marker colour, and G1's 'Electron's fit inside their pane' — would have survived a full re-capture untouched, because nothing in a capture re-examines a transcription. Neither was a build-skew casualty; the skew explanation was available, plausible, and wrong for both.",
+  "THE COROLLARY FOR THIS FILE: nine of the eighteen entries above are marked `measuredThisPass: false` and carried forward. They are NOT evidence at these revisions; they are the previous pass's readings, surviving because nobody has contradicted them. Marked rather than quietly promoted.",
+  "WHERE A CLAIM COULD NOT BE RECONSTRUCTED FROM THE ARTEFACTS, IT WAS RE-READ OR DEMOTED. S12 was re-read and holds. S8 could not be and is carried forward. 'Re-confirmed cheaply' was not true of either as stated.",
+  "A SECOND INSTRUMENT BEATS A SECOND OPINION. The screen oracle's highlightedLineNumber settled S10's row identity in one query, after two frame readers and one prior review had disagreed about what the band meant."
+ ]
+}

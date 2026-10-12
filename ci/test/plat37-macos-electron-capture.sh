@@ -187,6 +187,51 @@ BUILD_DIR="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}"
       build."
 export CODETRACER_BUILD_DIR="${BUILD_DIR}"
 
+# ---------------------------------------------------------------------------
+# THE FRESHNESS GATE — and why RECORDING the mtime was not enough
+# ---------------------------------------------------------------------------
+#
+# This lane already did better than its GPUI twin: it recorded `ctMtimeUtc`,
+# `indexJsMtimeUtc` and `uiJsMtimeUtc` in the manifest, with a `note` saying
+# in as many words that *"when they predate the checkout revision, the frames
+# below are of an OLDER front-end than the tree names and a parity comparison
+# must say so."*
+#
+# That note was correct, present, and useless. On 2026-10-12 the comparison
+# did not say so — because a note is addressed to a reader who has already
+# decided to look, and the whole failure mode is that nobody looks. The GPUI
+# arm's binary was 127 commits stale, this arm's bundle was current, and the
+# reading went out claiming both were one build.
+#
+# So the mtimes stay (they are the artefact's own word and cost nothing) and
+# an ASSERTION is put in front of them. The bundle is build-once output, is
+# gitignored, survives every branch switch, and is therefore stale by default
+# rather than by accident — exactly the shape `ci/lib/wasm-engine-freshness.sh`
+# was written for.
+#
+# THE RULE, and it is WEAKER than the GPUI arm's — labelled rather than left
+# to look equivalent. The bundle has three Nim entry points built by `repro`
+# out of `repro.nim` with three different define sets and two backends, so
+# replaying the compiler's own closure here would mean keeping a second copy
+# of `repro.nim`'s flags in a file nothing links to it. Instead the bundle is
+# digested by its TRACKED SOURCE TREE: `git ls-files -s` (mode + blob sha1 +
+# path — a content digest straight from the index, 1,786 files in 64 ms),
+# plus a working-tree overlay for unstaged edits and untracked files, which
+# the index alone cannot see. `ci/lib/build-freshness.sh` states what that
+# does not cover — the toolchain, which the GPUI side gets for free and this
+# side does not.
+echo
+echo "=== the subject: is this bundle of THIS tree? ==="
+# shellcheck source=ci/lib/build-freshness.sh
+. "${root}/ci/lib/build-freshness.sh"
+bf_electron_assert_fresh "${root}" "${BUILD_DIR}" ||
+	fail "the Electron bundle this lane would have captured is not the one
+      this checkout describes. Refused rather than captured: a reference set
+      is only as current as the bundle it was taken from, and a frame of the
+      wrong front-end grades exactly as green as a frame of the right one."
+ELECTRON_INPUT_DIGEST="$(bf_electron_input_digest "${root}")"
+ELECTRON_STAMP="${BUILD_DIR}/${BF_ELECTRON_STAMP_NAME}"
+
 mkdir -p "${OUT}"
 
 # ---------------------------------------------------------------------------
@@ -562,9 +607,22 @@ done <"${TSV}"
 # The manifest
 # ---------------------------------------------------------------------------
 python3 - "${SCENARIOS}" "${OUT}" "${ONLY}" "${BUILD_DIR}" "${drive_rc}" \
+	"${ELECTRON_INPUT_DIGEST}" "${ELECTRON_STAMP}" \
 	<<'PY' || fail "the manifest did not assemble"
 import datetime, json, os, subprocess, sys
-scenarios_path, out, only, build_dir, drive_rc = sys.argv[1:6]
+(scenarios_path, out, only, build_dir, drive_rc,
+ input_digest, stamp_path) = sys.argv[1:8]
+
+
+def stamp_field(name):
+    try:
+        for line in open(stamp_path):
+            if line.startswith(name + "="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
 doc = json.load(open(scenarios_path))
 records = []
 p = os.path.join(out, "records.jsonl")
@@ -619,6 +677,36 @@ manifest = {
                 "the checkout revision, the frames below are of an OLDER "
                 "front-end than the tree names and a parity comparison must "
                 "say so.",
+        # The mtimes above are a NOTE. This is the ASSERTION, and the
+        # difference is the whole lesson of 2026-10-12: the note was present,
+        # correct and ignored, because a note is addressed to a reader who
+        # has already decided to look and the failure mode is that nobody
+        # looks. The lane now refuses before it captures.
+        "freshnessGate": {
+            "enforced": True,
+            "rule": "the bundle must carry ci/lib/build-freshness.sh's stamp "
+                    "at .codetracer-bundle.build-stamp, and the stamp's "
+                    "input_digest must equal the digest recomputed from this "
+                    "tree now: `git ls-files -s` over the bundle's source "
+                    "roots, plus a working-tree overlay for unstaged edits "
+                    "and untracked files.",
+            "refusesRatherThanWarns": True,
+            "inputDigest": input_digest,
+            "stampInputDigest": stamp_field("input_digest"),
+            "stampBuiltAt": stamp_field("built_at"),
+            "weakerThanTheGpuiArm": "the GPUI binary's digest is the "
+                    "COMPILER's own closure, so it covers the toolchain for "
+                    "free (a /nix/store path is a content hash). This one is "
+                    "a source-tree digest and does NOT see the compiler: a "
+                    "bundle built by a different nim from identical sources "
+                    "reads as fresh here. Recorded rather than implied.",
+            "overApproximates": "the roots include src/frontend/gpui/**, "
+                    "which no Electron entry point compiles, so a GPUI-only "
+                    "edit demands a bundle rebuild it does not strictly "
+                    "need. That is the safe direction (false red, never "
+                    "false green) and for a parity reading it is arguably "
+                    "correct: both arms must be of ONE checkout.",
+        },
     },
     "pixelPaths": {
         "macos-window-screencapturekit": {
