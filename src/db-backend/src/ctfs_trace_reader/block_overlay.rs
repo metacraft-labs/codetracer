@@ -29,6 +29,13 @@
 //! and allocations do not touch the backing file until — and unless — the
 //! overlay is flushed in `Persist` mode.
 //!
+//! The root directory is not confined to block 0: a container declaring more
+//! entries than block 0 holds continues its entry array into the blocks after
+//! it (`ctfs-container.md` §1, the **root region** `[0, root_blocks)`; the MCR
+//! recorder declares 16 such blocks when it checkpoints). Every directory
+//! accessor below addresses entry `i` by its container byte offset, so the
+//! blocks it shadows are whichever root blocks hold the entries it touches.
+//!
 //! # Decoupling
 //!
 //! The overlay only ever *reads* from its backing [`BlockSource`]; in `InMemory`
@@ -44,9 +51,11 @@ use std::path::Path;
 
 use super::ctfs_container::{BlockSource, CTFS_DIRECT, CtfsError, FILE_ENTRY_SIZE, base40_decode, base40_encode};
 
-/// Byte offset of the `Size` field within a 24-byte `FileEntry`
-/// (CTFS-Binary-Format.md §2: `Size` is the first field).
+/// Byte offsets of the `Size`, `MapBlock` and `Name` fields within a 24-byte
+/// `FileEntry` (`ctfs-container.md` §2).
 const FILE_ENTRY_SIZE_FIELD_OFFSET: usize = 0;
+const FILE_ENTRY_MAP_BLOCK_OFFSET: usize = 8;
+const FILE_ENTRY_NAME_OFFSET: usize = 16;
 
 /// How the overlay reconciles its staged blocks with the backing file at close.
 ///
@@ -331,63 +340,98 @@ impl CtfsBlockOverlay {
         block_num
     }
 
-    // ── Shadow Block 0 accessors ──────────────────────────────────────────
+    // ── Shadow root region accessors ──────────────────────────────────────
 
-    /// The byte offset of file-entry slot `index` within Block 0.
+    /// The number of blocks, from block 0, that hold the header and the entry
+    /// array (`ctfs-container.md` §1:
+    /// `root_blocks = ceil((header + MaxRootEntries * 24) / BlockSize)`). They
+    /// are never data or mapping blocks.
+    pub fn root_blocks(&self) -> u64 {
+        let root_bytes = self.entry_start + self.max_root_entries * FILE_ENTRY_SIZE;
+        root_bytes.div_ceil(self.block_size).max(1) as u64
+    }
+
+    /// The container byte offset of file-entry slot `index`, as the writer
+    /// places it (the Nim `fileEntryOffset`). It lies past block 0 for any slot
+    /// block 0 cannot hold, and an entry may straddle two root blocks when the
+    /// header is 24 bytes.
     fn file_entry_offset(&self, index: usize) -> usize {
         self.entry_start + index * FILE_ENTRY_SIZE
     }
 
-    /// Find the file-entry slot index for the named internal file in Block 0, or
-    /// `None` if no entry carries that name. Reads through the overlay so a
-    /// shadowed Block 0 is honoured.
+    /// The whole entry array, read through the overlay from every root block
+    /// (so a shadowed root block is honoured): `max_root_entries` entries,
+    /// entry `i` at byte `i * FILE_ENTRY_SIZE`.
+    fn read_root_directory(&self) -> Result<Vec<u8>, CtfsError> {
+        let root_blocks = self.root_blocks();
+        let mut directory = Vec::with_capacity(root_blocks as usize * self.block_size);
+        for block_num in 0..root_blocks {
+            directory.extend_from_slice(&self.read_block(block_num)?);
+        }
+        directory.drain(..self.entry_start);
+        directory.truncate(self.max_root_entries * FILE_ENTRY_SIZE);
+        Ok(directory)
+    }
+
+    /// The `field` word of entry `index` in a [`read_root_directory`] image.
+    ///
+    /// [`read_root_directory`]: CtfsBlockOverlay::read_root_directory
+    fn entry_word(directory: &[u8], index: usize, field: usize) -> u64 {
+        let off = index * FILE_ENTRY_SIZE + field;
+        let mut word = [0u8; 8];
+        word.copy_from_slice(&directory[off..off + 8]);
+        u64::from_le_bytes(word)
+    }
+
+    /// The slot whose `Name` is `target` in a directory image, if any.
+    fn find_in(directory: &[u8], target: u64) -> Option<usize> {
+        (0..directory.len() / FILE_ENTRY_SIZE)
+            .find(|&index| Self::entry_word(directory, index, FILE_ENTRY_NAME_OFFSET) == target)
+    }
+
+    /// Copy-on-write `bytes` into the root region at container byte `offset`,
+    /// split across the root blocks the range spans.
+    fn write_root_bytes(&mut self, offset: usize, bytes: &[u8]) -> Result<(), CtfsError> {
+        let mut written = 0;
+        while written < bytes.len() {
+            let at = offset + written;
+            let in_block = at % self.block_size;
+            let len = (self.block_size - in_block).min(bytes.len() - written);
+            let chunk = &bytes[written..written + len];
+            self.mutate_block((at / self.block_size) as u64, |block| {
+                block[in_block..in_block + len].copy_from_slice(chunk);
+            })?;
+            written += len;
+        }
+        Ok(())
+    }
+
+    /// Find the file-entry slot index for the named internal file in the root
+    /// directory, or `None` if no entry carries that name. Reads through the
+    /// overlay so shadowed root blocks are honoured.
     pub fn find_file_entry(&self, name: &str) -> Result<Option<usize>, CtfsError> {
         let target = base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
-        let block0 = self.read_block(0)?;
-        for index in 0..self.max_root_entries {
-            let off = self.file_entry_offset(index);
-            if off + FILE_ENTRY_SIZE > block0.len() {
-                break;
-            }
-            let name_encoded = u64::from_le_bytes(
-                block0[off + 16..off + 24]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("overlay: file entry name slice".to_string()))?,
-            );
-            if name_encoded == target {
-                return Ok(Some(index));
-            }
-        }
-        Ok(None)
+        Ok(Self::find_in(&self.read_root_directory()?, target))
     }
 
     /// The current `FileEntry.Size` for the named internal file (resolved through
-    /// the overlay's shadow Block 0 if present).
+    /// the overlay's shadow root blocks if present).
     pub fn file_size(&self, name: &str) -> Result<Option<u64>, CtfsError> {
-        let Some(index) = self.find_file_entry(name)? else {
-            return Ok(None);
-        };
-        let block0 = self.read_block(0)?;
-        let off = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
-        let size = u64::from_le_bytes(
-            block0[off..off + 8]
-                .try_into()
-                .map_err(|_| CtfsError::Corrupt("overlay: file size slice".to_string()))?,
-        );
-        Ok(Some(size))
+        let target = base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
+        let directory = self.read_root_directory()?;
+        Ok(Self::find_in(&directory, target)
+            .map(|index| Self::entry_word(&directory, index, FILE_ENTRY_SIZE_FIELD_OFFSET)))
     }
 
-    /// Copy-on-write update of the named file's `FileEntry.Size` in shadow Block
-    /// 0. The first such update copies Block 0 into the overlay; the backing
-    /// Block 0 is never touched (until a `Persist` flush).
+    /// Copy-on-write update of the named file's `FileEntry.Size` in the shadow
+    /// root block that holds it. The first such update copies that block into
+    /// the overlay; the backing block is never touched (until a `Persist` flush).
     pub fn set_file_size(&mut self, name: &str, new_size: u64) -> Result<(), CtfsError> {
         let index = self
             .find_file_entry(name)?
             .ok_or_else(|| CtfsError::FileNotFound(name.to_string()))?;
         let off = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
-        self.mutate_block(0, |block0| {
-            block0[off..off + 8].copy_from_slice(&new_size.to_le_bytes());
-        })
+        self.write_root_bytes(off, &new_size.to_le_bytes())
     }
 
     /// Read the raw free-list-roots region of shadow Block 0.
@@ -501,43 +545,32 @@ impl CtfsBlockOverlay {
     }
 
     /// Set (or create) the directory `FileEntry` for `name` with the given size
-    /// and root map block, copy-on-write in shadow Block 0.
+    /// and root map block, copy-on-write in the shadow root block(s) holding it.
     ///
     /// Reuses an existing slot for `name`; otherwise claims the first free slot
-    /// (name == 0). Errors if the root directory is full.
+    /// (name == 0) in any root block. A full directory is refused, naming the
+    /// member, the occupancy and `root_blocks` (`ctfs-container.md` §1, "The
+    /// Root Directory Is Fixed At Creation", rule 3).
     fn set_or_create_file_entry(&mut self, name: &str, size: u64, map_block: u64) -> Result<(), CtfsError> {
         let name_encoded =
             base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
-        // Find an existing slot for the name, else the first free slot.
-        let block0 = self.read_block(0)?;
-        let mut target: Option<usize> = None;
-        for index in 0..self.max_root_entries {
-            let off = self.file_entry_offset(index);
-            if off + FILE_ENTRY_SIZE > block0.len() {
-                break;
-            }
-            let slot_name = u64::from_le_bytes(
-                block0[off + 16..off + 24]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("overlay: file entry name slice".to_string()))?,
-            );
-            if slot_name == name_encoded {
-                target = Some(index);
-                break;
-            }
-            if slot_name == 0 && target.is_none() {
-                target = Some(index);
-                // keep scanning in case the exact name appears later
-            }
-        }
-        let index =
-            target.ok_or_else(|| CtfsError::Corrupt(format!("overlay: root directory full, cannot add '{name}'")))?;
-        let off = self.file_entry_offset(index);
-        self.mutate_block(0, |block0| {
-            block0[off..off + 8].copy_from_slice(&size.to_le_bytes());
-            block0[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
-            block0[off + 16..off + 24].copy_from_slice(&name_encoded.to_le_bytes());
-        })
+        let directory = self.read_root_directory()?;
+        let entries = directory.len() / FILE_ENTRY_SIZE;
+        let first_free =
+            || (0..entries).find(|&index| Self::entry_word(&directory, index, FILE_ENTRY_NAME_OFFSET) == 0);
+        let index = Self::find_in(&directory, name_encoded)
+            .or_else(first_free)
+            .ok_or_else(|| {
+                CtfsError::Corrupt(format!(
+                    "overlay: root directory full ({entries} of {entries} entries used, {} root blocks), cannot add '{name}'",
+                    self.root_blocks()
+                ))
+            })?;
+        let mut entry = [0u8; FILE_ENTRY_SIZE];
+        entry[FILE_ENTRY_SIZE_FIELD_OFFSET..FILE_ENTRY_SIZE_FIELD_OFFSET + 8].copy_from_slice(&size.to_le_bytes());
+        entry[FILE_ENTRY_MAP_BLOCK_OFFSET..FILE_ENTRY_MAP_BLOCK_OFFSET + 8].copy_from_slice(&map_block.to_le_bytes());
+        entry[FILE_ENTRY_NAME_OFFSET..FILE_ENTRY_NAME_OFFSET + 8].copy_from_slice(&name_encoded.to_le_bytes());
+        self.write_root_bytes(self.file_entry_offset(index), &entry)
     }
 
     // ── Persistence (the "flip") ──────────────────────────────────────────
@@ -548,11 +581,11 @@ impl CtfsBlockOverlay {
     ///   and the staged blocks remain in RAM (discarded when the overlay drops).
     /// - [`OverlayMode::Persist`]: write every staged block through `sink` in an
     ///   order that preserves the §6 durability discipline — **all data blocks
-    ///   (every staged block except Block 0) are written and synced first, then
-    ///   Block 0 is written and synced last**. Block 0 carries the
-    ///   `FileEntry.Size` / free-list-root / allocation state that *publishes*
-    ///   the data blocks to a reader, so publishing it only after the data is
-    ///   durable means a crash mid-flush can never expose a size that points at
+    ///   (every staged block past the root region) are written and synced
+    ///   first, then the staged root blocks are written and synced last**. The
+    ///   root region carries the `FileEntry` words that *publish* the data
+    ///   blocks to a reader, so publishing them only after the data is durable
+    ///   means a crash mid-flush can never expose a size that points at
     ///   not-yet-written bytes (CTFS-Binary-Format.md §6 "Writer Protocol":
     ///   data + mapping before the `FileEntry.Size` store).
     ///
@@ -563,24 +596,26 @@ impl CtfsBlockOverlay {
         match self.mode {
             OverlayMode::InMemory => Ok(()),
             OverlayMode::Persist => {
-                // Phase 1: data blocks (everything except Block 0), low → high.
-                for (&block_num, bytes) in self.blocks.iter() {
-                    if block_num == 0 {
-                        continue;
-                    }
+                let root_blocks = self.root_blocks();
+                // Phase 1: data blocks (everything past the root region), low → high.
+                for (&block_num, bytes) in self.blocks.range(root_blocks..) {
                     let offset = block_num
                         .checked_mul(self.block_size as u64)
                         .ok_or_else(|| CtfsError::Corrupt(format!("flush: block {block_num} offset overflow")))?;
                     sink.write_at(offset, bytes)?;
                 }
-                // Barrier: data must be durable before the Block 0 update that
+                // Barrier: data must be durable before the root update that
                 // publishes it.
                 sink.sync()?;
 
-                // Phase 2: Block 0 — the size/root/allocation update that makes
-                // the data blocks visible to a reader — written and synced last.
-                if let Some(block0) = self.blocks.get(&0) {
-                    sink.write_at(0, block0)?;
+                // Phase 2: the root blocks — the entry updates that make the
+                // data blocks visible to a reader — written and synced last.
+                let mut root_written = false;
+                for (&block_num, bytes) in self.blocks.range(..root_blocks) {
+                    sink.write_at(block_num * self.block_size as u64, bytes)?;
+                    root_written = true;
+                }
+                if root_written {
                     sink.sync()?;
                 }
 
@@ -592,31 +627,20 @@ impl CtfsBlockOverlay {
         }
     }
 
-    /// Whether the named file is present in (shadow) Block 0.
+    /// Whether the named file is present in the (shadow) root directory.
     pub fn has_file(&self, name: &str) -> Result<bool, CtfsError> {
         Ok(self.find_file_entry(name)?.is_some())
     }
 
-    /// List the names of every file currently in (shadow) Block 0.
+    /// List the names of every file currently in the (shadow) root directory,
+    /// in slot order.
     pub fn file_names(&self) -> Result<Vec<String>, CtfsError> {
-        let block0 = self.read_block(0)?;
-        let mut names = Vec::new();
-        for index in 0..self.max_root_entries {
-            let off = self.file_entry_offset(index);
-            if off + FILE_ENTRY_SIZE > block0.len() {
-                break;
-            }
-            let name_encoded = u64::from_le_bytes(
-                block0[off + 16..off + 24]
-                    .try_into()
-                    .map_err(|_| CtfsError::Corrupt("overlay: file entry name slice".to_string()))?,
-            );
-            if name_encoded == 0 {
-                continue;
-            }
-            names.push(base40_decode(name_encoded));
-        }
-        Ok(names)
+        let directory = self.read_root_directory()?;
+        Ok((0..directory.len() / FILE_ENTRY_SIZE)
+            .map(|index| Self::entry_word(&directory, index, FILE_ENTRY_NAME_OFFSET))
+            .filter(|&name_encoded| name_encoded != 0)
+            .map(base40_decode)
+            .collect())
     }
 }
 
@@ -1044,5 +1068,260 @@ mod tests {
         assert_eq!(reader.read_file("empty.tc").unwrap(), Vec::<u8>::new());
         assert_eq!(reader.read_file("small.tc").unwrap(), small);
         assert_eq!(reader.read_file("big.tc").unwrap(), big);
+    }
+
+    // ── Root directories larger than block 0 (ctfs-container.md §1) ──────
+
+    /// The entry count the MCR recorder declares when it takes periodic
+    /// checkpoints (`trace_writer.RecorderCheckpointedMaxRootEntries`): at a
+    /// 16-byte header this is exactly 16 root blocks, and at version 6's
+    /// 24-byte header 17.
+    const CHECKPOINTED_ROOT_ENTRIES: u32 = 2730;
+
+    /// Entries that fit block 0 of a version 5 container: `(4096 - 16) / 24`.
+    const BLOCK0_ENTRIES: usize = 170;
+
+    /// Byte offset of root entry `slot` from the start of the container, as
+    /// `ctfs-container.md` §1 and the Nim writer's `fileEntryOffset` place it.
+    fn entry_offset(header_size: usize, slot: usize) -> usize {
+        header_size + slot * FILE_ENTRY_SIZE
+    }
+
+    /// A raw full-profile container (version 5 or 6) declaring
+    /// `max_root_entries`, holding the named empty members at the given slots
+    /// and nothing else: the root region `[0, root_blocks)` padded to whole
+    /// blocks, as the writer lays it out, with no data blocks after it.
+    /// Built byte by byte so it does not depend on the code under test.
+    fn root_region_container(version: u8, max_root_entries: u32, members: &[(usize, String)]) -> (Vec<u8>, usize) {
+        let header_size = if version == 6 { 24 } else { 16 };
+        let root_bytes = header_size + max_root_entries as usize * FILE_ENTRY_SIZE;
+        let root_blocks = root_bytes.div_ceil(BLOCK_SIZE);
+        let mut buf = vec![0u8; root_blocks * BLOCK_SIZE];
+        buf[0..5].copy_from_slice(&super::super::ctfs_container::CTFS_MAGIC);
+        buf[5] = version;
+        buf[8..12].copy_from_slice(&(BLOCK_SIZE as u32).to_le_bytes());
+        buf[12..16].copy_from_slice(&max_root_entries.to_le_bytes());
+        for (slot, name) in members {
+            let off = entry_offset(header_size, *slot) + 16;
+            buf[off..off + 8].copy_from_slice(&base40_encode(name).unwrap().to_le_bytes());
+        }
+        (buf, root_blocks)
+    }
+
+    fn member_name(slot: usize) -> String {
+        format!("m{slot}.dat")
+    }
+
+    /// The `(size, map_block, name)` words of root entry `slot` in a raw image.
+    fn raw_entry(raw: &[u8], header_size: usize, slot: usize) -> (u64, u64, String) {
+        let off = entry_offset(header_size, slot);
+        let word = |at: usize| u64::from_le_bytes(raw[at..at + 8].try_into().unwrap());
+        (word(off), word(off + 8), base40_decode(word(off + 16)))
+    }
+
+    /// A [`BlockSink`] that writes into a file and records, in order, the
+    /// block number of every write and every `sync`, so a test can check the
+    /// publication order of a flush.
+    struct RecordingSink {
+        inner: FileBlockSink,
+        events: Vec<Option<u64>>,
+    }
+
+    impl BlockSink for RecordingSink {
+        fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<(), CtfsError> {
+            self.events.push(Some(offset / BLOCK_SIZE as u64));
+            self.inner.write_at(offset, bytes)
+        }
+        fn sync(&mut self) -> Result<(), CtfsError> {
+            self.events.push(None);
+            self.inner.sync()
+        }
+    }
+
+    /// A member in any root block is found: block 0's first and last slots,
+    /// the first slot of block 1, one in the middle, and the container's last
+    /// slot in its last root block. Each is listed in slot order, and a size
+    /// update of the last one lands at the byte offset the writer reads it from.
+    #[test]
+    fn test_overlay_finds_entries_in_every_root_block() {
+        let last = CHECKPOINTED_ROOT_ENTRIES as usize - 1;
+        let slots = [0, BLOCK0_ENTRIES - 1, BLOCK0_ENTRIES, 1000, last];
+        let members: Vec<(usize, String)> = slots.iter().map(|&s| (s, member_name(s))).collect();
+        let (raw, root_blocks) = root_region_container(5, CHECKPOINTED_ROOT_ENTRIES, &members);
+        assert_eq!(root_blocks, 16, "the fixture declares the recorder's 16 root blocks");
+        assert_eq!(
+            entry_offset(16, last) / BLOCK_SIZE,
+            15,
+            "the last slot is in the last root block"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roots.ct");
+        std::fs::write(&path, &raw).unwrap();
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+
+        for (slot, name) in &members {
+            assert_eq!(
+                overlay.find_file_entry(name).unwrap(),
+                Some(*slot),
+                "'{name}' at root slot {slot} (root block {}) was not found",
+                entry_offset(16, *slot) / BLOCK_SIZE
+            );
+        }
+        let names: Vec<String> = members.iter().map(|(_, n)| n.clone()).collect();
+        assert_eq!(overlay.file_names().unwrap(), names);
+
+        let last_name = member_name(last);
+        overlay.set_file_size(&last_name, 77).unwrap();
+        assert_eq!(overlay.file_size(&last_name).unwrap(), Some(77));
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        overlay.flush(&mut sink).unwrap();
+
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(raw_entry(&written, 16, last), (77, 0, last_name.clone()));
+        assert_eq!(
+            written[..entry_offset(16, last)],
+            raw[..entry_offset(16, last)],
+            "a size update of the last entry changed bytes before it"
+        );
+        let reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(reader.file_entry(&last_name), Some((77, 0)));
+    }
+
+    /// With block 0 full and free slots after it, a new member takes the first
+    /// free slot (in block 1), not "root directory full". The flush writes the
+    /// root region after the data it publishes, and a plain reader reads the
+    /// member back.
+    #[test]
+    fn test_overlay_creates_an_entry_past_block_0() {
+        let occupied = BLOCK0_ENTRIES + 30;
+        let members: Vec<(usize, String)> = (0..occupied).map(|s| (s, member_name(s))).collect();
+        let (raw, root_blocks) = root_region_container(5, CHECKPOINTED_ROOT_ENTRIES, &members);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("create.ct");
+        std::fs::write(&path, &raw).unwrap();
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+        assert_eq!(overlay.next_free_block(), root_blocks as u64);
+
+        let data: Vec<u8> = (0..(BLOCK_SIZE + 100) as u32).map(|i| (i % 241) as u8).collect();
+        overlay.write_internal_file("coverage.tc", &data).unwrap();
+        assert_eq!(overlay.find_file_entry("coverage.tc").unwrap(), Some(occupied));
+
+        let mut sink = RecordingSink {
+            inner: FileBlockSink::open(&path).unwrap(),
+            events: Vec::new(),
+        };
+        overlay.flush(&mut sink).unwrap();
+        // Data and mapping blocks, a barrier, then the root region.
+        let barrier = sink.events.iter().position(Option::is_none).unwrap();
+        let (data_writes, root_writes) = sink.events.split_at(barrier);
+        assert!(
+            data_writes.iter().all(|b| b.unwrap() >= root_blocks as u64),
+            "a root block was written before the data it publishes was synced: {:?}",
+            sink.events
+        );
+        let entry_block = (entry_offset(16, occupied) / BLOCK_SIZE) as u64;
+        assert!(
+            root_writes.contains(&Some(entry_block)),
+            "the root block holding the new entry was not written after the barrier: {:?}",
+            sink.events
+        );
+        assert_eq!(root_writes.last(), Some(&None), "the root region is synced last");
+
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(raw_entry(&written, 16, occupied).2, "coverage.tc");
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(reader.read_file("coverage.tc").unwrap(), data);
+        assert_eq!(reader.file_entry(&member_name(occupied - 1)), Some((0, 0)));
+    }
+
+    /// The "full" boundary: with every slot but the last occupied, a new member
+    /// lands in the last slot of the last root block; the next one is refused,
+    /// naming it and the occupancy; and rewriting an existing member still
+    /// reuses its slot.
+    #[test]
+    fn test_overlay_root_directory_full_boundary() {
+        let last = CHECKPOINTED_ROOT_ENTRIES as usize - 1;
+        let members: Vec<(usize, String)> = (0..last).map(|s| (s, member_name(s))).collect();
+        let (raw, _) = root_region_container(5, CHECKPOINTED_ROOT_ENTRIES, &members);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("full.ct");
+        std::fs::write(&path, &raw).unwrap();
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+
+        overlay.write_internal_file("last.tc", b"fits").unwrap();
+        assert_eq!(overlay.find_file_entry("last.tc").unwrap(), Some(last));
+
+        let err = overlay
+            .write_internal_file("over.tc", b"no room")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("root directory full") && err.contains("'over.tc'"),
+            "unexpected refusal: {err}"
+        );
+        assert!(err.contains("2730 of 2730 entries used"), "occupancy not named: {err}");
+        assert!(err.contains("16 root blocks"), "root_blocks not named: {err}");
+        assert!(!overlay.has_file("over.tc").unwrap());
+
+        overlay.write_internal_file("last.tc", b"rewritten").unwrap();
+        assert_eq!(overlay.find_file_entry("last.tc").unwrap(), Some(last));
+
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        overlay.flush(&mut sink).unwrap();
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(reader.read_file("last.tc").unwrap(), b"rewritten");
+        assert_eq!(reader.file_entry(&member_name(0)), Some((0, 0)));
+    }
+
+    /// At version 6 the 24-byte header puts entries across block boundaries:
+    /// slot 169 has its size and map words at the end of block 0 and its name
+    /// at the start of block 1. Such an entry is found, updated in both
+    /// blocks, and read back by a plain reader.
+    #[test]
+    fn test_overlay_entry_straddling_two_root_blocks() {
+        let straddling = BLOCK0_ENTRIES - 1;
+        let off = entry_offset(24, straddling);
+        assert!(
+            off / BLOCK_SIZE == 0 && (off + 16) / BLOCK_SIZE == 1,
+            "slot {straddling} does not straddle blocks 0 and 1 at version 6"
+        );
+        let last = CHECKPOINTED_ROOT_ENTRIES as usize - 1;
+        let members = vec![(straddling, member_name(straddling)), (last, member_name(last))];
+        let (raw, root_blocks) = root_region_container(6, CHECKPOINTED_ROOT_ENTRIES, &members);
+        assert_eq!(root_blocks, 17);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v6.ct");
+        std::fs::write(&path, &raw).unwrap();
+        let backing = Box::new(LocalFileSource::open(&path).unwrap());
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+
+        for (slot, name) in &members {
+            assert_eq!(overlay.find_file_entry(name).unwrap(), Some(*slot));
+        }
+        overlay.set_file_size(&member_name(last), 5).unwrap();
+        // Rewriting the member reuses its straddling slot.
+        overlay
+            .write_internal_file(&member_name(straddling), b"straddles")
+            .unwrap();
+        assert_eq!(
+            overlay.find_file_entry(&member_name(straddling)).unwrap(),
+            Some(straddling)
+        );
+
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        overlay.flush(&mut sink).unwrap();
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(raw_entry(&written, 24, straddling).2, member_name(straddling));
+        assert_eq!(raw_entry(&written, 24, last), (5, 0, member_name(last)));
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(reader.read_file(&member_name(straddling)).unwrap(), b"straddles");
+        assert_eq!(reader.file_entry(&member_name(last)), Some((5, 0)));
     }
 }
