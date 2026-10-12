@@ -77,6 +77,7 @@ use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::dap::{DapMessage, ProtocolMessage, Request};
 use db_backend::dap_handler::Handler;
 use db_backend::recreator_session::RecreatorArgs;
+use db_backend::task::GoToTicksArguments;
 use db_backend::task::TraceKind;
 use db_backend::trace_reader::TraceReader;
 use serde_json::Value as JsonValue;
@@ -471,20 +472,35 @@ fn stop_after(handler: &mut Handler, step: StepId) -> JsonValue {
     step_forward(handler)
 }
 
-/// The stop a freshly launched session reports: the production run-to-entry
-/// path, which positions at the recording's first step and emits that stop
-/// WITHOUT advancing past it.
+/// The stop at the recording's first step (step 0), reached by the production
+/// `ct/goto-ticks` runner as the session's first move.
 ///
-/// This is how a forward-only session can stand on step 0 at all. `stop_after`
-/// cannot — it lands one step after the step it positions at — and step 0 is a
-/// real stop: `start` emits the recording's entry step there
-/// (`trace-events.md`, "The entry step is part of `start`").
-fn entry_stop(handler: &mut Handler) -> JsonValue {
+/// Step 0 is a real stop — `start` emits the recording's entry step there
+/// (`trace-events.md`, "The entry step is part of `start`") — and a backward
+/// navigation can land on it, but neither of the other forward routes reaches
+/// it: `stop_after` lands one step after the step it positions at, and the
+/// launch stop (`ct/run-to-entry`) is the program's entry call, which in a
+/// recording rooted in a wrapping `<toplevel>` call is the first call nested
+/// inside it, not the root's entry step. A handler whose first move is this
+/// jump has never moved backward, so its bundled-source state cannot have been
+/// shaped by a backward read.
+fn first_step_stop(handler: &mut Handler) -> JsonValue {
     let (tx, rx) = mpsc::channel::<DapMessage>();
     handler
-        .run_to_entry(make_request("ct/run-to-entry"), None, tx)
-        .unwrap_or_else(|e| panic!("GDH7-CHECK-FAIL: run_to_entry failed on a materialized trace: {e}"));
-    move_location(&rx)
+        .goto_ticks(
+            make_request("ct/goto-ticks"),
+            GoToTicksArguments { thread_id: 0, ticks: 0 },
+            tx,
+        )
+        .unwrap_or_else(|e| panic!("GDH7-CHECK-FAIL: goto_ticks(0) failed on a materialized trace: {e}"));
+    let loc = move_location(&rx);
+    assert_eq!(
+        ticks_of(&loc),
+        0,
+        "GDH7-CHECK-FAIL: ct/goto-ticks 0 reported a stop at step {}, not the recording's first step",
+        ticks_of(&loc)
+    );
+    loc
 }
 
 /// One production `stepIn`, returning the stop it lands on.
@@ -528,8 +544,8 @@ fn container_ordinal_at(reader: &Arc<dyn TraceReader>, loc: &JsonValue) -> Optio
 /// number of stops against what the container declares.
 fn walk_all_stops(handler: &mut Handler, reader: &Arc<dyn TraceReader>) -> Vec<JsonValue> {
     let mut stops = Vec::new();
-    // From the launch stop, so the walk includes the entry step at step 0.
-    let mut loc = entry_stop(handler);
+    // From step 0, so the walk includes the recording's entry step.
+    let mut loc = first_step_stop(handler);
     stops.push(loc.clone());
     let bound = reader.step_count() + 8;
     let mut last = ticks_of(&loc);
@@ -1292,8 +1308,8 @@ fn gdh7_reverse_across_the_boundary_shows_v1() {
     //
     // The control is a SEPARATE handler that has only ever moved forward, so
     // its bundled-source state cannot have been influenced by a backward read.
-    // It starts at the launch stop (the entry step, step 0) and walks forward
-    // with the production `stepIn` runner until it stands on the same step id,
+    // It starts at step 0, the recording's entry step (`first_step_stop`), and
+    // walks forward with the production `stepIn` runner until it stands on the same step id,
     // so it can reach every step the backward run can land on — including the
     // entry step itself. Failing to reach it is a CHECK-FAIL: comparing against
     // nothing is how a gate passes for free.
@@ -1301,7 +1317,7 @@ fn gdh7_reverse_across_the_boundary_shows_v1() {
     let control_text = {
         let creader = open_reader(&ct);
         let mut chandler = build_handler(&ct, creader);
-        let mut loc = entry_stop(&mut chandler);
+        let mut loc = first_step_stop(&mut chandler);
         let mut guard = 0usize;
         while ticks_of(&loc) < back_ticks && guard < bound {
             loc = step_forward(&mut chandler);
