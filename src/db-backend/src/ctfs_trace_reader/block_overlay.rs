@@ -174,6 +174,9 @@ pub struct CtfsBlockOverlay {
     entry_start: usize,
     /// Number of root directory entries (extended-header `max_root_entries`).
     max_root_entries: usize,
+    /// The number of blocks in the root region, validated at construction to
+    /// lie wholly within the backing container.
+    root_blocks: u64,
     /// The shadow `NextFreeBlock` counter: the next block number a fresh
     /// allocation hands out. Initialised from the backing container's block
     /// count and bumped by [`alloc_block`](CtfsBlockOverlay::alloc_block).
@@ -207,6 +210,23 @@ impl CtfsBlockOverlay {
             max_root_entries,
         } = super::ctfs_container::parse_container_header(&header)?;
 
+        // `MaxRootEntries` is a u32 the header carries unchecked, so a corrupt
+        // or hostile container can declare a root region of ~96 GiB. Every
+        // directory accessor reads all of it (`ctfs-container.md` §6, "Reader
+        // Protocol", step 2), and a writer pads it to whole blocks (§1), so a
+        // container shorter than its root region is truncated or lying about
+        // its header. Refuse it here, before anything is sized from the field.
+        let whole_blocks = total / block_size as u64;
+        let root_bytes = entry_start as u64 + max_root_entries as u64 * FILE_ENTRY_SIZE as u64;
+        let root_blocks = root_bytes.div_ceil(block_size as u64).max(1);
+        if root_blocks > whole_blocks {
+            return Err(CtfsError::Corrupt(format!(
+                "overlay: the header declares {max_root_entries} root entries, a root region of \
+                 {root_blocks} blocks of {block_size} bytes, but the container holds only \
+                 {whole_blocks} whole blocks ({total} bytes); it is truncated or its header is corrupt"
+            )));
+        }
+
         // The backing image is laid out as a whole number of blocks; the next
         // free block is the count of WHOLE blocks currently present.
         //
@@ -228,7 +248,11 @@ impl CtfsBlockOverlay {
         // this floor. Anything at or above it is either unreferenced waste or a
         // truncation, and in both cases `read_block`'s bound against
         // `current_size` refuses it rather than serving a short read.
-        let next_free_block = total / block_size as u64;
+        //
+        // Data allocation begins at `root_blocks` (§1), and the refusal above
+        // makes the whole-block count at least that, so an allocation never
+        // hands out a block of the root region.
+        let next_free_block = whole_blocks;
 
         Ok(CtfsBlockOverlay {
             backing,
@@ -236,6 +260,7 @@ impl CtfsBlockOverlay {
             block_size,
             entry_start,
             max_root_entries,
+            root_blocks,
             next_free_block,
             mode,
         })
@@ -345,8 +370,7 @@ impl CtfsBlockOverlay {
     /// `root_blocks = ceil((header + MaxRootEntries * 24) / BlockSize)`). They
     /// are never data or mapping blocks.
     pub fn root_blocks(&self) -> u64 {
-        let root_bytes = self.entry_start + self.max_root_entries * FILE_ENTRY_SIZE;
-        root_bytes.div_ceil(self.block_size).max(1) as u64
+        self.root_blocks
     }
 
     /// The container byte offset of file-entry slot `index`, as the writer
@@ -361,9 +385,10 @@ impl CtfsBlockOverlay {
     /// (so a shadowed root block is honoured): `max_root_entries` entries,
     /// entry `i` at byte `i * FILE_ENTRY_SIZE`.
     fn read_root_directory(&self) -> Result<Vec<u8>, CtfsError> {
-        let root_blocks = self.root_blocks();
-        let mut directory = Vec::with_capacity(root_blocks as usize * self.block_size);
-        for block_num in 0..root_blocks {
+        // Grown block by block rather than sized from the header up front, so
+        // the allocation is bounded by bytes the backing actually served.
+        let mut directory = Vec::new();
+        for block_num in 0..self.root_blocks {
             directory.extend_from_slice(&self.read_block(block_num)?);
         }
         directory.drain(..self.entry_start);
@@ -1234,6 +1259,54 @@ mod tests {
         let mut reader = CtfsReader::open(&path).unwrap();
         assert_eq!(reader.read_file("last.tc").unwrap(), b"rewritten");
         assert_eq!(reader.file_entry(&member_name(0)), Some((0, 0)));
+    }
+
+    /// A header's `MaxRootEntries` is refused at construction when the root
+    /// region it declares does not fit the container, before anything is
+    /// sized from it: a one-block container declaring `u32::MAX` entries (a
+    /// ~96 GiB root region) is a `CtfsError`, not a 96 GiB allocation.
+    #[test]
+    fn test_overlay_refuses_a_root_region_larger_than_the_container() {
+        let (mut raw, root_blocks) = root_region_container(5, 31, &[]);
+        assert_eq!(root_blocks, 1);
+        raw[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let result = CtfsBlockOverlay::new(Box::new(InMemoryBlockSource::new(raw)), OverlayMode::InMemory);
+        let err = result
+            .expect_err("a root region of u32::MAX entries over a one-block container was accepted")
+            .to_string();
+        assert!(
+            err.contains("4294967295 root entries") && err.contains("1 whole blocks"),
+            "the refusal does not name the declared entries and the container size: {err}"
+        );
+    }
+
+    /// Allocation never hands out a block of the root region. A container cut
+    /// short inside its 16-block root region used to seed `NextFreeBlock`
+    /// from its 3 whole blocks, so the next allocation was block 3 — root
+    /// entries 510 to 680 — and a flush would have written data over them.
+    #[test]
+    fn test_overlay_never_allocates_inside_the_root_region() {
+        let (raw, root_blocks) = root_region_container(5, CHECKPOINTED_ROOT_ENTRIES, &[(0, member_name(0))]);
+        assert_eq!(root_blocks, 16);
+        let short = raw[..3 * BLOCK_SIZE].to_vec();
+
+        match CtfsBlockOverlay::new(Box::new(InMemoryBlockSource::new(short)), OverlayMode::Persist) {
+            Ok(mut overlay) => {
+                let block = overlay.alloc_block();
+                assert!(
+                    block >= root_blocks as u64,
+                    "alloc_block handed out block {block}, inside the root region [1, {root_blocks})"
+                );
+            }
+            Err(err) => {
+                let err = err.to_string();
+                assert!(
+                    err.contains("16 blocks") && err.contains("3 whole blocks"),
+                    "the refusal does not name the root region and the container size: {err}"
+                );
+            }
+        }
     }
 
     /// At version 6 the 24-byte header puts entries across block boundaries:
