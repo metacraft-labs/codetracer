@@ -23,16 +23,17 @@ const
     ## a bit outside it is refused, the same strict-rejection contract the
     ## u16's known-bits mask enforces elsewhere.
 
-  SupportedMetaDatVersion* = 6'u16
+  SupportedMetaDatVersion* = 7'u16
     ## The one ``meta.dat`` schema version this reader accepts
     ## (``codetracer-trace-format-spec/internal-files.md`` §"Metadata
     ## (meta.dat)").
     ##
-    ## Version 6 carries ``flags_ext`` unconditionally and no path list
+    ## Version 7 carries ``flags_ext`` unconditionally and no path list
     ## after ``recorder_id``: a trace's source paths are the records of
-    ## ``paths.dat``.  Versions 3 to 5 wrote a path list where version 6 has
-    ## the flag-gated blocks, so neither can be read as the other, and every
-    ## other version is refused by name.  Versions at or below
+    ## ``paths.dat``.  Versions 3 to 5 wrote a path list where version 7 has
+    ## the flag-gated blocks, so neither can be read as the other.  Version 6
+    ## has version 7's layout but predates the ``events.dat`` kinds 14-23.
+    ## Every other version is refused by name.  Versions at or below
     ## ``LastShiftedGlobalIndexVersion`` are refused with their own reason
     ## too: their step addresses use a packing the current decode reads one
     ## line high, and nothing but the version tells the two apart.

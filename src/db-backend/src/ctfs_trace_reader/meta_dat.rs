@@ -16,7 +16,7 @@
 //!
 //! ```text
 //! [4 bytes] magic "CTMD"  (0x43 0x54 0x4D 0x44)
-//! [2 bytes] version u16 little-endian (6; see [`SUPPORTED_VERSIONS`])
+//! [2 bytes] version u16 little-endian (7; see [`SUPPORTED_VERSIONS`])
 //! [2 bytes] flags u16 little-endian
 //!           bit 0       — FLAG_HAS_MCR_FIELDS
 //!           bit 1       — FLAG_HAS_REPLAY_LAUNCH_FIELDS (M-RLP-1, §6A.5)
@@ -104,10 +104,13 @@
 //! - **v5** — GDH-M2 (2026-09-10): a `[4] flags_ext u32 LE` word follows the
 //!   u16 flags, written only when an extended flag is set.
 //! - **v6** — 2026-10: the path list after `recorder_id` is gone, and
-//!   `flags_ext` is always present, so there is one header length.  Every
-//!   other version is refused: the bytes after `recorder_id` mean something
-//!   else in v5 and below.  Spec: `codetracer-trace-format-spec/
+//!   `flags_ext` is always present, so there is one header length.  The
+//!   bytes after `recorder_id` mean something else in v5 and below.  Spec: `codetracer-trace-format-spec/
 //!   internal-files.md` §"Metadata (meta.dat)".
+//! - **v7** — 2026-10: no byte of the header changed. `events.dat` may carry
+//!   the `EventLogKind` values 14-23 (`trace-events.md` §"EventLogKind (u8
+//!   enum)"); the version moved so that a version 6 reader refuses such a
+//!   trace, and a version 6 container is refused here in turn.
 
 use std::error::Error;
 use std::fmt;
@@ -119,7 +122,7 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
 /// The `meta.dat` format version emitted by this serializer, and the only
 /// one the reader accepts (see [`SUPPORTED_VERSIONS`]).
-pub const META_DAT_VERSION: u16 = 6;
+pub const META_DAT_VERSION: u16 = 7;
 
 /// The highest schema version whose writer packed a line-only
 /// `global_position_index` as `prefix_sum[file_id] + line`.
@@ -131,15 +134,16 @@ pub const META_DAT_VERSION: u16 = 6;
 /// instead of refusing it.
 pub const LAST_SHIFTED_GLOBAL_INDEX_VERSION: u16 = 3;
 
-/// All `meta.dat` versions this reader can decode: version 6 alone.
+/// All `meta.dat` versions this reader can decode: version 7 alone.
 ///
 /// Version 6 removed the path list that versions 3 to 5 wrote after
 /// `recorder_id`, and made `flags_ext` unconditional. A version 5 header read
 /// under version 6's rules would decode its path count as the next
 /// flag-gated block, and a version 6 header read under version 5's would
 /// decode the ext word as the recording id's length, so neither is read as
-/// the other: pre-1.0 there is no compatibility path, and older containers
-/// are re-recorded.
+/// the other. Version 7 keeps version 6's layout and allocates the
+/// `events.dat` kinds 14-23, and is the only version read: pre-1.0 there is
+/// no compatibility path, and older containers are re-recorded.
 ///
 /// Versions at or below [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`] are refused
 /// with their own reason as well: their writers packed a line-only step
@@ -631,8 +635,8 @@ impl fmt::Display for MetaDatError {
                 f,
                 "meta.dat: version {v} is not readable: this reader reads version {META_DAT_VERSION} only. \
                  Version 5 and below carry a path list after recorder_id that version \
-                 {META_DAT_VERSION} does not, so the two cannot be read as each other. Re-record the \
-                 trace with a current recorder"
+                 {META_DAT_VERSION} does not, and version 6 predates the event kinds 14-23, so none of \
+                 them is read as version {META_DAT_VERSION}. Re-record the trace with a current recorder"
             ),
             MetaDatError::UnknownFlags { flags, unknown_bits } => write!(
                 f,
@@ -1124,8 +1128,8 @@ mod tests {
 
     /// A REAL schema-version-5 `meta.dat`, produced by the Nim writer
     /// (`codetracer-trace-format-nim`) recording one file that is reloaded
-    /// once, and copied out of the container byte for byte. Version 6 refuses
-    /// it: its path list sits where version 6 puts the flag-gated blocks.
+    /// once, and copied out of the container byte for byte. Version 7 refuses
+    /// it: its path list sits where version 7 puts the flag-gated blocks.
     ///
     ///   [0..4)  "CTMD"       [4..6)  version = 5
     ///   [6..8)  flags = 0x4f00    [8..12) flags_ext = 1 (source reload)
@@ -1357,6 +1361,36 @@ mod tests {
         buf.extend_from_slice(&1u16.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(1)));
+    }
+
+    /// The reader reads version 7, whose `events.dat` may carry the
+    /// `EventLogKind` values 14-23, and refuses a version 6 container by its
+    /// version although the two layouts are the same.
+    #[test]
+    fn a_version_6_container_is_refused_by_its_version() {
+        assert_eq!(META_DAT_VERSION, 7);
+        let mut buf = serialize_meta_dat(&MetaDat {
+            version: META_DAT_VERSION,
+            flags: 0,
+            recording_id: TEST_UUID_V7.to_owned(),
+            program: "prog".to_owned(),
+            args: vec![],
+            workdir: "/w".to_owned(),
+            recorder_id: "r".to_owned(),
+            ext_flags: 0,
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        });
+        assert_eq!(parse_meta_dat(&buf).expect("version 7 parses").version, 7);
+
+        buf[4..6].copy_from_slice(&6u16.to_le_bytes());
+        let err = parse_meta_dat(&buf).expect_err("a version 6 container must be refused");
+        assert_eq!(err, MetaDatError::UnsupportedVersion(6));
+        let msg = err.to_string();
+        assert!(msg.contains("version 6") && msg.contains("version 7"), "{msg}");
     }
 
     #[test]
@@ -1896,15 +1930,15 @@ mod tests {
         }
     }
 
-    // ── Version 6 (internal-files.md §"Metadata (meta.dat)") ─────────────
+    // ── Version 7 (internal-files.md §"Metadata (meta.dat)") ─────────────
 
-    /// A version 6 header built from the specification, byte by byte:
+    /// A version 7 header built from the specification, byte by byte:
     /// `flags_ext` always present, and nothing after `recorder_id` but the
     /// flag-gated blocks.
-    fn v6_bytes(flags: u16, ext: u32) -> Vec<u8> {
+    fn v7_bytes(flags: u16, ext: u32) -> Vec<u8> {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(b"CTMD");
-        buf.extend_from_slice(&6u16.to_le_bytes());
+        buf.extend_from_slice(&7u16.to_le_bytes());
         buf.extend_from_slice(&flags.to_le_bytes());
         buf.extend_from_slice(&ext.to_le_bytes());
         buf.push(TEST_UUID_V7.len() as u8);
@@ -1917,16 +1951,16 @@ mod tests {
     }
 
     #[test]
-    fn a_version_6_header_parses_with_its_ext_word_and_no_path_list() {
-        let m = parse_meta_dat(&v6_bytes(0, 0)).expect("a version 6 header with flags_ext 0 must parse");
-        assert_eq!(m.version, 6);
+    fn a_version_7_header_parses_with_its_ext_word_and_no_path_list() {
+        let m = parse_meta_dat(&v7_bytes(0, 0)).expect("a version 7 header with flags_ext 0 must parse");
+        assert_eq!(m.version, 7);
         assert_eq!(m.recording_id, TEST_UUID_V7);
         assert_eq!(m.program, "hi");
         assert_eq!(m.args, vec!["a".to_owned()]);
         assert_eq!(m.workdir, "/w");
         assert_eq!(m.recorder_id, "r");
 
-        let reload = parse_meta_dat(&v6_bytes(0, 1)).expect("flags_ext bit 0 is known");
+        let reload = parse_meta_dat(&v7_bytes(0, 1)).expect("flags_ext bit 0 is known");
         assert_eq!(reload.program, "hi", "the body starts after the ext word");
     }
 
@@ -1934,24 +1968,24 @@ mod tests {
     /// a version 5 path list there is not read as one.
     #[test]
     fn a_path_list_after_recorder_id_is_not_read() {
-        let mut buf = v6_bytes(0, 0);
+        let mut buf = v7_bytes(0, 0);
         buf.extend_from_slice(&[1, 1, b'x']);
         assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::TrailingBytes { extra: 3 }));
     }
 
-    /// Every version but 6 is refused, naming the version it found and the
+    /// Every version but 7 is refused, naming the version it found and the
     /// one this reader reads -- including a real version 5 header from the Nim
     /// writer, whose path list would otherwise be read as an MCR block.
     #[test]
-    fn every_version_but_6_is_refused_by_name() {
-        for v in [1u16, 2, 3, 4, 5, 7, 99] {
-            let mut buf = v6_bytes(0, 0);
+    fn every_version_but_7_is_refused_by_name() {
+        for v in [1u16, 2, 3, 4, 5, 6, 8, 99] {
+            let mut buf = v7_bytes(0, 0);
             buf[4..6].copy_from_slice(&v.to_le_bytes());
             let err = parse_meta_dat(&buf).expect_err("another version must be refused");
             assert_eq!(err, MetaDatError::UnsupportedVersion(v));
             let msg = err.to_string();
             assert!(
-                msg.contains(&format!("version {v}")) && msg.contains('6'),
+                msg.contains(&format!("version {v}")) && msg.contains("version 7"),
                 "the refusal names neither the version found nor the one read: {msg}"
             );
         }
@@ -1962,8 +1996,8 @@ mod tests {
     }
 
     #[test]
-    fn a_version_6_header_shorter_than_12_bytes_is_refused() {
-        let buf = v6_bytes(0, 0);
+    fn a_version_7_header_shorter_than_12_bytes_is_refused() {
+        let buf = v7_bytes(0, 0);
         for len in 8..12 {
             assert!(parse_meta_dat(&buf[..len]).is_err(), "a {len}-byte header was accepted");
         }
@@ -1971,7 +2005,7 @@ mod tests {
 
     #[test]
     fn an_unknown_ext_bit_is_refused_by_name() {
-        let err = parse_meta_dat(&v6_bytes(0, 1 << 8)).expect_err("an unknown ext bit must be refused");
+        let err = parse_meta_dat(&v7_bytes(0, 1 << 8)).expect_err("an unknown ext bit must be refused");
         assert_eq!(
             err,
             MetaDatError::UnknownExtendedFlags {
@@ -1981,16 +2015,16 @@ mod tests {
         );
     }
 
-    /// The serializer writes exactly the specified bytes: version 6, the ext
+    /// The serializer writes exactly the specified bytes: version 7, the ext
     /// word, and no path list.
     #[test]
-    fn the_serializer_writes_version_6() {
+    fn the_serializer_writes_version_7() {
         let mut m = fixture_minimal();
         m.program = "hi".to_owned();
         m.args = vec!["a".to_owned()];
         m.workdir = "/w".to_owned();
         m.recorder_id = "r".to_owned();
-        assert_eq!(serialize_meta_dat(&m), v6_bytes(0, 0));
+        assert_eq!(serialize_meta_dat(&m), v7_bytes(0, 0));
     }
 
     /// Capability and stream-presence bits are written as given, and the

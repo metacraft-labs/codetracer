@@ -177,7 +177,7 @@ suite "CTFS source materialization":
       # Only the fixed header is needed: `extractInterningTablePaths`
       # reads the flag word at offset 6 and nothing else.
       result.add "CTMD"
-      result.putU16Le(6)
+      result.putU16Le(7)
       result.putU16Le(flags)
       result.putU32Le(0)
 
@@ -269,11 +269,12 @@ const
 proc buildMetaDat(version: uint16, extFlags: uint32 = 0,
                   withPathList = false): string =
   ## A complete ``meta.dat`` body stamped with an explicit version, laid out
-  ## as version 6 (``internal-files.md`` §"Metadata (meta.dat)"):
+  ## as version 7 (``internal-files.md`` §"Metadata (meta.dat)"):
   ## ``flags_ext`` always present, nothing after ``recorder_id``.
   ##
   ## ``withPathList`` appends the path list versions 3 to 5 wrote after
-  ## ``recorder_id``; version 6 has none, and a reader must not look for one.
+  ## ``recorder_id``; versions 6 and 7 have none, and a reader must not look
+  ## for one.
   result.add "CTMD"
   result.putU16Le(version)
   result.putU16Le(0)  # flags — no optional blocks
@@ -308,11 +309,11 @@ proc refusal(ctPath: string): string =
   ""
 
 suite "CTFS meta.dat version gate":
-  test "version 6 is the one accepted":
+  test "version 7 is the one accepted":
     ## Literals, not the constants under test: an assertion written as
     ## `SupportedMetaDatVersion == SupportedMetaDatVersion` is an
     ## equation nothing can fail.
-    check SupportedMetaDatVersion == 6'u16
+    check SupportedMetaDatVersion == 7'u16
     check LastShiftedGlobalIndexVersion == 3'u16
 
   test "a current container is read, its paths from paths.dat":
@@ -321,13 +322,13 @@ suite "CTFS meta.dat version gate":
     createDir(root)
     defer: removeDir(root)
 
-    let parsed = readCtfsMetaDat(writeContainerWithMetaDat(root, "current.ct", 6))
+    let parsed = readCtfsMetaDat(writeContainerWithMetaDat(root, "current.ct", 7))
     check parsed.recordingId == RecordingId
     check parsed.program == Program
     check parsed.workdir == Workdir
     check parsed.paths == SrcPaths
 
-    let reload = readCtfsMetaDat(writeContainerWithMetaDat(root, "reload.ct", 6,
+    let reload = readCtfsMetaDat(writeContainerWithMetaDat(root, "reload.ct", 7,
       extFlags = FlagExtHasSourceReload))
     check reload.program == Program
 
@@ -337,8 +338,8 @@ suite "CTFS meta.dat version gate":
     createDir(root)
     defer: removeDir(root)
 
-    # A version 6 header with no paths.dat names no source path.
-    let bare = writeContainerWithMetaDat(root, "bare.ct", 6, paths = @[])
+    # A version 7 header with no paths.dat names no source path.
+    let bare = writeContainerWithMetaDat(root, "bare.ct", 7, paths = @[])
     check readCtfsMetaDat(bare).paths.len == 0
     let outDir = root / "out"
     createDir(outDir)
@@ -346,7 +347,7 @@ suite "CTFS meta.dat version gate":
     check not fileExists(outDir / "paths.json")
 
     # A path list after recorder_id is not read as one.
-    let listed = writeContainerWithMetaDat(root, "listed.ct", 6,
+    let listed = writeContainerWithMetaDat(root, "listed.ct", 7,
       withPathList = true, paths = @["/only/from/paths.dat.c"])
     check readCtfsMetaDat(listed).paths == @["/only/from/paths.dat.c"]
 
@@ -356,14 +357,18 @@ suite "CTFS meta.dat version gate":
     createDir(root)
     defer: removeDir(root)
 
-    for version in [3'u16, 4, 5, 7]:
+    for version in [3'u16, 4, 5, 8]:
       let message = refusal(writeContainerWithMetaDat(root,
         "v" & $version & ".ct", version, withPathList = true))
       check message.contains("version " & $version)
-      check message.contains("6")
+      check message.contains("version 7")
+    # Version 6 has version 7's layout, and is refused all the same.
+    let v6 = refusal(writeContainerWithMetaDat(root, "v6.ct", 6))
+    check v6.contains("version 6")
+    check v6.contains("version 7")
     # Only the superseded encode is diagnosed as one.
     check refusal(writeContainerWithMetaDat(root, "v3.ct", 3)).contains("one line high")
-    check not refusal(writeContainerWithMetaDat(root, "v7.ct", 7)).contains("one line high")
+    check not refusal(writeContainerWithMetaDat(root, "v6.ct", 6)).contains("one line high")
 
   test "the extended flag word is validated, and the header is 12 bytes":
     let root = getTempDir() / "ctfs-metadat-ext-" & $getCurrentProcessId()
@@ -373,11 +378,11 @@ suite "CTFS meta.dat version gate":
 
     let unknownBit = not KnownExtFlags
     check unknownBit != 0'u32  # or the fixture below is not a fixture
-    check refusal(writeContainerWithMetaDat(root, "badext.ct", 6,
+    check refusal(writeContainerWithMetaDat(root, "badext.ct", 7,
       extFlags = unknownBit)).contains("unknown extended flag")
 
     let short = root / "short.ct"
-    writeMinimalCtfs(short, @[("meta.dat", buildMetaDat(6)[0 ..< 11])])
+    writeMinimalCtfs(short, @[("meta.dat", buildMetaDat(7)[0 ..< 11])])
     check refusal(short).len > 0
 
 suite "CTFS container version 5":
@@ -387,7 +392,7 @@ suite "CTFS container version 5":
     createDir(root)
     defer: removeDir(root)
 
-    let ct = writeContainerWithMetaDat(root, "c.ct", 6)
+    let ct = writeContainerWithMetaDat(root, "c.ct", 7)
     for version in [3, 4, 7]:
       var data = readFile(ct)
       data[5] = char(version)
@@ -408,20 +413,20 @@ suite "CTFS container version 5":
     var many: seq[string] = @[]
     for i in 0 ..< 40:
       many.add "/workspace/project/src/a_rather_long_module_name_" & $i & ".c"
-    let ct = writeContainerWithMetaDat(root, "forms.ct", 6, paths = many)
+    let ct = writeContainerWithMetaDat(root, "forms.ct", 7, paths = many)
     check readCtfsMetaDat(ct).paths == many
 
     # A member written mapped while its size is still one block -- the state
     # a live reader can observe mid-transition -- is read through its mapping.
     let transition = root / "transition.ct"
-    writeMinimalCtfs(transition, @[("meta.dat", buildMetaDat(6))])
+    writeMinimalCtfs(transition, @[("meta.dat", buildMetaDat(7))])
     var data = readFile(transition)
     let blk = data.len div TestBlockSize
     data.setLen(data.len + TestBlockSize)
     for i in blk * TestBlockSize ..< data.len: data[i] = '\0'
     data.putPtr(blk, 0, 1)
     writeFile(transition, data)
-    patchEntry(transition, 0, uint64(buildMetaDat(6).len), uint64(blk))
+    patchEntry(transition, 0, uint64(buildMetaDat(7).len), uint64(blk))
     check readCtfsMetaDat(transition).program == Program
 
   test "a null or oversized member is refused, not read":
@@ -430,8 +435,8 @@ suite "CTFS container version 5":
     createDir(root)
     defer: removeDir(root)
 
-    let ct = writeContainerWithMetaDat(root, "n.ct", 6, paths = @[])
-    let size = uint64(buildMetaDat(6).len)
+    let ct = writeContainerWithMetaDat(root, "n.ct", 7, paths = @[])
+    let size = uint64(buildMetaDat(7).len)
     for (s, m, what) in [(size, 0'u64, "null"), (size, CtfsDirect, "null"),
                          (5000'u64, CtfsDirect or 1, "one block")]:
       patchEntry(ct, 0, s, m)
@@ -452,7 +457,7 @@ suite "CTFS container version 5":
 
     # Version 6 is version 5's body behind a 24-byte header: rebuild a v5
     # container with the entry array moved 8 bytes along.
-    let v5 = writeContainerWithMetaDat(root, "v5.ct", 6)
+    let v5 = writeContainerWithMetaDat(root, "v5.ct", 7)
     proc toV6(profile, compression, reserved: int): string =
       let data = readFile(v5)
       result = data[0 ..< 16] & char(profile) & char(compression) &
