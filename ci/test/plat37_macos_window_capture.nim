@@ -78,8 +78,26 @@ import gui_assert/window_layout
 
 const
   TitleBarPoints* = 29
-    ## How many POINTS a standard titled window's frame is taller than the
-    ## content area `--width`/`--height` asked for.
+    ## **The DEFAULT** for how many POINTS a standard titled window's frame is
+    ## taller than the content area `--width`/`--height` asked for.
+    ##
+    ## IT IS A DEFAULT AND NOT A CONSTANT OF THE PLATFORM, since 2026-10-12,
+    ## and the reason is measured. `ci/test/plat37-macos-electron-capture.sh`
+    ## aims this same binary at CodeTracer's ELECTRON window, whose frame is
+    ## its content area: asked for 1920x1080, `CGWindowListCopyWindowInfo`
+    ## reported bounds `1920x1080` while the page's own `window.innerHeight`
+    ## and the `BrowserWindow`'s `getContentSize()` both read 1080 as well.
+    ## Subtracting 29 from that frame produced `viewportDeviationPoints
+    ## {width: 0, height: -29}` and `viewportHonoured: false` for a viewport
+    ## that was honoured EXACTLY — the mirror image of the `>=` defect this
+    ## constant was introduced to fix, and the same defect class: a window
+    ## relabelled with a number it does not have.
+    ##
+    ## So the caller passes `--title-bar-points=<n>` for a window whose frame
+    ## it has measured. The GPUI lane passes nothing and gets 29, unchanged.
+    ## The Electron lane passes 0 and its driver ASSERTS the equality that
+    ## entitles it to — a 0 backed by a live assertion rather than by this
+    ## comment.
     ##
     ## **IT IS SUBTRACTED, NOT TOLERATED, AND THAT IS THE WHOLE POINT.** The
     ## first spelling of the comparison below tested the frame height with
@@ -129,6 +147,7 @@ type
     timeoutMs: int
     waitMs: int
     settleMs: int
+    titleBarPoints: int
 
 const Usage = """
 plat37_macos_window_capture — PLAT-37's macOS window capture
@@ -138,7 +157,7 @@ plat37_macos_window_capture — PLAT-37's macOS window capture
       --view=<name> --scenario=<id> \
       --requested-width=<points> --requested-height=<points> \
       [--owner=<name>] [--place] [--place-x=<p>] [--place-y=<p>] \
-      [--timeout-ms=<n>] [--wait-ms=<n>]
+      [--timeout-ms=<n>] [--wait-ms=<n>] [--title-bar-points=<n>]
 
 `--wait-ms` is how long to WAIT for the window to appear (default 90000, 0
 polls once). It is not a settle delay: `--replay-ops` runs BEFORE the window
@@ -156,7 +175,8 @@ proc parseConfig(args: seq[string]): Config =
   result = Config(mode: mCapture, owner: "codetracer-gpui",
                   requestedWidth: 0, requestedHeight: 0,
                   placeX: 0, placeY: 0, timeoutMs: 30_000,
-                  waitMs: 90_000, settleMs: 2_000)
+                  waitMs: 90_000, settleMs: 2_000,
+                  titleBarPoints: TitleBarPoints)
   if args.len == 0:
     quit(Usage, 2)
   case args[0]
@@ -186,6 +206,11 @@ proc parseConfig(args: seq[string]): Config =
       result.waitMs = parseInt(arg["--wait-ms=".len .. ^1])
     elif arg.startsWith("--settle-ms="):
       result.settleMs = parseInt(arg["--settle-ms=".len .. ^1])
+    elif arg.startsWith("--title-bar-points="):
+      result.titleBarPoints = parseInt(arg["--title-bar-points=".len .. ^1])
+      if result.titleBarPoints < 0:
+        quit("--title-bar-points cannot be negative: a frame is never " &
+             "SHORTER than its content area", 2)
     else: quit("unknown argument '" & arg & "'\n" & Usage, 2)
   if result.recordPath.len == 0:
     quit("--record is required: the record is this program's answer", 2)
@@ -561,10 +586,10 @@ proc runCapture(cfg: Config) =
   # against the flag that asked for it. A clamped window is `false` here with
   # its deviation spelled out, and is never relabelled with the figure it
   # could not reach.
-  let contentHeight = target.bounds[3] - TitleBarPoints
+  let contentHeight = target.bounds[3] - cfg.titleBarPoints
   let honouredW = target.bounds[2] == cfg.requestedWidth
   let honouredH = contentHeight == cfg.requestedHeight
-  node["titleBarPoints"] = %TitleBarPoints
+  node["titleBarPoints"] = %cfg.titleBarPoints
   node["windowContentHeightPoints"] = %contentHeight
   node["viewportHonoured"] = %(honouredW and honouredH)
   node["viewportDeviationPoints"] = %*{

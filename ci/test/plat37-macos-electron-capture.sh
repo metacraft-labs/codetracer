@@ -1,0 +1,729 @@
+#!/usr/bin/env bash
+#
+# plat37-macos-electron-capture.sh — THE ELECTRON REFERENCE SET, captured on
+# macOS through the SAME path the GPUI window lane uses.
+#
+#   bash ci/test/plat37-macos-electron-capture.sh
+#   bash ci/test/plat37-macos-electron-capture.sh --only editor
+#   bash ci/test/plat37-macos-electron-capture.sh --out build/x
+#   bash ci/test/plat37-macos-electron-capture.sh --controls-only
+#
+# ===========================================================================
+# WHAT THIS LANE IS, AND WHY IT IS NOT A PLAYWRIGHT GOLDEN LANE
+# ===========================================================================
+#
+# `ci/test/plat37-macos-window-capture.sh` opens a real `codetracer-gpui`
+# window, attests it through `CGWindowListCopyWindowInfo`, captures THAT
+# WINDOW'S OWN SURFACE through ScreenCaptureKit and grades the frame with
+# PLAT-39's screen oracle. This lane does the same four things to the real
+# ELECTRON front-end, with the same two binaries, so that a difference between
+# the two reference sets is a difference between the two front-ends and not
+# between two capture stacks.
+#
+# THE DECISION WAS MEASURED, 2026-10-12, on this host, and the measurement is
+# re-taken on every run rather than quoted:
+#
+#   * The Electron window is attestable and capturable by exactly the same
+#     code. Probed with the lane's own binary against the product launched
+#     from `src/build-debug-repro/bin/ct`: window 1657, owner `Electron`,
+#     1728x1084 points -> 3456x2168 pixels at scale 2.0,
+#     `sameWindowAsAttested: true`, `satisfiesG1: true`. The GPUI `editor`
+#     capture of the same day reports the same 1728x1084 / 3456x2168 / 2.0.
+#     Two frames of identical extent, from one compositor, one display, one
+#     scale factor and one font stack.
+#   * The owner is `Electron`, not `ct` and not `CodeTracer`, because `ct`
+#     **execv()s** into the Electron executable on POSIX
+#     (`src/ct/launch/electron.nim`), so the process owning the window is the
+#     nix `electron-41.3.0` bundle.
+#   * `page.screenshot()` is taken as well, every run, from the same settled
+#     state — `<view>.page.png` beside `<view>.png`, both named in
+#     `<view>.route.json`. The routing decision therefore stays falsifiable:
+#     if the two routes ever disagree about the content area, the records say
+#     so rather than the choice being an argument in a header.
+#
+# WHAT THE WINDOW ROUTE GIVES UP, stated here because a reader of the
+# reference set needs it:
+#
+#   * **Window chrome is in the frame — on ONE side only, and that is the
+#     finding.** The GPUI window is a standard titled window: asked for
+#     1440x900 it is a 1440x929 frame, the 29 extra points being its title
+#     bar. CodeTracer's ELECTRON window is not: measured 2026-10-12 at `wide`,
+#     `CGWindowListCopyWindowInfo` reports 1920x1080 while the page's own
+#     `window.innerHeight` and `getContentSize()` both read 1080. Frame and
+#     content are the same rectangle, so this lane passes
+#     `--title-bar-points=0` and the driver asserts the premise. **A parity
+#     differ must crop the GPUI frame's top 29 points and must NOT crop the
+#     Electron one.** Cropping both, or neither, compares a title bar against
+#     a row of product.
+#   * **No `toHaveScreenshot` masking / tolerance / retry.** The replacement
+#     is `codetracer-image-diff` (NVIDIA FLIP) for the perceptual comparison
+#     and the spec's own `captureSettled` for the stability. Both are
+#     deliberate: FLIP builds on darwin in this workspace and `magick` /
+#     `compare` do not exist here at all.
+#   * **Compositor alpha.** The window surface carries the window server's own
+#     alpha at the rounded corners; a page raster is opaque. Measured on
+#     `entry-shell`: RGB agrees to SSIM 0.999901 / PSNR 59.3 dB while alpha
+#     is 39.7 dB. A differ that weights alpha will see corners and nothing
+#     else.
+#
+# AND THE DIVERGENCE THAT IS NOT THIS LANE'S TO FIX. `scenarios.json`'s `wide`
+# viewport is 1920x1080 POINTS. **Electron honours it and GPUI cannot.**
+# Measured the same day, same display (1728x1117 points): the Electron window
+# is 1920x1080 points (3840x2160 pixels) and the GPUI window asked for the
+# same thing is 1728x1084 (3456x2168) — macOS clamped it. So three of the six
+# scenarios produce reference frames of DIFFERENT EXTENT on the two sides, and
+# a parity step that diffs them pixel-for-pixel is comparing two different
+# pictures. Both lanes record `viewportHonoured` and the deviation; neither
+# relabels. Resolving it is the parity step's decision — scale, letterbox, or
+# add a viewport that fits this display — and it must be made explicitly.
+#
+# ===========================================================================
+# ITS STANDING: HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE
+# ===========================================================================
+#
+# Same standing as its GPUI twin and for the same reason: it needs a live
+# macOS GUI session and a `kTCCServiceScreenCapture` grant held by
+# `com.metacraft-labs.guiassert.capture`, and neither exists on a fresh host
+# or in CI. PLAT-23's G5 — *"a gate cannot be passed by a measurement that
+# could not have failed"* — has the mirror image that a gate which cannot RUN
+# is a green tick for an absent machine. **Wire this into no required check.**
+#
+# ===========================================================================
+# WHAT IT REUSES
+# ===========================================================================
+#
+#  * `src/tests/visual/scenarios.json` — the SIX scenarios, with the same
+#    two-sided cardinality assertions. The ONE `gpuiProbe` is deliberately not
+#    driven: scenarios.json says of it *"A probe is NOT part of the
+#    cross-renderer comparison: it has no Electron arm, so nothing here claims
+#    one."*
+#  * `ci/test/plat37_macos_window_capture.nim` and
+#    `ci/test/plat37_macos_window_grade.nim` — the SAME two binaries, built
+#    here the same way, with `--owner` pointed at the Electron window.
+#  * `src/tests/gui/lib/fixtures.ts` — the product's own launch path, so the
+#    capture is of the shipped binaries and not of a harness-built surface.
+#
+# ===========================================================================
+# POINTS AND PIXELS
+# ===========================================================================
+#
+# Every PNG the capture binary writes is in DEVICE pixels (2x here). A second
+# frame is written beside it downscaled to the window's POINT extent
+# (`<view>.points.png`), and THAT is the one the oracle grades, because the
+# oracle's constants are 1x. The GPUI lane does exactly this; a parity
+# comparison must use the point-extent frames on both sides.
+#
+# ===========================================================================
+
+set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCENARIOS="${root}/src/tests/visual/scenarios.json"
+CAPTURE="${root}/build/plat37_macos_window_capture"
+GRADE="${root}/build/plat37_macos_window_grade"
+OUT="${root}/build/plat37-macos-electron"
+GUI="${root}/src/tests/gui"
+SPEC="tests/visual/plat37-electron-window-capture.spec.ts"
+ONLY=""
+CONTROLS_ONLY=0
+OWNER="${CODETRACER_PLAT37E_OWNER:-Electron}"
+GRADE_TIMEOUT_S="${CODETRACER_PLAT37E_GRADE_TIMEOUT_S:-300}"
+CAPTURE_TIMEOUT_S="${CODETRACER_PLAT37E_CAPTURE_TIMEOUT_S:-240}"
+DRIVE_TIMEOUT_S="${CODETRACER_PLAT37E_DRIVE_TIMEOUT_S:-5400}"
+
+fail() {
+	echo "FAIL: $*" >&2
+	exit 1
+}
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--only)
+		ONLY="${2:?--only needs a view name}"
+		shift 2
+		;;
+	--out)
+		OUT="${2:?--out needs a directory}"
+		shift 2
+		;;
+	--controls-only)
+		CONTROLS_ONLY=1
+		shift
+		;;
+	*) fail "unknown argument '$1'" ;;
+	esac
+done
+
+# ---------------------------------------------------------------------------
+# A REFUSAL, NEVER A SKIP
+# ---------------------------------------------------------------------------
+[ "$(uname -s)" = "Darwin" ] ||
+	fail "this lane is macOS-only by construction: it drives ScreenCaptureKit
+      and the Quartz window server. The Linux Electron arm is
+      \`just plat35-capture-electron\` (its own Xvfb at -dpi 96)."
+[ -f "${SCENARIOS}" ] || fail "the scenario set is not at ${SCENARIOS}"
+[ -d "${GUI}/node_modules" ] || fail "${GUI}/node_modules is absent; run
+      \`bash ci/lib/npm-install.sh ${GUI}\` once."
+command -v timeout >/dev/null || fail "timeout(1) is not on PATH, and this
+      lane will not run an unbounded capture against a window server."
+command -v ffmpeg >/dev/null || fail "ffmpeg is not on PATH; it is what
+      downscales each device-pixel capture to its point extent."
+command -v npx >/dev/null || fail "npx is not on PATH; this lane drives the
+      product through the repository's own Playwright suite."
+
+# THE BUILT FRONT-END, NAMED AND DATED RATHER THAN ASSUMED FRESH.
+#
+# `CODETRACER_BUILD_DIR` is what `src/tests/gui/lib/fixtures.ts` resolves
+# `bin/ct` and the Electron entry point under. A reference set is only as
+# current as the bundle it was taken from, so the lane refuses an absent one
+# and RECORDS the mtime of the one it found. `Verification-Harness-Traps`:
+# the artefact's own word, not the checkout's.
+BUILD_DIR="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}"
+[ -x "${BUILD_DIR}/bin/ct" ] || fail "no built front-end at
+      ${BUILD_DIR}/bin/ct. Build it with \`just build-once\` and re-run.
+      Set CODETRACER_BUILD_DIR to point elsewhere."
+[ -f "${BUILD_DIR}/index.js" ] || fail "no Electron entry point at
+      ${BUILD_DIR}/index.js; the tree at ${BUILD_DIR} is not a front-end
+      build."
+export CODETRACER_BUILD_DIR="${BUILD_DIR}"
+
+mkdir -p "${OUT}"
+
+# ---------------------------------------------------------------------------
+# The two Nim halves, built here rather than assumed
+# ---------------------------------------------------------------------------
+build_nim() {
+	local src="$1" exe="$2" cache="$3"
+	echo "building ${exe##*/}"
+	nim c --hints:off --warnings:off --path:"${root}/../GuiAssert/src" \
+		--nimcache:"${root}/nimcache/${cache}" -o:"${exe}" "${src}" ||
+		fail "${src} did not compile"
+}
+build_nim "${root}/ci/test/plat37_macos_window_capture.nim" "${CAPTURE}" \
+	plat37macoscap
+build_nim "${root}/ci/test/plat37_macos_window_grade.nim" "${GRADE}" \
+	plat37macosgrade
+
+# ---------------------------------------------------------------------------
+# CONTROL 1 — the host, the grant and the display positive control
+# ---------------------------------------------------------------------------
+echo
+echo "=== control 1: the host, the grant, and a display still ==="
+timeout "${CAPTURE_TIMEOUT_S}" "${CAPTURE}" host \
+	--record="${OUT}/host.json" --timeout-ms=30000 ||
+	fail "the host control failed. Its record is at ${OUT}/host.json and names
+      which of the three it was: no still capture at all, no ScreenCapture
+      grant for the capture bundle (the record carries the exact clickable
+      remedy), or a display that could not be captured."
+
+# ---------------------------------------------------------------------------
+# CONTROL 2 — a capture aimed at a window that is not there must REFUSE
+# ---------------------------------------------------------------------------
+echo
+echo "=== control 2: a capture aimed at an owner that does not exist ==="
+if timeout "${CAPTURE_TIMEOUT_S}" "${CAPTURE}" capture \
+	--owner="plat37e-no-such-application" \
+	--out="${OUT}/control-absent.png" \
+	--record="${OUT}/control-absent.json" \
+	--view=control --scenario=absent-owner \
+	--requested-width=1440 --requested-height=900 \
+	--wait-ms=0 >/dev/null 2>&1; then
+	fail "the capture path answered OK for an owner that does not exist. It is
+      then answering about something other than its target, and every green
+      below it would be unfalsifiable."
+fi
+python3 - "${OUT}/control-absent.json" <<'PY' || fail "control 2 did not refuse as expected"
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert r["outcome"] == "refused", r["outcome"]
+assert r["attestation"]["matched"] == 0, r["attestation"]["matched"]
+assert "satisfiesG1" not in r, "a refused run must not claim G1"
+print("  refused, attestation matched 0, no G1 claim — as required")
+PY
+
+# ---------------------------------------------------------------------------
+# CONTROL 3 — the grader's negative arm, over a synthesised flat frame
+# ---------------------------------------------------------------------------
+echo
+echo "=== control 3: the grader's rendersText assertion, made to fail ==="
+ffmpeg -loglevel error -y -f lavfi -i color=c=0x202020:s=1440x929 \
+	-frames:v 1 "${OUT}/control-flat.png" ||
+	fail "the flat control frame could not be synthesised"
+timeout "${GRADE_TIMEOUT_S}" "${GRADE}" --frame="${OUT}/control-flat.png" \
+	--record="${OUT}/control-flat.blank.json" \
+	--view=control --scenario=flat-frame \
+	--scratch="${OUT}/scratch/control" --expect-blank ||
+	fail "the flat control frame did not grade as blank, so the grader's
+      negative arm is not reaching the predicate it is supposed to control."
+if timeout "${GRADE_TIMEOUT_S}" "${GRADE}" --frame="${OUT}/control-flat.png" \
+	--record="${OUT}/control-flat.text.json" \
+	--view=control --scenario=flat-frame \
+	--scratch="${OUT}/scratch/control" >/dev/null 2>&1; then
+	fail "the grader passed a FLAT frame as rendering text. The rendersText
+      assertion cannot fail, so it is asserting nothing."
+fi
+echo "  the flat frame grades blank, and fails the text assertion — both arms live"
+
+if [ "${CONTROLS_ONLY}" -eq 1 ]; then
+	echo
+	echo "OK: the three controls pass. --controls-only, so no scenario ran."
+	exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# The scenario set, READ from scenarios.json and never listed here
+# ---------------------------------------------------------------------------
+TSV="${OUT}/scenarios.tsv"
+python3 - "${SCENARIOS}" "${TSV}" <<'PY' || fail "the scenario set did not parse"
+import json, sys
+doc = json.load(open(sys.argv[1]))
+scenarios = doc["scenarios"]
+if len(scenarios) != doc["expectedScenarios"]:
+    sys.exit(f"FAIL: scenarios.json declares {doc['expectedScenarios']} "
+             f"scenarios and holds {len(scenarios)}")
+probes = doc.get("gpuiProbes", [])
+if len(probes) != doc.get("expectedGpuiProbes", 0):
+    sys.exit(f"FAIL: scenarios.json declares {doc.get('expectedGpuiProbes')} "
+             f"GPUI probes and holds {len(probes)}")
+viewports = doc["viewports"]
+if len(viewports) != doc["expectedViewports"]:
+    sys.exit(f"FAIL: scenarios.json declares {doc['expectedViewports']} "
+             f"viewports and holds {len(viewports)}")
+kinds = set(doc["operationKinds"])
+names = {sc["view"] for sc in scenarios}
+if len(names) != len(scenarios):
+    sys.exit("FAIL: two scenarios share a view name, so one would overwrite "
+             "the other's PNG and the lane would still report success")
+rows = []
+for sc in scenarios:
+    for op in sc["operations"]:
+        if op["kind"] not in kinds:
+            sys.exit(f"FAIL: scenario {sc['id']} uses operation "
+                     f"'{op['kind']}', which operationKinds does not publish")
+    vp = viewports[sc["viewport"]]
+    rows.append("\t".join([sc["id"], sc["view"], str(vp["width"]),
+                           str(vp["height"]), sc["viewport"]]))
+open(sys.argv[2], "w").write("\n".join(rows) + "\n")
+print(f"scenarios.json: {len(scenarios)} scenarios, {len(probes)} GPUI "
+      f"probe(s) NOT driven here, {len(kinds)} operation kinds, "
+      f"{len(viewports)} viewports")
+PY
+
+# A `--only` THAT MATCHED NOTHING IS A FAILURE AND NOT A PASS.
+expected="$(python3 -c "
+import json,sys
+doc=json.load(open(sys.argv[1])); only=sys.argv[2]
+print(sum(1 for s in doc['scenarios'] if not only or s['view']==only))
+" "${SCENARIOS}" "${ONLY}")"
+if [ "${expected}" -eq 0 ]; then
+	fail "no scenario has the view '${ONLY}'. The view names are
+      scenarios.json's own: $(cut -f2 "${TSV}" | paste -sd' ' -)"
+fi
+
+# ---------------------------------------------------------------------------
+# Drive the product and capture each window
+# ---------------------------------------------------------------------------
+export CODETRACER_PLAT37E_OUT="${OUT}"
+export CODETRACER_PLAT37E_CAPTURE="${CAPTURE}"
+export CODETRACER_PLAT37E_OWNER="${OWNER}"
+export CODETRACER_DEV_TOOLS=0
+
+# ---------------------------------------------------------------------------
+# A SHORT `CODETRACER_HOME`, AND IT IS NOT A TIDINESS PREFERENCE
+# ---------------------------------------------------------------------------
+#
+# MEASURED 2026-10-12, first run of this lane. `src/tests/gui/lib/fixtures.ts`
+# makes its per-worker `CODETRACER_HOME` with `fs.mkdtempSync(os.tmpdir())`,
+# and inside the codetracer dev shell `TMPDIR` is a nested nix-shell scratch:
+#
+#   /var/folders/by/qdc078sx5bn6m3xv734qrjg40000gn/T/nix-shell.DjiX0m/
+#
+# 68 characters before the mkdtemp suffix. The replay backend then binds a
+# Unix-domain socket under it, and macOS's `sockaddr_un.sun_path` is 104
+# bytes. The window opened, the renderer mounted, and the session manager
+# answered:
+#
+#   ERROR [session_manager::backend_manager] Can't handle DAP message.
+#   Error: path must be shorter than SUN_LEN
+#
+# The product then drew its shell with an EMPTY editor — zero rendered rows,
+# zero recognised strings, no pane located by the oracle. That is the exact
+# shape of frame this lane must never grade green, and both the spec's
+# `drawnRows` assertion and the grader's `rendersText` refused it. The frames
+# are only worth capturing once the socket fits.
+#
+# `/tmp/ct-plat37e-$$` is 18 characters. The fixture honours both variables
+# (`CODETRACER_GUI_TEST_CODETRACER_HOME` and
+# `CODETRACER_GUI_TEST_XDG_CONFIG_HOME`); when it creates the directory
+# itself it also deletes it, and when it is given one it does not — so this
+# lane owns the cleanup.
+PLAT37E_HOME="${CODETRACER_PLAT37E_HOME:-/tmp/ct-plat37e-$$}"
+rm -rf "${PLAT37E_HOME}"
+mkdir -p "${PLAT37E_HOME}/home" "${PLAT37E_HOME}/xdg"
+export CODETRACER_GUI_TEST_CODETRACER_HOME="${PLAT37E_HOME}/home"
+export CODETRACER_GUI_TEST_XDG_CONFIG_HOME="${PLAT37E_HOME}/xdg"
+export TMPDIR="${PLAT37E_HOME}"
+# The bound is ASSERTED rather than hoped for, because the failure it guards
+# against is silent in the capture and loud only in a log nobody reads: a
+# window that opened, mounted and drew nothing.
+sun_probe="${CODETRACER_GUI_TEST_CODETRACER_HOME}/tmp/codetracer-backend-0123456789.sock"
+if [ "${#sun_probe}" -ge 104 ]; then
+	fail "the per-run CODETRACER_HOME is ${#sun_probe} characters deep once a
+      backend socket path is appended, and macOS's sun_path limit is 104.
+      The replay backend will fail to bind, the product will draw an EMPTY
+      editor, and the captured frames will be of a session that never
+      attached. Set CODETRACER_PLAT37E_HOME to something shorter."
+fi
+cleanup_home() { rm -rf "${PLAT37E_HOME}"; }
+trap cleanup_home EXIT
+# No `--headless`: the point of this lane is a window on the window server.
+# `--disable-gpu-compositing` only; the Linux default also passes `--no-zygote`
+# and `--disable-dev-shm-usage`, neither of which applies on Darwin.
+export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --disable-gpu-compositing}"
+
+grep_filter=()
+[ -n "${ONLY}" ] && grep_filter=(--grep "capture ${ONLY}\$")
+
+echo
+echo "=== driving ${expected} scenario(s) through the product's own toolbar ==="
+drive_rc=0
+(
+	cd "${GUI}" &&
+		timeout "${DRIVE_TIMEOUT_S}" npx playwright test --workers=1 \
+			--reporter=list "${SPEC}" "${grep_filter[@]}"
+) 2>&1 | tee "${OUT}/playwright.log" || drive_rc=$?
+
+# ---------------------------------------------------------------------------
+# Downscale to point extent and grade — the same two steps, in the same order,
+# as the GPUI lane, so the graded frame means the same thing on both sides.
+# ---------------------------------------------------------------------------
+RECORDS="${OUT}/records.jsonl"
+: >"${RECORDS}"
+captured=0
+refused=0
+
+while IFS=$'\t' read -r id view width height vpname; do
+	[ -n "${id}" ] || continue
+	if [ -n "${ONLY}" ] && [ "${view}" != "${ONLY}" ]; then continue; fi
+	png="${OUT}/${view}.png"
+	points_png="${OUT}/${view}.points.png"
+	rec="${OUT}/${view}.capture.json"
+	route="${OUT}/${view}.route.json"
+	grade="${OUT}/${view}.grade.json"
+
+	echo
+	echo "### ${id} -> ${view} at ${vpname} ${width}x${height} points"
+
+	if [ ! -f "${rec}" ]; then
+		echo "  no capture record at ${rec} — the driver did not reach it" >&2
+		refused=$((refused + 1))
+		continue
+	fi
+	if [ "$(python3 -c "
+import json,sys; print(json.load(open(sys.argv[1])).get('outcome'))" "${rec}")" != "captured" ]; then
+		echo "  refused: $(python3 -c "
+import json,sys; print(json.load(open(sys.argv[1])).get('refusal','?'))" "${rec}")" >&2
+		refused=$((refused + 1))
+		python3 -c "
+import json,sys
+r=json.load(open(sys.argv[1])); r['graded']=False
+print(json.dumps(r))" "${rec}" >>"${RECORDS}"
+		continue
+	fi
+
+	pw="$(python3 -c "
+import json,sys; print(json.load(open(sys.argv[1]))['capturedPoints']['width'])" "${rec}")"
+	ph="$(python3 -c "
+import json,sys; print(json.load(open(sys.argv[1]))['capturedPoints']['height'])" "${rec}")"
+	ffmpeg -loglevel error -y -i "${png}" \
+		-vf "scale=${pw}:${ph}:flags=lanczos" "${points_png}" ||
+		fail "downscaling ${png} to its point extent failed"
+
+	# ----------------------------------------------------------------
+	# THE ROUTING DECISION, RE-MEASURED EVERY RUN
+	# ----------------------------------------------------------------
+	#
+	# This lane chose the window over `page.screenshot()`. That choice is
+	# only honest while the two are known to agree about the content they
+	# share, so the agreement is computed rather than asserted in a header.
+	#
+	# Measured 2026-10-12 on `entry-shell` at `wide`: both PNGs 3840x2160,
+	# SSIM **0.999901** all-channel and PSNR **59.3 dB** on R, G and B, with
+	# the alpha channel the only real difference (PSNR 39.7 dB) — the
+	# compositor's own alpha at the window's rounded corners, which a page
+	# raster has no notion of. So the window route costs nothing in content
+	# fidelity and buys the one thing the page route cannot: a frame of the
+	# same KIND as the GPUI arm's, from the same compositor at the same
+	# scale.
+	#
+	# A run where these two diverge is a finding about the capture stack and
+	# is recorded, never silently preferred.
+	page_png="${OUT}/${view}.page.png"
+	route_cmp="${OUT}/${view}.routecmp.txt"
+	: >"${route_cmp}"
+	if [ -f "${page_png}" ]; then
+		{
+			ffmpeg -hide_banner -loglevel error -i "${png}" -i "${page_png}" \
+				-lavfi "[0:v][1:v]psnr=stats_file=-" -f null - 2>&1 |
+				grep -E '^n:' | head -1
+			ffmpeg -hide_banner -loglevel error -i "${png}" -i "${page_png}" \
+				-lavfi "[0:v][1:v]ssim=stats_file=-" -f null - 2>&1 |
+				grep -E '^n:' | head -1
+		} >>"${route_cmp}" 2>&1 || true
+		echo "  route agreement (window vs page): $(tr '\n' ' ' <"${route_cmp}")"
+	fi
+
+	grade_rc=0
+	timeout "${GRADE_TIMEOUT_S}" "${GRADE}" --frame="${points_png}" \
+		--record="${grade}" --view="${view}" --scenario="${id}" \
+		--scratch="${OUT}/scratch/${view}" || grade_rc=$?
+
+	python3 - "${rec}" "${grade}" "${png}" "${points_png}" "${grade_rc}" \
+		"${route}" "${route_cmp}" >>"${RECORDS}" <<'PY' || fail "the census did not assemble"
+import json, os, struct, sys
+rec = json.load(open(sys.argv[1]))
+grade = json.load(open(sys.argv[2])) if os.path.exists(sys.argv[2]) else None
+png, points_png, grade_rc, route_path = sys.argv[3], sys.argv[4], int(sys.argv[5]), sys.argv[6]
+route = json.load(open(route_path)) if os.path.exists(route_path) else None
+cmp_path = sys.argv[7]
+route_cmp = (open(cmp_path).read().strip().splitlines()
+             if os.path.exists(cmp_path) else [])
+problems = []
+
+# THE PNG'S OWN IHDR against what the driver said it captured. The record is
+# the driver's word for what it took; the IHDR is the artefact's word for what
+# it holds.
+for path, key in ((png, "capturedPixels"), (points_png, "capturedPoints")):
+    if not os.path.exists(path):
+        problems.append(f"no image at {path}")
+        continue
+    head = open(path, "rb").read(33)
+    if head[:8] != b"\x89PNG\r\n\x1a\n":
+        problems.append(f"{os.path.basename(path)} is not a PNG")
+        continue
+    iw, ih = struct.unpack(">II", head[16:24])
+    want = (rec[key]["width"], rec[key]["height"])
+    if (iw, ih) != want:
+        problems.append(f"{os.path.basename(path)} IHDR is {iw}x{ih}, "
+                        f"the record says {want[0]}x{want[1]}")
+
+if not rec.get("satisfiesG1"):
+    problems.append("a captured run did not claim G1")
+if rec["attestation"]["matched"] < 1:
+    problems.append("G1 is claimed and no window was attested")
+if not rec["capture"]["sameWindowAsAttested"]:
+    problems.append("ScreenCaptureKit captured a different window than the "
+                    "one CGWindowListCopyWindowInfo attested")
+if route is None:
+    problems.append("the driver wrote no route record, so nothing says which "
+                    "program state this frame is of")
+else:
+    if route["finalState"]["rrTicks"] < 0:
+        problems.append("the product reported no position at capture time")
+    if not route["pageRoute"]["byteStable"]:
+        problems.append("the page never produced two byte-identical "
+                        "screenshots, so the window was still moving")
+if grade is None:
+    problems.append("the grader wrote no record")
+elif grade["verdict"] != "OK":
+    problems.append("grader: " + "; ".join(grade["problems"]))
+elif grade_rc != 0:
+    problems.append(f"the grader answered OK and exited {grade_rc}")
+
+rec["grade"] = grade
+rec["route"] = route
+rec["routeAgreement"] = {
+    "what": "window capture vs page.screenshot() of the same settled state",
+    "ffmpeg": route_cmp,
+    "why": "the routing decision, re-measured rather than asserted. Both "
+           "frames are of the same content at the same device extent; a run "
+           "in which they diverge is a finding about the capture stack.",
+}
+rec["graded"] = True
+rec["png"] = png
+rec["pointsPng"] = points_png
+rec["pngBytes"] = os.path.getsize(png) if os.path.exists(png) else 0
+rec["laneVerdict"] = "OK" if not problems else "BAD"
+rec["laneProblems"] = problems
+print(json.dumps(rec))
+sys.stderr.write(("  OK" if not problems else "  BAD: " + "; ".join(problems)) + "\n")
+PY
+
+	if [ "$(python3 -c "
+import json,sys
+print(json.loads(open(sys.argv[1]).read().strip().splitlines()[-1])['laneVerdict'])" "${RECORDS}")" = "OK" ]; then
+		captured=$((captured + 1))
+	else
+		refused=$((refused + 1))
+	fi
+done <"${TSV}"
+
+# ---------------------------------------------------------------------------
+# The manifest
+# ---------------------------------------------------------------------------
+python3 - "${SCENARIOS}" "${OUT}" "${ONLY}" "${BUILD_DIR}" "${drive_rc}" \
+	<<'PY' || fail "the manifest did not assemble"
+import datetime, json, os, subprocess, sys
+scenarios_path, out, only, build_dir, drive_rc = sys.argv[1:6]
+doc = json.load(open(scenarios_path))
+records = []
+p = os.path.join(out, "records.jsonl")
+if os.path.exists(p):
+    for line in open(p):
+        line = line.strip()
+        if line:
+            records.append(json.loads(line))
+
+
+def mtime(path):
+    try:
+        return (datetime.datetime.utcfromtimestamp(os.path.getmtime(path))
+                .strftime("%Y-%m-%dT%H:%M:%SZ"))
+    except OSError:
+        return None
+
+
+def git(*args):
+    try:
+        return subprocess.run(("git",) + args, capture_output=True,
+                              text=True, timeout=20).stdout.strip()
+    except Exception:
+        return ""
+
+
+manifest = {
+    "schemaVersion": 1,
+    "milestone": "PLAT-37",
+    "lane": "plat37-macos-electron-capture",
+    "renderer": "electron",
+    "only": only,
+    "playwrightExitCode": int(drive_rc),
+    "expectedScenarios": doc["expectedScenarios"],
+    "gpuiProbesDriven": 0,
+    "whyNoProbes": "scenarios.json: 'A probe is NOT part of the "
+                   "cross-renderer comparison: it has no Electron arm, so "
+                   "nothing here claims one.'",
+    "operationKinds": doc["operationKinds"],
+    "host": json.load(open(os.path.join(out, "host.json"))),
+    # THE PROVENANCE OF THE THING CAPTURED. A reference set is only as current
+    # as the bundle it was taken from, and this lane states the bundle's age
+    # rather than letting the checkout's revision imply it.
+    "subject": {
+        "buildDir": build_dir,
+        "ctMtimeUtc": mtime(os.path.join(build_dir, "bin", "ct")),
+        "indexJsMtimeUtc": mtime(os.path.join(build_dir, "index.js")),
+        "uiJsMtimeUtc": mtime(os.path.join(build_dir, "ui.js")),
+        "checkoutRevision": git("rev-parse", "HEAD"),
+        "checkoutBranch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "note": "the mtimes are the artefact's own word. When they predate "
+                "the checkout revision, the frames below are of an OLDER "
+                "front-end than the tree names and a parity comparison must "
+                "say so.",
+    },
+    "pixelPaths": {
+        "macos-window-screencapturekit": {
+            "how": "the product launched through its own `ct` (which execv()s "
+                   "into Electron) on the Quartz window server; "
+                   "SCScreenshotManager over "
+                   "SCContentFilter(desktopIndependentWindow:)",
+            "needsCompositor": True,
+            "needsTccGrant": True,
+            "satisfiesG1": True,
+            "file": "<view>.png (device pixels) / <view>.points.png (points)",
+            "why": "the same binary, the same attestation and the same probe "
+                   "the GPUI arm uses, so a difference between the two "
+                   "reference sets is a difference between the front-ends.",
+        },
+        "cdp-page-screenshot": {
+            "how": "page.screenshot() over CDP — Chromium's own raster of the "
+                   "web contents",
+            "needsCompositor": False,
+            "needsTccGrant": False,
+            "satisfiesG1": False,
+            "file": "<view>.page.png",
+            "why": "kept beside the window frame, from the same settled "
+                   "state, so the routing decision stays falsifiable instead "
+                   "of being an argument in a header. It is NOT the reference "
+                   "frame: a page raster is not a window.",
+        },
+    },
+    "standing": {
+        "kind": "host-conditional evidence",
+        "requiredGate": False,
+        "why": "needs a live macOS GUI session and a kTCCServiceScreenCapture "
+               "grant held by com.metacraft-labs.guiassert.capture. Neither "
+               "exists on a fresh host or in CI. PLAT-23's G5 cuts both ways: "
+               "a gate that cannot RUN is not a gate.",
+    },
+    "displayConstraint": {
+        "note": "A WINDOW CAN BE WIDER THAN ITS DISPLAY, and on this lane one "
+                "is. scenarios.json's `wide` viewport is 1920x1080 POINTS and "
+                "this display is 1728x1117 points; the ELECTRON window is "
+                "made at 1920x1080 points at origin (0,33) — 192 points of it "
+                "hang off the right edge — and the capture is of the window's "
+                "OWN surface through SCContentFilter(desktopIndependentWindow:), "
+                "so the off-screen strip is captured and is real rendered "
+                "product, not padding. The GPUI window asked for the same "
+                "thing is clamped to 1728x1084. That asymmetry is a property "
+                "of the two FRONT-ENDS and not of this host: gpui builds a "
+                "titled NSWindow and does not override "
+                "`constrainFrameRect:toScreen:`, so AppKit's default "
+                "visible-frame constraint applies to it and not to Electron, "
+                "which overrides that hook. Read `viewportsHonoured` and "
+                "`viewportsClamped` below rather than this sentence: they are "
+                "computed from the records. Whatever is clamped is recorded "
+                "as viewportHonoured:false with the deviation in CONTENT "
+                "points (frame height minus titleBarPoints) and is never "
+                "relabelled.",
+        "viewportsHonoured": sorted({
+            r["requestedPoints"]["width"] for r in records
+            if r.get("viewportHonoured")}),
+        "viewportsClamped": sorted({
+            r["requestedPoints"]["width"] for r in records
+            if r.get("outcome") == "captured" and not r.get("viewportHonoured")}),
+    },
+    "records": records,
+}
+path = os.path.join(out, "manifest.json")
+json.dump(manifest, open(path, "w"), indent=2, sort_keys=True)
+print(f"manifest: {path}")
+PY
+
+# ---------------------------------------------------------------------------
+# The population, not the property
+# ---------------------------------------------------------------------------
+echo
+echo "=== ${captured} captured, ${refused} refused ==="
+total=$((captured + refused))
+[ "${total}" -eq "${expected}" ] ||
+	fail "${total} scenarios ran where ${expected} were declared"
+
+python3 - "${OUT}/manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+s = m["subject"]
+print(f"  subject: {s['buildDir']}")
+print(f"           bin/ct {s['ctMtimeUtc']}  ui.js {s['uiJsMtimeUtc']}")
+print(f"           checkout {s['checkoutRevision'][:9]} ({s['checkoutBranch']})")
+for r in m["records"]:
+    if r.get("outcome") != "captured":
+        continue
+    req, got = r["requestedPoints"], r["windowFramePoints"]
+    mark = "honoured" if r.get("viewportHonoured") else "CLAMPED BY THE DISPLAY"
+    rt = r.get("route") or {}
+    traj = ",".join(rt.get("trajectory", [])[-2:])
+    print(f"  {r['view']:<14} asked {req['width']}x{req['height']} pt, "
+          f"window {got['width']}x{got['height']} pt, "
+          f"captured {r['capturedPixels']['width']}x"
+          f"{r['capturedPixels']['height']} px @{r['pointPixelScale']}x  "
+          f"-> {mark}   [{traj}]")
+PY
+
+[ "${refused}" -eq 0 ] ||
+	fail "${refused} of ${total} scenarios did not produce a graded frame"
+[ "${drive_rc}" -eq 0 ] ||
+	fail "the Playwright driver exited ${drive_rc}; see ${OUT}/playwright.log"
+echo
+echo "OK: ${captured} of ${expected} attested Electron window frames in ${OUT}"
+echo "    Every record carries satisfiesG1: true and"
+echo "    standing: HOST-CONDITIONAL EVIDENCE. This lane is not a gate."
