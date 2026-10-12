@@ -157,4 +157,11 @@ LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # x86_64-linux on 2026-10-02: rustc 1.96.0 (ac68faa20) and cargo 1.96.0 are
 # unchanged, and nargo reports 1.0.0-beta.26. The Nim lines above were not
 # re-measured by this move.
-LOCK_NOIR=c008e89028a360a7854ac9e0e017b647bf8fd0a8
+#
+# Moved to 1786e598 (`codetracer`, built against the trace format with the
+# exact I/O event kinds, `codetracer-trace-format` c8e57b1), the revision
+# `ci/deploy/noir-wasm.pin` already names. At c008e890 `nargo trace` wrote a
+# version-6 `meta.dat`, which the db-backend reader at the current
+# trace-format pin refuses (it reads version 7 only), so every Noir recording
+# made with the dev shell's `nargo` failed to open.
+LOCK_NOIR=1786e598ec42062cf5458690bd37465767a004d6

@@ -298,7 +298,7 @@
             #
             # The trace-format hash is that of
             # https://github.com/metacraft-labs/codetracer-trace-format at the
-            # revision noir's Cargo.lock names (1eae589), a public URL. It was
+            # revision noir's Cargo.lock names (c8e57b1), a public URL. It was
             # computed as `nix hash path` of `git archive <rev>`, a method
             # checked against the previous revision's recorded hash. The URL is
             # public. A sandboxed `fetchgit` from github.com can still fail with
@@ -308,8 +308,13 @@
             # add the source with `nix-store --add-fixed --recursive sha256`
             # and the hash above.
             outputHashes = {
-              "codetracer_trace_types-0.19.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
-              "codetracer_trace_writer_nim-0.1.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
+              "codetracer_ctfs-0.1.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_format_capnp-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_format_cbor_zstd-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_reader-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_types-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_writer-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_writer_nim-0.1.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
               "clap-markdown-0.1.3" = "sha256-2vG7x+7T7FrymDvbsR35l4pVzgixxq9paXYNeKenrkQ=";
               "sancov-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
               "sancov-sys-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
