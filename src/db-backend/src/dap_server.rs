@@ -656,10 +656,7 @@ fn setup(
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    warn!(
-                        "native replay-worker setup: failed to load terminal events from {}: {e}",
-                        path.display()
-                    );
+                    return Err(format!("native event log of {}: {e}", path.display()).into());
                 }
             }
         }

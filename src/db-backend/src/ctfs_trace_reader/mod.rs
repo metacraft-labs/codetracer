@@ -81,6 +81,35 @@ use codetracer_trace_writer_nim::NimTraceReaderHandle;
 
 use ctfs_container::CtfsReader;
 
+/// A native recording's event log (`MCR-Event-Log-Stream.md` §2): CTFS member
+/// names hold at most 12 characters.
+const NATIVE_EVENT_LOG_DAT: &str = "eventlog.dat";
+const NATIVE_EVENT_LOG_IDX: &str = "eventlog.idx";
+/// The names recorders used before the event log was renamed to fit CTFS's
+/// 12-character limit; a recording that carries them is refused by name.
+const NATIVE_EVENT_LOG_RETIRED_NAMES: [&str; 2] = ["event_log.dat", "event_log.idx"];
+/// The last kind of the event log stream's own table
+/// (`MCR-Event-Log-Stream.md` §2.3: 0 `Write` .. 14 `Getrandom`).
+const NATIVE_EVENT_LOG_MAX_KIND: u8 = 14;
+
+/// The directory key under which a lossy CTFS writer stored a name base40
+/// cannot hold: its first 12 characters, each one outside the alphabet as
+/// the padding value (NUL), trailing padding dropped.
+fn ctfs_lossy_stored_key(name: &str) -> String {
+    let mut key: Vec<u8> = name
+        .bytes()
+        .take(12)
+        .map(|b| match b {
+            b'0'..=b'9' | b'a'..=b'z' | b'.' | b'/' | b'-' => b,
+            _ => 0,
+        })
+        .collect();
+    while key.last() == Some(&0) {
+        key.pop();
+    }
+    String::from_utf8_lossy(&key).into_owned()
+}
+
 /// A [`TraceReader`] backed by a `.ct` CTFS container file.
 ///
 /// A container's events live in its split streams. A container carrying
@@ -2747,9 +2776,7 @@ impl CTFSTraceReader {
                     db.events.extend(native_events);
                 }
                 Ok(_) => {}
-                Err(e) => {
-                    log::warn!("native event_log.dat fallback failed: {e}");
-                }
+                Err(e) => return Err(format!("native event log: {e}").into()),
             }
         }
 
@@ -2880,9 +2907,7 @@ impl CTFSTraceReader {
                 db.events.extend(native_events);
             }
             Ok(_) => {}
-            Err(e) => {
-                log::warn!("native event log unreadable: {e}");
-            }
+            Err(e) => return Err(format!("native event log: {e}").into()),
         }
 
         // The capability bits are read out of the Rust meta_dat parser the
@@ -2934,29 +2959,50 @@ impl CTFSTraceReader {
     /// a system call's bytes never reach the terminal (they used to be glued
     /// in front of the program's first line).
     fn load_native_terminal_events(ctfs: &mut CtfsReader) -> Result<Vec<DbRecordEvent>, Box<dyn Error>> {
-        let dat = match Self::read_native_event_log_file(ctfs, "eventlog.dat", "event_log.dat") {
-            Ok(bytes) => bytes,
-            Err(_) => return Ok(Vec::new()),
+        for retired in NATIVE_EVENT_LOG_RETIRED_NAMES {
+            if ctfs.has_file(&ctfs_lossy_stored_key(retired)) {
+                return Err(format!(
+                    "the recording stores its native event log as `{retired}`, a name CTFS cannot \
+                     address (more than 12 characters, and `_`); the event log is read as \
+                     `{NATIVE_EVENT_LOG_DAT}` / `{NATIVE_EVENT_LOG_IDX}` only: re-record the trace"
+                )
+                .into());
+            }
+        }
+        let (dat, idx) = match (ctfs.has_file(NATIVE_EVENT_LOG_DAT), ctfs.has_file(NATIVE_EVENT_LOG_IDX)) {
+            (false, false) => return Ok(Vec::new()),
+            (true, true) => (
+                ctfs.read_file(NATIVE_EVENT_LOG_DAT)?,
+                ctfs.read_file(NATIVE_EVENT_LOG_IDX)?,
+            ),
+            (true, false) => {
+                return Err(
+                    format!("the recording carries `{NATIVE_EVENT_LOG_DAT}` without `{NATIVE_EVENT_LOG_IDX}`").into(),
+                );
+            }
+            (false, true) => {
+                return Err(
+                    format!("the recording carries `{NATIVE_EVENT_LOG_IDX}` without `{NATIVE_EVENT_LOG_DAT}`").into(),
+                );
+            }
         };
-        let idx = Self::read_native_event_log_file(ctfs, "eventlog.idx", "event_log.idx")
-            .map_err(|e| format!("native event log data is present but index is missing: {e}"))?;
 
         if idx.len() < 18 {
-            return Err(format!("event_log.idx truncated: {} bytes", idx.len()).into());
+            return Err(format!("eventlog.idx truncated: {} bytes", idx.len()).into());
         }
         if &idx[0..4] != b"EIDX" {
-            return Err("event_log.idx has invalid magic".into());
+            return Err("eventlog.idx has invalid magic".into());
         }
 
         let entry_count = Self::read_u32_le(&idx, 6)? as usize;
         let chunk_count = Self::read_u32_le(&idx, 14)? as usize;
         let offsets_start = 18usize;
         let offsets_end = offsets_start
-            .checked_add(chunk_count.checked_mul(8).ok_or("event_log.idx chunk count overflow")?)
-            .ok_or("event_log.idx offsets overflow")?;
+            .checked_add(chunk_count.checked_mul(8).ok_or("eventlog.idx chunk count overflow")?)
+            .ok_or("eventlog.idx offsets overflow")?;
         if idx.len() < offsets_end {
             return Err(format!(
-                "event_log.idx truncated: expected at least {offsets_end} bytes, got {}",
+                "eventlog.idx truncated: expected at least {offsets_end} bytes, got {}",
                 idx.len()
             )
             .into());
@@ -2969,22 +3015,22 @@ impl CTFSTraceReader {
             let chunk_raw_size = Self::read_u32_le(&dat, chunk_offset)? as usize;
             let body_start = chunk_offset
                 .checked_add(4)
-                .ok_or("event_log.dat chunk offset overflow")?;
+                .ok_or("eventlog.dat chunk offset overflow")?;
             let body_end = body_start
                 .checked_add(chunk_raw_size)
-                .ok_or("event_log.dat chunk size overflow")?;
+                .ok_or("eventlog.dat chunk size overflow")?;
             if body_end > dat.len() {
-                return Err(format!("event_log.dat chunk {chunk} extends past end").into());
+                return Err(format!("eventlog.dat chunk {chunk} extends past end").into());
             }
             if chunk_raw_size < 4 {
-                return Err(format!("event_log.dat chunk {chunk} too small").into());
+                return Err(format!("eventlog.dat chunk {chunk} too small").into());
             }
 
             let chunk_entries = Self::read_u32_le(&dat, body_start)? as usize;
             let mut pos = body_start + 4;
             for entry in 0..chunk_entries {
                 if pos + 35 > body_end {
-                    return Err(format!("event_log.dat chunk {chunk} entry {entry} truncated").into());
+                    return Err(format!("eventlog.dat chunk {chunk} entry {entry} truncated").into());
                 }
                 let _geid = Self::read_u64_le(&dat, pos)?;
                 pos += 8;
@@ -2993,6 +3039,13 @@ impl CTFSTraceReader {
                 let _tid = Self::read_u32_le(&dat, pos)?;
                 pos += 4;
                 let native_kind = dat[pos];
+                if native_kind > NATIVE_EVENT_LOG_MAX_KIND {
+                    return Err(format!(
+                        "eventlog.dat chunk {chunk} entry {entry} carries unassigned event log kind \
+                         {native_kind} (assigned: 0-{NATIVE_EVENT_LOG_MAX_KIND})"
+                    )
+                    .into());
+                }
                 pos += 1;
                 let fd = Self::read_u32_le(&dat, pos)? as i32;
                 pos += 4;
@@ -3002,7 +3055,7 @@ impl CTFSTraceReader {
                 let metadata_len = Self::read_u16_le(&dat, pos)? as usize;
                 pos += 2;
                 if pos + metadata_len + 4 > body_end {
-                    return Err(format!("event_log.dat chunk {chunk} entry {entry} metadata truncated").into());
+                    return Err(format!("eventlog.dat chunk {chunk} entry {entry} metadata truncated").into());
                 }
                 let metadata = String::from_utf8_lossy(&dat[pos..pos + metadata_len]).to_string();
                 pos += metadata_len;
@@ -3010,7 +3063,7 @@ impl CTFSTraceReader {
                 let content_len = Self::read_u32_le(&dat, pos)? as usize;
                 pos += 4;
                 if pos + content_len > body_end {
-                    return Err(format!("event_log.dat chunk {chunk} entry {entry} content truncated").into());
+                    return Err(format!("eventlog.dat chunk {chunk} entry {entry} content truncated").into());
                 }
                 let content = String::from_utf8_lossy(&dat[pos..pos + content_len]).to_string();
                 pos += content_len;
@@ -3035,7 +3088,7 @@ impl CTFSTraceReader {
         }
 
         if decoded_entries != entry_count {
-            return Err(format!("event_log.idx says {entry_count} entries, decoded {decoded_entries}").into());
+            return Err(format!("eventlog.idx says {entry_count} entries, decoded {decoded_entries}").into());
         }
 
         Ok(events)
@@ -3044,19 +3097,6 @@ impl CTFSTraceReader {
     pub(crate) fn load_native_terminal_events_from_path(path: &Path) -> Result<Vec<DbRecordEvent>, Box<dyn Error>> {
         let mut ctfs = CtfsReader::open(path)?;
         Self::load_native_terminal_events(&mut ctfs)
-    }
-
-    fn read_native_event_log_file(
-        ctfs: &mut CtfsReader,
-        primary: &str,
-        legacy: &str,
-    ) -> Result<Vec<u8>, Box<dyn Error>> {
-        match ctfs.read_file(primary) {
-            Ok(bytes) => Ok(bytes),
-            Err(primary_err) => ctfs.read_file(legacy).map_err(|legacy_err| {
-                format!("failed to read {primary} ({primary_err}) or {legacy} ({legacy_err})").into()
-            }),
-        }
     }
 
     fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, Box<dyn Error>> {
@@ -4741,6 +4781,59 @@ mod tests {
 
         assert_eq!(writes.len(), 1);
         assert_eq!(writes[0].content, "TRACE:x=5\n");
+    }
+
+    /// A recording made before the recorder renamed its event log to fit
+    /// CTFS's 12-character names carries it under the lossy words of
+    /// `event_log.dat` / `event_log.idx`.  It is refused naming the member,
+    /// both by the terminal loader and by opening the trace.
+    #[test]
+    fn a_native_event_log_under_its_retired_names_is_refused_by_name() {
+        let dat = native_eventlog_dat(b"TRACE:x=5\n");
+        let idx = native_eventlog_idx(1);
+        let meta = meta_dat::serialize_meta_dat(&test_meta_dat_v3("/tmp/program", vec![], "/tmp"));
+        let dat_key = ctfs_lossy_stored_key("event_log.dat");
+        let idx_key = ctfs_lossy_stored_key("event_log.idx");
+        for members in [
+            vec![(dat_key.as_str(), &dat[..]), (idx_key.as_str(), &idx[..])],
+            vec![(idx_key.as_str(), &idx[..])],
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let ct_path = dir.path().join("retired-event-log.ct");
+            ctfs_container::write_minimal_ctfs(&ct_path, &members).unwrap();
+            let mut ctfs = CtfsReader::open(&ct_path).unwrap();
+            let err = CTFSTraceReader::load_native_terminal_events(&mut ctfs)
+                .expect_err("a retired event-log member refuses the recording")
+                .to_string();
+            assert!(err.contains("`event_log."), "the refusal names the member: {err}");
+
+            let mut with_meta = vec![("meta.dat", &meta[..])];
+            with_meta.extend(members);
+            ctfs_container::write_minimal_ctfs(&ct_path, &with_meta).unwrap();
+            let err = match CTFSTraceReader::open(&ct_path) {
+                Ok(_) => panic!("opening a recording with a retired event-log member must fail"),
+                Err(e) => e.to_string(),
+            };
+            assert!(err.contains("`event_log."), "the refusal names the member: {err}");
+        }
+    }
+
+    /// A native event log entry whose kind byte is outside the stream's
+    /// table (`MCR-Event-Log-Stream.md` §2.3, 0-14) is refused by value.
+    #[test]
+    fn a_native_event_log_kind_outside_the_table_is_refused_by_value() {
+        for kind in [15u8, 24, 255] {
+            let dir = tempfile::tempdir().unwrap();
+            let ct_path = dir.path().join("unassigned-kind.ct");
+            let dat = native_eventlog_chunk(&[native_eventlog_entry(kind, 1, "stdout", b"x\n")]);
+            let idx = native_eventlog_idx(1);
+            ctfs_container::write_minimal_ctfs(&ct_path, &[("eventlog.dat", &dat), ("eventlog.idx", &idx)]).unwrap();
+            let mut ctfs = CtfsReader::open(&ct_path).unwrap();
+            let err = CTFSTraceReader::load_native_terminal_events(&mut ctfs)
+                .expect_err("an unassigned kind refuses the event log")
+                .to_string();
+            assert!(err.contains(&format!("unassigned event log kind {kind}")), "{err}");
+        }
     }
 
     fn native_eventlog_dat(content: &[u8]) -> Vec<u8> {
