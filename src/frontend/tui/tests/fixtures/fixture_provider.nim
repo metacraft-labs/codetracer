@@ -389,6 +389,164 @@ const FixtureStampFile = ".ctui-fixture-complete"
   ## directory a killed recorder left behind", and adopting the second as a
   ## fixture is how a truncated trace becomes a mysterious replay failure three
   ## milestones later.
+  ##
+  ## Its CONTENT answers a second question the key cannot — see
+  ## `recorderIdentity` and `stampRecorder` below.
+
+const StampRecorderPrefix = "recorder-identity="
+  ## The line in `FixtureStampFile` that records WHICH RECORDER produced this
+  ## directory. See `recorderIdentity`.
+
+# ---------------------------------------------------------------------------
+# Recorder identity — what the cache key cannot carry
+# ---------------------------------------------------------------------------
+#
+# `fixtureKey` digests the fixture's schema, name and PROGRAM SOURCES. That is
+# the right key, and it is not a sufficient cache validity condition, because
+# a recorded trace is a function of two things and the key names only one:
+#
+#     trace = recorder(program)
+#
+# Hold the program fixed, change the recorder, and the key does not move — so
+# a directory recorded by a recorder that no longer exists is adopted as
+# though the current one had produced it. `isUsableTraceDir` cannot catch it
+# either: it asks whether a container is THERE, never which version it is.
+#
+# MEASURED, 2026-10-12, aarch64-darwin, and the reason this exists. This
+# checkout's `calc-2f0db4f45192` had been recorded by a recorder resolved out
+# of a Nix store env registered 2026-09-29, two days before the CTFS v5
+# container bump landed in `codetracer-trace-format-nim` `86ca226`. Its
+# container byte was 4. The current `replay-server` — correctly, and by a
+# tested refusal — answers
+#
+#     CTFS container version 4 is not readable: this reader reads versions 5 and 6
+#
+# Nothing in the resolution path could see that. The key matched (the program
+# had not changed), the stamp was present, the shape was usable, so the stale
+# directory was re-adopted on every run and the failure surfaced as an engine
+# defect several layers away from its cause. It cost two days.
+#
+# WHY THE IDENTITY IS IN THE STAMP AND NOT IN THE KEY. Folding it into the key
+# is the obvious move and it is the wrong one, for two independent reasons:
+#
+#   1. It would break the documented property that a WARM CACHE IS USABLE WITH
+#      NO RECORDER INSTALLED (see `findCtBinary`). The key is computed before
+#      the recorder is probed; if the key needed the recorder, a machine with
+#      a warm cache and no recorder could no longer even look the fixture up.
+#   2. The cache directory name is load-bearing OUTSIDE this module. Eight
+#      GPUI/TUI suites name `test-logs/tui-fixtures/calc-2f0db4f45192` as a
+#      literal constant. A key change renames the directory and reds all of
+#      them for a reason unrelated to what they test.
+#
+# In the stamp, the identity is a VALIDITY CONDITION rather than an address:
+# the lookup still finds the directory, and then asks whether the recorder
+# that produced it is the one running now. Unknown on either side means "no
+# opinion" and the cached directory is kept — which is exactly the warm-cache-
+# without-a-recorder case, preserved rather than argued away.
+
+proc nargoIdentity(): string =
+  ## `nargo --version`, verbatim-ish. The Noir recorder is an external
+  ## compiler whose output format moves with its version, which is precisely
+  ## what the version string is for.
+  let fromEnv = getEnv("NARGO", "")
+  let exe = if fromEnv.len > 0 and fileExists(fromEnv): fromEnv else: findExe("nargo")
+  if exe.len == 0:
+    return ""
+  let (output, code) = execCmdEx(quoteShell(exe) & " --version")
+  if code != 0:
+    return ""
+  output.strip().replace("\n", " ")
+
+const PythonRecorderIdentityProgram = """
+import hashlib, os, sys
+try:
+    import codetracer_python_recorder as m
+except Exception:
+    sys.exit(1)
+# The identity is the CONTENT of the installed package, not its import path.
+# A path alone is wrong in both directions: two different Nix store paths can
+# hold byte-identical recorders (a rebuild with no source change), and one
+# stable path — a `pip install -e` checkout, or a venv's site-packages — can
+# hold a recorder that changed under it. Content answers both.
+root = os.path.dirname(os.path.realpath(m.__file__))
+h = hashlib.sha256()
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames.sort()
+    for name in sorted(filenames):
+        if name.endswith(('.pyc', '.pyo')):
+            continue          # byte-compiled caches are not the recorder
+        p = os.path.join(dirpath, name)
+        h.update(os.path.relpath(p, root).encode('utf-8'))
+        h.update(b'\0')
+        try:
+            with open(p, 'rb') as fh:
+                while True:
+                    chunk = fh.read(1 << 20)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+        except OSError:
+            sys.exit(1)       # an unreadable member means NO identity, not a
+                              # partial one that would compare equal by luck
+print('py-' + h.hexdigest()[:24])
+"""
+  ## Run by `pythonRecorderIdentity` through the interpreter `ct record` will
+  ## actually use. Computed in Python rather than in Nim because the question
+  ## is "what will THAT interpreter import", and only that interpreter can
+  ## answer it — resolving site-packages from the outside is how a probe comes
+  ## to describe a different installation from the one that runs.
+
+proc pythonRecorderIdentity(): string =
+  let python = pythonInterpreter()
+  if python.len == 0:
+    return ""
+  let tmp = getTempDir() / "ct-recorder-identity-" & $getCurrentProcessId() & ".py"
+  try:
+    writeFile(tmp, PythonRecorderIdentityProgram)
+    let (output, code) = execCmdEx(quoteShell(python) & " " & quoteShell(tmp))
+    if code != 0:
+      return ""
+    result = output.strip()
+  except CatchableError:
+    result = ""
+  finally:
+    removeFile(tmp)
+
+proc recorderIdentity*(probe: FixtureProbe): string =
+  ## A stable content identity for the recorder that would produce this
+  ## fixture, or "" when it cannot be determined.
+  ##
+  ## "" IS A FIRST-CLASS ANSWER AND MUST NOT BE FAKED. It means "no opinion",
+  ## and every caller treats it as such. Returning a placeholder instead — the
+  ## interpreter path, a timestamp, the string "unknown" — would turn "we do
+  ## not know" into a value that compares unequal to the stamp and re-records
+  ## a perfectly good fixture on every run of a machine where the probe simply
+  ## does not work.
+  case probe.kind
+  of pkNargo: nargoIdentity()
+  of pkPythonRecorder: pythonRecorderIdentity()
+
+proc stampContent(spec: FixtureSpec; identity: string): string =
+  ## What `recordFixture` writes into `FixtureStampFile`.
+  ##
+  ## The first line is still the bare fixture name, unchanged, because that is
+  ## what every existing reader of this file expects to find there.
+  result = spec.name & "\n"
+  if identity.len > 0:
+    result.add(StampRecorderPrefix & identity & "\n")
+
+proc stampRecorder(path: string): string =
+  ## The recorder identity recorded in a stamp file, or "" if it carries none
+  ## — which is what every stamp written before 2026-10-12 looks like.
+  if not fileExists(path):
+    return ""
+  try:
+    for line in readFile(path).splitLines():
+      if line.startsWith(StampRecorderPrefix):
+        return line[StampRecorderPrefix.len .. ^1].strip()
+  except CatchableError:
+    discard
+  ""
 
 proc findCtFile(dir: string): string =
   for kind, path in walkDir(dir):
@@ -479,7 +637,8 @@ proc recordFixture(root, ctBin: string; spec: FixtureSpec;
       "rr/ directory, or a .ct container)\n  command: " & command & "\n" &
       output)
 
-  writeFile(recorded / FixtureStampFile, spec.name & "\n")
+  writeFile(recorded / FixtureStampFile,
+            stampContent(spec, recorderIdentity(spec.probe)))
   # One rename, so a reader (or a concurrent lane) never sees a half-written
   # cache entry under the name it looks the fixture up by.
   if recorded != staging:
@@ -528,10 +687,43 @@ proc resolveFixture*(spec: FixtureSpec): FixtureResolution =
 
   # 2. The cache. The stamp is checked as well as the trace shape, so a
   #    directory left by an interrupted run is re-recorded rather than adopted.
+  #
+  #    AND the stamp's recorder identity is checked against the recorder that
+  #    is installed NOW. `fixtureKey` cannot carry that (see the long note at
+  #    `recorderIdentity`), so without this check a directory produced by a
+  #    recorder that has since been replaced is re-adopted silently and
+  #    forever — which on 2026-10-12 kept a CTFS v4 container in circulation
+  #    against a `replay-server` that reads only 5 and 6.
+  #
+  #    THE ASYMMETRY BETWEEN THE TWO "UNKNOWN"S IS DELIBERATE, and it is the
+  #    part worth reading twice, because the obvious symmetric rule ("re-record
+  #    only when both are known and they differ") is inert against the very
+  #    case that motivated this code:
+  #
+  #      * AN UNKNOWN **CURRENT** IDENTITY MEANS KEEP. There is no recorder
+  #        here to ask, so there is nothing to compare against and no way to
+  #        re-record either. This is the warm-cache-without-a-recorder case
+  #        `findCtBinary` documents, and it is preserved exactly.
+  #      * AN UNKNOWN **STAMPED** IDENTITY MEANS RE-RECORD (when a recorder is
+  #        present). A stamp with no identity line was written by a provider
+  #        that predates this check, so nothing vouches for which recorder
+  #        produced it — and "recorded by an unknown recorder, some time ago"
+  #        is the precise description of the v4 directory above. Treating it
+  #        as "no opinion" would have let that directory survive this fix.
+  #
+  #    The cost of the asymmetry is one re-recording per pre-existing fixture
+  #    per checkout, once. That is the migration, not a regression.
   if fileExists(cached / FixtureStampFile) and isUsableTraceDir(cached):
-    result.outcome = foRecorded
-    result.tracePath = cached
-    return
+    let stamped = stampRecorder(cached / FixtureStampFile)
+    let current = recorderIdentity(spec.probe)
+    if current.len == 0 or stamped == current:
+      result.outcome = foRecorded
+      result.tracePath = cached
+      return
+    # Stale by recorder. Remove it rather than recording alongside it: the
+    # path is the cache key's whole address, so leaving it would make the
+    # re-recording below `moveDir` onto an existing directory.
+    removeDir(cached)
 
   # 3. Record. `ct` is only required HERE — a warm cache needs no recorder at
   #    all, and failing a run for a missing recorder it never had to use would
