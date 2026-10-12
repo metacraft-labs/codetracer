@@ -568,8 +568,11 @@ impl CtfsBlockOverlay {
     ///   root region carries the `FileEntry` words that *publish* the data
     ///   blocks to a reader, so publishing them only after the data is durable
     ///   means a crash mid-flush can never expose a size that points at
-    ///   not-yet-written bytes (CTFS-Binary-Format.md §6 "Writer Protocol":
-    ///   data + mapping before the `FileEntry.Size` store).
+    ///   not-yet-written bytes (`ctfs-container.md` §6, "Writer Protocol":
+    ///   data + mapping before the `FileEntry.Size` store). The root blocks go
+    ///   in two synced steps, `Name` and `MapBlock` words first and `Size`
+    ///   words last (§6, "Root Publication"), so an entry that straddles two
+    ///   root blocks is never left with a new `Size` and an old `MapBlock`.
     ///
     /// After a successful `Persist` flush the staged blocks are cleared, so the
     /// overlay reflects the backing file again (a subsequent read falls through
@@ -591,13 +594,34 @@ impl CtfsBlockOverlay {
                 sink.sync()?;
 
                 // Phase 2: the root blocks — the entry updates that make the
-                // data blocks visible to a reader — written and synced last.
-                let mut root_written = false;
+                // data blocks visible to a reader — in two synced steps, so
+                // every `Size` store lands after the `Name` and `MapBlock` it
+                // describes (§6, "Root Publication"). One sync over every
+                // root block would not order them: an entry can straddle two
+                // root blocks (`file_entry_offset`), and a crash can persist
+                // either one, pairing a new `Size` with the old `MapBlock`.
+                // Each word lies within one block, so a crash between or
+                // during the steps leaves every entry old, created empty,
+                // repointed with its old `Size`, or complete.
+                //
+                // Step 1: each staged root block with its `Size` words still
+                // holding the backing's values.
+                let mut sized = Vec::new();
                 for (&block_num, bytes) in self.blocks.range(..root_blocks) {
-                    sink.write_at(block_num * self.block_size as u64, bytes)?;
-                    root_written = true;
+                    let held = self.with_backing_sizes(block_num, bytes)?;
+                    sink.write_at(block_num * self.block_size as u64, &held)?;
+                    if held != *bytes {
+                        sized.push(block_num);
+                    }
                 }
-                if root_written {
+                if self.blocks.range(..root_blocks).next().is_some() {
+                    sink.sync()?;
+                }
+                // Step 2: the blocks whose `Size` words changed, in full.
+                for &block_num in &sized {
+                    sink.write_at(block_num * self.block_size as u64, &self.blocks[&block_num])?;
+                }
+                if !sized.is_empty() {
                     sink.sync()?;
                 }
 
@@ -607,6 +631,28 @@ impl CtfsBlockOverlay {
                 Ok(())
             }
         }
+    }
+
+    /// Root block `block_num` as staged in `staged`, but with every entry's
+    /// `Size` word set back to the backing's value: the image [`flush`] writes
+    /// before it publishes any size.
+    ///
+    /// [`flush`]: CtfsBlockOverlay::flush
+    fn with_backing_sizes(&self, block_num: u64, staged: &[u8]) -> Result<Vec<u8>, CtfsError> {
+        let backing = self.backing.read_block(block_num, self.block_size)?;
+        let mut held = staged.to_vec();
+        let block_start = block_num as usize * self.block_size;
+        let block_end = block_start + self.block_size;
+        let first = block_start.saturating_sub(self.entry_start).div_ceil(FILE_ENTRY_SIZE);
+        for index in first..self.max_root_entries {
+            let at = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
+            if at >= block_end {
+                break;
+            }
+            let in_block = at - block_start;
+            held[in_block..in_block + 8].copy_from_slice(&backing[in_block..in_block + 8]);
+        }
+        Ok(held)
     }
 
     /// Whether the named file is present in the (shadow) root directory.
@@ -1306,6 +1352,102 @@ mod tests {
                     "the refusal does not name the root region and the container size: {err}"
                 );
             }
+        }
+    }
+
+    /// A [`BlockSink`] that records every write and sync without applying
+    /// them, so a test can rebuild the file any crash would leave.
+    #[derive(Default)]
+    struct CapturingSink {
+        events: Vec<Option<(u64, Vec<u8>)>>,
+    }
+
+    impl BlockSink for CapturingSink {
+        fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<(), CtfsError> {
+            self.events.push(Some((offset, bytes.to_vec())));
+            Ok(())
+        }
+        fn sync(&mut self) -> Result<(), CtfsError> {
+            self.events.push(None);
+            Ok(())
+        }
+    }
+
+    /// Every file a crash during `events` can leave over `base`: for each
+    /// sync, everything written before it is durable, and any subset of the
+    /// writes after it (up to the next sync) may have reached the medium.
+    fn crash_images(base: &[u8], events: &[Option<(u64, Vec<u8>)>]) -> Vec<Vec<u8>> {
+        let apply = |image: &mut Vec<u8>, (offset, bytes): &(u64, Vec<u8>)| {
+            let at = *offset as usize;
+            if image.len() < at + bytes.len() {
+                image.resize(at + bytes.len(), 0);
+            }
+            image[at..at + bytes.len()].copy_from_slice(bytes);
+        };
+        let epochs: Vec<Vec<&(u64, Vec<u8>)>> = events
+            .split(Option::is_none)
+            .map(|epoch| epoch.iter().flatten().collect())
+            .collect();
+        let mut images = Vec::new();
+        let mut durable = base.to_vec();
+        for epoch in &epochs {
+            for subset in 0..1u32 << epoch.len() {
+                let mut image = durable.clone();
+                for (i, write) in epoch.iter().enumerate() {
+                    if subset & (1 << i) != 0 {
+                        apply(&mut image, write);
+                    }
+                }
+                images.push(image);
+            }
+            for write in epoch {
+                apply(&mut durable, write);
+            }
+        }
+        images
+    }
+
+    /// A crash anywhere in a flush never pairs an entry's new `Size` with its
+    /// old `MapBlock` (§6, "Root Publication": `MapBlock` before `Size`).
+    ///
+    /// Version 5 slot 511 straddles root blocks 2 and 3: its `Size` word is
+    /// the last word of block 2, its `MapBlock` and `Name` open block 3.
+    /// Rewriting the empty member there changes both blocks. When the flush
+    /// wrote them and then synced once, a crash that persisted only block 2
+    /// left `Size = 9` with `MapBlock = 0`, a member the reader refuses.
+    #[test]
+    fn test_overlay_flush_publishes_size_after_map_block() {
+        let slot = 511;
+        let off = entry_offset(16, slot);
+        assert!(
+            off / BLOCK_SIZE == 2 && (off + 8) / BLOCK_SIZE == 3,
+            "slot {slot} does not straddle root blocks 2 and 3 at version 5"
+        );
+        let name = member_name(slot);
+        let (raw, _) = root_region_container(5, CHECKPOINTED_ROOT_ENTRIES, &[(slot, name.clone())]);
+
+        let mut overlay =
+            CtfsBlockOverlay::new(Box::new(InMemoryBlockSource::new(raw.clone())), OverlayMode::Persist).unwrap();
+        overlay.write_internal_file(&name, b"straddles").unwrap();
+        let mut sink = CapturingSink::default();
+        overlay.flush(&mut sink).unwrap();
+
+        let images = crash_images(&raw, &sink.events);
+        let (size, map_block, _) = raw_entry(images.last().unwrap(), 16, slot);
+        assert_eq!(size, 9);
+        assert_ne!(map_block, 0);
+        for image in &images {
+            let entry = raw_entry(image, 16, slot);
+            assert!(
+                [(0, 0), (0, map_block), (9, map_block)].contains(&(entry.0, entry.1)),
+                "a crash left slot {slot} at (Size, MapBlock) = ({}, {}); the flush wrote {:?}",
+                entry.0,
+                entry.1,
+                sink.events
+                    .iter()
+                    .map(|e| e.as_ref().map(|(o, _)| o / BLOCK_SIZE as u64))
+                    .collect::<Vec<_>>()
+            );
         }
     }
 
