@@ -4057,7 +4057,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "b0ea5fc7a0c12706c36f94201fa4245ba3dc1dd8",
+        "rev": "a76a77df0adfc29e2c73f55ca0150b74feff122a",
         "type": "github"
       },
       "original": {
@@ -4072,7 +4072,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-tui",
-        "rev": "6ad4903fa9654d3cdbe0b14a947eb9d25233fe70",
+        "rev": "c6e2e03e3844b837c07a0a639ded1d8e27ae1cd1",
         "type": "github"
       },
       "original": {

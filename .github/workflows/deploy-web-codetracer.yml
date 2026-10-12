@@ -419,8 +419,8 @@ jobs:
             # 2026-10-09: the 2026-08-31 pins predated APIs the renderer now
             # calls (`selection.nim` no longer compiled against them).
             isonim=45673bbabb207773d307ddc39041b46dc79ce751
-            isonim-tui=6ad4903fa9654d3cdbe0b14a947eb9d25233fe70
-            isonim-gpui=76b2a2cdd49d55d1af57dd5bce375841f844cec9
+            isonim-tui=c6e2e03e3844b837c07a0a639ded1d8e27ae1cd1
+            isonim-gpui=a76a77df0adfc29e2c73f55ca0150b74feff122a
             nim-everywhere=b4e2b6aad6858e0494fdfc200ddfe715e2367071
             nim-termctl=3f105d1e4cc52781c4c1c42482b279294332b688
             nim-pty=50cccb5aab9f11134a4fa87dbfa14fc57026f61c
