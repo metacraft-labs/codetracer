@@ -62,8 +62,8 @@ const FILE_ENTRY_NAME_OFFSET: usize = 16;
 /// - [`OverlayMode::InMemory`] — never write through; the overlay is discarded
 ///   at close. Serves read-only media and non-expanding sessions.
 /// - [`OverlayMode::Persist`] — [`CtfsBlockOverlay::flush`] writes the staged
-///   blocks (data blocks first, then the shadow Block 0 that publishes them)
-///   through to the backing file.
+///   blocks (data blocks first, then the shadowed root blocks whose entries
+///   publish them) through to the backing file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayMode {
     /// Stage all mutations/allocations in RAM only; discard at close. `flush()`
@@ -164,9 +164,9 @@ pub struct CtfsBlockOverlay {
     /// never writes through this; writes go through the optional sink on flush.
     backing: Box<dyn BlockSource>,
     /// Staged blocks: copy-on-written existing blocks and newly-allocated ones.
-    /// A `BTreeMap` keeps a deterministic ascending iteration order so a flush
-    /// writes data blocks in a stable, low-to-high order before the Block 0
-    /// update that publishes them.
+    /// A `BTreeMap` keeps a deterministic ascending iteration order and splits
+    /// cleanly at `root_blocks`, so a flush writes data blocks low to high
+    /// before the root-region update that publishes them.
     blocks: BTreeMap<u64, Vec<u8>>,
     /// Block size in bytes (1024 / 2048 / 4096), parsed from the header.
     block_size: usize,
@@ -375,8 +375,11 @@ impl CtfsBlockOverlay {
 
     /// The container byte offset of file-entry slot `index`, as the writer
     /// places it (the Nim `fileEntryOffset`). It lies past block 0 for any slot
-    /// block 0 cannot hold, and an entry may straddle two root blocks when the
-    /// header is 24 bytes.
+    /// block 0 cannot hold. An entry straddles two root blocks wherever the
+    /// 24-byte stride crosses a block boundary, at either header size: at
+    /// 4096-byte blocks, version 5 slots 340, 511, 852, … and version 6 slots
+    /// 169, 340, 681, …. Each of its three words still lies within one block,
+    /// because the header sizes and the stride are multiples of 8.
     fn file_entry_offset(&self, index: usize) -> usize {
         self.entry_start + index * FILE_ENTRY_SIZE
     }
@@ -464,7 +467,8 @@ impl CtfsBlockOverlay {
     /// `memwrites.tc` / `linehits.tc` namespace images into the `.ct`).
     ///
     /// Allocates fresh blocks (born in the overlay) and a directory `FileEntry`
-    /// in shadow Block 0 — all copy-on-write, so the backing file is untouched
+    /// in whichever root block(s) hold its slot — all copy-on-write, so the
+    /// backing file is untouched
     /// until a `Persist` [`flush`](CtfsBlockOverlay::flush). The member is laid
     /// out as `ctfs-container.md` §2 requires of a version 5 container: empty
     /// owns no block (`MapBlock = 0`), at most one block is that data block
@@ -481,7 +485,7 @@ impl CtfsBlockOverlay {
     ///
     /// If `name` already has a directory entry, it is **overwritten** (the entry's
     /// size + map block are repointed at the freshly-allocated blocks; the old
-    /// blocks are simply abandoned in the overlay — acceptable for the
+    /// blocks stay in the container, unreferenced — acceptable for the
     /// replay-time single-writer path, where the overlay is short-lived).
     pub fn write_internal_file(&mut self, name: &str, data: &[u8]) -> Result<(), CtfsError> {
         let entries_per_block = self.block_size / 8;
@@ -1451,9 +1455,9 @@ mod tests {
         }
     }
 
-    /// At version 6 the 24-byte header puts entries across block boundaries:
-    /// slot 169 has its size and map words at the end of block 0 and its name
-    /// at the start of block 1. Such an entry is found, updated in both
+    /// Entries straddle root blocks at either header size; at version 6 the
+    /// first is slot 169, with its size and map words at the end of block 0
+    /// and its name at the start of block 1. Such an entry is found, updated in both
     /// blocks, and read back by a plain reader.
     #[test]
     fn test_overlay_entry_straddling_two_root_blocks() {
