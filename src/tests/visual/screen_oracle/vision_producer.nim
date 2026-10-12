@@ -24,6 +24,7 @@
 import std/[algorithm, os, osproc, sequtils, strutils, tables]
 import gui_assert/image_math
 import gui_assert/ocr
+import ../../../common/png
 import ./screen_reading
 import ./domain_models
 import ./pane_grammar
@@ -119,6 +120,99 @@ proc writePgm*(img: GrayImage, path: string) =
   if img.pixels.len > 0:
     discard f.writeBuffer(unsafeAddr img.pixels[0], img.pixels.len)
 
+# ---------------------------------------------------------------------------
+# WHICH OCR ENGINE READS THE CROPS
+# ---------------------------------------------------------------------------
+#
+# The reader was written against tesseract and tesseract stays the DEFAULT, so
+# every existing caller — `plat39_record`, `plat40_record`, `plat41_record`,
+# `plat42_window_record`, `plat45_window_record`, `test_screen_oracle` — keeps
+# the engine its recorded answers were taken with. Changing that default would
+# silently re-grade four committed records against a different engine, which is
+# a recapture wearing the shape of a refactor.
+#
+# **AND TESSERACT IS NOT REACHABLE WHERE THE macOS LANE RUNS.** Measured
+# 2026-10-12 on aarch64-darwin, and scoped carefully because the first version
+# of this sentence was too broad:
+#
+#   * `which tesseract` on the ambient PATH: not found.
+#   * `codetracer`'s own `flake.nix` and `repro.nim`: no `tesseract` at all.
+#   * GuiAssert's `flake.nix` DOES carry it, and `nix develop -c tesseract
+#     --version` in that repo answers `tesseract 5.5.1`. That is a different
+#     shell from the one `ci/test/plat37-macos-window-capture.sh` runs in, and
+#     the lane cannot enter it: `nix develop` in GuiAssert does not give it
+#     codetracer's sources.
+#
+# So the macOS window lane selects `obAppleVision`, which is a
+# `VNRecognizeTextRequest` through GuiAssert's bundled Swift helper compiled on
+# demand by `swiftc`, and needs no package on any PATH.
+#
+# TWO THINGS DIFFER PER BACKEND AND BOTH ARE HANDLED HERE RATHER THAN BY THE
+# CALLER:
+#
+#   1. **The scratch file's format.** Tesseract reads P5 PGM through
+#      leptonica. Apple Vision loads through `CGImageSourceCreateWithURL`,
+#      which has no PGM reader at all — a PGM crop fails with
+#      `cannot load image` (helper exit 3), not with a bad reading. So the
+#      Vision path writes an 8-bit RGBA PNG through `common/png`, expanding
+#      each gray level into R=G=B and an opaque alpha. The PIXELS ARE THE
+#      SAME ONES; only the container changes.
+#   2. **`upscale`.** `runOcrEx` Lanczos-upscales, OCRs, and then divides the
+#      bounding boxes back down, so a caller never sees upscaled coordinates.
+#      Vision does its own preprocessing and `runAppleVision` documents that
+#      the tesseract knobs do not apply; it is handed the crop at 1x and
+#      answers in the crop's own pixel space. The two backends therefore agree
+#      about the COORDINATE SPACE of every `OcrWord` they return, which is what
+#      `region_locator` and `readGutterDigits` consume.
+#
+# `psm` is likewise inert for Vision: it groups at line granularity by itself.
+# That is not a loss for this reader — `ocrLineBands` already feeds it one line
+# at a time, which is what `psm 7` was asking tesseract for.
+
+var selectedOcrBackend = obTesseract
+  ## Module-private so the only ways to move it are the two procs below.
+
+proc setOracleOcrBackend*(b: OcrBackend) =
+  ## Select the engine every `ocrRegion` / `ocrOnGrounds` / `ocrLineBands`
+  ## call in this module will use from here on.
+  ##
+  ## A free function rather than an exported `var` so the choice is greppable:
+  ## a recorded reading is only comparable with another taken on the same
+  ## engine, and every record this module feeds names the backend it used.
+  selectedOcrBackend = b
+
+proc oracleOcrBackend*(): OcrBackend =
+  ## What `setOracleOcrBackend` last selected. Written into every record so a
+  ## reading can never be compared against one taken on a different engine
+  ## without that being visible.
+  selectedOcrBackend
+
+proc ocrScratchExt(): string =
+  ## The container the selected backend can actually read. See the note above:
+  ## Vision's ImageIO loader has no PGM reader.
+  if selectedOcrBackend == obTesseract: ".pgm" else: ".png"
+
+proc writeOcrScratch*(img: GrayImage, path: string) =
+  ## Write `img` where the selected backend can read it. `path` must already
+  ## carry `ocrScratchExt()`.
+  if path.endsWith(".pgm"):
+    writePgm(img, path)
+  else:
+    var rgba = newSeq[uint8](img.width * img.height * png.RgbaChannels)
+    for i in 0 ..< img.width * img.height:
+      let v = uint8(ord(img.pixels[i]))
+      rgba[i * 4 + 0] = v
+      rgba[i * 4 + 1] = v
+      rgba[i * 4 + 2] = v
+      rgba[i * 4 + 3] = 255'u8
+    let failed = png.writePng(path, img.width, img.height, rgba)
+    if failed.len > 0:
+      raise newException(IOError, failed)
+
+proc runScratchOcr(path: string, opts: OcrOptions): seq[OcrWord] =
+  ## OCR one scratch crop through the selected backend.
+  runOcrWithBackend(path, selectedOcrBackend, opts)
+
 const
   TitleRetryExtraPx* = 14
     ## How much taller the retried title strip is. The native window's title
@@ -142,10 +236,10 @@ proc ocrRegion*(img: GrayImage, r: Rect, scratch: string,
   let sub = cropGray(img, r)
   if sub.width <= 0 or sub.height <= 0: return @[]
   let path = scratch / ("region_" & $r.x & "_" & $r.y & "_" &
-                        $r.w & "x" & $r.h & ".pgm")
-  writePgm(sub, path)
+                        $r.w & "x" & $r.h & ocrScratchExt())
+  writeOcrScratch(sub, path)
   try:
-    result = runOcrEx(path, initOcrOptions(psm = psm, upscale = upscale))
+    result = runScratchOcr(path, initOcrOptions(psm = psm, upscale = upscale))
   except CatchableError:
     result = @[]
   finally:
@@ -171,11 +265,11 @@ proc ocrOnGrounds*(img: GrayImage, r: Rect, scratch: string,
       if abs(v - g) <= 6: ground = true
     masked.pixels[i] = (if ground: char(255) else: char(0))
   let path = scratch / ("grounds_" & $r.x & "_" & $r.y & "_" &
-                        $r.w & "x" & $r.h & ".pgm")
-  writePgm(masked, path)
+                        $r.w & "x" & $r.h & ocrScratchExt())
+  writeOcrScratch(masked, path)
   try:
-    result = runOcrEx(path, initOcrOptions(psm = psm, upscale = upscale,
-                                           invert = oiNever))
+    result = runScratchOcr(path, initOcrOptions(psm = psm, upscale = upscale,
+                                                invert = oiNever))
   except CatchableError:
     result = @[]
   finally:
