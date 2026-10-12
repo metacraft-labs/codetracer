@@ -315,12 +315,79 @@ mkShell {
     # precisely the failure this block exists to prevent — so it is rebuilt
     # rather than reused. That is what makes the fix self-healing on a tree
     # that already carries a stale 3.13 venv.
+    #
+    # THE MINOR VERSION IS NOT THE PIN, AND TREATING IT AS ONE COST TWO DAYS.
+    #
+    # Measured 2026-10-12 on aarch64-darwin. This checkout's venv had been
+    # built from
+    #
+    #   /nix/store/mdwccx73f2r9jdpvl8794zqq5lbbfqds-python3-3.12.13-env
+    #
+    # (registered 2026-09-29), while $CODETRACER_PYTHON_CMD had since moved to
+    #
+    #   /nix/store/jnf5kir20pw7ydyykfksiabacvi6v4aq-python3-3.12.13-env
+    #
+    # Both are 3.12, so the comparison below said "matches the pin" and the
+    # venv was reused — for weeks. That matters because the venv is built
+    # `--system-site-packages`: it carries only the PURE-Python recorder, and
+    # the ABI-locked native `codetracer_python_recorder` is resolved out of
+    # the site-packages of WHICHEVER INTERPRETER THE VENV WAS BUILT FROM. So
+    # the store path in `pyvenv.cfg` is not an implementation detail of the
+    # venv — it *selects the recorder*, and with it the CTFS container version
+    # that `ct record` writes. The stale env's recorder wrote container v4;
+    # the current `replay-server` reads 5 and 6 only, and refused every
+    # freshly recorded fixture with
+    #
+    #   CTFS container version 4 is not readable: this reader reads versions 5 and 6
+    #
+    # which reads as an engine defect and is not one. A minor-version
+    # comparison cannot see any of this: the two paths it must distinguish
+    # differ in the store hash and agree in every digit of the version.
+    #
+    # So the pin is the INTERPRETER, compared by path, and the version check
+    # is kept only because it produces the better message in the (still real)
+    # 3.13-vs-3.12 case. `pyvenv.cfg`'s `home` is used as the record of what
+    # the venv was built from rather than a stamp file of our own: it is
+    # written by `venv` itself, so it cannot drift from the thing it
+    # describes, and an existing venv already carries it — which makes this
+    # check self-healing on a tree that predates it instead of needing one
+    # throwaway rebuild to start working.
     _ct_venv_python_version() {
       [ -x "$RECORDER_VENV/bin/python" ] || return 1
       "$RECORDER_VENV/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null
     }
+    # The directory `venv` recorded as the interpreter it was created from,
+    # physically resolved so a symlinked store path compares equal to itself.
+    _ct_venv_python_home() {
+      [ -f "$RECORDER_VENV/pyvenv.cfg" ] || return 1
+      local home
+      home=$(sed -n 's/^[[:space:]]*home[[:space:]]*=[[:space:]]*//p' \
+               "$RECORDER_VENV/pyvenv.cfg" | head -1)
+      [ -n "$home" ] || return 1
+      ( cd "$home" 2>/dev/null && pwd -P )
+    }
+    # Where $CODETRACER_PYTHON_CMD lives, resolved the same way.
+    _ct_pinned_python_home() {
+      [ -n "''${CODETRACER_PYTHON_CMD:-}" ] || return 1
+      ( cd "$(dirname "$CODETRACER_PYTHON_CMD")" 2>/dev/null && pwd -P )
+    }
     _ct_venv_matches_pin() {
-      [ "$(_ct_venv_python_version)" = "''${CODETRACER_PYTHON_VERSION:-}" ]
+      [ "$(_ct_venv_python_version)" = "''${CODETRACER_PYTHON_VERSION:-}" ] || return 1
+      local want have
+      want=$(_ct_pinned_python_home) || return 1
+      have=$(_ct_venv_python_home) || return 1
+      [ "$want" = "$have" ]
+    }
+    # Why the venv does not match, in one line, for the rebuild notice. The
+    # version arm and the interpreter arm are different failures and a reader
+    # who is shown the wrong one goes looking in the wrong place.
+    _ct_venv_mismatch_reason() {
+      local v="''${CODETRACER_PYTHON_VERSION:-}"
+      if [ "$(_ct_venv_python_version)" != "$v" ]; then
+        echo "it is Python $(_ct_venv_python_version), the pin is $v"
+      else
+        echo "it is Python $v built from $(_ct_venv_python_home), the pin is $(_ct_pinned_python_home)"
+      fi
     }
 
     # Failure reporting. This is deliberately NOT `exit 1`.
@@ -376,7 +443,7 @@ mkShell {
       if ! _ct_venv_matches_pin \
         || ! "$RECORDER_VENV/bin/python" -c "import codetracer_pure_python_recorder" 2>/dev/null; then
         if [ -d "$RECORDER_VENV" ] && ! _ct_venv_matches_pin; then
-          echo "Rebuilding Python recorder venv: it is Python $(_ct_venv_python_version), the pin is $CODETRACER_PYTHON_VERSION."
+          echo "Rebuilding Python recorder venv: $(_ct_venv_mismatch_reason)."
           rm -rf "$RECORDER_VENV"
         fi
         echo "Setting up Python recorder venv (first time or module needs rebuild)..."
@@ -401,7 +468,7 @@ mkShell {
         if ! _ct_venv_matches_pin \
           || ! "$RECORDER_VENV/bin/python" -c "import codetracer_python_recorder" 2>/dev/null; then
           if [ -d "$RECORDER_VENV" ] && ! _ct_venv_matches_pin; then
-            echo "Rebuilding Python recorder venv: it is Python $(_ct_venv_python_version), the pin is $CODETRACER_PYTHON_VERSION."
+            echo "Rebuilding Python recorder venv: $(_ct_venv_mismatch_reason)."
             rm -rf "$RECORDER_VENV"
           fi
           echo "Setting up Python recorder venv (Rust-backed, first time or module needs rebuild)..."

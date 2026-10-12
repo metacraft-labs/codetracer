@@ -7,9 +7,34 @@ CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Bootstrap the dev-shell PATH when key build tools (tup, nim, node) are not
 # already available.  The .direnv/flake-profile-*.rc file is the nix-direnv
 # cached evaluation of the codetracer flake — sourcing it is instant (no
-# network, no nix evaluation) and sets PATH, NIX_*, etc. exactly as the dev
-# shell would.  This makes `just build-once` work from a plain terminal that
-# hasn't run `direnv allow` or `nix develop`.
+# network, no nix evaluation) and sets PATH, NIX_*, etc. as the dev shell did
+# WHEN THE CACHE WAS WRITTEN.  This makes `just build-once` work from a plain
+# terminal that hasn't run `direnv allow` or `nix develop`.
+#
+# IT IS A CACHE, NOT AN EQUIVALENT OF `nix develop`, AND THE DIFFERENCE IS NOT
+# COSMETIC.  nix-direnv does not revalidate this file on a flake input bump, so
+# it can name store paths arbitrarily older than the ones a live `nix develop`
+# would give you.  Sourcing it therefore makes a toolchain OLDER, silently, and
+# the thing it makes older is not always a compiler.
+#
+# Measured here, 2026-10-12, aarch64-darwin.  The rc in this checkout was
+# written 2026-08-27 and names
+#   CODETRACER_PYTHON_CMD=/nix/store/xx6ypzy…-python3-3.12.13-env  (registered
+#   2026-08-18), while a live `nix develop` resolves it to
+#   /nix/store/jnf5kir…-python3-3.12.13-env  (registered 2026-10-12).
+# The Python recorder is selected by that interpreter, and the 08-18 one writes
+# CTFS container v4, which the current replay-server refuses:
+#   "CTFS container version 4 is not readable: this reader reads versions 5 and 6"
+# A reviewer's advice to "re-enter the dev shell via the cached profile" to
+# refresh a stale recorder was followed and would have made it two months
+# staler.  All three store paths are the same Python 3.12.13, so no version
+# check can see this; only the store path can.
+#
+# So: for a BUILD this cache is fine and is why it exists.  To refresh anything
+# that is pinned by a store path — the Python recorder above being the case
+# that has already cost two days — run a real `nix develop`.  The dev shell's
+# own `_ct_venv_matches_pin` (nix/shells/main.nix) now compares interpreter
+# PATHS for exactly this reason.
 #
 # The profile carries the dev shell's whole shellHook, which prepares the git
 # checkout enclosing the CURRENT directory (`node_modules` link, hook config,
