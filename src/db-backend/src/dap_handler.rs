@@ -736,14 +736,14 @@ impl Handler {
                     //   upper if the event is in the range of the move
                     //   this internal one: for which kinds do we produce dap events
                     #[allow(clippy::collapsible_if)]
-                    if event.kind == EventLogKind::Write {
+                    if let Some(category) = terminal_output_category(event.kind) {
                         let step = *self
                             .reader
                             .step(event.step_id)
                             .expect("prepare_output_events: invalid step_id");
                         info!("generate output event");
                         let raw_output_event = self.dap_client.output_event(
-                            "stdout",
+                            category,
                             self.reader.path(step.path_id).unwrap_or(""),
                             step.line.0 as usize,
                             &event.content,
@@ -6196,7 +6196,7 @@ impl Handler {
     /// When the full event cache (`cached_events`) has already been loaded
     /// (e.g. by a prior `ct/event-load` call), the Write events are
     /// extracted from it.  Otherwise the database's event records are
-    /// scanned directly for `EventLogKind::Write` entries, which is much
+    /// scanned directly for terminal output (stdout and stderr), which is much
     /// faster than loading every event type into memory first.
     fn ensure_terminal_events_loaded(&mut self) {
         if self.cached_terminal_events.is_some() {
@@ -6207,7 +6207,7 @@ impl Handler {
             // Full cache already populated -- extract Write events from it.
             all_events
                 .iter()
-                .filter(|e| e.kind == EventLogKind::Write)
+                .filter(|e| terminal_output_category(e.kind).is_some())
                 .cloned()
                 .collect()
         } else {
@@ -6217,7 +6217,7 @@ impl Handler {
                 .events()
                 .iter()
                 .enumerate()
-                .filter(|(_, record)| record.kind == EventLogKind::Write)
+                .filter(|(_, record)| terminal_output_category(record.kind).is_some())
                 .map(|(i, record)| self.to_program_event(record, i))
                 .collect()
         };
@@ -6944,6 +6944,17 @@ pub(crate) fn placeholder_unknown_summary() -> task::OriginSummary {
 ///
 /// Returns `None` when nothing matching the CTFS magic is found; the
 /// caller treats that as "no srcviews, fall through".
+/// The DAP output category of an event that is terminal output: the
+/// program's stdout (`Write`) or stderr (`WriteStderr`). Every other kind is
+/// not terminal output.
+fn terminal_output_category(kind: EventLogKind) -> Option<&'static str> {
+    match kind {
+        EventLogKind::Write => Some("stdout"),
+        EventLogKind::WriteStderr => Some("stderr"),
+        _ => None,
+    }
+}
+
 fn find_ct_container(trace_dir: &Path) -> Option<std::path::PathBuf> {
     // Direct `.ct` file → use as-is.
     if trace_dir.is_file() {
@@ -7061,6 +7072,20 @@ mod tests {
     use codetracer_trace_writer::trace_writer::TraceWriter;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
+
+    /// Terminal output is the program's stdout and stderr, each under its
+    /// own DAP output category; no other kind is terminal output.
+    #[test]
+    fn terminal_output_is_stdout_and_stderr_only() {
+        for kind in EventLogKind::ALL {
+            let expected = match kind {
+                EventLogKind::Write => Some("stdout"),
+                EventLogKind::WriteStderr => Some("stderr"),
+                _ => None,
+            };
+            assert_eq!(terminal_output_category(kind), expected, "{}", kind.name());
+        }
+    }
 
     #[test]
     fn test_struct_handling() {

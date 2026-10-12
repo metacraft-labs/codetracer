@@ -22,8 +22,11 @@ use crate::lang::*;
 use crate::value::{Type, Value, ValueRecordWithType};
 use schemars::JsonSchema;
 
-// IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
-pub const EVENT_KINDS_COUNT: usize = 14;
+/// One per `EventLogKind`. The Nim `EventLogKind` enum
+/// (`src/common/common_types/codetracer_features/events.nim`) must list the
+/// same kinds in the same order, as the frontend sends this filter indexed
+/// by its ordinals.
+pub const EVENT_KINDS_COUNT: usize = EventLogKind::ALL.len();
 const NO_DEPTH_LIMIT: i64 = -1;
 
 /// args for `ct/load-locals`
@@ -3693,5 +3696,34 @@ mod tests {
             json.get("traceId").is_none(),
             "M-REC-4 retired the `traceId` wire-format key on TableUpdate too",
         );
+    }
+
+    /// The event-log filter carries one flag per `EventLogKind`, every kind
+    /// of `trace-events.md` §"EventLogKind (u8 enum)" included, so a kind
+    /// can be selected by its ordinal up to the last one (`ChangeDir`, 23).
+    #[test]
+    fn the_kind_filter_has_one_flag_per_event_log_kind() {
+        assert_eq!(EVENT_KINDS_COUNT, EventLogKind::ALL.len());
+
+        let mut flags = vec![false; 24];
+        flags[EventLogKind::ChangeDir as usize] = true;
+        let text = serde_json::json!({
+            "tableArgs": {
+                "columns": [], "draw": 1, "length": 10, "order": [],
+                "search": {"value": "", "regex": false}, "start": 0
+            },
+            "selectedKinds": flags,
+            "isTrace": false,
+            "eventSlot": 0,
+        });
+        let args: UpdateTableArgs = serde_json::from_value(text).expect("a 24-flag filter decodes");
+        for kind in EventLogKind::ALL {
+            assert_eq!(
+                args.selected_kinds[kind as usize],
+                kind == EventLogKind::ChangeDir,
+                "flag for {}",
+                kind.name()
+            );
+        }
     }
 }
