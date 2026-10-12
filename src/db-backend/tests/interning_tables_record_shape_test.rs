@@ -282,14 +282,6 @@ const NOT_YET_RE_RECORDED: &[(&str, &str)] = &[
         "examples/recordings/mcr/macos-arm64/emulator/eme_m9c_2006/one_write.ct",
         "re-recorded only on macOS, by ct_cli/tests/record_macos_*.nim in codetracer-native-recorder",
     ),
-    (
-        "examples/recordings/mcr/windows-x86_64/trace.ct",
-        "re-recorded only on Windows in a VS Developer shell (mcr/windows-x86_64/regenerate.ps1)",
-    ),
-    (
-        "examples/recordings/mcr/windows-x86_64/trace-portable.ct",
-        "exported from windows-x86_64/trace.ct, which must be re-recorded first",
-    ),
 ];
 
 /// Every committed recording still opens: the bare-name fixtures were
