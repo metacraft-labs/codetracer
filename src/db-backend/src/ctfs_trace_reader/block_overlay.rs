@@ -10,31 +10,29 @@
 //!
 //! # Why copy-on-write (not append-only)
 //!
-//! CTFS is append-only for **data** blocks, but a few block classes are mutated
-//! **in place** as a trace grows (§11.4): Block 0 (the free-list roots, each
-//! `FileEntry.Size`, and the `NextFreeBlock` counter) and freed sub-block slots.
-//! An append-only overlay could capture newly-allocated blocks but would lose
-//! these in-place mutations, so the overlay must be copy-on-write: the *first*
-//! write to an existing block copies it into the overlay and then mutates the
-//! copy there; newly-allocated blocks (`NextFreeBlock++`) are born directly in
-//! the overlay and never read from the backing store.
+//! CTFS is append-only for **data** blocks, but the root directory is mutated
+//! **in place** as members are created and grow (`ctfs-container.md` §6, "What
+//! Is Mutated In Place"): each `FileEntry`'s `Name`, `MapBlock` and `Size`
+//! words. An append-only overlay could capture newly-allocated blocks but would
+//! lose these in-place mutations, so the overlay must be copy-on-write: the
+//! *first* write to an existing block copies it into the overlay and then
+//! mutates the copy there; newly-allocated blocks are born directly in the
+//! overlay and never read from the backing store.
 //!
-//! # Shadow Block 0
+//! # Shadow root region
 //!
-//! §11.4's structure carves out a **shadow block 0** holding the in-place-mutable
-//! root state (file-entry sizes, free-list roots, `NextFreeBlock`). The overlay
-//! captures Block 0 in the same `blocks` map the moment any root state is
-//! mutated (a `FileEntry.Size` update, a free-list push/pop, or a
-//! `NextFreeBlock` bump from [`CtfsBlockOverlay::alloc_block`]), so size updates
-//! and allocations do not touch the backing file until — and unless — the
+//! The root directory is the **root region** `[0, root_blocks)`
+//! (`ctfs-container.md` §1): the header followed by `MaxRootEntries` entries,
+//! continuing past block 0 when the container declares more entries than block
+//! 0 holds (the MCR recorder declares 16 root blocks when it checkpoints). Every
+//! directory accessor addresses entry `i` by its container byte offset and
+//! copies on write whichever root blocks hold the words it changes, so a
+//! directory update does not touch the backing file until — and unless — the
 //! overlay is flushed in `Persist` mode.
 //!
-//! The root directory is not confined to block 0: a container declaring more
-//! entries than block 0 holds continues its entry array into the blocks after
-//! it (`ctfs-container.md` §1, the **root region** `[0, root_blocks)`; the MCR
-//! recorder declares 16 such blocks when it checkpoints). Every directory
-//! accessor below addresses entry `i` by its container byte offset, so the
-//! blocks it shadows are whichever root blocks hold the entries it touches.
+//! `NextFreeBlock` is not stored in the container (§5, "Adding Members To A
+//! Closed Container"): the overlay recovers it from the backing length at
+//! construction and keeps it as a field.
 //!
 //! # Decoupling
 //!
@@ -304,10 +302,10 @@ impl CtfsBlockOverlay {
     /// the closure does not touch.
     ///
     /// This is the faithful §11.4 copy-on-write path for an *in-place mutation*
-    /// of an existing block (a `FileEntry.Size` bump, a free-list pointer
-    /// rewrite): the first such mutation copies the backing block into the
-    /// overlay, then the closure mutates the overlay copy. Subsequent mutations
-    /// hit the overlay copy directly. The backing block is never altered.
+    /// of an existing block (a `FileEntry.Size` bump): the first such mutation
+    /// copies the backing block into the overlay, then the closure mutates the
+    /// overlay copy. Subsequent mutations hit the overlay copy directly. The
+    /// backing block is never altered.
     pub fn mutate_block<F>(&mut self, block_num: u64, mutate: F) -> Result<(), CtfsError>
     where
         F: FnOnce(&mut [u8]),
@@ -432,47 +430,6 @@ impl CtfsBlockOverlay {
             .ok_or_else(|| CtfsError::FileNotFound(name.to_string()))?;
         let off = self.file_entry_offset(index) + FILE_ENTRY_SIZE_FIELD_OFFSET;
         self.write_root_bytes(off, &new_size.to_le_bytes())
-    }
-
-    /// Read the raw free-list-roots region of shadow Block 0.
-    ///
-    /// The free-list roots occupy a fixed area immediately after the 16-byte
-    /// container header (CTFS-Binary-Format.md §1 "MaxRootEntries and Block 0
-    /// Layout"). `len` is the root-area size in bytes (`R = 8 * max_shards * 6`),
-    /// which the caller derives from the container's `max_shards`. The overlay
-    /// stays format-agnostic about the *interpretation* of these bytes (that is
-    /// the M3 free-list/B-tree work); it only provides copy-on-write access to
-    /// the region so allocator state mutates in the overlay, not on disk.
-    pub fn read_free_list_roots(&self, len: usize) -> Result<Vec<u8>, CtfsError> {
-        let block0 = self.read_block(0)?;
-        let start = self.entry_start;
-        let end = start + len;
-        if end > block0.len() {
-            return Err(CtfsError::Corrupt(format!(
-                "overlay: free-list root area [{start}..{end}) exceeds block 0 ({} bytes)",
-                block0.len()
-            )));
-        }
-        Ok(block0[start..end].to_vec())
-    }
-
-    /// Copy-on-write update of the free-list-roots region of shadow Block 0.
-    ///
-    /// `roots` replaces the `roots.len()`-byte region starting immediately after
-    /// the container header. Mirrors [`read_free_list_roots`](CtfsBlockOverlay::read_free_list_roots).
-    pub fn write_free_list_roots(&mut self, roots: &[u8]) -> Result<(), CtfsError> {
-        let start = self.entry_start;
-        let block_size = self.block_size;
-        if start + roots.len() > block_size {
-            return Err(CtfsError::Corrupt(format!(
-                "overlay: free-list roots ({} bytes) overflow block 0 from offset {start}",
-                roots.len()
-            )));
-        }
-        let roots = roots.to_vec();
-        self.mutate_block(0, move |block0| {
-            block0[start..start + roots.len()].copy_from_slice(&roots);
-        })
     }
 
     // ── Internal-file writing (M5: persist a namespace into the .ct) ──────
