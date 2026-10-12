@@ -696,6 +696,25 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     selectedVariable: "",
     functions: @[])
 
+proc recordedSourceText*(s: TuiSession; path: string):
+    tuple[ok: bool, text, message: string] =
+  ## PLAT-68: a file of the RECORDING, whole — the source provider's
+  ## generation 0, what the Debug-mode editor shows — for the read-only
+  ## document its keys act on (`runtime.debugBuffer`). The same fetch
+  ## `showViewedFile` makes for a clicked file.
+  var fetched = SourceFetch(status: sfsProviderUnavailable,
+                            detail: "the provider callback never ran")
+  s.provider.fetch(SourceLineRequest(path: path, sourceGeneration: 0,
+                                     sourceDigest: "", firstLine: 1,
+                                     lastLine: high(int32)),
+                   proc(f: SourceFetch) = fetched = f)
+  drainSourceCallbacks()
+  let lines = if fetched.fileLines.len > 0: fetched.fileLines
+              else: fetched.lines
+  if lines.len == 0:
+    return (false, "", "could not read " & path & ": " & fetched.detail)
+  (true, lines.join("\n") & "\n", "")
+
 proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
   ## PLAT-50 (K17): the editor shows `rt.app.viewedFile` — a file the user
   ## clicked in the Files pane — read whole from the recording through the
@@ -1079,11 +1098,16 @@ proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
   outcome.detail
 
 proc header*(s: TuiSession; rt: TuiRuntime) =
-  ## Put the trace's NAME where §3.1's header row reads it. Separate from
-  ## `refresh` because it never changes and `refresh` runs on every step.
+  ## Point the runtime at this session — the one shown: the trace's NAME
+  ## where §3.1's header row reads it, and (PLAT-68) the reader the Debug-mode
+  ## editor opens its read-only documents with, from THIS recording. Separate
+  ## from `refresh` because neither changes and `refresh` runs on every step.
   let name = extractFilename(s.session.tracePath.strip(chars = {'/'}))
   rt.app.title = name
   rt.app.traceName = name
+  rt.editServices.readSource = proc(path: string): EditReadResult =
+    let read = s.recordedSourceText(path)
+    EditReadResult(ok: read.ok, text: read.text, message: read.message)
 
 proc describe*(s: TuiSession): string =
   ## For a diagnostic: where the engine is and what the recording's extent is.

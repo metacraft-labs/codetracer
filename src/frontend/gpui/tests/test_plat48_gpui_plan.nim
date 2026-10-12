@@ -273,7 +273,10 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck plan.topIndex(labels[0]) == plan{"children"}.len - 1
 
   test "Ctrl+O reveals the first docked pane ITSELF over the tree, with Unpin":
-    let plan = windowPlan("key:o:control")
+    # PLAT-68: `Ctrl+O` is the Vim and Kakoune bases' reveal (§4.2's), so the
+    # window runs under Vim here; under CUA the reveal is the strips' and the
+    # palette's.
+    let plan = windowPlan("key:o:control", @["--keymap=vim"])
     let rev = plan.nodesWith("data-ct-revealed")
     ck rev.len == 1
     ck rev[0].attr("data-ct-revealed") == $paneBuildOutput

@@ -32,7 +32,7 @@ import
       debug, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
-      no_source, ui_imports, shortcuts, step_list, low_level_code,
+      no_source, ui_imports, shortcuts, chord_display, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command, frame_viewer,
       pixel_history, shader_debug, video_player, agentic_session_launcher],
   # `layout_config_repair` is dependency-free by design (its own header says
@@ -754,7 +754,8 @@ proc menuNodeOf(item: MenuItem): MenuNode =
     elements: @[],
     isBeforeNextSubGroup: item.separatorAfter,
     menuOs: item.os,
-    role: cstring(item.role))
+    role: cstring(item.role),
+    mnemonic: item.mnemonic)
   for child in item.children:
     result.elements.add menuNodeOf(child)
 
@@ -1659,50 +1660,21 @@ proc configure(data: Data) =
   when defined(ctHmr):
     discard installCtHmrTransport(bundleUrl = cstring"ui.js")
 
-  Mousetrap.`bind`("ctrl+f5") do ():
-    data.toggleMode()
-
-  # `ctrl+e` AND `alt+1` STOOD HERE, AND NEITHER OF THEM DID ANYTHING.
-  #
-  # THE LOAD ORDER IN THIS FILE IS THE OPPOSITE OF THE ONE THE REGISTRY
-  # ASSUMED, and that is the whole finding. `hardBoundChords`' note in
-  # `ui/shortcut_labels.nim` said a hardcoded bind wins "because
-  # `configureShortcuts` registers them AFTER its loop over the config table".
-  # That is true of the binds written INSIDE `configureShortcuts`
-  # (`ui/shortcuts.nim`). It is false of these, and measurably so: `configure`
-  # runs at boot (`main`, below) and `configureShortcuts()` runs later, from
-  # `onInit` / `onNoTrace` / `onWelcomeScreen` — all of them IPC replies. So
-  # the config loop was the LAST writer for every chord this proc bound that
-  # the YAML also declared, and `Mousetrap.bind` replaces rather than chains.
-  #
-  # Measured in a browser on the assembled bundle, caret outside the editor:
-  # `ALT+1` dispatched `data.actions[aLowLevel1]` and logged
-  # `shortcuts: global handle`, which is the CONFIG bind and not this one. The
-  # two lines deleted here had been unreachable, and `hardBindShadowedActions`
-  # was reporting the shadow in the wrong direction — naming the live config
-  # entry as the dead one.
-  #
-  #   `alt+1`  — `default_config.yaml` declares `aLowLevel1: "ALT+1"` and its
-  #              handler is `data.openLowLevelCode()`, the identical call. The
-  #              config drives it in BOTH focus contexts (`ALT+1` is not
-  #              consumed by Monaco, so it reaches Mousetrap's document
-  #              listener with the caret in the editor too). Nothing is lost.
-  #
-  #   `ctrl+e` — now `aToggleReadOnly` in the YAML, dispatching the same
-  #              `data.toggleReadOnly()` through `data.actions`. See that
-  #              member's note in `codetracer_features/frontend.nim` for why
-  #              the chord belongs to toggle-read-only rather than to
-  #              `switchEdit`.
-  #
-  # `ctrl+f5` and `ctrl+s` are left alone: no YAML entry declares either
-  # (`aSave` is spelled `CTRL+KeyS`), so nothing overwrites them and they are
-  # the live binding for their chord.
-
-  Mousetrap.`bind`("ctrl+s") do ():
-    data.update()
-
-  # Mousetrap.`bind`("alt+2") do ():
-  #   data.openAlternativeView(2)
+  # PLAT-68: `Ctrl+F5` (`session.toggle-product-mode`) and `Ctrl+S`
+  # (`save`) are rows of the keymap now, run by `ui/key_router`; the
+  # Mousetrap binds that stood here (and the notes on why the config loop
+  # overwrote their neighbours) went with the binding table. The router's two
+  # hooks into modules it cannot import:
+  toggleSidePanelsHook = proc(data: Data) = toggleSidePanels(data)
+  toggleMacroExpansionHook = proc(editor: EditorViewComponent) =
+    editor.toggleMacroExpansion()
+  editorJumpHook = proc(editor: EditorViewComponent; operation: string): bool =
+    editor.runEditorJump(operation)
+  onKeymapChanged = proc() =
+    # The menus and the toolbar's tooltips show the router's chords; a
+    # `keybindings.json` (re)load re-reads them.
+    wireDebugToolbarShortcuts()
+    if not data.ui.menu.isNil: data.ui.menu.requestMenuRender()
 
   domwindow.onresize = proc(e: js) =
     if not data.isNil and not data.ui.isNil and not data.ui.layout.isNil:
@@ -1772,16 +1744,6 @@ proc configure(data: Data) =
           kind: cstring($request.kind)
         }))
 
-proc loadShortcut*(action: ClientAction, config: Config): cstring =
-  # load a shortcut for this node from config
-  # if we update config it should effect it
-  result = cstring""
-  for index, shortcutValue in config.shortcutMap.actionShortcuts[action]:
-    if index == 0:
-      result = result & shortcutValue.renderer.toUpperCase()
-    else:
-      result = result & cstring" " & shortcutValue.renderer.toUpperCase()
-
 proc menuNodeChildren(node: MenuNode): seq[MenuNode] =
   if node.isNil or seqIsNil(node.elements):
     @[]
@@ -1807,7 +1769,7 @@ proc getCommand(node: MenuNode, names: var JsAssoc[cstring, Command], parent: Co
         name: node.name,
         kind: ActionCommand,
         action: node.action,
-        shortcut: loadShortcut(node.action, data.config))
+        shortcut: displayedChord(node.action))
 
   else:
     # create a parent command from parent
@@ -5596,9 +5558,9 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
   videoPlayerTogglePlay: # --- M4 Visual Replay / Video Player handlers ----------------------------
   # Each handler delegates to ``dispatchVideoPlayerAction`` on the live
-  # VideoPlayerVM instance.  Focus scoping is enforced *by the Mousetrap
-  # overlay* registered in ``ui/shortcuts.nim`` (``configureVideoPlayerShortcuts``)
-  # — the overlay checks ``videoPlayerHasFocus()`` before calling these
+  # VideoPlayerVM instance.  Focus scoping is enforced by the pane's own keys
+  # in ``ui/key_router.nim`` (``videoPlayerKey``, asked before the router)
+  # — they check ``videoPlayerHasFocus()`` before calling these
   # handlers, so the handlers themselves do not re-check focus.  This keeps
   # the handlers usable from menus, the command palette, and the Playwright
   # test hook (``__CODETRACER_TEST__.videoPlayerAction``) without requiring a
@@ -5658,12 +5620,8 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aKeyboardShortcuts: proc(actionData: JsObject) = # aKeyboardShortcuts
     openShortcutsDialog(),
   aToggleReadOnly: proc(actionData: JsObject) = # aToggleReadOnly
-    ## `CTRL+E`. The same `toggleReadOnly` the two deleted hardcoded binds
-    ## called, reached through the table so that the chord is rebindable and so
-    ## that both delivery paths dispatch ONE action — `CTRL+E` is in
-    ## `MONACO_SHORTCUTS_WHITELIST`, so with the caret in the editor
-    ## `delegateShortcuts` calls this slot and with the caret outside
-    ## `configureShortcuts`' Mousetrap bind does.
+    ## `Ctrl+E` (`editor.toggle-read-only`). The one action the key router
+    ## runs for it with the caret anywhere — it used to be two, by focus.
     data.toggleReadOnly(),
   aApplyEditAndReload: proc(actionData: JsObject) = # aApplyEditAndReload
     ## Apply a source/parameter edit to the running process through the HCR
@@ -6843,57 +6801,22 @@ when defined(ctWeb) and not defined(ctInExtension):
           # about initialisation order. No import changes here.
           build.autoDismissBuildPanel())
 
-        # BUILD IS THE CONFIGURED ACTION, NOT A NEW CHORD.
-        #
-        # `default_config.yaml` has bound `build: "CTRL+B"` all along, and
-        # `bindShortcut` dispatches through `data.actions[action]` — read at
-        # PRESS TIME. So replacing the handler here is immune to the rebinding
-        # race that a `Mousetrap.bind` from this position loses: `onNoTrace`
-        # calls `configureShortcuts()` again, and it is `{.async.}`, so its
-        # rebinding lands in a later microtask than this line. Measured — a
-        # `Mousetrap.bind("ctrl+b")` here never fired, and neither did
-        # `Mousetrap.trigger('ctrl+b')` from the page, because the shortcut
-        # table had already been rebuilt over it.
-        #
-        # The desktop's hard-coded `ctrl+b` in `ui/shortcuts.nim` is excluded
-        # from `ctWeb` for the same defect from the other side; see the comment
-        # there.
+        # BUILD IS THE ACTION `build.run` RUNS (`Ctrl+Shift+B`, CUA-Keymap.md
+        # §3.7): the router dispatches through `data.actions[action]`, read at
+        # PRESS TIME, so replacing the handler here is all the web needs.
         data.actions[ClientAction.build] = proc(actionData: JsObject) =
           saveThenCompile(runAfter = false)
 
-        # RUN has no configured chord, so it gets one the YAML does not claim.
-        # NOT `ctrl+r` and NOT `F5`: both are the browser's own reload on every
-        # platform, and a studio that ate either would be taking a key away
-        # from the user rather than giving them one.
-        #
-        # THIS LINE USED TO SAY "one that NOTHING ELSE BINDS", AND THAT WAS
-        # FALSE WHEN IT WAS WRITTEN. `ui/editor.nim`'s `commands` table has
-        # claimed `CTRL+Enter` for `runTracepoints` all along, and registers it
-        # on every Monaco instance in every build. It was not visible from here
-        # because that table was the one chord registry nothing enumerated:
-        # `conflictList` sees collisions between two YAML entries and
-        # `hardBoundChords` enumerates the `Mousetrap.bind` literals, and a
-        # `commands` entry is neither. The two registries this claim was checked
-        # against were the only two that could be checked.
-        #
-        # THE CONSEQUENCE, and it is this build specifically. Monaco stops
-        # keydown propagation before the bubble phase Mousetrap listens on
-        # (measured; see the `CTRL+B` entry in `MONACO_SHORTCUTS_WHITELIST`), so
-        # with the caret in the editor this bind never fires and the Monaco
-        # command answers instead — `runTracepoints`, which in the web studio
-        # has no trace and no tracepoint service and returns at `trace.nim`'s
-        # "services not yet initialized, skipping". In an editor-first product
-        # the caret is in the editor, so Run is dead where it is used, silently.
-        #
-        # The collision is now ENUMERATED AND COUNTED, as a row of
-        # `KNOWN_MONACO_SEMANTIC_COLLISIONS` in `ui/shortcut_labels.nim`, with
-        # what would retire it: the web Run has to reach Monaco (either
-        # `commands` becomes build-aware or this Run is delegated through
-        # `delegateShortcut`), and that needs a `ctWeb` browser measurement this
-        # comment's change did not have. `shortcut_bindings_test.nim` fails the
-        # day the row stops describing the tree, in either direction.
-        Mousetrap.`bind`("ctrl+enter") do ():
-          saveThenCompile(runAfter = true)
+        # RUN AND EXPORT are the router's (PLAT-68): catalogued operations
+        # whose CUA rows hold only on the web (`frontEnd == web`, CUA-Keymap.md
+        # §3.7) — Run on `Ctrl+Enter` with the caret anywhere, Export on
+        # `Ctrl+Shift+E`; VS Code's open-line-below and Explorer step aside
+        # here. NOT `ctrl+r` and NOT `F5`: both are the browser's reload, and
+        # a studio that ate either would take a key away from the user. They
+        # were Mousetrap binds, which the one capture-phase key router left
+        # dead (it answers both chords first).
+        registerHostOperation("build.run-program", proc() =
+          saveThenCompile(runAfter = true))
 
         # EXPORT — the gesture every durability sentence instructs the user to
         # perform, and which had no way to be performed.
@@ -6905,12 +6828,10 @@ when defined(ctWeb) and not defined(ctInExtension):
         # action it does not offer is making the same kind of false claim as
         # one that accepts keystrokes and discards them.
         #
-        # `ctrl+shift+e` rather than `ctrl+e`: the latter is a browser-level
-        # chord on several platforms, and `web_noir_build`'s Run binding
-        # records the rule this follows — a studio must not take a key away
-        # from the user.
-        Mousetrap.`bind`("ctrl+shift+e") do ():
-          web_project_persistence.exportOpenProject()
+        # `Ctrl+Shift+E` rather than `Ctrl+E` (read-only, and a browser-level
+        # chord on several platforms) — the operation `project.export`.
+        registerHostOperation("project.export", proc() =
+          web_project_persistence.exportOpenProject())
 
       if mounted:
         # The line names the ENTRY as well as the surface. Two builds — one

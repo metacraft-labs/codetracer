@@ -161,6 +161,9 @@ type
     terminalDrag*: TerminalDragKind
       ## PLAT-52: a press held on one of the pane's scrubbers.
     listScrub*: tuple[active: bool, pane: PaneKind]
+    textDrag*: bool
+      ## PLAT-68: a left press on the editor's text is held — the pointer's
+      ## motion extends the selection from where it was pressed.
       ## PLAT-51: a press held on a list pane's scrollbar scrubber thumb (the
       ## Event Log's or the Call Trace's) — the motion that follows drags the
       ## VIEW (never the debugger) until the release.
@@ -193,6 +196,20 @@ type
       ## PLAT-50: text a click copied (Copy, the status bar's location),
       ## handed to the terminal's clipboard by the next frame (OSC 52) and
       ## cleared.
+    pasteBuffer*: string
+      ## PLAT-68: THE INTERNAL CLIPBOARD — the last text this session copied
+      ## or cut (kept, unlike `clipboard`, which is the one-shot OSC 52
+      ## write), and the text a terminal answered to an OSC 52 READ. `Ctrl+V`
+      ## pastes it; a terminal's own paste (bracketed paste) still arrives
+      ## as text.
+    findOwner*: string
+      ## PLAT-68: the scope element the open find widget belongs to — the
+      ## editor or list it searches — named when `find.open` ran, so its
+      ## pushed layer is active only while that element is on the scope
+      ## path (Base-Keymaps §5.3).
+    findQuery*: string
+      ## PLAT-68: the last query the find widget searched, for `F3` with the
+      ## widget closed.
     caret*: tuple[path: string, line, column: int]
       ## PLAT-51: the read-only debugging editor's CARET (Editor-Pane.md, "The
       ## caret in a read-only editor") — placed by a click on the text, moved

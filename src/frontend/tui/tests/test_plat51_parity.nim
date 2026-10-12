@@ -39,6 +39,7 @@ import headless_app/layout_model
 import viewmodels/product_menu
 
 import ../app/runtime
+import codetracer_embed   # `bkVim`, `ksFlag`
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/theme/roles
@@ -174,6 +175,9 @@ suite "PLAT-51 terminal: the Timeline is removed; 4 is the Event Log":
     ck "Event Log" in viewLabels
     for l in viewLabels:
       ck not l.startsWith("Timeline")
+    # §4.2's `4` is the Vim base's (CUA's pane keys are `F6` and
+    # `Ctrl+<n>`, CUA-Keymap §3.7).
+    rt.selectBase(bkVim, ksFlag)
     s.send(rt, "4")
     let (had, focused) = rt.focus.focusedPane()
     ck had

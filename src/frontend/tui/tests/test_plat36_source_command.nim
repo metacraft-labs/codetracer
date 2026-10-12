@@ -170,7 +170,8 @@ suite "PLAT-36: the import follows the session":
     let rt = editingRuntime(root)
     rt.runPrompt(":source vimrc")
     rt.runPrompt(":keymap")
-    ck rt.app.notification.startsWith("keymap vim with vimrc sourced; ")
+    # PLAT-68: and why the base is active (§3.6) — `:source` chose it.
+    ck rt.app.notification.startsWith("keymap vim (command) with vimrc sourced; ")
 
   test "`:keymap vim` afterwards is the SHIPPED keymap, macros and all":
     let root = withRc(MacroRc)

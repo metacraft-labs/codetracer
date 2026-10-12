@@ -234,16 +234,16 @@ ARMS = [
     # THE PRODUCT — the wiring PLAT-34 is about
     # =====================================================================
     Arm(
-        "M1", CORE,
-        "  of bkCua, bkEmacs: emInsert\n",
-        "  of bkCua, bkEmacs: emNormal\n",
+        "M1", KEYMAP,
+        "  of bkCua, bkEmacs: false\n",
+        "  of bkCua, bkEmacs: true\n",
         "UNDO GROUPING BREAKS ON THE CLOCK, through the terminal's own path",
-        "**A CUA DOCUMENT OPENS IN THE WRONG EDITING MODE AND THE "
-        "TERMINAL'S KEYS STOP RESOLVING.** (Re-aimed 2026-10-11, PLAT-68: the "
-        "product default this arm first targeted was retired for the CUA "
-        "base.) `initialModeFor` is what makes CUA and Emacs open ready to "
-        "type and what `isModal` reads; with CUA opening at `emNormal` the "
-        "base becomes modal, a printable key stops standing for itself, and "
+        "**CUA BECOMES A MODAL BASE AND THE TERMINAL'S KEYS STOP RESOLVING.** "
+        "(Re-aimed 2026-10-11, PLAT-68: the product default this arm first "
+        "targeted was retired for the CUA base; re-aimed again 2026-10-12, "
+        "Phase B: `initialModeFor` now READS `isModal`, so the defect is "
+        "planted where the answer is decided.) With CUA modal a document "
+        "opens at `emNormal`, a printable key stops standing for itself, and "
         "the terminal arm of the differential diverges from the GPUI arm "
         "(which has no keys and goes through `applyNamed`).",
     ),

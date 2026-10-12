@@ -14,16 +14,16 @@
 # (§16): re-recording from a tree whose arms have stopped matching
 # certifies the arms along with the bytes.
 ba2695508f6456f9a154474d8f7c44cddecf9289568cdb1884503be12501dee5  ../nim-everywhere/src/nim_everywhere/async_compat.nim
-d762b2f5813872d5bf5dce6d735753ef8c7d0e1f78f468481f26769fb8672d82  src/common/paths.nim
-3ef78b3f157eb19200253ee6d1f07483107d3e87de0a6c0dd05baf77e3a286b8  ci/lib/run-nim-test-lane.sh
-ce28b18f9d0b8df8ff85f7f812adf058a3a63c2ae7958c19e88eed37f39bd155  ci/lib/test-lane-files.sh
-f54004c853d63173c0c7e949f9222e88edd27d2ec6e76f4767a55c58f00e6787  justfile
+7df743fd7a5add06f72fecfef994322f98ac1f2e7694cab386ed7ddfc7e14823  src/common/paths.nim
+d96ece7d192d3570575d52b9d16d8697d51c7c54bd105ef11494fb84ba2575e0  ci/lib/run-nim-test-lane.sh
+6b0b090e94fa9f2ce916d98edf12488adb9880d1db8331add3f48e79209ddfd1  ci/lib/test-lane-files.sh
+4f8051447370facdd37f38761cf5dc4da421a71bba0413b0914e7a22d5ff840c  justfile
 f82d5d9bb1d134cba0df3de54c3d44c78ba0f978c8d884a5bd2dabe9c4ed5a98  src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim
 94a3f0aca01cbb9251c9ac993a8aa31500a8d38f03147d843e00f2a750771cb5  src/frontend/viewmodel/tests/manual/wasm_footprint_probe.nim
 938b658f452638cffee02b706c077ae915b97ac18050fb13eb2eb5c458be929e  src/frontend/viewmodel/tests/unit/test_async_compat_wasm_arm.nim
 117effeacc8dc9571f026a6a1553f3fd1529c0522da8329d8888150540212366  src/frontend/viewmodel/tests/unit/test_sdk_facade.nim
 707b5650849ae2372752b5aac59b620abadad722fb37292a79d943d4e79f3e3f  src/frontend/viewmodel/tests/unit/test_verification_panel_registration.nim
-493c07bca339693285e08a2d6bc905b567df7eeb5d075b7277205d86e8cfcc99  ci/test/vm-unit-wasm-parity.sh
+4588190125db636368c32a9594e62636cbff1f2506972843df4e9a238f802da1  ci/test/vm-unit-wasm-parity.sh
 25e02f5edd71b89864b5f771a585bff1f1c6f26e8053d728c5722d1dda5442ee  ci/test/vm-unit-wasm-lane-test.sh
 50e2c425fe2491f043cea25c6bf3a8491d3c6b203babd77f888325870338a41e  ci/test/wasm-footprint.sh
 aa7bbdc7239d570a6f225bbe78553f6130b6d460984009e15d2083be16cfecbc  ci/test/wasm-fake-timer-speed.sh

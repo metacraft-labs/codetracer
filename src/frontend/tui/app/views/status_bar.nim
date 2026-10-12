@@ -62,7 +62,15 @@ type
   StatusBarModel* = object
     ## Everything the bottom row shows, as a value.
     mode*: UiMode
-      ## The INPUT mode. Six values; see `UiMode`.
+      ## The INPUT mode. Six values; see `UiMode`. It chooses the indicator's
+      ## colour; `label` is its text.
+    label*: string
+      ## PLAT-68: THE INDICATOR'S TEXT — the router's `statusLabel`: a
+      ## pending prefix (`Ctrl+k…`), the newest pushed mode (`FIND`,
+      ## `PALETTE`, `COMMAND`), the modal machine's mode under the Vim and
+      ## Kakoune bases, and under CUA and Emacs — which have no NORMAL mode
+      ## (CodeTracer-TUI.md §4 as amended) — the base's own name. Empty is
+      ## `$mode`, for a model built without a router.
     product*: ProductMode
       ## The PRODUCT mode. Two values, and a SEPARATE FIELD rather than a
       ## seventh `UiMode` member — §1.2's requirement, and the field that makes
@@ -193,6 +201,10 @@ proc fitNoteCells*(note: string; width: int): string =
   fitCells(before & "…" & (if dir.len > 0: dir & "/" else: "/") & name & after,
            width)
 
+func modeText*(m: StatusBarModel): string =
+  ## The mode indicator as drawn: the router's label, else the input mode.
+  if m.label.len > 0: m.label else: $m.mode
+
 proc statusBarText*(m: StatusBarModel; width: int): string =
   ## The bottom row, exactly `width` cells wide.
   ##
@@ -208,7 +220,7 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   # below — "the mode indicator is never dropped" — covers the pair rather than
   # just the input half. A product mode that vanished at 14 columns would leave
   # a user editing a file on a screen that says NORMAL and nothing else.
-  let mode = $m.mode & " " & productIndicator(m.product) &
+  let mode = m.modeText & " " & productIndicator(m.product) &
              (if m.fold.len > 0: " " & m.fold else: "")
   # PLAT-49: the prompt's text when one is open, and nothing otherwise — no
   # key-hint strip.

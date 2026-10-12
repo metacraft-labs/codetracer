@@ -2,7 +2,7 @@ import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
   window, traces, files, config, install, electron_vars, debugger, launch_config,
-  recent_items,
+  recent_items, keybindings,
   ipc_subsystems/socket,
   ../[ config, types, trace_metadata ],
   ../lib/[ jslib, electron_lib ],
@@ -36,6 +36,10 @@ when not defined(server):
     f.call(self, cast[cstring](id), data)
 
 proc onStarted*(sender: js, response: js) {.async.} =
+  # PLAT-68: the renderer is listening — its key router gets the user's
+  # `keybindings.json` (imported once from the old files first), and again
+  # whenever the file changes.
+  startKeybindings()
   if not startedFuture.isNil:
     startedReceived = true
     startedFuture()

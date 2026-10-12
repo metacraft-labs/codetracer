@@ -160,7 +160,15 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 101
+  ExpectedAppModules = 106
+    ## 2026-10-12 (PLAT-68 Phase B review): 105 → 106. `tests/editor_ownership.nim`
+    ## (which keys a buffer takes, asked of the router): the query moved out of
+    ## `runtime.nim`, where nothing in the product called it any more.
+    ## 2026-10-12 (PLAT-68 Phase B): 101 → 105. `input/operation_dispatch.nim`
+    ## (the operation ↔ `KeyAction` table the router's answers are dispatched
+    ## by), `input/key_check.nim` (`:keys check`), `clipboard_read.nim` (the
+    ## OSC 52 paste conversation) and `tests/navigation_table.nim` (§4.2 read
+    ## off the shipped navigation rows for the modal suites).
     ## 2026-10-08 (PLAT-51 part B): 100 → 101. `views/welcome_view.nim`, the
     ## Welcome Screen a new tab opens.
     ## 2026-10-06 (PLAT-51): 101 → 100. The Timeline pane is removed:
@@ -264,7 +272,9 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 255
+  ExpectedStyleLiterals = 256
+    ## 2026-10-12 (PLAT-68 Phase B): 255 → 256, measured. The program menu's
+    ## underlined access key (`views/top_bar.nim`, already a styled file).
     ## 2026-10-08 (PLAT-51 part B): 239 → 255, measured. The Welcome Screen's
     ## styles (`views/welcome_view.nim`), and the focused strip's in
     ## `views/shell.nim`.

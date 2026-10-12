@@ -99,6 +99,9 @@ const
   MaxStringBytes* = 512
     ## An OSC/DCS/APC string longer than this is dropped rather than held: a
     ## reply to this program's queries is a few dozen bytes.
+  MaxClipboardReplyBytes* = 4 * 1024 * 1024
+    ## PLAT-68: …except the answer to the OSC 52 clipboard read
+    ## (`app/clipboard_read`), which is text a user copied.
     ## A CSI longer than this is not a sequence, it is a stuck terminal or a
     ## paste of binary. Dropped rather than accumulated, so one bad byte cannot
     ## make the front-end stop responding to the keyboard for the rest of the
@@ -188,7 +191,9 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       let token = f.pending
       f.reset()
       return (true, token)
-    if f.pending.len > MaxStringBytes:
+    let limit = if f.pending.startsWith("\e]52;"): MaxClipboardReplyBytes
+                else: MaxStringBytes
+    if f.pending.len > limit:
       f.reset()
     return (false, "")
   if f.pending.len == 2:
@@ -313,6 +318,20 @@ const
     ## their tooltip and key on hover (`runtime.routeTopBarMouse`), and is
     ## otherwise dropped without a repaint.
 
+template frameNodeIds(body: untyped) =
+  ## A frame's nodes take ids from 1 (`resetNodeIds`, so ids stay bounded
+  ## across a long session) — and the counter is put BACK afterwards, so a
+  ## node a LONG-LIVED tree creates later (the focus tree's editor, overlay
+  ## and field nodes, `input/motions`) never gets an id one of that tree's
+  ## own nodes already holds. PLAT-68 found the collision: the focus moved
+  ## from pane to pane with every key once a frame had reset the counter.
+  let kept = nextTerminalNodeId
+  resetNodeIds()
+  try:
+    body
+  finally:
+    nextTerminalNodeId = kept
+
 proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   ## One frame's component tree, laid out and composited into a screen buffer.
   ##
@@ -326,13 +345,13 @@ proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   ## records why: the driver's buffer is the diff base, so remounting onto the
   ## old one emits a delta, and this front-end's frame barrier needs a whole
   ## frame. `resetNodeIds` keeps node ids bounded across a long session rather
-  ## than letting them climb with the frame count.
-  resetNodeIds()
-  let renderer = TerminalRenderer()
-  let driver = newHeadlessDriver(cols, height)
-  let comp = newCompositor(cols, height)
-  comp.paint(styledRowsTree(renderer, rows), driver)
-  driver.buffer
+  ## than letting them climb with the frame count (`frameNodeIds`).
+  frameNodeIds:
+    let renderer = TerminalRenderer()
+    let driver = newHeadlessDriver(cols, height)
+    let comp = newCompositor(cols, height)
+    comp.paint(styledRowsTree(renderer, rows), driver)
+    result = driver.buffer
 
 proc composite*(rows: seq[StyledRow]; cols, height: int;
                 overlays: seq[FrameOverlay];
@@ -343,15 +362,15 @@ proc composite*(rows: seq[StyledRow]; cols, height: int;
   ## same call, byte for byte.
   if overlays.len == 0:
     return composite(rows, cols, height)
-  resetNodeIds()
-  let renderer = TerminalRenderer()
-  let driver = newHeadlessDriver(cols, height)
-  let comp = newCompositor(cols, height)
-  let tree = styledRowsTree(renderer, rows)
-  for node in overlayNodes(renderer, overlays, caps):
-    renderer.appendChild(tree, node)
-  comp.paint(tree, driver)
-  driver.buffer
+  frameNodeIds:
+    let renderer = TerminalRenderer()
+    let driver = newHeadlessDriver(cols, height)
+    let comp = newCompositor(cols, height)
+    let tree = styledRowsTree(renderer, rows)
+    for node in overlayNodes(renderer, overlays, caps):
+      renderer.appendChild(tree, node)
+    comp.paint(tree, driver)
+    result = driver.buffer
 
 proc plainScreen*(buf: ScreenBuffer): string =
   ## A composited screen as PLAIN TEXT: one line per row, trailing blanks

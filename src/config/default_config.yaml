@@ -60,6 +60,15 @@ showMinimap: true
 # # you can use KEY+OTHER
 # # use PageUp, PageDown, CTRL, ALT, SHIFT
 # # we'll fix it, but for now have to match to two apis and to process it more
+# LEGACY DATA SINCE PLAT-68. No key is delivered through this table any more:
+# every front-end's keys go through ONE router over the shared base keymaps
+# (CUA by default; codetracer-specs GUI/CUA-Keymap.md) and the user's
+# `keybindings.json`. This block is read only by the ONE-TIME IMPORT of a
+# user's customised `bindings:` into `keybindings.json`
+# (`index/keybindings.importOldConfigsOnce`) and, on macOS, for the native
+# menu's accelerators. The notes below record why each chord was chosen under
+# the Mousetrap / Monaco registries the router replaced; they describe that
+# history, not the running product.
 bindings:
   forwardContinue: "F8 F2"
   reverseContinue: "SHIFT+F8"

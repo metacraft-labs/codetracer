@@ -278,7 +278,7 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
       else:
         var sess = open(calc.tracePath)
         defer:
-          sess.send("q")
+          sess.send("\x11")  # Ctrl+Q, the CUA base's quit
           discard sess.waitExit(initDuration(seconds = 10))
           sess.close()
         var bpLine = -1
@@ -356,7 +356,7 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
         ck sess.atStop()
         for r in sess.sourceRows():
           colours[i].add (r.line, sess.codeColours(r))
-        sess.send("q")
+        sess.send("\x11")  # Ctrl+Q, the CUA base's quit
         discard sess.waitExit(initDuration(seconds = 10))
         sess.close()
       var changed: seq[int] = @[]

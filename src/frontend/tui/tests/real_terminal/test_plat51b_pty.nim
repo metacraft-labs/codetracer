@@ -247,8 +247,9 @@ suite "PLAT-51 part B on a real terminal: the focus highlight":
                $first.rowsOf())
     # ONE strip row, a strip's worth of cells.
     ck first.len >= 6 and first.rowsOf().len == 1
-    # Tab moves the focus, and the strip with it.
-    sess.send("\t")
+    # F6 (the CUA base's next pane, PLAT-68) moves the focus, and the strip
+    # with it.
+    sess.send("\e[17~")
     var moved: seq[(int, int)] = @[]
     let deadline = getMonoTime() + initDuration(seconds = 10)
     while getMonoTime() < deadline:
@@ -297,7 +298,7 @@ suite "PLAT-51 part B on a real terminal: the focus highlight":
         seen.add cells
         problems.add sess.snap().edgeProblems(cells, checkedLeft,
                                                checkedRight, bodyRows)
-      sess.send("\t")
+      sess.send("\e[17~")              # F6, the next pane
     sess.quit()
     checkpoint("focus positions " & $seen.len & ", left edges " &
                $checkedLeft & ", right edges " & $checkedRight &

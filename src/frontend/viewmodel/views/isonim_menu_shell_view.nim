@@ -29,6 +29,9 @@ type
     path*: seq[int]
     nameWidth*: int
     beforeNextSubGroup*: bool
+    mnemonic*: string
+      ## A folder's access key, one letter (`Alt+<letter>` opens it,
+      ## CUA-Keymap.md §3.8), drawn underlined; "" for none.
     children*: seq[MenuNodeRecord]
 
   MenuSearchResultRecord* = object
@@ -65,6 +68,21 @@ type
     onMaximizeWindow*: proc()
     onRestoreWindow*: proc()
     onCloseWindow*: proc()
+
+const
+  MenuMnemonicClass* = "ct-menu-mnemonic"
+    ## The underlined access key inside a folder's label.
+
+func labelRuns*(node: MenuNodeRecord): tuple[before, key, after: string] =
+  ## `node.name` split around its access key (the first letter matching
+  ## `node.mnemonic`, either case) — the three runs the view draws, the
+  ## middle one underlined. No mnemonic: the whole name, before it.
+  if node.mnemonic.len == 1:
+    let m = node.mnemonic[0].toLowerAscii
+    for i, ch in node.name:
+      if ch.toLowerAscii == m:
+        return (node.name[0 ..< i], $ch, node.name[i + 1 .. ^1])
+  (node.name, "", "")
 
 const
   MenuShellRootClass* = "menu-shell"
@@ -290,8 +308,14 @@ template renderMenuShellImpl(
                         tdiv(
                             class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
+                          let runs = labelRuns(node)
                           span(class = "ct-menu-item-label"):
-                            text node.name
+                            text runs.before
+                            if runs.key.len > 0:
+                              span(class = MenuMnemonicClass,
+                                   style = "text-decoration: underline"):
+                                text runs.key
+                            text runs.after
                           span(class = "ct-menu-item-trailing"):
                             discard
                       if node.beforeNextSubGroup:
@@ -328,8 +352,14 @@ template renderMenuShellImpl(
                         tdiv(
                             class = menuItemClass(node),
                             onmouseover = nodeMouseOverHandler(callbacks, node.path)):
+                          let runs = labelRuns(node)
                           span(class = "ct-menu-item-label"):
-                            text node.name
+                            text runs.before
+                            if runs.key.len > 0:
+                              span(class = MenuMnemonicClass,
+                                   style = "text-decoration: underline"):
+                                text runs.key
+                            text runs.after
                           span(class = "ct-menu-item-trailing"):
                             discard
                       if node.beforeNextSubGroup:

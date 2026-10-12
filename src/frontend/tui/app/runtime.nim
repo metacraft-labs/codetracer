@@ -45,6 +45,9 @@ import ./commands/interpreter
 import ./edit_binding
 import ./input/keymap
 import ./input/motions
+import ./input/operation_dispatch
+import ./input/key_check
+import ./clipboard_read
 import ./layout/persistence
 import ./layout/project
 import ./theme/degradation
@@ -139,6 +142,17 @@ type
       ## Starts a build and takes ownership of the process. The SESSION it
       ## reports into is `TuiApp.build`, which the host fills, because the poll
       ## loop that advances it is the host's too.
+    readSource*: proc(path: string): EditReadResult {.closure.}
+      ## PLAT-68: the whole text of a file of the RECORDING (the source
+      ## provider's, generation 0 — what the Debug-mode editor shows), for
+      ## the read-only document the Debug-mode editor's keys act on
+      ## (selection, copy, find, the tracepoint line). Nil in a session with
+      ## no recording; the editor then has no document and its facts are
+      ## `sourceViewFacts`.
+    reloadKeybindings*: proc(): string {.closure.}
+      ## PLAT-68: re-read the user's `keybindings.json` and lay it over the
+      ## base (`:keys reload`); answers the load summary. Nil in a host that
+      ## keeps no configuration.
 
   PaneClickKind* = enum
     ## PLAT-50: what a click in a pane asks the HOST to do — the operations
@@ -272,9 +286,14 @@ type
     caps*: TerminalCapabilities
       ## Handed in by `host/capabilities.negotiateCapabilities` before this
       ## object exists, for CTUI-11's "resolved before first paint".
-    keymap*: Keymap
+    router*: KeymapRouter
+      ## PLAT-68: THE ONE ROUTE FROM A KEY TO AN OPERATION — the active base,
+      ## the user's `keybindings.json` over it, the pushed layers and the
+      ## pending prefix (`viewmodel/keymap/keymap_router`, shared with GPUI
+      ## and the desktop). This runtime supplies the scope path
+      ## (`scopePath`), the ViewModels' facts (`sessionFacts`) and the
+      ## dispatch (`runResolution`).
     modal*: ModalState
-    pending*: PendingState
     focus*: PaneFocus
     maximize*: MaximizeState
     prompt*: CommandLineModel
@@ -302,17 +321,19 @@ type
       ## and wrote to another would silently keep two arrangements for one
       ## recording. `host/layout_store.nim` is what fills it, and it is the only
       ## thing in this front-end that touches a file for this purpose.
-    keymapModel*: BaseKeymap
-      ## PLAT-43. The keymap model a NEW edit session starts under: the stored
-      ## preference the host loaded, or the last `:keymap` choice. The product
-      ## default until a host says otherwise.
     eraseByte*: char
       ## PLAT-68. The byte this terminal sends for Backspace (termios
       ## `VERASE`, read by the host's driver); the other of `0x7f` / `0x08` is
       ## Ctrl+Backspace. Every token is named through `keyOf`, which reads it.
-    keymapReason*: string
-      ## PLAT-68: why `keymapModel` is active — `flag`, `stored`, `default`
-      ## or `chosen` (a `:keymap` this session) — said by `:keymap` alone.
+    tabMovesFocus*: bool
+      ## PLAT-68: VS Code's `Ctrl+M` mode (`editor.toggle-tab-moves-focus`):
+      ## while on, `Tab` in a buffer is not indentation. The `tabMovesFocus`
+      ## context key reads it.
+    keyCheck*: KeyCheck
+      ## PLAT-68: `:keys check` (Help: Check Key Delivery) while it runs.
+    clipboardRead*: ClipboardRead
+      ## PLAT-68: a paste asks the terminal for its clipboard (OSC 52) and is
+      ## held for the answer; `clipboard_read` has the conversation.
     keymapNotice*: string
       ## PLAT-43. A stored keymap preference the host REFUSED, by name, to be
       ## shown when Edit mode is furnished — where it wins the status line over
@@ -391,6 +412,14 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int
 
 proc runFileJob(rt: TuiRuntime; job: FileJob)
 proc writeBuffers(rt: TuiRuntime; verb: string; all = false)
+proc sessionFacts*(rt: TuiRuntime): SessionFacts
+proc debugBuffer*(rt: TuiRuntime): EditBuffer
+proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer)
+proc scopePath*(rt: TuiRuntime): ScopePath
+proc navMode(rt: TuiRuntime): NavigationMode
+proc unmountGoneOwners(rt: TuiRuntime)
+  ## FORWARD-DECLARED (PLAT-68) for the chord displays and the focus ring;
+  ## defined with the router's section beside `handleToken`.
   ## FORWARD-DECLARED for the `:w` and `:e!` arms of `runPromptLine`; defined
   ## beside `deliverFileJob`, the answer it hands a job to.
 
@@ -406,9 +435,13 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
   let projection = projectLayout(model.layout, bodyArea(width, height))
   TuiRuntime(
     app: app, caps: caps,
-    keymap: defaultKeymap(),
+    # The base an edit session was opened under, else the product default
+    # until the host's `selectBase` (the flag, the stored preference).
+    router: initKeymapRouter(
+      (if app.editSession.isNil: bkCua else: app.editSession.model),
+      KeyDelivery(frontEnd: feTerminal, platform: hostPlatform(),
+                  keyProtocol: caps.keyProtocol)),
     modal: initModalState(),
-    pending: initPendingState(),
     focus: newPaneFocus(projection),
     maximize: initMaximizeState(),
     prompt: initCommandLineModel(),
@@ -437,6 +470,28 @@ proc adoptCaps*(rt: TuiRuntime; caps: TerminalCapabilities) =
   rt.caps = caps
   if not rt.app.editSession.isNil:
     rt.app.editSession.adoptDelivery(rt.keyDelivery)
+  # The user's rows are judged again: a chord a legacy terminal could not
+  # deliver loads once the Kitty protocol is on (§7.4).
+  rt.router.delivery = rt.keyDelivery
+  rt.router.applyUserKeymap(rt.router.userKeymap)
+
+proc keymapModel*(rt: TuiRuntime): BaseKeymap =
+  ## The active base keymap (Base-Keymaps-And-Layer-Stack.md §3.1).
+  rt.router.base
+
+proc selectBase*(rt: TuiRuntime; base: BaseKeymap; source: BaseSource) =
+  ## Make `base` the active base, for the router and for every open buffer
+  ## (`--keymap`, the stored preference, `:keymap`, the palette's Select
+  ## Base Keymap all arrive here).
+  rt.router.switchBase(base, source)
+  if not rt.app.editSession.isNil:
+    rt.app.editSession.selectModel(base)
+
+proc applyUserKeymap*(rt: TuiRuntime; uk: UserKeymap): string =
+  ## Lay the user's `keybindings.json` over the base; answers the load
+  ## summary for the status line (`keymap_router.loadSummary`).
+  rt.router.applyUserKeymap(uk)
+  rt.router.loadSummary
 
 proc layoutBindingEnabled*(rt: TuiRuntime): bool =
   ## Whether PLAT-6's layout binding is driving this runtime's arrangement.
@@ -460,9 +515,12 @@ proc rebuildFocus(rt: TuiRuntime) =
   let (had, focused) = rt.focus.focusedPane()
   let model = rt.app.shellModel(rt.width, rt.height)
   let projection = projectLayout(model.layout, bodyArea(rt.width, rt.height))
-  rt.focus = newPaneFocus(projection)
+  rt.focus = newPaneFocus(projection,
+                         tabId = "tab:" & $(rt.app.shell.activeTabIndex() + 1))
   if had:
     discard rt.focus.focusPaneKind(focused)
+  # PLAT-68: a pane gone from the screen takes its pushed layers with it.
+  rt.unmountGoneOwners()
 
 proc layoutGeometry*(rt: TuiRuntime): LayoutGeometry =
   ## The binding's geometry at this terminal size — the dock strips, the inner
@@ -727,16 +785,14 @@ proc chooseKeymap*(rt: TuiRuntime; name: string) =
   ## base (including the retired `default`) is refused by name with the
   ## accepted set rather than silently defaulted. With no name it says which
   ## base is active and why.
-  let current =
-    if rt.app.editSession.isNil: rt.keymapModel
-    else: rt.app.editSession.model
+  let current = rt.keymapModel
   if name.len == 0:
     let sourced =
       if rt.app.editSession.isNil or rt.app.editSession.imported.isNil: ""
       else: " with " & rt.app.editSession.imported.source & " sourced"
-    let why = if rt.keymapReason.len == 0: "" else: " (" & rt.keymapReason & ")"
-    rt.note("keymap " & $current & why & sourced &
-            "; the accepted values are " & acceptedKeymapNamesText())
+    rt.note("keymap " & $current & " (" & $rt.router.baseSource & ")" &
+            sourced & "; the accepted values are " &
+            acceptedKeymapNamesText())
     return
   let selection = selectKeymap(name)
   if not selection.ok:
@@ -744,9 +800,7 @@ proc chooseKeymap*(rt: TuiRuntime; name: string) =
     return
   if rt.app.editSession.isNil:
     rt.app.editSession = newEditSession(selection.model, rt.keyDelivery)
-  rt.app.editSession.selectModel(selection.model)
-  rt.keymapModel = selection.model
-  rt.keymapReason = "chosen"
+  rt.selectBase(selection.model, ksCommand)
   let saved =
     if rt.editServices.saveKeymap.isNil:
       "not remembered: this session keeps no state"
@@ -754,19 +808,15 @@ proc chooseKeymap*(rt: TuiRuntime; name: string) =
   rt.note("keymap " & $selection.model &
           (if saved.len == 0: "" else: " (" & saved & ")"))
 
-proc runPromptLine(rt: TuiRuntime; line: string;
-                   outcome: var RuntimeOutcome) =
-  ## A committed prompt line, through CTUI-10's interpreter.
-  ##
-  ## Search prompts do not reach the interpreter: `/pattern` is not a §4.3
-  ## command, and handing it to `parseCommand` would report "unknown command
-  ## pattern" for a perfectly good search. It is reported as an unbuilt seam
-  ## instead, by name — CTUI-10 built the incremental search MODEL
-  ## (`app/views/search.nim`) and no pane in the shell binds it yet.
-  if rt.prompt.kind != pkCommand:
-    rt.note("search for `" & line & "` needs the source pane's search binding," &
-            " which no milestone has wired to the shell yet")
-    return
+proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
+                    unknownFallsThrough = false): bool =
+  ## One command line, through CTUI-10's interpreter and the verbs beside it —
+  ## from the command prompt (`runPromptLine`) or typed into the omnibar after
+  ## its `:` (`acceptOmnibar`). Answers whether the line was run: always,
+  ## unless `unknownFallsThrough` is set and its verb is no command at all, in
+  ## which case NOTHING has happened and the caller decides (the omnibar then
+  ## takes its chosen palette entry instead).
+  result = true
   if line.strip().len == 0:
     rt.note("")
     return
@@ -819,25 +869,25 @@ proc runPromptLine(rt: TuiRuntime; line: string;
               msg.add " (" & saved & ")"
             rt.note(msg)
       else:
-        # `:keys <file>` layers a `.cttui-keys` file (CTUI-9's user keymap)
-        # over the built-in table; `:keys default` goes back to the table.
-        # The menu's shortcuts and the controls' tooltips follow at once —
-        # they are read from the active keymap, never written beside it.
-        if arg.len == 0 or arg == "default":
-          rt.keymap = defaultKeymap()
-          rt.note("keys: the built-in table")
+        # PLAT-68: `keybindings.json` is the one user keymap
+        # (Base-Keymaps-And-Layer-Stack.md §3.5), so `:keys` reports it:
+        # `:keys` its load summary, `:keys reload` reads it again, and
+        # `:keys check` is Help: Check Key Delivery (§7.3). The menu's
+        # shortcuts and the controls' tooltips follow a reload at once —
+        # they are resolved from the router, never written beside it.
+        case arg
+        of "":
+          rt.note(rt.router.loadSummary)
+        of "reload":
+          rt.note(if rt.editServices.reloadKeybindings.isNil:
+                    "keys: this session keeps no configuration"
+                  else: rt.editServices.reloadKeybindings())
+        of "check":
+          rt.keyCheck = startCheck()
+          rt.note("keys check: press keys to see how they arrive; " &
+                  "Esc ends the check")
         else:
-          if not fileExists(expandTilde(arg)):
-            rt.note("keys: no such file: " & arg)
-            outcome.detail = rt.app.notification
-            return
-          try:
-            let load = loadKeymapFile(defaultKeymap(), expandTilde(arg))
-            rt.keymap = load.keymap
-            rt.note(if load.errors.len == 0: "keys " & arg
-                    else: describeError(load.errors[0]))
-          except CatchableError as e:
-            rt.note("keys: " & arg & ": " & e.msg)
+          rt.note("keys: '" & arg & "' is not a keys verb (reload, check)")
         rt.refreshMenuForKeymap()
       outcome.detail = rt.app.notification
       return
@@ -1005,7 +1055,9 @@ proc runPromptLine(rt: TuiRuntime; line: string;
           if rt.app.editSession.isNil:
             rt.app.editSession = newEditSession(bkVim, rt.keyDelivery)
           rt.app.editSession.installImported(sourced.imported)
-          rt.keymapModel = bkVim
+          rt.router.switchBase(bkVim, ksCommand)
+          rt.router.importedEditor = sourced.imported.keymap
+          rt.router.hasImported = true
           rt.note(sourcedSummary(sourced))
       outcome.detail = rt.app.notification
       return
@@ -1079,6 +1131,9 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     else:
       discard
 
+  if unknownFallsThrough and parseCommand(line).status == csUnknown:
+    return false
+
   # PLAT-50: "Add tracepoint" on an editor line chose WHERE the next
   # `:tracepoint` goes (the desktop's tracepoint editor opens on that line);
   # any other command forgets it.
@@ -1089,12 +1144,12 @@ proc runPromptLine(rt: TuiRuntime; line: string;
       context.file = rt.app.tracepointAt.path
       context.line = rt.app.tracepointAt.line
     rt.app.tracepointAt = ("", 0)
-  let result = runCommand(rt.dispatcher, context, line)
-  outcome.detail = result.message
-  var text = describeOutcome(result)
+  let ran = runCommand(rt.dispatcher, context, line)
+  outcome.detail = ran.message
+  var text = describeOutcome(ran)
   if text.len == 0:
-    text = result.message
-  for extra in result.lines:
+    text = ran.message
+  for extra in ran.lines:
     text.add "  |  " & extra
   rt.note(text)
   # THE ACTION THE COMMAND RESOLVED TO IS CARRIED OUT, so `handleToken` can
@@ -1108,21 +1163,36 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   # stops is `main.nim`'s, and only `applyLocalAction` reaches it. The key path
   # (`q`, `Ctrl+c`) always went through there and always worked, which is why a
   # published command was broken behind two working keys.
-  outcome.action = result.dispatch.action
+  outcome.action = ran.dispatch.action
   # ONLY A NAVIGATION IS PUMPED. This said `drDone` alone until 2026-09-23,
   # which was harmless while every command that answered `drDone` moved the
   # debugger; `:break` answering `drDone` (its service is now wired) would have
   # blocked the loop on a `stopped` event no engine sends — see
   # `movesTheDebugger` on why that is a hang rather than a wrong screen.
-  if result.dispatch.status == drDone:
+  if ran.dispatch.status == drDone:
     outcome.awaitsMove = movesTheDebugger(outcome.action)
     outcome.refreshesSession = changesSessionState(outcome.action)
     # PLAT-50: an origin query is not a move (`awaitsOrigin`).
     if outcome.action == kaValueOrigin and
-       result.message.startsWith(OriginPendingText):
+       ran.message.startsWith(OriginPendingText):
       outcome.awaitsMove = false
       outcome.awaitsOrigin = true
       outcome.originRetry = line
+
+proc runPromptLine(rt: TuiRuntime; line: string;
+                   outcome: var RuntimeOutcome) =
+  ## A committed prompt line.
+  ##
+  ## Search prompts do not reach the interpreter: `/pattern` is not a §4.3
+  ## command, and handing it to `parseCommand` would report "unknown command
+  ## pattern" for a perfectly good search. It is reported as an unbuilt seam
+  ## instead, by name — CTUI-10 built the incremental search MODEL
+  ## (`app/views/search.nim`) and no pane in the shell binds it yet.
+  if rt.prompt.kind != pkCommand:
+    rt.note("search for `" & line & "` needs the source pane's search binding," &
+            " which no milestone has wired to the shell yet")
+    return
+  discard rt.runCommandLine(line, outcome)
 
 const CallTraceWheelRows* = 3
   ## Rows one wheel notch scrolls the call trace — the common terminal
@@ -1421,6 +1491,7 @@ proc copyToClipboard(rt: TuiRuntime; text, what: string) =
   ## PLAT-50: hand `text` to the terminal's clipboard (OSC 52, written by the
   ## next frame) and say what was copied, as the desktop's copy does.
   rt.app.clipboard = text
+  rt.app.pasteBuffer = text
   rt.note("copied " & what)
 
 proc eventRowAt(model: EventLogModel; area: CellArea;
@@ -1620,6 +1691,45 @@ proc lineValues(target: SourceClickTarget): seq[NamedValue] =
   for v in target.values:
     result.add (v.name, v.value)
 
+proc placeCaret(rt: TuiRuntime; path: string; line, column: int) =
+  ## The read-only editor's caret onto `line:column` (1-based) of `path`:
+  ## the caret of the file's document (`debugBuffer`), so the keys move it
+  ## from there and a drag selects from there.
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == path:
+    buf.moveCaretTo(line - 1, column - 1)
+    rt.syncCaretFrom(buf)
+  else:
+    rt.app.caret = (path, line, column)
+
+proc routeTextDrag(rt: TuiRuntime; event: MouseEvent;
+                   outcome: var RuntimeOutcome): bool =
+  ## PLAT-68: a press held on the editor's text owns the pointer until it is
+  ## released: each motion extends the document's selection to the cell
+  ## under the pointer (`extendSelectionTo`, every front-end's drag).
+  if not rt.app.textDrag:
+    return false
+  if event.kind == mekPress:
+    rt.app.textDrag = false
+    return false
+  if event.kind == mekRelease:
+    rt.app.textDrag = false
+  let buf = rt.debugBuffer()
+  let geometry = rt.layoutGeometry()
+  var area = CellArea()
+  for i, region in geometry.projection.regions:
+    if region.pane == paneEditor: area = paneUnderStrip(geometry, i)
+  if buf.isNil or area.width <= 0:
+    return true
+  let row = clamp(event.row, area.row, area.row + area.height - 1)
+  let col = clamp(event.col, area.col, area.col + area.width - 1)
+  let target = rt.app.source.sourceClickTargetAt(area, row, col)
+  if target.line >= 1:
+    buf.doc.extendSelectionTo(target.line - 1, max(1, target.column) - 1)
+    rt.syncCaretFrom(buf)
+  outcome.repaint = true
+  true
+
 proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
                       outcome: var RuntimeOutcome): bool =
   ## K10-K15 and K36 on the recording's source in Debug: the gutter's toggle
@@ -1673,7 +1783,9 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
   # a read-only model — a plain left press, and a right press before its menu.
   if event.button == mbRight or
      (event.button == mbLeft and not event.ctrl and not event.alt):
-    rt.app.caret = (src.path, line, max(1, target.column))
+    rt.placeCaret(src.path, line, max(1, target.column))
+    # PLAT-68: a held left press SELECTS as the pointer moves.
+    rt.app.textDrag = event.button == mbLeft
     outcome.repaint = true
   case event.button
   of mbRight:
@@ -1727,57 +1839,6 @@ proc openTracepointEditorAt(rt: TuiRuntime; path: string; line: int) =
   discard rt.prompt.insert("tracepoint ")
   rt.note("a tracepoint at " & path.extractFilename & ":" & $line &
           " — type its expression and press Enter")
-
-proc caretTakesAltChord(rt: TuiRuntime; name: string): bool =
-  ## PLAT-51: whether `name` (an `Alt+<char>` key) is one the read-only
-  ## editor's caret takes right now — Alt+T, with the caret placed, the source
-  ## pane focused and nothing modal open (an open prompt, menu, omnibox or
-  ## overlay owns its keys first, as `handleToken` orders them).
-  if name != "Alt+t" or rt.app.modes.product == pmEdit or rt.prompt.open or
-     rt.app.contextMenu.open or rt.app.content.open or
-     rt.app.omnibar.isOpen or rt.app.menu.isOpen:
-    return false
-  if rt.app.caret.line <= 0 or rt.app.source.isEmpty or
-     rt.app.caret.path != rt.app.source.path:
-    return false
-  let (had, focused) = rt.focus.focusedPane()
-  had and focused == paneEditor
-
-proc handleCaretKey(rt: TuiRuntime; token: string;
-                    outcome: var RuntimeOutcome): bool =
-  ## PLAT-51: the caret's keys while it is placed and the source pane has the
-  ## focus — the arrows, Home and End move it (never the debugger); Alt+T
-  ## and Ctrl+Enter, the desktop's chords, open the tracepoint editor on its
-  ## line.
-  if rt.app.caret.line <= 0 or rt.app.source.isEmpty or
-     rt.app.caret.path != rt.app.source.path:
-    return false
-  let (had, focused) = rt.focus.focusedPane()
-  if not had or focused != paneEditor:
-    return false
-  let name = rt.keyOf(token)
-  if name in ["Alt+t", "Ctrl+Enter"]:
-    rt.openTracepointEditorAt(rt.app.caret.path, rt.app.caret.line)
-    outcome.repaint = true
-    return true
-  var (path, line, column) = rt.app.caret
-  let total = max(1, rt.app.source.totalLineCount)
-  case name
-  of "Up": line = max(1, line - 1)
-  of "Down": line = min(total, line + 1)
-  of "Left": column = max(1, column - 1)
-  of "Right": column = column + 1
-  of "Home": column = 1
-  of "End":
-    let local = line - rt.app.source.firstHeldLine
-    column =
-      if local >= 0 and local < rt.app.source.heldLines.len:
-        cellWidthOf(rt.app.source.heldLines[local]) + 1
-      else: column
-  else: return false
-  rt.app.caret = (path, line, column)
-  outcome.repaint = true
-  true
 
 proc routeDockLabelClick(rt: TuiRuntime; geometry: LayoutGeometry;
                          event: MouseEvent;
@@ -2133,22 +2194,6 @@ proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
     return event.kind != mekMotion
   false
 
-proc handleContextMenuKey(rt: TuiRuntime; token: string;
-                          outcome: var RuntimeOutcome) =
-  ## Up / Down move, Enter chooses, Esc closes — the program menu's keys.
-  outcome.repaint = true
-  case rt.keyOf(token)
-  of "Up": rt.app.contextMenu.move(-1)
-  of "Down": rt.app.contextMenu.move(1)
-  of "Enter":
-    let chosen = rt.app.contextMenu.choose(-1)
-    if chosen.chosen:
-      rt.runContextAction(chosen.action, chosen.target, outcome)
-  of "Escape", "Esc": rt.app.contextMenu.close()
-  else:
-    if rt.keyOf(token) == "Esc":
-      rt.app.contextMenu.close()
-
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome) =
   ## **PLAT-6's MOUSE HALF.** One decoded SGR-1006 report, as a layout gesture.
@@ -2316,33 +2361,6 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
 
 
-proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
-  ## Whether this token is text for the open buffer rather than a command.
-  ##
-  ## FOUR CONDITIONS, ALL OF THEM ALREADY-MODELLED STATE: Edit product mode,
-  ## NORMAL input mode, the editor pane focused, and a buffer open. See the
-  ## comment at the call site in `handleToken` for why it is not a fifth input
-  ## mode, and for what that costs.
-  if rt.isNil or rt.app.isNil:
-    return false
-  if rt.app.modes.product != pmEdit or rt.modal.mode != mmNormal:
-    return false
-  if rt.app.editSession.isNil or rt.app.editSession.activeBuffer().isNil:
-    return false
-  let (had, focused) = rt.focus.focusedPane()
-  if not had or focused != paneEditor:
-    return false
-  let name = rt.keyOf(token)
-  if name.len == 0:
-    return false
-  # A PRINTABLE KEY IS TEXT, OR THE BASE KEYMAP BINDS IT. Nothing else: the
-  # buffer's own resolver is asked — the one `applyEditKey` then runs — so the
-  # two cannot disagree about whose key it is, and there is no list of keys
-  # the editor "always" or "never" takes beside the keymap (PLAT-68 deleted
-  # both: under CUA `Tab` indents, as in VS Code, and `F6` / `Shift+F6` —
-  # which no base binds in the editor — are the way out of a buffer).
-  isTextKey(name) or rt.app.editSession.activeBuffer().claimsEditKey(name, 0)
-
 proc writeBuffers(rt: TuiRuntime; verb: string; all = false) =
   ## Write the open buffer — or, `all`, every buffer with unsaved changes —
   ## through the host's file worker: `:w`, and the `save` / `save-all` a base
@@ -2364,48 +2382,6 @@ proc writeBuffers(rt: TuiRuntime; verb: string; all = false) =
     if buf == active or (all and buf.isDirty):
       rt.note("writing " & buf.path & "…")
       rt.runFileJob(fileJobFor(fjWrite, buf.doc, buf.path, buf.serial))
-
-proc routeTokenToEditor*(rt: TuiRuntime; token: string;
-                         nowMs: int64): EditKeyOutcome =
-  ## Apply one token to the open buffer and keep the session's bookkeeping
-  ## honest.
-  ##
-  ## The three things that happen on a CHANGE and not on a move are the point:
-  ## the edited path is recorded (so `assessTrace` sees it), the pane follows
-  ## the caret, and nothing else. A caller that recorded an edit for an arrow
-  ## key would declare a recording stale because somebody scrolled — see
-  ## `edit_binding.EditKeyOutcome` on why the outcome is three-valued.
-  ##
-  ## **`nowMs` IS THE CLOCK PLAT-32's UNDO GROUPING NEEDS, AND IT WAS ALREADY
-  ## HERE.** `handleToken` has taken it since CTUI-2 so the debugger keymap's
-  ## prefix timeout is assertable at its bound without a sleep; the editing
-  ## path simply never asked for it, and `editing_keymap.applyResolution`'s
-  ## `applyOperation` call therefore ran at time zero on every keystroke. The
-  ## parameter carries it the last step, and `applyEditKey` will not compile
-  ## without it.
-  ##
-  ## `keyCharacter` IS NO LONGER CALLED HERE. `applyEditKey` takes the key
-  ## name only and the resolver derives the character from it — one derivation
-  ## instead of one per call site, which is CTUI-10's defect removed rather
-  ## than re-avoided.
-  ##
-  ## A key whose operation is one only the host can perform — the file
-  ## intents (`save`, `save-all`, `save-as`; Editing-Operations §5.2) — is
-  ## performed here, by the same writer `:w` uses.
-  let buf = rt.app.editSession.activeBuffer()
-  let applied = rt.app.editSession.applyEditKeyIn(buf, rt.keyOf(token), nowMs)
-  result = applied.outcome
-  if result == ekChanged:
-    rt.app.editSession.recordEdit(buf.path)
-    rt.app.editSession.refreshEditedPaths()
-  if result != ekIgnored:
-    buf.followCaret(max(1, rt.sourcePaneRows()))
-  if "save" in applied.operations or "save-all" in applied.operations:
-    rt.writeBuffers(rt.keyOf(token), all = "save-all" in applied.operations)
-  elif "save-as" in applied.operations:
-    rt.note("Save As takes a path: `:w` writes " & buf.path &
-            " and the palette's Save As arrives with the find and palette " &
-            "overlays")
 
 proc ensureEditWorkspace*(rt: TuiRuntime): string =
   ## Give this session an Edit-mode workspace if it has not got one: the file
@@ -2661,9 +2637,9 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     rt.note(message)
     outcome.detail = message
     rt.rebuildFocus()
-    # THE EDITOR TAKES THE FOCUS ON ARRIVAL, and it has to: `editorOwnsToken`
-    # requires the editor pane focused before a typed byte is text rather than
-    # a command, so a user who toggled into Edit mode and started typing would
+    # THE EDITOR TAKES THE FOCUS ON ARRIVAL, and it has to: a typed byte is
+    # text only while the editor is on the scope path the router resolves
+    # with, so a user who toggled into Edit mode and started typing would
     # otherwise be issuing keybindings at their own source. `rebuildFocus`
     # above re-derives the ring from the arrangement the next frame paints —
     # Edit mode's panes are not Debug's — and this names which of them wins.
@@ -2683,14 +2659,30 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
 # ---------------------------------------------------------------------------
 
 const
-  MenuKey* = "F12"
-    ## Opens the program menu. The desktop's `Ctrl+M` is `Enter` on a
-    ## terminal's wire and `Alt+<letter>` reaches this front-end as the bare
-    ## letter (`host/terminal_driver.feed`), so the menu takes the one free
-    ## function key; it is also a click on `≡` or a folder title.
-  RevealKey* = "Ctrl+o"
-    ## Reveals the next auto-hidden pane (and, after the last, hides again):
-    ## the auto-hide strips' keyboard route beside a click and `:reveal`.
+  MenuOperations = ["menu.open", "menu.toggle", "menu.open-folder"]
+    ## The keymap's menu keys (CUA-Keymap.md §3.8: `` Alt+` ``,
+    ## `Alt+<mnemonic>`, `F10` in Edit mode; Vim's `F12`). The menu is also a
+    ## click on `≡` or a folder title.
+
+proc probeKey*(rt: TuiRuntime; name: string): EditingResolution
+
+proc runMenuOperation(rt: TuiRuntime; operation, argument: string) =
+  ## A menu key, whether the menu is open or not: `menu.open-folder(x)`
+  ## opens folder x; `menu.open` and `menu.toggle` open the menu when it is
+  ## closed and close it when it is open (VS Code's Alt and F10 both toggle).
+  let vm = rt.app.menu
+  if operation == "menu.open-folder":
+    let i = vm.folderIndexOf(argument)
+    if i < 0:
+      rt.note("menu: no " & argument & " folder")
+      return
+    vm.openFolder(i)
+  elif vm.isOpen:
+    vm.close()
+    return
+  else:
+    vm.open(keyboard = true)
+  rt.note("menu: arrows to move, Enter to choose, Esc to close")
 
 proc transportKeyAction*(id: string): KeyAction =
   ## The terminal's action for a debugger control (`TransportControls` id).
@@ -2755,14 +2747,16 @@ proc menuActionAvailable*(action: string): bool =
     menuPromptLine(action).len > 0 or menuOmnibarQuery(action)[0]
 
 proc chordOf*(rt: TuiRuntime; action: KeyAction): string =
-  ## The ACTIVE keymap's first NORMAL-mode binding for `action`, as §4.2
-  ## spells it — what the menu and a control's tooltip display.
-  if action == kaNone:
+  ## The chord that RUNS `action` where the focus is now — what the menu
+  ## and a control's tooltip display (KL-8): resolved by the router from
+  ## the active base and the user's `keybindings.json`, so a rebinding is
+  ## shown the moment it loads and a shadowed row is never shown.
+  let op = operationOfAction(action)
+  if op.len == 0:
     return ""
-  for bnd in rt.keymap.bindingsOf(action):
-    if bnd.mode == mmNormal:
-      return bnd.spelling
-  ""
+  let (name, arg) = splitOperation(op)
+  let path = rt.scopePath
+  rt.router.chordFor(name, rt.sessionFacts, path, rt.navMode, arg)
 
 proc refreshMenuForKeymap*(rt: TuiRuntime) =
   ## Enable the items the terminal performs and show the ACTIVE keymap's
@@ -3055,6 +3049,19 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## to that point in time (`:goto`), a command runs its menu item, a file is
   ## selected in the Files pane (the debugger's source pane shows where the
   ## recording is; in Edit mode it is opened).
+  ##
+  ## A `:` QUERY IS A COMMAND LINE FIRST ("run a :command", the omnibar's own
+  ## placeholder): under CUA and Emacs the palette is how the command line is
+  ## reached (CodeTracer-TUI.md §4 — `Ctrl+Shift+P` / `F1`), so `:w`, `:q`,
+  ## `:keymap` and `:break 12` run as typed. Only a line whose verb is no
+  ## command takes the chosen palette entry, which is what fuzzy-picks one.
+  let (mode, needle) = classifyOmnibarQuery(rt.app.omnibar.query)
+  if mode == omCommand and
+     rt.runCommandLine(":" & needle, outcome,
+                       unknownFallsThrough = true):
+    rt.app.omnibar.close()
+    outcome.repaint = true
+    return
   let (ok, entry) = rt.app.omnibar.accept()
   outcome.repaint = true
   if not ok:
@@ -3085,33 +3092,6 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   else:
     rt.note(entry.label)
 
-proc handleOmnibarKey(rt: TuiRuntime; token: string;
-                      outcome: var RuntimeOutcome) =
-  ## Every key while the omnibar is open belongs to it.
-  let name = rt.keyOf(token)
-  outcome.repaint = true
-  case name
-  of "Esc":
-    rt.app.omnibar.close()
-    rt.note("")
-  of "Enter":
-    rt.acceptOmnibar(outcome)
-  of "Up": rt.app.omnibar.moveSelection(-1)
-  of "Down": rt.app.omnibar.moveSelection(1)
-  of "Backspace": rt.app.omnibar.backspace()
-  # PLAT-49: the query is edited at a caret, in insert or overwrite mode.
-  of "Delete": rt.app.omnibar.deleteForward()
-  of "Left": rt.app.omnibar.moveCursor(-1)
-  of "Right": rt.app.omnibar.moveCursor(1)
-  of "Home": rt.app.omnibar.cursorHome()
-  of "End": rt.app.omnibar.cursorEnd()
-  of "Insert": rt.app.omnibar.toggleOverwrite()
-  else:
-    if isTextKey(name):
-      rt.app.omnibar.typeText(keyCharacter(name))
-    else:
-      outcome.repaint = false
-
 proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
                    outcome: var RuntimeOutcome) =
   ## Every key while the menu is open belongs to it. The menu is the
@@ -3121,9 +3101,14 @@ proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
   let vm = rt.app.menu
   let name = rt.keyOf(token)
   outcome.repaint = true
+  # The keymap's own menu keys keep their meaning inside it: another
+  # mnemonic switches folder, `` Alt+` `` / `F10` close it.
+  let res = rt.probeKey(name)
+  if res.kind == erOperation and res.operation in MenuOperations:
+    rt.runMenuOperation(res.operation, res.argument)
+    return
   case name
   of "Esc": vm.escape()
-  of MenuKey: vm.close()
   of "Enter":
     let act = vm.activate()
     if act.ran:
@@ -3379,6 +3364,590 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     discard
   true
 
+# ---------------------------------------------------------------------------
+# PLAT-68 — KEYS THROUGH THE ROUTER (Base-Keymaps-And-Layer-Stack.md §6)
+#
+# The terminal's half of the front-end contract: its SCOPE PATH (read off the
+# focus tree, `motions.scopePathOf`: a node per pane and per overlay), the
+# ViewModels' FACTS for `contextKeysOf`, and the DISPATCH of what the shared
+# router resolved. What a key MEANS is the router's; nothing below has a
+# `case` over key names.
+# ---------------------------------------------------------------------------
+
+proc navMode(rt: TuiRuntime): NavigationMode =
+  ## The navigation mode the derived layers read (§5.5): an open prompt's —
+  ## the command line's or the search field's, decided by what is OPEN, the
+  ## fact the scope path is built from too, so the two cannot disagree —
+  ## else the modal machine's.
+  if rt.prompt.open:
+    return if rt.prompt.kind == pkCommand: nmCommand else: nmSearch
+  case rt.modal.mode
+  of mmNormal, mmCommand, mmSearch: nmNormal
+  of mmInspect: nmInspect
+
+proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer) =
+  ## The read-only editor's displayed caret IS its document's (PLAT-51's
+  ## caret, now the head of a real selection).
+  if buf.isNil: return
+  rt.app.caret = (buf.path, buf.caretLine, buf.caretColumn + 1)
+
+proc debugBuffer*(rt: TuiRuntime): EditBuffer =
+  ## THE DEBUG-MODE EDITOR'S DOCUMENT: the file the source pane shows, opened
+  ## from the recording (`EditServices.readSource`) as an `EditingDocument`
+  ## with PLAT-33's read-only filter — so selection, the caret, copy and find
+  ## act on a real document, edits are refused, and `editor.toggle-read-only`
+  ## (`Ctrl+E`, the desktop's) makes the same document writable. Nil when
+  ## there is no recording file to open.
+  if rt.app.modes.product == pmEdit or rt.app.source.path.len == 0:
+    return nil
+  let path = rt.app.source.path
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
+  let at = rt.app.editSession.indexOfPath(path)
+  if at >= 0:
+    return rt.app.editSession.buffers[at]
+  if rt.editServices.readSource.isNil:
+    return nil
+  let read = rt.editServices.readSource(path)
+  if not read.ok:
+    return nil
+  let keep = rt.app.editSession.active
+  discard rt.app.editSession.openFile(path, read.text,
+                                      max(1, rt.sourcePaneRows()))
+  result = rt.app.editSession.buffers[^1]
+  if keep >= 0: rt.app.editSession.active = keep
+  result.doc.setReadOnly(true)
+  # The caret starts where the user placed it, else on the execution line —
+  # where Monaco's cursor is when a replay stops.
+  let line = if rt.app.caret.line > 0 and rt.app.caret.path == path:
+               rt.app.caret.line
+             else: max(1, rt.app.source.executionLine)
+  let column = if rt.app.caret.line > 0 and rt.app.caret.path == path:
+                 rt.app.caret.column
+               else: 1
+  result.moveCaretTo(line - 1, column - 1)
+
+proc editorBuffer(rt: TuiRuntime): EditBuffer =
+  ## The document behind the `editor` pane: Edit mode's active buffer, or
+  ## Debug mode's document of the shown file.
+  if rt.app.modes.product == pmEdit:
+    if rt.app.editSession.isNil: nil else: rt.app.editSession.activeBuffer()
+  else: rt.debugBuffer()
+
+proc editorFocused(rt: TuiRuntime): bool =
+  let (had, focused) = rt.focus.focusedPane()
+  had and focused == paneEditor
+
+proc sessionFacts*(rt: TuiRuntime): SessionFacts =
+  ## The ViewModels' facts `contextKeysOf` derives the context keys from —
+  ## each the owning model's own answer (`editorFactsOf` of the document, the
+  ## overlays' `open`), never a key spelled here.
+  let buf = if rt.editorFocused: rt.editorBuffer() else: nil
+  let editor =
+    if not buf.isNil: editorFactsOf(buf.doc.state, rt.tabMovesFocus)
+    elif rt.app.modes.product == pmDebug: sourceViewFacts()
+    else: EditorFacts()
+  let drag = rt.layoutBindingEnabled() and
+             rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
+                                                       ikResizingSplit,
+                                                       ikRevealingDock}
+  SessionFacts(product: rt.app.modes.product,
+               replayLoaded: rt.app.traceName.len > 0,
+               editor: editor,
+               findWidgetVisible: rt.prompt.open and rt.prompt.kind != pkCommand,
+               paletteVisible: rt.app.omnibar.isOpen,
+               contextMenuVisible: rt.app.contextMenu.open,
+               dragActive: drag)
+
+proc editorElementId(rt: TuiRuntime): string =
+  ## The editor element the `editor` pane holds — always one: in Debug mode
+  ## it is the read-only source view even when no document could be opened
+  ## for it (no recording yet, an unreadable file), so the read-only editor's
+  ## keys (§4's letters, `:`) are its keys there too.
+  let buf = rt.editorBuffer()
+  let path = if not buf.isNil: buf.path else: rt.app.source.path
+  "editor:" & path
+
+proc scopePath*(rt: TuiRuntime): ScopePath =
+  ## **THE TERMINAL'S SCOPE PATH**: window, session tab and focused pane
+  ## from the focus tree, then what holds the focus inside — the editor and
+  ## an open find widget's field, or a window-owned overlay (the palette,
+  ## the command line, a context menu).
+  rt.focus.dropInner()
+  if rt.app.omnibar.isOpen:
+    return rt.focus.scopePathOf([element(ekOverlay, "palette"),
+                                 element(ekInput, "palette-query")],
+                                atWindow = true)
+  if rt.app.contextMenu.open:
+    return rt.focus.scopePathOf([element(ekOverlay, "context-menu")],
+                                atWindow = true)
+  if rt.prompt.open and rt.prompt.kind == pkCommand:
+    return rt.focus.scopePathOf([element(ekOverlay, "command-line"),
+                                 element(ekInput, "prompt")],
+                                atWindow = true)
+  var inner: seq[ScopeElement] = @[]
+  if rt.editorFocused:
+    let id = rt.editorElementId()
+    if id.len > 0: inner.add element(ekEditor, id)
+  if rt.prompt.open:
+    inner.add element(ekOverlay, "find")
+    inner.add element(ekInput, "find-query")
+  rt.focus.scopePathOf(inner)
+
+proc focusOwnerId(rt: TuiRuntime): string =
+  ## The element a mode opened now is owned by: the editor when it has the
+  ## focus, else the focused pane.
+  if rt.editorFocused and rt.editorElementId().len > 0:
+    return rt.editorElementId()
+  let (had, focused) = rt.focus.focusedPane()
+  if had: $focused else: "window"
+
+proc syncOverlayLayers(rt: TuiRuntime) =
+  ## THE PUSHED LAYERS MIRROR THE OVERLAYS (§5.3). An overlay is opened by an
+  ## operation or by a click, and closed by one or by a click elsewhere; the
+  ## layer its mode pushes follows it here, by token, so the stack is never
+  ## a second, disagreeing record of which mode is open.
+  proc want(rt: TuiRuntime; table, owner, label: string; open: bool) =
+    let at = rt.router.stack.indexOfLayer(table, owner)
+    if open and at < 0:
+      discard rt.router.pushLayer(table, owner, label)
+    elif not open and at >= 0:
+      discard rt.router.popLayer(rt.router.stack.layers[at].token)
+  # Popped newest-first, so a pop is always of the top.
+  let promptCommand = rt.prompt.open and rt.prompt.kind == pkCommand
+  let promptFind = rt.prompt.open and rt.prompt.kind != pkCommand
+  if not rt.app.contextMenu.open:
+    rt.want(ContextMenuTable, "window", "MENU", false)
+  if not rt.app.omnibar.isOpen:
+    rt.want(PaletteTable, "window", "PALETTE", false)
+  if not promptCommand:
+    rt.want(CommandLineTable, "window", "COMMAND", false)
+  if not promptFind:
+    for l in rt.router.stack.layers:
+      if l.table == FindTable:
+        rt.want(FindTable, l.owner, "FIND", false)
+        break
+  if promptFind and rt.router.stack.indexOfLayer(FindTable, rt.app.findOwner) < 0:
+    rt.want(FindTable, rt.app.findOwner, "FIND", true)
+  rt.want(CommandLineTable, "window", "COMMAND", promptCommand)
+  rt.want(PaletteTable, "window", "PALETTE", rt.app.omnibar.isOpen)
+  rt.want(ContextMenuTable, "window", "MENU", rt.app.contextMenu.open)
+
+proc unmountGoneOwners(rt: TuiRuntime) =
+  ## §5.4: a layer's lifetime is bounded by its owner. After the panes are
+  ## re-derived, a layer whose owner is no longer on screen is popped, and
+  ## its mode told: the find widget closes.
+  var present = @["window"]
+  for r in rt.focus.regions: present.add $r.pane
+  let editorId = rt.editorElementId()
+  if editorId.len > 0 and paneEditor in rt.focus.focusOrder:
+    present.add editorId
+  var gone: seq[string] = @[]
+  for l in rt.router.stack.layers:
+    if l.owner notin present and l.owner notin gone: gone.add l.owner
+  for owner in gone:
+    for popped in rt.router.unmountOwner(owner):
+      if popped.table == FindTable and rt.prompt.open and
+         rt.prompt.kind != pkCommand:
+        discard rt.prompt.cancel()
+        discard rt.modal.applyModalEvent(meCancel)
+
+proc routeKey*(rt: TuiRuntime; name: string; nowMs: int64): EditingResolution =
+  ## One canonical key through the shared router, for THIS terminal's scope
+  ## path and facts. The router keeps the pending prefix.
+  rt.syncOverlayLayers()
+  # The PATH FIRST: building it re-hangs the focus tree for what is open
+  # now (a closed overlay's nodes come down), and the facts read that tree.
+  let path = rt.scopePath
+  rt.router.route(rt.sessionFacts, path, rt.navMode, name, nowMs)
+
+proc probeKey*(rt: TuiRuntime; name: string): EditingResolution =
+  ## What `name` WOULD resolve to now, with no effect on the router.
+  rt.syncOverlayLayers()
+  let path = rt.scopePath
+  var probe = rt.router
+  probe.route(rt.sessionFacts, path, rt.navMode, name, 0)
+
+proc offerClipboardTo(rt: TuiRuntime; buf: EditBuffer) =
+  ## Paste reads the INTERNAL clipboard (what this session copied, or what
+  ## the terminal answered to an OSC 52 read): the core performs no I/O
+  ## (Editing-Operations §5.2), so the host hands the text in first.
+  if rt.app.pasteBuffer.len > 0:
+    buf.doc.offerClipboard(rt.app.pasteBuffer)
+
+proc holdPaste(rt: TuiRuntime; target: PasteTarget;
+               res: EditingResolution): bool =
+  ## Hold a paste while the terminal is asked for its clipboard (OSC 52,
+  ## written with the next frame), unless it is known not to answer or a
+  ## paste is already held. Answers whether it was held.
+  if not rt.clipboardRead.asks or rt.clipboardRead.pending.active:
+    return false
+  rt.clipboardRead.pending = PendingPaste(active: true, target: target,
+                                          resolution: res)
+  rt.clipboardRead.requested = true
+  true
+
+proc runEditorOperation(rt: TuiRuntime; buf: EditBuffer;
+                        res: EditingResolution; nowMs: int64;
+                        outcome: var RuntimeOutcome; askTerminal = true) =
+  ## A vocabulary operation (or a character) on the editor's document,
+  ## with the session's bookkeeping: an edit is recorded, the pane follows
+  ## the caret, a copy reaches the clipboard, a save is written. A paste
+  ## first asks the terminal for its clipboard (`holdPaste`), and is run
+  ## again by `completePaste` once the answer — or the silence — is in.
+  if res.operation == "clipboard-paste":
+    if askTerminal and not buf.doc.isReadOnly and
+       rt.holdPaste(ptEditor, res):
+      outcome.repaint = true
+      return
+    rt.offerClipboardTo(buf)
+  let applied = rt.app.editSession.applyResolvedIn(buf, res, nowMs)
+  if applied.outcome == eoChanged:
+    rt.app.editSession.recordEdit(buf.path)
+    rt.app.editSession.refreshEditedPaths()
+  if res.operation in ["clipboard-copy", "clipboard-cut"]:
+    let copied = buf.doc.clipboardText
+    if copied.len > 0:
+      rt.copyToClipboard(copied, $copied.countLines & " line(s)")
+  buf.followCaret(max(1, rt.sourcePaneRows()))
+  if rt.app.modes.product == pmDebug:
+    rt.syncCaretFrom(buf)
+  if "save" in applied.operations or "save-all" in applied.operations:
+    rt.writeBuffers(res.spelling, all = "save-all" in applied.operations)
+  elif "save-as" in applied.operations:
+    rt.note("Save As takes a path: `:w` writes " & buf.path)
+  if applied.outcome == eoIgnored and res.kind == erOperation and
+     buf.doc.isReadOnly:
+    rt.note("the editor is read-only — Ctrl+E makes it writable")
+  outcome.repaint = true
+
+proc pasteIntoField(rt: TuiRuntime; target: PasteTarget) =
+  ## The internal clipboard into the open palette's or prompt's field, as
+  ## typed text (a field is one line: the first line of a multi-line copy).
+  let text = rt.app.pasteBuffer.splitLines()
+  if text.len == 0 or text[0].len == 0:
+    rt.note("the clipboard is empty")
+    return
+  case target
+  of ptPalette:
+    if rt.app.omnibar.isOpen: rt.app.omnibar.typeText(text[0])
+  of ptPrompt:
+    if rt.prompt.open: discard rt.prompt.insert(text[0])
+  of ptEditor: discard
+
+proc completePaste*(rt: TuiRuntime; answered: bool; text: string;
+                    nowMs: int64): bool =
+  ## The terminal's answer to the clipboard read (`answered`, its `text`),
+  ## or the wait ran out: the answer becomes the internal clipboard, a
+  ## terminal that stayed silent is not asked again, and the held paste is
+  ## run. Answers whether there was one to run.
+  rt.clipboardRead.open = false
+  rt.clipboardRead.requested = false
+  if answered:
+    rt.clipboardRead.support = crsAnswers
+    if text.len > 0: rt.app.pasteBuffer = text
+  elif rt.clipboardRead.support == crsUnknown:
+    rt.clipboardRead.support = crsSilent
+  let held = rt.clipboardRead.pending
+  rt.clipboardRead.pending = PendingPaste()
+  if not held.active:
+    return false
+  case held.target
+  of ptEditor:
+    let buf = rt.editorBuffer()
+    if not buf.isNil:
+      var outcome = RuntimeOutcome()
+      rt.runEditorOperation(buf, held.resolution, nowMs, outcome,
+                            askTerminal = false)
+  of ptPrompt, ptPalette:
+    rt.pasteIntoField(held.target)
+  true
+
+proc focusedRowText(rt: TuiRuntime): (string, string) =
+  ## What `list.copy` copies from the focused list: the row (or value) it
+  ## has selected, and how to name it. Empty when the pane holds no
+  ## selection.
+  let (had, focused) = rt.focus.focusedPane()
+  if not had: return ("", "")
+  case focused
+  of paneFileTree:
+    let t = rt.app.fileTree
+    if t.selected >= 0 and t.selected < t.files.len:
+      return (t.files[t.selected], "the path")
+  of paneState:
+    if rt.app.variables.selected.len > 0:
+      return (rt.app.variables.selected, "the variable")
+  else: discard
+  ("", "")
+
+proc runFind(rt: TuiRuntime; forward: bool; outcome: var RuntimeOutcome) =
+  ## `find.next` / `find.previous`: the next occurrence of the find field's
+  ## query in the owner's document, selected, from the caret — the find
+  ## widget's matches as VS Code's walk them (CUA-Keymap.md §3.5).
+  let query = if rt.prompt.open: rt.prompt.buffer else: rt.app.findQuery
+  outcome.repaint = true
+  if query.len == 0:
+    rt.note("find: type what to look for")
+    return
+  rt.app.findQuery = query
+  let buf = rt.editorBuffer()
+  if buf.isNil:
+    rt.note("find: this pane has no text to search")
+    return
+  let text = buf.doc.text
+  let sel = buf.doc.state.selection.mainRange
+  var at = -1
+  if forward:
+    at = text.find(query, min(sel.rangeTo, text.len))
+    if at < 0: at = text.find(query)
+  else:
+    for i in countdown(min(sel.rangeFrom - 1, text.len - query.len), 0):
+      if text.continuesWith(query, i):
+        at = i
+        break
+    if at < 0: at = text.rfind(query)
+  if at < 0:
+    rt.note("find: no match for `" & query & "`")
+    return
+  buf.doc.selectSpan(at, at + query.len)
+  buf.followCaret(max(1, rt.sourcePaneRows()))
+  rt.syncCaretFrom(buf)
+  rt.note("find: `" & query & "` at line " & $buf.caretLine)
+
+proc runPromptKey(rt: TuiRuntime; key: string;
+                  outcome: var RuntimeOutcome)
+  ## The command line's own editing step, for the `input.*` operations the
+  ## router resolved on it; defined beside `handleToken`.
+
+proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
+                  outcome: var RuntimeOutcome) =
+  ## **THE TERMINAL'S DISPATCH** of a resolved operation onto its ViewModels:
+  ## the editing vocabulary onto the editor's document, the overlays' and
+  ## inputs' operations onto the overlay that is open, everything the
+  ## terminal's action vocabulary has onto `performAction`. An operation the
+  ## terminal does not perform is INERT AND SAYS SO (Input-Routing IR-6).
+  let op = if res.argument.len > 0: res.operation & "(" & res.argument & ")"
+           else: res.operation
+  outcome.repaint = true
+  if '.' notin res.operation:
+    let buf = rt.editorBuffer()
+    if buf.isNil:
+      rt.note("`" & res.operation & "` needs a document in the editor")
+    else:
+      rt.runEditorOperation(buf, res, nowMs, outcome)
+    return
+  # The overlays and inputs.
+  if res.operation.startsWith("palette.") and rt.app.omnibar.isOpen:
+    case res.operation
+    of "palette.focus-previous": rt.app.omnibar.moveSelection(-1)
+    of "palette.focus-next": rt.app.omnibar.moveSelection(1)
+    of "palette.focus-page-up": rt.app.omnibar.moveSelection(-10)
+    of "palette.focus-page-down": rt.app.omnibar.moveSelection(10)
+    of "palette.accept": rt.acceptOmnibar(outcome)
+    of "palette.close":
+      rt.app.omnibar.close()
+      rt.note("")
+    else: discard
+    return
+  if res.operation.startsWith("input.") and rt.app.omnibar.isOpen:
+    case res.operation
+    of "input.move-left": rt.app.omnibar.moveCursor(-1)
+    of "input.move-right": rt.app.omnibar.moveCursor(1)
+    of "input.move-start": rt.app.omnibar.cursorHome()
+    of "input.move-end": rt.app.omnibar.cursorEnd()
+    of "input.delete-backward": rt.app.omnibar.backspace()
+    of "input.delete-forward": rt.app.omnibar.deleteForward()
+    of "input.toggle-overwrite": rt.app.omnibar.toggleOverwrite()
+    of "input.copy", "input.cut":
+      # A field holds no selection: the whole of it is what is copied.
+      if rt.app.omnibar.query.len > 0:
+        rt.copyToClipboard(rt.app.omnibar.query, "the query")
+        if res.operation == "input.cut": rt.app.omnibar.setQuery("")
+    of "input.paste":
+      if not rt.holdPaste(ptPalette, res): rt.pasteIntoField(ptPalette)
+    of "input.commit": rt.acceptOmnibar(outcome)
+    of "input.cancel":
+      rt.app.omnibar.close()
+      rt.note("")
+    else: rt.note("`" & op & "` is not available in the palette")
+    return
+  if res.operation.startsWith("context-menu.") and rt.app.contextMenu.open:
+    case res.operation
+    of "context-menu.focus-previous": rt.app.contextMenu.move(-1)
+    of "context-menu.focus-next": rt.app.contextMenu.move(1)
+    of "context-menu.focus-first": rt.app.contextMenu.move(-1000)
+    of "context-menu.focus-last": rt.app.contextMenu.move(1000)
+    of "context-menu.accept":
+      let chosen = rt.app.contextMenu.choose(-1)
+      if chosen.chosen:
+        rt.runContextAction(chosen.action, chosen.target, outcome)
+    of "context-menu.close": rt.app.contextMenu.close()
+    else: discard
+    return
+  if res.operation.startsWith("input.") and rt.prompt.open:
+    case res.operation
+    of "input.copy", "input.cut":
+      if rt.prompt.buffer.len > 0:
+        rt.copyToClipboard(rt.prompt.buffer, "the command line")
+        if res.operation == "input.cut":
+          discard rt.prompt.moveCursor(KeyEnd)
+          while rt.prompt.buffer.len > 0:
+            discard rt.prompt.backspace()
+      return
+    of "input.paste":
+      if not rt.holdPaste(ptPrompt, res): rt.pasteIntoField(ptPrompt)
+      return
+    else: discard
+    let key = case res.operation
+              of "input.commit": "Enter"
+              of "input.cancel": "Esc"
+              of "input.delete-backward": "Backspace"
+              of "input.delete-forward": "Delete"
+              of "input.move-left": "Left"
+              of "input.move-right": "Right"
+              of "input.move-start": "Home"
+              of "input.move-end": "End"
+              of "input.history-previous": "Up"
+              of "input.history-next": "Down"
+              of "input.complete": "Tab"
+              else: ""
+    if key.len == 0:
+      rt.note("`" & op & "` is not available in the command line")
+    else:
+      rt.runPromptKey(key, outcome)
+    return
+  case res.operation
+  of "find.next", "find.previous":
+    if rt.router.base.isModal or rt.prompt.open or rt.app.findQuery.len > 0:
+      rt.runFind(res.operation == "find.next", outcome)
+      return
+  of "find.close":
+    if rt.prompt.open and rt.prompt.kind != pkCommand:
+      discard rt.prompt.cancel()
+      discard rt.modal.applyModalEvent(meCancel)
+      rt.note("")
+    return
+  of "find.open", "find.open-backward":
+    rt.app.findOwner = rt.focusOwnerId()
+  of "editor.toggle-read-only":
+    let buf = rt.editorBuffer()
+    if buf.isNil:
+      rt.note("there is no document in the editor to make writable")
+    else:
+      buf.doc.setReadOnly(not buf.doc.isReadOnly)
+      rt.note(if buf.doc.isReadOnly: "the editor is read-only"
+              else: "the editor is writable — Ctrl+E makes it read-only again")
+    return
+  of "editor.toggle-tracepoint":
+    let buf = rt.editorBuffer()
+    let line = if not buf.isNil: buf.caretLine
+               elif rt.app.caret.line > 0: rt.app.caret.line
+               else: rt.app.source.executionLine
+    rt.openTracepointEditorAt(rt.app.source.path, max(1, line))
+    return
+  of "editor.toggle-tab-moves-focus":
+    rt.tabMovesFocus = not rt.tabMovesFocus
+    rt.note(if rt.tabMovesFocus: "Tab moves the focus (Ctrl+M again to indent)"
+            else: "Tab indents")
+    return
+  of "list.copy":
+    let (text, what) = rt.focusedRowText()
+    if text.len == 0: rt.note("nothing is selected here to copy")
+    else: rt.copyToClipboard(text, what)
+    return
+  of "list.focus-previous": rt.performAction(kaScrollLineUp, outcome); return
+  of "list.focus-next": rt.performAction(kaScrollLineDown, outcome); return
+  of "list.focus-page-up": rt.performAction(kaHalfPageUp, outcome); return
+  of "list.focus-page-down": rt.performAction(kaHalfPageDown, outcome); return
+  of "help.check-key-delivery":
+    rt.keyCheck = startCheck()
+    rt.note("keys check: press keys to see how they arrive; Esc ends the check")
+    return
+  of "menu.open", "menu.toggle", "menu.open-folder":
+    rt.runMenuOperation(res.operation, res.argument)
+    outcome.repaint = true
+    return
+  of "layout.reveal-next-docked":
+    rt.cycleReveal(outcome)
+    return
+  else: discard
+  let palette = paletteQueryOf(res.operation)
+  if palette.ok:
+    outcome.action = kaCommandPalette
+    rt.openOmnibar(palette.query)
+    return
+  let action = actionOfOperation(op)
+  if action == kaNone:
+    rt.note("`" & op & "` (" & operationLabelOf(res.operation) &
+            ") is not available in the terminal")
+    return
+  rt.performAction(action, outcome)
+
+proc runResolution(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
+                   outcome: var RuntimeOutcome) =
+  ## What a resolution does on this terminal: an operation is dispatched, a
+  ## character goes into the focused text element, a pending prefix and the
+  ## reason for nothing are shown (§6.1 step 5).
+  case res.kind
+  of erPending:
+    rt.note(rt.router.pendingLabel)
+    outcome.repaint = true
+  of erNothing:
+    case res.reason
+    of nrPrefixAbandoned:
+      rt.note("")
+      outcome.repaint = true
+    of nrPrefixTimedOut:
+      rt.note("")
+      outcome.repaint = true
+    of nrDisabled:
+      # Mode-Transitions §8.1: inert in this product mode, and SAID — the
+      # operation, the mode it needs, the chord that switches.
+      rt.note(rt.router.inertNote(res, rt.sessionFacts, rt.scopePath,
+                                  rt.navMode))
+      outcome.repaint = true
+    else: discard
+  of erCharacter:
+    outcome.repaint = true
+    if rt.app.omnibar.isOpen:
+      rt.app.omnibar.typeText(res.character)
+    elif rt.prompt.open:
+      rt.runPromptKey(res.character, outcome)
+    else:
+      let buf = rt.editorBuffer()
+      if not buf.isNil and rt.editorFocused:
+        rt.runEditorOperation(buf, res, nowMs, outcome)
+  of erOperation:
+    rt.runOperation(res, nowMs, outcome)
+
+proc runPromptKey(rt: TuiRuntime; key: string;
+                  outcome: var RuntimeOutcome) =
+  ## One editing step of the open command line or find field: `key` is a
+  ## canonical name of one of the keys `command_line.applyKey` reads
+  ## (`Enter`, `Esc`, `Backspace`, the arrows, `Tab`) or a character. The
+  ## router decided the key is this; the prompt's model performs it.
+  let before = rt.prompt.buffer
+  let line = if key == "Enter": rt.prompt.buffer else: ""
+  let cla = rt.prompt.applyKey(key, rt.promptCandidates())
+  outcome.repaint = true
+  case cla
+  of claUnhandled:
+    discard
+  of claSubmitted:
+    rt.runPromptLine(line, outcome)
+    # A §4.3 COMMAND MAY RESOLVE TO A LOCAL ACTION, and `quit` does. Routed
+    # through the SAME `applyLocalAction` the key path uses rather than
+    # answered here, so `:quit` and `Ctrl+Q` cannot end a session
+    # differently.
+    if outcome.action != kaNone:
+      discard rt.applyLocalAction(outcome.action, outcome)
+    discard rt.modal.applyModalEvent(meCommit)
+  of claCancelled:
+    discard rt.modal.applyModalEvent(meCancel)
+    rt.note("")
+  else:
+    discard before
+
 proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ## ONE input token, end to end.
   ##
@@ -3388,32 +3957,35 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ##   0. **A mouse report is not a key, and it goes to the layout binding.**
   ##      PLAT-6, and only when a binding is enabled — see `routeMouseReport`
   ##      for the precedence rule and `enableLayoutBinding` for the opt-in.
-  ##      Ahead of the prompt because a report is not a prompt key and
-  ##      `command_line.applyKey` answers `claUnhandled` for one (its printable
-  ##      arm requires `token.len == 1`), so taking it here removes nothing from
-  ##      an open prompt.
-  ##   1. **An open prompt owns its keys first.** `command_line.applyKey`
-  ##      answers `claUnhandled` for anything that is not a prompt key, so this
-  ##      is a filter and not a swallow — but `Esc`, `Enter`, `Backspace`,
-  ##      `Tab`, the arrows and every printable character belong to the prompt
-  ##      while it is open, and CTUI-10 found the one that bites: `Space` is
-  ##      `keyName` `"Space"`, and a resolver that classified it as a command
-  ##      lost every space in `:goto 4500`.
-  ##   2. **`keymap.resolve`**, which owns the pending-chord timeout and the
-  ##      text-entry shadow.
-  ##   3. **Local actions** — focus, maximize, opening a prompt, quitting.
-  ##   4. **CTUI-10's dispatcher** for everything that is a debugger command.
+  ##      Ahead of the keys because a report is not one: `keyName` answers ""
+  ##      for it, so taking it here removes nothing from the router or from an
+  ##      open prompt.
+  ##   1. **The terminal's own widgets, outside the keymap**: a gesture in
+  ##      flight takes `Esc` (PLAT-47), a new tab's Welcome Screen its form
+  ##      (PLAT-51), an event's content overlay and the program menu every key
+  ##      while open (PLAT-48/49/50), the focused terminal output its few keys
+  ##      (PLAT-52), and `:keys check` reports keys instead of running them.
+  ##   2. **Every other key goes through the router** (PLAT-68, Base-Keymaps
+  ##      §6.1): `routeKey` resolves the key's canonical name against this
+  ##      terminal's scope path (`scopePath`, read off the `isonim-tui` focus
+  ##      tree) and facts, and `runResolution` runs the answer. An open prompt
+  ##      is a pushed layer of that same router, so its keys — `Esc`, `Enter`,
+  ##      `Backspace`, the arrows, every printable character (CTUI-10: `Space`
+  ##      included, or `:goto 4500` lost its spaces) — resolve to the prompt's
+  ##      operations or to characters typed into it, and the router owns the
+  ##      pending-chord timeout.
   result = RuntimeOutcome(repaint: false, quit: false, awaitsMove: false,
                           action: kaNone, detail: "")
   rt.lastToken = token
   rt.lastKey = rt.keyOf(token)
   # PLAT-51: ALT + A KEY arrives as ONE `ESC <byte>` token (the framer,
-  # `host/terminal_driver.feed`). The caret's Alt+T — the desktop's "Add
-  # tracepoint" chord — and (PLAT-68) the Alt chords an open buffer's base
-  # binds (Emacs's `M-f`, CUA's `Alt+Up`) are taken as chords; any other is
-  # the key alone, which is what the framer delivered before it framed Alt.
+  # `host/terminal_driver.feed`). An Alt chord the router resolves to
+  # something here (the desktop's `Alt+T`, Emacs's `M-f`, CUA's `Alt+Up`, a
+  # user's row) is taken as the chord; any other is the key alone, which is
+  # what the framer delivered before it framed Alt.
   if token.len == 2 and token[0] == '\x1b' and token[1] != '\x1b' and
-     not rt.caretTakesAltChord(rt.lastKey) and not rt.editorOwnsToken(token):
+     not rt.app.menu.isOpen and not rt.app.content.open and
+     rt.probeKey(rt.lastKey).kind == erNothing:
     return rt.handleToken(token[1 .. 1], nowMs)
 
   # PLAT-6's MOUSE HALF, ROUTED HERE AND ONLY WHEN A BINDING IS ENABLED. The
@@ -3457,6 +4029,8 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         return
       if rt.routeVariablesResize(event, result):
         return
+      if rt.routeTextDrag(event, result):
+        return
       if rt.routeTopBarMouse(event, result):
         return
       # PLAT-51: a new tab's Welcome Screen owns the body.
@@ -3489,53 +4063,10 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   if rt.routeWelcomeKey(token, result):
     return
 
-  if rt.prompt.open:
-    let before = rt.prompt.buffer
-    let candidates = rt.promptCandidates()
-    # PLAT-68: THE PROMPT IS HANDED THE KEY'S NAME for the keys it names
-    # (`command_line.applyKey` reads both spellings), so a terminal on the
-    # Kitty protocol — `Esc` as `CSI 27 u` — and `Home` / `End` in any of
-    # xterm's spellings reach it; a printable key stays its own byte.
-    let named = rt.keyOf(token)
-    let promptKey = if named in ["Esc", "Enter", "Backspace", "Tab", "Up",
-                                 "Down", "Left", "Right", "Home", "End"]: named
-                    else: token
-    let submitted = named == "Enter"
-    let line = if submitted: rt.prompt.buffer else: ""
-    let cla = rt.prompt.applyKey(promptKey, candidates)
-    case cla
-    of claUnhandled:
-      discard
-    of claSubmitted:
-      rt.runPromptLine(line, result)
-      # A §4.3 COMMAND MAY RESOLVE TO A LOCAL ACTION, and `quit` does. Routed
-      # through the SAME `applyLocalAction` the key path uses rather than
-      # answered here, so `:quit` and `q` cannot end a session differently.
-      if result.action != kaNone:
-        discard rt.applyLocalAction(result.action, result)
-      discard rt.modal.applyModalEvent(meCommit)
-      result.repaint = true
-      return
-    of claCancelled:
-      discard rt.modal.applyModalEvent(meCancel)
-      rt.note("")
-      result.repaint = true
-      return
-    else:
-      result.repaint = rt.prompt.buffer != before or cla == claCursorMoved or
-                       cla == claNoCompletion or cla == claNoHistory
-      if not result.repaint:
-        # An edit that changed nothing still redraws: `claNoCompletion` puts a
-        # message on the line, and a message the user cannot see is the same as
-        # no message at all.
-        result.repaint = true
-      return
-
-  # PLAT-50: an open right-click menu owns the keys, as the program menu
-  # does; the content overlay closes on Esc / q / Enter.
-  if rt.app.contextMenu.open:
-    rt.handleContextMenuKey(token, result)
-    return
+  # PLAT-50: an event's content overlay closes on Esc / q / Enter and
+  # scrolls; the program menu (PLAT-48/49) owns every key while open, with
+  # its type-to-select. Both are the terminal's own widgets over their
+  # ViewModels (`ContentOverlay`, `MenuVM`), outside the keymap.
   if rt.app.content.open:
     case rt.keyOf(token)
     of "Escape", "Esc", "Enter", "q":
@@ -3548,67 +4079,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     of "PageDown", "Space":
       rt.app.content.scroll(10); result.repaint = true; return
     else: discard
-  # PLAT-48: AN OPEN OMNIBAR, THEN AN OPEN MENU, OWN EVERY KEY — the text
-  # field and the menu are modal, as the desktop's are.
-  if rt.app.omnibar.isOpen:
-    rt.handleOmnibarKey(token, result)
-    return
   if rt.app.menu.isOpen:
     rt.handleMenuKey(token, nowMs, result)
     return
-  case rt.keyOf(token)
-  of MenuKey:
-    rt.app.menu.open(keyboard = true)
-    rt.note("menu: arrows to move, Enter to choose, Esc to close")
-    result.repaint = true
-    return
-  of RevealKey:
-    rt.cycleReveal(result)
-    return
-  else:
-    discard
-  # PLAT-51: THE READ-ONLY EDITOR'S CARET, once a click placed it, takes the
-  # arrows (and the tracepoint chords) while the source pane has the focus.
-  if rt.app.modes.product != pmEdit and rt.handleCaretKey(token, result):
-    return
-
-  # PLAT-16, STEP 1a: THE EDITOR OWNS ITS OWN KEYS, and it owns them by FOCUS
-  # rather than by a fifth input mode.
-  #
-  # The question "is this key text?" is answered by three facts that are all
-  # already modelled: the PRODUCT mode is Edit, the INPUT mode is NORMAL, and
-  # the FOCUSED pane is the editor. None of them is new state, which is why
-  # this is what the milestone shipped.
-  #
-  # **THE REASON IS SCOPE, NOT §1.2, AND THE EARLIER SPELLING OF THIS COMMENT
-  # HAD THAT WRONG.** It said §1.2 "forbids the obvious implementation — an
-  # INSERT mode beside NORMAL/COMMAND/SEARCH/INSPECT". It does not. §1.2
-  # forbids `UiMode` gaining **`EDIT`** — a PRODUCT mode masquerading as an
-  # input mode — and its sentence is precise about which collapse it is
-  # written against: *"`UiMode` … enumerates input modes and its cardinality is
-  # asserted by `test_layout_profiles.nim`"*. `INSERT` is an INPUT mode, the
-  # same family §4.1 enumerates, and adding it would be a fifth member of a
-  # list that already has four; it is not the two-dimensions-into-one collapse
-  # §1.2 exists to prevent. Deferring it is still right — a fifth input mode
-  # moves `modal_state`'s machine, every transition into and out of it, the
-  # cursor policy, the status indicator and the cardinality assertion, which is
-  # a milestone of its own — but it is deferred because it is BIG, not because
-  # it is FORBIDDEN, and a false prohibition in a comment is worse than an
-  # acknowledged gap: it tells the next author the door is locked.
-  #
-  # WHAT THE DEFERRAL COSTS, RECORDED RATHER THAN DISCOVERED LATER: `:` is a
-  # printable key, so while the editor is focused it types a colon instead of
-  # opening the command prompt, and `q` types a `q` instead of quitting. `Tab`
-  # is therefore deliberately NOT routed to the buffer — it stays "focus the
-  # next pane", so there is always a key that gets the user out — and neither
-  # is `Shift+Tab`. The consequence is that `:w`, `:build` and `:run` are
-  # reached by tabbing off the editor first. That is an ergonomic hole and it
-  # is named in PLAT-16's status note.
-  if rt.editorOwnsToken(token):
-    let outcome = rt.routeTokenToEditor(token, nowMs)
-    if outcome != ekIgnored:
-      result.repaint = true
-      return
 
   # PLAT-52: THE TERMINAL OUTPUT'S OWN KEYS while it is focused — the
   # previous / next write and the view toggle, keys no global binding uses.
@@ -3616,50 +4089,32 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     rt.routeTokenToTerminalOutput(token, result)
     return
 
-  let resolution = rt.keymap.resolve(rt.modal, rt.pending, token, nowMs,
-                                     rt.app.modes.product, rt.eraseByte)
-  case resolution.kind
-  of krNone:
-    return
-  of krInertInMode:
-    # Mode-Transitions.md §8.1: "A chord whose action has no meaning in the
-    # current mode must be inert AND SAY SO. … A key that silently does nothing
-    # is indistinguishable from a key that is broken."
-    #
-    # The reason goes on the status line, which is "the surface the user is
-    # looking at". `result.action` carries the action that WOULD have fired so
-    # a caller can name it; `result.detail` carries the sentence so a test
-    # asserts what the user was told rather than that something happened.
-    result.action = resolution.action
-    result.detail = resolution.reason
-    rt.note(resolution.reason)
-    result.repaint = true
-    return
-  of krPending, krPendingAbandoned, krPendingTimedOut:
-    # The pending indicator is part of the screen (§4.2: "a visible pending
-    # indicator"), so every one of these repaints.
-    rt.note(if resolution.pending.len > 0: resolution.pending else: "")
-    result.repaint = true
-    return
-  of krText:
-    # A printable key in a text-accepting mode with no prompt open. Nothing in
-    # this front-end is in that state today — the prompt is what makes a mode
-    # text-accepting — so it is reported rather than dropped.
-    rt.note("no text field is open for `" & resolution.character & "`")
-    result.repaint = true
-    return
-  of krAction:
-    discard
-
-  # PLAT-48: §4.2's `Ctrl+p` / `F1` "Fuzzy Command Palette" IS THE OMNIBAR —
-  # the desktop's palette is its omnibar, and one model draws both.
-  if resolution.action == kaCommandPalette:
-    result.action = kaCommandPalette
-    rt.openOmnibar()
+  # PLAT-68: `:keys check` — every key is reported, none is run, until Esc.
+  let name = rt.keyOf(token)
+  if rt.keyCheck.active:
+    if name == "Esc":
+      var bound: seq[string] = @[]
+      for b in rt.router.effective.bindings & rt.router.user.bindings:
+        if b.chords.len == 1: bound.add b.chords[0]
+      rt.note(rt.keyCheck.report(bound))
+      rt.keyCheck = KeyCheck()
+    elif name.len > 0:
+      rt.keyCheck.note(name)
+      let res = rt.probeKey(name)
+      rt.note(arrivalLine(name, case res.kind
+        of erOperation: (if res.argument.len > 0:
+                           res.operation & "(" & res.argument & ")"
+                         else: res.operation)
+        of erCharacter: "types `" & res.character & "`"
+        of erPending: "starts " & res.spelling & "…"
+        of erNothing: ""))
     result.repaint = true
     return
 
-  rt.performAction(resolution.action, result)
+  # EVERY OTHER KEY GOES THROUGH THE ROUTER (Base-Keymaps §6.1): the
+  # canonical name, this terminal's scope path and facts, the shared
+  # resolver; the answer is dispatched by `runResolution`.
+  rt.runResolution(rt.routeKey(name, nowMs), nowMs, result)
 
 # ---------------------------------------------------------------------------
 # The screen
@@ -3775,6 +4230,21 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   rt.scheduleHighlights()
   var model = rt.app.shellModel(rt.width, rt.height)
   model.status.mode = statusMode(rt.modal.mode)
+  # PLAT-68: the indicator's text is the router's (a pending prefix, a
+  # pushed mode, the modal mode under Vim / Kakoune, else the base).
+  rt.syncOverlayLayers()
+  model.status.label = rt.router.statusLabel(rt.scopePath, rt.navMode)
+  # PLAT-68: the Debug-mode editor's document — painted as the Edit pane
+  # once writable, and its selection over the recording's source while not.
+  if rt.app.modes.product == pmDebug and not rt.app.editSession.isNil:
+    let at = rt.app.editSession.indexOfPath(rt.app.source.path)
+    if at >= 0:
+      let buf = rt.app.editSession.buffers[at]
+      if buf.doc.isReadOnly:
+        model.source.selected = selectedCells(buf)
+      else:
+        model.editorWritable = true
+        model.edit = editPaneModelFor(rt.app.editSession, buf)
   if rt.maximize.active:
     # `z`. `motions.layoutFor` builds a one-pane `LayoutNode` of the SAME type
     # the profiles build, so `projectLayout`'s totality checks apply to the

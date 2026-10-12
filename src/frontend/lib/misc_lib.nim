@@ -57,4 +57,3 @@ var yaml*: Yaml
 when not defined(ctRenderer) and not defined(ctInExtension):
   yaml = cast[Yaml](require("js-yaml"))
 
-var Mousetrap* {.importc.}: js

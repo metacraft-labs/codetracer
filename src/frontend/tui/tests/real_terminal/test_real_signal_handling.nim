@@ -187,7 +187,7 @@ suite "CTUI-14 Tier 2: signals during a live session":
       var sess = tuiSession(@[tracePath], cols = Cols, rows = Rows)
       settleOnDebugger(sess, Cols, Rows)
       case ending
-      of "key": sess.send("q")
+      of "key": sess.send("\x11")  # Ctrl+Q, the CUA base's quit
       of "int": sess.sendSignal(SIGINT)
       else: sess.sendSignal(SIGTERM)
       let status = sess.waitExit(initDuration(seconds = 30))

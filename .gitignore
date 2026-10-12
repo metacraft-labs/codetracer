@@ -192,6 +192,8 @@ src/tests/run/quicktests/*/*.js
 /codetracer
 !python-api/codetracer/
 client*
+# `client*` is for build outputs; this source module only shares the prefix.
+!src/frontend/viewmodel/keymap/client_actions.nim
 server
 *.nims
 # ct_test ships a checked-in NimScript config that resolves the runquota_process

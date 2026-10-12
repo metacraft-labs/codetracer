@@ -668,8 +668,8 @@ when defined(js):
   ## M2 historical note: a raw window-level Escape keydown handler used to
   ## live here (``installEscapeHandler``).  M4 retired it in favour of the
   ## standard ClientAction pipeline — ``ClientAction.videoPlayerCancelPicker``
-  ## is registered through ``configureVideoPlayerShortcuts`` in
-  ## ``ui/shortcuts.nim`` and routed onto ``VideoPlayerVM.cancelPicker`` via
+  ## is one of the pane's own keys (``videoPlayerKey``) in
+  ## ``ui/key_router.nim`` and routed onto ``VideoPlayerVM.cancelPicker`` via
   ## ``dispatchVideoPlayerAction``.  The new wiring respects focus scoping
   ## (only fires when the Video Player is focused or hovered) and falls
   ## through to ``aEscape`` when picker mode is inactive, so it can coexist
@@ -762,8 +762,7 @@ when defined(js):
         proc(nowMs: float) =
           vm.tickPlayback(nowMs))
 
-    ## Escape → cancelPicker now flows through the standard ClientAction
-    ## pipeline registered in ``ui/shortcuts.nim`` (M4).  No raw keydown
-    ## listener is installed here — the global Mousetrap wrapper for
-    ## ``ClientAction.videoPlayerCancelPicker`` queries
+    ## Escape → cancelPicker flows through the standard ClientAction
+    ## pipeline (M4).  No raw keydown listener is installed here — the
+    ## pane's own keys in ``ui/key_router.nim`` (``videoPlayerKey``) query
     ## ``videoPlayerHasFocus()`` and ``vm.pickerState`` before delegating.

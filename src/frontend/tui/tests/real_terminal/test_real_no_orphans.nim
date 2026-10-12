@@ -199,7 +199,7 @@ suite "CTUI-14 Tier 2: a hundred sessions leave no unreaped children":
     for i in 0 ..< FullSessions:
       var sess = tuiSession(@[tracePath], cols = Cols, rows = Rows)
       settleOnDebugger(sess, Cols, Rows)
-      sess.send("q")
+      sess.send("\x11")  # Ctrl+Q, the CUA base's quit
       let status = sess.waitExit(initDuration(seconds = 30))
       let counts = altScreenCounts(sess)
       if status.isSome and status.get() == ExitOk and

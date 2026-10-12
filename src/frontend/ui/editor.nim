@@ -1,9 +1,9 @@
 import
   std/[ cstrutils, jsre, options ],
-  ui_imports, trace, debug, menu, flow, value, no_source, shortcuts, kdom,
+  ui_imports, trace, debug, menu, flow, value, no_source, kdom,
   shortcut_labels,
   trace_macro, trace_static,
-  column_click_resolver,
+  column_click_resolver, editor_scope,
   editor_decoration_layers, trace_redraw_policy,
   flow_line_styles, review_flow_adapter, review_flow_selection,
   ../[ renderer, communication, event_helpers, lsp_router ],
@@ -108,18 +108,6 @@ include system/timers
 
 type langstring = cstring
 
-# `MONACO_SHORTCUTS_WHITELIST` — the chords this editor delegates into Monaco
-# — now lives in `ui/shortcut_labels.nim`, next to `debugToolbarActions`, and
-# is re-exported from there by the import above.
-#
-# It moved because it is DATA about the shipped binding table and nothing in it
-# is about Monaco's API, while `ui/editor.nim` cannot be imported by a test:
-# `nim js` pulls the whole Karax/Monaco tree in. `shortcut_labels.nim` is a
-# documented leaf (`import ../types` only) that a node suite already compiles,
-# so `src/frontend/tests/shortcut_bindings_test.nim` can assert the property
-# the list exists to provide — that a debugger chord still works with the
-# caret in the editor. That assertion is what was missing when `SHIFT+F5`
-# (Stop) was absent from this list while being bound in the YAML.
 const EDITOR_GUTTER_PADDING = 2 #px
 
 proc getLineFunctionName(self: EditorViewComponent, line: int): cstring
@@ -148,55 +136,18 @@ proc clearViewZones*(self: EditorViewComponent) =
     for viewZone in self.viewZones:
       view.removeZone(viewZone)
 
-# NOT EXPORTED, AND THE MISSING `*` IS THE POINT. The only caller is the
-# `ALT+KeyE` entry of the `commands` table sixty lines below, in this module —
-# no other file has ever referenced this name. The `*` was an export nobody
-# outside could use, which is the shape `ci/test/frontend-reachability.sh`
-# counts and which `ci/lint/nim.sh` records the precedent for:
-# `layout.mountComponentContainer` carried the same meaningless `*`, and "the
-# fix was to drop the `*` ... and not to raise this number".
-#
-# It stayed uncounted only because nothing outside the module mentioned the
-# NAME either. `shortcut_bindings_test.nim` now does — the chord-collision
-# report names the action each claimant runs, and this is ALT+E's Monaco side —
-# which is exactly the transition that precedent describes: a test mentioning
-# the name moves an export from the uncounted "only its own module reaches it"
-# bucket into the counted "tested, and no product module reaches it" one. The
-# export was always empty; the test only made it visible.
-proc toggleMacroExpansion(self: EditorViewComponent) =
+# EXPORTED for the key router: `editor.toggle-macro-expansion` (a palette
+# operation with no default chord, rebindable in `keybindings.json`) reaches it
+# through `key_router.toggleMacroExpansionHook`, installed by `ui_js`. It used
+# to be the Monaco `commands` table's `ALT+KeyE`, which ran it instead of
+# focusing the Event Log whenever the caret was in the editor.
+proc toggleMacroExpansion*(self: EditorViewComponent) =
   if self.lastMouseMoveLine != -1:
     if self.expanded.hasKey(self.lastMouseMoveLine):
       self.expanded[self.lastMouseMoveLine].isExpanded = not self.expanded[self.lastMouseMoveLine].isExpanded
       self.data.redraw()
     else:
       expand(self.path, self.lastMouseMoveLine)
-
-proc loadKeyPlugins*(self: Component) =
-  cdebug "load key plugins"
-  for keys, plugin in self.data.keyPlugins[Content.EditorView]:
-    var shMonaco = shortcut($keys)
-    if shMonaco == -1:
-      cwarn "cant create shorctut for key plugin " & $keys
-    else:
-      self.toJs.monacoEditor.addCommand(shMonaco, proc =
-        let position = self.toJs.monacoEditor.getPosition()
-        let wordInfo = self.toJs.monacoEditor.getModel().getWordAtPosition(position)
-
-        let path = if not self.toJs.path.isNil: cast[cstring](self.toJs.path) else: cast[cstring](self.toJs.lowLevelTab.path)
-        let line = cast[int](position.lineNumber)
-        let column = cast[int](position.column)
-        let word = if not wordInfo.isNil: cast[cstring](wordInfo.word) else: cstring""
-        let startColumn = if not wordInfo.isNil: cast[int](wordInfo.startColumn) else: -1
-        let endColumn = if not wordInfo.isNil: cast[int](wordInfo.endColumn) else: -1
-        let context = KeyPluginContext(
-          path: path,
-          line: line,
-          column: column,
-          startColumn: startColumn,
-          endColumn: endColumn,
-          word: if not word.isNil: word else: cstring"",
-          data: self.data)
-        discard plugin(context), cstring"")
 
 func getLine(editor: MonacoEditor): int =
   editor.getPosition().lineNumber
@@ -224,107 +175,45 @@ func loadCallName(lineText: cstring, column: int): cstring =
   var finish = i - 1
   lineText.slice(start, finish + 1)
 
-var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewComponent): void)]{ ## commands for each monaco editor instance # app-global
-  # TODO improve or retire other modes
-  # cstring"ALT+P":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.flow.switchFlowUI(FlowParallel),
-  cstring"ALT+KeyI":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.flow.switchFlowUI(FlowInline),
-  # cstring"ALT+M":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.flow.switchFlowUI(FlowMultiline),
-  cstring"ALT+KeyE":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.toggleMacroExpansion(),
+proc runEditorJump*(self: EditorViewComponent; operation: string): bool =
+  ## PLAT-68: the three debugger jumps aimed at the caret, as the router
+  ## resolves them (they used to be entries of Monaco's `commands` table):
+  ## `debugger.smart-jump` (`Ctrl+F8`), `debugger.run-to-cursor` (`Ctrl+F10`,
+  ## Visual Studio's) and `debugger.source-call-jump` (`Ctrl+F11`, into the
+  ## call named at the caret). Answers whether `operation` was one of them.
+  let editor = self.monacoEditor
+  if editor.isNil or not editor.hasTextFocus():
+    return false
+  case operation
+  of "debugger.smart-jump":
+    self.editorLineJump(editor.getLine(), SmartJump)
+  of "debugger.run-to-cursor":
+    self.editorLineJump(editor.getLine(), ForwardJump)
+  of "debugger.source-call-jump":
+    let position = editor.getPosition()
+    let targetToken = editor.toJs.getModel().getWordAtPosition(position)
+    if not targetToken.isNil:
+      self.sourceCallJump(self.name, position.lineNumber,
+        if not targetToken.word.isNil: cast[cstring](targetToken.word)
+        else: cstring"", SmartJump)
+  else:
+    return false
+  true
 
-  cstring"ALT+KeyT":      proc(editor: MonacoEditor, e: EditorViewComponent) =
-    runTracepoints(data),
-
-
-  cstring"CTRL+Enter": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    runTracepoints(data),
-
-  cstring"CTRL+KeyS":      proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if not data.functions.update.isNil:
-      data.functions.update(data, false)
-    else:
-      data.saveFiles(data.services.editor.active),
-
-  cstring"CTRL+F5":     proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if not data.functions.toggleMode.isNil:
-      data.functions.toggleMode(data),
-
-  # `CTRL+KeyE` STOOD HERE, AND IT IS WHY ONE KEY RAN TWO DIFFERENT ACTIONS.
-  #
-  # Its doc comment said "mirror the Mousetrap shortcut so toggling works while
-  # Monaco has focus". The Mousetrap shortcut it mirrored — `ui_js.nim`'s
-  # `Mousetrap.bind("ctrl+e")` — was itself overwritten by the config loop that
-  # runs after it, so what this entry actually did was make `CTRL+E` mean
-  # something the global layer did not: measured on the assembled bundle,
-  # `CTRL+E` dispatched `switchEdit` outside the editor and toggled read-only
-  # inside it.
-  #
-  # THIS TABLE IS THE THIRD CLAIMANT AND THE INVISIBLE ONE. `conflictList` sees
-  # collisions between two YAML entries; `hardBoundChords` enumerates the
-  # `Mousetrap.bind` literals. Neither can see a chord claimed HERE, so a
-  # Monaco command that contradicts the config produces no warning anywhere.
-  #
-  # `CTRL+E` is now `aToggleReadOnly` in `default_config.yaml` and a member of
-  # `MONACO_SHORTCUTS_WHITELIST`, so the SECOND loop in `delegateShortcuts`
-  # registers the Monaco command from the config — same proc, one action, and
-  # the chord is rebindable and printable.
-
-  cstring"CTRL+F8": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if editor.hasTextFocus():
-      let line = editor.getLine()
-      e.editorLineJump(line, SmartJump),
-
-  # RUN TO CURSOR. `CTRL+F10` is Visual Studio's binding for it, and the whole
-  # F10 family is already the Step Over family here — `F10` step over,
-  # `SHIFT+F10` its reverse, `ALT+F10` step over statement — so the chord sits
-  # where a user looks for it and where nothing else is.
-  #
-  # THIS TABLE IS NOT THE YAML PATH. `commands` is delegated into Monaco
-  # directly by `delegateShortcuts` below, so entries here need no
-  # `MONACO_SHORTCUTS_WHITELIST` membership — that list gates the SECOND loop,
-  # the one that mirrors config-declared chords. `CTRL+F8`, the Smart jump,
-  # has always been bound this way; this is its forward sibling.
-  #
-  # The slot previously held a commented-out `co-next` (concurrent step over)
-  # sketch that had been dead since it was written.
-  cstring"CTRL+F10": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if editor.hasTextFocus():
-      let line = editor.getLine()
-      e.editorLineJump(line, ForwardJump),
-
-  cstring"CTRL+F11": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if editor.hasTextFocus():
-      let position = editor.getPosition()
-      let targetToken = editor.toJs.getModel().getWordAtPosition(position)
-
-      if not targetToken.isNil:
-        e.sourceCallJump(e.name, position.lineNumber, if not targetToken.word.isNil: cast[cstring](targetToken.word) else: cstring"", SmartJump)
-}
-
-for i in 1 .. 9:
-  capture [i]:
-    commands[cstring("CTRL+Digit" & $i)] = proc(editor: MonacoEditor, e: EditorViewComponent) =
-      discard data.ui.activeFocus.onCtrlNumber(i)
-
-proc delegateShortcuts*(self: EditorViewComponent, editor: MonacoEditor) =
-  cdebug "create context key"
-  console.log("SETTING READONLY")
+proc markEditorScope*(self: EditorViewComponent, editor: MonacoEditor) =
+  ## PLAT-68: the Monaco instance is the EDITOR element of the scope path
+  ## (`ui/key_router.desktopScopePath` reads it off the DOM focus chain), so
+  ## its keys resolve through the one router — Monaco's own `commands` table
+  ## and the config chords mirrored into it are gone, and every chord runs
+  ## once. Monaco's `readOnly` context key stays for its own contributions.
   self.readOnly = editor.toJs.createContextKey(cstring"readOnly", self.data.ui.readOnly)
-  for sh, command in commands:
-    cdebug "editor: delegate shortcut " & sh
-    self.delegateShortcut(sh, command, editor)
-
-  for action, shortcuts in data.config.shortcutMap.actionShortcuts:
-    for shortcut in shortcuts:
-      let editorShortcut = shortcut.editor
-      if editorShortcut notin MONACO_SHORTCUTS_WHITELIST:
-        cdebug "editor: ignoring, because not in monaco shortcuts whitelist: " & $editorShortcut
-        continue
-      cdebug "editor: delegate config monaco shortcut " & $editorShortcut
-      capture action, editorShortcut:
-        let command = proc(editor: MonacoEditor, e: EditorViewComponent) =
-          cdebug "editor: shortcuts: monaco handle " & $editorShortcut & " " & $action
-          data.actions[action](nil)
-        self.delegateShortcut(editorShortcut, command, editor)
+  # The editor element is the editor VIEW — the `.code-editor` container the
+  # click focuses (it is focusable, and a press on the read-only text lands
+  # its focus there), with Monaco inside it.
+  let node = editorScopeElement(editor)
+  if not node.isNil and not node.isUndefined:
+    discard node.setAttribute(cstring"data-scope-kind", cstring"editor")
+    discard node.setAttribute(cstring"data-scope-id", cstring("editor:" & $self.path))
 
 proc closeEditorTab*(data: Data, id: cstring) =
   cdebug "tabs: closeEditorTab " & $id
@@ -3395,10 +3284,7 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
       if self.monacoEditor notin self.data.ui.monacoEditors:
         self.data.ui.monacoEditors.add(self.monacoEditor)
       registerLspEditor(self)
-      try:
-        self.delegateShortcuts(self.monacoEditor)
-      except:
-        cerror "delegateShortcuts " & getCurrentExceptionMsg()
+      self.markEditorScope(self.monacoEditor)
     if not editorReady:
       return
 
@@ -3591,17 +3477,8 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     if not editorStatusCursorHook.isNil:
       editorStatusCursorHook(self.name, line, col))
 
-  console.log("DELEGATING SHORTCUTS")
-
-  try:
-    self.delegateShortcuts(self.monacoEditor)
-  except:
-    cerror "delegateShorcuts " & getCurrentExceptionMsg()
-
-  try:
-    self.loadKeyPlugins()
-  except:
-    cerror "loadKeyPlugins " & getCurrentExceptionMsg()
+  # PLAT-68: the instance is a scope element of the one router's path.
+  self.markEditorScope(self.monacoEditor)
 
   document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
     ev.stopPropagation()

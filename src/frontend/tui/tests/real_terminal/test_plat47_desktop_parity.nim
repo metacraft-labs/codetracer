@@ -114,7 +114,7 @@ proc spawnTui(args: seq[string]; cols, rows: int; colorFgBg = "";
   b.spawn()
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 15))
   sess.close()
 
@@ -482,7 +482,8 @@ suite "PLAT-47: the focused pane is outlined as the desktop outlines it":
         ck ok
         if ring in seen: break
         seen.add ring
-        sess.send("\t")
+        # F6: the CUA base's next pane (PLAT-68; `Tab` indents in a buffer).
+        sess.send("\e[17~")
         # WAIT FOR THE REPAINT THE KEY CAUSES, not for 300 ms: on a loaded
         # host the frame read after a fixed pause can still be the one from
         # BEFORE the Tab, and then this loop meets its own previous ring and

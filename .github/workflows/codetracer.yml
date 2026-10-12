@@ -3928,6 +3928,19 @@ jobs:
         # starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat51-capture-electron
 
+      - name: The desktop's keys go through the shared keymap router
+        if: ${{ !cancelled() }}
+        # The desktop column of the one keymap every front-end resolves:
+        # each F-key runs its operation once, a letter steps and Enter opens
+        # the tracepoint editor in the read-only editor, Alt+E focuses the
+        # event log with the caret anywhere, Ctrl+B and Ctrl+Shift+B, and the
+        # user's keybindings.json (a row added, a row removed, the chord the
+        # toolbar shows, a reload without a restart) — pressed in the REAL
+        # Electron app on `calc` with this checkout's desktop JavaScript and
+        # stylesheets. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

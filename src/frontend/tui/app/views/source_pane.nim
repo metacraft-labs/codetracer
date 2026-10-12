@@ -132,6 +132,12 @@ type
       ## read-only editor"): the read-only editor's CARET — the cell drawn in
       ## reverse video, distinct from the execution line's band and from the
       ## inspection cursor's ` ▹ `. Line 0: no caret.
+    selected*: seq[tuple[line, fromColumn, toColumn: int]]
+      ## PLAT-68: the read-only editor's SELECTION (Shift+arrows, Ctrl+A, a
+      ## drag, a find match — its document's selection, Monaco's read-only
+      ## mode): per line, the 1-based cell columns `[fromColumn, toColumn)`
+      ## painted on the selection ground. `toColumn` past the line's end
+      ## covers the line break, as a selection that continues does.
     columnMarks*: seq[(int, int)]
       ## PLAT-50 (K14): the column breakpoints on this file, `(line,
       ## column)` — the cell they are anchored at is marked in the code, as
@@ -536,6 +542,16 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       g.restyle(row, codeCol, area.col + area.width - codeCol,
                 proc(s: CellStyle): CellStyle =
                   s.withBackground(ExecutionLineBackground))
+    # PLAT-68: THE SELECTION, on the design system's selection ground, under
+    # the caret.
+    for sel in model.selected:
+      if sel.line == line and sel.toColumn > sel.fromColumn:
+        let first = max(1, sel.fromColumn)
+        let last = min(codeW + 1, sel.toColumn)
+        if last > first:
+          g.restyle(row, codeCol + first - 1, last - first,
+                    proc(s: CellStyle): CellStyle =
+                      s.withBackground(srSurfaceSelection))
     # PLAT-51: THE CARET, over everything — its cell reversed (a caret past
     # the line's end sits on the blank cell after it).
     if line == model.caretLine and line > 0 and model.caretColumn >= 1 and

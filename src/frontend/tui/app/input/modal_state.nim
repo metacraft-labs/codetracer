@@ -173,18 +173,6 @@ proc initModalState*(mode = mmNormal): ModalState =
   ModalState(mode: mode, phase: spTyping, backward: false, buffer: "",
              lastQuery: "")
 
-proc isTextEntry*(state: ModalState): bool =
-  ## Whether the mode currently owns every printable key.
-  ##
-  ## COMMAND always does; SEARCH does only while its prompt is open. This is
-  ## the ONE predicate `keymap.resolve` consults to decide between a binding and
-  ## a character, so "which keys are text" has a single answer rather than one
-  ## per call site.
-  case state.mode
-  of mmCommand: true
-  of mmSearch: state.phase == spTyping
-  of mmNormal, mmInspect: false
-
 # ---------------------------------------------------------------------------
 # The machine
 # ---------------------------------------------------------------------------

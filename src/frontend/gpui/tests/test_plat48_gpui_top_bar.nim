@@ -1,7 +1,7 @@
 ## test_plat48_gpui_top_bar.nim — PLAT-48, GPUI's half, Tier 1: the top
-## bar's pixel geometry and hit-test, the menu's popovers, the window's
-## keymap (the desktop's own `default_config.yaml` bindings), and the TOP dock
-## edge — projected, laid out as a strip, reachable by a drop.
+## bar's pixel geometry and hit-test, the menu's popovers, the chords the
+## menu shows (PLAT-68: the shared router's), and the TOP dock edge —
+## projected, laid out as a strip, reachable by a drop.
 ##
 ## Pure functions over the shared ViewModels and the layout model; the window
 ## itself is exercised by the window record
@@ -16,10 +16,12 @@ import ../app/dock_projection
 import ../chrome
 import ../window_geometry
 import ../window_top_bar
+import ../app/gpui_keys
+import ../app/edit_arm   # `GpuiDelivery`
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 88
+const ExpectedAssertions = 77
 
 var countedAssertions = 0
 
@@ -65,19 +67,18 @@ suite "PLAT-48 GPUI: the top bar's geometry":
       ck hit.part == s.part and hit.index == s.index
     ck lay.topBarHitAt(5, 5).rect.w == 0
 
-  test "the session tabs' keys: Ctrl+Alt+PageDown / PageUp, no desktop chord reused":
-    ck sessionTabStepOf("pagedown", @["control", "alt"]) == 1
-    ck sessionTabStepOf("PageUp", @["control", "alt"]) == -1
-    # Not the desktop's Switch File / file stepping chords, and not a bare
-    # or partly modified key.
-    ck sessionTabStepOf("tab", @["control"]) == 0
-    ck sessionTabStepOf("pagedown", @["control"]) == 0
-    ck sessionTabStepOf("pagedown", @["control", "alt", "shift"]) == 0
-    ck sessionTabStepOf("pagedown", @[]) == 0
-    let bindings = desktopBindings()
-    ck bindings.actionForChord(chordOfKey("pagedown", @["control", "alt"])) == ""
-    ck bindings.actionForChord(chordOfKey("pageup", @["control", "alt"])) == ""
-    ck bindings.actionForChord("CTRL+TAB") == "switchTabHistory"
+  test "the session tabs' keys are the router's CUA rows (Ctrl+PageDown / PageUp)":
+    # PLAT-68: the window resolves through the one router; GPUI's keystroke
+    # decoder spells the chord the CUA table binds.
+    var router = initKeymapRouter(bkCua, GpuiDelivery)
+    let facts = SessionFacts(product: pmDebug, editor: sourceViewFacts())
+    let path = @[element(ekWindow, "window"), element(ekTab, "tab:1"),
+                 pane("calltrace")]
+    for (key, mods, op) in [("pagedown", @["control"], "session-tabs.next"),
+                            ("pageup", @["control"], "session-tabs.previous")]:
+      let res = router.route(facts, path, nmNormal,
+                             canonicalKeyOfGpui(key, mods), 0)
+      ck res.kind == erOperation and res.operation == op
 
   test "a pin button under a revealed pane is not drawn, and not pressable":
     let pin = PxRect(x: 100, y: 58, w: 24, h: 24)
@@ -138,20 +139,25 @@ suite "PLAT-48 GPUI: the menu's popovers":
     ck pop.rows.len == 2
     ck pop.rect.x == lay.segOf(gtOmnibar).rect.x
 
-suite "PLAT-48 GPUI: the window's keymap is the desktop's":
+suite "PLAT-68 GPUI: the window's menu shows the router's chords":
 
-  test "the desktop's default bindings, spelled as its menu spells them":
-    let b = desktopBindings()
-    ck b["forwardNext"] == "F10"
-    ck b["reverseNext"] == "SHIFT+F10"
-    ck b["forwardContinue"] == "F8 F2"
-    ck b["aMenu"] == "CTRL+M"
-    ck chordOfKey("f10", @["shift"]) == "SHIFT+F10"
-    ck b.actionForChord("F2") == "forwardContinue"
-    ck b.actionForChord("CTRL+M") == "aMenu"
-    ck b.actionForChord("CTRL+Q") == ""
+  test "each transport item's chord is the one that runs it from the window":
+    let router = initKeymapRouter(bkCua, GpuiDelivery)
+    let facts = SessionFacts(product: pmDebug, editor: sourceViewFacts())
+    let path = @[element(ekWindow, "window"), element(ekTab, "tab:1"),
+                 pane("calltrace")]
+    proc chordOf(action: string): string =
+      let (name, arg) = splitOperation(operationOfClientAction(action))
+      router.chordFor(name, facts, path, nmNormal, arg)
+    ck chordOf("forwardNext") == "F10"
+    ck chordOf("reverseNext") == "Shift+F10"
+    ck chordOf("forwardStep") == "F11"
+    ck chordOf("forwardContinue") == "F8"
     let vm = menu()
-    vm.setShortcuts(b)
+    var chords = initTable[string, string]()
+    for action in ["forwardNext", "forwardStep"]:
+      chords[action] = chordOf(action)
+    vm.setShortcuts(chords)
     ck vm.shortcutFor("forwardStep") == "F11"
 
 suite "PLAT-48 GPUI: the TOP dock edge":

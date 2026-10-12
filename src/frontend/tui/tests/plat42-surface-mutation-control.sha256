@@ -2,14 +2,14 @@
 # subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-5fb40e23a22ce0eb4a62968ca9ccbbd87e2d237c220924533d6f0fe6bd8c8c13  src/frontend/view_vocabulary/editor_surface.nim
-3440f79fbc0d591dff46160abe70f3a90c297d927a212a2c75eda407021a7e77  src/frontend/gpui/app/leaves.nim
-3d509296a849cd127e489673075a662de0ee705bf019cca8c8b4d64d427f0ef2  src/frontend/tui/app/views/source_pane.nim
-77fbc7aa1124d44d45abccb2bfaf75c828dc9e14d9a87f6349c6cf26966ab8c2  src/frontend/tui/host/tui_session.nim
+4e58b3de0877c1849dd5ea6980c70e1b3e340f85ab48755c1ebe8a86b78cffd6  src/frontend/view_vocabulary/editor_surface.nim
+37f6cce67f8e420f194ece95f5156845f99df67057cee5eed20bb795afb61c6a  src/frontend/gpui/app/leaves.nim
+c1a1734d4b6bdcad27c89c6d7bca80c69babe4951fc726a4d45c9663babde6e7  src/frontend/tui/app/views/source_pane.nim
+b5fad155cd2f11654c1ecf84e9c399d2b5635f9e63c5569f2a5d414393668c8f  src/frontend/tui/host/tui_session.nim
 59a835e3a525657e9abef241c2bf7426edd39bfd1ab70f03cb2034d67082bf63  src/frontend/viewmodel/backend/stdio_backend.nim
 c9d9a4a35391d222f471db2fab2702ac7f3916f8280db3f1d6e886ad4034ea52  src/common/flow_line_rule.nim
 4fc9ec8d3dc76203235a298f70ec37f3a2d9ddfe88569cad22a26f68f8c41ada  src/frontend/viewmodel/viewmodels/flow_vm.nim
-b17803893f135ed29164ada994fa5174286371496417c5705717f5f5091ba083  src/frontend/tui/app/runtime.nim
+dd097fede9a22bd8b797cffd2cbc66709fb48226840a181740b2a4b09a201af9  src/frontend/tui/app/runtime.nim
 84599f19d8c533cafc0e90cf629f3aab4fb45b6a6d59dadd434e0d8acdaaf8fc  src/frontend/viewmodel/headless_session.nim
 b1b55ece1f9e384ee600448ca16042b34f5bb83de8c5e9147d40fe5ad885ad92  src/frontend/tui/tests/test_plat42_laws.nim
 df0164613f2d60b9c7505fd8684934a37cf1ff2ddbc2dcce77585e1e142c1c1c  src/frontend/tui/tests/test_plat42_flow_overlay_terminal.nim

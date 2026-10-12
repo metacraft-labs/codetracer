@@ -58,9 +58,9 @@ ARMS = [
     # K1 / K2 RE-AIMED 2026-10-11 (PLAT-68): the decoder spells a chord
     # through `key_names.chordName` now, so the defects are planted where the
     # GPUI modifiers become the chord's.
-    ("K1", KEYS, "  if \"shift\" in modifiers: mods.incl kmodShift", "  discard",
+    ("K1", KEYS, "  if \"shift\" in modifiers: result.incl kmodShift", "  discard",
      [SUITE_ARM], "a shifted letter decodes as the unshifted one"),
-    ("K2", KEYS, "  if \"control\" in modifiers: mods.incl kmodCtrl",
+    ("K2", KEYS, "  if \"control\" in modifiers: result.incl kmodCtrl",
      "  discard", [SUITE_ARM], "Ctrl+s decodes as `s`: saving types an s"),
     ("A1", ARM,
      "  let applied = arm.doc.applyKey(editScopeOf(arm.doc), name, nowMs)",

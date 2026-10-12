@@ -948,12 +948,10 @@ test_lane_files() {
 		# shape.  Its C-backend counterpart is
 		# `src/tests/cli/target_axes_test.nim`, in the `cli-record` lane.
 		#
-		# `shortcut_bindings_test.nim` asserts that the SHIPPED
-		# `default_config.yaml` actually binds the chords it names, and that
-		# nothing landed in `conflictList` — where `initShortcutMap` silently
-		# drops a second claim on a chord. It is JS-only because
-		# `frontend/config.nim` is built on `std/jsffi`'s `JsAssoc`, and it
-		# needs the same `globalThis.window` shim the scratchpad suite does.
+		# `monaco_operations_test.nim` holds the desktop router's editing
+		# table (`ui/monaco_operations`) to the CUA base, row by row, and
+		# resolves the chords the retired Mousetrap / Monaco registries
+		# disagreed about in the desktop's own delivery (PLAT-68).
 		# `debug_toolbar_tooltips_test.nim` is the same shape one level up: the
 		# debug toolbar's tooltips must NAME the chord that is bound rather than
 		# restate it as a literal, so it asserts the shipped table drives all 13
@@ -987,9 +985,9 @@ test_lane_files() {
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
+			src/frontend/tests/monaco_operations_test.nim \
 			src/frontend/tests/run_to_cursor_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
-			src/frontend/tests/shortcut_bindings_test.nim \
 			src/frontend/tests/shortcut_dialog_test.nim \
 			src/frontend/tests/shortcut_presets_test.nim \
 			src/frontend/tests/stop_command_test.nim \

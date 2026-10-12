@@ -1,6 +1,6 @@
 import
   results,
-  ui_imports,
+  ui_imports, chord_display,
   command,
   ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
@@ -112,7 +112,7 @@ proc setEditModeToolbar*(model: EditToolbarModel; invoke: proc(id: string)) =
 var debugComponentForBridge: DebugComponent
 var debugApiForBridge: MediatorWithSubscribers
 
-proc wireDebugToolbarShortcuts() =
+proc wireDebugToolbarShortcuts*() =
   ## Give the toolbar's tooltips a way to read the chords that are actually
   ## bound, and tell them the answer may have changed.
   ##
@@ -130,10 +130,10 @@ proc wireDebugToolbarShortcuts() =
   if debugControlsVMInstance.isNil:
     return
   debugControlsVMInstance.shortcutFor = proc(actionId: string): string =
-    # Read `data.config` at CALL time, not capture time: `configureShortcuts`
-    # runs again from `onNoTrace` and `onWelcomeScreen`, and the config object
-    # is replaced rather than mutated.
-    toolbarChord(data.config, actionId)
+    # PLAT-68: the chord the ROUTER runs the control with (`chord_display`),
+    # read at CALL time — a `keybindings.json` reload bumps the revision below
+    # through `key_router.onKeymapChanged`.
+    toolbarChord(proc(a: ClientAction): string = $displayedChord(a), actionId)
   debugControlsVMInstance.shortcutsRevision.val =
     debugControlsVMInstance.shortcutsRevision.val + 1
 

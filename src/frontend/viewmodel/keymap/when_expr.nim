@@ -170,22 +170,90 @@ func keysOf(e: WhenExpr; acc: var seq[ContextKey]) =
     keysOf(e.left, acc)
     keysOf(e.right, acc)
 
+proc coherentFocusAssignments(): seq[seq[(ContextKey, string)]] =
+  ## Every assignment of the focus keys (`CoherentKeys`) that `coherent`
+  ## admits — the few combinations one focused element can produce, out of
+  ## the full product of their domains. Enumerated once.
+  var keys: seq[ContextKey] = @[]
+  for k in CoherentKeys: keys.add k
+  var domains: seq[seq[string]] = @[]
+  for k in keys: domains.add domainOf(k)
+  var c = defaultContextKeys()
+  var idx = newSeq[int](keys.len)
+  while true:
+    for i, k in keys: c.values[k] = domains[i][idx[i]]
+    if coherent(c):
+      var assignment: seq[(ContextKey, string)] = @[]
+      for k in keys: assignment.add (k, c.values[k])
+      result.add assignment
+    var i = 0
+    while i < keys.len:
+      inc idx[i]
+      if idx[i] < domains[i].len: break
+      idx[i] = 0
+      inc i
+    if i == keys.len: return
+
+let CoherentFocus = coherentFocusAssignments()
+  ## `canBothHold` enumerates these rather than the product it filters — the
+  ## start-up cost of loading a base was that product, once per row pair.
+
 func canBothHold*(a, b: WhenExpr): bool =
   ## Whether some assignment of the keys the two conditions read makes both
   ## true — §5.6's conflict test, **decided by enumeration over the closed
   ## domains**, which is exact because every key is a bool or a closed enum.
+  ##
+  ## Only COHERENT assignments count (`context_keys.coherent`): the focus
+  ## keys derive from one focused element and are enumerated together, as
+  ## the coherent combinations of them (`CoherentFocus`).
   var keys: seq[ContextKey] = @[]
   keysOf(a, keys)
   keysOf(b, keys)
+  var readsFocus = false
+  var free: seq[ContextKey] = @[]
+  for k in keys:
+    if k in CoherentKeys: readsFocus = true
+    elif k notin free: free.add k
+  var domains: seq[seq[string]] = @[]
+  for k in free: domains.add domainOf(k)
   var c = defaultContextKeys()
-  var idx = newSeq[int](keys.len)
+  var idx = newSeq[int](free.len)
   while true:
-    for i, k in keys: c.values[k] = domainOf(k)[idx[i]]
-    if evalWhen(a, c) and evalWhen(b, c): return true
+    for i, k in free: c.values[k] = domains[i][idx[i]]
+    if readsFocus:
+      {.cast(noSideEffect).}:
+        for assignment in CoherentFocus:
+          for (k, v) in assignment: c.values[k] = v
+          if evalWhen(a, c) and evalWhen(b, c):
+            return true
+    elif evalWhen(a, c) and evalWhen(b, c):
+      return true
     var i = 0
-    while i < keys.len:
+    while i < free.len:
       inc idx[i]
-      if idx[i] < domainOf(keys[i]).len: break
+      if idx[i] < domains[i].len: break
       idx[i] = 0
       inc i
-    if i == keys.len: return false
+    if i == free.len: return false
+
+func `$`*(e: WhenExpr): string =
+  ## A condition in one canonical spelling: single spaces, `!` tight,
+  ## parentheses only where precedence needs them (an `||` inside an `&&`,
+  ## and any binary operand of `!`). Two texts that parse to the same tree
+  ## print the same — how the oracle compares a data row's `when` with the
+  ## specification's cell after its abbreviations are expanded.
+  if e.isNil: return ""
+  case e.kind
+  of wkTrue: ""
+  of wkKey: $e.key
+  of wkEq: $e.key & " == " & e.value
+  of wkNe: $e.key & " != " & e.value
+  of wkNot:
+    if e.operand.kind in {wkAnd, wkOr}: "!(" & $e.operand & ")"
+    else: "!" & $e.operand
+  of wkAnd:
+    proc side(x: WhenExpr): string =
+      if x.kind == wkOr: "(" & $x & ")" else: $x
+    side(e.left) & " && " & side(e.right)
+  of wkOr: $e.left & " || " & $e.right
+

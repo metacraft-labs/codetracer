@@ -317,74 +317,16 @@ func controlTooltip*(i: int; chord: string): string =
   transportTooltip(TransportControls[i].id, chord)
 
 # ---------------------------------------------------------------------------
-# The window's keymap: the DESKTOP'S bindings
+# The desktop's default bindings — the YAML block the desktop's own menu reads
+# (the window resolves its keys through `keymap_router` since PLAT-68)
 # ---------------------------------------------------------------------------
 
-const DesktopDefaultConfig = staticRead("../../config/default_config.yaml")
+const DesktopDefaultConfig* = staticRead("../../config/default_config.yaml")
   ## The desktop's default configuration. Its `bindings:` block is the
   ## chord table the desktop's menu, toolbar tooltips and shortcuts read
-  ## (`ui/shortcut_labels.renderChord`); the GPUI window binds and SHOWS the
-  ## same chords, so its menu displays what the desktop's displays.
-
-proc desktopBindings*(): Table[string, string] =
-  ## `ClientAction` name → the chord text, spelled as the desktop's menu
-  ## spells it (`renderChord`: upper case, alternatives joined by a space).
-  var inBindings = false
-  for raw in DesktopDefaultConfig.splitLines():
-    if raw.len == 0:
-      continue
-    if not raw[0].isSpaceAscii and raw[0] != '#':
-      inBindings = raw.startsWith("bindings:")
-      continue
-    if not inBindings:
-      continue
-    let line = raw.strip()
-    if line.startsWith("#"):
-      continue
-    let colon = line.find(':')
-    if colon <= 0:
-      continue
-    let action = line[0 ..< colon].strip()
-    var value = line[colon + 1 .. ^1].strip()
-    if value.len >= 2 and value[0] == '"' and value[^1] == '"':
-      value = value[1 .. ^2]
-    if value.len > 0 and action notin result:
-      result[action] = value.toUpperAscii
-
-func chordOfKey*(key: string; mods: openArray[string]): string =
-  ## A GPUI key event as the desktop spells a chord: `SHIFT+F10`, `CTRL+T`.
-  var parts: seq[string] = @[]
-  if "control" in mods: parts.add "CTRL"
-  if "alt" in mods: parts.add "ALT"
-  if "shift" in mods: parts.add "SHIFT"
-  parts.add key.toUpperAscii
-  parts.join("+")
-
-proc actionForChord*(bindings: Table[string, string]; chord: string): string =
-  ## The action a chord runs, or "" — each binding's alternatives are
-  ## separated by spaces (`forwardContinue: "F8 F2"`).
-  for action, chords in bindings:
-    for c in chords.splitWhitespace():
-      if c == chord:
-        return action
-  ""
-
-func sessionTabStepOf*(key: string; mods: openArray[string]): int =
-  ## The session tabs' keys in the window: `Ctrl+Alt+PageDown` steps to the
-  ## next tab, `Ctrl+Alt+PageUp` to the previous one (answers +1 / -1, or 0
-  ## for any other key). NOT `Ctrl+Tab`, which the terminal binds
-  ## (CodeTracer-TUI.md §3.3.1): this window binds the DESKTOP'S chords, and
-  ## the desktop's `Ctrl+Tab` is Switch File (`switchTabHistory`) and its
-  ## `Ctrl+PageUp` / `Ctrl+PageDown` step the editor's files — so the
-  ## session step takes the one modifier those leave free, rather than
-  ## giving a desktop chord a second meaning here.
-  if "control" notin mods or "alt" notin mods or "shift" in mods or
-     "platform" in mods:
-    return 0
-  case key.toLowerAscii
-  of "pagedown": 1
-  of "pageup": -1
-  else: 0
+  ## (`ui/shortcut_labels.renderChord`); the window hands it to
+  ## `keymap_importers` for the one-time import of an EDITED copy into
+  ## `keybindings.json`.
 
 func overlaps*(a, b: PxRect): bool =
   ## Whether two rectangles share a pixel.

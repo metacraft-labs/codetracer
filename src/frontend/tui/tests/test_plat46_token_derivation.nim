@@ -131,6 +131,10 @@ proc buildProbe(scratchTree, tokensNim, root: string): string =
   # type lives in the one key-name module.
   copyFile(root / "src" / "common" / "key_names.nim",
            scratchTree / "src" / "common" / "key_names.nim")
+  # `roles.nim` reads the focused strip's contrast floor (PLAT-68), a
+  # constant every front-end shares.
+  copyFile(root / "src" / "frontend" / "styles" / "contrast_floors.nim",
+           scratchTree / "src" / "frontend" / "styles" / "contrast_floors.nim")
   copyFile(tokensNim,
            scratchTree / "src" / "frontend" / "styles" / "generated" /
              "design_tokens.nim")

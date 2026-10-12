@@ -112,7 +112,10 @@ const
     ## Ctrl+F5: `CSI <code> ; <modifier> ~` with code 15 (F5) and modifier
     ## `1 + Ctrl(4)` = 5.
     ## https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
-  QuitByte = "q"
+  QuitByte = "\x11"
+    ## Ctrl+Q, the CUA base's quit (PLAT-68; `q` is text in a buffer).
+  F1 = "\eOP"
+    ## F1: `SS3 P`, xterm's spelling — the CUA base's command palette.
   F6 = "\x1b[17~"
     ## F6: `CSI 17 ~`, xterm's spelling. PLAT-68: the way off an editor whose
     ## `Tab` indents (CUA, as in VS Code), to the next pane.
@@ -231,7 +234,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck screen.contains("[EDIT]")
       # …and the INPUT mode indicator is still NORMAL, beside it, which is the
       # orthogonality visible on a terminal rather than in a type.
-      ck screen.contains("NORMAL [EDIT]")
+      ck screen.contains("CUA [EDIT]")
       # §2's Requirement: the pane says WHICH SOURCE it is showing, always.
       ck screen.contains("the working tree")
       # THE FILE'S CONTENT IS THERE, from the real disk through the real host.
@@ -316,7 +319,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
     let dir = projectDir()
     var sess = spawnEditor(dir)
     try:
-      discard waitForScreenText(sess, "NORMAL [EDIT]")
+      discard waitForScreenText(sess, "CUA [EDIT]")
 
       # ---- THE STRIPPED SPELLING: a plain F5 arrives -----------------------
       sess.sendKey("ctrl+f5")
@@ -330,14 +333,14 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       ck inert.contains("continue")
       ck inert.contains("Ctrl+F5 switches")
       # AND THE PRODUCT MODE DID NOT MOVE.
-      ck inert.contains("NORMAL [EDIT]")
+      ck inert.contains("CUA [EDIT]")
       ck not inert.contains("[DEBUG]")
 
       # ---- THE BYTES: the modifier survives --------------------------------
       sess.send(CtrlF5)
-      let switched = waitForScreenText(sess, "NORMAL [DEBUG]")
-      ck switched.contains("NORMAL [DEBUG]")
-      ck not switched.contains("NORMAL [EDIT]")
+      let switched = waitForScreenText(sess, "CUA [DEBUG]")
+      ck switched.contains("CUA [DEBUG]")
+      ck not switched.contains("CUA [EDIT]")
     finally:
       sess.send(QuitByte)
       discard sess.waitExit(initDuration(seconds = 10))
@@ -347,15 +350,15 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
     let dir = projectDir()
     var sess = spawnEditor(dir)
     try:
-      discard waitForScreenText(sess, "NORMAL [EDIT]")
+      discard waitForScreenText(sess, "CUA [EDIT]")
       # THE TOGGLE, as `CSI 15 ; 5 ~`.
       sess.send(CtrlF5)
-      let debug = waitForScreenText(sess, "NORMAL [DEBUG]")
+      let debug = waitForScreenText(sess, "CUA [DEBUG]")
       checkpoint(debug.splitLines()[^1].strip())
       # The PRODUCT indicator moved and the INPUT one did not: both are on the
       # row and only one changed, which is the orthogonality claim on a real
       # terminal.
-      ck debug.contains("NORMAL [DEBUG]")
+      ck debug.contains("CUA [DEBUG]")
       ck not debug.contains("[EDIT]")
       # …and the pane set moved with it (Mode-Transitions.md §4 requirement 4:
       # mode and layout change together or not at all).
@@ -369,7 +372,7 @@ suite "PLAT-16 Tier 2: editing in a real terminal":
       # through a real terminal.
       sess.send(CtrlF5)
       let back = waitForScreenText(sess, " " & ProjectFile & " ")
-      ck back.contains("NORMAL [EDIT]")
+      ck back.contains("CUA [EDIT]")
       ck back.contains("proc alpha() =")
       ck back.contains(" Files ")
     finally:
@@ -414,7 +417,7 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
       # ---- the debugger, on a real recording -------------------------------
       settleOnDebugger(sess, Cols, Rows)
       let opened = sess.screenContents()
-      ck opened.contains("NORMAL [DEBUG]")
+      ck opened.contains("CUA [DEBUG]")
       ck opened.contains(" Call Trace ")
       # THE POSITIVE CONTROL ON THE ABSENCE BELOW: the notice is not on screen
       # before the edit, so "it appeared" is an event rather than a constant.
@@ -422,7 +425,7 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
 
       # ---- Ctrl+F5 into Edit mode, and there is something to edit ----------
       sess.send(CtrlF5)
-      let editing = waitForScreenText(sess, "NORMAL [EDIT]")
+      let editing = waitForScreenText(sess, "CUA [EDIT]")
       checkpoint(editing.splitLines()[^1].strip())
       # The project is the WORKING DIRECTORY, and the front-end says so rather
       # than leaving the user to infer it from a file tree.
@@ -447,14 +450,13 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
       let typed = waitForScreenText(sess, "Zproc alpha() =")
       ck typed.contains(DirtyTab)
 
-      # ---- `:w`, which needs the focus off the editor ----------------------
-      # While the editor is focused every printable key is text, `:` included —
-      # `app/runtime.handleToken`'s step 1a records why. Under the CUA base
-      # (PLAT-68) `Tab` indents and `F6` is the way to the next pane, as in VS
-      # Code; `Ctrl+S` would save from inside the buffer, but this case is
-      # about the prompt's `:w`.
-      sess.send(F6)
-      discard waitForScreenText(sess, "focus ")
+      # ---- `:w`, through the palette ----------------------------------------
+      # While the editor is focused every printable key is text, `:` included.
+      # Under the CUA base (PLAT-68) the command line is the palette's `:` line
+      # (`F1`, as VS Code's; CodeTracer-TUI.md §4) — `Ctrl+S` would save from
+      # inside the buffer, but this case is about the prompt's `:w`.
+      sess.send(F1)
+      discard waitForScreenText(sess, "PALETTE ")
       sess.send(":w\r")
       discard waitForScreenText(sess, "wrote " & ProjectFile)
       # THE EFFECT IS ON THE DISK, not in a field. `readFile` is the assertion
@@ -468,7 +470,7 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
       sess.send(CtrlF5)
       let told = waitForScreenText(sess, "predates")
       checkpoint(told.splitLines()[^1].strip())
-      ck told.contains("NORMAL [DEBUG]")
+      ck told.contains("CUA [DEBUG]")
       # The three things that must survive the status line's truncation: the
       # fact, the file, and the consequence.
       ck told.contains("predates")
@@ -492,9 +494,9 @@ suite "PLAT-16 §2.1 Tier 2: the stale-trace notice, on the route a user has":
     try:
       settleOnDebugger(sess, Cols, Rows)
       sess.send(CtrlF5)
-      discard waitForScreenText(sess, "NORMAL [EDIT]")
+      discard waitForScreenText(sess, "CUA [EDIT]")
       sess.send(CtrlF5)
-      let back = waitForScreenText(sess, "NORMAL [DEBUG]")
+      let back = waitForScreenText(sess, "CUA [DEBUG]")
       checkpoint(back.splitLines()[^1].strip())
       ck not back.contains("predates")
       ck back.contains("switched to DEBUG mode")

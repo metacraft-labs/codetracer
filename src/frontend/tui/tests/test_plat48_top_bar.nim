@@ -59,8 +59,13 @@ proc caps(): TerminalCapabilities =
     initCapabilityFlags())
 
 proc newRuntime(cols, rows: int): TuiRuntime =
+  ## PLAT-68: under the VIM base — the keys these cases drive (`F12`,
+  ## `Ctrl+o`, `g t`, `n`) are CodeTracer-TUI.md §4.2's, which is the Vim and
+  ## Kakoune bases' navigation layer now (under CUA the menu, the reveal and
+  ## the session tabs are the palette's, `Ctrl+PageDown` and the top bar).
   result = newTuiRuntime(newTuiApp(), caps(), cols, rows)
   discard result.enableLayoutBinding()
+  result.selectBase(bkVim, ksFlag)
   result.refreshMenuForKeymap()
 
 proc row0(rt: TuiRuntime): string = rt.shellScreenOf().rows[0]
@@ -182,14 +187,19 @@ suite "PLAT-48: the menu":
     ck not rt.app.menu.isOpen
 
   test "switching the keymap changes the chord the menu shows":
+    # PLAT-68: the user's `keybindings.json` rows, laid over the base — the
+    # menu shows the chord that RUNS the item now (`chordFor`).
     let rt = newRuntime(200, 50)
-    let keys = getTempDir() / "plat48-keys-" & $getCurrentProcessId()
-    writeFile(keys, "NORMAL n = -\nNORMAL F10 = -\nNORMAL Ctrl+n = step-over\n")
-    discard rt.typeLine("keys " & keys)
-    ck rt.app.menu.shortcutFor("forwardNext") == "Ctrl+n"
-    discard rt.typeLine("keys default")
+    discard rt.applyUserKeymap(parseUserKeymap("""[
+      { "key": "n", "command": "-debugger.step-over" },
+      { "key": "f10", "command": "-debugger.step-over" },
+      { "key": "ctrl+n", "command": "debugger.step-over" }
+    ]"""))
+    rt.refreshMenuForKeymap()
+    ck rt.app.menu.shortcutFor("forwardNext") == "Ctrl+N"
+    discard rt.applyUserKeymap(parseUserKeymap(""))
+    rt.refreshMenuForKeymap()
     ck rt.app.menu.shortcutFor("forwardNext") == "n"
-    removeFile(keys)
 
   test "Enter on an item runs its action; a disabled item does nothing":
     let rt = newRuntime(200, 50)

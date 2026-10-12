@@ -415,6 +415,17 @@ export plugin_api
 import editing_core
 export editing_core
 
+# THE KEYMAP ROUTER (PLAT-68): the base keymaps, the user's
+# `keybindings.json`, the layer stack and the one resolver every front-end
+# routes keys through (Base-Keymaps-And-Layer-Stack.md §6). Here for the
+# reason the editing core is: a front-end that cannot see it would
+# reimplement it. Pure — the file's text arrives from the host.
+import keymap/keymap_router
+import keymap/keymap_importers
+import keymap/client_actions
+import keymap/navigation_keymap
+export keymap_router, keymap_importers, client_actions, navigation_keymap
+
 # PLAT-8's I/O primitives are DELIBERATELY NOT HERE, and the reason is the
 # whole of §8's argument.
 #

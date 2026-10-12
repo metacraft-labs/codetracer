@@ -70,7 +70,13 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
 
   folder(program, @[
     macStandardFolder(),
-    folder("File", @[
+    # THE MNEMONICS (CUA-Keymap.md §3.8): VS Code's where CodeTracer's own
+    # Alt chords leave the letter free — `Alt+E`, `Alt+V`, `Alt+C` focus the
+    # Event Log, the editor and the call trace (§3.7), so Edit and View take
+    # their second choice, as a Windows menu does. `cua_keymap`'s
+    # `menu.open-folder` rows bind exactly these letters
+    # (`test_plat68_menu_access` holds the two together).
+    folder("File", mnemonic = 'f', children = @[
       item("Open Trace...", "aOpenTrace"),
       item("Open Trace in New Tab...", "aOpenTraceInNewTab"),
       item("Record New Trace...", "aRecordNewTrace"),
@@ -81,12 +87,12 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       item("Previous File", "switchTabLeft"),
       sep(item("Switch File", "switchTabHistory")),
       item("Exit CodeTracer", "aExit", os = OsNonHost or OsNonMac)]),
-    folder("Edit", @[
+    folder("Edit", mnemonic = 'i', children = @[
       item("Find in Files", "findInFiles"),
       sep(item("Find Symbol", "findSymbol")),
       item("Expand All", "aExpandAll"),
       item("Collapse All", "aCollapseAll")]),
-    folder("View", @[
+    folder("View", mnemonic = 'w', children = @[
       item("Filesystem", "aFilesystem"),
       item("Calltrace", "aFullCalltrace"),
       item("State", "aState"),
@@ -103,7 +109,7 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       folder("Theme", @[
         item("Default Dark Theme", "aTheme3"),
         item("Default White Theme", "aTheme1")])]),
-    folder("Build", @[
+    folder("Build", mnemonic = 'b', children = @[
       item("Rebuild/Re-record file", "aReRecord"),
       item("Rebuild/Re-record project", "aReRecordProject"),
       item("Apply Edit & Hot-Reload", "aApplyEditAndReload"),
@@ -111,10 +117,10 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       sep(item("Launch Under Live Edit (HCR)…", "aLaunchUnderHcr")),
       item("Go to Next Error", "aGotoNextError"),
       item("Go to Previous Error", "aGotoPreviousError")]),
-    folder("Reset", @[
+    folder("Reset", mnemonic = 'r', children = @[
       item("Restart replay-server", "aRestartDbBackend"),
       item("Restart session-manager", "aRestartBackendManager")]),
-    folder("Debug", @[
+    folder("Debug", mnemonic = 'd', children = @[
       item("Continue", "forwardContinue"),
       item("Step Over", "forwardNext"),
       item("Step In", "forwardStep"),
@@ -144,7 +150,7 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
     folder("Help", @[item("Report a Problem...", "aReportProblem")],
            os = OsMac, role = "help"),
     folder("Help", @[item("Report a Problem...", "aReportProblem")],
-           os = OsNonMac)])
+           os = OsNonMac, mnemonic = 'h')])
 
 func hiddenOn*(os: int; ownsWindow: bool): bool =
   ## Whether an item with platform bits `os` is hidden in an in-page menu:

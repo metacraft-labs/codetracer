@@ -126,6 +126,10 @@ type
       ## inspection cursor — or 0 for none.
     caretColumn*: int
       ## Its 1-based column.
+    selection*: SelectionCells
+      ## PLAT-68: the editor document's selection as display cells
+      ## (`editing_core.selectionCells`) — in Debug mode the read-only
+      ## document's, which a selection and a copy act on as Monaco's do.
     rows*: seq[EditorRow]
     entryContext*: string
       ## PLAT-47 B1: the tokenizer state the FIRST row starts in

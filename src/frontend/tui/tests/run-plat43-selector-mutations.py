@@ -50,11 +50,13 @@ PREFERENCE = "src/frontend/viewmodel/host/keymap_preference.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 BINDING = "src/frontend/tui/app/edit_binding.nim"
 CORE = "src/frontend/viewmodel/editing_core.nim"
+CUA = "src/frontend/viewmodel/keymap/cua_keymap.nim"
+ROUTER = "src/frontend/viewmodel/keymap/keymap_router.nim"
 
 SUITE_SELECTOR = "src/frontend/tui/tests/test_plat43_keymap_selector.nim"
 SUITE_SOURCES = "src/frontend/tui/tests/test_plat43_selector_sources.nim"
 
-SUBJECTS = [SELECTION, PREFERENCE, RUNTIME, BINDING, CORE]
+SUBJECTS = [SELECTION, PREFERENCE, RUNTIME, BINDING, CORE, CUA, ROUTER]
 SUITES = [SUITE_SELECTOR, SUITE_SOURCES]
 
 
@@ -89,19 +91,21 @@ ARMS = [
     ("R1", RUNTIME, "    else: rt.editServices.saveKeymap(selection.model)",
      "    else: \"\"", SUITE_SELECTOR,
      "`:keymap` stops asking the host to remember the choice"),
-    # R2 RE-AIMED 2026-10-11 (PLAT-68): the `Tab` exclusion list it targeted
-    # was deleted; `F6` / `Shift+F6` are the way off a buffer now, and the arm
-    # makes the editor swallow `F6`.
-    ("R2", RUNTIME,
-     "  isTextKey(name) or rt.app.editSession.activeBuffer().claimsEditKey(name, 0)",
-     "  name == \"F6\" or isTextKey(name) or "
-     "rt.app.editSession.activeBuffer().claimsEditKey(name, 0)",
+    # R2 / R3 RE-AIMED 2026-10-12 (PLAT-68 Phase B): which keys a buffer
+    # takes is the ROUTER's answer now — the layer a key resolves in — so the
+    # arms plant their defects in the data and the router, not in a query.
+    ("R2", CUA,
+     "    BaseRow(chords: \"F6\", operation: \"layout.focus-next-pane\", table: G),",
+     "    BaseRow(chords: \"F6\", operation: \"layout.focus-next-pane\"),",
      SUITE_SELECTOR,
      "F6 stops being the way off the editor: the buffer swallows it"),
-    ("R3", RUNTIME,
-     "  isTextKey(name) or rt.app.editSession.activeBuffer().claimsEditKey(name, 0)",
-     "  isTextKey(name)", SUITE_SELECTOR,
-     "a model's own non-printable keys stop reaching the buffer"),
+    ("R3", ROUTER,
+     "      if source == lsBase and table == EditorTable and router.base.isModal and\n"
+     "         facts.editor.readOnly:",
+     "      if source == lsBase and table == EditorTable and router.base.isModal and\n"
+     "         true:",
+     SUITE_SELECTOR,
+     "a modal model's own keys stop reaching the buffer"),
     ("E1", BINDING, "    buf.doc.switchModel(model)", "    discard",
      SUITE_SELECTOR, "`:keymap` stops re-keying the OPEN buffer"),
     ("C1", CORE, "  d.state.mode = initialModeFor(model)", "  discard",

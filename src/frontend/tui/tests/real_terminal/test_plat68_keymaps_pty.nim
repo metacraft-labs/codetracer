@@ -25,6 +25,9 @@
 ##     the document one fixed keystroke sequence produces; `--keymap` overrides
 ##     the stored value for one session and does not persist; a stored
 ##     `default` becomes `cua` with the notice, once, and the file is rewritten.
+##     Every `:` command is typed into the palette each base opens with its own
+##     chord (`F1`, Emacs's `Alt+X`), so the omnibar running a `:` line as a
+##     command line (`:w`, `:q`, a bare `:keymap`) is held here too.
 ##
 ## THE ONE STAND-IN, AND WHY IT IS NOT A MOCK. No emulator that implements the
 ## Kitty keyboard protocol runs in CI, and the harness's libvterm does not
@@ -95,7 +98,7 @@ proc keyBytes(name: string): string =
   of "Right": "\e[C"
   of "Left": "\e[D"
   of "End": "\e[F"
-  of "F6": "\e[17~"
+  of "F1": "\eOP"
   of "Shift+Right": "\e[1;2C"
   of "Shift+Left": "\e[1;2D"
   of "Ctrl+Shift+k": "\e[107;6u"
@@ -188,15 +191,30 @@ proc sendKey(sess: var TuiTestSession; name: string) =
   sess.send(keyBytes(name))
   discard sess.drainOutput(if name == "Esc": 250 else: 40)
 
-proc offEditorAndRun(sess: var TuiTestSession; command, expect: string): string =
-  ## `F6` off the editor (no base binds it in a buffer), then a `:` command.
-  sess.sendKey("F6")
-  discard waitForScreenText(sess, "focus ")
+proc paletteKey(base: BaseKeymap): string =
+  ## The chord each base opens the command palette with — the omnibar, whose
+  ## `:` prefix runs a command-line command ("run a :command"). It is the
+  ## BASE's chord: the terminal's keys are its base's and nothing else's
+  ## (PLAT-68 Phase B), and CUA gives a bare `:` to the command line only
+  ## where a letter cannot type — the read-only editor, Debug's lists.
+  case base
+  of bkEmacs: "Alt+x"
+  of bkCua, bkVim, bkKakoune: "F1"
+
+proc runCommand(sess: var TuiTestSession; base: BaseKeymap;
+                command, expect: string): string =
+  ## A `:` command through `base`'s palette, from wherever the focus is.
+  sess.sendKey(paletteKey(base))
+  discard waitForScreenText(sess, "PALETTE ")
   sess.send(":" & command & "\r")
   waitForScreenText(sess, expect)
 
-proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+proc quit(sess: var TuiTestSession; base = bkCua) =
+  ## `:q` through `base`'s palette (the base's own quit chord differs per
+  ## base, the palette's command does not).
+  sess.sendKey(paletteKey(base))
+  discard sess.drainOutput(300)
+  sess.send(":q\r")
   discard sess.waitExit(initDuration(seconds = 10))
   sess.close()
 
@@ -236,10 +254,10 @@ suite "PLAT-68 Tier 2: the key synthesiser is the decoder's inverse":
   test "every key this suite sends decodes back to its own name":
     ck fileExists(tuiBinary())
     var names = @["Esc", "Enter", "Tab", "Backspace", "Space", "Up", "Down",
-                  "Right", "Left", "End", "F6", "Shift+Right", "Shift+Left",
+                  "Right", "Left", "End", "F1", "Shift+Right", "Shift+Left",
                   "Ctrl+Shift+k", "Ctrl+Space", "Ctrl+c", "Ctrl+v", "Ctrl+z",
                   "Ctrl+y", "Ctrl+s", "Ctrl+k", "Ctrl+f", "Ctrl+e", "Alt+w",
-                  "Alt+y", "d", "x", "q"]
+                  "Alt+y", "Alt+x", "d", "x"]
     for k in CuaSequence:
       if k != Pause and k notin names: names.add k
     for k in names:
@@ -274,7 +292,6 @@ suite "PLAT-68 Tier 2: Edit mode under CUA, with no stored preference":
       except AssertionDefect:
         saved = false
     finally:
-      sess.sendKey("F6")
       sess.quit()
     let onDisk = readFile(project / ProjectFile)
     let expected = inProcess(bkCua, StartDoc, CuaSequence, kpKitty)
@@ -307,7 +324,6 @@ suite "PLAT-68 Tier 2: Edit mode under CUA, with no stored preference":
       sess.send(keyBytes("Ctrl+s"))
       discard waitForScreenText(sess, "wrote " & ProjectFile)
     finally:
-      sess.sendKey("F6")
       sess.quit()
     let onDisk = readFile(project / ProjectFile)
     checkpoint("on disk: " & onDisk.escape)
@@ -335,7 +351,6 @@ suite "PLAT-68 Tier 2: Edit mode under CUA, with no stored preference":
         sess.send(keyBytes("Ctrl+s"))
         discard waitForScreenText(sess, "wrote " & ProjectFile)
       finally:
-        sess.sendKey("F6")
         sess.quit()
       let onDisk = readFile(project / ProjectFile)
       checkpoint(term & ": " & onDisk.escape)
@@ -365,7 +380,6 @@ suite "PLAT-68 Tier 2: the terminal's key protocol, negotiated and restored (KL-
         if term.startsWith("screen"): ck MokOn notin bytes
         ck sess.transcriptDroppedBytes() == 0
       finally:
-        sess.sendKey("F6")
         sess.quit()
 
   test "the pop or the reset is written on SIGTERM, SIGHUP and a crash":
@@ -422,15 +436,18 @@ suite "PLAT-68 Tier 2: switching the base":
       try:
         sess.answerProbe(kitty = false)
         discard waitForEditorTab(sess)
-        let told = offEditorAndRun(sess, "keymap " & $base, "keymap " & $base)
+        # The session starts under the STORED base (CUA, or Vim for the CUA
+        # arm), so the switch goes through that base's palette.
+        let starting = if base == bkCua: bkVim else: bkCua
+        let told = runCommand(sess, starting, "keymap " & $base,
+                              "keymap " & $base)
         checkpoint(told.splitLines()[^1])
-        sess.send("\e[17;2~")          # Shift+F6: back onto the editor
         discard sess.drainOutput(150)
         for k in Sequence: sess.sendKey(k)
         sess.sendKey("Esc")
-        discard offEditorAndRun(sess, "w", "wrote " & ProjectFile)
+        discard runCommand(sess, base, "w", "wrote " & ProjectFile)
       finally:
-        sess.quit()
+        sess.quit(base)
       ck readFile(state / KeymapFile) == $base & "\n"
       let onDisk = readFile(project / ProjectFile)
       let expected = inProcess(base, StartDoc, Sequence & @["Esc"],
@@ -452,10 +469,10 @@ suite "PLAT-68 Tier 2: switching the base":
     try:
       sess.answerProbe(kitty = false)
       discard waitForEditorTab(sess)
-      let told = offEditorAndRun(sess, "keymap", "keymap emacs")
+      let told = runCommand(sess, bkEmacs, "keymap", "keymap emacs")
       ck told.contains("keymap emacs (flag)")
     finally:
-      sess.quit()
+      sess.quit(bkEmacs)
     ck readFile(state / KeymapFile) == "vim\n"
 
   test "a stored `default` is read as `cua`, said once, and rewritten":
@@ -468,7 +485,6 @@ suite "PLAT-68 Tier 2: switching the base":
       let first = waitForScreenText(sess, "keymap 'default' is now 'cua'")
       ck first.contains("keymap 'default' is now 'cua'")
     finally:
-      sess.sendKey("F6")
       sess.quit()
     ck readFile(state / KeymapFile) == "cua\n"
     var again = spawnEditor(project, state)
@@ -478,7 +494,6 @@ suite "PLAT-68 Tier 2: switching the base":
       discard again.drainOutput(300)
       ck not again.screenContents().contains("is now 'cua'")
     finally:
-      again.sendKey("F6")
       again.quit()
 
 suite "PLAT-68 Tier 2 — assertion tally":

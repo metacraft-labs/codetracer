@@ -68,7 +68,9 @@ template ck(condition: untyped) =
 const
   Cols = 200
   Rows = 50
-  F12 = "\x1b[24~"
+  AltBacktick = "\x1b`"
+    ## `` Alt+` ``: the program menu's key on a terminal, which never sees
+    ## `Alt` alone (CUA-Keymap.md §3.8).
   CtrlP = "\x10"
   Esc = "\x1b"
   Down = "\x1b[B"
@@ -152,7 +154,7 @@ proc click(sess: var TuiTestSession; row, col: int) =
   sess.mouse(0, row, col, release = true)
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -171,14 +173,14 @@ proc saysNothingOfDrags(line: string): bool =
 
 suite "PLAT-49 on a real terminal: the menu is one root button with cascades":
 
-  test "row 0 holds one root button; F12 drops the first level; Right cascades":
+  test "row 0 holds one root button; Alt+` drops the first level; Right cascades":
     var sess = open()
     let top = sess.rowText(0)
     # PLAT-50: the button bounded by edge lines (the desktop's `#menu-root`).
     ck top.startsWith("▕≡▏")
     for title in ["File", "Edit", "View", "Build", "Debug", "Help"]:
       ck not top.contains(" " & title & " ")
-    sess.send(F12)
+    sess.send(AltBacktick)
     # Row 1 already says "Files" (the Files stack's strip): wait for the
     # dropdown's SECOND item instead, which nothing else on that row spells.
     # PLAT-50: the dropdown is framed — row 1 is its top edge, its items
@@ -327,8 +329,10 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     ck hexOfColor(s[1][vcsAt + 6].bg) == focusGround
     ck hexOfColor(s[3][vcsAt + 6].bg) == panel
     ck strip != panel and focusGround != strip
-    # The selected tab: its foreground, bold — on the focused strip's ground.
-    ck hexOfColor(s[1][filesAt + 1].bg) == focusGround
+    # The selected tab: its foreground, bold — on its OWN ground, apart from
+    # the focused strip's (PLAT-68: ui/surface/primary/default, by the
+    # contrast floor).
+    ck hexOfColor(s[1][filesAt + 1].bg) == dark(dtColorsUiSurfacePrimaryDefault)
     ck hexOfColor(s[1][filesAt + 1].fg) == activeFg
     ck caBold in s[1][filesAt + 1].attrs
     # An inactive tab of the focused strip: the subdued tier, not bold.

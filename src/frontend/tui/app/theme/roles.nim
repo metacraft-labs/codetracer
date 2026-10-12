@@ -44,9 +44,11 @@
 ## colour on the resolved tier.
 
 import ../../../styles/generated/design_tokens
+import ../../../styles/contrast_floors
+import ./colour_math
 import ./editor_theme
 
-export design_tokens
+export design_tokens, contrast_floors
 
 type
   DistinctionGroup* = enum
@@ -450,8 +452,15 @@ const
     srTabBarFocused: fgbg(dgTab, dtColorsUiTextPrimaryBodySubtle,
                           dtColorsUiBorderSecondary,
                           mono = {raUnderline, raItalic}),
+    # PLAT-68 (the user: the focused strip's selected and unselected tabs
+    # shared one ground): the ACTIVE tab of the focused strip is lifted off
+    # the focus colour onto ui/surface/primary/default — the window's ground,
+    # 1.51:1 against ui/border/secondary in Dark and 1.83:1 in Light, over the
+    # tab-contrast floor (`TabGroundContrastFloor`) — while the strip and its
+    # other tabs keep the focus colour, so the focused strip stays distinct
+    # from every unfocused one.
     srTabActiveFocused: fgbg(dgTab, dtColorsUiTextPrimaryHeadings,
-                             dtColorsUiBorderSecondary, attrs = {raBold},
+                             dtColorsUiSurfacePrimaryDefault, attrs = {raBold},
                              mono = {raBold, raReverse, raUnderline}),
     # PLAT-49 part B: a session tab off the bar's card (#262626 / #dbd6cc) by
     # one subtle step — ui/surface/primary/default (#1b1b1b / #f8f6f2) —
@@ -793,3 +802,17 @@ func dividerLineRole*(choice: DividerChoice): SemanticRole =
   case choice
   of dcStrip: srDividerStrip
   of dcSubtle: srBorderPane
+
+# PLAT-68, ENFORCED AT BUILD: on the focused strip the selected tab's ground
+# and the other tabs' stand apart by at least the tab-contrast floor, in both
+# modes — a token change that brings them together fails the build here
+# rather than reaching a screen where the selected tab cannot be found.
+static:
+  for mode in DesignMode:
+    doAssert contrastRatio(
+        parseHexColour(tokenHex(spec(srTabActiveFocused).bg, mode)),
+        parseHexColour(tokenHex(spec(srTabBarFocused).bg, mode))) >=
+      TabGroundContrastFloor,
+      "the focused strip's selected tab is below the tab-contrast floor in " &
+      $mode & " mode"
+

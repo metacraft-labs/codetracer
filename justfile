@@ -1642,7 +1642,7 @@ test-frontend-js:
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
-  shortcut_bindings_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-bindings-test.XXXXXX.js")"
+  monaco_operations_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-monaco-operations-test.XXXXXX.js")"
   shortcut_presets_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-presets-test.XXXXXX.js")"
   shortcut_dialog_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-dialog-test.XXXXXX.js")"
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
@@ -1651,7 +1651,7 @@ test-frontend-js:
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1686,10 +1686,11 @@ test-frontend-js:
   # a chord, producing an action with no keyboard and a menu item with no hint
   # beside it.  Needs the same `window` alias as the scratchpad suite, for the
   # same `types.nim` reason.
-  echo "Running shipped shortcut binding tests..."
+  echo "Running the desktop router's editing-table tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
-    --out:"$shortcut_bindings_test" js src/frontend/tests/shortcut_bindings_test.nim
-  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$shortcut_bindings_test"
+    --path:src/frontend/viewmodel \
+    --out:"$monaco_operations_test" js src/frontend/tests/monaco_operations_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$monaco_operations_test"
 
   # The preset tables, and the dialog that lists what they resolved to. Same
   # lane and same invocation as the suite above: all three read the SHIPPED
@@ -4038,9 +4039,7 @@ test-tests-pane-row-controls:
   exec > >(tee test-logs/test-tests-pane-row-controls.log) 2>&1
   bash ci/test/tests-pane-row-controls.sh
 
-# ONE PRESS RUNS ONE ACTION, AND ONE PANE ID NAMES ONE NODE.
-#
-# Two latent defects that did no visible harm by luck rather than by design.
+# ONE PRESS RUNS ONE OPERATION, AND ONE PANE ID NAMES ONE NODE.
 #
 # The pane half is a fixed bug with a mutation proof: `ui/layout.nim`'s
 # standalone auto-hide registration had its `continue` one level too deep, so a
@@ -4049,15 +4048,12 @@ test-tests-pane-row-controls:
 # `#errorsComponent-0` nodes, the GL one holding the mounted panel and an empty
 # duplicate parked offscreen at x = -9999.
 #
-# The chord half is a hazard rather than a present bug, and the gate is what
-# keeps it that way. Every entry of `ui/editor.nim`'s
-# MONACO_SHORTCUTS_WHITELIST is registered BOTH as a Monaco command and as a
-# Mousetrap bind onto the same `data.actions` slot, and
-# `ui/shortcuts.nim`'s global `stopCallback` override removes Mousetrap's
-# reason to stand down. They do not both fire today only because Monaco
-# `stopPropagation`s — which is a property of the chords currently on the list,
-# not a mechanism. ALT+F8, which Monaco binds natively, was measured firing
-# twice per press when whitelisted.
+# The key half holds PLAT-68's one key router to its promise on the shipped
+# bundle: every press runs exactly one operation (the router's own trace), the
+# same one with the caret in Monaco and outside it, and no action runs twice —
+# the three registries it replaced (Mousetrap's table, hard binds, Monaco's
+# `commands`) ran one key as two actions by focus and delivered some chords
+# twice.
 #
 # Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
 # otherwise.
@@ -4067,26 +4063,6 @@ test-chord-and-pane-uniqueness:
   mkdir -p test-logs
   exec > >(tee test-logs/test-chord-and-pane-uniqueness.log) 2>&1
   bash ci/test/chord-and-pane-uniqueness.sh
-
-# THE PERMITTED-SHADOW TABLE IS THE SAME ON BOTH SIDES.
-#
-# `shortcut_bindings_test.nim` fails on any chord `hardBindShadowedActions`
-# reports that `PERMITTED_HARD_BIND_SHADOWS` does not carry. That constant is a
-# copy of a table in `codetracer-specs`, so widening it by one row would make
-# the rule permit exactly the shadow it exists to catch, and every test over it
-# would go on passing. This compares the two texts.
-#
-# SKIPS LOUDLY when `codetracer-specs` is not a sibling -- no CI lane provisions
-# it today -- and `CT_SPECS_REQUIRED=1` turns that skip into a failure, which is
-# the one variable between this recipe and being enforcing in a lane that does.
-# Both instrument arms plant an extra row, one per side, so a run that compared
-# nothing cannot report agreement.
-test-shortcut-shadow-spec-agreement:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  mkdir -p test-logs
-  exec > >(tee test-logs/test-shortcut-shadow-spec-agreement.log) 2>&1
-  bash ci/test/shortcut-shadow-spec-agreement.sh
 
 # ONE BUNDLE, ONE DEFINITION PER NAME.
 #
@@ -6337,3 +6313,9 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
 # `src/tests/visual/answers/plat51-desktop.electron.json`.
 plat51-capture-electron *args:
   bash scripts/plat51-capture-electron.sh {{args}}
+
+# PLAT-68 Phase B: the real Electron app's keys through the one router (F-keys
+# once, letters and Enter in the read-only editor, Alt+E, Ctrl+B,
+# Ctrl+Shift+B, the user's keybindings.json and its reload).
+plat68-desktop-keys *args:
+  bash scripts/plat68-desktop-keys.sh {{args}}

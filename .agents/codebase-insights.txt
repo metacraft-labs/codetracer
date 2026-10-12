@@ -2892,16 +2892,10 @@ commands.
   `viewmodels/noir_build_producer.nim`, and both are pure so `vm-unit` and
   `vm-unit-js` run all of it. Four obstacles were found by measurement and
   each is worth knowing before touching this area:
-  * **`ui/shortcuts.nim`'s hard-coded `ctrl+b` shadows a CONFIGURED shortcut.**
-    `default_config.yaml` binds `build: "CTRL+B"`, the YAML loop binds it, and
-    then a later `Mousetrap.bind` in the same proc replaces it — Mousetrap
-    overwrites rather than chains. The YAML entry has been dead on every
-    platform. It is now excluded from `-d:ctWeb`, and the web arm installs
-    `data.actions[ClientAction.build]` instead, which `bindShortcut` reads AT
-    PRESS TIME. A `Mousetrap.bind` from `ui_js.nim`'s web arm does NOT work:
-    `onNoTrace` is `{.async.}` and calls `configureShortcuts()` again in a
-    later microtask, so it rebinds over anything installed there — measured,
-    with `Mousetrap.trigger('ctrl+b')` from the page also reaching nothing.
+  * (Superseded by PLAT-68 Phase B: the desktop's and the web's keys go
+    through ONE router, `ui/key_router.nim`; under CUA `build.run` is
+    `Ctrl+Shift+B` and `Ctrl+B` toggles the side panels, as in VS Code. The
+    Mousetrap binding loop this bullet described is gone.)
   * **The generated entry document had the auto-hide STRIPS and not the
     OVERLAY.** BUILD, PROBLEMS, FIND IN FILES and REQUESTS are standalone
     auto-hide panes (`ui/layout.nim`): their DOM lives in
@@ -7087,8 +7081,9 @@ PLAT-68 Phase A).
   with or without `editor.`, a `when` string, platforms) built by
   `base_rows.definitionOf`, which RAISES on a bad row at module init — a typo
   in a row crashes every suite that imports `editing_core`, not one test.
-  Rows that need a pane/overlay scope are `DeferredRow`s (Phase B) and must
-  not be bound. Vim and Kakoune stay PLAT-31's procedural tables.
+  Since Phase B every row is bound (panes, lists, overlays, the debugger);
+  Vim and Kakoune stay PLAT-31's procedural tables plus the shared
+  `navigation_keymap` (CodeTracer-TUI.md §4.2).
 - `when` (`keymap/when_expr`) is parsed against the closed `ContextKey`
   catalogue (`keymap/context_keys`); an unknown key is a parse error, never
   false. The editor's keys come from `editorContextKeys(state, product,
@@ -7096,13 +7091,14 @@ PLAT-68 Phase A).
   in-process test of a legacy fallback must build its document with a legacy
   `KeyDelivery`.
 - PENDING TIMEOUT IS THE BASE'S (`pendingTimeoutOf`): none under CUA/Emacs.
-  A CUA `Ctrl+K` with no second key waits forever, and while a prefix is
-  pending `claimsKey` answers true for EVERY key — the runtime must not route
-  the next key to the debugger keymap, or the prefix is left hanging.
+  A CUA `Ctrl+K` with no second key waits forever; the router owns the
+  pending prefix (`KeymapRouter.pending`), so the key after it goes to the
+  same router and either continues it or ends it.
 - The editor owns a key iff it is text or the base claims it
   (`runtime.editorOwnsToken`); there is no exclusion list. Under CUA `Tab`
   indents; `F6` / `Shift+F6` leave the editor; `Ctrl+Shift+p` and `F1` open
-  the prompt. Tests that used `Tab` to leave a buffer must use `F6`.
+  the palette (Emacs: `Alt+X`). Tests that used `Tab` to leave a buffer must
+  use `F6` — under CUA and Vim/Kakoune; Emacs has no `F6` (`Ctrl+X O`).
 - THE TERMINAL'S KEY PROTOCOL: `CSI ? u` is sent before the DA1 fence; a
   reply means Kitty (`CSI > 1 u` pushed AFTER the alt screen is entered — the
   flag stack is per screen), else `modifyOtherKeys` 2 on an `xterm*`/`tmux*`
@@ -7150,3 +7146,108 @@ PLAT-68 Phase A).
   trusting a copied cache. `test_plat45_three_media` also needs
   `just build-gpui` (build/bin/codetracer-gpui), or it is red for the
   prerequisite, not the product.
+
+ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
+- EVERY KEY GOES THROUGH `KeymapRouter.route(facts, scopePath, navMode,
+  name, nowMs)` (`viewmodel/keymap/keymap_router.nim`): user rows, then base
+  rows (KL-11); pushed layers before the scope path, innermost scope first.
+  A front-end only supplies the scope path and facts: the terminal reads the
+  `isonim-tui` focus tree (`runtime.scopePath`), GPUI the element focus chain
+  (`windowScopePath`), the desktop the DOM focus chain
+  (`ui/key_router.desktopScopePath`, elements stamped `data-scope-kind` /
+  `data-scope-id`). `describeResolution` is the one spelling of an answer;
+  `test_plat68_diff13` compares the terminal's and GPUI's answers key by key.
+- THERE IS NO SECOND KEY REGISTRY ANYWHERE. The terminal's old keymap, GPUI's
+  `chordOfKey`/`actionForChord`, the desktop's Mousetrap loop, hard binds and
+  Monaco `commands` table are deleted. A key that does nothing under a base
+  is a missing ROW, not a missing handler: e.g. Emacs binds no `F6` and no
+  bare `:` — the command line is the palette's `:` line there.
+- THE PALETTE'S `:` LINE IS A COMMAND LINE FIRST (`runtime.acceptOmnibar`):
+  `:w`, `:q`, `:keymap vim` run as typed (`runCommandLine`); only a line
+  whose verb is no command picks the highlighted fuzzy entry. Under CUA and
+  Emacs this is the only route to the command line in Edit mode.
+- `rt.focus` IS LONG-LIVED; FRAME NODE IDS ARE NOT. `terminal_driver`'s
+  `composite` resets node ids per frame; `frameNodeIds` saves and restores
+  `nextTerminalNodeId` around it, or a frame's nodes collide with the focus
+  tree's and the focus hops pane to pane on every key (measured: "left" typed
+  as "l"). An overlay hung at the window keeps the pane it covered in
+  `heldPane`; `scopePath` starts with `dropInner()`.
+- THE DESKTOP'S FOCUSED EDITOR is the `.code-editor` view containing
+  `document.activeElement` (a click lands on the `.editor.code-editor.tab`
+  div, tabindex 2, not on Monaco) — `editor_scope.editorScopeElement`; an
+  editing op focuses Monaco first (`runMonaco`). `window.__ctKeyTrace` records
+  every operation the router ran — what the Electron specs read.
+- `keybindings.json` (`host/keybindings_location`, `$CODETRACER_KEYBINDINGS`):
+  the desktop's main process reads/watches it and sends it over IPC; the
+  renderer asks for it (`keybindings-request`) because a send before the
+  listener exists is lost. Electron specs plant it under
+  `ctUserConfigDir()` — the worker's scratch `CODETRACER_HOME`.
+- `layout.toggleSidePanels` (Ctrl+B) pins the sides of the editor's row and
+  records their container TREE (`PinnedNode`); the second press rebuilds the
+  same rows/columns/stacks through `auto_hide.unpinPanelTarget`.
+  `unpinPanel` alone puts each panel in a new stack. Iterate a COPY of
+  `contentItems` while pinning (`childrenOf`): GoldenLayout removes emptied
+  containers from the array under the walk (Nim's seq iterator asserts).
+- `-d:ctWeb` CATCHES WHAT THE ELECTRON BUILD DOES NOT: a `for x in seq`
+  variable captured in a closure is `lent` there and refused ("cannot be
+  captured as it would violate memory safety"). `ci/test/web-bundle-assets.sh`
+  (run by the browser gates) is the web compile check.
+- OSC 52 (`app/clipboard_read`): copy writes `ESC ] 52 ; c ; <b64> BEL`;
+  paste asks `ESC ] 52 ; c ; ? BEL` and waits 300 ms; a terminal that stays
+  silent is not asked again (libvterm never answers — the pty suites answer
+  it themselves when they test the answered path).
+- THE PROGRAM MENU FROM THE KEYBOARD (CUA-Keymap.md §3.8): `Alt` pressed and
+  released alone is the canonical key name `Alt` (row → `menu.toggle`,
+  Linux/Windows), recognised by `viewmodel/keymap/alt_tap` from the desktop's
+  keydown/keyup and GPUI's `modifierschange` (a shim event added for it); a
+  terminal never sees a modifier alone, so `` Alt+` `` (`menu.open`, Emacs's
+  tmm-menubar chord) is its key, on every front-end. `F10` opens the menu in
+  Edit mode only (step over in Debug). `Alt+<mnemonic>` → `menu.open-folder(x)`;
+  the letters live in `product_menu` (File f, Edit i, View w, Build b, Reset r,
+  Debug d, Help h — `Alt+E/V/C` are pane focus) and `test_plat68_menu_access`
+  holds data and rows together. An OPEN menu owns its keys on all three
+  front-ends (TUI `handleMenuKey`, GPUI `handleTopKey`, desktop
+  `ui/menu_keys.menuAccess`), except the keymap's own menu keys.
+- Nim is STYLE-INSENSITIVE ACROSS MODULE AND IDENTIFIER NAMES: a module
+  `menu_access` and a var `menuAccess` in the same scope are "ambiguous"
+  ("expression 'menu_access' has no type"). Name the module differently.
+- `.gitignore`'s `client*` (for build outputs) IGNORED
+  `viewmodel/keymap/client_actions.nim`; it is negated explicitly now. Check
+  `git status --ignored` for source files before landing new modules.
+- THE WEB STUDIO IS `frontEnd == web` (`key_router` under `-d:ctWeb`): its Run
+  (`Ctrl+Enter`, `build.run-program`) and Export (`Ctrl+Shift+E`,
+  `project.export`) are router operations a build registers with
+  `registerHostOperation`; a `Mousetrap.bind` can never fire behind the
+  capture-phase router (Mousetrap is gone from the bundle).
+- `ci/test/chord-and-pane-uniqueness.sh` hard-codes `/usr/bin/python3`
+  (absent on NixOS hosts); run a copy with `python3` and a fixed `repo_root`
+  locally. Its key part reads the router's `window.__ctKeyTrace` through
+  `ci/test/one_key_one_operation_probe.mjs`.
+- `just test-e2e` runs the tree `$CODETRACER_REPO_ROOT_PATH` names (a
+  captured dev env may point it at another checkout) and `npm install`s into
+  the shared `node_modules`; run a worktree's spec with `npx playwright test`
+  from its own `src/tests/gui` instead.
+- A MODAL BASE'S READ-ONLY EDITOR HAS NO EDITOR LAYER (`keymap_router.
+  layersFor` skips `EditorTable` for Vim / Kakoune while `editorReadOnly`, so
+  §4.2's navigation rows answer there). A row meant for the read-only editor
+  under those bases therefore goes in the GLOBAL table with a `when`
+  (`navigation_keymap.ModalSurfaceRows`' `Enter` → `editor.toggle-tracepoint`),
+  and a §4.2 row on the same key must say what it is for (`Enter` →
+  `list.expand` is `!editorTextFocus`), so the two are disjoint.
+- `frontend-reachability-guard.py` always reads the REPOSITORY's allow-list,
+  even on `reachability-ratchet-test.sh`'s fixture, so any allow-list entry is
+  "stale" there and reddens that contract suite. Fix an unreached export (wire
+  it, move a test-only helper into test support, delete it) instead of
+  allow-listing it.
+- The trace format v7 engine refuses meta.dat v6. A v6 fixture recording is
+  upgraded by its version byte alone (the `CTMD` magic, then a u16 LE
+  version), as `2dbbbcdda` did for the committed fixtures: v7 changed no
+  header byte, and a v6 recording carries none of the new event kinds.
+- The orphan-sensitive pty suites (`test_real_no_orphans`,
+  `test_real_pty_lifecycle`, `test_real_signal_handling`) see EVERY
+  `replay-server` on the host. On a shared host run them in a private PID
+  namespace: `unshare -r -p -f --mount-proc <runner>`.
+- A pty suite's wait failure prints the status line, which carries the
+  recording's source path and tick; `run-plat68-keymaps-mutations.py`'s
+  `portable_cause` drops that snapshot from a recorded cause so causes match
+  across checkouts. The other pty harnesses still record it.

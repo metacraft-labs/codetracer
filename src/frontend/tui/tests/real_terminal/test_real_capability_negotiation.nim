@@ -267,7 +267,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     ck text.contains(" Variables ")
     ck text.contains("Event Log")   # PLAT-51: the Timeline tab is removed
 
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     checkpoint("exit: " & (if status.isSome: $status.get() else: "none"))
     ck status.isSome
@@ -290,7 +290,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     let text = screenText(sess)
     ck text.contains(" Call Trace ")
     ck text.contains(" main.py ")
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
     ck status.get() == 0
@@ -316,7 +316,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     ck sess.kittyKeyboardFlags() == {}
     ck sess.modifyOtherKeys() == 2
     ck sess.mouseProtocol() == mpSgr
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
     ck status.get() == 0
@@ -382,7 +382,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     ck text.len > 0
     ck text.contains(" main.py ")
 
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
     ck status.get() == 0
@@ -420,7 +420,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # …and a 256-colour terminal is NOT sent 24-bit SGR, which is the whole
     # point of the middle rung of the ladder.
     ck rgb == 0
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -447,7 +447,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
                " plain ANSI")
     ck rgb > 0
     ck palette256 == 0
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -521,7 +521,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     checkpoint("after step: " & statusRowText(sess))
     ck after.contains(" main.py ")
     ck statusRowText(sess).len > 0
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -550,7 +550,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
       # debugger. Every sample, not only the best.
       if firstRow.contains("opening "): inc openingFrames
       if i < ColdStarts - 1:
-        sess.send("q")
+        sess.send("\x11")  # Ctrl+Q, the CUA base's quit
         discard sess.waitExit(initDuration(seconds = 15))
         sess.close()
     let firstFrameMs = min(samples)
@@ -569,7 +569,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
          " ms)"
     checkpoint("debugger painted at " & $debuggerMs & " ms")
     ck debuggerMs >= firstFrameMs
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 
@@ -582,7 +582,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     settleOnDebugger(sess)
     # The negotiated set is named on the status line while it runs …
     ck sess.mouseProtocol() == mpSgr
-    sess.send("q")
+    sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))
     sess.close()
 

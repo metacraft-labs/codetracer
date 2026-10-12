@@ -176,7 +176,7 @@ proc hover(sess: var TuiTestSession; row, col: int) =
   sess.mouse(35, row, col)
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -315,8 +315,9 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     # THE DESKTOP'S ORDER: the file info first, then the labels, then the
     # status text (the review's fix; the desktop's status bar measured).
     ck last.startsWith(" Python | UTF-8   BUILD  PROBLEMS  FIND IN FILES  REQUESTS")
-    ck last.contains("NORMAL")
-    ck last.cellFind("NORMAL") > last.cellFind("REQUESTS")
+    # The mode label (since PLAT-68 the CUA base names itself: `CUA [DEBUG]`).
+    ck last.contains("CUA [")
+    ck last.cellFind("CUA [") > last.cellFind("REQUESTS")
     ck not sess.rowText(StatusRow - 1).contains("PROBLEMS")
     let buildCol = last.cellFind("BUILD")
     # The pointer onto BUILD: nothing at once.

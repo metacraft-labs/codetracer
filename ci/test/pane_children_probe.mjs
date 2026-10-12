@@ -147,8 +147,8 @@ try {
   // walked in on.
   report.panesBeforeRun = await page.evaluate(readPanes, PANES);
 
-  // Blur the editor: Mousetrap ignores a chord raised inside a TEXTAREA, and
-  // Monaco's input surface is one.
+  // Blur the editor, so the press starts outside Monaco as it always has here
+  // (the key router resolves it either way).
   try {
     await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
   } catch { /* a missing topbar shows up as `mounted: false` */ }

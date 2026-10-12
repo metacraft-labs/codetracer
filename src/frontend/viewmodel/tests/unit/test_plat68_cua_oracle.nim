@@ -11,16 +11,18 @@
 ## WHAT IS COMPARED. Each table row becomes one or more BINDING TUPLES: the
 ## normalised chord sequence (`key_names.normalizeChordSequence`, the function
 ## a user's configuration goes through), the operation, the `when` with its
-## abbreviations expanded, and the platform set. The shipped data
-## (`cua_keymap.CuaRows` / `CuaDeferred`, `emacs_keymap.EmacsRows` /
-## `EmacsDeferred`) becomes tuples the same way, and the two SETS must be
-## equal. A document row with no data row is a missing binding; a data row with
-## no document row is an undocumented one; both are named.
+## abbreviations expanded and printed canonically (`when_expr.canonicalWhen`,
+## so `ro || dl` and the data's parenthesised spelling are one condition),
+## and the platform set. The shipped data (`cua_keymap.CuaRows`,
+## `emacs_keymap.EmacsRows`) becomes tuples the same way, and the two SETS must
+## be equal. A document row with no data row is a missing binding; a data row
+## with no document row is an undocumented one; both are named.
 ##
-## THE POPULATION IS PHASE A's AND IT IS DECLARED. CUA's §3.1 – §3.4 (and
-## §3.10's editor fallbacks, which this suite checks by RESOLUTION, as §3.10's
-## own reading rule says), Emacs's §3.1 – §3.6. The cardinalities are asserted,
-## so a table that lost a row is red rather than a smaller equality.
+## THE POPULATION IS EVERY TABLE (PLAT-68 Phase B). CUA's §3.1 – §3.9 and §4
+## (and §3.10's fallbacks, which this suite checks by RESOLUTION for the
+## editor's and by presence for the rest, as §3.10's own reading rule says),
+## Emacs's §3.1 – §3.12. The cardinalities are asserted, so a table that lost
+## a row is red rather than a smaller equality.
 ##
 ## The second half of KL-3 — the document's agreement with VS Code — is
 ## `ci/test/cua-keymap-extractor.sh`, in the lint lane; it needs VS Code's
@@ -36,7 +38,13 @@ import std/[algorithm, sequtils, strutils, unittest]
 import ../../editing_core
 import ../../../test_support/spec_documents
 
-const ExpectedAssertions = 31
+proc canonicalWhen(text: string): string =
+  ## `text` in `$`'s canonical spelling, or the text itself when it does not
+  ## parse (so a comparison against it fails visibly).
+  let p = parseWhen(text)
+  if p.ok: $p.expr else: text
+
+const ExpectedAssertions = 39
 
 var countedAssertions = 0
 
@@ -51,12 +59,23 @@ const
   Writable = "editorTextFocus && !editorReadOnly"
   Inactive = "editorTextFocus && editorMode != visual"
   Active = "editorTextFocus && editorMode == visual"
+  Ro = "productMode == debug && editorFocus && editorReadOnly && !textInputFocus"
+  Dl = "productMode == debug && listFocus && !textInputFocus"
+  Inp = "textInputFocus && !editorTextFocus"
 
-  ExpectedCuaTuples = 98
-    ## The binding tuples §3.1 – §3.4 publish (bound and deferred), counted
-    ## from the document on 2026-10-11.
-  ExpectedEmacsTuples = 88
-    ## Emacs-Keymap.md §3.1 – §3.6's.
+  CuaSections = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8",
+                 "3.9", "4"]
+  EmacsSections = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8",
+                   "3.9", "3.10", "3.11", "3.12"]
+  ExpectedCuaTuples = 306
+    ## The binding tuples CUA-Keymap.md §3.1 – §3.9 and §4 publish (their
+    ## legacy fallbacks are §3.10's), counted from the document on 2026-10-12
+    ## (293, then +10 for §3.8's program-menu rows: `Alt`, `` Alt+` ``, `F10`
+    ## in Edit mode and the seven mnemonics; +2 for §3.7's web Run and
+    ## Export; +1 for §3.7's `Alt+1`, the low-level view, kept from §5).
+  ExpectedEmacsTuples = 180
+    ## Emacs-Keymap.md §3.1 – §3.12's (+1: `` Alt+` ``, `tmm-menubar`; +1:
+    ## §3.8's `Enter` in the read-only Debug editor, the tracepoint editor).
 
 type
   Tuple = object
@@ -118,7 +137,9 @@ proc tableRows(doc: string; sections: openArray[string]): seq[seq[string]] =
       inTable = false
       continue
     if line.startsWith("## "):
-      section = ""
+      # A top-level section is a section too (`## 4. The debugger layer`).
+      let head = line[3 .. ^1].split(' ')[0].strip(chars = {'.'})
+      section = if head.len > 0 and head[0] in {'0'..'9'}: head else: ""
       inTable = false
       continue
     if not line.startsWith("|"):
@@ -134,17 +155,20 @@ proc tableRows(doc: string; sections: openArray[string]): seq[seq[string]] =
     result.add cells
 
 proc expandWhen(cell: string): string =
+  ## The cell's condition, its abbreviations expanded (each in parentheses,
+  ## so `ro || dl` stays one disjunction of two conjunctions), canonical.
   let spans = codeSpans(cell)
   if spans.len == 0: return ""
   var w = spans[0]
   if w == "—": return ""
   for (abbrev, full) in [("writable", Writable), ("inactive", Inactive),
-                         ("active", Active)]:
+                         ("active", Active), ("ro", Ro), ("dl", Dl),
+                         ("inp", Inp)]:
     var words = w.split(' ')
     for i, word in words:
-      if word == abbrev: words[i] = full
+      if word == abbrev: words[i] = "(" & full & ")"
     w = words.join(" ")
-  w
+  canonicalWhen(w)
 
 const AllPlatforms = "*"
 
@@ -185,14 +209,17 @@ proc tuplesOfRow(cells: seq[string]): seq[Tuple] =
   var pieces: seq[(string, seq[seq[string]])] = @[]
   let clauses = chordCell.split(" · ")
   var base = clauses[0].strip()
-  var only = ""
+  # `*Linux*` or `*Linux, Windows*` before the chord: the row is ONLY those
+  # platforms' (its clauses' grammar, without `also`).
+  var only: seq[string] = @[]
   if base.startsWith("*"):
     let close = base.find('*', 1)
-    only = platformName(base[1 ..< close])
+    only = base[1 ..< close].split(',').mapIt(platformName(it.strip()))
     base = base[close + 1 .. ^1].strip()
   let basePositions = positionsOf(base)
   if only.len > 0:
-    pieces.add (only, basePositions)
+    for n in only:
+      pieces.add (n, basePositions)
   else:
     var overridden: seq[string] = @[]
     for c in clauses[1 .. ^1]:
@@ -228,14 +255,9 @@ proc platformsText(ps: set[PlatformKind]): string =
 proc dataTuples(rows: seq[BaseRow]): seq[Tuple] =
   for r in rows:
     result.add Tuple(chords: normalizeChordSequence(r.chords),
-                     operation: r.operation, whenText: r.whenText,
+                     operation: r.operation,
+                     whenText: canonicalWhen(r.whenText),
                      platforms: platformsText(r.platforms))
-
-proc deferredTuples(rows: seq[DeferredRow]): seq[Tuple] =
-  for r in rows:
-    result.add Tuple(chords: normalizeChordSequence(r.chords),
-                     operation: r.operation, whenText: r.whenText,
-                     platforms: AllPlatforms)
 
 proc mergePlatforms(ts: seq[Tuple]): seq[Tuple] =
   ## One binding on two platforms is one tuple: `· *Linux, Windows* also X`
@@ -268,12 +290,10 @@ proc difference(a, b: seq[string]): seq[string] =
   for x in a:
     if x notin b: result.add x
 
-suite "PLAT-68 KL-3: the CUA data is CUA-Keymap.md §3.1 – §3.4, both directions":
-  let spec = specTuples(CuaDoc, ["3.1", "3.2", "3.3", "3.4"]).sortedStrings
+suite "PLAT-68 KL-3: the CUA data is CUA-Keymap.md §3 – §4, both directions":
+  let spec = specTuples(CuaDoc, CuaSections).sortedStrings
   let data = mergePlatforms(
-    dataTuples(CuaRows).filterIt(it.whenText != "keyProtocol == legacy") &
-    deferredTuples(CuaDeferred).filterIt(
-      it.whenText != "keyProtocol == legacy")).sortedStrings
+    dataTuples(CuaRows).filterIt(it.whenText != "keyProtocol == legacy")).sortedStrings
 
   test "the document's tuples are counted":
     checkpoint("spec tuples: " & $spec.len)
@@ -309,9 +329,9 @@ suite "PLAT-68 KL-3: §3.10's legacy fallbacks, read the way §3.10 says":
         return r.kind == erOperation and r.operation == vocabularyName(op)
       now += 1
 
-  test "every editor fallback resolves under legacy, and every legacy row is in §3.10":
+  test "every fallback resolves under legacy, and every legacy row is in §3.10":
     var editorRows = 0
-    var deferred = 0
+    var otherRows = 0
     var documented: seq[string] = @[]
     var inTable = false
     for line in CuaDoc.splitLines():
@@ -322,29 +342,33 @@ suite "PLAT-68 KL-3: §3.10's legacy fallbacks, read the way §3.10 says":
       if not inTable or line.startsWith("|---"): continue
       let cells = cellsOf(line)
       let ops = codeSpans(cells[0])
-      if ops.len == 0 or not ops[0].startsWith("editor."): continue
+      if ops.len == 0: continue
       let fallbacks = positionsOf(cells[2])
       for k, op in ops:
         let fallback = fallbacks[min(k, fallbacks.len - 1)][0]
         documented.add fallback
-        if CuaDeferred.anyIt(it.operation == op):
-          inc deferred
-          continue
-        inc editorRows
         checkpoint("fallback " & fallback & " -> " & op)
-        ck legacyResolves(fallback, op)
-    checkpoint("editor fallbacks: " & $editorRows & ", deferred: " & $deferred)
+        if op.startsWith("editor.") and not isCatalogued(op):
+          inc editorRows
+          ck legacyResolves(fallback, op)
+        else:
+          # A pane, palette or workbench operation: the fallback chord is
+          # bound in the CUA data — to the operation, or (§3.10's
+          # `Ctrl+PageDown`, "adjacent meaning, already bound") to its
+          # neighbour — so the operation's place is reachable in legacy.
+          inc otherRows
+          ck CuaRows.anyIt(normalizeChordSequence(it.chords) == fallback)
+    checkpoint("editor fallbacks: " & $editorRows & ", others: " & $otherRows)
     ck editorRows == 12
-    ck deferred == 1
+    ck otherRows == 5
     for r in CuaRows:
       if r.whenText == "keyProtocol == legacy":
         checkpoint("legacy row " & r.chords)
         ck normalizeChordSequence(r.chords) in documented
 
 suite "PLAT-68 KL-3: the Emacs data is Emacs-Keymap.md §3, both directions":
-  let spec = specTuples(EmacsDoc, ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6"]).sortedStrings
-  let data = mergePlatforms(dataTuples(EmacsRows) &
-                            deferredTuples(EmacsDeferred)).sortedStrings
+  let spec = specTuples(EmacsDoc, EmacsSections).sortedStrings
+  let data = mergePlatforms(dataTuples(EmacsRows)).sortedStrings
 
   test "the document's tuples are counted":
     checkpoint("spec tuples: " & $spec.len)

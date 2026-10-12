@@ -43,6 +43,7 @@ import view_vocabulary/pane_views
 import ../../../common/view_vocabulary
 
 import ../app/runtime
+import codetracer_embed   # `bkVim`, `ksFlag`
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/views/shell
@@ -239,7 +240,7 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     let body = rt.paneBodyRows(paneCalltrace)
     ck body > 5
 
-    # ---- scroll to the end with the half-page key, as a reader would ----
+    # ---- scroll to the end with the page key, as a reader would ----
     # Until the pane stops moving: its last row is then the trace's last
     # call, whatever the backend counts there (a trace read to its end lists
     # the recorder's `<end of program>` too, one call more than the first
@@ -249,7 +250,9 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     var sections: seq[int64] = @[store.calltrace.startLineIndex.val]
     var lastTop = -1
     while pages < 400:
-      let outcome = rt.handleToken("\x04", now)       # Ctrl+d
+      # PageDown: the list's `list.focus-page-down` (CUA; §4.2's `Ctrl+d`
+      # under the Vim base).
+      let outcome = rt.handleToken("\e[6~", now)
       ck outcome.pagesCallTrace
       session.applyOutcome(rt, outcome)
       now += 10
@@ -309,13 +312,16 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     var ups = 0
     while not screenText(rt).contains("main #2") and ups < 400:
       now += 10
-      let outcome = rt.handleToken("\x15", now)       # Ctrl+u
+      let outcome = rt.handleToken("\e[5~", now)      # PageUp
       session.applyOutcome(rt, outcome)
       inc ups
     ck screenText(rt).contains("main #2")
     ck store.calltrace.startLineIndex.val == 0
 
     # ---- `.` follows the current call again ------------------------------
+    # (§3.3.5's `.` is the Vim base's; CUA's is the read-only editor's
+    # `editor.center-on-pointer`, CUA-Keymap §4.)
+    rt.selectBase(bkVim, ksFlag)
     let dot = rt.handleToken(".", now + 10)
     session.applyOutcome(rt, dot)
     ck not rt.app.callTraceScrolled

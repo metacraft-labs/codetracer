@@ -60,7 +60,7 @@ import styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 116
+const ExpectedAssertions = 122
 
 var countedAssertions = 0
 
@@ -73,7 +73,9 @@ const
   Rows = 56
   Enter = "\r"
   Esc = "\x1b"
-  Tab = "\t"
+  F6 = "\e[17~"
+    ## CUA's `layout.focus-next-pane` (`Tab` is `Tab` in lists — CUA-Keymap
+    ## §5; under the Vim base §4.2's `Tab` does this).
 
 proc newRuntime(width = Cols; height = Rows): TuiRuntime =
   let caps = resolveCapabilities(
@@ -157,7 +159,7 @@ let pages = resolveFixture(pythonSpec("call_pages"))
 
 suite "PLAT-51 part B: the focus highlight":
 
-  test "the focused pane's strip takes the ring's colour; Tab moves strip and ring":
+  test "the focused pane's strip takes the ring's colour; F6 moves strip and ring":
     require calc.outcome == foRecorded
     let (rt, s) = open(calc.tracePath)
     defer: s.close()
@@ -170,7 +172,7 @@ suite "PLAT-51 part B: the focus highlight":
     for r in roles:
       check r in {srTabBarFocused, srTabActiveFocused}
     ck screen.ringCells() > 0
-    s.send(rt, Tab)
+    s.send(rt, F6)
     let (_, second) = rt.focus.focusedPane()
     ck second != first
     screen = rt.shellScreenOf()
@@ -184,7 +186,9 @@ suite "PLAT-51 part B: the focus highlight":
   test "the subtler token, its contrasts, and a strip told apart on every rung":
     ck spec(srBorderFocused).fg == dtColorsUiBorderSecondary
     ck spec(srTabBarFocused).bg == dtColorsUiBorderSecondary
-    ck spec(srTabActiveFocused).bg == dtColorsUiBorderSecondary
+    # PLAT-68: the focused strip's ACTIVE tab is off the focus colour, on
+    # the window's ground — the selected tab told apart from the others.
+    ck spec(srTabActiveFocused).bg == dtColorsUiSurfacePrimaryDefault
     ck spec(srTabActiveFocused).fg == spec(srTabActive).fg
     for mode in DesignMode:
       let focus = parseHexColour(tokenHex(dtColorsUiBorderSecondary, mode))
@@ -213,6 +217,23 @@ suite "PLAT-51 part B: the focus highlight":
       parseHexColour(tokenHex(dtColorsUiBorderSecondary, dmLight)),
       parseHexColour(tokenHex(dtColorsUiSurfacePrimaryDefault, dmLight))),
       ffDecimal, 2) == "1.83"
+    # PLAT-68: on the focused strip the active tab's ground and the others'
+    # are apart by at least the tab-contrast floor, in both modes…
+    for mode in DesignMode:
+      let c = contrastRatio(
+        parseHexColour(tokenHex(spec(srTabActiveFocused).bg, mode)),
+        parseHexColour(tokenHex(spec(srTabBarFocused).bg, mode)))
+      checkpoint($mode & ": active vs other tabs " & formatFloat(c, ffDecimal, 2))
+      ck c >= TabGroundContrastFloor
+    # …and every rung draws them differently.
+    for depth in [cdTrueColor, cdAnsi256, cdAnsi16, cdMonochrome]:
+      let a = degradeStyle(CellStyle(role: srTabActiveFocused,
+                                     surface: srTabActiveFocused),
+                           TerminalCapabilities(colors: depth))
+      let b = degradeStyle(CellStyle(role: srTabBarFocused,
+                                     surface: srTabBarFocused),
+                           TerminalCapabilities(colors: depth))
+      ck a != b
     # Every rung keeps a focused strip apart from an unfocused one.
     for depth in [cdTrueColor, cdAnsi256, cdAnsi16, cdMonochrome]:
       let a = degradeStyle(CellStyle(role: srTabBarFocused,

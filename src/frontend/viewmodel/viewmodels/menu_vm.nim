@@ -67,6 +67,10 @@ type
       ## `MenuNode.isBeforeNextSubGroup`).
     role*: string
       ## The macOS native-menu role, for the items macOS draws itself.
+    mnemonic*: char
+      ## A top-level folder's access key, lower-case: `Alt+<mnemonic>` opens
+      ## it (CUA-Keymap.md §3.8) and the renderers underline it
+      ## (`mnemonicAt`). `'\0'` for none.
     os*: int
       ## The desktop's `MenuNodeOS` bits: which platforms the item is for.
       ## Carried so the desktop can build its `MenuNode` tree — and the
@@ -121,9 +125,20 @@ const
 # ---------------------------------------------------------------------------
 
 func folder*(label: string; children: seq[MenuItem]; os = 0;
-             role = ""; hidden = false): MenuItem =
+             role = ""; hidden = false; mnemonic = '\0'): MenuItem =
   MenuItem(kind: mikFolder, label: label, enabled: true, os: os, role: role,
-           hidden: hidden, children: children)
+           hidden: hidden, children: children, mnemonic: mnemonic)
+
+func mnemonicAt*(it: MenuItem): int =
+  ## Where `it.mnemonic` is in its label (the first occurrence, either
+  ## case) — the character a renderer underlines. -1 when it has none.
+  if it.mnemonic == '\0':
+    return -1
+  let m = it.mnemonic.toLowerAscii
+  for i, ch in it.label:
+    if ch.toLowerAscii == m:
+      return i
+  -1
 
 func item*(label, action: string; enabled = true; os = 0;
            role = ""): MenuItem =
@@ -308,6 +323,16 @@ proc close*(vm: MenuVM) =
 
 proc toggle*(vm: MenuVM) =
   if vm.isOpen: vm.close() else: vm.open(keyboard = false)
+
+proc folderIndexOf*(vm: MenuVM; name: string): int =
+  ## The SHOWN top-level folder labelled `name` (case-insensitive), or -1. A
+  ## name may label a hidden twin (Help, on macOS and elsewhere); the one this
+  ## front-end shows is the one meant.
+  for i, it in vm.root.children:
+    if it.kind == mikFolder and not it.hidden and
+       it.label.toLowerAscii == name.toLowerAscii:
+      return i
+  -1
 
 proc openFolder*(vm: MenuVM; index: int; keyboard = true) =
   ## Open the top-level folder `index` directly — a menu bar's click on a
@@ -499,7 +524,9 @@ type
     ## visible items, and which of them is highlighted / on the open path.
     folderPath*: seq[int]
     items*: seq[tuple[index: int, label, shortcut: string, folder,
-                      enabled, active, separatorAfter: bool]]
+                      enabled, active, separatorAfter: bool, mnemonic: int]]
+      ## `mnemonic`: where the item's access key is in `label` (the cell or
+      ## character a renderer underlines), -1 for none (`mnemonicAt`).
 
 proc openLevels*(vm: MenuVM): seq[MenuLevelView] =
   ## The levels an open menu shows, outermost first: the top level, then one
@@ -517,5 +544,5 @@ proc openLevels*(vm: MenuVM): seq[MenuLevelView] =
                                else: ""),
                     folder: c.kind == mikFolder, enabled: c.enabled,
                     active: vm.isOnPath(fp & @[i]),
-                    separatorAfter: c.separatorAfter)
+                    separatorAfter: c.separatorAfter, mnemonic: c.mnemonicAt)
     result.add lv

@@ -457,10 +457,10 @@ template ckDebuggerFrame(sess: var TuiTestSession) =
   ck compared == PaneTitles.len
 
 template ckQuitsCleanly(sess: var TuiTestSession) =
-  ## `q` is §4.2's quit. Exit 0 EXACTLY: `main.nim` separates a usage error (2)
+  ## `Ctrl+Q` is the CUA base's quit. Exit 0 EXACTLY: `main.nim` separates a usage error (2)
   ## from "no terminal" (3) and from an unhandled exception (1), and `rc != 0`
   ## would be satisfied by the binary crashing on the way out.
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   let status = sess.waitExit(initDuration(seconds = 15))
   checkpoint("exit: " & (if status.isSome: $status.get() else: "none"))
   ck status.isSome

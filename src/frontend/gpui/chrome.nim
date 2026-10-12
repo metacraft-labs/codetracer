@@ -348,14 +348,17 @@ func tabStyle*(active: bool; focused = false): seq[(string, string)] =
   ## ground (`stripStyle`) in the disabled tier. The window's chrome applies
   ## exactly this list (`main.paintWindowChrome`).
   ##
-  ## PLAT-51: on the FOCUSED pane's strip every tab sits on the focus colour
-  ## (the strip's ground there), the active one keeping its foreground and
-  ## weight, the others in `crTabFocusedForeground` (the disabled tier is
-  ## under the contrast floor there).
+  ## PLAT-51: on the FOCUSED pane's strip the other tabs sit on the focus
+  ## colour (the strip's ground there), in `crTabFocusedForeground` (the
+  ## disabled tier is under the contrast floor there). PLAT-68: the ACTIVE
+  ## tab there is lifted off the focus colour onto the window's ground
+  ## (`crTabStripBackground`, ui/surface/primary/default — the terminal's
+  ## `srTabActiveFocused`), keeping its foreground and weight: on one ground
+  ## the selected and the unselected tabs could not be told apart.
   if active:
     @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold"),
       ("background-color",
-       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]
+       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]
   else:
     @[("color", chromeOf(if focused: crTabFocusedForeground
                          else: crTabInactiveForeground))]

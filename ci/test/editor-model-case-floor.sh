@@ -111,7 +111,7 @@ MILESTONE_ID="${1:-PLAT-24}"
 
 # The specification checkout: the workspace sibling, or the one CT_SPECS_DIR
 # names (the variable `src/frontend/test_support/spec_documents.nim` and
-# `ci/test/shortcut-shadow-spec-agreement.sh` honour too). Its layout is the
+# `ci/test/cua-keymap-extractor.sh` honour too). Its layout is the
 # one codetracer-specs `1735345d` adopted: topical documents under `spec/`,
 # milestone files under `milestones/`. An override, never a fallback — a file
 # absent there still fails by name below.

@@ -94,7 +94,7 @@ LAYOUT = "src/frontend/headless_app/layout_model.nim"
 PMENU = "src/frontend/viewmodel/viewmodels/product_menu.nim"
 SCRUB = "src/frontend/viewmodel/viewmodels/scrollbar_scrubber.nim"
 VCH = "src/frontend/viewmodel/viewmodels/value_changes.nim"
-KEYMAP = "src/frontend/tui/app/input/keymap.nim"
+NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 TSESSION = "src/frontend/tui/host/tui_session.nim"
 TEVENT = "src/frontend/tui/app/views/event_log.nim"
@@ -161,7 +161,7 @@ DE_EVENTLOG = CAPTURE + "#scrubber.spans.the.whole.log"
 DE_SAVED = CAPTURE + "#Timeline.tab.is.dropped.on.load"
 DE_CHANGED = CAPTURE + "#carries..value-changed.in.the.accent"
 
-SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, KEYMAP, RUNTIME, TSESSION, TEVENT,
+SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, NAVIGATION, RUNTIME, TSESSION, TEVENT,
             TCALL, TTRACK, TTREE, TGUTTER, TBORDERS, TTOPBAR, TCTX, TFRAME,
             TDRIVER,
             READER, GMAIN, GLEAVES, GLIST, DEVLOG, DCONFIG, DSTATE, ENGINE,
@@ -258,7 +258,7 @@ H_MIDDLE = "the user's smaller middle joins, and is carved out of top and bottom
 H_PROXY = "the drag proxy lifts the pane out before anything is measured"
 H_HEADER = "left of a tab's middle before it, right of it after it; past the last, the end"
 X_IDENTICAL = "GoldenLayout's algorithm (no centre): IDENTICAL at every sample"
-B_STRIP = "the focused pane's strip takes the ring's colour; Tab moves strip and ring"
+B_STRIP = "the focused pane's strip takes the ring's colour; F6 moves strip and ring"
 B_TOKEN = "the subtler token, its contrasts, and a strip told apart on every rung"
 B_FLAGS = "the flags parse; a bare flag needs a value"
 B_PREF = "the preference is a file beside the remembered layout, and is read back"
@@ -345,9 +345,11 @@ ARMS = [
         "      item(\"Event Log\", \"aEventLog\"),\n",
         "      item(\"Event Log\", \"aEventLog\"),\n      item(\"Timeline\", \"aEventLog\"),\n",
         P_TIMELINE, "the View menu lists a Timeline again"),
-    Arm("K1", KEYMAP,
-        "  r.add b(mmNormal, \"4\", kaSelectEventLog)\n",
-        "  r.add b(mmNormal, \"4\", kaSelectCallStack)\n",
+    # K1 RE-AIMED 2026-10-12 (PLAT-68 Phase B): §4.2's rows are the modal
+    # bases' navigation table (`keymap/navigation_keymap`).
+    Arm("K1", NAVIGATION,
+        "    BaseRow(chords: \"4\", operation: \"layout.focus-pane(event-log)\", table: G, navModes: N),\n",
+        "    BaseRow(chords: \"4\", operation: \"layout.focus-pane(call-trace)\", table: G, navModes: N),\n",
         P_TIMELINE, "`4` selects another pane than the Event Log"),
     # --- the shared models --------------------------------------------------
     Arm("S1", SCRUB,
@@ -395,16 +397,20 @@ ARMS = [
         "      session.gotoTick(c.tick)\n",
         "      session.gotoTick(c.tick div 2)\n",
         P_HISTORY, "the host seeks a history entry to half its tick"),
+    # T8 RE-AIMED 2026-10-12 (PLAT-68 Phase B): `Alt+T` and `Ctrl+Enter` are
+    # CUA rows naming `editor.toggle-tracepoint`; the runtime performs it.
     Arm("T8", RUNTIME,
-        "  if name in [\"Alt+t\", \"Ctrl+Enter\"]:\n",
-        "  if false:\n",
+        "    rt.openTracepointEditorAt(rt.app.source.path, max(1, line))\n",
+        "    discard line\n",
         P_CARET, "Alt+t and Ctrl+Enter do not open the tracepoint editor"),
     Arm("T14", TDRIVER,
         "      if (b >= ' ' and b <= '~') or b == '\\x7f' or (b < ' ' and b != Esc):\n        let alt = Esc & $b\n",
         "      if false:\n        let alt = Esc & $b\n",
         Y_CARET, "the framer drops Alt's ESC: a real terminal's Alt+T is a bare t"),
+    # T15 RE-AIMED 2026-10-12 (PLAT-68 Phase B): an Alt chord is the key
+    # alone when the router resolves it to nothing.
     Arm("T15", RUNTIME,
-        "     not rt.caretTakesAltChord(rt.lastKey) and not rt.editorOwnsToken(token):\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
+        "     rt.probeKey(rt.lastKey).kind == erNothing:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
         "     false:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
         P_CARET, "an unbound Alt+<char> is swallowed instead of being the character"),
     Arm("T9", RUNTIME,

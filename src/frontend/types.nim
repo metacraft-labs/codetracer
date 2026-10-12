@@ -1978,6 +1978,9 @@ type
     isBeforeNextSubGroup*:  bool
     menuOs*:                int
     role*:                  cstring
+    mnemonic*:              char
+      ## A top-level folder's access key (`menu_vm.MenuItem.mnemonic`),
+      ## `'\0'` for none.
 
   StatusComponent* = ref object of Component
     build*: BuildComponent
@@ -2221,7 +2224,6 @@ type
     functions*:             Functions
     actions*: array[ClientAction, ClientActionHandler]
     contentActions*: array[ClientAction, array[Content, proc(data: Data): void]]
-    keyPlugins*:            array[Content, JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]]
     recentProjects*:        seq[Project]
     recentTraces*:          seq[Trace]
     recentFolders*:         seq[RecentFolder]
@@ -2271,16 +2273,6 @@ type
     sessions*:              seq[ReplaySession]
     activeSessionIndex*:    int
 
-
-  KeyPluginContext* = ref object
-    ## "" / -1 might mean no valid word info for that position
-    path*:    cstring
-    line*:    int
-    column*:  int
-    startColumn*: int
-    endColumn*: int
-    word*:    cstring
-    data*:    Data
 
   # workaround for calling data ui_js functions: their impls are be defined there to be able to eventually use
   # services and components, but we need to call them sometimes in components/services

@@ -293,6 +293,11 @@ proc caretColumn*(buf: EditBuffer): int =
 proc lineCount*(buf: EditBuffer): int =
   if buf.isNil: 0 else: buf.doc.lineCount
 
+proc selectedCells*(buf: EditBuffer): SelectionCells =
+  ## PLAT-68: the document's selection as the source pane paints it
+  ## (`editing_core.selectionCells`, the derivation GPUI paints too).
+  if buf.isNil: @[] else: buf.doc.selectionCells
+
 proc lines*(buf: EditBuffer): seq[string] =
   if buf.isNil: @[] else: buf.doc.lines
 
@@ -360,9 +365,9 @@ type
 proc editingScope*(buf: EditBuffer): EditingScope =
   ## **THE FIVE DIMENSIONS §4.3 NAMES, AS THIS FRONT-END SETS THEM.**
   ##
-  ## `pmEdit` and `epEditor` because this function is only reached when
-  ## `runtime.editorOwnsToken` has already established both — Edit product
-  ## mode, NORMAL input mode, the editor pane focused, a buffer open. Those
+  ## `pmEdit` and `epEditor` because this function is only reached when the
+  ## router has resolved the key in the editor's layer — Edit product mode,
+  ## NORMAL input mode, the editor pane focused, a buffer open. Those
   ## four conditions are already-modelled state and the scope is where they
   ## become the resolver's argument rather than a comment at a call site.
   ##
@@ -388,11 +393,6 @@ proc editingScope*(buf: EditBuffer): EditingScope =
   ##
   ## The rule itself is `editing_core.editScopeOf`, shared with GPUI.
   editScopeOf(buf.doc)
-
-proc claimsEditKey*(buf: EditBuffer; key: string; nowMs: int64): bool =
-  ## PLAT-43. Whether this buffer's model binds `key` in its current state —
-  ## `editing_core.claimsKey` under this front-end's scope.
-  not buf.isNil and buf.doc.claimsKey(buf.editingScope, key, nowMs)
 
 proc applyEditKey*(buf: EditBuffer; key: string; nowMs: int64): EditKeyResult =
   ## One canonical key name (`key_names.keyName`'s vocabulary) applied to the
@@ -483,32 +483,31 @@ proc installImported*(s: EditSession; imported: ImportedKeymap) =
   for buf in s.buffers:
     buf.doc.installImported(imported)
 
-proc applyEditKeyIn*(s: EditSession; buf: EditBuffer; key: string;
-                     nowMs: int64): EditKeyResult =
-  ## `applyEditKey`, with the session's points on `buf`'s file CARRIED THROUGH
-  ## the edit (PLAT-28 §8.2). A breakpoint belongs to the code on its line, so
-  ## a line opened above it moves it down, and a deleted line takes it away —
-  ## it does not become a breakpoint on whatever line took its place.
+proc applyResolvedIn*(s: EditSession; buf: EditBuffer;
+                      res: EditingResolution; nowMs: int64): KeyApplication =
+  ## A resolution the ROUTER computed, applied to `buf`'s document
+  ## (`editing_core.applyResolved`), with the session's points on its file
+  ## CARRIED THROUGH the edit (PLAT-28 §8.2). A breakpoint belongs to the
+  ## code on its line, so a line opened above it moves it down, and a
+  ## deleted line takes it away — it does not become a breakpoint on
+  ## whatever line took its place.
   ##
   ## The points are the SESSION's (§5: they belong to the project), so they
-  ## are lent to the buffer's model for exactly one key as
+  ## are lent to the buffer's model for exactly one resolution as
   ## `EditorState.trackedLines` — aligned by index, so the answer says which
   ## point went where — and taken back. The mapping is the model's
   ## `mapLinesThrough`, the same rule its own `breakpoints` move by.
-  if s.isNil or buf.isNil:
-    return applyEditKey(buf, key, nowMs)
   var owned: seq[int] = @[]
-  for i, p in s.points:
-    if p.path == buf.path: owned.add i
-  if owned.len == 0:
-    return applyEditKey(buf, key, nowMs)
+  if not s.isNil:
+    for i, p in s.points:
+      if p.path == buf.path: owned.add i
   buf.doc.state.trackedLines = @[]
   for i in owned:
     buf.doc.state.trackedLines.add s.points[i].line - 1
-  result = applyEditKey(buf, key, nowMs)
+  result = buf.doc.applyResolved(res, nowMs)
   let moved = buf.doc.state.trackedLines
   buf.doc.state.trackedLines = @[]
-  if moved.len != owned.len:
+  if owned.len == 0 or moved.len != owned.len:
     return
   var kept: seq[SourcePoint] = @[]
   var gone: seq[int] = @[]

@@ -104,6 +104,8 @@ import ./app/pane_names
 import ./app/edit_arm
 import ../view_vocabulary/pane_views   # `sourcePaneView`, for the redraw
 import ../viewmodel/host/keymap_preference
+import ../viewmodel/keymap/alt_tap
+import ../viewmodel/host/keybindings_file
 import ../viewmodel/host/layout_preferences
 import ../viewmodel/host/native_state
 import ./host/gpui_host
@@ -187,6 +189,12 @@ OPTIONS:
                       term:drag:<from>:<to> (its thumb, held and moved)
                       term:scrub:<from>:<to>[:hold] (the screen's scrubber)
                       term:key:<key>  term:wheel:<rows>
+                    and (PLAT-68) a drag over the editor's text, and what
+                    a key would resolve to, traced with no effect:
+                      select:<line>@<column>:<line>@<column>
+                      probe:<key>[:<mod>+<mod>]
+                      modifiers:[<mod>+<mod>] (the held modifiers
+                      changed: `modifiers:alt,modifiers:` taps Alt alone)
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
   --quit-after-ms=<n>
@@ -485,7 +493,10 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "term",
                        # PLAT-51: a list pane's scrollbar scrubber, and
                        # text typed key by key (a Welcome Screen's form).
-                       "scrub", "type"]:
+                       "scrub", "type",
+                       # PLAT-68: a drag over the editor's text, and a
+                       # key's resolution, probed.
+                       "select", "probe", "modifiers"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -779,6 +790,7 @@ proc probeHandler(el: GpuiElement): GpuiEventHandler =
              of gekPointerDown, gekPointerMove, gekPointerUp, gekWheel,
                 gekContextMenu, gekAuxDown:
                "pointer"
+             of gekModifiers: "modifiers"
              of gekOther: "other"),
       seqNo: el.lastEventSeq())
     if probeSentinel.len > 0 and el.lastEventKey() == probeSentinel:
@@ -1003,12 +1015,32 @@ var
   gCalltraceLoads = 0
     ## How many call-trace sections the window has read (the first, at open,
     ## included) — reported for the paging test.
-  gCaret: tuple[path: string, line, column: int]
-    ## PLAT-51: the read-only debugging editor's CARET (Editor-Pane.md, "The
-    ## caret in a read-only editor") — placed by a click on the text, moved
-    ## by the arrow keys, distinct from the execution pointer; Alt+T /
-    ## Ctrl+Enter (and the menu's "Add tracepoint") open the tracepoint
-    ## editor on its line. Line 0: no caret.
+  gDebugDocs = initTable[string, EditingDocument]()
+    ## PLAT-68: THE DEBUG-MODE EDITOR'S DOCUMENTS, by path — each file the
+    ## editor showed, opened from the recording as an `EditingDocument` with
+    ## PLAT-33's read-only filter (the terminal's `runtime.debugBuffer` is
+    ## the same value). PLAT-51's CARET (Editor-Pane.md, "The caret in a
+    ## read-only editor": placed by a click, moved by the keys, distinct
+    ## from the execution pointer) and the selection ARE the shown file's
+    ## document's; copy and the motions act on it, edits are refused, and
+    ## `editor.toggle-read-only` (`Ctrl+E`) makes the same document
+    ## writable. No document for a path: no caret drawn in it.
+  gTextDrag = false
+    ## PLAT-68: a left press on the editor's text is held — the pointer's
+    ## motion extends the selection from where it was pressed.
+  gRouter: KeymapRouter
+    ## PLAT-68: **THE WINDOW'S KEYMAP** — the active base, the user's
+    ## `keybindings.json` over it and the pushed layers of the open
+    ## overlays, resolved by the one router every front-end runs
+    ## (Base-Keymaps-And-Layer-Stack.md §6). Every replay-window key the menu,
+    ## a shown text, the Welcome Screen and the Terminal Output pane do not
+    ## own resolves here.
+  gAltTap: AltTap
+    ## PLAT-68: whether the press of `Alt` in progress is still a tap
+    ## (`windowModifiers`).
+  gKeybindings: KeybindingsLoad
+    ## The user's `keybindings.json` as it last loaded, for the re-read when
+    ## it changes on disk.
   gListDrag: ListScrubDrag
     ## PLAT-51: a press held on the Event Log's or the Call Trace's
     ## scrollbar scrubber thumb.
@@ -1535,6 +1567,14 @@ proc maximisedLayout(layout: Layout; pane: PaneKind): Layout
 proc stripHeading(r: GpuiRenderer; pane: GpuiElement)
   ## Forward-declared for `adoptNewLeaves`.
 
+proc markPaneScope(r: GpuiRenderer; pane: GpuiElement; id: string) =
+  ## PLAT-68: a pane is a scope element of the focus chain.
+  r.setAttribute(pane, ScopeKindAttribute, $ekPane)
+  r.setAttribute(pane, ScopeIdAttribute, id)
+
+proc armPaneKeys(r: GpuiRenderer; pane: GpuiElement)
+  ## PLAT-68: forward-declared; defined beside the pointer.
+
 proc adoptNewLeaves(r: GpuiRenderer) =
   ## PLAT-50: a pane a layout command ADDED (the View menu opening a pane the
   ## arrangement did not place) has no leaf yet — the leaves were rendered
@@ -1551,6 +1591,9 @@ proc adoptNewLeaves(r: GpuiRenderer) =
     stripHeading(r, node)
     applyTextFaces(r, node)
     gPanes[leaf.paneId] = node
+    markPaneScope(r, node, leaf.paneId)
+    if openArm.isNil and not probeEnabled:
+      armPaneKeys(r, node)
     gLeafSet.leaves.add leaf
     traceGesture("leaf adopted " & leaf.paneId)
 
@@ -1702,6 +1745,64 @@ proc redrawEditorRows(r: GpuiRenderer) =
   discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
                        gEditorSurface, gEditorViewportPx, gEditorScrollCols)
   applyTextFaces(r, pane)
+
+proc recordedLines(path: string): tuple[lines: seq[string], detail: string] =
+  ## The whole of `path` as the recording holds it, read through the source
+  ## service's provider.
+  if gSourceService.isNil:
+    return (@[], "no source service")
+  var fetched = SourceFetch(status: sfsProviderUnavailable)
+  gSourceService.provider.fetch(
+    SourceLineRequest(path: path, sourceGeneration: 0,
+                      sourceDigest: "", firstLine: 1, lastLine: high(int32)),
+    proc(f: SourceFetch) = fetched = f)
+  drainSourceCallbacks()
+  result.lines = if fetched.fileLines.len > 0: fetched.fileLines
+                 else: fetched.lines
+  result.detail = fetched.detail
+
+proc debugDocumentFor(path: string; executionLine: int): bool =
+  ## PLAT-68: make sure `gDebugDocs` holds `path`'s Debug-mode document —
+  ## opened read-only from the recording, the caret on the execution line
+  ## (where Monaco's cursor is when a replay stops). Answers whether there
+  ## is one.
+  if path.len == 0:
+    return false
+  if gDebugDocs.hasKey(path):
+    return true
+  let read = recordedLines(path)
+  if read.lines.len == 0:
+    return false
+  var d = initEditingDocument(path, read.lines.join("\n") & "\n",
+                              gRouter.base, delivery = GpuiDelivery)
+  d.setReadOnly(true)
+  d.moveCaretTo(max(1, executionLine) - 1, 0)
+  gDebugDocs[path] = d
+  true
+
+proc withDebugDocument(surface: EditorSurface): EditorSurface =
+  ## PLAT-68: the editor surface with the shown file's Debug-mode document
+  ## on it — its caret and selection over the recording's rows while it is
+  ## read-only; the document itself, drawn as Edit mode draws one, once
+  ## `Ctrl+E` made it writable (the terminal paints its Edit pane then).
+  result = surface
+  if not gDebugDocs.hasKey(surface.path):
+    return
+  let d = gDebugDocs[surface.path]
+  if not d.isReadOnly:
+    let rows = max(1, editorRowsOf(gGeom))
+    let top = if gEditorSurface.path == surface.path and
+                 gEditorSurface.productMode == pmEdit:
+                gEditorSurface.viewportTop
+              else: surface.viewportTop
+    result = editorSurfaceForDocument(
+      d, GpuiMedium, mutableHere = true,
+      viewportTop = followedViewportTop(max(1, top), d.caretLine, rows),
+      viewportHeight = rows)
+  else:
+    result.caretLine = d.caretLine
+    result.caretColumn = d.caretColumn + 1
+  result.selection = d.selectionCells
 
 proc syncEditorViewport(r: GpuiRenderer) =
   ## `PLAT35-F3`. Take the editor pane's inner width from the geometry the
@@ -2115,12 +2216,23 @@ proc moveStateResize(r: GpuiRenderer; x: int)
 proc refreshStateOrigins()
   ## PLAT-51: forward-declared; defined beside the state pane's clicks.
 
+proc refreshMenuShortcuts()
+  ## PLAT-68: forward-declared; the menu's chords, from the router.
+
+proc focusWindowPane(r: GpuiRenderer; pane: string)
+  ## PLAT-68: forward-declared; the focus, onto a pane's element.
+
+proc dragTextTo(r: GpuiRenderer; x, y: int)
+  ## PLAT-68: forward-declared; a held press on the text, moved.
+
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
   ## listener (`pointerHandler`) and `--window-ops` (the plan's scripted
   ## pointer) both call this, so a scripted press is the press a user makes.
   var r = r0
+  if kind in {gekPointerDown, gekContextMenu, gekAuxDown}:
+    gAltTap.interrupted()        # Alt+press is not Alt tapped
   if gShell.isNil:
     return
   var step: GestureStep
@@ -2149,7 +2261,7 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # take the focus colour when the highlight is on.
     let pressedPane = gGeom.activePaneAt(x, y)
     if pressedPane.len > 0 and pressedPane != gFocusPane:
-      gFocusPane = pressedPane
+      focusWindowPane(r, pressedPane)
       traceGesture("focus " & pressedPane)
       discard drawArrangement(r)
     # PLAT-51: a list pane's scrollbar scrubber BEFORE the pane's rows: the
@@ -2168,6 +2280,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
   of gekPointerMove:
+    if gTextDrag:
+      dragTextTo(r, x, y)
+      return
     if gTerminal.drag != gtdNone:
       moveTerminal(r, x, y)
       return
@@ -2182,6 +2297,10 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
   of gekPointerUp:
+    if gTextDrag:
+      dragTextTo(r, x, y)
+      gTextDrag = false
+      return
     if gTerminal.drag != gtdNone:
       releaseTerminal(r, x, y)
       return
@@ -2264,14 +2383,21 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
       return
     windowPointer(r0, ev.kind, int(p.x), int(p.y), p.dy, p.dx)
 
-proc caretKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
-  ## PLAT-51: forward-declared; defined beside the pane clicks.
+proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string])
+  ## PLAT-68: forward-declared; defined with the router below.
 
 proc windowKey(key: string; mods: seq[string]) =
-  ## One key of a replay window, from its `keydown` listener or from
-  ## `--window-ops`: the top bar's keys (an open omnibar or menu owns them
-  ## all), then `Esc` cancels a layout gesture.
+  ## One key of a replay window, from a pane's `keydown` listener or from
+  ## `--window-ops`. What draws its own key handling first — the open
+  ## program menu or a text shown over the window, a new tab's Welcome
+  ## Screen, a folder tab's editor, the focused Terminal Output pane — then
+  ## THE ROUTER, for everything else: the debugger's keys, the read-only
+  ## editor's caret and selection, the palette's and the right-click menu's
+  ## keys (their pushed layers), `Esc` ending a layout gesture.
   var r: GpuiRenderer
+  # Any key between Alt's press and release makes it a chord, not a tap.
+  if key != "alt":
+    gAltTap.interrupted()
   if handleTopKey(r, key, mods):
     return
   # PLAT-51: a new tab's Welcome Screen, and a folder tab's editor.
@@ -2280,14 +2406,10 @@ proc windowKey(key: string; mods: seq[string]) =
   if folderShown() and not openArm.isNil:
     editKey(key, mods)
     return
-  # PLAT-51: the read-only editor's caret, once placed.
-  if caretKey(r, key, mods):
-    return
   # PLAT-52: the Terminal Output pane's own keys, while it has focus.
   if mods.len == 0 and terminalKey(r, key):
     return
-  if key.toLowerAscii in ["escape", "esc"]:
-    discard cancelWindowGesture()
+  routeWindowKey(r, key, mods)
 
 proc gestureKeyHandler(el: GpuiElement): GpuiEventHandler =
   ## A replay window's `keydown` listener: `Esc` cancels a layout gesture.
@@ -2296,6 +2418,27 @@ proc gestureKeyHandler(el: GpuiElement): GpuiEventHandler =
     discard ev
     if el.lastEventKind() != gekKeyDown: return
     windowKey(el.lastEventKey(), modifierNamesOf(el.lastEventModifiers()))
+
+proc windowModifiers(mods: seq[string]) =
+  ## The held modifiers changed (GPUI's `modifierschange`, or `--window-ops`'
+  ## `modifiers:`): `Alt` pressed and released ALONE is the key `Alt`
+  ## (CUA-Keymap.md §3.8 — VS Code's menu-bar gesture; `alt_tap` decides).
+  if gAltTap.modifiersChanged(keyModifiersOfGpui(mods)):
+    traceGesture("alt tapped")
+    windowKey("alt", @[])
+
+proc modifiersHandler(el: GpuiElement): GpuiEventHandler =
+  result = proc(ev: GpuiEvent) =
+    discard ev
+    if el.lastEventKind() != gekModifiers: return
+    windowModifiers(modifierNamesOf(el.lastEventModifiers()))
+
+proc armPaneKeys(r: GpuiRenderer; pane: GpuiElement) =
+  ## A replay window's pane: focusable, its keys to `windowKey`, its modifier
+  ## changes to `windowModifiers`.
+  setFocusable(pane)
+  r.addEventListener(pane, "keydown", gestureKeyHandler(pane))
+  r.addEventListener(pane, "modifierschange", modifiersHandler(pane))
 
 proc armPointer(r: GpuiRenderer; root: GpuiElement) =
   if gShell.isNil:
@@ -2309,11 +2452,11 @@ proc armPointer(r: GpuiRenderer; root: GpuiElement) =
   # owns focus — its claim is that a key reached the pane IT focused — and
   # not in an edit window, whose editor listener is already armed.
   if openArm.isNil and not probeEnabled:
-    let editor = gPanes.getOrDefault($paneEditor)
-    if not editor.isNil:
-      setFocusable(editor)
-      discard focusElement(editor)
-      r.addEventListener(editor, "keydown", gestureKeyHandler(editor))
+    # PLAT-68: EVERY pane takes the focus and hears the keys — the focused
+    # one is the end of the focus chain the scope path is read from.
+    for id, pane in gPanes:
+      armPaneKeys(r, pane)
+    focusWindowPane(r, gFocusPane)
 
 proc cancelWindowGesture(): bool =
   ## `Esc` while a gesture is in flight: cancel it and redraw the committed
@@ -2360,9 +2503,6 @@ var
     ## the pointer really moved — the desktop menu's rule too.
   gIconDir = ""
     ## Where the desktop's marks are written as SVG documents for `img`.
-  gBindings: Table[string, string]
-    ## The window's keymap: the desktop's default chords
-    ## (`window_top_bar.desktopBindings`), shown in the menu and bound here.
 
 proc gpuiMenuActionAvailable(action: string): bool =
   ## What this window performs from the menu: the debugger's transport and
@@ -2674,10 +2814,24 @@ proc drawTopBar(r: GpuiRenderer) =
         else: crWindowForeground))
       if it.active:
         r.setStyle(rb, "font-weight", "bold")
-      var label = it.label
-      if it.shortcut.len > 0: label.add "   " & it.shortcut
-      if it.folder: label.add "  ›"
-      r.appendChild(rb, r.createTextNode(label))
+      var tail = ""
+      if it.shortcut.len > 0: tail.add "   " & it.shortcut
+      if it.folder: tail.add "  ›"
+      if it.mnemonic >= 0:
+        # The folder's access key underlined (CUA-Keymap.md §3.8:
+        # `Alt+<letter>`), the label in three runs on one line.
+        r.setStyle(rb, "flex-direction", "row")
+        let m = it.mnemonic
+        if m > 0:
+          r.appendChild(rb, r.createTextNode(it.label[0 ..< m]))
+        let key = r.createElement("span")
+        r.setStyle(key, "text-decoration", "underline")
+        r.setAttribute(key, "data-ct-menu-mnemonic", $it.label[m])
+        r.appendChild(key, r.createTextNode($it.label[m]))
+        r.appendChild(rb, key)
+        r.appendChild(rb, r.createTextNode(it.label[m + 1 .. ^1] & tail))
+      else:
+        r.appendChild(rb, r.createTextNode(it.label & tail))
       gTopEls.add rb
   # THE OMNIBAR'S RESULTS.
   let op = gpuiOmnibarPopover(gOmnibar, gTopLayout, pendingViewportHeight)
@@ -2903,12 +3057,10 @@ proc refreshReplayWindow(r: GpuiRenderer) =
     # `PLAT35-F3`. The horizontal scroll is RESET by a move, as Monaco's is:
     # the debugger put a new line under the cursor and leaving the view 40
     # columns right of it would hide the line the move was about.
-    gEditorSurface = surface
     # PLAT-51: the caret stays where the user put it (a move does not move
-    # it), on the file it was placed in.
-    if gCaret.line > 0 and gCaret.path == surface.path:
-      gEditorSurface.caretLine = gCaret.line
-      gEditorSurface.caretColumn = gCaret.column
+    # it), on the file it was placed in — it is the file's document's
+    # (PLAT-68), and so is the selection.
+    gEditorSurface = withDebugDocument(surface)
     gEditorScrollCols = 0
     discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
                          gEditorSurface, gEditorViewportPx, gEditorScrollCols)
@@ -3436,6 +3588,10 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
       openArm.doc.switchModel(base.model)
     for arm in gFolderArms.values:
       arm.doc.switchModel(base.model)
+    for d in gDebugDocs.mvalues:
+      d.switchModel(base.model)
+    gRouter.switchBase(base.model, ksCommand)
+    refreshMenuShortcuts()
     let saved = saveKeymapPreference(base.model)
     traceGesture("keymap " & $base.model &
                  (if saved.len > 0: " (" & saved & ")" else: ""))
@@ -3583,29 +3739,38 @@ proc revealNext(r: GpuiRenderer) =
                else: "reveal dismissed")
   discard drawArrangement(r)
 
+const MenuOperations = ["menu.open", "menu.toggle", "menu.open-folder"]
+  ## The keymap's menu keys (CUA-Keymap.md §3.8: `Alt` alone, `` Alt+` ``,
+  ## `Alt+<mnemonic>`, `F10` in Edit mode; Vim's `F12`).
+
+proc runMenuOperation(operation, argument: string) =
+  ## A menu key, whether the menu is open or not: `menu.open-folder(x)`
+  ## opens folder x; `menu.open` and `menu.toggle` open the menu when it is
+  ## closed and close it when it is open (VS Code's Alt and F10 both toggle).
+  if operation == "menu.open-folder":
+    let i = gMenu.folderIndexOf(argument)
+    if i >= 0:
+      gMenu.openFolder(i)
+  elif gMenu.isOpen:
+    gMenu.close()
+  else:
+    gMenu.open(keyboard = true)
+  traceGesture("menu " & (if gMenu.isOpen: "open " & $gMenu.path
+                          else: "closed"))
+
+proc probeWindowResolution(key: string; mods: seq[string]): EditingResolution
+
 proc handleTopKey(r: GpuiRenderer; key: string;
                   mods: seq[string]): bool =
-  ## The window's keys for the top bar and the strips. Answers whether the
-  ## key was taken. An open omnibar, then an open menu, own every key.
+  ## The keys of what is drawn OVER the window and reads its own keys: a
+  ## text shown over it (an event's content, a tracepoint's hits), then the
+  ## open program menu, which owns every key. Answers whether the key was
+  ## taken. (The palette and the right-click menu are pushed layers of the
+  ## router — `routeWindowKey`.)
   if gMenu.isNil or gOmnibar.isNil:
     return false
   let k = key.toLowerAscii
   let ctrl = "control" in mods
-  # PLAT-50: an open right-click menu, then an event's content, own the keys.
-  if gCtxMenu.open:
-    case k
-    of "escape", "esc": gCtxMenu.close()
-    of "up": gCtxMenu.move(-1)
-    of "down": gCtxMenu.move(1)
-    of "enter", "return":
-      let chosen = gCtxMenu.choose(-1)
-      if chosen.chosen:
-        drawTopBar(r)
-        runContextAction(r, chosen.action, chosen.target)
-        return true
-    else: discard
-    drawTopBar(r)
-    return true
   if gContent.open:
     case k
     of "escape", "esc", "enter", "return": gContent = GContent()
@@ -3616,37 +3781,18 @@ proc handleTopKey(r: GpuiRenderer; key: string;
     else: return true
     drawTopBar(r)
     return true
-  if gOmnibar.isOpen:
-    case k
-    of "escape", "esc": gOmnibar.close()
-    of "enter", "return":
-      acceptOmnibar(r)
-      return true
-    of "up": gOmnibar.moveSelection(-1)
-    of "down": gOmnibar.moveSelection(1)
-    of "backspace": gOmnibar.backspace()
-    of "delete": gOmnibar.deleteForward()
-    of "left": gOmnibar.moveCursor(-1)
-    of "right": gOmnibar.moveCursor(1)
-    of "home": gOmnibar.cursorHome()
-    of "end": gOmnibar.cursorEnd()
-    of "insert": gOmnibar.toggleOverwrite()
-    of "space": gOmnibar.typeText(" ")
-    else:
-      if key.len == 1 and not ctrl:
-        gOmnibar.typeText(key)
-      else:
-        return true
-    drawTopBar(r)
-    return true
   if gMenu.isOpen:
+    # The keymap's own menu keys keep their meaning inside it: another
+    # mnemonic switches folder, `Alt` / `` Alt+` `` / `F10` close it.
+    let res = probeWindowResolution(key, mods)
+    if res.kind == erOperation and res.operation in MenuOperations:
+      runMenuOperation(res.operation, res.argument)
+      drawTopBar(r)
+      return true
     # The desktop's cascade (PLAT-49): Up/Down within the open level, Right
     # (or Enter) into a folder's submenu, Left back out, Esc out and closed.
     case k
     of "escape", "esc": gMenu.escape()
-    of "m":
-      if ctrl: gMenu.close()
-      else: gMenu.typeToSelect(key, int64(epochTime() * 1000))
     of "enter", "return":
       let act = gMenu.activate()
       if act.ran:
@@ -3659,31 +3805,6 @@ proc handleTopKey(r: GpuiRenderer; key: string;
     else:
       if key.len == 1 and not ctrl:
         gMenu.typeToSelect(key, int64(epochTime() * 1000))
-    drawTopBar(r)
-    return true
-  # The desktop's chords: `CTRL+M` opens the menu (`aMenu`), the transport
-  # and Find Symbol run their action.
-  let chord = chordOfKey(key, mods)
-  let bound = gBindings.actionForChord(chord)
-  if bound == "aMenu":
-    gMenu.open(keyboard = true)
-    drawTopBar(r)
-    return true
-  if bound.len > 0 and gpuiMenuActionAvailable(bound):
-    runGpuiMenuAction(r, bound)
-    return true
-  if ctrl and k == "p":
-    openOmnibar(r)
-    return true
-  if ctrl and k == "o":
-    revealNext(r)
-    return true
-  let step = sessionTabStepOf(key, mods)
-  if step != 0 and not gShell.isNil:
-    # The session tabs (`session_tabs.stepTab`, wrapping); one session has
-    # no other tab, and the key is then taken and does nothing.
-    if gShell.app.stepTab(step):
-      traceGesture("session tab " & $gShell.app.activeTabIndex())
     drawTopBar(r)
     return true
   false
@@ -4001,16 +4122,9 @@ proc showViewedFile(r: GpuiRenderer) =
   let editor = gPanes.getOrDefault($paneEditor)
   if editor.isNil or gSourceService.isNil or gViewedFile.len == 0:
     return
-  var fetched = SourceFetch(status: sfsProviderUnavailable)
-  gSourceService.provider.fetch(
-    SourceLineRequest(path: gViewedFile, sourceGeneration: 0,
-                      sourceDigest: "", firstLine: 1, lastLine: high(int32)),
-    proc(f: SourceFetch) = fetched = f)
-  drainSourceCallbacks()
-  let lines = if fetched.fileLines.len > 0: fetched.fileLines
-              else: fetched.lines
+  let (lines, detail) = recordedLines(gViewedFile)
   if lines.len == 0:
-    traceGesture("could not open " & gViewedFile & ": " & fetched.detail)
+    traceGesture("could not open " & gViewedFile & ": " & detail)
     gViewedFile = ""
     return
   var surface = EditorSurface(medium: GpuiMedium, path: gViewedFile,
@@ -4029,9 +4143,13 @@ proc showViewedFile(r: GpuiRenderer) =
                 else: emBreakpointDisabled)
     surface.rows.add EditorRow(line: i + 1, text: lines[i], held: true,
                                mark: mark)
+  # PLAT-68: the surface the editor was drawn from is the one its caret,
+  # selection and horizontal scroll are redrawn from.
+  gEditorSurface = withDebugDocument(surface)
   while childCount(editor) > 0:
     r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
-  discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root, surface)
+  discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
+                       gEditorSurface)
   applyTextFaces(r, editor)
   noteEditorTab(r, editorTabLabel(gViewedFile, false))
   wireClicks(r)
@@ -4456,42 +4574,414 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     traceGesture(target.expression & " = " & target.text &
                  " is the value at this step")
 
-proc placeCaret(r: GpuiRenderer; path: string; line, column: int) =
-  ## Put the read-only editor's caret at `line:column` of `path` and draw it.
-  gCaret = (path, max(1, line), max(1, column))
-  if gEditorSurface.path == path:
-    gEditorSurface.caretLine = gCaret.line
-    gEditorSurface.caretColumn = gCaret.column
-    redrawEditorRows(r)
-  traceGesture("caret " & $gCaret.line & ":" & $gCaret.column)
+# ---------------------------------------------------------------------------
+# PLAT-68 — the window's keys through the ONE router
+# ---------------------------------------------------------------------------
 
-proc caretKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
-  ## PLAT-51: the caret's keys while it is placed — the arrows, Home and End
-  ## move it (never the debugger); Alt+T and Ctrl+Enter open the tracepoint
-  ## editor on its line, the desktop's chords (`Editor.TracepointCreation`).
-  if gCaret.line <= 0 or gEditorSurface.path != gCaret.path:
-    return false
-  let k = key.toLowerAscii
-  if ("alt" in mods and k == "t") or ("control" in mods and k in ["enter", "return"]):
-    gTracepointAt = (gCaret.path, gCaret.line)
-    traceGesture("tracepoint editor at " & $gCaret.line)
+proc drawDebugDocument(r: GpuiRenderer) =
+  ## The editor drawn again with its document's caret and selection (or,
+  ## once writable, the document itself).
+  gEditorSurface = withDebugDocument(gEditorSurface)
+  redrawEditorRows(r)
+
+proc placeCaret(r: GpuiRenderer; path: string; line, column: int) =
+  ## Put the read-only editor's caret at `line:column` (1-based) of `path` —
+  ## the caret of the file's Debug-mode document — and draw it.
+  if not debugDocumentFor(path, gEditorSurface.executionLine):
+    return
+  gDebugDocs[path].moveCaretTo(max(1, line) - 1, max(1, column) - 1)
+  if gEditorSurface.path == path:
+    drawDebugDocument(r)
+  traceGesture("caret " & $gDebugDocs[path].caretLine & ":" &
+               $(gDebugDocs[path].caretColumn + 1))
+
+proc editorLineAt(y: int): int =
+  ## The source line of the editor row drawn at window y (the rows below the
+  ## source statement, `GpuiEditorRowPx` each), clamped to the rows shown.
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  if i < 0 or gEditorSurface.rows.len == 0:
+    return 0
+  let top = gGeom.nodes[i].body.y + ChromePaddingPx + EditorLinesAbovePx
+  let at = clamp((y - top) div GpuiEditorRowPx, 0, gEditorSurface.rows.len - 1)
+  gEditorSurface.rows[at].line
+
+proc editorYOfLine(line: int): int =
+  ## The inverse: the window y at the middle of `line`'s row.
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  if i < 0:
+    return 0
+  for k, row in gEditorSurface.rows:
+    if row.line == line:
+      return gGeom.nodes[i].body.y + ChromePaddingPx + EditorLinesAbovePx +
+             k * GpuiEditorRowPx + GpuiEditorRowPx div 2
+  0
+
+proc dragTextTo(r: GpuiRenderer; x, y: int) =
+  ## A held press on the text moved: the selection runs from where it was
+  ## pressed to the cell under the pointer (`extendSelectionTo`, every
+  ## front-end's drag).
+  let path = gEditorSurface.path
+  if not gDebugDocs.hasKey(path):
+    return
+  let line = editorLineAt(y)
+  if line <= 0:
+    return
+  gDebugDocs[path].extendSelectionTo(line - 1, max(1, editorColumnAt(x)) - 1)
+  drawDebugDocument(r)
+  let cells = gDebugDocs[path].selectionCells
+  traceGesture("selection " & (if cells.len == 0: "none" else:
+    $cells[0].line & ":" & $cells[0].fromColumn & "-" & $cells[^1].line &
+    ":" & $cells[^1].toColumn))
+
+proc focusWindowPane(r: GpuiRenderer; pane: string) =
+  ## Give `pane` the focus: its element takes GPUI's element focus (the
+  ## chain the scope path is read from) and the focus outline follows it.
+  gFocusPane = pane
+  let el = gPanes.getOrDefault(pane)
+  if not el.isNil:
+    setFocusable(el)
+    discard focusElement(el)
+
+proc editorFocused(): bool =
+  gFocusPane == $paneEditor
+
+proc windowSessionFacts(): SessionFacts =
+  ## The ViewModels' facts the context keys derive from (`contextKeysOf`) —
+  ## the terminal's `runtime.sessionFacts`, from this window's models.
+  let path = editorPath()
+  let editor =
+    if editorFocused() and gDebugDocs.hasKey(path):
+      editorFactsOf(gDebugDocs[path].state, false)
+    else: sourceViewFacts()
+  SessionFacts(product: pmDebug,
+               replayLoaded: not gSession.isNil,
+               editor: editor,
+               paletteVisible: not gOmnibar.isNil and gOmnibar.isOpen,
+               contextMenuVisible: gCtxMenu.open,
+               dragActive: gGestures.active or gGestures.revealing)
+
+proc windowScopePath(): ScopePath =
+  ## **GPUI'S SCOPE PATH** (Base-Keymaps §6.2), read off the window's own
+  ## focus chain: the focused element and its ancestors, each scope element
+  ## carrying `data-scope-kind` / `data-scope-id` (the window root, the
+  ## session tab's container, the panes), then what the focused pane holds —
+  ## the editor's document. A window-owned overlay (the palette, the
+  ## right-click menu) replaces the chain below the window, as the
+  ## terminal's producer does.
+  var r: GpuiRenderer
+  var chain: seq[ScopeElement] = @[]
+  var node = focusedElement()
+  while not node.isNil:
+    let kind = getAttribute(node, ScopeKindAttribute)
+    if kind.len > 0:
+      chain.insert(elementOfAttributes(kind, getAttribute(node,
+                                                          ScopeIdAttribute)), 0)
+    node = r.parentNode(node)
+  let window = if chain.len > 0 and chain[0].kind == ekWindow: chain[0]
+               else: element(ekWindow, "window")
+  if not gOmnibar.isNil and gOmnibar.isOpen:
+    return @[window, element(ekOverlay, "palette"),
+             element(ekInput, "palette-query")]
+  if gCtxMenu.open:
+    return @[window, element(ekOverlay, "context-menu")]
+  if chain.len == 0:
+    return @[window]
+  result = chain
+  let path = editorPath()
+  if result[^1].kind == ekPane and result[^1].paneKind == $paneEditor and
+     gDebugDocs.hasKey(path):
+    result.add element(ekEditor, "editor:" & path)
+
+proc syncOverlayLayers() =
+  ## THE PUSHED LAYERS MIRROR THE OVERLAYS (§5.3): the palette's and the
+  ## right-click menu's tables are on the stack exactly while they are open,
+  ## however they were opened or closed.
+  proc want(table, label: string; open: bool) =
+    let at = gRouter.stack.indexOfLayer(table, "window")
+    if open and at < 0:
+      discard gRouter.pushLayer(table, "window", label)
+    elif not open and at >= 0:
+      discard gRouter.popLayer(gRouter.stack.layers[at].token)
+  let palette = not gOmnibar.isNil and gOmnibar.isOpen
+  if not gCtxMenu.open: want(ContextMenuTable, "MENU", false)
+  if not palette: want(PaletteTable, "PALETTE", false)
+  want(PaletteTable, "PALETTE", palette)
+  want(ContextMenuTable, "MENU", gCtxMenu.open)
+
+proc refreshMenuShortcuts() =
+  ## The menu's chords are THE ROUTER'S (KL-8): each item's operation
+  ## (`client_actions`), the chord that runs it from the focus — so a
+  ## rebinding in `keybindings.json` is shown the moment it loads.
+  if gMenu.isNil:
+    return
+  syncOverlayLayers()
+  let facts = windowSessionFacts()
+  let path = windowScopePath()
+  var chords = initTable[string, string]()
+  for (_, it) in gMenu.root.actionItems():
+    let op = operationOfClientAction(it.action)
+    if op.len == 0:
+      continue
+    let (name, arg) = splitOperation(op)
+    let chord = gRouter.chordFor(name, facts, path, nmNormal, arg)
+    if chord.len > 0:
+      chords[it.action] = chord
+  gMenu.setShortcuts(chords)
+
+proc applyKeybindings(load: KeybindingsLoad) =
+  ## Lay the user's `keybindings.json` over the base; what did not load is
+  ## said (the window's trace, which the window lanes read).
+  gKeybindings = load
+  if load.readError.len > 0:
+    traceGesture("keybindings: " & load.readError)
+    return
+  gRouter.applyUserKeymap(load.keymap)
+  if gRouter.errors.len > 0:
+    traceGesture("keybindings: " & gRouter.loadSummary)
+  refreshMenuShortcuts()
+
+proc wireKeybindings(base: BaseKeymap; source: BaseSource) =
+  ## The router this window resolves with: the base, then the ONE user
+  ## keymap every front-end reads (Base-Keymaps §3.5) — an old
+  ## `.cttui-keys` or edited desktop YAML translated into it once first.
+  gRouter = initKeymapRouter(base, GpuiDelivery, source)
+  for note in importOldConfigsOnce(defaultOldConfigs(DesktopDefaultConfig)):
+    traceGesture("keybindings: " & note)
+  applyKeybindings(readKeybindings())
+
+proc pollKeybindings() =
+  ## Between frames: the file changed on disk — read it again. A file that
+  ## cannot be read keeps the rows that loaded last.
+  if gKeybindings.path.len == 0 or not gKeybindings.changedSince:
+    return
+  let fresh = readKeybindings(gKeybindings.path)
+  if fresh.readError.len > 0:
+    traceGesture("keybindings: " & fresh.readError)
+    gKeybindings.exists = fresh.exists
+    gKeybindings.stamp = fresh.stamp
+  else:
+    applyKeybindings(fresh)
+
+proc runDebugEditorOperation(r: GpuiRenderer; res: EditingResolution;
+                             nowMs: int64) =
+  ## A vocabulary operation (or a character) on the shown file's document:
+  ## the motions and the selection move, a copy reaches GPUI's clipboard, a
+  ## paste reads it, an edit is refused while the document is read-only.
+  let path = editorPath()
+  if not debugDocumentFor(path, gEditorSurface.executionLine):
+    traceGesture("`" & res.operation & "` needs a document in the editor")
+    return
+  if res.operation == "clipboard-paste":
+    let pasted = clipboardText()
+    if pasted.len > 0:
+      gDebugDocs[path].offerClipboard(pasted)
+  let applied = gDebugDocs[path].applyResolved(res, nowMs)
+  if res.operation in ["clipboard-copy", "clipboard-cut"]:
+    let copied = gDebugDocs[path].clipboardText
+    if copied.len > 0:
+      copyToClipboard(copied, $copied.countLines & " line(s)")
+  if applied.outcome == eoIgnored and res.kind == erOperation and
+     gDebugDocs[path].isReadOnly:
+    traceGesture("the editor is read-only — Ctrl+E makes it writable")
+  drawDebugDocument(r)
+  traceGesture("caret " & $gDebugDocs[path].caretLine & ":" &
+               $(gDebugDocs[path].caretColumn + 1))
+
+proc focusedRowText(): tuple[text, what: string] =
+  ## What `list.copy` copies from the focused list: the row it has
+  ## selected, and how to name it.
+  if gSession.isNil:
+    return ("", "")
+  case gFocusPane
+  of $paneCalltrace:
+    let vm = gSession.session.calltraceVM
+    if not vm.isNil:
+      for row in vm.callRows():
+        if crfSelected in row.flags: return (row.callRowText, "the call")
+  of $paneState:
+    let vm = gSession.session.stateVM
+    if not vm.isNil and vm.selectedPath.val.len > 0:
+      return (vm.selectedPath.val, "the variable")
+  else: discard
+  ("", "")
+
+proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
+                        nowMs: int64) =
+  ## **GPUI'S DISPATCH** of a resolved operation onto its ViewModels — the
+  ## terminal's `runtime.runOperation`, this window's half: the editing
+  ## vocabulary onto the shown file's document, the overlays' operations
+  ## onto the overlay that is open, a `ClientAction` operation onto the
+  ## window's menu action (the desktop's own action names). An operation
+  ## this window does not perform is INERT AND SAYS SO (IR-6).
+  let op = if res.argument.len > 0: res.operation & "(" & res.argument & ")"
+           else: res.operation
+  traceGesture("operation " & op)
+  if '.' notin res.operation:
+    runDebugEditorOperation(r, res, nowMs)
+    return
+  if res.operation.startsWith("palette.") and gOmnibar.isOpen:
+    case res.operation
+    of "palette.focus-previous": gOmnibar.moveSelection(-1)
+    of "palette.focus-next": gOmnibar.moveSelection(1)
+    of "palette.focus-page-up": gOmnibar.moveSelection(-10)
+    of "palette.focus-page-down": gOmnibar.moveSelection(10)
+    of "palette.accept":
+      acceptOmnibar(r)
+      return
+    of "palette.close": gOmnibar.close()
+    else: discard
+    drawTopBar(r)
+    return
+  if res.operation.startsWith("input.") and gOmnibar.isOpen:
+    case res.operation
+    of "input.move-left": gOmnibar.moveCursor(-1)
+    of "input.move-right": gOmnibar.moveCursor(1)
+    of "input.move-start": gOmnibar.cursorHome()
+    of "input.move-end": gOmnibar.cursorEnd()
+    of "input.delete-backward": gOmnibar.backspace()
+    of "input.delete-forward": gOmnibar.deleteForward()
+    of "input.toggle-overwrite": gOmnibar.toggleOverwrite()
+    of "input.paste": gOmnibar.typeText(clipboardText())
+    of "input.commit":
+      acceptOmnibar(r)
+      return
+    of "input.cancel": gOmnibar.close()
+    else: traceGesture("`" & op & "` is not available in the palette")
+    drawTopBar(r)
+    return
+  if res.operation.startsWith("context-menu.") and gCtxMenu.open:
+    case res.operation
+    of "context-menu.focus-previous": gCtxMenu.move(-1)
+    of "context-menu.focus-next": gCtxMenu.move(1)
+    of "context-menu.focus-first": gCtxMenu.move(-1000)
+    of "context-menu.focus-last": gCtxMenu.move(1000)
+    of "context-menu.accept":
+      let chosen = gCtxMenu.choose(-1)
+      if chosen.chosen:
+        drawTopBar(r)
+        runContextAction(r, chosen.action, chosen.target)
+        return
+    of "context-menu.close": gCtxMenu.close()
+    else: discard
+    drawTopBar(r)
+    return
+  let palette = paletteQueryOf(res.operation)
+  if palette.ok:
+    openOmnibar(r, palette.query)
+    return
+  case res.operation
+  of "editor.toggle-read-only":
+    let path = editorPath()
+    if not debugDocumentFor(path, gEditorSurface.executionLine):
+      traceGesture("there is no document in the editor to make writable")
+      return
+    gDebugDocs[path].setReadOnly(not gDebugDocs[path].isReadOnly)
+    traceGesture(if gDebugDocs[path].isReadOnly: "the editor is read-only"
+                 else: "the editor is writable")
+    # Back to read-only: the recording's rows again, from the session.
+    if gViewedFile.len > 0: showViewedFile(r)
+    else: refreshReplayWindow(r)
+    return
+  of "editor.toggle-tracepoint":
+    # The desktop's `Enter` / `Ctrl+Enter` / `Alt+T` in the read-only
+    # editor (`Editor.TracepointCreation`): the tracepoint editor, on the
+    # caret's line.
+    let path = editorPath()
+    let line = if gDebugDocs.hasKey(path): gDebugDocs[path].caretLine
+               else: max(1, gEditorSurface.executionLine)
+    gTracepointAt = (path, line)
+    traceGesture("tracepoint editor at " & $line)
     openOmnibar(r, TracepointCommand)
-    return true
-  if mods.len > 0:
-    return false
-  var line = gCaret.line
-  var column = gCaret.column
-  let total = max(1, gEditorSurface.totalLineCount)
-  case k
-  of "up", "arrowup": line = max(1, line - 1)
-  of "down", "arrowdown": line = min(total, line + 1)
-  of "left", "arrowleft": column = max(1, column - 1)
-  of "right", "arrowright": column = column + 1
-  of "home": column = 1
-  of "end": column = max(1, lineTextOf(gCaret.path, line).runeLen + 1)
-  else: return false
-  placeCaret(r, gCaret.path, line, column)
-  true
+    return
+  of "menu.open", "menu.toggle", "menu.open-folder":
+    runMenuOperation(res.operation, res.argument)
+    drawTopBar(r)
+    return
+  of "layout.reveal-next-docked":
+    revealNext(r)
+    return
+  of "layout.cancel-drag":
+    discard cancelWindowGesture()
+    return
+  of "session-tabs.next", "session-tabs.previous", "session-tabs.next-recent",
+     "session-tabs.previous-recent":
+    if not gShell.isNil:
+      let step = if res.operation.endsWith("next") or
+                    res.operation.endsWith("next-recent"): 1 else: -1
+      if gShell.app.stepTab(step):
+        traceGesture("session tab " & $gShell.app.activeTabIndex())
+    drawTopBar(r)
+    return
+  of "list.copy":
+    let (text, what) = focusedRowText()
+    if text.len == 0: traceGesture("nothing is selected here to copy")
+    else: copyToClipboard(text, what)
+    return
+  of "find.open", "find.open-backward":
+    # GPUI's find is the omnibar's (`:grep` over the files).
+    openOmnibar(r, CommandPrefix & "grep ")
+    return
+  else: discard
+  let action = clientActionOf(op)
+  if action.len > 0 and gpuiMenuActionAvailable(action):
+    runGpuiMenuAction(r, action)
+    return
+  traceGesture("`" & op & "` (" & operationLabelOf(res.operation) &
+               ") is not available in this window")
+
+proc probeWindowResolution(key: string; mods: seq[string]): EditingResolution =
+  ## What the keystroke WOULD resolve to here, with no effect — the router
+  ## copied, nothing run.
+  let name = canonicalKeyOfGpui(key, mods)
+  if editorFocused():
+    discard debugDocumentFor(editorPath(), gEditorSurface.executionLine)
+  syncOverlayLayers()
+  var probe = gRouter
+  probe.route(windowSessionFacts(), windowScopePath(), nmNormal, name, 0)
+
+proc probeWindowKey(key: string; mods: seq[string]): string =
+  ## `probeWindowResolution` spelled (`--window-ops`' `probe:`, and the
+  ## cross-front-end differential's reading of this window).
+  let res = probeWindowResolution(key, mods)
+  canonicalKeyOfGpui(key, mods) & " at " & $windowScopePath() & " -> " &
+    describeResolution(res)
+
+proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
+  ## One GPUI keystroke through the shared router: decoded to its canonical
+  ## name (`canonicalKeyOfGpui`, GPUI's one decoder), resolved for THIS
+  ## window's scope path and facts, and run (§6.1 step 5).
+  let name = canonicalKeyOfGpui(key, mods)
+  if name.len == 0:
+    return
+  let nowMs = int64(epochTime() * 1000)
+  # The user's file changed since it loaded: the key resolves under the new
+  # rows (the window's loop has no frame hook of its own to poll from).
+  pollKeybindings()
+  if editorFocused():
+    discard debugDocumentFor(editorPath(), gEditorSurface.executionLine)
+  syncOverlayLayers()
+  let path = windowScopePath()
+  traceGesture("key " & name & " at " & $path)
+  let res = gRouter.route(windowSessionFacts(), path, nmNormal, name, nowMs)
+  case res.kind
+  of erPending:
+    traceGesture("pending " & gRouter.pendingLabel)
+  of erNothing:
+    if res.reason in {nrPrefixAbandoned, nrPrefixTimedOut}:
+      traceGesture("pending cleared")
+    elif res.reason == nrDisabled:
+      # Mode-Transitions §8.1: inert in this product mode — the window has no
+      # status line to say it on, so the trace carries it.
+      traceGesture("inert " & gRouter.inertNote(res, windowSessionFacts(),
+                                                path, nmNormal))
+  of erCharacter:
+    if gOmnibar.isOpen:
+      gOmnibar.typeText(res.character)
+      drawTopBar(r)
+    elif editorFocused():
+      runDebugEditorOperation(r, res, nowMs)
+  of erOperation:
+    runWindowOperation(r, res, nowMs)
 
 proc refreshStateOrigins() =
   ## PLAT-51: the value-origin chains open in the Variables pane, read at
@@ -4614,8 +5104,12 @@ proc onPaneClick(c: GPaneClick) =
     if (c.button == gbLeft and not c.ctrl and not c.alt) or c.button == gbRight:
       # K47 (PLAT-51): a press on the text PLACES THE CARET there, as
       # Monaco's does in a read-only model (a right press too, before its
-      # menu opens).
+      # menu opens) — and the editor has the focus.
+      if gFocusPane != $paneEditor:
+        focusWindowPane(r, $paneEditor)
       placeCaret(r, path, c.line, column)
+      # PLAT-68: a held left press SELECTS as the pointer moves.
+      gTextDrag = c.button == gbLeft
     if c.button == gbRight:
       openContextMenuAt(r, editorMenuAt(path, c.line, column), c.x, c.y)
     elif c.button == gbLeft and c.ctrl and c.alt:
@@ -4870,11 +5364,19 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   # PLAT-50: named, so `--window-ops`' bubbling stops below it (a handle is a
   # fresh pointer per lookup, so it cannot be compared with `gRoot`).
   r.setAttribute(root, WindowRootAttribute, "true")
+  # PLAT-68: the scope elements of the focus chain (Base-Keymaps §5.2) —
+  # the window, the session tab's container, each pane.
+  r.setAttribute(root, ScopeKindAttribute, $ekWindow)
+  r.setAttribute(root, ScopeIdAttribute, "window")
+  r.setAttribute(container, ScopeKindAttribute, $ekTab)
+  r.setAttribute(container, ScopeIdAttribute, "tab:1")
   gContainer = container
   gPanes = initTable[string, GpuiElement]()
   for pane in leaves:
     let id = getAttribute(pane, "data-ct-pane")
-    if id.len > 0 and id notin gPanes: gPanes[id] = pane
+    if id.len > 0 and id notin gPanes:
+      gPanes[id] = pane
+      markPaneScope(r, pane, id)
     stripHeading(r, pane)
   proc stylePane(pane: GpuiElement; w, h: int) =
     stylePaneBox(r, pane, w, h)
@@ -5314,6 +5816,34 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         node = r.parentNode(node)
       gPressDedupe.clear()
       return ""
+    of "modifiers":
+      # PLAT-68: `modifiers:[<mod>+<mod>]` — the held modifiers are now these
+      # (GPUI's `modifierschange`), through the listener's own path.
+      let held = if parts.len > 1 and parts[1].len > 0: parts[1].split('+')
+                 else: @[]
+      windowModifiers(held)
+    of "probe":
+      # PLAT-68: `probe:<key>[:<mod>+<mod>]` — what the key would resolve to
+      # where the focus is, traced, with no effect.
+      let mods = if parts.len > 2: parts[2].split('+') else: @[]
+      traceGesture("probe " & probeWindowKey(parts[1], mods))
+    of "select":
+      # PLAT-68: `select:<line>@<column>:<line>@<column>` — a left press on
+      # the editor's text at the first cell, the pointer moved, with the
+      # button held, to the second, and released there: a DRAG, through the
+      # row's press and the window's own pointer handler.
+      if parts.len != 3 or '@' notin parts[1] or '@' notin parts[2]:
+        return "select takes <line>@<column>:<line>@<column>"
+      let pressed = runWindowOp(r, "click:code:" & parts[1])
+      if pressed.len > 0:
+        return pressed
+      let to = parts[2].split('@')
+      let x = editorXOfColumn(parseInt(to[1]))
+      let y = editorYOfLine(parseInt(to[0]))
+      if y <= 0:
+        return "line " & to[0] & " is not drawn in the editor"
+      windowPointer(r, gekPointerMove, x, y)
+      windowPointer(r, gekPointerUp, x, y)
     of "ctx":
       # PLAT-50: the open right-click menu's entry `parts[1]`, pressed.
       if not gCtxMenu.open:
@@ -6028,8 +6558,15 @@ proc runOpen(cmd: GpuiCommand): int =
   # the index the terminal builds for the same recording.
   gMenu = newMenuVM(nativeFrontEndMenu("CodeTracer"))
   gMenu.setEnabled(gpuiMenuActionAvailable)
-  gBindings = desktopBindings()
-  gMenu.setShortcuts(gBindings)
+  # PLAT-68: the window's keys resolve through the one router, under the
+  # base this session starts with and the user's `keybindings.json`; the
+  # menu shows the chords it resolves (`refreshMenuShortcuts`).
+  let preference = sessionKeymap(cmd.keymap)
+  wireKeybindings(preference.model,
+                  case preference.reason
+                  of "flag": ksFlag
+                  of "stored": ksStored
+                  else: ksDefault)
   gOmnibar = newOmnibarVM()
   gOmnibar.setIndex(omnibarIndexOf(session.session.fileTreeVM,
                                    session.session.store, gMenu) &

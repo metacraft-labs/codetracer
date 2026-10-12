@@ -186,7 +186,7 @@ proc stepOverStatement*(self: DebuggerService) =
   ## line-granularity stepping otherwise.
   ##
   ## Unlike [`DebuggerService.step`] (which is the entry point for the
-  ## F10 button + Mousetrap keybind path and routes through
+  ## F10 button + key-router path and routes through
   ## ``CODETRACER::step`` for IPC compatibility with the legacy CT
   ## protocol), this proc speaks DAP directly — the granularity field
   ## is a vanilla DAP extension and does not need a custom CT

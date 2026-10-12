@@ -89,7 +89,7 @@
 # own note above grew.
 cad6f3e340ba65160902bc10f05db2e9c279ad8469df667a0189d0ac417cd2cc  src/tests/visual/plat37-measurements.json
 6691efa7f680d879a9ffc9f4ceb4b95f0c07c5550f982c206658b9ffeb4e60df  src/tests/visual/plat37-thresholds.json
-170f4eef93202876a9486e7723b0a19c50f59431cb1c9365b33ed96ae7b75bcf  src/frontend/gpui/chrome.nim
+5d70a564f9433683ab6797133e135c39c01320d08c185532a95c471515806911  src/frontend/gpui/chrome.nim
 cb6c5462e917d2e9e33645f68bbcb97e97bbfc7535260fa0a0f1ca8718e7329c  src/frontend/gpui/replay_ops.nim
 b80875c273eb71880e4ba1894c3eca0751f4e300216e5b18c113e3b66bfd732a  src/tests/visual/scenarios.json
 eae5ce275ce0f8d32a08ff37064e7794f9a6bcad368a4fd28a6be9ca742fd590  src/frontend/gpui/tests/plat37_vision.nim

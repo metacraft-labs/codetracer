@@ -45,6 +45,7 @@ import codetracer_embed
 import gpui/chrome
 import gpui/window_geometry
 import gpui/window_top_bar
+import gpui/app/edit_arm   # `GpuiDelivery`
 from gpui/app/leaves import EditorGround
 
 var CHECKS = 0
@@ -172,8 +173,12 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
     ck plan.nodesWith("data-ct-menu-title").len == 0
     ck plan.nodesWith("data-ct-menu-popover").len == 0
     let button = plan.nodesWith("data-ct-menu-button")[0].rectOf
-    # Ctrl+M opens the first level, below the button, one folder per row.
-    let opened = windowPlan("key:m:control")
+    # The menu key opens the first level, below the button, one folder per
+    # row. PLAT-68: `F12`, the Vim base's (§4.2) — CUA gives the menu no
+    # chord (the button and the palette open it), so the window runs under
+    # Vim for the keyboard walk.
+    var g: JsonNode
+    let opened = windowPlan("key:f12", g, @["--keymap=vim"])
     let first = opened.popover("@[]")
     ck not first.isNil
     let fr = first.rectOf
@@ -189,8 +194,8 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
     ck labels == @["File", "Edit", "View", "Build", "Reset", "Debug", "Help"]
     # Right on Debug: its items as a second popover, to the right of the first
     # and level with Debug's row.
-    let walked = windowPlan("key:m:control,key:down,key:down,key:down," &
-                            "key:down,key:down,key:right")
+    let walked = windowPlan("key:f12,key:down,key:down,key:down," &
+                            "key:down,key:down,key:right", g, @["--keymap=vim"])
     let debugRow = walked.item("Debug")
     let cont = walked.item("Continue")
     ck not debugRow.isNil and not cont.isNil
@@ -281,7 +286,9 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
       for t in s{"children"}.getElems:
         if t.attr("data-ct-tab-active") == "true":
           inc active
-          ck t.style("bg") == (if focused: chromeOf(crFocusOutline)
+          # PLAT-68: on the focused strip the selected tab is off the focus
+          # colour, on the window's ground — told apart from the others.
+          ck t.style("bg") == (if focused: chromeOf(crTabStripBackground)
                                else: chromeOf(crTabActiveBackground))
           ck t.style("text_color") == chromeOf(crTabActiveForeground)
           ck t.style("font_weight") == "bold"
@@ -321,13 +328,20 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
     ck held.nodesWith("data-ct-drop").len == 1
 
   test "the pointer over a control: the ViewModel's tooltip":
-    let bindings = desktopBindings()
+    # PLAT-68: the key in the tooltip is the one the window's router runs
+    # the control with (the menu's chord, `keymap_router.chordFor`).
+    let router = initKeymapRouter(bkCua, GpuiDelivery)
+    let facts = SessionFacts(product: pmDebug, editor: sourceViewFacts())
+    let path = @[element(ekWindow, "window"), element(ekTab, "tab:1"),
+                 pane("editor")]
     for id in ["next", "continue", "reverse-step-out"]:
       let plan = windowPlan("control:" & id)
       let labels = plan.nodesWith("data-ct-hover-label")
       ck labels.len == 1
       let c = TransportControls[controlIndex(id)]
-      let want = transportTooltip(id, bindings.getOrDefault(c.clientAction))
+      let (name, arg) = splitOperation(operationOfClientAction(c.clientAction))
+      let want = transportTooltip(id, router.chordFor(name, facts, path,
+                                                      nmNormal, arg))
       ck labels[0].attr("data-ct-hover-label") == want
       ck labels[0].textOf == want
       ck want.startsWith(transportLabel(id))

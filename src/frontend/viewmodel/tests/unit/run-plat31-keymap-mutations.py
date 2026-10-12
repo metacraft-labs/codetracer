@@ -205,12 +205,9 @@ ARMS = [
     ),
     Arm(
         "M2", RESOLVER,
-        "  if scope.textEntry and pending.chords.len == 0 and isTextKey(key):\n"
-        '    return EditingResolution(kind: erCharacter, operation: "", args: OpArgs(),\n'
-        "                             character: keyCharacter(key), spelling: key,\n",
-        "  if scope.textEntry and pending.chords.len == 0 and isPrintableKey(key):\n"
-        '    return EditingResolution(kind: erCharacter, operation: "", args: OpArgs(),\n'
-        "                             character: key, spelling: key,\n",
+        # PLAT-68: the text-entry shadow is `resolveLayers`', the one resolver.
+        "  if textEntry and pending.chords.len == 0 and isTextKey(key):\n",
+        "  if textEntry and pending.chords.len == 0 and isPrintableKey(key):\n",
         SPACE_CHARACTER,
         "**THE TEXT-ENTRY SHADOW USES `isPrintableKey`, WHICH IS THE DEFECT "
         "THIS PRODUCT HAS ALREADY SHIPPED ONCE.** `keyName(\" \")` is the "
@@ -224,8 +221,8 @@ ARMS = [
     ),
     Arm(
         "M3", RESOLVER,
-        "     nowMs - pending.startedMs > timeout:\n",
-        "     nowMs - pending.startedMs >= timeout:\n",
+        "     nowMs - pending.startedMs > timeoutMs:\n",
+        "     nowMs - pending.startedMs >= timeoutMs:\n",
         BOUND_EXACTLY,
         "THE TIMEOUT BOUNDARY MOVES BY ONE MILLISECOND. `>` becomes `>=`, so a "
         "prefix that arrives at EXACTLY the published bound is discarded "

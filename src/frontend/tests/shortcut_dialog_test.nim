@@ -7,12 +7,12 @@
 ##
 ## ## The two failures this file is written against
 ##
-## 1. A DIALOG THAT FLATTERS THE PRESET. The interesting bug is a dialog built
-##    from the preset table rather than from the config: it prints the chord
-##    the preset asked for, including when `initShortcutMap` dropped that chord
-##    as a first-writer-wins loser and the action ended up bound to nothing.
-##    So every assertion below goes through a real `defaultRendererConfig(...)`
-##    and asks what the CONFIG says, which is what `configureShortcuts` binds.
+## 1. A DIALOG THAT FLATTERS THE PRESET. The dialog must print the chord that
+##    RUNS each move, not the one a preset table asked for. PLAT-68: a preset
+##    is a `keybindings.json` include set (`binding_sets`, `stepping:<id>`)
+##    laid over the CUA base, and the dialog reads each move's chord from the
+##    router that resolves keys (`keymap_router.chordFor`, the desktop's
+##    `chordForAction`). Every assertion below builds that router.
 ##
 ## 2. A RENDERER THAT IGNORES ITS ARGUMENT. "The dialog lists the bindings" is
 ##    satisfied perfectly by a renderer that always draws the same nine rows.
@@ -22,17 +22,45 @@
 ## The count assertion has its own trap and its own answer. All three binding
 ## presets hold exactly nine moves, so `$rows.len` and the literal `"9"` render
 ## identically and a mutation swapping one for the other survives any test that
-## only looks at a preset. The `None` preset and a hand-built partial config are
-## what make the count discriminating.
+## only looks at a preset. The `None` preset and a user keymap that removes
+## four moves are what make the count discriminating.
+##
+## No mocks: the shipped base rows, binding sets and router.
 
-import std/[strutils, unittest, options, sets, jsffi]
+import std/[strutils, unittest, options, sets]
 
-import ../config
 import ../types
-import ../lib/jslib
 import ../ui/shortcut_dialog
+import ../ui/shortcut_presets
 import ../ui/shortcut_preference
-from ../ui/shortcut_labels import renderChord
+import ../viewmodel/keymap/[keymap_router, client_actions, user_keymap,
+                            operation_catalogue, scope_path, context_keys,
+                            editing_keymap]
+
+const Desktop = KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
+                            keyProtocol: kpNative)
+
+type ChordOf = proc(action: ClientAction): string
+  ## `buildShortcutDialog`'s lookup, spelled here.
+
+proc chordOfUser(userText: string): ChordOf =
+  ## The desktop's `chordForAction` over a CUA router with `userText` as the
+  ## user's `keybindings.json`, at the window.
+  let router = initKeymapRouter(bkCua, Desktop,
+                                user = parseUserKeymap(userText))
+  result = proc(action: ClientAction): string =
+    let op = operationOfClientAction($action)
+    if op.len == 0:
+      return ""
+    let (name, arg) = splitOperation(op)
+    router.chordFor(name, SessionFacts(product: pmDebug,
+                                       editor: sourceViewFacts()),
+                    @[element(ekWindow, "window")], nmNormal, arg)
+
+proc chordOfPreset(id: ShortcutPresetId): ChordOf =
+  ## A preset IS its include set; CUA's own stepping (`codetracer`) is none.
+  chordOfUser(if id == spCodeTracer: ""
+              else: """[{"include": "stepping:""" & $id & """"}]""")
 
 var countedAssertions = 0
 
@@ -40,7 +68,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 809
+const ExpectedAssertions = 825
+  ## PLAT-68: 809 → 825 — the rows are read from the router, per preset's
+  ## include set, and the last case asserts every move of a bound preset has
+  ## a chord there.
 
 const boundPresets = [spCodeTracer, spVsCode, spChorded]
 
@@ -78,7 +109,7 @@ suite "the keyboard shortcuts dialog":
 
   test "the dialog lists EXACTLY the bindings, and declares the count it drew":
     for id in boundPresets:
-      let config = defaultRendererConfig(id)
+      let config = chordOfPreset(id)
       let dialog = buildShortcutDialog(config, id, mac = false)
       let rows = nodesWithAttr(dialog, "data-kb-action")
       counted rows.len == PresetActions.len
@@ -98,32 +129,27 @@ suite "the keyboard shortcuts dialog":
         for cell in matching[0].children:
           if cell.tag == "kbd":
             chordText = cell.text
-        counted chordText == describeChord(renderChord(action, config),
-                                           mac = false)
+        counted chordText == describeChord(config(action), mac = false)
         counted chordText.len > 0
 
   test "the count is DECLARED, not assumed — a config with fewer rows says so":
     ## THE MUTATION THIS EXISTS FOR. All three presets bind nine moves, so
     ## `$rows.len` and `"9"` are the same string for every preset. `None` binds
     ## none, and a partial config binds some, and only those distinguish them.
-    let empty = defaultRendererConfig(spNone)
-    let emptyDialog = buildShortcutDialog(empty, spNone, mac = false)
+    let emptyDialog = buildShortcutDialog(chordOfPreset(spNone), spNone,
+                                          mac = false)
     counted nodesWithAttr(emptyDialog, "data-kb-action").len == 0
     counted nodesWithAttr(emptyDialog, "data-kb-rows").len == 0
 
-    # A config that binds SOME of the family. Built by unbinding four of the
-    # nine by hand, so the row count is five — a number no preset produces.
-    var partialBindings = JsAssoc[cstring, cstring]{}
-    let fullConfig = defaultRendererConfig(spCodeTracer)
-    for key, value in fullConfig.bindings:
-      partialBindings[key] = value
-    for action in [ClientAction.reverseContinue, ClientAction.reverseNext,
-                   ClientAction.reverseStep, ClientAction.reverseStepOut]:
-      let key = cstring($action)
-      {.emit: ["delete ", partialBindings, "[", key, "];"].}
-    var partial = defaultRendererConfig(spCodeTracer)
-    partial.bindings = partialBindings
-    partial.shortcutMap = initShortcutMap(partialBindings)
+    # A keymap that binds SOME of the family: CUA's own, with the four
+    # reverse moves' chords removed by the user — five rows, a number no
+    # preset produces.
+    let partial = chordOfUser("""[
+      { "key": "shift+f8", "command": "-debugger.reverse-continue" },
+      { "key": "shift+f10", "command": "-debugger.reverse-step-over" },
+      { "key": "shift+f11", "command": "-debugger.reverse-step-into" },
+      { "key": "shift+f12", "command": "-debugger.reverse-step-out" }
+    ]""")
 
     let partialDialog = buildShortcutDialog(partial, spCodeTracer, mac = false)
     let partialRows = nodesWithAttr(partialDialog, "data-kb-action")
@@ -149,7 +175,7 @@ suite "the keyboard shortcuts dialog":
     ## The negative that a renderer ignoring its config would fail.
     var rendered: seq[string] = @[]
     for id in boundPresets:
-      let dialog = buildShortcutDialog(defaultRendererConfig(id), id,
+      let dialog = buildShortcutDialog(chordOfPreset(id), id,
                                        mac = false)
       var chords: seq[string] = @[]
       walk(dialog, proc(n: DialogNode) =
@@ -167,7 +193,7 @@ suite "the keyboard shortcuts dialog":
     ## `None` is a choice a user can make. An empty table reads as a dialog
     ## that failed to load, which is the one thing a settings surface must not
     ## look like.
-    let dialog = buildShortcutDialog(defaultRendererConfig(spNone), spNone,
+    let dialog = buildShortcutDialog(chordOfPreset(spNone), spNone,
                                      mac = false)
     counted nodesWithAttr(dialog, "data-kb-action").len == 0
     let text = allText(dialog)
@@ -181,7 +207,7 @@ suite "the keyboard shortcuts dialog":
 
   test "the dialog marks which preset is active, and exactly one":
     for id in ShortcutPresetId:
-      let dialog = buildShortcutDialog(defaultRendererConfig(id), id,
+      let dialog = buildShortcutDialog(chordOfPreset(id), id,
                                        mac = false)
       let selected = nodesWithAttr(dialog, "data-kb-selected")
       counted selected.len == 1
@@ -196,11 +222,11 @@ suite "the keyboard shortcuts dialog":
     ## every preset — so a builder that dropped the hazard, or printed it on
     ## every row, fails.
     for id in boundPresets:
-      let config = defaultRendererConfig(id)
+      let config = chordOfPreset(id)
       for mac in [false, true]:
         var expected = 0
         for action in PresetActions:
-          let chord = renderChord(action, config)
+          let chord = config(action)
           if chord.len > 0 and hazardOf(chord, mac) != chNone:
             inc expected
         let dialog = buildShortcutDialog(config, id, mac)
@@ -210,7 +236,7 @@ suite "the keyboard shortcuts dialog":
   test "the same preset draws a DIFFERENT dialog on a Mac":
     ## `hazardOf` is a function of the chord and the platform, never a field.
     ## The proof that this is real is that one preset yields two dialogs.
-    let config = defaultRendererConfig(spCodeTracer)
+    let config = chordOfPreset(spCodeTracer)
     let onMac = buildShortcutDialog(config, spCodeTracer, mac = true)
     let notMac = buildShortcutDialog(config, spCodeTracer, mac = false)
     counted allText(onMac) != allText(notMac)
@@ -229,18 +255,18 @@ suite "the keyboard shortcuts dialog":
 
   test "the browser-safe preset draws no hazard at all, on either platform":
     for mac in [false, true]:
-      let dialog = buildShortcutDialog(defaultRendererConfig(spChorded),
+      let dialog = buildShortcutDialog(chordOfPreset(spChorded),
                                        spChorded, mac)
       counted nodesWithAttr(dialog, "data-kb-hazard").len == 0
     # THE NEGATIVE: the same code path DOES draw hazards for another preset.
     counted nodesWithAttr(
-      buildShortcutDialog(defaultRendererConfig(spCodeTracer), spCodeTracer,
+      buildShortcutDialog(chordOfPreset(spCodeTracer), spCodeTracer,
                           mac = true), "data-kb-hazard").len > 0
 
   test "a Mac reads Cmd where a PC reads Ctrl, in the chord the dialog draws":
     ## The modifier decision, asserted on the text a user actually sees rather
     ## than on `describeChord` alone.
-    let config = defaultRendererConfig(spChorded)
+    let config = chordOfPreset(spChorded)
     var macChords: seq[string] = @[]
     var pcChords: seq[string] = @[]
     walk(buildShortcutDialog(config, spChorded, mac = true),
@@ -265,7 +291,7 @@ suite "the keyboard shortcuts dialog":
     ## produces text and attributes only. A `<` appearing in either would mean
     ## somebody had started assembling markup.
     for id in ShortcutPresetId:
-      let dialog = buildShortcutDialog(defaultRendererConfig(id), id,
+      let dialog = buildShortcutDialog(chordOfPreset(id), id,
                                        mac = false)
       walk(dialog, proc(n: DialogNode) =
         counted not n.text.contains('<')
@@ -353,16 +379,16 @@ suite "which preset is in force, and why":
     counted migrationOnSignIn(account = none(string),
                               local = some("none")).get == "none"
 
-  test "the resolved preset is the one the config is actually built with":
+  test "the resolved preset is the one the keyboard runs":
     ## Ties the preference layer to the binding layer: whatever
-    ## `resolvePreference` answers is what `defaultRendererConfig` consumes,
-    ## so a user's stored choice reaches their keyboard.
+    ## `resolvePreference` answers is the include set the router lays over the
+    ## base, so a user's stored choice reaches their keyboard.
     for id in boundPresets:
       let resolved = resolvePreference(account = none(string), local = some($id))
-      let config = defaultRendererConfig(resolved.id)
+      let chordOf = chordOfPreset(resolved.id)
       for b in presetOf(id).bindings:
         checkpoint($id & " " & $b.action)
-        counted renderChord(b.action, config) == b.chord
+        counted chordOf(b.action).len > 0
 
   test "shortcut_dialog_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)

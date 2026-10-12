@@ -1,5 +1,5 @@
 import
-  asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
+  asyncjs, strformat, strutils, sequtils, jsffi, algorithm, options,
   state, editor, debug, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
   # The five panes whose mount was moved into this file's component factory.
@@ -36,7 +36,7 @@ when not defined(ctWeb):
 
 import kdom except Location
 from ../headless_app/layout_model import sharedDefaultDocked, DockedPane
-from ../headless_app/desktop_panes import PaneContent
+from ../headless_app/desktop_panes import PaneContent, paneOfContent
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
@@ -45,44 +45,9 @@ template dispatchLayoutUpdated() =
     window.dispatchEvent(new CustomEvent('ct:layoutUpdated'));
   """.}
 
-type
-  ContextHandler* = proc(tab: js, args: seq[string])
-
-# context handlers for each shortcut
-var contextHandlers*: JsAssoc[cstring, JsAssoc[cstring, ContextHandler]] = JsAssoc[cstring, JsAssoc[cstring, ContextHandler]]{} # app-global
-
 const RESULT_LIMIT = 20
 
 var activeDraggedItem: GoldenContentItem
-
-# FIND
-
-proc historyFind*(tab: js, args: seq[string]) =
-  log "history find"
-
-proc focus: js = # nil?
-  if data.ui.focusHistory.len > 0:
-    return data.ui.focusHistory[^1]
-  else:
-    return nil
-
-proc changeFocus*(panel: js) =
-  if data.ui.focusHistory.len == 0 or panel != data.ui.focusHistory[^1]:
-    data.ui.focusHistory.add(panel)
-
-proc contextBind*(shortcut: string, arg: js, handler: ContextHandler) =
-  var c = contextHandlers[shortcut]
-  if c.isNil:
-
-    c = JsAssoc[cstring, ContextHandler]{}
-    contextHandlers[shortcut] = c
-
-    Mousetrap.`bind`(cstring(shortcut)) do ():
-      var focused = focus()
-      if focused.isNil: return
-
-proc configureFind =
-  discard
 
 var document {.importc.}: js
 
@@ -1252,6 +1217,217 @@ proc unpinAllPanels*(data: Data) =
       cwarn "layout: reset could not unpin '" & $panel.title & "': " &
         getCurrentExceptionMsg()
 
+type
+  PinnedNode = ref object
+    ## One container of a side panel `toggleSidePanels` pinned — a row, a
+    ## column or a stack — so the same key rebuilds the side as it was
+    ## rather than one stack per panel (`unpinPanel`'s own placement).
+    kind: cstring
+      ## GoldenLayout's item type: "row", "column" or "stack".
+    size: cstring
+      ## Its GoldenLayout size ("20%"), so the rebuilt container is as large.
+    parent: PinnedNode
+    children: seq[PinnedNode]
+      ## A row's or column's containers, in order.
+    panels: seq[AutoHidePanel]
+      ## A stack's panels, in tab order.
+    active: int
+      ## A stack's active tab.
+    live: GoldenContentItem
+      ## The container rebuilt for it, once its first panel is back.
+
+  PinnedSide = object
+    index: int
+      ## The side's position in the editor's row.
+    root: PinnedNode
+
+var sidePanelsPinned: seq[PinnedSide] = @[]
+  ## What `toggleSidePanels` pinned, to bring back on the next toggle.
+
+var placeRestored: proc(config: JsObject)
+  ## Where the panel being restored goes; read by `placeRestoredPanel`, the
+  ## `unpinPanelTarget` hook (a `nimcall`, so it cannot capture).
+
+proc placeRestoredPanel(layout: GoldenLayout; panel: AutoHidePanel) {.nimcall.} =
+  placeRestored(panel.config)
+
+proc editorRow(layout: GoldenLayout): tuple[row, editorColumn: GoldenContentItem] =
+  ## The ROW the editor's column sits in — the nearest horizontal container
+  ## above the editor pane (found by its scope element, `markPaneScope`): its
+  ## other children are the side panels. Nil when the editor has none.
+  let editorPane = kdom.document.querySelector(
+    cstring"[data-scope-kind='pane'][data-scope-id='editor']")
+  if editorPane.isNil:
+    return
+  proc holdsEditor(item: GoldenContentItem): bool =
+    let el = item.toJs.element
+    not el.isNil and not el.isUndefined and
+      el.contains(editorPane.toJs).to(bool)
+  var chain: seq[GoldenContentItem] = @[]
+  var item = layout.groundItem
+  while not item.isNil and holdsEditor(item):
+    chain.add item
+    var next: GoldenContentItem = nil
+    for c in item.contentItems:
+      if holdsEditor(c): next = c
+    item = next
+  for i in countdown(chain.len - 2, 0):
+    if chain[i].toJs.isRow.to(bool):
+      return (chain[i], chain[i + 1])
+
+proc sizeOf(item: GoldenContentItem): cstring =
+  let size = item.toJs.size
+  let unit = item.toJs.sizeUnit
+  if size.isUndefined or unit.isUndefined:
+    return cstring""
+  cstring($size.to(float) & $unit.to(cstring))
+
+proc childrenOf(item: GoldenContentItem): seq[GoldenContentItem] =
+  ## A COPY of `item`'s children: pinning removes them from GoldenLayout's
+  ## own array (and an emptied container with it) while the walk is on it.
+  for i in 0 ..< item.contentItems.len:
+    result.add item.contentItems[i]
+
+proc pinTree(layout: GoldenLayout; item: GoldenContentItem; edge: AutoHideEdge;
+             parent: PinnedNode): PinnedNode =
+  ## Pin every panel under `item`, recording its containers. Nil when
+  ## nothing under it could be pinned.
+  result = PinnedNode(size: sizeOf(item), parent: parent)
+  if item.isComponent or item.isStack:
+    result.kind = cstring"stack"
+    let comps = if item.isComponent: @[item] else: childrenOf(item)
+    let current = if item.isStack: item.getActiveContentItem() else: nil
+    for c in comps:
+      let before = if autoHideState.isNil: 0 else: autoHideState.panels.len
+      let wasActive = c == current
+      pinPanel(layout, c, edge)
+      if not autoHideState.isNil and autoHideState.panels.len > before:
+        if wasActive: result.active = result.panels.len
+        result.panels.add autoHideState.panels[^1]
+    if result.panels.len == 0:
+      return nil
+  else:
+    result.kind = if item.toJs.isRow.to(bool): cstring"row" else: cstring"column"
+    for c in childrenOf(item):
+      let child = pinTree(layout, c, edge, result)
+      if not child.isNil:
+        result.children.add child
+    if result.children.len == 0:
+      return nil
+
+proc restorePanel(row: GoldenContentItem; at: int; stack: PinnedNode;
+                  panel: AutoHidePanel; layout: GoldenLayout) =
+  ## Put `panel` back into `stack`, rebuilding the containers above it that
+  ## are not back yet: the outermost missing one is added to its rebuilt
+  ## parent (or to `row` at `at`), holding the chain down to the panel.
+  var missing: seq[PinnedNode] = @[]
+  var node = stack
+  while not node.isNil and node.live.isNil:
+    missing.add node
+    node = node.parent
+  let host = if node.isNil: row else: node.live
+  let index = if node.isNil: min(at, row.contentItems.len)
+              else: host.contentItems.len
+  placeRestored = proc(config: JsObject) =
+    if missing.len == 0:
+      discard host.addItem(config.to(js), host.contentItems.len)
+      return
+    var cfg = config
+    for i in 0 ..< missing.len:
+      let wrapped = js{"type": missing[i].kind, "content": toJs(@[cfg])}
+      if missing[i].size.len > 0: wrapped.size = missing[i].size
+      cfg = wrapped
+    discard host.addItem(cfg.to(js), index)
+  unpinPanel(layout, panel)
+  if missing.len > 0 and index < host.contentItems.len:
+    var live = host.contentItems[index]
+    for i in countdown(missing.len - 1, 0):
+      missing[i].live = live
+      if i > 0:
+        if live.contentItems.len == 0: break
+        live = live.contentItems[0]
+
+proc restoreTree(row: GoldenContentItem; at: int; node: PinnedNode;
+                 layout: GoldenLayout) =
+  if node.kind == cstring"stack":
+    for panel in node.panels:
+      if autoHideState.isNil or panel notin autoHideState.panels:
+        continue   # unpinned (or closed) by hand in the meantime
+      restorePanel(row, at, node, panel, layout)
+    let live = node.live
+    if not live.isNil and live.isStack and node.active < live.contentItems.len:
+      live.setActiveContentItem(live.contentItems[node.active])
+  else:
+    for child in node.children:
+      restoreTree(row, at, child, layout)
+
+proc unpinTree(layout: GoldenLayout; node: PinnedNode) =
+  ## The fallback when the editor's row is gone: each panel goes back
+  ## wherever `unpinPanel` puts it rather than stay pinned.
+  for panel in node.panels:
+    if not autoHideState.isNil and panel in autoHideState.panels:
+      unpinPanel(layout, panel)
+  for child in node.children:
+    unpinTree(layout, child)
+
+proc toggleSidePanels*(data: Data) =
+  ## PLAT-68: `layout.toggle-side-panels` — CUA's `Ctrl+B`, VS Code's Toggle
+  ## Side Bar. The sides of the editor's row are pinned to their screen edge
+  ## (`auto_hide.pinPanel`: out of the way, a hover away, every panel's state
+  ## kept), and the same key puts exactly those panels back, where and as they
+  ## were.
+  if data.isNil or data.ui.isNil or data.ui.layout.isNil:
+    return
+  let layout = data.ui.layout
+  let (row, editorColumn) = editorRow(layout)
+  if sidePanelsPinned.len > 0:
+    let pinned = sidePanelsPinned
+    sidePanelsPinned = @[]
+    let previous = unpinPanelTarget
+    try:
+      for side in pinned:
+        if row.isNil:
+          unpinPanelTarget = previous
+          unpinTree(layout, side.root)
+        else:
+          unpinPanelTarget = placeRestoredPanel
+          restoreTree(row, side.index, side.root, layout)
+    finally:
+      unpinPanelTarget = previous
+      placeRestored = nil
+    return
+  if row.isNil:
+    return
+  # Sides are pinned from the last to the first, so each recorded index is
+  # its place in the row once the sides before it are back.
+  let sides = childrenOf(row)
+  var editorAt = -1
+  for i, item in sides:
+    if item == editorColumn: editorAt = i
+  for i in countdown(sides.len - 1, 0):
+    if i == editorAt: continue
+    let root = pinTree(layout, sides[i], (if i < editorAt: Left else: Right), nil)
+    if not root.isNil:
+      sidePanelsPinned.insert(PinnedSide(index: i, root: root), 0)
+
+proc markPaneScope(element: Element; state: GoldenItemState) =
+  ## PLAT-68: a GoldenLayout pane is a PANE element of the scope path
+  ## (`ui/key_router.desktopScopePath` reads the DOM focus chain): its kind,
+  ## in the shared vocabulary's name, and focusable — so a click into its
+  ## body focuses it (the browser focuses the nearest focusable ancestor of
+  ## what was pressed), and its keys are the pane's.
+  let kind =
+    if state.isEditor: "editor"
+    else:
+      let p = paneOfContent(ord(state.content))
+      if p.isSome: $p.get else: ""
+  if kind.len == 0:
+    return
+  element.setAttribute(cstring"data-scope-kind", cstring"pane")
+  element.setAttribute(cstring"data-scope-id", cstring(kind))
+  if element.getAttribute(cstring"tabindex").isNil:
+    element.setAttribute(cstring"tabindex", cstring"-1")
+
 proc closeLayoutTab*(data: Data, content: Content, id: int) =
   ## A TAB WITH NO COMPONENT BEHIND IT IS CLOSED, NOT AN ERROR.
   ##
@@ -2089,6 +2265,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
     let componentLabel = cstring(fmt"editorComponent-{state.id}")
     var element = cast[Element](container.getElement())
+    markPaneScope(element, state)
 
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
@@ -2271,6 +2448,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       return
     let editorLabel = state.label
     var element = cast[Element](container.getElement())
+    markPaneScope(element, state)
 
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)

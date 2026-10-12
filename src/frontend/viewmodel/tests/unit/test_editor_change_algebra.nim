@@ -117,7 +117,13 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1774
+const ExpectedAssertions = 1813
+  ## *1774 -> 1813 on 2026-10-12 (PLAT-68 Phase B): thirteen new production
+  ## modules — under `keymap/` `keymap_router`, `scope_path`, `layer_stack`,
+  ## `operation_catalogue`, `user_keymap`, `binding_sets`, `keymap_importers`,
+  ## `client_actions`, `navigation_keymap`, `base_keymaps`, `alt_tap`, and
+  ## under `host/` `keybindings_file`, `keybindings_location` — x three
+  ## assertions. None calls `rebase(` or spells `mapOver`.*
   ## *1762 -> 1774 on 2026-10-11 (PLAT-68): five new production modules under
   ## `viewmodel/keymap/` — `context_keys`, `when_expr`, `base_rows`,
   ## `cua_keymap`, `emacs_keymap` — and one deleted (`product_keymap`), x three

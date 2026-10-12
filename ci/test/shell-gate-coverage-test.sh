@@ -495,12 +495,12 @@ else
 	printf '%s\n' "${via_var_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
 fi
 
-# 15c — AND THROUGH A LOCAL WRAPPER. `chord-and-pane-uniqueness.sh` runs three
+# 15c — AND THROUGH A LOCAL WRAPPER. `chord-and-pane-uniqueness.sh` runs its
 # browser probes as `probe <label> ci/test/<probe>.mjs /noir`, and `probe` is its
 # own function: the path is an ARGUMENT, and only the function body says whether
 # that argument is executed or read. It executes `$2`; `expect_leak` in
 # `sourced-var-collision-gate.sh` greps `$1`. Without this the position rule
-# calls all three probes dark.
+# calls every one of them dark.
 stage "${work}/arm"
 printf '// a probe a wrapper runs\nconsole.log("x");\n' \
 	>"${work}/arm/ci/test/via_wrapper_probe.mjs"

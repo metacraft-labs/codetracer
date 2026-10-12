@@ -33,12 +33,24 @@ THREE THINGS PARTICULAR TO THIS MILESTONE:
     synthesiser first, so D1 is graded by the sequence test alone, through
     Nim's unittest filter — the `because` it records is the document's.
 
+PHASE B (the `B*` arms) adds the router, the layer stack, the three front
+ends' scope paths and the coordinator's additions, graded through the suites
+that hold them: the ViewModel's own (`test_plat68_layers`), the terminal's
+real pty (`test_plat68b_pty`, which REBUILDS `codetracer-tui`), GPUI's window
+plan (`test_plat68_gpui_keys_plan`, which REBUILDS `codetracer-gui`), the
+cross-front-end differential (`test_plat68_diff13`), the desktop's editing
+table under node, and `isonim-tui`'s propagation suite (`isonim-tui:` is
+`$ISONIM_TUI_SRC`, else `../isonim-tui/src`). The builds run
+`$PLAT68_BUILD_TUI` / `$PLAT68_BUILD_GPUI` when set (a worktree whose
+submodules `just build-tui` refuses), else the `just` recipes.
+
 Usage:
     run-plat68-keymaps-mutations.py [--only D1,O2] [--derive]
     run-plat68-keymaps-mutations.py --needle-scan
     run-plat68-keymaps-mutations.py --record-control-hashes
 """
 import argparse
+import re
 import hashlib
 import json
 import os
@@ -57,8 +69,12 @@ NIMCACHE = Path(os.environ.get("CT_NIM_CACHE_ROOT",
 BIN = REPO / "build/bin/codetracer-tui"
 TIMEOUT = 3600
 
+GPUI_BIN = REPO / "build/bin/codetracer-gpui"
+
 ROOTS = {
     "": REPO,
+    "isonim-tui:": Path(os.environ.get("ISONIM_TUI_SRC") or
+                        REPO.parent / "isonim-tui/src"),
     "specs:": Path(os.environ.get("CT_SPECS_DIR") or
                    REPO.parent / "codetracer-specs"),
     "nim-termctl:": Path(os.environ.get("NIM_TERMCTL_SRC") or
@@ -79,8 +95,46 @@ ORACLE = "src/frontend/viewmodel/tests/unit/test_plat68_cua_oracle.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat68_keymaps_pty.nim"
 EXTRACTOR = "ci/test/cua-keymap-extractor.sh"
 
-SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE]
-SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py"]
+# Phase B subjects.
+ROUTER = "src/frontend/viewmodel/keymap/keymap_router.nim"
+STACK = "src/frontend/viewmodel/keymap/layer_stack.nim"
+IMPORTERS = "src/frontend/viewmodel/keymap/keymap_importers.nim"
+CORE = "src/frontend/viewmodel/editing_core.nim"
+ROLES = "src/frontend/tui/app/theme/roles.nim"
+CHROME = "src/frontend/gpui/chrome.nim"
+TUI_MAIN = "src/frontend/tui/main.nim"
+DRIVER = "src/frontend/tui/host/terminal_driver.nim"
+MOTIONS = "src/frontend/tui/app/input/motions.nim"
+GPUI_MAIN = "src/frontend/gpui/main.nim"
+MONACO = "src/frontend/ui/monaco_operations.nim"
+DISPATCH = "isonim-tui:isonim_tui/event_dispatch.nim"
+RUNTIME = "src/frontend/tui/app/runtime.nim"
+ALT_TAP = "src/frontend/viewmodel/keymap/alt_tap.nim"
+PRODUCT_MENU = "src/frontend/viewmodel/viewmodels/product_menu.nim"
+TOP_BAR = "src/frontend/tui/app/views/top_bar.nim"
+OPERATIONS = "src/frontend/viewmodel/editor/operations.nim"
+NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
+EMACS = "src/frontend/viewmodel/keymap/emacs_keymap.nim"
+
+# Phase B suites.
+LAYERS = "src/frontend/viewmodel/tests/unit/test_plat68_layers.nim"
+PTYB = "src/frontend/tui/tests/real_terminal/test_plat68b_pty.nim"
+GPUIK = "src/frontend/gpui/tests/test_plat68_gpui_keys_plan.nim"
+DIFF13 = "src/frontend/tui/tests/test_plat68_diff13.nim"
+PARITY = "src/frontend/tui/tests/test_plat51b_parity.nim"
+PLAT28 = "src/frontend/tui/tests/test_plat28_edit_breakpoints.nim"
+NOCONF = "src/frontend/tui/app/tests/test_keymap_no_conflicts.nim"
+MONACO_T = "src/frontend/tests/monaco_operations_test.nim"
+PROPAGATION = "isonim-tui:../tests/test_event_propagation.nim"
+MENU = "src/frontend/viewmodel/tests/unit/test_plat68_menu_access.nim"
+
+SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
+            ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
+            MOTIONS, GPUI_MAIN, MONACO, DISPATCH, RUNTIME, ALT_TAP,
+            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS]
+SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
+          LAYERS, PTYB, GPUIK, DIFF13, PARITY, PLAT28, NOCONF, MONACO_T,
+          PROPAGATION, MENU]
 
 SEQUENCE = "*::the milestone's sequence, Ctrl+S, and the file on disk"
 RESTORED = "*::the pop or the reset is written on SIGTERM, SIGHUP and a crash"
@@ -129,9 +183,155 @@ ARMS = [
              "  of wkNot: not(evalWhen(e.operand, c))")],
      [(BASES, None)],
      "behaviour-preserving: the DECLARED SURVIVOR"),
+
+    # ---- Phase B: the router, the layer stack, the front ends ------------
+    ("B1", [(ROUTER, "  for source in [lsUser, lsBase]:",
+             "  for source in [lsBase, lsUser]:")],
+     [(LAYERS, None)],
+     "KL-11: the base answers before the user's rows"),
+    ("B2", [(STACK, "  if s.layers.len > 0 and s.layers[^1].token == token:",
+             "  if s.layers.len > 0:")],
+     [(LAYERS, None)],
+     "KL-5: a pop takes the top layer whatever token it is given"),
+    ("B3", [(ROUTER, "  if router.base.isModal: ($navMode).toUpperAscii",
+             "  if true: ($navMode).toUpperAscii")],
+     [(PTYB, "*::CUA shows its name, never NORMAL*")],
+     "the status line says NORMAL under CUA"),
+    ("B4", [(CUA, "    BaseRow(chords: \"Enter\", operation: \"editor.toggle-tracepoint\",",
+             "    BaseRow(chords: \"Ctrl+Alt+Enter\", operation: \"editor.toggle-tracepoint\",")],
+     [(PTYB, "*::Enter opens the tracepoint editor*"),
+      (GPUIK, "*::Enter opens the tracepoint editor*")],
+     "Enter in the read-only editor no longer opens the tracepoint editor"),
+    ("B5", [(ROLES, "                             dtColorsUiSurfacePrimaryDefault, attrs = {raBold},",
+             "                             dtColorsUiBorderSecondary, attrs = {raBold},")],
+     [(PTYB, "*::the selected tab's ground*")],
+     "the focused strip's selected tab back on the strip's own ground"),
+    ("B6", [(CHROME, "       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]",
+             "       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]")],
+     [(GPUIK, "*::its ground differs*")],
+     "GPUI: the focused strip's selected tab back on the focus colour"),
+    ("B7", [(CUA, "    BaseRow(chords: \"Home\", operation: \"editor.move-line-start-smart\", whenText: \"editorTextFocus\"),",
+             "    BaseRow(chords: \"Home\", operation: \"editor.move-line-start\", whenText: \"editorTextFocus\"),")],
+     [(PTYB, "*::Smart Home*"), (GPUIK, "*::Home is smart*")],
+     "Home is not smart"),
+    ("B8", [(CUA, "    BaseRow(chords: \"Shift+Down\", operation: \"editor.extend-line-down\", whenText: \"editorTextFocus\"),",
+             "    BaseRow(chords: \"Shift+Down\", operation: \"editor.extend-line-down\", whenText: Writable),")],
+     [(GPUIK, "*::Shift+Down selects*")],
+     "selection refused in the read-only editor"),
+    ("B9", [(CORE, "  d.state.selection = singleSelection(d.state.selection.mainRange.anchor,",
+             "  d.state.selection = singleSelection(d.offsetAt(line, column),")],
+     [(PTYB, "*::a pointer drag*"), (GPUIK, "*::a pointer drag*")],
+     "a pointer drag moves the caret and selects nothing"),
+    ("B10", [(TUI_MAIN, "    epilogue.add osc52Copy(rt.app.clipboard)",
+              "    discard")],
+     [(PTYB, "*::Shift+End selects to the line's end*")],
+     "a copy never reaches the terminal's clipboard (no OSC 52)"),
+    ("B11", [(TUI_MAIN, "    epilogue.add ClipboardQuery",
+              "    discard")],
+     [(PTYB, "*::paste asks the terminal*")],
+     "a paste never asks the terminal for its clipboard"),
+    ("B12", [(GPUI_MAIN, "      copyToClipboard(copied, $copied.countLines & \" line(s)\")",
+              "      discard copied")],
+     [(GPUIK, "*::Shift+Down selects*")],
+     "GPUI: a copy never reaches the window's clipboard"),
+    ("B13", [(ROUTER, "        if removes(r, b): inc router.removed",
+              "        if false: inc router.removed")],
+     [(LAYERS, None)],
+     "a user's `-command` row removes nothing"),
+    ("B14", [(GPUI_MAIN, "    result.add element(ekEditor, \"editor:\" & path)",
+              "    discard path")],
+     [(DIFF13, None)],
+     "GPUI's scope path loses the editor element (DIFF-13)"),
+    ("B15", [(MOTIONS, "  pf.heldPane = if atWindow: pf.focusedIndex() else: -1",
+              "  pf.heldPane = -1")],
+     [(DIFF13, "*::closing the palette hands the focus back*")],
+     "a closed overlay hands the focus to the first pane, not back"),
+    ("B16", [(DRIVER, "    nextTerminalNodeId = kept",
+              "    discard kept")],
+     [(PTYB, "*::Enter opens the tracepoint editor*")],
+     "a frame resets the node ids under the long-lived focus tree"),
+    ("B17", [(IMPORTERS, "      if removed: inc result.translated",
+              "      if removed: discard")],
+     [(NOCONF, None)],
+     "the .cttui-keys import miscounts its removal rows"),
+    ("B18", [(MONACO, "    \"clipboard-copy\": \"editor.action.clipboardCopyAction\",",
+              "    \"clipboard-copy\": \"editor.action.clipboardCutAction\",")],
+     [(MONACO_T, None)],
+     "the desktop's Ctrl+C is Monaco's cut"),
+    ("B19", [(DISPATCH, "    runListeners(path[i], ev, capture = true)",
+              "    discard")],
+     [(PROPAGATION, None)],
+     "isonim-tui: no capture phase"),
+    ("B20", [(STACK, "  if active.len > 0: active[0].label else: \"\"",
+              "  \"\"")],
+     [(PTYB, "*::CUA shows its name, never NORMAL*")],
+     "an open palette does not name itself on the status line"),
+    ("B21", [(RUNTIME, "  if mode == omCommand and",
+              "  if false and")],
+     [(PTY, "*::`--keymap` holds for one session and is not stored")],
+     "the palette fuzzy-picks an entry for a typed `:` command line"),
+
+    # ---- The program menu from the keyboard (CUA-Keymap.md §3.8) ----------
+    ("B22", [(PRODUCT_MENU, "    folder(\"Debug\", mnemonic = 'd', children = @[",
+              "    folder(\"Debug\", mnemonic = 'g', children = @[")],
+     [(MENU, "*::Alt+<mnemonic> opens that folder*")],
+     "the menu underlines a letter the keymap does not bind"),
+    ("B23", [(ALT_TAP, "  t.armed = false  # a chord now, or a click: no tap on the release",
+              "  discard")],
+     [(MENU, "*::a key, a second modifier or a pointer press*"),
+      (GPUIK, "*::Alt+D opens Debug*")],
+     "Alt held through a chord still opens the menu on release"),
+    ("B24", [(TOP_BAR, "                CellStyle(role: role, bold: it.active, underline: true))",
+              "                CellStyle(role: role, bold: it.active))")],
+     [(PTYB, "*::Alt+` opens the menu*")],
+     "the terminal's menu does not underline its access keys"),
+    ("B25", [(GPUI_MAIN, "        r.setStyle(key, \"text-decoration\", \"underline\")",
+              "        discard key")],
+     [(GPUIK, "*::Alt pressed and released alone*")],
+     "GPUI's menu does not underline its access keys"),
+    ("B26", [(GPUI_MAIN, "  if gAltTap.modifiersChanged(keyModifiersOfGpui(mods)):",
+              "  if false:")],
+     [(GPUIK, "*::Alt pressed and released alone*")],
+     "GPUI never recognises Alt pressed and released alone"),
+    ("B27", [(RUNTIME, "  if res.kind == erOperation and res.operation in MenuOperations:",
+              "  if false:")],
+     [(PTYB, "*::Alt+` opens the menu*")],
+     "the open terminal menu swallows `` Alt+` `` instead of closing"),
+    ("B28", [(ROUTER, "      result.reason = nrDisabled",
+              "      discard")],
+     [(LAYERS, None)],
+     "a key inert in this product mode does not say so (Mode-Transitions §8.1)"),
+
+    # ---- The user's two remaining reports, on their own logic -------------
+    ("B29", [(OPERATIONS, "  landing(if r.head == firstNonBlank: a else: firstNonBlank)",
+              "  landing(firstNonBlank)")],
+     [(PTYB, "*::Smart Home*"), (GPUIK, "*::Home is smart*")],
+     "Home always lands on the first non-blank: no alternation with column 1"),
+    ("B30", [(CUA, "    BaseRow(chords: \"n\", operation: \"debugger.step-over\", whenText: RoDl, table: G),",
+              "    BaseRow(chords: \"n\", operation: \"debugger.step-over\", whenText: Dl, table: G),")],
+     [(LAYERS, "*::letters step in the read-only editor*"),
+      (PTYB, "*::F10 steps; with the read-only editor focused*"),
+      (GPUIK, "*::a letter steps while the read-only editor*")],
+     "under CUA a letter no longer steps in the read-only editor"),
+    ("B31", [(NAVIGATION, "    BaseRow(chords: \"Enter\", operation: \"editor.toggle-tracepoint\", table: G,",
+              "    BaseRow(chords: \"Ctrl+Alt+Enter\", operation: \"editor.toggle-tracepoint\", table: G,")],
+     [(LAYERS, "*::Enter opens the tracepoint editor under every base*")],
+     "Vim / Kakoune: Enter in the read-only editor expands a tree node"),
+    ("B32", [(EMACS, "    BaseRow(chords: \"Enter\", operation: \"editor.toggle-tracepoint\",",
+              "    BaseRow(chords: \"Ctrl+Alt+Enter\", operation: \"editor.toggle-tracepoint\",")],
+     [(LAYERS, "*::Enter opens the tracepoint editor under every base*")],
+     "Emacs: Enter in the read-only editor does nothing"),
 ]
 DECLARED_SURVIVORS = {"N1"}
-IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE}
+IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
+             CORE, ROLES, TUI_MAIN, DRIVER, MOTIONS, RUNTIME, PRODUCT_MENU,
+             TOP_BAR, OPERATIONS}
+  # Subjects compiled into `codetracer-tui`.
+IN_GPUI = {NAMES, KEYMAP, SELECTION, WHEN, CUA, ROUTER, STACK, CORE, CHROME,
+           GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS}
+  # Subjects compiled into `codetracer-gpui`.
+GPUI_SUITES = {GPUIK, DIFF13}
+  # Suites that run the GPUI binary.
 
 
 def path_of(rel):
@@ -157,8 +357,12 @@ def lane_flags(lane):
 
 
 def suite_flags(suite):
-    if suite == PTY:
+    if suite in (PTY, PTYB):
         return lane_flags("tui-real-terminal")
+    if suite.startswith("src/frontend/tui/"):
+        return lane_flags("tui")
+    if suite.startswith("src/frontend/gpui/"):
+        return lane_flags("gpui-shell") + ["--path:src/frontend/viewmodel"]
     return ["--path:src/frontend/viewmodel"]
 
 
@@ -213,12 +417,35 @@ def controls_match():
     return ok
 
 
-def build_binary():
-    p = subprocess.run(["just", "build-tui"], cwd=REPO, capture_output=True,
-                       text=True, timeout=TIMEOUT)
+BUILD_REFUSALS = ["below the tab-contrast floor"]
+  # A build the PRODUCT refuses on its own check, by its diagnostic: the
+  # `roles.nim` compile-time assertion that the focused strip's selected tab
+  # stands apart by the contrast floor. Graded as a kill on that line, as the
+  # loader's `BaseRowError` is — the defect cannot reach a binary at all.
+
+
+def build_with(env_var, recipe):
+    """`(built, refusal)`: whether it built, and the product check's own
+    diagnostic when the build was refused by one (`BUILD_REFUSALS`)."""
+    cmd = os.environ.get(env_var)
+    argv = ["bash", "-c", cmd] if cmd else ["just", recipe]
+    p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
+                       timeout=TIMEOUT)
+    out = p.stdout + p.stderr
     if p.returncode != 0:
-        print((p.stdout + p.stderr)[-2000:])
-    return p.returncode == 0
+        print(out[-2000:])
+        for ln in out.splitlines():
+            if any(r in ln for r in BUILD_REFUSALS):
+                return False, ln.strip()
+    return p.returncode == 0, ""
+
+
+def build_binary():
+    return build_with("PLAT68_BUILD_TUI", "build-tui")
+
+
+def build_gpui():
+    return build_with("PLAT68_BUILD_GPUI", "build-gpui")
 
 
 def run_suite(suite, test_filter):
@@ -236,15 +463,49 @@ def run_suite(suite, test_filter):
         return ("RED", failures) if failures else ("DID-NOT-RUN", [])
     NIMCACHE.mkdir(parents=True, exist_ok=True)
     stem = Path(suite).stem
-    cmd = ["nim", "c", "-r", "--hints:off", "--warnings:off",
-           f"--nimcache:{NIMCACHE}/{stem}", f"-o:{NIMCACHE}/{stem}.out"] + \
-        suite_flags(suite) + [suite]
-    if test_filter and test_filter != "GREEN":
-        cmd.append(test_filter)
     env = dict(os.environ, CODETRACER_REPO_ROOT=str(REPO))
     try:
-        p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
-                           timeout=TIMEOUT, env=env)
+        if suite == MONACO_T:
+            # `frontend-js`: compiled to JavaScript, run under node.
+            out = f"{NIMCACHE}/{stem}.js"
+            c = subprocess.run(
+                ["nim", "-d:nodejs", "-d:chronicles_enabled=off",
+                 "-d:ctRenderer", "-d:ctInExtension", "--hints:off",
+                 "--warnings:off", "--path:src/frontend/viewmodel",
+                 f"--nimcache:{NIMCACHE}/{stem}", f"--out:{out}", "js",
+                 suite], cwd=REPO, capture_output=True, text=True,
+                timeout=TIMEOUT, env=env)
+            if c.returncode != 0:
+                return "DID-NOT-COMPILE", []
+            p = subprocess.run(
+                ["node", "-e", "globalThis.window = globalThis; "
+                 "require(process.argv[1])", out], cwd=REPO,
+                capture_output=True, text=True, timeout=TIMEOUT, env=env)
+        elif suite == PROPAGATION:
+            # `isonim-tui`'s own suite, in its own checkout.
+            # Its Justfile's flags: ORC, threads, its siblings on the path.
+            root = ROOTS["isonim-tui:"].parent
+            ws = root.parent
+            p = subprocess.run(
+                ["nim", "c", "-r", "--hints:off", "--warnings:off",
+                 "--mm:orc", "-d:release", "--threads:on", "--path:src",
+                 "--path:tests", f"--path:{ws}/isonim/src",
+                 f"--path:{ws}/isonim-examples",
+                 f"--path:{ws}/isonim-render-serve/src",
+                 f"--path:{ROOTS['nim-termctl:']}",
+                 f"--path:{ws}/nim-pty/src", f"--path:{ws}/nim-faststreams",
+                 f"--path:{ws}/nim-stew", f"--path:{ws}/nim-everywhere/src",
+                 f"--nimcache:{NIMCACHE}/{stem}", f"-o:{NIMCACHE}/{stem}.out",
+                 str(path_of(suite))], cwd=root, capture_output=True,
+                text=True, timeout=TIMEOUT, env=env)
+        else:
+            cmd = ["nim", "c", "-r", "--hints:off", "--warnings:off",
+                   f"--nimcache:{NIMCACHE}/{stem}",
+                   f"-o:{NIMCACHE}/{stem}.out"] + suite_flags(suite) + [suite]
+            if test_filter and test_filter != "GREEN":
+                cmd.append(test_filter)
+            p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True,
+                               timeout=TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return "HUNG", []
     out = (p.stdout or "") + (p.stderr or "")
@@ -266,9 +527,22 @@ def run_suite(suite, test_filter):
     if not failures and "Error:" in out and "[FAILED]" not in out:
         return "DID-NOT-COMPILE", failures
     if not failures:
-        failures = [ln.strip() for ln in out.splitlines()
+        failures = [portable_cause(ln.strip()) for ln in out.splitlines()
                     if "[FAILED]" in ln or "Unhandled exception" in ln][:1]
     return "RED", failures
+
+
+def portable_cause(line):
+    """A pty suite's wait names its condition and then snapshots the status
+    line (`never: Home to 3; status: … main.py:1  tick 1 …`). The snapshot
+    carries the recording's own source path and the session's tick, which
+    differ between checkouts, so the recorded cause keeps the condition and
+    drops the snapshot."""
+    head, sep, rest = line.partition("; status:")
+    if not sep:
+        return line
+    tail = re.search(r" \[\w+\]$", rest)
+    return head + (tail.group(0) if tail else "")
 
 
 def grade(suites):
@@ -317,13 +591,20 @@ def main():
         return 3
     only = set(filter(None, a.only.split(",")))
     selected = [arm for arm in ARMS if not only or arm[0] in only]
-    needs_binary = any(s == PTY for arm in selected for s, _ in arm[2])
+    needs_binary = any(s in (PTY, PTYB) for arm in selected for s, _ in arm[2])
+    needs_gpui = any(s in GPUI_SUITES for arm in selected for s, _ in arm[2])
     binary_digest = None
+    gpui_digest = None
     if needs_binary:
-        if not build_binary():
+        if not build_binary()[0]:
             print("ABORT: the unmutated binary does not build.")
             return 1
         binary_digest = sha_path(BIN)
+    if needs_gpui:
+        if not build_gpui()[0]:
+            print("ABORT: the unmutated GPUI binary does not build.")
+            return 1
+        gpui_digest = sha_path(GPUI_BIN)
     graded = sorted({s for arm in selected for s, _ in arm[2]})
     for s in graded:
         v, f = run_suite(s, None)
@@ -345,10 +626,16 @@ def main():
             for rel, find, replace in edits:
                 path = path_of(rel)
                 path.write_text(path.read_text().replace(find, replace, 1))
-            through_pty = any(s == PTY for s, _ in suites)
-            if through_pty and any(r in IN_BINARY for r in files) and \
-                    not build_binary():
-                verdict, first = "DID-NOT-COMPILE", ""
+            through_pty = any(s in (PTY, PTYB) for s, _ in suites)
+            through_gpui = any(s in GPUI_SUITES for s, _ in suites)
+            built, refusal = True, ""
+            if through_pty and any(r in IN_BINARY for r in files):
+                built, refusal = build_binary()
+            if built and through_gpui and any(r in IN_GPUI for r in files):
+                built, refusal = build_gpui()
+            if not built:
+                verdict, first = ("RED", refusal) if refusal else \
+                    ("DID-NOT-COMPILE", "")
             else:
                 verdict, first = grade(suites)
         finally:
@@ -382,9 +669,14 @@ def main():
         BECAUSE.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
         print(f"derived {len(derived)} because line(s)")
     if binary_digest is not None:
-        if not build_binary() or sha_path(BIN) != binary_digest:
+        if not build_binary()[0] or sha_path(BIN) != binary_digest:
             print("FAIL: the binary rebuilt from the restored tree differs "
                   "from the one the run started with.")
+            return 1
+    if gpui_digest is not None:
+        if not build_gpui()[0] or sha_path(GPUI_BIN) != gpui_digest:
+            print("FAIL: the GPUI binary rebuilt from the restored tree "
+                  "differs from the one the run started with.")
             return 1
     for rel in SUBJECTS:
         if sha(rel) != digests[rel]:

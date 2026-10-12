@@ -184,17 +184,11 @@ proc applyShortcutPreset*(bindings: JsAssoc[cstring, cstring];
   ## Overwrite the nine preset-governed bindings, in place, before the map is
   ## built.
   ##
-  ## THIS IS THE WHOLE INTEGRATION, and its smallness is the point. A preset
-  ## changes VALUES in the `InputShortcutMap`; `initShortcutMap` below then
-  ## produces the same `ShortcutMap` it always did, and every consumer —
-  ## `configureShortcuts`' Mousetrap binds, `delegateShortcuts`' Monaco
-  ## commands, `renderChord`'s labels, `loadShortcut`'s menu text and
-  ## `toolbarTooltip`'s parentheses — follows without knowing presets exist.
-  ##
-  ## `Keyboard-Shortcuts-System.md` § Requirements is what forbids the
-  ## alternative: a preset that installed its own binds would be "a chord bound
-  ## in code and not routed through the YAML", which is one "the user cannot
-  ## change and cannot discover".
+  ## LEGACY DATA (PLAT-68): no key is delivered through the `ShortcutMap`
+  ## any more — the one key router reads the base keymap and the user's
+  ## `keybindings.json`, where a chosen preset is an `include` set. The map
+  ## this writes into is read by the one-time import and by macOS's native
+  ## menu accelerators.
   ##
   ## `spNone` DELETES rather than leaves. Its meaning is "the nine debugger
   ## commands have no chord", and leaving the YAML's would mean "the nine

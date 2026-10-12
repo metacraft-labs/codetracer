@@ -70,9 +70,11 @@ import ./editor/wrap
 import ./editor/change_set
 import ./editor/document_version
 import ./editor/reconcile
+import ./editor/transaction
 
 import ./keymap/editing_keymap
 import ./keymap/base_rows
+import ./keymap/base_keymaps
 import ./keymap/cua_keymap
 import ./keymap/emacs_keymap
 import ./keymap/vim_keymap
@@ -82,8 +84,8 @@ from ./keymap/vim_import import VimImport, ImportReportEntry, ImportReason,
   importVimConfig, coverageFraction, describeReport
 
 export editor_state, selection, wrap
-export editing_keymap, base_rows, cua_keymap, emacs_keymap, vim_keymap,
-  kakoune_keymap
+export editing_keymap, base_rows, base_keymaps, cua_keymap, emacs_keymap,
+  vim_keymap, kakoune_keymap
 export keymap_selection
 export document_version, reconcile
 export VimImport, ImportReportEntry, ImportReason, importVimConfig,
@@ -206,19 +208,9 @@ func terminalWrapSettings*(): WrapSettings =
 
 func initialModeFor*(model: BaseKeymap): EditingMode =
   ## The mode a document opens in under `model` — see `initEditingDocument` on
-  ## why it is the base's to decide. One `case`, total over the enum, used by
-  ## both the constructor and `switchModel`: the modal bases open in normal,
-  ## the others ready to type (Editor-ViewModel §3.2 as amended by PLAT-68).
-  case model
-  of bkCua, bkEmacs: emInsert
-  of bkVim, bkKakoune: emNormal
-
-func isModal*(model: BaseKeymap): bool =
-  ## Whether the base has modal editing — whether a printable key can be a
-  ## command. Under CUA and Emacs it never is: a printable key types, in
-  ## every editing mode (Emacs's active mark is `visual`, and typing there
-  ## still types).
-  initialModeFor(model) == emNormal
+  ## why it is the base's to decide: the modal bases open in normal, the
+  ## others ready to type (Editor-ViewModel §3.2 as amended by PLAT-68).
+  if isModal(model): emNormal else: emInsert
 
 proc dropImported(d: var EditingDocument) =
   ## Take an imported configuration off `d`, macros included: a macro id the
@@ -353,22 +345,6 @@ func sourcedSummary*(c: SourcedConfig): string =
     result.add "; " & $c.report.len & " not translated, first at line " &
                $first.line & ": " & $first.reason
 
-let
-  CuaDefinition = definitionOf(bkCua, CuaRows, CuaDeferred)
-  EmacsDefinition = definitionOf(bkEmacs, EmacsRows, EmacsDeferred)
-    ## Built once from the data tables. A row the builder cannot read RAISES
-    ## here, at start-up, by name — a base with a bad row does not load.
-
-proc keymapOf*(model: BaseKeymap): KeymapDefinition =
-  ## The four shipped bases, by name. **ONE `case`, and it is total over the
-  ## enum**, so a fifth base does not compile rather than resolving to the
-  ## default and looking like it works.
-  case model
-  of bkCua: CuaDefinition
-  of bkEmacs: EmacsDefinition
-  of bkVim: vimKeymap()
-  of bkKakoune: kakouneKeymap()
-
 proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
                nowMs: int64): KeyApplication =
   ## **ONE KEY, THROUGH THE KEYMAP LAYER, ONTO THE MODEL.** This is the whole
@@ -412,6 +388,59 @@ proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
   KeyApplication(outcome: outcome, operations: step.operations,
                  resolution: step.kind, timedOut: step.timedOut)
 
+func isReadOnly*(d: EditingDocument): bool =
+  ## The document refuses local edits (PLAT-33's read-only filter) — the
+  ## Debug-mode editor until `editor.toggle-read-only`, the desktop's
+  ## `Ctrl+E`.
+  isReadOnly(d.state)
+
+proc setReadOnly*(d: var EditingDocument; readOnly: bool) =
+  ## **THE EDITOR'S READ-ONLY OPERATION**, one place for every front-end: put
+  ## PLAT-33's read-only filter on the document, or take it off. Selection,
+  ## caret motion and copy are untouched by it — only edits are refused —
+  ## which is Monaco's read-only mode and the user's requirement
+  ## (2026-10-12: Shift+arrows select in the read-only editor).
+  var kept: seq[TransactionFilter] = @[]
+  for f in d.state.filters:
+    if f.kind != tfReadOnly: kept.add f
+  if readOnly: kept.add TransactionFilter(kind: tfReadOnly)
+  d.state.filters = kept
+
+func clipboardText*(d: EditingDocument): string =
+  ## What the last `clipboard-copy` / `clipboard-cut` put on the clipboard
+  ## register, for the host to hand to the platform's clipboard (§5.2: the
+  ## core performs no I/O).
+  d.state.registers.getOrDefault(ClipboardRegister).text
+
+proc offerClipboard*(d: var EditingDocument; text: string) =
+  ## The platform's clipboard, handed in by the host before a
+  ## `clipboard-paste`: a payload ending in a newline is linewise, VS Code's
+  ## whole-line copy coming back as whole lines.
+  d.state.setRegister(ClipboardRegister, Register(
+    text: text, kind: (if text.endsWith("\n"): rkLinewise else: rkCharwise)))
+
+proc applyResolved*(d: var EditingDocument; res: EditingResolution;
+                    nowMs: int64): KeyApplication =
+  ## A resolution a ROUTER computed (`keymap_router.route`: every layer on the
+  ## scope path, the user's rows, the pushed modes), executed on this
+  ## document. The router owns the pending prefix, so the document's stays
+  ## empty; everything else is `applyKey`'s reading of the answer.
+  var local = res
+  local.pending = PendingChords()
+  let docBefore = d.state.doc
+  let (next, ops) = applyResolution(d.state, local, d.settings, nowMs,
+                                    d.viewportRows)
+  d.state = next
+  d.drainJournal()
+  let outcome =
+    case res.kind
+    of erNothing: eoIgnored
+    of erPending: eoMoved
+    of erOperation, erCharacter:
+      if d.state.doc != docBefore: eoChanged else: eoMoved
+  KeyApplication(outcome: outcome, operations: ops, resolution: res.kind,
+                 timedOut: res.timedOut)
+
 func followedViewportTop*(top, caretLine, rows: int): int =
   ## The first visible line after the minimal scroll that brings `caretLine`
   ## into a `rows`-high window starting at `top` — ONE rule for every
@@ -444,24 +473,6 @@ func editScopeOf*(d: EditingDocument): EditingScope =
                mode: d.state.mode,
                textEntry: not isModal(d.model) or d.state.mode == emInsert,
                context: editorContextKeys(d.state, pmEdit, d.delivery))
-
-proc claimsKey*(d: EditingDocument; scope: EditingScope; key: string;
-                nowMs: int64): bool =
-  ## PLAT-43. Would `applyKey` treat `key` as the editor's? The same resolver,
-  ## asked without executing: `erNothing` is the one answer that hands the key
-  ## back to the product keymap, exactly as `applyKey` reads it.
-  ##
-  ## PLAT-68: A KEY THAT FOLLOWS A PENDING PREFIX IS THE EDITOR'S, whatever it
-  ## resolves to. `Ctrl+K` waits for its continuation under CUA; a key that
-  ## does not continue it ends the prefix — VS Code's *"(Ctrl+K, X) is not a
-  ## command"* — and is consumed, not handed to the product keymap with the
-  ## prefix still hanging on the buffer for the key after it.
-  if key.len == 0:
-    return false
-  if d.state.pending.chords.len > 0:
-    return true
-  editing_keymap.resolveKey(d.state, keymapOf(d.model).keymap, scope, key,
-                            nowMs).kind != erNothing
 
 proc applyNamed*(d: var EditingDocument; name: string; args: OpArgs;
                  nowMs: int64): EditingOutcome =
@@ -614,6 +625,20 @@ proc caretColumn*(d: EditingDocument): int =
       return i
   metrics.clusters.len
 
+func offsetAt*(d: EditingDocument; line, column: int): int =
+  ## The byte offset of the 0-based (line, cluster column), clamped into the
+  ## document.
+  let ls = d.lines
+  if ls.len == 0:
+    return 0
+  let l = clamp(line, 0, ls.len - 1)
+  let metrics = lineMetrics(ls[l], d.settings.policy)
+  let byteInLine =
+    if column <= 0: 0
+    elif column >= metrics.clusters.len: metrics.byteLen
+    else: metrics.clusters[column].startByte
+  toTextStore(d.state.doc).offsetOf(TextPos(line: l, column: byteInLine))
+
 proc moveCaretTo*(d: var EditingDocument; line, column: int) =
   ## Place the caret at a 0-based (line, cluster column).
   ##
@@ -623,19 +648,49 @@ proc moveCaretTo*(d: var EditingDocument; line, column: int) =
   ## there" and none of them is a keystroke. It goes through
   ## `selection.caretSelection` rather than assigning a range, so the
   ## normalisation invariant `FUZZ-3` asserts holds by construction.
+  d.state.selection = caretSelection(d.offsetAt(line, column))
+
+proc extendSelectionTo*(d: var EditingDocument; line, column: int) =
+  ## Keep the main selection's anchor and move its head to the 0-based
+  ## (line, cluster column) — a pointer DRAG over the text, every
+  ## front-end's (a press placed the anchor with `moveCaretTo`). Edits stay
+  ## refused on a read-only document; selecting is not an edit.
+  d.state.selection = singleSelection(d.state.selection.mainRange.anchor,
+                                      d.offsetAt(line, column))
+
+proc selectSpan*(d: var EditingDocument; anchor, head: int) =
+  ## Select the bytes `[anchor, head)` (head may precede anchor) — the other
+  ## non-key writer, for a find match and a pointer drag. Through
+  ## `selection.singleSelection`, so the selection is normalised by
+  ## construction, as `moveCaretTo`'s is.
+  let n = d.state.doc.len
+  d.state.selection = singleSelection(clamp(anchor, 0, n), clamp(head, 0, n))
+
+type
+  SelectionCells* = seq[tuple[line, fromColumn, toColumn: int]]
+    ## A selection as a front-end paints it: per 1-based line, the 1-based
+    ## display columns `[from, to)`.
+
+proc selectionCells*(d: EditingDocument): SelectionCells =
+  ## THE SELECTION AS EVERY FRONT-END PAINTS IT — the terminal's source pane
+  ## and GPUI's editor rows read this one derivation: display columns from
+  ## `selection.columnAt` (tabs expanded, wide glyphs two columns), and a
+  ## range that continues past a line's end covers one cell for the line
+  ## break, as Monaco's selection does.
+  result = @[]
+  let text = d.text
   let ls = d.lines
-  if ls.len == 0:
-    d.state.selection = caretSelection(0)
-    return
-  let l = clamp(line, 0, ls.len - 1)
-  let metrics = lineMetrics(ls[l], d.settings.policy)
-  let byteInLine =
-    if column <= 0: 0
-    elif column >= metrics.clusters.len: metrics.byteLen
-    else: metrics.clusters[column].startByte
-  let store = toTextStore(d.state.doc)
-  d.state.selection = caretSelection(
-    store.offsetOf(TextPos(line: l, column: byteInLine)))
+  for r in d.state.selection.ranges:
+    if r.isEmpty: continue
+    let a = caretPosOf(text, r.rangeFrom)
+    let b = caretPosOf(text, r.rangeTo)
+    for line in a.line .. min(b.line, ls.len - 1):
+      let lineText = ls[line]
+      let fromCol = if line == a.line: columnAt(lineText, a.column) else: 0
+      let toCol = if line == b.line: columnAt(lineText, b.column)
+                  else: columnAt(lineText, lineText.len) + 1
+      if toCol > fromCol:
+        result.add (line + 1, fromCol + 1, toCol + 1)
 
 func hasSelection*(d: EditingDocument): bool =
   ## Whether any range spans text. A caret is a range of zero length, so

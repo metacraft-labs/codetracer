@@ -150,12 +150,12 @@ ARMS = [
     # the needle scan caught by name (`M1.find: occurs 0 time(s)`) rather
     # than letting the arm run unaimed.
     Arm("M1", LEAVES,
-        "  for i, row in surface.rows:\n"
         "    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,\n"
         "                                          scroll.leftCols,\n"
         "                                          (if row.line == surface.caretLine:\n"
-        "                                             surface.caretColumn else: 0)))",
-        "  for i, row in surface.rows:\n    discard row",
+        "                                             surface.caretColumn else: 0),\n"
+        "                                          selected))",
+        "    discard selected",
         SUITE,
         "stepped-editor / editor-row-count",
         CTL[LEAVES][0], CTL[LEAVES][1],

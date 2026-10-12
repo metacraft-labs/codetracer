@@ -363,7 +363,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
     let first = rt.focusedPaneOf()
-    discard rt.handleToken("\t", 0'i64)
+    discard rt.handleToken("\e[17~", 0'i64)   # F6: the next pane (CUA)
     let second = rt.focusedPaneOf()
     checkpoint("Tab moved focus from " & $first & " to " & $second)
     ck second != first
@@ -686,7 +686,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
         checkpoint("the ring offers " & $pane & ", which has no rectangle")
     ck offScreen == 0
     # And `Tab` really lands on one of them rather than on the hidden pane.
-    discard rt.handleToken("\t", 0'i64)
+    discard rt.handleToken("\e[17~", 0'i64)   # F6: the next pane (CUA)
     ck rt.focusedPaneOf() != hidden
     ck not rt.layoutGeometry().regionOfPane(rt.focusedPaneOf()).isEmptyArea
 

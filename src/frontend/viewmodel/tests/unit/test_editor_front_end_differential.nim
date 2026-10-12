@@ -91,7 +91,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 430
+const ExpectedAssertions = 452
+  ## 450 -> 452: the twenty-first scanned keymap module (`alt_tap`).
+  ## (+20 on 2026-10-12, PLAT-68 Phase B: ten more keymap modules scanned,
+  ## two assertions each.)
   ## (+9 on 2026-10-11, PLAT-68: four more keymap modules scanned, and the
   ## scope rule's `context` and base-dependent text entry asserted.)
   ## Asserted by the last case against the runtime tally. Written LAST, from a
@@ -251,9 +254,21 @@ proc newEditBuffer*(path, text: string): EditBuffer =
 const ScannedKeymapModules = [
   "editing_keymap.nim", "kakoune_keymap.nim", "vim_keymap.nim",
   "vim_import.nim", "keymap_selection.nim", "base_rows.nim",
-  "cua_keymap.nim", "emacs_keymap.nim", "context_keys.nim", "when_expr.nim"]
+  "cua_keymap.nim", "emacs_keymap.nim", "context_keys.nim", "when_expr.nim",
+  "base_keymaps.nim", "binding_sets.nim", "client_actions.nim",
+  "keymap_importers.nim", "keymap_router.nim", "layer_stack.nim",
+  "navigation_keymap.nim", "operation_catalogue.nim", "scope_path.nim",
+  "user_keymap.nim", "alt_tap.nim"]
 
-const ScannedKeymapModuleCount = 10
+const ScannedKeymapModuleCount = 21
+  ## **TWENTY-ONE SINCE 2026-10-12** (the twenty-first is `alt_tap`, the
+  ## menu's `Alt`-alone gesture): PLAT-68 Phase B added the shared router and
+  ## everything it reads — the one resolver's front door (`keymap_router`),
+  ## the scope path (`scope_path`), the pushed layers (`layer_stack`), the
+  ## operation catalogue, the user's `keybindings.json` (`user_keymap`), its
+  ## `include` sets (`binding_sets`), the one-time importers, the
+  ## `ClientAction` table, the Vim / Kakoune navigation rows as data
+  ## (`navigation_keymap`) and the bases' one builder (`base_keymaps`).
   ## **TEN SINCE 2026-10-11**: PLAT-68 retired `product_keymap.nim` and added
   ## the CUA and Emacs bases as data (`cua_keymap`, `emacs_keymap`), the one
   ## builder that reads them (`base_rows`), and a binding's `when`
@@ -738,10 +753,12 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
     # AND IT PASSES THE CLOCK. The last step of PLAT-32's residual: the
     # runtime has threaded `nowMs` through `handleToken` since CTUI-2 and the
     # editing path never asked for it.
-    counted "rt.routeTokenToEditor(token, nowMs)" in src
+    # PLAT-68: every key goes through the ROUTER with the clock, and its
+    # resolution reaches the buffer with the clock too.
+    counted "rt.runResolution(rt.routeKey(name, nowMs), nowMs, result)" in src
     # Through the SESSION since PLAT-28 (2026-09-23), so the file's project
     # breakpoints are carried through the edit; the clock still goes with it.
-    counted "applyEditKeyIn(buf, rt.keyOf(token), nowMs)" in src
+    counted "rt.app.editSession.applyResolvedIn(buf, res, nowMs)" in src
     counted mutableBufferSpellingsIn(src).len == 0
 
   # -------------------------------------------------------------------------

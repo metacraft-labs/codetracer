@@ -10,10 +10,10 @@
  *     are read back: they are the open folder and the item the ViewModel
  *     says, and they MOVE when only the ViewModel's highlight moves. A
  *     renderer that kept its own copy of the menu's state would not follow.
- *   * the menu opens by click (`#menu-root`) and by key (`CTRL+M`, the
- *     desktop's `aMenu`); the pointer walks into the Debug folder; each
- *     stepping item's shortcut is the chord the desktop's keymap binds
- *     (`default_config.yaml`, rendered as `renderChord` renders it);
+ *   * the menu opens by click (`#menu-root`) and by key (`Alt` pressed and
+ *     released alone — the default binding, CUA-Keymap.md §3.8); the pointer
+ *     walks into the Debug folder; each stepping item's shortcut is the
+ *     chord the router runs it with (`chord_display.displayedChord`);
  *     choosing Step Over moves the debugger;
  *   * the footer strip's labels are the shared default's docked panes.
  *
@@ -37,7 +37,10 @@ const answersDir = path.join(repoRoot, "src", "tests", "visual", "answers");
 const answersFile = path.join(answersDir, "plat48-menu.electron.json");
 
 function recording(): string {
-  const cache = path.join(repoRoot, "test-logs", "tui-fixtures");
+  // `PLAT48_FIXTURES_DIR`: a recording set the desktop backend under test
+  // reads (a built variant's `ct` reads one container version).
+  const cache = process.env.PLAT48_FIXTURES_DIR ??
+    path.join(repoRoot, "test-logs", "tui-fixtures");
   const hits = fs.existsSync(cache)
     ? fs.readdirSync(cache).filter((e) => e.startsWith("calc-")).sort()
     : [];
@@ -104,7 +107,9 @@ test("PLAT-48: the desktop's menu is drawn from the shared Menu ViewModel", asyn
   expect(second).toContain("Step Out");
   expect(second).not.toContain("Step Over");
 
-  // ---- THE DEBUG FOLDER'S SHORTCUTS: the keymap's chords --------------------
+  // ---- THE DEBUG FOLDER'S SHORTCUTS: the chords the router runs ------------
+  // One chord per item — the one the router RUNS the action with
+  // (`keymap_router.chordFor`), in the router's spelling (PLAT-68).
   const nested = ctPage.locator(".menu-nested-elements").first();
   const items = await nested.locator(".ct-menu-item").all();
   const shortcuts: Record<string, string> = {};
@@ -115,7 +120,7 @@ test("PLAT-48: the desktop's menu is drawn from the shared Menu ViewModel", asyn
   }
   out.debugShortcuts = shortcuts;
   expect(shortcuts["Step Over"]).toBe("F10");
-  expect(shortcuts["Continue"]).toBe("F8 F2");
+  expect(shortcuts["Continue"]).toBe("F8");
 
   // ---- CHOOSE Step Over: the debugger moves ----------------------------------
   const tick = async (): Promise<number> =>
@@ -127,12 +132,9 @@ test("PLAT-48: the desktop's menu is drawn from the shared Menu ViewModel", asyn
     before, { timeout: 120_000 });
   out.stepOver = { before, after: await tick(), closed: !(await state()).isOpen };
 
-  // ---- OPEN BY KEY: the desktop's aMenu chord --------------------------------
-  // Off the editor first: Monaco binds CTRL+M itself (tab-moves-focus), so
-  // the chord reaches the desktop's keymap only from the page.
-  await ctPage.mouse.click(900, 600);
-  await ctPage.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await ctPage.keyboard.press("Control+m");
+  // ---- OPEN BY KEY: Alt pressed and released alone (CUA-Keymap.md §3.8) ----
+  // The default binding, from wherever the focus is — no key planted.
+  await ctPage.keyboard.press("Alt");
   await ctPage.waitForTimeout(500);
   out.openedByKey = (await state()).isOpen;
   if ((await state()).isOpen) {

@@ -66,7 +66,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 161
+const ExpectedAssertions = 163
 
 var countedAssertions = 0
 
@@ -248,7 +248,7 @@ proc waitForStatus(sess: var TuiTestSession; cols, rows: int; needle: string;
   statusRowText(sess, cols, rows)
 
 proc finish(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 15))
   sess.close()
 
@@ -294,8 +294,10 @@ proc readWide(sess: var TuiTestSession): Fidelity =
     result.currentLineBg = hexOfColor(sess.cellAt(execRow, c).bg)
   result.statusBg = hexOfColor(sess.cellAt(rows - 1, cols - 1).bg)
   # The mode indicator, found by its text: since PLAT-49 part B the footer's
-  # auto-hide labels open the status row, and the mode follows them.
-  let modeCol = colOf(sess, rows - 1, cols, "NORMAL")
+  # auto-hide labels open the status row, and the mode follows them. Since
+  # PLAT-68 the label is the base's name (`CUA`) when the base has no modes,
+  # beside the product mode (`CUA [DEBUG]`).
+  let modeCol = colOf(sess, rows - 1, cols, "CUA [")
   result.modeFg = hexOfColor(sess.cellAt(rows - 1, max(0, modeCol)).fg)
   # A pane body: the Variables pane's last column before its separator, three
   # rows under its tab strip (PLAT-49: the strip is the pane's first row).
@@ -459,7 +461,13 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       ck focusedBorders(sess, Wide.cols, Wide.rows,
                         hexT(dtColorsUiBorderSecondary, mode)) > 0
       # PLAT-51: the focused pane's TAB STRIP takes the focus colour as its
-      # ground — one strip row's worth of cells, and nothing else does.
+      # ground — on one row, and nothing else does. PLAT-68: its SELECTED
+      # tab stands apart on its own ground (`srTabActiveFocused`,
+      # ui/surface/primary/default) by the contrast floor, so the focus
+      # colour is the strip's UNSELECTED tabs. On this layout the focused
+      # strip is the side panel's: ` Files ` selected (7 cells on the tab
+      # ground), `VC` beside it (4 cells on the focus colour) — measured
+      # 2026-10-12, both modes.
       var focusGround = 0
       var focusRows: seq[int] = @[]
       for r in 0 ..< Wide.rows:
@@ -470,7 +478,15 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
             if r notin focusRows: focusRows.add r
       checkpoint(modeName & ": " & $focusGround & " cell(s) on the focus " &
                  "colour, rows " & $focusRows)
-      ck focusGround >= 10 and focusRows.len == 1
+      ck focusGround >= 4 and focusRows.len == 1
+      var tabGround = 0
+      if focusRows.len == 1:
+        for c in 0 ..< Wide.cols:
+          if hexOfColor(sess.cellAt(focusRows[0], c).bg) ==
+             hexT(dtColorsUiSurfacePrimaryDefault, mode):
+            inc tabGround
+      checkpoint(modeName & ": " & $tabGround & " selected-tab cell(s)")
+      ck tabGround >= 7
       ck f.statusBg == hexT(dtColorsUiSurfaceBaseRaised, mode)
       ck f.modeFg == hexT(dtColorsUiTextSuccessPrimary, mode)
       ck f.currentLineBg == hexT(dtEditorThemeExecutionLine, mode)
@@ -759,7 +775,7 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
           # progress text before the source is drawn, and a capture taken then
           # has no keyword to find. `default` reads the status line's notice,
           # which the position text later crowds to the line's edge.
-          if status.contains("NORMAL") and not status.contains("opening") and
+          if status.contains("[DEBUG]") and not status.contains("opening") and
              (name == "default" or capture.contains("def add")):
             break
       checkpoint(name & " status: " & status.substr(0, 400))

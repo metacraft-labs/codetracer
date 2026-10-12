@@ -69,6 +69,7 @@ import ./app/cli
 # every build of the product.
 import ./app/edit_binding   # PLAT-43: `EditSession.selectModel`
 import ./app/runtime
+import ./app/clipboard_read
 import ./app/tui_app
 import ./host/build_runner
 import ./host/capabilities
@@ -96,6 +97,13 @@ import ./host/control_icons
 import ./host/image_probe
 import ./app/theme/palette
 import ../viewmodel/host/keymap_preference
+import ../viewmodel/host/keybindings_file
+import ../viewmodel/keymap/keymap_router
+
+const ShippedDesktopConfig = staticRead("../../config/default_config.yaml")
+  ## The desktop's shipped configuration: what a user's edited YAML
+  ## `bindings:` block is compared with when it is imported once into
+  ## `keybindings.json` (Base-Keymaps-And-Layer-Stack.md §3.5).
 import ../viewmodel/host/icons_preference
 import ../viewmodel/host/layout_preferences
 
@@ -184,10 +192,11 @@ proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
   # stored `default` — PLAT-43's name for the product default — is read as
   # `cua` and rewritten, and the notice says so once.
   let keymapPreference = sessionKeymap(keymapFlag)
-  rt.keymapModel = keymapPreference.model
-  rt.keymapReason = keymapPreference.reason
-  if not rt.app.editSession.isNil:
-    rt.app.editSession.selectModel(rt.keymapModel)
+  rt.selectBase(keymapPreference.model,
+                case keymapPreference.reason
+                of "flag": ksFlag
+                of "stored": ksStored
+                else: ksDefault)
   if keymapPreference.status in {kplRefused, kplMigrated}:
     rt.keymapNotice = keymapPreference.message
     rt.app.notification = keymapPreference.message
@@ -202,6 +211,45 @@ proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
     else:
       BuildStartResult(ok: false, message: describeVerdict(state.running.session))
   state
+
+proc wireKeybindings(rt: TuiRuntime): ref KeybindingsLoad =
+  ## PLAT-68: THE ONE USER KEYMAP (Base-Keymaps-And-Layer-Stack.md §3.5) —
+  ## `keybindings.json`, the file GPUI and the desktop read too. On the first
+  ## run an existing `.cttui-keys` or an edited desktop YAML `bindings:`
+  ## block is translated into it once (`importOldConfigsOnce`); the file is
+  ## then laid over the base, and `:keys reload` re-reads it. The status line
+  ## says what loaded when anything did not, or when an import ran.
+  result = new KeybindingsLoad
+  let imported = importOldConfigsOnce(defaultOldConfigs(ShippedDesktopConfig))
+  result[] = readKeybindings()
+  var notes = imported
+  if result.readError.len > 0:
+    notes.add result.readError
+  else:
+    let summary = rt.applyUserKeymap(result.keymap)
+    if rt.router.errors.len > 0: notes.add summary
+  if notes.len > 0:
+    rt.app.notification = notes.join("; ")
+  let held = result
+  rt.editServices.reloadKeybindings = proc(): string =
+    held[] = readKeybindings(held.path)
+    if held.readError.len > 0: held.readError
+    else: rt.applyUserKeymap(held.keymap)
+  rt.refreshMenuForKeymap()
+
+proc pollKeybindings(rt: TuiRuntime; held: ref KeybindingsLoad): bool =
+  ## Between frames: the file changed on disk — read it and lay it over the
+  ## base again. A file that cannot be read keeps the rows that loaded last.
+  if held.isNil or not held[].changedSince:
+    return false
+  let fresh = readKeybindings(held.path)
+  if fresh.readError.len > 0:
+    rt.app.notification = fresh.readError
+  else:
+    held[] = fresh
+    rt.app.notification = rt.applyUserKeymap(fresh.keymap)
+    rt.refreshMenuForKeymap()
+  true
 
 proc wireTopBar(rt: TuiRuntime) =
   ## PLAT-48: the top bar's host half, for both loops.
@@ -400,10 +448,40 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   if rt.app.clipboard.len > 0:
     epilogue.add osc52Copy(rt.app.clipboard)
     rt.app.clipboard = ""
+  # PLAT-68: A HELD PASTE ASKS THE TERMINAL FOR ITS CLIPBOARD — the OSC 52
+  # read, written with this frame; the answer is a reply string the framer
+  # delivers as one token (`takeClipboardReply`), or the wait runs out
+  # (`clipboardReadDue`).
+  if rt.clipboardRead.requested:
+    epilogue.add ClipboardQuery
+    rt.clipboardRead.requested = false
+    rt.clipboardRead.open = true
+    rt.clipboardRead.deadlineMs = nowMs() + ClipboardReadWaitMs
+    driver.expectReplies(true)
   driver.paint(screen.styledRows,
                prologue = cursorControlBytes(rt.modal.mode),
                epilogue = epilogue,
                overlays = screen.frameOverlays)
+
+proc takeClipboardReply(rt: TuiRuntime; driver: TerminalDriver;
+                        token: string): bool =
+  ## PLAT-68: the terminal's answer to the clipboard read — never a key,
+  ## never journalled: the held paste runs with its text.
+  if not isClipboardReply(token):
+    return false
+  let reply = decodeClipboardReply(token)
+  discard rt.completePaste(reply.ok, reply.text, nowMs())
+  paint(driver, rt)
+  true
+
+proc clipboardReadDue(rt: TuiRuntime; driver: TerminalDriver): bool =
+  ## The clipboard read's wait ran out: the held paste runs with the
+  ## internal clipboard, and the terminal is not asked again.
+  if not rt.clipboardRead.open or nowMs() <= rt.clipboardRead.deadlineMs:
+    return false
+  discard rt.completePaste(false, "", nowMs())
+  paint(driver, rt)
+  true
 
 proc themeSwitch(negotiation: StartupNegotiation; driver: TerminalDriver;
                  rt: TuiRuntime): proc(name: string): bool {.closure.} =
@@ -547,6 +625,7 @@ proc interactive(command: TuiCommand): int =
     let listing = listProjectFiles(rt.app.projectRoot)
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
+  let keybindings = wireKeybindings(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -667,7 +746,6 @@ proc interactive(command: TuiCommand): int =
   # abandoned mid-message cannot be resynchronised, which is the right trade
   # while the session is still being built and the wrong one afterwards.
   session.disarmHandshakeInterrupt()
-
   session.header(rt)
   app.dividers = command.dividers
   if command.noFlowOverlay:
@@ -915,7 +993,8 @@ proc interactive(command: TuiCommand): int =
       if graphicsProbe.open and nowMs() > graphicsProbe.deadlineMs:
         # No answer: the terminal draws no pictures. The default stays.
         graphicsProbe.open = false
-      if not graphicsProbe.open:
+      discard rt.clipboardReadDue(driver)
+      if not graphicsProbe.open and not rt.clipboardRead.open:
         negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, on
       # exactly `editInteractive`'s rule and for §5's reason. A replay session
@@ -929,8 +1008,9 @@ proc interactive(command: TuiCommand): int =
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs())
+      let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged or frameOwed or recorded:
+         hoverChanged or frameOwed or recorded or keysChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -945,6 +1025,8 @@ proc interactive(command: TuiCommand): int =
       session.refresh(rt)
       paint(driver, rt)
     of dekToken:
+      if rt.takeClipboardReply(driver, ev.token):
+        continue
       # PLAT-48: THE ANSWER TO THE GRAPHICS QUERY. `OK` means the terminal
       # draws pictures: the controls default to the desktop's marks, unless
       # the user chose otherwise. Never a key, never journalled.
@@ -1135,6 +1217,7 @@ proc editInteractive(command: TuiCommand): int =
                               proc(): EditListResult =
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
+  let keybindings = wireKeybindings(rt)
   wireLayoutPreferences(rt, soUnset, soUnset)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
@@ -1168,7 +1251,9 @@ proc editInteractive(command: TuiCommand): int =
     of dekEof:
       loop = false
     of dekIdle:
-      negotiation.closeReplyWindow(driver)
+      discard rt.clipboardReadDue(driver)
+      if not rt.clipboardRead.open:
+        negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, which
       # is the whole of §5's cancellability requirement: the key that cancels is
       # read while the compiler runs, and the clock that bounds an unattended
@@ -1176,14 +1261,17 @@ proc editInteractive(command: TuiCommand): int =
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs())
+      let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged:
+         hoverChanged or keysChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size
       rt.resize(size.cols, size.rows)
       paint(driver, rt)
     of dekToken:
+      if rt.takeClipboardReply(driver, ev.token):
+        continue
       let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
       if wasReply:
         adoptMouseMetrics(driver, negotiation)

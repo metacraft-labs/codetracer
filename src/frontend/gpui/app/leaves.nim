@@ -290,6 +290,10 @@ const
     ## 8 : 10.13 proportion.
   EditorCaretAttribute* = "data-ct-caret"
     ## PLAT-51: on the read-only editor's caret, `<line>:<column>`.
+  EditorSelectionAttribute* = "data-ct-selection"
+    ## PLAT-68: on a selected span of an editor row,
+    ## `<line>:<fromColumn>-<toColumn>` (1-based display columns, `to`
+    ## exclusive).
   PointerMarkAttribute* = "data-ct-pointer-mark"
     ## On the pointer lane of the execution line: what the lane draws
     ## (`highlight_line_arrow.svg`), so a plan reader can tell the desktop's
@@ -1062,7 +1066,9 @@ proc renderEditorScrollbar(r: GpuiRenderer;
 
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1; skipCols = 0;
-                     caretColumn = 0): GpuiElement =
+                     caretColumn = 0;
+                     selected: openArray[tuple[fromColumn, toColumn: int]] = []):
+                     GpuiElement =
   ## One row of the source editor.
   ##
   ## Every attribute below is the ROW's own field stringified. Nothing here
@@ -1158,6 +1164,25 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   r.setStyle(column, "overflow", "hidden")
   if row.pointer == eptExecution:
     r.setStyle(column, "background", ExecutionRowBand)
+  for span in selected:
+    # PLAT-68: THE SELECTION, Monaco's `editor.selectionBackground`
+    # (`editor-theme/selection`) behind the text — before the caret, which is
+    # drawn over it.
+    let fromCol = max(span.fromColumn, skipCols + 1)
+    if span.toColumn <= fromCol: continue
+    r.setStyle(column, "position", "relative")
+    let band = r.createElement("div")
+    r.setAttribute(band, EditorSelectionAttribute,
+                   $row.line & ":" & $span.fromColumn & "-" & $span.toColumn)
+    r.setStyle(band, "position", "absolute")
+    r.setStyle(band, "left", formatFloat(float(fromCol - 1 - skipCols) *
+                                         EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(band, "top", "0px")
+    r.setStyle(band, "width", formatFloat(float(span.toColumn - fromCol) *
+                                          EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(band, "height", "100%")
+    r.setStyle(band, "background", EditorSelectionColour)
+    r.appendChild(column, band)
   if caretColumn > 0 and caretColumn > skipCols:
     # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
     # before its column, in the editor's foreground (Monaco's cursor),
@@ -1307,10 +1332,14 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
   r.setAttribute(parent, EditorScrollMetricAttribute, scrollMetricText(scroll))
   let runs = editorRunsOf(surface)
   for i, row in surface.rows:
+    var selected: seq[tuple[fromColumn, toColumn: int]] = @[]
+    for cell in surface.selection:
+      if cell.line == row.line: selected.add (cell.fromColumn, cell.toColumn)
     r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,
                                           scroll.leftCols,
                                           (if row.line == surface.caretLine:
-                                             surface.caretColumn else: 0)))
+                                             surface.caretColumn else: 0),
+                                          selected))
   if scroll.present:
     r.appendChild(parent, renderEditorScrollbar(r, scroll))
   surface.rows.len > 0

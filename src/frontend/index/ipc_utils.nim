@@ -1,7 +1,7 @@
 import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
-  review_dataset,
+  review_dataset, keybindings,
   ns9_panes,
   hcr_launch,
   ipc_subsystems/[ dap, socket, acp_ipc ],
@@ -460,6 +460,10 @@ proc configureIpcMain* =
     "acp-pick-files"
 
     "save-config"
+    # PLAT-68: the renderer's stepping preset (`localStorage`), merged once
+    # into `keybindings.json` (`index/keybindings.onKeybindingsImport`).
+    "keybindings-import"
+    "keybindings-request"
     # Auto-hide (pinned panel) state.  It is persisted separately from the
     # GoldenLayout config because pinning a panel REMOVES it from the
     # GoldenLayout tree — see `onSaveAutoHideState` in `index/window.nim`.

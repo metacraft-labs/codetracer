@@ -2,10 +2,9 @@
 ## function that turns such a table into resolver bindings.
 ##
 ## Owns: `BaseRow` (one row of a data base: chord sequence, operation, `when`,
-## platforms), `DeferredRow` (a row its specification lists whose operation
-## lives in a pane table PLAT-64's router has not delivered — named and counted,
-## never dropped), and `definitionOf`, which builds a `KeymapDefinition` from a
-## base's rows.
+## platforms, the table it is installed in), `definitionOf`, which builds a
+## `KeymapDefinition` from a base's rows and refuses one that does not hold
+## together, and a base's coverage of the operation catalogue (KL-2).
 ##
 ## Refuses to own: any base's rows (`cua_keymap.nim`, `emacs_keymap.nim` hold
 ## nothing but data — Base-Keymaps-And-Layer-Stack.md §8 item 3: *"no
@@ -22,76 +21,91 @@
 ## row that silently binds nothing (`definitionOf` raises, and every suite that
 ## loads a base fails by name).
 
-import std/[algorithm, strutils]
+import std/[algorithm, sets, strutils, tables]
 
 import ../editor/operations
 import ./editing_keymap
+import ./operation_catalogue
+import ./scope_path
 import ./when_expr
+
+export operation_catalogue, scope_path
 
 const
   EditorOperationPrefix* = "editor."
     ## The editor table's namespace (Input-Routing §3.1). Its operations are
     ## the editing vocabulary's (Editing-Operations §2.2), spelled without it.
 
-  PaneOperation* = "an editor-PANE operation — it acts on the pane's " &
-    "viewport or settings, not on EditorState — dispatched by PLAT-64's " &
-    "router; PLAT-68 Phase B binds it"
-  OverlayOperation* = "an operation of the find widget or the palette, " &
-    "a pushed layer of PLAT-68 Phase B over PLAT-64's router"
-
 type
   BaseRow* = object
     chords*: string
       ## A chord sequence as the specification writes it: `Ctrl+K Ctrl+C`.
     operation*: string
-      ## `editor.<vocabulary name>`, with a literal argument in parentheses
-      ## when the operation takes one.
+      ## `editor.<vocabulary name>` or a catalogued name
+      ## (`debugger.step-over`), with a literal argument in parentheses when
+      ## the operation takes one (`layout.focus-pane-by-index(3)`).
     whenText*: string
       ## The row's `when`, spelled out (`writable` expanded); `""` is always.
     platforms*: set[PlatformKind]
       ## VS Code's platform override; empty is every platform.
-
-  DeferredRow* = object
-    ## A specified row this phase does not bind, with the reason. The oracle
-    ## counts these beside the bound rows, so a specified row is either bound
-    ## or deferred — never missing.
-    chords*: string
-    operation*: string
-    whenText*: string
-    reason*: string
+    table*: string
+      ## The table the row is installed in (`scope_path`'s names, or a
+      ## pushed layer's): "" is the editor table — every row of
+      ## CUA-Keymap.md §3.1–§3.4.
+    navModes*: set[NavigationMode]
+      ## The terminal's navigation modes the row holds in, for the modal
+      ## bases' navigation table (§5.5); empty is every mode.
 
   BaseRowError* = object of CatchableError
 
 proc vocabularyName*(operation: string): string =
-  ## `editor.move-char-left` → `move-char-left`.
-  if operation.startsWith(EditorOperationPrefix):
+  ## `editor.move-char-left` → `move-char-left`; a catalogued operation
+  ## (`editor.scroll-line-up`, `debugger.step-over`) keeps its namespace.
+  if operation.startsWith(EditorOperationPrefix) and
+     not isCatalogued(operation):
     operation[EditorOperationPrefix.len .. ^1]
   else:
     operation
 
+proc operationProblem*(operation: string): string =
+  ## Why `operation` (with its argument, `name(arg)`) names nothing a
+  ## binding can run, or "" — the one check the base data and the user's
+  ## file both go through.
+  let (name, arg) = splitOperation(operation)
+  if isCatalogued(name):
+    return argumentProblem(name, arg)
+  if arg.len > 0:
+    return "'" & name & "' takes no argument here"
+  if operationNamed(vocabularyName(name)) < 0:
+    return "'" & name & "' is not an operation"
+  ""
+
 proc bindingOf*(base: BaseKeymap; row: BaseRow): EditingBinding =
   ## One data row → one resolver binding. RAISES on a chord the normaliser
-  ## cannot read, an operation the vocabulary does not have, and a `when` the
-  ## grammar refuses — a base whose data is wrong does not load.
+  ## cannot read, an operation that names nothing, and a `when` the grammar
+  ## refuses — a base whose data is wrong does not load.
   let chords = normalizeChordSequence(row.chords)
   if chords.len == 0:
     raise newException(BaseRowError, $base & ": unreadable chord '" &
                        row.chords & "'")
-  let name = vocabularyName(row.operation)
-  if operationNamed(name) < 0:
-    raise newException(BaseRowError, $base & ": '" & row.operation &
-                       "' is not an editing operation")
+  let problem = operationProblem(row.operation)
+  if problem.len > 0:
+    raise newException(BaseRowError, $base & ": " & problem)
+  let (name, arg) = splitOperation(row.operation)
   let parsed = parseWhen(row.whenText)
   if not parsed.ok:
     raise newException(BaseRowError, $base & ": when '" & row.whenText &
                        "' of " & row.chords & ": " & parsed.message)
+  let table = if row.table.len == 0: EditorTable else: row.table
   EditingBinding(
     model: base,
-    scope: BindingScope(modes: {}, products: {}, panes: {epEditor},
+    scope: BindingScope(modes: {}, navModes: row.navModes, products: {},
+                        panes: (if table == EditorTable: {epEditor} else: {}),
                         whenText: row.whenText, cond: parsed.expr,
                         platforms: row.platforms),
-    chords: chords.splitWhitespace(), operation: name, args: OpArgs(),
-    spelling: row.chords)
+    table: table,
+    chords: chords.splitWhitespace(), operation: vocabularyName(name),
+    args: OpArgs(), argument: arg, spelling: row.chords)
 
 proc filedFor(base: BaseKeymap; bound: seq[string]): seq[FiledDeclaration] =
   ## KL-2 for a data base: every declaration the base binds no form of is
@@ -106,19 +120,23 @@ proc filedFor(base: BaseKeymap; bound: seq[string]): seq[FiledDeclaration] =
                 "(Emacs-Keymap.md §4 lists the commands not taken)"
     of bkVim, bkKakoune: "the modal bases file their own"
   result = @[]
+  # Sets, built once: this runs when a base loads, at start-up, and the
+  # nested scan over the vocabulary it replaced cost the Emacs base ~70 ms.
   let vocab = vocabulary()
-  var seen: seq[string] = @[]
-  for op in operations():
-    if op.name in bound: continue
+  let ops = operations()
+  let boundSet = bound.toHashSet()
+  var boundDecls = initHashSet[string]()
+  for op in ops:
+    if op.name in boundSet: boundDecls.incl vocab[op.decl].name
+  var seen = initHashSet[string]()
+  for op in ops:
+    if op.name in boundSet: continue
     let decl = vocab[op.decl].name
-    var anyBound = false
-    for other in operations():
-      if vocab[other.decl].name == decl and other.name in bound:
-        anyBound = true
+    let anyBound = decl in boundDecls
     if anyBound:
       result.add FiledDeclaration(decl: decl, forms: {op.form}, reason: reason)
     elif decl notin seen:
-      seen.add decl
+      seen.incl decl
       result.add FiledDeclaration(decl: decl, forms: {}, reason: reason)
 
 proc overlapping(a, b: set[PlatformKind]): bool =
@@ -133,21 +151,40 @@ func isPrefixOf(a, b: seq[string]): bool =
   true
 
 proc conflictsOf(bindings: openArray[EditingBinding]): seq[string] =
+  ## Per TABLE: two rows in different tables never conflict — the inner
+  ## table on the scope path is consulted first, and that is the rule, not
+  ## an accident of order.
   ## Base-Keymaps §5.6: two rows of one base whose chord sequences are equal,
   ## or one a proper prefix of the other, on overlapping platforms, under
   ## `when`s that can BOTH hold. Decided by `when_expr.canBothHold` —
   ## enumeration over the closed context-key domains, so exact. A conflict is
   ## REPORTED, never resolved by row order: `definitionOf` refuses the base.
   result = @[]
+  # Only rows that share their FIRST chord can be equal or prefixes of one
+  # another: pairs are drawn within those groups (start-up cost — this runs
+  # when a base loads).
+  # `canBothHold` is exact (it enumerates the closed context-key domains), and
+  # the same pair of `when` texts recurs across many rows: decided once.
+  var bothHold = initTable[(string, string), bool]()
+  var byFirst = initTable[string, seq[int]]()
+  for i, b in bindings:
+    byFirst.mgetOrPut(if b.chords.len > 0: b.chords[0] else: "", @[]).add i
   for i in 0 ..< bindings.len:
-    for j in 0 ..< bindings.len:
+    let first = if bindings[i].chords.len > 0: bindings[i].chords[0] else: ""
+    for j in byFirst[first]:
       if i == j: continue
       template a: untyped = bindings[i]
       template b: untyped = bindings[j]
+      if tableOf(a) != tableOf(b): continue
+      if a.scope.navModes != {} and b.scope.navModes != {} and
+         (a.scope.navModes * b.scope.navModes) == {}: continue
       if not overlapping(a.scope.platforms, b.scope.platforms): continue
       if not isPrefixOf(a.chords, b.chords): continue
       if a.chords.len == b.chords.len and i > j: continue
-      if not canBothHold(a.scope.cond, b.scope.cond): continue
+      let pair = (a.scope.whenText, b.scope.whenText)
+      if pair notin bothHold:
+        bothHold[pair] = canBothHold(a.scope.cond, b.scope.cond)
+      if not bothHold[pair]: continue
       if a.chords.len == b.chords.len:
         result.add "duplicate " & a.chords.join(" ") & ": " & a.operation &
                    " / " & b.operation
@@ -155,42 +192,19 @@ proc conflictsOf(bindings: openArray[EditingBinding]): seq[string] =
         result.add "prefix " & a.chords.join(" ") & " (" & a.operation &
                    ") of " & b.chords.join(" ") & " (" & b.operation & ")"
 
-proc deferredClashes*(base: BaseKeymap; rows: openArray[BaseRow];
-                      deferred: openArray[DeferredRow]): seq[string] =
-  ## A DEFERRED row is a promise about Phase B: its chord is kept free for the
-  ## operation it names. One whose chord a bound row of the same base already
-  ## takes is a promise that cannot be kept, so it is reported here — and its
-  ## operation must not be bound either, or it was not deferred at all.
-  result = @[]
-  var bound: seq[string] = @[]
-  for r in rows:
-    bound.add normalizeChordSequence(r.chords)
-  for d in deferred:
-    let chords = normalizeChordSequence(d.chords)
-    if chords.len == 0:
-      result.add "deferred " & d.chords & ": unreadable chord"
-    elif chords in bound:
-      result.add "deferred " & d.chords & " (" & d.operation &
-                 ") is bound by a row of the same base"
-    for r in rows:
-      if r.operation == d.operation:
-        result.add "deferred " & d.operation & " is also bound (" &
-                   r.chords & ")"
-
-proc definitionOf*(base: BaseKeymap; rows: openArray[BaseRow];
-                   deferred: openArray[DeferredRow] = []): KeymapDefinition =
+proc definitionOf*(base: BaseKeymap; rows: openArray[BaseRow]): KeymapDefinition =
   ## A data base, as the resolver and the coverage law read it. RAISES on a
-  ## conflict between two rows (`conflictsOf`) or a deferred row a bound row
-  ## contradicts (`deferredClashes`): a base that does not hold together does
-  ## not load, and every suite that loads it fails by name.
+  ## conflict between two rows (`conflictsOf`): a base that does not hold
+  ## together does not load, and every suite that loads it fails by name.
   var bindings: seq[EditingBinding] = @[]
   var bound: seq[string] = @[]
   for name in LayerReachedOperations: bound.add name
   for row in rows:
     let b = bindingOf(base, row)
     bindings.add b
-    if b.operation notin bound: bound.add b.operation
-  let problems = conflictsOf(bindings) & deferredClashes(base, rows, deferred)
+    if tableOf(b) == EditorTable and b.operation notin bound:
+      bound.add b.operation
+  let problems = conflictsOf(bindings)
   if problems.len > 0:
     raise newException(BaseRowError, $base & ": " & problems.join("; "))
   bound.sort()

@@ -5,7 +5,7 @@
   "P1": "refused.status == kplRefused",
   "R1": "remembered == @[bkVim]",
   "R2": "not rt.editorOwnsToken(\"\\e[17~\")",
-  "R3": "cua.editorOwnsToken(\"\\t\")",
+  "R3": "rt.editorOwnsToken(\"x\")",
   "S1": "not s.ok",
   "S2": "not s.ok",
   "S3": "s.refusal.contains(n)",

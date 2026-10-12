@@ -246,7 +246,7 @@ R_GPUIMENU = ("GPUI draws the same menu: one button, a first level below it, "
 R_TOOLTIPS = ("every transport tooltip is the ViewModel's, over the desktop's "
               "binding")
 H_NOHINTS = "the status bar carries no key-hint strip, at any profile or mode"
-P_MENU = ("row 0 holds one root button; F12 drops the first level; Right "
+P_MENU = ("row 0 holds one root button; Alt+` drops the first level; Right "
           "cascades")
 P_CLICKS = ("clicks never drag; a tab click activates; past the threshold is a "
             "drag")
@@ -442,8 +442,8 @@ ARMS = [
         S_STRIPS,
         "no strip is painted over a pane: the painters' headings show"),
     Arm("TI3", GPUIMAIN,
-        "    if id.len > 0 and id notin gPanes: gPanes[id] = pane\n    stripHeading(r, pane)\n",
-        "    if id.len > 0 and id notin gPanes: gPanes[id] = pane\n",
+        "      markPaneScope(r, pane, id)\n    stripHeading(r, pane)\n",
+        "      markPaneScope(r, pane, id)\n",
         G_HEADINGS,
         "the GPUI window keeps every leaf's heading"),
     Arm("TI4", WINGEOM,
@@ -502,8 +502,8 @@ ARMS = [
         P_MONO,
         "monochrome: the selected tab without reverse video"),
     Arm("TC5", CHROME,
-        '       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]\n',
-        '       chromeOf(if focused: crFocusOutline else: crTabStripBackground))]\n',
+        '       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]\n',
+        '       chromeOf(if focused: crTabStripBackground else: crTabStripBackground))]\n',
         G_STRIPS,
         "GPUI's selected tab on the strip's own ground"),
     Arm("TC6", GPUIMAIN,

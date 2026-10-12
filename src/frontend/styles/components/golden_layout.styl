@@ -445,3 +445,9 @@ SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
     // hands back a custom property's `em` token unresolved, and the builder
     // needs pixels.  Draws nothing — an SVG path has no border to round.
     border-top-left-radius: LAYOUT_TAB_CONNECTOR_RADIUS
+
+// PLAT-68: a pane is focusable (`tabindex="-1"`, `ui/layout.markPaneScope`)
+// so a click into its body puts the keyboard's scope there; the selected
+// panel already has its own outline, so the browser's focus ring is not drawn.
+[data-scope-kind="pane"]:focus
+  outline: none

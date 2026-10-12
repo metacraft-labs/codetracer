@@ -1,8 +1,7 @@
 ## The shortcut presets bind what they display, and reach the editor.
 ##
 ## LANE: `frontend-js` (listed in `ci/lib/test-lane-files.sh`). JS backend
-## only, for the same reason `shortcut_bindings_test.nim` is: `frontend/config.nim`
-## is built on `std/jsffi`'s `JsAssoc`.
+## only: `frontend/config.nim` is built on `std/jsffi`'s `JsAssoc`.
 ##
 ## Compile and run:
 ##   nim js -r src/frontend/tests/shortcut_presets_test.nim
@@ -45,8 +44,9 @@ import std/[strutils, unittest, options, sets, jsffi]
 import ../config
 import ../types
 import ../lib/jslib
-from ../ui/shortcut_labels import
-  MONACO_SHORTCUTS_WHITELIST, renderChord, hardBoundChords
+import ../viewmodel/keymap/[binding_sets, user_keymap, keymap_router,
+                            scope_path, context_keys, editing_keymap]
+import ../../common/key_names
 
 var countedAssertions = 0
 
@@ -54,11 +54,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 526
-  ## 525 before the F2 fix. The hard-bind case swapped its `"F2" in
-  ## hardSwallowed` pin for `"F2" notin hardBoundChords` (one for one) and
-  ## added `"F1" in hardBoundChords` beside it, so that the absence being
-  ## asserted is an absence from a registry that demonstrably contains things.
+const ExpectedAssertions = 409
+  ## PLAT-68: 526 → 409. The cases about the retired key registries (the
+  ## Monaco delegation whitelist, the hard-bound chords) and the tooltip that
+  ## read the YAML went with them; the include-set case came (a preset's
+  ## chords ARE its `keybindings.json` include set).
 
 const boundPresets = [spCodeTracer, spVsCode, spChorded]
   ## The presets that bind something. `spNone` is the negative and is used as
@@ -122,11 +122,13 @@ suite "shortcut presets":
     # statement about the presets and not something every value satisfies.
     counted presetOf(spNone).bindings.len == 0
 
-  test "the governed set is exactly the family already proved to reach Monaco":
-    ## `PresetActions` and `shortcut_bindings_test.nim`'s `debuggerCommands`
-    ## are one fact written twice, in two files. Pinned equal so a preset
-    ## cannot start governing an action whose editor reachability nothing
-    ## asserts.
+  test "the governed set is exactly the debugger's stepping family":
+    ## A preset is a `keybindings.json` include set of STEPPING chords; the
+    ## router delivers them in every focus context, the editor included (one
+    ## capture-phase listener — no per-surface registry to prove reachability
+    ## against any more). Pinned so a preset cannot quietly start governing a
+    ## non-stepping action, whose chord the user's own rows would then lose to
+    ## a preset they chose for stepping.
     const debuggerCommands = [
       ClientAction.forwardContinue,
       ClientAction.reverseContinue,
@@ -141,153 +143,6 @@ suite "shortcut presets":
     counted PresetActions.len == debuggerCommands.len
     for action in debuggerCommands:
       counted action in PresetActions
-
-  test "EVERY preset chord reaches the caret in the editor, by one route or the other":
-    ## THE CODETRACER-SPECIFIC INVARIANT, and it has a shipped bug behind it in
-    ## BOTH directions — which is why it is not simply "everything is
-    ## whitelisted".
-    ##
-    ## OFF THE LIST AND EATEN. `ui/editor.nim` delegates a chord into Monaco
-    ## only if it is in `MONACO_SHORTCUTS_WHITELIST`, and for a chord Monaco
-    ## binds natively Monaco stops keydown propagation before the bubble phase
-    ## Mousetrap listens on. `SHIFT+F5` (Stop) was missing, so the one command
-    ## that LEAVES Debug mode was unavailable from the editor; `CTRL+B` (Build)
-    ## was missing and was measured dead on the deployed site.
-    ##
-    ## ON THE LIST AND DOUBLED. A chord Monaco does NOT bind reaches `document`
-    ## on its own, so Mousetrap's global bind already answers it — and adding a
-    ## Monaco command as well made `ALT+F8` fire TWICE per press.
-    ##
-    ## So reachability has two arms and each chord must satisfy exactly one:
-    ## a function key must be delegated, and a `CTRL+ALT+<letter>` chord must
-    ## not be. `default_config.yaml` records the measurement the second arm
-    ## rests on — "Monaco binds no CTRL+ALT+<letter> natively" — and already
-    ## ships six such chords deliberately absent from the whitelist.
-    var delegated = 0
-    var uncontested = 0
-    for id in boundPresets:
-      let preset = presetOf(id)
-      for b in preset.bindings:
-        # A binding may carry two chords ("F8 F2"); each must reach the editor.
-        for single in b.chord.splitWhitespace():
-          let key = chordKeyToken(single)
-          let isFunctionKey = key.len >= 2 and key[0] == 'F' and
-            key[1] in {'0' .. '9'}
-          checkpoint($id & " " & $b.action & " -> " & single &
-            (if isFunctionKey: " (must be delegated)"
-             else: " (must NOT be delegated)"))
-          if isFunctionKey:
-            counted cstring(single) in MONACO_SHORTCUTS_WHITELIST
-            inc delegated
-          else:
-            # Monaco binds nothing here, so a Monaco command would be the
-            # second delivery that made ALT+F8 fire twice.
-            counted cstring(single) notin MONACO_SHORTCUTS_WHITELIST
-            counted single.startsWith("CTRL+ALT+")
-            inc uncontested
-    # Pinning both totals is what stops this passing over a loop that ranged
-    # over an empty preset table, and what makes the split itself visible: the
-    # two F-key presets contribute 19 chords, the browser-safe one 9.
-    counted delegated == 19
-    counted uncontested == 9
-
-  test "the reachability assertion can fail — the whitelist is not everything":
-    ## The containment above is only informative if the whitelist is not simply
-    ## every string. These are real chords the product binds elsewhere and
-    ## deliberately does not delegate, so membership discriminates.
-    for absent in ["CTRL+ALT+N", "CTRL+ALT+P", "ALT+F8", "CTRL+P", "CTRL+M",
-                   "ALT+F10"]:
-      counted cstring(absent) notin MONACO_SHORTCUTS_WHITELIST
-    # And the entries a preset genuinely needs ARE there, so the first arm is
-    # not passing because the list is empty.
-    for present in ["F5", "ALT+F5", "ALT+F11", "ALT+SHIFT+F11", "SHIFT+F5"]:
-      counted cstring(present) in MONACO_SHORTCUTS_WHITELIST
-
-  test "no preset chord is one that `ui/shortcuts.nim` HARD-BINDS":
-    ## THE COLLISION `conflictList` CANNOT SEE, and the one that already
-    ## claimed a chord in the first draft of this feature.
-    ##
-    ## About two dozen chords are bound directly with `Mousetrap.bind` in
-    ## `ui/shortcuts.nim` and `ui_js.nim`, never passing through the YAML. They
-    ## are therefore invisible to `initShortcutMap`, absent from
-    ## `conflictList`, and — because `configureShortcuts` registers them AFTER
-    ## the loop over the config table — they silently REPLACE any binding the
-    ## table gave the same chord. A preset that used one would simply stop
-    ## working, with no conflict reported anywhere.
-    ##
-    ## `ALT+F10` is the live example: it is `stepOverStatement`, and it is the
-    ## obvious reverse of `F10` under the VS Code preset's `ALT` rule. That
-    ## preset uses `SHIFT+F10` instead because of this test.
-    ## THE LIST IS NO LONGER A COPY. It used to be an 18-entry literal right
-    ## here, restating what `ui/shortcuts.nim` and `ui_js.nim` do — and a
-    ## restatement of another file's behaviour goes stale silently, which is
-    ## how it kept saying `F2` was swallowed after the swallow was removed.
-    ## `ui/shortcut_labels.nim` now owns `hardBoundChords`, and
-    ## `shortcut_bindings_test.nim` derives it from those two files with
-    ## `staticRead` — so this suite reads a list something else is responsible
-    ## for keeping true.
-    var hardBound: seq[string] = @[]
-    for chord in hardBoundChords:
-      hardBound.add($chord)
-    var checkedPairs = 0
-    for id in boundPresets:
-      for b in presetOf(id).bindings:
-        for single in b.chord.splitWhitespace():
-          checkpoint($id & " " & single)
-          counted single notin hardBound
-          inc checkedPairs
-    counted checkedPairs == 28
-    # THE NEGATIVE: the list is real and this comparison discriminates —
-    # `CTRL+B` really is hard-bound, and really is a chord the product uses.
-    counted "CTRL+B" in hardBound
-    counted "ALT+F10" in hardBound
-    counted "F10" notin hardBound
-
-    # `F2` WAS A PRE-EXISTING DEFECT, AND IT IS FIXED. THE PIN IS NOW THE
-    # OPPOSITE ASSERTION.
-    #
-    # `default_config.yaml` gives `forwardContinue` two chords, "F8 F2", and
-    # `ui/shortcuts.nim` used to hard-bind `f2` to an empty body AFTER the loop
-    # that registers the config table. `Mousetrap.bind` replaces, so the second
-    # Continue chord was swallowed: pressing F2 outside the editor did nothing,
-    # while the menu and every tooltip went on advertising it, because
-    # `renderChord` reads the config and the config still said F2.
-    #
-    # The previous version of this test pinned that defect as KNOWN, and said
-    # "the day `f2`'s hard bind is removed... this reddens and the pin can go."
-    # It did not redden, because it compared F2 against a `hardSwallowed`
-    # literal declared three lines above it rather than against the source —
-    # a check that could only ever agree with itself. That is why `hardBound`
-    # above is now the shared registry, and why this asserts F2's ABSENCE from
-    # it instead of its presence in a local copy.
-    #
-    # THE BEHAVIOUR ITSELF IS NOT ASSERTABLE HERE, and this test must not
-    # pretend otherwise. That the config binds F2 was true throughout the
-    # defect. The proof is a press in a browser tab:
-    # `ci/test/chord-and-pane-uniqueness.sh` measures F2 in both focus contexts
-    # and requires `forwardContinue` to be DISPATCHED once by each.
-    counted cstring"F2" notin hardBoundChords
-    # `F1` IS STILL RESERVED, and that is what makes the line above a
-    # discriminating check rather than a statement about an empty registry.
-    counted cstring"F1" in hardBoundChords
-    var presetsUsingASwallowedChord = 0
-    for id in boundPresets:
-      for b in presetOf(id).bindings:
-        for single in b.chord.splitWhitespace():
-          if cstring(single) in hardBoundChords:
-            checkpoint("swallowed chord still advertised: " & $id & " " &
-              $b.action & " -> " & single)
-            inc presetsUsingASwallowedChord
-    # ZERO NOW. It was one — the default preset's `forwardContinue`, through
-    # "F8 F2" — and that one was the defect.
-    counted presetsUsingASwallowedChord == 0
-    counted presetOf(spCodeTracer).chordFor(
-      ClientAction.forwardContinue).get == "F8 F2"
-    # And no preset INTRODUCES another one.
-    counted presetOf(spVsCode).chordFor(
-      ClientAction.forwardContinue).get == "F5"
-    counted presetOf(spChorded).chordFor(
-      ClientAction.forwardContinue).get == "CTRL+ALT+G"
 
   test "the DEFAULT preset is byte-for-byte what the YAML already shipped":
     ## THE PIN, and the reason this suite is not purely relational.
@@ -345,28 +200,6 @@ suite "shortcut presets":
     counted seen.len == boundPresets.len
     counted seen.toHashSet.len == boundPresets.len
 
-  test "the TOOLTIP text follows the preset, because it is derived not copied":
-    ## `renderChord` is the single producer of displayed chord text — the menu
-    ## reads it through `loadShortcut`, the toolbar through `toolbarChord` and
-    ## `toolbarTooltip`. It reads `config.shortcutMap`, which is what a preset
-    ## changes, so a rebinding moves every label with it.
-    ##
-    ## This is the assertion that would catch someone "helpfully" adding a
-    ## per-preset label table, which is the defect `shortcut_labels.nim` was
-    ## created to remove.
-    for id in boundPresets:
-      let config = defaultRendererConfig(id)
-      let preset = presetOf(id)
-      for b in preset.bindings:
-        checkpoint($id & " tooltip for " & $b.action)
-        counted renderChord(b.action, config) == b.chord
-    # THE NEGATIVE: the same action's label is not the same string across
-    # presets, so the check above is not satisfied by a constant.
-    counted renderChord(ClientAction.forwardContinue,
-                        defaultRendererConfig(spCodeTracer)) !=
-            renderChord(ClientAction.forwardContinue,
-                        defaultRendererConfig(spChorded))
-
   test "the empty preset really unbinds — it does not fall back to the YAML":
     ## `spNone` means "the nine debugger commands have no chord". Leaving the
     ## YAML's in place would mean "they have the chords you were turning off",
@@ -376,12 +209,9 @@ suite "shortcut presets":
     for action in PresetActions:
       checkpoint("unbound: " & $action)
       counted chordsFor(config, action).len == 0
-      # And therefore no tooltip names a chord for it.
-      counted renderChord(action, config) == ""
     # THE NEGATIVE, and the one that proves the config was really built rather
     # than returned empty: everything OUTSIDE the preset's remit is untouched.
     counted chordsFor(config, ClientAction.build).len == 1
-    counted renderChord(ClientAction.build, config) == "CTRL+B"
     counted chordsFor(config, ClientAction.aGotoNextError).len == 1
     counted config.shortcutBindingCount() > 30
 
@@ -558,33 +388,31 @@ suite "shortcut presets":
       if chordTokens(b.chord).len == 4: inc fourTokenChords
     counted fourTokenChords == 4
 
-  test "the dialog's own chord is bound, reachable, and not a preset's":
-    ## The affordance has to obey the rules the presets do. It is a real
-    ## binding in the YAML rather than a hardcoded `Mousetrap.bind`, because a
-    ## hardcoded one is invisible to `renderChord` — and the menu item that
-    ## opens the shortcuts dialog would then be the one menu item in the
-    ## product with no chord printed beside it.
-    let config = defaultRendererConfig()
-    let opener = chordsFor(config, ClientAction.aKeyboardShortcuts)
-    counted opener.len == 1
-    counted $opener[0].editor == "CTRL+ALT+K"
-    counted $opener[0].renderer == "ctrl+alt+k"
-    counted renderChord(ClientAction.aKeyboardShortcuts, config) == "CTRL+ALT+K"
-    counted config.shortcutMap.shortcutActions[cstring"CTRL+ALT+K"] ==
-      ClientAction.aKeyboardShortcuts
-    # NOT delegated into Monaco, by the same rule the browser-safe preset
-    # follows: Monaco binds nothing in the CTRL+ALT family, so the global bind
-    # already reaches the editor and a Monaco command would be a second
-    # delivery.
-    counted cstring"CTRL+ALT+K" notin MONACO_SHORTCUTS_WHITELIST
-    # And it survives EVERY preset, because it is not preset-governed — a user
-    # who chooses "None" must still be able to reopen the dialog and choose
-    # again.
-    for id in ShortcutPresetId:
-      checkpoint("opener under " & $id)
-      counted renderChord(ClientAction.aKeyboardShortcuts,
-                          defaultRendererConfig(id)) == "CTRL+ALT+K"
-    counted ClientAction.aKeyboardShortcuts notin PresetActions
+  test "every preset's chords ARE its keybindings.json include set":
+    ## PLAT-68: the dialog names a preset; the keyboard runs its INCLUDE SET
+    ## (`binding_sets`, `stepping:<id>`) over the CUA base. The two tables
+    ## must say the same thing, move for move — a preset whose dialog row
+    ## promised a chord its include set does not bind is the flattering-dialog
+    ## defect one level down.
+    const Desktop = KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
+                                keyProtocol: kpNative)
+    for id in [spVsCode, spChorded]:
+      var router = initKeymapRouter(bkCua, Desktop, user = parseUserKeymap(
+        """[{"include": "stepping:""" & $id & """"}]"""))
+      let facts = SessionFacts(product: pmDebug, editor: sourceViewFacts())
+      for b in presetOf(id).bindings:
+        for single in b.chord.splitWhitespace():
+          checkpoint($id & " " & $b.action & " " & single)
+          let res = router.route(facts, @[element(ekWindow, "window")],
+                                 nmNormal, normalizeChord(single), 0)
+          counted res.kind == erOperation
+    # `none` binds no move at all.
+    var none = initKeymapRouter(bkCua, Desktop, user = parseUserKeymap(
+      """[{"include": "stepping:none"}]"""))
+    counted none.route(SessionFacts(product: pmDebug, editor: sourceViewFacts()),
+                       @[element(ekWindow, "window")], nmNormal, "F10",
+                       0).kind == erNothing
+    counted bindingSetIndex("stepping:vscode") >= 0
 
   test "shortcut_presets_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)

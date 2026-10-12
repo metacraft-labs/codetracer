@@ -246,8 +246,8 @@ async function openMenuOnLine(page, lineIndex) {
 //
 // The gesture is `Ctrl+Enter`, the product's own Run chord — deliberately not
 // `Ctrl+R` or `F5`, both of which are the browser's reload. The editor is
-// blurred first because Mousetrap's default `stopCallback` ignores a chord
-// raised inside a textarea and Monaco's input surface is one. All of that is
+// blurred first so the press starts outside Monaco, as it always has here
+// (the key router resolves it either way). All of that is
 // `ci/test/noir_replay_probe.mjs`'s, and it is spelled the same way here on
 // purpose: two spellings of "Run the program" is two things to keep in step.
 async function debugLegViaRun(page, lineIndex, outPath) {

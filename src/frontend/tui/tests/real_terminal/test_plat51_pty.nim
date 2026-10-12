@@ -111,7 +111,7 @@ proc press(sess: var TuiTestSession; row, col: int; code = 0) =
   sess.mouse(code, row, col, release = true)
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()

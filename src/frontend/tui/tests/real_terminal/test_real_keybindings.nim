@@ -229,7 +229,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       discard settledFrame(sess, 1)
       checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "F10")
       checkField(sess, keysApp.ActionRow, keysApp.ActionLabel, $kaStepOver)
-      checkField(sess, keysApp.KindRow, keysApp.KindLabel, $krAction)
+      checkField(sess, keysApp.KindRow, keysApp.KindLabel, "action")
       checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
       # ---- `sendKey("shift+f10")`: THE HARNESS DROPS THE MODIFIER ---------
@@ -306,24 +306,24 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       sess.sendKey("ctrl+w")
       discard settledFrame(sess, 1)
       checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "Ctrl+w")
-      checkField(sess, keysApp.KindRow, keysApp.KindLabel, $krPending)
-      checkField(sess, keysApp.PendingRow, keysApp.PendingLabel, "Ctrl+w-")
+      checkField(sess, keysApp.KindRow, keysApp.KindLabel, "pending")
+      checkField(sess, keysApp.PendingRow, keysApp.PendingLabel, "Ctrl+w…")
       let bar = paneRow(sess, Rows - 1)
       checkpoint("status bar while pending: '" & bar & "'")
-      ck bar.endsWith("Ctrl+w-")
+      ck bar.endsWith("Ctrl+w…")
       # The mode did NOT change: a prefix is not a mode.
       checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
       # `l` completes it — §4.2's "Focus the pane to the … right".
       sess.send("l")
       discard settledFrame(sess, 2)
-      checkField(sess, keysApp.KindRow, keysApp.KindLabel, $krAction)
+      checkField(sess, keysApp.KindRow, keysApp.KindLabel, "action")
       checkField(sess, keysApp.ActionRow, keysApp.ActionLabel, $kaFocusRight)
       checkField(sess, keysApp.PendingRow, keysApp.PendingLabel, "")
       checkField(sess, keysApp.FocusRow, keysApp.FocusLabel, "editor")
       let cleared = paneRow(sess, Rows - 1)
       checkpoint("status bar after completion: '" & cleared & "'")
-      ck not cleared.endsWith("Ctrl+w-")
+      ck not cleared.endsWith("Ctrl+w…")
 
       # …and `l` ON ITS OWN is a different action entirely — §4.2's "Expand
       # Node" — which is the positive twin that makes the line above a

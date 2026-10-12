@@ -1105,7 +1105,6 @@ when defined(ctRenderer):
   data.services.flow.data = data
   data.services.eventLog.debugger = data.services.debugger
   data.services.search.data = data
-  data.keyPlugins[Content.EditorView] = JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]{}
 
   block:
     let emptyCache = JsAssoc[cstring, JsAssoc[cstring, Future[JsObject]]]{}

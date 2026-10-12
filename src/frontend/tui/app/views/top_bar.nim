@@ -793,6 +793,11 @@ proc paintMenuDropdowns*(g: var StyledGrid; dropdowns: seq[MenuDropdown]) =
       g.fillSurface(dr.row, ic, iw, 1, surface)
       g.paint(dr.row, ic, fitCells(" " & it.label, iw),
               CellStyle(role: role, bold: it.active))
+      # The folder's access key underlined (CUA-Keymap.md §3.8:
+      # `Alt+<letter>`). Labels are ASCII, so its index is its cell.
+      if it.mnemonic >= 0 and 1 + it.mnemonic < iw:
+        g.paint(dr.row, ic + 1 + it.mnemonic, $it.label[it.mnemonic],
+                CellStyle(role: role, bold: it.active, underline: true))
       var tail = ""
       if it.shortcut.len > 0: tail.add it.shortcut
       tail.add (if it.folder: " " & FolderMarker & " " else: "   ")

@@ -38,10 +38,15 @@ import std/[strutils, tables, unittest]
 
 import ../../editing_core
 
-const ExpectedAssertions = 849
-  ## Re-measured 2026-10-11 after the last CUA data edit: KL-2 asserts two
-  ## facts per FILED declaration, so the count moves with the filed set (CUA
-  ## 170, Emacs 185 of 245).
+const ExpectedAssertions = 1164
+  ## 1149 → 1160 with the program-menu rows (10 CUA, 1 Emacs; one `when`
+  ## assertion per shipped row) → 1162 with the web Run and Export rows →
+  ## 1163 with `Alt+1` → 1164 with Emacs's `Enter` in the read-only Debug
+  ## editor (the tracepoint editor).
+  ## Re-measured 2026-10-12 (PLAT-68 Phase B): KL-2 asserts two facts per
+  ## FILED declaration, so the count moves with the filed set, and the `when`
+  ## case asserts once per shipped row — CUA's and Emacs's tables now cover
+  ## every scope (CUA 303 rows, Emacs 179).
 
 var countedAssertions = 0
 
@@ -169,7 +174,7 @@ suite "PLAT-68: base conflicts are found exactly, and the shipped bases have non
     # hold. That is the exactness the enumeration buys.
     var tabs = 0
     for r in CuaRows:
-      if r.chords == "Tab": inc tabs
+      if r.chords == "Tab" and r.table.len == 0: inc tabs
     ck tabs == 2
   test "a planted prefix is found":
     var planted = CuaRows
@@ -179,26 +184,34 @@ suite "PLAT-68: base conflicts are found exactly, and the shipped bases have non
     ck found.len > 0
     for f in found: ck f.startsWith("prefix Ctrl+k (delete-line)")
 
-  test "a base that conflicts, or contradicts its deferred rows, does not LOAD":
+  test "a base that conflicts does not LOAD; tables are judged apart":
     # The check is the loader's, not this suite's: `definitionOf` — the call
-    # `editing_core` makes for the shipped bases — refuses both shapes.
+    # `base_keymaps` makes for the shipped bases — refuses the shape.
     var planted = CuaRows
     planted.add BaseRow(chords: "Ctrl+S", operation: "editor.save-all",
                         whenText: "")
     var refused = ""
     try:
-      discard definitionOf(bkCua, planted, CuaDeferred)
+      discard definitionOf(bkCua, planted)
     except BaseRowError as e:
       refused = e.msg
     ck refused.contains("duplicate Ctrl+s")
-    ck deferredClashes(bkCua, CuaRows, CuaDeferred).len == 0
-    ck deferredClashes(bkEmacs, EmacsRows, EmacsDeferred).len == 0
-    let promise = @[DeferredRow(chords: "Ctrl+Shift+K",
-                                operation: "editor.scroll-line-up",
-                                whenText: "", reason: PaneOperation)]
-    let clashes = deferredClashes(bkCua, CuaRows, promise)
-    ck clashes.len == 1
-    ck clashes[0].contains("bound by a row of the same base")
+    # PLAT-68 Phase B: the same chord in ANOTHER table is not a conflict —
+    # the inner table on the scope path is asked first, by rule.
+    var otherTable = CuaRows
+    otherTable.add BaseRow(chords: "Ctrl+S", operation: "debugger.step-over",
+                           whenText: "", table: GlobalTable)
+    ck baseConflicts(bkCua, otherTable).len == 0
+    # …and an operation that names nothing is refused at load.
+    var unknown = CuaRows
+    unknown.add BaseRow(chords: "Ctrl+Alt+Q", operation: "debugger.stepover",
+                        table: GlobalTable)
+    var named = ""
+    try:
+      discard definitionOf(bkCua, unknown)
+    except BaseRowError as e:
+      named = e.msg
+    ck named.contains("'debugger.stepover' is not an operation")
 
 suite "PLAT-68: a binding's `when` — the grammar, the closed keys, exactness":
   proc holds(text: string; c: ContextKeys): bool =

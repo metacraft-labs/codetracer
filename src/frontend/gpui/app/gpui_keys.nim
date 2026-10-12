@@ -30,9 +30,19 @@ const
     "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5", "f6": "F6",
     "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10", "f11": "F11",
     "f12": "F12",
+    "alt": "Alt",
   }.toTable
     ## GPUI's names for the non-printable keys, as `keystroke.key` spells
-    ## them.
+    ## them. `alt` is never a keystroke — GPUI reports a modifier alone as a
+    ## modifier change — and is the name the window gives `Alt` pressed and
+    ## released alone (`alt_tap`, CUA-Keymap.md §3.8).
+
+func keyModifiersOfGpui*(modifiers: openArray[string]): KeyModifiers =
+  ## GPUI's modifier names as this product's set (`platform` is Meta).
+  if "control" in modifiers: result.incl kmodCtrl
+  if "shift" in modifiers: result.incl kmodShift
+  if "alt" in modifiers: result.incl kmodAlt
+  if "platform" in modifiers: result.incl kmodMeta
 
 proc canonicalKeyOfGpui*(key: string; modifiers: openArray[string]): string =
   ## The canonical name of one GPUI keystroke, or "" when there is none.
@@ -43,11 +53,7 @@ proc canonicalKeyOfGpui*(key: string; modifiers: openArray[string]): string =
   ## folds them to one name.
   if "function" in modifiers:
     return ""
-  var mods: KeyModifiers = {}
-  if "control" in modifiers: mods.incl kmodCtrl
-  if "shift" in modifiers: mods.incl kmodShift
-  if "alt" in modifiers: mods.incl kmodAlt
-  if "platform" in modifiers: mods.incl kmodMeta
+  let mods = keyModifiersOfGpui(modifiers)
   if GpuiNamedKeys.hasKey(key):
     return chordName(mods, GpuiNamedKeys[key])
   if key.len == 1 and key[0] >= ' ' and key[0] <= '~':

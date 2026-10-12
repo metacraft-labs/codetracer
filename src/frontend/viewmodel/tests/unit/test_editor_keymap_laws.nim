@@ -74,6 +74,9 @@ import ../generators/vocabulary_generator
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
+proc describeError(e: EditingKeymapError): string =
+  "keys:" & $e.line & ": " & e.message & " — in: " & e.text.strip()
+
 const ExpectedAssertions = 18556
   ## **−755 ON 2026-10-11 (PLAT-68)**: the product default was retired for the
   ## CUA base, so the sweep lost its third model (168 scopes → 112) and the

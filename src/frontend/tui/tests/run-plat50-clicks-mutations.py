@@ -446,8 +446,8 @@ ARMS = [
         '    of "Enter", "q":\n      rt.app.content = ContentOverlay()\n',
         S_ESC, "Esc leaves the event's content open"),
     Arm("RT19", RUNTIME,
-        '  of "Down": rt.app.contextMenu.move(1)\n',
-        '  of "Down": rt.app.contextMenu.move(-1)\n',
+        '    of "context-menu.focus-next": rt.app.contextMenu.move(1)\n',
+        '    of "context-menu.focus-next": rt.app.contextMenu.move(-1)\n',
         S_TABMENU, "Down in a context menu moves up"),
     Arm("RT20", RUNTIME,
         "  if acted.status == lasNoGesture and not inGesture and\n     rt.routePaneClick(geometry, event, outcome):\n",
@@ -793,7 +793,9 @@ ARMS = [
         "    applyGestureCommand(r, cmdActivateTab(pane))\n    discard (cmdAddPane(pane,\n",
         G_SWEEP, "GPUI's View menu cannot open a pane the arrangement lacks"),
     Arm("GM22", GPUIMAIN,
-        "    gPanes[leaf.paneId] = node\n    gLeafSet.leaves.add leaf\n",
+        "    gPanes[leaf.paneId] = node\n    markPaneScope(r, node, leaf.paneId)\n"
+        "    if openArm.isNil and not probeEnabled:\n      armPaneKeys(r, node)\n"
+        "    gLeafSet.leaves.add leaf\n",
         "    discard node\n",
         G_SWEEP, "a pane added after open is never drawn"),
     Arm("GM23", GPUIMAIN,

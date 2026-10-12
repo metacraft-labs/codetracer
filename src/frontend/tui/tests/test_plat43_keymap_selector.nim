@@ -36,6 +36,7 @@ import std/[os, sequtils, strutils, tempfiles, unittest]
 import codetracer_embed
 import ../app/edit_binding
 import ../app/runtime
+import ../app/tests/editor_ownership
 import ../app/theme/capabilities
 import ../../viewmodel/host/keymap_preference
 import ../../viewmodel/host/native_state
@@ -196,7 +197,7 @@ suite "PLAT-43: which keys the editor owns, per model":
       discard result.focus.focusPaneKind(paneEditor)
     for model in BaseKeymap:
       let rt = focusedRuntime()
-      rt.app.editSession.selectModel(model)
+      rt.selectBase(model, ksCommand)   # the router and every buffer
       checkpoint($model)
       ck not rt.editorOwnsToken("\e[17~")      # F6
       ck not rt.editorOwnsToken("\e[17;2~")    # Shift+F6
@@ -204,7 +205,7 @@ suite "PLAT-43: which keys the editor owns, per model":
     let cua = focusedRuntime()
     ck cua.editorOwnsToken("\t")               # CUA: Tab indents
     let vim = focusedRuntime()
-    vim.app.editSession.selectModel(bkVim)
+    vim.selectBase(bkVim, ksCommand)
     # Vim binds `Esc` in insert, visual and operator-pending modes and NOT in
     # normal mode — so in normal mode it is not the editor's, and after `i`
     # it is. Both halves, because the clause is a question about the model's
@@ -213,7 +214,7 @@ suite "PLAT-43: which keys the editor owns, per model":
     discard vim.app.editSession.activeBuffer().applyEditKey("i", 1)
     ck vim.editorOwnsToken("\x1b")             # Esc, insert mode
     let kak = focusedRuntime()
-    kak.app.editSession.selectModel(bkKakoune)
+    kak.selectBase(bkKakoune, ksCommand)
     ck kak.editorOwnsToken("\x18")             # Ctrl+x
     # …and the default base does not claim a key none of its editor rows
     # binds: the clause is the BASE's answer, not a widened constant. `F10`

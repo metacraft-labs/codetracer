@@ -2003,18 +2003,6 @@ method clear*(self: FlowComponent) =
   if not self.flow.isNil:
     self.resetFlow()
 
-proc switchFlowUI*(self: FlowComponent, flowUI: FlowUI) =
-  if self.data.config.flow.realFlowUI == flowUI:
-    return
-
-  self.resetFlow()
-
-  let flowUINames: array[FlowUI, cstring] = [cstring"parallel", cstring"inline", cstring"multiline"]
-
-  self.data.config.flow.ui = flowUINames[flowUI]
-  self.data.config.flow.realFlowUI = flowUI
-  self.redraw()
-
 proc addContentWidget*(
   self: FlowComponent,
   dom: Node,

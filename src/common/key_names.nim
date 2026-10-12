@@ -81,10 +81,15 @@ const
     "Esc", "Enter", "Tab", "Backspace", "Delete", "Insert", "Space",
     "Home", "End", "PageUp", "PageDown", "Up", "Down", "Left", "Right",
     "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
-    "F12"]
+    "F12", "Alt"]
     ## Every canonical non-character key name. Closed: `normalizeChord`
     ## refuses anything that is neither one of these nor one printable
     ## character.
+    ##
+    ## `Alt` is the Alt key PRESSED AND RELEASED ALONE — VS Code's
+    ## "Alt focuses the menu bar" gesture (CUA-Keymap.md §3.8). A front-end
+    ## that can see a modifier on its own (the desktop's keydown / keyup, GPUI's
+    ## modifier changes) delivers it; a terminal cannot, and never does.
 
   KeyAliases = {
     "escape": "Esc", "esc": "Esc", "return": "Enter", "enter": "Enter",
@@ -94,7 +99,8 @@ const
     "pageup": "PageUp", "pgup": "PageUp", "pagedown": "PageDown",
     "pgdn": "PageDown", "up": "Up", "uparrow": "Up", "down": "Down",
     "downarrow": "Down", "left": "Left", "leftarrow": "Left",
-    "right": "Right", "rightarrow": "Right", "backquote": "`"}.toTable
+    "right": "Right", "rightarrow": "Right", "backquote": "`",
+    "alt": "Alt"}.toTable
     ## Spellings `normalizeChord` accepts for a key, lower-cased: this
     ## product's own, VS Code's (`escape`, `pageup`), and GPUI's.
 
@@ -458,3 +464,66 @@ func keyName*(token: string; eraseByte = '\x7f'): string =
   ## `VERASE`); xterm's `0x7f` unless the driver read otherwise.
   let d = decodeToken(token, eraseByte)
   if not d.ok: "" else: chordName(d.mods, d.key)
+
+func legacyTokens(): seq[string] =
+  ## Every token a terminal speaking the CLASSIC xterm encoding can send:
+  ## the bytes, `ESC` + a byte, SS3, and the cursor / function-key control
+  ## sequences, plain and with xterm's modifier parameter — and not the
+  ## Kitty `CSI … u` nor `modifyOtherKeys`' `CSI 27 ; … ~`.
+  result = @[]
+  for b in 0 .. 127:
+    result.add $chr(b)
+    result.add "\x1b" & $chr(b)
+  for f in "PQRSHFABCDM":
+    result.add "\x1bO" & $f
+  var mods = @[""]
+  for m in 2 .. 16: mods.add "1;" & $m
+  for f in "ABCDHFPQRSZ":
+    for m in mods: result.add "\x1b[" & m & $f
+  for code in [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18, 19, 20,
+               21, 23, 24]:
+    result.add "\x1b[" & $code & "~"
+    for m in 2 .. 16: result.add "\x1b[" & $code & ";" & $m & "~"
+
+func legacyEncodable*(name: string): bool =
+  ## Whether a terminal WITHOUT extended key reporting can deliver the key
+  ## `name` (Base-Keymaps-And-Layer-Stack.md §7.4): some classic token
+  ## decodes to it. Derived from the decoder rather than listed, so the
+  ## answer and what `keyName` produces cannot disagree. Both erase-byte
+  ## conventions are asked.
+  for t in legacyTokens():
+    if keyName(t, '\x7f') == name or keyName(t, '\b') == name:
+      return true
+  false
+
+func writtenChord*(name: string): string =
+  ## A canonical key NAME (`G`, `Ctrl+w`, `{`) spelled in the written
+  ## notation `normalizeChord` reads (`Shift+G`, `Ctrl+w`, `{`) — the
+  ## inverse that lets a file of canonical names (`.cttui-keys`) be written
+  ## as `keybindings.json`: a shifted letter is the only name the two spell
+  ## differently (in written notation a letter is the KEY).
+  if name.len == 1 and name[0] in {'A'..'Z'}: "Shift+" & name
+  else: name
+
+func writtenSequence*(names: string): string =
+  var parts: seq[string] = @[]
+  for n in names.splitWhitespace(): parts.add writtenChord(n)
+  parts.join(" ")
+
+func displayChord*(name: string): string =
+  ## A canonical key NAME as a menu, a tooltip or the shortcut reference
+  ## shows it — VS Code's spelling: a letter under Ctrl, Alt or Meta in upper
+  ## case (`Ctrl+N`, `Ctrl+Shift+K`), a bare letter as typed (`n`) and a
+  ## shifted one with its Shift (`Shift+G`).
+  result = writtenChord(name)
+  let modified = result.contains("Ctrl+") or result.contains("Alt+") or
+                 result.contains("Meta+")
+  if modified and result.len >= 2 and result[^2] == '+' and
+     result[^1] in {'a'..'z'}:
+    result[^1] = chr(ord(result[^1]) - 32)
+
+func displaySequence*(names: openArray[string]): string =
+  ## `displayChord` over a chord sequence (`Ctrl+K Ctrl+W`).
+  var parts: seq[string] = @[]
+  for n in names: parts.add displayChord(n)
+  parts.join(" ")

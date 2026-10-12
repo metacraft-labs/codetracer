@@ -149,6 +149,18 @@ type
     bkVim = "vim"
     bkKakoune = "kakoune"
 
+  NavigationMode* = enum
+    ## The terminal's NORMAL / COMMAND / SEARCH / INSPECT machine
+    ## (CodeTracer-TUI.md §4.1), under the Vim and Kakoune bases. Like the
+    ## editor's mode it is STATE, and the rows of the navigation table carry
+    ## the modes they hold in — Base-Keymaps §5.5's derived layers: the
+    ## layer for a mode is the table filtered by it, recomputed on every
+    ## resolution, never pushed.
+    nmNormal = "normal"
+    nmCommand = "command"
+    nmSearch = "search"
+    nmInspect = "inspect"
+
   EditingPane* = enum
     ## §4.3's second dimension: *"the editor has focus, or another pane does"*.
     ##
@@ -172,6 +184,9 @@ type
     product*: ProductMode
     pane*: EditingPane
     mode*: EditingMode
+    navMode*: NavigationMode
+      ## PLAT-68: the terminal's modal state, for the navigation table's
+      ## derived layers. `nmNormal` everywhere else.
     textEntry*: bool
     context*: ContextKeys
       ## PLAT-68: the context keys a binding's `when` reads
@@ -183,6 +198,8 @@ type
     ## dimension", which is how the common case (a binding that means the same
     ## thing in Debug and in Edit) stays one row.
     modes*: set[EditingMode]
+    navModes*: set[NavigationMode]
+      ## PLAT-68: the navigation modes a row holds in (empty is every one).
     products*: set[ProductMode]
     panes*: set[EditingPane]
     whenText*: string
@@ -201,9 +218,20 @@ type
     ## there being a vocabulary.
     model*: BaseKeymap
     scope*: BindingScope
+    table*: string
+      ## PLAT-68: the binding table the row belongs to — `editor`, `global`,
+      ## `list`, `input`, `pane:<kind>`, or a pushed layer's (`find`,
+      ## `palette`, …). Resolution builds one trie per table on the scope
+      ## path (`keymap_router`). "" is the editor table, which is every row
+      ## PLAT-31's procedural keymaps build.
     chords*: seq[string]
     operation*: string
+      ## A vocabulary name (`move-char-left`) or, PLAT-68, a catalogued one
+      ## (`debugger.step-over`; `operation_catalogue`).
     args*: OpArgs
+    argument*: string
+      ## PLAT-68: a catalogued operation's literal argument
+      ## (`layout.focus-pane-by-index(3)` → `3`).
     spelling*: string
       ## What a help screen shows. `chords.join(" ")` unless the row says
       ## otherwise, kept for `tui/app/input/keymap.nim`'s stated reason: the
@@ -241,6 +269,35 @@ type
     erPending = "pending"
     erCharacter = "character"
 
+  NothingReason* = enum
+    ## Base-Keymaps §5.6's closed set: why a key did nothing, so the status
+    ## line can say it.
+    nrNone = "none"
+      ## Not a nothing.
+    nrUnbound = "unbound"
+    nrPrefixAbandoned = "prefix-abandoned"
+    nrPrefixTimedOut = "prefix-timed-out"
+    nrDisabled = "disabled-operation"
+      ## Set by the router, never by the resolver: the operation exists and
+      ## is inert where the user is (Input-Routing IR-6) — the key runs
+      ## `operation` in the OTHER product mode (Mode-Transitions §8.1), and
+      ## the resolution names it so the front-end can say so.
+
+  LayerSource* = enum
+    lsUser = "user"
+    lsBase = "base"
+
+  ResolutionLayer* = object
+    ## One table's trie, in the order resolution consults it (§5.1).
+    name*: string
+      ## `<source>:<table>`, what a resolution reports as its `layer`.
+    source*: LayerSource
+    trie*: EditingTrie
+    atFocus*: bool
+      ## The focused element's own table, or a pushed layer: consulted BEFORE
+      ## the text-entry shadow, so a row with a true `when` there takes a
+      ## character key from the field (§5.6).
+
   EditingResolution* = object
     kind*: EditingResolutionKind
     operation*: string
@@ -256,6 +313,13 @@ type
       ## The previous prefix expired before this key arrived. Distinct from
       ## "the prefix was abandoned", for `tui/app/input/keymap.nim`'s reason:
       ## a status line should be able to say WHY the prefix went away.
+    argument*: string
+      ## PLAT-68: the binding's literal argument for a catalogued operation.
+    layer*: string
+      ## PLAT-68: the layer the binding came from (`user:global`,
+      ## `base:find`), for the status line and the shortcut reference.
+    reason*: NothingReason
+      ## PLAT-68: why an `erNothing` was nothing (Base-Keymaps §5.6).
 
   FiledDeclaration* = object
     ## §4.4: *"Every keymap must bind every operation it claims to cover"*, and
@@ -324,6 +388,15 @@ const
   NoPendingTimeout* = -1'i64
     ## A base whose prefixes wait until the next key or `Esc` (§3.7).
 
+func isModal*(base: BaseKeymap): bool =
+  ## Whether the base has modal editing — whether a printable key can be a
+  ## command. Under CUA and Emacs it never is: a printable key types, in
+  ## every editing mode (Emacs's active mark is `visual`, and typing there
+  ## still types). One `case`, total over the enum.
+  case base
+  of bkCua, bkEmacs: false
+  of bkVim, bkKakoune: true
+
 func pendingTimeoutOf*(base: BaseKeymap): int64 =
   ## Base-Keymaps-And-Layer-Stack.md §3.7: **the timeout is a property of the
   ## base.** VS Code waits on `Ctrl+K` and Emacs on `C-x` until the next key;
@@ -368,6 +441,7 @@ func admits*(bs: BindingScope; scope: EditingScope): bool =
   ## "every value", which is what keeps the common row one row; a nil `cond`
   ## is "always".
   (bs.modes == {} or scope.mode in bs.modes) and
+    (bs.navModes == {} or scope.navMode in bs.navModes) and
     (bs.products == {} or scope.product in bs.products) and
     (bs.panes == {} or scope.pane in bs.panes) and
     (bs.platforms == {} or platformOf(scope.context) in bs.platforms) and
@@ -421,18 +495,38 @@ proc findPrefixConflicts(t: var EditingTrie) =
       let seqText = t.bindings[node.binding].chords.join(" ")
       if seqText notin t.prefixed: t.prefixed.add seqText
 
-proc trieFor*(km: EditingKeymap; scope: EditingScope): EditingTrie =
-  ## The trie of every binding of `scope.model` admissible in `scope`.
+func tableOf*(b: EditingBinding): string =
+  ## The row's table; "" is the editor's (see `EditingBinding.table`).
+  if b.table.len == 0: "editor" else: b.table
+
+proc trieFor*(km: EditingKeymap; scope: EditingScope;
+              table = "editor"; laterFirst = false): EditingTrie =
+  ## The trie of every binding of `scope.model` in `table` admissible in
+  ## `scope`.
   ##
   ## The MODEL filter is here rather than in `admits` because it is not a
   ## binding-scope dimension the way the other three are: a row belongs to
   ## exactly one model and a keymap file holds rows for several.
+  ##
+  ## `laterFirst` inserts the rows in reverse, so of two rows for one
+  ## sequence the LATER one carries the node — VS Code's last-wins rule for
+  ## a user's `keybindings.json` (§5.1). A base never needs it: two base rows
+  ## that can both hold are a conflict and the base does not load.
   result = newTrie()
-  for b in km.bindings:
+  var order: seq[int] = @[]
+  for i, b in km.bindings:
     if b.model != scope.model: continue
+    if tableOf(b) != table: continue
     if not b.scope.admits(scope): continue
-    result.bindings.add b
-    result.insert(result.bindings.len - 1)
+    order.add i
+  if laterFirst:
+    for i in countdown(order.len - 1, 0):
+      result.bindings.add km.bindings[order[i]]
+      result.insert(result.bindings.len - 1)
+  else:
+    for i in order:
+      result.bindings.add km.bindings[i]
+      result.insert(result.bindings.len - 1)
   result.findPrefixConflicts()
 
 func nodeAfter(t: EditingTrie; chords: seq[string]): int =
@@ -458,30 +552,70 @@ proc conflictsIn*(km: EditingKeymap; scope: EditingScope): (seq[string], seq[str
 # THE RESOLVER — §4.1
 # ===========================================================================
 
-func nothingResolution(pending: PendingChords; timedOut: bool): EditingResolution =
+func nothingResolution(pending: PendingChords; timedOut: bool;
+                       reason = nrUnbound): EditingResolution =
   EditingResolution(kind: erNothing, operation: "", args: OpArgs(),
                     character: "", spelling: "", pending: pending,
-                    timedOut: timedOut)
+                    timedOut: timedOut, reason: reason)
 
-proc resolve*(t: EditingTrie; st: EditorState; scope: EditingScope;
-              key: string; nowMs: int64): EditingResolution =
-  ## **A PURE FUNCTION FROM (CHORD SEQUENCE, EDITOR STATE, SCOPE) TO A
-  ## RESOLUTION.** It reads no terminal, owns no buffer and performs no effect.
+func decided(layer: ResolutionLayer; node: int; candidate: seq[string];
+             pending: PendingChords; nowMs: int64;
+             timedOut: bool): EditingResolution =
+  ## What reaching `node` of `layer`'s trie means: its binding, or — a node
+  ## with children only — a pending prefix.
+  let n = layer.trie.nodes[node]
+  if n.binding >= 0:
+    let b = layer.trie.bindings[n.binding]
+    return EditingResolution(
+      kind: erOperation, operation: b.operation, args: b.args,
+      argument: b.argument, character: "", spelling: b.spelling,
+      pending: PendingChords(chords: @[], startedMs: 0), timedOut: timedOut,
+      layer: layer.name, reason: nrNone)
+  EditingResolution(
+    kind: erPending, operation: "", args: OpArgs(), character: "",
+    spelling: candidate.join(" "),
+    pending: PendingChords(chords: candidate,
+                           startedMs: if pending.chords.len == 0: nowMs
+                                      else: pending.startedMs),
+    timedOut: timedOut, layer: layer.name, reason: nrNone)
+
+func shadowDefeatedAt(layer: ResolutionLayer; node: int): bool =
+  ## A row of the focused element (or of a pushed layer) takes a character
+  ## key from the text field only when it says so with a `when` that holds
+  ## (§5.6: a find field's `Alt+C`). Every row in a trie already holds — the
+  ## trie is built from admitted rows — so what is asked is whether the row
+  ## HAS a condition: an unconditional row in a text field's own table is
+  ## not a reason to stop typing.
+  let n = layer.trie.nodes[node]
+  n.binding >= 0 and
+    layer.trie.bindings[n.binding].scope.whenText.len > 0
+
+proc resolveLayers*(layers: openArray[ResolutionLayer]; pending: PendingChords;
+                    timeoutMs: int64; textEntry: bool; key: string;
+                    nowMs: int64): EditingResolution =
+  ## **THE ONE RESOLVER** (Base-Keymaps §5.6, §8 item 1). A pure function of
+  ## the layers — already in §5.1's order: the user pass then the base pass,
+  ## each pushed layers newest first, then the scope path innermost first —
+  ## the pending prefix, the base's timeout, whether the focused element
+  ## accepts text, the key and the clock.
   ##
-  ## `key` is a CANONICAL KEY NAME — `key_names.keyName`'s answer, produced by
-  ## whoever read the bytes. This module never sees a byte.
+  ## The first layer whose trie has a node for the chord sequence decides:
+  ## its binding is the operation, or — a node with children only — the
+  ## sequence is a pending prefix. A layer that does not have it lets it
+  ## pass outward, which is the DOM's bubbling order applied to bindings.
   ##
-  ## `nowMs` is a parameter for `tui/app/input/keymap.resolve`'s reason: the
-  ## bounded timeout is then assertable at exactly its bound and at one past it
-  ## without a sleep.
-  var pending = st.pending
+  ## THE TEXT-ENTRY SHADOW: when the focused element accepts text and no
+  ## prefix is pending, a key that stands for a character is a character —
+  ## after the focused element's own layers have been asked
+  ## (`ResolutionLayer.atFocus`, `shadowDefeatedAt`), before anything
+  ## further out.
+  var pending = pending
   var timedOut = false
-  let timeout = pendingTimeoutOf(scope.model)
-  if pending.chords.len > 0 and timeout != NoPendingTimeout and
-     nowMs - pending.startedMs > timeout:
-    # CHECKED BEFORE THE KEY IS INTERPRETED, so a key that arrives late is read
-    # on its own terms rather than as the second half of a prefix the user has
-    # long forgotten.
+  if pending.chords.len > 0 and timeoutMs != NoPendingTimeout and
+     nowMs - pending.startedMs > timeoutMs:
+    # CHECKED BEFORE THE KEY IS INTERPRETED, so a key that arrives late is
+    # read on its own terms rather than as the second half of a prefix the
+    # user has long forgotten.
     pending = PendingChords(chords: @[], startedMs: 0)
     timedOut = true
 
@@ -490,43 +624,41 @@ proc resolve*(t: EditingTrie; st: EditorState; scope: EditingScope;
     # between `d` and `w` is not the user changing their mind.
     return nothingResolution(pending, timedOut)
 
-  # THE TEXT-ENTRY SHADOW (§4.3), and it is `keyCharacter` — see
-  # `key_names.nim`. It applies only at the START of a sequence: once `d` is
-  # pending the user is spelling a command, and a `:` prompt is not open
-  # inside one.
-  if scope.textEntry and pending.chords.len == 0 and isTextKey(key):
+  let candidate = pending.chords & @[key]
+  if textEntry and pending.chords.len == 0 and isTextKey(key):
+    for layer in layers:
+      if not layer.atFocus: continue
+      let node = layer.trie.nodeAfter(candidate)
+      if node >= 0 and shadowDefeatedAt(layer, node):
+        return decided(layer, node, candidate, pending, nowMs, timedOut)
     return EditingResolution(kind: erCharacter, operation: "", args: OpArgs(),
                              character: keyCharacter(key), spelling: key,
                              pending: PendingChords(chords: @[], startedMs: 0),
-                             timedOut: timedOut)
+                             timedOut: timedOut, reason: nrNone)
 
-  let candidate = pending.chords & @[key]
-  let node = t.nodeAfter(candidate)
-  if node < 0:
-    # Nothing starts with this. A prefix that was open is dropped and the key
-    # is NOT re-interpreted on its own.
-    return nothingResolution(PendingChords(chords: @[], startedMs: 0), timedOut)
+  for layer in layers:
+    let node = layer.trie.nodeAfter(candidate)
+    if node >= 0:
+      return decided(layer, node, candidate, pending, nowMs, timedOut)
 
-  if t.nodes[node].children.len > 0 and t.nodes[node].binding < 0:
-    return EditingResolution(
-      kind: erPending, operation: "", args: OpArgs(), character: "",
-      spelling: candidate.join(" "),
-      pending: PendingChords(chords: candidate,
-                             startedMs: if pending.chords.len == 0: nowMs
-                                        else: pending.startedMs),
-      timedOut: timedOut)
+  if pending.chords.len > 0:
+    # A prefix was open and this key completes nothing. Both are dropped and
+    # the key is NOT re-interpreted on its own.
+    return nothingResolution(PendingChords(chords: @[], startedMs: 0),
+                             timedOut, nrPrefixAbandoned)
+  nothingResolution(PendingChords(chords: @[], startedMs: 0), timedOut,
+                    if timedOut: nrPrefixTimedOut else: nrUnbound)
 
-  if t.nodes[node].binding >= 0:
-    let b = t.bindings[t.nodes[node].binding]
-    return EditingResolution(
-      kind: erOperation, operation: b.operation, args: b.args, character: "",
-      spelling: b.spelling,
-      pending: PendingChords(chords: @[], startedMs: 0), timedOut: timedOut)
-
-  # A node with neither a binding nor children cannot exist — `insert` only
-  # creates a node on the way to a terminal one — so this is unreachable and
-  # is spelled as the honest outcome rather than as a default.
-  nothingResolution(PendingChords(chords: @[], startedMs: 0), timedOut)
+proc resolve*(t: EditingTrie; st: EditorState; scope: EditingScope;
+              key: string; nowMs: int64): EditingResolution =
+  ## A document's own resolution — the editor table alone, the document's
+  ## pending prefix, the base's timeout — through `resolveLayers`, so there
+  ## is one resolver whether a key comes through a front-end's router or a
+  ## suite drives a document directly.
+  resolveLayers([ResolutionLayer(name: "base:editor", source: lsBase,
+                                 trie: t, atFocus: true)],
+                st.pending, pendingTimeoutOf(scope.model), scope.textEntry,
+                key, nowMs)
 
 # ===========================================================================
 # EXECUTION — the layer's whole effect is a sequence of PLAT-30's 224
@@ -723,7 +855,12 @@ proc reachableOperations*(km: EditingKeymap; model: BaseKeymap): seq[string] =
   result = @[]
   for name in LayerReachedOperations: result.add name
   for b in km.bindings:
-    if b.model == model and b.operation notin result:
+    # The VOCABULARY only: the editor table's rows that name an editing
+    # operation (a vocabulary name never contains a dot). The editor pane's
+    # catalogued operations and every other table are graded against the
+    # catalogue (`test_plat68_layers`' `catalogueCoverage`).
+    if b.model == model and tableOf(b) == "editor" and
+       '.' notin b.operation and b.operation notin result:
       result.add b.operation
   result.sort()
 
@@ -935,5 +1072,3 @@ proc loadEditingKeymap*(base: EditingKeymap; text: string): EditingKeymapLoad =
       chords: chords, operation: name, args: args,
       spelling: chords.join(" "))
 
-proc describeError*(e: EditingKeymapError): string =
-  "keys:" & $e.line & ": " & e.message & " — in: " & e.text.strip()

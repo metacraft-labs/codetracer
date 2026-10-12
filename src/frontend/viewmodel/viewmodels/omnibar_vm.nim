@@ -105,6 +105,18 @@ const
     ## desktop's palette wording, now read from here by the desktop, the
     ## terminal and GPUI alike.
 
+func paletteQueryOf*(operation: string): tuple[ok: bool, query: string] =
+  ## PLAT-68: the query a palette-opening OPERATION opens the omnibar on —
+  ## every front-end's (CUA-Keymap.md §3.8). The omnibar is this product's
+  ## one palette: files and `:commands` from an empty field, symbols from
+  ## `:sym `. `palette.go-to-line` has no omnibar mode and is not one of
+  ## these.
+  case operation
+  of "palette.quick-open-file", "palette.open-commands": (true, "")
+  of "palette.go-to-symbol", "palette.go-to-symbol-in-file":
+    (true, CommandPrefix & "sym ")
+  else: (false, "")
+
 func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
                                                   needle: string] =
   ## The mode a query puts the omnibar in, and the text that is matched.

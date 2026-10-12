@@ -262,6 +262,10 @@ type
       ## the focused pane is distinguished by its border's colour and weight,
       ## not only by the glyphs every pane shares. `hasFocus` false (the zero
       ## value) paints every pane with the ordinary border role.
+    editorWritable*: bool
+      ## PLAT-68: Debug mode with the editor's document made writable
+      ## (`Ctrl+E`, `editor.toggle-read-only`): the `editor` rectangle paints
+      ## `edit` — the document the keys now type into — as Edit mode does.
     edit*: EditPaneModel
       ## PLAT-16. Edit mode's Source pane, as a value.
       ##
@@ -789,7 +793,8 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # Debug shows the recording's source through `SourceVM`'s window, Edit the
   # working tree through a whole mutable buffer — two models, two painters,
   # and the branch is on `model.product`, never on "is there an edit buffer".
-  if region.pane == paneEditor and model.product == pmEdit:
+  if region.pane == paneEditor and
+     (model.product == pmEdit or model.editorWritable):
     underStrip:
       discard paintEditPane(g, under, model.edit, model.highlighting)
   elif region.pane == paneFileTree and not model.fileTree.isEmpty:
@@ -1159,11 +1164,11 @@ proc shellScreen*(model: ShellModel; width, height: int;
       # The two indicators in their own roles: the input mode, then the
       # product mode, exactly where `statusBarText` put them (it never drops
       # them).
-      let modeCells = min(sw, textCells($status.mode))
-      g.paint(height - 1, sc, fitCells($status.mode, modeCells),
+      let modeCells = min(sw, textCells(status.modeText))
+      g.paint(height - 1, sc, fitCells(status.modeText, modeCells),
               modeStyle(status.mode))
       let productText = productIndicator(status.product)
-      let productCol = sc + textCells($status.mode) + 1
+      let productCol = sc + textCells(status.modeText) + 1
       if productCol < width:
         g.paint(height - 1, productCol,
                 fitCells(productText, min(textCells(productText),

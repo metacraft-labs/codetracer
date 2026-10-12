@@ -50,6 +50,7 @@ import headless_app/layout_model
 
 import ../../app/input/keymap
 import ../../app/input/modal_state
+import ../../app/tests/navigation_table
 import ../../app/input/motions
 import ../../app/layout/profile
 import ../../app/layout/project
@@ -93,18 +94,19 @@ type
     # a `ModalState` of its own. Two different concepts with one name, so the
     # spelling here says which.
     modal*: modal_state.ModalState
-    pending*: keymap.PendingState
     lastKey*: string
     lastSpelling*: string
     lastAction*: KeyAction
-    lastKind*: KeyResolutionKind
+    lastKind*: string
+      ## The resolution's kind as §4.1 / §4.2 speak (`navigation_table`):
+      ## `action`, `pending`, `text`, `none`, …
     quitRequested*: bool
     focused*: PaneKind
     maximize*: MaximizeState
 
 proc initAppState*(): AppState =
-  AppState(modal: initModalState(), pending: initPendingState(), lastKey: "",
-           lastSpelling: "", lastAction: kaNone, lastKind: krNone,
+  AppState(modal: initModalState(), lastKey: "",
+           lastSpelling: "", lastAction: kaNone, lastKind: "none",
            # The shared default's first region (PLAT-45): the Files stack,
            # whose right-hand neighbour is the Source pane.
            quitRequested: false, focused: paneFileTree,
@@ -113,7 +115,9 @@ proc initAppState*(): AppState =
 var current = initAppState()
 var lastCols = 80
 var lastRows = 24
-let km = defaultKeymap()
+var resolver = newNavResolver()
+  ## PLAT-68: the SHIPPED router under the Vim base — §4.2 is that base's
+  ## navigation table — holding the pending prefix.
 
 proc focusFor(cols, rows: int): PaneFocus =
   ## The focus chain for the profile this geometry selects. Rebuilt per key
@@ -131,7 +135,7 @@ proc statusModelFor*(st: AppState; cols, rows: int): StatusBarModel =
   ## one row that is on screen in every profile.
   initStatusBarModel(mode = statusMode(st.modal.mode),
                      profile = selectProfile(cols, rows),
-                     notification = pendingIndicator(st.pending))
+                     notification = resolver.router.pendingLabel)
 
 proc paint*(g: var StyledGrid; st: AppState; cols, rows: int) =
   ## The whole screen.
@@ -144,7 +148,7 @@ proc paint*(g: var StyledGrid; st: AppState; cols, rows: int) =
   g.paint(ActionRow, 0, fieldText(ActionLabel, $st.lastAction))
   g.paint(KeyRow, 0, fieldText(KeyLabel, st.lastKey))
   g.paint(KindRow, 0, fieldText(KindLabel, $st.lastKind))
-  g.paint(PendingRow, 0, fieldText(PendingLabel, pendingIndicator(st.pending)))
+  g.paint(PendingRow, 0, fieldText(PendingLabel, resolver.router.pendingLabel))
   g.paint(FocusRow, 0, fieldText(FocusLabel, $st.focused))
   if st.quitRequested:
     g.paint(QuitRow, 0, QuitText)
@@ -199,13 +203,15 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
   ##
   ## PURE APART FROM `st`: the clock is passed in and the geometry is passed
   ## in, so the child's behaviour is reproducible from a transcript.
-  let res = km.resolve(st.modal, st.pending, token, atMs)
-  if res.kind == krNone and res.key.len == 0:
+  let key = keyName(token)
+  if key.len == 0:
     return false                              # a mouse report, or noise
-  st.lastKey = res.key
+  let res = resolver.resolve(st.modal, token, atMs)
+  st.lastKey = key
   st.lastKind = res.kind
+  st.lastAction = kaNone
   case res.kind
-  of krAction:
+  of "action":
     st.lastAction = res.action
     st.lastSpelling = res.spelling
     let (raises, ev) = modalEventFor(res.action)
@@ -240,32 +246,15 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
       discard toggleMaximize(st.maximize, st.focused)
     else:
       discard
-    true
-  of krText:
-    st.modal.buffer.add res.key
-    st.lastAction = kaNone
-    true
-  of krPending, krPendingAbandoned, krPendingTimedOut:
-    st.lastAction = kaNone
-    true
-  of krInertInMode:
-    # PLAT-16. A BOUND chord that has no meaning in the current PRODUCT mode.
-    #
-    # UNREACHABLE IN THIS APP AND HANDLED ANYWAY: `keymap.resolve` defaults
-    # `product` to `pmDebug` and this app never passes anything else, so no
-    # token can produce this kind here. It is an arm rather than an `else`
-    # because the exhaustive `case` is what will tell whoever adds a product
-    # mode to this app that there is a screen decision to make —
-    # Mode-Transitions.md §8.1's "inert AND says so" is a thing to DRAW, and an
-    # `else` would have absorbed it silently.
-    st.lastAction = kaNone
-    true
-  of krNone:
-    # A key nothing is bound to. Repainted anyway, so the screen SAYS the key
-    # arrived and was not bound — which is what makes "nothing happened" and
-    # "the key never got here" two different reports at Tier 2.
-    st.lastAction = kaNone
-    true
+  of "text":
+    st.modal.buffer.add res.character
+  else:
+    # Pending, abandoned, timed out, or a key nothing is bound to: repainted
+    # anyway, so the screen SAYS the key arrived — which is what makes
+    # "nothing happened" and "the key never got here" two different reports
+    # at Tier 2.
+    discard
+  true
 
 proc handleInput*(token: string): bool =
   ## The child's input handler. CHILD-SIDE ONLY: nothing in a test process may
