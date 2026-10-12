@@ -2920,6 +2920,19 @@ impl CTFSTraceReader {
         })
     }
 
+    /// The terminal output of a native (MCR) event log: its writes to
+    /// standard output and standard error, in log order.
+    ///
+    /// `codetracer-specs` `spec/Trace-Files/MCR-Event-Log-Stream.md` §2.2 and
+    /// §2.3: kind 0 (`Write`) is a `write()` to stdout or stderr, and the
+    /// entry's `fd` says which; `fd` is -1 where the entry carries no
+    /// descriptor.  The recorder also logs a generic system call
+    /// (`prlimit64`, `fstat`, ...) under kind 0 with `fd` -1 and the call's
+    /// output bytes as content; recordings made before recorder `dbadc9b7`
+    /// carry the raw field there instead of -1, and `metadata` "stdout" on
+    /// every kind-0 entry.  Only descriptors 1 and 2 are terminal output, so
+    /// a system call's bytes never reach the terminal (they used to be glued
+    /// in front of the program's first line).
     fn load_native_terminal_events(ctfs: &mut CtfsReader) -> Result<Vec<DbRecordEvent>, Box<dyn Error>> {
         let dat = match Self::read_native_event_log_file(ctfs, "eventlog.dat", "event_log.dat") {
             Ok(bytes) => bytes,
@@ -2981,7 +2994,7 @@ impl CTFSTraceReader {
                 pos += 4;
                 let native_kind = dat[pos];
                 pos += 1;
-                let _fd = Self::read_u32_le(&dat, pos)?;
+                let fd = Self::read_u32_le(&dat, pos)? as i32;
                 pos += 4;
                 let _return_value = Self::read_u64_le(&dat, pos)?;
                 pos += 8;
@@ -3003,9 +3016,16 @@ impl CTFSTraceReader {
                 pos += content_len;
 
                 decoded_entries += 1;
-                if native_kind == 0 && !content.is_empty() {
+                let terminal_kind = match (native_kind, fd) {
+                    (0, 1) => Some(EventLogKind::Write),
+                    (0, 2) => Some(EventLogKind::WriteStderr),
+                    _ => None,
+                };
+                if let Some(kind) = terminal_kind
+                    && !content.is_empty()
+                {
                     events.push(DbRecordEvent {
-                        kind: EventLogKind::Write,
+                        kind,
                         content,
                         step_id: StepId(crate::task::NO_INDEX),
                         metadata,
@@ -4724,24 +4744,77 @@ mod tests {
     }
 
     fn native_eventlog_dat(content: &[u8]) -> Vec<u8> {
+        native_eventlog_chunk(&[native_eventlog_entry(0, 1, "stdout", content)])
+    }
+
+    /// One `eventlog.dat` entry in the recorder's layout
+    /// (`MCR-Event-Log-Stream.md` §2.2, `serializeEntry` in the recorder's
+    /// `event_log_writer.nim`).
+    fn native_eventlog_entry(kind: u8, fd: i32, metadata: &str, content: &[u8]) -> Vec<u8> {
         let mut entry = Vec::new();
         entry.extend_from_slice(&1u64.to_le_bytes()); // geid
         entry.extend_from_slice(&1u64.to_le_bytes()); // tick
         entry.extend_from_slice(&0u32.to_le_bytes()); // tid
-        entry.push(0); // EventLogKind::elkWrite
-        entry.extend_from_slice(&1u32.to_le_bytes()); // fd
+        entry.push(kind);
+        entry.extend_from_slice(&fd.to_le_bytes());
         entry.extend_from_slice(&(content.len() as u64).to_le_bytes()); // returnValue
-        entry.extend_from_slice(&6u16.to_le_bytes()); // metadata_len
-        entry.extend_from_slice(b"stdout");
+        entry.extend_from_slice(&(metadata.len() as u16).to_le_bytes());
+        entry.extend_from_slice(metadata.as_bytes());
         entry.extend_from_slice(&(content.len() as u32).to_le_bytes());
         entry.extend_from_slice(content);
+        entry
+    }
 
-        let raw_size = 4 + entry.len();
+    /// One uncompressed chunk holding `entries`.
+    fn native_eventlog_chunk(entries: &[Vec<u8>]) -> Vec<u8> {
+        let body: usize = entries.iter().map(Vec::len).sum();
         let mut dat = Vec::new();
-        dat.extend_from_slice(&(raw_size as u32).to_le_bytes());
-        dat.extend_from_slice(&1u32.to_le_bytes()); // entries in chunk
-        dat.extend_from_slice(&entry);
+        dat.extend_from_slice(&((4 + body) as u32).to_le_bytes());
+        dat.extend_from_slice(&(entries.len() as u32).to_le_bytes()); // entries in chunk
+        for entry in entries {
+            dat.extend_from_slice(entry);
+        }
         dat
+    }
+
+    /// The rows a native recording's event log holds around the program's
+    /// first line (measured on an MCR recording of native-backend's
+    /// `tracepoint_output` C program, recorder `84a2b23b`): a generic system
+    /// call logged under kind 0 with `fd` -1 and its output bytes (a
+    /// `prlimit64`'s `struct rlimit`), the same row as a recording made before
+    /// recorder `dbadc9b7` stored it (the raw field, `prlimit64` = 302 packed
+    /// as `302 << 16`, and "stdout"), a write to a file (kind 1), and writes
+    /// to descriptors 2 and 1.  Only the last two are terminal output.
+    #[test]
+    fn native_eventlog_terminal_output_is_the_writes_to_descriptors_1_and_2() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("native-eventlog-syscall-rows.ct");
+        let rlimit = b"\x00\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff";
+        let dat = native_eventlog_chunk(&[
+            native_eventlog_entry(0, -1, "", rlimit),
+            native_eventlog_entry(0, 302 << 16, "stdout", rlimit),
+            native_eventlog_entry(1, 7, "", b"to a file\n"),
+            native_eventlog_entry(0, 2, "stderr", b"warn\n"),
+            native_eventlog_entry(0, 1, "stdout", b"TRACE:x=5\n"),
+        ]);
+        let idx = native_eventlog_idx(5);
+
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("eventlog.dat", &dat), ("eventlog.idx", &idx)]).unwrap();
+
+        let mut ctfs = CtfsReader::open(&ct_path).unwrap();
+        let events = CTFSTraceReader::load_native_terminal_events(&mut ctfs).unwrap();
+        let got: Vec<(EventLogKind, &str, &str)> = events
+            .iter()
+            .map(|e| (e.kind, e.content.as_str(), e.metadata.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (EventLogKind::WriteStderr, "warn\n", "stderr"),
+                (EventLogKind::Write, "TRACE:x=5\n", "stdout"),
+            ],
+            "only writes to descriptors 1 and 2 are terminal output"
+        );
     }
 
     fn native_eventlog_idx(entry_count: u32) -> Vec<u8> {

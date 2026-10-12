@@ -1683,14 +1683,13 @@ pub fn is_mcr_available() -> bool {
 }
 
 /// The start of the line `ct-mcr debugserver <trace>` prints, before it
-/// exits 1 without listening, for a same-platform interpose recording on
-/// Linux (codetracer-specs `spec/CLI/ct-mcr/debugserver.md`, Planned
-/// Changes).  Trace mode used to relaunch the recorded program as a new live
-/// recording, a re-execution in which no position of the recording can be
-/// reached; it refuses the trace until the stage0 emulator serves the replay,
-/// and `ct-native-replay` positions in it from HS-M2 U4b4, which also
-/// returns the MCR flow tests here to replay.
-pub const MCR_LINUX_TRACE_MODE_REFUSAL: &str = "error: trace mode does not serve a Linux interpose recording yet: ";
+/// exits 1 without listening, for a Linux interpose recording whose process
+/// recorded more than one thread (codetracer-specs
+/// `spec/CLI/ct-mcr/debugserver.md`, "Linux interpose recordings in trace
+/// mode"): trace mode serves the stage0 emulator replay of one thread, and a
+/// multi-threaded recording waits for multi-threaded emulator replay
+/// (XMR-B1, decision D9 of HS-M2), which the refusal names.
+pub const MCR_LINUX_MULTI_THREAD_REFUSAL: &str = "error: trace mode cannot serve this recording: ";
 
 /// The `ct-mcr` binary the MCR backend uses: `CODETRACER_CT_MCR_CMD`, else
 /// `ct-mcr` or `ct_cli` on `PATH` (the lookup of [`is_mcr_available`]).
@@ -1704,12 +1703,16 @@ pub fn find_ct_mcr() -> Option<PathBuf> {
     find_on_path("ct-mcr").or_else(|| find_on_path("ct_cli"))
 }
 
-/// For an MCR flow test on Linux: assert that `ct-mcr debugserver`, which
-/// `ct-native-replay` starts for the trace, refuses `trace` by name (exit 1,
-/// the refusal line, no `Listening on`), and return `true`; the caller ends
-/// the test there.  `false` on other hosts.  Panics when the server serves
-/// the trace (the relaunch is back) or fails some other way.
-pub fn mcr_linux_trace_mode_refused(test_name: &str, trace: &Path) -> bool {
+/// For an MCR flow test of a program that always runs several threads (a Go
+/// program: its runtime starts them), on Linux: assert that `ct-mcr
+/// debugserver`, which `ct-native-replay` starts for the trace, refuses
+/// `trace` as a multi-threaded recording (exit 1, the refusal line naming
+/// XMR-B1, no `Listening on`), and return `true`; the caller ends the test
+/// there until XMR-B1 lands.  `false` on other hosts.  Panics when the
+/// server serves the trace or fails some other way, so a recording that
+/// stops being multi-threaded, or a server that starts serving it, turns
+/// the test red rather than letting it pass unexamined.
+pub fn mcr_linux_multi_thread_refused(test_name: &str, trace: &Path) -> bool {
     if !cfg!(target_os = "linux") {
         return false;
     }
@@ -1741,15 +1744,16 @@ pub fn mcr_linux_trace_mode_refused(test_name: &str, trace: &Path) -> bool {
     };
     let output = child.wait_with_output().map(|o| o.stdout).unwrap_or_default();
     let stdout = String::from_utf8_lossy(&output);
-    let named = stdout.lines().any(|l| l.starts_with(MCR_LINUX_TRACE_MODE_REFUSAL));
+    let named = stdout
+        .lines()
+        .any(|l| l.starts_with(MCR_LINUX_MULTI_THREAD_REFUSAL) && l.contains("XMR-B1"));
     assert!(
         status.map(|s| s.code() == Some(1)).unwrap_or(false) && named && !stdout.contains("Listening on"),
-        "{test_name}: on Linux `ct-mcr debugserver` must refuse the MCR recording {} \
-         (exit 1, the named error, no port) until HS-M2 U4b4; got status {status:?}, \
-         stdout:\n{stdout}",
+        "{test_name}: on Linux `ct-mcr debugserver` must refuse the multi-threaded MCR recording {} \
+         by name, naming XMR-B1 (exit 1, no port); got status {status:?}, stdout:\n{stdout}",
         trace.display()
     );
-    println!("{test_name}: Linux: ct-mcr debugserver refused the recording by name, as it must until HS-M2 U4b4");
+    println!("{test_name}: Linux: ct-mcr debugserver refused the multi-threaded recording, naming XMR-B1");
     true
 }
 

@@ -5044,6 +5044,17 @@ impl Handler {
                     return Ok(());
                 }
 
+                // Go to the start BEFORE the tracepoint breakpoints exist.  A
+                // recreator replay's `jump_to` is `run_to_entry`, which clears
+                // the breakpoints it used to get there with
+                // `DeleteBreakpoints`, and that query removes every breakpoint
+                // of the session.  Added first, the tracepoint breakpoints were
+                // removed with them and the Continue below ran to the end:
+                // measured on an MCR recording served by `ct-mcr debugserver`
+                // (zero tracepoint results, the run-to-entry's
+                // `DeleteBreakpoints` sending `z0` for each tracepoint site).
+                self.replay.jump_to(StepId(0))?;
+
                 for (path, line_map) in tracepoint_locations.iter() {
                     if line_map.is_empty() {
                         continue;
@@ -5074,8 +5085,6 @@ impl Handler {
                 if tracepoint_breakpoints.is_empty() {
                     return Ok(());
                 }
-
-                self.replay.jump_to(StepId(0))?;
 
                 // Whether we need a Continue to reach the next breakpoint,
                 // or have already landed on a new location via a Next step.
@@ -6266,7 +6275,9 @@ impl Handler {
             rr_event_id: index,
             direct_location_rr_ticks: step_id_int,
             metadata: event_record.metadata.to_string(),
-            stdout: true,
+            // A write to standard error is terminal output, but not standard
+            // output (`terminal_output_category` files it under "stderr").
+            stdout: event_record.kind != EventLogKind::WriteStderr,
             event_index: index,
             tracepoint_result_index: NO_INDEX,
             high_level_path: path,
