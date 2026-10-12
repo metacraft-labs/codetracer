@@ -8,6 +8,7 @@ import
   ../viewmodel/viewmodels/visual_replay_layout,
   visual_replay_player,
   ../../common/[ ct_logging, paths, trace_source_paths ],
+  ../../ct/trace/recorder_output,
   # ../../common/common_types/codetracer_features/notifications,
   ./js_helpers,
   ./launch_config,
@@ -1672,52 +1673,46 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   )
   if processResult.isOk: # true
     let output = processResult.value
-    let lines = ($output).splitLines()
-    # copied/adapted by memory and src/frontend/vscode.nim, probably originatd in ct/other code
     echo output
-    # `lines.len > 2`, NOT `> 1`. The line read below is `lines[^3]`, so two
-    # lines of output indexed `lines[-1]` and raised an `IndexDefect` out of an
-    # `async` proc — which rejects the future, reaches no handler, and settles
-    # nothing. With the guard the same output takes the "couldn't extract
-    # traceId" arm below, which says so and ends the run.
-    if lines.len > 2:
-      let traceIdLine = lines[^3]
-      echo lines
-      # M-REC-6: stdout-marker renamed to ``recordingId:``.
-      if traceIdLine.startsWith("recordingId:"):
-        let traceId = cstring(traceIdLine[("recordingId:").len .. ^1].strip)
-        infoPrint "index: traceId for test: ", traceId
-        let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
-        if trace.isNil:
-          errorPrint "index: run-test: can't find trace"
-          sendTestRunSettled(cstring"", cstring(
-            "ct record-test reported recording " & $traceId &
-            ", but CodeTracer cannot find it. Nothing about the test has " &
-            "been established."))
-          return
-        infoPrint "trace is in ", trace.outputFolder
-
-        # SETTLED BEFORE THE TRACE IS LOADED, and the order is deliberate. The
-        # run is over the moment the recorder answered; loading the recording
-        # is the next operation, it can take seconds, and on the
-        # `newWindow` arm it happens in a different process entirely. Settling
-        # afterwards would leave the button spinning across the load, and would
-        # never settle at all if the load failed.
-        sendTestRunSettled(traceId, cstring"")
-
-        if response.newWindow:
-          infoPrint "new window"
-          discard startProcess(codetracerExe,
-            @[cstring"replay", cstring(fmt"--id={traceId}")],
-            options=JsObject{stdio: cstring"inherit"}
-          )
-        else:
-          infoPrint "existing window"
-          await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
-
-          await loadExistingRecord(traceId)
-
+    # `recordingIdFromOutput` scans for the last `recordingId:` line rather
+    # than reading a fixed index: `ct record-test` echoes the recorder's
+    # output, whose marker can be followed by the traced program's own
+    # output, and the old `lines[^3]` read both missed that and, behind a
+    # short guard, raised an `IndexDefect` out of this `async` proc.
+    let traceId = cstring(recordingIdFromOutput($output))
+    if traceId.len > 0:
+      infoPrint "index: traceId for test: ", traceId
+      let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
+      if trace.isNil:
+        errorPrint "index: run-test: can't find trace"
+        sendTestRunSettled(cstring"", cstring(
+          "ct record-test reported recording " & $traceId &
+          ", but CodeTracer cannot find it. Nothing about the test has " &
+          "been established."))
         return
+      infoPrint "trace is in ", trace.outputFolder
+
+      # SETTLED BEFORE THE TRACE IS LOADED, and the order is deliberate. The
+      # run is over the moment the recorder answered; loading the recording
+      # is the next operation, it can take seconds, and on the
+      # `newWindow` arm it happens in a different process entirely. Settling
+      # afterwards would leave the button spinning across the load, and would
+      # never settle at all if the load failed.
+      sendTestRunSettled(traceId, cstring"")
+
+      if response.newWindow:
+        infoPrint "new window"
+        discard startProcess(codetracerExe,
+          @[cstring"replay", cstring(fmt"--id={traceId}")],
+          options=JsObject{stdio: cstring"inherit"}
+        )
+      else:
+        infoPrint "existing window"
+        await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+
+        await loadExistingRecord(traceId)
+
+      return
     warnPrint "index: run-test: traced ok, but couldn't extract traceId"
     # EXIT 0 AND NO `recordingId:` LINE. `ct record-test` prints the marker on
     # every route that produced a recording, so this is a recorder that

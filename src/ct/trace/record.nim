@@ -2,6 +2,7 @@ import std/[os, osproc, streams, strutils, sequtils, strtabs, strformat, json, o
   multitrace,
   native_backend_selection,
   record_assessment, recorder_dispatch, portable_route, recorder_env,
+  recorder_output,
   ../../common/[ lang, paths, types, trace_index, config, ct_logging,
                  ct_state_dir ],
   ../utilities/[language_detection ],
@@ -236,16 +237,12 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
     # stdout is merged in via ``poStdErrToStdOut``.  When the traced
     # program prints a trailing banner/separator (e.g. the sudoku board
     # followed by a row of dashes) the child's final flush can land
-    # *after* the ``recordingId:`` marker.  Scan every captured line for
-    # the marker (last occurrence wins) rather than assuming ``lines[^1]``
-    # — the old ``lines[^1]`` form also crashed outright when the
-    # recorder produced no output at all.
-    var markerLine = ""
-    for line in lines:
-      if line.startsWith("recordingId:"):
-        markerLine = line
-    if markerLine.len > 0:
-      let traceId = markerLine[("recordingId:").len .. ^1].strip
+    # *after* the ``recordingId:`` marker.  ``recordingIdFromLines`` scans
+    # every captured line (last occurrence wins) rather than assuming
+    # ``lines[^1]`` — the old ``lines[^1]`` form also crashed outright when
+    # the recorder produced no output at all.
+    let traceId = recordingIdFromLines(lines)
+    if traceId.len > 0:
       result = trace_index.find(traceId, test=false)
 
       if withDiff.len > 0:
@@ -671,18 +668,14 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
         ctConfig.rrBackend.path,
         args = args,
         options = {poEchoCmd})
-      # copied/adapted by memory and src/frontend/vscode.nim, probably originatd in ct/other code
-      let lines = output.splitLines()
-      if lines.len > 0:
-        let traceIdLine = lines[^2]
-        # M-REC-6: stdout-marker renamed to ``recordingId:``.
-        if traceIdLine.startsWith("recordingId:"):
-          let traceId = traceIdLine[("recordingId:").len..^1].strip
-          let trace = trace_index.find(traceId, test=false)
-          writeFile(trace.outputFolder / "custom-entrypoint.txt", testName)
+      # M-REC-6: stdout-marker renamed to ``recordingId:``.
+      let traceId = recordingIdFromOutput(output)
+      if traceId.len > 0:
+        let trace = trace_index.find(traceId, test=false)
+        writeFile(trace.outputFolder / "custom-entrypoint.txt", testName)
 
-          echo output
-          quit(0)
+        echo output
+        quit(0)
 
       echo output
       quit(1)
