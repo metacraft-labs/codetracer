@@ -951,7 +951,7 @@ impl CtfsRecordingWriter {
         // The recording first, the tee second: the recording is the source
         // of truth (spec §2), snapshots are derived data, so the `.ct` must
         // never be short of a record the consumer already has.
-        open.apply(&record);
+        open.apply(&record)?;
         open.boundary.extend_from_slice(&frame);
         open.records += 1;
         if let Some(tee) = open.tee.as_mut() {
@@ -1409,8 +1409,9 @@ impl OpenRecording {
         }
     }
 
-    /// Write one boundary-log record into the CTFS recording.
-    fn apply(&mut self, record: &boundary_log::Record) {
+    /// Write one boundary-log record into the CTFS recording, refusing an
+    /// `Event` whose kind is not an assigned `EventLogKind`.
+    fn apply(&mut self, record: &boundary_log::Record) -> io::Result<()> {
         use boundary_log::Record;
         use codetracer_trace_types::{
             CallRecord, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, RecordEvent,
@@ -1483,21 +1484,32 @@ impl OpenRecording {
             } => TraceWriter::add_event(
                 &mut self.writer,
                 TraceLowLevelEvent::Event(RecordEvent {
-                    kind: event_log_kind(*kind),
+                    kind: event_log_kind(*kind)?,
                     metadata: metadata.clone(),
                     content: content.clone(),
                 }),
             ),
         }
+        Ok(())
     }
 }
 
-/// The recording's event kind for a boundary-log `Event` kind.
-fn event_log_kind(kind: i32) -> EventLogKind {
-    match kind {
-        EVENT_KIND_TRACE_LOG_EVENT => EventLogKind::TraceLogEvent,
-        _ => EventLogKind::Write,
-    }
+/// The recording's event kind for a boundary-log `Event` kind: the
+/// `EventLogKind` with that ordinal. A value that is not an assigned
+/// `EventLogKind` is refused, naming it, rather than given a substitute kind.
+fn event_log_kind(kind: i32) -> io::Result<EventLogKind> {
+    u8::try_from(kind)
+        .ok()
+        .and_then(EventLogKind::from_ordinal)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "boundary-log event kind {kind} is not an assigned EventLogKind (0-{})",
+                    EventLogKind::ALL.len() - 1
+                ),
+            )
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -1660,15 +1672,19 @@ impl CtfsWriter for CtfsRecordingWriter {
 /// `EventLogKind::TraceLogEvent` discriminator, as the boundary log carries
 /// it — mirrors `FfiEventLogKind::FFI_EVENT_TRACE_LOG_EVENT = 12` in
 /// `codetracer_trace_writer.h`.
-const EVENT_KIND_TRACE_LOG_EVENT: i32 = 12;
-/// Stdout / stderr discriminator.
-const EVENT_KIND_WRITE: i32 = 0;
+const EVENT_KIND_TRACE_LOG_EVENT: i32 = EventLogKind::TraceLogEvent as i32;
+/// `EventLogKind::Write`: output to stdout.
+const EVENT_KIND_WRITE: i32 = EventLogKind::Write as i32;
+/// `EventLogKind::WriteStderr`: output to stderr.
+const EVENT_KIND_WRITE_STDERR: i32 = EventLogKind::WriteStderr as i32;
 
+/// The event kind of a page write on `channel`: `stderr` is `WriteStderr`,
+/// `stdout` is `Write`. The channel name also rides in the metadata field.
 fn write_channel_to_kind(channel: &str) -> i32 {
-    // Stdout / stderr both map onto the generic Write kind — the channel
-    // tag rides in the metadata field.
-    let _ = channel;
-    EVENT_KIND_WRITE
+    match channel {
+        "stderr" => EVENT_KIND_WRITE_STDERR,
+        _ => EVENT_KIND_WRITE,
+    }
 }
 
 /// Convert a browser-side encoded value into its boundary-log value.
@@ -2398,6 +2414,83 @@ mod tests {
                 if ev.content == "balance: 12.34\n" && matches!(ev.kind, EventLogKind::Write))),
             "the page's output is recorded: {events:#?}",
         );
+    }
+
+    /// The page's stdout is recorded as `Write` and its stderr as
+    /// `WriteStderr`, in the recording and in the boundary log alike.
+    #[test]
+    fn stdout_and_stderr_are_recorded_under_their_own_kinds() {
+        use codetracer_trace_types::TraceLowLevelEvent as E;
+        let tmp = TempDir::new().expect("create tempdir");
+        let mut writer = writer_in(&tmp);
+        // An event is recorded at a step, so the page reaches one first.
+        let manifest = serde_json::json!({
+            "paths": ["src/app.js"],
+            "functions": [],
+            "sites": [{"pathIndex": 0, "line": 3}],
+        });
+        let events = vec![
+            BrowserEvent::SessionStart {
+                program: "streams".to_string(),
+                args: vec![],
+            },
+            BrowserEvent::Manifest { manifest },
+            BrowserEvent::Step { site_id: 0 },
+            BrowserEvent::Write {
+                channel: "stdout".to_string(),
+                content: "to stdout\n".to_string(),
+            },
+            BrowserEvent::Write {
+                channel: "stderr".to_string(),
+                content: "to stderr\n".to_string(),
+            },
+            BrowserEvent::SessionEnd {},
+        ];
+        let ct = drive(&mut writer, &events).expect("the sequence ends the session");
+
+        let recorded: Vec<(EventLogKind, String)> = recorded_events(&ct)
+            .into_iter()
+            .filter_map(|e| match e {
+                E::Event(ev) => Some((ev.kind, ev.content)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![
+                (EventLogKind::Write, "to stdout\n".to_string()),
+                (EventLogKind::WriteStderr, "to stderr\n".to_string()),
+            ]
+        );
+
+        let logged: Vec<(i32, String)> = decode_log(&stored_boundary_log(&ct))
+            .records
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::Event { kind, metadata, .. } => Some((kind, metadata)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            logged,
+            vec![(0, "stdout".to_string()), (14, "stderr".to_string())]
+        );
+    }
+
+    /// A boundary-log event kind is the `EventLogKind` with that ordinal,
+    /// for every assigned kind; any other value is refused, naming it.
+    #[test]
+    fn a_boundary_log_event_kind_is_exact_or_refused() {
+        for kind in EventLogKind::ALL {
+            assert_eq!(event_log_kind(kind as i32).unwrap(), kind, "{}", kind.name());
+        }
+        for raw in [24, 255, 256, -1] {
+            let err = event_log_kind(raw).expect_err("an unassigned kind must be refused");
+            assert!(
+                err.to_string().contains(&raw.to_string()),
+                "the refusal of kind {raw} does not name it: {err}"
+            );
+        }
     }
 
     /// `boundary.log` inside the container is the record sequence, in
