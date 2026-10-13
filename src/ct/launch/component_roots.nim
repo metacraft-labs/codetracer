@@ -29,8 +29,9 @@ import ../../common/ct_home
 
 const
   registryEnvVar* = "CODETRACER_REGISTRY_PATH"
-    ## Test-only override: forces a specific registry root. Matches the
-    ## launcher's ``CODETRACER_REGISTRY_PATH`` convention.
+    ## Test-only override: forces a specific registry root -- the DIRECTORY
+    ## holding ``registry.txt`` (help_delegate's ``registryRoot``). The
+    ## launcher's ``CODETRACER_REGISTRY_PATH`` names the file itself.
 
   componentsRootEnvVar* = "CODETRACER_COMPONENTS_ROOT"
     ## Test-only override: forces a specific components root, and SUPPRESSES
