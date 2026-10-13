@@ -89,7 +89,9 @@ const mcrAndroidArm64PortableRecordingId* = "019e3a35-2544-7a00-8aaa-43ff2005000
   ## ``recording_id`` for ``mcr/android-arm64/trace-portable.ct``.
 
 const mcrWindowsX86_64RecordingId* = "019e3a35-2545-7a00-8aaa-43ff20060001"
-  ## ``recording_id`` for ``mcr/windows-x86_64/trace.ct`` — Windows 11 x64 interpose.
+  ## ``recording_id`` for ``mcr/windows-x86_64/trace.ct`` — Windows x64 stage-0
+  ## recording with global turns. The committed trace carries the id the
+  ## recorder minted (``ct-mcr record`` has no ``--recording-id``).
 
 const mcrWindowsX86_64PortableRecordingId* = "019e3a35-2545-7a00-8aaa-43ff20060002"
   ## ``recording_id`` for ``mcr/windows-x86_64/trace-portable.ct``.
