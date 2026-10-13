@@ -383,6 +383,13 @@ proc trimToWindow*(vm: SourceVM) =
     vm.heldLines.val = @[]
     vm.heldLineContexts.val = @[]
     vm.heldFirstLine.val = 1
+    # The length belonged to the held revision too. Kept, it clamped the NEW
+    # file's window to the OLD file's length: going from a 5-line file to a
+    # 6-line one asked for lines 1-5 only, and line 6 read `⋯ loading` until
+    # something else moved the window. Unknown (0) until the new file answers.
+    if not vm.heldRevision.val.isEmpty:
+      vm.heldRevision.val = SourceRevision()
+      vm.totalLineCount.val = 0
     return
   let first = vm.windowFirstLine.val
   let last = vm.windowLastLine.val

@@ -68,7 +68,7 @@
 ## `when not defined(js)` and the DAP half is not, which is what lets the whole
 ## module compile on the JS backend where `codetracer_embed` also has to build.
 
-import std/json
+import std/[json, strutils]
 
 import isonim/core/[computation, async_compat]
 
@@ -78,7 +78,7 @@ import ../viewmodels/source_vm
 import trace_source
 
 when not defined(js):
-  import std/[os, strutils, tables]
+  import std/[os, tables]
   # The trace container's source payload is unpacked by `ct` itself; this is
   # the READ side of exactly that layout, and it calls the same writer rather
   # than re-deriving where the bytes went.
@@ -327,6 +327,84 @@ func splitSourceLines*(text: string): seq[string] =
     result.add(current)
 
 # ---------------------------------------------------------------------------
+# A recorded path's `.` and `..` components, resolved lexically
+# ---------------------------------------------------------------------------
+
+func resolveDotSegments*(path: string): string =
+  ## `path` with its `.` components dropped and each `..` folded into the
+  ## component before it — the file the path NAMES, spelled the way a
+  ## recording's `files/` store spells it.
+  ##
+  ## Why a payload lookup needs this: a recorder reports a location with the
+  ## path the interpreter saw. `multi_root`'s runner puts `app/../shared` on
+  ## `sys.path`, so Python reports `…/multi_root/app/../shared/helpers.py`
+  ## while the recording stores the file under its normalised path,
+  ## `…/multi_root/shared/helpers.py`. Matched as given, the stop's own file
+  ## was never found (the editor drew `⋯ loading` forever under the
+  ## "No verified source" banner).
+  ##
+  ## Lexical, not physical: nothing is read from this machine's filesystem.
+  ## The two spellings name the same entry of the recording, which is the only
+  ## filesystem the answer is looked up in.
+  ##
+  ## Kept as given:
+  ##   * the root — a leading separator, a `C:` drive with its separator, or a
+  ##     Godot `res://` / `user://` scheme;
+  ##   * a `..` with nothing before it to fold into (`/../x`, `../x`). That is
+  ##     a path climbing out of its root, and the payload lookup refuses it
+  ##     rather than reinterpreting it;
+  ##   * a path with no `.` or `..` component at all, byte for byte, so every
+  ##     path that resolved before this function existed resolves identically.
+  ##
+  ## The engine's `expr_loader::resolve_dot_segments` is the same function; the
+  ## two read sides must map one recorded path onto one candidate list.
+  var prefix = ""
+  var rest = path
+  for scheme in ["res://", "user://"]:
+    if rest.startsWith(scheme):
+      prefix = scheme
+      rest = rest[scheme.len .. ^1]
+      break
+  if prefix.len == 0:
+    if rest.len >= 3 and rest[1] == ':' and rest[2] in {'/', '\\'}:
+      prefix = rest[0 .. 2]
+      rest = rest[3 .. ^1]
+    elif rest.len > 0 and rest[0] in {'/', '\\'}:
+      prefix = rest[0 .. 0]
+      rest = rest[1 .. ^1]
+  var parts: seq[string] = @[]
+  var current = ""
+  var changed = false
+  template push() =
+    if current == ".":
+      changed = true
+    elif current == "..":
+      changed = true
+      if parts.len > 0 and parts[^1] != "..":
+        parts.setLen(parts.len - 1)
+      else:
+        parts.add(current)
+    elif current.len > 0:
+      parts.add(current)
+    current = ""
+  for ch in rest:
+    if ch == '/' or ch == '\\':
+      push()
+    else:
+      current.add(ch)
+  push()
+  if not changed:
+    return path
+  # Rejoined with the separator the path itself uses first, so a Windows
+  # recording keeps its backslashes.
+  var sep = "/"
+  for ch in rest:
+    if ch == '/' or ch == '\\':
+      sep = $ch
+      break
+  prefix & parts.join(sep)
+
+# ---------------------------------------------------------------------------
 # Implementation 1: the CTFS-materialized payload (native)
 # ---------------------------------------------------------------------------
 
@@ -400,10 +478,11 @@ when not defined(js):
     ## what `expr_loader::bundle_path_components` does, and these two lists have
     ## to match candidate for candidate.
     ##
-    ## `..` is deliberately NOT dropped. Dropping it would silently rewrite
-    ## `a/../b` into `a/b`, which may be an entirely different file; the caller
-    ## skips any suffix containing one instead, which refuses rather than
-    ## reinterprets.
+    ## `..` is deliberately NOT dropped here. Dropping it would silently
+    ## rewrite `a/../b` into `a/b`, which is an entirely different file; the
+    ## caller folds each `..` into the component before it first
+    ## (`resolveDotSegments`), and skips any suffix that still contains one —
+    ## a path climbing out of its root, refused rather than reinterpreted.
     result = @[]
     var current = ""
     for ch in path:
@@ -501,8 +580,20 @@ when not defined(js):
     ## layout. Both exact steps are skipped outright for a recorded path
     ## carrying a `..` component, so both sides answer such a path identically:
     ## from the walk, or not at all.
+    ##
+    ## ## `..` and `.` are resolved first, on both sides
+    ##
+    ## A recorder reports the path the program used, and a program that put
+    ## `app/../shared` on its search path is reported at
+    ## `…/app/../shared/helpers.py` while the recording stores the file at
+    ## `…/shared/helpers.py`. Both steps therefore work on
+    ## `resolveDotSegments(recordedPath)` — the same file, spelled the way the
+    ## store spells it. Only a `..` left after that (one with nothing before
+    ## it, i.e. climbing out of the root) keeps the refusal above. The engine
+    ## resolves the same way (`expr_loader::resolve_dot_segments`).
     let filesRoot = traceDir / "files"
-    let components = pathComponents(recordedPath.stripGodotScheme)
+    let resolvedPath = resolveDotSegments(recordedPath)
+    let components = pathComponents(resolvedPath.stripGodotScheme)
 
     var hasParentComponent = false
     for component in components:
@@ -518,7 +609,7 @@ when not defined(js):
     #    written is lost — it is just found in the same order the engine finds
     #    it.
     if not hasParentComponent:
-      let exact = payloadPathFor(traceDir, recordedPath)
+      let exact = payloadPathFor(traceDir, resolvedPath)
       if fileExists(exact) and isWithinPayloadRoot(filesRoot, exact):
         return exact
 

@@ -224,6 +224,15 @@ func degradedMessageFor*(state: PaneDegradation): string =
   else:
     ""
 
+func absentSourceMessageFor*(path: string): string =
+  ## What an editor says when the recording holds no source for the stop's
+  ## file (§14's source axis at `savAbsent`): which file, and that it is not
+  ## in the recording — never "showing what is available" over rows that
+  ## will not arrive. Both native editors print this one line: the terminal
+  ## through `tui/app/source_binding`, GPUI through `editorSurfaceFor` below.
+  if path.len == 0: "No source for this location in this recording."
+  else: "No source for " & path & " in this recording."
+
 func editorPointsOf*(rows: openArray[PointListEntry]): seq[EditorPoint] =
   ## The store's point rows as the editor's points — the GPUI arm of the
   ## conversion `tui/app/source_binding.sourcePointsOf` is on the terminal:
@@ -422,7 +431,7 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
     if editor.isNil: true else: editor.showBreakpointGutter.val
   result.degradedMessage =
     if availability == savAbsent and not editor.isNil:
-      degradedMessageFor(editor.degradedState.val)
+      absentSourceMessageFor(result.path)
     else: ""
 
   # `points` has no producer, so a surface handed none degrades the concern
@@ -454,7 +463,9 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
   # empty line and is named in `requested`, so its row is `held = false`.
   let reads = source.visibleReads()
   result.rows = @[]
-  if reads.len == 0:
+  if reads.len == 0 or availability == savAbsent:
+    # Absent: no line of this file will arrive, so there is no row to draw —
+    # `degradedMessage` above says which file is missing.
     return
   block entry:
     let contexts = source.heldLineContexts.val

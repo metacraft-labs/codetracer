@@ -306,7 +306,7 @@ proc sourcePaneModelFor*(vm: SourceVM;
     heat = heat,
     gutterMode = gutterMode,
     degradedMessage = (
-      if availability == savAbsent: degradedMessageFor(vm.degradedState.val)
+      if availability == savAbsent: absentSourceMessageFor(path)
       else: ""),
     notTakenLines = notTakenLines)
 

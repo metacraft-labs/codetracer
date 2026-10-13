@@ -7251,3 +7251,19 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   recording's source path and tick; `run-plat68-keymaps-mutations.py`'s
   `portable_cause` drops that snapshot from a recorded cause so causes match
   across checkouts. The other pty harnesses still record it.
+- A recorded source path may carry `..` (`multi_root`: Python reports
+  `…/app/../shared/helpers.py`) while the recording's `files/` store holds the
+  normalised path. Both payload resolvers (`source_provider.resolvePayload`,
+  `expr_loader::resolve_bundled_source`) resolve `.`/`..` LEXICALLY first
+  (`resolveDotSegments` / `resolve_dot_segments`, one rule); only a `..` left
+  over (climbing out of the root) is refused. Nim's `os./` also folds `..`
+  textually, so a test that wants an OS-unresolvable path must build it with
+  `&`, not `/`.
+- `SourceVM.trimToWindow` drops `totalLineCount` with the held revision; a
+  kept length clamped the next file's window to the previous file's length.
+- In `--report-window-plan`, `click:call:<i>:left` does NOT jump (only the
+  right button is routed there); a call jump is `press:<x>:<y>,release:…` at
+  the row's place in the geometry file (`CODETRACER_GPUI_GEOMETRY_OUT`).
+- The desktop does not share the TUI/GPUI source provider for self-contained
+  traces: it reads `files/` through `index/config.selfContainedReadPathCandidates`
+  and Node's `path.join`, which folds `..` itself.

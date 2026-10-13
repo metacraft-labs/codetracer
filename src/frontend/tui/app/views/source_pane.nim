@@ -428,7 +428,11 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       cache.highlight(model.path, 0, "", model.firstHeldLine, model.heldLines,
                       model.entryContext)
 
-  let bodyRows = area.height - 1
+  # Absent (§14's `savAbsent`): no line of this file will arrive, so no row is
+  # drawn as `⋯ loading` — the degraded message below names the missing file.
+  let bodyRows =
+    if model.provenance == gpAbsent and model.heldLines.len == 0: 0
+    else: area.height - 1
   for i in 0 ..< bodyRows:
     let row = area.row + 1 + i
     let line = model.viewportTop + i
@@ -563,8 +567,20 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
                   out2)
 
   if model.degradedMessage.len > 0 and area.height >= 2:
-    g.paint(area.row + 1, area.col,
-            truncateToCells(model.degradedMessage, area.width), DegradedStyle)
+    if bodyRows == 0:
+      # Absent: the rows are free, so the message is WRAPPED over them rather
+      # than cut — its tail is the missing file's name.
+      var rest = model.degradedMessage
+      var row = area.row + 1
+      while rest.len > 0 and row < area.row + area.height:
+        let piece = truncateToCells(rest, area.width)
+        g.paint(row, area.col, piece, DegradedStyle)
+        if piece.len == 0 or piece.len >= rest.len: break
+        rest = rest[piece.len .. ^1]
+        inc row
+    else:
+      g.paint(area.row + 1, area.col,
+              truncateToCells(model.degradedMessage, area.width), DegradedStyle)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)

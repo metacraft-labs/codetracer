@@ -505,6 +505,29 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     if read.kind == srkRequest:
       check read.request.sourceGeneration == 1
 
+  test "moving from a short file to a longer one asks for the longer file's whole window":
+    # The short file's length must not clamp the next file's window. It did:
+    # going from `multi_root`'s 5-line helpers.py to its 6-line extra.py asked
+    # for lines 1-5 only, and line 6 read `⋯ loading` in both native editors
+    # until something else moved the window.
+    let h = newHarness()
+    defer: h.teardown()
+    const ShortPath = "/opt/ctui4/window_fixture/short.src"
+    let short = h.traceDir / "files" / ShortPath[1 .. ^1]
+    writeFile(short, "one\ntwo\nthree\n")
+    h.vm.setViewport(height = 20, overscan = 5)
+    h.store.updateDebuggerPosition(rrTicks = 1, file = ShortPath, line = 1)
+    discard h.fillWindow()
+    check h.vm.totalLineCount.val == 3
+    check h.vm.heldLines.val == @["one", "two", "three"]
+
+    h.store.updateDebuggerPosition(rrTicks = 2, file = RecordedPath, line = 1)
+    checkRequestsAre(h.fillWindow(), @[(1, 25)])
+    h.checkHeldRangeIs(1, 25)
+    h.checkHeldTextIsCorrect()
+    for line in 1 .. 20:
+      h.checkLineIsHeld(line)
+
   test "fulfilling with the wrong revision is refused, and changes nothing":
     let h = newHarness()
     defer: h.teardown()

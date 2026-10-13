@@ -282,6 +282,76 @@ suite "CTUI-4 — the payload root is a containment boundary":
       check fetch.origin == soTracePayload
       check fetch.lines == @["def total(values):", "    return sum(values)"]
 
+suite "a recorded path with `..` reads the file it names":
+  ## A recorder reports the path the program used. `multi_root`'s runner puts
+  ## `app/../shared` on `sys.path`, so Python reports
+  ## `…/app/../shared/helpers.py` while the recording stores the file under its
+  ## normalised path. The provider must read THAT entry — and, when the named
+  ## file is not in the recording, say so for that path rather than answer with
+  ## a neighbour. (The real-stack half: `real_terminal/
+  ## test_stop_path_parent_component.nim` and the GPUI plan suite.)
+
+  test "`a/../b` reads the payload entry stored as `b`":
+    let h = newHarness()
+    defer: h.teardown()
+    # A sibling in the same folder, so a lookup that fell back to "some file
+    # in the folder" would have something to wrongly answer with.
+    writeFile(h.traceDir / "files" / "opt/ctui4/revisions/sibling.src",
+              "SIBLING\n")
+    for path in ["/opt/ctui4/elsewhere/../revisions/hot.src",
+                 "/opt/ctui4/a/b/../../revisions/./hot.src"]:
+      # The folders the path climbs out of do not exist under `files/`, so an
+      # OS-resolved join could not have found the file: the lookup resolved
+      # the path itself.
+      check not fileExists(h.traceDir & "/files" & path)
+      let fetch = h.fetchOnce(path, 0)
+      check fetch.status == sfsAvailable
+      check fetch.origin == soTracePayload
+      check fetch.lines == @["def total(values):", "    return sum(values)"]
+      check fetch.detail.endsWith("opt/ctui4/revisions/hot.src")
+
+  test "a `..` path naming a file the recording lacks is absent, naming the path":
+    let h = newHarness()
+    defer: h.teardown()
+    writeFile(h.traceDir / "files" / "opt/ctui4/revisions/sibling.src",
+              "SIBLING\n")
+    let path = "/opt/ctui4/elsewhere/../revisions/missing.src"
+    let fetch = h.fetchOnce(path, 0)
+    check fetch.status == sfsPathUnavailable
+    check not fetch.hasText
+    check fetch.origin == soNone
+    check fetch.detail.contains(path)
+
+  test "resolveDotSegments keeps the root, the separator and an escaping `..`":
+    check resolveDotSegments("/a/b/../c/./d.py") == "/a/c/d.py"
+    check resolveDotSegments("C:\\a\\b\\..\\c.py") == "C:\\a\\c.py"
+    check resolveDotSegments("res://scenes/../main.gd") == "res://main.gd"
+    check resolveDotSegments("/../x.py") == "/../x.py"
+    check resolveDotSegments("/a/../../x.py") == "/../x.py"
+    # No `.` or `..`: returned byte for byte.
+    check resolveDotSegments("/a//b.py") == "/a//b.py"
+    check resolveDotSegments("rel/x.py") == "rel/x.py"
+    # The table the engine's resolver test reads too
+    # (`expr_loader.rs`, `resolve_dot_segments`), so the two read sides answer
+    # every vector identically.
+    const Vectors = staticRead(currentSourcePath().parentDir / ".." / ".." /
+      ".." / ".." / "db-backend" / "tests" / "data" /
+      "resolve_dot_segments_vectors.tsv")
+    var vectorsChecked = 0
+    for line in Vectors.splitLines:
+      if line.len == 0 or line.startsWith("#"):
+        continue
+      let fields = line.split('\t')
+      check fields.len == 2
+      if fields.len != 2:
+        continue
+      let input = (if fields[0] == "<empty>": "" else: fields[0])
+      let expected = (if fields[1] == "<empty>": "" else: fields[1])
+      checkpoint("vector " & input)
+      check resolveDotSegments(input) == expected
+      inc vectorsChecked
+    check vectorsChecked >= 25
+
 suite "CTUI-4 — an unavailable revision degrades, and never substitutes":
 
   test "a generation the provider does not hold is a typed refusal":

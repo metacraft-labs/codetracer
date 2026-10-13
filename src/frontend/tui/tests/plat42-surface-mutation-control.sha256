@@ -2,9 +2,9 @@
 # subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-4e58b3de0877c1849dd5ea6980c70e1b3e340f85ab48755c1ebe8a86b78cffd6  src/frontend/view_vocabulary/editor_surface.nim
+ee93dab0784a27068b6b90270f1b7c88a0621a7b86d5060135c1115b96f7558b  src/frontend/view_vocabulary/editor_surface.nim
 37f6cce67f8e420f194ece95f5156845f99df67057cee5eed20bb795afb61c6a  src/frontend/gpui/app/leaves.nim
-c1a1734d4b6bdcad27c89c6d7bca80c69babe4951fc726a4d45c9663babde6e7  src/frontend/tui/app/views/source_pane.nim
+f4e48de96dcfe43ce9f50a811155edbc250d01a90ad0aa85badc93c217907110  src/frontend/tui/app/views/source_pane.nim
 b5fad155cd2f11654c1ecf84e9c399d2b5635f9e63c5569f2a5d414393668c8f  src/frontend/tui/host/tui_session.nim
 59a835e3a525657e9abef241c2bf7426edd39bfd1ab70f03cb2034d67082bf63  src/frontend/viewmodel/backend/stdio_backend.nim
 c9d9a4a35391d222f471db2fab2702ac7f3916f8280db3f1d6e886ad4034ea52  src/common/flow_line_rule.nim

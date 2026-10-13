@@ -2906,13 +2906,83 @@ pub fn contained_bundled_source_path(root: &Path, source_path: &Path, generation
 /// `a/./b` and `a/b` name the same bundle entry.
 ///
 /// `..` is deliberately NOT dropped here. Dropping it would silently rewrite
-/// `a/../b` into `a/b`, which may be a different file; the callers skip any
-/// suffix that contains one instead, which refuses rather than reinterprets.
+/// `a/../b` into `a/b`, which is a different file; the callers fold each `..`
+/// into the component before it first ([`resolve_dot_segments`]) and skip any
+/// suffix that still contains one — a path climbing out of its root, refused
+/// rather than reinterpreted.
 pub(crate) fn bundle_path_components(recorded: &str) -> Vec<&str> {
     recorded
         .split(['/', '\\'])
         .filter(|component| !component.is_empty() && *component != ".")
         .collect()
+}
+
+/// `path` with its `.` components dropped and each `..` folded into the
+/// component before it — the file the path NAMES, spelled the way a
+/// recording's bundle spells it.
+///
+/// A recorder reports a location with the path the program used: a Python
+/// program that put `app/../shared` on `sys.path` is reported at
+/// `…/app/../shared/helpers.py`, while the recording bundles the file under
+/// its normalised path `…/shared/helpers.py`. Matched as given, the stop's own
+/// file was never found.
+///
+/// Lexical, not physical — nothing on this machine is consulted; the bundle is
+/// the only filesystem the answer is looked up in. Kept as given: the root (a
+/// leading separator, a `C:` drive with its separator, or a Godot `res://` /
+/// `user://` scheme); a `..` with nothing before it to fold into (a path
+/// climbing out of its root, which the lookup refuses); and, byte for byte, a
+/// path with no `.` or `..` component.
+///
+/// `src/frontend/viewmodel/sdk/source_provider.nim`'s `resolveDotSegments` is
+/// the same function: the two read sides must map one recorded path onto one
+/// candidate list.
+pub fn resolve_dot_segments(path: &str) -> String {
+    let mut prefix = "";
+    let mut rest = path;
+    for scheme in ["res://", "user://"] {
+        if let Some(stripped) = rest.strip_prefix(scheme) {
+            prefix = scheme;
+            rest = stripped;
+            break;
+        }
+    }
+    if prefix.is_empty() {
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'/' || bytes[2] == b'\\') {
+            prefix = &path[..3];
+            rest = &rest[3..];
+        } else if !bytes.is_empty() && (bytes[0] == b'/' || bytes[0] == b'\\') {
+            prefix = &path[..1];
+            rest = &rest[1..];
+        }
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    let mut changed = false;
+    for component in rest.split(['/', '\\']) {
+        match component {
+            "." => changed = true,
+            ".." => {
+                changed = true;
+                if parts.last().is_some_and(|last| *last != "..") {
+                    parts.pop();
+                } else {
+                    parts.push("..");
+                }
+            }
+            "" => {}
+            other => parts.push(other),
+        }
+    }
+    if !changed {
+        return path.to_string();
+    }
+    // Rejoined with the separator the path itself uses first, so a Windows
+    // recording keeps its backslashes.
+    let sep = rest.chars().find(|c| *c == '/' || *c == '\\').unwrap_or('/');
+    let mut out = String::from(prefix);
+    out.push_str(&parts.join(&sep.to_string()));
+    out
 }
 
 /// The file under `root` that holds `source_path`'s bundled bytes, or `None`
@@ -2969,7 +3039,15 @@ pub(crate) fn bundle_path_components(recorded: &str) -> Vec<&str> {
 /// Both exact steps are skipped outright for a recorded path carrying a `..`
 /// component, so the two sides answer such a path identically: from the walk,
 /// or not at all.
+///
+/// # `..` and `.` are resolved first, on both sides
+///
+/// Both steps work on [`resolve_dot_segments`]'s answer, so
+/// `…/app/../shared/helpers.py` finds the bundle's `…/shared/helpers.py`. Only
+/// a `..` left after that — one climbing out of the root — keeps the refusal.
 pub fn resolve_bundled_source(root: &Path, source_path: &Path) -> Option<PathBuf> {
+    let resolved = resolve_dot_segments(&source_path.to_string_lossy());
+    let source_path = Path::new(&resolved);
     let source_str = source_path.to_string_lossy();
     // Strip the Godot scheme here too, so the walk sees the same components
     // `bundled_source_path` would have mapped.
@@ -3128,6 +3206,77 @@ mod tests {
             resolve_bundled_source(&root, Path::new("/home/x/proj/src/main.nr")),
             Some(root.join("src").join("main.nr"))
         );
+
+        let _ = fs::remove_dir_all(&base);
+        Ok(())
+    }
+
+    /// A recorded path that names a bundled file through `..` reads THAT
+    /// file — and never a different one.
+    ///
+    /// `multi_root`'s runner puts `app/../shared` on `sys.path`, so the Python
+    /// recorder reports `…/multi_root/app/../shared/helpers.py` while the
+    /// bundle holds `…/multi_root/shared/helpers.py` (and, beside it,
+    /// `…/shared/pkg/extra.py`). Before the path was resolved, the exact step
+    /// was skipped for any `..` path and the walk only reached `shared/…`
+    /// suffixes, which a full-path bundle does not hold, so the stop's own file
+    /// was never found.
+    #[test]
+    fn resolve_bundled_source_resolves_a_parent_component_to_the_same_file() -> Result<(), Box<dyn std::error::Error>> {
+        let base = std::env::temp_dir().join(format!("dotdot-bundle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("files");
+        let shared = root.join("home/x/multi_root/shared");
+        fs::create_dir_all(shared.join("pkg"))?;
+        fs::create_dir_all(root.join("home/x/multi_root/app"))?;
+        fs::write(shared.join("helpers.py"), "def add(left, right):\n")?;
+        fs::write(shared.join("pkg").join("extra.py"), "def scale(value, factor):\n")?;
+        fs::write(root.join("home/x/multi_root/app/main.py"), "import helpers\n")?;
+
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/../shared/helpers.py")),
+            Some(root.join("home/x/multi_root/shared/helpers.py"))
+        );
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/../shared/pkg/extra.py")),
+            Some(root.join("home/x/multi_root/shared/pkg/extra.py"))
+        );
+        // `.` and `..` together, and a `..` that folds two levels.
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/./x/../../shared/helpers.py")),
+            Some(root.join("home/x/multi_root/shared/helpers.py"))
+        );
+        // A name the bundle does not hold is not found — not answered with a
+        // sibling file.
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/multi_root/app/../shared/missing.py")),
+            None
+        );
+
+        // The function itself: the root and the separator are kept, a `..`
+        // with nothing before it is kept, and a plain path is returned as is.
+        assert_eq!(resolve_dot_segments("/a/b/../c/./d.py"), "/a/c/d.py");
+        assert_eq!(resolve_dot_segments("C:\\a\\b\\..\\c.py"), "C:\\a\\c.py");
+        assert_eq!(resolve_dot_segments("res://scenes/../main.gd"), "res://main.gd");
+        assert_eq!(resolve_dot_segments("/../x.py"), "/../x.py");
+        assert_eq!(resolve_dot_segments("/a/../../x.py"), "/../x.py");
+        assert_eq!(resolve_dot_segments("/a//b.py"), "/a//b.py");
+
+        // The table the Nim read side's test reads too
+        // (`test_source_provider_revisions.nim`), so the two implementations
+        // answer every vector identically.
+        let vectors = include_str!("../tests/data/resolve_dot_segments_vectors.tsv");
+        let mut checked = 0;
+        for line in vectors.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (input, expected) = line.split_once('\t').ok_or("a vector without a tab")?;
+            let unescape = |s: &str| if s == "<empty>" { String::new() } else { s.to_string() };
+            assert_eq!(resolve_dot_segments(&unescape(input)), unescape(expected), "vector {input:?}");
+            checked += 1;
+        }
+        assert!(checked >= 25, "only {checked} vectors read");
 
         let _ = fs::remove_dir_all(&base);
         Ok(())

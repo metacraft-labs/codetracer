@@ -66,7 +66,10 @@ func classOfDoc(id: string): int =
   ## that filters by class and the manifest that records it cannot disagree.
   parseInt($id[1])
 
-const ExpectedAssertions = 10353
+const ExpectedAssertions = 10475
+  ## 10353 -> 10475: `source_vm.nim` (`CorpusMid`) grew by `trimToWindow`
+  ## forgetting the previous file's length with its text (a new file's window
+  ## is no longer clamped to the old file's length).
   ## 9857 -> 10353 (PLAT-47 part B): `source_vm.nim` (`CorpusMid`) grew by the
   ## held line contexts (`heldLineContexts`, carried through fills, trims and
   ## merges).
