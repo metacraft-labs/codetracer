@@ -3273,7 +3273,11 @@ mod tests {
             }
             let (input, expected) = line.split_once('\t').ok_or("a vector without a tab")?;
             let unescape = |s: &str| if s == "<empty>" { String::new() } else { s.to_string() };
-            assert_eq!(resolve_dot_segments(&unescape(input)), unescape(expected), "vector {input:?}");
+            assert_eq!(
+                resolve_dot_segments(&unescape(input)),
+                unescape(expected),
+                "vector {input:?}"
+            );
             checked += 1;
         }
         assert!(checked >= 25, "only {checked} vectors read");
