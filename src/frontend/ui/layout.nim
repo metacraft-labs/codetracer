@@ -2921,20 +2921,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         if not autoHideState.onChanged.isNil:
           autoHideState.onChanged()
       return
-    {.emit: """
-      var isMax = (window.outerWidth >= screen.availWidth - 8) &&
-                  (window.outerHeight >= screen.availHeight - 8);
-    """.}
-    var isMax {.importc, nodecl.}: bool
     if not autoHideState.isNil:
       let wasCollapsed = autoHideState.collapsedMode
-      autoHideState.collapsedMode = isMax
-      # Simplified bounded-edge detection: when maximized, assume both
-      # left and right edges are bounded.  Full multi-monitor detection
-      # via Electron's screen API is a future enhancement.
-      autoHideState.leftBounded = isMax
-      autoHideState.rightBounded = isMax
-      if wasCollapsed != isMax:
+      # Collapsed mode disabled: always show side strips as full tab strips.
+      autoHideState.collapsedMode = false
+      autoHideState.leftBounded = false
+      autoHideState.rightBounded = false
+      if wasCollapsed:
         if not autoHideState.onChanged.isNil:
           autoHideState.onChanged()
 

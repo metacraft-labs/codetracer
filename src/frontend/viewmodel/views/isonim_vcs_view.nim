@@ -299,6 +299,18 @@ when defined(js):
         ev.stopPropagation()
         ev.preventDefault())
 
+proc attachCommitDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
+  r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
+
+when defined(js):
+  proc attachCommitDiffClick(r: WebRenderer; btn: isonim_dom.Element; callbacks: VCSCallbacks; target: string) =
+    let t = target
+    isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
+      proc(ev: isonim_dom.Event) =
+        callbacks.invokeOpenFileDiff(t)
+        ev.stopPropagation()
+        ev.preventDefault())
+
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
   let branchName = branch
@@ -790,31 +802,20 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
     renderGraphLanes(r, commit.graphCells, commit.dotLane,
                      commit.connectors, index == 0))
 
-  # Commit message + relative timestamp.
-  #
-  # There is deliberately NO commit-level "open unified diff" button here.
-  # It used to mint the target `commit:<hash>` — a whole commit, with no path —
-  # and that is the one target shape a diff tab must never be given:
-  # DeepReview-GUI.md §4.1, "Each diff tab shows a single file. Cross-file
-  # navigation is the Changed Files list (§3); a review does not concatenate
-  # every file into one scrolling document."  A pathless commit target reached
-  # `unified_diff.loadFromGit`'s whole-commit branch, so an N-file commit
-  # rendered N stacked file headers above one concatenated document (#753).
-  #
-  # Nothing is lost by its removal, because the navigation §4.1 names is one
-  # level down in this very widget: clicking the row expands the accordion and
-  # `renderAccordionFileRow` gives every file of the commit its own "View Diff"
-  # button, carrying the single-file target `commit:<hash>:<path>`.  That is
-  # also all VCS-Panel.md §Commit History ever specified a commit row to do —
-  # "Clicking a commit: Updates the Changed Files section to show files
-  # modified in that commit".  The whole-commit diff tab was in no spec.
+  # Commit message, relative timestamp, and whole-commit unified diff button.
+  var commitDiffBtn: typeof(r.createElement("span"))
+  let commitTarget = "commit:" & commit.hash
   let body = ui(r):
     tdiv(class = "vcs-commit-body"):
       span(class = "vcs-commit-msg"):
         text commit.message
       span(class = "vcs-commit-time-col"):
         text abbreviateRelTime(commit.relativeTime)
+      span(ref = commitDiffBtn, class = "vcs-commit-diff-btn"):
+        tdiv(class = "custom-tooltip"):
+          text "View Commit Diff"
   r.appendRenderedChild(headerNode, body)
+  r.attachCommitDiffClick(commitDiffBtn, callbacks, commitTarget)
 
   r.attachCommitTooltip(headerNode, commit.hash, commit.fullHash,
                         commit.author, commit.date)
