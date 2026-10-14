@@ -8869,23 +8869,33 @@ jobs:
           exit 1
 
   workspace-lock-freshness:
-    # Alarm, not a gate: is the shared manifests repo still receiving workspace
-    # locks for this repo's commits?
+    # Alarm, not a gate: does this commit carry a workspace lock that pins every
+    # sibling repo it declares, at revisions CI can actually fetch?
     #
-    # Until 2026-08-04 that question was answered as a side effect —
-    # `setup-dev-env` resolved every cross-repo sibling from the per-commit
-    # lock, so an unlocked commit could not get past `Setup dev env`. That
-    # coupling was a terrible gate (six jobs dead in their first real step, nine
-    # more `skipped`, for eight days) and the `siblings:` entries above now name
-    # their refs explicitly so it cannot recur. But it was also the only thing
-    # anyone was watching, and the condition it was accidentally reporting is
-    # not small: nothing has been committed to the manifests repo, for ANY repo,
-    # since 2026-08-02. Those locks are what make a published workspace state
-    # reproducible, so the stall means no reproducible snapshot exists for any
-    # commit in that window.
+    # WHICH LOCK. reprobuild-specs Unified-Locking-And-Hooks.md §14 (normative
+    # since 2026-09-30) made the commit's own committed `repro.lock` the lock
+    # `clone-siblings` reads by default (`lock-store: committed`). The per-commit
+    # record in metacraft-labs/metacraft-manifests is read only by a project
+    # that opts in with `lock-store: record-store`, and no workflow here does.
+    # Until 2026-10-14 this job still asserted that a manifests record had been
+    # published for the commit. No job reads that record, and on `dev` the
+    # assertion could never pass: every `dev` commit is a merge commit GitHub
+    # created, which no workspace ever pushed, so none gets a record. (In
+    # practice the job went red one step earlier, on a stale contract in its
+    # self-test; see the 9g note in workspace-lock-freshness-test.sh.)
     #
-    # Fixing the pipeline must not be the thing that hides that. Hence a job
-    # with its own name, red on every run while the stall lasts.
+    # WHAT IT ASSERTS NOW. The commit's `repro.lock` exists, is readable, and
+    # pins every DECLARED sibling (`.github/sibling-repos` plus every bare
+    # `siblings:` entry) by a full commit id with a matching integrity. These
+    # are the rules `clone-siblings` refuses on (§14.5). Each pinned commit must
+    # also be fetchable from the url the lock records. Every job clones only its
+    # own subset, so without this job a declared sibling missing from the lock
+    # surfaces late, in one job's `Setup dev env`. Freshness against sibling
+    # tips is not CI's to check: it is enforced at commit formation and by the
+    # pre-push gate (§13.3, §13.5). The store is derived from the `lock-store:`
+    # inputs under .github/workflows. If one ever opts into `record-store`, the
+    # job checks the manifests record instead (the script's record-store mode,
+    # with its grace window for a late-arriving record).
     #
     # NOTHING declares `needs:` on this job, and it is deliberately absent from
     # `ci/verdict/required-jobs.txt`. A red check here must never be able to
@@ -8898,13 +8908,16 @@ jobs:
     # not share the failure mode it watches for.
     runs-on: ubuntu-latest
     if: always()
-    # The check gives a missing lock a bounded 300s grace window to arrive (see
-    # the script header). This ceiling is far above that on purpose: it is the
-    # backstop that makes "this alarm can never hold a runner" true even if the
-    # window logic were broken, not the mechanism that bounds the wait.
+    # Committed mode is one shallow fetch per declared sibling. Record-store
+    # mode gives a missing record a bounded 300s grace window (see the script
+    # header). This ceiling is far above either on purpose: it is the backstop
+    # that makes "this alarm can never hold a runner" true even if the window
+    # logic were broken, not the mechanism that bounds the wait.
     timeout-minutes: 20
     steps:
-      - name: Mint installation token for the manifests repo
+      - name: Mint installation token
+        # Org-scoped: it fetches the private siblings' pinned commits and, in
+        # record-store mode, clones the manifests repo.
         id: ci_token
         uses: actions/create-github-app-token@v2
         with:
@@ -8913,15 +8926,23 @@ jobs:
           owner: metacraft-labs
 
       - name: Checkout
-        # depth 2 so HEAD's first parent is present: that is the second
-        # candidate, and the one that kept `dev` resolvable for exactly one
-        # commit after publication stopped.
+        # depth 2 so HEAD's first parent is present: record-store mode probes
+        # it as the second candidate. Committed mode reads only HEAD's tree.
         uses: actions/checkout@v5
         with:
           submodules: false
           fetch-depth: 2
 
-      - name: Clone the manifests repo
+      - name: Which lock store does CI read?
+        id: store
+        run: |
+          set -euo pipefail
+          store="$(bash ci/verdict/workspace-lock-freshness.sh --print-lock-store)"
+          echo "lock-store: ${store}"
+          echo "lock_store=${store}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone the manifests repo (record-store only)
+        if: steps.store.outputs.lock_store == 'record-store'
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
         run: |
@@ -8930,39 +8951,43 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/metacraft-manifests.git" \
             "${RUNNER_TEMP}/metacraft-manifests"
 
-      - name: Self-test the lock-freshness alarm
+      - name: Self-test the lock alarm
         # Same rule as `ci-verdict` and `queue-watchdog`: an alarm is only worth
-        # trusting if its own contracts hold. The decisive fixture here is a
-        # lock that arrives WHILE the check is running — the race that used to
-        # make this job intermittently red on commits that were in fact locked.
+        # trusting if its own contracts hold. Both modes are covered: the
+        # committed lock's (a declared repo it does not pin, a pin the remote
+        # does not have) and the record store's (a record that arrives WHILE
+        # the check is running).
         # Pure bash + git against local repositories; no network, no build.
         run: bash ci/verdict/workspace-lock-freshness-test.sh
 
-      - name: Assert this commit has a published workspace lock
+      - name: Assert this commit's workspace lock pins every declared sibling
+        env:
+          GH_TOKEN: ${{ steps.ci_token.outputs.token }}
+          LOCK_STORE: ${{ steps.store.outputs.lock_store }}
         run: |
           set -uo pipefail
-          # HEAD plus its first parent — the same two candidates clone-siblings
-          # probes. `git rev-parse HEAD^` is empty for a root commit or if the
-          # fetch depth did not reach the parent; the script ignores empty and
-          # all-zero candidates.
-          #
-          # The clone above is a snapshot, and the lock is published
-          # asynchronously by the pusher's pre-push hook — measured at 54s after
-          # the clone for 84a8b633. The check therefore re-fetches this
-          # checkout (the clone URL carries the installation token, so no extra
-          # credential plumbing is needed) until the lock appears or its grace
-          # window expires. It returns the moment a fetch finds the lock, so the
-          # healthy case is no slower than before.
-          #
-          # --branch names the branch in the report. (It used to select a
-          # cause from publish-workspace-lock.yml's trigger lists; that CI
-          # publisher is retired.) `github.head_ref` is the source branch on a
-          # pull request (empty otherwise); `github.ref_name` is the branch on
-          # a push. The BASE is what matters for a PR, because the base is the
-          # mainline whose commits `clone-siblings` probes.
+          if [ "${LOCK_STORE}" = "committed" ]; then
+            # The commit's own repro.lock, exactly as clone-siblings reads it.
+            # --verify-remote fetches each pinned commit (shallow, treeless)
+            # from the url the lock records, with the installation token.
+            bash ci/verdict/workspace-lock-freshness.sh \
+              --lock-store committed \
+              --verify-remote \
+              --sha "${GITHUB_SHA}"
+            exit $?
+          fi
+          # record-store: HEAD plus its first parent — the same two candidates
+          # clone-siblings probes. `git rev-parse HEAD^` is empty for a root
+          # commit or if the fetch depth did not reach the parent; the script
+          # ignores empty and all-zero candidates. The record is published
+          # asynchronously by the pusher's pre-push gate, so the script
+          # re-fetches the clone above until it appears or its grace window
+          # expires. `--branch` only names the branch in the report: the PR
+          # base (`GITHUB_BASE_REF`) on a pull request, else the pushed branch.
           BRANCH="${GITHUB_BASE_REF:-${GITHUB_REF_NAME:-}}"
           PARENT="$(git rev-parse --verify --quiet HEAD^ || true)"
           bash ci/verdict/workspace-lock-freshness.sh \
+            --lock-store record-store \
             --manifest-dir "${RUNNER_TEMP}/metacraft-manifests" \
             --branch "${BRANCH}" \
             --sha "${GITHUB_SHA}" \

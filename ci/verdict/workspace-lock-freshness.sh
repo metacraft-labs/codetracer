@@ -1,37 +1,71 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Alarm: the shared manifests repo is still receiving workspace locks for this
-# repo's commits.
+# Alarm: does this commit carry a workspace lock that pins every sibling repo it
+# declares, at revisions CI can actually resolve?
 #
-# # Why this file exists
+# # Which lock CI reads (since 2026-09-30)
 #
-# Until 2026-08-04, "is this commit locked?" was answered on every run as a side
-# effect: `setup-dev-env` resolved each cross-repo sibling's revision from the
-# per-commit workspace lock, so an unlocked commit could not get past
-# `Setup dev env`. That coupling was a terrible gate — it took six jobs down in
-# their first real step and left nine more `skipped` for eight days — and the
-# `siblings:` entries now name their refs explicitly so it cannot happen again.
+# reprobuild-specs Unified-Locking-And-Hooks.md §14 (owner-decided 2026-09-30)
+# made the commit's OWN committed `repro.lock` the default source of sibling
+# revisions. `clone-siblings` reads each sibling's `deps` entry from
+# `$GITHUB_WORKSPACE/repro.lock` (`lock-store: committed`) and contacts no
+# manifests repo. The team record store (`metacraft-labs/metacraft-manifests`,
+# `locks/<project>/<repo>/<sha>.toml`) is read only by a project that opts in
+# with `lock-store: record-store` (§14.5), and is never a fallback. A committed
+# lock travels with the commit that carries it, including the merge commit
+# GitHub creates when a pull request lands, so nothing has to be published for
+# it (§14.6). metacraft-dev-guidelines `policies/ci-workflow-standards.md`,
+# "Resolving the sibling revision", says the same.
 #
-# But that coupling was also the ONLY thing anyone was watching. Removing it
-# fixes the pipeline and silences the alarm in the same stroke, and the
-# underlying condition is not small:
+# Until 2026-10-14 this script asked only the record-store question ("has a
+# record been published to the manifests repo for this commit?") although no
+# job here reads that store any more. On `dev` that question can never be
+# answered yes: every `dev` commit is a merge commit GitHub created, which was
+# never pushed from a workspace and so never gets a record.
 #
-#   Nothing has been committed to metacraft-labs/metacraft-manifests, for ANY
-#   repo, since 2026-08-02 (`b3b0ac6 Publish 1 workspace lock entry`).
+# So the check now asks the lock CI really reads, and picks it the way
+# `clone-siblings` does: `record-store` when any workflow in this repo passes
+# `lock-store: record-store`, `committed` otherwise (`--print-lock-store`).
 #
-# Those per-commit locks are what make a published workspace state reproducible.
-# A stall means no reproducible snapshot of the workspace exists for any commit
-# in that window — a fact about the whole workspace, not about CI.
+# # What is asserted (lock-store: committed, the default)
 #
-# The failure is quieter than "the tooling broke". `repro`'s post-commit hook
-# still WRITES the lock, into a workspace-local checkout of the manifests repo,
-# and logs `ok wrote <path>` and exits 0. It is the commit-and-push that stopped:
-# the files sit untracked in that checkout. On 2026-08-13 a developer's checkout
-# held twenty untracked codetracer locks, including one for the exact commit CI
-# was reporting as unlocked. The tooling's success message was true and useless
-# — the artefact existed on one disk and nowhere else.
+#   1. THE COMMIT CARRIES A READABLE LOCK: `repro.lock` exists at the repo root
+#      and declares `schema = "reprobuild.solved-graph-lock.v2"`.
 #
-# So this job exists to say that out loud, on every run, in its own name.
+#   2. IT PINS EVERY SIBLING REPO THIS COMMIT DECLARES, and pins each the way
+#      `clone-siblings` requires (§14.5): a full commit id, and a VCS-native
+#      `integrity` that names the same commit. The entry is found by `name` or
+#      by `path = "../<name>"`, as `clone-siblings` finds it. See "THE DECLARED
+#      SIBLING SET" below for how the declared set is derived.
+#
+#   3. With `--verify-remote`, EACH OF THOSE PINS RESOLVES: the pinned commit can
+#      be fetched from the `url` the lock records for it. §14.2 requires a pin to
+#      be published, and the pre-push gate refuses one that is not. A commit that
+#      reached the forge some other way (a web edit, a force-push that dropped a
+#      sibling's commit) is caught only here or in the first job that clones it.
+#
+# `clone-siblings` refuses the same defects, so why a separate job? Each job
+# clones only its own `siblings:` subset, and some subsets (the
+# launcher<->recorder edges) run only on some events. A declared sibling that is
+# missing from the lock would otherwise surface late, in one job, as a setup
+# failure. This job checks the whole declared set on every run, from a stock
+# runner, under its own name.
+#
+# What is NOT asserted:
+#
+#   * That the pins are FRESH (equal to each sibling's tip). CI has no workspace
+#     to observe. §14.4 puts freshness at commit formation (the managed
+#     pre-commit re-pin) and at the pre-push gate (§13.5), and CI builds exactly
+#     what was committed.
+#   * That `repro.lock` and `flake.lock` agree on a repository both resolve.
+#     That is §16 H2, which the spec places at the managed hooks and in
+#     `repro check`, and which is not implemented yet. CI has nothing to add to
+#     it.
+#
+# The committed-lock reader below mirrors `load_committed_lock` /
+# `committed_lock_rev` in metacraft-github-actions `clone-siblings.sh`. If that
+# reader changes what it accepts, change this one with it: a check that is
+# stricter or looser than the resolver it vouches for reports the wrong thing.
 #
 # # Why it is a job and not a gate
 #
@@ -43,7 +77,34 @@
 # the next one. It is loud (a named, red check on every run) and structurally
 # incapable of cascading.
 #
-# # What is asserted
+# =============================================================================
+# RECORD-STORE MODE (`--lock-store record-store`, used only when a workflow here
+# passes `lock-store: record-store`). Everything from here to "Usage" describes
+# that mode alone. No workflow in this repo opts in today.
+# =============================================================================
+#
+# # Why this mode exists
+#
+# Until 2026-08-04, "is this commit locked?" was answered on every run as a side
+# effect: `setup-dev-env` resolved each cross-repo sibling's revision from the
+# per-commit workspace lock, so an unlocked commit could not get past
+# `Setup dev env`. That coupling was a terrible gate — it took six jobs down in
+# their first real step and left nine more `skipped` for eight days — and the
+# `siblings:` entries now name their refs explicitly so it cannot happen again.
+#
+# But that coupling was also the ONLY thing anyone was watching. In August 2026
+# nothing had been committed to metacraft-labs/metacraft-manifests, for ANY
+# repo, since 2026-08-02 (`b3b0ac6 Publish 1 workspace lock entry`). For a
+# project whose CI reads the record store, those per-commit records are what
+# make a published workspace state reproducible.
+#
+# The failure is quieter than "the tooling broke". `repro`'s post-commit hook
+# used to WRITE the lock into a workspace-local checkout of the manifests repo,
+# log `ok wrote <path>` and exit 0, while nothing committed or pushed it. On
+# 2026-08-13 a developer's checkout held twenty untracked codetracer locks,
+# including one for the exact commit CI was reporting as unlocked.
+#
+# # What is asserted (record-store mode)
 #
 # TWO things, and they are different questions with different remedies:
 #
@@ -144,33 +205,57 @@
 # was never pushed from a workspace, so it never gets a record of its own.
 #
 # Usage:
-#   ci/verdict/workspace-lock-freshness.sh --manifest-dir DIR --sha SHA [--sha PARENT_SHA]
+#   ci/verdict/workspace-lock-freshness.sh [--lock-store committed] [--lock-file FILE]
+#                                          [--verify-remote] [--sha SHA]
+#                                          [--sibling-list FILE] [--workflow-dir DIR]
+#   ci/verdict/workspace-lock-freshness.sh --lock-store record-store
+#                                          --manifest-dir DIR --sha SHA [--sha PARENT_SHA]
 #                                          [--branch NAME]
 #                                          [--sibling-list FILE] [--workflow-dir DIR]
 #                                          [--grace-seconds N] [--poll-seconds N]
 #   ci/verdict/workspace-lock-freshness.sh --list-declared
+#   ci/verdict/workspace-lock-freshness.sh --print-lock-store
 #
-#   --branch NAME      the branch the commit under test is on, printed in the
-#                      report. Omitted (or empty) => reported as not given.
+#   --lock-store S     `committed` or `record-store`. Omitted => derived from
+#                      the `lock-store:` inputs under `--workflow-dir` (see
+#                      "Which lock CI reads" above). CI passes the derived value.
+#   --lock-file FILE   (committed) the lock to read. Default: `repro.lock` at the
+#                      root of this checkout, the file `clone-siblings` reads.
+#   --verify-remote    (committed) also fetch each declared sibling's pinned
+#                      commit from the `url` the lock records. Uses GH_TOKEN, if
+#                      set, as an installation token for https://github.com/.
+#   --sha SHA          (committed) the commit under test, printed in the report.
+#                      (record-store) a candidate commit to probe; repeatable.
+#   --branch NAME      (record-store) the branch the commit under test is on,
+#                      printed in the report. Omitted (or empty) => reported as
+#                      not given.
 #   --sibling-list FILE
 #                      the names-only central declaration list. Default:
 #                      `.github/sibling-repos` in this checkout.
 #   --workflow-dir DIR the directory whose `*.yml` `siblings:` blocks are
-#                      scanned for BARE declarations. Default:
-#                      `.github/workflows` in this checkout. Both are
-#                      overridable ONLY so the contract suite can drive the
-#                      derivation from fixtures; CI uses the defaults.
+#                      scanned for BARE declarations, and whose `lock-store:`
+#                      inputs select the store. Default: `.github/workflows` in
+#                      this checkout. Both are overridable ONLY so the contract
+#                      suite can drive the derivation from fixtures; CI uses the
+#                      defaults.
 #   --list-declared    print the derived declared set, one name per line, and
 #                      exit 0. Nothing else is read and no lock is probed. This
 #                      is how the contract suite proves the derivation reads the
 #                      real declarations rather than a constant.
-#   --grace-seconds N  how long a missing lock may still arrive (default 300).
-#   --poll-seconds N   pause between re-fetches when the ref did not move
-#                      (default 15). Both exist so the contract suite can
-#                      compress the window into seconds; CI uses the defaults.
+#   --print-lock-store print the derived lock store and exit 0 (exit 2 if the
+#                      workflows name one this check does not know).
+#   --grace-seconds N  (record-store) how long a missing lock may still arrive
+#                      (default 300).
+#   --poll-seconds N   (record-store) pause between re-fetches when the ref did
+#                      not move (default 15). Both exist so the contract suite
+#                      can compress the window into seconds; CI uses the
+#                      defaults.
 #
-# Exit: 0 a lock exists and pins every declared sibling repo
-#     · 1 no lock, or no trustworthy answer (the alarm)
+# Exit: 0 a lock exists and pins every declared sibling repo (and, with
+#         --verify-remote, every one of those pins can be fetched)
+#     · 1 no lock, or no trustworthy answer (the alarm). In committed mode: no
+#         readable `repro.lock`, a declared sibling's entry that
+#         `clone-siblings` would refuse, or a pin that cannot be fetched
 #     · 2 usage error, including a declared set that derived to nothing (an
 #         empty set would pass every lock, so it is refused, not reported green)
 #     · 4 a lock exists and is well-formed, but one or more DECLARED sibling
@@ -179,7 +264,9 @@
 #         reached a lock and never will on its own
 # Lane: the `workspace-lock-freshness` job (stock ubuntu-latest, bash + git).
 # Contract suite: ./workspace-lock-freshness-test.sh — run it after any change
-# here; the decisive fixture is a lock that arrives while the check is running.
+# here. Record-store mode's decisive fixture is a lock that arrives while the
+# check is running; committed mode's are a declared sibling the lock does not
+# pin and a pin the remote does not have.
 # =============================================================================
 set -uo pipefail
 
@@ -195,12 +282,19 @@ BRANCH=""
 SIBLING_LIST="$REPO_ROOT/.github/sibling-repos"
 WORKFLOW_DIR="$REPO_ROOT/.github/workflows"
 LIST_DECLARED=0
+PRINT_LOCK_STORE=0
+LOCK_STORE=""
+LOCK_FILE="$REPO_ROOT/repro.lock"
+VERIFY_REMOTE=0
 
 usage() {
-	echo "usage: workspace-lock-freshness.sh --manifest-dir DIR --sha SHA [--sha SHA]" \
-		"[--branch NAME]" \
+	echo "usage: workspace-lock-freshness.sh [--lock-store committed] [--lock-file FILE]" \
+		"[--verify-remote] [--sha SHA] [--sibling-list FILE] [--workflow-dir DIR]" >&2
+	echo "       workspace-lock-freshness.sh --lock-store record-store" \
+		"--manifest-dir DIR --sha SHA [--sha SHA] [--branch NAME]" \
 		"[--sibling-list FILE] [--workflow-dir DIR]" \
-		"[--grace-seconds N] [--poll-seconds N] | --list-declared" >&2
+		"[--grace-seconds N] [--poll-seconds N]" >&2
+	echo "       workspace-lock-freshness.sh --list-declared | --print-lock-store" >&2
 	exit 2
 }
 
@@ -237,6 +331,26 @@ while [ "$#" -gt 0 ]; do
 		;;
 	--list-declared)
 		LIST_DECLARED=1
+		shift
+		;;
+	--print-lock-store)
+		PRINT_LOCK_STORE=1
+		shift
+		;;
+	--lock-store)
+		case "${2:-}" in
+		committed | record-store) LOCK_STORE="$2" ;;
+		*) usage ;;
+		esac
+		shift 2
+		;;
+	--lock-file)
+		LOCK_FILE="${2:-}"
+		[ -n "$LOCK_FILE" ] || usage
+		shift 2
+		;;
+	--verify-remote)
+		VERIFY_REMOTE=1
 		shift
 		;;
 	--grace-seconds)
@@ -385,8 +499,61 @@ if [ "$LIST_DECLARED" -eq 1 ]; then
 	exit 0
 fi
 
-if [ -z "$MANIFEST_DIR" ] || [ "${#SHAS[@]}" -eq 0 ]; then
-	usage
+# =============================================================================
+# WHICH LOCK STORE — derived from the workflows, like the declared set.
+#
+# `clone-siblings` reads the committed `repro.lock` unless its `lock-store`
+# input says `record-store` (§14.5), and a project opts in by passing that input
+# (ci-workflow-standards.md). So the store this check must ask is whatever the
+# `lock-store:` inputs under `--workflow-dir` say: `record-store` if any of them
+# says so, `committed` if none does. A value that is neither (an expression, a
+# typo) cannot be resolved here, and guessing would check the wrong lock, so it
+# is a usage error.
+# =============================================================================
+derived_lock_store() {
+	local f values bad
+	values=""
+	if [ -n "$WORKFLOW_DIR" ] && [ -d "$WORKFLOW_DIR" ]; then
+		for f in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+			[ -r "$f" ] || continue
+			values="${values}$(awk '
+				{ line = $0; sub(/#.*/, "", line) }
+				line ~ /^[ \t]*lock-store:/ {
+					v = line
+					sub(/^[ \t]*lock-store:[ \t]*/, "", v)
+					gsub(/["'\'' \t]/, "", v)
+					print v
+				}
+			' "$f")
+"
+		done
+	fi
+	bad="$(printf '%s' "$values" | grep -v -x -e '' -e committed -e record-store | sort -u | tr '\n' ' ')"
+	if [ -n "$bad" ]; then
+		echo "::error::workspace-lock-freshness: a \`lock-store:\` input under '${WORKFLOW_DIR}' is neither 'committed' nor 'record-store' (${bad% }), so the lock CI reads cannot be determined. Pass --lock-store explicitly or fix the input." >&2
+		return 2
+	fi
+	if printf '%s\n' "$values" | grep -q -x record-store; then
+		echo record-store
+	else
+		echo committed
+	fi
+}
+
+if [ -z "$LOCK_STORE" ]; then
+	LOCK_STORE="$(derived_lock_store)" || exit 2
+fi
+readonly LOCK_STORE
+
+if [ "$PRINT_LOCK_STORE" -eq 1 ]; then
+	echo "$LOCK_STORE"
+	exit 0
+fi
+
+if [ "$LOCK_STORE" = "record-store" ]; then
+	if [ -z "$MANIFEST_DIR" ] || [ "${#SHAS[@]}" -eq 0 ]; then
+		usage
+	fi
 fi
 
 # A check with nothing to probe would pass every lock ever written. That is a
@@ -396,6 +563,262 @@ if [ "$DECLARED_COUNT" -eq 0 ]; then
 	echo "::error::workspace-lock-freshness: no declared sibling repos could be derived from '${SIBLING_LIST}' or the \`siblings:\` blocks under '${WORKFLOW_DIR}'. Probing an empty set would pass every lock, so this is refused rather than reported green." >&2
 	exit 2
 fi
+
+# =============================================================================
+# COMMITTED MODE (the default). See "What is asserted (lock-store: committed)"
+# in the header.
+#
+# The reader mirrors `load_committed_lock` / `is_commit_id` /
+# `committed_lock_rev` in metacraft-github-actions `clone-siblings.sh`: the
+# whole `deps` array sits on ONE line of inline tables, written by
+# `repro lock refresh`, and is read with bash builtins, STRICTLY. A value that
+# is not a commit id, or an integrity that names a different commit, is a defect
+# to report, never something to guess around.
+# =============================================================================
+CL_STATE=""
+CL_WHY=""
+CL_NAMES=()
+CL_PATHS=()
+CL_URLS=()
+CL_REVS=()
+CL_INTEGS=()
+
+cl_field() { # <inline-table-body> <key> -> value on stdout; rc 1 when absent
+	local body=", $1" key="$2" rest
+	case "${body}" in
+	*", ${key} = \""*) ;;
+	*) return 1 ;;
+	esac
+	rest="${body#*", ${key} = \""}"
+	printf '%s' "${rest%%\"*}"
+}
+
+load_committed_lock() {
+	local line deps entry body schema_ok=0
+	if [ ! -f "${LOCK_FILE}" ]; then
+		CL_STATE="absent"
+		return 0
+	fi
+	deps=""
+	while IFS= read -r line || [ -n "${line}" ]; do
+		line="${line%$'\r'}"
+		case "${line}" in
+		'schema = "reprobuild.solved-graph-lock.v2"') schema_ok=1 ;;
+		'deps = ['*) deps="${line#deps = [}" ;;
+		esac
+	done <"${LOCK_FILE}"
+	if [ "${schema_ok}" -ne 1 ]; then
+		CL_STATE="unreadable"
+		CL_WHY="it does not declare schema = \"reprobuild.solved-graph-lock.v2\" (regenerate it with 'repro lock refresh')"
+		return 0
+	fi
+	deps="${deps%]}"
+	CL_STATE="ok"
+	while [ -n "${deps}" ]; do
+		case "${deps}" in
+		'{ '*' }'*) ;;
+		*)
+			CL_STATE="unreadable"
+			CL_WHY="its deps array is not a list of inline tables"
+			return 0
+			;;
+		esac
+		entry="${deps%%" }"*}"
+		body="${entry#"{ "}"
+		deps="${deps#"${entry} }"}"
+		deps="${deps#", "}"
+		CL_NAMES+=("$(cl_field "${body}" name)")
+		CL_PATHS+=("$(cl_field "${body}" path)")
+		CL_URLS+=("$(cl_field "${body}" url)")
+		CL_REVS+=("$(cl_field "${body}" revision)")
+		CL_INTEGS+=("$(cl_field "${body}" integrity)")
+	done
+}
+
+is_commit_id() { # <rev>: a full 40-hex (sha1) or 64-hex (sha256) object id
+	case "$1" in
+	*[!0-9a-f]*) return 1 ;;
+	esac
+	[ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
+}
+
+# committed_pin <sibling> — rc 0 found (sets PIN_REV / PIN_URL), 4 not pinned,
+# 5 an entry `clone-siblings` would refuse (sets PIN_WHY). Runs in the calling
+# shell so the three values survive.
+PIN_REV=""
+PIN_URL=""
+PIN_WHY=""
+committed_pin() {
+	local name="$1" i rev integ
+	PIN_REV=""
+	PIN_URL=""
+	PIN_WHY=""
+	for i in "${!CL_NAMES[@]}"; do
+		[ "${CL_PATHS[$i]}" = "." ] && continue
+		if [ "${CL_NAMES[$i]}" = "${name}" ] || [ "${CL_PATHS[$i]}" = "../${name}" ]; then
+			rev="${CL_REVS[$i]}"
+			integ="${CL_INTEGS[$i]}"
+			if ! is_commit_id "${rev}"; then
+				PIN_WHY="records revision '${rev}', which is not a commit id"
+				return 5
+			fi
+			case "${integ}" in
+			git-sha1:* | git-sha256:*)
+				if [ "${integ#*:}" != "${rev}" ]; then
+					PIN_WHY="is self-contradictory: revision ${rev} but integrity ${integ} names a different commit"
+					return 5
+				fi
+				;;
+			esac
+			PIN_REV="${rev}"
+			PIN_URL="${CL_URLS[$i]}"
+			return 0
+		fi
+	done
+	return 4
+}
+
+# fetch_pin <url> <rev> — can the pinned commit be fetched from where the lock
+# says it lives? A shallow, treeless fetch of that one commit into a throwaway
+# repository: enough to prove the forge has it, and cheap. FETCH_WHY carries
+# git's stderr for the report.
+FETCH_WHY=""
+fetch_pin() {
+	local url="$1" rev="$2" scratch rc=0
+	FETCH_WHY=""
+	if [ -z "${url}" ]; then
+		FETCH_WHY="the lock records no url for it"
+		return 1
+	fi
+	scratch="$(mktemp -d)"
+	if ! git init --quiet --bare "${scratch}" >/dev/null 2>&1; then
+		rm -rf "${scratch}"
+		FETCH_WHY="could not create a scratch repository to fetch into"
+		return 1
+	fi
+	FETCH_WHY="$(GIT_TERMINAL_PROMPT=0 git -C "${scratch}" fetch --quiet --no-tags \
+		--depth=1 --filter=tree:0 "${url}" "${rev}" 2>&1 >/dev/null </dev/null)" || rc=$?
+	rm -rf "${scratch}"
+	return "${rc}"
+}
+
+check_committed_lock() {
+	local label name rc missing="" refused="" unfetched="" pinned_count=0 auth
+	label="${SHAS[0]:-this checkout}"
+
+	load_committed_lock
+	case "${CL_STATE}" in
+	absent)
+		echo "::error::No committed repro.lock for ${label} (looked for ${LOCK_FILE}). With lock-store: committed (the default) every bare sibling's revision comes from this file, so every job that clones one fails at setup. THE FIX: run 'repro lock refresh' in a workspace whose manifest declares this repo's depends edges on its siblings, and commit the repro.lock it writes."
+		return 1
+		;;
+	unreadable)
+		echo "::error::The committed repro.lock of ${label} (${LOCK_FILE}) cannot be read: ${CL_WHY}. clone-siblings refuses it the same way."
+		return 1
+		;;
+	esac
+
+	if [ "${VERIFY_REMOTE}" -eq 1 ] && [ -n "${GH_TOKEN:-}" ]; then
+		# The installation token, for private siblings on github.com. Passed
+		# through the environment rather than argv, and only for this host.
+		auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+		export GIT_CONFIG_COUNT=1
+		export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+		export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"
+	fi
+
+	while IFS= read -r name; do
+		[ -n "${name}" ] || continue
+		rc=0
+		committed_pin "${name}" || rc=$?
+		case "${rc}" in
+		0)
+			pinned_count=$((pinned_count + 1))
+			if [ "${VERIFY_REMOTE}" -eq 1 ] && ! fetch_pin "${PIN_URL}" "${PIN_REV}"; then
+				unfetched="${unfetched}  - ${name}: ${PIN_REV} from ${PIN_URL:-<no url>}
+      $(printf '%s' "${FETCH_WHY}" | grep -v 'filtering not recognized' | tail -n 2 | tr '\n' ' ')
+"
+			fi
+			;;
+		4)
+			missing="${missing}  - ${name}
+      declared in: $(declaring_sites "${name}")
+"
+			;;
+		*)
+			refused="${refused}  - ${name}: the entry ${PIN_WHY}
+"
+			;;
+		esac
+	done <<EOF
+$DECLARED_NAMES
+EOF
+
+	if [ -n "${refused}" ]; then
+		echo "::error::The committed repro.lock of ${label} has entries clone-siblings refuses (§14.5). Re-pin them with 'repro lock refresh' and commit the lock."
+		printf '%s' "${refused}"
+	fi
+	if [ -n "${unfetched}" ]; then
+		echo "::error::The committed repro.lock of ${label} pins commits that cannot be fetched from the url it records. A job that clones one of these siblings fails at setup. Push the pinned commit to that remote (the pre-push gate refuses an unpublished pin, so check how this commit reached the forge), or re-pin with 'repro lock refresh'."
+		printf '%s' "${unfetched}"
+	fi
+	if [ -n "${missing}" ]; then
+		cat <<EOM
+::error::$(printf '%s' "${missing}" | grep -c '^  - ') declared sibling repo(s) are absent from the committed repro.lock of ${label}.
+
+==============================================================
+  DECLARED SIBLING REPOS ARE NOT PINNED BY THE COMMITTED LOCK
+==============================================================
+
+${LOCK_FILE} is readable, but it does not pin these repos, which
+this commit declares bare (so clone-siblings resolves them FROM the
+lock and refuses each one, naming it, before cloning anything):
+
+${missing}
+WHY THIS HAPPENS. The lock's sibling set is the repo's develop set
+(§14.2): its \`uses:\` producers and the transitive closure of its
+\`depends\` edges in the workspace manifest. The declarations above are
+read by CI only. A repo declared here but not reachable through those
+edges is never written into the lock.
+
+REMEDY, either one:
+
+  * DECLARE THE EDGE AND RE-PIN. Add the \`depends\` edge to this repo's
+    workspace manifest entry, run \`repro lock refresh\`, and commit
+    the repro.lock it writes.
+
+  * OR STOP DECLARING THEM BARE. If a repo is not part of this repo's
+    develop set, give it an explicit \`<name>=<ref>\` (a 40-hex SHA is
+    reproducible) or drop it from the declaration site named above.
+EOM
+	fi
+
+	# A refused or unfetchable pin outranks a missing one: it is the worse
+	# report (a lock that claims something CI cannot use), as in record-store
+	# mode, where an untrusted lock (1) outranks a declared repo it lacks (4).
+	if [ -n "${refused}" ] || [ -n "${unfetched}" ]; then
+		return 1
+	fi
+	if [ -n "${missing}" ]; then
+		return 4
+	fi
+
+	echo "Committed repro.lock of ${label} pins all ${DECLARED_COUNT} declared sibling repo(s) (lock-store: committed; no record store consulted)."
+	if [ "${VERIFY_REMOTE}" -eq 1 ]; then
+		echo "Each of the ${pinned_count} pinned commit(s) was fetched from the url the lock records."
+	fi
+	return 0
+}
+
+if [ "$LOCK_STORE" = "committed" ]; then
+	rc=0
+	check_committed_lock || rc=$?
+	exit "$rc"
+fi
+
+# =============================================================================
+# RECORD-STORE MODE from here on (lock-store: record-store).
+# =============================================================================
 
 # The LEAD is the one name the wait loop re-probes each round to answer "does a
 # lock exist at all?". Which name it is does not matter — any entry proves the

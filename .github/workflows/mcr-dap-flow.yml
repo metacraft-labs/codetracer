@@ -109,10 +109,13 @@ jobs:
         # bare entry resolves through the per-commit workspace lock in the
         # shared manifests repo, which has published nothing for this repo
         # since 2026-08-02 -- the outage documented at the top of
-        # codetracer.yml and alarmed on by the `workspace-lock-freshness`
-        # job. Every job that left it bare died in this step. When lock
-        # publication resumes, dropping the `=dev` suffixes restores
-        # per-commit pinning here along with everywhere else.
+        # codetracer.yml. Every job that left it bare died in this step.
+        # Since reprobuild-specs Unified-Locking-And-Hooks.md §14 a bare
+        # entry resolves from this commit's own committed repro.lock
+        # instead (no manifests repo), and the `workspace-lock-freshness`
+        # job checks that that lock pins every bare-declared sibling; once
+        # this sibling is pinned there, dropping the `=dev` suffix restores
+        # per-commit pinning here.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
