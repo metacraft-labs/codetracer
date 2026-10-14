@@ -221,10 +221,9 @@ fi
 #
 # So the sections that are not ABOUT the derivation declare exactly one repo —
 # ${PROBE_SIBLING}, which every fixture lock pins — and section 9 drives the
-# derivation from its own fixtures and from the real files. This mirrors
-# `--publisher-workflow`: the overridable input exists so a contract can state
-# the world it is testing, and there is a contract (9g) that the DEFAULTS still
-# point at the real declaration sites.
+# derivation from its own fixtures and from the real files. The overridable
+# inputs exist so a contract can state the world it is testing, and there is a
+# contract (9g) that the DEFAULTS still point at the real declaration sites.
 DECL_DIR="${tmp_root}/declarations"
 mkdir -p "$DECL_DIR"
 DEFAULT_DECL_LIST="${DECL_DIR}/one-repo"
@@ -236,13 +235,8 @@ mkdir -p "$DEFAULT_DECL_WF"
 
 # run_check ... -> sets RC, OUT, ELAPSED
 #
-# DEFAULT --branch dev. Every fixture below this line except the branch-coverage
-# contracts is about a PUBLISHING branch whose record did not arrive, which is
-# what `dev` is — and the check now refuses to call that a stall unless it can
-# see a publisher configured for the branch. Without a branch it would answer
-# "cause not determined", which is the correct answer to a question these
-# fixtures are not asking. The coverage contracts pass their own `--branch` and
-# `--publisher-workflow`, and this default steps aside when they do.
+# DEFAULT --branch dev, the branch CI passes; it is only printed in the report.
+# It steps aside when a fixture passes its own.
 #
 # DEFAULT --sibling-list / --workflow-dir, for the reason given just above. Each
 # steps aside independently when a fixture passes its own.
@@ -599,149 +593,6 @@ expect_rc 1 "usage/zero-sha"
 expect_contains "$STALL_BANNER" "usage/zero-sha"
 ok "the all-zero SHA is skipped and still yields a report"
 
-# --- the cause of a missing lock is DERIVED, not assumed -------------------
-#
-# A report that names the missing thing but not the cause is how the `cloud`
-# family stayed unexamined for its whole history: the check said "publication
-# has stalled" and pointed at a local post-commit log, while the real cause was
-# that no publisher was configured for the branch at all — a fact sitting in a
-# file in the same checkout. These contracts pin that the check reads that file
-# and that BOTH verdicts are reachable, because a cause-detector that can only
-# ever return one answer detects nothing.
-readonly NOPUB_BANNER="NO PUBLISHER IS CONFIGURED FOR BRANCH"
-readonly UNDET_BANNER="WORKSPACE LOCK IS MISSING"
-
-wf_dir="${tmp_root}/publisher-workflows"
-mkdir -p "$wf_dir"
-
-# Flow sequence — the spelling publish-workspace-lock.yml actually uses.
-cat >"${wf_dir}/flow.yml" <<'YAML'
-on:
-  push:
-    branches: [dev, cloud]
-  pull_request_target:
-    branches: [dev, cloud, stable]
-jobs: {}
-YAML
-
-# Block sequence — equally valid YAML. A parser that read only the flow form
-# would report a covered branch as uncovered, which is the most expensive way
-# this check could be wrong: it would send a reader to edit a workflow that is
-# already correct.
-cat >"${wf_dir}/block.yml" <<'YAML'
-on:
-  push:
-    branches:
-      - dev
-      - cloud
-jobs: {}
-YAML
-
-# THE COMMENT TRAP. A branch named only in a TRAILING comment on a `branches:`
-# line is not configuration — but it sits after the key, on a line the parser
-# does match, so it is the one place a missing comment-strip actually changes
-# the answer. Without stripping, `cloud` becomes a token of this list and the
-# check reports the branch as COVERED: it goes quiet on precisely the condition
-# it exists to report, which is worse than never having looked.
-#
-# A comment on its OWN line is not this trap — it fails the `^branches:` match
-# either way — so a fixture built from one passes with the strip removed and
-# pins nothing. This suite had exactly that fixture first; mutation testing
-# reported the strip as removable, which is how the weaker fixture was caught.
-cat >"${wf_dir}/comment-trap.yml" <<'YAML'
-on:
-  push:
-    branches: [dev]  # cloud is deliberately excluded here
-jobs: {}
-YAML
-
-# No `branches:` anywhere: the question cannot be answered from this file, and
-# an empty parse must read as UNKNOWN rather than as "covers nothing" — the
-# latter would send every reader to edit a workflow that may be fine.
-cat >"${wf_dir}/no-list.yml" <<'YAML'
-on:
-  push: {}
-jobs: {}
-YAML
-
-new_world coverage
-snapshot coverage
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/flow.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/covered-flow"
-expect_contains "$STALL_BANNER" "coverage/covered-flow"
-expect_not_contains "$NOPUB_BANNER" "coverage/covered-flow"
-ok "a branch the publisher covers is reported as a STALL, not as a missing publisher"
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/block.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_contains "$STALL_BANNER" "coverage/covered-block"
-ok "a block-sequence \`branches:\` list is read too, so a covered branch is never called uncovered"
-
-# THE CONTRACT THAT MATTERS. This is the exact condition that took out 11 of 21
-# jobs on `cloud`, and the check must name it rather than blame the workspace.
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/block.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_contains "$STALL_BANNER" "coverage/guard"
-cat >"${wf_dir}/dev-only.yml" <<'YAML'
-on:
-  push:
-    branches: [dev]
-  pull_request_target:
-    branches: [dev, stable]
-jobs: {}
-YAML
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/dev-only.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/uncovered"
-expect_contains "$NOPUB_BANNER" "coverage/uncovered"
-expect_not_contains "$STALL_BANNER" "coverage/uncovered"
-# The candidates AND the cause, in one report: naming one without the other is
-# the defect being fixed.
-expect_contains "$SHA_UNDER_TEST" "coverage/uncovered"
-expect_contains "REMEDY:" "coverage/uncovered"
-ok "an UNCOVERED branch is named as such, with the candidates and a remedy — the two verdicts are distinguishable"
-
-# Not-determined is a third answer, and it must not masquerade as either. A
-# parser that silently yields nothing would otherwise read as "not covered" and
-# send every reader to edit a workflow that was fine.
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/comment-trap.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/comment-trap"
-expect_contains "$NOPUB_BANNER" "coverage/comment-trap"
-expect_not_contains "$STALL_BANNER" "coverage/comment-trap"
-ok "a branch named only in a TRAILING COMMENT is not configuration — the check still reports it uncovered"
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch ghost --publisher-workflow "${wf_dir}/no-list.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/undetermined-parse"
-expect_contains "$UNDET_BANNER" "coverage/undetermined-parse"
-expect_contains "NOT DETERMINED" "coverage/undetermined-parse"
-expect_not_contains "$NOPUB_BANNER" "coverage/undetermined-parse"
-ok "a workflow with no \`branches:\` at all reads as UNKNOWN, not as 'covers nothing'"
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch "" --publisher-workflow "${wf_dir}/flow.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/no-branch"
-expect_contains "NOT DETERMINED" "coverage/no-branch"
-ok "with no --branch the check declines to answer the cause rather than answering it wrongly"
-
-# The default must point at the real workflow, or CI would silently run the
-# undetermined path forever and this whole mechanism would be decorative.
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --grace-seconds 0 --poll-seconds 1
-expect_contains "$STALL_BANNER" "coverage/default-workflow"
-expect_not_contains "NOT DETERMINED" "coverage/default-workflow"
-ok "the DEFAULT --publisher-workflow resolves to this repo's real publish-workspace-lock.yml, and it covers 'cloud'"
-
 # ---------------------------------------------------------------------------
 # 9. A DECLARED REPO THAT NEVER REACHED THE LOCK.
 #
@@ -750,11 +601,11 @@ ok "the DEFAULT --publisher-workflow resolves to this repo's real publish-worksp
 # bare entries of the `siblings:` blocks in `.github/workflows/*.yml`, and the
 # names-only list `.github/sibling-repos` — while locks are PRODUCED elsewhere:
 # by a developer's pre-push hook, whose repo set is whatever that developer had
-# checked out, or by the server-side re-anchor in publish-workspace-lock.yml,
-# which copies every sibling pin verbatim from an older lock named only by
-# `source-sha`. NEITHER PRODUCER READS THE DECLARATIONS. So a newly declared
-# bare-name repo has no pin to copy, is absent from the next lock, and is absent
-# from every lock carried forward from that one — the hole sustains itself.
+# checked out, and (until it was retired) by the server-side re-anchor in
+# publish-workspace-lock.yml, which copied every sibling pin verbatim from an
+# older lock named only by `source-sha`. NEITHER PRODUCER READ THE
+# DECLARATIONS. So a newly declared bare-name repo had no pin to copy, was
+# absent from the next lock, and from every lock carried forward from that one.
 #
 # It surfaced only at build time, as `resolve-sibling-rev: sibling '<name>' not
 # present in lock`, taking out every job that reached `clone-siblings`. That is
@@ -919,7 +770,8 @@ run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
 expect_rc 4 "derivation/workflow-bare"
 expect_contains "declared-bare-in-workflow" "derivation/workflow-bare"
 expect_contains "mixed.yml" "derivation/workflow-bare"
-ok "a BARE \`siblings:\` entry in a workflow is probed, and the workflow is named"
+# shellcheck disable=SC2016 # literal backticks, nothing to expand
+ok 'a BARE `siblings:` entry in a workflow is probed, and the workflow is named'
 
 # 9e — the same block's `name=ref`, SHA-pinned and commented entries are NOT
 # probed, and neither is the `name=ref` in the sibling list. They are in the
@@ -928,7 +780,8 @@ ok "a BARE \`siblings:\` entry in a workflow is probed, and the workflow is name
 expect_not_contains "pinned-by-ref" "derivation/workflow-ref"
 expect_not_contains "sha-pinned" "derivation/workflow-ref"
 expect_not_contains "commented-out-repo" "derivation/workflow-ref"
-ok "a \`name=ref\` entry bypasses the lock and is NOT probed — nor is a commented one"
+# shellcheck disable=SC2016 # literal backticks, nothing to expand
+ok 'a `name=ref` entry bypasses the lock and is NOT probed — nor is a commented one'
 
 # 9g — THE DEFAULTS. Everything above drives fixtures; if the defaults did not
 # point at this repo's real declaration sites the whole mechanism would be
@@ -953,7 +806,8 @@ ok "the default set spans BOTH declaration sites, from the real files"
 # it. A derivation that swept every token in those blocks would fail here.
 expect_not_contains "codetracer-native-backend" "derivation/defaults"
 expect_not_contains "io-mon" "derivation/defaults"
-ok "names that are only ever \`=ref\` or SHA-pinned in the real workflows are excluded"
+# shellcheck disable=SC2016 # literal backticks, nothing to expand
+ok 'names that are only ever `=ref` or SHA-pinned in the real workflows are excluded'
 
 # --- 9h. an empty declared set is refused, not passed -----------------------
 #
@@ -978,7 +832,7 @@ ok "an empty declared set is a refusal (exit 2), never a vacuous pass"
 # result; comparing against a number derived from the file is what tells the two
 # apart. If your count comes out LOWER than this, the suite stopped early or a
 # contract was deleted — find out which. Never lower this to make it match.
-readonly EXPECTED_ASSERTIONS=44
+readonly EXPECTED_ASSERTIONS=37
 
 echo
 echo "workspace-lock-freshness-test summary: executed=${pass_count} failed=0"

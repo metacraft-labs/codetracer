@@ -36,8 +36,8 @@
 # uncommitted changes would not reproduce the tree it claims"), and where
 # `.repro/manifests` is not a git checkout the lock is generated and then
 # silently dropped. `ci/verdict/workspace-lock-freshness.sh` is the alarm for
-# that condition and `.github/workflows/publish-workspace-lock.yml` is the
-# repair; neither is this script's business.
+# that condition, and the repair belongs to the workspace's pre-push gate, which
+# publishes the record; neither is this script's business.
 #
 # ## Where the SHAs come from: flake.lock, which is already correct
 #
