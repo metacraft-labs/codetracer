@@ -1020,6 +1020,24 @@ const
     "src/tests/cli/target_axes_test.nim",
   ]
 
+  CliReplayGateTests* = [
+    # `ct replay`'s replay-engine options (codetracer-specs CLI/ct/replay.md,
+    # "Options").  Same contract and the same runner as the arrays above --
+    # `just test-cli-record` globs the whole of `src/tests/cli` -- kept in its
+    # own array because its subject is the replay command, not recording.
+    #
+    # `--thread-sync-order` and `--os-simulation` reach the native replay
+    # engine only as their environment twins, through processes that have no
+    # argument slot for them, so a hop that stops passing them on drops them
+    # silently: the replay still runs, under the engine's defaults.  The pure
+    # test pins the decision (Rule 3 seeding, refusal by name, nothing
+    # published when nothing is given); the end-to-end test runs the shipped
+    # `ct` and checks what reaches the front-end it launches.  db-backend's own
+    # hop is `src/db-backend/tests/replay_worker_env_forwarding_test.rs`.
+    "src/tests/cli/replay_backend_env_test.nim",
+    "src/tests/cli/replay_backend_env_e2e_test.nim",
+  ]
+
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [
     GuiActionGateEntry(
       action: "ct.test.run",
