@@ -344,17 +344,23 @@ jobs:
   #
   # `metacraft-github-actions/setup-dev-env` clones cross-repo siblings via its
   # `clone-siblings` sub-action. A bare entry (`codetracer-trace-format`) asks
-  # that action to resolve the revision from a *workspace lock* — a per-commit
-  # snapshot published to `metacraft-labs/metacraft-manifests@latest` by the
-  # workspace tooling's pre-push hook. An entry of the form `name=ref` skips
-  # that lookup and clones `ref` directly.
+  # that action to resolve the revision from a *workspace lock*. An entry of the
+  # form `name=ref` skips that lookup and clones `ref` directly.
   #
-  # Lock publication for this repo stopped on 2026-08-02 (last entry:
-  # `locks/dev/codetracer/784c9bda…​.xml`). `clone-siblings` probes the pushed
+  # WHICH lock answers a bare entry changed on 2026-09-30. Since
+  # reprobuild-specs Unified-Locking-And-Hooks.md §14.5 it is the triggering
+  # commit's own committed `repro.lock` (`lock-store: committed`, the default;
+  # no manifests repo is contacted). The history below is about the lock it
+  # read BEFORE that: a per-commit record published to
+  # `metacraft-labs/metacraft-manifests@latest` by the workspace tooling's
+  # pre-push hook.
+  #
+  # Record publication for this repo stopped on 2026-08-02 (last entry:
+  # `locks/dev/codetracer/784c9bda…​.xml`). `clone-siblings` probed the pushed
   # commit and its parent only (`--no-walk`), so `dev` stayed resolvable for
   # exactly one more commit and then broke: 8d587343 (parent 784c9bda) was the
   # last green `Setup dev env`; 3583cd6b (run 30951549711, 2026-08-04) was the
-  # first red one, and every push since has failed the same way:
+  # first red one, and every push after it failed the same way:
   #
   #   ##[error]No workspace lock for codetracer (candidates: <sha> <parent>).
   #   Neither a repo-workspaces locks/<project>/codetracer/<sha>.xml nor a
@@ -367,25 +373,29 @@ jobs:
   # them `skipped` — the exact "the tests never ran" state `ci-verdict` exists
   # to name.
   #
-  # Restoring lock publication is an infrastructure task outside this repo (the
-  # workspace moved from repo-workspaces to reprobuild and the manifests repo
-  # has received nothing since). Until it is restored, siblings are pinned to
-  # the branch the lock itself recorded for every one of them (`upstream="dev"`
-  # in 784c9bda's lock), which is also what the lock-free paths in this file
-  # already do — the `clone-repo` steps in `viewmodel-tests` / `test-non-gui`
-  # all clone `ref: dev`.
+  # The fix at the time was to stop depending on that record: siblings were
+  # pinned to the branch the lock itself recorded for every one of them
+  # (`upstream="dev"` in 784c9bda's lock), which is also what the lock-free
+  # paths in this file already do — the `clone-repo` steps in
+  # `viewmodel-tests` / `test-non-gui` all clone `ref: dev`.
   #
   # ONE FAMILY OF SIBLINGS NO LONGER PARTICIPATES IN ANY OF THIS. codetracer's
   # from-source dependencies — isonim and the four nim-* libraries — are
   # provisioned by `.github/actions/provision-repro-lock-siblings` from the
   # `repro.lock` COMMITTED IN THIS REPO, at exact SHAs, with no manifest repo
-  # in the path at all. That is the shape the rest of this list is waiting on:
-  # a lock that lives next to the source it describes cannot lapse, and does
-  # not have to be told which repos a developer happened to have checked out.
+  # in the path at all. A lock that lives next to the source it describes
+  # cannot lapse, and does not have to be told which repos a developer happened
+  # to have checked out. Since §14 that is also the lock a bare entry resolves
+  # from.
   #
   # This changes WHERE a revision comes from, not WHICH repos are provisioned
-  # or what any job asserts. When locks are published again, dropping the
-  # `=dev` suffixes restores per-commit pinning.
+  # or what any job asserts. Dropping an `=dev` suffix now restores per-commit
+  # pinning for that sibling once this repo's committed `repro.lock` pins it
+  # (`clone-siblings` refuses a bare entry the lock does not pin, and the
+  # `workspace-lock-freshness` job checks every bare-declared sibling against
+  # that lock). `ci/test/sibling-provisioning-test.sh` treats a bare entry as
+  # the good shape and holds the remaining branch-tip entries under a
+  # shrink-only ceiling (`BRANCH_TIP_CEILING`); lower it when one is converted.
   #
   # NOTE (CIP-5 Wave 4): the whole Windows platform was migrated as a single
   # unit (honoring the prior "move the whole platform or none of it" rule) from
@@ -8549,11 +8559,16 @@ jobs:
         # taken down by the outages they watch for.
         #
         # WHICH REF: a bare `siblings:` entry resolves its revision from a
-        # workspace lock in metacraft-labs/metacraft-manifests, which has
-        # published nothing for this repo since 2026-08-02. Six jobs died in
-        # their first real step for eight days because of it, and nine more
-        # were reported `skipped` in consequence -- the state the verdict step
-        # below exists to name.
+        # workspace lock. Until 2026-09-30 that was a per-commit record in
+        # metacraft-labs/metacraft-manifests, which stopped receiving records
+        # for this repo on 2026-08-02: six jobs died in their first real step
+        # for eight days because of it, and nine more were reported `skipped`
+        # in consequence -- the state the verdict step below exists to name.
+        # Since reprobuild-specs Unified-Locking-And-Hooks.md §14.5 it is this
+        # commit's committed `repro.lock`. The contract treats a bare entry as
+        # the good shape and holds the branch-tip (`=dev`) entries under a
+        # shrink-only ceiling; the `workspace-lock-freshness` job checks that
+        # the lock pins every bare one.
         #
         # WHICH CREDENTIAL: one org-scoped installation token per job, minted
         # from the per-repo secret. The org-variable form of the app id
