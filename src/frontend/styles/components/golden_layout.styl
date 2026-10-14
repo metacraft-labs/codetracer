@@ -1,6 +1,12 @@
 // The space between two tabs.
 LAYOUT_TAB_GAP = 0.25em
 
+// How far a panel's tab — the top of everything you see of a panel — sits
+// below the top of its 32px header.  The side strips' first tab starts the
+// same distance down (`#auto-hide-strip-left.has-tabs`, auto_hide.styl), so the
+// strip tabs and the panels share one top line.  4px.
+LAYOUT_TAB_TOP = 0.25rem
+
 // The radius of the curve that joins a tab to its panel.
 //
 // This is the *painted* radius.  The connectors on a GoldenLayout tab are
@@ -318,7 +324,7 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
 // left 8px, floating the connectors above the panel's edge.
 .lm_header .lm_tab
   height: 1.5rem !important
-  margin-top: 0.25rem !important
+  margin-top: LAYOUT_TAB_TOP !important
 
 // ---------------------------------------------------------------------------
 // Busy tab

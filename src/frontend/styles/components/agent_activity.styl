@@ -1,3 +1,11 @@
+// Every control in the prompt toolbar — icon buttons, the branch and model
+// buttons, send — is this tall, with these corners (see "Prompt toolbar: one
+// size, one corner" at the end of this file); the menus, the message field and
+// the prompt area share the corners.  28px, 6px (Nikolay, 2026-10-11: 8px → 6px,
+// the app's control radius, CONTROL_RADIUS in button.styl).
+AGENT_TOOLBAR_CONTROL_SIZE = 1.75rem
+AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
+
 .log-item
     border-top: 0.0625em solid #4a4a4a
     padding: 0.5em
@@ -44,7 +52,7 @@
 
   .agent-input-wrapper
     background: colors-ui-surface-base-canvas
-    border-radius: 0.5em
+    border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
     display: flex
     flex-direction: column
 
@@ -223,9 +231,14 @@
   display: flex
   flex-wrap: nowrap
   align-items: stretch
-  gap: 0.5em
+  // 6px between the controls (Nikolay, 2026-10-12), matching their 6px corners.
+  gap: 0.375rem
   overflow: visible
   min-width: 0
+  // The toolbar's own width decides whether the branch and model buttons show
+  // their names (see the `@container` rule below).
+  container-type: inline-size
+  container-name: agent-toolbar
 
   .agent-button
     align-items: center
@@ -279,6 +292,9 @@
   .agent-model-select
     flex: 1 1 auto !important
     min-width: 0 !important
+    // Same start as the branch button (`.agent-branch-button`), now that both
+    // open with an icon.
+    padding-left: 0.5em !important
 
     .agent-model-img
       margin-left: auto
@@ -1118,9 +1134,20 @@
 
 .agent-interaction
   background: colors-ui-surface-base-canvas
-  border-radius: 0.5em
+  border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
   padding: 0.5em
   flex: 0 0 auto
+
+  // While a field in the prompt has the caret — the message, or the branch
+  // menu's search — the whole prompt area carries the selected-panel line: the same 1px
+  // (SELECTED_PANEL_BORDER, golden_layout.styl), in CodeTracer's active colour
+  // brand/600 #4F46E5 (Nikolay, 2026-10-11).  `outline`, not `border`: it takes
+  // no space, so nothing shifts by a pixel on focus, and it follows the
+  // corners.  `:focus-within`: whichever control inside has focus.  (Clicking
+  // a toolbar button does not count: on macOS a button takes no focus.)
+  &:focus-within
+    outline: SELECTED_PANEL_BORDER solid colors-brand-600
+    outline-offset: 0
 
 .prompt-wrapper
   background: colors-ui-surface-base-canvas
@@ -1371,15 +1398,32 @@
   white-space: nowrap
   min-width: 0
 
-.agent-branch-img
-  background-image: AGENT_BRANCH_IMG
-  background-size: 0.875em 0.875em
+// The branch and agent icons from the design system's Icons page
+// (`icons-lg=branch`, `icons-lg=agent`), drawn at their own 16px frame.  In rem:
+// the buttons' text size would otherwise shrink them to 14px.
+agent-toolbar-icon(img)
+  background-image: img
+  background-size: 1rem 1rem
   background-position: center
   background-repeat: no-repeat
-  width: 1em
-  min-width: 1em
-  height: 1em
+  width: 1rem
+  min-width: 1rem
+  height: 1rem
   flex-shrink: 0
+
+.agent-branch-img
+  agent-toolbar-icon(AGENT_BRANCH_IMG)
+
+.agent-model-icon
+  agent-toolbar-icon(AGENT_MODEL_IMG)
+
+// Icon + model name, laid out as `.agent-branch-label` lays out the branch.
+.agent-model-label
+  display: flex
+  align-items: center
+  gap: 0.375em
+  min-width: 0
+  overflow: hidden
 
 .agent-branch-dropdown
   position: absolute
@@ -1730,3 +1774,148 @@
   height: auto !important
   flex: 0 0 auto !important
   border-radius: 0.5em !important
+
+// ---------------------------------------------------------------------------
+// Narrow Agent panel: branch and model buttons become icons only.
+//
+// Squeezed, the two buttons cut their names down to a letter or two and then to
+// nothing, leaving a chevron no one can read (Nikolay, 2026-10-11).  Below the
+// width where each name still shows about eight characters, they drop the name
+// and the chevron and become 28px squares like the toolbar's other icon
+// buttons (`.agent-add-context-button`, `.agent-settings-button`).  The full
+// name stays on hover (`title`), and the dropdowns open as before.
+//
+// 23rem (368px) is the toolbar width that gives each button 8px padding, the
+// 16px icon, a 6px gap, ~64px of name (≈8 characters, the "…" included), the
+// 24px chevron and 8px padding (128px), beside the three 28px icon buttons and
+// four 6px gaps (108px): 128 + 128 + 108 = 364, rounded up.  At ~48px of name
+// (tried first) the "…" left "ui-de…" and "Cod…" — too little to recognise.
+// ---------------------------------------------------------------------------
+// Above that width, neither button is squeezed below those 128px, so a name
+// never gets fewer than ~8 characters.  Without this floor the toolbar shrank
+// the buttons in proportion to their full width, and the short model name was
+// cut to one letter while the long branch name still had plenty.
+.agent-buttons-container
+  .agent-branch-wrapper,
+  .agent-model-wrapper
+    min-width: 8rem
+
+// (Written out in the query: Stylus does not substitute variables inside
+// `@container`.)
+@container agent-toolbar (max-width: 23rem)
+  .agent-buttons-container
+    .agent-branch-wrapper,
+    .agent-model-wrapper
+      flex: 0 0 auto
+      min-width: 0
+
+  .agent-buttons-container .agent-branch-button,
+  .agent-buttons-container .agent-model-select
+    flex: 0 0 auto !important
+    width: AGENT_TOOLBAR_CONTROL_SIZE !important
+    height: AGENT_TOOLBAR_CONTROL_SIZE !important
+    align-self: center
+    padding: 0 !important
+    justify-content: center
+    gap: 0
+
+    .agent-branch-text,
+    .agent-model-text,
+    .agent-model-img
+      display: none
+
+  .agent-branch-label,
+  .agent-model-label
+    gap: 0
+
+
+// ---------------------------------------------------------------------------
+// Prompt toolbar: one hover for every control — a fill, no outline.
+//
+// Icon buttons app-wide carry the shared control outline and lighten it on
+// hover (button.styl, `[class*="ct-button-image-"]…`).  In this toolbar that
+// put a grey ring on add-context, settings and send, beside the branch and
+// model buttons, which have no outline and only change their fill (Nikolay,
+// 2026-10-11).  Here the outline is transparent, at rest and on hover, so all
+// five answer the pointer the same way: the hover fill alone (the send button
+// keeps its own primary hover fill).  The 1px stays, transparent, so no button
+// changes size.  Selector carries one class more than button.styl's to win.
+// ---------------------------------------------------------------------------
+.agent-buttons-container [class*="ct-button-image-"][class*="ct-button-image-"]
+  border-color: transparent !important
+
+  &:hover:not(:disabled)
+    border-color: transparent !important
+
+// ---------------------------------------------------------------------------
+// Prompt toolbar: one size, one corner — and menus that match it.
+//
+// Measured in the running app (Nikolay, 2026-10-11) the prompt mixed two
+// control heights (icon buttons 26px, branch/model 28px), three corner sizes
+// (6px icon buttons, 8px branch/model and the field, 6px menus), a 0.5px menu
+// border that the screen blurs, menu rows padded in fractions of a pixel
+// (41.5px / 66.5px rows), branch names wrapping onto two lines in the code
+// font, the field and the toolbar touching, and the two menus sized by
+// different rules.  All of it is set here, scoped to the prompt: the menus
+// elsewhere in the app keep the shared `dropdown-surface-chrome()` look.
+// ---------------------------------------------------------------------------
+
+// 8px between the field and the toolbar; they touched.
+.agent-interaction .agent-buttons-container
+  margin-top: 0.5rem
+
+// Every control 28px tall with 6px corners.  The icon buttons are 28px squares.
+// The send button stays a circle — its shape is what marks it as the action —
+// but at the same 28px.
+.agent-buttons-container
+  .agent-button,
+  [class*="ct-button-image-"][class*="ct-button-image-"]
+    height: AGENT_TOOLBAR_CONTROL_SIZE !important
+    // The md icon-button size also caps the height (`max-height: 1.625rem`,
+    // button.styl), which would hold the icon buttons at 26px.
+    max-height: AGENT_TOOLBAR_CONTROL_SIZE !important
+    border-radius: AGENT_TOOLBAR_CONTROL_RADIUS !important
+
+  [class*="ct-button-image-"][class*="ct-button-image-"]
+    width: AGENT_TOOLBAR_CONTROL_SIZE !important
+    min-width: AGENT_TOOLBAR_CONTROL_SIZE !important
+
+  .agent-start-button.agent-start-button,
+  .agent-stop-button.agent-stop-button
+    border-radius: 50% !important
+
+// Both menus: 6px corners like the buttons they open from, a whole 1px border,
+// and the same rule for width — as wide as the button, never under 160px.
+.agent-branch-dropdown,
+.agent-model-dropdown
+  border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
+  border: 0.0625rem solid colors-ui-border-primary
+  min-width: 10rem
+
+// Rows: 14px text on a 20px line with 8px / 12px padding — 36px rows, the
+// height of every other menu row in the app (`ct-menu-item`, 2.25rem), all on
+// whole pixels.
+.agent-branch-item,
+.agent-model-item,
+.agent-branch-create-row
+  font-size: 0.875rem
+  line-height: 1.25rem
+  padding: 0.5rem 0.75rem
+
+// Branch names on one line, cut with "…" (the full name on hover), in the
+// interface font like the branch button that shows the same name — not the
+// code font, which is for program text.
+.agent-branch-item
+  font-family: "SpaceGrotesk", sans-serif
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+.agent-branch-search-row
+  padding: 0.5rem 0.75rem
+
+  .agent-branch-search-input
+    font-size: 0.875rem
+    line-height: 1.25rem
+    padding: 0.25rem 0
+

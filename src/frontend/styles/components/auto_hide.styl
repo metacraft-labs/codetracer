@@ -59,6 +59,10 @@
     flex-basis: 2em
     padding-left: 0.25em
     padding-right: 0.25em
+    // The first tab starts where a panel's tab does, 4px below the layout's
+    // top (LAYOUT_TAB_TOP, golden_layout.styl), not flush with it — flush, the
+    // strip tabs stood 4px above the panels beside them (Nikolay, 2026-10-11).
+    padding-top: LAYOUT_TAB_TOP
 
 // When the left strip is visible, nullify #ROOT's padding-left so the visual
 // gap on both sides of the strip tabs is a consistent 0.25em:
@@ -94,6 +98,10 @@
   // container below always had this and the side ones did not.
   background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
+  // Its top on the same line as the panels' tabs and the strip tabs
+  // (LAYOUT_TAB_TOP, golden_layout.styl), so an opened side panel does not
+  // stand 4px above the panels beside it.
+  margin-top: LAYOUT_TAB_TOP
   position: relative
   // z-index: 5 creates a stacking context so GL children with high z-index
   // are confined within it — the backdrop (z-index: 98, transparent) is below
