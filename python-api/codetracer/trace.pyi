@@ -93,6 +93,10 @@ class Trace:
         """Jump to a specific execution point by ticks."""
         ...
 
+    def goto_geid(self, geid: int) -> Location:
+        """Jump to right after the event with global event id *geid* (native recordings)."""
+        ...
+
     # --- Inspection ---
 
     def current_location(self) -> Location:

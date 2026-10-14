@@ -11387,6 +11387,852 @@ async fn test_real_custom_mcp_exec_script_relative_trace_path() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
+// ===========================================================================
+// MCP `exec_script` + `Trace.goto_geid` on a native (MCR) recording
+// ===========================================================================
+//
+// `mcp_exec_script_goto_geid_native_recording` (codetracer-specs
+// milestones/Self-Healing-Pipeline.milestones.org, HS-M2 unit U4b5; spec
+// spec/Planned-Features/CodeTracer-MCP-Server.md, Python API `goto_geid`).
+//
+// The program, `tests/fixtures/native/span_goto_probe.c` (`-O0 -g`), declares
+// three spans through the recorder call and prints, for each, its marker
+// geids, the value the local `value` holds after the span's end call, and the
+// source line (`__LINE__`) of that call.  `ct-mcr record --split` records it
+// under the default attach; the test takes the recording's first slice, the
+// one a `--split` recording's replay is served from (debugserver.md: a slice
+// starting at a periodic checkpoint is refused until CAS-K3).  Oracles, never
+// values the test supplies: the program's own output, the fixture's source,
+// and `ct-mcr dump-events` (the recorder's own reader of the slice: which
+// slice holds the span markers, the first lock release in it, and the first
+// geid of the last slice).
+//
+// Through `session-manager trace mcp` (started in the test directory, given
+// the slice as a RELATIVE `trace_path`, as an agent would), one `exec_script`
+// calls `trace.goto_geid` and reports, as JSON lines:
+//   * span 2's end marker: the location (the result and `trace.location`)
+//     is the fixture at the printed line, and the local `value` is span 2's
+//     printed value;
+//   * back to span 1's end marker (a replay from the stage0 boundary) reads
+//     span 1's value; forward to span 3's reads span 3's;
+//   * the first geid of the last slice, beyond this slice: `NavigationError`
+//     naming `E02`; the slice's first lock release: `NavigationError`
+//     naming `E09` and the server's reason (`evSyncLockRelease`);
+//   * `0`, `-1`, `True`, `"12"` and `None`: `ValueError`, nothing sent;
+//   * the session still serves a seek afterwards (span 1 again);
+//   * the replay executes from the restored position: `step_over` stops on
+//     the fixture's next line (the `printf`), where the local `end_line` is
+//     the line the program printed (its own `__LINE__`, stored by the rest
+//     of the end call's line) and `value` is still span 1's; a second
+//     `step_over` steps over the call to the `fflush` line; a breakpoint on
+//     the loop's `probe_step` line and `continue_forward` stop there in the
+//     next iteration (`i` is 1); `step_back` raises `NavigationError` naming
+//     `E0C` (the replay does not execute backward); a seek to span 3 and a
+//     step from it read span 3's value on the `printf` line (codetracer-specs
+//     spec/Planned-Features/CodeTracer-MCP-Server.md, `goto_geid`: the
+//     replay executes forward from the restored position);
+//   * from there `continue_forward` runs to the end of the recording (no
+//     breakpoint ahead); `step_over` then raises `NavigationError` naming
+//     the end of the recording, and a seek to span 2 and a step from it
+//     still read span 2's line and value (ct-native-replay starts the
+//     debugserver on the slice again: LLDB drops the connection when the
+//     program exits).
+// Negative control: the same program recorded with a second thread (the
+// whole recording: its first slice is refused for another reason, see
+// codetracer-specs issue
+// 2026-10-12-slice-0-of-a-two-thread-split-recording-is-refused-as-a-broken-acquisition-order.md);
+// the replay refuses it and the agent's error names two threads and XMR-B1.
+//
+// Falsifying mutations (milestone U4b5 entry): `goto_geid` mapped to
+// `ct/goto-ticks`, or its geid dropped or replaced (the seek lands elsewhere),
+// the replay's reason dropped from the error, and, in ct-native-replay, a
+// step after a seek taken through the historical path again, a seek after
+// the end of the recording made without starting the debugserver again, and
+// a step after the end answered as a stop, all red here.
+//
+// No mocks: a real compiler, `ct-mcr record`, `session-manager` (daemon and
+// MCP server), `replay-server`, `ct-native-replay`, LLDB, `ct-mcr debugserver`
+// and Python.
+//
+// Prerequisites, each a failure when missing (`prereq_missing`): a C compiler
+// (`cc`, or `CC`), `ct-mcr` (`CODETRACER_CT_MCR_CMD`, else the sibling
+// `codetracer-native-recorder/ct_cli/ct_cli`, else `ct-mcr` on `PATH`),
+// `ct-native-replay` and `replay-server`.  Hermetic: the recorder, the daemon
+// and the MCP server run without any `CT_*_DEBUG_*` variable from the
+// caller's environment.  `ct-mcr record` refuses a host without CPUID
+// faulting (Multi-Core-Recorder.md §8.3), so on such a host this test fails
+// at the recording step and says why; replay needs no CPUID faulting.
+
+/// The span probe's source.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn span_goto_probe_source() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/span_goto_probe.c")
+}
+
+/// Locate `ct-mcr`, or report it missing through [`prereq_missing`].
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn find_ct_mcr() -> Option<PathBuf> {
+    if let Ok(cmd) = std::env::var("CODETRACER_CT_MCR_CMD")
+        && !cmd.is_empty()
+    {
+        return Some(PathBuf::from(cmd));
+    }
+    let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../codetracer-native-recorder/ct_cli/ct_cli");
+    if sibling.is_file() {
+        return Some(sibling.canonicalize().unwrap_or(sibling));
+    }
+    if let Ok(output) = std::process::Command::new("which").arg("ct-mcr").output()
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+    prereq_missing(&format!(
+        "ct-mcr was not found (CODETRACER_CT_MCR_CMD is unset, {} does not \
+         exist, and ct-mcr is not on PATH).  Build it with `just build-ct-mcr` \
+         in codetracer-native-recorder.",
+        sibling.display()
+    ));
+    None
+}
+
+/// The names of the `CT_*_DEBUG_*` variables in this process's environment:
+/// the recorder's and the replay's debug knobs, which a hermetic run removes.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn debug_knob_names() -> Vec<String> {
+    std::env::vars_os()
+        .map(|(key, _)| key.to_string_lossy().into_owned())
+        .filter(|key| key.starts_with("CT_") && key.contains("_DEBUG_"))
+        .collect()
+}
+
+/// A command whose environment carries no `CT_*_DEBUG_*` variable.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn hermetic_command(program: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    for key in debug_knob_names() {
+        command.env_remove(&key);
+    }
+    command
+}
+
+/// What the recorded run printed for one span.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[derive(Debug, Clone, Copy)]
+struct PrintedSpan {
+    end: u64,
+    value: i64,
+    line: i64,
+}
+
+/// The `span <i> start <s> end <e> value <v> line <l>` lines.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn parse_printed_spans(stdout: &str) -> Vec<PrintedSpan> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            if words.len() == 10 && words[0] == "span" && words[2] == "start" {
+                Some(PrintedSpan {
+                    end: words[5].parse().ok()?,
+                    value: words[7].parse().ok()?,
+                    line: words[9].parse().ok()?,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// A recording of the span probe and the facts the test reads from it.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+struct SpanProbeRecording {
+    /// `ct-mcr record`'s standard output (the program's lines among them).
+    stdout: String,
+    /// The whole recording.
+    trace: PathBuf,
+    /// The `--split` slices, in order.
+    slices: Vec<PathBuf>,
+}
+
+/// Build the probe and record it with `ct-mcr record --split` (hermetic).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn record_span_probe(
+    ct_mcr: &Path,
+    dir: &Path,
+    name: &str,
+    args: &[&str],
+) -> Result<SpanProbeRecording, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let binary = dir.join(name);
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".to_owned());
+    // `-z now`: resolve every symbol at load time.  With lazy binding the
+    // dynamic linker's resolver saves the vector registers with XSAVEC,
+    // which the stage0 emulator does not execute, so the replay would stop
+    // (`E06`) at the first call through the PLT.
+    let compiled = std::process::Command::new(&cc)
+        .args([
+            "-O0",
+            "-g",
+            "-U_FORTIFY_SOURCE",
+            "-Wall",
+            "-Wl,-z,now",
+            "-o",
+        ])
+        .arg(&binary)
+        .arg(span_goto_probe_source())
+        .arg("-lpthread")
+        .output();
+    let compiled = match compiled {
+        Ok(output) => output,
+        Err(e) => {
+            prereq_missing(&format!("cannot run the C compiler {cc:?}: {e}"));
+            return Err(format!("no C compiler ({cc:?}): {e}"));
+        }
+    };
+    if !compiled.status.success() {
+        return Err(format!(
+            "compiling the span probe failed: {}",
+            String::from_utf8_lossy(&compiled.stderr)
+        ));
+    }
+    let trace = dir.join(format!("{name}.ct"));
+    let recorded = hermetic_command(ct_mcr)
+        .current_dir(dir)
+        // The licensing counter of this recording goes to a scratch
+        // directory, never the developer's own profile.
+        .env("XDG_DATA_HOME", dir.join("xdg-data"))
+        .args(["record", "--split", "-o"])
+        .arg(&trace)
+        .arg("--")
+        .arg(&binary)
+        .args(args)
+        .output()
+        .map_err(|e| format!("run {}: {e}", ct_mcr.display()))?;
+    let stdout = String::from_utf8_lossy(&recorded.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&recorded.stderr).into_owned();
+    if !recorded.status.success() || !stdout.contains("span 2 ") {
+        return Err(format!(
+            "ct-mcr record did not record the span probe (exit {:?}); recording needs \
+             a host with CPUID faulting (Multi-Core-Recorder.md §8.3).\nstdout:\n{stdout}\n\
+             stderr:\n{stderr}",
+            recorded.status.code()
+        ));
+    }
+    // `split: <n> slices -> <dir>`
+    let slice_dir = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("split: "))
+        .and_then(|rest| rest.split_once(" -> "))
+        .map(|(_, dir)| PathBuf::from(dir.trim()))
+        .ok_or_else(|| format!("ct-mcr record printed no `split:` line:\n{stdout}"))?;
+    let mut slices: Vec<PathBuf> = std::fs::read_dir(&slice_dir)
+        .map_err(|e| format!("read {}: {e}", slice_dir.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "ct"))
+        .collect();
+    slices.sort();
+    if slices.len() < 2 {
+        return Err(format!(
+            "expected several slices in {}",
+            slice_dir.display()
+        ));
+    }
+    Ok(SpanProbeRecording {
+        stdout,
+        trace,
+        slices,
+    })
+}
+
+/// The geids `ct-mcr dump-events` lists for events of `event_type` in
+/// `trace`, at most `limit` of them (`[geid=<n> ...]` lines).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn dump_event_geids(
+    ct_mcr: &Path,
+    trace: &Path,
+    event_type: Option<&str>,
+    limit: usize,
+) -> Result<Vec<u64>, String> {
+    let mut command = hermetic_command(ct_mcr);
+    command.arg("dump-events").arg(trace);
+    if let Some(event_type) = event_type {
+        command.args(["--type", event_type]);
+    }
+    let output = command
+        .args(["--limit", &limit.to_string()])
+        .output()
+        .map_err(|e| format!("run ct-mcr dump-events: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        return Err(format!(
+            "ct-mcr dump-events {} failed: {stdout} {}",
+            trace.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(stdout
+        .lines()
+        .filter_map(|line| {
+            let rest = line.split_once("[geid=")?.1;
+            rest.split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()
+        })
+        .collect())
+}
+
+/// Start a daemon over the real replay server and an MCP server in
+/// `mcp_cwd`, both without any `CT_*_DEBUG_*` variable: the replay of a
+/// native recording needs none.  Returns `(mcp, daemon, socket)`.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+async fn start_hermetic_mcp_server(
+    test_dir: &Path,
+    log_path: &Path,
+    db_backend_path: &Path,
+    extra_env: &[(&str, &str)],
+    mcp_cwd: &Path,
+) -> Result<(tokio::process::Child, tokio::process::Child, PathBuf), String> {
+    let ct_dir = daemon_paths_in(test_dir);
+    std::fs::create_dir_all(&ct_dir).map_err(|e| format!("create ct dir: {e}"))?;
+    let socket_path = ct_dir.join("daemon.sock");
+    let _ = std::fs::remove_file(&socket_path);
+    let _ = std::fs::remove_file(ct_dir.join("daemon.pid"));
+    let knobs = debug_knob_names();
+    log_line(
+        log_path,
+        &format!("hermetic daemon and MCP server: removing {knobs:?}"),
+    );
+
+    let mut daemon = Command::new(binary_path());
+    daemon
+        .arg("daemon")
+        .arg("start")
+        .env("TMPDIR", test_dir)
+        .env("CODETRACER_DAEMON_SOCKET", &socket_path)
+        .env("CODETRACER_REPLAY_SERVER_CMD", db_backend_path)
+        .envs(extra_env.iter().copied())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in &knobs {
+        daemon.env_remove(key);
+    }
+    let mut daemon = daemon.spawn().map_err(|e| format!("spawn daemon: {e}"))?;
+    if let Err(e) = wait_for_socket(&socket_path, Duration::from_secs(10)).await {
+        let _ = daemon.kill().await;
+        return Err(e);
+    }
+
+    let mut mcp = Command::new(binary_path());
+    mcp.arg("trace")
+        .arg("mcp")
+        .current_dir(mcp_cwd)
+        .env("TMPDIR", test_dir)
+        .env("CODETRACER_DAEMON_SOCK", &socket_path)
+        .envs(extra_env.iter().copied())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in &knobs {
+        mcp.env_remove(key);
+    }
+    match mcp.spawn() {
+        Ok(mcp) => Ok((mcp, daemon, socket_path)),
+        Err(e) => {
+            let _ = daemon.kill().await;
+            Err(format!("spawn MCP server: {e}"))
+        }
+    }
+}
+
+/// The script the agent runs: each step prints one `STEP <json>` line.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn goto_geid_script(spans: &[PrintedSpan], beyond: u64, release: u64, probe_line: i64) -> String {
+    format!(
+        r#"import json
+
+def report(step, **fields):
+    print("STEP " + json.dumps(dict(step=step, **fields)), flush=True)
+
+def failure(step, error, **fields):
+    report(step, error=type(error).__name__, message=str(error), **fields)
+
+def at(step, geid):
+    try:
+        loc = trace.goto_geid(geid)
+    except Exception as error:
+        failure(step, error)
+        return
+    values = {{v.name: v.value for v in trace.locals()}}
+    report(step, path=loc.path, line=loc.line, value=values.get("value"),
+           current=trace.location.line)
+
+at("span2", {g2})
+at("span1", {g1})
+at("span3", {g3})
+at("beyond", {beyond})
+at("release", {release})
+for bad in (0, -1, True, "12", None):
+    try:
+        trace.goto_geid(bad)
+        report("invalid", arg=repr(bad), error=None)
+    except Exception as error:
+        failure("invalid", error, arg=repr(bad))
+at("again", {g1})
+
+def where(step):
+    loc = trace.location
+    values = {{v.name: v.value for v in trace.locals()}}
+    report(step, path=loc.path, line=loc.line, value=values.get("value"),
+           end_line=values.get("end_line"), i=values.get("i"))
+
+def move(step, action):
+    try:
+        action()
+    except Exception as error:
+        failure(step, error)
+        return
+    where(step)
+
+move("next1", trace.step_over)
+move("next2", trace.step_over)
+try:
+    trace.add_breakpoint(trace.location.path, {probe_line})
+    move("continue", trace.continue_forward)
+except Exception as error:
+    failure("continue", error)
+move("back", trace.step_back)
+at("span3again", {g3})
+move("next3", trace.step_over)
+move("toend", trace.continue_forward)
+move("afterend", trace.step_over)
+at("span2again", {g2})
+move("next4", trace.step_over)
+"#,
+        g1 = spans[0].end,
+        g2 = spans[1].end,
+        g3 = spans[2].end,
+    )
+}
+
+/// The `STEP` lines of a script's output, in order.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn script_steps(text: &str) -> Vec<Value> {
+    text.lines()
+        .filter_map(|line| line.split_once("STEP ").map(|(_, json)| json))
+        .filter_map(|json| serde_json::from_str(json).ok())
+        .collect()
+}
+
+/// One `exec_script` call; returns `(is_error, text)`.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+async fn mcp_exec_script(
+    stdin: &mut tokio::process::ChildStdin,
+    reader: &mut BufReader<tokio::process::ChildStdout>,
+    id: i64,
+    trace_path: &Path,
+    script: &str,
+    log_path: &Path,
+) -> Result<(bool, String), String> {
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tools/call",
+        "params": {
+            "name": "exec_script",
+            "arguments": {
+                "trace_path": trace_path.to_string_lossy(),
+                "script": script,
+                "timeout_seconds": 300
+            }
+        }
+    });
+    mcp_send(stdin, &req).await?;
+    let resp = mcp_read(reader, Duration::from_secs(400), log_path).await?;
+    log_line(log_path, &format!("exec_script {id} response: {resp}"));
+    if resp["id"] != id {
+        return Err(format!("response to another request: {resp}"));
+    }
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .ok_or_else(|| format!("no text in {resp}"))?
+        .to_owned();
+    Ok((resp["result"]["isError"] == Value::Bool(true), text))
+}
+
+/// The fixture's lines the steps after a seek stop on (read from its source).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[derive(Debug, Clone, Copy)]
+struct StepLines {
+    /// The `printf` after the end call: the next line a step reaches.
+    printf: i64,
+    /// The `fflush` after it: a step over the `printf` call.
+    fflush: i64,
+    /// The loop's `probe_step` call: the breakpoint of the continue.
+    probe: i64,
+}
+
+/// The checks of the `goto_geid` script's steps against the recorded run.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn check_goto_geid_steps(
+    steps: &[Value],
+    spans: &[PrintedSpan],
+    beyond: u64,
+    release: u64,
+    lines: StepLines,
+) -> Result<(), String> {
+    let step = |name: &str, nth: usize| -> Result<&Value, String> {
+        steps
+            .iter()
+            .filter(|s| s["step"] == name)
+            .nth(nth)
+            .ok_or_else(|| format!("the script reported no `{name}` step #{nth}: {steps:?}"))
+    };
+    let at_span = |name: &str, index: usize| -> Result<(), String> {
+        let s = step(name, 0)?;
+        let span = spans[index];
+        let path = s["path"].as_str().unwrap_or("");
+        if !path.ends_with("span_goto_probe.c") || s["line"].as_i64() != Some(span.line) {
+            return Err(format!(
+                "`{name}`: goto_geid({}) should land on span_goto_probe.c:{} (span {}'s end \
+                 call), got {s}",
+                span.end,
+                span.line,
+                index + 1
+            ));
+        }
+        if s["current"].as_i64() != Some(span.line) {
+            return Err(format!(
+                "`{name}`: trace.location disagrees with the result: {s}"
+            ));
+        }
+        if s["value"].as_str() != Some(span.value.to_string().as_str()) {
+            return Err(format!(
+                "`{name}`: the local `value` should be {} (printed inside span {}), got {s}",
+                span.value,
+                index + 1
+            ));
+        }
+        Ok(())
+    };
+    at_span("span2", 1)?;
+    at_span("span1", 0)?;
+    at_span("span3", 2)?;
+    at_span("again", 0)?;
+
+    let refused = |name: &str, code: &str, reason: &str| -> Result<(), String> {
+        let s = step(name, 0)?;
+        let message = s["message"].as_str().unwrap_or("");
+        if s["error"] != "NavigationError" || !message.contains(code) || !message.contains(reason) {
+            return Err(format!(
+                "`{name}` should raise NavigationError naming {code} and {reason:?}, got {s}"
+            ));
+        }
+        Ok(())
+    };
+    refused("beyond", "E02", &format!("geid {beyond}"))?;
+    refused("release", "E09", "evSyncLockRelease")?;
+    if !step("release", 0)?["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains(&format!("geid {release}"))
+    {
+        return Err(format!(
+            "the E09 refusal names the geid {release}: {steps:?}"
+        ));
+    }
+    let invalid: Vec<&Value> = steps.iter().filter(|s| s["step"] == "invalid").collect();
+    if invalid.len() != 5 || invalid.iter().any(|s| s["error"] != "ValueError") {
+        return Err(format!(
+            "goto_geid(0 / -1 / True / \"12\" / None) should each raise ValueError: {invalid:?}"
+        ));
+    }
+
+    // Steps from the restored position (after `again`, span 1's end).
+    let moved = |name: &str, line: i64, fields: &[(&str, String)]| -> Result<(), String> {
+        let s = step(name, 0)?;
+        let path = s["path"].as_str().unwrap_or("");
+        if !path.ends_with("span_goto_probe.c") || s["line"].as_i64() != Some(line) {
+            return Err(format!(
+                "`{name}` should stop on span_goto_probe.c:{line}, got {s}"
+            ));
+        }
+        for (field, expected) in fields {
+            if s[*field].as_str() != Some(expected.as_str()) {
+                return Err(format!("`{name}`: `{field}` should be {expected}, got {s}"));
+            }
+        }
+        Ok(())
+    };
+    moved(
+        "next1",
+        lines.printf,
+        &[
+            ("end_line", spans[0].line.to_string()),
+            ("value", spans[0].value.to_string()),
+        ],
+    )?;
+    moved(
+        "next2",
+        lines.fflush,
+        &[("value", spans[0].value.to_string())],
+    )?;
+    moved("continue", lines.probe, &[("i", "1".to_string())])?;
+    let back = step("back", 0)?;
+    if back["error"] != "NavigationError" || !back["message"].as_str().unwrap_or("").contains("E0C")
+    {
+        return Err(format!(
+            "`step_back` should raise NavigationError naming E0C, got {back}"
+        ));
+    }
+    at_span("span3again", 2)?;
+    moved(
+        "next3",
+        lines.printf,
+        &[
+            ("end_line", spans[2].line.to_string()),
+            ("value", spans[2].value.to_string()),
+        ],
+    )?;
+    // From span 3's `printf` no breakpoint is ahead: the continue runs to
+    // the end of the recording.  A step after it is refused naming the end,
+    // and a seek still positions the replay, which executes from there.
+    let toend = step("toend", 0)?;
+    if toend.get("error").is_some() {
+        return Err(format!(
+            "`continue_forward` to the end of the recording should return, got {toend}"
+        ));
+    }
+    let afterend = step("afterend", 0)?;
+    if afterend["error"] != "NavigationError"
+        || !afterend["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("end of the recording")
+    {
+        return Err(format!(
+            "`step_over` after the end of the recording should raise NavigationError naming \
+             the end, got {afterend}"
+        ));
+    }
+    at_span("span2again", 1)?;
+    moved(
+        "next4",
+        lines.printf,
+        &[
+            ("end_line", spans[1].line.to_string()),
+            ("value", spans[1].value.to_string()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// HS-M2 U4b5: an agent positions a native recording's first slice at its
+/// span markers with `trace.goto_geid` through the MCP server (header above).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[tokio::test]
+async fn mcp_exec_script_goto_geid_native_recording() {
+    let (test_dir, log_path) = setup_test_dir("mcp_exec_script_goto_geid_native_recording");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let Some(db_backend) = find_db_backend() else {
+            return Err("replay-server not found".to_string());
+        };
+        let Some(ct_native_replay) = find_ct_native_replay() else {
+            return Err("ct-native-replay not found".to_string());
+        };
+        let Some(ct_mcr) = find_ct_mcr() else {
+            return Err("ct-mcr not found".to_string());
+        };
+
+        // --- The recording and its oracles -------------------------------
+        let recording = record_span_probe(&ct_mcr, &test_dir.join("rec"), "span_goto_probe", &[])?;
+        log_line(&log_path, &format!("recorded:\n{}", recording.stdout));
+        let spans = parse_printed_spans(&recording.stdout);
+        if spans.len() != 3 {
+            return Err(format!("the probe printed three spans: {spans:?}"));
+        }
+        let source = std::fs::read_to_string(span_goto_probe_source())
+            .map_err(|e| format!("read the fixture: {e}"))?;
+        let line_of = |needle: &str| {
+            source
+                .lines()
+                .position(|line| line.contains(needle))
+                .map(|index| index as i64 + 1)
+        };
+        let end_call_line = line_of("RECORDER_CALL(end, 11, &c); end_line = __LINE__;");
+        if spans.iter().any(|span| Some(span.line) != end_call_line) {
+            return Err(format!(
+                "every printed line is the fixture's end call ({end_call_line:?}): {spans:?}"
+            ));
+        }
+        let step_lines = match (
+            line_of("printf(\"span %d start"),
+            line_of("fflush(stdout);"),
+            line_of("int value = probe_step(i);"),
+        ) {
+            (Some(printf), Some(fflush), Some(probe)) => StepLines {
+                printf,
+                fflush,
+                probe,
+            },
+            other => return Err(format!("the fixture's loop lines: {other:?}")),
+        };
+        if spans[0].value == spans[1].value || spans[1].value == spans[2].value {
+            return Err(format!("the printed values tell the spans apart: {spans:?}"));
+        }
+        let slice0 = recording.slices[0].clone();
+        let ends_in_slice0 =
+            dump_event_geids(&ct_mcr, &slice0, Some("evTraceContextSpanEnd"), 10)?;
+        let printed_ends: Vec<u64> = spans.iter().map(|span| span.end).collect();
+        if ends_in_slice0 != printed_ends {
+            return Err(format!(
+                "slice 0 holds the three span end markers the program printed: \
+                 dump-events {ends_in_slice0:?}, printed {printed_ends:?}"
+            ));
+        }
+        let release = *dump_event_geids(&ct_mcr, &slice0, Some("evSyncLockRelease"), 1)?
+            .first()
+            .ok_or("slice 0 holds a lock release")?;
+        let last_slice = recording.slices.last().expect("several slices");
+        let beyond = *dump_event_geids(&ct_mcr, last_slice, None, 1)?
+            .first()
+            .ok_or("the last slice holds events")?;
+        if beyond <= spans[2].end {
+            return Err(format!("the last slice starts after the spans: {beyond}"));
+        }
+        log_line(
+            &log_path,
+            &format!("spans {spans:?}; lock release {release}; last slice from {beyond}"),
+        );
+
+        // A two-thread recording of the same program (negative control).
+        let threaded = record_span_probe(
+            &ct_mcr,
+            &test_dir.join("rec-threads"),
+            "span_goto_probe_threads",
+            &["threads"],
+        )?;
+        let threaded_spans = parse_printed_spans(&threaded.stdout);
+        if threaded_spans.len() != 3 || !threaded.stdout.contains("threads: 2") {
+            return Err(format!(
+                "the threaded probe recorded two threads and three spans:\n{}",
+                threaded.stdout
+            ));
+        }
+
+        // --- The agent's view: MCP exec_script on a relative path ---------
+        let relative = |path: &Path| -> Result<PathBuf, String> {
+            path.strip_prefix(&test_dir)
+                .map(Path::to_path_buf)
+                .map_err(|e| format!("{} is not under the test dir: {e}", path.display()))
+        };
+        let slice0_relative = relative(&slice0)?;
+        let threaded_relative = relative(&threaded.trace)?;
+        let ct_native_replay = ct_native_replay.to_string_lossy().into_owned();
+        let ct_mcr = ct_mcr.to_string_lossy().into_owned();
+        // The replay's free-tier daily replay quota is bypassed the way
+        // db-backend's harness does it (`CODETRACER_IN_UI_TEST`), and its
+        // counter, index and sockets go to a scratch home, never the
+        // developer's own profile.
+        let scratch_home = test_dir.join("ct-home").to_string_lossy().into_owned();
+        let scratch_data = test_dir.join("xdg-data").to_string_lossy().into_owned();
+        let (mut mcp, mut daemon, socket_path) = start_hermetic_mcp_server(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", ct_native_replay.as_str()),
+                ("CODETRACER_CT_MCR_CMD", ct_mcr.as_str()),
+                ("CODETRACER_IN_UI_TEST", "1"),
+                ("CODETRACER_HOME", scratch_home.as_str()),
+                ("XDG_DATA_HOME", scratch_data.as_str()),
+            ],
+            &test_dir,
+        )
+        .await?;
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        // The exchange returns a Result so that both servers are shut down
+        // whatever the outcome.
+        let exchange: Result<(), String> = async {
+            mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+            let script = goto_geid_script(&spans, beyond, release, step_lines.probe);
+            let (is_error, text) = mcp_exec_script(
+                &mut stdin,
+                &mut reader,
+                15001,
+                &slice0_relative,
+                &script,
+                &log_path,
+            )
+            .await?;
+            if is_error {
+                return Err(format!("exec_script failed: {text}"));
+            }
+            let steps = script_steps(&text);
+            log_line(&log_path, &format!("steps: {steps:?}"));
+            check_goto_geid_steps(&steps, &spans, beyond, release, step_lines)?;
+
+            // Negative control: the two-thread recording is refused, and the
+            // agent sees why.
+            let threaded_script = format!(
+                "try:\n    trace.goto_geid({})\n    print('STEP {{\"step\": \"threads\", \"error\": null}}')\n\
+                 except Exception as error:\n    print('REFUSED', type(error).__name__, error)\n",
+                threaded_spans[1].end
+            );
+            let (_, text) = mcp_exec_script(
+                &mut stdin,
+                &mut reader,
+                15002,
+                &threaded_relative,
+                &threaded_script,
+                &log_path,
+            )
+            .await?;
+            if !(text.contains("XMR-B1") && text.contains("2 threads")) {
+                return Err(format!(
+                    "the two-thread recording's refusal names 2 threads and XMR-B1: {text}"
+                ));
+            }
+            Ok(())
+        }
+        .await;
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        match connect_to_daemon_socket(&socket_path).await {
+            Ok(mut client) => shutdown_daemon(&mut client, &mut daemon).await,
+            Err(_) => {
+                let _ = daemon.kill().await;
+            }
+        }
+        exchange
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+    report(
+        "mcp_exec_script_goto_geid_native_recording",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
 /// M10-CUSTOM-3. Start MCP server with real db-backend against a custom
 /// trace format.  Send initialize.  Send tools/call with `list_source_files`.
 /// Verify the response is non-empty and contains "test.rb".

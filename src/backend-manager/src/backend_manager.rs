@@ -1439,7 +1439,16 @@ impl BackendManager {
                 if nav_success {
                     // Silently consume — don't forward to any client.
                     // The subsequent `stopped` event will advance the
-                    // state machine.
+                    // state machine.  A command that answered success
+                    // without reaching its target (a seek answered
+                    // `false`) is remembered and answered as an error once
+                    // the location arrives.
+                    let command_name = msg.get("command").and_then(Value::as_str).unwrap_or("");
+                    if let Some(reason) =
+                        python_bridge::navigation_not_reached_reason(command_name, msg)
+                    {
+                        ds.py_bridge.pending_navigations[idx].not_reached = Some(reason);
+                    }
                     return;
                 }
 
@@ -1472,6 +1481,17 @@ impl BackendManager {
                     && p.state == PendingPyNavState::AwaitingStackTrace
             }) {
                 let pending = ds.py_bridge.pending_navigations.remove(idx);
+                if let Some(reason) = pending.not_reached {
+                    let py_error = serde_json::json!({
+                        "type": "response",
+                        "request_seq": pending.original_seq,
+                        "success": false,
+                        "command": "ct/py-navigate",
+                        "message": reason,
+                    });
+                    self.send_to_client(pending.client_id, py_error);
+                    return;
+                }
                 let mut location = python_bridge::extract_location_from_stack_trace(msg);
 
                 // Inject rrTicks captured from the ct/complete-move event if
@@ -2670,16 +2690,14 @@ impl BackendManager {
             }
         };
 
-        // Build DAP request arguments.
-        // For goto_ticks, include the ticks value; for all others, just threadId.
-        let dap_args = if method == "goto_ticks" {
-            let ticks = args
-                .and_then(|a| a.get("ticks"))
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
-            serde_json::json!({"threadId": 1, "ticks": ticks})
-        } else {
-            serde_json::json!({"threadId": 1})
+        // Build DAP request arguments (`goto_ticks` carries the ticks,
+        // `goto_geid` the geid; an invalid geid is refused, not defaulted).
+        let dap_args = match python_bridge::navigation_dap_arguments(&method, args) {
+            Ok(dap_args) => dap_args,
+            Err(message) => {
+                self.send_py_error(seq, &message);
+                return Ok(());
+            }
         };
 
         // Get a unique seq for the DAP command sent to the backend.
@@ -2719,6 +2737,7 @@ impl BackendManager {
                     nav_command_seq: Some(dap_seq),
                     rr_ticks: None,
                     end_of_trace: false,
+                    not_reached: None,
                 });
         }
 

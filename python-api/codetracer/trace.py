@@ -352,6 +352,48 @@ class Trace:
         """
         return self._navigate("goto_ticks", ticks=ticks)
 
+    def goto_geid(self, geid: int) -> Location:
+        """Jump to the event with global event id *geid* in a native recording.
+
+        A geid is the recorder's global event id: the ``ct.mcr.geid`` a span
+        marker carries and the ``geid`` parameter of a dive-in link.  The
+        replay stops right after that event (after a span marker, right after
+        the recorder call that wrote it), and :attr:`location`,
+        :meth:`locals`, :meth:`evaluate` and :meth:`stack_trace` describe the
+        program there.  A geid behind the current position replays from the
+        recording's start, so geids can be visited in any order.  The
+        forward steps and :meth:`continue_forward` execute the program from
+        the restored position; the reverse steps (:meth:`step_back`,
+        :meth:`reverse_step_in`, :meth:`reverse_step_out`) raise
+        :class:`NavigationError` naming ``E0C``, as the replay of these
+        recordings does not execute backward.
+
+        It wraps the backend's ``ct/seek-to-geid`` request and is available
+        for native (MCR) recordings only.
+
+        Parameters:
+            geid: The global event id to go to, a positive integer (geid 0
+                names no event).
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            ValueError: If *geid* is not a positive integer.  Nothing is sent
+                to the daemon.
+            NavigationError: If the replay refuses the geid or cannot seek by
+                geid.  The message carries the replay's reason, for example
+                ``E02`` for a geid beyond the recording, ``E09`` for a geid
+                that names no position the replay can stop after (a lock
+                release, the thread's start).  A recording the replay cannot
+                serve (a multi-threaded one) is refused when it is opened.
+        """
+        # ``bool`` is an ``int`` subclass; ``goto_geid(True)`` is a caller
+        # mistake, not geid 1.
+        if isinstance(geid, bool) or not isinstance(geid, int) or geid < 1:
+            raise ValueError(f"geid must be a positive integer, got {geid!r}")
+        return self._navigate("goto_geid", geid=geid)
+
     # --- Inspection ---
 
     def current_location(self) -> Location:

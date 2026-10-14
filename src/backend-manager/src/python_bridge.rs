@@ -328,6 +328,12 @@ pub struct PendingPyNavigation {
     /// replay reaches its boundary.  We capture this here so it can be
     /// injected as `endOfTrace: true` in the final response.
     pub end_of_trace: bool,
+    /// Why the navigation did not reach its target although the backend
+    /// answered the command successfully (see
+    /// [`navigation_not_reached_reason`]).  The backend still reports a
+    /// stop where the replay stands, so the location is read as usual and
+    /// then answered as this error instead.
+    pub not_reached: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1270,6 +1276,7 @@ pub fn format_resolve_variable_step_response(
 /// | `continue_forward`  | `continue`          | no      |
 /// | `continue_reverse`  | `reverseContinue`   | no      |
 /// | `goto_ticks`        | `ct/goto-ticks`     | yes     |
+/// | `goto_geid`         | `ct/seek-to-geid`   | yes     |
 ///
 /// Returns `None` for unrecognized method names.
 pub fn method_to_dap_command(method: &str) -> Option<(&str, bool)> {
@@ -1283,8 +1290,62 @@ pub fn method_to_dap_command(method: &str) -> Option<(&str, bool)> {
         "continue_forward" => Some(("continue", false)),
         "continue_reverse" => Some(("reverseContinue", false)),
         "goto_ticks" => Some(("ct/goto-ticks", true)),
+        "goto_geid" => Some(("ct/seek-to-geid", true)),
         _ => None,
     }
+}
+
+/// Builds the arguments of the DAP request a `ct/py-navigate` method sends.
+///
+/// `args` are the `ct/py-navigate` request's arguments:
+///
+/// - `goto_ticks`: `{"threadId": 1, "ticks": <ticks>}`, a missing `ticks`
+///   being 0 (the start of the trace), as it always was;
+/// - `goto_geid`: exactly `{"geid": <geid>}` (db-backend's
+///   `SeekToGeidArguments`).  A missing geid, or one that is not a positive
+///   integer, is an error: defaulting it would land the script on an event
+///   it did not ask for (geid 0 names no event at all);
+/// - every other method: `{"threadId": 1}`.
+pub fn navigation_dap_arguments(method: &str, args: Option<&Value>) -> Result<Value, String> {
+    match method {
+        "goto_ticks" => {
+            let ticks = args
+                .and_then(|a| a.get("ticks"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            Ok(serde_json::json!({"threadId": 1, "ticks": ticks}))
+        }
+        "goto_geid" => match args.and_then(|a| a.get("geid")).and_then(Value::as_u64) {
+            Some(geid) if geid > 0 => Ok(serde_json::json!({ "geid": geid })),
+            _ => Err(format!(
+                "goto_geid needs 'geid', a positive integer; got {}",
+                args.and_then(|a| a.get("geid"))
+                    .map_or_else(|| "none".to_string(), Value::to_string)
+            )),
+        },
+        _ => Ok(serde_json::json!({"threadId": 1})),
+    }
+}
+
+/// Why a navigation command the backend answered with `success: true` still
+/// did not reach its target, or `None` when it did.
+///
+/// `ct/seek-to-geid` answers `false` when the replay did not restore the geid
+/// without refusing it by error (db-backend's `seek_to_geid` returns the
+/// replay's boolean; a replay server without the restore packet answers an
+/// empty reply, which reads as `false`).  db-backend still completes the move
+/// where the replay stands, so without this check `goto_geid` would hand the
+/// script a location the caller never asked for.  Other commands' bodies
+/// carry no such verdict.
+pub fn navigation_not_reached_reason(dap_command: &str, response: &Value) -> Option<String> {
+    if dap_command == "ct/seek-to-geid" && response.get("body") == Some(&Value::Bool(false)) {
+        return Some(
+            "backend error for ct/seek-to-geid: the replay did not reach the geid \
+             (it answered false without a reason)"
+                .to_string(),
+        );
+    }
+    None
 }
 
 /// Extracts a location object (path, line, column, ticks, endOfTrace) from
@@ -1377,6 +1438,79 @@ mod tests {
             method_to_dap_command("goto_ticks"),
             Some(("ct/goto-ticks", true))
         );
+        assert_eq!(
+            method_to_dap_command("goto_geid"),
+            Some(("ct/seek-to-geid", true))
+        );
+    }
+
+    /// `goto_geid` sends the caller's geid, and only it, to `ct/seek-to-geid`.
+    #[test]
+    fn test_navigation_dap_arguments_goto_geid_carries_the_geid() {
+        let args = json!({"tracePath": "/t", "method": "goto_geid", "geid": 5741});
+        assert_eq!(
+            navigation_dap_arguments("goto_geid", Some(&args)),
+            Ok(json!({"geid": 5741}))
+        );
+        let big = json!({"geid": u64::MAX});
+        assert_eq!(
+            navigation_dap_arguments("goto_geid", Some(&big)),
+            Ok(json!({"geid": u64::MAX}))
+        );
+    }
+
+    /// A geid that is missing, zero, negative, fractional or not a number is
+    /// refused by name, never defaulted.
+    #[test]
+    fn test_navigation_dap_arguments_goto_geid_refuses_a_missing_or_invalid_geid() {
+        for args in [
+            None,
+            Some(json!({"tracePath": "/t"})),
+            Some(json!({"geid": 0})),
+            Some(json!({"geid": -3})),
+            Some(json!({"geid": 1.5})),
+            Some(json!({"geid": "12"})),
+            Some(json!({"geid": null})),
+        ] {
+            let err = navigation_dap_arguments("goto_geid", args.as_ref())
+                .expect_err("an invalid geid is refused");
+            assert!(err.contains("goto_geid needs 'geid'"), "{err}");
+        }
+    }
+
+    #[test]
+    fn test_navigation_dap_arguments_other_methods() {
+        assert_eq!(
+            navigation_dap_arguments("goto_ticks", Some(&json!({"ticks": 42}))),
+            Ok(json!({"threadId": 1, "ticks": 42}))
+        );
+        assert_eq!(
+            navigation_dap_arguments("goto_ticks", None),
+            Ok(json!({"threadId": 1, "ticks": 0}))
+        );
+        assert_eq!(
+            navigation_dap_arguments("step_over", Some(&json!({"geid": 9}))),
+            Ok(json!({"threadId": 1}))
+        );
+    }
+
+    #[test]
+    fn test_navigation_not_reached_reason() {
+        let refused = json!({"type": "response", "success": true, "body": false});
+        let reason = navigation_not_reached_reason("ct/seek-to-geid", &refused)
+            .expect("a seek answered false did not reach its geid");
+        assert!(reason.contains("ct/seek-to-geid"), "{reason}");
+        let reached = json!({"type": "response", "success": true, "body": true});
+        assert_eq!(
+            navigation_not_reached_reason("ct/seek-to-geid", &reached),
+            None
+        );
+        // `ct/goto-ticks` answers `{}`; no other command's body is a verdict.
+        assert_eq!(
+            navigation_not_reached_reason("ct/goto-ticks", &refused),
+            None
+        );
+        assert_eq!(navigation_not_reached_reason("next", &refused), None);
     }
 
     #[test]
