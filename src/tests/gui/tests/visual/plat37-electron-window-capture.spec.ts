@@ -617,7 +617,46 @@ function pngSize(file: string): { width: number; height: number } {
 
 for (const scenario of definition.scenarios) {
   test.describe(`plat37-electron ${scenario.id}`, () => {
-    test.use({ sourcePath: recordingPath, launchMode: "trace-folder" });
+    // `noUserLayout: true` — THE PRODUCT'S OWN FIRST-RUN LAYOUT, NOT THE
+    // BUNDLED TREE. Without it the launch fixture calls
+    // `layout-reset.ensureDefaultLayout`, which copies
+    // `src/config/default_layout.json` VERBATIM into the run's
+    // `$CODETRACER_HOME/config`. The index process then finds a saved layout
+    // and loads it as-is, so `index/config.installModeDefault` — and with it
+    // `mode_default_layout.modeDefaultLayout` — never runs.
+    //
+    // That matters here and nowhere else in this lane, because the bundled
+    // tree is the one the product's own source calls "nobody's layout": it
+    // gives TEST RESULTS and CONSTRAINTS a top-level column of their own
+    // (`src/config/default_layout.json`, third column, 25%), which the
+    // editing surface wants and a REPLAY does not. Debug mode's default
+    // moves TESTS into the FILES stack (`frontend.paneHomesForMode`) and
+    // omits CONSTRAINTS outright (`frontend.modeDefaultOmittedContentIds`),
+    // and that derived tree is what `headless_app/layout_model`'s
+    // `sharedDefaultLayout` is generated from — the arrangement every
+    // CodeTracer front-end opens with.
+    //
+    // MEASURED COST OF NOT SETTING IT (2026-10-12/13 passes, re-read
+    // 2026-10-14): every Electron frame carried a standing TESTS ("no tests
+    // found") / CONSTRAINTS ("No circuit has been compiled for this project
+    // yet.") column at x1165-1440 that no mode draws. The screen oracle
+    // counted 7 panes against the GPUI window's 5, and that census was filed
+    // as PARITY-S1, "GPUI draws 5 panes where Electron draws 7", with GPUI
+    // named the deficient side. It was an artefact of this line. The control
+    // that settles it is PLAT-45's own first-run capture
+    // (`src/tests/visual/answers/plat45-default-arrangement.electron.json`),
+    // taken with `noUserLayout: true` against the real app: five stacks,
+    // `[9,41,48] [2] [4,17] [6,35] [8,24]`, TESTS a tab of FILES and no
+    // CONSTRAINTS component anywhere.
+    //
+    // Eleven of the sixteen specs under `tests/visual/` already set this;
+    // this lane was the capture whose frames parity is measured against, and
+    // the one that did not.
+    test.use({
+      sourcePath: recordingPath,
+      launchMode: "trace-folder",
+      noUserLayout: true,
+    });
     test.setTimeout(600_000);
 
     test(`capture ${scenario.view}`, async ({ ctPage, electronApp }) => {

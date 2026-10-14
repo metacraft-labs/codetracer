@@ -119,6 +119,10 @@ set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCENARIOS="${root}/src/tests/visual/scenarios.json"
+# The arrangement every CodeTracer front-end opens with — the generated
+# translation of the desktop's own debug-mode default. The per-view pane
+# census is taken against THIS and never against a literal count.
+SHARED_DEFAULT_LAYOUT="${root}/src/frontend/headless_app/shared_default_layout.generated.json"
 CAPTURE="${root}/build/plat37_macos_window_capture"
 GRADE="${root}/build/plat37_macos_window_grade"
 OUT="${root}/build/plat37-macos-electron"
@@ -162,6 +166,10 @@ done
       and the Quartz window server. The Linux Electron arm is
       \`just plat35-capture-electron\` (its own Xvfb at -dpi 96)."
 [ -f "${SCENARIOS}" ] || fail "the scenario set is not at ${SCENARIOS}"
+[ -f "${SHARED_DEFAULT_LAYOUT}" ] || fail "the shared default layout is not
+      at ${SHARED_DEFAULT_LAYOUT}; the per-view pane census has nothing to
+      be a census against, and this lane will not grade a reference frame
+      without one."
 [ -d "${GUI}/node_modules" ] || fail "${GUI}/node_modules is absent; run
       \`bash ci/lib/npm-install.sh ${GUI}\` once."
 command -v timeout >/dev/null || fail "timeout(1) is not on PATH, and this
@@ -524,13 +532,15 @@ import json,sys; print(json.load(open(sys.argv[1]))['capturedPoints']['height'])
 		--scratch="${OUT}/scratch/${view}" || grade_rc=$?
 
 	python3 - "${rec}" "${grade}" "${png}" "${points_png}" "${grade_rc}" \
-		"${route}" "${route_cmp}" >>"${RECORDS}" <<'PY' || fail "the census did not assemble"
+		"${route}" "${route_cmp}" "${SHARED_DEFAULT_LAYOUT}" \
+		>>"${RECORDS}" <<'PY' || fail "the census did not assemble"
 import json, os, struct, sys
 rec = json.load(open(sys.argv[1]))
 grade = json.load(open(sys.argv[2])) if os.path.exists(sys.argv[2]) else None
 png, points_png, grade_rc, route_path = sys.argv[3], sys.argv[4], int(sys.argv[5]), sys.argv[6]
 route = json.load(open(route_path)) if os.path.exists(route_path) else None
 cmp_path = sys.argv[7]
+shared_layout_path = sys.argv[8]
 route_cmp = (open(cmp_path).read().strip().splitlines()
              if os.path.exists(cmp_path) else [])
 problems = []
@@ -574,6 +584,102 @@ elif grade["verdict"] != "OK":
     problems.append("grader: " + "; ".join(grade["problems"]))
 elif grade_rc != 0:
     problems.append(f"the grader answered OK and exited {grade_rc}")
+
+# ---------------------------------------------------------------------------
+# THE PANE CENSUS, AGAINST THE SHARED DEFAULT AND NOT AGAINST A NUMBER
+# ---------------------------------------------------------------------------
+#
+# WHAT THIS CATCHES, and it is the reason it exists rather than a precaution.
+# Until 2026-10-14 this spec did not set `noUserLayout`, so the launch fixture
+# copied `src/config/default_layout.json` VERBATIM into the run's config and
+# the index process loaded it instead of deriving debug mode's default. The
+# bundled tree carries a top-level TEST RESULTS / CONSTRAINTS column that the
+# product's own source calls "nobody's layout" and that
+# `frontend.modeDefaultOmittedContentIds` / `.paneHomesForMode` remove from
+# every mode. Every frame this lane took therefore showed two panes no
+# CodeTracer front-end opens with, the oracle counted 7 against the GPUI
+# window's 5, and that was filed as PARITY-S1 with GPUI named the deficient
+# side. The frames were right and the finding read them backwards.
+#
+# WHY THE EXPECTATION IS DERIVED AND NOT WRITTEN DOWN. `expected` below is
+# computed from `headless_app/shared_default_layout.generated.json` — the
+# generated translation of the desktop's own debug-mode default, and the
+# arrangement every front-end opens with. A literal `== 5` here would be a
+# second copy of that truth, free to go on agreeing with itself after the
+# shared tree moved (Verification-Harness-Traps 14). Change the shared
+# default and this expectation changes with it.
+#
+# WHY IT IS A SET AND NOT A COUNT. A count of 5 is satisfied by a frame with
+# five WRONG panes, and `paneCount` alone is also satisfied by an oracle that
+# has started labelling everything `other`. The comparison is over the
+# labelled multiset, so a renderer that loses `state` and gains an `other`
+# still fails. An oracle that reads nothing answers the empty set and fails
+# too, which is the property a vacuous assertion would not have.
+def _shared_default_visible_panes(path):
+    """The panes the shared default layout DRAWS: one per stack (the active
+    tab), plus every pane that is not inside a stack. A background tab is not
+    on screen and the oracle cannot see one."""
+    doc = json.load(open(path))
+    out = []
+
+    def walk(node):
+        kind = node.get("kind")
+        if kind == "pane":
+            out.append(node["pane"])
+            return
+        kids = node.get("children", []) or []
+        if kind == "stack":
+            if not kids:
+                return
+            i = node.get("activeIndex", 0)
+            if not isinstance(i, int) or i < 0 or i >= len(kids):
+                raise ValueError(
+                    f"{path}: a stack's activeIndex {i!r} is not a tab of it")
+            walk(kids[i])
+            return
+        for k in kids:
+            walk(k)
+
+    walk(doc)
+    if not out:
+        raise ValueError(f"{path}: the shared default draws no pane at all")
+    return sorted(out)
+
+
+if grade is not None and grade.get("oracle") is None:
+    # NOT a silent skip. A grader that stops emitting `oracle` would otherwise
+    # make this whole census vacuous while every other check stayed green,
+    # which is the failure mode the census was written to not have.
+    problems.append(
+        "the grader wrote a record with no `oracle`, so the pane census could "
+        "not be taken at all")
+elif grade is not None:
+    try:
+        expected = _shared_default_visible_panes(shared_layout_path)
+    except Exception as exc:                      # noqa: BLE001 - reported, never swallowed
+        problems.append(
+            "the shared default layout could not be read, so the pane census "
+            f"has nothing to be a census AGAINST: {exc}")
+    else:
+        seen = sorted(grade["oracle"].get("panes") or [])
+        rec["paneCensus"] = {
+            "expected": expected,
+            "seen": seen,
+            "expectedFrom": os.path.relpath(shared_layout_path),
+            "agrees": seen == expected,
+        }
+        if seen != expected:
+            extra = sorted((set(seen) - set(expected)) or [])
+            missing = sorted((set(expected) - set(seen)) or [])
+            problems.append(
+                "the pane census disagrees with the shared default "
+                f"({len(seen)} drawn, {len(expected)} expected): "
+                f"saw {seen}, expected {expected}"
+                + (f"; extra {extra}" if extra else "")
+                + (f"; missing {missing}" if missing else "")
+                + ". A frame with panes the shared default does not place is "
+                  "not a reference frame for parity: see this lane's spec "
+                  "`noUserLayout` note and PARITY-S1.")
 
 rec["grade"] = grade
 rec["route"] = route
