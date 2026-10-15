@@ -7481,11 +7481,9 @@
         "runquota-src": "runquota-src"
       },
       "locked": {
-        "lastModified": 1791974199,
-        "narHash": "sha256-XaP+2P5lKWlCw4hxfNewhZpoVBExLezhWPzrPQdy8qw=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "f248842443e09cd9758b903dd2701678766e759d",
+        "rev": "f55d24087523123129aa1c7ea9933fdad5207944",
         "type": "github"
       },
       "original": {
