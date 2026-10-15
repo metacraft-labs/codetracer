@@ -222,9 +222,14 @@ impl InterningTables {
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<InterningTables>, String> {
         let meta = ctfs.read_file("meta.dat").unwrap_or_default();
         let interning_tables_declared = meta_dat_has_interning_tables(&meta);
-        // `paths.dat` is written first and unconditionally by both writers, so
-        // its presence is the container's own answer to "do I carry interning
-        // tables".
+        // The four tables are carried all four or none (`internal-files.md`
+        // §"Interning Tables"); a container with some but not all of them is
+        // refused, in the words the library readers use.
+        if let Some(refusal) = codetracer_ctfs::interning_set::interning_set_refusal(|name| ctfs.has_file(name)) {
+            return Err(refusal);
+        }
+        // With the set whole or empty, `paths.dat` answers "do I carry
+        // interning tables".
         if !ctfs.has_file("paths.dat") {
             return Ok(None);
         }

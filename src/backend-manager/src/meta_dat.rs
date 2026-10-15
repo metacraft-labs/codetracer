@@ -865,6 +865,19 @@ pub fn read_meta_dat_from_ctfs(data: &[u8]) -> Result<Vec<u8>, String> {
 /// bit 14 (line-count table) set, a record is `path_len: varint` + path
 /// bytes + a tail this reader does not need; otherwise it is the path bytes.
 pub fn read_source_paths_from_ctfs(data: &[u8], meta_flags: u16) -> Result<Vec<String>, String> {
+    // `paths.dat` is one of four interning tables a container carries all
+    // four or none (`internal-files.md` §"Interning Tables").
+    let mut present = Vec::new();
+    for name in codetracer_ctfs::interning_set::INTERNING_TABLE_MEMBERS {
+        if ctfs_entry(data, name)?.is_some() {
+            present.push(name);
+        }
+    }
+    if let Some(refusal) =
+        codetracer_ctfs::interning_set::interning_set_refusal(|name| present.contains(&name))
+    {
+        return Err(refusal);
+    }
     let Some(dat) = read_ctfs_internal_file(data, "paths.dat")? else {
         return Ok(Vec::new());
     };
@@ -1034,7 +1047,7 @@ fn resolve_ctfs_file(
 #[cfg(test)]
 pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> std::io::Result<()> {
     const BLOCK_SIZE: usize = 1024;
-    const MAX_ENTRIES: usize = 8;
+    const MAX_ENTRIES: usize = 16;
     assert!(
         files.len() <= MAX_ENTRIES,
         "test container holds at most {MAX_ENTRIES} files"
@@ -1407,6 +1420,44 @@ mod tests {
         }
     }
 
+    /// `paths.dat` and `paths.off`, with the other three interning tables
+    /// empty: a container carries the four tables all four or none.
+    fn with_empty_tables<'a>(dat: &'a [u8], off: &'a [u8]) -> Vec<(&'a str, &'a [u8])> {
+        const EMPTY_OFF: &[u8] = &[0; 8];
+        vec![
+            ("paths.dat", dat),
+            ("paths.off", off),
+            ("funcs.dat", &[]),
+            ("funcs.off", EMPTY_OFF),
+            ("types.dat", &[]),
+            ("types.off", EMPTY_OFF),
+            ("varnames.dat", &[]),
+            ("varnames.off", EMPTY_OFF),
+        ]
+    }
+
+    /// A container with `paths.dat` but not the other three interning tables
+    /// is refused by name, as every reader of the format refuses it
+    /// (`internal-files.md` §"Interning Tables": all four or none).
+    #[test]
+    fn paths_without_the_other_three_tables_is_refused() {
+        let dir = std::env::temp_dir().join(format!("ct-meta-dat-partial-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ct = dir.join("trace.ct");
+        let off = [0u64, 5].map(u64::to_le_bytes).concat();
+        write_minimal_ctfs(&ct, &[("paths.dat", b"/a.rs"), ("paths.off", &off)]).unwrap();
+        let raw = std::fs::read(&ct).unwrap();
+        assert_eq!(
+            read_source_paths_from_ctfs(&raw, 0),
+            Err("the container carries paths.dat, paths.off but not funcs.dat, funcs.off, types.dat, \
+                 types.off, varnames.dat, varnames.off: the interning tables paths, funcs, types and \
+                 varnames are carried all four or none (internal-files.md \"Interning Tables\")"
+                .to_string())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The source paths are `paths.dat`'s records, in either record layout.
     #[test]
     fn source_paths_are_read_from_paths_dat() {
@@ -1419,7 +1470,7 @@ mod tests {
             b"/a.rs/bb.rs".to_vec(),
             [0u64, 5, 11].map(u64::to_le_bytes).concat(),
         );
-        write_minimal_ctfs(&ct, &[("paths.dat", &dat), ("paths.off", &off)]).unwrap();
+        write_minimal_ctfs(&ct, &with_empty_tables(&dat, &off)).unwrap();
         let raw = std::fs::read(&ct).unwrap();
         assert_eq!(
             read_source_paths_from_ctfs(&raw, 0).unwrap(),
@@ -1431,7 +1482,7 @@ mod tests {
         framed.extend_from_slice(b"/a.rs");
         framed.push(40);
         let off = [0u64, framed.len() as u64].map(u64::to_le_bytes).concat();
-        write_minimal_ctfs(&ct, &[("paths.dat", &framed), ("paths.off", &off)]).unwrap();
+        write_minimal_ctfs(&ct, &with_empty_tables(&framed, &off)).unwrap();
         let raw = std::fs::read(&ct).unwrap();
         assert_eq!(
             read_source_paths_from_ctfs(&raw, FLAG_HAS_LINE_COUNT_TABLE).unwrap(),
@@ -1455,7 +1506,7 @@ mod tests {
         let off = [0u64, first_end, second_end, column_aware.len() as u64]
             .map(u64::to_le_bytes)
             .concat();
-        write_minimal_ctfs(&ct, &[("paths.dat", &column_aware), ("paths.off", &off)]).unwrap();
+        write_minimal_ctfs(&ct, &with_empty_tables(&column_aware, &off)).unwrap();
         let raw = std::fs::read(&ct).unwrap();
         assert_eq!(
             read_source_paths_from_ctfs(&raw, FLAG_HAS_COLUMN_AWARE_STEPS).unwrap(),

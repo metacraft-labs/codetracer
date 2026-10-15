@@ -80,12 +80,21 @@ fn make_recording(test_name: &str, mcr_total_events: Option<u64>) -> PathBuf {
     // carries no copy of them.
     let paths_dat = b"src/main.rssrc/lib.rs".to_vec();
     let paths_off = [0u64, 11, 21].map(u64::to_le_bytes).concat();
+    // With the other three interning tables, empty: a container carries the
+    // four all together or none (`internal-files.md` "Interning Tables").
+    let empty_off = 0u64.to_le_bytes();
     meta_dat::write_minimal_ctfs(
         &dir.join("trace.ct"),
         &[
             ("meta.dat", &dat_bytes),
             ("paths.dat", &paths_dat),
             ("paths.off", &paths_off),
+            ("funcs.dat", &[]),
+            ("funcs.off", &empty_off),
+            ("types.dat", &[]),
+            ("types.off", &empty_off),
+            ("varnames.dat", &[]),
+            ("varnames.off", &empty_off),
         ],
     )
     .expect("write minimal ctfs");
