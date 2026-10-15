@@ -382,6 +382,49 @@ when defined(js):
       check not document.getElementById(cstring"calltraceComponent-0").isNil
       check document.getElementById(cstring"CALL TRACE").isNil
 
+  suite "independent auto-hide presentation persistence":
+    test "empty panel collections round-trip all four mode combinations":
+      for left in [false, true]:
+        for right in [false, true]:
+          freshWorld()
+          setEdgeMinimal(Left, left)
+          setEdgeMinimal(Right, right)
+          let saved = jsonParse(jsonStringify(serializeAutoHideState()))
+          autoHideState = nil
+          restoreAutoHideState(saved)
+          check isEdgeCollapsed(Left) == left
+          check isEdgeCollapsed(Right) == right
+          check not isEdgeCollapsed(Bottom)
+          check autoHideState.panels.len == 0
+
+    test "missing and invalid modes default independently before panels are read":
+      freshWorld()
+      restoreAutoHideState(js{"leftMinimal": cstring"true", "rightMinimal": true})
+      check not isEdgeCollapsed(Left)
+      check isEdgeCollapsed(Right)
+      restoreAutoHideState(js{"leftMinimal": true, "rightMinimal": js{"bad": true}})
+      check isEdgeCollapsed(Left)
+      check not isEdgeCollapsed(Right)
+      restoreAutoHideState(js{"panels": jsonParse(cstring"[]")})
+      check not isEdgeCollapsed(Left)
+      check not isEdgeCollapsed(Right)
+
+    test "collapsed directories filter by edge and preserve panel order":
+      freshWorld()
+      let first = AutoHidePanel(edge: Left, title: cstring"first")
+      let second = AutoHidePanel(edge: Right, title: cstring"second")
+      let third = AutoHidePanel(edge: Left, title: cstring"third")
+      autoHideState.panels = @[first, second, third, AutoHidePanel(edge: Bottom)]
+      setEdgeMinimal(Left, true)
+      check collapsedIconZoneModel(Left) == @[first, third]
+      check collapsedIconZoneModel(Right).len == 0
+      setEdgeMinimal(Right, true)
+      check collapsedIconZoneModel(Right) == @[second]
+      check collapsedIconZoneModel(Bottom).len == 0
+      setEdgeMinimal(Left, false)
+      check collapsedIconZoneModel(Left).len == 0
+      check collapsedIconZoneModel(Right) == @[second]
+
 else:
   import std/strutils
 
