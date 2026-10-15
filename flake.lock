@@ -4241,7 +4241,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-acp",
-        "rev": "d894960d22c7174ec71808669fd986871a376b5f",
+        "rev": "0f4eec753ec1c98db3ab5c632c33087ea3656e86",
         "type": "github"
       },
       "original": {
@@ -4567,7 +4567,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "4aa8892844a43ac59d4be74a4f992161b09491fe",
+        "rev": "3af63afc5c0b55a27fc5e0a26f3a32833caf8873",
         "type": "github"
       },
       "original": {
@@ -7614,11 +7614,9 @@
         ]
       },
       "locked": {
-        "lastModified": 1791399039,
-        "narHash": "sha256-j1Dog8bWR4IOL2bfnPVivUq/R86+Zrp6ONk9dcf6sWk=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "bf799831a1e7898b83765784ef513e05f75135ea",
+        "rev": "01e37c119a168c98da7a37dbdc6214e230ea7e9a",
         "type": "github"
       },
       "original": {
