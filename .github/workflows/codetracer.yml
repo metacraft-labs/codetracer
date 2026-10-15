@@ -8651,6 +8651,20 @@ jobs:
         # Stock bash, no network.
         run: bash ci/test/sibling-build-failure-test.sh
 
+      - name: Check that a stale sibling artifact is rebuilt, not skipped
+        # scripts/build-siblings.sh decided "already built" from the artifact
+        # merely EXISTING, so a sibling built against an older dependency was
+        # reported `SKIP … already built` on every run forever. Observed: a
+        # codetracer-js-recorder emitting meta.dat v3 while ct accepted only
+        # v4/v5, with every recording spec then dying inside importTraceFolder
+        # naming THE TRACE rather than the stale recorder. This suite runs the
+        # real script against throwaway git repos and pins that an artifact
+        # older than HEAD, or one built from a tree with tracked modifications,
+        # is rebuilt and SAYS WHY -- and that a genuinely fresh one is still
+        # skipped, which is the control that stops "always rebuild" passing.
+        # Stock bash and git, no network; its builders are stubs.
+        run: bash ci/test/sibling-artifact-freshness-test.sh
+
       - name: Self-test the private-registry credential preflight
         # This suite is also run by `visual-replay-regression-gate`, but that
         # job needs a GPU runner, a workspace lock and eight sibling
