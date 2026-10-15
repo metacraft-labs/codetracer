@@ -474,11 +474,44 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   color: colors-ui-text-primary-body-subtle
   flex-shrink: 0
 
-// The commit row's hover diff button (`.vcs-commit-diff-btn`) was removed with
-// #753: it minted the pathless target `commit:<hash>`, and a diff tab must name
-// exactly one file (DeepReview-GUI.md §4.1).  A commit's per-file diffs are
-// reached by expanding the commit — see `.vcs-accordion-file` / the per-row
-// `.vcs-file-diff-btn` below, which carry `commit:<hash>:<path>`.
+// Whole-commit unified diff button: shown on hover of a commit header row.
+// Hidden by default; appears to the right of the timestamp on row hover.
+.vcs-commit-diff-btn
+  display: none
+  flex-shrink: 0
+  position: relative
+  cursor: pointer
+  width: 0.6875rem
+  height: 0.8125rem
+  margin-left: 0.375em
+  background-image: url("../../public/resources/shared/vc-open-diff.svg")
+  background-repeat: no-repeat
+  background-size: contain
+  background-position: center
+  opacity: 0.7
+  transition: opacity 150ms ease
+
+  &:hover
+    opacity: 1
+
+  .custom-tooltip
+    right: 0
+    left: unset
+    z-index: 200
+
+    &:after
+      left: unset
+      right: 0.25em
+
+.vcs-commit-diff-btn:hover > .custom-tooltip
+  opacity: 1
+  visibility: visible
+
+.vcs-commit-header:hover .vcs-commit-diff-btn
+  display: block
+
+.vcs-commit-header-selected:hover .vcs-commit-diff-btn
+  display: block
 
 // ---------------------------------------------------------------------------
 // Accordion expanded area: file list rendered inline under the commit header.
