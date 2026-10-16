@@ -4564,17 +4564,17 @@
     "nim-shm-queue-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1784203906,
-        "narHash": "sha256-QPYS3OJPza6M2l1FMKa+jt3+mIBHCHWGkLOb9jAKMHs=",
+        "lastModified": 1790569352,
+        "narHash": "sha256-vsqb2Ibe+4VqVug6oGJVZqX4d+z4oOY0oWZMHKc2pLk=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "5a8e43b52fa202859658692c9f8432967f3971ea",
+        "rev": "a3564c13e0b7d0c6a092c19c998cd3faee5ce20a",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "5a8e43b52fa202859658692c9f8432967f3971ea",
+        "rev": "a3564c13e0b7d0c6a092c19c998cd3faee5ce20a",
         "type": "github"
       }
     },
@@ -7522,17 +7522,17 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1792169092,
-        "narHash": "sha256-Qu8xHY6xrNISufKJU75JPfq3IZIakW+inytJbaH8Dzo=",
+        "lastModified": 1792182730,
+        "narHash": "sha256-TH6I2GgqSgTrPtbnIQebWfW6J/smYb9cYf7JuL7qASA=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "f6a3a9bdbc26fdd03236fbea74af23abe4f9c3ee",
+        "rev": "3912f3874e3038af5a2648a11a82f824762c0940",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "f6a3a9bdbc26fdd03236fbea74af23abe4f9c3ee",
+        "rev": "3912f3874e3038af5a2648a11a82f824762c0940",
         "type": "github"
       }
     },
