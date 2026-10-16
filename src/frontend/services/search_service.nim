@@ -1,16 +1,16 @@
 import
-  service_imports,
-  ../ui/auto_hide
-from ../viewmodel/store/types as vmtypes import SearchResultLine
+  service_imports
 
-# Forward declarations of ``search_results`` sync helpers.  The
-# concrete implementations live in ``../ui/search_results.nim`` and are
-# wired up at module-init time below.  Going through proc variables
-# avoids the import cycle (``search_results`` imports ``ui_imports``,
-# which imports the renderer, which imports this service).
-var syncSearchResultsAppendBatchHook*: proc(matches: seq[SearchResultLine])
-var syncSearchResultsSetQueryHook*: proc(query: string)
-var syncSearchResultsClearHook*: proc()
+# THE FIND IN FILES PANE IS `SearchResultsVM`, and its wiring lives in
+# ``../ui/search_results.nim``, which this service cannot import (cycle:
+# ``search_results`` imports ``ui_imports``, which imports the renderer, which
+# imports this service). Two hooks, installed there at module init, carry the
+# two directions: a search the omnibar's ``:grep`` starts goes INTO the pane's
+# ViewModel (``startFindInFilesHook`` → ``SearchResultsVM.search``), and the
+# main process's batches go into it too (``acceptFindInFilesBatchHook`` →
+# ``SearchResultsVM.acceptBatch``).
+var startFindInFilesHook*: proc(query: string)
+var acceptFindInFilesBatchHook*: proc(batch: SearchResultsBatch)
 
 #data.services.search.pluginCommands = rendererPluginCommands
 
@@ -43,48 +43,24 @@ proc run*(self: SearchService, query: cstring, includePattern: cstring, excludeP
   # self.data.redraw()
 
 proc searchProgram*(self: SearchService, query: cstring) =
-  clog "searchProgram in service " & $query
-  # Set query mode to SearchFixed so ``onSearchResultsUpdated`` routes
-  # results to the Find in Files VM (the check ``self.query.searchMode ==
-  # SearchFixed`` was always false before this was set, causing endless
-  # loading because the batch hook was never called).
-  self.query = SearchQuery(query: query, searchMode: SearchFixed)
-  self.results[SearchFixed] = @[]
-  self.active[SearchFixed] = false
-  self.data.ipc.send("CODETRACER::search-program", query)
+  ## The omnibar's ``:grep <query>``: a search of the Find in Files pane —
+  ## the same one its own field runs (``SearchResultsVM.search``).
+  if not startFindInFilesHook.isNil:
+    startFindInFilesHook($query)
 
-data.services.search.onSearchResultsUpdated = proc(self: SearchService, results: seq[SearchResult]) {.async.} =
-  if self.query.isNil:
-    return
-  self.results[self.query.searchMode] = self.results[self.query.searchMode].concat(results)
-  self.active[self.query.searchMode] = true
-  if not self.data.ui.status.searchResults.isNil:
-    self.data.ui.status.searchResults.active = true
-  # Mirror the streamed batch into the IsoNim ``SearchResultsVM`` so
-  # the IsoNim view's reactive body rebuilds in lock-step with the
-  # legacy record.  Done as a single bulk-append so the body re-renders
-  # only once per IPC delivery.
-  if self.query.searchMode == SearchFixed:
-    var rows: seq[SearchResultLine] = @[]
-    for r in results:
-      rows.add(SearchResultLine(
-        text: (if r.text.isNil: "" else: $r.text),
-        path: (if r.path.isNil: "" else: $r.path),
-        line: r.line))
-    # Always invoke the hook even for an empty batch so the VM can clear
-    # the loading shimmer when ripgrep produces no matches.
-    if not syncSearchResultsAppendBatchHook.isNil:
-      syncSearchResultsAppendBatchHook(rows)
-    if not self.query.query.isNil and
-       not syncSearchResultsSetQueryHook.isNil:
-      syncSearchResultsSetQueryHook($self.query.query)
-  # Auto-reveal the search results panel if it is pinned to an auto-hide edge.
-  if not autoHideState.isNil:
-    let panel = autoHideState.findPanelByContent(Content.SearchResults)
-    if not panel.isNil:
-      # Idempotent reveal: this runs once per appended result batch, and
-      # `showOverlay` would toggle the panel shut on every second batch.
-      revealOverlay(panel)
+proc requestFindInFiles*(self: SearchService; runId: int; query: string;
+                         caseSensitive, wholeWord, regex: bool) =
+  ## Ask the main process to run search ``runId`` through the shared runner
+  ## (``index/ipc_utils.onSearchProgram``).
+  self.data.ipc.send("CODETRACER::search-program", js{
+    id: runId, query: cstring(query), caseSensitive: caseSensitive,
+    wholeWord: wholeWord, regex: regex})
+
+data.services.search.onSearchResultsUpdated = proc(self: SearchService, batch: SearchResultsBatch) {.async.} =
+  ## One batch of the shared runner's rows, handed to the pane's ViewModel,
+  ## which drops it unless it belongs to the latest search.
+  if not acceptFindInFilesBatchHook.isNil:
+    acceptFindInFilesBatchHook(batch)
   self.data.redraw()
 
 proc restart*(service: SearchService) =

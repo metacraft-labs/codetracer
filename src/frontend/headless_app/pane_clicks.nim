@@ -478,7 +478,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[56, ClickBehaviour] = [
+const ClickInventory*: array[57, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -567,9 +567,10 @@ const ClickInventory*: array[56, ClickBehaviour] = [
     "remove the entry", "ScratchpadVM.removeValue", nsDone, nsDone),
   k("K34", "VCS: changed file", {cgClick}, "open the file's diff",
     "vcsFileDiff", nsDone, nsDone),
-  k("K35", "Search results / Problems / Build line", {cgClick},
-    "jump to file:line", "source jump", nsNotApplicable, nsNotApplicable,
-    "the panes are report leaves natively in a replay"),
+  k("K35", "Search results: row", {cgClick},
+    "open the file at the line, the match selected; the recording position " &
+      "stays", "SearchResultsVM.openResult", nsDone, nsDone,
+    "PLAT-57: Find in Files is drawn natively on both"),
   k("K36", "Inline value", {cgClick, cgCtrlClick, cgRightClick},
     "go to the step the line ran at / add it to the scratchpad / menu: " &
       "Jump to value, Add value to scratchpad, Add all values to scratchpad",
@@ -638,7 +639,11 @@ const ClickInventory*: array[56, ClickBehaviour] = [
     "the native scratchpads hold one-line values"),
   k("K56", "Status bar: certificate", {cgClick}, "show the certificate",
     "-", nsNotApplicable, nsNotApplicable,
-    "drawn only for a test recording with a certificate")]
+    "drawn only for a test recording with a certificate"),
+  k("K57", "Problems / Build line", {cgClick},
+    "jump to file:line", "source jump", nsNotApplicable, nsNotApplicable,
+    "the panes are report leaves natively in a replay (K35 was this row " &
+      "with Find in Files' until PLAT-57 drew that pane)")]
 
 func behaviour*(id: string): ClickBehaviour =
   ## The inventory row named `id` (`K1` …); an empty value for an unknown id.

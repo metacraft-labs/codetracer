@@ -49,7 +49,7 @@ import headless_session
 import store/replay_data_store
 import backend/stdio_backend   # `toBackendService` over the live transport
 import viewmodels/[debug_controls_vm, filesystem_vm, flow_vm, timeline_vm,
-                   search_vm, scratchpad_vm, shell_vm]
+                   search_results_vm, scratchpad_vm, shell_vm]
 import headless_app/layout_model
 import headless_app/headless_app
 import ../../view_vocabulary/pane_views
@@ -321,8 +321,8 @@ suite "PLAT-41 4 — report to data, per new pane, on a live session":
     # The reader carries these because it imports no product module; each is
     # compared with what the pane REALLY says over an unexercised ViewModel.
     let drawn = @[
-      paneView(paneSearch, ViewModel(createSearchVM(fresh)), GpuiPanelBudget,
-               "tui").report,
+      paneView(paneSearch, ViewModel(createSearchResultsVM(fresh)),
+               GpuiPanelBudget, "tui").report,
       paneView(paneScratchpad, ViewModel(createScratchpadVM(fresh)),
                GpuiPanelBudget, "tui").report,
       paneView(paneShell, ViewModel(createShellVM(fresh)), GpuiPanelBudget,

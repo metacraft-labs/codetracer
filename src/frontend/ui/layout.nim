@@ -1913,12 +1913,11 @@ proc mountPaneForState(state: GoldenItemState) =
         errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
         errors.tryMountIsoNimErrorsPanel()
 
-      # SearchResults is now an IsoNim view -- its DOM is mounted by
-      # ``search_results.tryMountIsoNimSearchResultsPanel`` against
-      # the ``searchResultsComponent-{id}`` container, and reactive
-      # effects keep it in sync. No direct-DOM redraw hook is needed here.
+      # SearchResults is an IsoNim view over `SearchResultsVM`, mounted by
+      # ``search_results.tryMountIsoNimSearchResultsPanel`` against the
+      # ``searchResultsComponent-{id}`` container; the ViewModel is the
+      # only store of its rows, so a re-mount has nothing to re-sync.
       if state.content == Content.SearchResults:
-        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(component))
         search_results.tryMountIsoNimSearchResultsPanel()
 
       # StepList is now an IsoNim view -- its DOM is mounted by
@@ -2664,9 +2663,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       errors.tryMountIsoNimErrorsPanel()
       return
     if panel.content == Content.SearchResults:
-      let srComp = data.ui.componentMapping[Content.SearchResults][0]
-      if not srComp.isNil:
-        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
       search_results.isoNimSearchResultsMounted = false
       search_results.tryMountIsoNimSearchResultsPanel()
       return
@@ -2919,9 +2915,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           cerror "auto_hide: tryMountIsoNimErrorsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
       elif panelDef.content == Content.SearchResults:
         try:
-          let srComp = data.ui.componentMapping[Content.SearchResults][0]
-          if not srComp.isNil:
-            search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
           search_results.isoNimSearchResultsMounted = false
           search_results.tryMountIsoNimSearchResultsPanel()
         except:
@@ -2978,9 +2971,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       errors.tryMountIsoNimErrorsPanel()
       return
     if contentId == int(Content.SearchResults):
-      let srComp = data.ui.componentMapping[Content.SearchResults][0]
-      if not srComp.isNil:
-        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
       search_results.isoNimSearchResultsMounted = false
       search_results.tryMountIsoNimSearchResultsPanel()
       return

@@ -83,7 +83,7 @@ import viewmodels/point_list_vm
 # PLAT-41 — the five newly expressed panes' ViewModels.
 import viewmodels/debug_controls_vm
 import viewmodels/flow_vm
-import viewmodels/search_vm
+import viewmodels/search_results_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/filesystem_vm
@@ -550,36 +550,63 @@ proc flowPaneView*(vm: FlowVM): PaneView =
   result.root = table
   result.entries = entriesOf(result.root)
 
-proc searchPaneView*(vm: SearchVM): PaneView =
-  ## Search: a `Tree` of the query `Input` and a `List` of results.
-  ##
-  ## The query is an `Input` rather than a `Text` because it is the pane's
-  ## editable state — `SearchVM.query` is a `Signal[string]` a reader types
-  ## into — and the vocabulary distinguishes a reading from a control. A result
-  ## is a `ViewOption`, which is (identity, label, availability): the identity
-  ## is what a caller acts on, so a medium does not have to parse the label
-  ## back into a location.
+const
+  SearchQueryId* = "search.query"
+  SearchOptionIdPrefix* = "search.option."
+    ## A toggle's id is this prefix and its name (`case`, `word`, `regex`).
+  SearchResultIdPrefix* = "search.result."
+    ## A match row's id is this prefix and the row's index in
+    ## `SearchResultsVM.results` — what a click opens (K35).
+
+proc searchResultLabel*(row: SearchResultLine): string =
+  ## A match row as one line: its line number, then its text.
+  let p = rowParts(row)
+  $row.line & "  " & p.before & p.hit & p.after
+
+proc searchPaneView*(vm: SearchResultsVM): PaneView =
+  ## FIND IN FILES (PLAT-57): the query, the three toggles, where the search
+  ## is, then one `Collapsible` per file (its caption the desktop's group
+  ## header — `shortResultPath · N matches`) holding a `List` of its match
+  ## rows. A row's identity is its index in `results` (`SearchResultIdPrefix`),
+  ## so a medium never parses a label back into a location.
   result.pane = paneSearch
   if vm.isNil:
     result.report = "search has no ViewModel; the session has not launched"
     result.root = viewText("search.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  let o = vm.options.val
   var children: seq[ViewNode] = @[]
-  children.add viewInput("search.query", vm.query.val)
-  var options: seq[ViewOption] = @[]
-  for i, r in vm.results.val:
-    options.add ViewOption(id: "search.result." & $i,
-                           label: (if r.detail.len > 0: r.label & " — " & r.detail
-                                   else: r.label))
-  let list = viewList("search.results", options)
-  let sel = vm.selectedResult.val
-  if sel.isSome and sel.get >= 0 and sel.get < options.len:
-    list.cursor = sel.get
-  children.add list
-  result.root = viewTreeNode("search", "Search", children)
+  children.add viewInput(SearchQueryId, vm.query.val)
+  for which in SearchOption:
+    children.add viewToggle(SearchOptionIdPrefix & $which,
+                            SearchOptionTitles[which], checked = o.isOn(which))
+  let groups = vm.groups.val
+  let summary = vm.summaryText()
+  children.add viewText("search.summary",
+                        (if summary.len > 0: summary
+                         else: vm.emptyText(NativeSearchPrompt)))
+  let sel = vm.selected.val
+  for gi, g in groups:
+    var options: seq[ViewOption] = @[]
+    var cursor = -1
+    for k, (index, row) in g.rows:
+      options.add ViewOption(id: SearchResultIdPrefix & $index,
+                             label: searchResultLabel(row))
+      if index == sel:
+        cursor = k
+    let list = viewList("search.file." & $gi & ".rows", options,
+                        highlight = max(0, cursor))
+    if cursor < 0:
+      list.highlight = -1
+    children.add viewCollapsible("search.file." & $gi,
+                                 shortResultPath(g.path) & " · " &
+                                   matchCountLabel(g.rows.len),
+                                 @[list], expanded = true)
+  result.root = viewTreeNode("search", "Find in Files", children,
+                             expanded = true)
   result.entries = entriesOf(result.root)
-  if options.len == 0:
+  if groups.len == 0:
     result.report = "no search results"
 
 const ScratchpadCloseGlyph* = "✕"
@@ -817,7 +844,7 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   # PLAT-41 — five newly expressed.
   of paneDebugControls: debugControlsPaneView(DebugControlsVM(vm))
   of paneFlow: flowPaneView(FlowVM(vm))
-  of paneSearch: searchPaneView(SearchVM(vm))
+  of paneSearch: searchPaneView(SearchResultsVM(vm))
   of paneScratchpad: scratchpadPaneView(ScratchpadVM(vm))
   of paneShell: shellPaneView(ShellVM(vm))
   of paneFileTree: fileTreePaneView(FilesystemVM(vm))

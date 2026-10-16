@@ -129,8 +129,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-10-08"
-  MeasuredBinaryBytes = 17_282_128
+  MeasurementDate = "2026-10-16"
+  MeasuredBinaryBytes = 18_755_344
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -241,8 +241,28 @@ const
     ## and cell-size answers), `shell` and `palette` (the focused strip, the
     ## dimmed future), ~44 KB between them. No data table is linked in. The
     ## ceiling keeps 8.02% over the anchor.
+    ##
+    ##   18_138_608  2026-10-16: `agents` at 6b6d05a08 with `dev` merged in,
+    ##               built fresh; inside the band (PLAT-52…68 growth, 4.95%
+    ##               over the 17_282_128 anchor)
+    ##   18_755_344  2026-10-16: Find in Files with regular expressions
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. Find in Files costs +616_736 bytes
+    ## (+3.40%) over that tree built the same way, which tripped the band.
+    ## Attributed by summing `nm -S` per Nim module: a regular-expression
+    ## engine linked in for the first time — nim-regex (`libs/nim-regex`:
+    ## `parser`, `exptransformation`, `nfa`, `litopt`, `nfamatch2`,
+    ## `nfafindall2`, `types` and the rest, ~159 KB of code) and the Unicode
+    ## DATA TABLES it reads (nim-unicodedb's `casing_data`, `types_data`,
+    ## `properties_data`, ~191 KB, said so: case folding and `\w` / `\p{…}`
+    ## need them, and they are the one thing linked in as data); the search
+    ## runner and its matcher (`find_in_files`, `text_match`, ~29 KB); the
+    ## pane's ViewModel linked into the terminal for the first time
+    ## (`search_results_vm`, ~35 KB) and its painter (`search_results_pane`,
+    ## ~11 KB); and growth in `tui_session`, `runtime`, `native_host` and
+    ## `tui_app` (~24 KB). The ceiling keeps 8.02% over the anchor.
 
-  BinaryCeilingBytes = 18_668_200
+  BinaryCeilingBytes = 20_259_500
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

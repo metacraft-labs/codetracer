@@ -62,10 +62,15 @@ import ../../viewmodel/viewmodels/inline_value_timeline
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
+import viewmodels/search_results_vm   # PLAT-57: Find in Files
+from ../../viewmodel/host/find_in_files import FindInFilesScope, pump
+from std/unicode import runeLen
 import ../../viewmodel/host/terminal_output_source   # PLAT-52
 import ../app/call_stack_binding
 import ../app/frame_viewer_binding
 import ../app/runtime
+import ../app/views/search_results_pane   # PLAT-57
+from ../app/edit_binding import EditBuffer, moveCaretTo, caretLine, caretColumn   # the read-only document a result opens in
 import ../app/source_binding
 import ../app/timeline_binding
 import ../app/variables_binding
@@ -483,7 +488,133 @@ proc refreshTerminalOutput*(s: TuiSession; rt: TuiRuntime) =
     s.session.session.terminalOutputVM, s.session.getCurrentRRTicks(),
     rt.app.terminalOutput)
 
-proc showViewedFile(s: TuiSession; rt: TuiRuntime)
+proc showViewedFile(s: TuiSession; rt: TuiRuntime; force = false)
+
+# ---------------------------------------------------------------------------
+# PLAT-57: Find in Files
+# ---------------------------------------------------------------------------
+
+proc searchModelOf*(vm: SearchResultsVM;
+                    prior: SearchResultsPaneModel): SearchResultsPaneModel =
+  ## The session's `SearchResultsVM` as the pane's value: the field, the
+  ## toggles, where the search is, and the groups flattened into rows — every
+  ## caption, count and highlight split the ViewModel's own. The reading
+  ## position (`scrollTop`) is the pane's, kept while the query is.
+  result = SearchResultsPaneModel(loaded: not vm.isNil, selected: -1)
+  if vm.isNil:
+    return
+  result.query = vm.query.val
+  let o = vm.options.val
+  for which in SearchOption:
+    result.options.add SearchPaneOption(
+      operation: SearchOptionOperations[which],
+      label: SearchOptionLabels[which], on: o.isOn(which))
+  result.summary = vm.summaryText()
+  result.empty = vm.emptyText(NativeSearchPrompt)
+  result.selected = vm.selected.val
+  for d in vm.displayRows():
+    result.rows.add SearchPaneRow(
+      kind: (if d.kind == sdFile: spFile else: spMatch), path: d.path,
+      caption: d.caption, count: d.count, index: d.index, line: d.line,
+      before: d.before, hit: d.hit, after: d.after)
+  result.scrollTop = if prior.query == result.query: prior.scrollTop else: 0
+
+proc refreshSearch*(s: TuiSession; rt: TuiRuntime) =
+  rt.app.search = searchModelOf(s.session.session.searchResultsVM,
+                                rt.app.search)
+
+proc wireFindInFiles*(s: TuiSession) =
+  ## The session's Find in Files searches go to the shared runner, over this
+  ## recording's scope (`native_host.recordingSearchScope`).
+  let folder = s.session.tracePath
+  wireFindInFiles(s.session.session.searchResultsVM,
+                  proc(): FindInFilesScope = recordingSearchScope(folder))
+
+proc findInFiles*(s: TuiSession; rt: TuiRuntime; query: string): string =
+  ## `:grep <query>`: the session's search (`SearchResultsVM.search`, which
+  ## hands it to the runner). "" when it started, else why not.
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil:
+    return "this session has no Find in Files"
+  vm.search(query)
+  s.refreshSearch(rt)
+  ""
+
+proc pumpFindInFiles*(s: TuiSession; rt: TuiRuntime): bool =
+  ## Advance the search in flight (the loop calls this on its idle tick);
+  ## whether the pane's value changed.
+  discard nativeFindInFiles.pump()
+  let before = rt.app.search
+  s.refreshSearch(rt)
+  rt.app.search != before
+
+proc showSearchResult*(s: TuiSession; rt: TuiRuntime; index: int): string =
+  ## PLAT-57 (K35, `search.next-result`): result `index` selected and its file
+  ## shown in the editor at its line, the match selected and the caret on it
+  ## — read from the recording, as a file opened from the Files pane is; the
+  ## recording position does not move (Editor-Pane.md: a Find-in-Files row
+  ## click deliberately does not). "" when it opened, else why not.
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil:
+    return "there are no search results"
+  let rows = vm.results.val
+  if index < 0 or index >= rows.len:
+    return "there is no such search result"
+  vm.selectResult(index)
+  let row = rows[index]
+  rt.app.viewedFile = row.path
+  s.showViewedFile(rt, force = true)
+  if rt.app.viewedFile.len == 0:
+    s.refreshSearch(rt)
+    return rt.app.notification
+  let paneRows = max(1, rt.sourcePaneRows())
+  rt.app.source.viewportTop = max(1, row.line - paneRows div 3)
+  let column = if row.matchStart > 0 and row.matchStart <= row.text.len:
+                 row.text[0 ..< row.matchStart].runeLen
+               else: 0
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == row.path:
+    buf.moveCaretTo(row.line - 1, column)
+    if row.matchLength > 0:
+      let width = row.text[row.matchStart ..<
+                           min(row.text.len,
+                               row.matchStart + row.matchLength)].runeLen
+      buf.doc.extendSelectionTo(row.line - 1, column + width)
+    rt.app.caret = (buf.path, buf.caretLine, buf.caretColumn + 1)
+  else:
+    rt.app.caret = (row.path, row.line, column + 1)
+  s.refreshSearch(rt)
+  # The list keeps the selected row in view.
+  let at = rt.app.search.rowOfResult(index)
+  if at >= 0:
+    let under = rt.paneBodyRows(paneSearch)
+    rt.app.search.scrollTop = rt.app.search.revealRow(at, max(1, under - 3))
+  rt.app.notification = "opened " & row.path & ":" & $row.line
+  ""
+
+proc toggleSearchOption*(s: TuiSession; rt: TuiRuntime;
+                         operation: string): string =
+  ## One of Find in Files' toggles flipped by its operation
+  ## (`search.toggle-case`, `-whole-word`, `-regex`) — a press on it, or its
+  ## key in the field — and a search that ran runs again with it (the
+  ## ViewModel's rule). The words the status line shows.
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil:
+    return "this session has no Find in Files"
+  let (known, which) = searchOptionOf(operation)
+  if not known:
+    return "`" & operation & "` is no Find in Files option"
+  vm.toggleOption(which)
+  s.refreshSearch(rt)
+  SearchOptionTitles[which] & (if vm.options.val.isOn(which): " on" else: " off")
+
+proc stepSearchResult*(s: TuiSession; rt: TuiRuntime; delta: int): string =
+  ## `search.next-result` / `search.previous-result`: the next / previous
+  ## result, wrapping (`SearchResultsVM.stepResult`), shown.
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil or vm.results.val.len == 0:
+    return "there are no search results"
+  s.showSearchResult(rt, vm.stepResult(delta))
 
 proc refreshOrigins(s: TuiSession; rt: TuiRuntime) =
   ## PLAT-51: the origin chains open in the Variables pane, read at THIS stop
@@ -591,6 +722,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
 
   # PLAT-40. The Points pane reads the same points the gutter just drew.
   rt.app.points = pointListPaneModelFor(s.points)
+  # PLAT-57: Find in Files, this session's.
+  s.refreshSearch(rt)
 
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)
@@ -715,7 +848,7 @@ proc recordedSourceText*(s: TuiSession; path: string):
     return (false, "", "could not read " & path & ": " & fetched.detail)
   (true, lines.join("\n") & "\n", "")
 
-proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
+proc showViewedFile(s: TuiSession; rt: TuiRuntime; force = false) =
   ## PLAT-50 (K17): the editor shows `rt.app.viewedFile` — a file the user
   ## clicked in the Files pane — read whole from the recording through the
   ## same source provider the stop's file comes from (generation 0, the
@@ -726,9 +859,14 @@ proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
   ## debugger next moves, as the desktop's editor then switches back to the
   ## location's file.
   let path = rt.app.viewedFile
-  if path == s.source.path.val:
+  # The stop's own file is the editor's already — unless a caller FORCES the
+  # whole file (a Find in Files result, PLAT-57, shown at a line the stop's
+  # window may not hold), with the execution pointer where it is.
+  let stopFile = path == s.source.path.val
+  if stopFile and not force:
     rt.app.viewedFile = ""
     return
+  let executionLine = if stopFile: s.source.executionLine.val else: 0
   var fetched = SourceFetch(status: sfsProviderUnavailable,
                             detail: "the provider callback never ran")
   s.provider.fetch(SourceLineRequest(path: path, sourceGeneration: 0,
@@ -752,7 +890,7 @@ proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
     heldLines = lines,
     totalLineCount = lines.len,
     viewportTop = top,
-    executionLine = 0,
+    executionLine = executionLine,
     marks = marksForFile(s.points, path),
     columnMarks = columnMarksForFile(s.points, path))
   rt.app.fileTree.openPath = path
@@ -927,6 +1065,15 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
       if vm == s.state and s.state == session.session.stateVM:
         break
     s.refresh(rt)
+  of pcSearchResult:
+    # PLAT-57 (K35): the result opens at its line; the debugger stays.
+    let why = s.showSearchResult(rt, int(c.index))
+    if why.len > 0:
+      rt.app.notification = why
+  of pcSearchOption:
+    # PLAT-57: a toggle flips (and a search that ran runs again with it —
+    # the ViewModel's rule).
+    rt.app.notification = s.toggleSearchOption(rt, c.text)
   of pcOpenFile:
     # K17: the desktop's `FilesystemVM.openFile`.
     rt.app.viewedFile = c.path

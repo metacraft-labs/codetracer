@@ -49,6 +49,7 @@ import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
 import ./menu_keys
 import ../viewmodel/keymap/alt_tap
+from ../viewmodel/viewmodels/omnibar_vm import paletteFieldOf
 import ../../common/key_names
 import ../viewmodel/viewmodels/video_player_vm
 
@@ -152,8 +153,9 @@ proc desktopScopePath*(): ScopePath =
   let window = element(ekWindow, "window")
   if not data.isNil and not data.ui.isNil and
      not data.ui.commandPalette.isNil and data.ui.commandPalette.active:
+    let line = data.ui.commandPalette.inputValue
     return @[window, element(ekOverlay, "palette"),
-             element(ekInput, "palette-query")]
+             paletteFieldOf(if line.isNil: "" else: $line)]
   let chain = scopeChainOf(activeElementJs())
   result = @[window]
   for e in chain:

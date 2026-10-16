@@ -336,7 +336,7 @@ proc vmFor(pane: PaneKind): ViewModel =
   # portability claim would be about five apologies rather than five views.
   of paneDebugControls: ViewModel(s.debugControlsVM)
   of paneFlow: ViewModel(s.flowVM)
-  of paneSearch: ViewModel(s.searchVM)
+  of paneSearch: ViewModel(s.searchResultsVM)
   of paneScratchpad: ViewModel(s.scratchpadVM)
   of paneShell: ViewModel(s.shellVM)
   else: nil

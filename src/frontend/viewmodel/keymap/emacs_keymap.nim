@@ -131,6 +131,17 @@ const
     BaseRow(chords: "Alt+%", operation: "find.open-replace",
             whenText: "editorFocus && !editorReadOnly"),
     BaseRow(chords: "Alt+G G", operation: "palette.go-to-line", whenText: "editorFocus"),
+    # `next-error` / `previous-error`: in Emacs they walk `grep` output.
+    BaseRow(chords: "Alt+G N", operation: "search.next-result", table: G),
+    BaseRow(chords: "Alt+G P", operation: "search.previous-result", table: G),
+    # Find in Files' field: isearch's `M-c` / `M-r`, and `M-w` for the word
+    # toggle (isearch's `M-s w` is a prefix the field does not have).
+    BaseRow(chords: "Alt+C", operation: "search.toggle-case",
+            whenText: "searchInputFocus", table: G),
+    BaseRow(chords: "Alt+W", operation: "search.toggle-whole-word",
+            whenText: "searchInputFocus", table: G),
+    BaseRow(chords: "Alt+R", operation: "search.toggle-regex",
+            whenText: "searchInputFocus", table: G),
     BaseRow(chords: "Ctrl+L", operation: "editor.center-on-pointer", whenText: "editorTextFocus"),
     BaseRow(chords: "Alt+X", operation: "palette.open-commands", table: G),
 

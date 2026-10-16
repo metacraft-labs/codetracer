@@ -42,7 +42,11 @@ PARSING THE SOURCES
   matching around every `primary:`; its command is the `id:` of the nearest
   enclosing object that has one (an editor action's `super({ id, kbOpts })`,
   an `Action2`'s `super({ id, keybinding })`, or the
-  `registerCommandAndKeybindingRule({ id, primary })` argument itself). An
+  `registerCommandAndKeybindingRule({ id, primary })` argument itself). A
+  binding written `keybinding: Object.assign({ weight, when }, NAME)` — the
+  search view's toggles, which share the find widget's chords — is the first
+  object with the members of `const NAME = { primary, … }` (its own file or
+  an import) merged in. An
   identifier id is resolved through the string constants the tree declares
   (`const X = '…'`, `static readonly ID = '…'`, enum members). Key codes are
   read from the `KeyMod.X` / `KeyCode.Y` spellings — written in TypeScript and
@@ -606,6 +610,57 @@ def extract(paths, consts):
                 continue
             when = top_level_value(obj, "when") or top_level_value(obj, "kbExpr") or ""
             out.append((cmd, path, chords_of(obj, text, path), when))
+        out.extend(assigned_bindings(text, path, consts, local))
+    return out
+
+
+def const_object(name, text, path):
+    """The `{ … }` of `const <name> = { … }`, in `text` or the module `path`
+    imports `name` from; None when there is none."""
+    d = re.search(r"\bconst\s+" + name + r"\b[^=]*=\s*\{", text)
+    if not d:
+        imp = imports_of(path).get(name)
+        if not (imp and imp[0] and imp[1]):
+            return None
+        try:
+            text = open(imp[0], encoding="utf-8", errors="replace").read()
+        except OSError:
+            return None
+        d = re.search(r"\bconst\s+" + imp[1] + r"\b[^=]*=\s*\{", text)
+        if not d:
+            return None
+    o = d.end() - 1
+    close = matching(text, o, "{", "}")
+    return text[o:close + 1] if close > 0 else None
+
+
+def assigned_bindings(text, path, consts, local):
+    """[(command, file, {platform: [chords]}, when)] for every
+    `keybinding: Object.assign({ … }, NAME)`: the object with NAME's members
+    merged in, its command the enclosing `super({ id, … })`'s."""
+    out = []
+    for m in re.finditer(r"keybinding\s*:\s*Object\.assign\(\s*\{", text):
+        o = m.end() - 1
+        close = matching(text, o, "{", "}")
+        if close < 0:
+            continue
+        tail = re.match(r"\s*,\s*(\w+)\s*\)", text[close + 1:])
+        if not tail:
+            continue
+        shared = const_object(tail.group(1), text, path)
+        if not shared:
+            continue
+        obj = "{" + text[o + 1:close].rstrip().rstrip(",") + ", " + shared[1:]
+        owner = enclosing_open(text, m.start())
+        if owner < 0:
+            continue
+        oclose = matching(text, owner, "{", "}")
+        v = top_level_value(text[owner:oclose + 1], "id") if oclose > 0 else None
+        cmd = resolve_id(v, consts, local, path) if v else None
+        if not cmd:
+            continue
+        when = top_level_value(obj, "when") or ""
+        out.append((cmd, path, chords_of(obj, text, path), when))
     return out
 
 

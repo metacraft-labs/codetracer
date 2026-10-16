@@ -79,13 +79,18 @@ proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
   ## construction of each mode's `SearchQuery` (the value is the query past
   ## its first character, as it always was). The desktop has no tick search:
   ## `desktopKindOf` keeps `#…` a file query here.
-  case desktopKindOf(classifyOmnibarQuery($query).mode)
+  let classified = classifyOmnibarQuery($query)
+  case desktopKindOf(classified.mode)
   of omCommand, omRecording:
     # (`desktopKindOf` keeps `:open …` a command here: the desktop's "+"
     # opens a tab on its welcome screen.)
     self.parseCommandQuery(cstring(($query).substr(1)))
   of omProgram:
-    SearchQuery(kind: ProgramQuery, value: cstring(($query).substr(1)))
+    # The PATTERN, which is the shared classification's needle: the rest of
+    # the line after `:grep`, trimmed (Find-And-Incremental-Search.md §5.1).
+    # (It was the query past its first character — `grep foo` for
+    # `:grep foo` — so the desktop searched for the word `grep` too.)
+    SearchQuery(kind: ProgramQuery, value: cstring(classified.needle))
   of omSymbol:
     SearchQuery(kind: SymbolQuery, value: cstring(($query).substr(1)))
   of omAgent:

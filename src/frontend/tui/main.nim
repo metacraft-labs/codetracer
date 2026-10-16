@@ -80,6 +80,7 @@ import ./host/file_worker
 import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
+from ../viewmodel/host/find_in_files import running   # PLAT-57
 import ./host/terminal_driver
 import ./host/terminal_probe
 import ./host/tui_session
@@ -117,10 +118,17 @@ const
     ## a partially framed escape sequence — an `ESC` with nothing after it — is
     ## not held forever.
 
+const SearchPollMs = 10
+  ## PLAT-57: how long the loop may block while a Find in Files search
+  ## streams, so its batches reach the pane as they arrive.
+
 proc idleWaitMs(rt: TuiRuntime): int =
   ## How long the loop may block: `IdlePollMs`, or less when the auto-hide
   ## hover has a preview or a dismissal due sooner (PLAT-49 part B) — so a
-  ## preview opens when its delay is up, not up to `IdlePollMs` later.
+  ## preview opens when its delay is up, not up to `IdlePollMs` later — or
+  ## while a search streams (PLAT-57).
+  if nativeFindInFiles.running:
+    return SearchPollMs
   let due = rt.autoHideDueMs()
   if due < 0:
     return IdlePollMs
@@ -752,6 +760,7 @@ proc interactive(command: TuiCommand): int =
     session.setFlowOverlay(false)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()
+  session.wireFindInFiles()
   session.refresh(rt)
 
   # PLAT-49 part B (finding 7): THE SESSION IS A TAB OF THE STRIP. It is put
@@ -804,6 +813,7 @@ proc interactive(command: TuiCommand): int =
       opened.session.backend.toBackendService(),
       title = extractFilename(opened.session.tracePath.strip(chars = {'/'})),
       layout = app.layoutBinding.layout, adopt = opened.session.sdk)
+    opened.wireFindInFiles()
     sessions[int(slot.id)] = opened
     showSession(slot.id)
     ""
@@ -822,6 +832,16 @@ proc interactive(command: TuiCommand): int =
       sessions.del(int(id))
     showSession(app.shell.activeSessionId())
     true
+  # PLAT-57: Find in Files — `:grep` searches the shown session's recording
+  # into its `SearchResultsVM` (the shared runner, pumped on the idle tick
+  # below); `:cnext` / `:cprev` open the next / previous result.
+  app.findInFiles = proc(query: string): string =
+    session.findInFiles(rt, query)
+  app.stepSearchResult = proc(delta: int): string =
+    session.stepSearchResult(rt, delta)
+  app.toggleSearchOption = proc(operation: string): string =
+    session.toggleSearchOption(rt, operation)
+
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
   var vcs = newVcsSource(projectRoot)
@@ -1003,6 +1023,8 @@ proc interactive(command: TuiCommand): int =
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
+      # PLAT-57: the search in flight, a bounded step per tick.
+      let searched = session.pumpFindInFiles(rt)
       # PLAT-51: a welcome tab's recording, when it finishes.
       let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
@@ -1010,7 +1032,7 @@ proc interactive(command: TuiCommand): int =
       let hoverChanged = rt.tickAutoHide(nowMs())
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged or frameOwed or recorded or keysChanged:
+         hoverChanged or frameOwed or recorded or keysChanged or searched:
         paint(driver, rt)
         frameOwed = false
     of dekResize:

@@ -39,5 +39,5 @@
   "O2": "NOT REPRODUCED: \u00a73.3 linux: `Ctrl+Shift+j` -> `editor.action.deleteLines` is not VS Code's on linux (VS Code binds ['Ctrl+Shift+k'])",
   "R1": "bytes.find(off, enabledAt) > enabledAt",
   "T1": "pendingTimeoutOf(bkCua) == NoPendingTimeout",
-  "W1": "Unhandled exception: cua: duplicate Esc: keep-primary-selection / simplify-selection; duplicate Shift+Esc: keep-primary-selection / simplify-selection; duplicate Enter: insert-newline-and-indent / editor.toggle-tracepoint; duplicate Tab: insert-tab / indent-selection; duplicate Ctrl+Enter: open-line-below / editor.toggle-tracepoint; duplicate Esc: router.cancel-pending / layout.cancel-drag [BaseRowError]"
+  "W1": "Unhandled exception: cua: duplicate Esc: keep-primary-selection / simplify-selection; duplicate Shift+Esc: keep-primary-selection / simplify-selection; duplicate Enter: insert-newline-and-indent / editor.toggle-tracepoint; duplicate Tab: insert-tab / indent-selection; duplicate Ctrl+Enter: open-line-below / editor.toggle-tracepoint; duplicate Alt+c: search.toggle-case / layout.focus-pane; duplicate Alt+w: search.toggle-whole-word / menu.open-folder; duplicate Alt+r: search.toggle-regex / menu.open-folder; duplicate Esc: router.cancel-pending / layout.cancel-drag [BaseRowError]"
 }

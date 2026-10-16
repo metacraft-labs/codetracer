@@ -39,7 +39,8 @@ type
     id*: string
       ## The element's identity: a pane id, a row key, an overlay name
       ## (`find`, `palette`, `command-line`, `context-menu`), an input's role
-      ## (`find-query`, `replace-query`, `palette-query`, `prompt`). Owners of
+      ## (`find-query`, `replace-query`, `palette-query`, `search-query`,
+      ## `prompt`). Owners of
       ## pushed layers are named by it (`layer_stack`).
     paneKind*: string
       ## For an `ekPane`: its `PaneKind` name (one of `PaneKinds`).
@@ -49,6 +50,15 @@ type
     ## then the focused element.
 
 const
+  PaletteQueryInput* = "palette-query"
+    ## The palette's field.
+  SearchQueryInput* = "search-query"
+    ## Find in Files' query field: the desktop pane's own field, and on the
+    ## terminal and GPUI the palette's field while it holds `:grep` — their
+    ## field for the pane (Find-And-Incremental-Search.md §5.2). The context
+    ## key `searchInputFocus` is true there, where the field's toggle keys
+    ## (`Alt+C` / `Alt+W` / `Alt+R`) hold.
+
   PaneKinds* = ["editor", "calltrace", "state", "eventLog", "debugControls",
                 "flow", "search", "pointList", "scratchpad", "shell",
                 "fileTree", "buildOutput", "vcs", "agentActivity",

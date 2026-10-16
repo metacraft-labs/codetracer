@@ -122,6 +122,9 @@ import ../viewmodel/viewmodels/[point_list_vm, scratchpad_vm, state_vm,
                                 origin_chain_types]
 # PLAT-52: the Terminal Output pane, drawn natively, and its producer.
 import ./terminal_output_leaf
+import ./search_results_leaf   # PLAT-57: Find in Files, drawn natively
+import ../viewmodel/viewmodels/search_results_vm
+from ../viewmodel/host/find_in_files import FindInFilesScope, running, pump
 import ../viewmodel/host/terminal_output_source
 
 const DefaultPixelsView* = "window"
@@ -195,6 +198,12 @@ OPTIONS:
                       probe:<key>[:<mod>+<mod>]
                       modifiers:[<mod>+<mod>] (the held modifiers
                       changed: `modifiers:alt,modifiers:` taps Alt alone)
+                    and (PLAT-57) Find in Files (`wait:<ms>` lets a search
+                    stream to its end):
+                      search:row:<index>
+                      search:option:<case|word|regex>
+                      search:field  search:wheel:<rows>
+                      search:track:<permille>
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
   --quit-after-ms=<n>
@@ -496,7 +505,9 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "scrub", "type",
                        # PLAT-68: a drag over the editor's text, and a
                        # key's resolution, probed.
-                       "select", "probe", "modifiers"]:
+                       "select", "probe", "modifiers",
+                       # PLAT-57: Find in Files' rows, toggles and field.
+                       "search"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -884,6 +895,8 @@ proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.}
   ## walk never reached keeps the window's inherited proportional face.
 
 proc drawTerminalPane(r: GpuiRenderer)
+proc drawSearchPane(r: GpuiRenderer)
+  ## PLAT-57: forward-declared; defined beside the Terminal Output pane's.
   ## PLAT-52: the Terminal Output pane, drawn natively (defined with its
   ## clicks, before `windowPointer`).
 
@@ -981,6 +994,8 @@ var
   gGeom: WindowGeometry
   gGestures = idle()
   gSession: HeadlessDebugSession = nil
+  gSearch = initGSearchPane()
+    ## PLAT-57: Find in Files' reading position and a held scrubber thumb.
   gSessionsOpened = initTable[int, HeadlessDebugSession]()
     ## PLAT-49 part B: every session this window holds, by its tab's id —
     ## the one it opened with and each the strip's "+" opened.
@@ -1634,6 +1649,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   r.appendChild(gContainer, gTop)
   # PLAT-52: the Terminal Output pane is laid out from the box it now has.
   drawTerminalPane(r)
+  # PLAT-57: and Find in Files from its own (a docked one's included).
+  drawSearchPane(r)
   # PLAT-51: and the list panes' scrubbers from theirs.
   drawListScrubbers(r)
   if not gRoot.isNil:
@@ -2071,6 +2088,54 @@ proc terminalKey(r: GpuiRenderer; key: string): bool =
   else: false
 
 # ---------------------------------------------------------------------------
+# PLAT-57: Find in Files, drawn natively (`search_results_leaf`)
+# ---------------------------------------------------------------------------
+
+proc searchVM(): SearchResultsVM =
+  if gSession.isNil: nil else: gSession.session.searchResultsVM
+
+proc dockedBodyOf(rect: PxRect): PxRect =
+  ## The body of a docked pane's box (`dockedPaneBox`): inside the outline,
+  ## below the one-tab strip.
+  PxRect(x: rect.x + FocusOutlinePx, y: rect.y + FocusOutlinePx + TabStripPx,
+         w: max(0, rect.w - 2 * FocusOutlinePx),
+         h: max(0, rect.h - 2 * FocusOutlinePx - TabStripPx))
+
+proc searchBody(): PxRect =
+  ## Find in Files' body in window pixels — revealed over the tree, docked
+  ## open in its band, or a visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneSearch:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneSearch:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneSearch)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneSearch:
+    return PxRect()
+  n.body
+
+proc drawSearchPane(r: GpuiRenderer) =
+  ## Draw Find in Files from its ViewModel, natively, replacing whatever the
+  ## leaf held (the vocabulary tree `renderLeaf` built is the leaf plan's).
+  let pane = gPanes.getOrDefault($paneSearch)
+  let vm = searchVM()
+  if pane.isNil or vm.isNil:
+    return
+  if drawSearchResults(r, pane, vm, gSearch, searchBody()):
+    applyTextFaces(r, pane)
+
+proc pressSearch(r: GpuiRenderer; x, y: int): bool
+proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string)
+proc openFindInFiles(r: GpuiRenderer)
+proc stepSearchResult(r: GpuiRenderer; delta: int)
+proc wireSearch(s: HeadlessDebugSession)
+  ## PLAT-57: forward-declared; defined beside the editor's caret, which
+  ## opening a result places.
+
+# ---------------------------------------------------------------------------
 # PLAT-51: the Event Log's and the Call Trace's scrollbar scrubbers
 # ---------------------------------------------------------------------------
 
@@ -2255,6 +2320,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-48: the top bar, its popovers and the pin / unpin buttons first.
     if handleTopPress(r, x, y):
       return
+    # PLAT-57: Find in Files' presses — first, because a revealed or
+    # docked-open pane is drawn over (or beside) the tree, and the tree's
+    # pane under a revealed one must not take the press.
+    if pressSearch(r, x, y):
+      return
     # PLAT-51: A PRESS FOCUSES THE PANE UNDER IT (the desktop's selected
     # panel follows its clicks) — whatever the pane then does with the press
     # (a call row, a scrubber, the terminal output): its strip and outline
@@ -2286,6 +2356,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gTerminal.drag != gtdNone:
       moveTerminal(r, x, y)
       return
+    if gSearch.dragging:
+      let vm = searchVM()
+      if not vm.isNil:
+        gSearch.scrubSearch(vm, searchBody(), y, dragging = true)
+        drawSearchPane(r)
+      return
     if gListDrag.active:
       moveListScrubber(r, y)
       return
@@ -2303,6 +2379,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     if gTerminal.drag != gtdNone:
       releaseTerminal(r, x, y)
+      return
+    if gSearch.dragging:
+      gSearch.dragging = false
       return
     if gListDrag.active:
       moveListScrubber(r, y)
@@ -2329,6 +2408,17 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       gContent.top = max(0, gContent.top +
                             (if dy < 0.0: 3 elif dy > 0.0: -3 else: 0))
       drawTopBar(r)
+      return
+    # PLAT-57: the wheel scrolls Find in Files' rows (revealed or docked
+    # open included), before the tree's pane under it.
+    let search = searchBody()
+    if search.w > 0 and search.contains(x, y) and dy != 0.0:
+      let vm = searchVM()
+      if not vm.isNil:
+        let rows = int(round(-dy / float(SearchRowPx)))
+        gSearch.scrollBy(vm, search, (if rows == 0: (if dy < 0: 1 else: -1)
+                                      else: rows))
+        drawSearchPane(r)
       return
     let onPane = gGeom.activePaneAt(x, y)
     if onPane == $paneCalltrace:
@@ -2510,7 +2600,8 @@ proc gpuiMenuActionAvailable(action: string): bool =
   ## rest are drawn disabled — the same menu, honestly marked.
   action in ["forwardContinue", "reverseContinue", "forwardNext",
              "reverseNext", "forwardStep", "reverseStep", "forwardStepOut",
-             "reverseStepOut", "findSymbol", "aFilesystem", "aFullCalltrace",
+             "reverseStepOut", "findSymbol", "findInFiles", "aFilesystem",
+             "aFullCalltrace",
              "aState", "aEventLog", "aTerminal", "aScratchpad",
              "aPointList", "aAgentActivity"]
 
@@ -3071,6 +3162,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
       if not pane.isNil and not leaf.vm.isNil:
         redrawWindowLeaf(r, pane, leaf)
   drawTerminalPane(r)
+  drawSearchPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu) &
@@ -3127,6 +3219,7 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
     opened.backend.toBackendService(),
     title = extractFilename(opened.tracePath.strip(chars = {'/'})),
     layout = layout, adopt = opened.sdk)
+  wireSearch(opened)
   gSessionsOpened[int(slot.id)] = opened
   traceGesture("opened " & path & " as tab " & $slot.id)
   showSession(r, slot.id)
@@ -3633,6 +3726,7 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
       return
   case action
   of "findSymbol": openOmnibar(r, ":sym ")
+  of "findInFiles": openFindInFiles(r)
   of "aFilesystem": showPaneFromMenu(r, paneFileTree)
   of "aFullCalltrace": showPaneFromMenu(r, paneCalltrace)
   of "aState": showPaneFromMenu(r, paneState)
@@ -3683,6 +3777,23 @@ proc runWatchCommand(r: GpuiRenderer; query: string): bool
 proc acceptOmnibar(r: GpuiRenderer) =
   # PLAT-51: a watch verb.
   if runWatchCommand(r, gOmnibar.query):
+    return
+  # PLAT-57: `:grep <text>` is Find in Files (§5.1) — the omnibox closes and
+  # the search runs into the pane; `:grep` alone keeps the field open.
+  # `:cnext` / `:cprev` (`:cn` / `:cp`) open the next / previous result.
+  let (mode, needle) = classifyOmnibarQuery(gOmnibar.query)
+  if mode == omProgram:
+    if needle.len == 0:
+      openFindInFiles(r)
+    else:
+      gOmnibar.close()
+      drawTopBar(r)
+      runGpuiFindInFiles(r, needle)
+    return
+  if mode == omCommand and needle in ["cnext", "cn", "cprev", "cp"]:
+    gOmnibar.close()
+    drawTopBar(r)
+    stepSearchResult(r, (if needle in ["cnext", "cn"]: 1 else: -1))
     return
   # PLAT-50: the tracepoint "Add tracepoint" asked for, on its line.
   if gTracepointAt.path.len > 0 and
@@ -3930,6 +4041,9 @@ proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
 proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
 proc recordTick() {.cdecl.}
+proc searchTick() {.cdecl.}
+const SearchPollMs = 15
+  ## PLAT-57: how often a streaming Find in Files search is pumped.
 const RecordPollMs = 200
   ## PLAT-51: how often a welcome tab's running `ct record` is polled.
 var gVcsDirectory = ""
@@ -3946,6 +4060,12 @@ proc armHoverTick() =
   ## Wake the loop when the hover machine has something due (a preview, a
   ## dismissal) — the shim's one tick, shared with the VCS refresh.
   let due = gAutoHide.nextDueMs
+  # PLAT-57: a Find in Files search streaming is pumped on the same tick,
+  # every `SearchPollMs`, while it runs.
+  if due < 0 and nativeFindInFiles.running:
+    gArmedTick = (due: -4'i64, vcs: false)
+    gpui_set_tick(uint32(SearchPollMs), searchTick)
+    return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
   if due < 0 and not gRecordJob.isNil and not gRecordJob.done:
@@ -4046,6 +4166,19 @@ proc recordTick() {.cdecl.} =
   discard pollWelcomeRecording(r)
   armHoverTick()
 
+proc searchTick() {.cdecl.} =
+  ## PLAT-57: the search in flight advanced a bounded step, and the pane
+  ## drawn again when what it shows moved; re-armed while it runs.
+  var r: GpuiRenderer
+  gArmedTick = (due: -2'i64, vcs: false)
+  let vm = searchVM()
+  let before = if vm.isNil: (-1, false) else: (vm.results.val.len,
+                                               vm.searching.val)
+  discard nativeFindInFiles.pump()
+  if not vm.isNil and (vm.results.val.len, vm.searching.val) != before:
+    drawSearchPane(r)
+  armHoverTick()
+
 proc hoverTick() {.cdecl.} =
   ## The hover machine's due moment arrived (`armHoverTick`): run it, then
   ## re-arm for what is due next — and the VCS refresh it shares the tick
@@ -4090,6 +4223,9 @@ proc redrawPaneOf(r: GpuiRenderer; pane: PaneKind) =
   if pane == paneTerminalOutput:
     drawTerminalPane(r)
     return
+  if pane == paneSearch:
+    drawSearchPane(r)
+    return
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == pane:
       redrawWindowLeaf(r, el, leaf)
@@ -4113,12 +4249,13 @@ proc editorPath(): string =
   elif gSession.isNil: ""
   else: gSession.getCurrentFile()
 
-proc showViewedFile(r: GpuiRenderer) =
+proc showViewedFile(r: GpuiRenderer; atLine = 1) =
   ## PLAT-50 (K17): the editor draws `gViewedFile` — read whole from the
   ## recording through the source service's provider, its breakpoints in the
   ## gutter, the execution pointer only when the debugger is in it — until
   ## the debugger moves (`refreshReplayWindow` clears it), as the desktop's
-  ## editor follows the debugger back to the location's file.
+  ## editor follows the debugger back to the location's file. PLAT-57: from
+  ## the window of rows that shows `atLine` (a Find in Files result's line).
   let editor = gPanes.getOrDefault($paneEditor)
   if editor.isNil or gSourceService.isNil or gViewedFile.len == 0:
     return
@@ -4127,14 +4264,15 @@ proc showViewedFile(r: GpuiRenderer) =
     traceGesture("could not open " & gViewedFile & ": " & detail)
     gViewedFile = ""
     return
+  let shown = min(lines.len, editorRowsOf(gGeom))
+  let top = clamp(atLine - shown div 3, 1, max(1, lines.len - shown + 1))
   var surface = EditorSurface(medium: GpuiMedium, path: gViewedFile,
                               revisionLabel: "@0",
-                              provenance: epVerified, viewportTop: 1,
+                              provenance: epVerified, viewportTop: top,
                               totalLineCount: lines.len,
                               gutterVisible: true)
   let points = editorPointsOf(gSession.session.store.pointList.rows.val)
-  let shown = min(lines.len, editorRowsOf(gGeom))
-  for i in 0 ..< shown:
+  for i in top - 1 ..< top - 1 + shown:
     var mark = emNone
     for p in points:
       if p.path == gViewedFile and p.line == i + 1:
@@ -4595,6 +4733,111 @@ proc placeCaret(r: GpuiRenderer; path: string; line, column: int) =
   traceGesture("caret " & $gDebugDocs[path].caretLine & ":" &
                $(gDebugDocs[path].caretColumn + 1))
 
+proc wireSearch(s: HeadlessDebugSession) =
+  ## PLAT-57: the session's Find in Files searches go to the shared runner,
+  ## over this recording's scope (`native_host.recordingSearchScope`).
+  if s.isNil:
+    return
+  let folder = s.tracePath
+  wireFindInFiles(s.session.searchResultsVM,
+                  proc(): FindInFilesScope = recordingSearchScope(folder))
+
+proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string) =
+  ## `:grep <pattern>` (Find-And-Incremental-Search.md §5.1): the search, and
+  ## Find in Files shown (`showPaneFromMenu`'s rule: revealed, activated or
+  ## opened). Nothing opens — the user's OQ-F2.
+  let vm = searchVM()
+  if vm.isNil:
+    traceGesture("Find in Files needs a recording to search")
+    return
+  vm.search(pattern)
+  gSearch.scrollTop = 0
+  traceGesture("find in files '" & pattern & "'")
+  showPaneFromMenu(r, paneSearch)
+  armHoverTick()
+
+proc openFindInFiles(r: GpuiRenderer) =
+  ## `search.find-in-files` with no pattern (`Ctrl+Shift+F`, the Edit menu,
+  ## a press on the pane's field): the pane shown and its field — the
+  ## omnibox's `:grep` line, holding the pane's query (§5.2).
+  showPaneFromMenu(r, paneSearch)
+  let vm = searchVM()
+  openOmnibar(r, CommandPrefix & "grep " & (if vm.isNil: "" else: vm.query.val))
+
+proc openSearchResult(r: GpuiRenderer; index: int): bool =
+  ## K35: result `index` selected and opened in the editor at its line — the
+  ## file read from the recording as a Files click's is (`showViewedFile`),
+  ## the caret on the match and the match selected. The recording position
+  ## does not move (Editor-Pane.md: a Find-in-Files row click does not).
+  let vm = searchVM()
+  if vm.isNil:
+    return false
+  let rows = vm.results.val
+  if index < 0 or index >= rows.len:
+    return false
+  vm.selectResult(index)
+  let row = rows[index]
+  gViewedFile = row.path
+  showViewedFile(r, atLine = row.line)
+  if gViewedFile.len > 0:
+    let column = if row.matchStart > 0 and row.matchStart <= row.text.len:
+                   row.text[0 ..< row.matchStart].runeLen
+                 else: 0
+    if debugDocumentFor(row.path, gEditorSurface.executionLine):
+      gDebugDocs[row.path].moveCaretTo(row.line - 1, column)
+      if row.matchLength > 0:
+        let width = row.text[row.matchStart ..< min(row.text.len,
+                      row.matchStart + row.matchLength)].runeLen
+        gDebugDocs[row.path].extendSelectionTo(row.line - 1, column + width)
+      drawDebugDocument(r)
+    traceGesture("opened " & row.path & ":" & $row.line)
+  gSearch.revealResult(vm, searchBody(), index)
+  drawSearchPane(r)
+  gViewedFile.len > 0
+
+proc stepSearchResult(r: GpuiRenderer; delta: int) =
+  ## `search.next-result` / `search.previous-result`: the next / previous
+  ## result, wrapping, opened.
+  let vm = searchVM()
+  if vm.isNil or vm.results.val.len == 0:
+    traceGesture("there are no search results")
+    return
+  discard openSearchResult(r, vm.stepResult(delta))
+
+proc toggleSearchOption(r: GpuiRenderer; which: SearchOption) =
+  ## One of Find in Files' toggles flipped — a press on it, or its key in the
+  ## field (`search.toggle-*`) — and a search that ran runs again with it
+  ## (the ViewModel's rule).
+  let vm = searchVM()
+  if vm.isNil:
+    traceGesture("Find in Files has no session")
+    return
+  vm.toggleOption(which)
+  traceGesture("search option " & $which & " " & $vm.options.val.isOn(which))
+  drawSearchPane(r)
+
+proc pressSearch(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on Find in Files: a result opens, a toggle flips (and a
+  ## search that ran runs again — the ViewModel's rule), the field opens the
+  ## omnibox's `:grep`, the
+  ## scrubber moves the view. Every press on the pane is the pane's.
+  let vm = searchVM()
+  let body = searchBody()
+  if vm.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let hit = searchHitAt(vm, gSearch, body, x, y)
+  case hit.kind
+  of gsNone, gsFile: discard
+  of gsQuery: openFindInFiles(r)
+  of gsOption: toggleSearchOption(r, hit.option)
+  of gsMatch: discard openSearchResult(r, hit.index)
+  of gsTrack, gsThumb:
+    gSearch.dragging = hit.kind == gsThumb
+    gSearch.scrubSearch(vm, body, y, dragging = gSearch.dragging)
+    drawSearchPane(r)
+  armHoverTick()
+  true
+
 proc editorLineAt(y: int): int =
   ## The source line of the editor row drawn at window y (the rows below the
   ## source statement, `GpuiEditorRowPx` each), clamped to the rows shown.
@@ -4681,7 +4924,7 @@ proc windowScopePath(): ScopePath =
                else: element(ekWindow, "window")
   if not gOmnibar.isNil and gOmnibar.isOpen:
     return @[window, element(ekOverlay, "palette"),
-             element(ekInput, "palette-query")]
+             paletteFieldOf(gOmnibar.query)]
   if gCtxMenu.open:
     return @[window, element(ekOverlay, "context-menu")]
   if chain.len == 0:
@@ -4920,6 +5163,21 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
   of "find.open", "find.open-backward":
     # GPUI's find is the omnibar's (`:grep` over the files).
     openOmnibar(r, CommandPrefix & "grep ")
+    return
+  of "search.find-in-files":
+    # PLAT-57: with a pattern, the search; without, the pane and its field.
+    if res.argument.len > 0: runGpuiFindInFiles(r, res.argument)
+    else: openFindInFiles(r)
+    return
+  of "search.next-result", "search.previous-result":
+    # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
+    stepSearchResult(r, (if res.operation == "search.next-result": 1 else: -1))
+    return
+  of "search.toggle-case", "search.toggle-whole-word", "search.toggle-regex":
+    # `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field (the omnibox on
+    # `:grep`).
+    toggleSearchOption(r, searchOptionOf(res.operation).option)
+    drawTopBar(r)
     return
   else: discard
   let action = clientActionOf(op)
@@ -5651,6 +5909,52 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))
       else:
         return "unknown terminal event '" & parts[1] & "'"
+    of "search":
+      # PLAT-57: Find in Files, aimed from the geometry it was drawn with
+      # (`search_results_leaf.searchLayout`):
+      #   search:row:<index>               press a result (scrolled into view)
+      #   search:option:<case|word|regex>  press a toggle
+      #   search:field                     press the field
+      #   search:wheel:<rows>              the wheel over the pane
+      #   search:track:<permille>          press the scrubber's track
+      let vm = searchVM()
+      let body = searchBody()
+      if vm.isNil or body.w <= 0:
+        return "the Find in Files pane is not drawn"
+      let rows = vm.displayRows()
+      let lay = searchLayout(body, rows.len)
+      case parts[1]
+      of "row":
+        let at = rows.displayRowOf(at(2))
+        if at < 0:
+          return "no result " & parts[2]
+        gSearch.revealResult(vm, body, at(2))
+        drawSearchPane(r)
+        let top = gSearch.visibleTop(rows.len, lay.rows)
+        pressAt(lay.list.x + 40,
+                lay.list.y + (at - top) * SearchRowPx + SearchRowPx div 2)
+      of "option":
+        var which = soCase
+        try: which = parseEnum[SearchOption](parts[2])
+        except ValueError: return "unknown search option '" & parts[2] & "'"
+        let (x, y) = centreOf(lay.optionBoxes[which])
+        pressAt(x, y)
+      of "field":
+        let (x, y) = centreOf(lay.field)
+        pressAt(x, y)
+      of "wheel":
+        let (cx, cy) = centreOf(body)
+        windowPointer(r, gekWheel, cx, cy, -float(at(2) * SearchRowPx))
+      of "track":
+        if not lay.overflow:
+          return "the list does not overflow"
+        let track = listTrackRect(PxRect(x: body.x,
+          y: lay.list.y - ChromePaddingPx, w: body.w,
+          h: lay.list.h + 2 * ChromePaddingPx))
+        pressAt(track.x + ListTrackPx div 2,
+                track.y + min(track.h - 1, track.h * at(2) div 1000))
+      else:
+        return "unknown search event '" & parts[1] & "'"
     of "scrub":
       # PLAT-51: a list pane's scrollbar scrubber, aimed from the geometry
       # the window drew it at (`list_scrubber.listTrackRect`):
@@ -5878,6 +6182,15 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
           if pollWelcomeRecording(r):
             break
           sleep(RecordPollMs)
+      # PLAT-57: and a Find in Files search streaming — REALLY waited for,
+      # up to `ms`, pumped as the window's tick pumps it.
+      if nativeFindInFiles.running:
+        let deadline = epochTime() + float(at(1)) / 1000.0
+        while nativeFindInFiles.running and epochTime() < deadline:
+          if not nativeFindInFiles.pump():
+            break
+          sleep(SearchPollMs)
+        drawSearchPane(r)
       return ""
     of "label", "label-menu":
       for st in gGeom.strips:
@@ -6550,6 +6863,7 @@ proc runOpen(cmd: GpuiCommand): int =
   gWindow = windowId
   gRemember = not quarantined and cmd.layoutFile.len == 0
   gSession = session
+  wireSearch(session)
   gSourceService = sourceService
   # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
   # with what this window performs enabled, its chords none (the window has

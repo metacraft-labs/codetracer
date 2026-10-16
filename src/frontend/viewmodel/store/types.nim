@@ -545,27 +545,37 @@ type
   # -------------------------------------------------------------------
   # Search results panel value types
   #
-  # The Search Results panel renders a flat list of file/line/snippet
-  # rows produced by a workspace-wide search (``data.services.search``
-  # in the legacy world).  ``SearchResultLine`` is the simple, platform-
-  # neutral shape the view layer needs without dragging the JS-only
-  # ``SearchResult`` Karax record into the ViewModel layer.
+  # The Find in Files pane renders file/line/snippet rows produced by the
+  # one search runner (``host/find_in_files``), on every front-end.
   # -------------------------------------------------------------------
 
   SearchResultLine* = object
-    ## One row in the Search Results panel.  Mirrors the legacy
-    ## ``SearchResult`` object in ``frontend/types.nim`` but uses
-    ## ``string`` instead of ``cstring`` so the same value works on
-    ## both the native and JS backends.
+    ## One row of the Find in Files pane: the line ``line`` (1-based) of
+    ## ``path``, whose text is ``text``. Plain ``string`` fields, so the
+    ## same value is built by the runner and drawn by every front-end on
+    ## both backends.
     ##
-    ## ``text`` is the matched line snippet (the panel highlights any
-    ## occurrence of the active query inside it).  ``path`` is the
-    ## absolute / project-relative source path; clicking a row asks
-    ## the backend to navigate to ``path : line`` via
-    ## ``ct/jump-location``.  ``line`` is 1-based.
+    ## ``path`` is the source path as the recording names it (the
+    ## materialised ``files/`` prefix already removed), which is what a
+    ## click opens.
+    ##
+    ## ``matchStart`` / ``matchLength`` are the line's FIRST match, as byte
+    ## offsets into ``text`` — what the runner found, from ``rg --json``'s
+    ## submatches or from the walker's matcher. A row with ``matchLength``
+    ## 0 carries no match position.
     text*: string
     path*: string
     line*: int
+    matchStart*: int
+    matchLength*: int
+
+  TextMatchOptions* = object
+    ## Find in Files' toggles (Find-And-Incremental-Search.md §5.1), the
+    ## pane's state and the runner's input. The zero value is the desktop's
+    ## default: a literal, case-insensitive, any occurrence.
+    caseSensitive*: bool
+    wholeWord*: bool
+    regex*: bool
 
   # -------------------------------------------------------------------
   # No-source panel value types

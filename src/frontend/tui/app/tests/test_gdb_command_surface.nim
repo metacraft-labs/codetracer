@@ -160,7 +160,9 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 106
+  ExpectedAppModules = 107
+    ## 2026-10-15 (PLAT-57): 106 → 107. `views/search_results_pane.nim`, the
+    ## Find in Files pane's painter and hit-test.
     ## 2026-10-12 (PLAT-68 Phase B review): 105 → 106. `tests/editor_ownership.nim`
     ## (which keys a buffer takes, asked of the router): the query moved out of
     ## `runtime.nim`, where nothing in the product called it any more.
@@ -272,7 +274,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 256
+  ExpectedStyleLiterals = 266
+    ## 2026-10-15 (PLAT-57): 256 → 266, measured. Find in Files' field,
+    ## toggles, summary, file headers, line numbers, text and match
+    ## (`views/search_results_pane.nim`, a new styled file).
     ## 2026-10-12 (PLAT-68 Phase B): 255 → 256, measured. The program menu's
     ## underlined access key (`views/top_bar.nim`, already a styled file).
     ## 2026-10-08 (PLAT-51 part B): 239 → 255, measured. The Welcome Screen's
@@ -371,7 +376,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 34
+  ExpectedStyledFiles = 35
+    ## 2026-10-15 (PLAT-57): +1, `views/search_results_pane.nim`.
     ## 2026-10-08 (PLAT-51 part B): +1, `views/welcome_view.nim`.
     ## 2026-10-03 (PLAT-50): +1, `views/context_menu.nim`.
     ## 2026-09-30 (PLAT-48): +1, `views/top_bar.nim`.

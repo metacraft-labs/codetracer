@@ -38,11 +38,14 @@ import std/[strutils, tables, unittest]
 
 import ../../editing_core
 
-const ExpectedAssertions = 1164
+const ExpectedAssertions = 1174
   ## 1149 → 1160 with the program-menu rows (10 CUA, 1 Emacs; one `when`
   ## assertion per shipped row) → 1162 with the web Run and Export rows →
   ## 1163 with `Alt+1` → 1164 with Emacs's `Enter` in the read-only Debug
-  ## editor (the tracepoint editor).
+  ## editor (the tracepoint editor) → 1168 with PLAT-57's result walk
+  ## (`F4` / `Shift+F4` under CUA, `Alt+G N` / `Alt+G P` under Emacs) → 1174
+  ## with Find in Files' field toggles (`Alt+C` / `Alt+W` / `Alt+R`, three
+  ## rows under each of CUA and Emacs).
   ## Re-measured 2026-10-12 (PLAT-68 Phase B): KL-2 asserts two facts per
   ## FILED declaration, so the count moves with the filed set, and the `when`
   ## case asserts once per shipped row — CUA's and Emacs's tables now cover

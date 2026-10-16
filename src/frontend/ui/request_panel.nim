@@ -320,7 +320,7 @@ proc autoRevealRequestPanel*(): bool =
   ## requests at all; it is the wrong default for a recorded server.
   ##
   ## Docks rather than showing the hover overlay (which is what
-  ## ``autoRevealBuildPanel`` / ``autoRevealSearchResultsPanel`` do): the
+  ## ``autoRevealBuildPanel`` does): the
   ## overlay is dismissed by the next click outside it, and a request list is
   ## something the developer reads *while* stepping through a handler.  Falls
   ## back to the overlay if the docked sidebar could not take the panel, so a

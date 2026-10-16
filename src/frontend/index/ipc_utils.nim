@@ -8,18 +8,10 @@ import
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
   ../[ types, config, trace_metadata ],
-  ../../common/[ ct_logging, paths ]
+  ../../common/[ ct_logging, paths ],
+  ../viewmodel/host/find_in_files
 
 var Object {.importc, nodecl.}: JsObject
-
-proc fsExistsSync(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
-
-proc jsEmptyArray: JsObject {.importjs: "([])".}
-  ## Return a fresh empty JS array.  Used to satisfy ``nimCopy``'s
-  ## ``.length`` read when the renderer deserializes ``seq[SearchResult]``
-  ## — without this, the ``customFields`` field arrives as ``undefined``
-  ## and the copy crashes with "Cannot read properties of undefined
-  ## (reading 'length')``.
 
 proc nodeEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 
@@ -294,100 +286,53 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
       message: report.message,
       remedy: report.remedy}
 
-proc onSearchProgram*(sender: js, response: cstring) {.async.} =
-  ## Handle ``CODETRACER::search-program`` from the renderer.
+var findInFilesRuns = newFindInFilesService()
+  ## The main process's Find in Files runner: the run in flight, cancelled
+  ## when the renderer asks for the next one.
+
+proc searchBatchToJs(batch: FindInFilesBatch): JsObject =
+  ## One runner batch as the renderer's `CODETRACER::search-results-updated`
+  ## payload: the run id the renderer drops stale batches by, the rows, and
+  ## whether this is the last batch.
+  var rows: seq[JsObject] = @[]
+  for r in batch.rows:
+    rows.add js{text: cstring(r.text), path: cstring(r.path), line: r.line,
+                matchStart: r.matchStart, matchLength: r.matchLength}
+  js{id: batch.runId, rows: rows.toJs, done: batch.done,
+     note: cstring(batch.note)}
+
+proc onSearchProgram*(sender: js, request: JsObject) {.async.} =
+  ## Handle ``CODETRACER::search-program`` from the renderer: run Find in
+  ## Files through THE shared runner (``viewmodel/host/find_in_files``) — the
+  ## one the terminal and GPUI run — and stream its batches back, each
+  ## carrying the request's run id.
   ##
-  ## Searches exactly the source folders shown in the Files panel.
-  ## ``sourceFoldersFromTracePaths`` returns the same roots the Files panel
-  ## filesystem tree uses, so the search scope matches what the user sees —
-  ## e.g. only ``ruby_space_ship/`` for a Ruby trace rather than the wider
-  ## ``examples/`` parent directory.
-  ##
-  ## Only folders that actually exist on disk are searched; trace-internal
-  ## paths that map into a materialized ``files/`` tree are resolved to that
-  ## tree as a fallback.
-  let query = $response
-  if query.len == 0:
-    return
-
-  let escapedQuery = query.replace("'", "'\\''")
-
-  var searchRoot = ""
-  # When we search inside the materialized files/ tree, rg returns paths like
-  # <outputFolder>/files/home/user/project/foo.rb.  We strip this prefix so
-  # the renderer receives the original on-disk path and opens the real file
-  # rather than the trace-internal copy.
-  var materialisedFilesPrefix = ""
-
+  ## The scope is the runner's ``findInFilesScope``, fed with this trace's
+  ## facts: an imported recording's materialised ``files/`` store, else the
+  ## source folders the Files panel shows (``sourceFoldersFromTracePaths``);
+  ## with no trace (Edit mode), the folder CodeTracer was started in.
+  let runId = request.id.to(int)
+  let query = $request.query.to(cstring)
+  let options = TextMatchOptions(
+    caseSensitive: request.caseSensitive.to(bool),
+    wholeWord: request.wholeWord.to(bool),
+    regex: request.regex.to(bool))
+  var store = ""
+  var imported = false
+  var folders: seq[string] = @[]
   if not data.trace.isNil:
-    if data.trace.imported:
-      # Imported (recorder) traces materialize source files into the trace
-      # output's files/ subdirectory.  This is exactly what the Files panel
-      # shows, so searching it gives the right scope without touching the
-      # wider project tree or the codetracer repo root.
-      let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
-      if fsExistsSync(cstring(filesRoot)):
-        searchRoot = filesRoot
-        materialisedFilesPrefix = filesRoot
-
-    if searchRoot.len == 0:
-      # Live trace (or imported trace with no materialized files/):
-      # use sourceFoldersFromTracePaths, which returns the same roots the
-      # Files panel filesystem tree uses.
-      let sourceFolders = await sourceFoldersFromTracePaths(data.trace)
-      for f in sourceFolders:
-        let s = $f
-        if s.len > 0 and fsExistsSync(cstring(s)):
-          searchRoot = s
-          break
-
-  if searchRoot.len == 0:
-    infoPrint "onSearchProgram: no search root for query: ", query
-    var emptyBatch: seq[JsObject] = @[]
-    mainWindow.webContents.send "CODETRACER::search-results-updated", emptyBatch.toJs
-    return
-
-  let escapedRoot = searchRoot.replace("'", "'\\''")
-  let rgCmd = cstring(&"rg -n -F -i -H --no-heading -- '{escapedQuery}' '{escapedRoot}'")
-  infoPrint "onSearchProgram: rg query=", query, " root=", searchRoot
-
-  # rg exits with code 1 for no matches — that is not an error.
-  let (stdoutData, _, _) = await childProcessExec(rgCmd)
-
-  let lines = ($stdoutData).splitLines()
-  var batch: seq[JsObject] = @[]
-  for rawLine in lines:
-    if rawLine.len == 0:
-      continue
-    # rg -H --no-heading output:  path:linenum:text
-    # Paths on Linux do not contain colons, so the first two colons delimit.
-    let colonIdx1 = rawLine.find(':')
-    if colonIdx1 < 0:
-      continue
-    let colonIdx2 = rawLine.find(':', colonIdx1 + 1)
-    if colonIdx2 < 0:
-      continue
-    var filePath = rawLine[0 ..< colonIdx1]
-    let lineStr  = rawLine[colonIdx1 + 1 ..< colonIdx2]
-    let lineText = rawLine[colonIdx2 + 1 .. ^1]
-    var lineNum = 0
-    try:
-      lineNum = parseInt(lineStr)
-    except:
-      continue
-    # Strip the materialized files/ prefix so the renderer opens the real
-    # source file (/home/user/project/foo.rb) instead of the trace copy
-    # (<outputFolder>/files/home/user/project/foo.rb).
-    if materialisedFilesPrefix.len > 0 and filePath.startsWith(materialisedFilesPrefix):
-      filePath = filePath[materialisedFilesPrefix.len .. ^1]
-    batch.add(js{text: cstring(lineText), path: cstring(filePath), line: lineNum, customFields: jsEmptyArray()})
-    if batch.len >= 50:
-      mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
-      batch = @[]
-
-  # Always send the final batch, even when empty, so the renderer can
-  # clear the loading shimmer when ripgrep finds no matches.
-  mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
+    imported = data.trace.imported
+    store = $nodePath.join(data.trace.outputFolder, cstring"files")
+    for f in await sourceFoldersFromTracePaths(data.trace):
+      folders.add $f
+  elif not data.startOptions.folder.isNil:
+    folders.add $data.startOptions.folder
+  let scope = findInFilesScope(store, imported, folders)
+  infoPrint "onSearchProgram: query=", query, " roots=", $scope.roots
+  discard findInFilesRuns.search(runId, query, options, scope,
+    proc(batch: FindInFilesBatch) =
+      mainWindow.webContents.send "CODETRACER::search-results-updated",
+                                  searchBatchToJs(batch))
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>

@@ -97,6 +97,8 @@ import
   property_test / test,
   event_helpers,
   .. / common / ct_event
+# Find in Files' toggles: the operations the pane's field keys run.
+from viewmodel/viewmodels/search_results_vm import SearchOptionOperations
 
 when defined(ctInExtension):
   import vscode
@@ -1666,6 +1668,13 @@ proc configure(data: Data) =
   # overwrote their neighbours) went with the binding table. The router's two
   # hooks into modules it cannot import:
   toggleSidePanelsHook = proc(data: Data) = toggleSidePanels(data)
+  # Find in Files' field toggles (`Alt+C` / `Alt+W` / `Alt+R` where the
+  # field has the focus, `searchInputFocus`).
+  proc registerSearchToggle(operation: string) =
+    registerHostOperation(operation, proc() =
+      search_results.toggleSearchOption(operation))
+  for operation in SearchOptionOperations:
+    registerSearchToggle(operation)
   toggleMacroExpansionHook = proc(editor: EditorViewComponent) =
     editor.toggleMacroExpansion()
   editorJumpHook = proc(editor: EditorViewComponent; operation: string): bool =
@@ -4487,7 +4496,7 @@ proc configureIPC(data: Data) =
     "complete-move": MoveState => [debugger, editor, eventLog, ui]
     "tracepoint-locals": TraceValues => [ui]
     "loaded-locals": JsAssoc[cstring, Value] => debugger
-    "search-results-updated": seq[SearchResult] => search
+    "search-results-updated": SearchResultsBatch => search
     "load-callstack-received"
     "debug-output": DebugOutput => [debugger, ui]
     "log-output"
@@ -5465,8 +5474,10 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aGotoNextPointInTime: nil,
   aGotoNextError: nil,
   aGotoPreviousError: nil,
-  aGotoNextSearchResult: nil,
-  aGotoPreviousSearchResult: nil,
+  aGotoNextSearchResult: proc(actionData: JsObject) =
+    search_results.stepSearchResult(1),
+  aGotoPreviousSearchResult: proc(actionData: JsObject) =
+    search_results.stepSearchResult(-1),
   aBuild: nil,
   aCompile: nil,
   aRunStatic: nil,

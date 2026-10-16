@@ -189,15 +189,12 @@ proc runQuery(self: CommandPaletteComponent) =
     self.resetCommandPalette()
 
   of ProgramQuery:
-    clog "search program"
-
-    if self.results.len != 0 and self.prevCommandValue == self.inputValue:
-      let selectedResult = self.results[self.selected]
-      self.interpreter.runCommandPanelResult(selectedResult)
-      self.close()
-      self.resetCommandPalette()
-    else:
-      self.interpreter.searchProgram(self.query.value)
+    # `:grep <text>` (Find-And-Incremental-Search.md §5.1): the Find in Files
+    # pane's search, and the palette closes — the results are the pane's, and
+    # nothing is opened (the user's OQ-F2: "Only open the results panel").
+    # `resetCommandPalette` empties the field and closes the palette.
+    self.interpreter.searchProgram(self.query.value)
+    self.resetCommandPalette()
 
   of TextSearchQuery:
     # should be unreachable. This type is accessible through ProgramQuery

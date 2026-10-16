@@ -53,6 +53,7 @@ type
     ckFindWidgetVisible = "findWidgetVisible"
     ckFindInputFocus = "findInputFocus"
     ckReplaceInputFocus = "replaceInputFocus"
+    ckSearchInputFocus = "searchInputFocus"
     ckSnippetMode = "snippetMode"
     ckRenameInputVisible = "renameInputVisible"
     ckPaletteVisible = "paletteVisible"
@@ -226,6 +227,7 @@ func contextKeysOf*(facts: SessionFacts; path: ScopePath;
   result.values[ckFindWidgetVisible] = b(facts.findWidgetVisible)
   result.values[ckFindInputFocus] = b(inputFocus and f.id == "find-query")
   result.values[ckReplaceInputFocus] = b(inputFocus and f.id == "replace-query")
+  result.values[ckSearchInputFocus] = b(inputFocus and f.id == SearchQueryInput)
   result.values[ckSnippetMode] = b(facts.snippetMode)
   result.values[ckRenameInputVisible] = b(facts.renameInputVisible)
   result.values[ckPaletteVisible] = b(facts.paletteVisible)
@@ -238,7 +240,8 @@ func contextKeysOf*(facts: SessionFacts; path: ScopePath;
   result.values[ckKeyProtocol] = $delivery.keyProtocol
 
 const CoherentKeys* = {ckEditorFocus, ckEditorTextFocus, ckTextInputFocus,
-                       ckFindInputFocus, ckReplaceInputFocus, ckListFocus,
+                       ckFindInputFocus, ckReplaceInputFocus,
+                       ckSearchInputFocus, ckListFocus,
                        ckTreeFocus, ckEditorReadOnly, ckElementKind}
   ## The keys `coherent` relates. `when_expr.canBothHold` enumerates all of
   ## them together whenever a condition reads one, so a relation is never
@@ -262,9 +265,12 @@ func coherent*(c: ContextKeys): bool =
   if on(ckTextInputFocus) and not input and
      not (on(ckEditorTextFocus) and not on(ckEditorReadOnly)):
     return false
-  if (on(ckFindInputFocus) or on(ckReplaceInputFocus)) and not input:
+  if (on(ckFindInputFocus) or on(ckReplaceInputFocus) or
+      on(ckSearchInputFocus)) and not input:
     return false
-  if on(ckFindInputFocus) and on(ckReplaceInputFocus): return false
+  if ord(on(ckFindInputFocus)) + ord(on(ckReplaceInputFocus)) +
+     ord(on(ckSearchInputFocus)) > 1:
+    return false
   if on(ckListFocus) and (on(ckEditorFocus) or input or
                           element notin ["none", "row"]):
     return false

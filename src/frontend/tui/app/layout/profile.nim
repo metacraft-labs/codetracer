@@ -115,11 +115,12 @@ proc terminalCapability*(): PaneCapability =
      paneScratchpad,
      # PLAT-52: the recorded program's terminal output
      # (`views/terminal_output_pane.nim`).
-     paneTerminalOutput},
+     paneTerminalOutput,
+     # PLAT-57: Find in Files (`views/search_results_pane.nim`).
+     paneSearch},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
-     (paneSearch, "search results open in the command line, not a pane"),
      (paneShell, "the terminal has no embedded shell view yet"),
      (paneAgentActivity, "the terminal has no agent-activity view yet"),
      (paneTestResults, "the terminal has no test-results view yet"),

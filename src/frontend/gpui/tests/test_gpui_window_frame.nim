@@ -95,7 +95,9 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 665
+const ExpectedAssertions = 675
+  ## PLAT-57: 665 -> 675 — ONE more non-test file under `src/frontend/gpui/`,
+  ## `search_results_leaf.nim` (Find in Files), by the same route.
   ## PLAT-51 part B: 655 -> 665 — ONE more non-test file under
   ## `src/frontend/gpui/`, `welcome_leaf.nim` (the Welcome Screen a new tab
   ## shows), by the second route above (10 assertions in the registry scan).

@@ -459,7 +459,7 @@ type
     pluginCommands*: JsAssoc[cstring, SearchSource]
     activeCommandName*: cstring
     query*: SearchQuery
-    onSearchResultsUpdated*: proc(self: SearchService, results: seq[SearchResult]): Future[void]
+    onSearchResultsUpdated*: proc(self: SearchService, batch: SearchResultsBatch): Future[void]
 
   QueryKind* = enum
     CommandQuery,
@@ -2345,6 +2345,24 @@ type
     line*:      int
     customFields*: seq[cstring]
     # names are in SearchSource
+
+  SearchResultRow* = object
+    ## One Find in Files row as the main process sends it
+    ## (`index/ipc_utils.searchBatchToJs`).
+    text*:      cstring
+    path*:      cstring
+    line*:      int
+    matchStart*: int
+    matchLength*: int
+
+  SearchResultsBatch* = object
+    ## `CODETRACER::search-results-updated`: one batch of the shared runner's
+    ## rows for the search `id`; `done` on the last one, `note` saying why a
+    ## search could read nothing.
+    id*: int
+    rows*: seq[SearchResultRow]
+    done*: bool
+    note*: cstring
 
   FlowConfigObjWrapper* = object
     enabled*: bool

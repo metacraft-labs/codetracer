@@ -61,6 +61,7 @@ import ./views/header       # `textCells`
 import ./layout/binding     # `slotExtent`, `footerLeadCells`
 import ./layout/cells       # `terminalPaneName`
 import ./views/vcs_pane
+import ./views/search_results_pane
 import ./views/point_list
 
 export headless_app
@@ -258,6 +259,11 @@ type
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. `paneVcs`'s model, as a value, filled by the
       ## host (`host/vcs_source.nim`) from the shared `VCSVM`.
+    search*: SearchResultsPaneModel
+      ## PLAT-57. FIND IN FILES' model, as a value, filled by the host
+      ## (`host/tui_session.searchModelOf`) from the session's
+      ## `SearchResultsVM`; its
+      ## `scrollTop` is the pane's own reading position.
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -288,6 +294,18 @@ type
       ## PLAT-49 part B: the session tab under the pointer, -1 for none.
     hoveredTabAdd*: bool
       ## PLAT-49 part B: the pointer is on the strip's "+".
+    findInFiles*: proc(query: string): string {.closure.}
+      ## PLAT-57: the HOST's Find in Files — run the search for `query` into
+      ## the session's `SearchResultsVM` through the shared runner
+      ## (`viewmodel/host/find_in_files`); "" when it started, else why not.
+      ## Nil when no host searches (an in-process caller).
+    toggleSearchOption*: proc(operation: string): string {.closure.}
+      ## PLAT-57: the HOST's Find in Files toggle, by its operation
+      ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
+      ## search that ran run again. The words the status line shows.
+    stepSearchResult*: proc(delta: int): string {.closure.}
+      ## PLAT-57: the HOST's next (`1`) / previous (`-1`) result: selected and
+      ## opened in the editor at its line. "" when one opened, else why not.
     recordingOpener*: proc(path: string): string {.closure.}
       ## PLAT-49 part B: the HOST's "open this recording in a new session
       ## tab" — "" when it opened, else why not. Nil when the host cannot
@@ -542,6 +560,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     frameViewer: app.frameViewer,
     fileTree: app.fileTree,
     vcs: app.vcs,
+    search: app.search,
     build: buildPaneModelFor(app.build),
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()

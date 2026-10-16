@@ -207,6 +207,11 @@ const
 
     # --- The workbench (§3.7) ----------------------------------------------
     op("search.find-in-files", GlobalTable, "Find in Files"),
+    op("search.next-result", GlobalTable, "Next Search Result"),
+    op("search.previous-result", GlobalTable, "Previous Search Result"),
+    op("search.toggle-case", GlobalTable, "Toggle Match Case"),
+    op("search.toggle-whole-word", GlobalTable, "Toggle Match Whole Word"),
+    op("search.toggle-regex", GlobalTable, "Toggle Use Regular Expression"),
     op("session-tabs.next-recent", GlobalTable, "Next Recently Used Tab"),
     op("session-tabs.previous-recent", GlobalTable,
        "Previous Recently Used Tab"),

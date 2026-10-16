@@ -529,7 +529,12 @@ CONTROL_HEADER = """\
 #   GRADED, here, against these bytes:  M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M12
 #                                       — 11 of 11 KILLED, each verdict
 #                                       reported per arm, not as a total.
-#   NOT GRADED, and OWED:               M11.
+#   M11, GRADED 2026-10-16 against a LIVE capture (`ci/test/plat37-window-
+#   frame.sh` on Linux: headless sway 1.11, grim, wayland-info; windowed
+#   6 of 6 scenarios captured, featureless 6 of 6 timed out, as DIFF-6
+#   says): KILLED, its derived `because` matched and its behaviour-preserving
+#   control left the killer case OK. The notes below are why it was owed
+#   until then.
 #
 #   HARNESS   run-plat37-window-mutations.py
 #   BASE      6fa0bdd89 (origin/agents). **RE-GRADED FROM SCRATCH ON THIS

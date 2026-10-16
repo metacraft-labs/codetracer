@@ -20,7 +20,7 @@ func gpuiPaneName*(kind: PaneKind): string =
   of paneEventLog: "Event Log"
   of paneDebugControls: "Debug Controls"
   of paneFlow: "Flow"
-  of paneSearch: "Search"
+  of paneSearch: "Find in Files"
   of panePointList: "Points"
   of paneScratchpad: "Scratchpad"
   of paneShell: "Shell"

@@ -7267,3 +7267,62 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The desktop does not share the TUI/GPUI source provider for self-contained
   traces: it reads `files/` through `index/config.selfContainedReadPathCandidates`
   and Node's `path.join`, which folds `..` itself.
+- Find in Files is ONE runner, `viewmodel/host/find_in_files.nim`, compiled to
+  C (terminal, GPUI: pumped from the host loop, `rg`'s pipe O_NONBLOCK) and to
+  JS (Electron's main process, `index/ipc_utils.onSearchProgram`: node drives
+  it). `rg --json` with an argument vector when `rg` is on PATH, else an
+  in-process walker that must give the same rows in the same order (FS-8 in
+  `test_plat57_find_in_files.nim`): `--no-ignore` (the walker reads no ignore
+  files), `--sort path` (siblings by byte order of their names, depth first),
+  hidden entries / symlinks / NUL-holding files skipped. The scope is
+  `findInFilesScope` (the recording's `files/` store with its prefix
+  stripped, else the outermost existing source folders). A new search cancels
+  the run in flight AND `SearchResultsVM.acceptBatch` drops any batch whose
+  `runId` is not the latest — two guards, each graded by its own arm.
+- `SearchResultsVM` is the one Find in Files model; every front-end draws
+  `displayRows` / `rowParts` / `summaryText` / `emptyText`. The highlight is
+  the RUNNER's match (`SearchResultLine.matchStart` / `matchLength`), never a
+  second search of the line by a view. The toggles re-run the search inside
+  the VM, so every front-end gets that for free.
+- On the terminal, a pane shown by `showPane` may be the REVEALED overlay of a
+  docked pane: `runtime.paneAt` asks the reveal first (it is painted over the
+  arrangement), then the tiled regions, then an open dock. A click handler
+  that asks only `regionIndexAt` lands on the pane under the overlay.
+- GPUI `--window-ops` key names are lower case (`enter`, `f4`) and the
+  modifier is spelled `control`; `wait:<ms>` pumps a streaming search.
+- Desktop `:grep foo`: `command_interpreter` must take
+  `classifyOmnibarQuery(...).needle`; the query past its first character is
+  `grep foo`.
+- Find in Files' matcher is `viewmodel/host/text_match.nim` (beside the
+  runner, NOT in `editor/`): every pattern, literal or regular expression, is
+  compiled once into the expression `rg` builds from the same flags (literal
+  escaped with `escapeRe`, `regexCaseless`, whole word as
+  `(?<!\w)(?:…)(?!\w)` = `rg -w`'s half word boundaries) on nim-regex
+  (`libs/nim-regex`, v0.27.0, pure Nim, C and JS; it needs
+  `libs/nim-unicodedb` >= 0.13.2). The editor core's import closure
+  (`ci/test/editor-import-closure.sh`) cannot resolve a third-party package
+  and refuses it, which is why the matcher is not an `editor/` module; the
+  toggles (`TextMatchOptions`) are a `store/types` value.
+- nim-regex vs `rg` 15, measured: look-around and `\1` are nim-regex-only
+  (refused for both engines in `refusalOf`, with `rg`'s words), `\n` is
+  refused by `rg`; `\p{Greek}` / `\p{Uppercase}` (scripts, binary
+  properties) do not compile in nim-regex; case-insensitively nim-regex does
+  not fold `[[:upper:]]` / `\p{Lu}` and misses the Kelvin sign and long `ſ`
+  in a bracket RANGE. A walker line keeps a CRLF's `\r` (as `rg` searches
+  it); both engines strip it from the row's text and clip the match to it.
+- Find in Files' field keys (`Alt+C` / `Alt+W` / `Alt+R`) hold where
+  `searchInputFocus` is true: the scope element `search-query` — the
+  desktop pane's `#fif-input` (stamped `data-scope-*`), or on the terminal
+  and GPUI the palette's field while its line is `:grep`
+  (`omnibar_vm.paletteFieldOf`). They are G rows; CUA's pane-focus `Alt+C`
+  and the menu's `Alt+W` / `Alt+R` say `!searchInputFocus`.
+- `src/tests/gui/lib/js-trace-fixture.ts` records with
+  `CODETRACER_JS_RECORDER_PATH` (the CLI FILE) or else the workspace
+  sibling's `packages/cli/dist/index.js`, whatever revision it was built at.
+  A stale sibling build writes CTFS container v4 and every chrome spec
+  (`tests/build/search-results-e2e.spec.ts`, …) dies in `ct host` with
+  "ct host did not import trace folder … container version 4". Build the
+  recorder at the repro.lock pin (a real copy with the trace-format siblings
+  symlinked to the pins; `npm install`, `npx napi build --release
+  --manifest-path crates/recorder_native/Cargo.toml --output-dir
+  crates/recorder_native/`, `npm run build`) and export the CLI path.

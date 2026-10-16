@@ -65,6 +65,7 @@ import ./styled_row
 import ./top_bar
 import ./tracepoint_manager
 import ./vcs_pane
+import ./search_results_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -161,6 +162,10 @@ type
       ## CTUI-8's event log, as a value: the Event Log pane's own rectangle
       ## (the Timeline that shared it is removed, 2026-10-05), its scrollbar a
       ## scrubber over the whole log (PLAT-51).
+    search*: SearchResultsPaneModel
+      ## PLAT-57. FIND IN FILES, as a value: the session's `SearchResultsVM`
+      ## the desktop's panel draws too, read by `tui_session.searchModelOf`.
+      ## Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -803,6 +808,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneVcs and model.vcs.loaded:
     belowStrip:
       discard paintVcsPane(g, content, model.vcs)
+  # PLAT-57. FIND IN FILES — its field is content, so below the strip.
+  elif region.pane == paneSearch and model.search.loaded:
+    belowStrip:
+      discard paintSearchResults(g, content, model.search)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

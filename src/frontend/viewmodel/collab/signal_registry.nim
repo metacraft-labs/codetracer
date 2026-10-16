@@ -457,7 +457,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("ShellVM", "inputHistory", vscPresenceAwareness,
     "Command history is participant-local awareness, not replayable ViewState.")
 
-  entries.addMany("SearchResultsVM", ["query", "active"],
+  entries.addMany("SearchResultsVM", ["query", "active", "options"],
     vscSharedSessionViewState,
     "Global search results panel query and visibility are shared view state. " &
     "There is no `filter` alongside them any more: the client-side " &
@@ -468,12 +468,18 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Search result rows are backend/search service output.")
   entries.addEntry("SearchResultsVM", "loading", vscBackendAuthoritative,
     "In-flight flag for one search request; set on submit and cleared by the first batch of backend results.")
+  entries.addMany("SearchResultsVM", ["searching", "note"],
+    vscBackendAuthoritative,
+    "Whether the runner is still streaming the latest search, and why it " &
+    "could read nothing: facts the search runner reports.")
+  entries.addEntry("SearchResultsVM", "selected", vscRendererLocal,
+    "The row a participant selected (a click, F4) is their own cursor.")
   entries.addEntry("SearchResultsVM", "recentSearches", vscPresenceAwareness,
     "A participant's own last ten queries, shown in this panel's empty " &
     "state. Same call as ShellVM.inputHistory: what one person typed is " &
     "theirs, not replayable session state, and publishing it would put " &
     "another participant's search history in front of everyone.")
-  entries.addDerived("SearchResultsVM", ["resultCount", "fileCount"])
+  entries.addDerived("SearchResultsVM", ["resultCount", "fileCount", "groups"])
 
   entries.addMany("TestResultsVM", ["catalog", "summary", "projectName"],
     vscBackendAuthoritative,

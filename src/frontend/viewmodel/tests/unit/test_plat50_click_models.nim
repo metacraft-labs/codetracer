@@ -3,7 +3,7 @@
 ## (`headless_app/pane_clicks`).
 ##
 ##   * the INVENTORY — every desktop click behaviour the milestone's table
-##     lists, one row each (`K1` … `K56`), every row with a target, gestures,
+##     lists, one row each (`K1` … `K57`), every row with a target, gestures,
 ##     the desktop's behaviour and a state for each native front-end (done,
 ##     existing, or n/a with the reason the front-end draws no such target);
 ##   * the WORD UNDER THE POINTER (`callTokenAt`), Monaco's rule, with Rust's
@@ -35,7 +35,7 @@ import viewmodels/event_log_vm
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 215
+const ExpectedAssertions = 217
 
 var countedAssertions = 0
 
@@ -51,13 +51,13 @@ func rowsWith(state: NativeState; gpui = false): seq[string] =
 
 suite "PLAT-50: the click inventory":
 
-  test "every row K1..K56, once, complete":
+  test "every row K1..K57, once, complete":
     var ids = initHashSet[string]()
     for i, b in ClickInventory:
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 56
+    ck ClickInventory.len == 57
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)
@@ -90,6 +90,8 @@ suite "PLAT-50: the click inventory":
     # PLAT-52 drew the Terminal Output pane on both native front-ends.
     ck behaviour("K32").terminal == nsDone
     ck behaviour("K32").gpui == nsDone
+    # PLAT-57 drew Find in Files on both: its row opens the result.
+    ck behaviour("K35").terminal == nsDone and behaviour("K35").gpui == nsDone
     ck behaviour("K99").id.len == 0
     ck describe(behaviour("K24")).startsWith("K24 Event log: row [click]")
 

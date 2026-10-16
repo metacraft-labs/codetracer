@@ -39,7 +39,7 @@ import store/replay_data_store
 import store/types as store_types
 import viewmodels/debug_controls_vm
 import viewmodels/flow_vm
-import viewmodels/search_vm
+import viewmodels/search_results_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/filesystem_vm
@@ -243,14 +243,18 @@ suite "PLAT-41 — the five panes DRAW DATA, not only reports":
       ck pv.root.rows.len == 2
       dispose()
 
-  test "search renders an Input and a List when the ViewModel has results":
+  test "Find in Files renders an Input and a List when the ViewModel has results":
+    # PLAT-57: the pane is `SearchResultsVM`'s (Find in Files), its rows
+    # grouped by file — a `Collapsible` per file holding a `List`.
     createRoot proc(dispose: proc()) =
-      let vm = createSearchVM(freshStore())
-      vm.setQuery("checksum")
-      vm.setResults(@[
-        SearchPanelResultEntry(label: "calc.py:112", detail: "checksum = 73",
-                               shortcut: ""),
-        SearchPanelResultEntry(label: "calc.py:44", detail: "div", shortcut: "")])
+      let vm = createSearchResultsVM(freshStore())
+      let id = vm.beginSearch("checksum")
+      discard vm.acceptBatch(id, @[
+        SearchResultLine(path: "/p/calc.py", line: 112, text: "checksum = 73",
+                         matchStart: 0, matchLength: 8),
+        SearchResultLine(path: "/p/calc.py", line: 44,
+                         text: "return checksum", matchStart: 7,
+                         matchLength: 8)], true)
       let pv = paneView(paneSearch, ViewModel(vm), GpuiPanelBudget, "gpui")
       ck pv.report.len == 0
       ck pkInput in pv.entries

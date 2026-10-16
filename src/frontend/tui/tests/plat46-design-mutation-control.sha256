@@ -6,7 +6,7 @@ ac1765ef010c344e12e6f44cc271de52488c61e774b3372fa65d8e7fd7329b21  src/frontend/t
 e616143d22849befeba60171bd7fad5b867a6b9abf98f18dedfefd6fe83c2111  src/frontend/tui/app/theme/palette.nim
 6edc28cf1a7b3e433c5f6a229a5a86f275fbb555bd8e42a5813a11b103bde4ce  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
-9edc9695c12fd0b21a3cb1b9e9d12bb47e2166d7ca6f60bbfb38cd7660751a56  src/frontend/tui/app/views/shell.nim
+e0fad030b69da5a312f41c88846fc9d81d708740da1d7b385aa0fb0de9723029  src/frontend/tui/app/views/shell.nim
 61e7125f4d3e5e5dcd6a8babc457ce98645a864e49eab305bf543db29c737862  src/frontend/tui/app/views/gutter.nim
 f4e48de96dcfe43ce9f50a811155edbc250d01a90ad0aa85badc93c217907110  src/frontend/tui/app/views/source_pane.nim
 fcf40b1779256bc5c3371b6618988683915f0d46f829ab50cb0441c003589997  src/frontend/tui/host/terminal_probe.nim

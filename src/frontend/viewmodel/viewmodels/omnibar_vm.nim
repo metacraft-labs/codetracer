@@ -41,6 +41,8 @@
 
 import std/[algorithm, strutils]
 
+import ../keymap/scope_path
+
 type
   OmnibarMode* = enum
     omFile = "file"
@@ -144,6 +146,17 @@ func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
     if digits:
       return (omTick, query[1 .. ^1].strip.replace(",", ""))
   (omFile, query.strip)
+
+
+func paletteFieldOf*(query: string): ScopeElement =
+  ## The palette's field as a scope element: Find in Files' query field while
+  ## the line is `:grep` (the terminal's and GPUI's field for the pane,
+  ## Find-And-Incremental-Search.md §5.2, so its toggle keys hold there),
+  ## else the palette's own field.
+  if classifyOmnibarQuery(query).mode == omProgram:
+    element(ekInput, SearchQueryInput)
+  else:
+    element(ekInput, PaletteQueryInput)
 
 func desktopKindOf*(mode: OmnibarMode): OmnibarMode =
   ## The mode the DESKTOP acts in for a classified query: its palette has no

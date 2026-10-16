@@ -52,6 +52,8 @@ import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
+import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
+from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
 export headless_session
 
@@ -478,6 +480,18 @@ proc outermostRoots(roots: seq[string]): seq[string] =
     if not inside and r notin result:
       result.add r
 
+proc recordedSourcePaths(traceFolder: string): seq[string] =
+  ## The recording's source paths: its `paths.json`, else its `files/`
+  ## store's own listing (the desktop's `loadFilenames` fallback).
+  let pathsFile = traceFolder / "paths.json"
+  if fileExists(pathsFile):
+    try:
+      for p in parseJson(readFile(pathsFile)): result.add p.getStr("")
+    except CatchableError:
+      result = @[]
+  if result.len == 0:
+    result = storedSourcePaths(traceFolder / "files")
+
 proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   ## **The replay session's file tree**: the recording's own source folders,
   ## derived from its `paths.json` by the rule the desktop's Files pane uses
@@ -495,15 +509,7 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   result = FilesystemEntryNode(text: "source folders", isFolder: true,
                                isExpanded: true)
   let store = traceFolder / "files"
-  let pathsFile = traceFolder / "paths.json"
-  var recorded: seq[string] = @[]
-  if fileExists(pathsFile):
-    try:
-      for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
-    except CatchableError:
-      recorded = @[]
-  if recorded.len == 0:
-    recorded = storedSourcePaths(store)
+  let recorded = recordedSourcePaths(traceFolder)
   for root in outermostRoots(sourceFolderRootsOf(recorded)):
     let dir = store / root
     if dirExists(dir):
@@ -512,6 +518,32 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
       result.children.add FilesystemEntryNode(text: root.extractFilename,
                                               path: "/" & root)
 
+
+# ---------------------------------------------------------------------------
+# PLAT-57: Find in Files on the native front-ends
+# ---------------------------------------------------------------------------
+
+proc recordingSearchScope*(traceFolder: string): FindInFilesScope =
+  ## What Find in Files reads for this recording — the runner's
+  ## `findInFilesScope`, the desktop's rule: the recording's `files/` store
+  ## (every recording the native front-ends open is read from it), else its
+  ## source folders.
+  findInFilesScope(traceFolder / "files", preferStore = true,
+                   sourceFolderRootsOf(recordedSourcePaths(traceFolder)))
+
+var nativeFindInFiles* = newFindInFilesService()
+  ## The process's one runner service: a front-end runs one search at a
+  ## time, and a new one cancels the one in flight. The host's loop pumps it.
+
+proc wireFindInFiles*(vm: SearchResultsVM; scope: proc(): FindInFilesScope) =
+  ## Hand `vm`'s searches to the shared runner: each runs over `scope()` and
+  ## streams its batches into `vm`, which drops any that are not its latest.
+  if vm.isNil:
+    return
+  vm.onSearch = proc(runId: int; query: string; options: TextMatchOptions) =
+    discard nativeFindInFiles.search(runId, query, options, scope(),
+      proc(b: FindInFilesBatch) =
+        discard vm.acceptBatch(b.runId, b.rows, b.done, b.note))
 
 proc expandAllFolders*(vm: FilesystemVM) =
   ## PLAT-50: mark every folder of `vm`'s tree expanded.

@@ -25,7 +25,12 @@
 #   GRADED, here, against these bytes:  M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M12
 #                                       — 11 of 11 KILLED, each verdict
 #                                       reported per arm, not as a total.
-#   NOT GRADED, and OWED:               M11.
+#   M11, GRADED 2026-10-16 against a LIVE capture (`ci/test/plat37-window-
+#   frame.sh` on Linux: headless sway 1.11, grim, wayland-info; windowed
+#   6 of 6 scenarios captured, featureless 6 of 6 timed out, as DIFF-6
+#   says): KILLED, its derived `because` matched and its behaviour-preserving
+#   control left the killer case OK. The notes below are why it was owed
+#   until then.
 #
 #   HARNESS   run-plat37-window-mutations.py
 #   BASE      6fa0bdd89 (origin/agents). **RE-GRADED FROM SCRATCH ON THIS
@@ -93,4 +98,4 @@ cad6f3e340ba65160902bc10f05db2e9c279ad8469df667a0189d0ac417cd2cc  src/tests/visu
 cb6c5462e917d2e9e33645f68bbcb97e97bbfc7535260fa0a0f1ca8718e7329c  src/frontend/gpui/replay_ops.nim
 b80875c273eb71880e4ba1894c3eca0751f4e300216e5b18c113e3b66bfd732a  src/tests/visual/scenarios.json
 eae5ce275ce0f8d32a08ff37064e7794f9a6bcad368a4fd28a6be9ca742fd590  src/frontend/gpui/tests/plat37_vision.nim
-e55e693fc29d3c750dabbf7a5827cf46a5270f9e2cc9943139cf2a66f00d72f0  src/frontend/gpui/tests/test_gpui_window_frame.nim
+f9e8ef560a96b8ee4dfd60c41d1e42db9a26e561d4ab59814955e116b7675d26  src/frontend/gpui/tests/test_gpui_window_frame.nim

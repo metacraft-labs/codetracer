@@ -50,6 +50,7 @@ import viewmodels/[
   timeline_vm,
   debug_controls_vm,
   search_vm,
+  search_results_vm,
   point_list_vm,
   scratchpad_vm,
   shell_vm,
@@ -105,6 +106,11 @@ type
     timelineVM*: TimelineVM
     debugControlsVM*: DebugControlsVM
     searchVM*: SearchVM
+    searchResultsVM*: SearchResultsVM
+      ## PLAT-57. The Find in Files pane's ViewModel on the native
+      ## front-ends (`headless_app.paneViewModel(paneSearch)`); its searches
+      ## run in the host's loop through `host/find_in_files`. The desktop
+      ## keeps its own instance in `ui/search_results.nim`.
     pointListVM*: PointListVM
     scratchpadVM*: ScratchpadVM
     shellVM*: ShellVM
@@ -236,6 +242,8 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.debugControlsVM = createDebugControlsVM(session.store)
   if session.searchVM.isNil:
     session.searchVM = createSearchVM(session.store)
+  if session.searchResultsVM.isNil:
+    session.searchResultsVM = createSearchResultsVM(session.store)
   if session.pointListVM.isNil:
     session.pointListVM = createPointListVM(session.store)
   if session.scratchpadVM.isNil:
@@ -449,6 +457,8 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.debugControlsVM.dispose()
   if not session.searchVM.isNil:
     session.searchVM.dispose()
+  if not session.searchResultsVM.isNil:
+    session.searchResultsVM.dispose()
   if not session.pointListVM.isNil:
     session.pointListVM.dispose()
   if not session.scratchpadVM.isNil:

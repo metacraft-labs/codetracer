@@ -58,6 +58,7 @@ import ./views/welcome_view
 import headless_app/welcome_tabs
 import ./views/event_log
 import ./views/vcs_pane
+import ./views/search_results_pane
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -208,6 +209,14 @@ type
     pcTerminalView
       ## PLAT-52: the Terminal Output pane's toggle — show the view named by
       ## `text` (`lines` / `screen`), remembered for this recording.
+    pcSearchResult
+      ## PLAT-57 (K35): Find in Files' result `index` — selected and opened
+      ## in the editor at its line, the match selected; the recording
+      ## position does not move.
+    pcSearchOption
+      ## PLAT-57: Find in Files' toggle whose operation is `text`
+      ## (`search.toggle-case` / `-whole-word` / `-regex`) flipped, and the
+      ## search run again.
     pcFrameSeek
       ## PLAT-51: the frame viewer's own scrubber — show frame `index`
       ## (`behaviour` "drag" while held, "release" where it is let go:
@@ -409,6 +418,13 @@ proc sourcePaneRows*(rt: TuiRuntime): int
 proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int
   ## FORWARD-DECLARED for the call trace's scroll keys; defined beside
   ## `sourcePaneRows`.
+
+proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome)
+proc runFindInFiles(rt: TuiRuntime; pattern: string;
+                    outcome: var RuntimeOutcome)
+proc stepFindInFiles(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome)
+  ## PLAT-57: FORWARD-DECLARED for the command line's `:grep`, `:cnext` and
+  ## `:cprev`; defined beside `showPane`, whose rule they use.
 
 proc runFileJob(rt: TuiRuntime; job: FileJob)
 proc writeBuffers(rt: TuiRuntime; verb: string; all = false)
@@ -843,6 +859,20 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
     if text.startsWith(":"):
       text = text[1 .. ^1].strip()
     let words = text.splitWhitespace()
+    # PLAT-57 (CodeTracer-TUI.md §4.3): `:grep <pattern>` searches the
+    # recording's sources into Find in Files — nothing opens — and `:grep`
+    # alone opens its field; `:cnext` / `:cprev` (`:cn` / `:cp`) open the
+    # next / previous result.
+    if words.len > 0 and words[0] == "grep":
+      if words.len == 1: rt.openFindInFiles(outcome)
+      else: rt.runFindInFiles(text[4 .. ^1].strip(), outcome)
+      outcome.detail = rt.app.notification
+      return
+    if words.len == 1 and words[0] in ["cnext", "cn", "cprev", "cp"]:
+      rt.stepFindInFiles((if words[0] in ["cnext", "cn"]: 1 else: -1),
+                         outcome)
+      outcome.detail = rt.app.notification
+      return
     if words.len > 0 and words[0] in ["icons", "keys"]:
       let arg = if words.len > 1: words[1] else: ""
       if words[0] == "icons":
@@ -1507,13 +1537,39 @@ proc eventRowAt(model: EventLogModel; area: CellArea;
     return (false, event_log.EventLogRow(), screen)
   (true, screen.visible[i], screen)
 
+proc paneAt(geometry: LayoutGeometry; row, col: int):
+    tuple[found: bool, region: PaneRegion, under: CellArea] =
+  ## The pane painted at `(row, col)` and the rectangle its painter was
+  ## handed: a pane of the tiled arrangement, or — PLAT-57 — a docked pane
+  ## shown open in its band or revealed over the body, which `shell` paints
+  ## through the same `paintPane` (so its box is its whole area).
+  # The revealed overlay is painted OVER the arrangement, so it is asked
+  # first.
+  if geometry.revealing and geometry.reveal.contains(row, col):
+    return (true, PaneRegion(pane: geometry.revealPane, area: geometry.reveal,
+                             activeTab: -1),
+            geometry.reveal)
+  let idx = geometry.regionIndexAt(row, col)
+  if idx >= 0:
+    return (true, geometry.projection.regions[idx],
+            paneUnderStrip(geometry, idx))
+  if not geometry.openDock.isEmptyArea and geometry.openDock.contains(row, col):
+    return (true, PaneRegion(pane: geometry.openDockPane,
+                             area: geometry.openDock, activeTab: -1),
+            geometry.openDock)
+
 proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
   ## The rectangle pane `kind` is painted into (its strip row first), or an
-  ## empty one when it is not on the screen.
+  ## empty one when it is not on the screen — PLAT-57: a docked pane shown
+  ## open or revealed included.
   let geometry = rt.layoutGeometry()
   for i, region in geometry.projection.regions:
     if region.pane == kind:
       return paneUnderStrip(geometry, i)
+  if geometry.revealing and geometry.revealPane == kind:
+    return geometry.reveal
+  if not geometry.openDock.isEmptyArea and geometry.openDockPane == kind:
+    return geometry.openDock
   CellArea()
 
 proc scrubEventLog(rt: TuiRuntime; area: CellArea; row: int;
@@ -1561,6 +1617,40 @@ proc scrubCallTrace(rt: TuiRuntime; area: CellArea; row: int;
   outcome.repaint = true
   true
 
+proc searchPaneScreen(rt: TuiRuntime): tuple[area: CellArea,
+                                             screen: SearchPaneScreen] =
+  ## PLAT-57: Find in Files' rows below its strip, and where the painter put
+  ## its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneSearch)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintSearchResults(g, result.area, rt.app.search)
+
+proc scrubSearch(rt: TuiRuntime; row: int; dragging: bool): bool =
+  ## PLAT-57: Find in Files' scrollbar scrubber — the VIEW jumps (a press on
+  ## the track) or follows the held thumb, as every list pane's does.
+  let (area, screen) = rt.searchPaneScreen()
+  if area.width <= 0 or screen.trackCol < 0:
+    return false
+  let sm = rt.app.search.scrubberOf(screen.listRows)
+  let at = clamp(row, screen.listTop, screen.listTop + screen.listRows - 1)
+  let hit = sm.verticalScrubberHit(screen.listTop, screen.listRows, at)
+  if hit.kind == shNone:
+    return false
+  rt.app.search.scrollTop = sm.scrubTo(hit, dragging)
+  true
+
+proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-57: the wheel over Find in Files scrolls its rows.
+  let (_, screen) = rt.searchPaneScreen()
+  rt.app.search.scrollTop = rt.app.search.clampScrollTop(
+    rt.app.search.scrollTop + delta, screen.listRows)
+  outcome.repaint = true
+
 proc routeVariablesResize(rt: TuiRuntime; event: MouseEvent;
                           outcome: var RuntimeOutcome): bool =
   ## PLAT-51: the Variables pane's name / value separator held — each motion
@@ -1601,6 +1691,8 @@ proc routeListScrubDrag(rt: TuiRuntime; event: MouseEvent;
         outcome.repaint = true
     of paneCalltrace:
       discard rt.scrubCallTrace(area, event.row, dragging = true, outcome)
+    of paneSearch:
+      discard rt.scrubSearch(event.row, dragging = true)
     else: discard
   outcome.repaint = true
   true
@@ -1880,11 +1972,9 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     rt.copyToClipboard(path, "the path " & path)
     outcome.repaint = true
     return true
-  let idx = geometry.regionIndexAt(event.row, event.col)
-  if idx < 0:
+  let (onPane, region, under) = geometry.paneAt(event.row, event.col)
+  if not onPane:
     return false
-  let region = geometry.projection.regions[idx]
-  let under = paneUnderStrip(geometry, idx)
   # K7: a right-click on a TAB opens the tab's menu.
   if event.row == region.area.row:
     if event.button != mbRight:
@@ -2037,6 +2127,36 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     outcome.requestClick(PaneClickRequest(kind: pcScratchpadRemove,
                                           index: hit.row))
     return true
+  of paneSearch:
+    # PLAT-57 (K35): a result opens at its line; a toggle flips and the
+    # search runs again; the field opens the omnibox on `:grep <query>`;
+    # the scrubber column moves the view.
+    if event.button != mbLeft or not rt.app.search.loaded:
+      return false
+    let (area, screen) = rt.searchPaneScreen()
+    let t = rt.app.search.searchTargetAt(screen, area, event.row, event.col)
+    case t.kind
+    of stMatch:
+      outcome.requestClick(PaneClickRequest(kind: pcSearchResult,
+                                            index: t.index, path: t.path))
+      return true
+    of stOption:
+      outcome.requestClick(PaneClickRequest(kind: pcSearchOption,
+                                            text: t.option))
+      return true
+    of stQuery:
+      rt.openFindInFiles(outcome)
+      return true
+    of stTrack:
+      let hit = rt.app.search.scrubberOf(screen.listRows).verticalScrubberHit(
+        screen.listTop, screen.listRows, event.row)
+      if hit.kind == shThumb:
+        rt.app.listScrub = (active: true, pane: paneSearch)
+      discard rt.scrubSearch(event.row, dragging = hit.kind == shThumb)
+      outcome.repaint = true
+      return true
+    of stFile, stNone:
+      return false
   of paneVcs:
     # K34 / K53: a changed file opens its diff; a commit opens (lists the
     # files it changed) or closes; a commit's file opens that change.
@@ -2328,6 +2448,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     if idx >= 0 and geometry.projection.regions[idx].pane == paneEventLog and
        rt.app.eventLog.hasContent:
       rt.scrollEventLog(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-57: the wheel scrolls Find in Files' rows (a docked one shown
+    # open or revealed included).
+    let at = geometry.paneAt(event.row, event.col)
+    if at.found and at.region.pane == paneSearch and rt.app.search.loaded:
+      rt.scrollSearch(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -2992,6 +3120,41 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
       rt.note($pane & ": " & added.message)
   outcome.repaint = true
 
+proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `search.find-in-files` with no pattern — `Ctrl+Shift+F` under CUA, the
+  ## Edit menu's Find in Files, `:grep` alone, a press on the pane's field:
+  ## Find in Files shown (`showPane`'s rule) and its field opened. The
+  ## terminal's field is the omnibox's `:grep` line, holding the pane's
+  ## current query (Find-And-Incremental-Search.md §5.2).
+  rt.showPane(paneSearch, outcome)
+  rt.openOmnibar(":grep " & rt.app.search.query)
+  outcome.repaint = true
+
+proc runFindInFiles(rt: TuiRuntime; pattern: string;
+                    outcome: var RuntimeOutcome) =
+  ## `:grep <pattern>` (§5.1): the host's search of the recording's sources
+  ## into Find in Files, which is shown (`showPane`'s rule). Nothing opens:
+  ## the user's OQ-F2, *"Only open the results panel"*.
+  outcome.repaint = true
+  if rt.app.findInFiles.isNil:
+    rt.note("Find in Files needs a recording or a project to search")
+    return
+  let why = rt.app.findInFiles(pattern)
+  rt.showPane(paneSearch, outcome)
+  rt.note(if why.len > 0: why
+          else: "searching the sources for \"" & pattern & "\"")
+
+proc stepFindInFiles(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## `search.next-result` / `search.previous-result`: the host selects the
+  ## next / previous result and opens it at its line (§5.3).
+  outcome.repaint = true
+  if rt.app.stepSearchResult.isNil:
+    rt.note("there are no search results")
+    return
+  let why = rt.app.stepSearchResult(delta)
+  if why.len > 0:
+    rt.note(why)
+
 proc runMenuAction*(rt: TuiRuntime; action: string;
                     outcome: var RuntimeOutcome) =
   ## A chosen menu item (or omnibar command), in the terminal's terms.
@@ -3036,6 +3199,9 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
       discard rt.applyLocalAction(outcome.action, outcome)
     outcome.repaint = true
     return
+  if action == "findInFiles":
+    rt.openFindInFiles(outcome)
+    return
   let (isOmni, query) = menuOmnibarQuery(action)
   if isOmni:
     rt.openOmnibar(query)
@@ -3056,6 +3222,15 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## `:keymap` and `:break 12` run as typed. Only a line whose verb is no
   ## command takes the chosen palette entry, which is what fuzzy-picks one.
   let (mode, needle) = classifyOmnibarQuery(rt.app.omnibar.query)
+  # PLAT-57: `:grep <text>` is Find in Files (§5.1): the omnibar closes and
+  # the search runs into the pane; `:grep` alone keeps the field open.
+  if mode == omProgram:
+    if needle.len == 0:
+      rt.openFindInFiles(outcome)
+    else:
+      rt.app.omnibar.close()
+      rt.runFindInFiles(needle, outcome)
+    return
   if mode == omCommand and
      rt.runCommandLine(":" & needle, outcome,
                        unknownFallsThrough = true):
@@ -3476,7 +3651,7 @@ proc scopePath*(rt: TuiRuntime): ScopePath =
   rt.focus.dropInner()
   if rt.app.omnibar.isOpen:
     return rt.focus.scopePathOf([element(ekOverlay, "palette"),
-                                 element(ekInput, "palette-query")],
+                                 paletteFieldOf(rt.app.omnibar.query)],
                                 atWindow = true)
   if rt.app.contextMenu.open:
     return rt.focus.scopePathOf([element(ekOverlay, "context-menu")],
@@ -3869,6 +4044,25 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     return
   of "layout.reveal-next-docked":
     rt.cycleReveal(outcome)
+    return
+  of "search.find-in-files":
+    # PLAT-57: `search.find-in-files(query?)` — with a pattern, the search;
+    # without, the pane and its field (`Ctrl+Shift+F`).
+    if res.argument.len > 0: rt.runFindInFiles(res.argument, outcome)
+    else: rt.openFindInFiles(outcome)
+    return
+  of "search.next-result", "search.previous-result":
+    # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
+    rt.stepFindInFiles((if res.operation == "search.next-result": 1 else: -1),
+                       outcome)
+    return
+  of "search.toggle-case", "search.toggle-whole-word", "search.toggle-regex":
+    # PLAT-57: `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field (the
+    # omnibox on `:grep`, `searchInputFocus`) — the toggle flips and a search
+    # that ran runs again.
+    rt.note(if rt.app.toggleSearchOption.isNil:
+              "Find in Files needs a recording or a project to search"
+            else: rt.app.toggleSearchOption(res.operation))
     return
   else: discard
   let palette = paletteQueryOf(res.operation)

@@ -5723,8 +5723,12 @@ suite "IsoNim Errors Panel — interactions":
 
 proc makeResult(path: string = "src/main.nim";
                 line: int = 1;
-                text: string = "match snippet"): SearchResultLine =
-  SearchResultLine(text: text, path: path, line: line)
+                text: string = "match snippet";
+                matchStart = 0; matchLength = 0): SearchResultLine =
+  ## A row as the runner produces it; `matchStart` / `matchLength` are the
+  ## runner's match (0 length: none).
+  SearchResultLine(text: text, path: path, line: line,
+                   matchStart: matchStart, matchLength: matchLength)
 
 # ---------------------------------------------------------------------------
 # Structure
@@ -5790,6 +5794,15 @@ suite "IsoNim Search Results Panel — structure":
       check input.attributes["placeholder"] == "Search in files..."
       check findByClassOrNil(bar, "fif-input") == input
       check findByClass(bar, "fif-badge").textContent == "Find in Files"
+      # PLAT-57: the two options, VS Code's search view's.
+      check findByClass(bar, "fif-option-case").textContent == "Aa"
+      check findByClass(bar, "fif-option-word").textContent == "ab"
+      check findByClass(bar, "fif-option-regex").textContent == ".*"
+      # The field is Find in Files' query field in the scope path, where the
+      # toggles' keys (`Alt+C` / `Alt+W` / `Alt+R`) hold.
+      let field = findByClass(bar, "fif-input")
+      check field.attributes["data-scope-kind"] == "input"
+      check field.attributes["data-scope-id"] == "search-query"
 
       # The reactive body: every state the render effect rebuilds hangs here.
       check findByClassOrNil(panel, "fif-body") != nil
@@ -5865,8 +5878,7 @@ suite "IsoNim Search Results Panel — structure":
 #
 # The pre-redesign panel-wide badge is gone; the count surfaces that
 # survived are the per-file-group `fif-file-count` badge, the number of
-# rendered rows, and `vm.resultCount` (which `ui/search_results.nim` reads
-# back via `currentResultCount` to build the recent-searches entries).
+# rendered rows, and `vm.resultCount`.
 # ---------------------------------------------------------------------------
 
 suite "IsoNim Search Results Panel — count reactivity":
@@ -6080,9 +6092,14 @@ suite "IsoNim Search Results Panel — row rendering":
 # Query highlighting
 # ---------------------------------------------------------------------------
 
-suite "IsoNim Search Results Panel — query highlighting":
+suite "IsoNim Search Results Panel — the runner's match highlighted":
 
-  test "matched substring is wrapped in a search-results-highlight span":
+  # PLAT-57: the highlight is the match the RUNNER found (`matchStart` /
+  # `matchLength`, from `rg --json`'s submatches or the walker's matcher) —
+  # the view never searches the line itself, so it cannot disagree with the
+  # runner about case or word boundaries.
+
+  test "the runner's match is wrapped in a search-results-highlight span":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
@@ -6091,15 +6108,17 @@ suite "IsoNim Search Results Panel — query highlighting":
       let panel = renderSearchResultsPanel(r, vm)
 
       vm.setQuery("foo")
-      vm.setResults(@[makeResult(text = "let foo = 1")])
+      vm.setResults(@[makeResult(text = "let foo = 1", matchStart = 4,
+                                 matchLength = 3)])
 
       let highlight = findByClass(panel, "search-results-highlight")
       check highlight != nil
       check highlight.textContent == "foo"
+      check findByClass(panel, "fif-match-text").textContent == "let foo = 1"
 
       dispose()
 
-  test "case-insensitive match still highlights with original casing":
+  test "the highlight keeps the line's casing":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
@@ -6108,17 +6127,14 @@ suite "IsoNim Search Results Panel — query highlighting":
       let panel = renderSearchResultsPanel(r, vm)
 
       vm.setQuery("FOO")
-      vm.setResults(@[makeResult(text = "let foo = 1")])
+      vm.setResults(@[makeResult(text = "let foo = 1", matchStart = 4,
+                                 matchLength = 3)])
 
-      let highlight = findByClass(panel, "search-results-highlight")
-      check highlight != nil
-      # The highlighted substring carries the source-text casing, not the
-      # query casing — same behaviour as the legacy ``highlightMatch``.
-      check highlight.textContent == "foo"
+      check findByClass(panel, "search-results-highlight").textContent == "foo"
 
       dispose()
 
-  test "no highlight span is emitted when the query does not match":
+  test "a row with no match position is not highlighted, whatever the query":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
@@ -6126,10 +6142,57 @@ suite "IsoNim Search Results Panel — query highlighting":
 
       let panel = renderSearchResultsPanel(r, vm)
 
-      vm.setQuery("bar")
+      # The query occurs in the text: a view that searched the line itself
+      # would highlight it.
+      vm.setQuery("foo")
       vm.setResults(@[makeResult(text = "let foo = 1")])
 
       check findByClassOrNil(panel, "search-results-highlight") == nil
+
+      dispose()
+
+suite "IsoNim Search Results Panel — the options":
+
+  # The one stand-in: `onSearch` is the host's runner (Electron's main
+  # process). It is replaced by a closure that RECORDS what the panel asked
+  # for — not a mock of anything asserted here: the subject is what the
+  # panel's toggles do to the ViewModel and which search they ask for.
+
+  test "Aa, ab and .* toggle the options and run the search again":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      var asked: seq[(int, string, TextMatchOptions)] = @[]
+      vm.onSearch = proc(runId: int; query: string; options: TextMatchOptions) =
+        asked.add((runId, query, options))
+
+      let panel = renderSearchResultsPanel(r, vm)
+      let caseBox = findByClass(panel, "fif-option-case")
+      let wordBox = findByClass(panel, "fif-option-word")
+      check "fif-option-on" notin caseBox.attributes["class"].split(' ')
+
+      # No query: a toggle sets the option and runs nothing.
+      caseBox.fireEvent("click")
+      check vm.options.val.caseSensitive
+      check asked.len == 0
+      check "fif-option-on" in caseBox.attributes["class"].split(' ')
+
+      vm.search("Foo")
+      check asked.len == 1
+      check asked[0][2].caseSensitive and not asked[0][2].wholeWord
+      wordBox.fireEvent("click")
+      check asked.len == 2
+      check asked[1][1] == "Foo" and asked[1][2].wholeWord
+      let regexBox = findByClass(panel, "fif-option-regex")
+      regexBox.fireEvent("click")
+      check asked.len == 3 and asked[2][2].regex and asked[2][2].wholeWord
+      check "fif-option-on" in regexBox.attributes["class"].split(' ')
+      # Each search is a new run: a batch of the first is dropped.
+      check asked[1][0] > asked[0][0]
+      check not vm.acceptBatch(asked[0][0], @[makeResult()], true)
+      check vm.resultCount.val == 0
 
       dispose()
 
@@ -6150,8 +6213,8 @@ suite "IsoNim Search Results Panel — interactions":
       let r = MockRenderer()
 
       var opened: seq[(string, int)] = @[]
-      vm.onJumpToResult = proc(path: string; line: int) =
-        opened.add((path, line))
+      vm.onJumpToResult = proc(row: SearchResultLine) =
+        opened.add((row.path, row.line))
 
       let panel = renderSearchResultsPanel(r, vm)
 
@@ -6177,8 +6240,8 @@ suite "IsoNim Search Results Panel — interactions":
       let r = MockRenderer()
 
       var opened: seq[(string, int)] = @[]
-      vm.onJumpToResult = proc(path: string; line: int) =
-        opened.add((path, line))
+      vm.onJumpToResult = proc(row: SearchResultLine) =
+        opened.add((row.path, row.line))
 
       let panel = renderSearchResultsPanel(r, vm)
 

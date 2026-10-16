@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1813
+const ExpectedAssertions = 1819
+  ## *1813 -> 1819 on 2026-10-16 (PLAT-57): two new production modules under
+  ## `host/` — `find_in_files.nim` (the one search runner) and
+  ## `text_match.nim` (its matcher) — x three assertions. Neither calls
+  ## `rebase(` or spells `mapOver`.*
   ## *1774 -> 1813 on 2026-10-12 (PLAT-68 Phase B): thirteen new production
   ## modules — under `keymap/` `keymap_router`, `scope_path`, `layer_stack`,
   ## `operation_catalogue`, `user_keymap`, `binding_sets`, `keymap_importers`,

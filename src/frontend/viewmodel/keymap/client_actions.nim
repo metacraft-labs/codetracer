@@ -58,6 +58,8 @@ const
     ("flow.set-parallel", "setFlowTypeToParallel"),
     ("flow.set-inline", "setFlowTypeToInline"),
     ("search.find-in-files", "findInFiles"),
+    ("search.next-result", "aGotoNextSearchResult"),
+    ("search.previous-result", "aGotoPreviousSearchResult"),
     ("palette.go-to-symbol", "findSymbol"),
     ("problems.next", "aGotoNextError"),
     ("problems.previous", "aGotoPreviousError"),
