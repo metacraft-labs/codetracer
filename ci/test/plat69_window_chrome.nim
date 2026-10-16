@@ -358,19 +358,33 @@ suite "plat69-window-management":
     let footerH = before["footer"][3].getInt
     let areaRight = w.rect.w - (before["area"][0].getInt + before["area"][2].getInt)
     # 2 px inside the content: within the renderer's right resize zone.
-    # The holds are longer than a bare window needs: the press reaches this
-    # window's own pointer handling too (it focuses the pane under it), and
-    # motion sent before the compositor has started the resize grab goes to
-    # the window and is lost to the grab.
+    # The holds and the slow steps are for this window, not the renderer:
+    # the press reaches the window's own pointer handling too (it focuses the
+    # pane under it), motion sent before the compositor has started the grab
+    # is lost to it, and every configure the grab sends is a full re-layout
+    # here. Measured with 10 steps 60 ms apart: sway's sizes for one 40 px
+    # drag went 1284, 1292, 1304, 1292, 1320, 1292 and settled at +12. So
+    # this asserts what the scenario claims — the edge widens the window and
+    # the layout follows the width it settles at — and leaves the exact
+    # pointer tracking of an edge to isonim-gpui's own frame suite.
     let grab = (w.rect.x + w.rect.w - 3, w.rect.y + w.rect.h div 2)
-    t.drag(grab, grab + (40, 0), steps = 10, stepMs = 60,
+    t.drag(grab, grab + (40, 0), steps = 8, stepMs = 250,
            pressHoldMs = 800, releaseHoldMs = 800)
-    # Each configure the grab sends is a full re-layout of this window, so
-    # the last one can trail the release by seconds on a loaded host.
     t.waitUntil("the window widened", proc(): bool =
-      t.window(AppId).rect.w == w.rect.w + 40,
+      t.window(AppId).rect.w > w.rect.w,
       timeout = initDuration(seconds = 30))
+    var settled = t.window(AppId).rect
+    var still = 0
+    t.waitUntil("the compositor's size settled", proc(): bool =
+      sleep(250)
+      let now = t.window(AppId).rect
+      if now == settled: inc still else: (still = 0; settled = now)
+      still >= 6,
+      timeout = initDuration(seconds = 30))
+    checkpoint("widened " & $w.rect & " -> " & $settled)
+    let before0 = w.rect
     w = t.window(AppId)
+    check w.rect.w > before0.w
     check (w.rect.x, w.rect.h) == (40, WinH)
     t.waitUntil("the window laid out at its new size", proc(): bool =
       l.geometry.win["content"] == %*[w.rect.w, w.rect.h])
