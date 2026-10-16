@@ -4017,11 +4017,14 @@ jobs:
       - name: Clone GuiAssert sibling
         # PLAT-45's window record reads the frames through GuiAssert's pixel
         # readers (`--path:../GuiAssert/src`), the declared cross-repo edge
-        # the `gpui-shell` and `screen-oracle` lanes carry.
+        # the `gpui-shell` and `screen-oracle` lanes carry. PLAT-69's
+        # scenarios drive the window on GuiAssert's desktop-environment
+        # targets (`gui_assert/desktop_env`), which are on its `agents`
+        # branch until they reach `dev`.
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/GuiAssert
-          ref: dev
+          ref: agents
           path: ${{ github.workspace }}/../GuiAssert
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
@@ -4069,6 +4072,7 @@ jobs:
             build/plat45/
             build/plat47-gpui/
             build/plat48-gpui/
+            build/plat69/
             src/tests/visual/plat45-gpui-arrangement.json
             src/tests/visual/plat47-gpui-window.json
             src/tests/visual/plat48-gpui-window.json

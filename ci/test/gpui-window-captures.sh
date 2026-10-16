@@ -2,8 +2,8 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68]
-#   just gpui-window-captures                 # all four
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69]
+#   just gpui-window-captures                 # all five
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
 # `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
@@ -31,6 +31,14 @@
 #      step that measures its frames into `src/tests/visual/…json`, and the
 #      Nim suite that asserts that record.
 #
+# `plat69` is the other shape: GuiAssert scenarios
+# (`ci/test/plat69-window-chrome.sh`) that drive the window through its title
+# bar on GuiAssert's own sway target and assert what the compositor reports
+# live — there is no committed record to re-take. It needs the GuiAssert
+# checkout (`GUI_ASSERT_DIR`, default `../GuiAssert`) and, for the desktop
+# half of `plat69-initial-window`, `just build-once`'s `ct` and Electron
+# bundle. `PLAT69_SCENARIOS` names some of its scenarios (default: all).
+#
 # Prerequisites it does not build are refused BY NAME: the isonim-gpui
 # checkout (`ISONIM_GPUI_DIR`, default `../isonim-gpui`), `nix`, `nim`,
 # `tesseract`, and `REPLAY_SERVER_BIN` (default: the one `just build-once`
@@ -52,11 +60,11 @@ fail() {
 }
 
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat68) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68)" ;;
+	plat45 | plat47 | plat48 | plat68 | plat69) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69)" ;;
 	esac
 done
 
@@ -152,6 +160,13 @@ for w in "${which[@]}"; do
 		in_compositor_shell "bash ci/test/plat47-gpui-window.sh" &&
 			python3 ci/test/plat47_gpui_window.py record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat47_gpui_window.nim ||
+			failed+=("${w}")
+		;;
+	plat69)
+		# PLAT-69: the top bar as the window's title bar, on GuiAssert's
+		# sway target; the scenarios assert the compositor's readings live.
+		# shellcheck disable=SC2086  # the scenario names must word-split
+		bash ci/test/plat69-window-chrome.sh ${PLAT69_SCENARIOS:-} ||
 			failed+=("${w}")
 		;;
 	plat68)

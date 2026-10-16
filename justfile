@@ -5093,6 +5093,19 @@ plat48-gpui-window-record:
 gpui-window-captures *which:
   bash ci/test/gpui-window-captures.sh {{which}}
 
+# PLAT-69: the GPUI window as a normal desktop window — its top bar is the
+# title bar — as GuiAssert scenarios on a headless sway (`PLAT69_TARGET=gnome`
+# for GuiAssert's headless GNOME): the window moved, resized, maximized and
+# closed through its bar, its buttons where the desktop's `button-layout`
+# puts them, both front-ends opening as the `window:` setting says with one
+# app id, and nothing of it where the compositor draws the frame. Builds the
+# windowed front-end as `gpui-window-captures` does (that job runs it as its
+# `plat69` capture), then the scenarios named (default: all four:
+# plat69-window-management, plat69-button-placement, plat69-initial-window,
+# plat69-server-mode). Needs `just build-once` for the desktop half.
+plat69-window-chrome *scenarios:
+  PLAT69_SCENARIOS="{{scenarios}}" bash ci/test/gpui-window-captures.sh plat69
+
 # PLAT-46: the desktop's computed colour for every role the TUI also paints,
 # written to src/tests/visual/answers/plat46-token-parity.electron.json for
 # `tests/real_terminal/test_plat46_desktop_parity.nim`. Same Xvfb arrangement
