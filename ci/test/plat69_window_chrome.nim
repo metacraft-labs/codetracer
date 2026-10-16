@@ -224,6 +224,20 @@ proc ready(l: Launched; csd: bool; timeoutS = 120): EnvWindow =
   result = t.window(AppId)
   discard t.captureSettled(result.rect, timeout = initDuration(seconds = 60))
 
+proc defaultCsd(): bool =
+  ## Whether a window that asks for no decoration mode draws its own frame
+  ## here: true where the compositor cannot draw one (GNOME), false where it
+  ## draws it by default (sway). A fact, measured by the target.
+  t.fact("decorations.default").value == "client"
+
+proc movedBy(before, after: Rect; dx, dy: int): bool =
+  ## A title-bar move of (dx, dy) whose first motion was the 1px arming one:
+  ## the window travels dx - 1 or dx, as the compositor anchors its move grab
+  ## at that motion (sway) or at the press (Mutter) — a difference between
+  ## compositors, measured on both, not between runs.
+  after.x - before.x in [dx - 1, dx] and after.y - before.y == dy and
+    (after.w, after.h) == (before.w, before.h)
+
 proc guardClient(l: Launched): EnvWindow =
   ## THE VACUITY GUARD: client-side decorations are in force, or no case
   ## below proves anything.
@@ -328,8 +342,7 @@ suite "plat69-window-management":
     moveDrag(w.onScreen(gap), (120, 70))
     t.waitUntil("the window moved", proc(): bool =
       t.window(AppId).rect.x != w.rect.x)
-    check t.window(AppId).rect ==
-          Rect(x: w.rect.x + 119, y: w.rect.y + 70, w: w.rect.w, h: w.rect.h)
+    check movedBy(w.rect, t.window(AppId).rect, 120, 70)
     # The padding ABOVE the band drags too (the strip starts at y = 0). At
     # y = 8: the renderer's top resize zone takes the first 5 px inside the
     # content, as a desktop window's top edge resizes.
@@ -338,8 +351,7 @@ suite "plat69-window-management":
     moveDrag(w.onScreen((gap[0], 8)), (80, 40))
     t.waitUntil("the window moved from the padding", proc(): bool =
       t.window(AppId).rect.x != w.rect.x)
-    check t.window(AppId).rect ==
-          Rect(x: w.rect.x + 79, y: w.rect.y + 40, w: w.rect.w, h: w.rect.h)
+    check movedBy(w.rect, t.window(AppId).rect, 80, 40)
     # A control is the control's, the menu button the menu's: no move.
     w = l.placeAt(60, 60)
     for part in [("control", "reverse-next"), ("menu", "")]:
@@ -358,20 +370,19 @@ suite "plat69-window-management":
     let footerH = before["footer"][3].getInt
     let areaRight = w.rect.w - (before["area"][0].getInt + before["area"][2].getInt)
     # 2 px inside the content: within the renderer's right resize zone.
-    # The holds and the slow steps are for this window, not the renderer:
-    # the press reaches the window's own pointer handling too (it focuses the
-    # pane under it), motion sent before the compositor has started the grab
-    # is lost to it, and every configure the grab sends is a full re-layout
-    # here. Measured with 10 steps 60 ms apart: sway's sizes for one 40 px
-    # drag went 1284, 1292, 1304, 1292, 1320, 1292 and settled at +12. So
-    # this asserts what the scenario claims — the edge widens the window and
-    # the layout follows the width it settles at — and leaves the exact
-    # pointer tracking of an edge to isonim-gpui's own frame suite.
+    # The holds are for this window: the press reaches its own pointer
+    # handling too (it focuses the pane under it), motion sent before the
+    # compositor has started the grab is lost to it, and every configure the
+    # grab sends is a full re-layout here. (An oscillating, short resize was
+    # measured here once — 1284, 1292, 1304, 1292, 1320, 1292 for 40 px — and
+    # was the renderer drawing a frame of its fallback title bar at each
+    # decoration grant, fixed in isonim-gpui d34c790; traced since: sway's
+    # configures step 1280 -> 1320 in 5 px steps, none throttled.)
     let grab = (w.rect.x + w.rect.w - 3, w.rect.y + w.rect.h div 2)
     t.drag(grab, grab + (40, 0), steps = 8, stepMs = 250,
            pressHoldMs = 800, releaseHoldMs = 800)
-    t.waitUntil("the window widened", proc(): bool =
-      t.window(AppId).rect.w > w.rect.w,
+    t.waitUntil("the window widened by 40", proc(): bool =
+      t.window(AppId).rect.w == w.rect.w + 40,
       timeout = initDuration(seconds = 30))
     var settled = t.window(AppId).rect
     var still = 0
@@ -384,7 +395,7 @@ suite "plat69-window-management":
     checkpoint("widened " & $w.rect & " -> " & $settled)
     let before0 = w.rect
     w = t.window(AppId)
-    check w.rect.w > before0.w
+    check w.rect.w == before0.w + 40
     check (w.rect.x, w.rect.h) == (40, WinH)
     t.waitUntil("the window laid out at its new size", proc(): bool =
       l.geometry.win["content"] == %*[w.rect.w, w.rect.h])
@@ -431,22 +442,31 @@ suite "plat69-window-management":
     for s in g["topBar"]["segs"]:
       if s["part"].getStr == "control": lastControl = rectOf(s["rect"])
     let omni = g.seg("omnibar")
-    let gap = w.onScreen(((lastControl.x + lastControl.w + omni.x) div 2,
-                          g.seg("omnibar").centre[1]))
+    # In the window's own coordinates: the window is somewhere else once
+    # maximized, and the restore double-click is on the window as it is then.
+    let gapIn = ((lastControl.x + lastControl.w + omni.x) div 2,
+                 g.seg("omnibar").centre[1])
     for how in ["button", "double-click"]:
       checkpoint(how & ", canMaximize=" & $canMaximize)
-      if how == "button": t.click(maxButton) else: t.doubleClick(gap)
+      if how == "button": t.click(maxButton)
+      else: t.doubleClick(t.window(AppId).onScreen(gapIn))
       if canMaximize:
         t.waitUntil("maximized by " & how, proc(): bool =
           l.geometry.win["maximized"].getBool and icon() == "restore")
-        check t.window(AppId).rect.w > w.rect.w
+        # The window's account comes first; the compositor's follows.
+        t.waitUntil("the compositor's window maximized", proc(): bool =
+          t.window(AppId).rect.w > w.rect.w)
+        sleep(800)   # past the double-click interval: the next one is a new gesture
         # Restore, from the button where it now is.
         let g2 = l.geometry
         let at = t.window(AppId).onScreen(g2.seg("window-button", "maximize").centre)
-        if how == "button": t.click(at) else: t.doubleClick(gap)
+        if how == "button": t.click(at)
+        else: t.doubleClick(t.window(AppId).onScreen(gapIn))
         t.waitUntil("restored by " & how, proc(): bool =
           not l.geometry.win["maximized"].getBool and icon() == "maximize")
-        check t.window(AppId).rect.w == w.rect.w
+        t.waitUntil("the compositor's window restored to its size", proc(): bool =
+          (t.window(AppId).rect.w, t.window(AppId).rect.h) == (w.rect.w, w.rect.h))
+        sleep(800)
       else:
         # This compositor does not maximize the window (a fact, measured):
         # the button is there, and nothing changes — not the window, not
@@ -569,7 +589,7 @@ suite "plat69-initial-window":
     block:
       let l = launchGpui(decorations = "", size = false,
                          config = shippedConfigWith(""))
-      discard l.ready(csd = false)
+      discard l.ready(csd = defaultCsd())
       let launch = l.geometry.win["launch"]
       check launch["maximized"].getBool         # the window's request
       check not launch["explicitSize"].getBool
@@ -593,7 +613,7 @@ suite "plat69-initial-window":
       "window:\n  initial: windowed\n  width: 1200\n  height: 700\n")
     block:
       let l = launchGpui(decorations = "", size = false, config = config)
-      let w = l.ready(csd = false)
+      let w = l.ready(csd = defaultCsd())
       check (w.rect.w, w.rect.h) == (1200, 700)    # the compositor's
       check not l.geometry.win["launch"]["maximized"].getBool
       check not l.geometry.win["maximized"].getBool
@@ -609,7 +629,7 @@ suite "plat69-initial-window":
     var titles: seq[string]
     block:
       let l = launchGpui(decorations = "")
-      let w = l.ready(csd = false)
+      let w = l.ready(csd = defaultCsd())
       check w.appId == AppId
       check l.geometry.win["appId"].getStr == AppId
       titles.add w.title
@@ -643,6 +663,9 @@ suite "plat69-server-mode":
     # A target that cannot draw a frame (GNOME has no decoration manager)
     # has no server mode to control: SKIPPED, and reported as such.
     if not t.boolFact("decorations.serverAvailable"):
+      # Not applicable here, by name: this compositor cannot draw a frame.
+      echo "NOT APPLICABLE on ", getEnv("PLAT69_TARGET", "sway"),
+           ": decorations.serverAvailable is false"
       skip()
     else:
       let l = launchGpui(decorations = "")

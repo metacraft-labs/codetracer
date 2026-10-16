@@ -4071,8 +4071,10 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "788108a2fa064b96fd90aa8ef9c46fc47e80c0ab",
-        "type": "github"
+        "rev": "d34c7909accf6a888587050387d84b609fb9639f",
+        "type": "github",
+        "narHash": "sha256-4YnQ59dX9kcM0pRLtOBrdPxJxYEl+k1ZvdrXN5iZHk8=",
+        "lastModified": 1792176143
       },
       "original": {
         "owner": "metacraft-labs",

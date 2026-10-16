@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # PLAT-69 — the GPUI window as a normal desktop window (its top bar is the
-# title bar), driven on GuiAssert's headless-sway target (PLAT69_TARGET=gnome:
-# its headless GNOME). See `ci/test/plat69_window_chrome.nim` for the
-# scenarios and what each reads.
+# title bar), driven on GuiAssert's headless-sway and headless-GNOME targets
+# in turn (`PLAT69_TARGET=sway|gnome` runs one). See
+# `ci/test/plat69_window_chrome.nim` for the scenarios and what each reads.
 #
 #   bash ci/test/plat69-window-chrome.sh                  # every scenario
 #   bash ci/test/plat69-window-chrome.sh plat69-button-placement ...
@@ -76,17 +76,25 @@ for s in "$@"; do
 done
 
 echo "=== the scenarios, in GuiAssert's dev shell"
-(cd "${GUI_ASSERT}" &&
-	PLAT69_GPUI_BIN="${BIN}" \
-		PLAT69_GPUI_LD_LIBRARY_PATH="$(cat "${OUT}/gpui.ld-path")" \
-		PLAT69_TRACE="${TRACE}" PLAT69_OUT="${OUT}" PLAT69_REPO="${root}" \
-		PLAT69_CT_BIN="${CT}" PLAT69_CT_PATH="${PATH}" \
-		PLAT69_CT_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
-		PLAT69_CT_NODE_PATH="${NODE_PATH:-}" \
-		nix develop --command nim c -r --hints:off --warnings:off --path:src \
-		--nimcache:"${root}/build/nimcache/plat69_window_chrome" \
-		-o:"${root}/build/plat69_window_chrome" \
-		"${root}/ci/test/plat69_window_chrome.nim" "${filters[@]}")
-rc=$?
+(cd "${GUI_ASSERT}" && nix develop --command nim c --hints:off --warnings:off --path:src \
+	--nimcache:"${root}/build/nimcache/plat69_window_chrome" \
+	-o:"${root}/build/plat69_window_chrome" \
+	"${root}/ci/test/plat69_window_chrome.nim") || fail "could not build the scenarios"
+# Every target by default — the same scenarios on headless sway and on
+# headless GNOME Shell; `PLAT69_TARGET` (one) or `PLAT69_TARGETS` (a list)
+# narrows it.
+rc=0
+for target in ${PLAT69_TARGET:-${PLAT69_TARGETS:-sway gnome}}; do
+	echo "=== plat69 on ${target}"
+	(cd "${GUI_ASSERT}" &&
+		PLAT69_TARGET="${target}" \
+			PLAT69_GPUI_BIN="${BIN}" \
+			PLAT69_GPUI_LD_LIBRARY_PATH="$(cat "${OUT}/gpui.ld-path")" \
+			PLAT69_TRACE="${TRACE}" PLAT69_OUT="${OUT}" PLAT69_REPO="${root}" \
+			PLAT69_CT_BIN="${CT}" PLAT69_CT_PATH="${PATH}" \
+			PLAT69_CT_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
+			PLAT69_CT_NODE_PATH="${NODE_PATH:-}" \
+			nix develop --command "${root}/build/plat69_window_chrome" "${filters[@]}") || rc=1
+done
 echo "plat69-window-chrome: rc=${rc}"
 exit "${rc}"
