@@ -95,7 +95,19 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 675
+const ExpectedAssertions = 680
+  ## PLAT-69: 675 -> 680, RE-DERIVED against `isonim-gpui` `b68f115`, whose
+  ## `window.nim` exports 31 procs (15 at `47ea664`): GWIN added the
+  ## operations on the window `gpui_launch` opens, and this front-end now
+  ## uses them (`window_chrome.nim`). They are not the registry, so they are
+  ## a second declared, checked exclusion (`LaunchedWindowNames`, 17 names),
+  ## which leaves 31 - 6 - 17 = 8 registry subjects. The tally: the scan's
+  ## per-file body is `1 + 8 = 9` over 22 files (`window_chrome.nim` is the
+  ## new one) = 198, where it was `1 + 9 = 10` over 21 = 210 (-12); the
+  ## derived-sets case checks the 17 new exclusions are exports (+17). Net
+  ## +5. Measured: the same suite printed `CHECKS: 1011` against `b68f115`
+  ## before this change — 21 files x (1 + 25) with no second exclusion, the
+  ## red it was on arrival — and `CHECKS: 680` with it.
   ## PLAT-57: 665 -> 675 — ONE more non-test file under `src/frontend/gpui/`,
   ## `search_results_leaf.nim` (Find in Files), by the same route.
   ## PLAT-51 part B: 655 -> 665 — ONE more non-test file under
@@ -1245,6 +1257,24 @@ const AmbiguousWindowNames = ["state", "size", "width", "height", "show",
   ## rather than silently emptying the exclusion and, with it, shrinking the
   ## scan.
 
+const LaunchedWindowNames = [
+  "launchWindow", "onResize", "onWindowState", "clientDecorated",
+  "tiledEdges", "supportedControls", "isMaximized", "isActive",
+  "buttonLayout", "setTitle", "setAppId", "setMinWindowSize",
+  "setInitialWindowState", "minimize", "toggleMaximize", "toggleFullscreen",
+  "requestClose"]
+  ## PLAT-69: `window.nim`'s operations on THE WINDOW `gpui_launch` OPENS
+  ## (isonim-gpui GWIN: `launchWindow()` names it, and the rest read or act
+  ## on it, or are the launch options read before `gpui_launch`). They are the
+  ## opposite of what this scan forbids — the registry path that opens
+  ## nothing — and `window_chrome.nim` calls them so the window can be a
+  ## desktop window. `onResize` is the registry's callback API AS GWIN USES
+  ## IT: registered on `launchWindow()`, which `gpui_launch` notifies.
+  ##
+  ## Declared and checked as `AmbiguousWindowNames` is: each must still be
+  ## exported, and a proc added upstream lands in the FORBIDDEN set until
+  ## somebody adds it here and says why — the safe direction for a scan.
+
 proc exportedWindowProcs(): seq[string] =
   ## Parse `proc <name>*(` out of the sibling's window module.
   result = @[]
@@ -1387,6 +1417,8 @@ suite "PLAT-37: the front-end reaches the window through gpui_launch":
     # Every declared exclusion is still a real export upstream.
     for name in AmbiguousWindowNames:
       ck name in exported
+    for name in LaunchedWindowNames:
+      ck name in exported
 
   test "no source file CALLS the window registry, comments excluded":
     # **TWO SWITCHES ARE OFF, NOT ONE, AND THIS IS THE SECOND.**
@@ -1398,9 +1430,10 @@ suite "PLAT-37: the front-end reaches the window through gpui_launch":
     # which is what every milestone from PLAT-20 to PLAT-23 was doing.
     var subjects: seq[string] = @[]
     for name in exported:
-      if name in AmbiguousWindowNames: continue
+      if name in AmbiguousWindowNames or name in LaunchedWindowNames: continue
       subjects.add name
-    ck subjects.len == exported.len - AmbiguousWindowNames.len
+    ck subjects.len == exported.len - AmbiguousWindowNames.len -
+                       LaunchedWindowNames.len
     ck subjects.len > 0
     for path in sources:
       let (code, hasBlockComment) = splitCode(readFile(path))

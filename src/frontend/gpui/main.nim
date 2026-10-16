@@ -86,6 +86,11 @@ import ./window_gestures
 import ./welcome_leaf
 import headless_app/welcome_tabs
 import ./window_top_bar
+import ./window_chrome                   # PLAT-69: the top bar as the title bar
+import ../../common/window_policy        # PLAT-69: how the window opens
+from ../../common/ct_home import ctConfigDir
+from ../../ct/trace/ctfs_sources import readCtfsMetaDat
+from ../viewmodel/platform/displayed_product import sessionDocumentTitle
 import ./window_clicks
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
@@ -204,8 +209,30 @@ OPTIONS:
                       search:option:<case|word|regex>
                       search:field  search:wheel:<rows>
                       search:track:<permille>
+                    and (PLAT-69) what an open window's renderer reports:
+                      resize:<width>:<height> (the content area resized)
+                      chrome:<spec> (its frame changed; `--window-chrome`'s
+                      spellings, `;` for a layout's commas)
   --width=<px>      Window width  (default 1440)
   --height=<px>     Window height (default 900)
+                    PLAT-69: a window opens as the user configured it (the
+                    `window:` entry of `.config.yaml`, which the desktop
+                    reads too: maximized, restoring to 1900x1400, by
+                    default). Either flag OVERRIDES that: the window opens
+                    windowed at exactly the size given (the other dimension
+                    from the setting), whatever `window.initial` says. The
+                    paths that open no window (`--report-plan`,
+                    `--report-window-plan`, `--pixels-out`) draw at these
+                    sizes and read no setting.
+  --window-chrome=<spec>
+                    PLAT-69, with `--report-window-plan`: the window's frame,
+                    which an open window reports for itself —
+                    `server` (the platform draws it: no window buttons, no
+                    drag strip) or `client` (the top bar is the title bar),
+                    then `+`-separated parts: `maximized`, `no-minimize`,
+                    `no-maximize`, `layout=<GNOME button-layout>` (e.g.
+                    `client+layout=close,minimize,maximize:`). Default
+                    `server`.
   --quit-after-ms=<n>
                     Close the window and return after <n> milliseconds.
                     0 (the default) means "stay open until the window is
@@ -380,6 +407,12 @@ type
       ## PLAT-48. `--window-ops`: window events for `--report-window-plan`.
     width: int
     height: int
+    widthGiven, heightGiven: bool
+      ## PLAT-69: `--width` / `--height` were on the command line, so the
+      ## user's `window:` setting is overridden (`window_policy`).
+    windowChrome: string
+      ## PLAT-69: `--window-chrome`, the frame `--report-window-plan` draws
+      ## for (`window_chrome.windowChromeOfSpec`). "" is `server`.
     quitAfterMs: uint32
       ## PLAT-37. 0 means "no deadline"; the window stays until it is closed.
       ## Handed to `gpui_quit_after_ms` BEFORE `gpui_launch`, which is the
@@ -507,7 +540,9 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        # key's resolution, probed.
                        "select", "probe", "modifiers",
                        # PLAT-57: Find in Files' rows, toggles and field.
-                       "search"]:
+                       "search",
+                       # PLAT-69: the window resized, its frame changed.
+                       "resize", "chrome"]:
           return GpuiCommand(kind: gckUsageError,
             message: "codetracer-gpui: --window-ops: unknown event '" & op &
                      "'")
@@ -517,11 +552,25 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       except ValueError:
         return GpuiCommand(kind: gckUsageError,
           message: "codetracer-gpui: --width needs an integer")
+      if result.width <= 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --width needs a positive number of pixels")
+      result.widthGiven = true
     elif arg.startsWith("--height="):
       try: result.height = parseInt(arg["--height=".len .. ^1])
       except ValueError:
         return GpuiCommand(kind: gckUsageError,
           message: "codetracer-gpui: --height needs an integer")
+      if result.height <= 0:
+        return GpuiCommand(kind: gckUsageError,
+          message: "codetracer-gpui: --height needs a positive number of pixels")
+      result.heightGiven = true
+    elif arg.startsWith("--window-chrome="):
+      result.windowChrome = arg["--window-chrome=".len .. ^1]
+      let chrome = windowChromeOfSpec(result.windowChrome)
+      if not chrome.ok:
+        return GpuiCommand(kind: gckUsageError,
+                           message: "codetracer-gpui: " & chrome.message)
     elif arg.startsWith("--quit-after-ms="):
       # A NEGATIVE DEADLINE IS REFUSED RATHER THAN CLAMPED. `uint32(-1)` is
       # 4294967295 ms — a little over 49 days — so a clamp here would turn a
@@ -654,6 +703,13 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                   " a time; got " else: "codetracer-gpui: one recording at a" &
                   " time; got ") & $positional.len)
   result.traceFolder = positional[0]
+  # PLAT-69: a stand-in frame is for the plan of a window that is not open;
+  # an open window reports its own, and a flag that silently lost to it
+  # would be a test instrument that does nothing.
+  if result.windowChrome.len > 0 and not result.reportWindowPlan:
+    return GpuiCommand(kind: gckUsageError,
+      message: "codetracer-gpui: --window-chrome stands in for a window's " &
+               "frame in --report-window-plan; an open window reports its own")
 
 # ---------------------------------------------------------------------------
 # THE WINDOW — PLAT-37
@@ -746,6 +802,13 @@ var
     ## window path derive from one render rather than two.
   pendingViewportWidth = 0
   pendingViewportHeight = 0
+    ## The window's content size in logical pixels: the launch size, and
+    ## since PLAT-69 whatever the renderer last reported (`windowResized`) —
+    ## every layout below is computed from these two.
+  gLaunch = resolveWindowLaunch(DefaultWindowSetting)
+    ## PLAT-69: how the window was asked to open (`applyWindowPolicy`).
+  gWindowTitle = "CodeTracer"
+    ## PLAT-69: what the window is called (`windowTitleFor`).
   pendingDock: JsonNode = nil
     ## The window's projected dock document (`shell.projectionFor`), which the
     ## root builder lays the leaves out by. nil when the projection refused,
@@ -2593,6 +2656,17 @@ var
     ## the pointer really moved — the desktop menu's rule too.
   gIconDir = ""
     ## Where the desktop's marks are written as SVG documents for `img`.
+  gChrome: WindowChrome
+    ## PLAT-69: THE WINDOW'S FRAME — whether the top bar is the title bar
+    ## (client-side decorations), which window buttons it holds and where,
+    ## and whether the window is maximized. Read from the renderer on every
+    ## change it reports (`chromeChanged`); the server-side answer — no
+    ## buttons, no drag strip — until it has reported one.
+  gHoverWindowButton = -1
+    ## PLAT-69: the window button under the pointer (its `GWindowButton`
+    ## ordinal), drawn at half opacity as the desktop's are.
+  gChromeSpec = ""
+    ## PLAT-69: `--window-chrome`, the frame `--report-window-plan` draws.
 
 proc gpuiMenuActionAvailable(action: string): bool =
   ## What this window performs from the menu: the debugger's transport and
@@ -2621,6 +2695,36 @@ proc markSvgPath(controlIndex: int; enabled: bool): string =
     svg = svg.replace("<svg ", "<svg width=\"" & $(2 * ControlIconPx) &
                       "\" height=\"" & $(2 * ControlIconPx) & "\" ")
     writeFile(path, svg)
+  path
+
+const
+  WindowButtonIcons: array[GWindowButton, tuple[svg: string; w, h: int]] = [
+    (staticRead("../../public/resources/window/minimize_window_dark.svg"), 10, 2),
+    (staticRead("../../public/resources/window/maximize_window_dark.svg"), 14, 11),
+    (staticRead("../../public/resources/window/close_window_dark.svg"), 10, 10)]
+    ## PLAT-69: THE DESKTOP'S OWN WINDOW-BUTTON ICONS (`.window-menu`'s
+    ## `WINDOW_*_ICON_PATH`, `styles/default_dark_theme.styl`), compiled in
+    ## and drawn at their own size in the 24 px circle, as the desktop draws
+    ## them as a centred background. Dark only: this window has no light
+    ## theme to take the `_16_white` set for.
+  WindowRestoreIcon = (svg: staticRead(
+    "../../public/resources/window/restore_window_dark.svg"), w: 14, h: 10)
+    ## The maximize button of a MAXIMIZED window restores it, and says so.
+    ## The desktop's dark theme points `.restore` at the maximize icon;
+    ## this window draws the restore icon beside it in the same directory,
+    ## so the swap the state makes is visible (`data-ct-window-button-icon`).
+
+proc windowButtonSvgPath(button: GWindowButton; restore: bool): string =
+  ## A window button's icon, written once as an SVG file for `img` beside
+  ## the debugger's marks (and removed with them, `removeMarkFiles`).
+  if gIconDir.len == 0:
+    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
+    createDir(gIconDir)
+  let name = if restore: "restore" else: $button
+  let path = gIconDir / ("window-" & name & ".svg")
+  if not fileExists(path):
+    writeFile(path, if restore: WindowRestoreIcon.svg
+                    else: WindowButtonIcons[button].svg)
   path
 
 proc controlsEnabled(): seq[bool] =
@@ -2738,7 +2842,23 @@ proc drawTopBar(r: GpuiRenderer) =
   let tabs = if gShell.isNil: @[]
              else: mainShell().app.stripTabsOf(gWelcomeTabs)
   gTopLayout = gpuiTopBarLayout(gMenu, gOmnibar, tabs, pendingViewportWidth,
-                                canAddTab = gSessionsOpened.len > 0)
+                                canAddTab = gSessionsOpened.len > 0,
+                                windowButtons = gChrome.shownButtons)
+  # PLAT-69 (C2): WHERE THE APPLICATION DRAWS THE WINDOW'S FRAME, THE BAR IS
+  # ITS TITLE BAR. A transparent strip the width of the window, from its top
+  # edge to the band's bottom, is a drag region: a press on any of it that
+  # nothing in front of it takes moves the window, a double-click maximizes
+  # and a right-click opens the window menu — all the renderer's, none of it
+  # code here. It is drawn FIRST, under the band and every part, so the
+  # padding above and beside the band drags too, as the desktop's
+  # full-width `#menu` does; the parts are marked `no-drag` below. Where the
+  # platform draws the frame there is no strip (PLAT-69-AREQ3).
+  if gChrome.clientDecorated:
+    let strip = absBox(r, PxRect(x: 0, y: 0, w: pendingViewportWidth,
+                                 h: ChromePaddingPx + TopBarPx))
+    r.setAttribute(strip, WindowRegionAttribute, $wrDrag)
+    r.setAttribute(strip, "data-ct-window-drag", "title-bar")
+    gTopEls.add strip
   # PLAT-50: the band is the desktop's caption bar — the window's own ground
   # (ui/surface/primary/default), no card of its own.
   let band = absBox(r, gTopLayout.band, chromeOf(crWindowBackground))
@@ -2857,6 +2977,32 @@ proc drawTopBar(r: GpuiRenderer) =
                                        else: crTabInactiveForeground))
       r.appendChild(ab, r.createTextNode(NewSessionTabGlyph))
       gTopEls.add ab
+    of gtWindowButton:
+      # PLAT-69 (C3): THE DESKTOP'S `.window-menu` BUTTON — a 24 px circle
+      # with the desktop's icon centred, at half opacity under the pointer.
+      # The REGION is what acts (`data-window-region`: the renderer
+      # minimizes, toggles maximize, or closes through the window's own
+      # close path, which ends this process as a compositor close does); the
+      # press also reaches `handleTopPress`, which takes it and does nothing
+      # more.
+      let button = GWindowButton(sg.index)
+      let restore = button == gwbMaximize and gChrome.maximized
+      let icon = if restore: WindowRestoreIcon else: WindowButtonIcons[button]
+      let wb = absBox(r, sg.rect)
+      r.setAttribute(wb, "data-ct-window-button", $button)
+      r.setAttribute(wb, "data-ct-window-button-icon",
+                     if restore: "restore" else: $button)
+      r.setAttribute(wb, WindowRegionAttribute, $button)
+      r.setStyle(wb, "justify", "center")
+      r.setStyle(wb, "rounded", $(WindowButtonPx div 2) & "px")
+      if gHoverWindowButton == sg.index:
+        r.setStyle(wb, "opacity", "0.5")
+      let img = r.createElement("img")
+      r.setAttribute(img, "src", windowButtonSvgPath(button, restore))
+      r.setStyle(img, "width", $icon.w & "px")
+      r.setStyle(img, "height", $icon.h & "px")
+      r.appendChild(wb, img)
+      gTopEls.add wb
   # PIN BUTTONS on every pane box. Drawn BEFORE the popovers and the
   # omnibar's results, which open over the panes' tab strips and must cover
   # them, and not at all under an overlay of the tree — a revealed pane, a
@@ -3061,6 +3207,19 @@ proc drawTopBar(r: GpuiRenderer) =
     r.appendChild(hb, r.createTextNode(hoverText))
     gTopEls.add hb
   for e in gTopEls:
+    # PLAT-69 (C2): EVERY PART AND POPOVER IS `no-drag`, so a press on one
+    # stays a press. They are absolutely placed SIBLINGS of the strip, not
+    # its children, and the renderer's rule is that the topmost element
+    # under the pointer decides — an element with no listener of its own
+    # (every part here: the root's listener hit-tests them) would otherwise
+    # let the press through to the strip behind it and move the window.
+    # The band itself is the bar's empty space and stays draggable; the
+    # strip and the window buttons carry their own regions. Inert where
+    # the platform draws the frame, and not written there.
+    if gChrome.clientDecorated and
+       getAttribute(e, WindowRegionAttribute).len == 0 and
+       getAttribute(e, "data-ct-top-bar") != "band":
+      r.setAttribute(e, WindowRegionAttribute, $wrNoDrag)
     r.appendChild(gRoot, e)
   # PLAT-50: the rows a redraw made get their click listeners.
   wireClicks(r)
@@ -3082,9 +3241,17 @@ proc topBarGeometry(): JsonNode =
       var label = ""
       case sg.part
       of gtControl: label = TransportControls[sg.index].id
+      of gtWindowButton: label = $GWindowButton(sg.index)
       else: discard
-      segs.add %*{"part": $sg.part, "index": sg.index, "label": label,
-                  "rect": rect(sg.rect)}
+      var seg = %*{"part": $sg.part, "index": sg.index, "label": label,
+                   "rect": rect(sg.rect)}
+      if sg.part == gtWindowButton:
+        # PLAT-69: what the button shows — the maximize button of a
+        # maximized window shows (and does) restore.
+        seg["icon"] = %(if GWindowButton(sg.index) == gwbMaximize and
+                           gChrome.maximized: "restore"
+                        else: label)
+      segs.add seg
     var pops = newJArray()
     let levels = gMenu.openLevels()
     for p in gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
@@ -3111,7 +3278,117 @@ proc topBarGeometry(): JsonNode =
              "query": gOmnibar.query, "results": results,
              "tick": (if gSession.isNil: 0'u64
                       else: gSession.getCurrentRRTicks())}
+  # PLAT-69: THE WINDOW'S FRAME, AS THE RENDERER REPORTED IT, and what the
+  # window asked for at launch — the app's own account, labelled as such: a
+  # window lane reads where the window IS from the compositor, and this is
+  # what it compares that with (and the vacuity guard's "the top bar is the
+  # title bar").
+  proc names(bs: seq[GWindowButton]): JsonNode =
+    result = newJArray()
+    for b in bs: result.add %($b)
+  let shown = gChrome.shownButtons
+  top["window"] = %*{
+    "clientDecorated": gChrome.clientDecorated,
+    "live": gChrome.live,
+    "maximized": gChrome.maximized,
+    "supported": names(gChrome.supported),
+    "preferredLeft": names(gChrome.buttons.left),
+    "preferredRight": names(gChrome.buttons.right),
+    "left": names(shown.left), "right": names(shown.right),
+    "buttonLayout": gChrome.buttonLayout,
+    "placementSource": gChrome.placementSource,
+    "platform": gChrome.platform,
+    "drag": (if gChrome.clientDecorated:
+               rect(PxRect(x: 0, y: 0, w: pendingViewportWidth,
+                           h: ChromePaddingPx + TopBarPx))
+             else: newJNull()),
+    "content": [pendingViewportWidth, pendingViewportHeight],
+    "title": gWindowTitle,
+    "appId": windowAppId(),
+    "launch": {"maximized": gLaunch.maximized, "width": gLaunch.width,
+               "height": gLaunch.height, "minWidth": gLaunch.minWidth,
+               "minHeight": gLaunch.minHeight,
+               "explicitSize": gLaunch.explicitSize}}
   top
+
+# ---------------------------------------------------------------------------
+# PLAT-69 (C4) — what the window is called
+# ---------------------------------------------------------------------------
+
+var gProgramOf = initTable[string, string]()
+  ## Each recording's program, read once (`recordedProgramOf`).
+
+proc recordedProgramOf(traceFolder: string): string =
+  ## The program a recording ran, by its file name — what the desktop's
+  ## window title names (`ui_js.traceLoaded`: `baseName(trace.program)`).
+  ## Read from the recording's own metadata: a CTFS container's `meta.dat`,
+  ## else a materialized recording's `trace_metadata.json`. A recording whose
+  ## metadata cannot be read is named by its folder, as its session tab is.
+  let folder = traceFolder.strip(leading = false, chars = {'/'})
+  if gProgramOf.hasKey(folder):
+    return gProgramOf[folder]
+  var program = ""
+  try:
+    for container in walkFiles(folder / "*.ct"):
+      program = readCtfsMetaDat(container).program
+      if program.len > 0: break
+  except CatchableError:
+    program = ""
+  if program.len == 0 and fileExists(folder / "trace_metadata.json"):
+    try:
+      let meta = parseJson(readFile(folder / "trace_metadata.json"))
+      if meta.kind == JObject and meta{"program"}.kind == JString:
+        program = meta["program"].getStr
+    except CatchableError:
+      program = ""
+  result = if program.len > 0: program.extractFilename
+           else: folder.extractFilename
+  gProgramOf[folder] = result
+
+proc windowTitleFor(session: HeadlessDebugSession): string =
+  ## THE DESKTOP'S TITLE FORMAT: `<program> — CodeTracer` while a recording
+  ## is shown (`displayed_product.sessionDocumentTitle`, the title the
+  ## desktop's page sets and its window shows), and `CodeTracer` otherwise —
+  ## an Edit window, a Welcome Screen — as the desktop's is.
+  if session.isNil: sessionDocumentTitle("", "CodeTracer")
+  else: sessionDocumentTitle(recordedProgramOf(session.tracePath), "CodeTracer")
+
+proc noteWindowTitle(title: string) =
+  ## The window is called `title` from now on (the session shown changed).
+  if title == gWindowTitle:
+    return
+  gWindowTitle = title
+  setWindowTitle(title)
+
+proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
+  ## The replay editor drawn again from the source window as it now holds,
+  ## at the pane's current width: after a move (`refreshReplayWindow`, which
+  ## resets the horizontal scroll) and after the window resized (PLAT-69,
+  ## which keeps it).
+  let editor = gPanes.getOrDefault($paneEditor)
+  if editor.isNil or gSourceService.isNil or gSession.isNil:
+    return
+  let surface = editorSurfaceFor(
+    source = gSourceService.vm,
+    editor = gSession.session.editorVM,
+    state = gSession.session.stateVM,
+    flow = gSession.session.flowVM,
+    availability = gSourceService.availability(),
+    budget = gpuiRowBudget(),
+    medium = GpuiMedium,
+    points = editorPointsOf(gSession.session.store.pointList.rows.val))
+  # No heading in the window (PLAT-49): every child is the editor's own.
+  while childCount(editor) > 0:
+    r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
+  # PLAT-51: the caret stays where the user put it (a move does not move
+  # it), on the file it was placed in — it is the file's document's
+  # (PLAT-68), and so is the selection.
+  gEditorSurface = withDebugDocument(surface)
+  if resetScroll:
+    gEditorScrollCols = 0
+  discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
+                       gEditorSurface, gEditorViewportPx, gEditorScrollCols)
+  noteEditorTab(r, editorTabLabel(surface.path, false))
 
 proc refreshReplayWindow(r: GpuiRenderer) =
   ## After the debugger moved: the source window, the stop's panes, every
@@ -3131,31 +3408,10 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   # the value-origin chains open in the Variables pane, re-read here.
   refreshEventLogMark()
   refreshStateOrigins()
-  let editor = gPanes.getOrDefault($paneEditor)
-  if not editor.isNil and not gSourceService.isNil:
-    let surface = editorSurfaceFor(
-      source = gSourceService.vm,
-      editor = gSession.session.editorVM,
-      state = gSession.session.stateVM,
-      flow = gSession.session.flowVM,
-      availability = gSourceService.availability(),
-      budget = gpuiRowBudget(),
-      medium = GpuiMedium,
-      points = editorPointsOf(gSession.session.store.pointList.rows.val))
-    # No heading in the window (PLAT-49): every child is the editor's own.
-    while childCount(editor) > 0:
-      r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
-    # `PLAT35-F3`. The horizontal scroll is RESET by a move, as Monaco's is:
-    # the debugger put a new line under the cursor and leaving the view 40
-    # columns right of it would hide the line the move was about.
-    # PLAT-51: the caret stays where the user put it (a move does not move
-    # it), on the file it was placed in — it is the file's document's
-    # (PLAT-68), and so is the selection.
-    gEditorSurface = withDebugDocument(surface)
-    gEditorScrollCols = 0
-    discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
-                         gEditorSurface, gEditorViewportPx, gEditorScrollCols)
-    noteEditorTab(r, editorTabLabel(surface.path, false))
+  # `PLAT35-F3`. The horizontal scroll is RESET by a move, as Monaco's is:
+  # the debugger put a new line under the cursor and leaving the view 40
+  # columns right of it would hide the line the move was about.
+  redrawReplayEditor(r, resetScroll = true)
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin != paneEditor:
       let pane = gPanes.getOrDefault($leaf.builtin)
@@ -3188,6 +3444,8 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   attachVcs(leafSet, getCurrentDir())
   gLeafSet = leafSet
   traceGesture("session shown " & $id & " " & gSession.tracePath)
+  # PLAT-69: the window is called after the recording it shows.
+  noteWindowTitle(windowTitleFor(gSession))
   refreshReplayWindow(r)
   discard drawArrangement(r)
 
@@ -4011,6 +4269,11 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
     gHoverTabAdd = false
     openWelcomeTab(r)
     return true
+  of gtWindowButton:
+    # PLAT-69: the renderer acts on a window button's press itself (its
+    # `data-window-region`); the window takes the press so nothing under the
+    # band does, and adds nothing to it.
+    return true
   drawTopBar(r)
   true
 
@@ -4096,6 +4359,7 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
   var control = -1
   var tab = -1
   var add = false
+  var windowButton = -1
   if gTopLayout.band.contains(x, y):
     let hit = gTopLayout.topBarHitAt(x, y)
     if hit.part == gtControl and hit.rect.w > 0:
@@ -4104,9 +4368,13 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
       tab = hit.index
     elif hit.part == gtTabAdd and hit.rect.w > 0:
       add = true
-  if tab != gHoverTab or add != gHoverTabAdd:
+    elif hit.part == gtWindowButton and hit.rect.w > 0:
+      windowButton = hit.index
+  if tab != gHoverTab or add != gHoverTabAdd or
+     windowButton != gHoverWindowButton:
     gHoverTab = tab
     gHoverTabAdd = add
+    gHoverWindowButton = windowButton
     drawTopBar(r)
   var slot = ""
   let (si, sj) = gGeom.slotAt(x, y)
@@ -5557,6 +5825,100 @@ proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
     return true
   false
 
+# ---------------------------------------------------------------------------
+# PLAT-69 — the window as a desktop window: its size and its frame follow
+# what the renderer reports
+# ---------------------------------------------------------------------------
+
+proc containerHeightPx(): int =
+  ## The arrangement's container: the content height less the root's padding
+  ## and the top band.
+  max(1, pendingViewportHeight - 2 * ChromePaddingPx - GpuiTopBandPx)
+
+proc refitEditorRows(r: GpuiRenderer) =
+  ## The editor holds as many source rows as its pane now shows
+  ## (`editorRowsOf`, the reading the window opened with): after a resize a
+  ## taller pane is filled, a shorter one asks for no rows it cannot draw.
+  let rows = editorRowsOf(gGeom)
+  if rows <= 0:
+    return
+  if not openArm.isNil:
+    # An Edit window (or a folder tab's arm): the arm's own surface.
+    if rows != editViewportRows:
+      editViewportRows = rows
+      redrawEditor()
+  elif not gSourceService.isNil and not gSourceService.vm.isNil:
+    if rows == gSourceService.vm.viewportHeight.val:
+      return
+    gSourceService.vm.setViewport(height = rows,
+                                  overscan = GpuiSourceOverscan)
+    if gViewedFile.len > 0:
+      # A file opened from the Files pane: drawn again at the new height
+      # from the line it showed first.
+      showViewedFile(r, max(1, gEditorSurface.viewportTop))
+    else:
+      gSourceService.serveWindow()
+      redrawReplayEditor(r, resetScroll = false)
+    let editor = gPanes.getOrDefault($paneEditor)
+    if not editor.isNil:
+      applyTextFaces(r, editor)
+    wireClicks(r)
+
+proc windowResized(r: GpuiRenderer; width, height: int) =
+  ## PLAT-69 (C1): THE CONTENT AREA IS NOW `width` x `height` — the renderer's
+  ## report (`gpui_on_resize`, before the frame at that size is built), or
+  ## `--window-ops`' `resize:`. Everything is laid out again at the new size
+  ## exactly as the window would open at it: the dock viewport the
+  ## arrangement is divided over, the arrangement and its strips and footer
+  ## (`drawArrangement`), the top bar, the popovers (all drawn from
+  ## `pendingViewport*`), and the editor's width and rows.
+  ##
+  ## NOTHING IS REMEMBERED. The remembered layout is proportional and is
+  ## written only by a gesture that changes it (`applyGestureCommand`); a
+  ## resize changes no layout, only the pixels it is drawn at.
+  if width <= 0 or height <= 0:
+    return
+  if width == pendingViewportWidth and height == pendingViewportHeight:
+    return
+  traceGesture("window resized " & $pendingViewportWidth & "x" &
+               $pendingViewportHeight & " -> " & $width & "x" & $height)
+  pendingViewportWidth = width
+  pendingViewportHeight = height
+  for shell in [gMainShell, gEditShell, gShell]:
+    if not shell.isNil:
+      shell.viewport.width = width
+      shell.viewport.height = height
+  if not gContainer.isNil:
+    r.setStyle(gContainer, "height", $containerHeightPx() & "px")
+  if windowDrawn() and drawArrangement(r):
+    syncEditorViewport(r)
+    refitEditorRows(r)
+    # The editor's redraw may have moved its tab: the geometry once more.
+    writeGeometry()
+  else:
+    # No arrangement to lay out (a refused projection tiles its leaves):
+    # the top bar still spans the window.
+    drawTopBar(r)
+
+proc chromeChanged(r: GpuiRenderer; chrome: WindowChrome) =
+  ## PLAT-69 (C2, C3): THE WINDOW'S FRAME CHANGED — the compositor granted
+  ## client-side decorations (sway does so only once the window is mapped),
+  ## the window was maximized or restored, the desktop's button layout was
+  ## changed while it is open. The top bar is drawn again: its drag strip,
+  ## its window buttons where the desktop now wants them, the maximize
+  ## button's restore icon. (A frame that changes the content size is
+  ## reported as a resize as well.)
+  if chrome == gChrome:
+    return
+  traceGesture("window chrome csd=" & $chrome.clientDecorated &
+               " maximized=" & $chrome.maximized & " layout='" &
+               chrome.buttonLayout & "' left=" & $chrome.shownButtons.left &
+               " right=" & $chrome.shownButtons.right)
+  gChrome = chrome
+  if gHoverWindowButton >= 0:
+    gHoverWindowButton = -1
+  drawTopBar(r)
+
 proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   ## The `root_builder` handed to `gpui_launch`, called from inside the shim
   ## before the event loop starts.
@@ -5603,9 +5965,7 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
 
   let container = pendingOutcome.root
   r.setStyle(container, "width", "100%")
-  r.setStyle(container, "height",
-             $max(1, pendingViewportHeight - 2 * ChromePaddingPx -
-                     GpuiTopBandPx) & "px")
+  r.setStyle(container, "height", $containerHeightPx() & "px")
   r.setStyle(container, "flex-direction", "row")
   r.setStyle(container, "gap", $ChromeGapPx & "px")
 
@@ -5697,6 +6057,24 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   # window's root, which covers the whole window, so a drag that leaves the
   # pane it started in keeps reporting.
   armPointer(r, root)
+  # PLAT-69 — THE WINDOW'S SIZE AND FRAME, as the renderer reports them from
+  # now on. Subscribed from here, the root builder, which is when the
+  # launched window exists to subscribe to; the plan and the capture paths
+  # have none, and draw the frame `--window-chrome` names (the server-side
+  # one by default — no buttons, no drag strip — which is what they drew
+  # before).
+  let subscribed = subscribeWindow(
+    proc(w, h: int) =
+      var rr: GpuiRenderer
+      windowResized(rr, w, h),
+    proc() =
+      var rr: GpuiRenderer
+      chromeChanged(rr, liveWindowChrome()))
+  gChrome =
+    if subscribed: liveWindowChrome()
+    elif gChromeSpec.len > 0:
+      windowChromeOfSpec(gChromeSpec).chrome
+    else: liveWindowChrome()
 
   r.appendChild(root, container)
   # `PLAT35-F3`. **AFTER the arrangement and BEFORE the faces**: the editor
@@ -5818,6 +6196,20 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     windowPointer(r, gekPointerUp, x, y)
   try:
     case parts[0]
+    of "resize":
+      # PLAT-69: what the renderer reports when the content area resizes.
+      windowResized(r, at(1), at(2))
+      return ""
+    of "chrome":
+      # PLAT-69: what the renderer reports when the frame changes. The
+      # spec's layout commas are spelled `;` here, since `,` separates
+      # the events.
+      let spec = op["chrome:".len .. ^1].replace(';', ',')
+      let chrome = windowChromeOfSpec(spec)
+      if not chrome.ok:
+        return chrome.message
+      chromeChanged(r, chrome.chrome)
+      return ""
     of "key":
       let mods = if parts.len > 2: parts[2].split('+') else: @[]
       # `colon` names `:`, which the op's own `:` separator cannot spell
@@ -6280,6 +6672,7 @@ proc reportWindowPlan(cmd: GpuiCommand; outcome: LeafRenderOutcome;
   pendingDock = dock
   builderCalls = 0
   probeEnabled = false
+  gChromeSpec = cmd.windowChrome
   var r: GpuiRenderer
   let root = r.createElement("div")
   paintWindowChrome(root)
@@ -6357,6 +6750,41 @@ proc capturePixels(cmd: GpuiCommand): int =
        " distinct byte values)"
   0
 
+proc opensWindow(cmd: GpuiCommand): bool =
+  ## Whether this run opens a window (and not a plan, or an off-screen frame).
+  not cmd.reportPlan and not cmd.reportWindowPlan and cmd.pixelsOut.len == 0
+
+proc applyWindowPolicy(cmd: var GpuiCommand) =
+  ## PLAT-69 (C5): THE WINDOW OPENS AS THE USER CONFIGURED IT — the
+  ## `window:` entry of the configuration file the desktop reads, found the
+  ## way the desktop finds it (`window_policy.findUserConfigFile`), resolved
+  ## by the one policy both front-ends apply. `--width` / `--height` override
+  ## it (a windowed window of exactly that size), which is what keeps every
+  ## window lane deterministic. A setting that cannot be used is reported and
+  ## replaced by the default; it never stops the window from opening.
+  ##
+  ## Only for a run that opens a window: the plan and the capture paths draw
+  ## at the command line's size (default 1440x900) and read no setting, so a
+  ## user's configuration cannot change what a suite reads off them.
+  if not opensWindow(cmd):
+    return
+  var setting = DefaultWindowSetting
+  let file = findUserConfigFile(getCurrentDir(), ctConfigDir())
+  if file.len > 0:
+    try:
+      let parsed = windowSettingOfConfigText(readFile(file))
+      setting = parsed.setting
+      for problem in parsed.problems:
+        stderr.writeLine("codetracer-gpui: " & file & ": " & problem)
+    except IOError as e:
+      stderr.writeLine("codetracer-gpui: cannot read " & file & ": " & e.msg &
+                       "; the window opens as the default says")
+  gLaunch = resolveWindowLaunch(setting,
+                                if cmd.widthGiven: cmd.width else: 0,
+                                if cmd.heightGiven: cmd.height else: 0)
+  cmd.width = gLaunch.width
+  cmd.height = gLaunch.height
+
 proc launchWindow(cmd: GpuiCommand; title: string;
                   outcome: LeafRenderOutcome; dock: JsonNode = nil): int =
   ## Open the window, run the event loop, and return when it stops.
@@ -6387,6 +6815,11 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   let loadStart = loadAverage()
   if cmd.frameReport.len > 0:
     gpui_frame_stats_reset()
+  # PLAT-69: the window's minimum size, its initial state (maximized, unless
+  # the setting or the command line says otherwise) and the app id it shares
+  # with the desktop; `gpui_launch`'s size is the windowed (restore) size.
+  gWindowTitle = title
+  prepareWindowLaunch(gLaunch)
   let startedAt = epochTime()
   gpui_launch(title.cstring, float(cmd.width), float(cmd.height),
               paintWindowChrome)
@@ -6582,7 +7015,8 @@ proc runEdit(cmd: GpuiCommand): int =
     echo leafPlanJson(r, drawn)
     return 0
   let editDock = shell.projectionFor(windowId)
-  launchWindow(cmd, "CodeTracer — " & cmd.traceFolder & " [EDIT]", drawn,
+  # PLAT-69 (C4): the desktop's Edit window is called `CodeTracer`.
+  launchWindow(cmd, windowTitleFor(nil), drawn,
                if editDock.status == dpsRefused: nil else: editDock.state)
 
 proc runOpen(cmd: GpuiCommand): int =
@@ -6951,7 +7385,8 @@ proc runOpen(cmd: GpuiCommand): int =
   # contract, and `--replay-ops` is what stands in for it meanwhile.
   # `--input-probe` is the instrument that shows the delivery half works.
   let dock = shell.projectionFor(windowId)
-  result = launchWindow(cmd, "CodeTracer — " & cmd.traceFolder, drawn,
+  # PLAT-69 (C4): `<program> — CodeTracer`, the desktop's title.
+  result = launchWindow(cmd, windowTitleFor(session), drawn,
                         if dock.status == dpsRefused: nil else: dock.state)
   # PLAT-49 part B: the sessions a "+" opened, and their engines, closed.
   for id, s in gSessionsOpened:
@@ -6971,6 +7406,8 @@ proc main() =
     stderr.writeLine(cmd.message)
     quit(2)
   of gckOpen:
+    var cmd = cmd
+    applyWindowPolicy(cmd)
     try:
       quit(runOpen(cmd))
     except DapLaunchRefusedError as e:
