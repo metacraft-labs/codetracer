@@ -15,6 +15,17 @@ type
     ui*:                                  string
     FlowUI* {.defaultVal: FlowParallel}:  types.FlowUI
 
+  WindowConfigObj* = object
+    ## PLAT-69: the `window:` entry (`window_policy`, which both front-ends
+    ## apply). Every field has a default so a config file written before
+    ## the entry existed — or one that gives only `initial` — still loads:
+    ## the loader is strict, and a missing field would make it reject the
+    ## whole file. Values are validated by `window_policy.parseWindowSetting`,
+    ## not here.
+    initial* {.defaultVal: "maximized".}:  string
+    width* {.defaultVal: 1900.}:           int
+    height* {.defaultVal: 1400.}:          int
+
   TraceSharingConfigObj* = object
     enabled*:               bool
     ## The four keys below named a sharing service that no longer exists.
@@ -64,6 +75,11 @@ type
       path: "",
     ).}:                                                  RRBackendConfig
     skipInstall:                                          bool
+
+    ## PLAT-69: how the window opens (`window_policy`).
+    window* {.defaultVal: WindowConfigObj(
+      initial: "maximized", width: 1900, height: 1400
+    ).}:                                                  WindowConfigObj
 
     ## Controls whether a second `ct run` / `ct replay` invocation opens
     ## the trace in a new tab within the existing window ("tab") or

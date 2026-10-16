@@ -48,6 +48,16 @@ layout: "default_layout"
 #   you can also choose default_white or default_dark
 theme: "default_dark"
 
+# the window, on the desktop and in the GPUI front-end alike:
+#   initial: maximized | windowed
+#   width / height: the windowed size, which a maximized window restores to
+#   (never below 1050x600). The GPUI front-end's `--width` / `--height`
+#   override it and open a window of exactly that size.
+window:
+  initial: maximized
+  width: 1900
+  height: 1400
+
 # project open
 default: ""
 

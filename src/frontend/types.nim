@@ -2402,6 +2402,17 @@ type
     rrBackend*:               RRBackendConfig
     ## "tab" (default) or "window" — see common/config.nim for docs.
     newTracePolicy*:          cstring
+    window*:                  WindowConfig
+      ## PLAT-69: the `window:` entry, as js-yaml read it. nil (undefined)
+      ## in a config file written before the entry existed; its fields are
+      ## whatever the user typed, so they are read defensively
+      ## (`index/window.windowLaunchOf`) and validated by
+      ## `common/window_policy`, never trusted as typed here.
+
+  WindowConfig* = ref object
+    initial*: cstring
+    width*: int
+    height*: int
 
   RRBackendConfig* = ref object
     enabled*: bool

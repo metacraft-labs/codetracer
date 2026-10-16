@@ -567,7 +567,7 @@ proc ready*(): Future[void] {.async.} =
         discard await waitForResponseFromInstall()
 
   debugPrint "index: creating window"
-  mainWindow = createMainWindow()
+  mainWindow = createMainWindow(config)
   registerMainWindow()
   infoPrint "index: main window created"
   sendLspStatusToRenderer()
