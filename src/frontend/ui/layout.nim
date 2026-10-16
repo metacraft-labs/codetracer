@@ -1022,6 +1022,14 @@ proc setupSelectedPanelOutline() =
         if (overlayBody !== null) { ro.observe(overlayBody); }
       }
 
+      // The overlay slides in (`ct-overlay-slide-*`, auto_hide.styl), and a
+      // transform moves it without resizing anything, so none of the hooks
+      // above fire: the outline would stay where the panel was when it was
+      // first measured, mid-slide.  Re-measure once the slide has finished.
+      // (The outline is kept transparent until then — see `.ct-overlay-outline`.)
+      var overlayEl = document.getElementById('auto-hide-overlay');
+      if (overlayEl !== null) { overlayEl.addEventListener('animationend', schedule); }
+
       schedule();
     })();
   """.}

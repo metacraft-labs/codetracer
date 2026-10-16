@@ -481,7 +481,14 @@ proc renderColumnHeader(tableId: cstring; columns: seq[JsObject];
     var title = column.title.to(cstring)
     if not recorded and index == orderedAt and title.len > 0:
       title = title & (if ascending: cstring" ▲" else: cstring" ▼")
-    cell.textContent = title
+    # The label in its own element: the header is styled like the Requests
+    # panel's (small uppercase Space Grotesk, `event_log.styl`), and setting
+    # that font size on `cell` itself would resize the cell — its width is in
+    # `ch`/`em` of its own font, shared with the body cells below it.
+    let label = document.createElement(cstring"span")
+    label.className = cstring"eventLog-column-label"
+    label.textContent = title
+    cell.appendChild(label)
     if not dataTable.isNil:
       let at = index
       cell.addEventListener(cstring"click", proc(ev: Event) =

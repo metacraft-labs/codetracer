@@ -179,6 +179,16 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     color: colors-ui-text-primary-label
     user-select: none
 
+    // Icon = a ui-icons SVG (design system, icons-lg) used as a mask, so it
+    // takes the button's `color` in every state below.
+    &::before
+      content: ""
+      width: 1rem
+      height: 1rem
+      background-color: currentColor
+      -webkit-mask: var(--build-ctrl-icon) center / contain no-repeat
+      mask: var(--build-ctrl-icon) center / contain no-repeat
+
     &:hover
       color: colors-ui-text-primary-body
       background-color: rgba(255, 255, 255, 0.1)
@@ -191,7 +201,17 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     &.active
       color: colors-ui-text-success-primary
 
+  .build-run-btn
+    --build-ctrl-icon: url('../../public/resources/shared/build_play.svg')
+
+  .build-clear-btn
+    --build-ctrl-icon: url('../../public/resources/shared/build_close.svg')
+
+  .build-scroll-btn
+    --build-ctrl-icon: url('../../public/resources/shared/build_chevron_down.svg')
+
   .build-stop-btn
+    --build-ctrl-icon: url('../../public/resources/shared/build_stop.svg')
     color: colors-ui-icon-error-primary
 
     &:hover
@@ -1258,3 +1278,19 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     mask-position: center
     -webkit-mask-size: contain
     mask-size: contain
+
+// HIDDEN FOR NOW (Nikolay, 2026-10-15): the location path and its copy button.
+// A deliberate design decision for the current iteration, made knowing the
+// warning at the top of this file: this is the only on-screen readout of the
+// debug location, and footer-visibility-css-guard.spec.ts /
+// status-bar-footer-contract.spec.ts FAIL while this rule exists.  Delete the
+// rule to bring both back.
+#status #status-base .location-path,
+#status #status-base #copy-path-image
+  display: none !important
+
+// ...and the certificate readout's 8px end margin, which spaced it from the
+// path: with the path gone it is the bar's last readout, 16px from the right
+// sidebar toggle's icon (auto_hide.styl).  Goes with the rule above.
+#status #status-base .test-certificate-status
+  margin-right: 0 !important

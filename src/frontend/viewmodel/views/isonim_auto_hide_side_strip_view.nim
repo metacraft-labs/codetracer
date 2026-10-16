@@ -25,6 +25,10 @@ type
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
     onCollapsedSelect*: proc()
+    ## Called when the mouse enters the collapsed line — starts the same
+    ## hover-preview timer a tab does, so the line opens its edge's overlay
+    ## (with the edge's tabs down its side) on hover as well as on click.
+    onCollapsedHoverEnter*: proc()
     ## Called when mouse enters a tab — starts the hover-preview timer.
     onHoverEnter*: proc(index: int)
     ## Called when mouse leaves a tab — cancels the pending hover-preview timer.
@@ -71,6 +75,10 @@ proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onUnpin.isNil:
     callbacks.onUnpin(index)
 
+proc invokeCollapsedHoverEnter(callbacks: AutoHideSideStripCallbacks) =
+  if not callbacks.onCollapsedHoverEnter.isNil:
+    callbacks.onCollapsedHoverEnter()
+
 proc invokeCollapsedSelect(callbacks: AutoHideSideStripCallbacks) =
   if not callbacks.onCollapsedSelect.isNil:
     callbacks.onCollapsedSelect()
@@ -107,7 +115,8 @@ proc renderCollapsedLine(
   ui(r):
     tdiv(
         class = AutoHideCollapsedStripLineClass,
-        onclick = proc() = callbacks.invokeCollapsedSelect())
+        onclick = proc() = callbacks.invokeCollapsedSelect(),
+        onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 
 when defined(js):
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
@@ -148,7 +157,8 @@ when defined(js):
     ui(r):
       tdiv(
           class = AutoHideCollapsedStripLineClass,
-          onclick = proc() = callbacks.invokeCollapsedSelect())
+          onclick = proc() = callbacks.invokeCollapsedSelect(),
+          onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 
 proc renderModeButton(r: MockRenderer; callbacks: AutoHideSideStripCallbacks): MockNode =
   ui(r):
@@ -204,15 +214,23 @@ when defined(js):
       tabs: seq[AutoHideSideStripRecord];
       collapsed: bool;
       callbacks: AutoHideSideStripCallbacks =
-        AutoHideSideStripCallbacks()) =
+        AutoHideSideStripCallbacks();
+      revealed = false;
+      revealClosing = false) =
+    ## `revealed`: a minimal edge shown with its tabs while one of its panels
+    ## is open — `revealed` keeps the strip's layout footprint at the thin
+    ## line's (auto_hide.styl) so the tabs float over the layout instead of
+    ## pushing it; `revealClosing` slides it out with the panel.
     let containerNode = isonim_dom.Node(container)
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
-    isonim_dom.setAttribute(
-      container,
-      cstring"class",
-      cstring sideStripClass(tabs.len > 0, collapsed and tabs.len > 0))
+    var cls = sideStripClass(tabs.len > 0, collapsed and tabs.len > 0)
+    if revealed and not collapsed and tabs.len > 0:
+      cls.add(" revealed")
+      if revealClosing:
+        cls.add(" reveal-closing")
+    isonim_dom.setAttribute(container, cstring"class", cstring cls)
 
     let panel = renderAutoHideSideStripPanel(r, tabs, collapsed, callbacks)
     let panelNode = isonim_dom.Node(panel)

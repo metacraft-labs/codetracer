@@ -12,6 +12,49 @@
 // Layout row — flex container that holds left strip, GL (#ROOT), right strip.
 // ---------------------------------------------------------------------------
 
+// Hovered (overlay) panels slide in — see `#auto-hide-overlay`.  0.1s, ease-in.
+OVERLAY_SLIDE_DURATION = 0.1s
+OVERLAY_SLIDE_EASING = cubic-bezier(0.42, 0, 1, 1)
+
+@keyframes ct-overlay-slide-left
+  from
+    transform: translateX(calc(-100% - 2rem))
+  to
+    transform: none
+
+@keyframes ct-overlay-slide-right
+  from
+    transform: translateX(calc(100% + 2rem))
+  to
+    transform: none
+
+@keyframes ct-overlay-slide-bottom
+  from
+    transform: translateY(calc(100% + 2rem))
+  to
+    transform: none
+
+@keyframes ct-overlay-slide-left-out
+  from
+    transform: none
+  to
+    transform: translateX(calc(-100% - 2rem))
+
+@keyframes ct-overlay-slide-right-out
+  from
+    transform: none
+  to
+    transform: translateX(calc(100% + 2rem))
+
+@keyframes ct-overlay-slide-bottom-out
+  from
+    transform: none
+  to
+    transform: translateY(calc(100% + 2rem))
+
+// Hovered (overlay) panels' elevation — see `#auto-hide-overlay`.
+OVERLAY_ELEVATION_SHADOW = 0 0.75rem 2rem rgba(0, 0, 0, 0.55), 0 0.125rem 0.5rem rgba(0, 0, 0, 0.45)
+
 #auto-hide-layout-row
   display: flex
   flex-direction: row
@@ -97,7 +140,7 @@
   // docked panel came up darker than every other panel; the bottom docked
   // container below always had this and the side ones did not.
   background-color: colors-ui-surface-base-panel
-  border-radius: 0.36em
+  border-radius: TAB_CORNER_RADIUS
   // Its top on the same line as the panels' tabs and the strip tabs
   // (LAYOUT_TAB_TOP, golden_layout.styl), so an opened side panel does not
   // stand 4px above the panels beside it.
@@ -181,6 +224,26 @@
   pointer-events: none
   z-index: 204
   overflow: visible
+  // Created each time the overlay opens, while the panel is still sliding in
+  // (OVERLAY_SLIDE_DURATION).  It is measured from the panel's on-screen box,
+  // so it stays transparent through the slide, is re-measured when the slide
+  // ends (layout.nim, `animationend`), and then fades in.
+  animation: ct-overlay-outline-in OVERLAY_SLIDE_DURATION + 0.1s linear both
+
+  @media (prefers-reduced-motion: reduce)
+    animation: none
+
+// The outline is measured where the panel stood, so it cannot follow one
+// sliding out: it goes the moment the panel starts to close.  `visibility`, not
+// `opacity`, which the fade-in animation above would override.
+body:has(#auto-hide-overlay.closing) .ct-overlay-outline
+  visibility: hidden
+
+@keyframes ct-overlay-outline-in
+  0%, 83%
+    opacity: 0
+  100%
+    opacity: 1
 
 #auto-hide-docked-left-content,
 #auto-hide-docked-right-content
@@ -234,19 +297,29 @@
   right: auto
 
 // ---------------------------------------------------------------------------
-// Collapsed mode — 1px accent line when maximized on bounded screen edge.
+// Collapsed mode — a thin accent line when maximized on a bounded screen edge.
+//
+// 6px wide, in the panels' own surface colour (`surface/base/panel`), brand/600
+// (#4F46E5) under the pointer.  It spans what a panel spans — from the panels'
+// top line (LAYOUT_TAB_TOP below the layout's top, where their tabs start) to
+// the layout's bottom — and rounds 6px on its inner side only, the side facing
+// the panels; the outer side runs along the window edge (Nikolay, 2026-10-15;
+// it was a 3px #3a5070 strip the full height).  The strip itself takes the window background; the
+// colour is painted by `.collapsed-strip-line` below.
 // ---------------------------------------------------------------------------
+COLLAPSED_STRIP_WIDTH = 0.375rem
+COLLAPSED_STRIP_RADIUS = 0.375rem
 
 #auto-hide-strip-left.collapsed-mode,
 #auto-hide-strip-right.collapsed-mode
-  width: 3px
-  min-width: 3px
-  max-width: 3px
-  flex-basis: 3px
+  width: COLLAPSED_STRIP_WIDTH
+  min-width: COLLAPSED_STRIP_WIDTH
+  max-width: COLLAPSED_STRIP_WIDTH
+  flex-basis: COLLAPSED_STRIP_WIDTH
   padding-top: 0
   padding-left: 0
   padding-right: 0
-  background-color: #3a5070  // Subtle blue accent — distinct from panel bg
+  background-color: colors-ui-surface-base-canvas
   cursor: pointer
   overflow: hidden
   align-items: center
@@ -254,17 +327,162 @@
 #auto-hide-strip-left.collapsed-mode
   border-right: none
 
+// ---------------------------------------------------------------------------
+// Revealed strip — a collapsed edge while one of its panels is open.
+//
+// The edge shows its ordinary tabs again, exactly as an expanded strip draws
+// them, and the panel opens attached to its tab as on an expanded edge
+// (`edgeRevealed`, auto_hide.nim).  It FLOATS: the strip keeps the thin line's
+// layout footprint (COLLAPSED_STRIP_WIDTH), so the panels do not move, and the
+// 2em column is painted past that footprint, over the layout — `::before` for
+// the column's background, the tabs on top.  It slides in from the window edge
+// with its panel and back out with it (OVERLAY_SLIDE_DURATION / _EASING), on
+// the strip element itself: the tabs inside are rebuilt on every strip render,
+// so an animation on them would replay at each hover.
+// ---------------------------------------------------------------------------
+#auto-hide-strip-left.revealed,
+#auto-hide-strip-right.revealed
+  width: COLLAPSED_STRIP_WIDTH
+  min-width: COLLAPSED_STRIP_WIDTH
+  max-width: COLLAPSED_STRIP_WIDTH
+  flex-basis: COLLAPSED_STRIP_WIDTH
+  padding-left: 0
+  padding-right: 0
+  padding-top: LAYOUT_TAB_TOP
+  overflow: visible
+  // Stacking as on an expanded strip (z-index 100, set above): over the
+  // layout, under the overlay — which covers the active tab's bridge where
+  // the two meet, the join an expanded edge already gets right.
+
+  &::before
+    content: ""
+    position: absolute
+    top: 0
+    bottom: 0
+    width: 2em
+    background-color: colors-ui-surface-base-canvas
+    z-index: -1
+
+  .auto-hide-strip-tab
+    width: 1.5em
+    min-width: 1.5em
+    flex-shrink: 0
+
+#auto-hide-strip-left.revealed
+  align-items: flex-start
+  animation: ct-strip-reveal-left OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING
+
+  &::before
+    left: 0
+
+  .auto-hide-strip-tab
+    margin-left: 0.25em
+
+  &.reveal-closing
+    animation: ct-strip-reveal-left-out OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING forwards
+
+#auto-hide-strip-right.revealed
+  align-items: flex-end
+  animation: ct-strip-reveal-right OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING
+
+  &::before
+    right: 0
+
+  .auto-hide-strip-tab
+    margin-right: 0.25em
+
+  &.reveal-closing
+    animation: ct-strip-reveal-right-out OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING forwards
+
+@media (prefers-reduced-motion: reduce)
+  #auto-hide-strip-left.revealed,
+  #auto-hide-strip-right.revealed
+    animation: none !important
+
+@keyframes ct-strip-reveal-left
+  from
+    transform: translateX(-2em)
+  to
+    transform: none
+
+@keyframes ct-strip-reveal-left-out
+  from
+    transform: none
+  to
+    transform: translateX(-2em)
+
+@keyframes ct-strip-reveal-right
+  from
+    transform: translateX(2em)
+  to
+    transform: none
+
+@keyframes ct-strip-reveal-right-out
+  from
+    transform: none
+  to
+    transform: translateX(2em)
+
+// The layout keeps the gap it has beside the thin line: a revealed strip
+// floats, it does not take the expanded strip's place in the row.
+#auto-hide-strip-left.revealed ~ #ROOT
+  padding-left: 0.25rem
+
+#auto-hide-layout-row:has(#auto-hide-strip-right.revealed) #ROOT
+  padding-right: 0.25rem
+
+// In the panels' colour, the line has to stand apart from the panel beside it
+// the way panels stand apart from each other: the layout's usual 4px edge gap,
+// which the rules above take away whenever a strip has tabs (the expanded
+// strip brings its own padding; the collapsed line has none).  Without it the
+// 6px line ran straight into the panel and disappeared into it.
+#auto-hide-strip-left.collapsed-mode ~ #ROOT
+  padding-left: 0.25rem
+
+#auto-hide-layout-row:has(#auto-hide-strip-right.collapsed-mode) #ROOT
+  padding-right: 0.25rem
+
+// A panel docked from a collapsed strip sits between the line and the layout,
+// so it keeps the same 4px from the line.
+#auto-hide-strip-left.collapsed-mode ~ #auto-hide-docked-left
+  margin-left: 0.25rem
+
+#auto-hide-layout-row:has(#auto-hide-strip-right.collapsed-mode) #auto-hide-docked-right
+  margin-right: 0.25rem
+
 #auto-hide-strip-right.collapsed-mode
   border-left: none
 
-// The collapsed strip line is the clickable target inside the strip.
+// The collapsed strip line is the clickable target inside the strip.  The
+// element stays the strip's full height, so the whole edge still answers a
+// click; the line you see is its `::before`, placed on the panels' top and
+// bottom and rounded on the inner side — a plain box, nothing animated.
 .collapsed-strip-line
+  position: relative
   width: 100%
   height: 100%
   cursor: pointer
 
-  &:hover
-    background-color: #4a6080  // Slightly lighter on hover
+  &::before
+    content: ""
+    position: absolute
+    top: LAYOUT_TAB_TOP
+    bottom: 0
+    left: 0
+    right: 0
+    background-color: colors-ui-surface-base-panel
+    pointer-events: none
+
+  &:hover::before
+    background-color: colors-brand-600
+
+// Inner side = the side facing the panels: right on the left strip, left on
+// the right strip.
+#auto-hide-strip-left .collapsed-strip-line::before
+  border-radius: 0 COLLAPSED_STRIP_RADIUS COLLAPSED_STRIP_RADIUS 0
+
+#auto-hide-strip-right .collapsed-strip-line::before
+  border-radius: COLLAPSED_STRIP_RADIUS 0 0 COLLAPSED_STRIP_RADIUS
 
 // ---------------------------------------------------------------------------
 // Docked bottom panel — pushes GL up when a bottom strip tab is clicked.
@@ -277,7 +495,7 @@
   flex-shrink: 0
   flex-grow: 0
   background-color: colors-ui-surface-base-panel
-  border-radius: 0.36em
+  border-radius: TAB_CORNER_RADIUS
   position: relative
   z-index: 5  // same as side docked panels — keeps panel children below backdrop (98)
   min-height: 100px
@@ -377,13 +595,13 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
   margin-right: 0.24em
   // Tab height is the full status-bar height — no explicit height needed
   // since the parent is align-items: stretch.
-  // All corners 0.36em — matches the side-strip tab border-radius exactly.
-  border-radius: 0.36em
+  // All corners TAB_CORNER_RADIUS (golden_layout.styl), like every other tab.
+  border-radius: TAB_CORNER_RADIUS
   overflow: visible  // allow curve pseudo-elements to bleed outside the tab
 
   &.active
     color: colors-ui-text-primary-label
-    border-radius: 0.36em
+    border-radius: TAB_CORNER_RADIUS
     // Shadow bridges the gap between the strip top edge and the docked panel.
     box-shadow: 0em -0.48em 0em 0em colors-ui-surface-base-panel
     overflow: visible
@@ -484,7 +702,7 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
   // the GAP between the two, which a brighter idle value would close.
   color: colors-ui-text-primary-label-subtle
   background-color: colors-ui-surface-base-panel
-  border-radius: 0.36em
+  border-radius: TAB_CORNER_RADIUS
   cursor: pointer
   // No horizontal padding — the tab is only 2em wide and removing horizontal
   // padding gives the rotated label enough block-size to render without clipping.
@@ -506,13 +724,19 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
   user-select: none
   transition: color 150ms ease, background-color 150ms ease
 
+  // An idle tab — side strips and the status bar alike — brightens to the
+  // active tab's #C8C8C8 (label tier = grey-150) under the pointer (Nikolay,
+  // 2026-10-15).  Colour only, on the transition above.
+  &:hover:not(.active)
+    color: colors-ui-text-primary-label
+
   // Active state: open end faces the main content area (right side).
   // Curves appear above (::before) and below (::after) the tab, matching
   // the lm_tabs pattern rotated 90 degrees clockwise.
   &.active
     color: colors-ui-text-primary-label
-    border-top-left-radius: 0.36em
-    border-bottom-left-radius: 0.36em
+    border-top-left-radius: TAB_CORNER_RADIUS
+    border-bottom-left-radius: TAB_CORNER_RADIUS
     border-top-right-radius: 0em
     border-bottom-right-radius: 0em
     // Shadow bridges the 0.25em gap to the strip edge and extends slightly into
@@ -563,8 +787,8 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
 #auto-hide-strip-right .auto-hide-strip-tab.active
   border-top-left-radius: 0em
   border-bottom-left-radius: 0em
-  border-top-right-radius: 0.36em
-  border-bottom-right-radius: 0.36em
+  border-top-right-radius: TAB_CORNER_RADIUS
+  border-bottom-right-radius: TAB_CORNER_RADIUS
   // Shadow bridges the 0.25em gap to the strip left edge; overlay (z-index: 101)
   // renders above and covers the slight overlap with its panel-color background.
   box-shadow: -0.48em 0em 0em 0em colors-ui-surface-base-panel
@@ -588,57 +812,35 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
 #auto-hide-strip-right .auto-hide-strip-tab.active:first-child::before
   display: none
 
-// Bottom strip: first active tab has no LEFT curve (nothing to its left).
-#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child::before
-  display: none
+// ...and with no curve above it, the tab's top edge runs straight on into the
+// panel's: they share one top line (LAYOUT_TAB_TOP).  The panel's corner on the
+// tab side is then inside that one shape, and rounding it cut a notch where the
+// two meet (Nikolay, 2026-10-15) — so square it, as the bottom strip squares
+// its first tab's corner below.  Docked and hovered panels both; the body is
+// listed with the overlay because it paints the overlay's fill and clips it.
+// The outline SVGs read these radii back out of computed style.
+body:has(#auto-hide-strip-left .auto-hide-strip-tab.active:first-child)
+  #auto-hide-docked-left,
+  #auto-hide-overlay.auto-hide-overlay-left,
+  #auto-hide-overlay.auto-hide-overlay-left #auto-hide-overlay-body
+    border-top-left-radius: 0
 
-// ...and with no curve there, the tab's left corners have nothing to round
-// against: it sits flush with the panel's own left edge, and the upward bridge
-// shadow already joins the two into one shape.  Rounding them only puts a notch
-// in an edge that should run straight down from the panel into the tab, so
-// square the left side and leave the right corners as they are.
-#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child
-  // Top-left only.  That corner is where the tab meets the panel above, and the
-  // bridge shadow already fuses the two, so a curve there notches an edge that
-  // should run straight down.  The bottom-left is the opposite case: nothing
-  // continues past it, the tab simply ends, so it keeps the 0.36em every other
-  // corner has.
-  border-top-left-radius: 0
+body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
+  #auto-hide-docked-right,
+  #auto-hide-overlay.auto-hide-overlay-right,
+  #auto-hide-overlay.auto-hide-overlay-right #auto-hide-overlay-body
+    border-top-right-radius: 0
 
-// The panel's own bottom-left corner is the last thing rounding that edge.  With
-// the first tab active the two are one shape, squared down the left side, so a
-// curve here only reintroduces the notch the rule above just removed.
-//
-// Scoped with :has() to that case alone: with any later tab active the first tab
-// is an inactive pill sitting apart from the panel, and the panel's corner
-// should still curve.  The strip lives in `#status-base` and the panel under
-// `#root-container`, so `body` is the nearest shared ancestor to hang this on.
-//
-// The `.ct-docked-outline` SVG reads its corner radii back out of computed
-// style, so the traced line follows this without a second change.
-// Both surfaces that can sit above the tab have to give up the same corner:
-// clicking docks the panel, hovering opens the overlay, and either way the
-// square-topped tab is directly beneath.  `#auto-hide-overlay-body` is listed
-// too because it, not the outer overlay, paints the background and clips to the
-// rounded corners.
-body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
-  #auto-hide-docked-bottom,
-  #auto-hide-overlay.auto-hide-overlay-bottom,
-  #auto-hide-overlay.auto-hide-overlay-bottom #auto-hide-overlay-body
-    border-bottom-left-radius: 0
+// Bottom strip: the first tab is NOT special.  It used to drop its left curve,
+// square its top-left corner and square the panel's bottom-left, on the premise
+// that it sits flush with the panel's left edge.  It no longer does — the
+// status readouts (language, encoding) come first, so BUILD sits far in — and
+// those rules made it the one footer tab that joined its panel differently
+// (Nikolay, 2026-10-15: consistency).  It now joins like every other tab.
 
-// The first tab's bottom-left is where the strip's left edge finishes: the tab
-// is flush with the window inset and nothing continues past that corner, so it
-// carries a wider 0.5rem than the 0.36em the other corners use.
-//
-// `rem`, not `em`: 0.36em resolves against whatever font-size the tab inherits
-// and lands on 5.76px at 16px — a quarter-pixel short of the 6px it reads as,
-// so the curve antialiases instead of coming out crisp.  0.5rem is 8px exactly,
-// on a whole pixel, and does not move with the strip's type size.
-//
-// Not scoped to `.active`: this corner looks the same docked, hovered or idle.
-#auto-hide-bottom-strip .auto-hide-strip-tab:first-child
-  border-bottom-left-radius: 0.5rem
+// The first tab's bottom-left corner is the same as every other tab corner.
+// It used to be a wider 0.5rem (8px) as the strip's "end" corner, which read
+// as a mismatched corner on one tab (Nikolay, 2026-10-15: consistency).
 
 // ---------------------------------------------------------------------------
 // Tab label span — carries the text rotation so the tab div stays un-rotated.
@@ -761,7 +963,7 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   z-index: 203
   background-color: colors-ui-surface-primary-default
   border: none
-  border-radius: 0.36em
+  border-radius: TAB_CORNER_RADIUS
   box-shadow: none
   margin: 0
   padding: 0
@@ -775,22 +977,81 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   &.visible
     display: flex
 
+  // SLIDE IN.  An opening overlay slides in from its own edge — left panels
+  // from the left, right from the right, bottom panels up — fast, 0.1s, easing
+  // in (Nikolay, 2026-10-15; first tried at 0.5s).  It starts fully off the window (its own size
+  // plus the 2rem strip), so it enters from the edge rather than appearing
+  // part-way in.  `transform` only: the browser moves the already-painted
+  // panel on the graphics chip, with no layout or repaint per frame.  Not for
+  // anyone who has asked the system to reduce motion.
+  &.visible.auto-hide-overlay-left
+    animation: ct-overlay-slide-left OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING
+
+  &.visible.auto-hide-overlay-right
+    animation: ct-overlay-slide-right OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING
+
+  &.visible.auto-hide-overlay-bottom
+    animation: ct-overlay-slide-bottom OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING
+
+  // SLIDE OUT — the same movement in reverse when the panel closes: back to
+  // its own edge, same duration and easing (Nikolay, 2026-10-15).
+  // `hideOverlay` (auto_hide.nim) adds `closing` and tears the panel down when
+  // the slide is over; `forwards` holds it off-screen for that last frame.
+  // A closing panel is on its way out: clicks pass through it to whatever it
+  // is sliding across — the collapsed line or a tab it covers on its way —
+  // instead of landing on a panel that is already closed.
+  &.closing
+    pointer-events: none
+
+  &.visible.closing.auto-hide-overlay-left
+    animation: ct-overlay-slide-left-out OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING forwards
+
+  &.visible.closing.auto-hide-overlay-right
+    animation: ct-overlay-slide-right-out OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING forwards
+
+  &.visible.closing.auto-hide-overlay-bottom
+    animation: ct-overlay-slide-bottom-out OVERLAY_SLIDE_DURATION OVERLAY_SLIDE_EASING forwards
+
+  @media (prefers-reduced-motion: reduce)
+    &.visible
+      animation: none !important
+
+  // ELEVATION.  A hovered panel floats over the layout, so it casts a soft,
+  // blurred shadow on the layout around it (Nikolay, 2026-10-15) — on every
+  // side but the one against its strip, where it continues into its tab and a
+  // shadow there would cut the panel off from the tab.  `clip-path` trims that
+  // one side exactly (per edge, below); the 3rem on the others is room for the
+  // blur.  Two layers: a wide, faint one for depth and a tight one that keeps
+  // the edge defined on the dark canvas.
+  //
+  // Cost: one static shadow on one element, painted when the panel opens and
+  // never animated (the overlay transitions only `transform`).  No `filter`,
+  // no `backdrop-filter`, nothing redrawn on scroll or per frame.
+  box-shadow: OVERLAY_ELEVATION_SHADOW
+
 // Edge-specific positioning: each overlay is flush with its edge and
 // spans the full available dimension along that edge.
 
 // Left overlay: flush with the strip's right edge (2em from screen left).
+// `top` sits LAYOUT_TAB_TOP (4px, golden_layout.styl) below the caption bar —
+// where the strip tabs and the docked panels start — so a hovered panel and the
+// tab it opens from share one top edge.  Flush with the caption bar, the panel
+// stood 4px above a top tab, and the step read as a broken corner (Nikolay,
+// 2026-10-15).
 #auto-hide-overlay.auto-hide-overlay-left
-  top: CAPTION_BAR_HEIGHT  // flush below the caption bar, like #root-container
+  top: "calc(%s + %s)" % (CAPTION_BAR_HEIGHT LAYOUT_TAB_TOP)
   left: 2em
   bottom: 2rem  // stop above the bottom tab strip (2rem)
   width: 360px
+  clip-path: inset(-3rem -3rem -3rem 0)  // no shadow on the strip side
 
 // Right overlay: mirrored.
 #auto-hide-overlay.auto-hide-overlay-right
-  top: CAPTION_BAR_HEIGHT
+  top: "calc(%s + %s)" % (CAPTION_BAR_HEIGHT LAYOUT_TAB_TOP)
   right: 2em
   bottom: 2rem
   width: 360px
+  clip-path: inset(-3rem 0 -3rem -3rem)  // no shadow on the strip side
 
 // Bottom overlay: sits above the tab strip, inset to match #ROOT left/right padding.
 #auto-hide-overlay.auto-hide-overlay-bottom
@@ -798,6 +1059,7 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   right: 0.25em
   bottom: 2rem
   height: 280px
+  clip-path: inset(-3rem -3rem 0 -3rem)  // no shadow on the strip side
 
 // ---------------------------------------------------------------------------
 // Overlay resize handle — sits on the inner edge of the overlay (the edge
@@ -858,7 +1120,7 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
 // deliberately has no overflow:hidden.
 #auto-hide-overlay-body
   background-color: colors-ui-surface-base-panel
-  border-radius: 0.36em
+  border-radius: TAB_CORNER_RADIUS
   overflow: hidden
   box-shadow: none
 
@@ -986,8 +1248,8 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   gap: 2px
   margin: 0
   padding: 0 6px
-  background-color: #3a5070  // Same accent as collapsed strip
-  border-radius: 0 3px 3px 0  // Rounded only on the right
+  // No fill: the group sits on the status bar's own background (Nikolay,
+  // 2026-10-15; it was a #3a5070 chip).
   height: 100%  // Full status bar height for seamless connection
   align-self: stretch
 
@@ -1022,7 +1284,7 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   transition: background-color 150ms ease
 
   &:hover
-    background-color: #4a6080
+    background-color: colors-ui-surface-primary-secondary-hover
 
 // ---------------------------------------------------------------------------
 // Side-edge tabs — VS Studio style, inside the overlay.
@@ -1128,12 +1390,151 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
 .collapsed-icon-zone.has-icons
   flex-shrink: 0
 
-#auto-hide-collapsed-icon-zone-right.has-icons
-  border-radius: 3px 0 0 3px
+// Hidden for now (Nikolay, 2026-10-15): the per-panel icons of a minimal
+// sidebar.  Only the sidebar toggle shows in the group; the panels are still
+// reached through the thin edge line.  Delete this rule to bring them back.
+.collapsed-icon-zone .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button)
+  display: none
 
+SIDEBAR_OPEN_ICON_PATH = url('../../public/resources/shared/sidebar_open.svg')
+SIDEBAR_CLOSE_ICON_PATH = url('../../public/resources/shared/sidebar_close.svg')
+
+// The sidebar toggle — the Figma design system's `icons-lg=sidebar-open`
+// (sidebar expanded) and `icons-lg=sidebar-close` (sidebar minimal), drawn as
+// masks so the colour comes from tokens, like the tab icons.  It is the zone's
+// outer-end button in both modes, so it never moves.  The right edge's is
+// mirrored: its sidebar is on the right.
 .auto-hide-restore-button
-  font-size: 20px
-  line-height: 1
-  min-width: 24px
+  width: 1.5rem
+  height: 1.5rem
+  // Exactly 24px: the generic `button { flex: 0 0 1.75em }` made it 24.5px,
+  // which put the 16px icon a fractional 4.25px in from the button's edge.
+  flex: 0 0 1.5rem !important
+  padding: 0
   border: 0
   -webkit-app-region: no-drag
+  tab-icon(SIDEBAR_CLOSE_ICON_PATH, 1rem 1rem)
+  transition: background-color 150ms ease
+
+  &.sidebar-open
+    -webkit-mask-image: SIDEBAR_OPEN_ICON_PATH
+    mask-image: SIDEBAR_OPEN_ICON_PATH
+
+  &.sidebar-right
+    transform: scaleX(-1)
+
+// 16px between each sidebar toggle's ICON and the text beside it, on both
+// sides (Nikolay, 2026-10-15): the 24px button insets its 16px icon by 4px,
+// and the group pads 12px on the side facing the text.  The neighbours' own
+// spacing is cleared so it does not add on: "Ruby · UTF-8"'s 0.6em lead on
+// the left, `.status-right`'s 8px end padding on the right.
+#auto-hide-collapsed-icon-zone.has-icons
+  padding-right: 0.75rem
+
+#status-base #auto-hide-collapsed-icon-zone.has-icons + #file-info-status
+  margin-left: 0
+
+#auto-hide-collapsed-icon-zone-right.has-icons
+  padding-left: 0.75rem
+
+// `!important`: status_bar.styl sets it under `#status #status-base`.  (The
+// certificate readout's end margin is cleared with the location path it
+// separated it from — the "hidden for now" rule in status_bar.styl.)
+#status-base .status-right:has(+ #auto-hide-collapsed-icon-zone-right.has-icons)
+  padding-right: 0 !important
+
+// ---------------------------------------------------------------------------
+// Tab-list button and dropdown (Nikolay, 2026-10-16)
+//
+// Beside each sidebar toggle, on its inner side: the Figma design system's
+// `icons-lg=tab_list_sm`, drawn as a mask like the toggle.  It opens a menu of
+// that sidebar's pinned tabs, built like every other dropdown in the app —
+// `dropdown-surface()` with `ct-menu-item` rows (shared_widgets.styl) — that
+// opens UP from the status bar, DROPDOWN_TRIGGER_GAP above it, aligned to the
+// zone's outer edge.  ui/auto_hide.nim owns the open state and dismissal.
+// ---------------------------------------------------------------------------
+TAB_LIST_ICON_PATH = url('../../public/resources/shared/tab_list_sm.svg')
+CLOSE_SM_ICON_PATH = url('../../public/resources/shared/close_sm.svg')
+
+.collapsed-icon-zone.has-icons
+  position: relative
+
+.auto-hide-tablist-button
+  width: 1.5rem
+  height: 1.5rem
+  flex: 0 0 1.5rem !important
+  padding: 0
+  border: 0
+  -webkit-app-region: no-drag
+  tab-icon(TAB_LIST_ICON_PATH, 1rem 1rem)
+  transition: background-color 150ms ease
+
+  // Open: the icon stays lit while its menu is up.
+  &.open
+    background-color: TAB_ICON_COLOR_HOVER
+
+// 8px between the toggle's icon and the tab-list icon (Nikolay, 2026-10-16):
+// the two 24px buttons touch, and each insets its 16px icon by 4px.  So the
+// zone's 2px item gap goes (the per-panel icons it spaced are hidden for now —
+// restore it with them).
+.collapsed-icon-zone.has-icons
+  gap: 0
+
+// Lifted to the top of the page by ui/auto_hide.nim (`liftTabListMenu`),
+// which sets `bottom` and `left` / `right`: fixed, above every panel.
+.auto-hide-tablist-menu
+  position: fixed
+  z-index: 100
+  display: flex
+  flex-direction: column
+  min-width: 13.75rem
+  max-width: 22.5rem
+  max-height: 60vh
+  dropdown-surface()
+  // After the mixin on purpose, as the tab-overflow menu does: it sets
+  // `overflow: hidden`, but a long list of pinned tabs has to scroll.
+  overflow-y: auto
+  -webkit-app-region: no-drag
+
+.auto-hide-tablist-item
+  dropdown-surface-row()
+  // The generic `button { flex: 0 0 1.75em !important }` would squash the
+  // 2.25rem `ct-menu-item` row to 24.5px in this column (cf. request_panel's
+  // Handler button).
+  flex: 0 0 auto !important
+  white-space: nowrap
+  // Rows are square, as in every dropdown; only the menu's outer corners
+  // round.  The generic `button` rule rounds each row to 7px otherwise.
+  border-radius: 0 !important
+
+  &:first-child
+    border-radius: DROPDOWN_RADIUS DROPDOWN_RADIUS 0 0 !important
+
+  &:last-child
+    border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS !important
+
+  .ct-menu-item-label
+    overflow: hidden
+    text-overflow: ellipsis
+
+  .ct-menu-item-label
+    flex: 1 1 auto
+    min-width: 0
+
+  // The × at the end of the selected row (Figma `icons-lg=close-sm`): closes
+  // the panel that is showing.  A mask like the tab icons, so it takes their
+  // resting and hover colours (TAB_ICON_COLOR / _HOVER, shared_widgets.styl).
+  .auto-hide-tablist-close
+    flex: 0 0 1rem
+    width: 1rem
+    height: 1rem
+    margin-left: auto
+    cursor: pointer
+    tab-icon(CLOSE_SM_ICON_PATH, 1rem 1rem)
+
+  // The tab whose panel is showing.  On the label as well: `ct-menu-item`
+  // gives the label its own colour, which beat the row's.
+  &.active,
+  &.active .ct-menu-item-label
+    color: colors-ui-text-primary-active
+

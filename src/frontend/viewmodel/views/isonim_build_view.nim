@@ -141,20 +141,20 @@ proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
                title = "Run build (no re-record)",
                onclick = proc() =
                  if not vm.runBuild.isNil: vm.runBuild()):
-            text "▶"
+            discard
           tdiv(class = stopButtonClass(vm),
                title = "Stop build",
                onclick = proc() =
                  if vm.isRunning.val: vm.cancelBuild()):
-            text "■"
+            discard
           tdiv(class = "build-ctrl-btn build-clear-btn",
                title = "Clear build output",
                onclick = proc() = vm.clearOutput()):
-            text "✕"
+            discard
           tdiv(class = scrollButtonClass(vm),
                title = "Toggle auto-scroll",
                onclick = proc() = vm.toggleAutoScroll()):
-            text "↓"
+            discard
           tdiv(class = "build-duration",
                display = displayIf(vm.isRunning.val)):
             text vm.command.val
@@ -202,20 +202,20 @@ when defined(js):
                  title = "Run build (no re-record)",
                  onclick = proc() =
                    if not vm.runBuild.isNil: vm.runBuild()):
-              text "▶"
+              discard
             tdiv(class = stopButtonClass(vm),
                  title = "Stop build",
                  onclick = proc() =
                    if vm.isRunning.val: vm.cancelBuild()):
-              text "■"
+              discard
             tdiv(class = "build-ctrl-btn build-clear-btn",
                  title = "Clear build output",
                  onclick = proc() = vm.clearOutput()):
-              text "✕"
+              discard
             tdiv(class = scrollButtonClass(vm),
                  title = "Toggle auto-scroll",
                  onclick = proc() = vm.toggleAutoScroll()):
-              text "↓"
+              discard
             tdiv(class = "build-duration",
                  display = displayIf(vm.isRunning.val)):
               text vm.command.val
