@@ -236,6 +236,7 @@ const
     projectRootPath / "libs/nim-serialization",
     projectRootPath / "libs/nim-stew",
     projectRootPath / "libs/nim-unicodedb/src",
+    projectRootPath / "libs/nim-regex/src",
     projectRootPath / "libs/poly",
     projectRootPath / "libs/quicktest",
     projectRootPath / "libs/chronos",

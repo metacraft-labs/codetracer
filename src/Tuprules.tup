@@ -59,6 +59,7 @@ NIM_REPO_PATH_FLAGS=\
 --path:$(ROOT)/libs/nim-prompt\
 --path:$(ROOT)/libs/nim-stew\
 --path:$(ROOT)/libs/nim-unicodedb/src\
+--path:$(ROOT)/libs/nim-regex/src\
 --path:$(ROOT)/libs/poly\
 --path:$(ROOT)/libs/quicktest\
 --path:$(ROOT)/libs/chronos\
