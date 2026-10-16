@@ -6,7 +6,10 @@
 ## and that reactive updates (tab switching, variable list changes,
 ## loading state) propagate to the DOM automatically.
 ##
-## Uses MockRenderer for headless testing — no browser required.
+## MockRenderer and MockBackendService isolate view structure and callbacks
+## without launching a debugger for each unit assertion. Production event wiring,
+## layout, and persisted sidebar modes are covered by the real Electron tests
+## in auto-hide/auto-hide-panes.spec.ts.
 ##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_isonim_views.nim
@@ -390,6 +393,24 @@ suite "IsoNim Auto-hide Collapsed Icons — structure":
     panel.children[1].fireEvent("click")
     check selected == 1
 
+  test "restore controls sit nearest the center on both edges":
+    for right in [false, true]:
+      let r = MockRenderer()
+      var restored = false
+      let label = if right: "Use normal right sidebar" else: "Use normal left sidebar"
+      let callbacks = AutoHideCollapsedIconCallbacks(
+        restoreFirst: right, restoreLabel: label,
+        onRestore: proc() = restored = true)
+      let panel = renderAutoHideCollapsedIconsPanel(r,
+        @[AutoHideCollapsedIconRecord(icon: "F", title: "FILES")], callbacks)
+      check panel.children.len == 2
+      let button = panel.children[if right: 0 else: 1]
+      check button.attributes["aria-label"] == label
+      button.fireEvent("click")
+      check restored
+      let empty = renderAutoHideCollapsedIconsPanel(r, @[], callbacks)
+      check empty.children.len == 0
+
 suite "IsoNim Auto-hide Bottom Strip — structure":
   ## These three cases used to exercise `isonim_auto_hide_bottom_tabs_view`,
   ## a second bottom-tabs renderer that only storybook imported and that the
@@ -529,6 +550,23 @@ suite "IsoNim Auto-hide Side Strips — structure":
 
     panel.children[0].fireEvent("click")
     check clicked
+
+  test "normal strips offer a mode button below tabs, empty and minimal strips do not":
+    let r = MockRenderer()
+    var changed = false
+    let callbacks = AutoHideSideStripCallbacks(
+      modeLabel: "Use minimal left sidebar", modeGlyph: "«",
+      onToggleMode: proc() = changed = true)
+    let tabs = @[AutoHideSideStripRecord(title: "FILES")]
+    let panel = renderAutoHideSideStripPanel(r, tabs, false, callbacks)
+    check panel.children.len == 2
+    check panel.children[1].attributes["aria-label"] == "Use minimal left sidebar"
+    panel.children[1].fireEvent("click")
+    check changed
+    check renderAutoHideSideStripPanel(r, @[], false, callbacks).children.len == 0
+    let minimal = renderAutoHideSideStripPanel(r, tabs, true, callbacks)
+    check minimal.children.len == 1
+    check minimal.children[0].attributes["class"] == AutoHideCollapsedStripLineClass
 
 suite "IsoNim Status Shell — structure":
 

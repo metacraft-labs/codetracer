@@ -370,6 +370,7 @@ when defined(js):
         # the hosts exist before anything mounts into them.
         discard windowSetTimeout(proc() =
           requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+          requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone-right", AutoHideEdge.Right)
           requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
         , 0)
     except CatchableError as e:

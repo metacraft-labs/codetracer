@@ -48,7 +48,7 @@ type
 
   TestEventKind* = enum
     tekDiscoveryStarted = "discovery-started"
-
+
     tekDiscoveryFinished = "discovery-finished"
     tekRunStarted = "run-started"
 [36m    tekRecordStarted = "record-started"[0m
@@ -99,7 +99,7 @@ type
     severity*: DiagnosticSeverity
     message*: string
     file*: string
-
+
     range*: Option[SourceRange]
 
   TestItem* = object
@@ -150,7 +150,7 @@ type
     projectRoot*: string
     file*: string
     testId*: string
-
+
     selector*: string
 
   TestCommandTemplates* = object
@@ -201,7 +201,7 @@ type
     record*: proc(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.}
     parseEvent*: proc(raw: string): ProviderResult[TestEvent] {.gcsafe.}
     mapTraceEntryPoints*: proc(catalog: TestCatalog; traces: seq[TraceMetadata]): ProviderResult[Table[string, TraceMetadata]] {.gcsafe.}
-
+
 
 proc ok*(): ValidationResult =
   ValidationResult(valid: true, errors: @[])
@@ -252,7 +252,7 @@ proc sourceRangeFromJson*(node: JsonNode): SourceRange =
 [36m    startLine: node.fieldInt("startLine"),[0m
     startColumn: node.fieldInt("startColumn"),
     endLine: node.fieldInt("endLine"),
-
+
     endColumn: node.fieldInt("endColumn"))
 
 proc toJson*(location: LocationProvenance): JsonNode =
@@ -303,7 +303,7 @@ proc toJson*(provider: TestProviderInfo): JsonNode =
   %*{
     "id": provider.id,
 [36m    "language": provider.language,[0m
-
+
     "framework": provider.framework,
     "displayName": provider.displayName,
     "version": provider.version,
@@ -354,7 +354,7 @@ proc toJson*(item: TestItem): JsonNode =
     "tags": item.tags,
     "location": item.location.toJson,
     "stale": item.stale,
-
+
     "staleReason": item.staleReason
 [36m  }[0m
 
@@ -405,7 +405,7 @@ proc testCatalogFromJson*(node: JsonNode): TestCatalog =
     result.diagnostics.add diagnosticFromJson(diagnostic)
 
 proc toJson*(trace: TraceMetadata): JsonNode =
-
+
   var metadata = newJObject()
   for key, value in trace.metadata:
     metadata[key] = %value
@@ -456,7 +456,7 @@ proc toJson*(event: TestEvent): JsonNode =
 
 proc testEventFromJson*(node: JsonNode): TestEvent =
   result = TestEvent(
-
+
     schemaVersion: node.fieldInt("schemaVersion"),
     kind: parseEnumValue[TestEventKind](node.fieldString("kind"), "test event kind"),
     providerId: node.fieldString("providerId"),
@@ -507,7 +507,7 @@ proc validateSourceRange*(range: SourceRange): ValidationResult =
     errors.addError "source range endColumn must not precede startColumn on the same line"
   fail(errors)
 
-
+
 proc validateCapabilities*(capabilities: TestCapabilities): ValidationResult =
   var errors: seq[string] = @[]
   if capabilities.canRunSingle and not capabilities.canDiscoverFile and
@@ -558,7 +558,7 @@ proc validateTestItem*(item: TestItem): ValidationResult =
 
 proc validateCatalog*(catalog: TestCatalog): ValidationResult =
   var errors: seq[string] = @[]
-
+
   if catalog.schemaVersion != TestCatalogSchemaVersion:
     errors.addError "unsupported catalog schemaVersion: " & $catalog.schemaVersion
   if catalog.provider.id.len == 0:
@@ -609,7 +609,7 @@ proc validateEvent*(event: TestEvent): ValidationResult =
   of tekRecordFinished:
 [36m    if event.testId.len == 0:[0m
       errors.addError "record-finished event requires testId"
-
+
     if event.status.isNone:
       errors.addError "record-finished event requires status"
   else:
@@ -660,7 +660,7 @@ proc validateManifest*(manifest: AdapterManifest): ValidationResult =
       manifest.commandTemplates.runFile.len == 0:
     errors.addError "manifest runFile capability requires runFile command"
   if manifest.capabilities.canRunSingle and
-
+
 [36m      manifest.commandTemplates.runSingle.len == 0:[0m
     errors.addError "manifest runSingle capability requires runSingle command"
   if manifest.capabilities.canRecordProject and

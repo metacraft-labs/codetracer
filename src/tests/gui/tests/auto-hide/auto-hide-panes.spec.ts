@@ -47,7 +47,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ctUserConfigDir } from "../../lib/ct-home";
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect, codetracerInstallDir, restartTraceFolderElectron } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { LayoutPage } from "../../page-objects/layout-page";
 import {
@@ -902,5 +902,167 @@ test.describe("Pinning FILES does not reset the layout", () => {
     const leftTabs = ctPage.locator("#auto-hide-strip-left .auto-hide-strip-tab");
     await expect(leftTabs).toHaveCount(1, { timeout: WAIT_TIMEOUT_MS });
     await expect(leftTabs.first()).toHaveText(/FILES/i);
+  });
+});
+
+// No mocks: seed the real persisted layout, then exercise the production
+// controls and IPC persistence in Electron. The saved entries describe real
+// Filesystem/Event Log components, just as a previous app launch would save.
+test.describe("Independent sidebar presentation", () => {
+  test.setTimeout(120_000);
+  test.use({
+    sourcePath: fixture.traceDir,
+    launchMode: "trace-folder",
+    preserveAutoHideState: true,
+  });
+
+  function seedModes(leftMinimal?: unknown, rightMinimal?: unknown) {
+    const right = {
+      ...pinnedFilesystemPanel(),
+      edge: 1,
+      title: "EVENTS",
+      content: CONTENT_EVENT_LOG,
+      componentId: 1,
+      config: {
+        type: "component",
+        componentType: "genericUiComponent",
+        componentState: { id: 1, label: "eventLogComponent-1", content: CONTENT_EVENT_LOG },
+        title: "EVENTS",
+      },
+    };
+    fs.mkdirSync(userConfigDir, { recursive: true });
+    fs.writeFileSync(autoHideStatePath, JSON.stringify({
+      panels: [pinnedFilesystemPanel(), right], leftMinimal, rightMinimal,
+    }));
+  }
+
+  test.beforeEach(() => seedModes());
+  test.afterEach(() => removeIfPresent(autoHideStatePath));
+
+  const leftHost = "#auto-hide-collapsed-icon-zone";
+  const rightHost = "#auto-hide-collapsed-icon-zone-right";
+
+  async function modes(page: import("@playwright/test").Page, left: boolean, right: boolean) {
+    for (const [edge, minimal] of [["left", left], ["right", right]] as const) {
+      const strip = page.locator(`#auto-hide-strip-${edge}`);
+      await expect(strip).toHaveClass(minimal ? /collapsed-mode/ : /^(?!.*collapsed-mode)/);
+      await expect(strip.locator(".auto-hide-mode-button")).toHaveCount(minimal ? 0 : 1);
+      const host = page.locator(edge === "left" ? leftHost : rightHost);
+      if (minimal) await expect(host).toBeVisible();
+      else await expect(host).toBeHidden();
+    }
+  }
+
+  test("visible controls independently switch all four combinations and preserve live panels", async ({ ctPage, electronApp }) => {
+    await new LayoutPage(ctPage).waitForTraceLoaded();
+    await modes(ctPage, false, false); // Legacy state defaults to normal.
+    await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+
+    // Keep the right panel docked while changing the left presentation.
+    await ctPage.locator("#auto-hide-strip-right .auto-hide-strip-tab").click();
+    await expect(dockedContainer(ctPage, "right")).toHaveClass(/docked-open/);
+    await ctPage.getByRole("button", { name: "Use minimal left sidebar", exact: true }).click();
+    await modes(ctPage, true, false);
+    await expect(dockedContainer(ctPage, "right")).toHaveClass(/docked-open/);
+    await expect(ctPage.locator(`${leftHost} button`).last()).toHaveAccessibleName("Use normal left sidebar");
+    await expect(ctPage.locator(`${leftHost} button`).first()).toHaveAccessibleName("FILES");
+
+    await ctPage.getByRole("button", { name: "Use minimal right sidebar", exact: true }).click();
+    await modes(ctPage, true, true);
+    await expect(dockedContainer(ctPage, "right")).not.toHaveClass(/docked-open/);
+    await expect(ctPage.locator(`${rightHost} button`).first()).toHaveAccessibleName("Use normal right sidebar");
+    await expect(ctPage.locator(`${rightHost} button`).last()).toHaveAccessibleName("EVENTS");
+    const leftBox = await ctPage.locator(leftHost).boundingBox();
+    const rightBox = await ctPage.locator(rightHost).boundingBox();
+    expect(leftBox!.x).toBeLessThan(10);
+    expect(rightBox!.x).toBeGreaterThan((await ctPage.evaluate(() => window.innerWidth)) / 2);
+    await ctPage.screenshot({ path: test.info().outputPath("independent-minimal-sidebars.png") });
+    // Icons reveal the actual assigned edge. Keep a reference to a live DOM
+    // node so closing/reopening through a mode switch proves it was retained.
+    await ctPage.locator(leftHost).getByRole("button", { name: "FILES", exact: true }).click();
+    await expect(ctPage.locator(OVERLAY_SELECTOR)).toHaveClass(/auto-hide-overlay-left/);
+    await ctPage.evaluate(() => {
+      (window as any).__sidebarLiveNode = document.querySelector("#auto-hide-overlay-content")?.firstElementChild;
+    });
+    await ctPage.getByRole("button", { name: "Use normal left sidebar", exact: true }).click();
+    await modes(ctPage, false, true);
+    await ctPage.getByRole("button", { name: "Use minimal left sidebar", exact: true }).click();
+    await expect(ctPage.locator(OVERLAY_SELECTOR)).not.toHaveClass(/visible/);
+    await ctPage.locator(leftHost).getByRole("button", { name: "FILES", exact: true }).click();
+    expect(await ctPage.evaluate(() => (window as any).__sidebarLiveNode ===
+      document.querySelector("#auto-hide-overlay-content")?.firstElementChild)).toBe(true);
+    await ctPage.keyboard.press("Escape");
+    await ctPage.locator(rightHost).getByRole("button", { name: "EVENTS", exact: true }).click();
+    await expect(ctPage.locator(OVERLAY_SELECTOR)).toHaveClass(/auto-hide-overlay-right/);
+    await ctPage.keyboard.press("Escape");
+
+    await ctPage.getByRole("button", { name: "Use normal right sidebar", exact: true }).click();
+    await modes(ctPage, true, false);
+    expect(electronApp).not.toBeNull();
+    await electronApp!.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w.isVisible())!;
+      win.setSize(1400, 900);
+      win.maximize();
+      win.unmaximize();
+    });
+    await modes(ctPage, true, false);
+    await expect(() => {
+      const saved = JSON.parse(fs.readFileSync(autoHideStatePath, "utf8"));
+      expect([saved.leftMinimal, saved.rightMinimal]).toEqual([true, false]);
+    }).toPass();
+    // Restart the real app. A bare renderer reload does not repeat the index
+    // process's one-time init IPC, so it cannot test the startup restore path.
+    const restarted = await restartTraceFolderElectron(electronApp!, fixture.traceDir);
+    try {
+      await modes(restarted.page, true, false);
+      // Native button keyboard activation restores the left strip.
+      await restarted.page.getByRole("button", { name: "Use normal left sidebar", exact: true }).focus();
+      await restarted.page.keyboard.press("Enter");
+      await modes(restarted.page, false, false);
+      await expect(bottomStripTabs(restarted.page)).toHaveCount(DEFAULT_BOTTOM_TAB_COUNT);
+    } finally {
+      await restarted.teardown();
+    }
+  });
+
+  for (const [left, right] of [[false, true], [true, false], [true, true]] as const) {
+    test.describe(`saved modes left=${left} right=${right}`, () => {
+      test.beforeEach(() => seedModes(left, right));
+      test("restores independent modes on launch", async ({ ctPage }) => {
+        await new LayoutPage(ctPage).waitForTraceLoaded();
+        await modes(ctPage, left, right);
+      });
+    });
+  }
+
+  for (const [left, right, expectedLeft, expectedRight] of [
+    ["true", true, false, true], [true, { invalid: true }, true, false],
+  ] as const) {
+    test.describe(`invalid mode ${JSON.stringify([left, right])}`, () => {
+      test.beforeEach(() => seedModes(left, right));
+      test("defaults only the invalid preference to normal", async ({ ctPage }) => {
+        await new LayoutPage(ctPage).waitForTraceLoaded();
+        await modes(ctPage, expectedLeft, expectedRight);
+      });
+    });
+  }
+
+  test.describe("empty edges", () => {
+    test.beforeEach(() => {
+      fs.writeFileSync(autoHideStatePath, JSON.stringify({ panels: [], leftMinimal: true, rightMinimal: false }));
+    });
+    test("remember preferences without showing empty icon groups", async ({ ctPage }) => {
+      await new LayoutPage(ctPage).waitForTraceLoaded();
+      await expect(ctPage.locator(`${leftHost} button`)).toHaveCount(0);
+      await expect(ctPage.locator(`${rightHost} button`)).toHaveCount(0);
+      await waitForDefaultBottomTabs(ctPage, WAIT_TIMEOUT_MS);
+      await expect(() => {
+        const saved = JSON.parse(fs.readFileSync(autoHideStatePath, "utf8"));
+        expect([saved.leftMinimal, saved.rightMinimal]).toEqual([true, false]);
+      }).toPass();
+      await pinToEdge(ctPage, "Left", 0);
+      await expect(ctPage.locator(leftHost)).toBeVisible();
+      await expect(ctPage.getByRole("button", { name: "Use normal left sidebar", exact: true })).toBeVisible();
+    });
   });
 });

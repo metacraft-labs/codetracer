@@ -2719,21 +2719,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     if not data.ui.status.isNil:
       data.ui.status.requestStatusRender()
     requestAutoHideBottomStripRender(cstring"auto-hide-bottom-strip")
-    # …and the collapsed status-bar icon zone, for the same reason and on the
-    # same terms as the bottom strip: it is a host inside the status shell, so
-    # the mount below is a no-op while the host is missing and `ui/status.nim`
-    # re-mounts it whenever it rebuilds the shell.
-    #
-    # This line was missing, and its absence is a real defect rather than a
-    # missed optimisation.  When the strips are collapsed — the normal state for
-    # a maximized window, `Planned-Features/Auto-Hide-Panes.md` §1.3 — the side
-    # strip renders as a 1 px accent line with no tabs, and §10 makes the icon
-    # zone the replacement affordance: "This icon zone serves as the panel
-    # directory — it tells the user which panels" are pinned.  With no render
-    # request here, pinning a panel while collapsed left the zone empty until
-    # something unrelated happened to rebuild the status shell, so the panel had
-    # no visible affordance at all.
+    # Each edge owns its footer directory; status-shell rebuilds remount both.
     requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+    requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone-right", AutoHideEdge.Right)
     # Persist here rather than only from the `stateChanged` handler below.
     # Pinning is a REPARENT, and `itemDestroyed` deliberately returns early
     # while `data.ui.isReparenting` is set, so a pin can complete without
@@ -3012,36 +3000,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   proc createNewSessionHelper() =
     createNewSession(data)
 
-  # Force collapsed mode on/off for E2E tests.  Bypasses maximize
-  # detection so tests can capture collapsed-mode screenshots without
-  # actually maximizing the window.
-  #
-  # The override is STICKY.  Without this, `updateCollapsedMode` below — which
-  # runs on every window `resize`, plus once 1 s after layout init — simply
-  # overwrote the forced value from its maximize heuristic, so the override
-  # silently expired at the next resize.  Under Xvfb the window
-  # fills the virtual screen, so the heuristic answers "maximized", and a spec
-  # that had asked for expanded strips would find `#auto-hide-strip-left`
-  # rendered as the 1 px `collapsed-strip-line` with its tabs gone —
-  # `auto-hide-panes.spec.ts`'s "editor unpin behavior" failed exactly that
-  # way, with the tab detached from under `locator.hover`.
-  #
-  # There is deliberately no way to clear the override: only test hooks set it,
-  # and a test that has pinned the rendering mode wants it pinned for the rest
-  # of the process.
-  var collapsedModeForced = false
-  var collapsedModeForcedValue = false
-
+  # Backwards-compatible force-both helper. Production controls change one edge.
   proc forceCollapsedMode(enable: bool) =
-    if autoHideState.isNil:
-      initAutoHideState()
-    collapsedModeForced = true
-    collapsedModeForcedValue = enable
-    autoHideState.collapsedMode = enable
-    autoHideState.leftBounded = enable
-    autoHideState.rightBounded = enable
-    if not autoHideState.onChanged.isNil:
-      autoHideState.onChanged()
+    setEdgeMinimal(AutoHideEdge.Left, enable)
+    setEdgeMinimal(AutoHideEdge.Right, enable)
 
   # Render side-edge tabs into the overlay's side-tab container.
   # Called from onPanelShown and whenever the overlay edge changes.
@@ -3076,49 +3038,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     };
   """.}
 
-  # ---------------------------------------------------------------------------
-  # Maximize detection for collapsed-mode auto-hide strips.
-  # When the window is maximized and an edge is bounded (no adjacent monitor),
-  # side strips collapse to a 1px accent line.
-  # ---------------------------------------------------------------------------
-  proc updateCollapsedMode() =
-    ## Check if the window is maximized and update collapsed mode.
-    ## Each edge is evaluated independently for adjacent monitors.
-    ## This is a simplified check — full multi-monitor detection requires
-    ## Electron's screen API (done via IPC in main process).
-    ## For now, we use a heuristic: if outerWidth ~= screen.availWidth
-    ## and outerHeight ~= screen.availHeight, the window is maximized.
-    ##
-    ## An explicit `forceCollapsedMode` override wins: see the note there.
-    if collapsedModeForced:
-      if not autoHideState.isNil and
-         autoHideState.collapsedMode != collapsedModeForcedValue:
-        autoHideState.collapsedMode = collapsedModeForcedValue
-        autoHideState.leftBounded = collapsedModeForcedValue
-        autoHideState.rightBounded = collapsedModeForcedValue
-        if not autoHideState.onChanged.isNil:
-          autoHideState.onChanged()
-      return
-    {.emit: """
-      var isMax = (window.outerWidth >= screen.availWidth - 8) &&
-                  (window.outerHeight >= screen.availHeight - 8);
-    """.}
-    var isMax {.importc, nodecl.}: bool
-    if not autoHideState.isNil:
-      let wasCollapsed = autoHideState.collapsedMode
-      autoHideState.collapsedMode = isMax
-      # Simplified bounded-edge detection: when maximized, assume both
-      # left and right edges are bounded.  Full multi-monitor detection
-      # via Electron's screen API is a future enhancement.
-      autoHideState.leftBounded = isMax
-      autoHideState.rightBounded = isMax
-      if wasCollapsed != isMax:
-        if not autoHideState.onChanged.isNil:
-          autoHideState.onChanged()
-
-  # Check on initial load and on window resize/maximize.
-  discard windowSetTimeout(proc() = updateCollapsedMode(), 1000)
-
   proc requestMenuRenderAfterResize() =
     ## Refresh the caption bar after a resize, at most once per 50 ms.
     ##
@@ -3149,7 +3068,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   {.emit: """
     window.addEventListener('resize', function() {
-      `updateCollapsedMode`();
       `requestMenuRenderAfterResize`();
     });
   """.}

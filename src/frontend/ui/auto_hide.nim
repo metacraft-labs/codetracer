@@ -146,6 +146,7 @@ type
     panels*: seq[AutoHidePanel]
     activeOverlay*: AutoHidePanel  ## Currently shown overlay, or nil
     lastActivePanel*: AutoHidePanel  ## Last panel shown in overlay (survives hideOverlay)
+    lastPanelByEdge*: array[AutoHideEdge, AutoHidePanel]
     overlayVisible*: bool
     ## True when the overlay was opened via a click (stays open on mouse-leave).
     ## False when opened via hover-preview (auto-dismisses on mouse-leave).
@@ -153,15 +154,9 @@ type
     ## Panel currently docked into the inline sidebar (not the overlay). nil if none.
     dockedPanel*: AutoHidePanel
     dockedVisible*: bool
-    ## Collapsed mode: when true, side strips render as 1px accent lines
-    ## instead of 28px text-label strips.  Activated when the window is
-    ## maximized and the edge is bounded (no adjacent monitor).  Can be
-    ## forced on via __ctForceCollapsedMode for E2E tests.
-    collapsedMode*: bool
-    ## Per-edge bounded flags (true = screen boundary, no adjacent monitor).
-    ## Only meaningful when collapsedMode is true.
-    leftBounded*: bool
-    rightBounded*: bool
+    ## Presentation preferences belong to each edge, independent of window size.
+    leftMinimal*: bool
+    rightMinimal*: bool
     ## Callback to re-render strips after mutations.
     onChanged*: proc()
     ## Callback fired after a panel's overlay is shown (with the panel
@@ -964,6 +959,7 @@ proc showDockedPanel*(panel: AutoHidePanel) =
       containerEl.style.height = cstring($panel.overlayHeight & "px")
 
   autoHideState.dockedPanel = panel
+  autoHideState.lastPanelByEdge[panel.edge] = panel
   autoHideState.dockedVisible = true
 
   if not autoHideState.onChanged.isNil:
@@ -1192,11 +1188,11 @@ proc cancelHoverPreview*() =
 
 proc isEdgeCollapsed*(edge: AutoHideEdge): bool =
   ## Returns true when the given edge should render in collapsed (1px) mode.
-  if autoHideState.isNil or not autoHideState.collapsedMode:
+  if autoHideState.isNil:
     return false
   case edge
-  of Left:   autoHideState.leftBounded
-  of Right:  autoHideState.rightBounded
+  of Left:   autoHideState.leftMinimal
+  of Right:  autoHideState.rightMinimal
   of Bottom: false  # Bottom uses status bar icons, not 1px strip
 
 proc hideOverlay*() =
@@ -1238,6 +1234,34 @@ proc hideOverlay*() =
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
 
+proc setEdgeMinimal*(edge: AutoHideEdge; minimal: bool) =
+  ## Change one edge without destroying live panel contents or disturbing the
+  ## opposite edge. Resize/maximize never overrides these saved preferences.
+  if edge == Bottom:
+    return
+  initAutoHideState()
+  if isEdgeCollapsed(edge) == minimal:
+    return
+  cancelHoverPreview()
+  if edge == Left:
+    autoHideState.leftMinimal = minimal
+  else:
+    autoHideState.rightMinimal = minimal
+  if minimal:
+    if not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay.edge == edge:
+      hideOverlay()
+    if not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel.edge == edge:
+      hideDockedPanel()
+  # A visible minimal preview can stay open when normal tabs return, but its
+  # chrome must follow the new mode (including removal of overlay side tabs).
+  if not minimal and not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay.edge == edge:
+    let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+    if not overlayEl.isNil:
+      overlayEl.classList.remove(cstring"collapsed-overlay")
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+  deferredUpdateGLSize()
+
 proc doShowOverlayImpl(panel: AutoHidePanel) =
   ## Internal: perform the DOM manipulation to show `panel` in the overlay.
   ## Callers must set `autoHideState.pinnedOpen` before calling.
@@ -1247,6 +1271,7 @@ proc doShowOverlayImpl(panel: AutoHidePanel) =
 
   autoHideState.activeOverlay = panel
   autoHideState.lastActivePanel = panel
+  autoHideState.lastPanelByEdge[panel.edge] = panel
   autoHideState.overlayVisible = true
 
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
@@ -1504,8 +1529,7 @@ proc contentIcon*(content: Content): cstring =
 proc sideAutoHideTabsModel*(edge: AutoHideEdge): tuple[
     panels: seq[AutoHidePanel];
     collapsed: bool] =
-  ## Derive left/right side-strip state while preserving the 1.28
-  ## Xvfb-sensitive collapsed-mode heuristic in ``isEdgeCollapsed``.
+  ## Derive left/right side-strip state from explicit presentation preferences.
   let panels = if not autoHideState.isNil:
       autoHideState.panelsForEdge(edge)
     else:
@@ -1530,6 +1554,9 @@ when defined(js):
 
     let panels = model.panels
     let callbacks = AutoHideSideStripCallbacks(
+      modeLabel: "Use minimal " & (if edge == Left: "left" else: "right") & " sidebar",
+      modeGlyph: (if edge == Left: "«" else: "»"),
+      onToggleMode: proc() = setEdgeMinimal(edge, true),
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
           showDockedPanel(panels[index]),
@@ -1544,9 +1571,8 @@ when defined(js):
       onCollapsedSelect: proc() =
         if panels.len > 0:
           let target = if not autoHideState.isNil and
-                          not autoHideState.lastActivePanel.isNil and
-                          autoHideState.lastActivePanel.edge == edge:
-              autoHideState.lastActivePanel
+                          autoHideState.lastPanelByEdge[edge] in panels:
+              autoHideState.lastPanelByEdge[edge]
             else:
               panels[0]
           showDockedPanel(target),
@@ -1701,27 +1727,24 @@ else:
 proc requestBottomAutoHideTabsRender*(containerId: cstring) =
   requestAutoHideBottomStripRender(containerId)
 
-proc collapsedIconZoneModel*(): seq[AutoHidePanel] =
+proc collapsedIconZoneModel*(edge: AutoHideEdge = Left): seq[AutoHidePanel] =
   ## Derive side-pinned panels that should appear in the collapsed status-bar
   ## icon zone. Bottom panels keep their separate text tabs.
-  if autoHideState.isNil or not autoHideState.collapsedMode:
+  if autoHideState.isNil:
     return @[]
 
-  for panel in autoHideState.panels:
-    if panel.edge == Bottom:
-      continue
-    if not isEdgeCollapsed(panel.edge):
-      continue
-    result.add(panel)
+  if edge == Bottom or not isEdgeCollapsed(edge):
+    return @[]
+  autoHideState.panelsForEdge(edge)
 
 when defined(js):
-  proc requestCollapsedIconZoneRender*(containerId: cstring) =
+  proc requestCollapsedIconZoneRender*(containerId: cstring, edge: AutoHideEdge = Left) =
     ## Refresh the collapsed status-bar icon zone through IsoNim direct DOM.
     let container = dom_api.getElementById(dom_api.document, containerId)
     if dom_api.isNodeNil(dom_api.Node(container)):
       return
 
-    let panels = collapsedIconZoneModel()
+    let panels = collapsedIconZoneModel(edge)
     var records: seq[AutoHideCollapsedIconRecord] = @[]
     for panel in panels:
       records.add(AutoHideCollapsedIconRecord(
@@ -1729,13 +1752,16 @@ when defined(js):
         title: $panel.title))
 
     let callbacks = AutoHideCollapsedIconCallbacks(
+      restoreFirst: edge == Right,
+      restoreLabel: "Use normal " & (if edge == Left: "left" else: "right") & " sidebar",
+      onRestore: proc() = setEdgeMinimal(edge, false),
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
           showOverlay(panels[index]))
     let r = WebRenderer()
     renderAutoHideCollapsedIconsInto(r, container, records, callbacks)
 else:
-  proc requestCollapsedIconZoneRender*(containerId: cstring) =
+  proc requestCollapsedIconZoneRender*(containerId: cstring, edge: AutoHideEdge = Left) =
     discard
 
 proc overlaySideTabsModel*(): tuple[
@@ -1746,7 +1772,6 @@ proc overlaySideTabsModel*(): tuple[
   ## auto-hide state. Kept separate so the direct IsoNim renderer and tests can
   ## exercise the same visibility / edge-class rules.
   if autoHideState.isNil or
-     not autoHideState.collapsedMode or
      autoHideState.activeOverlay.isNil:
     return (visible: false, edgeClass: "", panels: @[])
 
@@ -1816,8 +1841,8 @@ proc serializeAutoHideState*(): JsObject =
   ## un-pinned.  A ``standalone`` panel is re-registered from scratch on every
   ## launch and has no GL config to re-attach from, so persisting it would
   ## only suppress that registration.
-  if autoHideState.isNil or autoHideState.panels.len == 0:
-    return js{"panels": newJsArray()}
+  if autoHideState.isNil:
+    return js{"panels": newJsArray(), "leftMinimal": false, "rightMinimal": false}
 
   var panelArray = newJsArray()
   # Index rather than `for panel in ...`: the loop variable of a `for x in seq`
@@ -1844,7 +1869,12 @@ proc serializeAutoHideState*(): JsObject =
     }
     panelArray.push(obj)
 
-  return js{"panels": panelArray}
+  # Nim's JS backend can store bools in Uint8Arrays as 0/1. Persist JSON
+  # booleans so strict validation on restore also accepts those internal values.
+  proc jsonBoolean(value: bool): bool {.importjs: "Boolean(#)".}
+  return js{"panels": panelArray,
+    "leftMinimal": jsonBoolean(autoHideState.leftMinimal),
+    "rightMinimal": jsonBoolean(autoHideState.rightMinimal)}
 
 proc restoreAutoHideState*(saved: JsObject) =
   ## Restore auto-hide panels from a previously serialised state.
@@ -1853,6 +1883,10 @@ proc restoreAutoHideState*(saved: JsObject) =
     return
 
   initAutoHideState()
+  # Only literal booleans are valid; malformed fields fall back independently.
+  proc savedMode(value: JsObject): bool {.importjs: "(# === true)".}
+  autoHideState.leftMinimal = savedMode(saved["leftMinimal"])
+  autoHideState.rightMinimal = savedMode(saved["rightMinimal"])
 
   let panelArray = saved["panels"]
   if panelArray.isNil or panelArray.isUndefined:
