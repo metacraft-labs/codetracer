@@ -1298,7 +1298,9 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   # later, the pane clips the last rows rather than the flex column squeezing
   # every row and cutting off descenders.
   r.setStyle(el, "flex-shrink", "0")
-  # Monaco's line: 22 px, its text in the line box's middle.
+  # Monaco's line (`chrome.EditorLinePx`: 24 px on macOS, 22 px elsewhere,
+  # derived by `chrome.monacoLineHeightPx`), its text in the line box's
+  # middle.
   r.setStyle(el, "height", $EditorLinePx & "px")
   r.setStyle(el, "line-height", $EditorLinePx & "px")
 
