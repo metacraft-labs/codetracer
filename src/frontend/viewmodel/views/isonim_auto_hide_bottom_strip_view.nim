@@ -22,6 +22,9 @@ type
   AutoHideBottomStripRecord* = object
     title*: string
     active*: bool
+    ## Opened by a click, not a hover preview — only then the × shows, as on
+    ## the side strips (`AutoHideSideStripRecord.pinned`).
+    pinned*: bool
 
   AutoHideBottomStripCallbacks* = object
     onSelect*: proc(index: int)
@@ -82,7 +85,7 @@ proc invokeHide(cb: AutoHideBottomStripCallbacks; i: int) =
   if not cb.onHide.isNil: cb.onHide(i)
 
 proc showsHide(cb: AutoHideBottomStripCallbacks; tab: AutoHideBottomStripRecord): bool =
-  tab.active and not cb.onHide.isNil
+  tab.active and tab.pinned and not cb.onHide.isNil
 
 proc invokeUnpin(cb: AutoHideBottomStripCallbacks; i: int) =
   if not cb.onUnpin.isNil: cb.onUnpin(i)

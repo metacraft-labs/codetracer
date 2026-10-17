@@ -16,6 +16,10 @@ type
   AutoHideSideStripRecord* = object
     title*: string
     active*: bool
+    ## Opened by a click (docked, or the overlay pinned open) rather than shown
+    ## as a hover preview.  Only such a tab gets the × (Nikolay, 2026-10-17):
+    ## a preview closes itself when the pointer leaves.
+    pinned*: bool
 
   AutoHideSideStripCallbacks* = object
     modeLabel*: string
@@ -84,7 +88,7 @@ proc invokeHide(callbacks: AutoHideSideStripCallbacks; index: int) =
     callbacks.onHide(index)
 
 proc showsHide(callbacks: AutoHideSideStripCallbacks; tab: AutoHideSideStripRecord): bool =
-  tab.active and not callbacks.onHide.isNil
+  tab.active and tab.pinned and not callbacks.onHide.isNil
 
 proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onUnpin.isNil:

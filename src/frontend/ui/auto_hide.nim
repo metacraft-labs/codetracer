@@ -1615,10 +1615,13 @@ proc revealOverlay*(panel: AutoHidePanel) =
 
   if autoHideState.activeOverlay == panel and autoHideState.overlayVisible:
     # Already visible.  Promote a hover preview to a click-pinned overlay so it
-    # survives the pointer leaving, but re-render nothing: `pinnedOpen` feeds no
-    # rendered output, so signalling `onChanged` here would only rebuild the
-    # strip for no observable change.
-    autoHideState.pinnedOpen = true
+    # survives the pointer leaving.  `pinnedOpen` now feeds the strip (the ×
+    # shows on a pinned tab only), so the promotion re-renders it — once: a
+    # repeat call finds it pinned already and returns without signalling.
+    if not autoHideState.pinnedOpen:
+      autoHideState.pinnedOpen = true
+      if not autoHideState.onChanged.isNil:
+        autoHideState.onChanged()
     return
 
   autoHideState.pinnedOpen = true
@@ -1627,6 +1630,15 @@ proc revealOverlay*(panel: AutoHidePanel) =
 # ---------------------------------------------------------------------------
 # Strip rendering (called from layout.nim or a dedicated Karax renderer)
 # ---------------------------------------------------------------------------
+
+proc isPanelPinnedOpen*(panel: AutoHidePanel): bool =
+  ## `panel` is open because it was clicked open — docked, or in the overlay
+  ## pinned open — not shown as a hover preview.  A strip tab shows its × only
+  ## then (Nikolay, 2026-10-17): a preview goes away by itself.
+  not autoHideState.isNil and not panel.isNil and (
+    (autoHideState.dockedVisible and autoHideState.dockedPanel == panel) or
+    (autoHideState.overlayVisible and autoHideState.pinnedOpen and
+     autoHideState.activeOverlay == panel))
 
 proc contentIcon*(content: Content): cstring =
   ## Return a Unicode icon character for a Content type, used in the
@@ -1683,7 +1695,8 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive))
+      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive,
+        pinned: isPanelPinnedOpen(panel)))
 
     let panels = model.panels
     let callbacks = AutoHideSideStripCallbacks(
@@ -1857,7 +1870,8 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive))
+      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive,
+        pinned: isPanelPinnedOpen(panel)))
 
     let callbacks = AutoHideBottomStripCallbacks(
       onSelect: proc(index: int) =
