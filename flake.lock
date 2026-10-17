@@ -4030,7 +4030,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "3ccdd4bec34b883901bf208b30a966922471ac32",
+        "rev": "f33311ea06be5fe1569172ade9a6cd27b480e9af",
         "type": "github"
       },
       "original": {
@@ -4060,11 +4060,9 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1792177252,
-        "narHash": "sha256-zFKI3nH54lqgkUoetM639HALjPtv8gqLEd+o9Ia79Y4=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "c3e346f6949753d2fcc2c1b97403933a0125803f",
+        "rev": "deb3c8a7623ddf5dac0485c4af374c0ea4ac92f1",
         "type": "github"
       },
       "original": {
@@ -4079,10 +4077,8 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "03175361527a393fa0cc5f341b29a18a1657f839",
-        "type": "github",
-        "narHash": "sha256-Bnaj68XXRjSp1ALnzfOcHz3eEm6N/ArLwiGIt1gdAfk=",
-        "lastModified": 1792202651
+        "rev": "ab520c05fccbc08adec17606b201d7db19960eea",
+        "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
@@ -4591,7 +4587,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "3af63afc5c0b55a27fc5e0a26f3a32833caf8873",
+        "rev": "ff7eb18af166f9355c5e62bf1434ba5f9fd2c99e",
         "type": "github"
       },
       "original": {
@@ -7528,11 +7524,9 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1792094899,
-        "narHash": "sha256-xwh3zjy1KjTWTYMyLzLrur6vW39wLGcnHHaKGigO5Cc=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "2391fa8cb9fbadf9285c454436941d2f61bc6cd3",
+        "rev": "023aacad9e970e1f79744eb3e9b8e7e715fcf159",
         "type": "github"
       },
       "original": {
@@ -8777,11 +8771,9 @@
         "pre-commit-hooks": "pre-commit-hooks_10"
       },
       "locked": {
-        "lastModified": 1790940615,
-        "narHash": "sha256-DQynweFXmBMk0vLqusNOButVDZnKLCy1vk0YNsuOH9o=",
         "owner": "metacraft-labs",
         "repo": "codetracer-wasm-recorder",
-        "rev": "c8c88d0e61827ff8d19b6ac84c8a0dbf0e3457f6",
+        "rev": "dbbeff80a198313c3365539c33876813875fccb1",
         "type": "github"
       },
       "original": {
