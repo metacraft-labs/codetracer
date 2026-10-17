@@ -4075,7 +4075,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "ab520c05fccbc08adec17606b201d7db19960eea",
+        "rev": "5776cd936779db60af8d48c7ba2427b8b4c7fefd",
         "type": "github"
       },
       "original": {
@@ -5073,11 +5073,9 @@
         ]
       },
       "locked": {
-        "lastModified": 1781988271,
-        "narHash": "sha256-ICwlJQfIDLiOpM8yJMCnbu9z9PKX8DmXbTh8jlH4Btc=",
         "owner": "metacraft-labs",
         "repo": "nix-blockchain-development",
-        "rev": "a702258d4312b5479f8b07bef3a1a03b20642516",
+        "rev": "b3fcb2ec8b1b7681168a861490b3ed1edf0aba24",
         "type": "github"
       },
       "original": {
@@ -5149,11 +5147,9 @@
         ]
       },
       "locked": {
-        "lastModified": 1781988271,
-        "narHash": "sha256-ICwlJQfIDLiOpM8yJMCnbu9z9PKX8DmXbTh8jlH4Btc=",
         "owner": "metacraft-labs",
         "repo": "nix-blockchain-development",
-        "rev": "a702258d4312b5479f8b07bef3a1a03b20642516",
+        "rev": "b3fcb2ec8b1b7681168a861490b3ed1edf0aba24",
         "type": "github"
       },
       "original": {
