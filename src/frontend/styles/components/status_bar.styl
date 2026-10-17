@@ -836,6 +836,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       float: right
       width: auto
       display: flex
+      // Pinned to the right edge: the tab strip that used to fill the gap
+      // (`flex: 1`) is now centred out of flow (auto_hide.styl).
+      margin-left: auto
       padding-right: 8px
       // Let the location readout shrink so `.location-path`'s ellipsis can
       // engage: a flex item will not go below its min-content width unless

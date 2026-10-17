@@ -24,6 +24,9 @@ type
     onSelect*: proc(index: int)
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
+    ## The × on the active tab: hide its panel, keeping the tab pinned — what
+    ## the × on the selected row of the status bar's tab-list menu does.
+    onHide*: proc(index: int)
     onCollapsedSelect*: proc()
     ## Called when the mouse enters the collapsed line — starts the same
     ## hover-preview timer a tab does, so the line opens its edge's overlay
@@ -42,6 +45,11 @@ const
   AutoHideSideStripTabClass* = "auto-hide-strip-tab"
   AutoHideSideStripTabActiveClass* = "auto-hide-strip-tab active"
   AutoHideSideStripTabLabelClass* = "auto-hide-strip-tab-label"
+  ## The × on the active tab (Nikolay, 2026-10-16): the same `close_sm` icon
+  ## and behaviour as `auto-hide-tablist-close` in the status bar's tab-list
+  ## menu — it hides the panel that is showing and leaves the tab pinned.
+  AutoHideSideStripTabHideClass* = "auto-hide-strip-tab-hide"
+  HideTabLabel = "Close panel"
   ## The four button classes below have **no producer**.  `f214d703b` added
   ## the tab context menu and `1af471302` then removed the inline close /
   ## unpin buttons from `renderSideStripTab`, so a strip tab is now just its
@@ -70,6 +78,13 @@ proc invokeSelect(callbacks: AutoHideSideStripCallbacks; index: int) =
 proc invokeClose(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onClose.isNil:
     callbacks.onClose(index)
+
+proc invokeHide(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onHide.isNil:
+    callbacks.onHide(index)
+
+proc showsHide(callbacks: AutoHideSideStripCallbacks; tab: AutoHideSideStripRecord): bool =
+  tab.active and not callbacks.onHide.isNil
 
 proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onUnpin.isNil:
@@ -102,12 +117,18 @@ proc renderSideStripTab(
     callbacks: AutoHideSideStripCallbacks): MockNode =
   let cls = if tab.active: AutoHideSideStripTabActiveClass
             else: AutoHideSideStripTabClass
-  ui(r):
+  result = ui(r):
     tdiv(
         class = cls,
         onclick = proc() = callbacks.invokeSelect(index)):
       span(class = AutoHideSideStripTabLabelClass):
         text tab.title
+  if callbacks.showsHide(tab):
+    let hide = ui(r):
+      span(class = AutoHideSideStripTabHideClass, role = "button",
+          title = HideTabLabel, `aria-label` = HideTabLabel,
+          onclick = proc() = callbacks.invokeHide(index))
+    r.appendChild(result, hide)
 
 proc renderCollapsedLine(
     r: MockRenderer;
@@ -139,6 +160,19 @@ when defined(js):
            onclick = proc() = callbacks.invokeSelect(index)):
         span(class = AutoHideSideStripTabLabelClass):
           text tab.title
+    if callbacks.showsHide(tab):
+      var hideEl: isonim_dom.Element
+      let hide = ui(r):
+        span(ref = hideEl, class = AutoHideSideStripTabHideClass, role = "button",
+            title = HideTabLabel, `aria-label` = HideTabLabel)
+      # Its own listener, stopped there: the tab's click would reopen the
+      # panel the × just closed.
+      isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          ev.preventDefault()
+          ev.stopPropagation()
+          callbacks.invokeHide(index))
+      discard isonim_dom.appendChild(isonim_dom.Node(result), isonim_dom.Node(hide))
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
       proc(ev: isonim_dom.Event) =
         callbacks.invokeHoverEnter(index))

@@ -567,16 +567,32 @@ DOCK_BOTTOM_HANDLE_SIZE = 4px
   padding-left: 0.25em
   padding-right: 0.25em
 
-// When the left side strip is visible (2em wide), push the bottom tab row to
-// start at the strip's right edge so the tabs sit between the strips — not
-// under them.  Only the strip (2em) is accounted for; the docked/hover panel
-// that may open on top does not affect this padding.
-#root-container:has(#auto-hide-strip-left.has-tabs) #auto-hide-bottom-strip
-  padding-left: 2em
+// CENTRED in the status bar (Nikolay, 2026-10-16): the pinned-tab row sits in
+// the middle of the window, not after the left-hand readouts; the tabs keep
+// their sizes and spacing.  Taken out of the bar's flex flow and centred
+// across its full width — `left`/`right: 0` with auto margins and a
+// fit-content width, no transform, so nothing that measures the tabs (the
+// docked-panel outline, the active tab's curves) sees a transformed box.  The
+// readouts either side keep their places (`.status-right` is pushed right in
+// status_bar.styl, which used to be this strip's `flex: 1`).  The old 2em
+// side-strip insets went with it: centred, the row is nowhere near the strips.
+#auto-hide-bottom-strip
+  position: absolute
+  // Inset by the bar's own vertical padding: an absolute box is placed from
+  // the bar's padding edge, so `0` made the tabs the full 32px bar height and
+  // lost the 4px above and below them (Nikolay, 2026-10-16).
+  top: STATUS_BAR_VERTICAL_PADDING      // status_bar.styl, imported earlier
+  bottom: STATUS_BAR_VERTICAL_PADDING
+  left: 0
+  right: 0
+  width: fit-content
+  max-width: 50%
+  margin: 0 auto
+  flex: none
 
-// Mirror for the right strip.
-#root-container:has(#auto-hide-strip-right.has-tabs) #auto-hide-bottom-strip
-  padding-right: 2em
+  // The tabs' trailing 0.24em gap would sit the row that much left of centre.
+  .auto-hide-strip-tab:last-child
+    margin-right: 0
 
 // ---------------------------------------------------------------------------
 // Bottom strip tab overrides — use the same .auto-hide-strip-tab classes
@@ -918,6 +934,26 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
   &:hover
     opacity: 1
     background-color: transparent  // override .auto-hide-strip-tab-btn:hover
+
+// The × on the active side tab (Nikolay, 2026-10-16): the same `close_sm`
+// icon, 16px size and resting/hover colours as the × on the selected row of
+// the status bar's tab-list menu (`.auto-hide-tablist-close` below), and the
+// same job — hide the panel that is showing, keep the tab.  It sits where the
+// label's text ends: below it on the left strip (read top-to-bottom), above it
+// on the right (read bottom-to-top), 4px from the label.
+.auto-hide-strip-tab-hide
+  display: block
+  flex: 0 0 1rem
+  width: 1rem
+  height: 1rem
+  margin-top: 0.25rem
+  cursor: pointer
+  tab-icon(url('../../public/resources/shared/close_sm.svg'), 1rem 1rem)
+
+#auto-hide-strip-right .auto-hide-strip-tab-hide
+  order: -1
+  margin-top: 0
+  margin-bottom: 0.25rem
 
 // (The `.auto-hide-bottom-tabs .ct-button-sm-secondary` overrides that used
 // to live here were removed with the renderer that emitted them.  The status

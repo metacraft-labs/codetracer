@@ -1707,6 +1707,16 @@ when defined(js):
           hideOverlay()
           hideDockedPanel()
           unpinPanel(autoHideLayout, panels[index]),
+      # The × on the active tab: hide the panel, docked or in the overlay, and
+      # keep the tab pinned — as the × in the status bar's tab-list menu does
+      # (Nikolay, 2026-10-16).  Not `closePanelFromStrip`, which discards it.
+      onHide: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          let panel = panels[index]
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+            hideDockedPanel()
+          if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
+            hideOverlay(),
       # Clicking the collapsed line opens the edge's last panel (or its first)
       # in the overlay, which on a collapsed edge carries the edge's tabs down
       # its side (`requestOverlaySideEdgeTabsRender`) — so the click reveals

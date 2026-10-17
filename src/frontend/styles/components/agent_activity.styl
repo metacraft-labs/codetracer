@@ -1074,10 +1074,10 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
   &:hover
     opacity: 0.9
 
-// Tool name — monospace, truncated
+// Tool name — truncated (Space Grotesk: a UI label, not code)
 .agent-tc-name
   flex: 1
-  font-family: monospace
+  font-family: "SpaceGrotesk", sans-serif
   font-size: 0.8125rem
   color: colors-ui-text-primary-body-subtle
   overflow: hidden
@@ -1475,7 +1475,7 @@ agent-toolbar-icon(img)
 .agent-branch-item
   padding: 0.625em 0.75em
   cursor: pointer
-  font-family: monospace
+  font-family: "SpaceGrotesk", sans-serif
   font-size: 0.875rem
   color: colors-ui-text-primary-body
   border-top: 0.0625rem solid colors-ui-border-tertiary
@@ -1574,6 +1574,18 @@ agent-toolbar-icon(img)
   flex-direction: column
   border-radius: inherit
 
+  // The scrollbar sits INSIDE the panel, not on its border and outline
+  // (Nikolay, 2026-10-16): the bar is 4px wider than the thumb, and that 4px
+  // on the outer side is transparent border, so the thumb is drawn 4px in
+  // from the edge.  Top to bottom it spans the panel, as every scrollbar in
+  // the app does.
+  &::-webkit-scrollbar
+    width: calc(0.5em + 0.25rem)
+
+  &::-webkit-scrollbar-thumb:vertical
+    border-right: 0.25rem solid transparent
+    background-clip: padding-box
+
 .agent-settings-section
   padding: 1em 1em 0.75em
   border-bottom: 1px solid colors-ui-border-primary
@@ -1606,9 +1618,14 @@ agent-toolbar-icon(img)
   background: colors-ui-surface-primary-default
   border: 1px solid colors-ui-border-primary
   border-radius: 0.375em
-  padding: 0.5em 0.75em
+  // 28px tall (Nikolay, 2026-10-16; it was 40px from the 24px line plus
+  // 0.5em padding): a fixed border-box height, the text centred by the flex
+  // row, so the vertical padding goes and only the sides keep theirs.
+  box-sizing: border-box
+  height: 1.75rem
+  padding: 0 0.75em
   cursor: pointer
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk", sans-serif
   font-size: 0.875em
   color: colors-ui-text-primary-body
   user-select: none
@@ -1651,7 +1668,7 @@ agent-toolbar-icon(img)
   cursor: pointer
   font-size: 0.875em
   color: colors-ui-text-primary-body
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk", sans-serif
   gap: 0.5em
 
   &:hover
@@ -1691,7 +1708,11 @@ agent-toolbar-icon(img)
   width: 2.25em
   height: 1.25em
   border-radius: 0.625em
-  background: colors-ui-surface-primary-secondary
+  // Off: #1B1B1B (surface/primary/default), the fill of the select fields
+  // above it, so the track reads against the panel — primary-secondary was
+  // the panel's own colour and left only the knob visible (Nikolay,
+  // 2026-10-16).
+  background: colors-ui-surface-primary-default
   position: relative
   cursor: pointer
   transition: background 0.2s
@@ -1720,30 +1741,52 @@ agent-toolbar-icon(img)
   gap: 0.375em
   padding-top: 0.125em
 
-.agent-settings-agent-chip
+// The agent badges look like the design system's Status pill for now
+// (Nikolay, 2026-10-16; Figma `status-pill`, node 3689:26, with its dot):
+// 20px tall, fully round, a 0.5px border, 6px dot + 10px Space Grotesk label,
+// 4px between
+// them, 6px in on the left and 8px on the right.  The dot is the label's own
+// colour in Figma, so it is drawn here as a circle in `currentColor`.
+// GREY, not the pill's blue `running` colours (Nikolay, 2026-10-17): an agent
+// has no run state to colour yet, so the pill takes neutral surface, border
+// and label tokens.
+agent-status-pill()
   display: inline-flex
   align-items: center
-  padding: 0.25em 0.625em
-  border: 1px solid colors-ui-border-primary
-  border-radius: 1em
-  font-size: 0.75em
-  color: colors-ui-text-primary-body
-  font-family: "SpaceMono"
+  gap: 0.25rem
+  box-sizing: border-box
+  height: 1.25rem
+  padding: 0.125rem 0.5rem 0.125rem 0.375rem
+  border: 0.5px solid colors-ui-border-primary   // border/border-width/thin
+  border-radius: 100px
+  background: colors-ui-surface-primary-tertiary
+  color: colors-ui-text-primary-label
+  font-family: "SpaceGrotesk", sans-serif
+  font-weight: 400
+  font-size: 0.625rem      // type/ui/size/label/sm
+  line-height: 1rem        // type/ui/lineheight/label/sm
+  white-space: nowrap
 
+.agent-settings-agent-chip
+  agent-status-pill()
+
+  &::before
+    content: ''
+    flex: 0 0 auto
+    width: 0.375rem
+    height: 0.375rem
+    border-radius: 50%
+    background: currentColor
+
+// "+ add" takes the same pill, without the dot — it is an action, not an
+// agent.  On hover its fill takes the surface's -hover step.
 .agent-settings-add-chip
-  display: inline-flex
-  align-items: center
-  padding: 0.25em 0.625em
-  border: 1px solid colors-ui-border-primary
-  border-radius: 1em
-  font-size: 0.75em
-  color: colors-ui-text-primary-subtle
+  agent-status-pill()
+  padding-left: 0.5rem
   cursor: pointer
-  font-family: "SpaceMono"
 
   &:hover
-    background: colors-ui-surface-primary-hover
-    color: colors-ui-text-primary-body
+    background: colors-ui-surface-primary-tertiary-hover
 
 .agent-settings-footer
   display: flex
@@ -1758,7 +1801,7 @@ agent-toolbar-icon(img)
   border: none !important
   color: colors-ui-text-primary-body-subtle
   font-size: 0.8125em
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk", sans-serif
   cursor: pointer
   padding: 0.25em 0 !important
   text-decoration: underline
@@ -1769,7 +1812,7 @@ agent-toolbar-icon(img)
 
 .agent-settings-done
   font-size: 0.875em
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk", sans-serif
   padding: 0.5em 1.25em !important
   height: auto !important
   flex: 0 0 auto !important

@@ -480,7 +480,14 @@ SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
   top: 0
   left: 0
   pointer-events: none
-  z-index: 6
+  // Above anything a panel opens inside itself — its menus are 100–200 (the
+  // agent settings' select lists are 200) — so a menu that runs past the
+  // panel's edge never hides the outline (Nikolay, 2026-10-16).  It was 6.
+  // The value only competes inside GoldenLayout's own stacking context
+  // (`.lm_goldenlayout`, z-index 3), so nothing outside the layout — the
+  // auto-hide overlay, the status-bar menus — is affected.  It is a 1px line
+  // with `pointer-events: none`, so it never takes a click from the menu.
+  z-index: 250
   overflow: visible
 
 // All three outlines — the one around a GL stack, the one around a docked
