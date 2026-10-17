@@ -541,6 +541,18 @@ package codeTracer:
     # ``appimage-scripts/`` / ``nix bundle`` (see ``build-app-image``).
     when defined(macosx):
       "create-dmg >=1"
+      # The Mach-O debug-info pass. `nim c` with `debugInfo = true` compiles
+      # and links through `clang` and then shells out AGAIN, by bare name, to
+      # `dsymutil` to build the `.dSYM` bundle. Both `ct` and
+      # `db-backend-record` go through the `ctNative` template below, which
+      # declares tool refs and is therefore hermetic, so the second tool has
+      # to be declared exactly as the first one is.
+      #
+      # It is NOT reachable through `clang`: measured 2026-10-16 on
+      # aarch64-darwin, the realized `clang-wrapper-21.1.8/bin` carries 17
+      # binaries and `dsymutil` is not among them. It comes from
+      # `nixpkgs#llvm` (reprobuild `repro_dsl_stdlib/packages/dsymutil.nim`).
+      "dsymutil >=0"
 
     # POSIX-only / Nix-only tools — guarded off the Windows branch.
     when not defined(windows):
@@ -972,6 +984,30 @@ package codeTracer:
           else: "gcc"
         appendRegisteredActionToolIdentityRefs(ctNativeAction.id,
           [CtBackendCompiler, "zstd-dev"])
+        # THE DEBUG-INFO PASS IS A SECOND SUB-TOOL, AND ONLY ON MACOS.
+        #
+        # `debugInfo = true` above is not free on darwin. The linker leaves
+        # DWARF in the object files and writes only a debug map; `dsymutil`
+        # is the separate pass that turns that map into `ct.dSYM`. `nim c`
+        # runs it by BARE NAME after the link, so on a hermetic edge it is
+        # subject to exactly the same rule as `clang` three lines up.
+        #
+        # This failure mode reads unlike the compiler one and is worth
+        # recognising: the action has ALREADY WRITTEN A WORKING BINARY when
+        # it dies. Measured 2026-10-16 on aarch64-darwin, `ct` existed at
+        # 11,389,600 bytes and answered `ct --version` -> `26.10.1(debug)`,
+        # while `ct.dSYM` was empty and the edge exited non-zero. Do not read
+        # "the binary is there" as "the edge succeeded".
+        #
+        # Gated on macOS because it is a Mach-O concern: ELF and PE builds
+        # keep their debug info in the image and never invoke it. On Linux
+        # and Windows the ref would be inert anyway (the resolver returns
+        # `none` for a name no `uses:` entry declares, and the entry above is
+        # itself `when defined(macosx)`), but saying so here keeps the
+        # declaration honest rather than accidentally harmless.
+        when defined(macosx):
+          appendRegisteredActionToolIdentityRefs(ctNativeAction.id,
+            ["dsymutil"])
         ctNativeAction
 
     template ctStylus(name: string): BuildActionDef =
