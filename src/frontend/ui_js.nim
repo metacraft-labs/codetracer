@@ -2219,6 +2219,15 @@ proc onInit*(
     if data.lastRestartKind != RestartSubsystem:
       renderer.resetLayoutState(data)
 
+  # THE EDITOR'S DECLARED SHARE, read before GoldenLayout renormalises the
+  # layout — `onNoTrace`'s line, which this trace-launch path lacked. Without
+  # it the editor the first stop opens (`utils.openNewLayoutContainer`) took
+  # GoldenLayout's `addChild` third of the row, measured 17.8 / 33.3 / 48.9 at
+  # 1920 px where the debug-mode default declares 20 / 25 / 55 — the shares
+  # the terminal and the native window open with. A saved layout that already
+  # fills its row reads 0 and is left alone.
+  data.ui.editorAreaPercent =
+    max(0, unclaimedTopLevelPercent(response.layout))
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
   data.services.flow.enabledFlow = response.config.flow.enabled

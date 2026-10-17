@@ -323,3 +323,6 @@ myproject
 truecolor
 worktree
 omnibar
+frameless
+maximise
+minimise

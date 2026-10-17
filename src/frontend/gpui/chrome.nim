@@ -149,7 +149,15 @@ const
     ##
     ## HISTORY: introduced 2026-09-22 at 4.5. It has never been lowered.
 
-  WindowFontFamily* = when defined(macosx): "Helvetica Neue" else: "DejaVu Sans"
+  WindowFontFamily* = "Space Grotesk"
+    ## **SINCE 2026-10-17 THE DESIGN SYSTEM'S FACE, ON EVERY PLATFORM**, as in
+    ## the Electron front-end (`styles/components/font_family.styl`): the
+    ## files are registered by `design_fonts.registerDesignFonts` before
+    ## launch. Before that this was the platform's sans, per platform, for
+    ## the reason below — which still holds for any family the text system
+    ## does not have: name a family it can resolve, or text falls back to a
+    ## face with no bold.
+    ##
     ## The window's text face, named rather than left to GPUI's default
     ## (`.SystemUIFont`). Measured 2026-09-29 on the window lane: with the
     ## default alias the text rendered in the fallback sans's Book face and a
@@ -176,7 +184,11 @@ const
     ## these names; `.SystemUIFont` and `SF Mono` are not reliably resolvable
     ## by name, which is the defect this constant exists against.
 
-  MonoFontFamily* = when defined(macosx): "Menlo" else: "DejaVu Sans Mono"
+  MonoFontFamily* = "Space Mono"
+    ## Space Mono since 2026-10-17, as the Electron front-end sets code and
+    ## program data (registered by `design_fonts`). Previously Menlo / DejaVu
+    ## Sans Mono:
+    ##
     ## **The face the editor, the gutter and the inline values are set in.**
     ##
     ## PLAT-35, 2026-10-02, and it is a correction of a sentence this tree
@@ -255,11 +267,28 @@ const
     ## re-graded here, and recording a digest without a re-grade is
     ## `Verification-Harness-Traps` §39.
 
-  ChromeGapPx* = 8
+  EditorLinePx* = 22
+    ## One editor line: the desktop's Monaco `lineHeight` (measured on the
+    ## Electron front-end 2026-10-17). The window's row pitch
+    ## (`window_geometry.GpuiEditorRowPx`) and the row's drawn `line-height`
+    ## (`leaves.renderEditorRow`) are this one number.
+  EditorPadSidePx* = 0
+    ## The editor reaches its pane's left and right edges (the desktop's
+    ## Monaco fills its panel).
+  ChromeGapPx* = 4
+    ## The gap between two panes: the desktop's GoldenLayout splitter
+    ## (`.lm_splitter` 4px, measured on the Electron front-end's computed
+    ## styles, 2026-10-17). 8 px until then.
+  WindowEdgePx* = 4
+    ## The window's own side padding around the arrangement: the desktop's
+    ## layout root sits 4 px in from either edge, directly under the caption
+    ## bar and directly above the status bar (`#ROOT` / `.lm_root`, measured
+    ## 2026-10-17). Until then the window was padded `ChromePaddingPx` on
+    ## every side.
   ChromePaddingPx* = 12
-    ## The window's own padding and the gap between panes, in device pixels.
-    ## They are here rather than in `main.nim` because `paneWidthPx` below has
-    ## to subtract exactly these, and two spellings of one number is §30.
+    ## A pane's own inner padding, in device pixels. Here rather than in
+    ## `main.nim` because the leaves' hit-tests subtract exactly this, and two
+    ## spellings of one number is §30.
 
 func hexChannel(hex: string; index: int): float =
   ## One 8-bit channel of `#rrggbb`, as 0.0 .. 1.0.
@@ -335,8 +364,8 @@ func paneWidthPx*(viewportWidth, paneCount: int): int =
   ## itself. Returns at least 1 so a degenerate viewport produces a visible
   ## sliver rather than a zero-width div the renderer silently drops.
   if paneCount <= 0:
-    return max(1, viewportWidth - 2 * ChromePaddingPx)
-  let usable = viewportWidth - 2 * ChromePaddingPx - (paneCount - 1) * ChromeGapPx
+    return max(1, viewportWidth - 2 * WindowEdgePx)
+  let usable = viewportWidth - 2 * WindowEdgePx - (paneCount - 1) * ChromeGapPx
   max(1, usable div paneCount)
 
 func tabStyle*(active: bool; focused = false): seq[(string, string)] =

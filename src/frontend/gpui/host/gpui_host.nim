@@ -67,7 +67,7 @@
 when defined(js):
   {.error: "src/frontend/gpui/host is native-only: it spawns replay-server.".}
 
-import std/strutils
+import std/[strutils, tables]
 
 import codetracer_embed
 
@@ -157,6 +157,16 @@ type
     store*: ReplayDataStore
     contexts*: LexerContextCache
       ## PLAT-47 B1: each held line's tokenizer entry state, per file text.
+    visibleRows*: int
+      ## How many of the window's rows are WHOLLY in view above the editor's
+      ## horizontal scrollbar band — what Monaco calls the viewport when it
+      ## decides whether a stop is "outside" it. 0: every row counts.
+    followed: string
+      ## The stop (`<path>:<line>`) the window last followed, so a scroll
+      ## the user made afterwards is never taken back.
+    fileLines*: Table[string, seq[string]]
+      ## Each file's whole text as the provider last read it — the lines
+      ## above the window the editor's sticky scope headers are read from.
 
 proc newGpuiSourceService*(session: HeadlessDebugSession;
                            traceFolder: string;
@@ -195,6 +205,20 @@ proc serveWindow*(s: GpuiSourceService) =
   ## window that draws once must converge before it draws.
   if s.isNil or s.vm.isNil:
     return
+  # MONACO'S "OUTSIDE THE VIEWPORT" (`revealLineInCenterIfOutsideViewport`,
+  # what the desktop calls after every stop): a line under the horizontal
+  # scrollbar's band is not in its viewport, so a NEW stop on one of the
+  # window's last, partly hidden rows is centred, as the desktop's editor
+  # centres it. Done through the shared rule — the window's top moved past
+  # the line, so `followExecutionPointer` sees it outside and centres it with
+  # its own clamping — rather than a second centring computed here.
+  let line = s.vm.executionLine.val
+  let stop = $s.vm.revision.val.path & ":" & $line
+  if s.visibleRows > 0 and stop != s.followed and line > 0:
+    let top = s.vm.viewportTop.val
+    if line >= top + s.visibleRows and line < top + s.vm.viewportHeight.val:
+      s.vm.viewportTop.val = line + 1
+  s.followed = stop
   for _ in 0 ..< ServeRounds:
     let requests = s.vm.followAndRequest()
     if requests.len == 0:
@@ -226,6 +250,8 @@ proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest]) =
                                captured.firstLine,
                                captured.firstLine + captured.lines.len - 1)
       else: @[]
+    if captured.fileLines.len > 0:
+      s.fileLines[captured.revision.path] = captured.fileLines
     discard s.store.applySourceFetch(s.vm, captured, contexts)
 
 proc availability*(s: GpuiSourceService): SourceAvailability =

@@ -4,7 +4,7 @@
   "answers": [
     {
       "question": "pane-rectangles",
-      "value": "calltrace=76,8,24,42;commandPalette=44,1,26,3;editor=18,8,33,89;eventLog=51,55,48,42;filesystem=0,8,18,88;state=51,8,24,42",
+      "value": "calltrace=73,8,27,42;commandPalette=44,1,26,3;editor=20,8,25,89;eventLog=45,55,54,42;filesystem=0,8,20,88;state=45,8,27,42",
       "tier": "captured"
     },
     {
@@ -44,8 +44,8 @@
     }
   ],
   "provenance": {
-    "capturedAt": "2026-10-16T23:42:36.505Z",
-    "uiBundleBytes": 29302548,
-    "uiBundleMtime": "2026-10-16T16:23:52.257Z"
+    "capturedAt": "2026-10-17T00:47:09.497Z",
+    "uiBundleBytes": 29303845,
+    "uiBundleMtime": "2026-10-17T00:24:43.138Z"
   }
 }

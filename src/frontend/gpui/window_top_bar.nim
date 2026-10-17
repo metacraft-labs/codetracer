@@ -37,14 +37,39 @@ export session_tabs, tables
 
 const
   TopBarPx* = 34
-    ## The band's height: one line of the title face plus its padding.
-  GpuiTopBandPx* = TopBarPx + ChromeGapPx
+    ## The band's height: the desktop's caption bar (`#menu`, 34 px, measured
+    ## 2026-10-17).
+  GpuiTopBandPx* = TopBarPx
     ## What the top bar takes above the arrangement (`windowGeometryOf`'s
-    ## `topBandPx`).
-  ControlPx* = 30
-    ## One debugger control's button: the mark (`ControlIconPx`) centred.
-  ControlIconPx* = 18
+    ## `topBandPx`): the band alone — the desktop's layout starts directly
+    ## under its caption bar (a `ChromeGapPx` between them until 2026-10-17).
+  ControlPx* = 28
+    ## One tool button of the bar: the desktop's `ct-button-image-md`, 28 px
+    ## square (measured 2026-10-17; 30 until then), its mark centred.
+  ControlIconPx* = 16
+    ## The mark inside it (`.ct-control-mark`, 16 px).
+  ControlGapPx* = 8
+    ## Between two buttons of a group, and after a group's last button.
+  SeparatorPx* = 1
+    ## The desktop's `.separate-bar` before every group: 1 px wide, 16 high.
+  SeparatorHeightPx* = 16
+  SeparatorLeadPx* = 9
+    ## From a separator to the first button after it.
+  BarContentTopPx* = 6
+    ## The bar's content row (`#menu` `padding-top: 6px`): the menu button,
+    ## the omnibox's box and the window buttons sit on it.
+  BarContentPx* = 26
+  BarPadPx* = 4
+    ## The bar's own padding at an end with no window buttons
+    ## (`#menu` `padding-left: 4px`).
+  BarTrailPx* = 19
+    ## What the bar reserves past its window buttons' inner edge: the
+    ## desktop's `padding-right: 6em` (96 px) for its three 24 px buttons
+    ## 5 px from the end.
   MenuButtonPx* = 34
+  MenuPartGapPx* = 8
+    ## Between the menu button and the controls, and the controls and the
+    ## omnibox (the bar's flex gap).
   OmnibarIconPx* = 34
   OmnibarFieldMinPx* = 160
   OmnibarDesktopFloorPx* = 384
@@ -54,25 +79,35 @@ const
     ## Its ceiling.
   OmnibarDesktopShare* = 0.24
     ## Its middle term: 24% of the window (`24vw`).
+  OmnibarFieldInsetPx* = 4
+    ## The omnibox's input row inside its slot (`#debug` → `.command-input-row`).
+  OmnibarTabGapPx* = 3
+    ## Between the omnibox's slot and the session tabs.
   MenuItemPx* = 26
     ## One menu or omnibar row.
   MenuPopoverMinPx* = 240
   OmnibarRows* = 10
   PartGapPx* = 12
-    ## The space between two parts of the band.
+    ## The space between two parts of a narrow band (the fallback layout).
   WindowButtonPx* = 24
     ## PLAT-69: one window button, a circle — the desktop's `.window-menu`
     ## `.menu-button-svg` (`1.5em` at its 16 px em).
-  WindowButtonGapPx* = 6
-    ## Between two window buttons.
+  WindowButtonGapPx* = 0
+    ## Between two window buttons: none, the desktop's three circles touch.
   WindowButtonEdgePx* = 5
     ## Between the outermost window button and the band's end (`.window-menu`
     ## `right: 0.3125em`).
+  WindowButtonTopPx* = 7
+    ## A window button's top (`.window-menu` on the content row, its 24 px
+    ## circles one pixel down).
 
 type
   GTopPart* = enum
     gtMenuButton = "menu"
     gtControl = "control"
+    gtTool = "tool"
+      ## A button of the bar that is not a transport control — history back
+      ## and forward, reset, run tests, stop (`GToolButton`).
     gtOmnibar = "omnibar"
     gtTab = "tab"
     gtTabClose = "tab-close"
@@ -91,6 +126,15 @@ type
     gwbMaximize = "maximize"
     gwbClose = "close"
 
+  GToolButton* = enum
+    ## The desktop's bar buttons beside the transport controls, named by the
+    ## marks / ids it draws them with.
+    gtbBack = "history-back"
+    gtbForward = "history-forward"
+    gtbReset = "reset-operation"
+    gtbRunTests = "run-tests"
+    gtbStop = "stop"
+
   GWindowButtons* = tuple[left, right: seq[GWindowButton]]
     ## Which buttons a bar draws on each side, in order, left to right. Empty
     ## on both sides where the platform draws the window's frame.
@@ -104,6 +148,8 @@ type
   GTopLayout* = object
     band*: PxRect
     segs*: seq[GTopSeg]
+    separators*: seq[PxRect]
+      ## The `.separate-bar` before each group of buttons: drawn, never hit.
     omnibarField*: bool
 
   GPopover* = object
@@ -127,7 +173,7 @@ const
     ## item on its own ground.
   SessionTabClosePx* = 20
     ## The close control at a tab's right end (`.session-tab-close`).
-  SessionTabAddPx* = 28
+  SessionTabAddPx* = 26
     ## The strip's "+", after its tabs (`.session-tab-add`, a small image
     ## button).
 
@@ -152,25 +198,58 @@ func omnibarDesktopPx*(width: int): int =
         OmnibarDesktopCeilingPx)
 
 func windowButtonsReservePx*(count: int): int =
-  ## The width one side's `count` window buttons reserve in the band: the
-  ## buttons, the gaps between them, the margin to the band's end and the
-  ## gap to the part beside them. Nothing for no buttons.
-  if count <= 0: 0
-  else: WindowButtonEdgePx + count * WindowButtonPx +
-        (count - 1) * WindowButtonGapPx + PartGapPx
+  ## The width one side's window buttons reserve in the band — the desktop's
+  ## fixed `padding-right: 6em` (96 px), room for its three buttons whichever
+  ## of them the platform supports, so the omnibox does not move with the
+  ## count. The bar's plain padding for none.
+  if count <= 0: BarPadPx
+  else: WindowButtonEdgePx + 3 * WindowButtonPx + 2 * WindowButtonGapPx +
+        BarTrailPx
+
+type
+  BarItem = tuple[tool: bool, index: int]
+    ## One button of the bar: a `GToolButton` ordinal, or a transport
+    ## control's `TransportControls` index.
+
+func barGroups(): seq[seq[BarItem]] =
+  ## The desktop's bar, group by group, a separator before each: history,
+  ## then the transport controls in pairs (reverse, forward), run to entry,
+  ## reset, run tests, stop.
+  result.add @[(true, ord(gtbBack)), (true, ord(gtbForward))]
+  for pair in [("reverse-next", "next"), ("reverse-step-in", "step-in"),
+               ("reverse-step-out", "step-out"),
+               ("reverse-continue", "continue")]:
+    result.add @[(false, controlIndex(pair[0])), (false, controlIndex(pair[1]))]
+  result.add @[(false, controlIndex("run-to-entry"))]
+  result.add @[(true, ord(gtbReset))]
+  result.add @[(true, ord(gtbRunTests))]
+  result.add @[(true, ord(gtbStop))]
+
+func groupsWidthPx(groups: seq[seq[BarItem]]): int =
+  for g in groups:
+    if g.len > 0:
+      result += SeparatorLeadPx + g.len * ControlPx +
+                (g.len - 1) * ControlGapPx + ControlGapPx
+  if result > 0:
+    result -= ControlGapPx
 
 proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
                        tabs: seq[SessionTabView]; width: int;
                        canAddTab = false;
                        windowButtons: GWindowButtons = (@[], @[])): GTopLayout =
-  ## Where each part goes in a `width`-pixel window. See the header for the
-  ## priority order.
-  let band = PxRect(x: ChromePaddingPx, y: ChromePaddingPx,
-                    w: max(1, width - 2 * ChromePaddingPx), h: TopBarPx)
+  ## Where each part goes in a `width`-pixel window — THE DESKTOP'S CAPTION
+  ## BAR, measured on the Electron front-end (2026-10-17): the menu button,
+  ## the button groups each after a separator, the omnibox centred between
+  ## two equal-share neighbours (the controls' and the session tabs'), the
+  ## session tabs and their "+", and the window buttons at the ends. Narrower
+  ## than that row, the tool buttons go first and then the controls from the
+  ## end of `TextPriority`, then the omnibox's field (the header).
+  # The desktop's caption bar spans the window from its top-left corner.
+  let band = PxRect(x: 0, y: 0, w: max(1, width), h: TopBarPx)
   result.band = band
   # PLAT-69: the window buttons first, at the band's two ends; everything
-  # else is laid out in what they leave, `inner`.
-  let buttonY = band.y + (band.h - WindowButtonPx) div 2
+  # else is laid out in what they leave.
+  let buttonY = band.y + WindowButtonTopPx
   for i, b in windowButtons.left:
     result.segs.add GTopSeg(part: gtWindowButton, index: ord(b),
       rect: PxRect(x: band.x + WindowButtonEdgePx +
@@ -184,88 +263,76 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
     rightSegs.add GTopSeg(part: gtWindowButton, index: ord(b),
       rect: PxRect(x: band.x + band.w - fromEnd, y: buttonY,
                    w: WindowButtonPx, h: WindowButtonPx))
-  let leftReserve = windowButtonsReservePx(windowButtons.left.len)
-  let rightReserve = windowButtonsReservePx(rightButtons)
-  let inner = PxRect(x: band.x + leftReserve, y: band.y,
-                     w: max(0, band.w - leftReserve - rightReserve),
-                     h: band.h)
-  var used = 0
-  let avail = inner.w
-  proc take(n: int): bool =
-    if used + n <= avail:
-      used += n
-      true
-    else: false
-  discard take(MenuButtonPx + PartGapPx)
-  # The controls, by priority.
-  var shown: seq[int] = @[]
-  block:
-    let room = avail - used - (OmnibarIconPx + PartGapPx)
-    let fit = max(0, room div ControlPx)
-    if fit >= TransportControls.len:
-      for i in 0 ..< TransportControls.len: shown.add i
-    else:
-      var chosen: seq[int] = @[]
-      for id in TextPriority:
-        if chosen.len >= fit: break
-        chosen.add controlIndex(id)
-      for i in 0 ..< TransportControls.len:
-        if i in chosen: shown.add i
-    if shown.len > 0:
-      discard take(shown.len * ControlPx + PartGapPx)
+  let x0 = band.x + windowButtonsReservePx(windowButtons.left.len)
+  let x1 = band.x + band.w - windowButtonsReservePx(rightButtons)
+  let rowY = band.y + BarContentTopPx
   let omnibarOpen = not omnibar.isNil and omnibar.isOpen
-  var omniW = 0
-  if take(OmnibarIconPx + PartGapPx):
-    omniW = OmnibarIconPx
-  if omniW > 0:
-    let room = avail - used
-    let grow = min(omnibarDesktopPx(width) - omniW, room)
-    if omniW + grow >= OmnibarFieldMinPx or omnibarOpen and grow > 0:
-      used += grow
-      omniW += grow
-      result.omnibarField = true
   var tabW: seq[int] = @[]
   if tabs.len >= 2:
     for t in tabs:
       tabW.add titlePx(sessionTabText(t)) +
                (if t.closable: SessionTabClosePx else: 0)
-
-  # Place.
-  var x = inner.x
+  var after = OmnibarTabGapPx
+  for w in tabW: after += w + SessionTabGapPx
+  if canAddTab: after += SessionTabAddPx
+  # The groups that fit, dropping tools then controls by priority.
+  var groups = barGroups()
+  let controlsStart = x0 + MenuButtonPx + MenuPartGapPx
+  proc fits(groups: seq[seq[BarItem]]): bool =
+    controlsStart + groupsWidthPx(groups) + MenuPartGapPx + OmnibarIconPx +
+      after <= x1
+  for t in [gtbStop, gtbRunTests, gtbReset, gtbForward, gtbBack]:
+    if fits(groups): break
+    for g in groups.mitems:
+      let at = g.find((true, ord(t)))
+      if at >= 0: g.delete(at)
+  for i in countdown(TextPriority.high, 0):
+    if fits(groups): break
+    let ci = controlIndex(TextPriority[i])
+    for g in groups.mitems:
+      let at = g.find((false, ci))
+      if at >= 0: g.delete(at)
+  var kept: seq[seq[BarItem]] = @[]
+  for g in groups:
+    if g.len > 0: kept.add g
+  # Place: the menu button, then the groups.
   result.segs.add GTopSeg(part: gtMenuButton,
-                          rect: PxRect(x: x, y: band.y, w: MenuButtonPx,
-                                       h: band.h))
-  x += MenuButtonPx
-  x += PartGapPx
-  for i in shown:
-    result.segs.add GTopSeg(part: gtControl, index: i,
-                            rect: PxRect(x: x, y: band.y, w: ControlPx,
-                                         h: band.h))
-    x += ControlPx
-  if shown.len > 0:
-    x += PartGapPx
-  if omniW > 0:
-    # PLAT-50: CENTRED in the band, as the desktop's omnibox is between its
-    # two equal-share neighbours (measured: 703..1155 of a 1900 px window);
-    # never left of the controls, and moved left only as far as the session
-    # tabs and the "+" after it need.
-    # PLAT-69: centred in what the window buttons leave of the band, so
-    # buttons on one side move it by half their reserve, as the desktop's
-    # bar padding moves its omnibox.
-    var after = 0
-    for w in tabW: after += w + SessionTabGapPx
-    if canAddTab: after += SessionTabAddPx + PartGapPx
-    let centred = inner.x + (inner.w - omniW) div 2
-    let latest = inner.x + inner.w - after - omniW - PartGapPx
-    x = max(x, min(centred, latest))
+                          rect: PxRect(x: x0, y: rowY, w: MenuButtonPx,
+                                       h: BarContentPx))
+  var x = controlsStart
+  for g in kept:
+    result.separators.add PxRect(x: x, y: rowY + (BarContentPx -
+                                 SeparatorHeightPx) div 2, w: SeparatorPx,
+                                 h: SeparatorHeightPx)
+    x += SeparatorLeadPx
+    for item in g:
+      result.segs.add GTopSeg(part: (if item.tool: gtTool else: gtControl),
+                              index: item.index,
+                              rect: PxRect(x: x, y: rowY - 1, w: ControlPx,
+                                           h: ControlPx))
+      x += ControlPx + ControlGapPx
+  let controlsW = groupsWidthPx(kept)
+  # The omnibox: its slot centred between two equal-share neighbours, never
+  # over the controls, shrunk (to its icon at last) to leave the tabs room.
+  let want = omnibarDesktopPx(width)
+  let share = (x1 - controlsStart - want - MenuPartGapPx - OmnibarTabGapPx) div 2
+  let slotX = controlsStart + max(share, controlsW) + MenuPartGapPx
+  let room = x1 - slotX - after
+  var slotW = min(want, room)
+  if slotW >= OmnibarFieldMinPx or omnibarOpen and slotW > OmnibarIconPx:
+    result.omnibarField = true
+  else:
+    slotW = OmnibarIconPx
+  if slotW > 0 and slotX + slotW <= x1:
+    let inset = if result.omnibarField: OmnibarFieldInsetPx else: 0
     result.segs.add GTopSeg(part: gtOmnibar,
-                            rect: PxRect(x: x, y: band.y + 3, w: omniW,
-                                         h: band.h - 6))
-    x += omniW + PartGapPx
+                            rect: PxRect(x: slotX + inset, y: rowY - 1,
+                                         w: slotW - inset, h: ControlPx))
+  x = slotX + slotW + OmnibarTabGapPx
   for i, w in tabW:
-    if x + w > inner.x + inner.w:
+    if x + w > x1:
       break
-    let r = PxRect(x: x, y: band.y + 4, w: w, h: band.h - 8)
+    let r = PxRect(x: x, y: rowY, w: w, h: BarContentPx)
     # The close control FIRST, so a press on it is not the tab's
     # (`topBarHitAt` answers the first segment that contains the pixel).
     if tabs[i].closable:
@@ -277,15 +344,15 @@ proc gpuiTopBarLayout*(menu: MenuVM; omnibar: OmnibarVM;
     x += w + SessionTabGapPx
   # PLAT-49 part B: the "+", after the tabs (with one session, on its own):
   # the desktop's add control is there either way.
-  if canAddTab and x + SessionTabAddPx <= inner.x + inner.w:
+  if canAddTab and x + SessionTabAddPx <= x1:
     result.segs.add GTopSeg(part: gtTabAdd,
-                            rect: PxRect(x: x, y: band.y + 4,
-                                         w: SessionTabAddPx, h: band.h - 8))
+                            rect: PxRect(x: x, y: rowY,
+                                         w: SessionTabAddPx, h: BarContentPx))
   result.segs.add rightSegs
 
 proc segOf*(lay: GTopLayout; part: GTopPart; index = 0): GTopSeg =
   for s in lay.segs:
-    if s.part == part and (part notin {gtControl, gtTab, gtTabClose,
+    if s.part == part and (part notin {gtControl, gtTool, gtTab, gtTabClose,
                                        gtWindowButton} or
                            s.index == index):
       return s

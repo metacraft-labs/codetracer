@@ -93,21 +93,9 @@ proc tabLabel(tab: StateTab): string =
   of stWatches: "Watches"
 
 proc emptyOverlayText(tab: StateTab): string =
-  ## What an empty pane says, per tab.
-  ##
-  ## Every tab used to say "No local variables are present in the current
-  ## point of execution." — including the Watches tab, where it is simply
-  ## untrue: an empty Watches tab means the user has not added a watch
-  ## yet, and telling them about locals gives no hint that the input above
-  ## is the thing to use. An empty state that cannot say WHICH emptiness
-  ## it is describing is the failure this pane keeps producing.
-  case tab
-  of stLocals:
-    "No local variables are present in the current point of execution."
-  of stGlobals:
-    "No global variables are present in the current point of execution."
-  of stWatches:
-    "No watch expressions yet — type one above to evaluate it at this step."
+  ## What an empty pane says, per tab — `state_vm.stateEmptyText`, the one
+  ## spelling every front-end draws.
+  stateEmptyText(tab)
 
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"

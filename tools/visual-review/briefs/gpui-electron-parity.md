@@ -44,6 +44,17 @@ You may also be given crops of one region of both at 2x.
      shade;
    - **P3**: differences you find only by flipping between the images.
 
+## Accepted differences — do not report these
+
+- **The window buttons.** The Electron window is frameless and always draws
+  minimise, maximise and close. The GPUI window draws the buttons the desktop
+  supports and is configured for, where it is configured for them (the
+  product decision for the native front-end); on the capture lane's sway
+  target that is close alone. Report a button only if its shape, size or
+  position differs from Electron's equivalent button.
+- **A number before "No certificates"** in Electron's status bar (`4`, `14`,
+  `20`): Electron's test-movement counter, drawn only under its test harness.
+
 ## How to report
 
 - Keep it under 400 words.

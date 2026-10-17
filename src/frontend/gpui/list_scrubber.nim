@@ -27,6 +27,18 @@ const
   ListMarkAttribute* = "data-ct-list-scrubber-mark"
     ## On the current-position mark: the row it marks.
   EventLogRowPx* = 21
+  NarrowTrackPx* = 10
+    ## The desktop's list scrollbar (`.ct-list-scrubber`), its thumb 6 px
+    ## inside it on `rgba(121, 121, 121, 0.4)`.
+  NarrowThumbColour = "#79797966"
+  EventChromeAbovePx* = 30 + 25
+    ## The event log's toolbar and header (`leaves.EventToolbarPx`,
+    ## `EventHeaderPx`).
+  EventChromeBelowPx* = 33
+    ## Its pager (`leaves.EventFooterPx`).
+  CallChromeAbovePx* = 26
+    ## The call trace's search field (`leaves.CallSearchPx`): the desktop's
+    ## track starts at its foot.
     ## The event log's row pitch in the window (the vocabulary table's text
     ## line), for how many rows its body shows.
 
@@ -42,9 +54,23 @@ type
     onThumb*: bool
     fraction*: float
 
-proc listTrackRect*(body: PxRect): PxRect =
+proc listTrackRect*(body: PxRect; pane = ""): PxRect =
   ## The track: the pane body's right edge inside its padding, its full
   ## height.
+  # The desktop's list panes (measured 2026-10-17): a 10 px track along the
+  # pane's right edge, under the pane's own chrome — the event log's toolbar
+  # and header, the call trace's search field — and above the event log's
+  # pager.
+  case pane
+  of "eventLog":
+    let top = 8 + EventChromeAbovePx
+    return PxRect(x: body.x + body.w - NarrowTrackPx, y: body.y + top,
+                  w: NarrowTrackPx, h: max(0, body.h - top - EventChromeBelowPx))
+  of "calltrace":
+    let top = 8 + CallChromeAbovePx
+    return PxRect(x: body.x + body.w - NarrowTrackPx, y: body.y + top,
+                  w: NarrowTrackPx, h: max(0, body.h - top))
+  else: discard
   PxRect(x: body.x + body.w - ChromePaddingPx - ListTrackPx,
          y: body.y + ChromePaddingPx, w: ListTrackPx,
          h: max(0, body.h - 2 * ChromePaddingPx))
@@ -78,10 +104,11 @@ proc drawListScrubber*(r: GpuiRenderer; pane: GpuiElement; body: PxRect;
        getAttribute(c, ListMarkAttribute).len > 0:
       r.removeChild(pane, c)
     dec i
-  if body.w <= ListTrackPx or body.h <= 2 * ChromePaddingPx:
+  if body.w <= ListTrackPx or listTrackRect(body, paneId).h <= 0:
     return
   r.setStyle(pane, "position", "relative")
-  let track = listTrackRect(body)
+  let track = listTrackRect(body, paneId)
+  let narrow = paneId in ["eventLog", "calltrace"]
   let span = sm.thumbSpan(track.h, ListMinThumbPx)
   let t = box(r, track, body, "")
   r.setAttribute(t, ListTrackAttribute, paneId)
@@ -93,26 +120,30 @@ proc drawListScrubber*(r: GpuiRenderer; pane: GpuiElement; body: PxRect;
   r.setStyle(t, "display", "flex")
   r.setStyle(t, "flex-direction", "column")
   r.setStyle(t, "padding-top", $span.start & "px")
+  if narrow:
+    r.setStyle(t, "padding-left", "2px")
   let thumb = r.createElement("div")
-  r.setStyle(thumb, "width", $ListTrackPx & "px")
+  r.setStyle(thumb, "width", $(if narrow: track.w - 4 else: ListTrackPx) & "px")
   r.setStyle(thumb, "height", $span.length & "px")
   r.setStyle(thumb, "flex-shrink", "0")
-  r.setStyle(thumb, "background", TerminalThumbColour)
+  r.setStyle(thumb, "background", if narrow: NarrowThumbColour
+                                  else: TerminalThumbColour)
   r.setStyle(thumb, "rounded", "3px")
   r.appendChild(t, thumb)
   r.appendChild(pane, t)
   let f = sm.currentFraction
   if f >= 0.0:
     let y = track.y + min(track.h - ListMarkPx, int(f * float(track.h)))
-    let mark = box(r, PxRect(x: track.x, y: y, w: ListTrackPx, h: ListMarkPx),
+    let mark = box(r, PxRect(x: track.x, y: y, w: track.w, h: ListMarkPx),
                    body, TerminalMarkColour)
     r.setAttribute(mark, ListMarkAttribute, $sm.current)
     r.appendChild(pane, mark)
 
-proc listScrubHit*(body: PxRect; sm: ScrubberModel; x, y: int): ListScrubHit =
+proc listScrubHit*(body: PxRect; sm: ScrubberModel; x, y: int;
+                   pane = ""): ListScrubHit =
   ## A press at `(x, y)`: on the track (a jump) or on its thumb (a drag), and
   ## the fraction the model takes — the track's ends at 0 and 1.
-  let track = listTrackRect(body)
+  let track = listTrackRect(body, pane)
   if track.h <= 0 or x < track.x or x >= track.x + track.w or
      y < track.y or y >= track.y + track.h:
     return

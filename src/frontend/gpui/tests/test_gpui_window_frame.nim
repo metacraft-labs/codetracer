@@ -100,7 +100,7 @@ const ExpectedAssertions = 680
   ## `window.nim` exports 31 procs (15 at `47ea664`): GWIN added the
   ## operations on the window `gpui_launch` opens, and this front-end now
   ## uses them (`window_chrome.nim`). They are not the registry, so they are
-  ## a second declared, checked exclusion (`LaunchedWindowNames`, 17 names),
+  ## a second declared, checked exclusion (`LaunchedWindowNames`, 18 names),
   ## which leaves 31 - 6 - 17 = 8 registry subjects. The tally: the scan's
   ## per-file body is `1 + 8 = 9` over 22 files (`window_chrome.nim` is the
   ## new one) = 198, where it was `1 + 9 = 10` over 21 = 210 (-12); the
@@ -1262,7 +1262,7 @@ const LaunchedWindowNames = [
   "tiledEdges", "supportedControls", "isMaximized", "isActive",
   "buttonLayout", "setTitle", "setAppId", "setMinWindowSize",
   "setInitialWindowState", "minimize", "toggleMaximize", "toggleFullscreen",
-  "requestClose"]
+  "requestClose", "addFontFile"]
   ## PLAT-69: `window.nim`'s operations on THE WINDOW `gpui_launch` OPENS
   ## (isonim-gpui GWIN: `launchWindow()` names it, and the rest read or act
   ## on it, or are the launch options read before `gpui_launch`). They are the
@@ -1270,6 +1270,9 @@ const LaunchedWindowNames = [
   ## nothing — and `window_chrome.nim` calls them so the window can be a
   ## desktop window. `onResize` is the registry's callback API AS GWIN USES
   ## IT: registered on `launchWindow()`, which `gpui_launch` notifies.
+  ## `addFontFile` (2026-10-17) is a launch option too: the design system's
+  ## font files, handed to the text system `gpui_launch` creates
+  ## (`design_fonts.registerDesignFonts`).
   ##
   ## Declared and checked as `AmbiguousWindowNames` is: each must still be
   ## exported, and a proc added upstream lands in the FORBIDDEN set until

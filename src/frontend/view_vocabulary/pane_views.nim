@@ -364,6 +364,15 @@ proc eventLogCell(r: EventLogRow; col: EventLogColumn): string =
     # measured every row of the native window's event log double-spaced).
     r.value.strip(leading = false, chars = {'\n', '\r'})
 
+func eventLogText*(r: EventLogRow): string =
+  ## The event's text as the desktop's output column says it
+  ## (`ui/event_log.eventLogDescriptionRepr`): a write is prefixed with the
+  ## stream it went to — `stdout: 2 + 3 = 5` — and every other event is its
+  ## content. Without its line terminator (`eventLogCell`'s reason).
+  let content = r.value.strip(leading = false, chars = {'\n', '\r'})
+  if r.kind == "stdout": "stdout: " & content
+  else: content
+
 proc eventLogPaneView*(vm: EventLogVM): PaneView =
   ## The event log: a `Table`.
   ##

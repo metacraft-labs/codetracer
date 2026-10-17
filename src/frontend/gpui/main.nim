@@ -68,6 +68,7 @@
 when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
+import ./design_fonts
 import std/[cpuinfo, json, math, options, os, sets, strutils, tables, times]
 
 import isonim_gpui/renderer
@@ -94,6 +95,11 @@ from ../viewmodel/platform/displayed_product import sessionDocumentTitle
 import ./window_clicks
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
+import ../ui/history_cursor   # history back / forward: the desktop's cursor rule
+import ../viewmodel/viewmodels/[certificate_indicator_vm,
+                                certificate_indicator_source]
+import ../viewmodel/host/desktop_native   # the certificate indicator's host
+import ./design_font_metrics
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
 import ../styles/generated/design_tokens
 
@@ -747,6 +753,8 @@ const
     ## row opens the omnibar with it); `:unwatch EXPR` and
     ## `:watch-edit OLD -> NEW` remove and edit (the row controls).
     ## PLAT-50: the omnibar's tracepoint command ("Add tracepoint").
+  CallsCommand = ":calls "
+    ## The call trace's search field's omnibox prefix (`runWatchCommand`).
 
 type
   GContent = object
@@ -1146,6 +1154,13 @@ var
   gFocusPane = $paneEditor
     ## PLAT-51: the FOCUSED pane — the one last pressed (the desktop's
     ## selected panel follows its clicks), the editor until then.
+  gEditorGeometryDrawn = false
+    ## Whether the replay editor has been drawn against the window's geometry
+    ## (the first frame's leaves are rendered before there is one).
+  gFocusShown = false
+    ## Whether the focus highlight is drawn yet: from the first press on a
+    ## pane, as the desktop outlines its selected panel only once one has
+    ## been clicked (the editor holds the keys before that, unmarked).
     ## PLAT-51: the Variables pane's column rule held — the name column
     ## follows the pointer until the release (the desktop's column resize).
   gestureTrace = getEnv("CODETRACER_GPUI_GESTURE_TRACE", "") == "1"
@@ -1187,6 +1202,7 @@ const
     ## scrolled to is on screen, not clipped below the pane.
 
 proc drawTopBar(r: GpuiRenderer)
+proc toolAvailable(tool: GToolButton): bool
   ## PLAT-48: the top bar over the window (defined with its handlers below).
 proc handleTopPress(r: GpuiRenderer; x, y: int): bool
 proc handleTopHover(r: GpuiRenderer; x, y: int)
@@ -1243,7 +1259,22 @@ proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.} =
   for i in 0 ..< childCount(node):
     result += applyTextFaces(r, nthChild(node, i))
 
-proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int) =
+proc editorTopInsetPx(): int =
+  ## Where the editor's first drawn row starts below its pane's top. At the
+  ## top of a file, the desktop's 4 px. Scrolled — the window centred on a
+  ## stop (`SourceVM.followExecutionPointer`) — Monaco's sub-row offset too:
+  ## it reveals a line with its top at the viewport's middle, so the first
+  ## WHOLE line starts `(viewport div 2) mod lineHeight` down (5 px in the
+  ## 1920x1080 editor, line 22 at y 75 for a stop on line 44), the line
+  ## above it cut off under the band.
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  if i < 0 or gEditorSurface.viewportTop <= 1:
+    return EditorPadTopPx
+  let viewport = gGeom.nodes[i].body.h - EditorPadTopPx
+  EditorPadTopPx + (viewport div 2) mod GpuiEditorRowPx
+
+proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int;
+                  id = "") =
   ## One leaf's own box: its size, its fill, its clip.
   let isEditor = getAttribute(pane, EditorMediumAttribute).len > 0
   r.setStyle(pane, "background-color",
@@ -1256,10 +1287,26 @@ proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int) =
   # the shipped binary; the pane is the boundary a reader expects.
   r.setStyle(pane, "overflow", "hidden")
   r.setStyle(pane, "flex-direction", "column")
-  r.setStyle(pane, "padding", $ChromePaddingPx & "px")
-  r.setStyle(pane, "rounded", "4px")
+  # The pane's content inset (`window_geometry.paneInsetOf`), the editor's
+  # top moving with its scroll (`editorTopInsetPx`).
+  let inset = paneInsetOf(if isEditor: $paneEditor else: id)
+  r.setStyle(pane, "padding", "0px")
+  r.setStyle(pane, "padding-top",
+             $(if isEditor: editorTopInsetPx() else: inset.top) & "px")
+  r.setStyle(pane, "padding-right", $inset.right & "px")
+  r.setStyle(pane, "padding-bottom", $inset.bottom & "px")
+  r.setStyle(pane, "padding-left", $inset.left & "px")
+  r.setStyle(pane, "rounded", $TabRadiusPx & "px")
   # (No heading to colour since PLAT-49: the window strips it, and the
   # pane's tab strip names the pane.)
+
+const
+  TabPinIcon = staticRead("../../public/resources/menu/lm_pin_tab_dark.svg")
+    ## The desktop's tab icons (`LAYOUT_TAB_PIN_ICON_PATH`,
+    ## `LAYOUT_TAB_CLOSE_ICON_PATH`, `styles/default_dark_theme.styl`).
+  TabCloseIcon = staticRead("../../public/resources/menu/lm_close_tab_dark.svg")
+
+proc tabIconSvgPath(svg: string): string
 
 proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
   ## One node of the geometry, as elements sized exactly as it says.
@@ -1285,30 +1332,29 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
     let box = r.createElement("div")
     # PLAT-51: the focused pane — the one last pressed — when the focus
     # highlight is on: its outline AND its tab strip in the focus colour.
-    let focusedHere = gLayoutSettings.focusHighlight and
+    let focusedHere = gLayoutSettings.focusHighlight and gFocusShown and
                       activePane == gFocusPane
     r.setAttribute(box, "data-ct-focus-frame", $focusedHere)
     r.setStyle(box, "flex-direction", "column")
     r.setStyle(box, "width", $n.rect.w & "px")
     r.setStyle(box, "height", $n.rect.h & "px")
-    r.setStyle(box, "background-color",
-               if isEditor: EditorGround else: chromeOf(crPaneBackground))
-    r.setStyle(box, "rounded", "4px")
-    for (key, value) in paneOutlineStyle(focusedHere):
-      r.setStyle(box, key, value)
+    # No fill of its own: the strip shows the window's ground between its
+    # tabs, as the desktop's transparent header does; the body is filled.
+    r.setStyle(box, "rounded", $TabRadiusPx & "px")
     if not n.strip.isEmpty:
       let strip = r.createElement("div")
       r.setAttribute(strip, "data-ct-tabs", n.labels.join(","))
       r.setStyle(strip, "flex-direction", "row")
       r.setStyle(strip, "flex-shrink", "0")
-      r.setStyle(strip, "padding-left", $StripInsetPx & "px")
       r.setStyle(strip, "height", $TabStripPx & "px")
-      r.setStyle(strip, "items", "center")
-      # PLAT-49: the strip on its own ground, distinct from the pane body —
-      # PLAT-51: the focus colour's, on the focused pane.
+      r.setStyle(strip, "padding-top", $TabTopPx & "px")
+      r.setStyle(strip, "gap", $TabGapPx & "px")
+      # PLAT-51: the focus colour's ground, on the focused pane. Otherwise the
+      # window's own: the desktop's header is transparent over its ground.
       r.setAttribute(strip, "data-ct-strip-focused", $focusedHere)
-      for (key, value) in stripStyle(focusedHere):
-        r.setStyle(strip, key, value)
+      if focusedHere:
+        for (key, value) in stripStyle(focusedHere):
+          r.setStyle(strip, key, value)
       # PLAT-51: GOLDENLAYOUT'S TAB-DROP PLACEHOLDER — during a drag over
       # this strip, a `GlPlaceholderPx` gap before the tab the drop would
       # land at; the tabs after it move right, as GoldenLayout's do.
@@ -1319,33 +1365,96 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
         r.setAttribute(result, "data-ct-tab-placeholder", $gapAt)
         r.setStyle(result, "width", $int(GlPlaceholderPx) & "px")
         r.setStyle(result, "flex-shrink", "0")
-      # A TAB STRIP SHAPED BY COLOUR AND WEIGHT (PLAT-47), no brackets, no
-      # rule — and, by the user's direction (PLAT-49), the selected tab on a
-      # background and in a foreground of its own, the others on the strip's.
-      # Each tab is exactly as wide as the geometry says, so a click and a
-      # drop caret land where the tab is drawn.
+      # THE DESKTOP'S TABS (`components/golden_layout.styl`, measured on the
+      # Electron front-end 2026-10-17): every tab a rounded chip on the panel
+      # surface, its title in the label face at 14 px — the active one in the
+      # label tier, the others in the disabled tier — and a pin and a close
+      # icon at its right end, at 40% on a tab at the back. The ACTIVE tab
+      # runs on down into its pane's body, square at the bottom, so tab and
+      # panel are one shape (`.lm_active`'s box-shadow bridge). Each tab is
+      # exactly as wide as the geometry says, so a click and a drop caret
+      # land where the tab is drawn.
+      let ground = if isEditor: EditorGround else: chromeOf(crPaneBackground)
       for t, label in n.labels:
         if t == gapAt:
           r.appendChild(strip, gapEl(r))
+        let active = t == n.active
         let tab = r.createElement("div")
-        r.setAttribute(tab, "data-ct-tab-active", $(t == n.active))
+        r.setAttribute(tab, "data-ct-tab-active", $active)
         # PLAT-50: which pane the tab is, for its right-click menu.
         if t < n.panes.len:
           r.setAttribute(tab, TabPaneAttribute, n.panes[t])
         r.setStyle(tab, "width", $n.tabs[t].w & "px")
+        r.setStyle(tab, "height",
+                   $(if active: TabStripPx - TabTopPx else: TabHeightPx) & "px")
         r.setStyle(tab, "flex-shrink", "0")
-        r.setStyle(tab, "padding-left", $TabPadPx & "px")
-        r.setStyle(tab, "white-space", "nowrap")
-        r.setStyle(tab, "overflow", "hidden")
-        for (key, value) in tabStyle(t == n.active, focusedHere):
-          r.setStyle(tab, key, value)
-        r.appendChild(tab, r.createTextNode(label))
+        r.setStyle(tab, "flex-direction", "column")
+        r.setStyle(tab, "background-color",
+                   if active: ground else: chromeOf(crPaneBackground))
+        r.setStyle(tab, "rounded", $TabRadiusPx & "px")
+        if active:
+          r.setStyle(tab, "border-bottom-left-radius", "0px")
+          r.setStyle(tab, "border-bottom-right-radius", "0px")
+        # The tab's own row, `TabHeightPx` high: the active tab's bridge is
+        # below it.
+        let row = r.createElement("div")
+        r.setStyle(row, "flex-direction", "row")
+        r.setStyle(row, "items", "center")
+        r.setStyle(row, "height", $TabHeightPx & "px")
+        r.setStyle(row, "flex-shrink", "0")
+        r.setStyle(row, "padding-left", $TabTitleInsetPx & "px")
+        r.setStyle(row, "padding-right", $TabTitleInsetPx & "px")
+        r.appendChild(tab, row)
+        let title = r.createElement("div")
+        r.setStyle(title, "flex-grow", "1")
+        r.setStyle(title, "flex-shrink", "1")
+        r.setStyle(title, "overflow", "hidden")
+        r.setStyle(title, "white-space", "nowrap")
+        r.setStyle(title, "font-size", "14px")
+        r.setStyle(title, "line-height", "18px")
+        # `.lm_title`: the active tab's in ui/text/primary/label (#c8c8c8,
+        # measured), the others' in the disabled tier.
+        r.setStyle(title, "color",
+                   if active: DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark]
+                   else: chromeOf(crTabInactiveForeground))
+        var shown = label
+        for k in PaneKind:
+          if t < n.panes.len and $k == n.panes[t] and label == labelOf($k):
+            shown = desktopTabTitle(k)
+        r.appendChild(title, r.createTextNode(shown))
+        r.appendChild(row, title)
+        for (icon, side, gapAfter) in [(TabPinIcon, TabPinPx, 4),
+                                       (TabCloseIcon, TabClosePx, 0)]:
+          let img = r.createElement("img")
+          r.setAttribute(img, "src", tabIconSvgPath(icon))
+          r.setStyle(img, "width", $side & "px")
+          r.setStyle(img, "height", $side & "px")
+          r.setStyle(img, "flex-shrink", "0")
+          if not active:
+            r.setStyle(img, "opacity", "0.4")
+          r.appendChild(row, img)
+          if gapAfter > 0:
+            let gap = r.createElement("div")
+            r.setStyle(gap, "width", $gapAfter & "px")
+            r.setStyle(gap, "flex-shrink", "0")
+            r.appendChild(row, gap)
         r.appendChild(strip, tab)
       if gapAt >= n.labels.len:
         r.appendChild(strip, gapEl(r))
       r.appendChild(box, strip)
     if not leaf.isNil:
-      stylePaneBox(r, leaf, n.body.w, n.body.h)
+      stylePaneBox(r, leaf, n.body.w, n.body.h, activePane)
+      # The body's corner under the active tab is square where that tab is
+      # the first or the last of its strip — the tab and the panel are one
+      # shape there (`.lm_stack:has(... .lm_active:first-child)`).
+      # Both are set on every draw: a leaf is moved between arrangements,
+      # never rebuilt, and keeps the corners its last one gave it.
+      let flat = not n.strip.isEmpty
+      r.setStyle(leaf, "border-top-left-radius",
+                 (if flat and n.active == 0: "0" else: $TabRadiusPx) & "px")
+      r.setStyle(leaf, "border-top-right-radius",
+                 (if flat and n.active == n.labels.high: "0"
+                  else: $TabRadiusPx) & "px")
       r.appendChild(box, leaf)
     box
 
@@ -1675,6 +1784,9 @@ proc adoptNewLeaves(r: GpuiRenderer) =
     gLeafSet.leaves.add leaf
     traceGesture("leaf adopted " & leaf.paneId)
 
+proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool)
+  ## Forward-declared for `drawArrangement`'s first frame.
+
 proc drawArrangement(r: GpuiRenderer): bool =
   ## Lay the window out from the layout it should show NOW — the committed
   ## one, or, while a divider is dragged, the committed one with the pending
@@ -1696,6 +1808,11 @@ proc drawArrangement(r: GpuiRenderer): bool =
   if gGeom.root < 0:
     return false
   adoptNewLeaves(r)
+  # The first arrangement is where the editor's geometry exists: its sticky
+  # headers, sub-row offset and overview ruler are drawn from here.
+  if not gEditorGeometryDrawn and not gSourceService.isNil and openArm.isNil:
+    gEditorGeometryDrawn = true
+    redrawReplayEditor(r, resetScroll = false)
   # The leaves are MOVED into the new arrangement, never rebuilt.
   for _, pane in gPanes:
     let parent = r.parentNode(pane)
@@ -1749,12 +1866,23 @@ proc stripHeading(r: GpuiRenderer; pane: GpuiElement) =
   if not pane.isNil and childCount(pane) > 0 and isHeading(nthChild(pane, 0)):
     r.removeChild(pane, nthChild(pane, 0))
 
+proc syncLeafContext() =
+  ## What the leaves read from the window rather than from a ViewModel: the
+  ## debugger's tick and the event log's width (`leaves.eventLogNowTicks`,
+  ## `eventLogPaneWidthPx`).
+  if not gSession.isNil:
+    eventLogNowTicks = gSession.getCurrentRRTicks()
+  let i = gGeom.tabsNodeOfPane($paneEventLog)
+  if i >= 0:
+    eventLogPaneWidthPx = gGeom.nodes[i].body.w
+
 proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
   ## that procedure keeps its node's FIRST child as the heading and redraws
   ## the rest, so the old content is cleared first and a stand-in first child
   ## held while it runs, then dropped — the pane is left with exactly the
   ## content `renderPaneView` drew.
+  syncLeafContext()
   if pane.isNil:
     return
   while childCount(pane) > 0:
@@ -1784,6 +1912,12 @@ proc redrawCalltrace(r: GpuiRenderer) =
       break
   drawListScrubbers(r)
 
+func callTraceRowsIn(body: PxRect): int =
+  ## The call rows a call-trace body shows: under its search field, at the
+  ## desktop's fractional pitch.
+  max(1, callRowAtPx(body.h - paneInsetOf($paneCalltrace).top -
+                     CallRowsTopPx))
+
 proc scrollCalltrace(r: GpuiRenderer; rows: int) =
   ## PLAT-47 B3: the wheel over the call-trace pane scrolls it a row per
   ## `CalltraceRowPx`, reading a section past the one held as it scrolls
@@ -1796,8 +1930,7 @@ proc scrollCalltrace(r: GpuiRenderer; rows: int) =
     return
   # The rows the pane shows: its body inside the pane's padding, at the row
   # pitch (no heading row since PLAT-49; the tab strip is outside the body).
-  let body = max(1, (gGeom.nodes[i].body.h - 2 * ChromePaddingPx) div
-                    CalltraceRowPx)
+  let body = callTraceRowsIn(gGeom.nodes[i].body)
   let page = gSession.pageCalltrace(body, rows)
   if page.loaded:
     inc gCalltraceLoads
@@ -1939,18 +2072,19 @@ proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
     return false
   let rows = vm.callRows()
   let body = gGeom.nodes[i].body
-  let at = (y - body.y - ChromePaddingPx) div CalltraceRowPx
-  if y < body.y + ChromePaddingPx or at < 0 or at >= rows.len:
+  let rowsTop = body.y + paneInsetOf($paneCalltrace).top + CallRowsTopPx
+  let at = callRowAtPx(y - rowsTop)
+  if y < rowsTop or at < 0 or at >= rows.len:
     return false
   let row = rows[at]
-  let toggleX = body.x + ChromePaddingPx + row.depth * CallIndentPx
+  let toggleX = body.x + CallToggleLeftPx + row.depth * CallIndentPx
   let store = gSession.session.store
   let local = row.index - store.calltrace.startLineIndex.val
   let lines = store.calltrace.lines.val
   if local < 0 or local >= lines.len.int64:
     return false
   let line = lines[local.int]
-  if row.toggle != crtLeaf and x >= toggleX and x < toggleX + CallIndentPx:
+  if row.toggle != crtLeaf and x >= toggleX and x < toggleX + 14:
     let command = if line.isExpanded: "ct/collapse-calls"
                   else: "ct/expand-calls"
     traceGesture("calltrace " & command & " #" & $row.index)
@@ -2215,11 +2349,14 @@ proc visibleBodyOf(kind: PaneKind): PxRect =
   n.body
 
 proc eventLogRows(): int =
-  ## The rows the event log's body shows: under its column header.
-  max(1, listRowsOf(visibleBodyOf(paneEventLog), EventLogRowPx) - 1)
+  ## The rows the event log's body shows: between its toolbar and header and
+  ## its pager, at the desktop's pitch.
+  let body = visibleBodyOf(paneEventLog)
+  max(1, int(floor(float(body.h - 8 - EventChromeAbovePx - EventChromeBelowPx) /
+                   EventRowPitch)))
 
 proc callTraceRows(): int =
-  listRowsOf(visibleBodyOf(paneCalltrace), CalltraceRowPx)
+  callTraceRowsIn(visibleBodyOf(paneCalltrace))
 
 proc eventLogScrubber(): ScrubberModel =
   ## The WHOLE log (the engine's count), the window's first row — the pane
@@ -2276,7 +2413,7 @@ proc scrubListPane(r: GpuiRenderer; kind: PaneKind; y: int; dragging: bool) =
   case kind
   of paneEventLog:
     let sm = eventLogScrubber()
-    let hit = listScrubHit(body, sm, listTrackRect(body).x, y)
+    let hit = listScrubHit(body, sm, listTrackRect(body, $kind).x, y, $kind)
     if not hit.onTrack:
       return
     let page = gSession.pageEventLog(sm.scrubTop(hit.fraction, dragging),
@@ -2288,7 +2425,7 @@ proc scrubListPane(r: GpuiRenderer; kind: PaneKind; y: int; dragging: bool) =
                  " total=" & $page.total)
   of paneCalltrace:
     let sm = callTraceScrubber()
-    let hit = listScrubHit(body, sm, listTrackRect(body).x, y)
+    let hit = listScrubHit(body, sm, listTrackRect(body, $kind).x, y, $kind)
     if not hit.onTrack:
       return
     let top = sm.scrubTop(hit.fraction, dragging)
@@ -2309,7 +2446,7 @@ proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
     let body = visibleBodyOf(kind)
     if body.w <= 0 or sm.total <= 0:
       continue
-    let hit = listScrubHit(body, sm, x, y)
+    let hit = listScrubHit(body, sm, x, y, $kind)
     if not hit.onTrack:
       continue
     if hit.onThumb:
@@ -2393,7 +2530,8 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # (a call row, a scrubber, the terminal output): its strip and outline
     # take the focus colour when the highlight is on.
     let pressedPane = gGeom.activePaneAt(x, y)
-    if pressedPane.len > 0 and pressedPane != gFocusPane:
+    if pressedPane.len > 0 and (pressedPane != gFocusPane or not gFocusShown):
+      gFocusShown = true
       focusWindowPane(r, pressedPane)
       traceGesture("focus " & pressedPane)
       discard drawArrangement(r)
@@ -2630,7 +2768,6 @@ proc cancelWindowGesture(): bool =
 # ---------------------------------------------------------------------------
 
 const
-  PinButtonPx = 24
   HoverLabelPx = 24
 
 var
@@ -2643,6 +2780,18 @@ var
     ## The band, its parts, the popovers and the hover label: absolutely
     ## placed on the root, rebuilt by `drawTopBar`.
   gHoverControl = -1
+  gHoverTool = -1
+    ## The tool button under the pointer (`GToolButton` ordinal).
+  gCertVm: CertificateIndicatorVm = nil
+    ## The status bar's certificate indicator, over `gCertDir`.
+  gCertDir = ""
+  gJumpHistory: seq[uint64] = @[]
+    ## The ticks the debugger has stopped at, oldest first — the desktop's
+    ## `DebugComponent.jumpHistory`, for history back and forward.
+  gHistoryIndex = 1
+    ## Where the cursor is, counted back from the newest (`[^gHistoryIndex]`).
+  gHistoryMoving = false
+    ## A history move is landing: its stop is not a new entry.
   gHoverTab = -1
   gHoverTabAdd = false
     ## PLAT-49 part B: the pointer is on the strip's "+".
@@ -2679,6 +2828,63 @@ proc gpuiMenuActionAvailable(action: string): bool =
              "aState", "aEventLog", "aTerminal", "aScratchpad",
              "aPointList", "aAgentActivity"]
 
+const
+  MenuLogoIcon = staticRead("../../public/resources/menu/ct_logo_dark.svg")
+    ## The desktop's `#menu-logo-img` (`ct-images-logo-dark`).
+  SessionTabAddIcon = staticRead(
+    "../../public/resources/shared/session_tab_add.svg").replace(
+      "#DDDDDD", "#f3f3f3")
+    ## `.session-tab-add`'s plus, in its `color: #b0b0b0`.
+  StopIcon = staticRead("../../public/resources/debug/stop_16_dark.svg")
+    ## `#stop-image` (`ct-images-stop`).
+  RunTestsIcon = staticRead("../../public/resources/shared/run_test_img.svg")
+    ## `#run-tests-image` (`ct-images-run-tests`).
+  CopyPathIcon = staticRead("../../public/resources/menu/copy_file_path_dark.svg")
+    ## The status bar's copy-path button (`ct-images-copy-path`).
+  OmnibarSearchIcon = staticRead(
+    "../../public/resources/shared/input_empty_search_icon_dark.svg")
+    ## The omnibox's magnifier (`ct-images-empty-search-icon`).
+  ControlInk = DesignTokenHex[dtColorsUiTextPrimaryBodySubtle][dmDark]
+    ## The ink of an enabled bar button: the desktop's
+    ## `ct-button-image-md-secondary` colour, #b4b4b4 (measured 2026-10-17).
+
+proc topBarSvgPath(name, svg: string): string =
+  ## An icon of the bar, written once as an SVG file beside the marks.
+  if gIconDir.len == 0:
+    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
+    createDir(gIconDir)
+  let path = gIconDir / ("bar-" & name & ".svg")
+  if not fileExists(path):
+    writeFile(path, svg)
+  path
+
+proc toolSvgPath(tool: GToolButton; enabled: bool): string =
+  ## A tool button's icon: the desktop's own mark for history and reset
+  ## (`debug_control_marks`), its image for run tests and stop — in the
+  ## controls' ink, or the disabled tier's when the window cannot act on it.
+  let ink = if enabled: ControlInk else: chromeOf(crTabInactiveForeground)
+  let suffix = if enabled: "-on" else: "-off"
+  # The two images keep their own fills while enabled, as the desktop's
+  # `background-image` buttons do.
+  case tool
+  of gtbRunTests:
+    topBarSvgPath("run-tests" & suffix,
+                  if enabled: RunTestsIcon else: RunTestsIcon.replace("#DDDDDD", ink))
+  of gtbStop:
+    topBarSvgPath("stop" & suffix,
+                  if enabled: StopIcon else: StopIcon.replace("#ADAEAE", ink))
+  else:
+    var svg = svgMarkup(markFor($tool)).replace("currentColor", ink)
+    svg = svg.replace("<svg ", "<svg width=\"" & $(2 * ControlIconPx) &
+                      "\" height=\"" & $(2 * ControlIconPx) & "\" ")
+    topBarSvgPath($tool & suffix, svg)
+
+func toolIconSize(tool: GToolButton): (int, int) =
+  ## Drawn at the desktop's `auto 1em`: 16 px high.
+  case tool
+  of gtbRunTests: (21, 16)
+  else: (ControlIconPx, ControlIconPx)
+
 proc markSvgPath(controlIndex: int; enabled: bool): string =
   ## The desktop's mark for a control, written once as an SVG document in
   ## the ink its state is drawn in — `svgMarkup`'s `currentColor` resolved,
@@ -2689,8 +2895,7 @@ proc markSvgPath(controlIndex: int; enabled: bool): string =
   let c = TransportControls[controlIndex]
   let path = gIconDir / (c.id & (if enabled: "-on" else: "-off") & ".svg")
   if not fileExists(path):
-    let ink = chromeOf(if enabled: crTabActiveForeground
-                       else: crTabInactiveForeground)
+    let ink = if enabled: ControlInk else: chromeOf(crTabInactiveForeground)
     var svg = svgMarkup(markFor(c.id)).replace("currentColor", ink)
     svg = svg.replace("<svg ", "<svg width=\"" & $(2 * ControlIconPx) &
                       "\" height=\"" & $(2 * ControlIconPx) & "\" ")
@@ -2727,6 +2932,17 @@ proc windowButtonSvgPath(button: GWindowButton; restore: bool): string =
                     else: WindowButtonIcons[button].svg)
   path
 
+proc tabIconSvgPath(svg: string): string =
+  ## A tab icon, written once as an SVG file beside the debugger's marks.
+  if gIconDir.len == 0:
+    gIconDir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
+    createDir(gIconDir)
+  let path = gIconDir / (if svg == TabPinIcon: "tab-pin.svg"
+                         else: "tab-close.svg")
+  if not fileExists(path):
+    writeFile(path, svg)
+  path
+
 proc controlsEnabled(): seq[bool] =
   if gSession.isNil or gSession.session.debugControlsVM.isNil:
     return newSeq[bool](TransportControls.len)
@@ -2746,11 +2962,10 @@ proc absBox(r: GpuiRenderer; rect: PxRect; bg = ""): GpuiElement =
     r.setStyle(result, "background-color", bg)
 
 proc pinButtonRect(n: GeomNode): PxRect =
-  ## The PIN button of a pane box: the right end of its tab strip (every
-  ## pane box has one since PLAT-49).
-  let top = if n.strip.isEmpty: n.body.y else: n.strip.y
-  PxRect(x: n.rect.x + n.rect.w - PinButtonPx - 2, y: top + 3,
-         w: PinButtonPx, h: TabStripPx - 6)
+  ## The PIN icon of a pane box's ACTIVE tab (every tab has one since the
+  ## desktop's tab strip, 2026-10-17; the box's one pin button at the strip's
+  ## right end until then).
+  if n.pins.len == 0: PxRect() else: n.pins[n.active]
 
 proc overlayRects(): seq[PxRect] =
   ## What `drawOverlay` draws OVER the tree right now: the revealed pane, a
@@ -2772,29 +2987,102 @@ proc unpinButtonRect(): PxRect =
   let rr = gGeom.revealRectOf(gGestures.reveal.edge)
   PxRect(x: rr.x + rr.w - 72, y: rr.y + 4, w: 64, h: TabStripPx - 8)
 
+proc footerLocation(): string =
+  ## The status bar's location — the desktop's `.location-path`,
+  ## `<path>:<line>#<ticks>` — or "" with no session.
+  if gSession.isNil: ""
+  else: gSession.getCurrentFile() & ":" & $gSession.getCurrentLine() & "#" &
+        $gSession.getCurrentRRTicks()
+
+proc certificateLabel(): string =
+  ## The status bar's test-certificate indicator (`certificate_indicator_vm`,
+  ## the desktop's `.test-certificate-label`), over the recording's source
+  ## folder, read once per folder through the shipped native reader.
+  if gSession.isNil:
+    return ""
+  let dir = gSession.getCurrentFile().parentDir
+  if dir.len == 0:
+    return ""
+  if gCertVm.isNil or gCertDir != dir:
+    gCertDir = dir
+    gCertVm = newCertificateIndicatorVm(platformCertificateFactsReader(
+      newDesktopNativePlatform(), dir, standardPlatformTriple(hostOS, hostCPU)))
+    try:
+      discard gCertVm.refresh(citStartup)
+    except CatchableError:
+      discard
+  gCertVm.model.label
+
+proc copyPathRect(): PxRect =
+  ## The status bar's copy-path button (`#copy-path-image`, 26 px, 8 px from
+  ## the window's right edge).
+  if gGeom.footer.isEmpty or gSession.isNil: PxRect()
+  else: PxRect(x: gGeom.footer.x + gGeom.footer.w - 34,
+               y: gGeom.footer.y + (gGeom.footer.h - 26) div 2, w: 26, h: 26)
+
+proc drawFocusOutline(r: GpuiRenderer) =
+  ## PLAT-47 deliverable 9, GPUI's half, since 2026-10-17 an OVERLAY: the
+  ## focused pane's 1px outline in the desktop's selected-panel colour
+  ## (`chrome.paneOutlineStyle`), drawn over its box with the band's
+  ## absolutely placed parts — the desktop's `.ct-selected-outline` — so
+  ## focus moving never moves a pane's content and an unfocused pane has no
+  ## frame at all.
+  if not (gLayoutSettings.focusHighlight and gFocusShown):
+    return
+  for n in gGeom.nodes:
+    if n.kind != gnTabs or n.panes.len == 0 or n.panes[n.active] != gFocusPane:
+      continue
+    let o = absBox(r, n.rect)
+    r.setAttribute(o, "data-ct-focus-outline", gFocusPane)
+    r.setStyle(o, "rounded", $TabRadiusPx & "px")
+    for (key, value) in paneOutlineStyle(true):
+      r.setStyle(o, key, value)
+    gTopEls.add o
+
 proc drawFooter(r: GpuiRenderer) =
   ## PLAT-49 part B (finding 9): THE WINDOW'S FOOTER — its status bar, along
-  ## the bottom, full width — with the bottom auto-hide labels on its LEFT,
-  ## as the desktop's status bar holds them (Auto-Hide-Panes.md §3.1), each
-  ## lit while its pane is previewed or docked open, and the position on its
-  ## right. Drawn with the band's absolutely placed parts.
+  ## the bottom, full width — as the desktop's `#status-base` (measured
+  ## 2026-10-17): the file info (language | encoding) on the left, then the
+  ## bottom auto-hide labels as chips on the panel surface, each lit while its
+  ## pane is previewed or docked open; on the right the test-certificate
+  ## indicator, the location (`path:line#ticks`) and its copy button. All in
+  ## the label face at 14 px, ui/text/primary/label-subtle.
   if gGeom.footer.isEmpty:
     return
-  let f = absBox(r, gGeom.footer, chromeOf(crTabStripBackground))
+  let ink = DesignTokenHex[dtColorsUiTextPrimaryLabelSubtle][dmDark]
+  let f = absBox(r, gGeom.footer, chromeOf(crWindowBackground))
   r.setAttribute(f, "data-ct-footer", "status-bar")
   gTopEls.add f
+  proc text(r: GpuiRenderer; parent: GpuiElement; s: string) =
+    let t = r.createElement("div")
+    r.setStyle(t, "font-size", "14px")
+    r.setStyle(t, "white-space", "nowrap")
+    r.setStyle(t, "flex-shrink", "0")
+    r.appendChild(t, r.createTextNode(s))
+    r.appendChild(parent, t)
+  let rowY = gGeom.footer.y + (gGeom.footer.h - TabHeightPx) div 2
   # The file info FIRST, as the desktop's status bar opens with it
-  # (`#file-info-status`); the labels follow it (`footerLeadPx`).
+  # (`#file-info-status`): its parts with the desktop's `.separate-bar`
+  # between them; the labels follow it (`footerLeadPx`).
   let info = footerInfo()
   if info.len > 0:
-    let fi = absBox(r, PxRect(x: gGeom.footer.x, y: gGeom.footer.y,
-                              w: footerLeadPx(info), h: gGeom.footer.h))
+    let fi = absBox(r, PxRect(x: FooterFileInfoX, y: rowY,
+                              w: FooterFileInfoPx, h: TabHeightPx))
     r.setAttribute(fi, "data-ct-footer-file-info", info)
-    r.setStyle(fi, "padding-left", $TabPadPx & "px")
-    r.setStyle(fi, "items", "center")
-    r.setStyle(fi, "white-space", "nowrap")
-    r.setStyle(fi, "color", chromeOf(crTabInactiveForeground))
-    r.appendChild(fi, r.createTextNode(info))
+    r.setStyle(fi, "color", ink)
+    r.setStyle(fi, "gap", "9px")
+    r.setStyle(fi, "overflow", "hidden")
+    let parts: seq[string] = strutils.split(info, FooterInfoSeparator)
+    for i, part in parts:
+      if i > 0:
+        let bar = r.createElement("div")
+        r.setStyle(bar, "width", "1px")
+        r.setStyle(bar, "height", "16px")
+        r.setStyle(bar, "flex-shrink", "0")
+        r.setStyle(bar, "background-color",
+                   DesignTokenHex[dtColorsUiDividerPrimary][dmDark])
+        r.appendChild(fi, bar)
+      text(r, fi, part)
     gTopEls.add fi
   for st in gGeom.strips:
     if st.edge != leBottom or st.rect.isEmpty:
@@ -2808,29 +3096,49 @@ proc drawFooter(r: GpuiRenderer) =
                   gGeom.openDockPane == sl.pane
       let b = absBox(r, PxRect(x: sl.rect.x - st.rect.x,
                                y: sl.rect.y - st.rect.y,
-                               w: sl.rect.w, h: sl.rect.h))
+                               w: sl.rect.w, h: sl.rect.h),
+                     chromeOf(if shown: crTabActiveBackground
+                              else: crPaneBackground))
       r.setAttribute(b, "data-ct-dock-slot", sl.pane)
       r.setAttribute(b, "data-ct-tab-active", $shown)
-      r.setStyle(b, "padding-left", $TabPadPx & "px")
-      r.setStyle(b, "white-space", "nowrap")
-      r.setStyle(b, "items", "center")
-      for (key, value) in tabStyle(shown): r.setStyle(b, key, value)
-      r.appendChild(b, r.createTextNode(sl.label))
+      r.setStyle(b, "padding-left", $SlotPadPx & "px")
+      r.setStyle(b, "rounded", $TabRadiusPx & "px")
+      r.setStyle(b, "color", if shown: chromeOf(crTabActiveForeground) else: ink)
+      text(r, b, sl.label)
       r.appendChild(strip, b)
     gTopEls.add strip
   if not gSession.isNil:
-    let text = gSession.getCurrentFile().extractFilename & ":" &
-               $gSession.getCurrentLine() & "  tick " &
-               $gSession.getCurrentRRTicks()
-    let w = textPx(text) + 2 * TabPadPx
-    let p = absBox(r, PxRect(x: gGeom.footer.x + gGeom.footer.w - w,
-                             y: gGeom.footer.y, w: w, h: gGeom.footer.h))
-    r.setAttribute(p, "data-ct-footer-position", text)
-    r.setStyle(p, "items", "center")
-    r.setStyle(p, "white-space", "nowrap")
-    r.setStyle(p, "color", chromeOf(crTabInactiveForeground))
-    r.appendChild(p, r.createTextNode(text))
+    # From the right: the copy button, the location before it, the
+    # certificate label before that.
+    let copy = copyPathRect()
+    let cb = absBox(r, copy)
+    r.setAttribute(cb, "data-ct-footer-copy-path", "true")
+    r.setStyle(cb, "justify", "center")
+    r.setStyle(cb, "rounded", "6px")
+    let icon = r.createElement("img")
+    r.setAttribute(icon, "src", topBarSvgPath("copy-path", CopyPathIcon))
+    r.setStyle(icon, "width", "16px")
+    r.setStyle(icon, "height", "16px")
+    r.appendChild(cb, icon)
+    gTopEls.add cb
+    let location = footerLocation()
+    let lw = groteskTextPx(location, 14.0)
+    let lx = max(gGeom.footer.x, copy.x - 8 - lw)
+    let p = absBox(r, PxRect(x: lx, y: rowY, w: copy.x - 8 - lx,
+                             h: TabHeightPx))
+    r.setAttribute(p, "data-ct-footer-position", location)
+    r.setStyle(p, "color", ink)
+    r.setStyle(p, "overflow", "hidden")
+    text(r, p, location)
     gTopEls.add p
+    let cert = certificateLabel()
+    if cert.len > 0:
+      let cw = groteskTextPx(cert, 14.0)
+      let c = absBox(r, PxRect(x: lx - 8 - cw, y: rowY, w: cw, h: TabHeightPx))
+      r.setAttribute(c, "data-ct-footer-certificate", cert)
+      r.setStyle(c, "color", ink)
+      text(r, c, cert)
+      gTopEls.add c
 
 proc drawTopBar(r: GpuiRenderer) =
   ## The band and everything over it, from the shared ViewModels.
@@ -2855,7 +3163,7 @@ proc drawTopBar(r: GpuiRenderer) =
   # platform draws the frame there is no strip (PLAT-69-AREQ3).
   if gChrome.clientDecorated:
     let strip = absBox(r, PxRect(x: 0, y: 0, w: pendingViewportWidth,
-                                 h: ChromePaddingPx + TopBarPx))
+                                 h: TopBarPx))
     r.setAttribute(strip, WindowRegionAttribute, $wrDrag)
     r.setAttribute(strip, "data-ct-window-drag", "title-bar")
     gTopEls.add strip
@@ -2863,24 +3171,34 @@ proc drawTopBar(r: GpuiRenderer) =
   # (ui/surface/primary/default), no card of its own.
   let band = absBox(r, gTopLayout.band, chromeOf(crWindowBackground))
   r.setAttribute(band, "data-ct-top-bar", "band")
-  r.setStyle(band, "rounded", "4px")
   gTopEls.add band
+  # The desktop's `.separate-bar` before each group of buttons.
+  for sep in gTopLayout.separators:
+    let bar = absBox(r, sep, DesignTokenHex[dtColorsUiDividerPrimary][dmDark])
+    r.setAttribute(bar, "data-ct-top-separator", "true")
+    gTopEls.add bar
   drawFooter(r)
+  drawFocusOutline(r)
   let enabled = controlsEnabled()
   for sg in gTopLayout.segs:
     case sg.part
     of gtMenuButton:
       let b = absBox(r, sg.rect)
       r.setAttribute(b, "data-ct-menu-button", $gMenu.isOpen)
-      r.setStyle(b, "padding-left", $TabPadPx & "px")
+      r.setStyle(b, "justify", "center")
       for (k, v) in tabStyle(gMenu.isOpen): r.setStyle(b, k, v)
       # PLAT-50: the desktop's `#menu-root` — the bar's ground inside a 1px
-      # ui/border/secondary border.
+      # ui/border/secondary border — and, since 2026-10-17, its LOGO
+      # (`#menu-logo-img`, 20 px) where this window drew a "≡".
+      r.setStyle(b, "rounded", "6px")
       if not gMenu.isOpen:
         r.setStyle(b, "border-width", "1px")
         r.setStyle(b, "border-color", chromeOf(crFieldBorder))
-        r.setStyle(b, "rounded", "6px")
-      r.appendChild(b, r.createTextNode("≡"))
+      let logo = r.createElement("img")
+      r.setAttribute(logo, "src", topBarSvgPath("logo", MenuLogoIcon))
+      r.setStyle(logo, "width", "20px")
+      r.setStyle(logo, "height", "20px")
+      r.appendChild(b, logo)
       gTopEls.add b
     of gtControl:
       let on = sg.index < enabled.len and enabled[sg.index]
@@ -2899,6 +3217,26 @@ proc drawTopBar(r: GpuiRenderer) =
       r.setStyle(icon, "height", $ControlIconPx & "px")
       r.appendChild(b, icon)
       gTopEls.add b
+    of gtTool:
+      # The desktop's bar buttons beside the transport controls: history back
+      # and forward, reset, run tests, stop — in the controls' ink, lifted
+      # under the pointer like them.
+      let tool = GToolButton(sg.index)
+      let b = absBox(r, sg.rect,
+                     if gHoverTool == sg.index: chromeOf(crTabActiveBackground)
+                     else: "")
+      r.setAttribute(b, "data-ct-tool", $tool)
+      r.setStyle(b, "justify", "center")
+      r.setStyle(b, "rounded", "6px")
+      let on = toolAvailable(tool)
+      r.setAttribute(b, "data-ct-enabled", $on)
+      let icon = r.createElement("img")
+      r.setAttribute(icon, "src", toolSvgPath(tool, on))
+      let (iw, ih) = toolIconSize(tool)
+      r.setStyle(icon, "width", $iw & "px")
+      r.setStyle(icon, "height", $ih & "px")
+      r.appendChild(b, icon)
+      gTopEls.add b
     of gtOmnibar:
       # PLAT-49: AN INPUT BOX on the input surface; empty, it shows the
       # Omnibar ViewModel's placeholder — the desktop's and the terminal's
@@ -2910,32 +3248,56 @@ proc drawTopBar(r: GpuiRenderer) =
       # idle, hovered, focused / typing — and the placeholder in the
       # editor's muted foreground; the border stays ui/border/secondary.
       # (PLAT-50's input surface, `crInputBackground`, is superseded.)
-      let b = absBox(r, sg.rect, EditorGround)
+      # 2026-10-17: the bar's own ground, as the desktop's
+      # `.command-input-row` is measured (#1b1b1b) — not the editor's.
+      let b = absBox(r, sg.rect, chromeOf(crWindowBackground))
       r.setAttribute(b, "data-ct-omnibar", $gOmnibar.isOpen)
-      r.setStyle(b, "padding-left", $TabPadPx & "px")
       r.setStyle(b, "rounded", "6px")
       # PLAT-50: bounded as the desktop's `.command-input-row` is.
       r.setStyle(b, "border-width", "1px")
       r.setStyle(b, "border-color", chromeOf(crFieldBorder))
       r.setStyle(b, "white-space", "nowrap")
       r.setStyle(b, "overflow", "hidden")
-      let text =
-        if gOmnibar.isOpen and gOmnibar.query.len > 0:
-          let c = min(gOmnibar.cursor, gOmnibar.query.len)
-          "⌕ " & gOmnibar.query[0 ..< c] &
-            (if gOmnibar.overwrite: "█" else: "▏") &
-            gOmnibar.query[c .. ^1]
-        elif gOmnibar.isOpen: "⌕ " & (if gOmnibar.overwrite: "█" else: "▏") &
-                              OmnibarPlaceholder
-        elif gTopLayout.omnibarField: "⌕ " & OmnibarPlaceholder
-        else: "⌕"
+      # The desktop's field (measured 2026-10-17): its magnifier
+      # (`.ct-input-search-image`, 14 px at 0.5em) and the text from 1.875em,
+      # in 14 px — the placeholder in the body tier at 45%, a query in the
+      # field's own #c8c8c8. Only the magnifier when the band is too narrow
+      # for the field.
+      let field = gTopLayout.omnibarField or gOmnibar.isOpen
+      if not field:
+        r.setStyle(b, "justify", "center")
+      else:
+        r.setStyle(b, "padding-left", "6px")
+      let glass = r.createElement("img")
+      r.setAttribute(glass, "src", topBarSvgPath("search", OmnibarSearchIcon))
+      r.setStyle(glass, "width", "14px")
+      r.setStyle(glass, "height", "14px")
+      r.setStyle(glass, "flex-shrink", "0")
+      r.appendChild(b, glass)
+      let showsQuery = gOmnibar.isOpen and gOmnibar.query.len > 0
       r.setAttribute(b, "data-ct-omnibar-placeholder",
                      $(gOmnibar.query.len == 0))
-      r.setStyle(b, "color",
-        if gOmnibar.query.len > 0: EditorTextColour
-        elif gTopLayout.omnibarField or gOmnibar.isOpen: EditorLineNumberColour
-        else: EditorTextColour)
-      r.appendChild(b, r.createTextNode(text))
+      if field:
+        let gap = r.createElement("div")
+        r.setStyle(gap, "width", "5px")
+        r.setStyle(gap, "flex-shrink", "0")
+        r.appendChild(b, gap)
+        let text = r.createElement("div")
+        r.setStyle(text, "font-size", "14px")
+        r.setStyle(text, "white-space", "nowrap")
+        r.setStyle(text, "overflow", "hidden")
+        let caret = if gOmnibar.overwrite: "█" else: "▏"
+        if showsQuery:
+          let c = min(gOmnibar.cursor, gOmnibar.query.len)
+          r.setStyle(text, "color", "#c8c8c8")
+          r.appendChild(text, r.createTextNode(gOmnibar.query[0 ..< c] &
+            caret & gOmnibar.query[c .. ^1]))
+        else:
+          # The desktop's placeholder as it lands: #c8c8c8 (measured).
+          r.setStyle(text, "color", DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark])
+          r.appendChild(text, r.createTextNode(
+            (if gOmnibar.isOpen: caret else: "") & OmnibarPlaceholder))
+        r.appendChild(b, text)
       gTopEls.add b
     of gtTab:
       # PLAT-49 part B (finding 7): EACH SESSION TAB A SEPARATE ITEM on its
@@ -2968,14 +3330,21 @@ proc drawTopBar(r: GpuiRenderer) =
     of gtTabAdd:
       # PLAT-49 part B: the desktop's `.session-tab-add` — a borderless
       # button, lit under the pointer, its tooltip "New tab".
+      # Since 2026-10-17 the desktop's circle: a 26 px disc on
+      # ui/surface/primary/tertiary with its 12 px plus (`#menu
+      # .session-tab-add`), lighter under the pointer.
       let ab = absBox(r, sg.rect,
-                      if gHoverTabAdd: chromeOf(crTabActiveBackground) else: "")
+                      chromeOf(if gHoverTabAdd: crFocusOutline
+                               else: crTabActiveBackground))
       r.setAttribute(ab, "data-ct-session-tab-add", NewSessionTabTitle)
       r.setStyle(ab, "justify", "center")
-      r.setStyle(ab, "rounded", "6px")
-      r.setStyle(ab, "color", chromeOf(if gHoverTabAdd: crTabActiveForeground
-                                       else: crTabInactiveForeground))
-      r.appendChild(ab, r.createTextNode(NewSessionTabGlyph))
+      r.setStyle(ab, "rounded", $(sg.rect.h div 2) & "px")
+      let plus = r.createElement("img")
+      r.setAttribute(plus, "src", topBarSvgPath("session-tab-add",
+                                                SessionTabAddIcon))
+      r.setStyle(plus, "width", "12px")
+      r.setStyle(plus, "height", "12px")
+      r.appendChild(ab, plus)
       gTopEls.add ab
     of gtWindowButton:
       # PLAT-69 (C3): THE DESKTOP'S `.window-menu` BUTTON — a 24 px circle
@@ -3003,23 +3372,6 @@ proc drawTopBar(r: GpuiRenderer) =
       r.setStyle(img, "height", $icon.h & "px")
       r.appendChild(wb, img)
       gTopEls.add wb
-  # PIN BUTTONS on every pane box. Drawn BEFORE the popovers and the
-  # omnibar's results, which open over the panes' tab strips and must cover
-  # them, and not at all under an overlay of the tree — a revealed pane, a
-  # drag's drop indication (`pinButtonShown`, `overlayRects`).
-  let covers = overlayRects()
-  for n in gGeom.nodes:
-    if n.kind != gnTabs:
-      continue
-    let pr = pinButtonRect(n)
-    if not pinButtonShown(pr, covers):
-      continue
-    let pb = absBox(r, pr)
-    r.setAttribute(pb, "data-ct-pin", n.panes[n.active])
-    r.setStyle(pb, "justify", "center")
-    r.setStyle(pb, "color", chromeOf(crTabInactiveForeground))
-    r.appendChild(pb, r.createTextNode("⇲"))
-    gTopEls.add pb
   # THE MENU'S POPOVERS: a native-looking menu — rows on the pane surface,
   # the open path and the highlight lifted, the chord right-aligned.
   for p in gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
@@ -3241,6 +3593,7 @@ proc topBarGeometry(): JsonNode =
       var label = ""
       case sg.part
       of gtControl: label = TransportControls[sg.index].id
+      of gtTool: label = $GToolButton(sg.index)
       of gtWindowButton: label = $GWindowButton(sg.index)
       else: discard
       var seg = %*{"part": $sg.part, "index": sg.index, "label": label,
@@ -3300,7 +3653,7 @@ proc topBarGeometry(): JsonNode =
     "platform": gChrome.platform,
     "drag": (if gChrome.clientDecorated:
                rect(PxRect(x: 0, y: 0, w: pendingViewportWidth,
-                           h: ChromePaddingPx + TopBarPx))
+                           h: TopBarPx))
              else: newJNull()),
     "content": [pendingViewportWidth, pendingViewportHeight],
     "title": gWindowTitle,
@@ -3360,6 +3713,76 @@ proc noteWindowTitle(title: string) =
   gWindowTitle = title
   setWindowTitle(title)
 
+proc loopZonesOf(surface: EditorSurface): seq[LoopZone] =
+  ## The flow's loop controls for the editor's file (`FlowVM.loops`): each
+  ## loop's first line, the iteration the debugger is in (the last whose
+  ## first tick is at or before the current one) and the iteration count.
+  if gSession.isNil or gSession.session.flowVM.isNil or
+     not surface.flowOverlayVisible:
+    return
+  let tick = int(gSession.getCurrentRRTicks())
+  for loop in gSession.session.flowVM.loops.val:
+    let count = loop.rrTicksForIterations.len
+    if count <= 0 or loop.first <= 0: continue
+    # Only a loop whose first line is drawn: the zone sits above that row.
+    var drawn = false
+    for row in surface.rows:
+      if row.line == loop.first: drawn = true
+    if not drawn: continue
+    var iteration = 0
+    for i, t in loop.rrTicksForIterations:
+      if t <= tick: iteration = i
+    result.add LoopZone(line: loop.first, iteration: iteration, count: count)
+
+proc stickyLinesOf(surface: EditorSurface):
+    seq[tuple[line: int; text: string; top: int]] =
+  ## The sticky scope headers for the editor's view (`leaves.stickyScopeLines`)
+  ## over the file's whole text (`GpuiSourceService.fileLines`). The line at
+  ## the viewport's top edge is the one partly hidden above the first whole
+  ## row when the view sits at a sub-row offset (`editorTopInsetPx`).
+  if gSourceService.isNil or surface.viewportTop <= 1 or
+     not gSourceService.fileLines.hasKey(surface.path):
+    return
+  let file = gSourceService.fileLines[surface.path]
+  let offset = editorTopInsetPx() - EditorPadTopPx
+  for (line, top) in stickyScopeLines(file, surface.viewportTop, offset):
+    result.add (line, file[line - 1], top)
+
+proc withFlowValues(surface: EditorSurface): EditorSurface =
+  ## THE DESKTOP'S INLINE VALUES ARE THE FLOW'S (`ui/flow.nim`'s parallel
+  ## values): every line of the current function the run reached carries the
+  ## values its step recorded — before the step, as `flow-parallel-value-
+  ## before-only` shows them — not only the execution line's names in scope.
+  ## Read off the shared `FlowVM`'s steps (`flowStepEntriesOf`, one entry per
+  ## step and expression in the engine's order); the first step at a line is
+  ## the one shown. A line the flow has nothing for keeps the surface's own.
+  result = surface
+  if gSession.isNil or gSession.session.flowVM.isNil or
+     not surface.flowOverlayVisible:
+    return
+  let base = surface.path.extractFilename
+  var byLine = initTable[int, seq[EditorValue]]()
+  var firstStep = initTable[int, int]()
+  for st in gSession.session.flowVM.steps.val:
+    let colon = st.location.rfind(':')
+    if colon <= 0 or st.location[0 ..< colon] != base:
+      continue
+    var line = 0
+    try:
+      line = parseInt(st.location[colon + 1 .. ^1])
+    except ValueError:
+      continue
+    if firstStep.hasKeyOrPut(line, st.step) and firstStep[line] != st.step:
+      continue
+    let value = if st.beforeValue.len > 0: st.beforeValue else: st.afterValue
+    if value.len == 0:
+      continue
+    byLine.mgetOrPut(line, @[]).add EditorValue(name: st.expression,
+                                                value: value)
+  for row in result.rows.mitems:
+    if row.held and byLine.hasKey(row.line):
+      row.values = byLine[row.line]
+
 proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
   ## The replay editor drawn again from the source window as it now holds,
   ## at the pane's current width: after a move (`refreshReplayWindow`, which
@@ -3383,12 +3806,33 @@ proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
   # PLAT-51: the caret stays where the user put it (a move does not move
   # it), on the file it was placed in — it is the file's document's
   # (PLAT-68), and so is the selection.
-  gEditorSurface = withDebugDocument(surface)
+  gEditorSurface = withFlowValues(withDebugDocument(surface))
   if resetScroll:
     gEditorScrollCols = 0
+  r.setStyle(editor, "padding-top", $editorTopInsetPx() & "px")
+  editorLoopZones = loopZonesOf(gEditorSurface)
+  block:
+    let i = gGeom.tabsNodeOfPane($paneEditor)
+    if i >= 0: editorPaneHeightPx = gGeom.nodes[i].body.h
   discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
-                       gEditorSurface, gEditorViewportPx, gEditorScrollCols)
+                       gEditorSurface, gEditorViewportPx, gEditorScrollCols,
+                       stickyLinesOf(gEditorSurface))
   noteEditorTab(r, editorTabLabel(surface.path, false))
+  # The state pane's code line (`updateCodeStateLine`, what the desktop's
+  # editor feeds it): the stop's line and its source, unindented.
+  for row in gEditorSurface.rows:
+    if row.pointer == eptExecution and row.held:
+      gSession.session.store.updateCodeStateLine(row.line, row.text.strip())
+
+proc noteHistoryStop() =
+  ## A stop the debugger reached, appended to the history unless it is where
+  ## the newest entry already is or a history move brought the replay here.
+  if gSession.isNil or gHistoryMoving:
+    return
+  let tick = gSession.getCurrentRRTicks()
+  if gJumpHistory.len == 0 or gJumpHistory[^1] != tick:
+    gJumpHistory.add tick
+  gHistoryIndex = 1
 
 proc refreshReplayWindow(r: GpuiRenderer) =
   ## After the debugger moved: the source window, the stop's panes, every
@@ -3423,6 +3867,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu) &
                     gRecordings)
+  noteHistoryStop()
   drawTopBar(r)
 
 proc attachVcs(leafSet: var GpuiLeafSet; directory: string)
@@ -3870,6 +4315,73 @@ proc welcomePress(r: GpuiRenderer; x, y: int): bool =
   discard drawArrangement(r)
   true
 
+proc toolAvailable(tool: GToolButton): bool =
+  ## Whether the window performs a tool button now. Run tests needs the
+  ## desktop's test runner, which this window does not have: drawn disabled,
+  ## as the menu marks what it does not perform (`gpuiMenuActionAvailable`).
+  case tool
+  of gtbBack:
+    nextHistoryIndex(gJumpHistory.len, gHistoryIndex, hdOlder) > 0
+  of gtbForward:
+    nextHistoryIndex(gJumpHistory.len, gHistoryIndex, hdNewer) > 0
+  of gtbReset, gtbStop: not gSession.isNil
+  of gtbRunTests: false
+
+proc performTool(r: GpuiRenderer; tool: GToolButton) =
+  ## A tool button's press — the desktop's `DebugComponent.action`:
+  ##   * history back / forward: the cursor moves one stop through the stops
+  ##     the debugger has been at (`ui/history_cursor`, the desktop's rule)
+  ##     and the replay goes there;
+  ##   * reset: the replay restarted — the recording opened afresh, at the
+  ##     tick it was at — and the old session closed;
+  ##   * stop: the debugging session ended — the recording's folder opened as
+  ##     an Edit tab (and the session closed when it is not the last).
+  if gSession.isNil or not toolAvailable(tool):
+    traceGesture("tool " & $tool & " unavailable")
+    return
+  case tool
+  of gtbBack, gtbForward:
+    let direction = if tool == gtbBack: hdOlder else: hdNewer
+    let next = nextHistoryIndex(gJumpHistory.len, gHistoryIndex, direction)
+    gHistoryIndex = next
+    gHistoryMoving = true
+    gSession.gotoTick(gJumpHistory[^next])
+    refreshReplayWindow(r)
+    gHistoryMoving = false
+  of gtbReset:
+    let tick = gSession.getCurrentRRTicks()
+    let old = gShell.app.activeSessionId()
+    openRecordingInTab(r, gSession.tracePath)
+    if gShell.app.activeSessionId() != old:
+      let fresh = gShell.app.activeSessionId()
+      gSession.gotoTick(tick)
+      refreshReplayWindow(r)
+      let tabs = gShell.app.tabsOf()
+      for i, t in tabs:
+        if t.id == old:
+          closeSessionTab(r, i)
+          break
+      showSession(r, fresh)
+  of gtbStop:
+    let folder = gSession.getCurrentFile().parentDir
+    let tabs = gShell.app.tabsOf()
+    let current = gShell.app.activeSessionId()
+    openWelcomeTab(r)
+    let index = gWelcomeTabs.tabs.high
+    gWelcomeTabs.turnIntoFolder(index, folder)
+    let why = showFolderTab(r, index)
+    if why.len > 0:
+      traceGesture("stop: " & why)
+    if tabs.len >= 2:
+      for i, t in tabs:
+        if t.id == current:
+          closeSessionTab(r, i)
+          break
+  of gtbRunTests:
+    discard
+  traceGesture("tool " & $tool)
+  drawTopBar(r)
+
 proc performControl(r: GpuiRenderer; id: string) =
   ## A debugger control (or its menu item), through the transport
   ## ViewModel the desktop's toolbar calls (`DebugControlsVM`), then the
@@ -4178,6 +4690,9 @@ proc handleTopKey(r: GpuiRenderer; key: string;
     return true
   false
 
+proc copyToClipboard(text, what: string)
+  ## Forward-declared for the status bar's copy button.
+
 proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
   ## A left press the top bar, a popover, a pin / unpin button or an open
   ## menu / omnibar takes. Answers whether it was taken.
@@ -4222,16 +4737,29 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
     discard drawArrangement(r)
     drawTopBar(r)
     return true
+  # A TAB'S PIN AND CLOSE ICONS: the pin docks that tab's pane (to the
+  # bottom, as the box's pin button did), the close removes it — not under
+  # an overlay of the tree (`pinButtonShown`, `overlayRects`).
   let covers = overlayRects()
   for n in gGeom.nodes:
-    if n.kind == gnTabs and pinButtonRect(n).contains(x, y) and
-       pinButtonShown(pinButtonRect(n), covers):
+    if n.kind != gnTabs:
+      continue
+    for t in 0 ..< min(n.panes.len, n.pins.len):
+      let onPin = n.pins[t].contains(x, y) and pinButtonShown(n.pins[t], covers)
+      let onClose = n.closes[t].contains(x, y) and
+                    pinButtonShown(n.closes[t], covers)
+      if not (onPin or onClose):
+        continue
       for k in PaneKind:
-        if $k == n.panes[n.active]:
-          applyGestureCommand(r, cmdDock(k, leBottom))
+        if $k == n.panes[t]:
+          applyGestureCommand(r, if onPin: cmdDock(k, leBottom)
+                                 else: cmdRemovePane(k))
       discard drawArrangement(r)
       drawTopBar(r)
       return true
+  if copyPathRect().contains(x, y):
+    copyToClipboard(footerLocation(), "the location")
+    return true
   if not band.contains(x, y):
     return false
   let hit = gTopLayout.topBarHitAt(x, y)
@@ -4242,6 +4770,9 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
     if gMenu.isOpen: gMenu.close() else: gMenu.open(keyboard = false)
   of gtControl:
     performControl(r, TransportControls[hit.index].id)
+    return true
+  of gtTool:
+    performTool(r, GToolButton(hit.index))
     return true
   of gtOmnibar:
     if not gOmnibar.isOpen:
@@ -4356,7 +4887,17 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
   if gMenu.isNil or (x, y) == gHoverAt:
     return
   gHoverAt = (x, y)
+  # The editor's scrollbar shows while the pointer is over the editor
+  # (Monaco's fading scrollbars).
+  block:
+    let i = gGeom.tabsNodeOfPane($paneEditor)
+    let over = i >= 0 and gGeom.nodes[i].body.contains(x, y)
+    if over != editorScrollbarShown:
+      editorScrollbarShown = over
+      if openArm.isNil: redrawReplayEditor(r, resetScroll = false)
+      else: redrawEditor()
   var control = -1
+  var tool = -1
   var tab = -1
   var add = false
   var windowButton = -1
@@ -4364,6 +4905,8 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
     let hit = gTopLayout.topBarHitAt(x, y)
     if hit.part == gtControl and hit.rect.w > 0:
       control = hit.index
+    elif hit.part == gtTool and hit.rect.w > 0:
+      tool = hit.index
     elif hit.part in {gtTab, gtTabClose} and hit.rect.w > 0:
       tab = hit.index
     elif hit.part == gtTabAdd and hit.rect.w > 0:
@@ -4371,7 +4914,8 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
     elif hit.part == gtWindowButton and hit.rect.w > 0:
       windowButton = hit.index
   if tab != gHoverTab or add != gHoverTabAdd or
-     windowButton != gHoverWindowButton:
+     windowButton != gHoverWindowButton or tool != gHoverTool:
+    gHoverTool = tool
     gHoverTab = tab
     gHoverTabAdd = add
     gHoverWindowButton = windowButton
@@ -4603,8 +5147,7 @@ proc editorCodeLeftPx(): int =
   let i = gGeom.tabsNodeOfPane($paneEditor)
   if i < 0:
     return -1
-  gGeom.nodes[i].body.x + ChromePaddingPx +
-    columnsPx(editorGutterColumns(editorNumberWidth(gEditorSurface.rows)))
+  gGeom.nodes[i].body.x + EditorPadSidePx + EditorGutterPx
 
 proc editorColumnAt(x: int): int =
   ## The 1-based text column a press at window x is on (the horizontal
@@ -4847,6 +5390,15 @@ proc runWatchCommand(r: GpuiRenderer; query: string): bool =
   let sp = text.find(' ')
   let verb = if sp < 0: text else: text[0 ..< sp]
   let arg = if sp < 0: "" else: text[sp + 1 .. ^1].strip()
+  if verb == "calls" and not gSession.isNil and
+     not gSession.session.calltraceVM.isNil:
+    # The call trace's search (`:calls QUERY`; empty clears it).
+    gSession.session.calltraceVM.setSearchQuery(arg)
+    traceGesture("calls search '" & arg & "'")
+    gOmnibar.close()
+    redrawCalltrace(r)
+    drawTopBar(r)
+    return true
   if verb notin ["watch", "unwatch", "watch-edit"] or gSession.isNil or
      gSession.session.stateVM.isNil or arg.len == 0:
     return false
@@ -5112,9 +5664,17 @@ proc editorLineAt(y: int): int =
   let i = gGeom.tabsNodeOfPane($paneEditor)
   if i < 0 or gEditorSurface.rows.len == 0:
     return 0
-  let top = gGeom.nodes[i].body.y + ChromePaddingPx + EditorLinesAbovePx
-  let at = clamp((y - top) div GpuiEditorRowPx, 0, gEditorSurface.rows.len - 1)
-  gEditorSurface.rows[at].line
+  let top = gGeom.nodes[i].body.y + editorTopInsetPx() + EditorLinesAbovePx
+  # Row by row, past the loop controls drawn above some of them.
+  var rowTop = top
+  for k, row in gEditorSurface.rows:
+    rowTop += zonesAbove(row.line) * LoopZonePx -
+              (if k > 0: zonesAbove(gEditorSurface.rows[k - 1].line) * LoopZonePx
+               else: 0)
+    if y < rowTop + GpuiEditorRowPx or k == gEditorSurface.rows.high:
+      return row.line
+    rowTop += GpuiEditorRowPx
+  gEditorSurface.rows[^1].line
 
 proc editorYOfLine(line: int): int =
   ## The inverse: the window y at the middle of `line`'s row.
@@ -5123,8 +5683,9 @@ proc editorYOfLine(line: int): int =
     return 0
   for k, row in gEditorSurface.rows:
     if row.line == line:
-      return gGeom.nodes[i].body.y + ChromePaddingPx + EditorLinesAbovePx +
-             k * GpuiEditorRowPx + GpuiEditorRowPx div 2
+      return gGeom.nodes[i].body.y + editorTopInsetPx() + EditorLinesAbovePx +
+             k * GpuiEditorRowPx + zonesAbove(line) * LoopZonePx +
+             GpuiEditorRowPx div 2
   0
 
 proc dragTextTo(r: GpuiRenderer; x, y: int) =
@@ -5754,6 +6315,13 @@ proc onPaneClick(c: GPaneClick) =
     # PLAT-51: the watch field — the omnibar opens with `:watch `.
     if c.button == gbLeft:
       openOmnibar(r, WatchCommand)
+  of gcpCallSearch:
+    # The call trace's search field — the omnibar opens with `:calls `, its
+    # query the field's (`CalltraceVM.setSearchQuery`).
+    if c.button == gbLeft:
+      let vm = if gSession.isNil: nil else: gSession.session.calltraceVM
+      openOmnibar(r, CallsCommand &
+                     (if vm.isNil: "" else: vm.searchQuery.val))
   of gcpStateSeparator:
     # PLAT-51: the column rule held — a column resize until the release.
     if c.button == gbLeft:
@@ -5833,7 +6401,7 @@ proc handlePopoverPress(r: GpuiRenderer; kind: GpuiEventKind;
 proc containerHeightPx(): int =
   ## The arrangement's container: the content height less the root's padding
   ## and the top band.
-  max(1, pendingViewportHeight - 2 * ChromePaddingPx - GpuiTopBandPx)
+  max(1, pendingViewportHeight - GpuiTopBandPx - FooterPx)
 
 proc refitEditorRows(r: GpuiRenderer) =
   ## The editor holds as many source rows as its pane now shows
@@ -5852,6 +6420,7 @@ proc refitEditorRows(r: GpuiRenderer) =
       return
     gSourceService.vm.setViewport(height = rows,
                                   overscan = GpuiSourceOverscan)
+    gSourceService.visibleRows = editorVisibleRowsOf(gGeom)
     if gViewedFile.len > 0:
       # A file opened from the Files pane: drawn again at the new height
       # from the line it showed first.
@@ -5954,8 +6523,10 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
   # are placed absolutely from `window_top_bar`, the geometry the pointer
   # reads) above the arrangement.
   r.setStyle(root, "flex-direction", "column")
-  r.setStyle(root, "padding", $ChromePaddingPx & "px")
-  r.setStyle(root, "gap", $ChromeGapPx & "px")
+  # The desktop's frame: the caption bar from the window's top edge, the
+  # layout `WindowEdgePx` in from either side, the status bar below it.
+  r.setStyle(root, "padding-left", $WindowEdgePx & "px")
+  r.setStyle(root, "padding-right", $WindowEdgePx & "px")
   let topSpacer = r.createElement("div")
   r.setAttribute(topSpacer, "data-ct-top-bar", "spacer")
   r.setStyle(topSpacer, "width", "100%")
@@ -6364,8 +6935,8 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       let body = visibleBodyOf(kind)
       if body.w <= 0:
         return "the " & parts[1] & " pane is not drawn"
-      let track = listTrackRect(body)
-      let x = track.x + ListTrackPx div 2
+      let track = listTrackRect(body, $kind)
+      let x = track.x + track.w div 2
       proc ty(permille: int): int =
         track.y + min(track.h - 1, track.h * permille div 1000)
       case parts[2]
@@ -6599,7 +7170,7 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     of "pin":
       for n in gGeom.nodes:
         if n.kind == gnTabs and parts[1] in n.panes:
-          let (x, y) = centreOf(pinButtonRect(n))
+          let (x, y) = centreOf(n.pins[n.panes.find(parts[1])])
           pressAt(x, y)
           return ""
       return "no pane box holds '" & parts[1] & "'"
@@ -6807,6 +7378,8 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   probeSentinel = getEnv("CODETRACER_GPUI_PROBE_SENTINEL", "")
   # PLAT-35: the off-screen capture takes the place of the window, with the
   # tree already built above.
+  # The design system's faces, before anything is drawn — window or pixels.
+  discard registerDesignFonts()
   if cmd.pixelsOut.len > 0:
     return capturePixels(cmd)
   if cmd.quitAfterMs > 0'u32:
@@ -6852,6 +7425,28 @@ proc editorRowsFor(layout: Layout; viewport: DockViewport;
                                 (if proj.status == dpsRefused: nil
                                  else: proj.state),
                                 cmd.width, cmd.height, GpuiTopBandPx))
+
+proc editorSubRowOffsetFor(layout: Layout; viewport: DockViewport;
+                           cmd: GpuiCommand): int =
+  ## Monaco's sub-row offset for a centred view of this window's editor
+  ## (`editorTopInsetPx`'s second term), before the window is laid out.
+  let proj = projectDock(layout, viewport)
+  let g = windowGeometryOf(layout,
+                           (if proj.status == dpsRefused: nil else: proj.state),
+                           cmd.width, cmd.height, GpuiTopBandPx)
+  let i = g.tabsNodeOfPane($paneEditor)
+  if i < 0: return 0
+  ((g.nodes[i].body.h - EditorPadTopPx) div 2) mod GpuiEditorRowPx
+
+proc editorVisibleRowsFor(layout: Layout; viewport: DockViewport;
+                          cmd: GpuiCommand): int =
+  ## `editorRowsFor`'s companion: the rows wholly in view above the editor's
+  ## horizontal scrollbar band (`window_geometry.editorVisibleRowsOf`).
+  let proj = projectDock(layout, viewport)
+  editorVisibleRowsOf(windowGeometryOf(layout,
+                                       (if proj.status == dpsRefused: nil
+                                        else: proj.state),
+                                       cmd.width, cmd.height, GpuiTopBandPx))
 
 proc editorBodyWidthFor(layout: Layout; viewport: DockViewport;
                         cmd: GpuiCommand): int =
@@ -7201,6 +7796,9 @@ proc runOpen(cmd: GpuiCommand): int =
   let sourceService = newGpuiSourceService(session, cmd.traceFolder,
     editorRowsFor(shell.windows.windows[shell.windows.indexOf(windowId)].layout,
                   shell.viewport, cmd))
+  sourceService.visibleRows = editorVisibleRowsFor(
+    shell.windows.windows[shell.windows.indexOf(windowId)].layout,
+    shell.viewport, cmd)
   sourceService.serveWindow()
 
   # THE VALUES IN SCOPE AT THE STOP, requested here because nothing else does.
@@ -7252,7 +7850,17 @@ proc runOpen(cmd: GpuiCommand): int =
       stderr.writeLine("codetracer-gpui: --replay-ops asked for a breakpoint" &
                        " and the editor drew no rows to place it on")
       return 1
-    let at = probe.rows[min(bpRow, probe.rows.high)].line
+    # Monaco's DRAWN rows include the one partly hidden above the first whole
+    # line when the view is scrolled to a sub-row offset (`editorTopInsetPx`):
+    # the desktop's driver counts it, so this one does too — row `bpRow` is
+    # one line above the window's `bpRow`th row then.
+    let partial = probe.viewportTop > 1 and
+                  editorSubRowOffsetFor(
+                    shell.windows.windows[shell.windows.indexOf(windowId)].layout,
+                    shell.viewport, cmd) > 0
+    let at = if partial and bpRow > 0: probe.rows[min(bpRow - 1, probe.rows.high)].line
+             elif partial: probe.rows[0].line - 1
+             else: probe.rows[min(bpRow, probe.rows.high)].line
     # THROUGH THE ENGINE (PLAT-40), by the producer the terminal's `:break`
     # uses: the store's point list gets the line the engine VERIFIED, and the
     # editor draws what the store holds. Until 2026-09-23 this drew a point at
@@ -7284,11 +7892,31 @@ proc runOpen(cmd: GpuiCommand): int =
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at — the same reading `editorRowsFor`
   # takes for the row count, over the same layout.
-  gEditorSurface = surface
+  # The session is the window's from here (`withFlowValues` reads its flow);
+  # it was assigned only after the first frame until 2026-10-17.
+  gSession = session
+  gEditorSurface = withFlowValues(surface)
   gEditorViewportPx = editorBodyWidthFor(
     shell.windows.windows[shell.windows.indexOf(windowId)].layout,
     shell.viewport, cmd)
-  let drawn = renderLeaves(r, leafSet, surface, gEditorViewportPx)
+  # What the first frame's leaves read besides their ViewModels: the state
+  # pane's code line (`updateCodeStateLine`, as `redrawReplayEditor` feeds it
+  # after every move) and the event log's tick and width (`syncLeafContext`).
+  for row in gEditorSurface.rows:
+    if row.pointer == eptExecution and row.held:
+      session.session.store.updateCodeStateLine(row.line, row.text.strip())
+  eventLogNowTicks = session.getCurrentRRTicks()
+  block:
+    let layout = shell.windows.windows[shell.windows.indexOf(windowId)].layout
+    let proj = projectDock(layout, shell.viewport)
+    let g = windowGeometryOf(layout,
+                             (if proj.status == dpsRefused: nil else: proj.state),
+                             cmd.width, cmd.height, GpuiTopBandPx)
+    let i = g.tabsNodeOfPane($paneEventLog)
+    if i >= 0: eventLogPaneWidthPx = g.nodes[i].body.w
+    let e = g.tabsNodeOfPane($paneEditor)
+    if e >= 0: editorPaneHeightPx = g.nodes[e].body.h
+  let drawn = renderLeaves(r, leafSet, gEditorSurface, gEditorViewportPx)
   # PLAT-47 part B: what the window's gestures and the call trace's paging
   # act on. A rearrangement is remembered on the terms `--layout-ops` is:
   # never over a quarantined file, and not for a session opened from a named

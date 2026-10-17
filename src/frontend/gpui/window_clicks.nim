@@ -88,6 +88,8 @@ type
       ## PLAT-51: a value-history row under its variable; the key is its tick.
     gcpAddWatch = "addwatch"
       ## PLAT-51: the Watches tab's "Add watch expression…" row.
+    gcpCallSearch = "callsearch"
+      ## The call trace's search field (`CallSearchAttribute`).
     gcpStateSeparator = "separator"
       ## PLAT-51: the name / value column rule — a press starts the column
       ## resize drag.
@@ -277,6 +279,8 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
                        key: getAttribute(el, StateHistoryEntryAttribute))
       elif getAttribute(el, StateAddWatchAttribute).len > 0:
         c = GPaneClick(part: gcpAddWatch, key: "watch")
+      elif getAttribute(el, CallSearchAttribute).len > 0:
+        c = GPaneClick(part: gcpCallSearch, key: "calls")
       elif getAttribute(el, StateSeparatorAttribute).len > 0 and
            getAttribute(r.parentNode(el), StateHeaderAttribute).len == 0:
         c = GPaneClick(part: gcpStateSeparator, key: "separator")
@@ -318,7 +322,7 @@ proc findClickTarget*(r: GpuiRenderer; root: GpuiElement; part: GClickPart;
     of gcpEventRow: getAttribute(el, "data-row-index") == key
     of gcpCallRow: getAttribute(el, CallRowAttribute) == key
     of gcpTab: getAttribute(el, TabPaneAttribute) == key
-    of gcpPosition, gcpAddWatch, gcpStateSeparator: true
+    of gcpPosition, gcpAddWatch, gcpCallSearch, gcpStateSeparator: true
     of gcpStateControl, gcpHistoryEntry:
       getAttribute(el, StateControlAttribute) == key or
         getAttribute(el, StateHistoryEntryAttribute) == key

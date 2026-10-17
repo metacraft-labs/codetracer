@@ -251,18 +251,25 @@ proc sourceStatementFor*(mode: ProductMode): string =
 
 proc editorTabLabel*(path: string; dirty: bool): string =
   ## The editor's tab when it is the only tab of its pane: the open file's
-  ## NAME, as the desktop's editor tab is, with " ●" after it while an Edit
-  ## buffer holds unsaved changes. "" when no file is open (the caller then
-  ## shows the pane's own name). One answer for every front-end, so the
-  ## terminal's strip and the GPUI window's strip cannot name the same file
-  ## differently.
+  ## folder and name — `calc/main.py` — as the desktop's editor tab is
+  ## (`ui/layout.nim`: the label's last two path segments; it was the name
+  ## alone until 2026-10-17, which the desktop never drew), with " ●" after
+  ## it while an Edit buffer holds unsaved changes. "" when no file is open
+  ## (the caller then shows the pane's own name). One answer for every
+  ## front-end, so the terminal's strip and the GPUI window's strip cannot
+  ## name the same file differently.
   var cut = path.len
   while cut > 0 and path[cut - 1] notin {'/', '\\'}:
     dec cut
   let name = path[cut .. ^1]
   if name.len == 0:
     return ""
-  name & (if dirty: " ●" else: "")
+  var start = cut - 1
+  while start > 0 and path[start - 1] notin {'/', '\\'}:
+    dec start
+  let folder = if cut >= 2: path[max(0, start) ..< cut - 1] else: ""
+  (if folder.len > 0: folder & "/" & name else: name) &
+    (if dirty: " ●" else: "")
 
 proc usesSourceVM*(mode: ProductMode): bool =
   ## §2.1 consequence 1, as a predicate a binding can branch on: *"Edit mode

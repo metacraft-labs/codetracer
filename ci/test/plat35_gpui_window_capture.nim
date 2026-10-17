@@ -85,7 +85,11 @@ try:
                       quoteShell(outDir / (view & ".run.log")) & " 2>&1"] & argv,
       extraEnv = [("LD_LIBRARY_PATH", libs), ("REPLAY_SERVER_BIN", replayServer),
                   ("CODETRACER_HOME", home), ("XDG_STATE_HOME", home / "state"),
-                  ("XDG_CONFIG_HOME", home / "config")])
+                  ("XDG_CONFIG_HOME", home / "config"),
+                  # The window draws its own title bar — window buttons in
+                  # its top bar — as the Electron reference's frameless
+                  # window always does, so the two are compared like for like.
+                  ("ISONIM_GPUI_DECORATIONS", "client")])
     try:
       let win = t.waitWindow(AppId, timeout = initDuration(seconds = 180),
         until = proc(x: EnvWindow): bool = x.rect.w == w and x.rect.h == h)
