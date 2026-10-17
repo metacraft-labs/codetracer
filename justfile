@@ -5006,6 +5006,10 @@ test-gpui-shell:
 plat35-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
+  # A capture lane measures pixels, not speed: its launches are not gated on
+  # the performance limits a contended host cannot meet
+  # (`lib/performance-limits.ts`, `CODETRACER_PERF_LIMIT_SCALE`).
+  export CODETRACER_PERF_LIMIT_SCALE="${CODETRACER_PERF_LIMIT_SCALE:-4}"
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)

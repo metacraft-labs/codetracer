@@ -875,13 +875,32 @@ async function captureSettled(
 
 for (const scenario of definition.scenarios) {
   test.describe(`PLAT-35 capture: ${scenario.id}`, () => {
-    test.use({ sourcePath: recordingPath, launchMode: "trace-folder" });
+    // `noUserLayout: true` — the product's own first-run layout (the shared
+    // default), not the bundled tree the launch fixture otherwise copies into
+    // the run's home. Without it this capture drew a fourth column (TESTS
+    // over CONSTRAINTS) that no CodeTracer mode opens with, and a parity review
+    // read the GPUI front-end — which draws the shared default — as the
+    // deficient side (measured 2026-10-17; the same defect, and the same
+    // remedy, as PARITY-S1 in `plat37-electron-window-capture.spec.ts`).
+    test.use({
+      sourcePath: recordingPath,
+      launchMode: "trace-folder",
+      noUserLayout: true,
+    });
 
     test(`captures the '${scenario.view}' view and its eight answers`, async ({
       ctPage,
       electronApp,
     }) => {
-      test.setTimeout(240_000);
+      // The budget grows with the operations the scenario declares: under
+      // Xvfb's software rendering a scenario with none took three to four
+      // minutes end to end (measured 2026-10-17, 17.8 min for four), and a
+      // flat 240 s timed out the two that step eight and twenty-two times.
+      const opCount = scenario.operations.reduce(
+        (n: number, op: { times?: number }) => n + (op.times ?? 1),
+        0,
+      );
+      test.setTimeout(300_000 + 30_000 * opCount);
       const size = definition.viewports[scenario.viewport];
       expect(size, `scenario '${scenario.id}' names viewport '${scenario.viewport}'`)
         .toBeTruthy();
@@ -977,6 +996,50 @@ for (const scenario of definition.scenarios) {
       // removing that from the frame is the repair, not a side effect.
       await waitForEditorFrameSettled(ctPage);
       const answers = await extractLayoutAnswers(ctPage, scenario.id);
+      // THE STYLE DUMP: the computed style and box of every visible element of
+      // the frame the PNG is of, written beside it as
+      // `captures/electron/<scenario>.styles.json`. It is the reference the
+      // GPUI front-end is aligned to — exact faces, sizes, line heights,
+      // paddings and colours, where a pixel reading can only estimate them.
+      // A record, not a gate: nothing asserts over it.
+      const styles = await ctPage.evaluate(() => {
+        const keys = [
+          "font-family", "font-size", "font-weight", "line-height",
+          "letter-spacing", "text-transform", "color", "background-color",
+          "padding-top", "padding-right", "padding-bottom", "padding-left",
+          "border-top-width", "border-bottom-width", "border-left-width",
+          "border-right-width", "border-top-color", "border-bottom-color",
+          "border-radius", "opacity", "display",
+        ];
+        const out: object[] = [];
+        for (const el of Array.from(document.querySelectorAll("*"))) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 1 || r.height < 1) continue;
+          if (r.bottom < 0 || r.right < 0 || r.top > window.innerHeight ||
+              r.left > window.innerWidth) continue;
+          const cs = getComputedStyle(el);
+          if (cs.visibility === "hidden" || cs.display === "none") continue;
+          const style: Record<string, string> = {};
+          for (const k of keys) style[k] = cs.getPropertyValue(k);
+          let ownText = "";
+          for (const n of Array.from(el.childNodes)) {
+            if (n.nodeType === Node.TEXT_NODE) ownText += n.textContent ?? "";
+          }
+          out.push({
+            tag: el.tagName.toLowerCase(),
+            id: el.id || undefined,
+            cls: (el.getAttribute("class") || "").slice(0, 120) || undefined,
+            rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+            text: ownText.trim().slice(0, 60) || undefined,
+            style,
+          });
+        }
+        return out;
+      });
+      fs.writeFileSync(
+        path.join(capturesDir, `${scenario.id}.styles.json`),
+        JSON.stringify(styles),
+      );
       // THE PROVENANCE TRAVELS WITH THE ANSWER. The Nim comparison suite reads
       // this file as a RECORDED CAPTURE: it was produced by a shipped binary,
       // but not in the run that reads it. `Editor-Model-Conformance-Suite.md`

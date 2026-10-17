@@ -4,12 +4,12 @@
   "answers": [
     {
       "question": "pane-rectangles",
-      "value": "calltrace=61,8,20,42;commandPalette=44,1,26,3;constraints=81,55,18,42;editor=15,8,25,89;eventLog=40,55,41,42;filesystem=0,8,15,88;state=40,8,20,42;testResults=81,8,18,42",
+      "value": "calltrace=76,8,24,42;commandPalette=44,1,26,3;editor=18,8,33,89;eventLog=51,55,48,42;filesystem=0,8,18,88;state=51,8,24,42",
       "tier": "captured"
     },
     {
       "question": "which-panes-are-present",
-      "value": "commandPalette@0/1,filesystem@0/2,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/3,testResults@0/1,constraints@0/1",
+      "value": "commandPalette@0/1,filesystem@0/3,editor@0/1,state@0/2,calltrace@0/2,eventLog@0/2",
       "tier": "captured"
     },
     {
@@ -39,13 +39,13 @@
     },
     {
       "question": "focus-order",
-      "value": "editor,commandPalette,filesystem,state,calltrace,eventLog,testResults,constraints",
+      "value": "editor,commandPalette,filesystem,state,calltrace,eventLog",
       "tier": "captured"
     }
   ],
   "provenance": {
-    "capturedAt": "2026-10-04T20:32:52.414Z",
-    "uiBundleBytes": 28605155,
-    "uiBundleMtime": "2026-10-04T20:29:19.263Z"
+    "capturedAt": "2026-10-16T23:49:33.216Z",
+    "uiBundleBytes": 29302548,
+    "uiBundleMtime": "2026-10-16T16:23:52.257Z"
   }
 }

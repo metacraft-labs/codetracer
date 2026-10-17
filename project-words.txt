@@ -322,3 +322,4 @@ zend
 myproject
 truecolor
 worktree
+omnibar

@@ -104,11 +104,27 @@ export const LIMIT_RELOAD_RECONNECT_MS = 8_000;
  *     await layout.waitForAllComponentsLoaded();
  *   });
  */
+/**
+ * `CODETRACER_PERF_LIMIT_SCALE` multiplies every limit `timed` enforces. It is
+ * for lanes whose subject is NOT performance — the visual captures
+ * (`just plat35-capture-electron`) — run on a host they do not have to
+ * themselves: on 2026-10-17 a 32-core workstation at load 53 from other
+ * sessions' builds failed all six captures on "base components loaded"
+ * (81 s against 45 s), which says nothing about the frames they take. A lane
+ * that gates performance must never set it. Unset, or not a number >= 1,
+ * means 1.
+ */
+const limitScale = (() => {
+  const v = Number(process.env.CODETRACER_PERF_LIMIT_SCALE ?? "1");
+  return Number.isFinite(v) && v >= 1 ? v : 1;
+})();
+
 export async function timed<T>(
   label: string,
-  limitMs: number,
+  rawLimitMs: number,
   fn: () => Promise<T>,
 ): Promise<{ result: T; durationMs: number }> {
+  const limitMs = rawLimitMs * limitScale;
   const t0 = Date.now();
   const result = await fn();
   const durationMs = Date.now() - t0;
