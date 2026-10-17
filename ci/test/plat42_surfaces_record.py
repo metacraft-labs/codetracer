@@ -43,11 +43,15 @@ TRACE = os.environ.get("CODETRACER_PLAT42_TRACE",
 OUT = os.path.join(ROOT, "src/tests/visual/plat42-surfaces.json")
 # The FLOW scenario needs a program with a branch the run declines, which `calc`
 # deliberately has none of (its operator dispatch is a table, not an `if`).
-# `noir_space_ship`'s `shield.nr` has one: `stepIn=33` stops in the first call
+# `noir_space_ship`'s `shield.nr` has one: `stepIn=28` stops in the first call
 # of `calculate_damage`, on line 29 (the taken arm of `shield_pct == 100`), with
 # the `else` arm (lines 32-33) and the `damage > remaining_shield` arm (lines
 # 35-36) declined — found by probing step counts on 2026-09-24, not chosen for
-# the answer.
+# the answer, and re-probed on 2026-10-17: since 2026-10-04 the engine opens a
+# recording in the program's entry call rather than on `<toplevel>`, five
+# steps further on, and `stepIn=33` (the count until then) reached line 7 of
+# `iterate_asteroids`, which has no declined line. Probed: 26 → line 27,
+# 27 → 28, 28 → 29, 29 → 34, each with 32/33/35/36 declined; 33 → line 7.
 #
 # It was `stepIn=15`, "the arm on lines 11-13 not taken", until 2026-09-24. That
 # arm (the `if` on line 10, inside the loop) RUNS — `stepIn=42` stops on line 11
@@ -58,7 +62,7 @@ OUT = os.path.join(ROOT, "src/tests/visual/plat42-surfaces.json")
 FLOW_TRACE = os.environ.get("CODETRACER_PLAT42_FLOW_TRACE",
                             os.path.join(ROOT, "test-logs/tui-fixtures/noir_space_ship-f9f31b01a0d2"))
 FLOW_SCENARIOS = [
-    {"id": "noir-declined-arm", "replayOps": "stepIn=33"},
+    {"id": "noir-declined-arm", "replayOps": "stepIn=28"},
 ]
 SCEN = os.path.join(ROOT, "src/tests/visual/scenarios.json")
 
@@ -112,6 +116,15 @@ def read_surfaces(plan):
                      if c.get("attributes", {}).get("data-ct-code-column")),
                     ""),
                 "text": text(n).strip()[:80],
+                # The CODE span's text alone. `text` runs the gutter number,
+                # the code and (since 2026-10-17, when values became chips
+                # rather than a `/* … */` suffix) every chip's name and value
+                # together with no separator, so the code cannot be cut back
+                # out of it.
+                "code": next(
+                    (text(c) for c in descendants(n)
+                     if c.get("attributes", {}).get("data-ct-text-role") == "editor-code"),
+                    "").replace("\u00a0", " ")[:80],
             })
         for c in n.get("children", []):
             walk(c)

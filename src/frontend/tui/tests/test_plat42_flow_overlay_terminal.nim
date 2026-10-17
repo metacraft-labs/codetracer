@@ -90,6 +90,9 @@ proc recordedStop(rec: JsonNode): tuple[line: int, code: string] =
       let comment = code.find("/*")
       if comment >= 0: code = code[0 ..< comment]
       result.code = code.strip()
+      # Since 2026-10-17 the row's text runs the inline-value chips onto the
+      # code with no separator; the record carries the code span on its own.
+      if r{"code"}.getStr.len > 0: result.code = r["code"].getStr.strip()
       return
 
 proc codeStylesOf(screen: SourcePaneScreen; model: SourcePaneModel;

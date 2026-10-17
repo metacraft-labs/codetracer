@@ -21,7 +21,10 @@ import ../app/edit_arm   # `GpuiDelivery`
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 77
+const ExpectedAssertions = 96
+# 77 -> 96 (the Electron-parity caption bar): the bar's five tool buttons are
+# segments too, so the three per-segment loops run 15 more times; +2 for the
+# tool and separator counts, +1 for the area's top, +1 for the header join.
 
 var countedAssertions = 0
 
@@ -37,11 +40,17 @@ suite "PLAT-48 GPUI: the top bar's geometry":
     # PLAT-49: the menu is ONE root button at every width, as the desktop's.
     let lay = gpuiTopBarLayout(menu(), newOmnibarVM(), @[], 1920)
     ck lay.segOf(gtMenuButton).rect.w == MenuButtonPx and lay.omnibarField
-    var controls = 0
+    var controls, tools = 0
     for s in lay.segs:
       if s.part == gtControl: inc controls
+      if s.part == gtTool: inc tools
     ck controls == TransportControls.len
-    ck lay.band.y == ChromePaddingPx and lay.band.h == TopBarPx
+    # The desktop's caption bar also holds its tool buttons (back, forward,
+    # reset, run tests, stop), each after a separator, all of them at 1920.
+    ck tools == ord(GToolButton.high) + 1
+    ck lay.separators.len > 0
+    # The desktop's caption bar spans the window from its top-left corner.
+    ck lay.band == PxRect(x: 0, y: 0, w: 1920, h: TopBarPx)
     # Left to right, no overlap.
     for i in 1 ..< lay.segs.len:
       ck lay.segs[i].rect.x >= lay.segs[i - 1].rect.x + lay.segs[i - 1].rect.w
@@ -177,18 +186,25 @@ suite "PLAT-48 GPUI: the TOP dock edge":
       if st.edge == leTop: top = i
     ck top >= 0
     ck g.strips[top].slots.len == 1 and g.strips[top].slots[0].pane == "state"
-    # The strip sits above the tree, below the window's top bar.
-    ck g.strips[top].rect.y == ChromePaddingPx + GpuiTopBandPx
+    # The strip sits above the tree, directly below the window's top bar
+    # (the desktop's layout starts under its caption bar, no padding).
+    ck g.area.y == GpuiTopBandPx
+    ck g.strips[top].rect.y == GpuiTopBandPx
     ck g.inner.y > g.strips[top].rect.y + g.strips[top].rect.h - 1
     # A reveal from it is a third of the tree, against the top.
     let rr = g.revealRectOf(leTop)
     ck rr.y == g.inner.y and rr.h == g.inner.h div 3
     # PLAT-51: the margin above the layout area is constrained onto the
     # tree's edge (GoldenLayout's `constrainDragToContainer`) — no drop
-    # docks; docking is the menus' and `:dock`'s, as on the desktop.
+    # docks; docking is the menus' and `:dock`'s, as on the desktop. Since
+    # the panes have no frame inset (the desktop's GoldenLayout headers start
+    # at the tree's top edge), the constrained point is ON the header's top
+    # edge, which GoldenLayout's strict header test excludes: nothing is
+    # found — and one pixel lower, in the header, the drop joins the pane.
     let above = g.pointerAt(g.area.x + 400, g.area.y - 2)
-    ck above.isSome and above.get.zone notin {dzOutsideTop, dzOutsideLeft,
-                                             dzOutsideRight, dzOutsideBottom}
+    ck above.isNone
+    let header = g.pointerAt(g.area.x + 400, g.inner.y + 1)
+    ck header.isSome and header.get.zone == dzCentre
     # Left of the tree, at its middle height: the ground's left band — a
     # split of the whole layout, not the left dock.
     let left = g.pointerAt(g.inner.x - 2, g.inner.y + g.inner.h div 2)

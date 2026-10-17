@@ -627,8 +627,11 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
       # fold).
       ck shellText[1].contains(" Variables ")
       ck not shellText[editorArea.row].contains(SourcePaneTitle)
+      # The editor's tab is the file's folder and name — `calc/main.py` —
+      # as the desktop's tab is (`editorTabLabel`).
       ck shellText[editorArea.row].contains(
-        " " & extractFilename(shellModel.source.path) & " ")
+        " " & lastPathPart(parentDir(shellModel.source.path)) & "/" &
+        extractFilename(shellModel.source.path) & " ")
 
       # ---- FINE-GRAINED SUBSCRIPTION, measured ----------------------------
       # CTUI-5: "changing the execution line re-evaluates the gutter and

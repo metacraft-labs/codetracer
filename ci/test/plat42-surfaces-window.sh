@@ -5,9 +5,12 @@
 # Frames, written to build/plat42-window/<id>.ppm:
 #   * the six pinned calc scenarios (src/tests/visual/scenarios.json), with
 #     their own `--replay-ops` — the pointer and the inline values;
-#   * `noir-flow` and `noir-flow-off`: noir_space_ship stopped (`stepIn=33`)
-#     beside the declined `if` arm, with the flow overlay shown and hidden —
-#     the flow overlay's PIXEL TWIN;
+#   * `noir-flow` and `noir-flow-off`: noir_space_ship stopped beside the
+#     declined `if` arm, with the flow overlay shown and hidden — the flow
+#     overlay's PIXEL TWIN. The stop's operations are READ from
+#     `plat42-surfaces.json`'s `noir-declined-arm` (they were a literal
+#     `stepIn=33` here, which went on reaching line 7 after the recording
+#     began five steps later, while the record had moved to `stepIn=28`);
 #   * `breakpoint-editor` against `stepped-editor` — the same stop with and
 #     without the breakpoint — is the per-line status mark's pixel twin.
 #
@@ -124,8 +127,12 @@ for s in json.load(open(sys.argv[1]))["scenarios"]:
     print(s["id"] + "\t" + ",".join(terms))
 PY
 	)
-	one noir-flow "${NOIR}" "stepIn=33"
-	one noir-flow-off "${NOIR}" "stepIn=33" --no-flow-overlay
+	local flow_ops
+	flow_ops="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flowScenarios"]["noir-declined-arm"]["replayOps"])' \
+		"${root}/src/tests/visual/plat42-surfaces.json")" ||
+		fail "no noir-declined-arm stop in plat42-surfaces.json"
+	one noir-flow "${NOIR}" "${flow_ops}"
+	one noir-flow-off "${NOIR}" "${flow_ops}" --no-flow-overlay
 }
 
 if [ "${INSIDE}" = "1" ]; then

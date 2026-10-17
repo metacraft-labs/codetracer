@@ -33,7 +33,9 @@ import headless_app/layout_model
 import gpui/chrome
 import gpui/window_geometry
 import gpui/window_top_bar
+import gpui/app/dock_projection
 import views/debug_control_marks
+import styles/generated/design_tokens   # the bar buttons' ink (`ControlInk`)
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -41,7 +43,15 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 203
+  ExpectedAssertions = 212
+    ## 203 -> 212 (the Electron-parity redesign, 2026-10-17), measured. The
+    ## pins are icons in their tabs now, not buttons of their own: the cases
+    ## that walked `data-ct-pin` walk the drawn pins (one check per pin under
+    ## a popover / reveal / tint, by paint order) and read where they are
+    ## from the window's geometry, checked against the drawn tabs (+1) and
+    ## the drawn pin count (+1); the Ctrl+O, top-edge and pin cases each
+    ## assert a non-empty pin / tab set first. The band also asserts the menu
+    ## button's logo and place and the omnibox's magnifier.
     ## 203 -> 203 (PLAT-51 part B), net: the top-edge case docks by a layout
     ## command, since a drag no longer docks, and no longer asserts the reveal
     ## from that strip (a pane docked at start has no element — filed); the
@@ -57,6 +67,12 @@ const
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
   H = 1080
+  MenuLogoSvg = "src/public/resources/menu/ct_logo_dark.svg"
+    ## The desktop's `#menu-logo-img`, which the root menu button draws.
+  OmnibarGlassSvg = "src/public/resources/shared/input_empty_search_icon_dark.svg"
+    ## The omnibox's magnifier (`ct-images-empty-search-icon`).
+  TabPinSvg = "src/public/resources/menu/lm_pin_tab_dark.svg"
+    ## A tab's pin icon (`LAYOUT_TAB_PIN_ICON_PATH`).
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
@@ -167,6 +183,39 @@ proc markPaths(id: string): seq[string] =
     result.add svg[i + 3 ..< j]
     at = j + 1
 
+proc drawnPins(plan: JsonNode): seq[tuple[pane: string, root: int]] =
+  ## Every pane whose tab draws the desktop's pin icon (`.lm_pin_tab`), with
+  ## the root child (paint order) the tab is drawn in. Since the Electron
+  ## parity redesign the pin is an icon INSIDE its tab, in the pane tree, not
+  ## a button of its own over the tree.
+  let pinSvg = readFile(repo / TabPinSvg)
+  for i, c in plan{"children"}.getElems:
+    for tab in c.nodesWith("data-ct-tab-pane"):
+      var pinned = false
+      proc look(n: JsonNode) =
+        if n{"tag"}.getStr == "img" and
+           drawnFiles.getOrDefault(n.attr("src")) == pinSvg:
+          pinned = true
+        for k in n{"children"}.getElems: look(k)
+      look(tab)
+      if pinned: result.add (pane: tab.attr("data-ct-tab-pane"), root: i)
+
+proc tabPanes(plan: JsonNode): seq[string] =
+  ## Every pane with a tab in the tree, in plan order.
+  for t in plan.nodesWith("data-ct-tab-pane"):
+    result.add t.attr("data-ct-tab-pane")
+
+proc defaultGeometry(): WindowGeometry =
+  ## The window's arrangement of the shared default at `W` x `H` — what the
+  ## window lays its panes out from (`windowGeometryOf` under the top bar,
+  ## over the shared default it opens with).
+  let layout = initLayout(sharedDefaultLayout().tree,
+                          sharedDefaultLayout().docked)
+  let proj = projectDock(layout, DockViewport(width: W, height: H,
+                                              dockExtent: 300))
+  doAssert proj.status == dpsProjected
+  windowGeometryOf(layout, proj.state, W, H, GpuiTopBandPx)
+
 suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
 
   test "the band: the shared menu's root button, the desktop's nine marks, the omnibar":
@@ -177,11 +226,22 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       if b.attr("data-ct-top-bar") == "band": bandBox = b
     ck not bandBox.isNil
     let br = bandBox.rectOf
-    ck br.x == ChromePaddingPx and br.y == ChromePaddingPx and br.h == TopBarPx
+    # The desktop's caption bar: the window's whole width from its top-left
+    # corner, `TopBarPx` high.
+    ck br == PxRect(x: 0, y: 0, w: W, h: TopBarPx)
+    # Every part where the bar's own layout puts it (the one computation the
+    # pointer reads too), with the "+" a recording window offers.
+    let lay = gpuiTopBarLayout(newMenuVM(nativeFrontEndMenu("calc")),
+                               newOmnibarVM(), @[], W, canAddTab = true)
     # PLAT-49: ONE root button, as the desktop's menu has; its folders are a
     # popover inside it (`test_plat49_gpui_plan`), never titles in the band.
-    ck plan.nodesWith("data-ct-menu-button").len == 1
-    ck plan.nodesWith("data-ct-menu-button")[0].textOf == "≡"
+    # Since the parity redesign it draws the desktop's logo where it drew "≡".
+    let menuButton = plan.nodesWith("data-ct-menu-button")
+    ck menuButton.len == 1
+    ck menuButton.len == 1 and menuButton[0].textOf == "" and
+       drawnFiles.getOrDefault(menuButton[0].imgSrc) ==
+         readFile(repo / MenuLogoSvg)
+    ck menuButton.len == 1 and menuButton[0].rectOf == lay.segOf(gtMenuButton).rect
     ck plan.nodesWith("data-ct-menu-title").len == 0
     # Nine controls, in the desktop toolbar's order, each drawing the
     # DESKTOP'S mark for itself — its own paths — in the ink its state takes.
@@ -201,12 +261,17 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
         if not svg.contains("d=\"" & d & "\""): all = false
       ck all and markPaths(id).len > 0
       ck not svg.contains("currentColor")
-      ck svg.contains(chromeOf(crTabActiveForeground))
+      # The desktop's `ct-button-image-md-secondary` ink (#b4b4b4).
+      ck svg.contains(DesignTokenHex[dtColorsUiTextPrimaryBodySubtle][dmDark])
       let r = c.rectOf
-      ck r.y == br.y and r.h > 0 and r.x >= br.x
+      ck r == lay.segOf(gtControl, i).rect and r.y >= br.y and
+         r.y + r.h <= br.y + br.h
     let omni = plan.nodesWith("data-ct-omnibar")
     ck omni.len == 1
-    ck omni[0].textOf == "⌕ " & OmnibarPlaceholder
+    # The placeholder after the desktop's magnifier icon (no glyph since the
+    # parity redesign).
+    ck omni[0].textOf == OmnibarPlaceholder
+    ck drawnFiles.getOrDefault(omni[0].imgSrc) == readFile(repo / OmnibarGlassSvg)
 
   test "the footer strip is the shared default's docked panes, in order":
     let plan = windowPlan("")
@@ -238,19 +303,34 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck pr.w > 0
     for it in items:
       ck plan.topIndex(it) > plan.topIndex(pops[0])
-    # Paint order: a pin button that a popover overlaps is painted BEFORE it
-    # (under it), never over its rows. Since PLAT-49 a folder's submenu opens
-    # level with the folder's row, so Debug's (the sixth row) clears the
-    # strips' pins; Edit's opens beside the second row, over the Files pane's
-    # strip and its pin.
+    # Paint order: a pin that a popover overlaps is painted BEFORE it (under
+    # it), never over its rows. Since the parity redesign the pin is an icon
+    # in its tab (`.lm_pin_tab`), drawn with the pane tree; where it is comes
+    # from the window's geometry, checked first against the tabs the window
+    # drew (each exactly as wide as the geometry says). The first level, under
+    # the root button, lies over the Files pane's strip and its pins.
     let edit = windowPlan("menu:Edit")
+    let g = defaultGeometry()
+    var drawnWidths, geomWidths: seq[(string, int)] = @[]
+    for t in edit.nodesWith("data-ct-tab-pane"):
+      drawnWidths.add (t.attr("data-ct-tab-pane"), t.px("w"))
+    var pinOf = initTable[string, PxRect]()
+    for n in g.nodes:
+      if n.kind == gnTabs:
+        for k, pane in n.panes:
+          geomWidths.add (pane, n.tabs[k].w)
+          pinOf[pane] = n.pins[k]
+    checkpoint("drawn tabs " & $drawnWidths & " geometry " & $geomWidths)
+    ck drawnWidths == geomWidths
+    let pins = edit.drawnPins()
+    ck pins.len == geomWidths.len
     var overlapped = 0
     for p in edit.nodesWith("data-ct-menu-popover"):
-      for pin in edit.nodesWith("data-ct-pin"):
-        if pin.rectOf.overlaps(p.rectOf):
+      for (pane, root) in pins:
+        if pinOf.getOrDefault(pane).overlaps(p.rectOf):
           inc overlapped
-          checkpoint("pin " & pin.attr("data-ct-pin") & " under a popover")
-          ck edit.topIndex(pin) < edit.topIndex(p)
+          checkpoint("pin " & pane & " under a popover")
+          ck root < edit.topIndex(p)
     ck overlapped >= 1
 
   test "a key walks the open menu: the highlight is drawn where the ViewModel has it":
@@ -295,9 +375,13 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck unpin[0].textOf == "Unpin"
     let ur = unpin[0].rectOf
     ck ur.x >= rr.x and ur.x + ur.w <= rr.x + rr.w and ur.y >= rr.y
-    for pin in plan.nodesWith("data-ct-pin"):
-      checkpoint("pin " & pin.attr("data-ct-pin"))
-      ck not pin.rectOf.overlaps(rr)
+    # No pin is drawn through it: every pin is an icon in the pane tree,
+    # painted before (under) the revealed pane.
+    let pins = plan.drawnPins()
+    ck pins.len > 0
+    for (pane, root) in pins:
+      checkpoint("pin " & pane)
+      ck root < plan.topIndex(rev[0])
     # A pane revealed from the LEFT strip lies over the tree's left third —
     # over the strips there, whose pin buttons are not drawn through it.
     # (PLAT-51 part B: the top strip's reveal did this job until a drag no
@@ -306,12 +390,12 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
                           @["--layout-ops=dock:state:left"])
     let lrev = left.nodesWith("data-ct-revealed")
     ck lrev.len == 1
-    var overlapping = 0
+    var over = 0
+    let leftPins = left.drawnPins()
     if lrev.len == 1:
-      let lr = lrev[0].rectOf
-      for pin in left.nodesWith("data-ct-pin"):
-        if pin.rectOf.overlaps(lr): inc overlapping
-    ck overlapping == 0
+      for (_, root) in leftPins:
+        if root > left.topIndex(lrev[0]): inc over
+    ck leftPins.len > 0 and over == 0
 
   test "the pointer resting on a strip label reveals that pane; Esc hides it":
     # PLAT-49 part B (finding 9): as on the desktop, a HOVER previews the
@@ -338,9 +422,9 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       for s in top.nodesWith("data-ct-dock-slot"):
         slots.add s.attr("data-ct-dock-slot")
     ck slots == @[$paneState]
-    # No pane box holds State any more.
-    for pin in plan.nodesWith("data-ct-pin"):
-      ck pin.attr("data-ct-pin") != $paneState
+    # No pane box holds State any more: no tab of the tree is State's.
+    ck plan.tabPanes().len > 0
+    ck $paneState notin plan.tabPanes()
     # The reveal FROM the top strip is not asserted here: a pane docked when
     # the window opens has no element to reveal (filed:
     # codetracer-specs issues/2026-10-08-gpui-pane-docked-at-start-has-no-
@@ -356,18 +440,21 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     ck tints.len == 1
     let tr = tints[0].rectOf
     ck tr.w > 0 and tr.h > 0
-    for pin in plan.nodesWith("data-ct-pin"):
-      checkpoint("pin " & pin.attr("data-ct-pin"))
-      ck not pin.rectOf.overlaps(tr)
+    # Every pin is in the pane tree, painted before (under) the tint.
+    let pins = plan.drawnPins()
+    for (pane, root) in pins:
+      checkpoint("pin " & pane)
+      ck root < plan.topIndex(tints[0])
     # The tint is the pane's CONTENT (PLAT-49: GoldenLayout highlights a
     # stack's content, below its header), so the editor's own pin, on its
-    # strip, is drawn and sits above the tint.
+    # strip — the top `TabStripPx` of the editor, which meets the layout's
+    # top under the bar — is drawn and is not under the tint.
     var editorPin = false
-    for pin in plan.nodesWith("data-ct-pin"):
-      if pin.attr("data-ct-pin") == $paneEditor:
+    for (pane, _) in pins:
+      if pane == $paneEditor:
         editorPin = true
-        ck pin.rectOf.y + pin.rectOf.h <= tr.y
     ck editorPin
+    ck tr.y >= GpuiTopBandPx + TabStripPx
     # The middle: a join, highlighted on the editor's strip — above its
     # content, the height of a strip.
     let join = windowPlan("hold:state:editor")
@@ -388,8 +475,9 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
           elsewhere.add s.attr("data-ct-dock-slot")
     ck $paneState in bottom
     ck elsewhere.len == 0
-    for p in pinned.nodesWith("data-ct-pin"):
-      ck p.attr("data-ct-pin") != $paneState
+    # Out of the tree: no tab of it is State's.
+    ck pinned.tabPanes().len > 0
+    ck $paneState notin pinned.tabPanes()
     let back = windowPlan("pin:state,hover-label:state,wait:350,unpin")
     ck back.nodesWith("data-ct-revealed").len == 0
     var slots: seq[string] = @[]
@@ -445,13 +533,20 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
         let kv = part.split('=')
         if kv.len == 2 and kv[0] == key: return parseInt(kv[1])
       -1
+    proc codeTextOf(n: JsonNode): string =
+      ## A code column's text, without the inline value chips the desktop's
+      ## flow draws over it (`data-ct-inline-values`, positioned past the
+      ## line's end): they are not columns of the line.
+      if n{"kind"}.getStr == "TextNode": return n{"text"}.getStr
+      if n.has("data-ct-inline-values"): return ""
+      for c in n{"children"}.getElems: result.add codeTextOf(c)
     proc codeByRow(plan: JsonNode): Table[int, string] =
       ## Every drawn row's CODE text, by line number.
       result = initTable[int, string]()
       for row in plan.nodesWith("data-ct-row"):
         var code = ""
         for col in row.nodesWith("data-ct-code-column"):
-          code.add textOf(col)
+          code.add codeTextOf(col)
         result[parseInt(row.attr("data-ct-row"))] = code
     proc gutterRunsOf(plan: JsonNode): seq[string] =
       for lane in plan.nodesWith("data-ct-gutter-lane"):

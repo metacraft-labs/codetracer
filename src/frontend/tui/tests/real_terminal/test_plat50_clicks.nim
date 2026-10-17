@@ -31,10 +31,13 @@ import nim_libvterm
 import ../fixtures/fixture_provider
 import ./lifecycle_support
 import ../../app/theme/colour_math
+from viewmodels/product_mode import editorTabLabel
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 107
+const ExpectedAssertions = 108
+  ## 107 -> 108: the Files click case pins the derived tab label
+  ## (`editorTabLabel`, folder/name since 2026-10-17) before using it.
   ## PLAT-51: 112 -> 107 — the two Timeline-track cases (K30, K45) went with
   ## the pane; value history and origin open in the pane, read under the row.
 
@@ -250,13 +253,18 @@ suite "PLAT-50 on a real terminal: Files (K17, K18, K19)":
     var sess = open("multi_root")
     let (rh, ch) = sess.waitFor("helpers.py", below = Rows - 1)
     ck rh > 1
+    # The editor's tab is the opened file's folder and name, as every
+    # front-end draws it (`product_mode.editorTabLabel`): `shared/helpers.py`.
+    let helpersTab = " " & editorTabLabel(
+      "test-programs" / "multi_root" / "shared" / "helpers.py", false) & " "
+    ck helpersTab == " shared/helpers.py "
     # The editor opens on the runner; helpers.py is a file of the tree.
-    ck not sess.snap().text(1).contains(" helpers.py ")
+    ck not sess.snap().text(1).contains(helpersTab)
     sess.press(rh, ch + 2)
     discard sess.waitFor("def add(left, right):")
     let s = sess.snap()
     # The editor's tab names the opened file, and the status line says so.
-    ck s.text(1).contains(" helpers.py ")
+    ck s.text(1).contains(helpersTab)
     ck sess.rowText(StatusRow).contains("opened ")
     # A folder: `shared` collapses (its files go, its twisty turns) and
     # expands again.
@@ -561,11 +569,13 @@ suite "PLAT-50 on a real terminal: the call-trace click's status (F2)":
     sess.quit()
 
 proc stepToAdd(sess: var TuiTestSession) =
-  ## Into `add`'s body (line 31, `left: 2, right: 3` beside it).
+  ## Into `add`'s body (line 31, `left: 2, right: 3` beside it — the flow's
+  ## values, which carry the step's `return` after them and are drawn on
+  ## `def add(` above as well, as GPUI's window draws them).
   sess.send(":goto 32\r")
   discard sess.waitFor(" ▸  def add(")
   sess.send("n")
-  discard sess.waitFor("/* left: 2, right: 3 */")
+  discard sess.waitFor(" ▸      return left + right  /* left: 2, right: 3")
 
 proc osc52(sess: var TuiTestSession): seq[string] =
   ## Every text the terminal was asked to put on its clipboard (OSC 52).

@@ -30,7 +30,9 @@
 ## `continued-event-log` and **1** on the other five — so the marker moves
 ## with the stop instead of resting on row 0. It is drawn, too:
 ## `bg: #333333` on the row (the design system's active-row token) and
-## `font-weight: bold` on the callee and its index.
+## `font-weight: bold` on the callee and its index. (Since the 2026-10-17
+## redesign it is drawn as the desktop draws it: the editor's selection
+## ground, #3e3e3b, and the active toggle icon; no weight.)
 ##
 ## So this suite does not gate a fix made here. **It gates the behaviour
 ## against coming back**, which is the thing iteration 3's reading could not
@@ -63,7 +65,7 @@
 ##      wrong about the editor too in order to pass.
 ##   3. *the marker is drawn* — satisfied by a style nobody can see. So the
 ##      marked row is required to carry a background the unmarked rows do
-##      NOT, and bold callee/index weights the unmarked rows do NOT; both
+##      NOT, and the active toggle icon the unmarked rows do NOT; both
 ##      sides of each comparison are read off the same plan.
 ##   4. *the rule is right* — satisfied by "the last call entered", which is
 ##      wrong exactly when a call has already returned. That is
@@ -87,6 +89,7 @@ import std/[json, options, os, osproc, streams, strtabs, strutils, tables,
             tempfiles, unittest]
 
 import codetracer_embed
+import styles/generated/design_tokens
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -94,7 +97,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 257
+  ExpectedAssertions = 369
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   CalcSource = "test-programs/calc/main.py"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
@@ -257,6 +260,16 @@ proc partText(row: JsonNode; kind: string): string =
     if c.attr(CallPartAttr) == kind: return c.textOf
   ""
 
+proc toggleIcon(row: JsonNode): string =
+  ## The file name of the icon a row's toggle part draws, "" when the row
+  ## has no toggle image.
+  for c in row{"children"}.getElems:
+    if c.attr(CallPartAttr) == "toggle":
+      for img in c{"children"}.getElems:
+        let src = img.attr("src")
+        if src.len > 0: return src.extractFilename
+  ""
+
 proc executionLine(plan: JsonNode): int =
   ## The editor's own execution line in the SAME plan. -1 when no node
   ## carries it, which the caller asserts against rather than defaulting.
@@ -383,21 +396,26 @@ suite "PLAT-40 / PLAT35-F2: the pane marks the current frame, and draws it":
       let marked = plan.markedRows
       ck marked.len == 1
       let row = marked[0]
-      ck row.style("bg").len > 0
+      # SINCE 2026-10-17 AS THE DESKTOP DRAWS IT (`.event-selected`, the
+      # `-active` toggle SVGs): the marked row sits on the editor theme's
+      # selection ground and its toggle is the active (yellow) icon. Neither
+      # the desktop nor this pane sets the selected call in bold any more —
+      # the weight this case used to count was this front-end's own mark.
+      ck row.style("bg").toLowerAscii ==
+         DesignTokenHex[dtColorsEditorSurfaceSelect][dmDark].toLowerAscii
       ck row.partText("callee").len > 0
-      # Its callee and index carry weight; an unmarked row's do not.
-      var boldOnMarked = 0
-      for c in row{"children"}.getElems:
-        if c.attr(CallPartAttr) in ["callee", "index"] and
-           c.style("font_weight") == "bold":
-          inc boldOnMarked
-      checkpoint(vp & " bold parts on the marked row " & $boldOnMarked)
-      ck boldOnMarked == 2
+      let icon = row.toggleIcon
+      checkpoint(vp & " the marked row's toggle icon " & icon)
+      ck icon.endsWith("-active.svg")
       var others = 0
       for r in plan.callRows:
         if r.attr(CallSelectedAttr) == "true": continue
         inc others
         ck r.style("bg").len == 0
+        # Every other row's toggle is the plain icon, and present: a pane
+        # that drew the active icon everywhere (or nowhere) fails one side.
+        ck r.toggleIcon.len > 0
+        ck not r.toggleIcon.endsWith("-active.svg")
         for c in r{"children"}.getElems:
           if c.attr(CallPartAttr) in ["callee", "index"]:
             ck c.style("font_weight") != "bold"

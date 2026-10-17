@@ -18,12 +18,17 @@
 ##   * the terminal paints it at `gutter + display width of the code + gap`,
 ##     in CELLS — so a line of double-width CJK pushes it twice as far as the
 ##     same number of ASCII characters would;
-##   * GPUI draws it as the code span's NEXT SIBLING in a flex row with no
-##     absolute positioning, so its x is wherever the code ends (the window
-##     frames show it: `test_plat42_window.nim`).
+##   * GPUI draws it as the desktop's flow draws it (since 2026-10-17): chips
+##     ABSOLUTELY placed in the code column at `left = (line length + 1)` of
+##     the flow container's `ch` (10.18 px, `ui/flow.nim`'s
+##     `calc(<len>ch + 1ch)`, measured) less the horizontal scroll, `top`
+##     2 px — so its x is still the CODE's length, per line (the window
+##     frames show it: `test_plat42_window.nim` measures each chip's x there).
 ## The killer is an OVERLAY — the value drawn at a fixed position rather than
 ## after the code — which is exactly what an editor that cannot reflow
-## (candidate B in the decision above) would have to do.
+## (candidate B in the decision above) would have to do. Placing by the code's
+## length is asserted per document, and that the eighteen documents' values do
+## NOT all land at one x is asserted over the corpus.
 ##
 ## THE CORPUS IS PLAT-24's EIGHTEEN DOCUMENTS, cardinality asserted, and the
 ## realised DOCUMENT set is asserted (§34b: class coverage is weaker by the
@@ -31,7 +36,8 @@
 ##
 ## No mocks: the shipped painter, the shipped surface builder, the real shim.
 
-import std/[json, sets, strutils, unittest]
+import std/[json, math, sets, strutils, unittest]
+from std/unicode import runeLen
 
 import codetracer_embed
 import isonim_gpui/renderer
@@ -51,6 +57,15 @@ template ck(cond: untyped) =
 const
   CorpusSize = 18
   Cols = 200
+  FlowCh = 10.18
+    ## The desktop flow container's `ch`, in px — the unit its inline values
+    ## are placed in (`ui/flow.nim`'s `flowLeftStyle`), measured on its six
+    ## reference states. Spelled here, not imported, so the law is the
+    ## desktop's rule and not the renderer's own constant read back.
+
+var chipLefts: seq[string] = @[]
+  ## Every document's chip `left` AS THE PLAN HAS IT, for the corpus-wide
+  ## overlay twin.
 
 type
   Presence = enum
@@ -154,7 +169,7 @@ suite "PLAT-42: LAW-E2 — inline values reflow, on both media":
       checkpoint(d.id & ": code " & $codeCells & " cells, annotation at " &
                  $at & ", want " & $wantCol & " | " & painted)
       ck at == wantCol
-      # --- GPUI: the annotation FOLLOWS the code in a flex row. ------------
+      # --- GPUI: the chips are placed BY THE CODE'S LENGTH. ----------------
       gpui_reset_tree()
       var r: GpuiRenderer
       let parent = r.createElement("div")
@@ -171,21 +186,52 @@ suite "PLAT-42: LAW-E2 — inline values reflow, on both media":
         for i in 0 ..< childCount(n): stack.add nthChild(n, i)
       ck not rowEl.isNil
       # gutter, then the code column (PLAT-47 B1: the band's extent), which
-      # holds the code and the annotation.
+      # holds the code and the inline values — found by role, since the
+      # column also carries the indent guides of an indented line.
       ck childCount(rowEl) == 2
       let column = nthChild(rowEl, 1)
-      ck childCount(column) == 2
-      let code = nthChild(column, 0)
-      let ann = nthChild(column, 1)
-      ck getAttribute(code, TextRoleAttribute) == "editor-code"
-      ck textContent(ann).startsWith("/*")
-      # No absolute placement anywhere on the annotation: its position is the
-      # flex layout's, i.e. the code's width.
-      # Read from the RUST side's plan, not from what this case set.
-      let plan = parseJson(renderPlanJson(r, rowEl))
-      let annStyles = plan["children"][1]["children"][1]["styles"]
-      ck annStyles{"position"}.getStr notin ["absolute", "fixed"]
-      ck annStyles{"left"}.isNil
+      var codeAt, annAt = -1
+      var codes, anns = 0
+      for i in 0 ..< childCount(column):
+        let c = nthChild(column, i)
+        if getAttribute(c, TextRoleAttribute) == "editor-code":
+          codeAt = i
+          inc codes
+        if getAttribute(c, InlineValuesAttribute).len > 0:
+          annAt = i
+          inc anns
+      ck codes == 1
+      ck anns == 1
+      ck annAt > codeAt
+      if codes == 1 and anns == 1:
+        let ann = nthChild(column, annAt)
+        # The row's values, as `inlineValueText` spells them for a plan reader,
+        # and drawn as ONE chip naming `x` and showing `1`.
+        ck getAttribute(ann, InlineValuesAttribute) == inlineValueText(values)
+        ck childCount(ann) == 1
+        ck textContent(ann) == "x1"
+        # THE PLACEMENT, read from the RUST side's plan, not from what this case
+        # set: absolute in the code column, at the code's length + 1 in the
+        # flow's `ch` (nothing here scrolls, so no columns are skipped).
+        let plan = parseJson(renderPlanJson(r, rowEl))
+        let colPlan = plan["children"][1]
+        let annStyles = colPlan["children"][annAt]["styles"]
+        let wantLeft = int(round(float(line.runeLen + 1) * FlowCh))
+        checkpoint(d.id & ": " & $line.runeLen & " runes, chip styles " &
+                   $annStyles & ", want left " & $wantLeft & "px")
+        ck colPlan["styles"]{"position"}.getStr == "relative"
+        ck annStyles{"position"}.getStr == "absolute"
+        ck annStyles{"left"}.getStr == $wantLeft & "px"
+        ck annStyles{"top"}.getStr == "2px"
+        chipLefts.add annStyles{"left"}.getStr
+
+  test "the corpus's values are not all at one x (the OVERLAY twin)":
+    # A renderer that drew every value at a fixed x passes no per-document
+    # case above; over eighteen first lines of different lengths it would
+    # also leave one distinct `left` here.
+    checkpoint("chip lefts: " & $chipLefts)
+    ck chipLefts.len == CorpusSize
+    ck chipLefts.toHashSet.len > 1
 
 suite "PLAT-42: the flow overlay as GPUI draws it, read from the Rust plan":
 

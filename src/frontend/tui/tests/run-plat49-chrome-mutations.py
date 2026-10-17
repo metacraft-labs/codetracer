@@ -1030,10 +1030,12 @@ ARMS = [
         P2_ROWSCUR,
         "the active-row ground is the panel's: nothing marks the row"),
     Arm("CG3", GPUILEAVES,
-        "          (if selected: CallTextColour else: CallToggleColour)\n",
-        "          CallToggleColour\n",
+        '                                                (if selected: "-active" else: "")))\n',
+        '                                                (if false: "-active" else: "")))\n',
         G2_ROWS,
-        "GPUI's selected row keeps the muted toggle, illegible on its ground"),
+        "GPUI's selected row keeps the plain toggle, not the desktop's active "
+        "one (re-aimed 2026-10-17: the muted toggle colour it targeted was "
+        "removed with the redesign; the toggle is an SVG now)"),
 
     # --- review: the session strip's "+" ---------------------------------------
     Arm("NT1", TOPBAR,

@@ -341,12 +341,8 @@ ARMS = [
     # N1 in particular is the arm-C shape, satisfying "a footer exists and
     # carries a number" while violating the only thing the number is for.
     Arm("N1", LEAVES,
-        "  r.appendChild(parent, eventLogFooterElement(\n"
-        "    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,\n"
-        "    vm.totalEventCount.val))\n",
-        "  r.appendChild(parent, eventLogFooterElement(\n"
-        "    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,\n"
-        "    vm.eventRows.val.len))\n",
+        "  let total = eventLogTotalOf(start, rows.len, vm.totalEventCount.val)\n",
+        "  let total = eventLogTotalOf(start, rows.len, rows.len)\n",
         FOOTER_SUITE,
         "the published total is the ViewModel's, NOT the rows in hand",
         CTL[LEAVES][0], CTL[LEAVES][1],
@@ -377,11 +373,14 @@ ARMS = [
         "field and this breaks the first."),
 
     Arm("N3", LEAVES,
-        '      r.setStyle(cell, "font-weight", "bold")\n',
-        '      r.setStyle(cell, "font-weight", "normal")\n',
+        '  r.setStyle(head, "font-weight", "600")\n',
+        '  r.setStyle(head, "font-weight", "400")\n',
         FOOTER_SUITE,
-        "the header's cells differ from a data row's in COLOUR and in WEIGHT",
+        "the header differs from a data row in WEIGHT, as the desktop's does",
         CTL[LEAVES][0], CTL[LEAVES][1],
+        "(RE-AIMED 2026-10-17 at `renderEventLog`'s header row, which now "
+        "carries the weight itself; the desktop's header differs by weight "
+        "alone, so this arm now restores the whole of the defect.) "
         "THE HEADER KEEPS ITS COLOUR AND LOSES ITS WEIGHT, which is half of "
         "`PLAT35-F12` restored. The finding's words are *'the same weight AND "
         "colour as a data row'*, and the two halves are separable: this arm "
@@ -391,11 +390,16 @@ ARMS = [
         "untouched, so every existence check still passes."),
 
     Arm("N4", LEAVES,
-        "  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]\n",
-        "  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimaryHover][dmDark]\n",
+        "  EventSelectedGround = DesignTokenHex[dtColorsEditorSurfaceSelect][dmDark]\n",
+        "  EventSelectedGround = DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark]\n",
         FOOTER_SUITE,
-        "the header carries the rule, in the PUBLISHED token",
+        "NO zebra: only the selected row carries a background",
         CTL[LEAVES][0], CTL[LEAVES][1],
+        "(RE-AIMED 2026-10-17: the header rule this arm targeted was removed "
+        "with the redesign — the desktop draws none — so it now puts the "
+        "SELECTED ROW's ground in the wrong published token, which the zebra "
+        "case catches by comparing against the generated table. The history "
+        "of the rule arm follows.) "
         "THE RULE IS DRAWN IN THE WRONG PUBLISHED TOKEN — the HOVER variant "
         "of the very token it should take, `#818181` instead of `#565656`. "
         "Still a token, still from the generated table, still a plausible "
@@ -414,9 +418,9 @@ ARMS = [
         "a check it does not have."),
 
     Arm("N5", LEAVES,
-        '  r.setAttribute(result, EventLogFooterAttribute, "true")\n',
-        '  r.setAttribute(result, EventLogFooterAttribute, "true")\n'
-        '  r.setAttribute(result, "data-column-index", "0")\n',
+        '  r.setAttribute(foot, EventLogFooterAttribute, "true")\n',
+        '  r.setAttribute(foot, EventLogFooterAttribute, "true")\n'
+        '  r.setAttribute(foot, "data-column-index", "0")\n',
         FOOTER_SUITE,
         "the footer carries NO column index, so a click cannot re-sort the log",
         CTL[LEAVES][0], CTL[LEAVES][1],

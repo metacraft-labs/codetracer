@@ -131,10 +131,15 @@ ARMS = [
     # the stop-reconciled `InlineValueGate`, bound to `values` a few lines up,
     # so the line that hands them over is `inlineValues = values)`. RE-RUN,
     # not only re-recorded.
+    # RE-AIMED 2026-10-17: the host hands the pane the FLOW's values per
+    # line (`flowValuesByLine`, the rule GPUI's surface calls) after the
+    # names in scope, so the line that closes the call is `lineValues =
+    # flowValues)`; dropping it puts the terminal back on the execution-line-
+    # only rule GPUI no longer draws.
     ("V1", HOST,
-     "    inlineValues = values)",
-     "    inlineValues = @[])", [VALUES_TERM],
-     "the shipped terminal draws no inline value again"),
+     "    lineValues = flowValues)",
+     "    lineValues = initTable[int, seq[EditorValue]]())", [VALUES_TERM],
+     "the shipped terminal draws the flow's values on no line again"),
     # --- the declared survivor ---------------------------------------------
     ("N1", RULE, "      return true\n", "      return (true)\n", [FACTS],
      "behaviour-preserving: the DECLARED SURVIVOR"),

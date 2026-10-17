@@ -24,8 +24,8 @@
 ##   * deliverable 7 — Shift + right-click opens the SAME menu as a plain
 ##     right-click, with no "terminal / browser menu" hint row (GPUI has no
 ##     native menu to fall back to);
-##   * deliverable 12 — the omnibox on the editor's ground and foreground in
-##     every state;
+##   * deliverable 12 — the omnibox on the bar's own ground in every state
+##     (the desktop's, measured 2026-10-17), its results on the editor's;
 ##   * deliverable 13 — the execution pointer is the desktop's
 ##     `highlight_line_arrow.svg`, never the `▶` glyph.
 ##
@@ -34,7 +34,9 @@
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import gpui/app/leaves
+import gpui/chrome
 import gpui/list_scrubber
+import styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
@@ -272,10 +274,14 @@ suite "PLAT-51 GPUI: list-pane scrollbars are scrubbers over the whole list":
 suite "PLAT-51 GPUI: values, the caret, menus, the omnibox, the pointer":
 
   test "a changed value takes the desktop's accent; nothing at the entry":
+    # Every value row carries the attribute; a CHANGED one says `"true"`.
+    proc changedRows(plan: JsonNode): seq[JsonNode] =
+      for n in plan.nodesWith(StateChangedAttribute):
+        if n.attr(StateChangedAttribute) == "true": result.add n
     let entry = windowPlan("", calc)
-    ck entry.nodesWith(StateChangedAttribute).len == 0
+    ck entry.changedRows.len == 0
     let stepped = windowPlan("", calc, pre = @["--replay-ops=next=3"])
-    let changed = stepped.nodesWith(StateChangedAttribute)
+    let changed = stepped.changedRows
     checkpoint("changed rows: " & $changed.len)
     ck changed.len > 0
     var lit = 0
@@ -324,15 +330,20 @@ suite "PLAT-51 GPUI: values, the caret, menus, the omnibox, the pointer":
     for e in b:
       ck not e.contains("Shift + right-click")
 
-  test "the omnibox is on the editor's ground and foreground in every state":
+  test "the omnibox is on the bar's ground in every state; its results on the editor's":
+    # 2026-10-17: the field on the bar's own ground in every state, as the
+    # desktop's `.command-input-row` is measured (#1b1b1b) — no longer the
+    # editor's; the typed query in the field's own #c8c8c8 (the label tier).
     for ops in ["", "key:p:control", "key:p:control,key:a"]:
       let plan = windowPlan(ops, calc)
       let field = plan.nodesWith("data-ct-omnibar")
       ck field.len == 1
-      ck field[0]{"styles"}{"bg"}.getStr == EditorGround
+      ck field[0]{"styles"}{"bg"}.getStr == chromeOf(crWindowBackground)
     let typed = windowPlan("key:p:control,key:a", calc)
-    ck typed.nodesWith("data-ct-omnibar")[0]{"styles"}{"text_color"}.getStr ==
-       EditorTextColour
+    var queryColour = ""
+    for c in typed.nodesWith("data-ct-omnibar")[0]{"children"}.getElems:
+      if c.textOf == "a▏": queryColour = c{"styles"}{"text_color"}.getStr
+    ck queryColour == DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark]
     let results = typed.nodesWith("data-ct-omnibar-results")
     ck results.len == 1
     ck results[0]{"styles"}{"bg"}.getStr == EditorGround

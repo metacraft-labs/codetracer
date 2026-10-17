@@ -191,8 +191,9 @@ suite "PLAT-49: panes, strips and dividers on the shell":
       for heading in ["FILES", "CALL TRACE", "VARIABLES", "TRACEPOINTS",
                       "SOURCE ", "BUILD "]:
         ck not line.contains(heading)
-    # A lone editor's one tab names its file.
-    ck screen.rows[1].contains(" main.py ")
+    # A lone editor's one tab names its file by folder and name, as the
+    # desktop's tab does (`editorTabLabel`).
+    ck screen.rows[1].contains(" calc/main.py ")
 
   test "every divider cell sits on the panes' own surface":
     # PLAT-50 refines finding 13: a divider in a BODY row is on the ground of

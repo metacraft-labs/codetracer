@@ -29,7 +29,7 @@ import styles/contrast_floors     # `TabGroundContrastFloor`
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 57
+const ExpectedAssertions = 56
 
 var countedAssertions = 0
 
@@ -269,15 +269,25 @@ suite "PLAT-68 GPUI: the focused strip's selected tab is told apart":
       if strip.attr("data-ct-strip-focused") != "true": continue
       inc focusedStrips
       let ground = strip{"styles"}{"bg"}.getStr
+      # THE FLOOR AS `contrast_floors` DEFINES IT: the selected tab's ground
+      # against the OTHER TABS' grounds on the same strip. Until 2026-10-17
+      # the others were transparent over the strip's (focus) ground; since
+      # the desktop-parity redesign every tab is an opaque chip of its own,
+      # so each other tab's ground is read from the tab itself, and the
+      # strip's only where the tab has none.
+      var own = ""
+      var others: seq[string] = @[]
       for tab in strip{"children"}.getElems:
         if tab.attr("data-ct-tab-active") == "true":
-          let own = tab{"styles"}{"bg"}.getStr
-          checkpoint("focused strip " & ground & ", its active tab " & own)
-          ck own.len > 0 and own != ground
-          ck contrastRatio(own, ground) >= TabGroundContrastFloor
+          own = tab{"styles"}{"bg"}.getStr
         elif tab.attr("data-ct-tab-active") == "false":
-          # The others sit on the strip's own (focus) ground.
-          ck tab{"styles"}{"bg"}.getStr in ["", ground]
+          let bg = tab{"styles"}{"bg"}.getStr
+          others.add(if bg.len > 0: bg else: ground)
+      checkpoint("focused strip " & ground & ", its active tab " & own &
+                 ", the others " & $others)
+      ck own.len > 0 and others.len > 0
+      for other in others:
+        ck contrastRatio(own, other) >= TabGroundContrastFloor
     ck focusedStrips == 1
 
 suite "PLAT-68 GPUI: the program menu from the keyboard (CUA-Keymap.md §3.8)":

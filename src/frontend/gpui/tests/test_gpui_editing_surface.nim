@@ -522,9 +522,13 @@ suite "PLAT-22: the GPUI editing surface":
         let drawn = getAttribute(root, EditorProvenanceAttribute)
         ck drawn.len > 0
         ck drawn == $s.provenance
-        # §2's Requirement on the DEBUG side, in an element of its own — the
-        # half `exactTextNodes` exists for, and the half no case had.
-        ck exactTextNodes(root, sourceContractFor(pmDebug).statement) == 1
+        # §2's Requirement on the DEBUG side, stated EXACTLY — the half no
+        # case had. Since 2026-10-17 the statement is an attribute of the pane
+        # (`EditorSourceStatementAttribute`), not a caption row: the desktop
+        # draws no such row. An exact equality, so prose that merely QUOTES
+        # the statement cannot satisfy it.
+        ck getAttribute(root, EditorSourceStatementAttribute) ==
+          sourceContractFor(pmDebug).statement
         seen.add drawn
       ck seen.len == 3
       ck seen[0] != seen[1]        # verified vs UNVERIFIED — CTUI-5's own line
@@ -893,12 +897,15 @@ suite "PLAT-22: the GPUI editing surface":
     # statement in the value and drew nothing fails.
     ck contract.statement in textContent(root)
     ck s.notice in textContent(root)
-    # **AND IN AN ELEMENT OF ITS OWN.** The containment check above is
-    # satisfied by the NOTICE, which quotes the statement verbatim, so it was
-    # green over a renderer that had stopped drawing the statement — measured
-    # by an undeclared arm on 2026-09-16 (§4d). Arm E14 is that mutation and
-    # this is the only line that reddens.
-    ck exactTextNodes(root, contract.statement) == 1
+    # **AND STATED BY THE PANE ITSELF, EXACTLY.** The containment check above
+    # is satisfied by the NOTICE, which quotes the statement verbatim, so it
+    # was green over a renderer that had stopped drawing the statement —
+    # measured by an undeclared arm on 2026-09-16 (§4d). Arm E14 is that
+    # mutation and this is the only line that reddens. Since 2026-10-17 the
+    # statement is the pane's `EditorSourceStatementAttribute` rather than a
+    # caption row (the desktop draws no such row), so the exact check reads
+    # that attribute — which the notice cannot satisfy.
+    ck getAttribute(root, EditorSourceStatementAttribute) == contract.statement
     expectCount(25)
 
   test "THE SHIPPED BINARY draws the editor — Tier 2, through --report-plan":

@@ -14,20 +14,26 @@
 ## asserts over the committed measurement, the arrangement PLAT-40/41/44/45
 ## use: a compositor is not a CI dependency, the frames are.
 ##
-## The expected colours are the DESKTOP's, measured by the Electron capture
-## (`plat47-desktop-parity.electron.json`), never the constants the window
-## paints with. The regions a drop must tint are derived from the window's
-## own pixels (the editor's box is its focus ring), and what a drop DID is
-## read from which pixels changed.
+## The expected colours are the DESKTOP's, measured by the Electron captures
+## (`plat47-desktop-parity.electron.json`, `plat50-desktop.electron.json`),
+## never the constants the window paints with. The regions a drop must tint
+## are derived from the window's own pixels (the editor's box is its focus
+## outline, shown after the first press since the 2026-10-17 redesign) and
+## the lifted arrangement the drag draws (PLAT-51: the dragged pane is lifted
+## out first), and what a drop DID is read from which pixels changed.
 ##
 ## No mocks: a real window, a real compositor, a real pointer, real OCR.
 
 import std/[algorithm, json, os, sequtils, strutils, unittest]
 
 import gpui/window_top_bar   # `GpuiTopBandPx`: the band above the layout (PLAT-48)
-import gpui/chrome          # `crFocusOutline` (PLAT-51)
-from gpui/window_geometry import TabStripPx, FooterPx
-  # the pane's tab strip, and the window's footer (PLAT-49 part B)
+import gpui/chrome          # `crFocusOutline` (PLAT-51), the window's edges
+from gpui/window_geometry import TabStripPx, FooterPx, GpuiEditorRowPx,
+  EditorHScrollBandPx
+  # the pane's tab strip, the window's footer (PLAT-49 part B), the editor's
+  # row pitch and its horizontal scrollbar's band
+from headless_app/golden_layout_hit import GlSideAreaPx
+  # GoldenLayout's ground band, where a drop splits the whole layout
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -37,14 +43,20 @@ template ck(cond: untyped) =
 const
   Record = "src/tests/visual/plat47-gpui-window.json"
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
-  ExpectedAssertions = 104
+  Desktop50 = "src/tests/visual/answers/plat50-desktop.electron.json"
+    ## The desktop's tab strip colours (PLAT-50's capture).
+  ExpectedAssertions = 125
+    ## 104 -> 125 (the Electron-parity redesign, 2026-10-17, re-captured and
+    ## measured): three more frames settled (counted per frame); the outline
+    ## absent before the first press and drawn on the editor's own box; the
+    ## tabs told apart by title colour and bridge; the indent guides' 4f
+    ## shaped as guides; the band's start read against a found number; the
+    ## drag read against its lifted frame (the lift, the editor's box, the
+    ## smaller middle's strip, the slot's strip, the press's focus); the
+    ## commit read from the dropped pane's own outline; the dock by the pin,
+    ## to the footer, its label in the reveal's reach.
     ## PLAT-50: +1, the docked reveal is read by the span of its change.
   GhostBoxPx = 160 * 32
-  EditorRowPx = 26
-    ## One editor row's pitch in the window (`window_geometry.GpuiEditorRowPx`).
-  PanePaddingPx = 12
-    ## The pane's own padding in the window: the code column's right edge is
-    ## the editor's box minus its 1px border minus this.
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -62,7 +74,9 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
       checkpoint(k)
       ck v.getBool
       inc n
-    ck n == 19
+    # Three frames since the redesign: the first screen before any press,
+    # the press on the Variables tab alone, and the drag's lifted frame.
+    ck n == 22
 
   test "B2: the focused pane is closed in a 1px border of the focus colour":
     # The desktop's outline is #565656; PLAT-51 made the native focus colour
@@ -71,26 +85,51 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck desk["focus"]["outline"].getStr == "#565656"
     ck chromeOf(crFocusOutline) == "#3a3a3a"
     let ring = rec["focusRing"]
+    # Since 2026-10-17 the outline is an OVERLAY shown after the first press,
+    # as the desktop's `.ct-selected-outline`: none on the first screen.
+    ck ring["pristine"].kind == JNull
     ck ring["bbox"].kind == JArray
+    # After the press on the editor's body it is drawn ON the editor's own
+    # box (no frame inset: the panes start at their edge, as GoldenLayout's).
+    ck arr(ring["bbox"]) == arr(ring["editorRect"])
     for side in ["top", "bottom", "left", "right"]:
       let s = ring["sides"][side]
       checkpoint(side & ": " & $s)
-      # Every pixel of the side is the outline colour, and the pixel one in
-      # is not: exactly one pixel wide, closed.
+      # Every pixel of the side is the outline colour (the rounded corners
+      # left out): exactly one pixel wide, closed.
       ck s["ring"].getInt == s["of"].getInt and s["of"].getInt > 100
-      ck s["inside"].getInt == 0
+      if side == "top":
+        # One in from the top is the focused pane's STRIP, whose ground is
+        # the focus colour too (PLAT-51) — the outline is still one pixel,
+        # the strip under it is the pane's.
+        ck ring["stripGround"].getStr == chromeOf(crFocusOutline)
+      else:
+        ck s["inside"].getInt == 0
 
-  test "B2: the active tab is drawn heavier than the same label inactive":
+  test "B2: the active tab is told from the same label inactive, as the desktop tells it":
+    # The desktop draws no heavier face for the active tab: its TITLE is the
+    # label tier (#c8c8c8) where an inactive one is the disabled tier, and
+    # the active tab runs on down into its pane's body (`.lm_active`'s
+    # bridge) where an inactive one stops above the strip's ground. The same
+    # label read active and inactive — before and after the click on VCS —
+    # so the difference is not one of letters.
+    let strip = parseJson(readFile(repo / Desktop50))["chrome"]["strip"]
+    proc grey(h: string): int = parseHexInt(h[1 .. 2])
     for pane in ["fileTree", "vcs"]:
       let t = rec["tabs"][pane]
       let (activeKey, inactiveKey) =
         if pane == "fileTree": ("base", "vcs") else: ("vcs", "base")
-      let a = t[activeKey]["mass"].getFloat
-      let i = t[inactiveKey]["mass"].getFloat
+      let a = t[activeKey]
+      let i = t[inactiveKey]
       checkpoint(pane & ": active " & $a & " inactive " & $i)
-      # Ink normalised by each label's own colour: the weight, not the tier.
-      ck a > 1.4 * i
-      ck t[activeKey]["ink"].getStr != t[inactiveKey]["ink"].getStr
+      # The title's ink, within an antialiasing step of the desktop's.
+      ck abs(grey(a["titleInk"].getStr) - grey(strip["activeTitle"].getStr)) <= 3
+      ck abs(grey(i["titleInk"].getStr) - grey(strip["inactiveTitle"].getStr)) <= 3
+      # The bridge: the pane's own ground under the active tab, the strip's
+      # ground (the window's, behind the tabs) under the inactive one.
+      ck a["bridge"].getStr == t["bodyGround"].getStr
+      ck a["bridge"].getStr == strip["paneGround"].getStr
+      ck i["bridge"].getStr == strip["groundBehindTabs"].getStr
 
   test "B1: the editor's ground and every token class are the desktop's colours":
     let px = rec["editor"]["pixelsByDesktopColour"]
@@ -105,8 +144,12 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck px["activeLineNumber"].getInt > 5
     # Punctuation is thin; that its colour is painted at all is the claim.
     ck px["delimiter"].getInt > 0
-    # And the colours that were painted there before PLAT-47 B1 are gone.
+    # And the colours that were painted there before PLAT-47 B1 are gone:
+    # no row is a band of 4f (the old execution band). 4f is the indent
+    # guides' colour now (`editorIndentGuide`), and what is drawn in it is
+    # guide-shaped — 1 px wide, a vertical run.
     ck px["oldBand4f4f4f"].getInt == 0
+    ck px["indentGuide4f4f4f"].getInt > 20
     ck px["chromePaneFill"].getInt == 0
 
   test "B1: the execution band is Monaco's — the code column to the right edge, not the gutter":
@@ -114,29 +157,44 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     checkpoint($b)
     ck b["rows"].kind == JArray
     let rows = arr(b["rows"])
-    # ONE FULL TEXT ROW: 26 px at the window's text size. Squeezed rows (the
-    # fetch window holding more lines than the pane shows) were 18.
-    ck rows[1] - rows[0] + 1 >= EditorRowPx - 2
+    # ONE FULL TEXT ROW at the window's row pitch (Monaco's 22 px line
+    # height since 2026-10-17; 26 before). Squeezed rows (the fetch window
+    # holding more lines than the pane shows) were shorter.
+    ck rows[1] - rows[0] + 1 == GpuiEditorRowPx
     # It starts right of the line number it belongs to…
+    ck b["activeNumberMaxX"].kind == JInt
     ck b["startX"].getInt > b["activeNumberMaxX"].getInt
     ck b["gutterAtBandRow"].getStr == desk["editor"]["background"].getStr
-    # …and runs to the code column's right edge.
-    ck b["endX"].getInt == b["bodyRight"].getInt - PanePaddingPx
+    # …and runs to the code column's right edge: the editor's, which fills
+    # its pane to the edge (`EditorPadSidePx`).
+    ck b["endX"].getInt == b["bodyRight"].getInt - EditorPadSidePx
 
   test "deliverable 5: a divider dragged 80 px moves the pane edge 80 px, live and committed":
     let r = rec["resize"]
     checkpoint($r)
     let before = r["baseRingLeft"].getInt
-    ck r["liveRingLeft"].getInt - before == 80
-    ck r["doneRingLeft"].getInt - before == 80
+    # Within a pixel: the layout rounds each pane's share as golden-layout
+    # does (floored, the leftover pixels to the first panes —
+    # `window_geometry.addNode`), as the model's own case allows
+    # (`test_plat47_window_gestures`).
+    ck abs(r["liveRingLeft"].getInt - before - 80) <= 1
+    ck abs(r["doneRingLeft"].getInt - before - 80) <= 1
     # A press that is not on a divider resizes nothing.
     ck r["pressBodyRingLeft"].getInt == r["doneRingLeft"].getInt
     # (PLAT-51: the press places the read-only editor's CARET — a bar one
-    # cell wide at most; nothing else changes.)
+    # cell wide at most — and, the pointer now over the editor, Monaco shows
+    # its horizontal scrollbar in the band along the editor's bottom
+    # (`EditorHScrollBandPx`); nothing else changes.)
+    let box = if r["pressBodyChanged"].getInt == 0: @[0, 0, 0, 0]
+              else: arr(r["pressBodyChangedBox"])
+    let editorBottom = arr(rec["focusRing"]["bbox"])[1] +
+                       arr(rec["focusRing"]["bbox"])[3]
     let caretOnly =
       r["pressBodyChanged"].getInt == 0 or
-      (arr(r["pressBodyChangedBox"])[2] <= 12 and
-       arr(r["pressBodyChangedBox"])[3] <= EditorRowPx + 2)
+      (box[2] <= 12 and box[3] <= GpuiEditorRowPx + 2) or
+      (box[0] >= r["doneRingLeft"].getInt and
+       box[1] >= editorBottom - 1 - EditorHScrollBandPx and
+       box[1] + box[3] <= editorBottom and box[3] <= EditorHScrollBandPx)
     ck caretOnly
     # The layout document the window wrote carries the new weight: the Files
     # column's share grew by 80 px of the row's extent (the shared default
@@ -145,15 +203,25 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck saved.kind == JObject
     let files = saved["layout"]["children"][0]
     ck files["children"][0]["pane"].getStr == "fileTree"
+    # The row's extent: the window less its edges (`WindowEdgePx`) and the
+    # two splitters between its three columns (`ChromeGapPx`).
     let frameW = rec["frame"][0].getInt
-    let extent = frameW - 2 * PanePaddingPx - 2 * 8
+    let extent = frameW - 2 * WindowEdgePx - 2 * ChromeGapPx
     let want = 20.0 + 100.0 * 80.0 / float(extent)
     checkpoint("files weight " & $files["weight"].getFloat & " want " & $want)
     ck abs(files["weight"].getFloat - want) < 0.2
 
   test "deliverable 6: each drop kind tints exactly its region, and the ghost follows the pointer":
     let d = rec["drop"]
-    let pane = arr(d["editorBody"])
+    # PLAT-51: the drag LIFTS the Variables pane out first and the window is
+    # laid out again without it — the lifted frame drew something else
+    # (State's column given to the Scratchpad) and nothing indicated. The
+    # editor is untouched by the lift: the box its outline closed before the
+    # drag is the box the lifted arrangement gives it.
+    ck d["liftedChangedPixels"].getInt > 0
+    ck "state" notin d["liftedPanes"].getElems.mapIt(it.getStr)
+    let pane = arr(d["editorBox"])
+    ck pane == arr(d["liftedEditorRect"])
     # The tint is the pane's CONTENT, below its tab strip (PLAT-49 part B:
     # GoldenLayout highlights half of a stack's content area).
     let body = @[pane[0], pane[1] + TabStripPx, pane[2], pane[3] - TabStripPx]
@@ -163,55 +231,70 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     checkpoint("split " & $split & " body " & $body)
     ck split == @[body[0] + body[2] - half, body[1], half, body[3]]
     ck d["drop-split"]["changedPixels"].getInt == half * body[3]
-    # WHOLE PANE over the editor's centre: all of it.
-    ck arr(d["drop-whole"]["tintBBox"]) == body
-    # Every pixel of it changed, bar the ghost label's own box (the record
-    # leaves the 160x32 box beside the pointer out of the tint's count).
-    ck d["drop-whole"]["changedPixels"].getInt >= body[2] * body[3] - GhostBoxPx
-    ck d["drop-whole"]["changedPixels"].getInt <= body[2] * body[3]
+    # THE SMALLER MIDDLE over the editor's centre (PLAT-51): a join after
+    # its one tab, highlighted on its STRIP — `TabStripPx` tall, from its
+    # left edge, nothing below it. (GoldenLayout's placeholder caret at the
+    # slot runs on past the strip's right end, into the splitter: no wider
+    # than the splitter.)
+    let whole = arr(d["drop-whole"]["tintBBox"])
+    checkpoint("whole " & $whole)
+    ck whole[0] == pane[0] and whole[1] == pane[1] and whole[3] == TabStripPx and
+       whole[2] >= pane[2] and whole[2] <= pane[2] + ChromeGapPx
+    ck d["drop-whole"]["changedPixels"].getInt <= whole[2] * whole[3]
     # TAB SLOT over the Call Trace stack's second tab: its strip, one row of
     # tabs tall, at the top of that stack — nothing below the strip.
     let slot = arr(d["drop-slot"]["tintBBox"])
     let slotPtr = arr(d["pointers"]["drop-slot"])
-    checkpoint("slot " & $slot)
+    let ct = arr(d["liftedRects"]["calltrace"]["strip"])
+    checkpoint("slot " & $slot & " strip " & $ct)
     ck slot[1] <= slotPtr[1] and slot[1] + slot[3] > slotPtr[1]
-    ck slot[3] <= 32
+    ck slot[1] == ct[1] and slot[3] == TabStripPx
+    # (The tabs moved apart for GoldenLayout's placeholder run on past the
+    # stack's right end, into the window's edge: no further than it.)
+    ck slot[0] == ct[0] and slot[0] + slot[2] <= ct[0] + ct[2] + WindowEdgePx
     ck slot[0] <= slotPtr[0] and slot[0] + slot[2] >= slotPtr[0]
     ck d["drop-slot"]["changedPixels"].getInt <= slot[2] * slot[3]
-    # DOCK EDGE in the left margin: a band along the layout's left edge, the
-    # layout's whole height.
+    # THE LEFT MARGIN: GoldenLayout's ground band along the layout's left
+    # edge (`GlSideAreaPx` wide), the layout's whole height — a split of the
+    # whole layout; no drop docks since PLAT-51.
     let dock = arr(d["drop-dock"]["tintBBox"])
     checkpoint("dock " & $dock)
-    ck dock[0] == PanePaddingPx and dock[2] < 100
-    # The layout's whole height: the window less its padding and, since
-    # PLAT-48, the top bar's band above the layout and, since PLAT-49, the
-    # footer (the status bar holding the bottom labels) below it.
-    ck dock[3] >= rec["frame"][1].getInt - 2 * PanePaddingPx - GpuiTopBandPx -
-                  FooterPx
+    ck dock[0] == WindowEdgePx and dock[2] == int(GlSideAreaPx)
+    # The layout's whole height: the window less the top bar's band above
+    # the layout (PLAT-48) and the footer below it (PLAT-49); the layout
+    # runs into both with no padding since the redesign.
+    ck dock[3] == rec["frame"][1].getInt - GpuiTopBandPx - FooterPx
     # The ghost label was drawn beside the pointer in every one.
     for k in ["drop-split", "drop-whole", "drop-slot", "drop-dock"]:
       ck d[k]["ghostChangedPixels"].getInt > 100
 
   test "deliverable 6: Esc cancels — every pixel back — and a release then does nothing":
     let d = rec["drop"]
+    # The press on the Variables tab focuses that pane (its outline and
+    # strip) before any motion: the frame the cancel must restore.
+    ck d["pressFocusChangedPixels"].getInt > 0
     ck d["cancelChangedPixels"].getInt == 0
     ck d["releasedChangedPixels"].getInt == 0
 
   test "deliverable 6: a release performs the indicated split":
     let d = rec["drop"]
-    let body = arr(d["editorBody"])
+    let box = arr(d["editorBox"])
     let ring = arr(d["commitRing"])
-    checkpoint("commit ring " & $ring & " body " & $body)
-    # The editor keeps its left edge and gives up its right half to the
+    checkpoint("commit ring " & $ring & " editor " & $box)
+    # The dropped pane is focused after the drop, so the outline is ITS box:
+    # the editor's right half, to the editor's old right edge…
+    ck ring[0] > box[0] and ring[0] + ring[2] == box[0] + box[2]
+    ck abs(ring[2] - box[2] div 2) <= 8
+    # …and the editor keeps its left edge and gives up that half to the
     # dragged pane.
-    ck ring[0] == body[0] - 1
-    ck abs((ring[2] - 2) - body[2] div 2) <= 8
-    var stateRight = false
+    var editorKept, stateRight = false
     for n in d["commitArrangement"]:
+      let r = arr(n["rect"])
+      if n["panes"].getElems.len == 1 and n["panes"][0].getStr == "editor":
+        editorKept = r[0] == box[0] and r[0] + r[2] < ring[0]
       if n["panes"].getElems.len == 1 and n["panes"][0].getStr == "state":
-        let r = arr(n["rect"])
-        stateRight = r[0] > ring[0] + ring[2] - 1 and
-                     r[0] < body[0] + body[2]
+        stateRight = r == ring
+    ck editorKept
     ck stateRight
 
   test "deliverable 4: the VCS pane shows the branch and the three changed files":
@@ -245,41 +328,53 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck bb[0] >= pane[0] and bb[1] >= pane[1] and
        bb[0] + bb[2] <= pane[0] + pane[2] and bb[1] + bb[3] <= pane[1] + pane[3]
 
-  test "a pane docked by a drop stays on screen: a strip label, revealed by a hover, hidden by Esc":
+  test "a pane docked by its pin stays on screen: a footer label, revealed by a hover, hidden by Esc":
     let d = rec["dock"]
     checkpoint($d["strips"])
-    # Docked: out of the tree, one label in the left strip, and the saved
-    # document says so. (Since PLAT-48 the shared default's footer panels
-    # are a bottom strip beside it, and the saved document docks them too.)
+    # Docked by the tab's pin icon (`.lm_pin_tab`: GoldenLayout docks
+    # nothing on a drop since PLAT-51, and the pin docks to the footer): out
+    # of the tree, the LAST label in the footer's strip after the shared
+    # default's, and the saved document says so.
     ck "state" notin d["treePanes"].getElems.mapIt(it.getStr)
     var edges: seq[string] = @[]
-    var leftSlots: seq[string] = @[]
+    var bottomSlots: seq[string] = @[]
     for st in d["strips"]:
       edges.add st["edge"].getStr
-      if st["edge"].getStr == "left":
-        for sl in st["slots"]: leftSlots.add sl["pane"].getStr
+      if st["edge"].getStr == "bottom":
+        for sl in st["slots"]: bottomSlots.add sl["pane"].getStr
     edges.sort()
-    ck edges == @["bottom", "left"]
-    ck leftSlots == @["state"]
+    ck edges == @["bottom"]
+    ck bottomSlots.len >= 2 and bottomSlots[^1] == "state"
+    ck d["edge"].getStr == "bottom"
     var savedEdge = ""
     for e in d["savedLayout"]["docked"]:
       if e["pane"].getStr == "state": savedEdge = e["edge"].getStr
-    ck savedEdge == "left"
-    # The strip is drawn, with its label's ink on it, reading down.
+    ck savedEdge == "bottom"
+    # The label is drawn, its ink on its chip.
     ck d["stripInk"].getInt > 50
     ck d["slotText"].getStr.splitWhitespace().join("").contains("tate")
     # The pointer resting on the label (PLAT-49 part B, the desktop's
-    # preview; a click docks it open) draws the pane over the tree, against the left
-    # edge: the pixels that changed are the revealed region (and the label's
-    # own weight), and the pane's own text is in it.
+    # preview; a click docks it open) draws the pane over the tree, against
+    # the bottom edge: the pixels that changed are the revealed region and
+    # the label itself (lit while its pane is previewed), and the pane's own
+    # text is in it.
     ck d["revealed"]["pane"].getStr == "state"
     let rr = arr(d["revealed"]["rect"])
     let bb = arr(d["revealChangedBBox"])
-    checkpoint("reveal " & $rr & " changed " & $bb)
-    ck bb[0] + bb[2] <= rr[0] + rr[2] + 1 and bb[1] >= rr[1] and
-       bb[1] + bb[3] <= rr[1] + rr[3]
+    var label: seq[int]
+    for st in d["strips"]:
+      for sl in st["slots"]:
+        if sl["pane"].getStr == "state": label = arr(sl["rect"])
+    checkpoint("reveal " & $rr & " label " & $label & " changed " & $bb)
+    ck label.len == 4
+    ck rr[1] + rr[3] == rec["frame"][1].getInt - FooterPx
+    let reach = @[min(rr[0], label[0]), min(rr[1], label[1]),
+                  max(rr[0] + rr[2], label[0] + label[2]),
+                  max(rr[1] + rr[3], label[1] + label[3])]
+    ck bb[0] >= reach[0] and bb[1] >= reach[1] and
+       bb[0] + bb[2] <= reach[2] + 1 and bb[1] + bb[3] <= reach[3]
     # PLAT-50: the revealed pane and the editor under it are both
-    # ui/surface/base/panel now (the window's colours are the desktop's
+    # ui/surface/base/panel (the window's colours are the desktop's
     # tokens), so the pixels that change are the TEXT, not a whole new
     # ground: what proves the pane is drawn over the region is that the
     # change spans it — most of its width and of its height — not a

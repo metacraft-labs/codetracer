@@ -4,9 +4,10 @@
 ## its element tree read back from `--report-window-plan` and its geometry
 ## from `CODETRACER_GPUI_GEOMETRY_OUT`.
 ##
-##   * 9, THE FOCUS HIGHLIGHT: ONE strip on the focus colour, the focused
-##     box's outline in it; a press on another pane moves both; the omnibox's
-##     `Focus highlight: off` removes them and is REMEMBERED (`gpui-preferences`
+##   * 9, THE FOCUS HIGHLIGHT: none before a pane is pressed, then ONE strip
+##     on the focus colour, the focused box's outline in it; a press on
+##     another pane moves both; the omnibox's `Focus highlight: off` removes
+##     them and is REMEMBERED (`gpui-preferences`
 ##     beside the remembered layout, read at the next start);
 ##     `--focus-highlight=on|off`;
 ##   * 11, LIVE REFLOW: a divider held 80 px along has ALREADY moved its panes
@@ -37,7 +38,10 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 32
+  ExpectedAssertions = 33
+    ## 32 -> 33 (2026-10-17): the focus case asserts that NOTHING is outlined
+    ## before the first press (the desktop's behaviour since the redesign),
+    ## then that a press outlines the pressed pane — one check more.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   DesktopAnswers = "src/tests/visual/answers/plat51-desktop.electron.json"
@@ -140,32 +144,39 @@ suite "PLAT-51 part B GPUI: the focus highlight":
   test "one strip on the focus colour; a press moves it; the command turns it off, remembered":
     var g: JsonNode
     let plan = windowPlan("wait:1", g)
-    let first = plan.focusedStrips()
+    # As on the desktop, nothing is outlined until a pane has been pressed
+    # (the editor holds the keys before that, unmarked).
+    ck plan.focusedStrips().len == 0
+    proc pressIn(pane: string): string =
+      let (x, y) = centre(g.tabsNode(pane)["body"])
+      "press:" & $x & ":" & $y & ",release:" & $x & ":" & $y
+    # A press in the editor's body: its strip takes the focus colour.
+    let first = windowPlan(pressIn("editor")).focusedStrips()
     ck first.len == 1
     if first.len == 1:
       ck first[0].style("bg") == chromeOf(crFocusOutline)
-    # A press in the call trace's body: its strip takes the focus colour.
-    let ct = g.tabsNode("calltrace")
-    let (x, y) = centre(ct["body"])
-    let pressed = windowPlan("press:" & $x & ":" & $y & ",release:" & $x &
-                             ":" & $y)
+    # Then a press in the call trace's body: the focus moves to its strip.
+    let pressed = windowPlan(pressIn("editor") & "," & pressIn("calltrace"))
     let now = pressed.focusedStrips()
     ck now.len == 1
     if now.len == 1 and first.len == 1:
       ck now[0].attr("data-ct-tabs") != first[0].attr("data-ct-tabs")
       ck "Call Trace" in now[0].attr("data-ct-tabs")
-    # The omnibox's command: off, and remembered for the next start.
+    # The omnibox's command: off — a press then outlines nothing — and
+    # remembered for the next start.
     let state = createTempDir("plat51b-gpui-focus-", "")
     defer: removeDir(state)
-    let off = windowPlan("key:p:control,type::focus highlight off,key:enter",
-                         state)
+    let off = windowPlan("key:p:control,type::focus highlight off,key:enter," &
+                         pressIn("calltrace"), state)
     ck off.focusedStrips().len == 0
     ck readFile(state / "gpui-preferences").contains("focus-highlight=off")
-    let restarted = windowPlan("wait:1", state)
+    let restarted = windowPlan(pressIn("calltrace"), state)
     ck restarted.focusedStrips().len == 0
     # The command line, over the remembered choice, for that run.
-    ck windowPlan("wait:1", state, @["--focus-highlight=on"]).focusedStrips().len == 1
-    ck windowPlan("wait:1", "", @["--focus-highlight=off"]).focusedStrips().len == 0
+    ck windowPlan(pressIn("calltrace"), state,
+                  @["--focus-highlight=on"]).focusedStrips().len == 1
+    ck windowPlan(pressIn("calltrace"), "",
+                  @["--focus-highlight=off"]).focusedStrips().len == 0
 
 suite "PLAT-51 part B GPUI: live reflow while a divider is dragged":
 

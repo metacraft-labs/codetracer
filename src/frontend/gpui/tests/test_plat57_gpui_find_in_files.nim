@@ -30,6 +30,8 @@ import std/[algorithm, json, os, osproc, sequtils, streams, strtabs, strutils,
             tempfiles, unittest]
 
 import ../../tui/tests/fixtures/fixture_provider
+from viewmodels/product_mode import editorTabLabel
+  # the editor tab's title for a file (its folder and name, as the desktop's)
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -112,14 +114,17 @@ proc textOf(n: JsonNode): string =
   for c in n{"children"}.getElems: result.add textOf(c)
 
 proc tickOf(plan: JsonNode): string =
-  ## The footer's location's `tick N` (`main.py:1  tick 1`).
-  let t = textOf(plan)
-  let at = t.find("  tick ")
-  if at < 0: return ""
-  var i = at + 7
-  while i < t.len and t[i] in {'0' .. '9'}:
-    inc i
-  t[at + 2 ..< i]
+  ## The footer's location's ticks — the desktop's `.location-path`,
+  ## `<path>:<line>#<ticks>` (`data-ct-footer-position`); "" when the footer
+  ## shows no location or it carries no ticks.
+  let loc = plan.nodesWith("data-ct-footer-position")
+  if loc.len != 1: return ""
+  let t = loc[0].attr("data-ct-footer-position")
+  let at = t.rfind('#')
+  if at < 0 or at == t.high: return ""
+  for c in t[at + 1 .. ^1]:
+    if c notin {'0' .. '9'}: return ""
+  t[at + 1 .. ^1]
 
 proc oracle(pattern: string): seq[(string, int)] =
   ## Every line of every file in the recording's `files/` store containing
@@ -215,7 +220,7 @@ suite "PLAT-57: Find in Files in the GPUI window":
     var active: seq[string] = @[]
     for n in plan.nodesWith("data-ct-tab-active"):
       active.add textOf(n)
-    ck expected[last][0].extractFilename in active
+    ck editorTabLabel(expected[last][0], false) in active
     let selected = plan.nodesWith("data-ct-selected")
     ck selected.len == 1 and selected[0].attr("data-ct-search-row") == $last
 

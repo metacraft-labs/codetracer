@@ -22,6 +22,8 @@
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import gpui/chrome
+import gpui/window_geometry   # `paneInsetOf`
+import gpui/app/leaves        # the call trace's row geometry
 import ../../tui/tests/fixtures/fixture_provider
 
 var CHECKS = 0
@@ -38,7 +40,6 @@ const
   NoVerifiedSource = "No verified source"
   W = 1440
   H = 1400
-  RowPx = 26           # `leaves.CallRowPx`
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
@@ -141,12 +142,15 @@ proc calltraceBody(geom: JsonNode): seq[int] =
   @[]
 
 proc pressOn(row: JsonNode; body: seq[int]): string =
-  ## A press and release on `row`'s name (right of its toggle, at its depth's
-  ## indent), as the pointer delivers it.
+  ## A press and release on `row`'s name (right of its 14 px toggle and the
+  ## 8 px gap after it, at its depth's indent), as the pointer delivers it.
+  ## The rows start below the pane's inset and the search field, at the
+  ## desktop's fractional pitch (`leaves.callRowTopPx`).
   let at = parseInt(row.attr("data-call-index"))
   let indent = row{"styles"}{"padding_left"}.getStr("0px")
-  let x = body[0] + ChromePaddingPx + parseInt(indent[0 ..< indent.len - 2]) + 40
-  let y = body[1] + ChromePaddingPx + at * RowPx + RowPx div 2
+  let x = body[0] + parseInt(indent[0 ..< indent.len - 2]) + 14 + 8 + 6
+  let y = body[1] + paneInsetOf("calltrace").top + CallRowsTopPx +
+          callRowTopPx(at) + (callRowTopPx(at + 1) - callRowTopPx(at)) div 2
   "press:" & $x & ":" & $y & ",release:" & $x & ":" & $y
 
 proc checkStopShows(plan: JsonNode; file, other: string; lines: seq[string];

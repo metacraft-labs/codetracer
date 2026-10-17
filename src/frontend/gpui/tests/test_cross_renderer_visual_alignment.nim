@@ -111,6 +111,8 @@ import ../app/leaves
 import ../app/dock_projection
 import ../host/gpui_host
 import ../window_geometry
+import ../layout_memory
+import ../window_top_bar
 import ../../view_vocabulary/editor_surface
 import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/gpui_layout_answers
@@ -351,13 +353,24 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
 
   let viewport = viewportOf(sc.viewport)
   var shell = newGpuiShell(viewport)
+  # THE LAYOUT THE SHIPPED WINDOW OPENS: `main.nim`'s `runOpen`, with no
+  # `--layout` and nothing remembered (the lane's state root is empty), opens
+  # `layout_memory.sharedDefaultValue()` — the ONE shared default every
+  # product opens with. Until 2026-10-17 this arm passed no layout, so
+  # `openSession` fell back to `defaultReplayLayout()` (debug controls, editor,
+  # call trace, state): a GPUI arrangement no window has drawn since PLAT-45,
+  # compared against the Electron one as if it were this front-end's.
   let slot = shell.app.openSession(session.backend.toBackendService(),
-                                   title = trace, adopt = session.sdk)
+                                   title = trace,
+                                   layout = sharedDefaultValue(),
+                                   adopt = session.sdk)
   let windowId = WindowId(0)
   let opened = shell.openWindowForSession(windowId, slot.id)
   doAssert opened.kind == wsApplied,
     "the GPUI shell refused a window for scenario " & sc.id
-  discard slot.activatePane(paneDebugControls)
+  # As `runOpen` does in Debug mode: the shared default has no debug-controls
+  # pane (the toolbar is chrome), so the call trace is brought to the front.
+  discard slot.activatePane(paneCalltrace)
 
   # The rows the window's editor pane shows (`window_geometry.editorRowsOf`),
   # as the shipped window asks for them — and, `PLAT35-F3`, how WIDE that
@@ -368,13 +381,21 @@ proc runGpuiScenario(sc: Scenario): GpuiRun =
   let editorGeom = block:
     let idx = shell.windows.indexOf(windowId)
     let proj = shell.projectionFor(windowId)
+    # `GpuiTopBandPx`: the shipped window's top bar takes its band above the
+    # arrangement, and `runOpen` passes it to every geometry it derives
+    # (`editorRowsFor`, `editorBodyWidthFor`, the source service's row
+    # counts); a geometry without it is a window 40 px taller than any drawn.
     windowGeometryOf(shell.windows.windows[idx].layout,
                      (if proj.status == dpsRefused: nil else: proj.state),
-                     viewport.width, viewport.height)
+                     viewport.width, viewport.height, GpuiTopBandPx)
   let editorRows = editorRowsOf(editorGeom)
   let editorWidthPx = editorBodyWidthOf(editorGeom)
   let sourceService = newGpuiSourceService(session, trace, editorRows)
   defer: sourceService.close()
+  # As `runOpen` sets them: the rows wholly in view and the whole rows, which
+  # decide where a stop is revealed and Monaco's end-of-file clamp.
+  sourceService.visibleRows = editorVisibleRowsOf(editorGeom)
+  sourceService.fullRows = editorFullRowsOf(editorGeom)
   sourceService.serveWindow()
 
   var points: seq[EditorPoint] = @[]
@@ -789,8 +810,9 @@ suite "PLAT-35: THE CORPUS IS PINNED — a shifted corpus reddens":
       # fails here rather than agreeing with itself.
       ck electronRuns[sc.id].stoppedLine == elecLine
 
-      # **THE PANE CENSUS, PER ARM.** `PLAT35-VG5`'s four-against-eight is a
-      # claim about exactly these two strings, and the residual for this
+      # **THE PANE CENSUS, PER ARM.** `PLAT35-VG5`'s six-against-six (four
+      # against eight until both arms opened the shipped default, 2026-10-17)
+      # is a claim about exactly these two strings, and the residual for this
       # question only asks that three named panes are on both sides — which a
       # front-end that lost four of its other panes would still satisfy.
       ck gpuiPanes == p["gpuiPanes"].getStr

@@ -12,6 +12,6 @@
   "L3": "not first.awaitsMove",
   "P1": "row.pointer == eptExecution",
   "S1": "\"ct/updated-calltrace\" in seen",
-  "V1": "\"inlineValues = values)\" in src",
+  "V1": "\"lineValues = flowValues)\" in src",
   "W1": "w == (\"nowrap\", \"hidden\")"
 }

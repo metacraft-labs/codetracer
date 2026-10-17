@@ -95,7 +95,13 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 680
+const ExpectedAssertions = 708
+  ## 2026-10-17 (desktop-parity redesign): 680 -> 708, by the second and
+  ## third routes above. THREE more non-test files under `src/frontend/gpui/`
+  ## (`design_fonts.nim`, `design_font_metrics.nim`, `devicon_marks.nim`),
+  ## each `1 + 8 = 9` in the registry scan (+27), and `addFontFile` joined
+  ## `LaunchedWindowNames`, whose exports the derived-sets case checks one
+  ## by one (+1). `window.nim` exports 32 procs: 32 - 6 - 18 = 8 subjects.
   ## PLAT-69: 675 -> 680, RE-DERIVED against `isonim-gpui` `b68f115`, whose
   ## `window.nim` exports 31 procs (15 at `47ea664`): GWIN added the
   ## operations on the window `gpui_launch` opens, and this front-end now

@@ -7,7 +7,7 @@
 ##
 ## Nothing here opens a window. The ViewModel is constructed in process and
 ## the window it holds is SEEDED through the store's own producer entry point
-## (`applyEventLogRows`), which is what makes the central claim of this file
+## (`applyEventLogResponse`, a declared producer), which is what makes the central claim of this file
 ## assertable at all — see "the trap" below. The frame-level reading is the
 ## capture lane's (`ci/test/plat35-gpui-capture.sh`) and the tier-4 ledger's.
 ##
@@ -89,6 +89,7 @@ import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
 import codetracer_embed
 import gpui/app/leaves
+import gpui/chrome
 import view_vocabulary/pane_views
 # `ViewIdAttribute` reaches `leaves.nim` through a `from … import`, which does
 # NOT re-export, and the design tokens are not re-exported either — so both are
@@ -104,15 +105,17 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 157
+  ExpectedAssertions = 159
     ## Written from a run, not estimated: **18** cases — four in suite 1, six
     ## in suite 2, five in suite 3, two in suite 4 and this count case — over
     ## one seeded window. `std/unittest` prints one `[OK]` per test BLOCK and
     ## never one per `check`, so a file of empty cases scores a full pass; this
     ## count is what makes a case that stopped running fail instead (§7).
     ##
-    ## Most of the 157 are the per-row and per-cell loops: six body rows times
-    ## four cells, read for weight and for colour, is where the bulk sits.
+    ## Most of the 159 are the per-row and per-cell loops: six body rows times
+    ## four cells read for weight, and every row's height and ground, is where
+    ## the bulk sits. (157 before the 2026-10-17 redesign, when the cells were
+    ## also read for colour and the header carried a rule.)
   WindowStart = 240
   WindowRows = 6
   WholeLog = 1000
@@ -129,22 +132,23 @@ const
 proc seededVm(start, shown, total: int): EventLogVM =
   ## An `EventLogVM` holding ONE WINDOW of a larger log.
   ##
-  ## Seeded through `ReplayDataStore.applyEventLogRows` — the store's own
-  ## documented producer entry point, *"the ONE place every producer ends"* —
-  ## rather than by writing the ViewModel's signals, so the window this test
-  ## renders is one the real `ct/update-table` path can produce. Its
-  ## `recordsTotal` argument is taken VERBATIM when supplied (the store's own
-  ## comment: *"A producer that DOES know … passes it and it is taken
-  ## verbatim"*), which is what lets the total differ from the rows in hand.
+  ## Seeded through `ReplayDataStore.applyEventLogResponse` — a DECLARED
+  ## producer (`test_plat40_producers.nim`'s census: no procedure under
+  ## `tests/` may write the event log's rows through the sink
+  ## `applyEventLogRows` itself) — with a `ct/event-load` answer, so the
+  ## window this test renders is one the real wire path produces. The
+  ## answer's `total` is the engine's count of the WHOLE log and is taken
+  ## verbatim (`recordsTotal`), which is what lets the total differ from the
+  ## rows in hand.
   let mock = newMockBackendService(autoRespond = true)
   let store = createReplayDataStore(mock.toBackendService())
   result = createEventLogVM(store)
-  var rows: seq[EventLogRow] = @[]
+  var events = newJArray()
   for i in 0 ..< shown:
-    rows.add EventLogRow(eventIndex: start + i, kind: "stdout",
-                         value: "line " & $(start + i),
-                         rrTicks: uint64((start + i) * 10))
-  store.applyEventLogRows(rows, start, total, total, elwsTable)
+    events.add %*{"eventIndex": start + i, "kind": 0, "stdout": true,
+                  "content": "line " & $(start + i),
+                  "directLocationRRTicks": (start + i) * 10}
+  store.applyEventLogResponse(%*{"total": total, "events": events}, start)
   drainPlatformCallbacks()
 
 type Drawn = object
@@ -199,6 +203,21 @@ proc textOf(n: JsonNode): string =
   result = n{"text"}.getStr
   for c in n.kids: result.add c.textOf
 
+proc wordsOf(n: JsonNode): string =
+  ## A node's TEXT RUNS joined by single spaces, in plan order. The desktop's
+  ## pager is three runs — `Rows`, the first row in its own input box, and
+  ## `to M of T` — laid out with a gap between them rather than spaces in the
+  ## strings, so the reading a user gets is the runs separated.
+  if n.isNil or n.kind != JObject: return ""
+  var parts: seq[string] = @[]
+  proc walk(m: JsonNode) =
+    if m.isNil or m.kind != JObject: return
+    let t = m{"text"}.getStr.strip
+    if t.len > 0: parts.add t
+    for c in m.kids: walk(c)
+  walk(n)
+  parts.join(" ")
+
 proc firstWith(plan: JsonNode; attribute: string): JsonNode =
   let all = plan.nodesWith(attribute)
   if all.len == 0: nil else: all[0]
@@ -252,8 +271,18 @@ suite "PLAT35-F5: the DRAWN footer reads the ViewModel's total":
     ck d.plan.nodesWith(EventLogFooterAttribute).len == 1
 
   test "the footer's text names the window and the whole log":
+    # The desktop's pager (`.data-tables-footer`): `Rows`, the first row in
+    # an input box of its own, then `to M of T`. Read as its runs, it is the
+    # pure function's string to the byte — and the first row really is the
+    # BOX's text, so a pager that dropped the offset from the box fails.
     let f = d.plan.firstWith(EventLogFooterAttribute)
-    ck f.textOf == "Rows 241 to 246 of 1000"
+    ck f.wordsOf == "Rows 241 to 246 of 1000"
+    ck f.wordsOf == eventLogFooterText(WindowStart, WindowRows, WholeLog)
+    var boxed: seq[string] = @[]
+    for c in f.kids:
+      if c{"kind"}.getStr != "TextNode" and c.textOf.len > 0:
+        boxed.add c.textOf.strip
+    ck boxed == @["241"]
 
   test "the published total is the ViewModel's, NOT the rows in hand":
     # The arm-C invariant, asserted on the attribute rather than on the text,
@@ -300,49 +329,49 @@ suite "PLAT35-F12: the header row reads as a header":
     ck not h.has("data-row-index")
     ck h.kids.len > 0
 
-  test "the header carries the rule, in the PUBLISHED token":
+  test "the header is the desktop's column-header row, in the code face":
+    # SINCE 2026-10-17 THE PANE IS DRAWN AS THE DESKTOP DRAWS IT
+    # (`.eventLog-column-header`, measured): a 25 px row in the code face's
+    # bold, with NO rule under it — the desktop draws none, and the rule this
+    # case used to require was this front-end's own addition. The header is
+    # still a row apart: its own height (a data row is on the 27.5 px pitch),
+    # inside the table that sets the mono face.
     let h = d.plan.firstWith(EventLogHeaderAttribute)
-    ck h.style("border_bottom_width") == "1px"
-    # **AGAINST THE GENERATED TABLE, NOT AGAINST THE RENDERER'S OWN
-    # CONSTANT.** The rendered value is compared to `DesignTokenHex` directly,
-    # so a rule drawn in ANY other value — including a plausible wrong token,
-    # which is what arm `N4` now substitutes — fails here.
-    ck h.style("border_color") == DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
-    # And the constant agrees with what was drawn, so the two cannot drift.
-    ck h.style("border_color") == EventLogRuleColour
-    #
-    # **WHAT THIS CASE CANNOT DO, STATED RATHER THAN IMPLIED.** It cannot
-    # catch a HEX LITERAL that is numerically equal to the token. That was
-    # MEASURED, not reasoned: arm `N4` originally replaced
-    # `DesignTokenHex[dtColorsUiBorderPrimary][dmDark]` with the literal
-    # `"#565656"` — its own correct dark value — and the arm **SURVIVED**,
-    # because every runtime comparison available here is between two strings
-    # that are equal. A literal is a SOURCE property and no assertion over the
-    # render plan can see it; claiming otherwise would be a check that reads
-    # as teeth and has none. The arm was re-aimed at a wrong token, which this
-    # case does catch, and the literal question is left to review.
+    ck h.style("h") == $EventHeaderPx & "px"
+    ck h.style("border_bottom_width") == ""
+    var tableNode: JsonNode = nil
+    for t in d.plan.nodesWith(ViewIdAttribute):
+      if t.attr(ViewIdAttribute) == "eventLog": tableNode = t
+    ck tableNode.style("font_family") == MonoFontFamily
+    ck tableNode.nodesWith(EventLogHeaderAttribute).len == 1
+    for i, row in d.plan.nodesWith("data-row-index"):
+      ck row.style("h") == $(eventRowTopPx(i + 1) - eventRowTopPx(i)) & "px"
+      ck row.style("h") != h.style("h")
 
   test "no DATA row carries the rule — it is the header's, not every row's":
     for row in d.plan.nodesWith("data-row-index"):
       ck row.style("border_bottom_width") == ""
 
-  test "the header's cells differ from a data row's in COLOUR and in WEIGHT":
+  test "the header differs from a data row in WEIGHT, as the desktop's does":
     # The finding's own words: *"its header row is the same weight and colour
-    # as a data row"*. Both halves are asserted, because `layOutRow` gave the
-    # two rows one style object and either half alone could be restored
-    # without the other.
+    # as a data row"*. The desktop (the reference) separates its header by
+    # WEIGHT — the code face's bold — and draws both in the body text colour,
+    # so the weight is the half that must hold, and the colour is pinned to
+    # the token the desktop uses for both rather than left to drift.
     let h = d.plan.firstWith(EventLogHeaderAttribute)
     ck h.kids.len > 0
+    ck h.style("font_weight") == "600"
+    ck h.style("text_color") == DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
     for cell in h.kids:
-      ck cell.style("font_weight") == "bold"
-      ck cell.style("text_color") == EventLogHeaderColour
+      # The cells inherit the row's weight rather than undoing it.
+      ck cell.style("font_weight") in ["", "600"]
     let rows = d.plan.nodesWith("data-row-index")
     ck rows.len == WindowRows
     for row in rows:
       ck row.kids.len > 0
+      ck row.style("font_weight") notin ["600", "bold"]
       for cell in row.kids:
-        ck cell.style("font_weight") != "bold"
-        ck cell.style("text_color") != EventLogHeaderColour
+        ck cell.style("font_weight") notin ["600", "bold"]
 
   test "the header's style object is no longer a data row's":
     # Stated as the finding stated it — one style object shared by every row —
@@ -357,7 +386,7 @@ suite "PLAT35-F12: what is NOT drawn, and why it is residue":
     let vm = seededVm(WindowStart, WindowRows, WholeLog)
     let d = drawEventLog(vm)
 
-  test "NO zebra: no row carries a background at all":
+  test "NO zebra: only the selected row carries a background":
     # **Not specified. Not drawn.** `Event-Log-Pane.md` at `90ff8fce` says
     # nothing about alternating backgrounds (zero hits for zebra / alternat /
     # stripe), the terminal's event log draws none, and the design system
@@ -366,8 +395,21 @@ suite "PLAT35-F12: what is NOT drawn, and why it is residue":
     # value, not pending. Drawing one here would be this renderer inventing a
     # visual language, so the finding's third sub-claim stays OPEN and this
     # case holds the invention shut.
-    for row in d.plan.nodesWith("data-row-index"):
-      ck row.style("bg") == ""
+    #
+    # The ONE ground a row may carry is the selection: the desktop's
+    # DataTables starts with its first row `.event-selected`, on the editor's
+    # selection token. Exactly one row, the first, and no other.
+    var grounded = 0
+    for i, row in d.plan.nodesWith("data-row-index"):
+      if i == 0:
+        ck row.attr("data-ct-event-current") == "true"
+        ck row.style("bg") ==
+           DesignTokenHex[dtColorsEditorSurfaceSelect][dmDark]
+      else:
+        ck not row.has("data-ct-event-current")
+        ck row.style("bg") == ""
+      if row.style("bg").len > 0: inc grounded
+    ck grounded == 1
 
   test "NO column dividers: no cell carries a rule of its own":
     # **Not specified. Not drawn.** The state pane's single column rule is

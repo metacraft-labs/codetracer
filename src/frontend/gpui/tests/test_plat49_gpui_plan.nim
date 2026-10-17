@@ -15,19 +15,18 @@
 ##      ghost); a press moved past it is a drag.
 ##   3. NO HEADINGS — no leaf in the window carries a pane-title heading;
 ##      every pane box, a lone pane's included, has a tab strip naming it.
-##   4. TAB STRIPS — every strip on its own ground (`crTabStripBackground`,
-##      ui/surface/base/card), the selected tab on a background
-##      (`crTabActiveBackground`) and in a foreground (`crTabActiveForeground`)
-##      of its own and bold, the others on the strip's ground in the inactive
-##      tier; the pane body under the strip on the pane's surface.
+##   4. TAB STRIPS — the desktop's (2026-10-17): every strip transparent over
+##      the window's ground (the focused one on the focus colour), every tab
+##      a chip on the panel surface; the selected tab on its pane's ground,
+##      taller, its title in the label tier, the others in the inactive tier.
 ##   5. TOOLTIP — the pointer over a control draws the hover popover with the
 ##      ViewModel's `transportTooltip` (label and the desktop binding's key).
-##   3b. A LONE EDITOR'S TAB IS ITS FILE — the open file's name, as the
-##      terminal's and the desktop's editor tab are; in an Edit window, " ●"
+##   3b. A LONE EDITOR'S TAB IS ITS FILE — the open file's folder and name
+##      (`editorTabLabel`), as the desktop's editor tab is; in an Edit window, " ●"
 ##      after it once a key has modified the buffer (keys reach the editor,
 ##      which holds the focus there), and gone again after a save.
-##   6. OMNIBAR — the closed field shows the Omnibar ViewModel's placeholder
-##      on the input surface; open, the query with its caret — a bar while
+##   6. OMNIBAR — the closed field shows its magnifier and the Omnibar
+##      ViewModel's placeholder on the bar's ground; open, the query with its caret — a bar while
 ##      inserting, a block after `Insert` — where the ViewModel's caret is.
 ##
 ## Run (needs `just build-gpui`, the `calc` recording under
@@ -47,6 +46,8 @@ import gpui/window_geometry
 import gpui/window_top_bar
 import gpui/app/edit_arm   # `GpuiDelivery`
 from gpui/app/leaves import EditorGround
+import gpui/app/pane_names   # `desktopTabTitle`
+import styles/generated/design_tokens
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -54,9 +55,14 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 184
+  ExpectedAssertions = 212
     ## PLAT-51: 186 -> 183, measured — the View menu lost its Timeline entry
     ## (the per-entry sweep), and the omnibox's ground became the editor's.
+    ## 184 -> 212 (2026-10-17, the desktop-parity redesign), measured: the
+    ## no-heading sweep visits every `data-ct-text-role` node, and the editor
+    ## now shows 45 rows of 22 px (a number and a code cell each) plus its
+    ## inline value chips — 95 nodes at 1920x1080; the Edit window's label
+    ## case asserts the root file's label once more.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
@@ -218,8 +224,15 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
       let labels = s.attr("data-ct-tabs").split(',')
       if labels.len == 1: inc lone
       ck s{"children"}.len == labels.len
+      # THE DESKTOP'S TAB TITLES: a built-in pane's tab says its name split
+      # at the capitals and upper-cased (`desktopTabTitle`: CALLTRACE,
+      # STATE …); the editor's names its file, as the geometry's label does.
       for i, t in s{"children"}.getElems:
-        ck t.textOf == labels[i]
+        var want = labels[i]
+        for k in PaneKind:
+          if $k == t.attr("data-ct-tab-pane") and k != paneEditor:
+            want = desktopTabTitle(k)
+        ck t.textOf == want
     ck lone >= 1                     # the editor: a lone pane, one tab
     # …and no pane VIEW titles itself either: the State pane's own first row
     # used to repeat "State" under its strip.
@@ -247,56 +260,78 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
           return s{"children"}.len == 1 and
                  s{"children"}[0].textOf == label
       false
-    # Debug: the recording's file.
+    # Debug: the recording's file, as the desktop's editor tab names it —
+    # its folder and its name (`editorTabLabel`).
     var geom: JsonNode
     let plan = windowPlan("", geom)
-    ck geom.editorLabel == "main.py"
-    ck plan.stripLabel("main.py")
+    ck geom.editorLabel == "calc/main.py"
+    ck plan.stripLabel("calc/main.py")
     # Edit: a project's file; a typed key makes it dirty; Ctrl+S saves it.
     let project = createTempDir("plat49-gpui-edit-", "")
     writeFile(project / "main.py", "print(1)\n")
+    # A file at the project's root: the project's folder and its name — the
+    # last two segments of its absolute path, as the desktop's tab reads.
+    let file = editorTabLabel(project / "main.py", false)
+    ck file == project.extractFilename & "/main.py"
     var g2: JsonNode
     let clean = windowPlan("", g2, @["--edit"], project)
-    ck g2.editorLabel == "main.py"
-    ck clean.stripLabel("main.py")
+    ck g2.editorLabel == file
+    ck clean.stripLabel(file)
     var g3: JsonNode
     let typed = windowPlan("key:x", g3, @["--edit"], project)
-    ck g3.editorLabel == "main.py ●"
-    ck typed.stripLabel("main.py ●")
-    ck editorTabLabel("main.py", true) == "main.py ●"
+    ck g3.editorLabel == file & " ●"
+    ck typed.stripLabel(file & " ●")
+    ck editorTabLabel(project / "main.py", true) == file & " ●"
     var g4: JsonNode
     discard windowPlan("key:x,key:s:control", g4, @["--edit"], project)
-    ck g4.editorLabel == "main.py"
+    ck g4.editorLabel == file
     removeDir(project)
 
-  test "strips on their own ground; the selected tab its own background and foreground":
-    let plan = windowPlan("")
-    let stripBg = chromeOf(crTabStripBackground)
-    ck stripBg != chromeOf(crPaneBackground)
-    ck chromeOf(crTabActiveBackground) != stripBg
+  test "strips on the window's ground; the selected tab one shape with its pane":
+    # THE DESKTOP'S TABS (`components/golden_layout.styl`, 2026-10-17): the
+    # strip is transparent over the window's ground, every tab a chip on the
+    # panel surface; the selected tab is on its PANE's ground (the editor's
+    # for the editor), taller — it runs on down into the body — with its
+    # title in the label tier, the others in the inactive tier.
+    ck chromeOf(crPaneBackground) != chromeOf(crWindowBackground)
+    ck chromeOf(crFocusOutline) != chromeOf(crWindowBackground)
     # PLAT-51 (Native-Front-End-Parity.md §2): the FOCUSED pane's strip is
-    # on the focus colour, its selected tab too (foreground and weight kept),
-    # its other tabs in `crTabFocusedForeground`; exactly one strip is.
+    # on the focus colour; exactly one strip is once a press has focused a
+    # pane (none at the start: nothing has been pressed yet).
+    var geom: JsonNode
+    discard windowPlan("", geom)
+    var press = ""
+    for n in geom["nodes"]:
+      if n{"kind"}.getStr == "tabs" and n["panes"].to(seq[string]) == @["editor"]:
+        let (x, y) = centre(n["body"])
+        press = "press:" & $x & ":" & $y & ",release:" & $x & ":" & $y
+    let plan = windowPlan(press)
+    proc titleColour(tab: JsonNode): string =
+      tab{"children"}[0]{"children"}[0].style("text_color")
     var focusedStrips = 0
     for s in plan.nodesWith("data-ct-tabs"):
       let focused = s.attr("data-ct-strip-focused") == "true"
       if focused: inc focusedStrips
-      ck s.style("bg") == (if focused: chromeOf(crFocusOutline) else: stripBg)
+      ck s.style("bg") == (if focused: chromeOf(crFocusOutline) else: "")
       var active = 0
       for t in s{"children"}.getElems:
         if t.attr("data-ct-tab-active") == "true":
           inc active
-          # PLAT-68: on the focused strip the selected tab is off the focus
-          # colour, on the window's ground — told apart from the others.
+          # PLAT-68: on the focused strip the selected tab is lifted off the
+          # focus colour onto the window's ground — told apart from the rest.
           ck t.style("bg") == (if focused: chromeOf(crTabStripBackground)
-                               else: chromeOf(crTabActiveBackground))
-          ck t.style("text_color") == chromeOf(crTabActiveForeground)
-          ck t.style("font_weight") == "bold"
+                               elif t.attr("data-ct-tab-pane") == "editor":
+                                 EditorGround
+                               else: chromeOf(crPaneBackground))
+          ck t.titleColour == DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark]
+          ck t.px("h") == TabStripPx - TabTopPx
         else:
-          ck t.style("bg") == ""
-          ck t.style("text_color") ==
-             chromeOf(if focused: crTabFocusedForeground
-                      else: crTabInactiveForeground)
+          # A tab at the back: on the panel surface — on the focused strip,
+          # on the strip's own (focus) ground, its title in the focused tier.
+          ck t.style("bg") == (if focused: "" else: chromeOf(crPaneBackground))
+          ck t.titleColour == chromeOf(if focused: crTabFocusedForeground
+                                       else: crTabInactiveForeground) and
+             t.px("h") == TabHeightPx
       ck active == 1
     ck focusedStrips == 1
 
@@ -350,18 +385,21 @@ suite "PLAT-49: the GPUI window's chrome, as drawn":
     let closed = windowPlan("")
     let field = closed.nodesWith("data-ct-omnibar")
     ck field.len == 1
-    ck field[0].textOf == "⌕ " & OmnibarPlaceholder
-    # PLAT-51: the EDITOR's ground (Commands-And-Omnibox.md, "Omnibox
-    # colours on every front-end"), superseding PLAT-50's input surface.
-    ck field[0].style("bg") == EditorGround
+    # The desktop's field: its magnifier (an icon, not a glyph) and the
+    # placeholder after it.
+    ck field[0].textOf == OmnibarPlaceholder and
+       field[0]{"children"}[0]{"tag"}.getStr == "img"
+    # 2026-10-17: the bar's own ground, as the desktop's
+    # `.command-input-row` is measured — the window's, not the editor's.
+    ck field[0].style("bg") == chromeOf(crWindowBackground)
     ck field[0].attr("data-ct-omnibar-placeholder") == "true"
     let typed = windowPlan("key:p:control,key:a,key:b,key:left")
-    ck typed.nodesWith("data-ct-omnibar")[0].textOf == "⌕ a▏b"
+    ck typed.nodesWith("data-ct-omnibar")[0].textOf == "a▏b"
     let over = windowPlan("key:p:control,key:a,key:b,key:left,key:insert")
-    ck over.nodesWith("data-ct-omnibar")[0].textOf == "⌕ a█b"
+    ck over.nodesWith("data-ct-omnibar")[0].textOf == "a█b"
     let replaced = windowPlan("key:p:control,key:a,key:b,key:left," &
                               "key:insert,key:c")
-    ck replaced.nodesWith("data-ct-omnibar")[0].textOf == "⌕ ac█"
+    ck replaced.nodesWith("data-ct-omnibar")[0].textOf == "ac█"
 
 suite "PLAT-49 GPUI plan: assertion count":
   test "every assertion ran":

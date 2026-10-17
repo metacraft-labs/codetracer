@@ -34,6 +34,7 @@ import gpui/chrome
 import gpui/window_geometry
 import gpui/window_top_bar
 import gpui/app/dock_projection
+import gpui/app/leaves      # the call trace's row geometry and colours
 import styles/generated/design_tokens
 
 var CHECKS = 0
@@ -54,8 +55,6 @@ const
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1920
   H = 1080
-  RowPx = 26           # `leaves.CallRowPx`
-  IndentPx = 16        # `leaves.CallIndentPx`
   ArgsColour = DesignTokenHex[dtColorsUiTextSuccessPrimary][dmDark]
   ReturnColour = DesignTokenHex[dtColorsUiTextInformationOnColor][dmDark]
 
@@ -122,10 +121,15 @@ proc windowPlan(ops: string): JsonNode =
   windowPlan(ops, g)
 
 proc attr(n: JsonNode; name: string): string =
-  if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
+  ## A missing node (a row the plan does not have) has no attributes: the
+  ## check over it fails rather than the suite crashing on a nil node.
+  if not n.isNil and n{"attributes"}.kind == JObject:
+    n["attributes"]{name}.getStr
+  else: ""
 
 proc has(n: JsonNode; name: string): bool =
-  n{"attributes"}.kind == JObject and n["attributes"].hasKey(name)
+  not n.isNil and n{"attributes"}.kind == JObject and
+    n["attributes"].hasKey(name)
 
 proc style(n: JsonNode; name: string): string = n{"styles"}{name}.getStr
 
@@ -137,6 +141,7 @@ proc nodesWith(plan: JsonNode; attribute: string): seq[JsonNode] =
   walk(plan, result)
 
 proc textOf(n: JsonNode): string =
+  if n.isNil: return ""
   if n{"kind"}.getStr == "TextNode": return n{"text"}.getStr
   for c in n{"children"}.getElems: result.add textOf(c)
 
@@ -176,8 +181,10 @@ proc callRowOf(plan: JsonNode; name, args: string): JsonNode =
   ## recorder wraps the program in (the Python recorder roots the trace in a
   ## `<toplevel>` call above the `<__main__>` module frame).
   for r in plan.callRows:
-    let t = r.textOf
-    if t.contains(" " & name & " #") and t.contains(args):
+    var callee = ""
+    for c in r{"children"}.getElems:
+      if c.attr("data-call-part") == "callee": callee = c.textOf
+    if callee == name and r.textOf.contains(args):
       return r
   nil
 
@@ -185,8 +192,18 @@ proc indexOf(row: JsonNode): int =
   if row.isNil: -1 else: parseInt(row.attr("data-call-index"))
 
 proc part(row: JsonNode; kind: string): seq[JsonNode] =
+  if row.isNil: return
   for c in row{"children"}.getElems:
     if c.attr("data-call-part") == kind: result.add c
+
+proc toggleIcon(row: JsonNode): string =
+  ## The SVG the row's toggle draws (`leaves.CallIcons`: `collapse`,
+  ## `expand`, `dot`, each with an `-active` twin on the selected row), by
+  ## the file name the window wrote it to — `""` when the row has none.
+  for t in row.part("toggle"):
+    for img in t{"children"}.getElems:
+      if img{"tag"}.getStr == "img":
+        return img.attr("src").extractFilename.changeFileExt("")
 
 proc calltraceBody(geom: JsonNode): seq[int] =
   for n in geom["nodes"]:
@@ -205,7 +222,9 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     let r2 = plan.callRowOf("evaluate", "(expression=\"2 + 3\")")
     let ev = r2.indexOf
     ck ev > 0
-    ck r2.textOf == "▾ evaluate #" & $ev & "(expression=\"2 + 3\") => 5"
+    # The desktop's row: no glyph (the toggle is an SVG), `callee #i`, the
+    # arguments, and `=>` with the value — spaced by padding, not by text.
+    ck r2.textOf == "evaluate #" & $ev & "(expression=\"2 + 3\")=>5"
     ck r2.part("argName")[0].textOf == "expression"
     ck r2.part("argValue")[0].textOf == "\"2 + 3\""
     ck r2.part("argValue")[0].style("text_color").toLowerAscii ==
@@ -213,17 +232,18 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     ck r2.part("returnValue")[0].textOf == "5"
     ck r2.part("returnValue")[0].style("text_color").toLowerAscii ==
        ReturnColour.toLowerAscii
-    ck r2.attr("data-call-toggle") == "expanded"
+    ck r2.attr("data-call-toggle") == "expanded" and
+       r2.toggleIcon == "call-collapse"
     let add = plan.callRowOf("add", "(left=2, right=3)")
     ck add.indexOf > ev
-    ck add.attr("data-call-toggle") == "leaf"
-    ck add.textOf.startsWith("· add #" & $add.indexOf & "(left=2, right=3)")
+    ck add.attr("data-call-toggle") == "leaf" and add.toggleIcon == "call-dot"
+    ck add.textOf.startsWith("add #" & $add.indexOf & "(left=2, right=3)")
     let main = plan.callRowOf("main", "()")
     ck main.indexOf >= 0 and main.indexOf < ev
-    ck main.textOf == "▾ main #" & $main.indexOf & "() => @[5, 7, 42, 17, 2]"
+    ck main.textOf == "main #" & $main.indexOf & "()=>@[5, 7, 42, 17, 2]"
     # The trace's root is the first row, and it is a frame the recorder wraps
     # the program in — not a call the program made.
-    ck plan.callRow(0).textOf.startsWith("▾ <")
+    ck plan.callRow(0).textOf.startsWith("<")
     # The current call — the entry, at the module's top level, in a frame the
     # recorder wraps the program in — selected, on its ground; and only it.
     var selected: seq[JsonNode] = @[]
@@ -232,19 +252,17 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     ck selected.len == 1
     let sel = (if selected.len == 1: selected[0] else: plan.callRow(0))
     ck sel.indexOf < main.indexOf
-    ck sel.textOf.startsWith("▾ <")
+    ck sel.textOf.startsWith("<")
     ck r2.attr("data-call-selected") == "false"
     ck sel.style("bg").len > 0
     ck r2.style("bg").len == 0
-    # The selected row's ground is the design system's active-row token
-    # (ui/surface/primary/secondary-hover), and its toggle is drawn in the
-    # body colour on it — the muted one is not legible there.
+    # The selected row's ground is the desktop's (`.event-selected`, the
+    # editor theme's selection surface, #3E3E3B), and its toggle is the
+    # ACTIVE icon — the desktop's yellow one; every other row's is the plain.
     ck sel.style("bg").toLowerAscii.startsWith(
-      DesignTokenHex[dtColorsUiSurfacePrimarySecondaryHover][dmDark].toLowerAscii)
-    ck sel.part("toggle")[0].style("text_color").toLowerAscii ==
-       DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark].toLowerAscii
-    ck r2.part("toggle")[0].style("text_color").toLowerAscii ==
-       DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark].toLowerAscii
+      DesignTokenHex[dtColorsEditorSurfaceSelect][dmDark].toLowerAscii)
+    ck sel.toggleIcon == "call-collapse-active"
+    ck r2.toggleIcon == "call-collapse"
 
   test "a press on a row goes there; a press on its toggle collapses it":
     var geom: JsonNode
@@ -255,7 +273,11 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     # root's entry step (the trace format's step 0).
     let entryTick = geom.tickOf
     ck entryTick >= 0
-    proc rowY(i: int): int = b[1] + ChromePaddingPx + i * RowPx + RowPx div 2
+    # The rows start below the pane's inset and the search field, at the
+    # desktop's fractional pitch (`leaves.callRowTopPx`).
+    proc rowY(i: int): int =
+      b[1] + paneInsetOf("calltrace").top + CallRowsTopPx + callRowTopPx(i) +
+        (callRowTopPx(i + 1) - callRowTopPx(i)) div 2
     # The first `add` and its `apply_op`, found by what they are. They are the
     # trace's first descent — every row above them is an ancestor, opened —
     # so a row's place on screen and its depth are both its index.
@@ -264,8 +286,8 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     let opAt = opened.callRowOf("apply_op", "(symbol=\"+\", left=2, right=3)").indexOf
     ck opAt > 0
     ck addAt == opAt + 1
-    # `add`: its name, right of its toggle.
-    let xa = b[0] + ChromePaddingPx + addAt * IndentPx + 40
+    # `add`: its name, right of its toggle (14 px) and the 8 px gap.
+    let xa = b[0] + CallToggleLeftPx + addAt * CallIndentPx + 14 + 8 + 6
     var g2: JsonNode
     let jumped = windowPlan("press:" & $xa & ":" & $rowY(addAt) & ",release:" &
                             $xa & ":" & $rowY(addAt), g2)
@@ -273,16 +295,16 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     ck g2.tickOf > entryTick
     ck jumped.callRow(addAt).attr("data-call-selected") == "true"
     # `apply_op`: its toggle.
-    let xt = b[0] + ChromePaddingPx + opAt * IndentPx + 4
+    let xt = b[0] + CallToggleLeftPx + opAt * CallIndentPx + 4
     let collapsed = windowPlan("press:" & $xt & ":" & $rowY(opAt) & ",release:" &
                                $xt & ":" & $rowY(opAt))
     ck collapsed.callRow(opAt).attr("data-call-toggle") == "collapsed"
-    ck collapsed.callRow(opAt).textOf.startsWith("▸ apply_op #" & $opAt & "(")
+    ck collapsed.callRow(opAt).textOf.startsWith("apply_op #" & $opAt & "(")
     # Its child `add` is gone; the rows below move up — and are renumbered,
     # as the desktop's are (`#N` is the row's place in the section).
     for r in collapsed.callRows:
       ck not r.textOf.contains("add #" & $addAt & "(left=2, right=3)")
-    ck collapsed.callRow(addAt).textOf.startsWith("▾ evaluate #" & $addAt &
+    ck collapsed.callRow(addAt).textOf.startsWith("evaluate #" & $addAt &
                                                   "(expression=\"10 - 4 + 1\")")
 
 suite "PLAT-49 part B: the GPUI window's event log columns":
@@ -294,7 +316,9 @@ suite "PLAT-49 part B: the GPUI window's event log columns":
       if t.attr("data-view-id") == "eventLog":
         for th in t{"children"}[0]{"children"}.getElems:
           headers.add th.textOf
-    ck headers == @["tick", "#", "kind", "output"]
+    # The kind column is the desktop's untitled icon column (its header
+    # cell is drawn, empty — `leaves.renderEventLog`).
+    ck headers == @["tick", "#", "", "output"]
     var rowTexts: seq[string] = @[]
     for t in plan.nodesWith("data-view-kind"):
       if t.attr("data-view-id") == "eventLog":
@@ -315,7 +339,7 @@ suite "PLAT-49 part B: the GPUI window's event log columns":
         for th in t{"children"}[0]{"children"}.getElems:
           headers.add th.textOf
     checkpoint("headers " & $headers)
-    ck headers == @["tick", "#", "location", "kind", "output"]
+    ck headers == @["tick", "#", "location", "", "output"]
     var rowTexts = ""
     for t in plan.nodesWith("data-view-kind"):
       if t.attr("data-view-id") == "eventLog":
@@ -335,21 +359,29 @@ suite "PLAT-49 part B: the GPUI window's footer auto-hide panels":
     ck not bottom.isNil
     for sl in bottom["slots"]:
       let r = sl["rect"].to(seq[int])
-      ck r[1] == f[1] and r[1] + r[3] <= f[1] + f[3]
+      # Inside the bar, centred in it (the desktop's chips).
+      ck r[1] >= f[1] and r[1] + r[3] <= f[1] + f[3] and
+         r[1] - f[1] == f[1] + f[3] - (r[1] + r[3])
     let a = geom["area"].to(seq[int])
     ck a[1] + a[3] <= f[1]
     ck plan.nodesWith("data-ct-footer").len == 1
     # THE DESKTOP'S ORDER (review): the file info first — the language and
     # the encoding — and the labels after it.
     let info = plan.nodesWith("data-ct-footer-file-info")
-    ck info.len == 1 and info[0].textOf == "Python | UTF-8"
+    # Its parts with the desktop's `.separate-bar` (a rule, not text)
+    # between them.
+    ck info.len == 1 and
+       info[0].attr("data-ct-footer-file-info") == "Python | UTF-8" and
+       info[0].textOf == "PythonUTF-8"
     let firstLabel = bottom["slots"][0]["rect"].to(seq[int])
     ck info[0].rectOf.x < firstLabel[0]
     ck firstLabel[0] >= info[0].rectOf.x + info[0].rectOf.w
     let pos = plan.nodesWith("data-ct-footer-position")
-    # The entry stop: line 1, at the tick the window's top bar reports.
+    # The entry stop: line 1, at the tick the window's top bar reports — as
+    # the desktop's location reads, `path:line#ticks`.
     ck geom.tickOf >= 0
-    ck pos.len == 1 and pos[0].textOf == "main.py:1  tick " & $geom.tickOf
+    ck pos.len == 1 and
+       pos[0].textOf.endsWith("/calc/main.py:1#" & $geom.tickOf)
 
   test "a hover previews after the delay; leaving closes it after the grace":
     var g: JsonNode
@@ -531,7 +563,10 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     let one = windowPlan("")
     ck one.nodesWith("data-ct-session-tab").len == 0
     let add = one.nodesWith("data-ct-session-tab-add")
-    ck add.len == 1 and add[0].textOf == NewSessionTabGlyph
+    # The desktop's "+" is an icon (`bar-session-tab-add.svg`), not a glyph.
+    ck add.len == 1 and add[0].textOf == "" and
+       add[0]{"children"}[0].attr("src").extractFilename ==
+         "bar-session-tab-add.svg"
     ck add[0].attr("data-ct-session-tab-add") == NewSessionTabTitle
     # PLAT-51 (Multi-Window-Tab-Management.md rule 3): the "+" opens a tab
     # showing the WELCOME SCREEN — the recordings beside calc are its recent
@@ -581,7 +616,7 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     let back = windowPlan("tab-add" & toPages & ",key:enter,tab:0")
     ck back.callRows.len == one.callRows.len
     let backEv = back.callRowOf("evaluate", "(expression=\"2 + 3\")")
-    ck backEv.textOf == "▾ evaluate #" & $backEv.indexOf & "(expression=\"2 + 3\") => 5"
+    ck backEv.textOf == "evaluate #" & $backEv.indexOf & "(expression=\"2 + 3\")=>5"
     # Closing the second tab: one session, no tabs, the "+" stays.
     let closed = windowPlan("tab-add" & toPages & ",key:enter,tab-close:1")
     ck closed.nodesWith("data-ct-session-tab").len == 0

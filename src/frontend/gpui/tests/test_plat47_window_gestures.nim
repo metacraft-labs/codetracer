@@ -36,7 +36,11 @@ import gpui/chrome
 const
   W = 1440
   H = 900
-  ExpectedAssertions = 130
+  ExpectedAssertions = 136
+    ## 130 -> 136 (the Electron-parity redesign): the strip ends at its last
+    ## tab and the gap between tabs finds nothing (+2); the layout reaches
+    ## the bottom edge without a footer, its last row the bottom band (+2);
+    ## the editor's whole rows beside its partly shown last one (+2).
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -115,8 +119,17 @@ suite "PLAT-47: the window's geometry is total and exact":
     ck onVcs.get.path == files.path & "/1"
     let rightOfVcs = g0.pointerAt(files.tabs[1].x + files.tabs[1].w - 3, vy)
     ck rightOfVcs.isSome and rightOfVcs.get.path == files.path & "/2"
-    let past = g0.pointerAt(files.tabs[^1].x + files.tabs[^1].w + 3, vy)
+    # The desktop's tabs share the strip equally (`.lm_tab` `flex: 1`), so
+    # there is no strip past the last tab: it ends at the strip's right edge,
+    # and its right half is the "after the last tab" join — the stack's
+    # centre in the model's vocabulary.
+    ck files.tabs[^1].x + files.tabs[^1].w == files.strip.x + files.strip.w
+    let past = g0.pointerAt(files.tabs[^1].x + files.tabs[^1].w - 3, vy)
     ck past.isSome and past.get.zone == dzCentre
+    # Between two tabs (`LAYOUT_TAB_GAP`) GoldenLayout's header gives up
+    # (`highlightHeaderDropZone` finds no tab): a fresh drag finds nothing.
+    ck g0.pointerAt(files.tabs[0].x + files.tabs[0].w + TabGapPx div 2,
+                    vy).isNone
     let editor = g0.nodeOf("editor")
     let b = editor.body
     let (cx, cy) = centre(b)
@@ -139,23 +152,34 @@ suite "PLAT-47: the window's geometry is total and exact":
     # flight keeps its last valid area) — its asymmetry, kept.
     ck g0.pointerAt(3, H div 2).get.zone == dzRootLeft
     ck g0.pointerAt(W - 3, H div 2).isNone
-    ck g0.pointerAt(W div 2, H - 3).isNone
+    # A window drawn without the top bar has no footer either: the layout
+    # runs to the window's bottom edge (`windowGeometryOf`), so its last row
+    # is the ground's bottom band, and the first row past it finds nothing.
+    ck g0.area.y + g0.area.h == H
+    ck g0.pointerAt(W div 2, H - 3).get.zone == dzRootBottom
+    ck g0.pointerAt(W div 2, g0.inner.y + g0.inner.h).isNone
     let above = g0.pointerAt(W div 2, 3)
     ck above.isSome and above.get.zone in {dzRootTop, dzTabStrip}
 
 suite "the editor pane shows whole rows":
 
   test "the editor's fetch window is the rows its pane shows at the row pitch":
-    # Every row a full line high (`GpuiEditorRowPx`): as many as fit below
-    # the source statement (no heading since PLAT-49: the pane's tab strip,
-    # outside its body, names it), and not one more — a window
-    # holding more was squeezed into the pane, clipping every descender.
+    # Every row a full line high (`GpuiEditorRowPx`, Monaco's 22 px), below
+    # the editor's top padding (`EditorPadTopPx`; nothing above the rows
+    # since the source statement became the pane's attribute). As Monaco
+    # does, the fetch window counts the last row when it is only partly in
+    # view (the pane clips it) — and not one more, which would squeeze rows;
+    # the WHOLE rows (`editorFullRowsOf`) are those that fit entirely.
     let body = g0.nodeOf("editor").body
     let rows = editorRowsOf(g0)
-    checkpoint("editor body " & describe(body) & " rows " & $rows)
-    let used = 2 * ChromePaddingPx + EditorLinesAbovePx
-    ck rows * GpuiEditorRowPx + used <= body.h
-    ck (rows + 1) * GpuiEditorRowPx + used > body.h
+    let full = editorFullRowsOf(g0)
+    checkpoint("editor body " & describe(body) & " rows " & $rows &
+               " full " & $full)
+    let used = EditorPadTopPx + EditorLinesAbovePx
+    ck (rows - 1) * GpuiEditorRowPx + used < body.h
+    ck rows * GpuiEditorRowPx + used >= body.h
+    ck full * GpuiEditorRowPx + used <= body.h
+    ck (full + 1) * GpuiEditorRowPx + used > body.h
     # A taller editor holds more.
     let tall = geometryOf(start).editorRowsOf()
     ck windowGeometryOf(start, projectDock(start, DockViewport(width: W,

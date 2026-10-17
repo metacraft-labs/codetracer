@@ -36,11 +36,22 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 239
+  ExpectedAssertions = 264
+    ## 2026-10-17: 239 -> 264. The desktop's caption bar has more parts
+    ## (history, reset, run-tests and stop tools beside the controls), and
+    ## three cases check once per part (no window-button segment, no overlap
+    ## in a narrow window, every part over the strip `no-drag`): +16. The
+    ## omnibar case now asserts its centring at a wide window AND that it
+    ## clears the controls at 1440 (+8), and the empty reserve is the bar's
+    ## padding (+1).
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   W = 1440
   H = 900
-  StripH = ChromePaddingPx + TopBarPx
+  StripH = TopBarPx
+    ## The drag strip spans the window's top to the band's bottom. Since
+    ## 2026-10-17 the band is the desktop's caption bar, starting at the
+    ## window's top-left corner (no `ChromePaddingPx` above it), so that is
+    ## the band's own height.
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
@@ -137,11 +148,14 @@ suite "PLAT-69: the top bar's layout with window buttons":
     let none = gpuiTopBarLayout(nil, nil, tabs, W, canAddTab = true,
                                 windowButtons = (@[], @[]))
     ck plain.segs == none.segs
-    ck plain.segOf(gtMenuButton).rect.x == ChromePaddingPx
+    # The bar's own padding at an end with no window buttons (the desktop's
+    # `#menu` `padding-left`), and the reserve for none says the same.
+    ck plain.segOf(gtMenuButton).rect.x == plain.band.x + BarPadPx
+    ck windowButtonsReservePx(0) == BarPadPx
     for s in plain.segs:
       ck s.part != gtWindowButton
 
-  test "right-side buttons: after the tabs and the +, 24 px, 6 apart, 5 from the end":
+  test "right-side buttons: after the tabs and the +, 24 px, touching, 5 from the end":
     let lay = gpuiTopBarLayout(nil, nil, tabs, W, canAddTab = true,
                                windowButtons = (@[], @[gwbMinimize, gwbMaximize,
                                                        gwbClose]))
@@ -155,13 +169,16 @@ suite "PLAT-69: the top bar's layout with window buttons":
     ck mini.x + mini.w + WindowButtonGapPx == maxi.x
     for r in [close, maxi, mini]:
       ck (r.w, r.h) == (WindowButtonPx, WindowButtonPx)
-      ck r.y == band.y + (band.h - WindowButtonPx) div 2
+      # On the bar's content row, one pixel down (`.window-menu`), all at
+      # the same height.
+      ck r.y == band.y + WindowButtonTopPx
     # The "+" ends before the reserve the buttons take.
     let add = lay.segOf(gtTabAdd).rect
     ck add.w > 0
     ck add.x + add.w <= band.x + band.w - windowButtonsReservePx(3)
-    # The menu button is where it always was.
-    ck lay.segOf(gtMenuButton).rect.x == band.x
+    # The menu button is where it always was: right-side buttons do not
+    # move it from the bar's own left padding.
+    ck lay.segOf(gtMenuButton).rect.x == band.x + windowButtonsReservePx(0)
 
   test "left-side buttons: before the menu button, in the configured order":
     let lay = gpuiTopBarLayout(nil, nil, tabs, W, canAddTab = true,
@@ -173,29 +190,63 @@ suite "PLAT-69: the top bar's layout with window buttons":
        band.x + WindowButtonEdgePx
     let menu = lay.segOf(gtMenuButton).rect
     ck menu.x == band.x + windowButtonsReservePx(3)
-    ck lay.segOf(gtWindowButton, ord(gwbMaximize)).rect.x + WindowButtonPx +
-       PartGapPx <= menu.x
+    # The last button ends BEFORE the menu button starts: a gap, not a
+    # touch (the narrow-band `PartGapPx` this read was removed with the
+    # fallback layout it belonged to).
+    ck lay.segOf(gtWindowButton, ord(gwbMaximize)).rect.x + WindowButtonPx <
+       menu.x
 
   test "the omnibar is centred in what the buttons leave of the band":
-    let plain = gpuiTopBarLayout(nil, nil, tabs, W)
-    let right = gpuiTopBarLayout(nil, nil, tabs, W,
+    # THE DESKTOP'S RULE (measured 2026-10-17): the omnibox's slot is centred
+    # between the controls' start and the right end of what the window
+    # buttons leave — two equal-share neighbours — but NEVER over the
+    # controls. So the centring is observable only in a window wide enough
+    # for the share to exceed the controls' width (1920 here); at 1440 the
+    # controls push it, and what must hold is that it clears them.
+    const Wide = 1920
+    let plain = gpuiTopBarLayout(nil, nil, tabs, Wide)
+    let right = gpuiTopBarLayout(nil, nil, tabs, Wide,
                                  windowButtons = (@[], @[gwbMinimize,
                                                          gwbMaximize, gwbClose]))
-    let left = gpuiTopBarLayout(nil, nil, tabs, W,
+    let left = gpuiTopBarLayout(nil, nil, tabs, Wide,
                                 windowButtons = (@[gwbClose], @[]))
-    let both = gpuiTopBarLayout(nil, nil, tabs, W,
+    let both = gpuiTopBarLayout(nil, nil, tabs, Wide,
                                 windowButtons = (@[gwbClose], @[gwbMinimize]))
     let o = plain.segOf(gtOmnibar).rect
     let band = plain.band
+    # The slot is the field plus its inset, and it is the desktop's width.
+    let slotW = o.w + OmnibarFieldInsetPx
+    ck slotW == omnibarDesktopPx(Wide)
     proc centredIn(leftReserve, rightReserve: int): int =
-      let x = band.x + leftReserve
-      x + (band.w - leftReserve - rightReserve - o.w) div 2
-    ck o.x == centredIn(0, 0)
-    ck right.segOf(gtOmnibar).rect.x == centredIn(0, windowButtonsReservePx(3))
-    ck left.segOf(gtOmnibar).rect.x == centredIn(windowButtonsReservePx(1), 0)
+      ## The field's x when its slot is centred between the menu part
+      ## (menu button and its gap) and the right reserve's tab gap.
+      let start = band.x + leftReserve + MenuButtonPx + 2 * MenuPartGapPx
+      let stop = band.x + band.w - rightReserve - OmnibarTabGapPx
+      start + (stop - start - slotW) div 2 + OmnibarFieldInsetPx
+    ck o.x == centredIn(windowButtonsReservePx(0), windowButtonsReservePx(0))
+    ck right.segOf(gtOmnibar).rect.x ==
+       centredIn(windowButtonsReservePx(0), windowButtonsReservePx(3))
+    ck left.segOf(gtOmnibar).rect.x ==
+       centredIn(windowButtonsReservePx(1), windowButtonsReservePx(0))
     ck both.segOf(gtOmnibar).rect.x ==
        centredIn(windowButtonsReservePx(1), windowButtonsReservePx(1))
     ck right.segOf(gtOmnibar).rect.w == o.w
+    # The buttons on one side move it: four layouts, three positions (the
+    # reserve is fixed, so `left` and `both` differ only by the right side).
+    ck o.x != right.segOf(gtOmnibar).rect.x
+    ck o.x != left.segOf(gtOmnibar).rect.x
+    ck left.segOf(gtOmnibar).rect.x != both.segOf(gtOmnibar).rect.x
+    # At 1440 the controls would overlap a centred slot: it clears them.
+    for lay in [gpuiTopBarLayout(nil, nil, tabs, W),
+                gpuiTopBarLayout(nil, nil, tabs, W,
+                                 windowButtons = (@[gwbClose], @[gwbMinimize]))]:
+      var controlsEnd = 0
+      for s in lay.segs:
+        if s.part in {gtControl, gtTool}:
+          controlsEnd = max(controlsEnd, s.rect.x + s.rect.w)
+      ck controlsEnd > 0
+      ck lay.segOf(gtOmnibar).rect.x - OmnibarFieldInsetPx ==
+         controlsEnd + MenuPartGapPx
 
   test "a narrow window keeps its window buttons":
     let lay = gpuiTopBarLayout(nil, nil, tabs, 360, canAddTab = true,
@@ -306,7 +357,7 @@ suite "PLAT-69: the window plan, where the top bar is the title bar":
     for b in plan.nodesWith("data-ct-window-button"):
       xs.add (b.rectOf.x, b.attr("data-ct-window-button"))
     ck xs.len == 3
-    ck xs[0] == (ChromePaddingPx + WindowButtonEdgePx, "close")
+    ck xs[0] == (WindowButtonEdgePx, "close")   # the band starts at x = 0
     ck xs[1][1] == "minimize"
     ck xs[2][1] == "maximize"
     let menu = plan.nodesWith("data-ct-menu-button")[0]
