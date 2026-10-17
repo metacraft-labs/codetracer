@@ -235,6 +235,10 @@ done
 echo
 echo "=== the subject: is this binary of THIS tree? ==="
 # shellcheck source=ci/lib/build-freshness.sh
+# The pre-commit hook runs shellcheck WITHOUT `-x`, which is what makes a
+# `source=` directive followable, so SC1091 fires on the line below however
+# correct that path is. `shellcheck -x` still resolves it.
+# shellcheck disable=SC1091
 . "${root}/ci/lib/build-freshness.sh"
 # Computed ONCE and reused by the manifest below. `bf_gpui_assert_fresh` would
 # recompute it, and the closure costs ~10 s of real compiler time, so the gate
@@ -493,7 +497,14 @@ while IFS=$'\t' read -r id view width height vpname ops; do
 	rec="${OUT}/${view}.capture.json"
 	grade="${OUT}/${view}.grade.json"
 	log="${OUT}/${view}.gpui.log"
-	rm -f "${png}" "${points_png}" "${rec}" "${grade}" "${log}"
+	# The face the GPUI text system RESOLVED, written by the shim's
+	# `register_fonts` at launch. PARITY-P1's residual is an advance
+	# difference and advance is a property of the resolved face, so the
+	# capture has to record which face that was rather than which one the
+	# front-end asked for. It also reaches stderr, hence the log; the file
+	# is the machine-readable copy.
+	face="${OUT}/${view}.face.json"
+	rm -f "${png}" "${points_png}" "${rec}" "${grade}" "${log}" "${face}"
 
 	echo
 	echo "### ${id} -> ${view} at ${vpname} ${width}x${height} points [${ops:-no operations}]"
@@ -509,7 +520,7 @@ while IFS=$'\t' read -r id view width height vpname ops; do
 		"--quit-after-ms=${WINDOW_MS}")
 	[ -n "${ops}" ] && argv+=("--replay-ops=${ops}")
 	argv+=("${TRACE}")
-	"${argv[@]}" >"${log}" 2>&1 &
+	GPUI_FONT_REPORT_PATH="${face}" "${argv[@]}" >"${log}" 2>&1 &
 	gpid=$!
 	python3 -c "import time; time.sleep(${SETTLE_S})"
 

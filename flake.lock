@@ -744,11 +744,9 @@
         "zig-overlay": "zig-overlay"
       },
       "locked": {
-        "lastModified": 1781988275,
-        "narHash": "sha256-E1s7M9YY+WwssGjSWzqGRCRLVWV3JAMpAT3nn1jOpVk=",
         "owner": "metacraft-labs",
         "repo": "nix-codetracer-toolchains",
-        "rev": "942c995a36469853351af605da90025314ffc58e",
+        "rev": "e830fd3211db97b07ab04612bc116a3cb1ceab6e",
         "type": "github"
       },
       "original": {

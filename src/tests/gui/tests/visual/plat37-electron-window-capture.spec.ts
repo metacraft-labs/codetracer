@@ -287,6 +287,18 @@ async function readEditorFontMetrics(
         };
       };
     };
+    const requestedFamilyFromOption = (ed: {
+      getOption?: (id: number) => unknown;
+    }): string => {
+      const id = (
+        window as unknown as {
+          monaco?: { editor?: { EditorOption?: { fontFamily?: number } } };
+        }
+      ).monaco?.editor?.EditorOption?.fontFamily;
+      if (typeof id !== "number" || typeof ed.getOption !== "function") return "";
+      const v = ed.getOption(id);
+      return typeof v === "string" ? v : "";
+    };
     const editors = w.data?.ui?.monacoEditors ?? [];
     for (const ed of editors) {
       if (!ed) continue;
@@ -309,7 +321,22 @@ async function readEditorFontMetrics(
       return {
         lineHeightPx: lh,
         fontSizePx: fs,
-        fontFamily: fi.fontFamily ?? "",
+        // `config.fontInfo` does not exist on CodeTracer's own `config`
+        // snapshot (`trace.nim`'s `getConfiguration` builds no such field),
+        // so without a fallback the family is `""` on every capture —
+        // PLAT37-ISSUE-A.
+        //
+        // THE OPTION ID IS LOOKED UP, NOT WRITTEN DOWN. A first attempt
+        // hard-coded 51 by analogy with the 75 and 61 above and recorded
+        // `fontFamily: true` on every capture, because 51 is some boolean
+        // option in this Monaco. An id that names a different option is
+        // indistinguishable from a correct one unless the ANSWER is
+        // type-checked, so the lookup is symbolic and the result is
+        // rejected unless it is a string.
+        //
+        // Both of these are still the REQUEST. The face the renderer
+        // RESOLVED is `resolvedEditorFace`.
+        fontFamily: fi.fontFamily ?? requestedFamilyFromOption(ed),
         source:
           ed.config?.lineHeight !== undefined
             ? "monacoEditor.config.lineHeight"
@@ -318,6 +345,244 @@ async function readEditorFontMetrics(
     }
     return null;
   });
+}
+
+/**
+ * THE FACE CHROMIUM ACTUALLY RESOLVED for the editor's code text — not the
+ * face the CSS or the Monaco option ASKED FOR.
+ *
+ * PARITY-P1's residual is a glyph-positioning difference that grows along a
+ * line, which is what two different per-character ADVANCES produce. Advance
+ * is a property of the resolved FACE, so the comparison cannot be grounded
+ * until each arm records the face its renderer chose. `readEditorFontMetrics`
+ * above records the REQUEST (and, through `fontInfo` never existing on
+ * CodeTracer's own `config` snapshot, records it as `""`); this records the
+ * ANSWER.
+ *
+ * TWO INDEPENDENT READINGS, because each covers the other's failure:
+ *
+ *  1. `CSS.getPlatformFontsForNode` over CDP NAMES the faces the renderer
+ *     used for a node's text, with a glyph count per face. This is Blink's
+ *     own record of what it shaped with. It is the authoritative answer and
+ *     it is the one that can be absent — the command is not in every
+ *     Electron, so it is wrapped and may come back null.
+ *  2. A canvas FINGERPRINT: the advance of the resolved face, measured with
+ *     the editor row's own computed `font` shorthand, beside the advance of
+ *     each candidate family measured explicitly. Two faces with the same
+ *     name and different `hmtx` tables are distinguished by this and not by
+ *     the name. It is also the reading that is directly comparable with the
+ *     GPUI arm's, whose text system can be asked for metrics and cannot be
+ *     asked for a file.
+ *
+ * THE CONTROLS, both of which would fail a probe that reported the REQUEST:
+ *
+ *  - NEGATIVE (`controlBogus`): a node asking for a family no host has. A
+ *    probe echoing its input answers with that name; this one must answer
+ *    with something else.
+ *  - POSITIVE (`controlMenlo`): a node asking for `Menlo`, which macOS has.
+ *    A probe stuck on one answer — the "uniform result" failure — gives the
+ *    same face here as for the editor; this one must give Menlo, and Menlo's
+ *    advance must differ from the editor's if the editor is not in Menlo.
+ *
+ * Soft on purpose, like `readEditorFontMetrics`: a scenario with no editor
+ * records `null`, and a CDP that refuses records the fingerprint alone. A
+ * diagnostic must not fail a capture lane.
+ */
+async function readResolvedEditorFace(
+  page: import("playwright").Page,
+): Promise<Record<string, unknown> | null> {
+  // `.view-line` is a container: its text lives in `mtk*` spans, and
+  // `CSS.getPlatformFontsForNode` on the container answered `[]` on the
+  // 2026-10-19 run. The token span is asked first and the container is kept
+  // as a fallback, with `resolvedFromSelector` recording which answered, so
+  // an empty list is never read as "no face".
+  const CODE_SELECTORS = [
+    '.monaco-editor .view-line span[class^="mtk"]',
+    ".monaco-editor .view-line span",
+    ".monaco-editor .view-line",
+  ];
+  const CODE_SELECTOR = CODE_SELECTORS[CODE_SELECTORS.length - 1];
+  const BOGUS_FAMILY = "ZZ No Such Face ZZ";
+
+  // ---- Reading 2 and the computed request, in the page. ----
+  const inPage = await page.evaluate(
+    ([selector, bogus]) => {
+      const row = document.querySelector(selector as string);
+      if (!row) return null;
+      const cs = getComputedStyle(row as Element);
+
+      // The advance of a face, measured over a long run so that any
+      // per-glyph rounding in `measureText` is divided away rather than
+      // reported as the advance.
+      const N = 200;
+      const run = "M".repeat(N);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const advanceOf = (fontShorthand: string): number | null => {
+        if (!ctx) return null;
+        ctx.font = fontShorthand;
+        // A browser that cannot parse the shorthand silently keeps the old
+        // `font`; comparing the readback catches that instead of reporting
+        // the previous face's advance under this one's name.
+        if (ctx.font === "" ) return null;
+        return ctx.measureText(run).width / N;
+      };
+
+      const size = cs.fontSize;
+      const candidates: Record<string, number | null> = {};
+      for (const fam of [
+        '"SpaceMono"',
+        '"Space Mono"',
+        "Menlo",
+        "Monaco",
+        "monospace",
+        `"${bogus}"`,
+      ]) {
+        candidates[fam] = advanceOf(`${size} ${fam}`);
+      }
+
+      const faces: Array<Record<string, unknown>> = [];
+      try {
+        (document as unknown as { fonts: Set<FontFace> }).fonts.forEach(
+          (f: FontFace) => {
+            faces.push({
+              family: f.family,
+              weight: f.weight,
+              style: f.style,
+              status: f.status,
+            });
+          },
+        );
+      } catch {
+        /* document.fonts is optional for this reading */
+      }
+
+      return {
+        // THE REQUEST, recorded so the answer can be seen to differ from it.
+        requestedCssFontFamily: cs.fontFamily,
+        computedFontShorthand: cs.font,
+        computedFontSize: cs.fontSize,
+        computedFontWeight: cs.fontWeight,
+        computedFontStyle: cs.fontStyle,
+        computedLetterSpacing: cs.letterSpacing,
+        // THE FINGERPRINT.
+        advancePxResolved: advanceOf(cs.font || `${size} ${cs.fontFamily}`),
+        advancePxByCandidate: candidates,
+        loadedFontFaces: faces.filter(
+          (f) => typeof f.family === "string" && /Space|Fira/.test(f.family as string),
+        ),
+        sampleRowText: ((row as HTMLElement).innerText ?? "").slice(0, 40),
+      };
+    },
+    [CODE_SELECTOR, BOGUS_FAMILY] as const,
+  );
+
+  if (inPage === null) return null;
+
+  // ---- Reading 1: Blink's own record, over CDP. ----
+  let platformFonts: unknown = null;
+  let platformFontsError: string | null = null;
+  let resolvedFromSelector: string | null = null;
+  let controlBogus: unknown = null;
+  let controlMenlo: unknown = null;
+  try {
+    const session = await page.context().newCDPSession(page);
+    try {
+      await session.send("DOM.enable");
+      await session.send("CSS.enable");
+      const fontsFor = async (selector: string) => {
+        const { root } = (await session.send("DOM.getDocument", {
+          depth: -1,
+        })) as { root: { nodeId: number } };
+        const { nodeId } = (await session.send("DOM.querySelector", {
+          nodeId: root.nodeId,
+          selector,
+        })) as { nodeId: number };
+        if (!nodeId) return null;
+        const r = (await session.send("CSS.getPlatformFontsForNode", {
+          nodeId,
+        })) as { fonts: unknown };
+        return r.fonts;
+      };
+
+      for (const sel of CODE_SELECTORS) {
+        const f = await fontsFor(sel);
+        if (Array.isArray(f) && f.length > 0) {
+          platformFonts = f;
+          resolvedFromSelector = sel;
+          break;
+        }
+        if (platformFonts === null) platformFonts = f;
+      }
+
+      // The two controls need nodes of their own, carrying real text so the
+      // renderer has something to shape.
+      await page.evaluate(
+        ([bogus]) => {
+          const mk = (id: string, family: string) => {
+            document.getElementById(id)?.remove();
+            const el = document.createElement("div");
+            el.id = id;
+            el.textContent = "MMMMMMMMMMMMMMMM";
+            el.style.cssText =
+              `position:fixed;left:0;top:0;opacity:0.01;pointer-events:none;` +
+              `font-size:16px;font-family:${family};`;
+            document.body.appendChild(el);
+          };
+          mk("plat37-face-control-bogus", `"${bogus}"`);
+          mk("plat37-face-control-menlo", "Menlo");
+        },
+        [BOGUS_FAMILY] as const,
+      );
+      controlBogus = await fontsFor("#plat37-face-control-bogus");
+      controlMenlo = await fontsFor("#plat37-face-control-menlo");
+      await page.evaluate(() => {
+        document.getElementById("plat37-face-control-bogus")?.remove();
+        document.getElementById("plat37-face-control-menlo")?.remove();
+      });
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  } catch (e) {
+    platformFontsError = String(e).slice(0, 300);
+  }
+
+  const firstFamily = (v: unknown): string | null => {
+    const arr = v as Array<{ familyName?: string }> | null;
+    return Array.isArray(arr) && arr.length > 0 ? (arr[0].familyName ?? null) : null;
+  };
+  const editorFace = firstFamily(platformFonts);
+  const bogusFace = firstFamily(controlBogus);
+  const menloFace = firstFamily(controlMenlo);
+
+  return {
+    how:
+      "CDP CSS.getPlatformFontsForNode over the first Monaco view-line (the " +
+      "faces Blink SHAPED with), beside a canvas advance fingerprint of the " +
+      "row's own computed font",
+    selector: CODE_SELECTOR,
+    ...inPage,
+    resolvedPlatformFonts: platformFonts,
+    resolvedPlatformFontsError: platformFontsError,
+    resolvedFromSelector,
+    resolvedFamily: editorFace,
+    controls: {
+      bogusFamilyRequested: BOGUS_FAMILY,
+      bogusResolvedTo: bogusFace,
+      // A probe echoing the request answers the bogus family with itself.
+      bogusProvesResolution:
+        bogusFace !== null && bogusFace !== BOGUS_FAMILY,
+      menloResolvedTo: menloFace,
+      // A probe stuck on one answer gives the editor's face here too.
+      menloProvesNotUniform:
+        menloFace !== null && editorFace !== null && menloFace !== editorFace,
+      meaning:
+        "bogusProvesResolution false => the probe is echoing its input. " +
+        "menloProvesNotUniform false => either the editor really is in " +
+        "Menlo, or the probe answers the same thing for every node; the " +
+        "advance fingerprint separates those two.",
+    },
+  };
 }
 
 const fmtState = (s: ProgramState) =>
@@ -822,6 +1087,8 @@ for (const scenario of definition.scenarios) {
         finalState: driven.final,
         // PARITY-S5's reference value, from Monaco rather than from ink.
         editorFontMetrics: await readEditorFontMetrics(ctPage),
+        // PARITY-P1's: the face the renderer RESOLVED, not the one asked for.
+        resolvedEditorFace: await readResolvedEditorFace(ctPage),
         viewport: viewportRecord,
         pageRoute: {
           how: "page.screenshot() over CDP — Chromium's own raster of the web contents, no window chrome, no compositor",
