@@ -622,9 +622,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
+        "lastModified": 1792240883,
+        "narHash": "sha256-gkKyhI1vfrpwtiL2dKgIO03g2lUeJE8JMIY3WkEnM1c=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "478a81ad8081eb9854de4bf34d8f536174dd46e3",
+        "rev": "abfd194ba4a599639e2be51dc96a5cd29ea955b5",
         "type": "github"
       },
       "original": {
@@ -788,9 +790,11 @@
     "codetracer-trace-format": {
       "flake": false,
       "locked": {
+        "lastModified": 1792075348,
+        "narHash": "sha256-17PNLxmxUhqe4q8XAAT5HfazQJtxsskw/UcpGFunnVo=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format",
-        "rev": "015b604a4e339d02724351df4402a67a3cb36f7b",
+        "rev": "5da139d7a69a2d75be24b5570031bb9fc5923429",
         "type": "github"
       },
       "original": {
@@ -803,9 +807,11 @@
     "codetracer-trace-format-nim": {
       "flake": false,
       "locked": {
+        "lastModified": 1792246645,
+        "narHash": "sha256-RGX61GRKRYBM/BY4ua/xDpzxwhDo5EQ/CLjqLmBScPU=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "d8cd2ed542b9cdd990eef8a1cda5c89b539f8d4e",
+        "rev": "b4794ba69fa7ccb0b568de7c582a576994c63e5b",
         "type": "github"
       },
       "original": {
@@ -4054,9 +4060,11 @@
     "isonim": {
       "flake": false,
       "locked": {
+        "lastModified": 1792177252,
+        "narHash": "sha256-zFKI3nH54lqgkUoetM639HALjPtv8gqLEd+o9Ia79Y4=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "f1dff218e07f5147ac7df04f2a3f917a9895cfe3",
+        "rev": "c3e346f6949753d2fcc2c1b97403933a0125803f",
         "type": "github"
       },
       "original": {
@@ -8769,11 +8777,11 @@
         "pre-commit-hooks": "pre-commit-hooks_10"
       },
       "locked": {
-        "lastModified": 1790858220,
-        "narHash": "sha256-vmVGS6h3DlSilM6HpPSfB9JAnVM4i+sz//gS2863LSQ=",
+        "lastModified": 1790940615,
+        "narHash": "sha256-DQynweFXmBMk0vLqusNOButVDZnKLCy1vk0YNsuOH9o=",
         "owner": "metacraft-labs",
         "repo": "codetracer-wasm-recorder",
-        "rev": "be9053c6e3371a5f740103270529ea4be20ae393",
+        "rev": "c8c88d0e61827ff8d19b6ac84c8a0dbf0e3457f6",
         "type": "github"
       },
       "original": {
