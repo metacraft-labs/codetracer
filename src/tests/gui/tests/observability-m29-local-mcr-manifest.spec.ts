@@ -268,10 +268,13 @@ function prepareLocalMcrManifest(): { rootDir: string; manifestPath: string } {
         retentionStatus: "available",
         sizeBytes: fs.statSync(portableTracePath).size,
       },
+      // No geid: the session opens at the recording's entry. A start geid
+      // is a position the hosted session seeks to at launch (ct host's
+      // CODETRACER_START_GEID), and geid 1 is not one a native replay can
+      // stop after.
       replay_start: {
         trace_id: "m25-real-mcr-request-001",
         span_id: "30000000000025cc",
-        geid: "1",
       },
     },
   };

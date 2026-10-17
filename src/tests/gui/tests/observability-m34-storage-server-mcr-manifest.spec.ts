@@ -3429,8 +3429,11 @@ function startPersistedStorageFailureBridge(options: {
         );
       }
       const upstreamLocation = upstreamResponse.headers.get("location") ?? "";
-      if (!/\/replay\/ready\//.test(upstreamLocation)) {
-        throw new Error(`debug-session did not return replay-ready redirect: ${upstreamLocation}`);
+      // The browser route redirects to the queued replay's waiting room,
+      // `/{tenant slug}/{replay id}/preparing`; the older
+      // `/{slug}/replay/ready/{id}` form is retired and no page serves it.
+      if (!/^(https?:\/\/[^/]+)?\/[^/?]+\/[0-9a-fA-F-]{36}\/preparing(\?|$)/.test(upstreamLocation)) {
+        throw new Error(`debug-session did not redirect to the replay's waiting room: ${upstreamLocation}`);
       }
 
       const replayPayload = await fetchJsonFromUrl(
@@ -4598,6 +4601,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       expect(bodyText).toContain("storage_failure");
       expect(bodyText).toContain("Replay storage objects could not be read");
       expect(bodyText).not.toContain("/replay/ready/");
+      expect(bodyText).not.toContain("/preparing");
       expect(bodyText).not.toContain("codetracer-replay");
       if (problemPage !== page) {
         await problemPage.close();
@@ -4846,6 +4850,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         expect(bodyText, `${linkReady.language} Grafana browser body`).toContain("storage_failure");
         expect(bodyText, `${linkReady.language} Grafana browser body`).toContain("Replay storage objects could not be read");
         expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("/replay/ready/");
+        expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("/preparing");
         expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("codetracer-replay");
         browserProblems.push({ language: linkReady.language, bodyText });
         if (problemPage !== page) {
@@ -5022,6 +5027,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         );
         expect(bodyText, `${testcase.name} browser body`).not.toContain(
           "/replay/ready/",
+        );
+        expect(bodyText, `${testcase.name} browser body`).not.toContain(
+          "/preparing",
         );
       }
 
@@ -5213,6 +5221,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         );
         expect(bodyText, `${testcase.name} Grafana browser body`).not.toContain(
           "/replay/ready/",
+        );
+        expect(bodyText, `${testcase.name} Grafana browser body`).not.toContain(
+          "/preparing",
         );
         grafanaBrowserProblems.push({
           name: testcase.name,

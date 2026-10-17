@@ -1228,6 +1228,10 @@ impl ReplaySession for RecreatorReplaySession {
         parse_bool_or_status_response(&response)
     }
 
+    fn serves_geid_positions(&self) -> bool {
+        true
+    }
+
     /// Forward `GetProcessInfo` to the replay worker.
     ///
     /// The native-backend worker either shells out to `rr ps` (for RR traces)
