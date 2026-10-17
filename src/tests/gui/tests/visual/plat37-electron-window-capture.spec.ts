@@ -243,6 +243,83 @@ async function readProgramState(
   });
 }
 
+/**
+ * THE REFERENCE'S OWN ROW PITCH, read from the live editor rather than
+ * estimated from the frame.
+ *
+ * PARITY-S5 is "the two front-ends draw editor rows at different pitches",
+ * and every reading of it so far has been an INFERENCE from ink: the
+ * OCR-free instrument's mode of consecutive line-band centre deltas. That is
+ * a sound estimator, but it is an estimator on both sides, so a disagreement
+ * between the two arms could always have been the estimator rather than the
+ * product.
+ *
+ * Monaco knows the answer exactly. `editor.getOption(EditorOption.lineHeight)`
+ * is the resolved `fontInfo.lineHeight` — the value after
+ * `BareFontInfo._create` has applied `GOLDEN_LINE_HEIGHT_RATIO * fontSize`
+ * and rounded it (`monaco-editor/esm/vs/editor/common/config/fontInfo.js`).
+ * Recording it makes the Electron side of S5 a MEASUREMENT of the reference
+ * and not a reading of a photograph of it, and it is what the GPUI side's
+ * `chrome.monacoLineHeightPx` derivation has to reproduce.
+ *
+ * Soft on purpose: a scenario with no editor (entry-shell draws none) must
+ * record `null` and not fail a capture lane over a diagnostic.
+ */
+async function readEditorFontMetrics(
+  page: import("playwright").Page,
+): Promise<{
+  lineHeightPx: number;
+  fontSizePx: number;
+  fontFamily: string;
+  source: string;
+} | null> {
+  return page.evaluate(() => {
+    // `EditorOption.lineHeight` is 75 and `.fontSize` is 61 in the Monaco
+    // this product ships (`editorOptions.js`); `config` is the snapshot
+    // `editor.nim` keeps as `monacoEditor.config` (`getConfiguration`).
+    const w = window as unknown as {
+      data?: {
+        ui?: {
+          monacoEditors?: Array<{
+            config?: { lineHeight?: number; fontInfo?: Record<string, unknown> };
+            getOption?: (id: number) => unknown;
+          }>;
+        };
+      };
+    };
+    const editors = w.data?.ui?.monacoEditors ?? [];
+    for (const ed of editors) {
+      if (!ed) continue;
+      const fromOption =
+        typeof ed.getOption === "function"
+          ? (ed.getOption(75) as number | undefined)
+          : undefined;
+      const lh = ed.config?.lineHeight ?? fromOption;
+      if (typeof lh !== "number" || !(lh > 0)) continue;
+      const fi = (ed.config?.fontInfo ?? {}) as {
+        fontSize?: number;
+        fontFamily?: string;
+      };
+      const fs =
+        fi.fontSize ??
+        (typeof ed.getOption === "function"
+          ? (ed.getOption(61) as number | undefined)
+          : undefined) ??
+        -1;
+      return {
+        lineHeightPx: lh,
+        fontSizePx: fs,
+        fontFamily: fi.fontFamily ?? "",
+        source:
+          ed.config?.lineHeight !== undefined
+            ? "monacoEditor.config.lineHeight"
+            : "editor.getOption(EditorOption.lineHeight)",
+      };
+    }
+    return null;
+  });
+}
+
 const fmtState = (s: ProgramState) =>
   `line ${s.line} @ ticks ${s.rrTicks}${s.busy === true ? " (busy)" : ""}`;
 
@@ -743,6 +820,8 @@ for (const scenario of definition.scenarios) {
         movesPerformed: driven.moves,
         editorSettledBetweenOperations: driven.settled,
         finalState: driven.final,
+        // PARITY-S5's reference value, from Monaco rather than from ink.
+        editorFontMetrics: await readEditorFontMetrics(ctPage),
         viewport: viewportRecord,
         pageRoute: {
           how: "page.screenshot() over CDP — Chromium's own raster of the web contents, no window chrome, no compositor",
