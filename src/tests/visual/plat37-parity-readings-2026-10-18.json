@@ -1,0 +1,1052 @@
+{
+ "_comment": [
+  "PLAT-37 — GPUI-vs-ELECTRON PARITY, 2026-10-18 PASS.",
+  "",
+  "WHAT THIS PASS WAS FOR. Two things: find out why the Electron arm draws",
+  "panes the shared default layout does not place (PARITY-S1/S14), and close",
+  "the editor row-pitch gap whose direction had flipped (PARITY-S5).",
+  "",
+  "THE HEADLINE. PARITY-S1 WAS NOT A PRODUCT FINDING. It was the output",
+  "directory. The Electron lane graded whatever `<view>.png` and",
+  "`<view>.capture.json` were on disk, and three of the six scenarios had",
+  "failed before their capture step, leaving the 2026-10-12 run's frames in",
+  "place — frames taken five days before the `noUserLayout` fixture option",
+  "and therefore showing the raw bundled tree's TEST RESULTS / CONSTRAINTS",
+  "column. The records say so themselves: `takenAt` 2026-10-12T20:29..20:39Z",
+  "on exactly the three views that reported seven panes, against",
+  "2026-10-17T13:19..13:25Z on the three that did not.",
+  "",
+  "EVERY FINDING SAYS WHETHER IT WAS RE-MEASURED OR INHERITED",
+  "(`measuredThisPass`), and every claim names the commit it was measured",
+  "against, in the same sentence.",
+  "",
+  "STANDING: HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. Both lanes",
+  "need a live macOS GUI session and a kTCCServiceScreenCapture grant.",
+  "",
+  "Raw per-frame records are in build/plat37-parity-2026-10-18/ (gitignored)."
+ ],
+ "schemaVersion": 2,
+ "supersedes": [
+  "src/tests/visual/plat37-parity-readings.json (2026-10-12, build-skew contaminated)",
+  "src/tests/visual/plat37-parity-readings-2026-10-13.json",
+  "src/tests/visual/plat37-parity-readings-2026-10-14.json",
+  "src/tests/visual/plat37-parity-readings-2026-10-16.json (Electron arm never built)",
+  "src/tests/visual/plat37-parity-readings-2026-10-17.json (its PARITY-S1 and PARITY-S14 pane censuses rest on three STALE Electron frames; see `theStaleFrameFinding` below. Its PARITY-S5 and PARITY-P1 readings are unaffected by the staleness in the pitch dimension and are reproduced here as the `before` column.)"
+ ],
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE.",
+ "measuredAt": "2026-10-18",
+ "subject": {
+  "codetracer": "d883db0e2b94b04a10d0160b68219032b47394b5 (agents)",
+  "codetracerWorkingTree": "dirty, deliberately and in this pass's own changes: ci/test/plat37-macos-electron-capture.sh (the run stamp and the perf-limit scale), src/frontend/gpui/chrome.nim (the Monaco line-height derivation), src/frontend/gpui/window_geometry.nim and src/frontend/gpui/app/leaves.nim and src/frontend/gpui/tests/test_plat47_window_gestures.nim (the comments that named the old literal), src/tests/gui/tests/visual/plat37-electron-window-capture.spec.ts (the Monaco font-metrics probe). PLUS repro.nim, which was already uncommitted before this pass began and carries someone else's `dsymutil` tool declaration.",
+  "isonimGpui": "ab520c05fccbc08adec17606b201d7db19960eea (agents), clean",
+  "isonim": "deb3c8a7623ddf5dac0485c4af374c0ea4ac92f1",
+  "codetracerPm": "30a01366caa61b0ce06665ed68e05c797ae5e097 (latest)",
+  "guiAssert": "3058e0c030b6db13af0452f2cc9870e56548942c",
+  "codetracerImageDiff": "ee9fb397b94155557d730ee6997db60687214988 (unchanged since the flipdiff binary was built from it on 2026-10-12, which is what makes reusing that binary legitimate)",
+  "reprobuildPackages": "9f981af6c771ce062de810dcdd3affae21857f22",
+  "reprobuildCheckout": "a192a91295aa88eb35f1599d40a32a0904d31cf0 (agents)",
+  "whatMovedSinceTheLastPassSSUBJECT": "codetracer 596cb6e50 -> d883db0e2, ONE commit: `refactor(viewmodel): one per-stop loader for every front-end`, 748 insertions / 187 deletions over 8 files, all under src/frontend/tui/host and src/frontend/viewmodel. `git diff --name-only 596cb6e50..d883db0e2 -- src/tests/visual/screen_oracle` is EMPTY, which is what licenses reusing the structdump binary built at 596cb6e50.",
+  "isonimGpuiShims": "REBUILT with `just plat37-shims` at 2026-10-17T17:03 as instructed, and the rebuild was a CONTENT NO-OP, stated rather than assumed: `git show --stat ab520c0` is one file, tools/virtual_pointer.c (+11 lines), which `plat37-shims` does not compile — it runs `cargo build` over rust/ only — and the three staged cdylibs came out at exactly the byte counts they had before (1,640,200 / 71,006,072 / 66,770,072) with 113 `gpui_` symbols each. `virtual_pointer` is a Wayland `zwlr_virtual_pointer_v1` tool used by the Linux PLAT-47/48 lanes and by nothing on this macOS path."
+ },
+ "upstreamRecheckedAtTheEnd": {
+  "when": "2026-10-17T15:21:45Z, with `git ls-remote <origin url> refs/heads/<branch>` per repo, after every measurement in this file was taken.",
+  "codetracer": "MEASURED AGAINST d883db0e2b94b04a10d0160b68219032b47394b5 (agents). The remote has since moved to 1b2bdf6f5707e35cb33484b30d26ebf92f7e6519. NOT CHASED, by instruction; every reading in this file is against d883db0e2 and says so.",
+  "isonimGpui": "ab520c05fccbc08adec17606b201d7db19960eea — SAME as measured.",
+  "isonim": "deb3c8a7623ddf5dac0485c4af374c0ea4ac92f1 — SAME as measured.",
+  "codetracerPm": "30a01366caa61b0ce06665ed68e05c797ae5e097 — SAME as measured.",
+  "codetracerImageDiff": "MEASURED WITH a flipdiff built from ee9fb397b94155557d730ee6997db60687214988, which is still this checkout's HEAD. The REMOTE has since moved to 5a4a6e792cdcdcaba35a2794cdb5ee5b6c994324. The binary is the local checkout's revision, not the remote's, and that is what 'the FLIP implementation is byte-identical' means here — it is identical to ee9fb397b, which may no longer be the newest FLIP.",
+  "ruling": "The codetracer remote moved during the pass, which was expected (the Linux arm pushes hourly). Nothing in this file was re-measured against the new tip, and nothing claims to be."
+ },
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 (Darwin 25.5.0 arm64)",
+  "displayPoints": "1728x1117, one display",
+  "pointPixelScale": 2.0,
+  "loadAtTheStartOfThePass": "load average 13.47 / 15.02 / 11.22 — another workspace on this host (fix-codetracer-in-place-frontend-aggregate-a) was running its own reprobuild throughout. This is the condition the perf-limit fix below exists for, and it is why the dev-shell entry that opens this pass took about nine minutes.",
+  "devShell": "nix develop in codetracer. The first entry of the pass BUILT reprobuild-0.2.5 from source (/nix/store/kr61nm6ybcj32vy1dz489q4rjwmc5ivk-reprobuild-0.2.5.drv), which is the whole of that nine minutes; later entries were warm.",
+  "reproBootstrapCc": "/nix/store/2my3q4ffmph0md3p0d4l31wkqgbxgz5w-clang-wrapper-21.1.8/bin/clang. PROVEN with AGENTS.md's control pair run this pass, each exit code captured into a variable on its own line before any other command: under `env -i`, a bare `#include <stdlib.h>` compiled with the wrapper (rc_wrapped=0) and FAILED with the unwrapped /nix/store/15n3slfdsd5zhyxrvaa7vm36f1jydwqp-clang-21.1.8/bin/clang (rc_unwrapped=1, `ctrl.c:1:10: fatal error: 'stdlib.h' file not found`).",
+  "reproForeignEnvBash": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (GNU bash 5.3.9, >= 4 as required)",
+  "runquotaSocket": "/tmp/rq-adopt-501/runquota.sock (adopted, not restarted)",
+  "reproOnPath": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro, the local build, PATH-led as instructed",
+  "diskFreeAtStart": "70G",
+  "diskFreeBetweenPhases": "68-69G, never near the 20G abort floor"
+ },
+ "prerequisitesCheckedBeforeAnythingCouldBeMeasured": [
+  {
+   "what": "libs/nim-regex, which the 2026-10-17 pass had to `git submodule update --init`",
+   "measured": "ALREADY INITIALISED. `git submodule status` shows ` a0f1df6a6512340df9ababe59f55140c94a2200f libs/nim-regex (v0.27.0)` with no leading `-`, as do all 33 submodules. No action taken.",
+   "worthKnowing": "The instruction to re-check it was right to give; the check cost one command and the answer was no."
+  },
+  {
+   "what": "isonim-gpui's PLAT-37 shims, which build-freshness.sh:113-116 excludes from the digest BY DESIGN (`Link-time inputs that are not Nim modules — the isonim-gpui cdylib above all`), so the gate cannot see a stale one",
+   "measured": "REBUILT with `nix develop --command just plat37-shims` (exit 0), and the rebuild was a content no-op — see `subject.isonimGpuiShims`. Rebuilt anyway, because 'the gate cannot see it' is exactly the condition under which you do not reason about it, you rebuild it."
+  }
+ ],
+ "buildOutcomes": {
+  "gpuiArm": {
+   "command": "nix develop --command just build-gpui",
+   "environment": "INSIDE the codetracer dev shell, PATH led by reprobuild/build/bin, REPRO_BOOTSTRAP_CC and REPRO_FOREIGN_ENV_BASH set as in `host`.",
+   "exit": 0,
+   "artefact": "build/bin/codetracer-gpui, 5,935,040 B, stamped `built at 2026-10-17T14:30:56Z by /nix/store/2ry3sav2…-nim-fork-2.3.1-codetracer/bin/nim`, input_digest 44f3eaa710948bc0a588b4fe5a5718b4efc4c1878bce705c4de2d36876b0ca0e.",
+   "digestDiffersFromTheLastPassAndShould": "44f3eaa71094… against the 2026-10-17 pass's d23bac099ed1…: the tree moved one commit AND this pass changed chrome.nim, window_geometry.nim and leaves.nim, all of which are in the GPUI closure.",
+   "noFirstAttemptFailure": "Unlike 2026-10-17, which failed once on the uninitialised nim-regex submodule, this build succeeded on its first attempt."
+  },
+  "electronArm": {
+   "command": "nix develop --command env REPROBUILD_PACKAGES_ROOT=<workspace reprobuild-packages @9f981af6> REPRO_DAEMON=off REPRO_NIM_COMPILER=/nix/store/4m0ffd42r0qn0rzpjjibdrb97kadc5j2-nim-unwrapped-2.2.4/bin/nim CODETRACER_REPROBUILD_TARGET=ct-binary just build-once",
+   "exit": 0,
+   "deviationDeclared": "THE TARGET SCOPING IS A DEVIATION from `just build-once` with no arguments, and it is flagged as one. `CODETRACER_REPROBUILD_TARGET` is build-once.sh's own documented knob (scripts/build-once.sh:466) and it exists here to step past two pre-existing actions outside the Electron bundle's closure — `dmg` and `docs-book-assets` — which the 2026-10-17 pass measured failing for reasons unrelated to the bundle.",
+   "threeEnvironmentVariablesWithoutWhichITDOESNOTBUILD": "REPROBUILD_PACKAGES_ROOT, REPRO_DAEMON=off and REPRO_NIM_COMPILER. Carried from the 2026-10-17 pass, which measured the failure without them (`package \"nim@2.2.10\" has no tarball realization for aarch64-macos`) and recorded that it is reprobuild's own printed remedy.",
+   "artefact": "src/build-debug-repro/bin/ct, 11,410,880 B, 2026-10-17T17:37 local; bundle stamp input_digest 9090b2c49966a78c701f1fdca5c05780a574a7b3ba95903481a6c808f9c6a9b7.",
+   "andTheRuntimeAssetsCheckRAN": "`require-runtime-assets.sh: ok -- src/build-debug-repro/config/ carries default_config.yaml and default_layout.json, both matching src/config/.` This matters to PARITY-S1: the layout the built bundle will load is byte-identical to the one in the source tree, so the oracle argument is about the file the product actually reads."
+  }
+ },
+ "freshnessGates": {
+  "_rule": "Every gate was run INSIDE the dev shell, because `bf_gpui_input_digest` regenerates the closure with `nim c --genDeps` using whatever nim is on PATH and answers differently outside it.",
+  "defaultLayoutFresh": {
+   "command": "nix develop --command bash ci/test/default-layout-fresh.sh",
+   "exit": 0,
+   "whyItIsINthisFILE": "It is not a PLAT-37 gate; it is run here because it is the direct check of PARITY-S1's central claim. It regenerates BOTH src/config/default_layout.json and src/frontend/headless_app/shared_default_layout.generated.json with the single generator (`headless_app/generate_default_layout.nim`, compiled with `nim js` and run under node) and fails if either differs by a byte. Exit 0 means the bundled tree and the shared default ARE one computation at codetracer d883db0e2, so 'the oracle is incomplete' cannot be rescued by supposing the two files drifted."
+  },
+  "gpuiAssert": {
+   "command": "nix develop --command bash ci/lib/build-freshness.sh assert",
+   "exit": 0,
+   "inputDigest": "44f3eaa710948bc0a588b4fe5a5718b4efc4c1878bce705c4de2d36876b0ca0e",
+   "artefactDigest": "db698a639a3c",
+   "note": "Reported `built from THIS tree`."
+  },
+  "electronAssert": {
+   "command": "nix develop --command bash ci/lib/build-freshness.sh electron-assert",
+   "exit": 0
+  },
+  "gpuiAssertRerunAfterTheElectronBuild": {
+   "command": "the same `assert`, after `just build-once`",
+   "exit": 0,
+   "why": "The Electron build touches the shared frontend; re-asserting shows the GPUI binary did not go stale under it."
+  }
+ },
+ "laneOutcomes": {
+  "_rule": "Each exit code was captured with `rc=$?` on its own line, never through a pipe.",
+  "gpui": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<src/build-debug-repro/bin/replay-server> bash ci/test/plat37-macos-window-capture.sh",
+   "exit": 0,
+   "captured": 7,
+   "refused": 0,
+   "viewportHonouring": "state, calltrace, editorWithMark and gutterLanes honoured at 1440x929 pt; shell, editor and eventLog CLAMPED BY THE DISPLAY to 1728x1084 pt against the 1920x1080 asked for, because the display is 1728x1117. Unchanged from previous passes and the reason PARITY-P1 can only be computed on the three `laptop` scenarios.",
+   "controlsThatRan": [
+    "control 1 host + Screen Recording grant + a display still: OK",
+    "control 2 a capture aimed at an owner that does not exist: refused, attestation matched 0, no G1 claim",
+    "control 3 the grader's rendersText assertion made to fail on a flat frame: OK, both arms live"
+   ]
+  },
+  "electron": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<...> bash ci/test/plat37-macos-electron-capture.sh",
+   "exit": 0,
+   "captured": 6,
+   "censusRefusals": 0,
+   "playwright": "6 passed (16.1m). ALL SIX, where the 2026-10-17 run at 596cb6e50 was 2 passed / 4 failed. entry-shell, stepped-editor, advanced-state and returned-calltrace — the four that failed then — all pass now.",
+   "theRunStampFIRED_asITshould": "The lane printed `run stamp: frames older than 2026-10-17T14:43:34Z will be refused, not graded` and then had nothing to refuse, because all six tests reached their capture step and overwrote the 2026-10-12 frames. The guard's own control is in `instrumentControls`, not in this run.",
+   "whatTheRaisedPERFlimitDID": "`# timing: first window: 7018ms / 60000ms (12%) [ok]` and 6903-7018 ms on every launch, against the 10000 ms ceiling that threw at 35567 ms and 32122 ms on 2026-10-17. Note the host was also much less loaded by then (load average ~3 against ~13), so this run does not by itself prove the scale was NECESSARY — it proves the ceiling is no longer where a contended host hits it.",
+   "viewportHonouring": "all six honoured: 1920x1080 pt -> 3840x2160 px on the three `wide` views, 1440x900 pt -> 2880x1800 px on the three `laptop` ones."
+  }
+ },
+ "theStaleFrameFinding": {
+  "question": "Is Electron right or wrong to draw TESTS and CONSTRAINTS where the shared default places neither?",
+  "answer": "NEITHER. The build under test never drew them. The reading came from three frames the 2026-10-17 run did not take.",
+  "whichOfTheThreeCandidates": "CANDIDATE 1, in a sharpened form. Not the test fixture leaking state BETWEEN SCENARIOS — the launch fixture's `noUserLayout: true` is set once for every scenario in the spec's loop (plat37-electron-window-capture.spec.ts:658) and `removeUserLayout()` runs before every launch. It is the OUTPUT DIRECTORY leaking frames BETWEEN RUNS.",
+  "theEvidenceThatDecided": [
+   "TWO INDEPENDENT TIMESTAMPS AGREE, PER VIEW. The capture driver stamps each record with `takenAt`, and the filesystem stamps each PNG. Read 2026-10-18 out of build/plat37-macos-electron/, left over from the run graded against codetracer 596cb6e50: state takenAt 2026-10-12T20:32:36Z / png mtime 2026-10-12T20:32:39Z; calltrace 20:39:06Z / 20:39:09Z; editor 20:29:47Z / 20:29:50Z; eventLog 2026-10-17T13:23:08Z / 13:23:11Z; editorWithMark 13:25:20Z / 13:25:23Z; shell 13:19:34Z / 13:19:43Z. Each pair agrees to within the 3-9 s a capture takes.",
+   "THE SPLIT IS EXACTLY THE FINDING'S SPLIT. The three views with 2026-10-12 stamps — state, calltrace, editor — are precisely the three the 2026-10-17 pass reported as drawing SEVEN panes with a TESTS / CONSTRAINTS column. The three with 2026-10-17 stamps are the ones that reported five, five and four. The correlation is one-to-one over six rows.",
+   "THE GEOMETRY CORROBORATES, ARITHMETICALLY, AND THE TWO FRAMES MATCH TWO DIFFERENT FILES. The FRESH editorWithMark frame's Electron columns at the 1440-point viewport are 289 / 357 / 787 points of 1433 (two 4-point splitters make up the 1440) = 20.17% / 24.91% / 54.92%, against the generated oracle's 20 / 25 / 55 — every column within 0.2 points. The STALE state frame's are 218 / 355 / 585 / 270 of 1428 (three splitters) = 15.27% / 24.86% / 40.97% / 18.91%, against the RAW BUNDLED tree's 20 / 55 / 25 each scaled by 0.75 with a 25% editor inserted = 15.00 / 25.00 / 41.25 / 18.75 — every column within 0.3 points. Two frames, two different layout files, each matched to a fraction of a point. The bundled tree has no editor slot at all (its ten components are filesystem, vCS, state, scratchpad, calltrace, agentActivity, eventLog, terminal, testResults, constraints), which is why the editor's 25% has to be inserted and the rest rescaled.",
+   "THE DATES BRACKET THE FIX. `noUserLayout: true` entered this lane's spec in 9226bc5ed (2026-10-15T16:40). Every stale frame predates it; every fresh frame postdates it. The 2026-10-14 fix DID work — it was never re-measured on three of the six views."
+  ],
+  "soTheOracleIsNotIncomplete": "The second candidate — 'Electron legitimately opens these panes and the shared default does not describe them, so GPUI is the deficient side' — is REFUTED, and by the product's own code rather than only by the frames. `src/config/default_layout.json` and `src/frontend/headless_app/shared_default_layout.generated.json` are BOTH written by one generator (`headless_app/generate_default_layout.nim`) from one input: the first is the bundled tree, the second is that tree through `index/mode_default_layout.modeDefaultLayout(_, DebugMode)`. The bundled tree gives TEST RESULTS and CONSTRAINTS a column of their own on purpose, and the mode derivation removes them. `index/config.installModeDefault` applies that derivation on first run and on View > Reset Layout, and its own comment records that copying the bundled file verbatim — which is what it did until 2026-09-27 — is the defect that produced 'a standing TEST RESULTS / CONSTRAINTS column that no mode draws'. The oracle is complete; the frames were old.",
+  "andTheThirdCandidate": "'The capture samples before the layout settles' is not what produced the seven-pane census either, because the frames in question were not sampled at all in that run. It remains live for PARITY-S14 and for PARITY-I1's `editorSettledBetweenOperations`, which are separate.",
+  "andOneGateSaysItOUTRIGHT": "ci/test/default-layout-fresh.sh regenerates BOTH src/config/default_layout.json and src/frontend/headless_app/shared_default_layout.generated.json from the single generator and fails if either differs by one byte. So 'the bundled tree and the shared default are one computation, not two that happen to agree' is not an inference from reading the generator — it is a gate, and this pass ran it (see `freshnessGates.defaultLayoutFresh`)."
+ },
+ "whyTheThreeScenariosNeverREACHEDtheirCapture": {
+  "measured": "From build/plat37-macos-electron/playwright.log of the 596cb6e50 run, which the 2026-10-17 readings summarised as 'all four failures are the same assertion at plat37-electron-window-capture.spec.ts:862'. THAT SUMMARY IS WRONG: only ONE of the four is that assertion.",
+  "theFourFailures": {
+   "advanced-state": "`Performance limit exceeded: \"first window\" took 35567ms (limit: 10000ms)` — thrown inside `launchTraceFolderElectron` (fixtures.ts:1449), i.e. in the LAUNCH fixture, before the viewport was applied, before anything was driven and before anything was captured.",
+   "returned-calltrace": "the same, 32122ms.",
+   "stepped-editor": "`the 'stepIn' toolbar button (#step-in-image) is not in the DOM` — `toHaveCount(1)` timing out at 15 s inside `drive`, so again before the capture step.",
+   "entry-shell": "`the editor drew no rows` at line 862 — the ONLY one of the four that is that assertion, and the only one of the four that DID capture. Its frame is fresh, so PARITY-S14 below is a real reading."
+  },
+  "soTheLaneHADnoFRESHframeFORthreeVIEWS": "and graded three five-day-old ones instead, because its only freshness test was `[ -f \"${rec}\" ]`."
+ },
+ "theRowPitchFinding": {
+  "question": "GPUI 22.0-22.5 points against Electron 23.5-24.5 at codetracer 596cb6e50 — GPUI the tighter, where it had been the looser. Where is the pitch decided, and can GPUI derive it rather than copy it?",
+  "answer": "GPUI was carrying MONACO'S LINUX ANSWER as a literal on a macOS host. It is now derived, and the derivation is Monaco's own rule.",
+  "theMechanism": [
+   "The desktop never sets Monaco's `lineHeight`. `editor.nim`'s `createMonacoEditor` call (src/frontend/ui/editor.nim:3245-3270) passes `fontSize` and `fontFamily` and no `lineHeight`, so the option stays at `EDITOR_FONT_DEFAULTS.lineHeight`, which is 0 (editorOptions.js:2917) — Monaco's 'compute it from the font size' branch.",
+   "That branch is PLATFORM-DEPENDENT. In the Monaco this product ships, `node_modules/monaco-editor/esm/vs/editor/common/config/fontInfo.js:12` reads `export const GOLDEN_LINE_HEIGHT_RATIO = platform.isMacintosh ? 1.5 : 1.35;` and line 36 `lineHeight = GOLDEN_LINE_HEIGHT_RATIO * fontSize;`, rounded at line 42.",
+   "The font size is 16 on both arms: the desktop's `data.ui.fontSize` (frontend/utils.nim:1039) which it hands Monaco, and the GPUI front-end's own default (app/leaves.nim's `if sizePx != 16`, 16 being the size it does not bother to set).",
+   "So Monaco draws round(1.35 * 16) = 22 on Linux and round(1.5 * 16) = 24 on macOS. `chrome.EditorLinePx` was the literal `22` — correct on Linux, two points short on macOS, and the gap the instrument measured."
+  ],
+  "whatWasChanged": {
+   "where": "src/frontend/gpui/chrome.nim",
+   "what": "`EditorLinePx` is now `monacoLineHeightPx(CodeFontPx)`. `monacoLineHeightPx` transcribes `BareFontInfo._create`'s four lines — the automatic branch, the em branch for an option below 8, the absolute branch, the round, and the 8 px floor — and `MonacoGoldenLineHeightRatio` is `when defined(macosx): 1.5 else: 1.35`, the same conditional Monaco writes. `CodeFontPx = 16` names the one font size both front-ends use.",
+   "whyADerivationAndNotTheConstant24": "A literal cannot be right on both platforms, and the Linux arm of this campaign measures the same finding against Monaco's 22. The derivation is right on both and moves by itself if the font size ever does. The editor-zoom multiplier is deliberately NOT transcribed: this front-end has no zoom control, so copying `EditorZoom.getZoomLevel()` would invent a second answer for a level that is always 0.",
+   "alsoUpdated": "The three comments that still spelled the literal 22 — `window_geometry.GpuiEditorRowPx`, `app/leaves.renderEditorRow`, and `tests/test_plat47_window_gestures.nim` — now say what the derivation gives on each platform."
+  }
+ },
+ "instrumentControls": {
+  "_rule": "A uniform result across all rows is a broken probe until proven otherwise. Each entry says what the probe answered DIFFERENTLY, and on what.",
+  "theDerivedPitchConstant": "POSITIVE CONTROL, and not uniform. build/plat37-parity-2026-10-18/showpitch.nim imports the REAL `gpui/chrome` and prints the derivation's branches: EditorLinePx 24, monacoLineHeightPx(16) 24, (12) 18, (16,2) 32 (the em branch), (16,30) 30 (the absolute branch), (1) 8 (the floor). Five inputs, five different answers, each the one Monaco's `BareFontInfo._create` gives. MonacoGoldenLineHeightRatio printed 1.5, which is the macOS arm of the `when`.",
+  "theStaleFrameGuard": "POSITIVE AND NEGATIVE CONTROL, over the exact comparison the lane now makes, on three synthetic records: `takenAt` 2026-10-12T20:32:36Z (the real stale value) -> REFUSED; 2026-10-17T13:25:20Z (the real fresh value) -> graded; no `takenAt` at all -> REFUSED. Three rows, two outcomes, so the guard is not answering one thing to everything.",
+  "theRowPitchInstrument": "UNCHANGED from the 2026-10-17 pass and deliberately so, because it is the before/after instrument: the MODE of consecutive `lineBands` centre deltas at 0.5-point resolution, a statistic of the oracle's ink projection using no OCR at all. The gutter-digit estimator was already rejected by that pass for reading 15-22 usable steps per GPUI frame against 0-2 per Electron frame. Its own liveness control is that it does NOT answer uniformly: see the before table, where it reads 22.0 and 22.5 on GPUI and 23.5, 24.0 and 24.5 on Electron, with support between 6 and 17 deltas.",
+  "theTypecheckOnTheSpecChange": "POSITIVE CONTROL. `tsc --noEmit -p tsconfig.json` over src/tests/gui reports 14 errors, all in four unrelated specs (auto-hide-panes, omniscience_eye_icon, m24-session-toml-load, python-trivial-chain) and none in the edited file. To show tsc actually reads the edited file, `readEditorFontMetrics` was renamed to `readEditorFontMetricsTYPO` at its call site and the run then reported `plat37-electron-window-capture.spec.ts(824,34): error TS2552: Cannot find name 'readEditorFontMetricsTYPO'`. The file was restored and re-checked.",
+  "theShellScriptChange": "`bash -n` and `shellcheck -S warning` both exit 0 on the edited ci/test/plat37-macos-electron-capture.sh.",
+  "flipdiffProvenance": "REUSED, the binary built 2026-10-12 at build/plat37-parity/flipdiff, as the 2026-10-17 pass did. Justified by measurement, and stated precisely: it was built from codetracer-image-diff ee9fb397b and `git -C codetracer-image-diff rev-parse HEAD` still reads ee9fb397b94155557d730ee6997db60687214988, so the FLIP implementation in the binary is byte-identical to THIS CHECKOUT's. The REMOTE moved to 5a4a6e792 during the pass (see `upstreamRecheckedAtTheEnd`); the binary is the checkout's revision, not the remote's.",
+  "structdumpProvenance": "REUSED, the binary built 2026-10-17T16:28 from build/plat37-parity-2026-10-17/structdump.nim. Justified by measurement: `git diff --name-only 596cb6e50..d883db0e2 -- src/tests/visual/screen_oracle` is EMPTY, and structdump.nim itself was copied unchanged, so neither the probe nor the oracle primitives it links moved between the two subjects.",
+  "chipDetectorNegativeControl": "NOT RELIED ON THIS PASS. It still FAILS on the GPUI side (2 false positives per frame in the fileTree) and HOLDS on Electron (0), as the 2026-10-17 pass recorded. No finding here rests on chip counts."
+ },
+ "regrade": [
+  {
+   "id": "PARITY-S1",
+   "previousVerdict": "CHANGED — STILL OPEN, BUT NARROWER, AND THE TWO `other` PANES ARE NOW NAMED (2026-10-17): Electron 7 panes in 3 of 6, 5 in 2 of 6, 4 in 1 of 6; 4 census refusals.",
+   "verdict": "WITHDRAWN AS A PRODUCT FINDING — IT WAS THE OUTPUT DIRECTORY, NOT THE RENDERER.",
+   "measuredThisPass": true,
+   "deficientSide": "neither renderer — the LANE was deficient",
+   "whatTheQuestionWas": "Is Electron right or wrong to draw TESTS and CONSTRAINTS? Three candidates were on the table: fixture state leaking between scenarios, an incomplete oracle, or a capture taken before the layout settled.",
+   "whatTheEvidenceSaid": "See `theStaleFrameFinding`. The three views that reported seven panes carried `takenAt` 2026-10-12T20:29..20:39Z — frames from a run five days earlier, left in the output directory because those three Playwright tests died before their capture step and the grading loop's only freshness test was `[ -f \"${rec}\" ]`.",
+   "soTheANSWERtoTHEquestion": "Electron is RIGHT, and so is the oracle. The two files are one computation — `ci/test/default-layout-fresh.sh` regenerates both from the single generator and exited 0 this pass — and the mode derivation that strips TEST RESULTS and CONSTRAINTS from the bundled tree is what the index process applies on first run. The 2026-10-14 `noUserLayout` fix worked; three of six views were simply never re-measured after it.",
+   "censusAfter": "12 of 12 frames (both arms, all six scenarios) draw EXACTLY ['calltrace','editor','eventLog','fileTree','state'], the derived oracle's set, at codetracer d883db0e2. Electron's lane reports `6 captured, 0 refused`.",
+   "whatWasCHANGEDtoCLOSEit": "Nothing in either renderer. Two changes to ci/test/plat37-macos-electron-capture.sh: (1) a RUN STAMP — the lane records `RUN_STARTED_AT` before the Playwright drive and refuses any capture record whose `takenAt` is absent or earlier, naming both timestamps, so a frame this run did not take can never be graded as if it had; (2) `CODETRACER_PERF_LIMIT_SCALE=6`, the knob `lib/performance-limits.ts` documents for lanes whose subject is not performance and which the sibling PLAT-35 lane has always set, which is what stopped two of the four tests from dying in the launch fixture on a contended host.",
+   "andTheTESTSpassNOW": "6 passed (16.1m) against 2 passed / 4 failed at 596cb6e50. All four that failed then pass now."
+  },
+  {
+   "id": "PARITY-S14",
+   "previousVerdict": "OPEN — Electron's entry-shell draws a `Search` pane (x 1219..1920) where the editor and call trace should be, four panes, no editor (NEW at 2026-10-17, on a FRESH frame).",
+   "verdict": "CLOSED — THE SYMPTOM IS GONE ON A FRESH FRAME AT d883db0e2, AND THE 2026-10-17 READING WAS REAL BUT WAS OF A RUSHED LAUNCH.",
+   "measuredThisPass": true,
+   "reading": "electron/shell at `wide` now holds the usual five panes — fileTree, editor, state, calltrace, eventLog — with no pane the oracle labels `search`. Its route record reads `editorFontMetrics {lineHeightPx 24, fontSizePx 16}`, i.e. a Monaco editor is mounted and configured, where on 2026-10-17 the Playwright assertion `the editor drew no rows` was the one genuine failure of the four.",
+   "whichOfTheTHREEcandidates": "CANDIDATE 3, the settling one, and NOT the stale-frame mechanism that explains S1 — the 2026-10-17 shell frame was taken at 13:19:34Z, in that run, and was never stale. What changed is that the launch is no longer racing the 10-second `first window` ceiling: the same scenario now reports `first window: 7018ms / 60000ms`, the test passes, and the editor is on the frame.",
+   "notFULLYdiagnosed": "Whether the `Search` surface appeared because the editor had not yet mounted, or because the first-run layout briefly placed Find-in-Files in the editor column, was NOT established — the frame that would answer it is gone. What IS established is that it does not survive a launch that is given room. Recorded as closed-by-measurement, not as explained."
+  },
+  {
+   "id": "PARITY-S5",
+   "previousVerdict": "CHANGED — STILL OPEN, AND THE DIRECTION HAS FLIPPED. GPUI 22.0-22.5 points against Electron 23.5-24.5, GPUI the tighter (2026-10-17, codetracer 596cb6e50).",
+   "verdict": "CLOSED ON THIS PLATFORM — GPUI NOW DERIVES MONACO'S LINE HEIGHT INSTEAD OF CARRYING MONACO'S LINUX ANSWER.",
+   "measuredThisPass": true,
+   "theReferenceVALUE_measuredDIRECTLY": "NEW THIS PASS, and it is the strongest thing in this file: the Electron lane's route record now carries `editorFontMetrics`, read from the LIVE Monaco editor rather than estimated from ink. Every fresh Electron route record reads `{\"lineHeightPx\": 24, \"fontSizePx\": 16, \"source\": \"monacoEditor.config.lineHeight\"}`. The reference's row pitch is 24 px at font size 16, from Monaco's own resolved configuration.",
+   "andTheDerivationREPRODUCESit": "`build/plat37-parity-2026-10-18/showpitch` imports the real `gpui/chrome` and prints EditorLinePx 24 on this host, from MonacoGoldenLineHeightRatio 1.5 and CodeFontPx 16.",
+   "before": "GPUI 22.0-22.5 points against Electron 23.5-24.5 across six frames (codetracer 596cb6e50).",
+   "after": "GPUI 24.0-24.5 against Electron 23.5-24.5 (codetracer d883db0e2). Per-view gap 1.5-2.5 points -> 0.0-0.5.",
+   "theCONTROLthatTHEinstrumentDIDnotMOVE": "Electron read 23.5 / 24.0 / 24.5 / 24.5 / 24.0 on state, calltrace, editorWithMark, editor and eventLog in BOTH passes — the same five values, with a different build of the Electron bundle and a fresh capture of three of those five frames. Only the GPUI column moved, which is what distinguishes 'the product changed' from 'the estimator changed under both arms'.",
+   "consequence": "Over an 830-point pane this is about 34.4 GPUI rows against 34.4 Electron rows, where it was 37.7 against 35.3. The GPUI band counts fell 37->34/35 at laptop and 45->40 at wide, as predicted before the measurement. PARITY-S6's mechanism — a corpus line number expressed relative to the first drawn row — is correspondingly less live, but it was not re-measured here.",
+   "itCOSTSsomething": "See issue unfiled-C: `corpus-pins.json` pins GPUI editor row counts as exact sets and those sets are now platform-dependent. No pin was edited."
+  },
+  {
+   "id": "PARITY-P1",
+   "previousVerdict": "CHANGED — IMPROVED, AND IT NOW TRACKS PARITY-S1 (2026-10-17, codetracer 596cb6e50): state 0.3019, calltrace 0.3057, editorWithMark 0.2019, mean 0.2698, the three spanning TEN points.",
+   "verdict": "IMPROVED AGAIN, AND THE SPREAD COLLAPSED. THE CLAIM THAT P1 IS S1'S SHADOW IS CONFIRMED BY THE SHAPE OF THE FALL, NOT ONLY BY ITS SIZE.",
+   "measuredThisPass": true,
+   "measuredAgainst": "codetracer d883db0e2, on the three `laptop` scenarios — the only three whose two arms have the same extent, because the display clamps GPUI's `wide` window to 1728 points while Electron obtains a true 1920.",
+   "flipAfter": {
+    "state": {
+     "width": 2880,
+     "height": 1800,
+     "mean": 0.08893796056509018,
+     "p50": 0.0,
+     "p90": 0.35672298073768616,
+     "p99": 0.9690597653388977,
+     "max": 0.990104079246521,
+     "fracOver0_10": 0.18450347222222221,
+     "fracOver0_25": 0.12377430555555556,
+     "fracOver0_50": 0.07624324845679012
+    },
+    "calltrace": {
+     "width": 2880,
+     "height": 1800,
+     "mean": 0.0905957967042923,
+     "p50": 0.0,
+     "p90": 0.3631450831890106,
+     "p99": 0.9685860872268677,
+     "max": 0.990104079246521,
+     "fracOver0_10": 0.19026774691358025,
+     "fracOver0_25": 0.12750868055555556,
+     "fracOver0_50": 0.07642804783950617
+    },
+    "editorWithMark": {
+     "width": 2880,
+     "height": 1800,
+     "mean": 0.08615858107805252,
+     "p50": 0.0,
+     "p90": 0.34044790267944336,
+     "p99": 0.9688559770584106,
+     "max": 0.990104079246521,
+     "fracOver0_10": 0.17921913580246915,
+     "fracOver0_25": 0.1192957175925926,
+     "fracOver0_50": 0.07374980709876543
+    }
+   },
+   "notComparable": {
+    "editor": "extent mismatch: gpui 3456x2168 (cropped 3456x2110) vs electron 3840x2160",
+    "eventLog": "extent mismatch: gpui 3456x2168 (cropped 3456x2110) vs electron 3840x2160",
+    "shell": "extent mismatch: gpui 3456x2168 (cropped 3456x2110) vs electron 3840x2160"
+   },
+   "numbersInWords": "state fracOver0_10 0.1845 (mean 0.0889, p50 0.000000, p90 0.3567, p99 0.9691, max 0.9901); calltrace 0.1903 (0.0906 / 0.000000 / 0.3631 / 0.9686 / 0.9901); editorWithMark 0.1792 (0.0862 / 0.000000 / 0.3404 / 0.9689 / 0.9901). Mean over the three 0.1847, against 0.2699 at 596cb6e50.",
+   "didItFALLasS1CLOSED": "YES, AND THE DECOMPOSITION IS THE ACTUAL TEST. state fell 0.3019 -> 0.1845 (-0.1174) and calltrace 0.3057 -> 0.1903 (-0.1154) — those are the two whose 'before' reading came from a STALE 2026-10-12 Electron frame carrying the extra TESTS/CONSTRAINTS column. editorWithMark, whose before-frame was already fresh and already census-clean, fell only 0.2019 -> 0.1792 (-0.0227). If P1 were an independent cause, the three would have fallen by similar amounts. They did not: the two contaminated by S1 fell by about 11.6 points and the clean one by 2.3. P1 is S1's pixel shadow, and the 2.3-point residual is what the row-pitch fix is worth on its own.",
+   "theSPREADisTHEotherHALF": "The three used to span TEN points (0.2019 to 0.3057). They now span ONE POINT ONE (0.1792 to 0.1903). A metric that varied with which frame happened to be stale now agrees across scenarios, which is what it should do when both arms draw the same arrangement.",
+   "andTHEYareNOWinsideTHEladder": "At 596cb6e50 state and calltrace at ~0.30 were BEYOND every rung of the pixel-shift ladder — 64 px of pure translation reads 0.2524 — which is what a STRUCTURAL difference looks like. All three now sit between the 4-px rung (0.1619) and the 8-px rung (0.1916). The structural component is gone; what is left is in the range a few pixels of rigid displacement produces.",
+   "deltaPerScenario": {
+    "state": {
+     "fracOver0_10": -0.1174,
+     "mean": -0.0662,
+     "p90": -0.3076
+    },
+    "calltrace": {
+     "fracOver0_10": -0.1155,
+     "mean": -0.0644,
+     "p90": -0.2916
+    },
+    "editorWithMark": {
+     "fracOver0_10": -0.0227,
+     "mean": -0.0153,
+     "p90": -0.0929
+    }
+   },
+   "identityNegativeControl": {
+    "label": "shift0px",
+    "width": 2880,
+    "height": 1800,
+    "mean": 0.0,
+    "p50": 0.0,
+    "p90": 0.0,
+    "p99": 0.0,
+    "max": 0.0,
+    "fracOver0_10": 0.0,
+    "fracOver0_25": 0.0,
+    "fracOver0_50": 0.0,
+    "errorPng": "/Users/zahary/m/fix-pxor-issues/codetracer/build/plat37-parity-2026-10-18/ladder/shift0.flip.png",
+    "tiles": [
+     {
+      "tx": 0,
+      "ty": 0,
+      "x": 0,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 1,
+      "ty": 0,
+      "x": 360,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 2,
+      "ty": 0,
+      "x": 720,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 3,
+      "ty": 0,
+      "x": 1080,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 4,
+      "ty": 0,
+      "x": 1440,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 5,
+      "ty": 0,
+      "x": 1800,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 6,
+      "ty": 0,
+      "x": 2160,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 7,
+      "ty": 0,
+      "x": 2520,
+      "y": 0,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 0,
+      "ty": 1,
+      "x": 0,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 1,
+      "ty": 1,
+      "x": 360,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 2,
+      "ty": 1,
+      "x": 720,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 3,
+      "ty": 1,
+      "x": 1080,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 4,
+      "ty": 1,
+      "x": 1440,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 5,
+      "ty": 1,
+      "x": 1800,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 6,
+      "ty": 1,
+      "x": 2160,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 7,
+      "ty": 1,
+      "x": 2520,
+      "y": 300,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 0,
+      "ty": 2,
+      "x": 0,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 1,
+      "ty": 2,
+      "x": 360,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 2,
+      "ty": 2,
+      "x": 720,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 3,
+      "ty": 2,
+      "x": 1080,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 4,
+      "ty": 2,
+      "x": 1440,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 5,
+      "ty": 2,
+      "x": 1800,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 6,
+      "ty": 2,
+      "x": 2160,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 7,
+      "ty": 2,
+      "x": 2520,
+      "y": 600,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 0,
+      "ty": 3,
+      "x": 0,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 1,
+      "ty": 3,
+      "x": 360,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 2,
+      "ty": 3,
+      "x": 720,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 3,
+      "ty": 3,
+      "x": 1080,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 4,
+      "ty": 3,
+      "x": 1440,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 5,
+      "ty": 3,
+      "x": 1800,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 6,
+      "ty": 3,
+      "x": 2160,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 7,
+      "ty": 3,
+      "x": 2520,
+      "y": 900,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 0,
+      "ty": 4,
+      "x": 0,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 1,
+      "ty": 4,
+      "x": 360,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 2,
+      "ty": 4,
+      "x": 720,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 3,
+      "ty": 4,
+      "x": 1080,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 4,
+      "ty": 4,
+      "x": 1440,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 5,
+      "ty": 4,
+      "x": 1800,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 6,
+      "ty": 4,
+      "x": 2160,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 7,
+      "ty": 4,
+      "x": 2520,
+      "y": 1200,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 0,
+      "ty": 5,
+      "x": 0,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 1,
+      "ty": 5,
+      "x": 360,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 2,
+      "ty": 5,
+      "x": 720,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 3,
+      "ty": 5,
+      "x": 1080,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 4,
+      "ty": 5,
+      "x": 1440,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 5,
+      "ty": 5,
+      "x": 1800,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 6,
+      "ty": 5,
+      "x": 2160,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     },
+     {
+      "tx": 7,
+      "ty": 5,
+      "x": 2520,
+      "y": 1500,
+      "w": 360,
+      "h": 300,
+      "mean": 0.0,
+      "fracOver0_10": 0.0
+     }
+    ]
+   },
+   "pixelShiftLadder": [
+    {
+     "shiftPx": "1",
+     "fracOver0_10": 0.10767110339506172,
+     "mean": 0.037974487990140915,
+     "p90": 0.11544719338417053,
+     "max": 0.8484741449356079
+    },
+    {
+     "shiftPx": "2",
+     "fracOver0_10": 0.13519695216049382,
+     "mean": 0.05858372896909714,
+     "p90": 0.20463880896568298,
+     "max": 0.9772748947143555
+    },
+    {
+     "shiftPx": "4",
+     "fracOver0_10": 0.1618528163580247,
+     "mean": 0.08197420090436935,
+     "p90": 0.33375048637390137,
+     "max": 0.9832233190536499
+    },
+    {
+     "shiftPx": "8",
+     "fracOver0_10": 0.1916016589506173,
+     "mean": 0.09699001908302307,
+     "p90": 0.4156636595726013,
+     "max": 0.9888994693756104
+    },
+    {
+     "shiftPx": "16",
+     "fracOver0_10": 0.2086988811728395,
+     "mean": 0.1051257848739624,
+     "p90": 0.44693729281425476,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "24",
+     "fracOver0_10": 0.22139023919753087,
+     "mean": 0.1121891438961029,
+     "p90": 0.47924891114234924,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "32",
+     "fracOver0_10": 0.2308287037037037,
+     "mean": 0.11837723851203918,
+     "p90": 0.509641706943512,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "48",
+     "fracOver0_10": 0.24273939043209877,
+     "mean": 0.12365801632404327,
+     "p90": 0.5267254710197449,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "64",
+     "fracOver0_10": 0.2523929398148148,
+     "mean": 0.128488689661026,
+     "p90": 0.539634108543396,
+     "max": 0.9905253052711487
+    }
+   ],
+   "whatTheLadderSettles": "Re-measured this pass on THIS pass's own Electron `state` frame (2880x1800), so it is directly comparable with the readings beside it. It is monotonic throughout and it saturates: a 1-pixel rigid shift reads 0.1077 and a 64-pixel one reads 0.2524 — a 64-fold displacement for a 2.3-fold reading. That is why `mean`, `p50`, `p90` and `max` are reported beside the thresholded fraction and not behind it.",
+   "p50StaysZero": "p50 is 0.000000 on all three while p90 is 0.34-0.36. The bimodality is still there; it is simply much smaller than it was (p90 was 0.43-0.66)."
+  },
+  {
+   "id": "PARITY-I1",
+   "previousVerdict": "SYMPTOM STILL GONE; MECHANISM STILL UNTOUCHED.",
+   "verdict": "UNCHANGED, AND RE-MEASURED.",
+   "measuredThisPass": true,
+   "reading": "`editorSettledBetweenOperations` is FALSE in 5 of 6 Electron route records at d883db0e2 — true only for shell, which has zero operations. Identical to the 596cb6e50 reading. Every route is otherwise settled and correct (busy false, final lines 1 / 44 / 56 / 110 / 113 / 44, each matching its pin). The settle logic the issue is about was not touched by this pass and the issue should stay open.",
+   "worthNoting": "The perf-limit scale did NOT make it true, which is useful: `editorSettledBetweenOperations` is not merely a symptom of a rushed host."
+  }
+ ],
+ "carriedForwardNotMeasured": [
+  {
+   "id": "PARITY-TITLEBAR-CROP",
+   "status": "CLOSED and NOT re-litigated. 58 device pixels / 29 points, derived three independent ways by the 2026-10-17 pass. RE-DERIVED ARITHMETICALLY HERE ANYWAY, because it costs nothing and the crop decides whether the flip comparison is even legal: every one of the seven GPUI capture records on disk reads `titleBarPoints` 29 at `pointPixelScale` 2.0, so CROP_PX = 58 on all seven.",
+   "measuredThisPass": "re-derived, not re-argued"
+  },
+  {
+   "id": "PARITY-S3",
+   "status": "CLOSED (boundaries identical to the point). Not re-opened.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S13",
+   "status": "CLOSED. Not re-opened.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-G1",
+   "status": "REPRODUCES; Electron genuinely obtains a 1920x1080 point window at x=0 y=33 on a 1728-point display. Inherited from 2026-10-17.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PLAT-35-vs-PLAT-37",
+   "status": "COMPLEMENTARY, not duplicates. Inherited from 2026-10-17.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S4",
+   "status": "Inherited. The chip detector's negative control still FAILS on the GPUI side (2 false positives per frame in the fileTree) and HOLDS on Electron (0). Any instrument reused there needs its own control; this pass reused none of it.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-O1",
+   "status": "Inherited. The oracle's gutter grammar is far weaker on Electron frames, which is why the pitch instrument uses no OCR at all.",
+   "measuredThisPass": false
+  }
+ ],
+ "issuesToFile": {
+  "policyConflictDeclared": "metacraft-dev-guidelines says a defect found during other work goes in the owning specs repo's `issues/`, pushed immediately. This agent was instructed to make NO git commits. These are therefore DRAFTED HERE AND UNFILED, and the conflict is declared rather than resolved silently.",
+  "owningRepo": "codetracer-pm (the PLAT-37 milestone's governing pm repo)",
+  "new": [
+   {
+    "id": "unfiled-A",
+    "title": "The PLAT-37 Electron capture lane grades frames it did not take",
+    "measured": "ci/test/plat37-macos-electron-capture.sh's grading loop tested only `[ -f \"${rec}\" ]`. The capture happens inside Playwright, in a separate process, before the loop runs, so a scenario whose test died before its capture step left the PREVIOUS run's PNG and record in the output directory and the loop graded them. Against codetracer 596cb6e50 on 2026-10-17 this made three of six views report a pane census taken on 2026-10-12, which was recorded and reasoned about as PARITY-S1, 'Electron draws seven panes where the shared default places five', for five days across three readings files.",
+    "whyTheGpuiLaneIsImmune": "plat37-macos-window-capture.sh:496 does `rm -f \"${png}\" \"${points_png}\" \"${rec}\" \"${grade}\" \"${log}\"` immediately before it launches the window and captures, so a view it fails to capture has NO record and is counted a refusal. The asymmetry is the defect.",
+    "remedyApplied": "A run stamp. The lane records `RUN_STARTED_AT` (`date -u +%Y-%m-%dT%H:%M:%SZ`, the same spelling the driver writes into `takenAt`) before the Playwright drive, and refuses any record whose `takenAt` is absent or lexicographically earlier, naming both timestamps. The stale artefact is KEPT, because it is the evidence that something went wrong; it is simply not graded.",
+    "severity": "high — it silently attributes an old build's rendering to the build under test, in a lane whose entire output is attributions of that kind"
+   },
+   {
+    "id": "unfiled-B",
+    "title": "The PLAT-37 Electron capture lane never set CODETRACER_PERF_LIMIT_SCALE",
+    "measured": "`lib/performance-limits.ts`'s docstring says the knob exists for lanes whose subject is not performance and names the visual captures; the sibling PLAT-35 Electron lane has set it since its first run (Justfile:5012, default 4). The PLAT-37 lane set nothing, so `LIMIT_FIRST_WINDOW_MS` stayed at 10 s. Against codetracer 596cb6e50 on 2026-10-17, on a host at load average ~13, `advanced-state` and `returned-calltrace` both died inside the LAUNCH fixture with `Performance limit exceeded: \"first window\" took 35567ms / 32122ms (limit: 10000ms)` — two of the four failures, and two of the three views that then got a stale frame graded in their place.",
+    "remedyApplied": "`export CODETRACER_PERF_LIMIT_SCALE=\"${CODETRACER_PERF_LIMIT_SCALE:-6}\"` in the lane. 6 and not the sibling's 4 because 35567 ms is 89% of the 40 s a scale of 4 gives, which `timed` itself prints as SLOW.",
+    "severity": "medium — it turns host contention into a capture failure, and before unfiled-A that capture failure turned into a false product finding"
+   },
+   {
+    "id": "unfiled-C",
+    "title": "corpus-pins.json pins editor row counts that are platform-dependent by construction",
+    "measured": "`src/tests/visual/corpus-pins.json` pins `gpuiEditorRows` and `electronEditorRows` as exact admissible-string sets (`rows=45;first=1;last=45`), and `test_cross_renderer_visual_alignment.nim:854` asserts set membership with no tolerance. But the row count is the pane height over Monaco's line height, and Monaco's line height is `GOLDEN_LINE_HEIGHT_RATIO * fontSize` with the ratio 1.5 on macOS and 1.35 elsewhere (fontInfo.js:12). At font size 16 that is 24 px against 22 px, so the SAME pane holds a different number of rows on the two platforms and no single pinned string can be right on both.",
+    "suggestedRemedy": "Either scope the pinned arrays per platform, or add the macOS answers to the existing arrays — the file's own comment already establishes the array as an admissible SET rather than a single value, and `pinnedRowsAreDefended` already requires a reason for a multi-member set, which this is.",
+    "notDoneHere": "No pin was edited. The pins were re-pinned twice on 2026-10-17 by the Linux arm of this campaign and re-pinning them from a macOS run would make that arm's readings wrong.",
+    "severity": "medium — it will redden the cross-renderer gate on macOS the first time anyone runs it there"
+   },
+   {
+    "id": "unfiled-D",
+    "title": "The 2026-10-17 readings misreport all four Electron Playwright failures as one assertion",
+    "measured": "`plat37-parity-readings-2026-10-17.json`'s `laneOutcomes.electron.playwright` says 'All four failures are the same assertion at plat37-electron-window-capture.spec.ts:862, `the editor drew no rows`'. The run's own playwright.log shows ONE of the four is that assertion (entry-shell); two are `Performance limit exceeded: \"first window\"` thrown in the launch fixture and one is `the 'stepIn' toolbar button (#step-in-image) is not in the DOM` thrown in `drive`.",
+    "whyItMattered": "The misreport is what made the three stale frames look like captures that had happened and then failed a DOM assertion, rather than captures that never happened at all. It is corrected in this file.",
+    "severity": "low as a defect, high as a lesson — a reporter's summary line was read in place of the log"
+   }
+  ]
+ },
+ "whatIcouldNOTdo": [
+  "NO GIT COMMIT, by instruction. Every change in this pass is in the working tree only: ci/test/plat37-macos-electron-capture.sh, src/frontend/gpui/chrome.nim, src/frontend/gpui/window_geometry.nim, src/frontend/gpui/app/leaves.nim, src/frontend/gpui/tests/test_plat47_window_gestures.nim and src/tests/gui/tests/visual/plat37-electron-window-capture.spec.ts, plus this readings file. `repro.nim` was already dirty before this pass and is not mine.",
+  "THE FOUR ISSUES ARE DRAFTED AND UNFILED. Recording a defect in the owning specs repo's `issues/` and pushing it immediately is what the shared policy requires; the no-commit instruction forbids it. Declared rather than silently skipped.",
+  "NO CORPUS PIN WAS RE-PINNED. The row-pitch change moves the GPUI editor's row count on macOS, and `corpus-pins.json` pins it as an exact set that `test_cross_renderer_visual_alignment.nim:854` asserts membership in. Those pins were re-pinned twice on 2026-10-17 by this campaign's Linux arm and re-pinning them from a macOS run would make that arm's readings wrong. Filed as unfiled-C instead.",
+  "THE ELECTRON BUILD WAS SCOPED, and the scoping is a deviation. `CODETRACER_REPROBUILD_TARGET=ct-binary` was passed to `just build-once`, which otherwise stops on two pre-existing actions outside the Electron bundle's closure (`dmg` and `docs-book-assets`). It is build-once.sh's own documented knob (scripts/build-once.sh:466). Declared, as the 2026-10-17 pass declared it.",
+  "`test_cross_renderer_visual_alignment.nim` WAS NOT RUN. It is not one of the two lanes this pass was asked to re-run, and its pins are known to be platform-blind (unfiled-C), so running it here would have produced a red that says nothing about the change.",
+  "PARITY-S14 WAS RE-MEASURED BUT NOT FULLY DIAGNOSED. See its entry: what the frame shows is recorded; which of the two mechanisms produces it is not established."
+ ],
+ "paneCensus": {
+  "expectation": "DERIVED, not written down: the panes `shared_default_layout.generated.json` DRAWS — one per stack (the active tab) plus every pane not in a stack — which is ['calltrace','editor','eventLog','fileTree','state'].",
+  "result": "12 OF 12 FRAMES MATCH IT EXACTLY. Both arms, all six scenarios, read by one instrument (`structdump`, the grader's own `readFrame`) at codetracer d883db0e2. No TESTS pane, no CONSTRAINTS pane, no `Search` pane, nothing labelled `other`, on either side.",
+  "against": "GPUI 7 of 7 and Electron 3 of 6 at 596cb6e50 (2026-10-17), where the three that failed were reading 2026-10-12 frames."
+ },
+ "rowPitchBeforeAndAfter": {
+  "unit": "points. The statistic is the MODE of consecutive lineBands centre deltas at 0.5-point resolution — no OCR.",
+  "before": "measured at codetracer 596cb6e50 (the 2026-10-17 pass's own struct.jsonl, recomputed here with the same estimator and reproducing its numbers exactly)",
+  "after": "measured at codetracer d883db0e2 with chrome.EditorLinePx derived",
+  "perView": {
+   "state": {
+    "gpuiBefore": 22.0,
+    "gpuiAfter": 24.0,
+    "electronBefore": 23.5,
+    "electronAfter": 23.5,
+    "gapBefore": 1.5,
+    "gapAfter": 0.5,
+    "supportAfterGpui": 12,
+    "supportAfterElectron": 6,
+    "bandsBefore": null,
+    "bandsAfter": null
+   },
+   "calltrace": {
+    "gpuiBefore": 22.0,
+    "gpuiAfter": 24.0,
+    "electronBefore": 24.0,
+    "electronAfter": 24.0,
+    "gapBefore": 2.0,
+    "gapAfter": 0.0,
+    "supportAfterGpui": 17,
+    "supportAfterElectron": 9,
+    "bandsBefore": null,
+    "bandsAfter": null
+   },
+   "editorWithMark": {
+    "gpuiBefore": 22.0,
+    "gpuiAfter": 24.0,
+    "electronBefore": 24.5,
+    "electronAfter": 24.5,
+    "gapBefore": 2.5,
+    "gapAfter": 0.5,
+    "supportAfterGpui": 11,
+    "supportAfterElectron": 9,
+    "bandsBefore": null,
+    "bandsAfter": null
+   },
+   "editor": {
+    "gpuiBefore": 22.5,
+    "gpuiAfter": 24.5,
+    "electronBefore": 24.5,
+    "electronAfter": 24.5,
+    "gapBefore": 2.0,
+    "gapAfter": 0.0,
+    "supportAfterGpui": 12,
+    "supportAfterElectron": 11,
+    "bandsBefore": null,
+    "bandsAfter": null
+   },
+   "eventLog": {
+    "gpuiBefore": 22.0,
+    "gpuiAfter": 24.0,
+    "electronBefore": 24.0,
+    "electronAfter": 24.0,
+    "gapBefore": 2.0,
+    "gapAfter": 0.0,
+    "supportAfterGpui": 17,
+    "supportAfterElectron": 14,
+    "bandsBefore": null,
+    "bandsAfter": null
+   },
+   "shell": {
+    "gpuiBefore": 22.5,
+    "gpuiAfter": 24.5,
+    "electronBefore": null,
+    "electronAfter": 24.5,
+    "gapBefore": null,
+    "gapAfter": 0.0,
+    "supportAfterGpui": 10,
+    "supportAfterElectron": 9,
+    "bandsBefore": null,
+    "bandsAfter": null
+   }
+  },
+  "summary": "GPUI moved 22.0-22.5 -> 24.0-24.5 on every one of the six frames. ELECTRON DID NOT MOVE ON ANY OF THE FIVE WHERE BOTH PASSES MEASURED IT: 23.5 / 24.0 / 24.5 / 24.5 / 24.0, the same five values. The per-view gap went from 1.5-2.5 points to 0.0-0.5.",
+  "theREFERENCEvalue": "24 px at font size 16, read from Monaco itself on all six fresh Electron route records (`editorFontMetrics.lineHeightPx`), not inferred from ink.",
+  "whyTHEinstrumentSTILLreads23_5onONEframe": "state's Electron mode is 23.5 with only 6 supporting deltas out of 36, and its median is 23.5 too, while Monaco says 24. The ink estimator carries about half a point of quantisation on ELECTRON frames specifically — Monaco positions and antialiases glyphs sub-pixel, so band centroids scatter — and essentially none on GPUI frames, which read exactly 24.0 where the code draws 24. That is the reason this pass added the direct Monaco read: the estimator was good enough to find a 2-point error and is not good enough to certify a half-point one.",
+  "bandCounts": "GPUI 37/37/37/45/44/47 -> 35/34/34/40/40/43 (state/calltrace/editorWithMark/editor/eventLog/shell), the predicted consequence of a taller row in the same pane. Electron 37/37/38/47/43/- -> 37/37/38/47/43/46, unchanged wherever it was measured before.",
+  "thePREDICTIONwasRECORDEDfirst": "Before the after-measurement was taken, `build/plat37-parity-2026-10-18/` recorded the prediction GPUI ~24.0, bands ~34-35 at laptop and ~41 at wide, Electron unchanged. Measured: 24.0-24.5, bands 34-35 and 40, Electron unchanged. The wide band count came in at 40 against a predicted 40-41."
+ }
+}
