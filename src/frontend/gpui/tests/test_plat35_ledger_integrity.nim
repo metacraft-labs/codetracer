@@ -179,8 +179,16 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     # would report zero unresolved P1 and P2, would satisfy the equality in
     # the next case, and would flip `met` to true — a green gate over a file
     # full of defects. The two-sided version of §4.
-    ck severityCount(findings, "P1") > 0
-    ck severityCount(findings, "P2") > 0
+    #
+    # OVER THE WHOLE LEDGER — open AND resolved — since 2026-10-17. Asked of
+    # the open findings alone, this case demanded that a P1 and a P2 stay
+    # open for ever, so the gate could never be met however many were fixed;
+    # the grading is what has to be shown to be real, and a resolved entry
+    # carries its severity (checked against the closed set below) as much as
+    # an open one does.
+    let resolved = ledger{"resolved"}
+    ck severityCount(findings, "P1") + severityCount(resolved, "P1") > 0
+    ck severityCount(findings, "P2") + severityCount(resolved, "P2") > 0
 
   test "the gate's counts are the counts DERIVED from the findings":
     let p1 = severityCount(findings, "P1")

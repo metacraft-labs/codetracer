@@ -2850,6 +2850,11 @@ proc stateIconButton(r: GpuiRenderer; attr, iconName, svg: string;
 var statePaneSizePx*: tuple[w, h: int] = (0, 0)
   ## The state pane body's size, set by the window: its scrollbars are drawn
   ## from it (`stateScrollbars`).
+var stateScroll*: tuple[top, left: int] = (0, 0)
+  ## How far the state pane's scroll box is scrolled, in pixels — moved by
+  ## the wheel (`main.windowPointer`), clamped to the content when drawn.
+var stateScrollMax*: tuple[top, left: int] = (0, 0)
+  ## The furthest it can scroll, as last drawn.
 
 const
   StateRowsTopPx = 78
@@ -2882,6 +2887,9 @@ proc stateScrollbars(r: GpuiRenderer; parent: GpuiElement;
   var vertical = contentH > boxH
   let horizontal = contentW > w - (if vertical: StateScrollbarPx else: 0)
   vertical = vertical or (horizontal and contentH > boxH - StateScrollbarPx)
+  let visibleH = boxH - (if horizontal: StateScrollbarPx else: 0)
+  let visibleW = w - (if vertical: StateScrollbarPx else: 0)
+  stateScrollMax = (max(0, contentH - visibleH), max(0, contentW - visibleW))
   r.setStyle(parent, "position", "relative")
   if horizontal:
     # The box's rows end above its horizontal scrollbar (its client height
@@ -2904,13 +2912,19 @@ proc stateScrollbars(r: GpuiRenderer; parent: GpuiElement;
     r.setStyle(t, "height", $max(1, th) & "px")
     r.setStyle(t, "background-color", "#333333")
     r.appendChild(parent, t)
+  # The thumbs at the scroll's share of the track.
   if vertical:
-    let track = boxH - (if horizontal: StateScrollbarPx else: 0)
-    r.thumb(w - StateScrollbarPx, StateRowsTopPx, StateScrollbarPx,
+    let track = visibleH
+    let top = min(stateScroll.top, stateScrollMax.top)
+    r.thumb(w - StateScrollbarPx,
+            StateRowsTopPx + int(round(float(track) * float(top) / float(contentH))),
+            StateScrollbarPx,
             int(round(float(track) * float(track) / float(contentH))), "vertical")
   if horizontal:
-    let track = w - (if vertical: StateScrollbarPx else: 0)
-    r.thumb(0, h - StateScrollbarPx,
+    let track = visibleW
+    let left = min(stateScroll.left, stateScrollMax.left)
+    r.thumb(int(round(float(track) * float(left) / float(contentW))),
+            h - StateScrollbarPx,
             int(round(float(track) * float(track) / float(contentW))),
             StateScrollbarPx, "horizontal")
 
@@ -3068,6 +3082,18 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   r.setStyle(table, "overflow", "hidden")
   r.setStyle(table, "margin-top", "12px")
   r.setStyle(table, "padding-left", $StateInsetPx & "px")
+  # The rows, moved by the box's scroll (`stateScroll`): the table clips.
+  let scroller = r.createElement("div")
+  r.setAttribute(scroller, "data-ct-state-scroll",
+                 $stateScroll.top & "," & $stateScroll.left)
+  r.setStyle(scroller, "display", "flex")
+  r.setStyle(scroller, "flex-direction", "column")
+  r.setStyle(scroller, "flex-shrink", "0")
+  # Each row its natural width, so a long value reaches past the pane and
+  # the horizontal scroll brings the rest in.
+  r.setStyle(scroller, "items", "start")
+  r.setStyle(scroller, "margin-top", $(-stateScroll.top) & "px")
+  r.setStyle(scroller, "margin-left", $(-stateScroll.left) & "px")
   if rows.len == 0:
     # The tab's empty state, centred in what is left of the pane.
     r.setStyle(table, "flex-grow", "1")
@@ -3156,7 +3182,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
       let c = stateText(r, "×", StateEmptyColour, mono = false)
       r.setAttribute(c, StateControlAttribute, "unwatch:" & row.name)
       r.appendChild(el, c)
-    r.appendChild(table, el)
+    r.appendChild(scroller, el)
     if historyOpen:
       for e in vm.valueHistory.val.getOrDefault(row.path):
         let h = r.createElement("div")
@@ -3169,7 +3195,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         r.setStyle(h, "padding-left", $((row.depth + 1) * StateRowIndentPx) & "px")
         r.appendChild(h, stateText(r, "tick " & $e.locationTicks, StateEmptyColour))
         r.appendChild(h, stateText(r, e.valueText, StateValueColour))
-        r.appendChild(table, h)
+        r.appendChild(scroller, h)
     if originOpen:
       for i, hop in vm.originLines.val.getOrDefault(row.path):
         let o = r.createElement("div")
@@ -3178,10 +3204,12 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         r.setStyle(o, "height", $StateValueRowPx & "px")
         r.setStyle(o, "padding-left", $((row.depth + 1) * StateRowIndentPx) & "px")
         r.appendChild(o, stateText(r, "⇠ " & hop, StateEmptyColour))
-        r.appendChild(table, o)
+        r.appendChild(scroller, o)
+  if childCount(scroller) > 0:
+    r.appendChild(table, scroller)
   r.appendChild(body, table)
   r.appendChild(parent, body)
-  stateScrollbars(r, parent, rows, childCount(table))
+  stateScrollbars(r, parent, rows, childCount(scroller))
   true
 
 # ---------------------------------------------------------------------------

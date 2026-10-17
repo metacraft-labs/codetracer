@@ -2548,6 +2548,9 @@ proc focusWindowPane(r: GpuiRenderer; pane: string)
 proc dragTextTo(r: GpuiRenderer; x, y: int)
   ## PLAT-68: forward-declared; a held press on the text, moved.
 
+proc redrawPaneOf(r: GpuiRenderer; pane: PaneKind)
+  ## Forward-declared; defined with the panes' redraws.
+
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
@@ -2697,6 +2700,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                                                 else: rows)))
         gTerminal.follow = false
         drawTerminalPane(r)
+    elif onPane == $paneState and (dx != 0.0 or dy != 0.0):
+      # The state scroll box scrolls both ways, as the desktop's does: the
+      # rest of a long value and the rows below the box are reached.
+      stateScroll = (clamp(stateScroll.top - int(round(dy)), 0, stateScrollMax.top),
+                     clamp(stateScroll.left - int(round(dx)), 0, stateScrollMax.left))
+      traceGesture("state scroll top=" & $stateScroll.top & " left=" &
+                   $stateScroll.left)
+      redrawPaneOf(r, paneState)
     elif onPane == $paneEditor and dx != 0.0:
       # `PLAT35-F3`. **THE EDITOR SCROLLS SIDEWAYS, and this is the half that
       # makes the clipped text reachable rather than merely announced.** The
