@@ -1864,8 +1864,8 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
         outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,
                                               values: @[(v.name, v.value)]))
       else:
-        # The value IS the current step's (the terminal annotates only the
-        # line the debugger is on), so the step it was observed at is here.
+        # The note GPUI's window gives for the same click (`gpui/main.nim`'s
+        # inline-value press) — the line's value as the flow recorded it.
         rt.note(v.name & " = " & v.value & " is the value at this step")
         outcome.repaint = true
     else:

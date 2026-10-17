@@ -86,8 +86,6 @@ const
     ## One menu or omnibar row.
   MenuPopoverMinPx* = 240
   OmnibarRows* = 10
-  PartGapPx* = 12
-    ## The space between two parts of a narrow band (the fallback layout).
   WindowButtonPx* = 24
     ## PLAT-69: one window button, a circle — the desktop's `.window-menu`
     ## `.menu-button-svg` (`1.5em` at its 16 px em).

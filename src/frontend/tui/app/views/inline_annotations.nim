@@ -229,6 +229,19 @@ proc annotationRoom*(codeWidth, renderedCells: int): int =
   ## the same number the pane did instead of re-deriving it.
   codeWidth - max(0, renderedCells) - AnnotationGap
 
+proc shownAnnotationSpan*(selected: openArray[Annotation];
+                          codeWidth, renderedCells: int): StyledSpan =
+  ## `selected` — already the line's values — as one styled span fitted to
+  ## the room the code left, or an empty span. The flow's per-line values
+  ## (`editor_surface.flowValuesByLine`) are drawn through this directly: the
+  ## flow already decided which values belong to the line, so they are not
+  ## filtered by the names the line's text mentions.
+  let text = annotationText(selected)
+  if text.len == 0:
+    return StyledSpan(text: "", style: AnnotationStyle)
+  let fitted = fitAnnotation(text, annotationRoom(codeWidth, renderedCells))
+  StyledSpan(text: fitted, style: AnnotationStyle)
+
 proc annotationSpan*(lineText: string; values: openArray[Annotation];
                      codeWidth, renderedCells: int): StyledSpan =
   ## The annotation for one line, as one styled span, or an empty span.
@@ -243,12 +256,8 @@ proc annotationSpan*(lineText: string; values: openArray[Annotation];
   ## variable whose name sits past the pane's right edge is still a variable
   ## this statement touches, and dropping it would make the annotation depend
   ## on the terminal's width in a way a reader cannot see.
-  let selected = annotationsForLine(lineText, values)
-  let text = annotationText(selected)
-  if text.len == 0:
-    return StyledSpan(text: "", style: AnnotationStyle)
-  let fitted = fitAnnotation(text, annotationRoom(codeWidth, renderedCells))
-  StyledSpan(text: fitted, style: AnnotationStyle)
+  shownAnnotationSpan(annotationsForLine(lineText, values), codeWidth,
+                      renderedCells)
 
 type
   AnnotationTarget* = object
@@ -258,13 +267,11 @@ type
       ## `[startCell, endCell)`, relative to the annotation's start.
     value*: Annotation
 
-proc annotationTargets*(lineText: string; values: openArray[Annotation];
-                        codeWidth, renderedCells: int): seq[AnnotationTarget] =
-  ## Where each value of `annotationSpan`'s text is, by the same arithmetic:
-  ## `/* ` then `name: value` pairs joined by `, `, cut where the span was cut
-  ## (a value the `…` replaced is not a target; one the cut runs through is,
-  ## over the cells still drawn).
-  let selected = annotationsForLine(lineText, values)
+proc shownAnnotationTargets*(selected: openArray[Annotation];
+                             codeWidth, renderedCells: int):
+                            seq[AnnotationTarget] =
+  ## `annotationTargets` over values already chosen for the line
+  ## (`shownAnnotationSpan`'s counterpart).
   let full = annotationText(selected)
   if full.len == 0:
     return
@@ -283,3 +290,12 @@ proc annotationTargets*(lineText: string; values: openArray[Annotation];
     result.add AnnotationTarget(startCell: at, endCell: min(at + w, drawn),
                                 value: v)
     at += w
+
+proc annotationTargets*(lineText: string; values: openArray[Annotation];
+                        codeWidth, renderedCells: int): seq[AnnotationTarget] =
+  ## Where each value of `annotationSpan`'s text is, by the same arithmetic:
+  ## `/* ` then `name: value` pairs joined by `, `, cut where the span was cut
+  ## (a value the `…` replaced is not a target; one the cut runs through is,
+  ## over the cells still drawn).
+  shownAnnotationTargets(annotationsForLine(lineText, values), codeWidth,
+                         renderedCells)

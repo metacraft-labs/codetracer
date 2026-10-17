@@ -710,11 +710,17 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   let notTaken =
     if editorVM.isNil or flowVM.isNil or not editorVM.showFlowOverlay.val: @[]
     else: notTakenLinesOf(flowVM.styledLines.val)
+  # THE FLOW'S VALUES ON EVERY LINE IT REACHED — the one rule GPUI's editor
+  # draws too (`editor_surface.flowValuesByLine`), with the overlay.
+  let flowValues = flowValuesByLine(
+    flowVM, s.source.path.val, int(tick),
+    not editorVM.isNil and editorVM.showFlowOverlay.val)
   rt.app.source = sourcePaneModelFor(
     s.source, s.session.session.store.degraded.sourceAvailability.val,
     points = s.points,
     notTakenLines = notTaken,
-    inlineValues = values)
+    inlineValues = values,
+    lineValues = flowValues)
   # PLAT-50: A FILE OPENED FROM THE FILES PANE stays in the editor until the
   # debugger moves (`applyOutcome` clears `viewedFile` on every move).
   if rt.app.viewedFile.len > 0:

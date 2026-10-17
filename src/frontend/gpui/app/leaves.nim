@@ -2080,7 +2080,6 @@ const
     ## CALLTRACE_RETURN_COLOR (#BFDBFE, Dark) exactly: the window is Dark.
     ## (The terminal's `srCallReturn` takes information-primary, the token
     ## with a legible Light value.)
-  CallToggleColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
   CallTextColour* = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
   CallSelectedBackground* =
     DesignTokenHex[dtColorsEditorSurfaceSelect][dmDark]
@@ -2344,11 +2343,11 @@ const
     ## rows here; nothing paints it yet, and a selected-row ground is not
     ## `PLAT35-F4`'s to add.
   StateAlignAttribute* = "data-state-value-x"
-    ## **THE ONE X EVERY VALUE CELL STARTS AT**, in px, on the table.
-    ##
-    ## Derived from the same number that sets each name cell's width, so it
-    ## cannot disagree with the drawing — the shape `PLAT35-F3`'s scroll
-    ## metric uses and the reason it is one value and not two (§30).
+    ## **THE ONE X EVERY VALUE CELL STARTED AT**, in px, on the table, while
+    ## the pane was a two-column table. Since the 2026-10-17 redesign the
+    ## pane draws the desktop's `name:value` and publishes no such x; the
+    ## name is kept so `test_plat40_state_pane_columns.nim` can assert that
+    ## it is ABSENT, i.e. that the fixed column has not come back.
   StateChangedAttribute* = "data-ct-changed"
     ## PLAT-51: `"true"` on a row whose value the step changed.
   StateChangedColour* = DesignTokenHex[dtColorsUiTextInformationPrimaryHover][dmDark]
@@ -2368,6 +2367,10 @@ const
   StateNameColumn* = "name"
   StateValueColumn* = "value"
   StateTableAttribute* = "data-state-table"
+  # (HISTORY — SUPERSEDED 2026-10-17: the pane now draws the desktop's
+  # `name:value`, with no column rule and no resize drag; the rule's element
+  # and the drag were removed. The spec reading below is kept as the record.)
+  #
   # **THE NAME/VALUE COLUMN RULE IS DRAWN, AND THE SPEC DOES PUBLISH IT.**
   # The element is `StateSeparatorAttribute`'s, below; this is the spec
   # reading, because the text that stood here said the opposite.
@@ -2421,8 +2424,8 @@ const
   #
   # **WHAT STANDS FROM THE EARLIER PASSES, BECAUSE IT WAS MEASURED AND
   # RIGHT**: the rule paints iff it declares its own height, and the colour
-  # the framebuffer holds is not the declared token. Both are carried on
-  # `StateSeparatorAttribute`, where a reader looking at the drawing will be.
+  # the framebuffer holds is not the declared token. Both were carried on
+  # `StateSeparatorAttribute` while the rule was drawn.
   #
   # **THE DRAG IS STILL NOT DRAWN, AND STAYS NAMED RESIDUE**
   # (`PLAT35-F4.residue` 1): it needs a persisted width and a
@@ -2433,54 +2436,13 @@ const
   # static rule is not an affordance, and a `col-resize` cursor over no drag
   # would be.
   StateSeparatorAttribute* = "data-state-separator"
-    ## **THE 1 px RULE BETWEEN THE NAME AND VALUE COLUMNS**, on the header
-    ## row and on every body row — the `|` thirteen of the spec's wireframed
-    ## rows put at a constant column (see `StateTableAttribute`).
-    ##
-    ## **IT PAINTS IFF IT DECLARES ITS OWN HEIGHT. NECESSARY AND
-    ## SUFFICIENT.** A childless flex child inherits none: a row declaring
-    ## `height: 26px` does not pass it to a child with no content. Four arms
-    ## were measured — `flex-shrink: 0` plus its own `height: 26px` → paints
-    ## on 276 of 276 scanned rows; its own `height: 26px` alone → 194 of 276;
-    ## `flex-shrink: 0` with no height → **nothing**; a bare `div` with a
-    ## background → **nothing**. `flex-shrink` is neither necessary nor
-    ## sufficient. In the two failing arms the element still consumed its 1 px
-    ## of layout width: present, laid out, INVISIBLE, which is §7a. Both
-    ## declarations are made below, which is the arm that painted everywhere.
-    ##
-    ## **THE RENDERED COLOUR IS NOT THE DECLARED TOKEN, AND AN EXACT-TOKEN
-    ## PIXEL PROBE CANNOT FIND THIS RULE IN ANY BUILD — WORKING OR BROKEN.**
-    ## `StateSeparatorColour` declares `#565656`; the frame holds
-    ## **`(75, 75, 75)` = `#4B4B4B`**, that token over the pane's `#282828`
-    ## ground at coverage ≈ 0.76. (RE-MEASURED AT THE PLAT-50 MERGE,
-    ## 2026-10-05, AND BOTH NUMBERS MOVED: it read `(71, 73, 76)` = `#47494C`
-    ## over a `#1b222c` ground at 0.746 / 0.750 / 0.762. PLAT-50's
-    ## `0a52bd0aa` re-grounded the panes on the desktop's own tokens —
-    ## `main.PanelGround = "#282828"`, `ui/surface/base/panel` — and its notes
-    ## name `#1b222c` as what it replaced. The rule declares the same token
-    ## and sits at the same x on the same rows; only the ground beneath it
-    ## changed, so the composite did.) The
-    ## blend is the RASTERISER's and not the token's — the shim parses a
-    ## 6-digit hex at full alpha (`gpui_app.parse_color`) — so a 1 px logical
-    ## box simply fails to land on one whole device pixel.
-    ##
-    ## A search for exact `#565656` is the FALSE NEGATIVE that cost this
-    ## finding two passes: the rule was built, probed for the declared token,
-    ## reported as painting nothing, deleted, and its absence asserted in a
-    ## suite. **IT IS NOT MERELY BLIND, IT IS INSENSITIVE**, measured over all
-    ## seven frames at the merged bytes: exact `#565656` counts 350 / 468 /
-    ## 429 / 464 / 602 / 388 / 328 in `shell` / `editor` / `state` /
-    ## `calltrace` / `eventLog` / `editorWithMark` / `gutterLanes` — a few
-    ## hundred in EVERY frame, including the two whose state pane has no rows
-    ## and therefore no rule at all. So the declared-token count does not
-    ## distinguish a drawn rule from an undrawn one in either direction.
-    ## **Any pixel assertion here must target the
-    ## RENDERED value and must carry a POSITIVE CONTROL proving the probe can
-    ## find the rule when the rule is there** (`Verification-Harness-Traps`
-    ## §67). The shim's own source refutes the deleted-on-sight reading
-    ## outright: `apply_styles_to_div` applies `bg` UNCONDITIONALLY
-    ## (`gpui-nim-shim/src/gpui_app.rs:415`–`:419` → `el = el.bg(color)`),
-    ## with no test of children and none of height.
+    ## The 1 px name/value column rule the two-column state pane drew (and a
+    ## press on it started a column-resize drag). Since the 2026-10-17
+    ## redesign the pane draws the desktop's `name:value`, which has no
+    ## column rule and nothing to drag, so nothing sets this attribute; the
+    ## name is kept so `test_plat40_state_pane_columns.nim` can assert the
+    ## rule has not come back. (The measurements of why the rule painted, and
+    ## of its rendered colour, are in the tier-4 ledger's history.)
   StateTreeViewId* = "state.root"
     ## `pane_views.statePaneView`'s id for the variables `Tree`. The ONE node
     ## this renderer takes over from the vocabulary; everything else the pane
@@ -2503,62 +2465,12 @@ const
     ## deliberately not drawn. Changing that is a spec change — it would move
     ## Electron and the design system too — and is recorded in
     ## `PLAT35-F4.specCorrection`, not taken here.
-  StateCharPx* = 8
-    ## The width budgeted per character of a NAME, for the one purpose of
-    ## deciding the name column's width.
-    ##
-    ## A BUDGET AND NOT A MEASUREMENT, exactly as `window_geometry.TabCharPx`
-    ## is and for the same reason: nothing in this workspace can ask a text
-    ## system for an advance (`PLAT35-VG1` — the shim is built without
-    ## `--features gpui-backend`), and a column whose width is known HERE is
-    ## what lets the header and every row agree about where the value column
-    ## starts. Eight px is under `TabCharPx`'s ten because this
-    ## is body text rather than the tab strip's bold face.
-  StateIndentPx* = 14
-    ## A child row's offset per level. INSIDE the name cell, so depth moves
-    ## the name and never the column.
-  StateNameMinPx* = 72
-  StateNameMaxPx* = 260
-    ## The name column's bounds. A floor so `Name` and a one-letter variable
-    ## still read as a column; a ceiling so one long dunder cannot push the
-    ## value column off a laptop-width pane.
-  StateValuePadPx* = 6
-    ## The value cell's own left inset, past the RULE that ends the name
-    ## column. So `stateValueColumnPx` is the name column's width, plus
-    ## `StateSeparatorPx`, plus this.
-    ##
-    ## (Until this pass the line above said this inset was *"the ONLY thing
-    ## between the two columns — there is no rule"*. That is RETRACTED with
-    ## the reading it rested on; see `StateTableAttribute`.)
-  StateSeparatorPx* = 1
-    ## The rule's width, and the second term of `stateValueColumnPx`. ONE
-    ## device-independent pixel, which is what the spec's single `|` column
-    ## is and is why the rendered colour is a composite rather than the token
-    ## (`StateSeparatorAttribute`).
-  StateSeparatorColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
-    ## `colors/ui/border/primary` — `#565656` in dark mode. **DECLARED, NOT
-    ## RENDERED**: the frame holds `#4B4B4B` over PLAT-50's `#282828` pane
-    ## ground (it was `#47494C` over `#1b222c`). See
-    ## `StateSeparatorAttribute`.
-  StateRowPx* = CallRowPx
-    ## A row's height, and it is the window's own row pitch rather than a new
-    ## number — the call trace's rows take the same one, which is
-    ## `window_geometry.GpuiEditorRowPx` read off the frame. MEASURED rather
-    ## than chosen: the rows this pane already drew sat 26 px apart in the
-    ## captured frame (y 214, 240, 266, …), so declaring it changes no
-    ## spacing.
-    ##
-    ## It is ALSO the rule's own height, which is what makes the rule paint at
-    ## all (`StateSeparatorAttribute`). It was introduced for that, kept
-    ## through the two passes that had deleted the rule on a false reading,
-    ## and is load-bearing again.
   StateNameColour* = DesignTokenHex[dtColorsUiTextPrimaryActive][dmDark]
     ## `.value-name { color: colors-ui-text-primary-active }` —
     ## `styles/components/state.styl:232`, the Electron front-end's own
     ## choice, carried across rather than picked (§6: the desktop is the
     ## reference).
   StateValueColour* = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
-  StateHeaderColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
 
 type
   StateRow* = object
@@ -2598,10 +2510,6 @@ proc appendStateRows(v: Variable; path: string; depth: int;
       appendStateRows(c, path & "." & c.name, depth + 1, budget, expanded,
                       selected, acc)
 
-var stateNameColumnOverridePx* = 0
-  ## PLAT-51: the name column's width the user dragged its separator to (the
-  ## desktop's column resize), 0 for the measured default.
-
 proc stateRows*(vm: StateVM; budget: Budget): seq[StateRow] =
   ## The pane's visible rows, from the ViewModel the other two front-ends read.
   ##
@@ -2617,118 +2525,6 @@ proc stateRows*(vm: StateVM; budget: Budget): seq[StateRow] =
   for i, v in vars:
     if i >= MaxTreeRows: break
     appendStateRows(v, v.name, 0, budget, expanded, selected, result)
-
-func stateNameColumnPx*(rows: openArray[StateRow]): int =
-  ## **THE ONE WIDTH EVERY NAME CELL GETS**, header included.
-  ##
-  ## Decided ONCE, from the widest drawn name at its own indent and from the
-  ## `Name` heading, then clamped. One number for the whole pane is what makes
-  ## *"nothing aligns vertically"* answerable: the value column's x is this
-  ## plus the rule's 1 px plus the value cell's inset
-  ## (`stateValueColumnPx`), and it is the same arithmetic on every row
-  ## because it is the same number.
-  ##
-  ## (This docstring said *"plus the value cell's inset and NOTHING ELSE
-  ## (there is no boundary rule)"*. RETRACTED — the rule is drawn, and the
-  ## arithmetic above is the one `stateValueColumnPx` does.)
-  ##
-  ## A pure `func` so the rule has a test of its own that opens no window
-  ## (`test_plat40_state_pane_columns.nim`, suite 1), which is the half a plan
-  ## reading cannot gate: a plan shows what one program state produced, and
-  ## this shows what the rule answers for a state no recording has to reach.
-  var widest = StateHeaderNameLabel.runeLen * StateCharPx
-  for row in rows:
-    let needed = row.depth * StateIndentPx + row.name.runeLen * StateCharPx
-    if needed > widest:
-      widest = needed
-  min(max(widest, StateNameMinPx), StateNameMaxPx)
-
-func stateValueColumnPx*(nameColumnPx: int): int =
-  ## Where the value column's text begins, given the name column's width.
-  ## Derived, never a second literal — `StateAlignAttribute`'s own reason.
-  ##
-  ## THREE terms, and the middle one is the drawn rule: a layout engine puts
-  ## the 1 px `div` between the two cells, so a value x that skipped it would
-  ## be a published number the drawing disagrees with. The suite recomputes
-  ## the same sum from the plan's own three boxes rather than reading this.
-  nameColumnPx + StateSeparatorPx + StateValuePadPx
-
-proc stateCell(r: GpuiRenderer; column, text: string; widthPx: int;
-               indentPx: int; colour: string; bold: bool): GpuiElement =
-  ## One cell: its column, its width when it has a fixed one, its text.
-  ##
-  ## `white-space: nowrap; overflow: hidden; text-overflow: ellipsis` is what
-  ## the vocabulary `Tree` binding already put on these rows, and it is kept
-  ## BYTE-FOR-BYTE: `PLAT35-F7` is open against exactly that elision and this
-  ## change is not its remedy. A cell that started wrapping here would have
-  ## silently answered another milestone's open question.
-  # **A `div` AND NOT A `span`, AND THAT IS MEASURED.** The shim renders a
-  # `span` as a `TextContainer`, which honours NEITHER `white-space: nowrap`
-  # NOR `text-overflow: ellipsis`: with `span`s the `__builtins__` value — a
-  # 7269-character string carrying 21 newlines — wrapped to twenty-one drawn
-  # lines and pushed every other variable out of the pane, where the
-  # vocabulary `Tree`'s `li` had elided it to one. Four pixel readers saw the
-  # wrapped form before this line existed. A `div` is what the `Tree` rows
-  # were, so the pane's line budget and `PLAT35-F7`'s measured elision are
-  # both exactly what they were.
-  result = r.createElement("div")
-  r.setAttribute(result, StateColumnAttribute, column)
-  if widthPx > 0:
-    r.setStyle(result, "width", $widthPx & "px")
-    r.setStyle(result, "flex-shrink", "0")
-  else:
-    # The value column takes the rest of the row and clips inside it. Without
-    # `min-width: 0` a flex child cannot shrink below its content, so there is
-    # nothing for the ellipsis to be an ellipsis OF.
-    r.setStyle(result, "flex-grow", "1")
-    r.setStyle(result, "min-width", "0")
-  r.setStyle(result, "white-space", "nowrap")
-  r.setStyle(result, "overflow", "hidden")
-  r.setStyle(result, "text-overflow", "ellipsis")
-  if indentPx > 0:
-    r.setStyle(result, "padding-left", $indentPx & "px")
-  r.setStyle(result, "color", colour)
-  if bold:
-    r.setStyle(result, "font-weight", "bold")
-  r.appendChild(result, r.createTextNode(text))
-
-proc stateSeparatorElement(r: GpuiRenderer): GpuiElement =
-  ## **THE COLUMN RULE**, one per row, between the name cell and the value
-  ## cell — `StateSeparatorAttribute`'s element.
-  ##
-  ## FOUR DECLARATIONS AND EVERY ONE OF THEM IS LOAD-BEARING:
-  ##  * `width: 1px` — the spec's single `|` column, and the second term of
-  ##    `stateValueColumnPx`.
-  ##  * `height: 26px` (`StateRowPx`) — **WITHOUT ITS OWN HEIGHT IT DOES NOT
-  ##    PAINT.** A childless flex child inherits none from a row that declares
-  ##    one; measured, four arms, on `StateSeparatorAttribute`.
-  ##  * `flex-shrink: 0` — so a wide value cannot squeeze the rule to nothing.
-  ##    Not sufficient on its own (the no-height arms painted nothing with it)
-  ##    and not necessary (the height-only arm painted on 194 of 276 rows),
-  ##    but the pair is the arm that painted on 276 of 276.
-  ##  * `background` — the only thing that puts ink on the pixel.
-  ##    `apply_styles_to_div` applies it unconditionally.
-  ##
-  ## NO `cursor` AND NO CLICK HANDLER, deliberately: the drag is residue, and
-  ## a rule that advertised one without having it is exactly what
-  ## `PLAT35-F7`'s clause forbids.
-  result = r.createElement("div")
-  r.setAttribute(result, StateSeparatorAttribute, "true")
-  r.setStyle(result, "width", $StateSeparatorPx & "px")
-  r.setStyle(result, "height", $StateRowPx & "px")
-  r.setStyle(result, "flex-shrink", "0")
-  r.setStyle(result, "background", StateSeparatorColour)
-
-proc stateRowElement(r: GpuiRenderer): GpuiElement =
-  ## A row: one line, its cells side by side. The header and a body row are
-  ## the SAME container, so the heading cannot drift from the rows it names.
-  result = r.createElement("div")
-  r.setStyle(result, "display", "flex")
-  r.setStyle(result, "white-space", "nowrap")
-  r.setStyle(result, "overflow", "hidden")
-  r.setStyle(result, "flex-shrink", "0")
-  r.setStyle(result, "height", $StateRowPx & "px")
-  r.setStyle(result, "items", "center")
 
 const
   StateInsetPx* = 8
@@ -2774,23 +2570,11 @@ const
     ("question", staticRead("../../../public/resources/origin-icons/question.svg")),
     ("hourglass", staticRead("../../../public/resources/origin-icons/hourglass.svg"))]
     ## The origin badge's marks (`.ct-origin-icon-*`, `components/button.styl`).
-  CaretCollapsedSvg = """<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="#dddddd" d="M5 3l6 5-6 5z"/></svg>"""
-    ## A collapsed value's caret (`.caret-collapse`).
 
 func originIconSvg(name: string): string =
   for (n, svg) in OriginIconSvgs:
     if n == name: return svg
   OriginIconSvgs[5][1]
-
-var caretCollapsedFile {.threadvar.}: string
-
-proc caretCollapsedPath(): string =
-  if caretCollapsedFile.len == 0 or not fileExists(caretCollapsedFile):
-    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
-    createDir(dir)
-    caretCollapsedFile = dir / "caret-collapsed.svg"
-    writeFile(caretCollapsedFile, CaretCollapsedSvg)
-  caretCollapsedFile
 
 var stateIconFiles {.threadvar.}: Table[string, string]
 
@@ -3255,36 +3039,15 @@ const
     ## `{gap: 12px, display: flex, white_space: nowrap}` — `layOutRow` in
     ## `gpui_binding.nim:486` applies the same three declarations to `head`
     ## and to every body `tr` — so the header was the same weight and colour
-    ## as a data row.
-  EventLogRulePx* = 1
-    ## The header rule's width, the state pane's `StateSeparatorPx`.
-  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]
-    ## **A PUBLISHED TOKEN AND NOT A HEX LITERAL**, the same one the state
-    ## pane's column rule takes (`StateSeparatorColour`). The event-log spec
-    ## publishes no rule — grepped at `codetracer-specs@90ff8fce` for zebra /
-    ## divider / header rule / alternat / stripe / border over
-    ## `Event-Log-Pane.md`: **zero hits for all six** — so this is grounded on
-    ## the TOKEN plus convergence with the two front-ends that already draw
-    ## one, not on a clause. The terminal rules its event-log title row with
-    ## `PaneRule "─"` at `RuleStyle = CellStyle(role: srBorderPane)`
-    ## (`tui/app/views/event_log.nim:203,230,537-541`); the state pane rules
-    ## its columns with this token. Typing `#565656` here instead is what arm
-    ## **G** of the state-pane suite exists to redden.
-  EventLogHeaderColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
-    ## The header's own colour, `StateHeaderColour`'s token — and the
-    ## terminal's `HeaderStyle = CellStyle(role: srChromeMuted, bold: true)`
-    ## (`tui/app/views/event_log.nim:223`) is the same decision in that
-    ## medium. Both front-ends distinguish the header by COLOUR AND WEIGHT
-    ## together, so this renderer does both rather than picking one.
-  EventLogFooterColour* = DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark]
-    ## The footer reads as chrome, not as data — the header's token.
+    ## as a data row. Since 2026-10-17 `renderEventLog` draws the header as
+    ## the desktop does: its own 25 px row in the code face's bold.
 
 proc eventLogTotalOf*(windowStart, shown, total: int): int =
   ## **THE NUMBER THE FOOTER'S `of N` IS, DECIDED ONCE.** The drawn string and
   ## the published `EventLogTotalAttribute` both read it from here, so the
   ## attribute a test asserts on and the text a user reads cannot disagree —
-  ## the shape `stateValueColumnPx` and `data-state-value-x` already take one
-  ## pane over (§30). The clamp below was written out twice — once for the
+  ## the shape `data-state-value-x` took one pane over when the state pane
+  ## was a two-column table (§30). The clamp below was written out twice — once for the
   ## string and once for the attribute — until it was written here once.
   ##
   ## THE FLOOR IS THE STORE'S OWN ARITHMETIC, NOT A COUNT OF THE ROWS IN HAND.
@@ -3331,48 +3094,6 @@ proc eventLogFooterText*(windowStart, shown, total: int): string =
   result = "Rows " & $first & " to " & $last & " of " &
            $eventLogTotalOf(windowStart, shown, total)
 
-proc eventLogFooterElement(r: GpuiRenderer; windowStart, shown,
-                           total: int): GpuiElement =
-  ## The footer node: its text, its two attributes, and no column cell.
-  result = r.createElement("div")
-  r.setAttribute(result, EventLogFooterAttribute, "true")
-  r.setAttribute(result, EventLogTotalAttribute,
-                 $eventLogTotalOf(windowStart, shown, total))
-  r.setStyle(result, "color", EventLogFooterColour)
-  r.setStyle(result, "white-space", "nowrap")
-  r.setStyle(result, "overflow", "hidden")
-  r.setStyle(result, "flex-shrink", "0")
-  r.appendChild(result, r.createTextNode(
-    eventLogFooterText(windowStart, shown, total)))
-
-proc styleEventLogHeader(r: GpuiRenderer; table: GpuiElement): bool =
-  ## Mark the vocabulary table's header row and style it AS a header: the
-  ## rule under it, and its cells' colour and weight.
-  ##
-  ## **THE HEADER IS FOUND THE WAY THE CLICK CLASSIFIER FINDS IT** — the row
-  ## carrying no `data-row-index` (`window_clicks.nim:211-213`) — rather than
-  ## by position. One definition of "the header row", in two readers, is §30;
-  ## `nthChild(table, 0)` would have been a second one, and it would drift
-  ## the moment the binding appended anything before `head`.
-  for i in 0 ..< childCount(table):
-    let row = nthChild(table, i)
-    if getAttribute(row, "data-row-index").len > 0:
-      continue
-    r.setAttribute(row, EventLogHeaderAttribute, "true")
-    # THE RULE. `border-bottom-width` plus `border-color` and not a 1 px
-    # child `div`: the shim draws a border on the element itself
-    # (`gpui_app.rs:640-666`, the 2026-09-29 repair — *"Both were parsed into
-    # the plan and never drawn"*), so there is no childless flex child to
-    # inherit no height, which is the trap `StateSeparatorAttribute` carries.
-    r.setStyle(row, "border-bottom-width", $EventLogRulePx & "px")
-    r.setStyle(row, "border-color", EventLogRuleColour)
-    for c in 0 ..< childCount(row):
-      let cell = nthChild(row, c)
-      r.setStyle(cell, "color", EventLogHeaderColour)
-      r.setStyle(cell, "font-weight", "bold")
-    return true
-  false
-
 const
   EventToolbarPx* = 30
     ## The event log's toolbar row (`.ct-flex`): the menu button, the find
@@ -3387,8 +3108,6 @@ const
   EventIndexColPx = 49
   EventKindColPx = 23
   EventTextLeadPx = 14
-  EventBarPx = 85
-    ## The tick's progress bar (`.rr-ticks-line-container`), 3 px high.
   EventBarFill = DesignTokenHex[dtColorsUiBorderAction][dmDark]
   EventBarTrack = "#38393a"
   EventSelectedGround = DesignTokenHex[dtColorsEditorSurfaceSelect][dmDark]

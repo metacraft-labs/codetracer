@@ -26,7 +26,6 @@ const
     ## On the track: the pane id it scrubs.
   ListMarkAttribute* = "data-ct-list-scrubber-mark"
     ## On the current-position mark: the row it marks.
-  EventLogRowPx* = 21
   NarrowTrackPx* = 10
     ## The desktop's list scrollbar (`.ct-list-scrubber`), its thumb 6 px
     ## inside it on `rgba(121, 121, 121, 0.4)`.
@@ -74,10 +73,6 @@ proc listTrackRect*(body: PxRect; pane = ""): PxRect =
   PxRect(x: body.x + body.w - ChromePaddingPx - ListTrackPx,
          y: body.y + ChromePaddingPx, w: ListTrackPx,
          h: max(0, body.h - 2 * ChromePaddingPx))
-
-proc listRowsOf*(body: PxRect; rowPx: int): int =
-  ## How many rows a body shows at `rowPx`.
-  max(1, (body.h - 2 * ChromePaddingPx) div max(1, rowPx))
 
 proc box(r: GpuiRenderer; rect, body: PxRect; colour: string): GpuiElement =
   result = r.createElement("div")

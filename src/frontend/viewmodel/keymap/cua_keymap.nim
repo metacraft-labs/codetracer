@@ -72,11 +72,11 @@ const
     BaseRow(chords: "Ctrl+Shift+\\", operation: "editor.move-matching-bracket", whenText: "editorTextFocus"),
     BaseRow(chords: "Ctrl+U", operation: "editor.undo-selection", whenText: "editorTextFocus"),
     BaseRow(chords: "Escape", operation: "editor.keep-primary-selection",
-            whenText: "editorTextFocus && editorHasMultipleSelections"),
+            whenText: "editorTextFocus && editorHasMultipleSelections && !dragActive"),
     BaseRow(chords: "Shift+Escape", operation: "editor.keep-primary-selection",
             whenText: "editorTextFocus && editorHasMultipleSelections"),
     BaseRow(chords: "Escape", operation: "editor.simplify-selection",
-            whenText: "editorTextFocus && editorHasSelection && !editorHasMultipleSelections"),
+            whenText: "editorTextFocus && editorHasSelection && !editorHasMultipleSelections && !dragActive"),
     BaseRow(chords: "Shift+Escape", operation: "editor.simplify-selection",
             whenText: "editorTextFocus && editorHasSelection && !editorHasMultipleSelections"),
 
@@ -252,7 +252,11 @@ const
     BaseRow(chords: "Space", operation: "list.toggle-expand", whenText: "treeFocus",
             table: ListTable),
     BaseRow(chords: "Enter", operation: "list.activate", whenText: "listFocus", table: ListTable),
-    BaseRow(chords: "Escape", operation: "list.clear-selection", whenText: "listFocus",
+    # `!dragActive`: while a layout gesture is live (a drag, a revealed pane)
+    # Esc is the gesture's (`layout.cancel-drag` below), whatever pane holds
+    # the focus — the focused list must not take it first.
+    BaseRow(chords: "Escape", operation: "list.clear-selection",
+            whenText: "listFocus && !dragActive",
             table: ListTable),
     BaseRow(chords: "Ctrl+F", operation: "list.filter", whenText: "listFocus", table: ListTable),
     BaseRow(chords: "Ctrl+C", operation: "list.copy", whenText: "listFocus", table: ListTable),

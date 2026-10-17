@@ -859,9 +859,12 @@ proc dropIndicationRects*(g: WindowGeometry; ind: DropIndication;
     if placeholderPx > 0:
       # PLAT-51: GoldenLayout's placeholder is open there — the caret IS the
       # gap the tabs moved apart for (GoldenLayout highlights it).
+      # Held inside the stack's strip, as GoldenLayout's header clips it:
+      # never into the splitter or the window's edge past it.
+      let w = min(placeholderPx, n.strip.w)
+      let x = clamp(cx, n.strip.x, n.strip.x + n.strip.w - w)
       return (tint: n.strip,
-              caret: PxRect(x: cx, y: n.strip.y, w: placeholderPx,
-                            h: n.strip.h))
+              caret: PxRect(x: x, y: n.strip.y, w: w, h: n.strip.h))
     (tint: n.strip,
      caret: PxRect(x: max(n.strip.x, cx - DropCaretPx div 2), y: n.strip.y,
                    w: DropCaretPx, h: n.strip.h))

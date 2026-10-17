@@ -65,7 +65,8 @@
 ## Nothing here constructs a ViewModel, a store or a backend. It reads the ones
 ## a real session built.
 
-import std/strutils
+import std/[strutils, tables]
+from std/os import extractFilename
 
 import codetracer_embed
 
@@ -323,6 +324,90 @@ func notTakenLinesOf*(facts: openArray[FlowStyledLine]): seq[int] =
        (result.len == 0 or result[^1] != f.position):
       result.add f.position
 
+proc flowValuesByLine*(flow: FlowVM; path: string; tick: int;
+                       visible: bool): Table[int, seq[EditorValue]] =
+  ## **THE DESKTOP'S INLINE VALUES ARE THE FLOW'S** (`ui/flow.nim`'s parallel
+  ## values), per line of `path`: every line of the current function the run
+  ## reached carries the values its step recorded — before the step, as
+  ## `flow-parallel-value-before-only` shows them, else after it — not only
+  ## the execution line's names in scope. ONE answer for every front-end:
+  ## `editorSurfaceFor` attaches it to GPUI's rows and the terminal's host
+  ## hands it to its source pane (`sourcePaneModelFor(lineValues = …)`).
+  ##
+  ## Read off the shared `FlowVM`'s steps (one entry per step and expression
+  ## in the engine's order); the first step at a line is the one shown, its
+  ## events (`<stdout>` and the text written) before its values. A line the
+  ## flow has nothing for is ABSENT — the caller keeps its own rule there.
+  ## Empty when the overlay is hidden: the desktop draws them with the flow.
+  ##
+  ## A LOOP'S STEPS ONLY AS ITS CONTROL SHOWS THEM (`addStepValues`): a step
+  ## inside a loop is drawn when its iteration is the one the loop's control
+  ## is at (the last iteration whose first tick is at or before `tick`) — and
+  ## none at the first iteration, where the desktop draws the control without
+  ## its slider and registers no loop to match against (measured 2026-10-17:
+  ## nothing from `for` to `print` after `stepIn=21,stepOut=1`; the exit
+  ## step's `<stdout>` and `results` at the loop's last iteration after
+  ## `continueForward`). A loop's header carries its control, not values.
+  ##
+  ## The values arrive pre-rendered (`flowValueText`); each medium fits them
+  ## to its own row as it fits every inline value.
+  result = initTable[int, seq[EditorValue]]()
+  if flow.isNil or not visible:
+    return
+  let base = path.extractFilename
+  let loops = flow.loops.val
+  var iterationOf = initTable[int, int]()
+  for i, loop in loops:
+    var at = 0
+    for k, t in loop.rrTicksForIterations:
+      if t <= tick: at = k
+    iterationOf[i] = at
+  proc shown(loop, iteration: int): bool =
+    if loop == 0 and iteration == 0:
+      return true
+    let at = iterationOf.getOrDefault(loop, 0)
+    at > 0 and iteration == at
+  proc lineOf(location: string): int =
+    let colon = location.rfind(':')
+    if colon <= 0 or location[0 ..< colon] != base:
+      return 0
+    try: parseInt(location[colon + 1 .. ^1])
+    except ValueError: 0
+  var firstStep = initTable[int, int]()
+  var eventsOf = initTable[int, seq[EditorValue]]()
+  if not flow.events.isNil:
+    for ev in flow.events.val:
+      if shown(ev.loop, ev.iteration):
+        eventsOf.mgetOrPut(ev.step, @[]).add EditorValue(
+          name: "<" & ev.name & ">", value: ev.text)
+  for st in flow.steps.val:
+    if not shown(st.loop, st.iteration):
+      continue
+    let line = lineOf(st.location)
+    if line <= 0:
+      continue
+    # A loop's header carries its control, not values (measured: nothing
+    # on `for expression in EXPRESSIONS:` at the loop's last iteration).
+    if st.loop != 0 and st.loop < loops.len and loops[st.loop].first == line:
+      continue
+    if firstStep.hasKeyOrPut(line, st.step):
+      if firstStep[line] != st.step:
+        continue
+    else:
+      for e in eventsOf.getOrDefault(st.step):
+        result.mgetOrPut(line, @[]).add e
+    let value = if st.beforeValue.len > 0: st.beforeValue else: st.afterValue
+    if value.len == 0:
+      continue
+    result.mgetOrPut(line, @[]).add EditorValue(name: st.expression,
+                                                value: value)
+
+proc currentTickOf*(flow: FlowVM): int =
+  ## The debugger's tick, as the flow's own store holds it — what
+  ## `flowValuesByLine` places a loop's iteration against.
+  if flow.isNil or flow.store.isNil: 0
+  else: int(flow.store.debugger.val.rrTicks)
+
 const FlowOverlayShownByDefault* = true
   ## Whether a native host opens with the flow overlay drawn.
   ##
@@ -490,8 +575,9 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
     proc (line: int; text: string; held: bool): RowFacts =
       result.pointer = pointerFor(line, executionLine, inspection)
       result.mark = markFor(pts, path, line)
-      # INLINE VALUES ON THE EXECUTION LINE ONLY, which is the terminal's rule
-      # carried across rather than re-decided. The values the ViewModel
+      # THE NAMES IN SCOPE, ON THE EXECUTION LINE ONLY — where the flow has
+      # no values for it (the flow's, below, replace them on every line it
+      # reached). The values the ViewModel
       # reports are the values in scope AT THE STOP; attaching them to every
       # line that mentions the name would put the value of `x` at the stop
       # beside a line thirty above it that has not run yet, which is a stale
@@ -500,6 +586,17 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
         result.values = valuesForLine(text, values)
       result.flow = if flowVisible: flowStateOf(flowFacts, line)
                     else: efsUnknown)
+  # THE FLOW'S VALUES, on every line it has values for (`flowValuesByLine`);
+  # a line it has nothing for — the execution line included — keeps the rule
+  # above. Set on the projected rows rather than through the decoration codec
+  # because a flow name is an arbitrary EXPRESSION, and `inlineTextOf` refuses
+  # a name containing its separator.
+  let flowValues = flowValuesByLine(flow, path, currentTickOf(flow),
+                                    flowVisible)
+  if flowValues.len > 0:
+    for row in result.rows.mitems:
+      if row.held and flowValues.hasKey(row.line):
+        row.values = flowValues[row.line]
 
 proc followAndRequest*(vm: SourceVM): seq[SourceLineRequest] =
   ## Scroll to the execution pointer and report what the window then lacks.

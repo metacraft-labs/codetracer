@@ -990,7 +990,7 @@ proc redrawEditor() =
   gEditorSurface = openArm.surfaceOf(editViewportRows)
   discard renderEditor(r, editPane, sourcePaneView(GpuiMedium).root,
                        gEditorSurface, gEditorViewportPx, gEditorScrollCols)
-  noteEditorTab(r, editorTabLabel(openArm.path, openArm.isDirty))
+  noteEditorTab(r, editorTabLabel(openArm.root / openArm.path, openArm.isDirty))
   applyTextFaces(r, editPane)
 
 proc cancelWindowGesture(): bool
@@ -1133,7 +1133,6 @@ var
   gEventLogLoads = 0
     ## PLAT-51: how many event-log windows the scrubber has read — reported
     ## for the bounded-fetch test.
-  gStateResize: tuple[active: bool, startX, startPx: int]
   gWelcomeTabs = initWelcomeTabs()
     ## PLAT-51 deliverable 8: the tabs the "+" opened that are not (yet)
     ## replay sessions — the Welcome Screen, or an Edit-mode folder.
@@ -1163,8 +1162,6 @@ var
     ## Whether the focus highlight is drawn yet: from the first press on a
     ## pane, as the desktop outlines its selected panel only once one has
     ## been clicked (the editor holds the keys before that, unmarked).
-    ## PLAT-51: the Variables pane's column rule held — the name column
-    ## follows the pointer until the release (the desktop's column resize).
   gestureTrace = getEnv("CODETRACER_GPUI_GESTURE_TRACE", "") == "1"
     ## One stderr line per gesture step, for a window lane's record.
 
@@ -1363,6 +1360,9 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
       r.setStyle(strip, "height", $TabStripPx & "px")
       r.setStyle(strip, "padding-top", $TabTopPx & "px")
       r.setStyle(strip, "gap", $TabGapPx & "px")
+      # The tabs a drop placeholder pushes apart stay inside the stack
+      # (GoldenLayout's header clips them).
+      r.setStyle(strip, "overflow", "hidden")
       # PLAT-51: the focus colour's ground, on the focused pane. Otherwise the
       # window's own: the desktop's header is transparent over its ground.
       r.setAttribute(strip, "data-ct-strip-focused", $focusedHere)
@@ -1403,8 +1403,18 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
                    $(if active: TabStripPx - TabTopPx else: TabHeightPx) & "px")
         r.setStyle(tab, "flex-shrink", "0")
         r.setStyle(tab, "flex-direction", "column")
-        r.setStyle(tab, "background-color",
-                   if active: ground else: chromeOf(crPaneBackground))
+        # On a strip in the focus colour (PLAT-51's highlight, which the
+        # desktop's sheets do not have) a tab at the back shows the strip's
+        # ground, so the selected tab is told apart by its own (PLAT-68's
+        # `TabGroundContrastFloor`); elsewhere every tab is on the panel
+        # surface, as the desktop draws them.
+        if focusedHere and active:
+          # …and the selected one is lifted off the focus colour onto the
+          # window's ground (`chrome.tabStyle`'s PLAT-68 rule).
+          r.setStyle(tab, "background-color", chromeOf(crTabStripBackground))
+        elif not focusedHere:
+          r.setStyle(tab, "background-color",
+                     if active: ground else: chromeOf(crPaneBackground))
         r.setStyle(tab, "rounded", $TabRadiusPx & "px")
         if active:
           r.setStyle(tab, "border-bottom-left-radius", "0px")
@@ -1430,6 +1440,7 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
         # measured), the others' in the disabled tier.
         r.setStyle(title, "color",
                    if active: DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark]
+                   elif focusedHere: chromeOf(crTabFocusedForeground)
                    else: chromeOf(crTabInactiveForeground))
         var shown = label
         for k in PaneKind:
@@ -2533,9 +2544,6 @@ proc refreshEventLogMark() =
   except CatchableError:
     discard
 
-proc moveStateResize(r: GpuiRenderer; x: int)
-  ## PLAT-51: forward-declared; defined beside the state pane's clicks.
-
 proc refreshStateOrigins()
   ## PLAT-51: forward-declared; defined beside the state pane's clicks.
 
@@ -2627,9 +2635,6 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gListDrag.active:
       moveListScrubber(r, y)
       return
-    if gStateResize.active:
-      moveStateResize(r, x)
-      return
     if not gGestures.active:
       handleTopHover(r, x, y)
       return
@@ -2648,10 +2653,6 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gListDrag.active:
       moveListScrubber(r, y)
       gListDrag = ListScrubDrag()
-      return
-    if gStateResize.active:
-      moveStateResize(r, x)
-      gStateResize.active = false
       return
     if not gGestures.active: return
     step = gGestures.pointerUp(committedLayout(), gGeom, x, y)
@@ -3029,12 +3030,6 @@ proc absBox(r: GpuiRenderer; rect: PxRect; bg = ""): GpuiElement =
   r.setStyle(result, "items", "center")
   if bg.len > 0:
     r.setStyle(result, "background-color", bg)
-
-proc pinButtonRect(n: GeomNode): PxRect =
-  ## The PIN icon of a pane box's ACTIVE tab (every tab has one since the
-  ## desktop's tab strip, 2026-10-17; the box's one pin button at the strip's
-  ## right end until then).
-  if n.pins.len == 0: PxRect() else: n.pins[n.active]
 
 proc overlayRects(): seq[PxRect] =
   ## What `drawOverlay` draws OVER the tree right now: the revealed pane, a
@@ -3817,81 +3812,6 @@ proc stickyLinesOf(surface: EditorSurface):
   for (line, top) in stickyScopeLines(file, surface.viewportTop, offset):
     result.add (line, file[line - 1], top)
 
-proc withFlowValues(surface: EditorSurface): EditorSurface =
-  ## THE DESKTOP'S INLINE VALUES ARE THE FLOW'S (`ui/flow.nim`'s parallel
-  ## values): every line of the current function the run reached carries the
-  ## values its step recorded — before the step, as `flow-parallel-value-
-  ## before-only` shows them — not only the execution line's names in scope.
-  ## Read off the shared `FlowVM`'s steps (`flowStepEntriesOf`, one entry per
-  ## step and expression in the engine's order); the first step at a line is
-  ## the one shown, its events (`<stdout>` and the text written) before its
-  ## values. A line the flow has nothing for keeps the surface's own.
-  ##
-  ## A LOOP'S STEPS ONLY AS ITS CONTROL SHOWS THEM (`addStepValues`): a step
-  ## inside a loop is drawn when its iteration is the one the loop's control
-  ## is at — and none at the first iteration, where the desktop draws the
-  ## control without its slider and registers no loop to match against
-  ## (measured 2026-10-17: nothing from `for` to `print` after
-  ## `stepIn=21,stepOut=1`; the exit step's `<stdout>` and `results` at the
-  ## loop's last iteration after `continueForward`).
-  result = surface
-  if gSession.isNil or gSession.session.flowVM.isNil or
-     not surface.flowOverlayVisible:
-    return
-  let flow = gSession.session.flowVM
-  let base = surface.path.extractFilename
-  let tick = int(gSession.getCurrentRRTicks())
-  var iterationOf = initTable[int, int]()
-  for i, loop in flow.loops.val:
-    var at = 0
-    for k, t in loop.rrTicksForIterations:
-      if t <= tick: at = k
-    iterationOf[i] = at
-  proc shown(loop, iteration: int): bool =
-    if loop == 0 and iteration == 0:
-      return true
-    let at = iterationOf.getOrDefault(loop, 0)
-    at > 0 and iteration == at
-  proc lineOf(location: string): int =
-    let colon = location.rfind(':')
-    if colon <= 0 or location[0 ..< colon] != base:
-      return 0
-    try: parseInt(location[colon + 1 .. ^1])
-    except ValueError: 0
-  var byLine = initTable[int, seq[EditorValue]]()
-  var firstStep = initTable[int, int]()
-  var eventsOf = initTable[int, seq[EditorValue]]()
-  if not flow.events.isNil:
-    for ev in flow.events.val:
-      if shown(ev.loop, ev.iteration):
-        eventsOf.mgetOrPut(ev.step, @[]).add EditorValue(
-          name: "<" & ev.name & ">", value: ev.text)
-  let loops = flow.loops.val
-  for st in flow.steps.val:
-    if not shown(st.loop, st.iteration):
-      continue
-    let line = lineOf(st.location)
-    if line <= 0:
-      continue
-    # A loop's header carries its control, not values (measured: nothing
-    # on `for expression in EXPRESSIONS:` at the loop's last iteration).
-    if st.loop != 0 and st.loop < loops.len and loops[st.loop].first == line:
-      continue
-    if firstStep.hasKeyOrPut(line, st.step):
-      if firstStep[line] != st.step:
-        continue
-    else:
-      for e in eventsOf.getOrDefault(st.step):
-        byLine.mgetOrPut(line, @[]).add e
-    let value = if st.beforeValue.len > 0: st.beforeValue else: st.afterValue
-    if value.len == 0:
-      continue
-    byLine.mgetOrPut(line, @[]).add EditorValue(name: st.expression,
-                                                value: value)
-  for row in result.rows.mitems:
-    if row.held and byLine.hasKey(row.line):
-      row.values = byLine[row.line]
-
 proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
   ## The replay editor drawn again from the source window as it now holds,
   ## at the pane's current width: after a move (`refreshReplayWindow`, which
@@ -3915,7 +3835,9 @@ proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
   # PLAT-51: the caret stays where the user put it (a move does not move
   # it), on the file it was placed in — it is the file's document's
   # (PLAT-68), and so is the selection.
-  gEditorSurface = withFlowValues(withDebugDocument(surface))
+  # The flow's values are on the surface already (`editor_surface.
+  # flowValuesByLine`, the rule the terminal draws too).
+  gEditorSurface = withDebugDocument(surface)
   if resetScroll:
     gEditorScrollCols = 0
   r.setStyle(editor, "padding-top", $max(0, editorTopInsetPx()) & "px")
@@ -4232,7 +4154,7 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   if editViewportRows <= 0:
     editViewportRows = max(1, editorRowsOf(gGeom))
   gEditorSurface = arm.surfaceOf(editViewportRows)
-  gEditorTab = editorTabLabel(arm.path, arm.isDirty)
+  gEditorTab = editorTabLabel(arm.root / arm.path, arm.isDirty)
   # The editor leaf is drawn again for this surface (`adoptNewLeaves`).
   for id in [$paneEditor, $paneFileTree, $paneVcs]:
     if gPanes.hasKey(id):
@@ -4900,9 +4822,9 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
       continue
     for t in 0 ..< min(n.panes.len, n.pins.len):
       let onPin = n.pins[t].contains(x, y) and pinButtonShown(n.pins[t], covers)
-      let onClose = n.closes[t].contains(x, y) and
-                    pinButtonShown(n.closes[t], covers)
-      if not (onPin or onClose):
+      let onCloseIcon = n.closes[t].contains(x, y) and
+                        pinButtonShown(n.closes[t], covers)
+      if not (onPin or onCloseIcon):
         continue
       for k in PaneKind:
         if $k == n.panes[t]:
@@ -6240,13 +6162,6 @@ proc refreshStateOrigins() =
       lines[path] = @[]
   vm.originLines.val = lines
 
-proc moveStateResize(r: GpuiRenderer; x: int) =
-  ## PLAT-51: the column rule follows the pointer (the desktop's column
-  ## resize); the state pane is drawn again at the new width.
-  stateNameColumnOverridePx = max(1, gStateResize.startPx + x -
-                                     gStateResize.startX)
-  redrawPaneOf(r, paneState)
-
 proc historyPathAt(ticks: uint64): string =
   ## The variable whose open history holds an entry at `ticks`.
   if gSession.isNil or gSession.session.stateVM.isNil:
@@ -6478,13 +6393,6 @@ proc onPaneClick(c: GPaneClick) =
       let vm = if gSession.isNil: nil else: gSession.session.calltraceVM
       openOmnibar(r, CallsCommand &
                      (if vm.isNil: "" else: vm.searchQuery.val))
-  of gcpStateSeparator:
-    # PLAT-51: the column rule held — a column resize until the release.
-    if c.button == gbLeft:
-      gStateResize = (active: true, startX: c.x,
-                      startPx: (if stateNameColumnOverridePx > 0:
-                                  stateNameColumnOverridePx
-                                else: StateNameMinPx))
   of gcpPoint:
     # K31: the desktop's click selects the point.
     if c.button != gbLeft or session.pointListVM.isNil:
@@ -7685,7 +7593,7 @@ proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
   if preference.status in {kplRefused, kplMigrated}:
     openArm.status = preference.message
   editViewportRows = rows
-  gEditorTab = editorTabLabel(openArm.path, openArm.isDirty)
+  gEditorTab = editorTabLabel(openArm.root / openArm.path, openArm.isDirty)
   openArm.surfaceOf(editViewportRows)
 
 proc runEdit(cmd: GpuiCommand): int =
@@ -8062,10 +7970,10 @@ proc runOpen(cmd: GpuiCommand): int =
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at — the same reading `editorRowsFor`
   # takes for the row count, over the same layout.
-  # The session is the window's from here (`withFlowValues` reads its flow);
-  # it was assigned only after the first frame until 2026-10-17.
+  # The session is the window's from here (the first frame's leaves read its
+  # flow); it was assigned only after the first frame until 2026-10-17.
   gSession = session
-  gEditorSurface = withFlowValues(surface)
+  gEditorSurface = surface
   gEditorViewportPx = editorBodyWidthFor(
     shell.windows.windows[shell.windows.indexOf(windowId)].layout,
     shell.viewport, cmd)

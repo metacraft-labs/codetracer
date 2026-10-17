@@ -145,6 +145,13 @@ type
     values*: seq[Annotation]
       ## What the ViewModel reports at THIS tick. Rebuilt every frame; see
       ## `inline_annotations.nim` on why nothing here is cached.
+    lineValues*: seq[(int, seq[Annotation])]
+      ## The FLOW's values, by line (`editor_surface.flowValuesByLine` — the
+      ## rule GPUI's editor draws): every line of the current function the run
+      ## reached, drawn as they are, beside the code. A line listed here shows
+      ## these instead of `values`; the execution line falls back to `values`
+      ## (filtered by the names its text mentions) when the flow has nothing
+      ## for it. Empty when the flow overlay is hidden.
     heat*: LineHeat
     notTakenLines*: seq[int]
       ## The flow overlay: lines inside a branch arm the recorded run DECLINED,
@@ -257,7 +264,9 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
                           inspectionLine = 0;
                           notTakenLines: seq[int] = @[];
                           entryContext = "";
-                          columnMarks: seq[(int, int)] = @[]): SourcePaneModel =
+                          columnMarks: seq[(int, int)] = @[];
+                          lineValues: seq[(int, seq[Annotation])] = @[]):
+                         SourcePaneModel =
   ## `inspectionLine` is LAST and defaults to 0, so every CTUI-5 call site
   ## builds exactly the model it built before CTUI-6 existed.
   SourcePaneModel(
@@ -268,7 +277,19 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
     executionLine: executionLine, inspectionLine: inspectionLine,
     marks: marks, columnMarks: columnMarks, values: values, heat: heat,
     notTakenLines: notTakenLines, gutterMode: gutterMode,
-    degradedMessage: degradedMessage)
+    degradedMessage: degradedMessage, lineValues: lineValues)
+
+proc annotationsAt*(model: SourcePaneModel; line: int;
+                    lineText: string): seq[Annotation] =
+  ## The values drawn beside `line`: the flow's for it when it has any
+  ## (`lineValues`), else — on the execution line only — the names in scope
+  ## its text mentions. ONE answer for every front-end: GPUI's rows carry the
+  ## same (`editor_surface.editorSurfaceFor`).
+  for (l, vs) in model.lineValues:
+    if l == line:
+      return vs
+  if line == model.executionLine and line > 0 and model.values.len > 0:
+    return annotationsForLine(lineText, model.values)
 
 # ---------------------------------------------------------------------------
 # Reading the model
@@ -510,11 +531,13 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
             out2.role = srGutterBreakpoint
             out2.underline = true
             out2)
-      # The inline annotation, for the EXECUTION line only. §3.3.2 renders the
-      # evaluated values "at the current step", and a value printed beside a
-      # line the debugger is not on is a value from another moment.
-      if line == model.executionLine and model.values.len > 0:
-        let span = annotationSpan(raw, model.values, codeW, shown)
+      # The inline annotation: the flow's values on every line the run
+      # reached in this function (the step's own values, recorded at that
+      # step, so not a value from another moment), and the names in scope on
+      # the execution line where the flow has none (`annotationsAt`).
+      let annotations = model.annotationsAt(line, raw)
+      if annotations.len > 0:
+        let span = shownAnnotationSpan(annotations, codeW, shown)
         if span.text.len > 0:
           inc result.annotatedLines
           g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)
@@ -605,7 +628,7 @@ proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
                           row, col: int): SourceClickTarget =
   ## A press at `(row, col)` on the pane `paintSourcePane` painted into
   ## `area`, read back by the same arithmetic: the line, the gutter or the
-  ## code column, and on the execution line which inline value it is on.
+  ## code column, and on a line with inline values which one it is on.
   result = SourceClickTarget(value: -1)
   if area.width <= 0 or area.height <= 1 or row <= area.row or
      row >= area.row + area.height or col < area.col or
@@ -626,10 +649,11 @@ proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
     return
   let raw = model.heldTextAt(line)
   result.lineText = raw
-  if line == model.executionLine and model.values.len > 0:
+  let annotations = model.annotationsAt(line, raw)
+  if annotations.len > 0:
     let shown = cellWidthOf(truncateToCells(raw, codeW))
     let start = codeCol + shown + AnnotationGap
-    let targets = annotationTargets(raw, model.values, codeW, shown)
+    let targets = shownAnnotationTargets(annotations, codeW, shown)
     for t in targets:
       result.values.add t.value
     for i, t in targets:
