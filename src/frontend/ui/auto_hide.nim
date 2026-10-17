@@ -1871,6 +1871,15 @@ when defined(js):
           hideOverlay()
           hideDockedPanel()
           unpinPanel(autoHideLayout, panels[index]),
+      # The × on the active tab, as on the side strips: hide the panel and
+      # keep the tab pinned (Nikolay, 2026-10-17).
+      onHide: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          let panel = panels[index]
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+            hideDockedPanel()
+          if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
+            hideOverlay(),
       onHoverEnter: proc(index: int) =
         if index >= 0 and index < panels.len:
           # Its panel is already on screen, docked, so there is nothing to
