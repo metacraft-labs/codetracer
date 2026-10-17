@@ -45,8 +45,10 @@ when defined(js):
 import std/[algorithm, json, os, osproc, posix, sets, streams, strutils]
 
 import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
+import isonim/core/async_compat   # `drainPlatformCallbacks`: applies the answers
 
 import headless_session
+import sdk/stop_loader   # the SDK's per-stop loads, which `loadStopPanes` runs
 import store/types as store_types   # `FilesystemEntryNode`
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
@@ -648,26 +650,11 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
 
 proc refreshCallStackFallback*(s: HeadlessDebugSession) =
   ## PLAT-47: hand the calltrace pane the call STACK when — and only when —
-  ## the recording provides no call trace (`CalltraceVM.fallbackStack`). Per
-  ## stop, because the stack is a fact about the stop. A recording WITH a
-  ## trace pays nothing here: the store's lines are checked first.
-  let vm = s.session.calltraceVM
-  if vm.isNil:
-    return
-  if s.session.store.calltrace.lines.val.len > 0:
-    if vm.fallbackStack.val.len > 0:
-      vm.fallbackStack.val = newSeq[string]()
-    return
-  var names: seq[string] = @[]
-  try:
-    let response = s.sendRawDapRequest("stackTrace", %*{
-      "threadId": 1, "startFrame": 0, "levels": RecordingCalltraceLevels})
-    discard s.drainEvents()
-    for f in response{"body", "stackFrames"}.getElems:
-      names.add f{"name"}.getStr("")
-  except CatchableError:
-    names = @[]
-  vm.fallbackStack.val = names
+  ## the recording provides no call trace (`CalltraceVM.fallbackStack`),
+  ## re-asked now even at an unchanged stop. The load itself is the SDK stop
+  ## loader's (`StopPane.spCallStackFallback`).
+  s.sdk.stops.reload(spCallStackFallback)
+  drainPlatformCallbacks()
 
 proc selectCurrentCall*(s: HeadlessDebugSession) =
   ## PLAT-49 part B: select the call the debugger is in, as the desktop does
@@ -690,14 +677,15 @@ proc selectCurrentCall*(s: HeadlessDebugSession) =
   vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), names))
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
-  ## The per-STOP producer: the values in scope where the debugger now is,
-  ## which the state pane and the editor's inline values both read.
-  try:
-    s.requestAndLoadLocals()
-    result.locals = true
-  except CatchableError:
-    result.locals = false
-  refreshCallStackFallback(s)
+  ## The per-STOP producers — the values in scope where the debugger now is
+  ## (the state pane and the editor's inline values) and the PLAT-47 call
+  ## stack fallback — through the SDK's stop loader, the one per-stop loader
+  ## of every front-end. Each is asked once per stop; the stdio transport's
+  ## answers are applied when the platform callbacks are drained, below.
+  let loader = s.sdk.stops
+  loader.loadStop()
+  drainPlatformCallbacks()
+  result.locals = loader.status[spLocals].val == plsApplied
 
 proc stdoutIsTerminal*(): bool =
   ## Whether standard output is a terminal.

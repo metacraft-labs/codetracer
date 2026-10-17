@@ -990,10 +990,37 @@ proc localsLanguage*(store: ReplayDataStore): string =
   if result.len == 0:
     result = LoadLocalsDefaultLang
 
+const
+  LocalsCountBudget* = 3000
+    ## `ct/load-locals`' value budgets — the Electron GUI's numbers
+    ## (`ui/state.nim` `loadLocals`), sent by every front-end. They bound a
+    ## value TREE, not a screen; whether `countBudget` should follow the state
+    ## pane's viewport is Viewport-Driven-Loading.md Q2.
+  LocalsMinCountLimit* = 50
+  LocalsDepthLimit* = 7
+
+proc localsLoadArgs*(store: ReplayDataStore; rrTicks: uint64;
+                     watchExpressions: seq[string];
+                     countBudget = LocalsCountBudget;
+                     minCountLimit = LocalsMinCountLimit;
+                     depthLimit = LocalsDepthLimit;
+                     lang = ""): JsonNode =
+  ## The full `CtLoadLocalsArguments` for a `ct/load-locals` sent now. An
+  ## empty `lang` is the language of the file the debugger is stopped in
+  ## (`localsLanguage`).
+  %*{
+    "rrTicks": rrTicks,
+    "countBudget": countBudget,
+    "minCountLimit": minCountLimit,
+    "depthLimit": depthLimit,
+    "watchExpressions": watchExpressions,
+    "lang": (if lang.len > 0: lang else: store.localsLanguage()),
+  }
+
 proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
-                    countBudget: int = 3000;
-                    minCountLimit: int = 50;
-                    depthLimit: int = 7;
+                    countBudget: int = LocalsCountBudget;
+                    minCountLimit: int = LocalsMinCountLimit;
+                    depthLimit: int = LocalsDepthLimit;
                     watchExpressions: seq[string] = @[];
                     lang: string = "") =
   ## Request locals/globals from the backend for the given rrTicks.
@@ -1047,14 +1074,8 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   store.requestTracker.markPending(key, argsStr)
   store.locals.loadingState.val = lsLoading
 
-  let args = %*{
-    "rrTicks": rrTicks,
-    "countBudget": countBudget,
-    "minCountLimit": minCountLimit,
-    "depthLimit": depthLimit,
-    "watchExpressions": watchExpressions,
-    "lang": (if lang.len > 0: lang else: store.localsLanguage()),
-  }
+  let args = store.localsLoadArgs(rrTicks, watchExpressions, countBudget,
+                                  minCountLimit, depthLimit, lang)
   let fut = store.backend.send("ct/load-locals", args)
 
   # In the native (C) backend the future resolves synchronously in
