@@ -622,11 +622,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1792240883,
-        "narHash": "sha256-gkKyhI1vfrpwtiL2dKgIO03g2lUeJE8JMIY3WkEnM1c=",
+        "lastModified": 1792262980,
+        "narHash": "sha256-doo10z7jB/gF1PMBfpMnLsQhtW45mBrjdUliO5ZUXb8=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "abfd194ba4a599639e2be51dc96a5cd29ea955b5",
+        "rev": "a39df007ebe37cb77d52ce8d28f1c4c91116d0d5",
         "type": "github"
       },
       "original": {
@@ -744,9 +744,11 @@
         "zig-overlay": "zig-overlay"
       },
       "locked": {
+        "lastModified": 1790779225,
+        "narHash": "sha256-fSUq36pWMAq+7GXvIbPjaMZkxW76J5L0vMj6PDdqfOU=",
         "owner": "metacraft-labs",
         "repo": "nix-codetracer-toolchains",
-        "rev": "e830fd3211db97b07ab04612bc116a3cb1ceab6e",
+        "rev": "a05c95e748d6244617083e4e73f2a52c14df4dd4",
         "type": "github"
       },
       "original": {
@@ -805,11 +807,11 @@
     "codetracer-trace-format-nim": {
       "flake": false,
       "locked": {
-        "lastModified": 1792246645,
-        "narHash": "sha256-RGX61GRKRYBM/BY4ua/xDpzxwhDo5EQ/CLjqLmBScPU=",
+        "lastModified": 1792267836,
+        "narHash": "sha256-u4v/RL1o0fTsocmJ4tRHEuRli84eg41vvAS32T6TcCM=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "b4794ba69fa7ccb0b568de7c582a576994c63e5b",
+        "rev": "c791f23755f9a69b3063a08317ee8ccf46b60724",
         "type": "github"
       },
       "original": {
@@ -5073,9 +5075,11 @@
         ]
       },
       "locked": {
+        "lastModified": 1790936692,
+        "narHash": "sha256-bH/Me81vzh9cSKKc4GysgbLEZiRH095Tuxpr+ds78tE=",
         "owner": "metacraft-labs",
         "repo": "nix-blockchain-development",
-        "rev": "b3fcb2ec8b1b7681168a861490b3ed1edf0aba24",
+        "rev": "0c9b8cdf6df32ebd37de2ab9ca1fae760637483b",
         "type": "github"
       },
       "original": {
@@ -5147,9 +5151,11 @@
         ]
       },
       "locked": {
+        "lastModified": 1790936692,
+        "narHash": "sha256-bH/Me81vzh9cSKKc4GysgbLEZiRH095Tuxpr+ds78tE=",
         "owner": "metacraft-labs",
         "repo": "nix-blockchain-development",
-        "rev": "b3fcb2ec8b1b7681168a861490b3ed1edf0aba24",
+        "rev": "0c9b8cdf6df32ebd37de2ab9ca1fae760637483b",
         "type": "github"
       },
       "original": {
@@ -6573,13 +6579,13 @@
         "lastModified": 1773531224,
         "narHash": "sha256-XidXG/2KOqgGw6KxaoY/6SJMnQEwJypLB7acUJ/Pshs=",
         "owner": "metacraft-labs",
-        "repo": "nixos-modules",
+        "repo": "devops-modules",
         "rev": "9fdbf289a176358466049c3d56e2c7b5e52a63e8",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "repo": "nixos-modules",
+        "repo": "devops-modules",
         "type": "github"
       }
     },
@@ -6629,13 +6635,13 @@
         "lastModified": 1768173219,
         "narHash": "sha256-KeGfgvjNN/cYD9HaUiNIsGx9Cf6Rzy8Zi09JNC9gAe0=",
         "owner": "metacraft-labs",
-        "repo": "nixos-modules",
+        "repo": "devops-modules",
         "rev": "7a0f1c7a3ee30827a19cc5da0a39defb15b734f6",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "repo": "nixos-modules",
+        "repo": "devops-modules",
         "type": "github"
       }
     },
