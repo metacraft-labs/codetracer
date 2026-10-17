@@ -61,6 +61,12 @@ You may also be given crops of one region of both at 2x.
   to clear when it loads the new function's flow. GPUI shows only the
   current flow's values. Every other inline-value difference is still to be
   reported.
+- **The eventLog view's editor scroll, by one loop control's height (21 px)
+  or one row.** After a run to completion Electron's editor lands at either
+  of two positions, depending on whether the flow's loop control was laid
+  out before it scrolled. Two consecutive Electron captures disagreed this
+  way (`first=73` against `first=75`, measured 2026-09-21 in
+  `visual-alignment-capture.spec.ts`). Report any other offset.
 
 ## How to report
 

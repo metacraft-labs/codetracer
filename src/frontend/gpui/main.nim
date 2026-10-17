@@ -1278,8 +1278,12 @@ proc editorTopInsetPx(): int =
   # .bottomAligned`): the window's rows are drawn so, which can start them
   # above the editor's top — a NEGATIVE inset, the rows above cut off.
   if not gSourceService.isNil and gSourceService.bottomAligned:
+    # Monaco's scroll height counts the horizontal scrollbar's band under
+    # the last line (`scrollBeyondLastLine: false`): the last line rests
+    # that band above the bottom edge.
     let shown = gSourceService.monacoLineCount - gEditorSurface.viewportTop + 1
-    return EditorPadTopPx + viewport - shown * GpuiEditorRowPx
+    return EditorPadTopPx + viewport - EditorHScrollBandPx -
+           shown * GpuiEditorRowPx
   EditorPadTopPx + (viewport div 2) mod GpuiEditorRowPx
 
 proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int;
@@ -3851,11 +3855,16 @@ proc withFlowValues(surface: EditorSurface): EditorSurface =
       if shown(ev.loop, ev.iteration):
         eventsOf.mgetOrPut(ev.step, @[]).add EditorValue(
           name: "<" & ev.name & ">", value: ev.text)
+  let loops = flow.loops.val
   for st in flow.steps.val:
     if not shown(st.loop, st.iteration):
       continue
     let line = lineOf(st.location)
     if line <= 0:
+      continue
+    # A loop's header carries its control, not values (measured: nothing
+    # on `for expression in EXPRESSIONS:` at the loop's last iteration).
+    if st.loop != 0 and st.loop < loops.len and loops[st.loop].first == line:
       continue
     if firstStep.hasKeyOrPut(line, st.step):
       if firstStep[line] != st.step:

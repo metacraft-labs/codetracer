@@ -1027,9 +1027,10 @@ const
   GutterBreakpointX* = 62
     ## The breakpoint lane's left, from the margin's.
   GutterBreakpointPx* = 9
-  GutterFoldX* = 90
-    ## The fold chevron's left (`codicon-folding-expanded`, 12.8 px).
-  StickyFoldX* = 58
+  GutterFoldX* = 84
+    ## The fold chevron's box's left (`codicon-folding-expanded`, its ink
+    ## 2.6 px into the 14 px box).
+  StickyFoldX* = 56
     ## A sticky header's chevron's left: Monaco's sticky widget draws the
     ## fold icon right after its line-number box, its ink 60–67 px into the
     ## margin (measured 2026-10-17), and no number.
@@ -1205,11 +1206,14 @@ const
                         tcRegexp}
   IndentUnitCols = 4
     ## One indentation level, the desktop editor's tab size.
-  IndentGuideColour = "#333333"
+  IndentGuideColour = "#4f4f4f"
     ## `editorIndentGuide` as it lands on the editor's ground (measured on the
-    ## desktop, 2026-10-17).
-  IndentGuideInsetPx = 4.0
-    ## The guide sits 4 px into its column (measured: 503 for code at 499).
+    ## desktop, 2026-10-17: a function's body)…
+  IndentGuideInBracketsColour = "#313131"
+    ## …and inside an open bracket (the `OPERATIONS` table's rows).
+  IndentGuideInsetPx = 3.0
+    ## The guide sits 3 px into its column (measured: 502 for code at 499,
+    ## 406 for code at 403).
 
 func bracketDepths*(rows: openArray[EditorRow];
                     runs: openArray[seq[TokenRun]]): seq[int] =
@@ -1393,31 +1397,36 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     let holder = r.createElement("div")
     r.setStyle(holder, "position", "absolute")
     r.setStyle(holder, "left", $StickyFoldX & "px")
-    r.setStyle(holder, "top", "5px")
-    r.setStyle(holder, "width", "13px")
-    r.setStyle(holder, "height", "13px")
+    r.setStyle(holder, "top", "6px")
+    r.setStyle(holder, "width", "14px")
+    r.setStyle(holder, "height", "14px")
     let chevron = r.createElement("img")
     r.setAttribute(chevron, "data-ct-fold", "sticky")
     r.setAttribute(chevron, "src", stickyChevronPath())
-    r.setStyle(chevron, "width", "13px")
-    r.setStyle(chevron, "height", "13px")
+    r.setStyle(chevron, "width", "14px")
+    r.setStyle(chevron, "height", "14px")
     r.appendChild(holder, chevron)
     r.appendChild(gutter, holder)
   elif foldable:
     # Monaco's fold chevron (`.codicon-folding-expanded`), always shown on a
-    # line that opens an indented block (`alwaysShowFoldIcons`), in its lane
-    # at `GutterFoldX`.
+    # line that opens an indented block (`alwaysShowFoldIcons`): 14 px,
+    # placed so its ink is 86–94 px into the margin and 8–12 px down the row
+    # as the desktop's glyph is (measured 2026-10-17) — absolutely, as the
+    # lanes' flow does not put it there.
+    r.setStyle(gutter, "position", "relative")
+    let holder = r.createElement("div")
+    r.setStyle(holder, "position", "absolute")
+    r.setStyle(holder, "left", $GutterFoldX & "px")
+    r.setStyle(holder, "top", "3px")
+    r.setStyle(holder, "width", "14px")
+    r.setStyle(holder, "height", "14px")
     let chevron = r.createElement("img")
     r.setAttribute(chevron, "data-ct-fold", "expanded")
     r.setAttribute(chevron, "src", foldChevronPath())
-    # 14 px, its ink 86–94 px into the margin and 8–12 px down the row as
-    # the desktop's glyph is (measured 2026-10-17).
     r.setStyle(chevron, "width", "14px")
     r.setStyle(chevron, "height", "14px")
-    r.setStyle(chevron, "flex-shrink", "0")
-    r.setStyle(chevron, "margin-left", "7px")
-    r.setStyle(chevron, "margin-bottom", "2px")
-    r.appendChild(gutter, chevron)
+    r.appendChild(holder, chevron)
+    r.appendChild(gutter, holder)
   r.appendChild(el, gutter)
 
   # THE CODE COLUMN: the rest of the row, grown to the pane's right edge, so
@@ -1479,7 +1488,8 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
       r.setStyle(g, "top", "0px")
       r.setStyle(g, "width", "1px")
       r.setStyle(g, "height", "100%")
-      r.setStyle(g, "background", IndentGuideColour)
+      r.setStyle(g, "background", if bracketDepth > 0: IndentGuideInBracketsColour
+                                  else: IndentGuideColour)
       r.appendChild(column, g)
   let code = r.createElement("span")
   r.setAttribute(code, TextRoleAttribute, $trEditorCode)
@@ -1769,13 +1779,15 @@ proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
     r.setStyle(result, "border-width", "1px")
     r.setStyle(result, "border-color", DesignTokenHex[dtColorsUiBorderSecondary][dmDark])
     r.setStyle(result, "background-color", DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark])
+    # `.flow-loop-button`: its arrow 6 x 12 px, the whole button at half
+    # opacity when it cannot move (measured 2026-10-17).
     let icon = r.createElement("img")
-    r.setAttribute(icon, "src", stateIconPath(name, svg, "#dddddd"))
-    r.setStyle(icon, "width", "8px")
-    r.setStyle(icon, "height", "8px")
-    if not enabled:
-      r.setStyle(icon, "opacity", "0.4")
+    r.setAttribute(icon, "src", stateIconPath(name, svg, "#f3f3f3"))
+    r.setStyle(icon, "width", "12px")
+    r.setStyle(icon, "height", "12px")
     r.appendChild(result, icon)
+    if not enabled:
+      r.setStyle(result, "opacity", "0.5")
   r.appendChild(result, button(r, "loop-back", LoopBackSvg, z.iteration > 0))
   let chip = r.createElement("div")
   r.setStyle(chip, "display", "flex")
@@ -1800,6 +1812,9 @@ proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
   r.setStyle(n, "padding-left", "4px")
   r.setStyle(n, "background-color", DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark])
   r.setStyle(n, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+  # `.flow-loop-textarea`: the field at 0.7 opacity, its digit regular.
+  r.setStyle(n, "opacity", "0.7")
+  r.setStyle(n, "font-weight", "400")
   r.appendChild(n, r.createTextNode($z.iteration))
   r.appendChild(chip, n)
   r.appendChild(chip, r.createTextNode(" from " & $last))
@@ -1944,6 +1959,19 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                                           guideCounts[i]))
   if scroll.present:
     r.appendChild(parent, renderEditorScrollbar(r, scroll))
+  if editorPaneHeightPx > 0 and viewportPx > 0:
+    # The editor's top inset is ground: a row scrolled partly above the
+    # viewport is cut at its top edge, as Monaco's lines are, rather than
+    # drawn into the inset.
+    r.setStyle(parent, "position", "relative")
+    let inset = r.createElement("div")
+    r.setStyle(inset, "position", "absolute")
+    r.setStyle(inset, "left", "0px")
+    r.setStyle(inset, "top", "0px")
+    r.setStyle(inset, "width", $viewportPx & "px")
+    r.setStyle(inset, "height", $EditorTopPadPx & "px")
+    r.setStyle(inset, "background-color", EditorGround)
+    r.appendChild(parent, inset)
   if sticky.len > 0:
     # The sticky scope headers, over the top rows, each a full editor row
     # on the sticky ground.
@@ -2002,9 +2030,16 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     # the #282828 ground, drawn as the black it is laid over that ground).
     if surface.viewportTop > 1:
       var below = 0
+      # The scroll decoration lies over the code alone (`.scroll-decoration`
+      # in the scrollable element: from the margin's edge to the overview
+      # ruler's border); the sticky widget's shadow spans the whole editor.
+      var left = EditorGutterPx
+      var width = viewportPx - EditorGutterPx - 15
       var alphas = @[0.45, 0.325, 0.225, 0.15, 0.1, 0.05]
       if sticky.len > 0:
         below = sticky[^1].top + EditorLinePx
+        left = 0
+        width = viewportPx
         alphas = if sticky[^1].top < (sticky.len - 1) * EditorLinePx:
                    @[0.225, 0.475, 0.225, 0.075]
                  else: @[0.95, 0.7, 0.325, 0.075, 0.025]
@@ -2012,9 +2047,9 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
         let band = r.createElement("div")
         r.setAttribute(band, "data-ct-scroll-shadow", $i)
         r.setStyle(band, "position", "absolute")
-        r.setStyle(band, "left", "0px")
+        r.setStyle(band, "left", $left & "px")
         r.setStyle(band, "top", $(EditorTopPadPx + max(0, below) + i) & "px")
-        r.setStyle(band, "width", $viewportPx & "px")
+        r.setStyle(band, "width", $max(1, width) & "px")
         r.setStyle(band, "height", "1px")
         r.setStyle(band, "background-color",
                    "#000000" & toHex(int(round(alpha * 255)), 2).toLowerAscii)
@@ -2066,9 +2101,10 @@ const
     ## either side of the pane.
   CallRowsTopPx* = CallSearchPx + 8
     ## The first row below the pane's content top: the field and its 8 px.
-  CallRowPitch* = 25.6
-    ## The desktop's row pitch (`.calltrace-call-line`, 1.6 x 16 px): rows at
-    ## 108, 134, 159, 185 … under a field at 74.
+  CallRowPitch* = 25.78
+    ## The desktop's row pitch (`.calltrace-call-line`): rows at 108, 134,
+    ## 159, 185 … 830 under a field at 74 — 722 px over 28 rows (measured
+    ## 2026-10-17; 1.6 x 16 px fell 2 px short by the pane's foot).
   CallToggleLeftPx* = 6
     ## The toggle icon's left at depth 0 (`.collapse-call-img`, 14 px), and the
     ## text 20 px after it.
@@ -2150,7 +2186,7 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
   r.setStyle(glass, "flex-shrink", "0")
   r.appendChild(field, glass)
   let text = r.createElement("div")
-  r.setStyle(text, "padding-left", "9px")
+  r.setStyle(text, "padding-left", "5px")
   r.setStyle(text, "color", DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark])
   r.appendChild(text, r.createTextNode(if query.len > 0: query else: "Search"))
   r.appendChild(field, text)
@@ -2847,6 +2883,17 @@ proc stateScrollbars(r: GpuiRenderer; parent: GpuiElement;
   let horizontal = contentW > w - (if vertical: StateScrollbarPx else: 0)
   vertical = vertical or (horizontal and contentH > boxH - StateScrollbarPx)
   r.setStyle(parent, "position", "relative")
+  if horizontal:
+    # The box's rows end above its horizontal scrollbar (its client height
+    # is the box's less the bar): a row reaching under the bar is not drawn.
+    let cover = r.createElement("div")
+    r.setStyle(cover, "position", "absolute")
+    r.setStyle(cover, "left", "0px")
+    r.setStyle(cover, "top", $(h - StateScrollbarPx) & "px")
+    r.setStyle(cover, "width", $w & "px")
+    r.setStyle(cover, "height", $StateScrollbarPx & "px")
+    r.setStyle(cover, "background-color", chromeOf(crPaneBackground))
+    r.appendChild(parent, cover)
   proc thumb(r: GpuiRenderer; x, y, tw, th: int; axis: string) =
     let t = r.createElement("div")
     r.setAttribute(t, "data-ct-state-scrollbar", axis)
@@ -3540,7 +3587,7 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
   r.appendChild(find, glass)
   let ph = stateText(r, "Find event", DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark],
                      14, mono = false)
-  r.setStyle(ph, "padding-left", "9px")
+  r.setStyle(ph, "padding-left", "5px")
   r.appendChild(find, ph)
   r.appendChild(bar, find)
   let columns = r.createElement("div")
