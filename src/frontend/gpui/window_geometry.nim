@@ -40,7 +40,7 @@
 ##
 ## Pure: integers and the model's values, no renderer, no window.
 
-import std/[json, options, strutils]
+import std/[json, math, options, strutils]
 
 import headless_app/layout_model
 import headless_app/layout_interaction
@@ -246,14 +246,19 @@ proc addNode(g: var WindowGeometry; layout: Layout; n: JsonNode;
     var used = 0
     var cursor = if horizontal: x else: y
     var sizes: seq[int] = @[]
+    # THE DESKTOP'S ROUNDING (golden-layout's `calculateAbsoluteSizes`):
+    # each child its share floored, and the pixels left over handed out one
+    # apiece to the FIRST children — not all of them to the last, which put
+    # every divider of a 1920 px window a pixel left of the desktop's.
     for i in 0 ..< kids.len:
       let share =
         if total > 0.0: stack{"sizes"}[i].getFloat / total
         else: 1.0 / float(kids.len)
-      let px = if i == kids.high: extent - used
-               else: int(float(extent) * share)
+      let px = int(floor(float(extent) * share))
       used += px
       sizes.add px
+    for i in 0 ..< min(kids.len, max(0, extent - used)):
+      inc sizes[i]
     let at = g.nodes.len
     g.nodes.add node
     var childIdx: seq[int] = @[]
@@ -640,6 +645,13 @@ const
   EditorHScrollBandPx* = 12
     ## Monaco's horizontal scrollbar band along the editor's bottom, which its
     ## viewport excludes (`scrollbar.horizontalScrollbarSize`).
+
+proc editorFullRowsOf*(g: WindowGeometry): int =
+  ## How many WHOLE rows the editor shows: its body over the row pitch, the
+  ## partial last row not counted — where Monaco stops at a file's end.
+  let i = g.tabsNodeOfPane("editor")
+  let h = if i >= 0: g.nodes[i].body.h else: g.inner.h
+  max(1, (h - EditorPadTopPx - EditorLinesAbovePx) div GpuiEditorRowPx)
 
 proc editorVisibleRowsOf*(g: WindowGeometry): int =
   ## How many of the editor's rows are WHOLLY in view above that band — the

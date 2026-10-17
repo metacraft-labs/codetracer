@@ -1145,6 +1145,8 @@ var
   gRecentFolders: seq[string] = @[]
   gRecordJob: NativeRecordJob = nil
   gRecordSerial = -1
+  gTestJob: NativeRecordJob = nil
+    ## The top bar's run-tests, running (`native_host.startRecordTestJob`).
   gFolderArms = initTable[int, GpuiEditArm]()
     ## A folder tab's editing core (`app/edit_arm`), by the tab's serial.
   gLayoutSettings = defaultLayoutSettings()
@@ -1271,6 +1273,13 @@ proc editorTopInsetPx(): int =
   if i < 0 or gEditorSurface.viewportTop <= 1:
     return EditorPadTopPx
   let viewport = gGeom.nodes[i].body.h - EditorPadTopPx
+  # At the file's end Monaco rests its last line (the empty one after a
+  # final newline counted) on the bottom edge (`GpuiSourceService
+  # .bottomAligned`): the window's rows are drawn so, which can start them
+  # above the editor's top — a NEGATIVE inset, the rows above cut off.
+  if not gSourceService.isNil and gSourceService.bottomAligned:
+    let shown = gSourceService.monacoLineCount - gEditorSurface.viewportTop + 1
+    return EditorPadTopPx + viewport - shown * GpuiEditorRowPx
   EditorPadTopPx + (viewport div 2) mod GpuiEditorRowPx
 
 proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int;
@@ -1292,7 +1301,7 @@ proc stylePaneBox(r: GpuiRenderer; pane: GpuiElement; w, h: int;
   let inset = paneInsetOf(if isEditor: $paneEditor else: id)
   r.setStyle(pane, "padding", "0px")
   r.setStyle(pane, "padding-top",
-             $(if isEditor: editorTopInsetPx() else: inset.top) & "px")
+             $(if isEditor: max(0, editorTopInsetPx()) else: inset.top) & "px")
   r.setStyle(pane, "padding-right", $inset.right & "px")
   r.setStyle(pane, "padding-bottom", $inset.bottom & "px")
   r.setStyle(pane, "padding-left", $inset.left & "px")
@@ -1341,6 +1350,7 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
     # No fill of its own: the strip shows the window's ground between its
     # tabs, as the desktop's transparent header does; the body is filled.
     r.setStyle(box, "rounded", $TabRadiusPx & "px")
+    r.setStyle(box, "position", "relative")
     if not n.strip.isEmpty:
       let strip = r.createElement("div")
       r.setAttribute(strip, "data-ct-tabs", n.labels.join(","))
@@ -1439,6 +1449,32 @@ proc drawNode(r: GpuiRenderer; i: int): GpuiElement =
             r.setStyle(gap, "flex-shrink", "0")
             r.appendChild(row, gap)
         r.appendChild(strip, tab)
+        if active:
+          # `.lm_active::before` / `::after`: the tab flares into its panel
+          # with a 6 px concave corner on each side that has a neighbour.
+          for (side, x) in [(-1, n.tabs[t].x - n.rect.x - TabRadiusPx),
+                            (1, n.tabs[t].x - n.rect.x + n.tabs[t].w)]:
+            if (side < 0 and t == 0) or (side > 0 and t == n.labels.high):
+              continue
+            let corner = r.createElement("div")
+            r.setAttribute(corner, "data-ct-tab-flare", $side)
+            r.setStyle(corner, "position", "absolute")
+            r.setStyle(corner, "left", $x & "px")
+            r.setStyle(corner, "top", $(TabStripPx - TabRadiusPx) & "px")
+            r.setStyle(corner, "width", $TabRadiusPx & "px")
+            r.setStyle(corner, "height", $TabRadiusPx & "px")
+            r.setStyle(corner, "overflow", "hidden")
+            r.setStyle(corner, "background-color", ground)
+            let hole = r.createElement("div")
+            r.setStyle(hole, "position", "absolute")
+            r.setStyle(hole, "left", $(if side < 0: -TabRadiusPx else: 0) & "px")
+            r.setStyle(hole, "top", $(-TabRadiusPx) & "px")
+            r.setStyle(hole, "width", $(2 * TabRadiusPx) & "px")
+            r.setStyle(hole, "height", $(2 * TabRadiusPx) & "px")
+            r.setStyle(hole, "rounded", $TabRadiusPx & "px")
+            r.setStyle(hole, "background-color", chromeOf(crWindowBackground))
+            r.appendChild(corner, hole)
+            r.appendChild(box, corner)
       if gapAt >= n.labels.len:
         r.appendChild(strip, gapEl(r))
       r.appendChild(box, strip)
@@ -1875,6 +1911,9 @@ proc syncLeafContext() =
   let i = gGeom.tabsNodeOfPane($paneEventLog)
   if i >= 0:
     eventLogPaneWidthPx = gGeom.nodes[i].body.w
+  let st = gGeom.tabsNodeOfPane($paneState)
+  if st >= 0:
+    statePaneSizePx = (gGeom.nodes[st].body.w, gGeom.nodes[st].body.h)
 
 proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
@@ -2367,20 +2406,35 @@ proc eventLogScrubber(): ScrubberModel =
   scrubberModel(ev.recordsTotal.val, ev.loadedStart.val, eventLogRows(),
                 ev.currentIndex.val, totalKnown = ev.totalReported.val)
 
+var gCallMark: tuple[current: int, ticks: uint64] = (-1, high(uint64))
+  ## The call trace scrubber's mark as last established, kept while a
+  ## section that cannot say where "now" is is held.
+
 proc callTraceScrubber(): ScrubberModel =
   ## The WHOLE trace at its expansion, the ViewModel's scroll position, and
-  ## the debugger's call (the selected row when it is listed, else the
-  ## engine's `currentCallLineIndex`).
+  ## the mark the desktop's scrubber draws (`isonim_calltrace_view`'s
+  ## `current`): the last call entered at or before the debugger's tick
+  ## (`currentCallOf` with no stack) — read only off a held section that
+  ## reaches past the tick, remembered while one that does not is held, and
+  ## dropped when the debugger moves.
   if gSession.isNil or gSession.session.calltraceVM.isNil:
     return scrubberModel(0, 0, 0, totalKnown = false)
   let vm = gSession.session.calltraceVM
   let store = gSession.session.store
-  var current = int(store.calltrace.currentLineIndex.val)
-  for row in vm.callRows():
-    if crfSelected in row.flags:
-      current = int(row.index)
+  let ticks = store.debugger.val.rrTicks
+  let held = store.calltrace.lines.val
+  let at = currentCallOf(held, ticks, @[])
+  var coversAfter = false
+  for l in held:
+    if l.rrTicks > ticks:
+      coversAfter = true
+      break
+  if at.isSome and coversAfter:
+    gCallMark = (int(at.get), ticks)
+  elif ticks != gCallMark.ticks:
+    gCallMark = (-1, ticks)
   scrubberModel(int(store.calltrace.totalCallsCount.val),
-                int(vm.scrollPosition.val), callTraceRows(), current)
+                int(vm.scrollPosition.val), callTraceRows(), gCallMark.current)
 
 proc drawListScrubbers(r: GpuiRenderer) =
   ## Each list pane's scrubber over what its leaf drew.
@@ -3755,25 +3809,60 @@ proc withFlowValues(surface: EditorSurface): EditorSurface =
   ## before-only` shows them — not only the execution line's names in scope.
   ## Read off the shared `FlowVM`'s steps (`flowStepEntriesOf`, one entry per
   ## step and expression in the engine's order); the first step at a line is
-  ## the one shown. A line the flow has nothing for keeps the surface's own.
+  ## the one shown, its events (`<stdout>` and the text written) before its
+  ## values. A line the flow has nothing for keeps the surface's own.
+  ##
+  ## A LOOP'S STEPS ONLY AS ITS CONTROL SHOWS THEM (`addStepValues`): a step
+  ## inside a loop is drawn when its iteration is the one the loop's control
+  ## is at — and none at the first iteration, where the desktop draws the
+  ## control without its slider and registers no loop to match against
+  ## (measured 2026-10-17: nothing from `for` to `print` after
+  ## `stepIn=21,stepOut=1`; the exit step's `<stdout>` and `results` at the
+  ## loop's last iteration after `continueForward`).
   result = surface
   if gSession.isNil or gSession.session.flowVM.isNil or
      not surface.flowOverlayVisible:
     return
+  let flow = gSession.session.flowVM
   let base = surface.path.extractFilename
+  let tick = int(gSession.getCurrentRRTicks())
+  var iterationOf = initTable[int, int]()
+  for i, loop in flow.loops.val:
+    var at = 0
+    for k, t in loop.rrTicksForIterations:
+      if t <= tick: at = k
+    iterationOf[i] = at
+  proc shown(loop, iteration: int): bool =
+    if loop == 0 and iteration == 0:
+      return true
+    let at = iterationOf.getOrDefault(loop, 0)
+    at > 0 and iteration == at
+  proc lineOf(location: string): int =
+    let colon = location.rfind(':')
+    if colon <= 0 or location[0 ..< colon] != base:
+      return 0
+    try: parseInt(location[colon + 1 .. ^1])
+    except ValueError: 0
   var byLine = initTable[int, seq[EditorValue]]()
   var firstStep = initTable[int, int]()
-  for st in gSession.session.flowVM.steps.val:
-    let colon = st.location.rfind(':')
-    if colon <= 0 or st.location[0 ..< colon] != base:
+  var eventsOf = initTable[int, seq[EditorValue]]()
+  if not flow.events.isNil:
+    for ev in flow.events.val:
+      if shown(ev.loop, ev.iteration):
+        eventsOf.mgetOrPut(ev.step, @[]).add EditorValue(
+          name: "<" & ev.name & ">", value: ev.text)
+  for st in flow.steps.val:
+    if not shown(st.loop, st.iteration):
       continue
-    var line = 0
-    try:
-      line = parseInt(st.location[colon + 1 .. ^1])
-    except ValueError:
+    let line = lineOf(st.location)
+    if line <= 0:
       continue
-    if firstStep.hasKeyOrPut(line, st.step) and firstStep[line] != st.step:
-      continue
+    if firstStep.hasKeyOrPut(line, st.step):
+      if firstStep[line] != st.step:
+        continue
+    else:
+      for e in eventsOf.getOrDefault(st.step):
+        byLine.mgetOrPut(line, @[]).add e
     let value = if st.beforeValue.len > 0: st.beforeValue else: st.afterValue
     if value.len == 0:
       continue
@@ -3809,14 +3898,34 @@ proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
   gEditorSurface = withFlowValues(withDebugDocument(surface))
   if resetScroll:
     gEditorScrollCols = 0
-  r.setStyle(editor, "padding-top", $editorTopInsetPx() & "px")
+  r.setStyle(editor, "padding-top", $max(0, editorTopInsetPx()) & "px")
   editorLoopZones = loopZonesOf(gEditorSurface)
   block:
     let i = gGeom.tabsNodeOfPane($paneEditor)
     if i >= 0: editorPaneHeightPx = gGeom.nodes[i].body.h
+  let sticky = stickyLinesOf(gEditorSurface)
+  traceGesture("editor top=" & $gEditorSurface.viewportTop & " inset=" &
+               $editorTopInsetPx() & " rows=" & $gEditorSurface.rows.len &
+               " end=" & $(not gSourceService.isNil and gSourceService.bottomAligned) &
+               " sticky=" & $sticky.len & " full=" &
+               $(if gSourceService.isNil: 0 else: gSourceService.fullRows) &
+               " total=" & $(if gSourceService.isNil: 0 else: gSourceService.vm.totalLineCount.val) &
+               " file=" & $(if gSourceService.isNil: -1
+                            elif gSourceService.fileLines.hasKey(gEditorSurface.path):
+                              gSourceService.fileLines[gEditorSurface.path].len
+                            else: -1))
   discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
                        gEditorSurface, gEditorViewportPx, gEditorScrollCols,
-                       stickyLinesOf(gEditorSurface))
+                       sticky)
+  # A negative inset starts the rows above the editor's top: the first row
+  # is pulled up by it, the pane's clip cutting off what is above.
+  let inset = editorTopInsetPx()
+  if inset < 0:
+    for k in 0 ..< childCount(editor):
+      let child = nthChild(editor, k)
+      if getAttribute(child, EditorRowAttribute).len > 0:
+        r.setStyle(child, "margin-top", $inset & "px")
+        break
   noteEditorTab(r, editorTabLabel(surface.path, false))
   # The state pane's code line (`updateCodeStateLine`, what the desktop's
   # editor feeds it): the stop's line and its source, unindented.
@@ -4270,6 +4379,24 @@ proc pollWelcomeRecording(r: GpuiRenderer): bool =
     discard drawArrangement(r)
   true
 
+proc pollTestRun(r: GpuiRenderer): bool =
+  ## The top bar's `ct record-test`, once it finishes: the recording it
+  ## made opened in a session tab, or why not in the trace.
+  if not pollRecordJob(gTestJob):
+    return false
+  if gTestJob.ok:
+    let folder = recordingFolderOf(gTestJob.recordingId)
+    if folder.len > 0:
+      openRecordingInTab(r, folder)
+    else:
+      traceGesture("run tests: ct record-test reported recording " &
+                   gTestJob.recordingId & ", but the trace store has no " &
+                   "folder for it")
+  else:
+    traceGesture("run tests: " & gTestJob.message)
+  drawTopBar(r)
+  true
+
 proc welcomeKeyName(key: string; mods: seq[string]): string =
   ## A window key in the shared model's names.
   case key.toLowerAscii
@@ -4316,16 +4443,15 @@ proc welcomePress(r: GpuiRenderer; x, y: int): bool =
   true
 
 proc toolAvailable(tool: GToolButton): bool =
-  ## Whether the window performs a tool button now. Run tests needs the
-  ## desktop's test runner, which this window does not have: drawn disabled,
-  ## as the menu marks what it does not perform (`gpuiMenuActionAvailable`).
+  ## Whether the window performs a tool button now. Run tests: with a
+  ## session, and not while a run it started is still going.
   case tool
   of gtbBack:
     nextHistoryIndex(gJumpHistory.len, gHistoryIndex, hdOlder) > 0
   of gtbForward:
     nextHistoryIndex(gJumpHistory.len, gHistoryIndex, hdNewer) > 0
   of gtbReset, gtbStop: not gSession.isNil
-  of gtbRunTests: false
+  of gtbRunTests: not gSession.isNil and (gTestJob.isNil or gTestJob.done)
 
 proc performTool(r: GpuiRenderer; tool: GToolButton) =
   ## A tool button's press — the desktop's `DebugComponent.action`:
@@ -4335,7 +4461,11 @@ proc performTool(r: GpuiRenderer; tool: GToolButton) =
   ##   * reset: the replay restarted — the recording opened afresh, at the
   ##     tick it was at — and the old session closed;
   ##   * stop: the debugging session ended — the recording's folder opened as
-  ##     an Edit tab (and the session closed when it is not the last).
+  ##     an Edit tab (and the session closed when it is not the last);
+  ##   * run tests: the tests of the file the debugger is in recorded in the
+  ##     background (`ct record-test`), the recording opened in a session tab
+  ##     of its own when it finishes — the desktop's new window
+  ##     (`pollTestRun`).
   if gSession.isNil or not toolAvailable(tool):
     traceGesture("tool " & $tool & " unavailable")
     return
@@ -4378,7 +4508,11 @@ proc performTool(r: GpuiRenderer; tool: GToolButton) =
           closeSessionTab(r, i)
           break
   of gtbRunTests:
-    discard
+    gTestJob = startRecordTestJob(gSession.getCurrentFile())
+    if gTestJob.done:
+      traceGesture("run tests: " & gTestJob.message)
+    else:
+      armRecordTick()
   traceGesture("tool " & $tool)
   drawTopBar(r)
 
@@ -4862,7 +4996,8 @@ proc armHoverTick() =
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
-  if due < 0 and not gRecordJob.isNil and not gRecordJob.done:
+  if due < 0 and ((not gRecordJob.isNil and not gRecordJob.done) or
+                  (not gTestJob.isNil and not gTestJob.done)):
     gArmedTick = (due: -3'i64, vcs: false)
     gpui_set_tick(uint32(RecordPollMs), recordTick)
     return
@@ -4976,6 +5111,7 @@ proc recordTick() {.cdecl.} =
   var r: GpuiRenderer
   gArmedTick = (due: -2'i64, vcs: false)
   discard pollWelcomeRecording(r)
+  discard pollTestRun(r)
   armHoverTick()
 
 proc searchTick() {.cdecl.} =
@@ -6421,6 +6557,7 @@ proc refitEditorRows(r: GpuiRenderer) =
     gSourceService.vm.setViewport(height = rows,
                                   overscan = GpuiSourceOverscan)
     gSourceService.visibleRows = editorVisibleRowsOf(gGeom)
+    gSourceService.fullRows = editorFullRowsOf(gGeom)
     if gViewedFile.len > 0:
       # A file opened from the Files pane: drawn again at the new height
       # from the line it showed first.
@@ -7660,6 +7797,13 @@ proc runOpen(cmd: GpuiCommand): int =
                            op.kind & "'")
           return 1
         discard session.drainEvents()
+        # The values in scope at every stop, as the desktop's window loads
+        # them at each one: the changed-value marks (`StateVM.isChanged`)
+        # compare a stop against the one before it, so they need it seen.
+        try:
+          session.requestAndLoadLocals()
+        except CatchableError:
+          discard
         inc performed
     let declared = declaredOperations(cmd.replayOps)
     if performed != declared:
@@ -7799,6 +7943,12 @@ proc runOpen(cmd: GpuiCommand): int =
   sourceService.visibleRows = editorVisibleRowsFor(
     shell.windows.windows[shell.windows.indexOf(windowId)].layout,
     shell.viewport, cmd)
+  block:
+    let layout = shell.windows.windows[shell.windows.indexOf(windowId)].layout
+    let proj = projectDock(layout, shell.viewport)
+    sourceService.fullRows = editorFullRowsOf(windowGeometryOf(layout,
+      (if proj.status == dpsRefused: nil else: proj.state),
+      cmd.width, cmd.height, GpuiTopBandPx))
   sourceService.serveWindow()
 
   # THE VALUES IN SCOPE AT THE STOP, requested here because nothing else does.
@@ -7906,6 +8056,10 @@ proc runOpen(cmd: GpuiCommand): int =
     if row.pointer == eptExecution and row.held:
       session.session.store.updateCodeStateLine(row.line, row.text.strip())
   eventLogNowTicks = session.getCurrentRRTicks()
+  # And the event log's "now" row, for its scrubber's mark — what a move
+  # asks for (`refreshReplayWindow`), asked once for the stop the window
+  # opens at.
+  refreshEventLogMark()
   block:
     let layout = shell.windows.windows[shell.windows.indexOf(windowId)].layout
     let proj = projectDock(layout, shell.viewport)
@@ -7914,6 +8068,8 @@ proc runOpen(cmd: GpuiCommand): int =
                              cmd.width, cmd.height, GpuiTopBandPx)
     let i = g.tabsNodeOfPane($paneEventLog)
     if i >= 0: eventLogPaneWidthPx = g.nodes[i].body.w
+    let st = g.tabsNodeOfPane($paneState)
+    if st >= 0: statePaneSizePx = (g.nodes[st].body.w, g.nodes[st].body.h)
     let e = g.tabsNodeOfPane($paneEditor)
     if e >= 0: editorPaneHeightPx = g.nodes[e].body.h
   let drawn = renderLeaves(r, leafSet, gEditorSurface, gEditorViewportPx)

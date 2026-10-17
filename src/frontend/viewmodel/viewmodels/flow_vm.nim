@@ -81,6 +81,23 @@ type
     expression*: string
     beforeValue*: string
     afterValue*: string
+    loop*: int
+      ## The loop the step ran in (the backend's `FlowStep.loop`; 0: none).
+    iteration*: int
+      ## Its iteration of that loop.
+
+  FlowStepEvent* = object
+    ## An event a step recorded (`FlowStep.events`): output the program
+    ## wrote, an error — what the desktop's flow draws as a `<stdout>` chip
+    ## before the step's values (`ui/flow.nim`'s `flowEventValue`).
+    step*: int
+    location*: string
+    name*: string
+      ## The chip's name, `flowEventValue`'s: `stdout`, `stderr`, `stdin`,
+      ## `error`, or the EVM event's metadata.
+    text*: string
+    loop*: int
+    iteration*: int
 
   FlowLoopInfo* = object
     ## One loop of the loaded flow window, as the backend describes it in
@@ -124,6 +141,8 @@ type
     iterationCount*: Signal[int]
     loadingState*: Signal[LoadingState]
     steps*: Signal[seq[FlowStepEntry]]
+    events*: Signal[seq[FlowStepEvent]]
+      ## The window's steps' events, in step order.
 
     # -- Loaded flow window (written by `applyFlowUpdate`) --
     loops*: Signal[seq[FlowLoopInfo]]
@@ -454,7 +473,44 @@ proc flowStepEntriesOf*(view: JsonNode): seq[FlowStepEntry] =
         location: base & ":" & $line,
         expression: expr,
         beforeValue: flowValueText(if before.isNil: nil else: before{expr}),
-        afterValue: flowValueText(if after.isNil: nil else: after{expr}))
+        afterValue: flowValueText(if after.isNil: nil else: after{expr}),
+        loop: jsonInt(st{"loop"}, 0),
+        iteration: jsonInt(st{"iteration"}, 0))
+
+proc flowStepEventsOf*(view: JsonNode): seq[FlowStepEvent] =
+  ## The window's steps' events, named as `ui/flow.nim`'s `flowEventValue`
+  ## names them; a kind it draws no chip for is left out.
+  if view.isNil or view.kind != JObject: return
+  let steps = view{"steps"}
+  if steps.isNil or steps.kind != JArray: return
+  var file = ""
+  let loc = view{"location"}
+  if not loc.isNil and loc.kind == JObject:
+    file = loc{"highLevelPath"}.getStr("")
+    if file.len == 0: file = loc{"path"}.getStr("")
+  let base = file[file.rfind('/') + 1 .. ^1]
+  for st in steps:
+    if st.kind != JObject: continue
+    let events = st{"events"}
+    if events.isNil or events.kind != JArray: continue
+    for ev in events:
+      if ev.kind != JObject: continue
+      # `EventLogKind`'s ordinals (`common_types/codetracer_features/events`).
+      let name = case jsonInt(ev{"kind"}, -1)
+                 of 0, 1: "stdout"
+                 of 3, 4: "stdin"
+                 of 11: "error"
+                 of 13: ev{"metadata"}.getStr("")
+                 of 14: "stderr"
+                 else: ""
+      if name.len == 0: continue
+      result.add FlowStepEvent(
+        step: jsonInt(st{"stepCount"}, 0),
+        location: base & ":" & $jsonInt(st{"position"}, 0),
+        name: name,
+        text: ev{"text"}.getStr(""),
+        loop: jsonInt(st{"loop"}, 0),
+        iteration: jsonInt(st{"iteration"}, 0))
 
 proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## Adopt a `ct/load-flow` response.
@@ -504,6 +560,7 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   # facts and dropped the steps on the floor, so the pane said "no flow steps
   # have been loaded" beside an editor drawing the same window's overlay.
   vm.steps.val = flowStepEntriesOf(view)
+  vm.events.val = flowStepEventsOf(view)
   vm.windowRRTicks.val = ticks
   vm.iterationCount.val =
     if focused >= 0: loops[focused].rrTicksForIterations.len else: 0
@@ -539,6 +596,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
     let iterationCount = createSignal(0)
     let loadingState = createSignal(lsIdle)
     let steps = createSignal(newSeq[FlowStepEntry]())
+    let events = createSignal(newSeq[FlowStepEvent]())
     let loops = createSignal(newSeq[FlowLoopInfo]())
     let focusedLoop = createSignal(-1)
     let windowRRTicks = createSignal(0)
@@ -561,6 +619,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
       iterationCount: iterationCount,
       loadingState: loadingState,
       steps: steps,
+      events: events,
       loops: loops,
       focusedLoop: focusedLoop,
       windowRRTicks: windowRRTicks,

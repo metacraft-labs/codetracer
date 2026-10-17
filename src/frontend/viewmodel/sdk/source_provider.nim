@@ -156,6 +156,11 @@ type
       ## comment is coloured as the desktop colours it (PLAT-47 B4). The
       ## ViewModel never keeps it: `applySourceFetch` takes the per-line
       ## contexts the front-end derived, and `SourceVM` holds the window.
+    endsWithNewline*: bool
+      ## Whether the file's text ends in a line terminator. `fileLines` and
+      ## `totalLineCount` do not count the empty line after it
+      ## (`splitSourceLines`); an editor that does — Monaco's model, and so
+      ## the desktop's scroll extent — reads it here.
     detail*: string
       ## Human-readable diagnosis. Never the thing a pane renders — that is
       ## §14's row — but what a log or a `--verbose` surface shows.
@@ -789,6 +794,7 @@ when not defined(js):
       answer.lines = sliced.lines
       answer.totalLineCount = allLines.len
       answer.fileLines = allLines
+      answer.endsWithNewline = text.len > 0 and text[^1] == '\n'
       answer.detail = resolved
       onResult(answer)
 
@@ -996,12 +1002,14 @@ proc newDapSourceProvider*(backend: BackendService;
            else: " (no `" & DapSourceOriginField & "` in the response body)") &
           "; the text cannot be tied to the recording"
 
-      let allLines = splitSourceLines(body["content"].getStr(""))
+      let content = body["content"].getStr("")
+      let allLines = splitSourceLines(content)
       let sliced = sliceForRequest(allLines, request)
       answer.firstLine = sliced.firstLine
       answer.lines = sliced.lines
       answer.totalLineCount = allLines.len
       answer.fileLines = allLines
+      answer.endsWithNewline = content.len > 0 and content[^1] == '\n'
       onResult(answer)
 
     proc onError(message: string) =

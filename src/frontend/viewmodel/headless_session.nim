@@ -625,6 +625,10 @@ type
     rows*: seq[Variable]
     requestedAt*: StopStamp
       ## The stop the request was SENT at — see `fetchLocals`.
+    origins*: seq[(string, OriginSummary)]
+      ## Each local's `originSummary` (Value Origin Tracking, spec §3.2.3),
+      ## by expression — what the desktop's `state.syncOriginSummaries`
+      ## reads off the same answer for the state rows' origin badges.
 
 proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
   ## Send ``ct/load-locals`` to the backend and parse the answer, WITHOUT
@@ -677,6 +681,9 @@ proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
           parsed.isWatch =
             localNode.getOrDefault("value").getOrDefault("isWatch").getBool(false)
           result.rows.add(parsed)
+          let origin = localNode.getOrDefault("originSummary")
+          if not origin.isNil and origin.kind == JObject:
+            result.origins.add((parsed.name, parseOriginSummary(origin)))
         result.ok = true
 
 proc applyLocals*(s: HeadlessDebugSession; answer: LocalsAnswer): bool =
@@ -688,6 +695,8 @@ proc applyLocals*(s: HeadlessDebugSession; answer: LocalsAnswer): bool =
   if not s.session.store.applyLocalsResponse(answer.rows, answer.requestedAt):
     return false
   s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
+  if not s.session.stateVM.isNil:
+    s.session.stateVM.updateOriginSummaries(answer.origins)
   drain()
   true
 

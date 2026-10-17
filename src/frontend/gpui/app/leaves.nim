@@ -378,6 +378,8 @@ const
   InlineValueColour = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
     ## `.flow-parallel-value-box` (#f3f3f3, bold).
   InlineValueMaxCols = 30
+  InlineChipCh = 10.18
+    ## The flow container's `ch` (`flowLeftStyle`'s unit), measured.
     ## `ui/flow.nim`'s `max-width: 30ch` on a long value.
   FlowHideSvg = staticRead("../../../public/resources/shared/flow_hide_dark.svg")
 
@@ -395,7 +397,24 @@ const FoldChevronSvg = """<svg xmlns="http://www.w3.org/2000/svg" width="24" hei
   ## Monaco's `codicon-folding-expanded` (the codicon chevron-down), in the
   ## colour the desktop draws it (#c5c5c5).
 
+const
+  StickyGround = "#2c2c2c"
+    ## The sticky header's margin ground (`.sticky-widget-line-numbers`).
+
+const StickyChevronSvg = FoldChevronSvg.replace("#c5c5c5", "#717171")
+  ## The same chevron as a sticky header draws it: dimmed, its ink #717171
+  ## (measured 2026-10-17).
+
 var foldChevronFile {.threadvar.}: string
+var stickyChevronFile {.threadvar.}: string
+
+proc stickyChevronPath(): string =
+  if stickyChevronFile.len == 0 or not fileExists(stickyChevronFile):
+    let dir = getTempDir() / ("codetracer-gpui-marks-" & $getCurrentProcessId())
+    createDir(dir)
+    stickyChevronFile = dir / "fold-sticky.svg"
+    writeFile(stickyChevronFile, StickyChevronSvg)
+  stickyChevronFile
 
 proc foldChevronPath*(): string =
   ## The fold chevron written once to a file the shim's `img` can load.
@@ -1001,12 +1020,19 @@ const
     ## breakpoint lane (9), 2, the trace lane (10), and the fold chevron's
     ## lane to the end. The code starts here.
   GutterPointerPx* = 13
-  GutterNumberPx* = 40
+  GutterNumberPx* = 38
+    ## Monaco's 40 less the 2 px its digits end short of the box: the last
+    ## digit's ink ends 49 px into the margin (measured 2026-10-17), where
+    ## this lane's right-aligned text ends with no bearing.
   GutterBreakpointX* = 62
     ## The breakpoint lane's left, from the margin's.
   GutterBreakpointPx* = 9
   GutterFoldX* = 90
     ## The fold chevron's left (`codicon-folding-expanded`, 12.8 px).
+  StickyFoldX* = 58
+    ## A sticky header's chevron's left: Monaco's sticky widget draws the
+    ## fold icon right after its line-number box, its ink 60–67 px into the
+    ## margin (measured 2026-10-17), and no number.
   GutterNumberSize* = "14px"
   GutterNumberWeight* = "300"
 
@@ -1231,9 +1257,11 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      caretColumn = 0;
                      selected: openArray[tuple[fromColumn, toColumn: int]] = [];
                      foldable = false; bracketDepth = 0;
-                     guides = 0):
+                     guides = 0; stickyHeader = false):
                      GpuiElement =
-  ## One row of the source editor.
+  ## One row of the source editor. `stickyHeader`: drawn as Monaco's sticky
+  ## widget draws a scope's first line — no number, a dim chevron after the
+  ## number's box, the margin on the sticky ground.
   ##
   ## Every attribute below is the ROW's own field stringified. Nothing here
   ## re-decides what the row says — `editor_surface` decided it from the
@@ -1335,7 +1363,8 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     of grkNumber:
       r.setStyle(lane, "width", $GutterNumberPx & "px")
       r.setStyle(lane, "justify", "end")
-      r.appendChild(lane, r.createTextNode($row.line))
+      if not stickyHeader:
+        r.appendChild(lane, r.createTextNode($row.line))
     of grkMark:
       # Right of the number: the breakpoint lane, or the trace lane beside
       # it — a disc in the mark's colour (`.gutter-breakpoint-enabled`,
@@ -1358,17 +1387,36 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.setStyle(disc, "flex-shrink", "0")
         r.appendChild(lane, disc)
     r.appendChild(gutter, lane)
-  if foldable:
+  if stickyHeader:
+    r.setStyle(gutter, "position", "relative")
+    r.setStyle(gutter, "background-color", StickyGround)
+    let holder = r.createElement("div")
+    r.setStyle(holder, "position", "absolute")
+    r.setStyle(holder, "left", $StickyFoldX & "px")
+    r.setStyle(holder, "top", "5px")
+    r.setStyle(holder, "width", "13px")
+    r.setStyle(holder, "height", "13px")
+    let chevron = r.createElement("img")
+    r.setAttribute(chevron, "data-ct-fold", "sticky")
+    r.setAttribute(chevron, "src", stickyChevronPath())
+    r.setStyle(chevron, "width", "13px")
+    r.setStyle(chevron, "height", "13px")
+    r.appendChild(holder, chevron)
+    r.appendChild(gutter, holder)
+  elif foldable:
     # Monaco's fold chevron (`.codicon-folding-expanded`), always shown on a
     # line that opens an indented block (`alwaysShowFoldIcons`), in its lane
     # at `GutterFoldX`.
     let chevron = r.createElement("img")
     r.setAttribute(chevron, "data-ct-fold", "expanded")
     r.setAttribute(chevron, "src", foldChevronPath())
-    r.setStyle(chevron, "width", "13px")
-    r.setStyle(chevron, "height", "13px")
+    # 14 px, its ink 86–94 px into the margin and 8–12 px down the row as
+    # the desktop's glyph is (measured 2026-10-17).
+    r.setStyle(chevron, "width", "14px")
+    r.setStyle(chevron, "height", "14px")
     r.setStyle(chevron, "flex-shrink", "0")
-    r.setStyle(chevron, "margin-left", "4px")
+    r.setStyle(chevron, "margin-left", "7px")
+    r.setStyle(chevron, "margin-bottom", "2px")
     r.appendChild(gutter, chevron)
   r.appendChild(el, gutter)
 
@@ -1507,7 +1555,16 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     r.setStyle(ann, "display", "flex")
     r.setStyle(ann, "items", "center")
     r.setStyle(ann, "gap", "7px")
-    r.setStyle(ann, "padding-left", "18px")
+    # AT `calc(<line length>ch + 1ch)` FROM THE CODE'S LEFT, as `ui/flow.nim`'s
+    # `flowLeftStyle` places it — in the flow container's `ch`, not the
+    # code's advance: 10.18 px, which every chip of the six reference states
+    # sits at to the pixel (measured 2026-10-17) — and 2 px down the row.
+    r.setStyle(column, "position", "relative")
+    r.setStyle(ann, "position", "absolute")
+    r.setStyle(ann, "left", $(int(round(float(row.text.runeLen + 1) *
+                                       InlineChipCh -
+                                       float(skipCols) * EditorColumnPx))) & "px")
+    r.setStyle(ann, "top", "2px")
     r.setStyle(ann, "font-size", "14px")
     r.setStyle(ann, "flex-shrink", "0")
     for v in row.values:
@@ -1543,7 +1600,11 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.appendChild(more, eye)
         r.appendChild(chip, more)
       let name = r.createElement("div")
-      r.setStyle(name, "color", InlineNameColour)
+      # An event's chip (`<stdout>`, `flowEventValue`) names it in the
+      # desktop's `.ct-omni-name-std` cyan.
+      r.setStyle(name, "color",
+                 if v.name.startsWith("<") and v.name.endsWith(">"): "#67e8f9"
+                 else: InlineNameColour)
       r.setStyle(name, "flex-shrink", "0")
       r.appendChild(name, r.createTextNode(v.name))
       r.appendChild(chip, name)
@@ -1578,24 +1639,27 @@ proc editorRunsOf*(surface: EditorSurface): seq[seq[TokenRun]] =
     else:
       result.add tokenRuns(lexer, row.text, context)
 
-func stickyScopeLines*(file: openArray[string]; firstRow, offset: int;
+func stickyScopeLines*(lines: openArray[string]; firstRow, offset: int;
                        maxLines = 5): seq[tuple[line, top: int]] =
   ## **MONACO'S STICKY SCROLL** (`editor.stickyScroll`, on by default in the
-  ## desktop's editor): the first lines of the indentation scopes the
-  ## viewport's top is inside, outermost first, pinned over the editor's top
-  ## rows, each answered with the y (from the viewport's top) it is drawn at.
-  ## The view's first whole row is `firstRow`, drawn `offset` px down (the
-  ## line above it shows in those pixels). A scope's header is kept while
-  ## the scope goes on under the headers already pinned, and the last one is
-  ## pushed up as its scope's end reaches it (Monaco's
-  ## `StickyScrollController`). `file` is the whole text.
+  ## desktop's editor): the first lines of the indentation scopes around the
+  ## line under the headers already pinned, outermost first, each answered
+  ## with the y (from the viewport's top) it is drawn at. The view's first
+  ## whole row is `firstRow`, drawn `offset` px down. At each step the line
+  ## at the stack's foot is asked for the next deeper scope around it — one
+  ## starting at that very line counts, its header being hidden under the
+  ## stack — and a header is pushed up as its scope's last line rises under
+  ## it (Monaco's `StickyScrollController`). Its scopes are its indentation
+  ## folds, which read no strings: an indented run inside a docstring is a
+  ## scope too. `file` is the whole text.
+  let file = @lines
   func indent(s: string): int =
     for c in s:
       if c == ' ': inc result
       elif c == '\t': result += 4
       else: return
     -1
-  func scopeEnd(file: openArray[string]; start: int): int =
+  func scopeEnd(start: int): int =
     let own = indent(file[start - 1])
     result = start
     for j in start + 1 .. file.len:
@@ -1603,37 +1667,53 @@ func stickyScopeLines*(file: openArray[string]; firstRow, offset: int;
       if n < 0: continue
       if n <= own: break
       result = j
+  func opens(j: int): bool =
+    j >= 1 and j <= file.len and indent(file[j - 1]) >= 0 and
+      scopeEnd(j) > j
   func lineAtY(y: int): int =
-    ## The line drawn at viewport y.
     firstRow + int(floor(float(y - offset) / float(EditorLinePx)))
   func lineTop(line: int): int = (line - firstRow) * EditorLinePx + offset
-  let topLine = lineAtY(0)
-  if topLine < 1 or topLine > file.len:
-    return
-  # The scopes around the viewport's top line, innermost first.
-  var scopes: seq[int] = @[]
-  var limit = high(int)
-  var probe = topLine
-  while probe >= 1 and indent(file[probe - 1]) < 0: dec probe
-  if probe >= 1: limit = indent(file[probe - 1]) + 1
-  for j in countdown(topLine, 1):
-    let n = indent(file[j - 1])
-    if n < 0 or n >= limit: continue
-    if scopeEnd(file, j) > j:
-      scopes.add j
-      limit = n
-    if n == 0: break
-  for k in countdown(scopes.high, 0):
-    let start = scopes[k]
+  var deepest = -1
+    ## The indentation of the last header pinned.
+  while result.len < maxLines:
     let natural = result.len * EditorLinePx
     let under = lineAtY(natural)
-    if result.len >= maxLines or start >= under: break
-    let last = scopeEnd(file, start)
+    if under < 1 or under > file.len: break
+    # The scopes around `under`, innermost first (one starting at it too).
+    var around: seq[int] = @[]
+    var limit = high(int)
+    if opens(under):
+      around.add under
+      limit = indent(file[under - 1])
+    else:
+      var probe = under
+      while probe >= 1 and indent(file[probe - 1]) < 0: dec probe
+      if probe >= 1: limit = indent(file[probe - 1])
+      if probe >= 1 and opens(probe) and probe == under: around.add probe
+    for j in countdown(under - 1, 1):
+      let n = indent(file[j - 1])
+      if n < 0 or n >= limit: continue
+      if opens(j) and scopeEnd(j) >= under:
+        around.add j
+        limit = n
+      if n == 0: break
+    # The outermost of them deeper than what is pinned.
+    var next = -1
+    for k in countdown(around.high, 0):
+      if indent(file[around[k] - 1]) > deepest:
+        next = around[k]
+        break
+    if next < 0: break
+    let last = scopeEnd(next)
     if last < under: break
-    # Pushed up as the scope's last line rises under it.
     let top = min(natural, lineTop(last + 1) - EditorLinePx)
     if top + EditorLinePx <= 0: break
-    result.add (start, top)
+    result.add (next, top)
+    deepest = indent(file[next - 1])
+
+proc stateIconPath(name, svg, ink: string): string
+  ## Forward-declared: an icon written once in `ink` (defined with the state
+  ## pane's controls).
 
 const
   LoopZonePx* = 21
@@ -1656,9 +1736,18 @@ proc zonesAbove*(line: int): int =
   for z in editorLoopZones:
     if z.line <= line: inc result
 
+const
+  LoopBackSvg = staticRead("../../../public/resources/shared/omniscience_backward_dark.svg")
+  LoopForwardSvg = staticRead("../../../public/resources/shared/omniscience_forward_dark.svg")
+    ## The loop control's arrows (`ct-images-omni-backward`/`-forward`).
+
 proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
-  ## `‹ [iteration N from M] ›` at the code's column: the desktop's
-  ## `flow-loop-button`s and `ct-omniscience-loop` chip.
+  ## The desktop's loop control (`ui/flow.nim`'s `makeLoopLine`, measured
+  ## 2026-10-17) at the code's column: the backward button, the
+  ## `iteration [N] from M` chip — M the last iteration's index — the forward
+  ## button, and — past the first iteration — the iteration slider
+  ## (`.flow-loop-slider`).
+  let last = max(0, z.count - 1)
   result = r.createElement("div")
   r.setAttribute(result, "data-ct-loop-zone", $z.line)
   r.setStyle(result, "display", "flex")
@@ -1668,7 +1757,7 @@ proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
   r.setStyle(result, "padding-left", $EditorGutterPx & "px")
   r.setStyle(result, "font-family", WindowFontFamily)
   r.setStyle(result, "font-size", "14px")
-  proc button(r: GpuiRenderer; glyph: string; enabled: bool): GpuiElement =
+  proc button(r: GpuiRenderer; name, svg: string; enabled: bool): GpuiElement =
     result = r.createElement("div")
     r.setStyle(result, "display", "flex")
     r.setStyle(result, "items", "center")
@@ -1680,19 +1769,26 @@ proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
     r.setStyle(result, "border-width", "1px")
     r.setStyle(result, "border-color", DesignTokenHex[dtColorsUiBorderSecondary][dmDark])
     r.setStyle(result, "background-color", DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark])
-    r.setStyle(result, "color", if enabled: DesignTokenHex[dtColorsUiTextPrimaryBodySubtle][dmDark]
-                                else: DesignTokenHex[dtColorsUiTextPrimaryDisabled][dmDark])
-    r.appendChild(result, r.createTextNode(glyph))
-  r.appendChild(result, button(r, "‹", z.iteration > 0))
+    let icon = r.createElement("img")
+    r.setAttribute(icon, "src", stateIconPath(name, svg, "#dddddd"))
+    r.setStyle(icon, "width", "8px")
+    r.setStyle(icon, "height", "8px")
+    if not enabled:
+      r.setStyle(icon, "opacity", "0.4")
+    r.appendChild(result, icon)
+  r.appendChild(result, button(r, "loop-back", LoopBackSvg, z.iteration > 0))
   let chip = r.createElement("div")
   r.setStyle(chip, "display", "flex")
   r.setStyle(chip, "items", "center")
   r.setStyle(chip, "flex-shrink", "0")
   r.setStyle(chip, "height", "18px")
   r.setStyle(chip, "margin-left", "11px")
+  r.setStyle(chip, "margin-right", "11px")
   r.setStyle(chip, "padding-left", "4px")
   r.setStyle(chip, "padding-right", "4px")
   r.setStyle(chip, "rounded", "4px")
+  r.setStyle(chip, "border-width", "1px")
+  r.setStyle(chip, "border-color", DesignTokenHex[dtColorsUiBorderPrimary][dmDark])
   r.setStyle(chip, "background-color", DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark])
   r.setStyle(chip, "color", EditorTextColour)
   r.appendChild(chip, r.createTextNode("iteration "))
@@ -1700,21 +1796,49 @@ proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
   r.setStyle(n, "display", "flex")
   r.setStyle(n, "items", "center")
   r.setStyle(n, "height", "16px")
+  r.setStyle(n, "width", "18px")
   r.setStyle(n, "padding-left", "4px")
-  r.setStyle(n, "padding-right", "4px")
   r.setStyle(n, "background-color", DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark])
   r.setStyle(n, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
   r.appendChild(n, r.createTextNode($z.iteration))
   r.appendChild(chip, n)
-  r.appendChild(chip, r.createTextNode(" from " & $z.count))
+  r.appendChild(chip, r.createTextNode(" from " & $last))
   r.appendChild(result, chip)
-  let next = button(r, "›", z.iteration + 1 < z.count)
-  r.setStyle(next, "margin-left", "11px")
-  r.appendChild(result, next)
-
-const
-  StickyGround = "#2c2c2c"
-    ## The sticky header's ground (`.sticky-widget-lines-scrollable`).
+  r.appendChild(result, button(r, "loop-forward", LoopForwardSvg, z.iteration < last))
+  if z.iteration <= 0:
+    # At the first iteration the desktop draws no slider (measured
+    # 2026-10-17: none after `stepIn=21,stepOut=1`, one at the last).
+    return
+  # The slider: a 101 px track, filled to the iteration, its handle at the end.
+  let track = r.createElement("div")
+  r.setAttribute(track, "data-ct-loop-slider", $z.iteration)
+  r.setStyle(track, "display", "flex")
+  r.setStyle(track, "items", "center")
+  r.setStyle(track, "flex-shrink", "0")
+  r.setStyle(track, "margin-left", "21px")
+  r.setStyle(track, "width", "105px")
+  r.setStyle(track, "height", "14px")
+  let fillPx = if last > 0: int(round(101.0 * float(z.iteration) / float(last))) else: 0
+  let filled = r.createElement("div")
+  r.setStyle(filled, "flex-shrink", "0")
+  r.setStyle(filled, "width", $fillPx & "px")
+  r.setStyle(filled, "height", "2px")
+  r.setStyle(filled, "background-color", "#818cf8")
+  r.appendChild(track, filled)
+  let handle = r.createElement("div")
+  r.setStyle(handle, "flex-shrink", "0")
+  r.setStyle(handle, "width", "4px")
+  r.setStyle(handle, "height", "14px")
+  r.setStyle(handle, "rounded", "2px")
+  r.setStyle(handle, "background-color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+  r.appendChild(track, handle)
+  let rest = r.createElement("div")
+  r.setStyle(rest, "flex-shrink", "0")
+  r.setStyle(rest, "width", $(101 - fillPx) & "px")
+  r.setStyle(rest, "height", "2px")
+  r.setStyle(rest, "background-color", DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark])
+  r.appendChild(track, rest)
+  r.appendChild(result, track)
 
 proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                    escape: ViewNode; surface: EditorSurface;
@@ -1791,6 +1915,20 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
   let folds = foldableRows(surface.rows)
   let depths = bracketDepths(surface.rows, runs)
   let guideCounts = indentGuides(surface.rows)
+  if editorPaneHeightPx > 0 and viewportPx > 15:
+    # Monaco's overview ruler's left border (`editorOverviewRuler.border`,
+    # #353535), 15 px in from the editor's right edge, the pane's height —
+    # drawn first, under the rows' inline values as the desktop's is.
+    r.setStyle(parent, "position", "relative")
+    let rule = r.createElement("div")
+    r.setAttribute(rule, "data-ct-overview-border", "true")
+    r.setStyle(rule, "position", "absolute")
+    r.setStyle(rule, "left", $(viewportPx - 15) & "px")
+    r.setStyle(rule, "top", $EditorTopPadPx & "px")
+    r.setStyle(rule, "width", "1px")
+    r.setStyle(rule, "height", $(editorPaneHeightPx - EditorTopPadPx) & "px")
+    r.setStyle(rule, "background-color", "#353535")
+    r.appendChild(parent, rule)
   for i, row in surface.rows:
     for z in editorLoopZones:
       if z.line == row.line:
@@ -1813,18 +1951,31 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     let widest = editorNumberWidth(surface.rows)
     let lexer = if grammarForPath(surface.path) != giNone: lxNone
                 else: lexerForPath(surface.path)
+    # Clipped to the viewport's top edge, as Monaco's sticky widget is: a
+    # header pushed up shows only its bottom.
+    var stickyBottom = 0
+    for (_, _, top) in sticky: stickyBottom = max(stickyBottom, top + EditorLinePx)
+    let clip = r.createElement("div")
+    r.setStyle(clip, "position", "absolute")
+    r.setStyle(clip, "left", "0px")
+    r.setStyle(clip, "top", $EditorTopPadPx & "px")
+    r.setStyle(clip, "width", $max(1, viewportPx) & "px")
+    r.setStyle(clip, "height", $max(1, stickyBottom) & "px")
+    r.setStyle(clip, "overflow", "hidden")
     for k, (line, text, top) in sticky:
       var context = initialContext(lexer)
       let runs = if lexer == lxNone: @[] else: tokenRuns(lexer, text, context)
       let el = renderEditorRow(r, EditorRow(line: line, text: text, held: true),
-                               runs, widest, scrollLeftCols)
+                               runs, widest, scrollLeftCols,
+                               stickyHeader = true)
       r.setAttribute(el, "data-ct-sticky-line", $line)
       r.setStyle(el, "position", "absolute")
       r.setStyle(el, "left", "0px")
-      r.setStyle(el, "top", $(EditorTopPadPx + top) & "px")
+      r.setStyle(el, "top", $top & "px")
       r.setStyle(el, "width", $max(1, viewportPx) & "px")
-      r.setStyle(el, "background-color", StickyGround)
-      r.appendChild(parent, el)
+      r.setStyle(el, "background-color", EditorGround)
+      r.appendChild(clip, el)
+    r.appendChild(parent, clip)
   if editorPaneHeightPx > 0 and viewportPx > 0:
     r.setStyle(parent, "position", "relative")
     # Monaco's overview ruler (`.decorationsOverviewRuler`, 14 px along the
@@ -1844,19 +1995,29 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
       r.setStyle(mark, "height", "2px")
       r.setStyle(mark, "background-color", "#b6b9bb")
       r.appendChild(parent, mark)
-    # Scrolled, Monaco's shadow under the top edge (`.scroll-decoration`):
-    # 6 px from #161616 to the ground.
+    # Scrolled, Monaco's shadow under the top edge (`.scroll-decoration`,
+    # 6 px from #161616 to the ground) — or, under sticky headers, the
+    # sticky widget's own shadow below them: 5 px from #020202 under whole
+    # headers, a lighter 4 px under one pushed up (measured 2026-10-17 over
+    # the #282828 ground, drawn as the black it is laid over that ground).
     if surface.viewportTop > 1:
-      for (i, colour) in [(0, "#161616"), (2, "#1c1c1c"), (4, "#232323")]:
+      var below = 0
+      var alphas = @[0.45, 0.325, 0.225, 0.15, 0.1, 0.05]
+      if sticky.len > 0:
+        below = sticky[^1].top + EditorLinePx
+        alphas = if sticky[^1].top < (sticky.len - 1) * EditorLinePx:
+                   @[0.225, 0.475, 0.225, 0.075]
+                 else: @[0.95, 0.7, 0.325, 0.075, 0.025]
+      for i, alpha in alphas:
         let band = r.createElement("div")
         r.setAttribute(band, "data-ct-scroll-shadow", $i)
         r.setStyle(band, "position", "absolute")
         r.setStyle(band, "left", "0px")
-        let below = if sticky.len > 0: sticky[^1].top + EditorLinePx else: 0
         r.setStyle(band, "top", $(EditorTopPadPx + max(0, below) + i) & "px")
         r.setStyle(band, "width", $viewportPx & "px")
-        r.setStyle(band, "height", "2px")
-        r.setStyle(band, "background-color", colour)
+        r.setStyle(band, "height", "1px")
+        r.setStyle(band, "background-color",
+                   "#000000" & toHex(int(round(alpha * 255)), 2).toLowerAscii)
         r.appendChild(parent, band)
   surface.rows.len > 0
 
@@ -1891,10 +2052,6 @@ const
     ## The selected row's ground (`.event-selected`, #3E3E3B): the editor
     ## theme's selection surface, as measured on the desktop 2026-10-17 (the
     ## active-row token, #333333, until then).
-
-proc stateIconPath(name, svg, ink: string): string
-  ## Forward-declared: an icon written once in `ink` (defined with the state
-  ## pane's controls).
 
 const
   SearchGlassSvg = staticRead(
@@ -2654,6 +2811,62 @@ proc stateIconButton(r: GpuiRenderer; attr, iconName, svg: string;
   r.setStyle(icon, "height", $side & "px")
   r.appendChild(result, icon)
 
+var statePaneSizePx*: tuple[w, h: int] = (0, 0)
+  ## The state pane body's size, set by the window: its scrollbars are drawn
+  ## from it (`stateScrollbars`).
+
+const
+  StateRowsTopPx = 78
+    ## The rows' scroll box's top below the pane body's (the 8 px inset, the
+    ## controls, the code line, the 12 px gap — 144 - 66 at 1920x1080).
+  StateScrollbarPx = 8
+    ## The desktop's `::-webkit-scrollbar` (8 px, its thumb #333333, no track).
+  StateMonoAdvance14 = 14.0 * 612.0 / 1000.0
+
+proc stateScrollbars(r: GpuiRenderer; parent: GpuiElement;
+                     rows: openArray[StateRow]; drawnRows: int) =
+  ## The desktop's state scroll box's scrollbars, at rest at its origin: a
+  ## vertical thumb when its rows are taller than the box, a horizontal one
+  ## when a row is wider — each `track * visible / content` long, the track
+  ## and the visible extent both short of the other bar's 8 px when both
+  ## show (measured 2026-10-17: 328 px over 19 rows in a 395 px box; 19 px
+  ## for a 14 076 px row in a 522 px one).
+  let (w, h) = statePaneSizePx
+  if w <= 0 or h <= StateRowsTopPx:
+    return
+  let boxH = h - StateRowsTopPx
+  let contentH = drawnRows * StateValueRowPx
+  var contentW = 0
+  for row in rows:
+    let natural = StateInsetPx + row.depth * StateRowIndentPx +
+      int(ceil(float((row.name & ":").runeLen +
+                     row.value.splitWhitespace.join(" ").runeLen) *
+               StateMonoAdvance14))
+    contentW = max(contentW, natural)
+  var vertical = contentH > boxH
+  let horizontal = contentW > w - (if vertical: StateScrollbarPx else: 0)
+  vertical = vertical or (horizontal and contentH > boxH - StateScrollbarPx)
+  r.setStyle(parent, "position", "relative")
+  proc thumb(r: GpuiRenderer; x, y, tw, th: int; axis: string) =
+    let t = r.createElement("div")
+    r.setAttribute(t, "data-ct-state-scrollbar", axis)
+    r.setStyle(t, "position", "absolute")
+    r.setStyle(t, "left", $x & "px")
+    r.setStyle(t, "top", $y & "px")
+    r.setStyle(t, "width", $max(1, tw) & "px")
+    r.setStyle(t, "height", $max(1, th) & "px")
+    r.setStyle(t, "background-color", "#333333")
+    r.appendChild(parent, t)
+  if vertical:
+    let track = boxH - (if horizontal: StateScrollbarPx else: 0)
+    r.thumb(w - StateScrollbarPx, StateRowsTopPx, StateScrollbarPx,
+            int(round(float(track) * float(track) / float(contentH))), "vertical")
+  if horizontal:
+    let track = w - (if vertical: StateScrollbarPx else: 0)
+    r.thumb(0, h - StateScrollbarPx,
+            int(round(float(track) * float(track) / float(contentW))),
+            StateScrollbarPx, "horizontal")
+
 proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
                   pv: var PaneView; budget: Budget): bool =
   ## **THE STATE PANE AS THE DESKTOP DRAWS IT** (`isonim_state_view`,
@@ -2743,6 +2956,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   r.setStyle(field, "margin-right", "11px")
   r.setStyle(field, "height", "26px")
   r.setStyle(field, "padding-left", "11px")
+  r.setStyle(field, "padding-right", "12px")
   r.setStyle(field, "rounded", "6px")
   r.setStyle(field, "border-width", "1px")
   r.setStyle(field, "border-color", StateControlBorder)
@@ -2751,7 +2965,18 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   let ph = stateText(r, "Enter a watch expression",
                      DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark], 14,
                      mono = false)
-  r.appendChild(field, ph)
+  # Clipped at the CONTENT edge, as an `input` clips its text — the field's
+  # own `overflow` clips at its padding edge, 12 px further right.
+  let clip = r.createElement("div")
+  r.setStyle(clip, "display", "flex")
+  r.setStyle(clip, "items", "center")
+  r.setStyle(clip, "flex-grow", "1")
+  r.setStyle(clip, "flex-shrink", "1")
+  r.setStyle(clip, "min-width", "0px")
+  r.setStyle(clip, "height", "100%")
+  r.setStyle(clip, "overflow", "hidden")
+  r.appendChild(clip, ph)
+  r.appendChild(field, clip)
   r.appendChild(head, field)
   r.appendChild(body, head)
 
@@ -2909,6 +3134,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         r.appendChild(table, o)
   r.appendChild(body, table)
   r.appendChild(parent, body)
+  stateScrollbars(r, parent, rows, childCount(table))
   true
 
 # ---------------------------------------------------------------------------

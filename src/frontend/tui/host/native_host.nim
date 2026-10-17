@@ -55,6 +55,7 @@ import ../../../common/trace_source_paths   # the shared source-folder rule
 import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
 from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
+import ../../../ct/trace/recorder_output   # `ct record-test`'s recording id
 export headless_session
 
 type
@@ -142,6 +143,11 @@ type
     done*: bool
     ok*: bool
     message*: string
+    testRun*: bool
+      ## A `ct record-test` (`startRecordTestJob`): it records into the
+      ## trace store, and says where by the recording id it prints.
+    recordingId*: string
+      ## That id, once the run finished.
 
 proc startRecordJob*(program: string; args: seq[string];
                      outputFolder: string): NativeRecordJob =
@@ -177,6 +183,49 @@ proc startRecordJob*(program: string; args: seq[string];
     result.message = "could not start ct record: " & e.msg
     result.process = nil
 
+proc startRecordTestJob*(path: string): NativeRecordJob =
+  ## THE DESKTOP'S RUN-TESTS (`ui/debug.nim`'s `run-tests` action, answered
+  ## by `index/traces.onRunTest`): `ct record-test "" <path> 0 0
+  ## --with-diff=HEAD --store-trace-folder-for-pid=<pid>` in the background —
+  ## the tests of the file the debugger is in, recorded. Its log is a
+  ## temporary file; `recordingId` names the recording when it finishes.
+  result = NativeRecordJob(program: path, testRun: true)
+  let ct = findCtBinary()
+  if ct.len == 0:
+    result.done = true
+    result.message = "no ct found to run the tests with; set CT_BIN"
+    return
+  result.logPath = getTempDir() / ("codetracer-record-test-" &
+                                   $getCurrentProcessId() & ".log")
+  try:
+    writeFile(result.logPath, "")
+    result.process = startProcess(ct, workingDir = path.parentDir,
+      args = @["record-test", "", path, "0", "0", "--with-diff=HEAD",
+               "--store-trace-folder-for-pid=" & $getCurrentProcessId()],
+      options = {poStdErrToStdOut})
+  except CatchableError as e:
+    result.done = true
+    result.message = "could not start ct record-test: " & e.msg
+    result.process = nil
+
+proc recordingFolderOf*(recordingId: string): string =
+  ## Where the trace store keeps a recording (`ct trace-metadata --id`, as
+  ## the desktop's `findTraceWithCodetracer` asks), or "".
+  let ct = findCtBinary()
+  if ct.len == 0 or recordingId.len == 0:
+    return ""
+  try:
+    let (output, code) = execCmdEx(quoteShellCommand(
+      [ct, "trace-metadata", "--id=" & recordingId]))
+    if code != 0:
+      return ""
+    let start = output.find('{')
+    if start < 0:
+      return ""
+    result = parseJson(output[start .. ^1]){"outputFolder"}.getStr("")
+  except CatchableError:
+    result = ""
+
 proc pollRecordJob*(job: NativeRecordJob): bool =
   ## Whether the job FINISHED on this poll (once): `ok` and `message` say
   ## how. The recorder's output is drained so a chatty program cannot fill
@@ -207,9 +256,19 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
   if code == -1:
     return false
   job.done = true
-  job.ok = code == 0 and traceFolderProblem(job.outputFolder).len == 0
+  if job.testRun:
+    var log = ""
+    try: log = readFile(job.logPath)
+    except CatchableError: discard
+    job.recordingId = recordingIdFromOutput(log)
+    job.ok = code == 0 and job.recordingId.len > 0
+    if code == 0 and job.recordingId.len == 0:
+      job.message = "ct record-test finished without reporting a " &
+                    "recording id, so there is nothing to replay"
+  else:
+    job.ok = code == 0 and traceFolderProblem(job.outputFolder).len == 0
   job.process.close()
-  if not job.ok:
+  if not job.ok and job.message.len == 0:
     var last = ""
     try:
       for l in readFile(job.logPath).splitLines():
@@ -217,7 +276,8 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
           last = l.strip
     except CatchableError:
       discard
-    job.message = "recording " & job.program & " failed (exit " & $code &
+    job.message = (if job.testRun: "running the tests of " else: "recording ") &
+                  job.program & " failed (exit " & $code &
                   ")" & (if last.len > 0: ": " & last else: "")
   true
 

@@ -164,9 +164,23 @@ type
     followed: string
       ## The stop (`<path>:<line>`) the window last followed, so a scroll
       ## the user made afterwards is never taken back.
+    fullRows*: int
+      ## How many whole rows the editor shows (its body over the row pitch,
+      ## the partial last row not counted) — where Monaco stops scrolling at
+      ## a file's end. 0: not known.
+    monacoLineCount*: int
+      ## The file's lines as Monaco counts them: the empty one after a final
+      ## newline included.
+    bottomAligned*: bool
+      ## The window sits at the file's end, its last line's bottom on the
+      ## editor's bottom edge (`main.editorTopInsetPx` then offsets the rows
+      ## by the remainder at the top).
     fileLines*: Table[string, seq[string]]
       ## Each file's whole text as the provider last read it — the lines
       ## above the window the editor's sticky scope headers are read from.
+    trailingNewline*: Table[string, bool]
+      ## Whether that text ends in a newline (Monaco counts the empty line
+      ## after it).
 
 proc newGpuiSourceService*(session: HeadlessDebugSession;
                            traceFolder: string;
@@ -224,6 +238,33 @@ proc serveWindow*(s: GpuiSourceService) =
     if requests.len == 0:
       break
     s.serveRequests(requests)
+  # MONACO'S END OF FILE: it scrolls no further than the file's last line —
+  # the empty one after a final newline included — resting on the editor's
+  # bottom edge. The shared window clamps its top by its own line count and
+  # height; a window at that clamp is at the file's end, and the editor
+  # draws its rows bottom-aligned to Monaco's count (`main.editorTopInsetPx`).
+  s.bottomAligned = false
+  let path = s.vm.revision.val.path
+  s.monacoLineCount = (if s.fileLines.hasKey(path): s.fileLines[path].len
+                       else: s.vm.totalLineCount.val) +
+                      (if s.trailingNewline.getOrDefault(path, false): 1 else: 0)
+  let ownTotal = s.vm.totalLineCount.val
+  let height = s.vm.viewportHeight.val
+  if s.fullRows > 0 and ownTotal > height and s.vm.viewportTop.val > 1 and
+     s.vm.viewportTop.val >= ownTotal - height:
+    s.bottomAligned = true
+    # ONE ROW SHORT OF THE CLAMP — a window that grew (the top clamped to the
+    # taller end) and shrank back keeps its top — is drawn at the end too:
+    # its held rows then reach the file's last line, which the bottom-aligned
+    # rows need, rather than stopping one short of it over a blank strip.
+    let atEnd = ownTotal - height + 1
+    if s.vm.viewportTop.val < atEnd:
+      s.vm.viewportTop.val = atEnd
+      for _ in 0 ..< ServeRounds:
+        let requests = s.vm.followAndRequest()
+        if requests.len == 0:
+          break
+        s.serveRequests(requests)
 
 proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest]) =
   for request in requests:
@@ -252,6 +293,7 @@ proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest]) =
       else: @[]
     if captured.fileLines.len > 0:
       s.fileLines[captured.revision.path] = captured.fileLines
+      s.trailingNewline[captured.revision.path] = captured.endsWithNewline
     discard s.store.applySourceFetch(s.vm, captured, contexts)
 
 proc availability*(s: GpuiSourceService): SourceAvailability =

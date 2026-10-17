@@ -89,7 +89,8 @@ try:
                   # The window draws its own title bar — window buttons in
                   # its top bar — as the Electron reference's frameless
                   # window always does, so the two are compared like for like.
-                  ("ISONIM_GPUI_DECORATIONS", "client")])
+                  ("ISONIM_GPUI_DECORATIONS", "client"),
+                  ("CODETRACER_GPUI_GESTURE_TRACE", "1")])
     try:
       let win = t.waitWindow(AppId, timeout = initDuration(seconds = 180),
         until = proc(x: EnvWindow): bool = x.rect.w == w and x.rect.h == h)

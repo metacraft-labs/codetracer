@@ -30,7 +30,6 @@ import std/[strutils, tables]
 
 import codetracer_embed
 import headless_app/session_tabs
-import ./chrome
 import ./window_geometry
 
 export session_tabs, tables
