@@ -192,7 +192,7 @@ fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
     // requires Rust edition 2024; this crate is currently on edition
     // 2021 (`Cargo.toml`), so we nest the checks manually.  Revisit
     // when the workspace bumps its edition.
-    if let Ok(explicit) = env::var("CODETRACER_RUNTIME_DIR")
+    if let Ok(explicit) = env::var(CODETRACER_RUNTIME_DIR_ENV)
         && !explicit.is_empty()
     {
         return PathBuf::from(explicit);
@@ -242,6 +242,30 @@ pub fn log_path_for(
     let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
     let run_dir = run_dir_for(&tmp_path, run_id)?;
     Ok(run_dir.join(format!("{name}-{worker_kind}-{worker_index_for_kind}.log")))
+}
+
+/// Environment variable naming the base directory of the per-run socket
+/// directories ([`run_dir_for`]). An explicit value wins over every other
+/// resolution, in this process and in every replay worker.
+pub const CODETRACER_RUNTIME_DIR_ENV: &str = "CODETRACER_RUNTIME_DIR";
+
+/// Spawner-side: the base directory this process resolves its per-run
+/// socket directories under, which it hands to every replay worker it
+/// spawns as `$CODETRACER_RUNTIME_DIR`.
+///
+/// The worker (`ct-native-replay`, a separate program) resolves the same
+/// directory by its own copy of this logic, and the two copies' fallbacks
+/// differ: this one falls back to `$CODETRACER_HOME/tmp`
+/// (`ct_home::tmp_dir`), the worker's to `$TMPDIR/codetracer`. On a host
+/// with `$XDG_RUNTIME_DIR` both use that and agree; without it (a CI
+/// runner's service, which has no login session) a test that set
+/// `CODETRACER_HOME` had the worker listen in one directory while this
+/// process waited for its socket in another, until the test's own
+/// timeout. Naming the directory to the worker makes the rendezvous not
+/// depend on the two resolutions agreeing.
+pub fn runtime_base_dir() -> Result<PathBuf, Box<dyn Error>> {
+    let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
+    Ok(socket_runtime_base_dir(&tmp_path))
 }
 
 /// Environment variable carrying the per-run identifier from spawner to
