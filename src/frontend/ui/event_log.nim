@@ -110,24 +110,25 @@ proc installEventLogSwitchProcessBridge*(onSwitch: proc(recordingId: string)) =
   ## §5.3 — give the Event Log a way to rotate the session's active
   ## recording when a boundary chip's counterpart lives in a sibling
   ## trace. Called by the renderer bootstrap right after
-  ## `initEventLogVMWithStore`, mirroring how the State Pane's
+  ## `initEventLogVMFromSession`, mirroring how the State Pane's
   ## "Switch process" menu is wired.
   if eventLogVMInstance.isNil:
     return
   eventLogVMInstance.onSwitchProcessProc = onSwitch
 
-proc initEventLogVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel EventLogVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel).
+proc initEventLogVMFromSession*(vm: EventLogVM) =
+  ## Hand the pane the session's `EventLogVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initEventLogVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   let replacing = eventLogVMInstance != nil
   if replacing:
     clog "EventLogVM: replacing existing instance with shared-store version"
   eventLogVMStore = store
-  eventLogVMInstance = createEventLogVM(store)
+  eventLogVMInstance = vm
   clog "EventLogVM: parallel ViewModel instance created (shared store)"
   # 2026-05-30 — earlier this proc unconditionally cleared
   # `isoNimEventLogMounted = false` before falling through to
@@ -163,7 +164,7 @@ proc initEventLogVMWithStore*(store: ReplayDataStore) =
 proc initEventLogVM() =
   ## Lazily create the parallel EventLogVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided
-  ## via `initEventLogVMWithStore`.
+  ## via `initEventLogVMFromSession`.
   if eventLogVMInstance != nil:
     return
 

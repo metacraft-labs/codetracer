@@ -387,33 +387,29 @@ proc tryMountIsoNimCalltrace*() =
 
   doMount()
 
-proc initCalltraceVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel CalltraceVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel
-  ## which is backed by a real DapApi).
+proc initCalltraceVMFromSession*(vm: CalltraceVM) =
+  ## Hand the pane the session's `CalltraceVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initCalltraceVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if calltraceVMInstance != nil:
     clog "CalltraceVM: replacing existing instance with shared-store version"
     # No flag to reset. `calltracePanelIsLive` compares `mountedCalltraceVM`
     # against `calltraceVMInstance`, so the assignment below IS the
     # invalidation and the remount happens for the same reason it used to.
   calltraceVMStore = store
-  # Clear any pending calltrace request in the shared store's tracker
-  # so the new VM's auto-load effect isn't deduplicated against a
-  # request that was sent through the old stub backend.
-  store.requestTracker.markComplete("load-calltrace")
-  calltraceVMInstance = createCalltraceVM(store)
-  cdebug "[PIPELINE] initCalltraceVMWithStore: storeId=" & $store.storeId
+  calltraceVMInstance = vm
+  cdebug "[PIPELINE] initCalltraceVMFromSession: storeId=" & $store.storeId
   clog "CalltraceVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimCalltrace()
 
 proc initCalltraceVM() =
   ## Lazily create the parallel CalltraceVM instance backed by a stub
   ## BackendService.  This fallback is used when no shared store has
-  ## been provided via `initCalltraceVMWithStore` (e.g. in the VS Code
+  ## been provided via `initCalltraceVMFromSession` (e.g. in the VS Code
   ## extension where the SessionViewModel is not yet wired).
   if calltraceVMInstance != nil:
     return
@@ -451,7 +447,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   cdebug fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={calltracePanelIsLive()}"
   if calltraceVMStore.isNil:
     # Stays at ERROR: this silently DROPS a backend calltrace response.
-    # The store is created by `initCalltraceVMWithStore` (or the stub
+    # The store is created by `initCalltraceVMFromSession` (or the stub
     # `initCalltraceVM`) before `configureMiddleware` registers the
     # `CtUpdatedCalltrace` subscription that calls us, so a nil store here
     # is an initialisation-ordering defect, not a benign race — and its
@@ -691,7 +687,7 @@ method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   # stub-backed fallback during component registration can run reactive memos
   # before the session store has been installed, aborting startup before the
   # caption bar and Golden Layout panels finish hydrating.  The real VM is
-  # installed by configureMiddleware through initCalltraceVMWithStore.
+  # installed by configureMiddleware through initCalltraceVMFromSession.
   if calltraceVMInstance != nil:
     tryMountIsoNimCalltrace()
 

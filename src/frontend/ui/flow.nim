@@ -115,25 +115,26 @@ proc validFlowStepCount*(self: FlowComponent, stepCount: int): bool =
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
-proc initFlowVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel FlowVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel).
+proc initFlowVMFromSession*(vm: FlowVM) =
+  ## Hand the pane the session's `FlowVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initFlowVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if flowVMInstance != nil:
     clog "FlowVM: replacing existing instance with shared-store version"
     isoNimFlowMounted = false
   flowVMStore = store
-  flowVMInstance = createFlowVM(store)
+  flowVMInstance = vm
   clog "FlowVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimFlowPanel()
 
 proc initFlowVM() =
   ## Lazily create the parallel FlowVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided
-  ## via `initFlowVMWithStore`.
+  ## via `initFlowVMFromSession`.
   if flowVMInstance != nil:
     return
 

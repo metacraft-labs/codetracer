@@ -104,7 +104,7 @@ proc setEditModeToolbar*(model: EditToolbarModel; invoke: proc(id: string)) =
 # instance gets the `onDapStep` / `onAction` bridge re-applied.
 #
 # Without this, replacing the stub-backed VM with the shared-store VM
-# in `initDebugControlsVMWithStore` leaves the new instance's bridge
+# in `initDebugControlsVMFromSession` leaves the new instance's bridge
 # callbacks nil — the IsoNim toolbar's click handlers then call
 # `vm.onDapStep` (which is nil) and silently drop the step request.
 # That is the root cause of TODO 5.2(i): wasm DB-trace `next` clicks
@@ -137,7 +137,7 @@ proc wireDebugToolbarShortcuts*() =
   debugControlsVMInstance.shortcutsRevision.val =
     debugControlsVMInstance.shortcutsRevision.val + 1
 
-# Forward declarations: `initDebugControlsVMWithStore` (defined below)
+# Forward declarations: `initDebugControlsVMFromSession` (defined below)
 # needs to call `dapStep` and `action` (both also below) when
 # re-applying the bridge after replacing the VM instance.
 proc dapStep*(api: MediatorWithSubscribers, action: cstring)
@@ -196,7 +196,7 @@ proc tryMountIsoNimDebugControls() =
       discard setTimeout(proc() = doMount(), 0)
       return
     # Clear any existing children from a previous mount cycle (e.g. when
-    # initDebugControlsVMWithStore replaces the stub VM with the real one).
+    # initDebugControlsVMFromSession replaces the stub VM with the real one).
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
@@ -301,24 +301,23 @@ proc requestDebugActionRefresh(self: DebugComponent) =
   self.requestDebugShellRender()
   self.requestDebugControlsRender()
 
-proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel DebugControlsVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel).
+proc initDebugControlsVMFromSession*(vm: DebugControlsVM) =
+  ## Hand the pane the session's `DebugControlsVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initDebugControlsVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
   ##
-  ## After the replacement, re-apply the `onDapStep` / `onAction` bridge
-  ## callbacks if `register()` has already wired the `DebugComponent` to
-  ## the middleware API. Without this, IsoNim toolbar clicks call a nil
-  ## `onDapStep` on the new instance and the DAP step request is silently
-  ## dropped — TODO 5.2(i).
+  ## The `onDapStep` / `onAction` bridge is then re-applied if `register()`
+  ## has already wired the `DebugComponent`: without it, toolbar clicks call
+  ## a nil `onDapStep` and the step is silently dropped (TODO 5.2(i)).
+  let store = vm.store
   if debugControlsVMInstance != nil:
     clog "DebugControlsVM: replacing existing instance with shared-store version"
     isoNimDebugMounted = false
   debugControlsVMStore = store
-  debugControlsVMInstance = createDebugControlsVM(store)
+  debugControlsVMInstance = vm
   clog "DebugControlsVM: parallel ViewModel instance created (shared store)"
   if not debugComponentForBridge.isNil and not debugApiForBridge.isNil:
     let component = debugComponentForBridge
@@ -334,7 +333,7 @@ proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
 proc remountDebugControls*() =
   ## Re-attempt the toolbar mount after the surface has changed under it.
   ##
-  ## THE MOUNT GIVES UP, AND NOTHING RETRIES IT. `initDebugControlsVMWithStore`
+  ## THE MOUNT GIVES UP, AND NOTHING RETRIES IT. `initDebugControlsVMFromSession`
   ## ends by calling `tryMountIsoNimDebugControls`, whose `doMount` polls for
   ## `#isonim-debug-controls` on `setTimeout(0)` and abandons the attempt after
   ## 100 ticks. On the web that call happens inside `onNoTrace`, which runs
@@ -415,7 +414,7 @@ proc refreshTopbarSurface*() =
 proc initDebugControlsVM() =
   ## Lazily create the parallel DebugControlsVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided
-  ## via `initDebugControlsVMWithStore`.
+  ## via `initDebugControlsVMFromSession`.
   if debugControlsVMInstance != nil:
     return
 
@@ -768,7 +767,7 @@ method register*(self: DebugComponent, api: MediatorWithSubscribers) =
   # Wire up the legacy bridge callbacks on the DebugControlsVM so that
   # IsoNim view button clicks route through the existing DAP event mediator.
   # We also memoise `self` and `api` so that any later
-  # `initDebugControlsVMWithStore` call (which replaces the VM instance
+  # `initDebugControlsVMFromSession` call (which replaces the VM instance
   # with a shared-store one) can re-apply the bridge — see the
   # `debugComponentForBridge` / `debugApiForBridge` doc above for the
   # TODO 5.2(i) failure mode this fixes.

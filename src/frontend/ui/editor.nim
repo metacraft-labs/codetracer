@@ -51,23 +51,24 @@ var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
-proc initEditorVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel EditorVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel).
+proc initEditorVMFromSession*(vm: EditorVM) =
+  ## Hand the pane the session's `EditorVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initEditorVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if editorVMInstance != nil:
     clog "EditorVM: replacing existing instance with shared-store version"
   editorVMStore = store
-  editorVMInstance = createEditorVM(store)
+  editorVMInstance = vm
   clog "EditorVM: parallel ViewModel instance created (shared store)"
 
 proc initEditorVM() =
   ## Lazily create the parallel EditorVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided
-  ## via `initEditorVMWithStore`.
+  ## via `initEditorVMFromSession`.
   if editorVMInstance != nil:
     return
 

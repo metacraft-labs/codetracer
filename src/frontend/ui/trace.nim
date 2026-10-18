@@ -27,20 +27,21 @@ var timelineVMStore: ReplayDataStore
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
-proc initTimelineVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel TimelineVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel).
+proc initTimelineVMFromSession*(vm: TimelineVM) =
+  ## Hand the pane the session's `TimelineVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initTimelineVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if timelineVMInstance != nil:
     clog "TimelineVM: replacing existing instance with shared-store version"
     # No flag to reset — `timelinePanelIsLive` compares `mountedTimelineVM`
     # against `timelineVMInstance`, so the assignment below IS the
     # invalidation.
   timelineVMStore = store
-  timelineVMInstance = createTimelineVM(store)
+  timelineVMInstance = vm
   clog "TimelineVM: parallel ViewModel instance created (shared store)"
   # No pane mounts it: the Timeline panel is removed (2026-10-05). The VM
   # stays as the shared extent arithmetic the scrubbers and seeks read.
@@ -48,7 +49,7 @@ proc initTimelineVMWithStore*(store: ReplayDataStore) =
 proc initTimelineVM() =
   ## Lazily create the parallel TimelineVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided
-  ## via `initTimelineVMWithStore`.
+  ## via `initTimelineVMFromSession`.
   if timelineVMInstance != nil:
     return
 

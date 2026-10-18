@@ -67,8 +67,8 @@ proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - se
 proc loadLocals*(self: StateComponent)
 
 var storeSendsLocals = false
-  ## Set by `initStateVMWithStore`: the StateVM's auto-load, over the
-  ## session's real store, is the one `ct/load-locals` sender (`loadLocals`).
+  ## Set by `initStateVMFromSession`: the session's stop loader is the one
+  ## `ct/load-locals` sender (`loadLocals`).
 
 func watchInputId(self: StateComponent): cstring =
   cstring(fmt"watch-{self.id}")
@@ -347,7 +347,7 @@ proc releaseOriginSidePanelEffect*() =
   ## Needed because the effect captures its reactive dependencies from
   ## whichever ``OriginChainVM`` existed when it first ran. Startup
   ## creates a stub-backed VM during ``register()`` and then *replaces*
-  ## it with the shared-store VM in ``initStateVMWithStore``; without
+  ## it with the shared-store VM in ``initStateVMFromSession``; without
   ## this reset the effect stays subscribed to the discarded stub's
   ## ``sidePanelOpen`` / ``activeChain`` signals, so the real VM's
   ## chain arrives and the panel never re-renders — the side panel is
@@ -400,18 +400,26 @@ proc activeStateVM*(): StateVM =
 proc activeOriginChainVM*(): OriginChainVM =
   ## M29 §14.8 — expose the module-local `OriginChainVM` so the
   ## bootstrap code path (`ui_js.nim`) can attach it to the active
-  ## `SessionViewModel` after `initStateVMWithStore` finishes.
+  ## `SessionViewModel` after `initStateVMFromSession` finishes.
   ## Returns ``nil`` until the VM has been created.
   originChainVMInstance
 
-proc initStateVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel StateVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel
-  ## which is backed by a real DapApi).
+proc installSourceLanguage*(store: ReplayDataStore) =
+  ## THE LANGUAGE the store's `ct/load-locals` names: the stopped-in file's,
+  ## resolved exactly as the legacy `StateComponent.loadLocals` resolved it.
+  ## The host installs it before the session's ViewModels exist, because the
+  ## stop loader may ask at once.
+  store.sourceLanguageOf = proc(file: string): string =
+    langWireName(toLangFromFilename(cstring(file)))
+
+proc initStateVMFromSession*(vm: StateVM) =
+  ## Hand the pane the session's `StateVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initStateVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if stateVMInstance != nil:
     clog "StateVM: replacing existing instance with shared-store version"
     # No flag to reset. `statePanelIsLive` compares `mountedStateVM` against
@@ -420,16 +428,9 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
     # remounts. This was the one and only site that cleared `isoNimStateMounted`
     # and it is the reason the flag could not simply be deleted.
   stateVMStore = store
-  # THE LANGUAGE the store's `ct/load-locals` names: the stopped-in file's,
-  # resolved exactly as the legacy `StateComponent.loadLocals` resolved it.
-  # Installed before the StateVM exists, because its auto-load runs at once.
-  store.sourceLanguageOf = proc(file: string): string =
-    langWireName(toLangFromFilename(cstring(file)))
-  stateVMInstance = createStateVM(store)
-  # From here on the StateVM's auto-load is the ONE sender of
-  # `ct/load-locals` — see `storeSendsLocals` and `loadLocals`. Set only once
-  # that StateVM exists: were `createStateVM` to raise (the caller logs and
-  # carries on), the legacy component must go on asking.
+  stateVMInstance = vm
+  # From here on the session's stop loader is the ONE sender of
+  # `ct/load-locals` — see `storeSendsLocals` and `loadLocals`.
   storeSendsLocals = true
   stateVMInstance.onToggleHistory = stateHistoryBridge
   # WATCHES: re-issue the request whose response this module renders.
@@ -469,14 +470,14 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   # tokens into the same lazy-fill batch (spec §3.2.3).
   setOriginChainVM(originChainVMInstance)
   tryMountOriginSidePanel()
-  cdebug "[PIPELINE] initStateVMWithStore: storeId=" & $store.storeId
+  cdebug "[PIPELINE] initStateVMFromSession: storeId=" & $store.storeId
   clog "StateVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimStatePanel()
 
 proc initStateVM() =
   ## Lazily create the parallel StateVM instance backed by a stub
   ## BackendService.  This fallback is used when no shared store has
-  ## been provided via `initStateVMWithStore` (e.g. in the VS Code
+  ## been provided via `initStateVMFromSession` (e.g. in the VS Code
   ## extension where the SessionViewModel is not yet wired).
   if stateVMInstance != nil:
     return
@@ -654,6 +655,12 @@ proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
   ## proper field per ``TypeKind``.
   if stateVMStore.isNil or response.isNil:
     return
+  # THE SESSION'S STOP LOADER APPLIES THE ANSWER IT ASKED FOR, through the
+  # shared decoder (`store/locals_answer`), on the request's own future. This
+  # fan-out delivers the same answer a second time; applying it here as well
+  # would write the locals twice per stop.
+  if stateVMStore.localsLoadedByHost:
+    return
   # WATCH ANSWERS TRAVEL IN THE SAME LIST. Each row carries `value.isWatch`
   # (set by the backend — see `db-backend/src/watch_expression.rs`); the
   # split itself belongs to `applyLocalsResponse`, which is the one place
@@ -680,11 +687,12 @@ proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers) =
   ## Connect the web renderer's `ct/load-locals` traffic to the store's
   ## request ledger — both ends, and the one direct subscription.
   ##
-  ## THE WEB SENDS `ct/load-locals` FROM ONE PLACE PER STOP: the StateVM's
-  ## auto-load effect (`store.requestLocals` -> the real backend's
-  ## `sendCommand` -> `DapApi.asyncSendCtRequest`). `StateComponent.loadLocals`
+  ## THE WEB SENDS `ct/load-locals` FROM ONE PLACE PER STOP: the session's
+  ## stop loader (`sdk/stop_loader` -> the real backend's `sendCommand` ->
+  ## `DapApi.asyncSendCtRequest`), which also applies the answer, so
+  ## `syncStoreLocals` stands down on such a store. `StateComponent.loadLocals`
   ## (through the mediator and `middleware` to `DapApi.sendCtRequest`) stands
-  ## down once `initStateVMWithStore` has run, and sent a second request per
+  ## down once `initStateVMFromSession` has run, and sent a second request per
   ## move until it did. Every sender reaches `dap.dispatchCtRequest`, and that
   ## is where the tracker records each request's stop under its identity —
   ## so the matching holds however many senders there are. The answer reaches
@@ -898,10 +906,11 @@ proc loadLocals*(self: StateComponent) =
   ## host whose StateVM runs over a stub store (the VS Code extension, where
   ## `configureMiddleware` never builds the session's store).
   ##
-  ## ONE REQUEST PER STOP. Once `initStateVMWithStore` has put the StateVM on
-  ## the session's real store, its auto-load (`state_vm.nim`) asks on every
-  ## stop and every watch-list change, through the same transport, and its
-  ## answer reaches this component through the same fan-out. This component
+  ## ONE REQUEST PER STOP. Once `initStateVMFromSession` has put the StateVM on
+  ## the session's real store, the session's stop loader (`sdk/stop_loader`)
+  ## asks on every stop and every watch-list change, through the same
+  ## transport, and its answer reaches this component through the same
+  ## fan-out. This component
   ## asking as well made two requests per move — one naming the file's
   ## language, the store's naming `c` — so it stands down; the store's
   ## request names the file's language (`ReplayDataStore.sourceLanguageOf`,

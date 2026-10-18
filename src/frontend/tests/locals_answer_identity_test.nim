@@ -49,9 +49,18 @@
 ## views mediator and a component mediator built by `types`' own
 ## constructors, `StateComponent.register` / `onCompleteMove` / `loadLocals` /
 ## `registerLocals`, `state.wireLocalsAnswers` (called by `ui_js` in
-## production), the StateVM and its auto-load effect over a
-## `ReplayDataStore` whose backend is `newDapBackendService` (the constructor
-## `ui_js` uses), and the frame shape the backend answers with.
+## production), and the session `ui_js.configureMiddleware` builds: a
+## `DebuggerSession` over `newDapBackendService` (the constructor `ui_js`
+## uses), its panel ViewModels and its stop loader, attached to a trace as
+## `ui_js.attachLoadedTrace` attaches it. The frame shape the backend answers
+## with is the real one.
+##
+## THE ANSWER IS MATCHED BY ITS OWN REQUEST'S FUTURE. Since HSF-S1 the stop
+## loader is the web's sender and applies what it asked for when that
+## request's future settles — `DapApi` resolves it from the response whose
+## `request_seq` names it, in the session that sent it. The fan-out
+## (`syncStoreLocals`) stands down on such a store. Settling happens on the
+## microtask queue, so every read below follows `settle()`.
 ##
 ## THE ONE STAND-IN: the `ipc` object's `send`, which records the request
 ## frame instead of writing it to the Backend Manager — and the answer frames,
@@ -83,6 +92,9 @@ import ../ui/state
 import ../lang
 from ../viewmodel/viewmodels/state_vm import addWatch, removeWatch
 import ../viewmodel/store/replay_data_store
+import ../viewmodel/session_vm
+import ../viewmodel/sdk/[debugger_session, trace_source]
+from ../viewmodel/sdk/stop_loader import claimLocalsLoading
 from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/editor/reconcile
 import isonim/core/signals
@@ -210,12 +222,17 @@ suite "where the StateVM runs over a stub store, the State component asks":
     ck sent.len == 1 and langOf(sent[0]) == rustWire
 
 # ---------------------------------------------------------------------------
-# The session's store, wired as `ui_js.configureMiddleware` wires it
+# The session, built as `ui_js.configureMiddleware` builds it
 # ---------------------------------------------------------------------------
 
-let store = createReplayDataStore(newDapBackendService(dapApi))
-initStateVMWithStore(store)
+let session = newDebuggerSession(newDapBackendService(dapApi))
+let store = session.store
+installSourceLanguage(store)
+store.claimLocalsLoading()
+session.session.initializePanelViewModels()
+initStateVMFromSession(session.session.stateVM)
 wireLocalsAnswers(viewsApi)
+session.attach(localFolderTrace("/trace"))
 
 proc deliver(frame: JsObject) =
   ## What `ui_js.onDapReceiveResponse` does with a response frame.
@@ -228,49 +245,50 @@ proc shown(): seq[string] =
 proc dropped(): int =
   store.stops.report.count(pkInlineValues, roDropped)
 
-# The StateVM's effect asked once at construction, before `wireLocalsAnswers`
-# ran — the boot request `resetForNewSession` is about. Not recorded, so its
-# answer, were it to arrive, would name no stop.
+proc settle(): Future[void] =
+  ## Yield to the event loop until every pending microtask has run — the
+  ## stop loader applies an answer in its request future's continuation,
+  ## which never runs inside the delivering call.
+  newPromise proc(resolve: proc()) =
+    {.emit: "setTimeout(`resolve`, 0);".}
+
+# Attaching asks nothing: the store has no stop yet.
 let bootRequests = localsRequests().len
 
-suite "the web renderer matches a ct/load-locals answer to its request":
+proc sessionChecks() {.async.} =
+  # ---- one request per move, in the file's language; a stale answer is dropped
+  moveTo(100, 10)
+  let atStop1 = newSince(bootRequests)
+  # ONE REQUEST PER MOVE — the stop loader's; the legacy component stands
+  # down. It names the language of the file the debugger stopped in (`rust`,
+  # from `calc.rs`), not the store's fallback `c`, and the stop's own tick.
+  ck atStop1.len == 1
+  ck atStop1.len == 1 and langOf(atStop1[0]) == rustWire
+  ck atStop1.len == 1 and ticksOf(atStop1[0]) == 100
 
-  test "one request per move, in the file's language; a stale answer is dropped":
-    moveTo(100, 10)
-    let atStop1 = newSince(bootRequests)
-    # ONE REQUEST PER MOVE — the StateVM's auto-load over the session's
-    # store; the legacy component stands down. It names the language of the
-    # file the debugger stopped in (`rust`, from `calc.rs`), not the store's
-    # fallback `c`, and the stop's own tick.
-    ck atStop1.len == 1
-    ck atStop1.len == 1 and langOf(atStop1[0]) == rustWire
-    ck atStop1.len == 1 and ticksOf(atStop1[0]) == 100
-    ck store.pendingLocals.len == 1
+  moveTo(200, 20)
+  let atStop2 = newSince(bootRequests + 1)
+  ck atStop2.len == 1
+  ck atStop2.len == 1 and langOf(atStop2[0]) == rustWire
 
-    moveTo(200, 20)
-    let atStop2 = newSince(bootRequests + 1)
-    ck atStop2.len == 1
-    ck atStop2.len == 1 and langOf(atStop2[0]) == rustWire
-    ck store.pendingLocals.len == 2
+  # The FAST MOVE: stop 1's answer arrives after the debugger reached stop 2.
+  let droppedBefore = dropped()
+  deliver(localsAnswer(seqOf(atStop1[0]), 10))
+  await settle()
+  ck "initial_shield=10" notin shown()
+  ck shown().len == 0
+  # Counted once per ANSWER, however many subscribers it was fanned out to.
+  ck dropped() - droppedBefore == 1
 
-    # The FAST MOVE: stop 1's answer arrives after the debugger reached stop 2.
-    let droppedBefore = dropped()
-    deliver(localsAnswer(seqOf(atStop1[0]), 10))
-    ck "initial_shield=10" notin shown()
-    ck shown().len == 0
-    # Counted once per ANSWER, however many subscribers it was fanned out to.
-    ck dropped() - droppedBefore == 1
-    # A record lives exactly as long as its answer's delivery.
-    ck store.pendingLocals.len == 1
+  deliver(localsAnswer(seqOf(atStop2[0]), 20))
+  await settle()
+  ck shown() == @["initial_shield=20"]
+  ck dropped() - droppedBefore == 1
+  # The legacy component's own subscription received the answer as well.
+  ck component.locals.len == 1
 
-    deliver(localsAnswer(seqOf(atStop2[0]), 20))
-    ck shown() == @["initial_shield=20"]
-    ck dropped() - droppedBefore == 1
-    ck store.pendingLocals.len == 0
-    # The legacy component's own subscription received the answer as well.
-    ck component.locals.len == 1
-
-  test "an answer overtaken by a later one is still judged by its own stop":
+  # ---- an answer overtaken by a later one is still judged by its own stop
+  block:
     let base = localsRequests().len
     moveTo(300, 30)
     let atStop3 = newSince(base)
@@ -279,12 +297,14 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     ck atStop3.len == 1 and atStop4.len == 1
     # Stop 4's answer overtakes stop 3's.
     deliver(localsAnswer(seqOf(atStop4[0]), 40))
+    await settle()
     ck shown() == @["initial_shield=40"]
     deliver(localsAnswer(seqOf(atStop3[0]), 30))
+    await settle()
     ck shown() == @["initial_shield=40"]
-    ck store.pendingLocals.len == 0
 
-  test "a repeated move asks nothing; a new stop at the same tick asks":
+  # ---- a repeated move asks nothing; a new stop at the same tick asks
+  block:
     let base = localsRequests().len
     moveTo(450, 45)
     ck newSince(base).len == 1
@@ -300,10 +320,11 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     ck sent.len == 2 and ticksOf(sent[1]) == 450
     deliver(localsAnswer(seqOf(sent[0]), 45))
     deliver(localsAnswer(seqOf(sent[1]), 46))
+    await settle()
     ck shown() == @["initial_shield=46"]
-    ck store.pendingLocals.len == 0
 
-  test "a watch-list change asks once, with the watch, in the file's language":
+  # ---- a watch-list change asks once, with the watch, in the file's language
+  block:
     let base = localsRequests().len
     activeStateVM().addWatch("initial_shield")
     let sent = newSince(base)
@@ -311,98 +332,70 @@ suite "the web renderer matches a ct/load-locals answer to its request":
     ck sent.len == 1 and watchesOf(sent[0]) == @["initial_shield"]
     ck sent.len == 1 and langOf(sent[0]) == rustWire
     deliver(localsAnswer(seqOf(sent[^1]), 47))
+    await settle()
     activeStateVM().removeWatch("initial_shield")
     let after = newSince(base)
     ck after.len == 2
     ck after.len == 2 and watchesOf(after[1]).len == 0
     deliver(localsAnswer(seqOf(after[^1]), 48))
-    ck store.pendingLocals.len == 0
+    await settle()
+    ck shown() == @["initial_shield=48"]
 
-  test "an answer to a request this store never recorded is not applied":
+  # ---- an answer to a request this session never sent is not applied
+  block:
     let before = shown()
-    let droppedBefore = dropped()
     deliver(localsAnswer(9_999, 999))
+    await settle()
     ck shown() == before
-    ck dropped() - droppedBefore == 1
 
-  test "the identity travels in the body every subscriber receives":
-    let base = localsRequests().len
-    moveTo(500, 50)
-    let sent = newSince(base)
-    ck sent.len == 1
-    let frame = localsAnswer(seqOf(sent[^1]), 50)
-    deliver(frame)
-    ck $ctRequestIdOf(frame["body"]) == "0:" & $seqOf(sent[^1])
-    ck shown() == @["initial_shield=50"]
-
-  test "an answer is named by the session that sent it, not the one on screen":
+  # ---- an answer is named by the session that sent it, not the one on screen
+  block:
     # Every replay session's `DapApi` numbers its requests from zero, so two
-    # sessions routinely have a request with the same `seq` in flight. The
-    # answer must be judged against the stop of the request ITS session sent
-    # — named by the `DapApi` that sent it (`responseDap`), not by the one the
-    # fan-out goes through (`fanOut`, the session on screen).
+    # sessions routinely have a request with the same `seq` in flight. An
+    # answer settles the request ITS session sent — named by the `DapApi`
+    # that sent it (`responseDap`), not by the one the fan-out goes through
+    # (`fanOut`, the session on screen) — so another session's answer never
+    # reaches this session's store.
     let base = localsRequests().len
-    let pendingBefore = store.pendingLocals.len
     moveTo(600, 60)
     let atStop6 = newSince(base)
     ck atStop6.len == 1
     moveTo(700, 70)
     let atStop7 = newSince(base + 1)
     ck atStop7.len == 1
-    # A second session asks at stop 7 with the same wire `seq` session 0
-    # used at stop 6.
+    # A second session asks with the same wire `seq` session 0 used at stop 6.
     let other = DapApi(ipc: recordingIpc(), seq: seqOf(atStop6[0]),
                        sessionId: 1)
     discard other.asyncSendCtRequest(CtLoadLocals, JsObject{})
-    ck store.pendingLocals.len == pendingBefore + 3
-    # Session 1's answer: about the current stop, so applied — although
-    # session 0's identically numbered request is about stop 6.
     deliverDapResponse(dapApi, other, localsAnswer(seqOf(atStop6[0]), 71))
-    ck shown() == @["initial_shield=71"]
+    await settle()
+    ck "initial_shield=71" notin shown()
     # Session 0's answer to that seq: about stop 6, dropped.
     deliver(localsAnswer(seqOf(atStop6[0]), 60))
-    ck shown() == @["initial_shield=71"]
+    await settle()
+    ck "initial_shield=60" notin shown()
     deliver(localsAnswer(seqOf(atStop7[0]), 72))
+    await settle()
     ck shown() == @["initial_shield=72"]
-    ck store.pendingLocals.len == pendingBefore
 
-proc settle(): Future[void] =
-  ## Yield to the event loop until every pending microtask has run — the
-  ## continuations that retire an ANSWERED request (`requestLocals`'
-  ## `onComplete`) run there, never inside a synchronous test block.
-  newPromise proc(resolve: proc()) =
-    {.emit: "setTimeout(`resolve`, 0);".}
+  # ---- a status-only change is not a new stop, and asks nothing
+  block:
+    # The debugger is marked stepping at the stop it is LEAVING — a write to
+    # `status` alone, which is what `store.requestStep` does before the new
+    # position arrives. The stop loader keys a load on the stop's identity,
+    # so it asks nothing about the stop being left.
+    let base = localsRequests().len
+    var stepping = store.debugger.val
+    stepping.status = store_types.dsStepping
+    store.debugger.val = stepping
+    ck newSince(base).len == 0
+    # A real move afterwards is asked about, once.
+    moveTo(900, 90)
+    ck newSince(base).len == 1
 
-proc afterAnswersSettle() {.async.} =
-  await settle()
-  suite "once an answer has settled":
+  ck moveFailures.len == 0
+  echo "CHECKS: ", checks
+  if failedChecks > 0:
+    {.emit: "process.exitCode = 1;".}
 
-    test "a status-only change is not a new stop, and asks nothing":
-      # The debugger is marked stepping at the stop it is LEAVING — a write
-      # to `status` alone, which is what `store.requestStep` does before the
-      # new position arrives. Once the stop's own request has been answered
-      # nothing is in flight to absorb a second one, so only the auto-load's
-      # reading of the STOP (not the whole state) keeps it from asking about
-      # the stop being left — an answer that could only be dropped.
-      let base = localsRequests().len
-      var stepping = store.debugger.val
-      stepping.status = store_types.dsStepping
-      store.debugger.val = stepping
-      ck newSince(base).len == 0
-      # A real move afterwards is asked about, once.
-      moveTo(900, 90)
-      ck newSince(base).len == 1
-
-    ck moveFailures.len == 0
-    echo "CHECKS: ", checks
-    if failedChecks > 0:
-      {.emit: "process.exitCode = 1;".}
-
-block:
-  # The last answered request's retirement (a microtask) must have run.
-  let base = localsRequests().len
-  moveTo(800, 80)
-  let sent = newSince(base)
-  doAssert sent.len == 1
-  deliver(localsAnswer(seqOf(sent[0]), 80))
-  discard afterAnswersSettle()
+discard sessionChecks()

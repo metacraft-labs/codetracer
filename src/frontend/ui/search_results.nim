@@ -177,17 +177,19 @@ proc installSearchVMCallbacks*(vm: SearchResultsVM) =
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initSearchResultsVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel ``SearchResultsVM`` using an externally-provided
-  ## ``ReplayDataStore`` (typically the shared store from
-  ## ``SessionViewModel``).  If a stub-backed instance already exists
-  ## (created by ``initSearchResultsVM`` before the real backend was
-  ## available) it is replaced so the panel uses the real backend.
+proc initSearchResultsVMFromSession*(vm: SearchResultsVM) =
+  ## Hand the pane the session's `SearchResultsVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if searchResultsVMInstance != nil:
     clog "SearchResultsVM: replacing existing instance with shared-store version"
     isoNimSearchResultsMounted = false
   searchResultsVMStore = store
-  searchResultsVMInstance = createSearchResultsVM(store)
+  searchResultsVMInstance = vm
   installSearchVMCallbacks(searchResultsVMInstance)
   clog "SearchResultsVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimSearchResultsPanel()
@@ -195,7 +197,7 @@ proc initSearchResultsVMWithStore*(store: ReplayDataStore) =
 proc initSearchResultsVM*() =
   ## Lazily create the parallel ``SearchResultsVM`` backed by a stub
   ## ``BackendService``.  Fallback when no shared store has been
-  ## provided via ``initSearchResultsVMWithStore``.
+  ## provided via ``initSearchResultsVMFromSession``.
   if searchResultsVMInstance != nil:
     return
 

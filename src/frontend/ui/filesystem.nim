@@ -24,7 +24,7 @@
 ##    ``filesystemComponent-{id}`` container and the reactive effects
 ##    keep the DOM in sync with the VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initFilesystemVMWithStore`` so the
+##    store version of the VM via ``initFilesystemVMFromSession`` so the
 ##    panel uses the production ``ReplayDataStore``.
 ##
 ## NOTE: rich jstree affordances (animated open/close, contextmenu
@@ -407,18 +407,19 @@ proc refreshIsoNimFilesystemPanel*() =
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initFilesystemVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``FilesystemVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initFilesystemVM`` before the real backend
-  ## was available) it is replaced so the panel uses the real backend.
+proc initFilesystemVMFromSession*(vm: FilesystemVM) =
+  ## Hand the pane the session's `FilesystemVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if filesystemVMInstance != nil:
     clog "FilesystemVM: replacing existing instance with shared-store version"
     isoNimFilesystemMountedIds = JsAssoc[cstring, bool]{}
   filesystemVMStore = store
-  filesystemVMInstance = createFilesystemVM(store)
+  filesystemVMInstance = vm
   wireFilesystemOpenBridge()
   when defined(js):
     if not data.isNil:

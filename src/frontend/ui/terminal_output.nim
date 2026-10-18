@@ -50,24 +50,26 @@ proc tryMountIsoNimTerminalOutputPanel*()
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initTerminalOutputVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel ``TerminalOutputVM`` using an externally
-  ## provided ``ReplayDataStore`` (typically the shared store from
-  ## ``SessionViewModel``). If a stub-backed instance already exists
-  ## (created by ``initTerminalOutputVM`` before the real backend was
-  ## available) it is replaced so the panel uses the real backend.
+proc initTerminalOutputVMFromSession*(vm: TerminalOutputVM) =
+  ## Hand the pane the session's `TerminalOutputVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if terminalOutputVMInstance != nil:
     clog "TerminalOutputVM: replacing existing instance with shared-store version"
     isoNimTerminalOutputMounted = false
   terminalOutputVMStore = store
-  terminalOutputVMInstance = createTerminalOutputVM(store)
+  terminalOutputVMInstance = vm
   clog "TerminalOutputVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimTerminalOutputPanel()
 
 proc initTerminalOutputVM() =
   ## Lazily create the parallel ``TerminalOutputVM`` backed by a stub
   ## ``BackendService``. Fallback when no shared store has been
-  ## provided via ``initTerminalOutputVMWithStore``.
+  ## provided via ``initTerminalOutputVMFromSession``.
   if terminalOutputVMInstance != nil:
     return
 

@@ -24,7 +24,7 @@
 ##    ``scratchpadComponent-{id}`` container and the reactive effects
 ##    keep the DOM in sync with the VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initScratchpadVMWithStore`` so the
+##    store version of the VM via ``initScratchpadVMFromSession`` so the
 ##    panel uses the production ``ReplayDataStore``.
 ##
 ## NOTE: the rich ``ValueComponent`` rendering remains a follow-up — the
@@ -274,18 +274,19 @@ proc syncLegacyScratchpadIntoVM*(self: ScratchpadComponent) =
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initScratchpadVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``ScratchpadVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initScratchpadVM`` before the real backend
-  ## was available) it is replaced so the panel uses the real backend.
+proc initScratchpadVMFromSession*(vm: ScratchpadVM) =
+  ## Hand the pane the session's `ScratchpadVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if scratchpadVMInstance != nil:
     clog "ScratchpadVM: replacing existing instance with shared-store version"
     isoNimScratchpadMountedIds = JsAssoc[int, bool]{}
   scratchpadVMStore = store
-  scratchpadVMInstance = createScratchpadVM(store)
+  scratchpadVMInstance = vm
   clog "ScratchpadVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimScratchpadPanel()
 

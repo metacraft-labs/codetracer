@@ -261,6 +261,8 @@ proc hideWelcomeScreenSurface() =
 # individual panels so they all share a single real backend connection.
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
+import viewmodel/sdk/[debugger_session, trace_source]
+from viewmodel/sdk/stop_loader import claimLocalsLoading
 import viewmodel/backend/[backend_service, real_backend]
 import dap_backend
 import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
@@ -285,7 +287,13 @@ from viewmodel/viewmodels/review_open import
   ReviewOpenService, ReviewDatasetRequest, ReviewDatasetRequestKind
 from viewmodel/viewmodels/evidence_call_vm import
   EvidenceDataset, EvidenceDatasetState, edsReady, edsUnavailable
+var activeDebuggerSession: DebuggerSession
+  ## The renderer's one session (Shared-DOM-Front-Ends D1). Built by
+  ## `configureMiddleware`; adopts the trace the host process opened when
+  ## `onTraceLoaded` runs (`attachLoadedTrace`).
 var activeSessionVM: SessionViewModel
+  ## `activeDebuggerSession.session`, kept as its own name for the many
+  ## readers of the panel ViewModels and the store.
 # Backend-reported `supportsStepBack` capability from the DAP `initialize`
 # response. The response can arrive (synchronously, via the in-process DAP
 # transport) before `activeSessionVM` exists, in which case the handler cannot
@@ -2309,19 +2317,23 @@ when not defined(ctInExtension):
           when defined(js):
             if data.startOptions.inTest:
               recordVmBackendRequest(command, argsJs))
-      activeSessionVM = createSessionVM(realBackend)
+      activeDebuggerSession = newDebuggerSession(realBackend)
+      activeSessionVM = activeDebuggerSession.session
+      # The panel ViewModels are the session's, built once by
+      # `initializePanelViewModels` — in edit mode too, where no trace is open
+      # and the session is not yet attached. The stop loader is the one
+      # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
+      # exists (its effect would otherwise send on its first run), and the
+      # request's language hook is installed before anything can ask.
+      state.installSourceLanguage(activeSessionVM.store)
+      activeSessionVM.store.claimLocalsLoading()
+      activeSessionVM.initializePanelViewModels()
       # PLAT-40: the debugger service's `setBreakpoints` answers go to the
       # ViewModel store's one breakpoint decoder — the point list then holds
       # what the engine verified, as it does on the native front-ends.
       let pointStore = activeSessionVM.store
       data.onBreakpointsVerified = proc(path: cstring; lines: seq[int]) =
         pointStore.applyVerifiedBreakpoints($path, lines)
-      # The desktop builds panel ViewModels on demand rather than through
-      # `initializePanelViewModels`, so the session's point list may not exist
-      # yet: create it over the session's store and record it on the session,
-      # so every reader of `pointListVM` sees the one list.
-      if activeSessionVM.pointListVM.isNil:
-        activeSessionVM.pointListVM = createPointListVM(activeSessionVM.store)
       point_list.setPointListVM(activeSessionVM.pointListVM)
       # Apply any `supportsStepBack` capability that arrived before this VM
       # existed (its DAP `initialize` response can beat this assignment), so the
@@ -2338,12 +2350,11 @@ when not defined(ctInExtension):
       if pendingCollabJoinBootstrapRaw.len > 0:
         discard activateCollabJoinBootstrap(pendingCollabJoinBootstrapRaw)
 
-      # Pre-initialise (or upgrade) the panel VMs that have legacy bridge
-      # code so they use the shared store from the SessionViewModel.
-      # If register() already created stub-backed VM instances during
-      # createUIComponents(), these calls replace them with real-backend
-      # instances.  If register() hasn't run yet, the instances are
-      # created fresh with the real backend.
+      # Hand the panels with legacy bridge code the session's ViewModels, or,
+      # for the panels `initializePanelViewModels` does not cover yet, build
+      # theirs over the session's store. If register() already created
+      # stub-backed VM instances during createUIComponents(), these calls
+      # replace them.
       template initPanelVM(label: string; body: untyped) =
         try:
           cdebug "[PIPELINE] configureMiddleware: calling " & label
@@ -2357,8 +2368,8 @@ when not defined(ctInExtension):
           # `[PIPELINE]` progress traces were demoted to DEBUG.
           cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
 
-      initPanelVM("initStateVMWithStore"):
-        state.initStateVMWithStore(activeSessionVM.store)
+      initPanelVM("initStateVMFromSession"):
+        state.initStateVMFromSession(activeSessionVM.stateVM)
         # M29 §14.8 — attach the OriginChainVM to the SessionVM so
         # the chain panel's breadcrumb chips route process switches
         # through `SessionViewModel.onSwitchProcess` (and so the
@@ -2486,33 +2497,33 @@ when not defined(ctInExtension):
       initPanelVM("mountProcessTree"):
         mountProcessTree(activeSessionVM)
 
-      initPanelVM("initDebugControlsVMWithStore"):
-        debug.initDebugControlsVMWithStore(activeSessionVM.store)
-      initPanelVM("initCalltraceVMWithStore"):
-        calltrace.initCalltraceVMWithStore(activeSessionVM.store)
-      initPanelVM("initEventLogVMWithStore"):
-        event_log.initEventLogVMWithStore(activeSessionVM.store)
+      initPanelVM("initDebugControlsVMFromSession"):
+        debug.initDebugControlsVMFromSession(activeSessionVM.debugControlsVM)
+      initPanelVM("initCalltraceVMFromSession"):
+        calltrace.initCalltraceVMFromSession(activeSessionVM.calltraceVM)
+      initPanelVM("initEventLogVMFromSession"):
+        event_log.initEventLogVMFromSession(activeSessionVM.eventLogVM)
         # §5.3 — an Event Log boundary chip whose counterpart lives in
         # a sibling recording rotates the session, exactly as clicking
         # that recording in the process tree would.
         event_log.installEventLogSwitchProcessBridge(proc(recordingId: string) =
           if not activeSessionVM.isNil:
             activeSessionVM.onSwitchProcess(recordingId))
-      initPanelVM("initFlowVMWithStore"):
-        flow.initFlowVMWithStore(activeSessionVM.store)
-      initPanelVM("initEditorVMWithStore"):
-        editor.initEditorVMWithStore(activeSessionVM.store)
-      initPanelVM("initTimelineVMWithStore"):
-        trace.initTimelineVMWithStore(activeSessionVM.store)
-      initPanelVM("initTerminalOutputVMWithStore"):
-        terminal_output.initTerminalOutputVMWithStore(activeSessionVM.store)
+      initPanelVM("initFlowVMFromSession"):
+        flow.initFlowVMFromSession(activeSessionVM.flowVM)
+      initPanelVM("initEditorVMFromSession"):
+        editor.initEditorVMFromSession(activeSessionVM.editorVM)
+      initPanelVM("initTimelineVMFromSession"):
+        trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
+      initPanelVM("initTerminalOutputVMFromSession"):
+        terminal_output.initTerminalOutputVMFromSession(activeSessionVM.terminalOutputVM)
       initPanelVM("initBuildVMWithStore"):
         build.initBuildVMWithStore(activeSessionVM.store)
         build.buildVMInstance.runBuild = proc() = data.update(build=true)
       initPanelVM("initErrorsVMWithStore"):
         errors.initErrorsVMWithStore(activeSessionVM.store)
-      initPanelVM("initSearchResultsVMWithStore"):
-        search_results.initSearchResultsVMWithStore(activeSessionVM.store)
+      initPanelVM("initSearchResultsVMFromSession"):
+        search_results.initSearchResultsVMFromSession(activeSessionVM.searchResultsVM)
       initPanelVM("initNoSourceVMWithStore"):
         no_source.initNoSourceVMWithStore(activeSessionVM.store)
       initPanelVM("initStepListVMWithStore"):
@@ -2527,10 +2538,10 @@ when not defined(ctInExtension):
         request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
       initPanelVM("initTraceLogVMWithStore"):
         trace_log.initTraceLogVMWithStore(activeSessionVM.store)
-      initPanelVM("initScratchpadVMWithStore"):
-        scratchpad.initScratchpadVMWithStore(activeSessionVM.store)
-      initPanelVM("initFilesystemVMWithStore"):
-        filesystem.initFilesystemVMWithStore(activeSessionVM.store)
+      initPanelVM("initScratchpadVMFromSession"):
+        scratchpad.initScratchpadVMFromSession(activeSessionVM.scratchpadVM)
+      initPanelVM("initFilesystemVMFromSession"):
+        filesystem.initFilesystemVMFromSession(activeSessionVM.fileTreeVM)
       initPanelVM("initCommandPaletteVMWithStore"):
         command.initCommandPaletteVMWithStore(activeSessionVM.store)
       initPanelVM("initFrameViewerVMWithStore"):
@@ -2910,6 +2921,19 @@ proc onDapLiveSessionSelected(sender: js; response: JsObject) =
   else:
     pendingDapLiveSelection = response
 
+proc attachLoadedTrace(folder: string) =
+  ## The host process opened `folder` on the replay engine; the renderer's
+  ## session adopts it (`DebuggerSession.attach`), which starts its stop
+  ## loader. A renderer that loads another trace into the same tab re-attaches,
+  ## so the session's `trace` names what is open.
+  if activeDebuggerSession.isNil:
+    return
+  if activeDebuggerSession.phase.val == dspReady and
+     activeDebuggerSession.trace.kind == tskLocalFolder and
+     activeDebuggerSession.trace.folder == folder:
+    return
+  activeDebuggerSession.attach(localFolderTrace(folder))
+
 proc onTraceLoaded(
   sender: js,
   response: jsobject(
@@ -3048,6 +3072,7 @@ proc onTraceLoaded(
     if not middlewareConfigured:
       configureMiddleware()
       middlewareConfigured = true
+    attachLoadedTrace($data.trace.outputFolder)
 
   dapSessionSelectionReady = true
   flushPendingDapSessionSelections()
