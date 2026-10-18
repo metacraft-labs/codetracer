@@ -2090,10 +2090,53 @@ const
   CallSelectedAttribute* = "data-call-selected"
   CallArgAttribute* = "data-call-arg"
     ## PLAT-50: the argument a row part belongs to (0-based into `args`).
-  CallRowPx* = 26
-    ## A row's height: the window's row pitch (`window_geometry
-    ## .GpuiEditorRowPx`), fixed, so a press is mapped to the row it is on
-    ## (`main.clickCalltrace`).
+  CallRowToggleEmRatio* = 1.5625
+    ## `.toggle-call`'s `height`, VERBATIM from the stylesheet that draws the
+    ## desktop's call trace (`styles/components/calltrace.styl`, compiled to
+    ## `.calltrace-view .toggle-call { height: 1.5625em }`).
+    ##
+    ## **THIS, NOT THE ROW'S OWN `min-height`, IS WHAT SETS THE ROW BOX.** A
+    ## row is `display: inline-flex` with `min-height: 1.55em` (24.8 px), and
+    ## every row carries a toggle: the chain
+    ## `.calltrace-row > .calltrace-child > .call-child-box > .toggle-call`
+    ## hands the row a flex item 1.5625em (25 px) tall, which is the taller of
+    ## the two, so the row box is the TOGGLE's height and the `min-height`
+    ## never binds. Both lengths are `em` against the SAME inherited
+    ## font-size (nothing between `.calltrace-view` and `.toggle-call` sets
+    ## one), so the ratio 1.5625 : 1.55 is fixed and the toggle wins at every
+    ## font size — the `min-height` is dead weight, not a rival that takes
+    ## over once the text grows.
+
+  CallRowPitch* = CallRowToggleEmRatio * float(CodeFontPx)
+    ## The desktop's row pitch: the row box above, at the root font size the
+    ## desktop sets on `documentElement` (`ui_js.nim`'s
+    ## `style.fontSize = "{data.ui.fontSize}px"`, and `data.ui.fontSize` is
+    ## `CodeFontPx`). 1.5625 x 16 = 25 px.
+    ##
+    ## It was `25.78` until 2026-10-18: "722 px over 28 rows", a fitted
+    ## AVERAGE with no rule behind it. Measured on the parity captures at
+    ## `codetracer 052ca76ce`, 2x: the desktop paints the selected row's box
+    ## — `.event-selected` covers the whole row — exactly **50 device px**,
+    ## sharp-edged, with no partially covered scanline at either edge, in
+    ## each of the three views that show the pane. 50 device px is 25
+    ## logical px, which is this rule; 25.78 is not any row's height.
+    ##
+    ## **One thing here is measured and NOT explained, so do not read this
+    ## constant as the whole story.** The row BOX is 25, but the mean row
+    ## ADVANCE down the desktop's pane measures 50.596 device px (25.298
+    ## logical) — four independent estimators agree, and the one that
+    ## recovers this front-end's own former 25.78 to 0.03% is the control
+    ## that says they can be trusted. So the desktop advances ~0.3 px per row
+    ## more than its own row box, and nothing in `calltrace.styl` accounts
+    ## for it. This constant deliberately does NOT absorb that 0.3: absorbing
+    ## it is how 25.78 was arrived at, and a fitted pitch re-drifts at a
+    ## different font size. Derive the box; leave the remainder visible.
+
+  CallRowPx* = int(round(CallRowPitch))
+    ## A row's height, as an integer, so a press is mapped to the row it is on
+    ## (`main.clickCalltrace`). Derived from the pitch rather than restated:
+    ## it was a standalone `26` while the pitch said 25.78, and the two
+    ## disagreeing is what a reader had to notice by hand.
   CallIndentPx* = 8
     ## The desktop's depth offset per level (`.call-depth`, measured 8 px a
     ## level 2026-10-17: toggles at 1053, 1061, 1069 …; 16 until then).
@@ -2124,10 +2167,6 @@ const
     ## either side of the pane.
   CallRowsTopPx* = CallSearchPx + 8
     ## The first row below the pane's content top: the field and its 8 px.
-  CallRowPitch* = 25.78
-    ## The desktop's row pitch (`.calltrace-call-line`): rows at 108, 134,
-    ## 159, 185 … 830 under a field at 74 — 722 px over 28 rows (measured
-    ## 2026-10-17; 1.6 x 16 px fell 2 px short by the pane's foot).
   CallToggleLeftPx* = 6
     ## The toggle icon's left at depth 0 (`.collapse-call-img`, 14 px), and the
     ## text 20 px after it.
