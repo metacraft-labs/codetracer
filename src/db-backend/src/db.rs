@@ -2416,22 +2416,122 @@ impl MaterializedReplaySession {
     /// `start`"), when the program's own first step lies in a call nested
     /// inside it (Python's module frame, JavaScript's `<module>`).
     ///
-    /// A root whose next step is its OWN is not a wrapper: several recorders
-    /// (Fuel, Cardano, …) merge the program's entry function into
-    /// `<toplevel>`, so the root's steps ARE the program's body and its first
-    /// nested call is a helper the body calls later. Skipping such a root
-    /// would open the recording inside that helper, past the body's opening
-    /// lines.
+    /// ## The rule
+    ///
+    /// Walking forward from the root's entry step, the root is a wrapper when
+    /// the first step that belongs to ANOTHER call is reached before the root
+    /// has executed anything of its own — when every root step on the way is
+    /// only positioning:
+    ///
+    /// * an exec record with no source position (`line < 1`; source lines
+    ///   are 1-based), or
+    /// * a step at the entry step's own `(path, line)`, when that is also the
+    ///   definition `(path, line)` of the call that then opens.
+    ///
+    /// Positionless exec records need the first bullet because they DO
+    /// occupy step ids: the CTFS execution stream indexes every record, not
+    /// only steps, and the other streams are indexed by it
+    /// (`ct_reader_step_count` is the exec-record count,
+    /// `ct_reader_logical_step_count` the step-record count). The CTFS reader
+    /// surfaces each such record as a `DbStep` in the frame that was active,
+    /// without a source position (measured: a `ThreadStart` right after the
+    /// entry step reads back as `line 0, column None` in `<toplevel>`). The
+    /// JavaScript recorder emits exactly that `ThreadStart`: its
+    /// async-context tracker announces the main thread when recording is
+    /// enabled.
+    ///
+    /// The second bullet exists because a real JavaScript recording does not
+    /// go from the entry step straight into `<module>`: the recorder emits a
+    /// step at the CALLEE's definition position, in the caller's frame, right
+    /// before every `Call` (codetracer-js-recorder `recorder_native`, "Anchor
+    /// the call entry on the function's DEFINITION line"), and it hands
+    /// `start` the position of that first step. So the anchor before
+    /// `<module>` repeats the entry position, 1:1, which is also where
+    /// `<module>` is defined. A rule that looked only at the step right after
+    /// the entry step found a root step there (the thread record, and behind
+    /// it the anchor), called the root a body carrier, and the recording
+    /// opened on `<toplevel>`. From there the first step over, by line or by
+    /// statement, stepped over the whole module (codetracer-pm issue
+    /// `2026-09-26-js-statement-and-formatted-view-stepping-fails-on-real-recordings`).
+    ///
+    /// ## What is not a wrapper
+    ///
+    /// Any other root step is the root executing its own body, so the root is
+    /// not a wrapper. Several recorders merge the program's entry function
+    /// into `<toplevel>` (Fuel, Cardano, EVM's absorbed first internal call),
+    /// so the root's steps ARE the program's body and its first nested call
+    /// is a helper the body calls. Skipping such a root would open the
+    /// recording inside that helper, past the body's opening lines. Both
+    /// halves of the second bullet guard that: the body may start on the
+    /// entry line and call a helper defined elsewhere, and the EVM recorder
+    /// defines each external call's function at the CALLER's line, so a body
+    /// that ran a single line before an external call stands at the
+    /// definition position of the call that opens. A root with no nested
+    /// call at all (root-only recordings) is the entry by definition.
+    ///
+    /// The rule is stated in `codetracer-trace-format-spec`
+    /// `recorded-entry-identity.md`, "Legacy entry selection", which replay
+    /// preserves for recordings without an `entry.dat` member.
+    ///
+    /// ## Cost
+    ///
+    /// The walk is bounded: it stops at the first step of another call, at
+    /// the first root step away from the entry position, or after
+    /// [`MAX_ROOT_ANCHOR_STEPS`] root steps. So it visits a handful of steps
+    /// through `scan_steps_from` and never builds the step table (M0/3).
     fn is_wrapping_toplevel_root(&self, call: &DbCall) -> bool {
-        call.key == CallKey(0)
-            && self
+        /// More positioning steps than any recorder emits before the
+        /// program's frame opens (the JavaScript recorder emits two: the
+        /// thread record and the anchor). A root still positioning after this
+        /// many steps is executing a body, and is not a wrapper.
+        const MAX_ROOT_ANCHOR_STEPS: usize = 8;
+
+        if call.key != CallKey(0)
+            || self
                 .reader
                 .function(call.function_id)
-                .is_some_and(|function| function.name == TOP_LEVEL_FUNCTION_NAME)
-            && self
-                .reader
-                .step(StepId(call.step_id.0 + 1))
-                .is_some_and(|next| next.call_key != call.key)
+                .is_none_or(|function| function.name != TOP_LEVEL_FUNCTION_NAME)
+        {
+            return false;
+        }
+        let Some(entry) = self.reader.step(call.step_id) else {
+            return false;
+        };
+        let entry_position = (entry.path_id, entry.line);
+
+        // Whether a root step repeated the entry position. Such a step is an
+        // anchor only if the call that opens next is defined there, which is
+        // known at the first step outside the root, so it is judged there.
+        let mut anchored = false;
+        let mut root_steps = 0usize;
+        let mut wraps = false;
+        self.reader.scan_steps_from(call.step_id, true, &mut |step: &DbStep| {
+            if step.call_key != call.key {
+                let opened_definition = self
+                    .reader
+                    .call(step.call_key)
+                    .and_then(|opened| self.reader.function(opened.function_id))
+                    .map(|function| (function.path_id, function.line));
+                wraps = !anchored || opened_definition == Some(entry_position);
+                return false;
+            }
+            root_steps += 1;
+            if root_steps > MAX_ROOT_ANCHOR_STEPS {
+                return false;
+            }
+            if step.line.0 < 1 {
+                // A positionless exec record (a thread record, …): it
+                // executes nothing of the root's.
+                return true;
+            }
+            if (step.path_id, step.line) != entry_position {
+                // The root is executing its own body: stop early.
+                return false;
+            }
+            anchored = true;
+            true
+        });
+        wraps
     }
 
     /// The program's entry call: the first call in user source that is not
