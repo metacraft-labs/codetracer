@@ -43,6 +43,13 @@ lint_step "test-lane coverage guard: contract suite" \
 lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 	bash ci/test/test-lane-coverage.sh
 
+# The other half of the lane list's honesty: every lane is run through
+# ci/lib/run-nim-test-lane.sh by some recipe XOR marked recipe-owned, and the
+# runner refuses a recipe-owned lane by name before compiling anything (checked
+# against the real runner with a recording stub `nim`). Pure bash, seconds.
+lint_step "test-lane runner: recipe-owned lanes are refused, by name" \
+	bash ci/test/recipe-owned-lanes-test.sh
+
 # THE SAME QUESTION, ONE FILE EXTENSION OVER. `test-lane-coverage.sh` is scoped
 # in its own first line to "any test-shaped **Nim** file", and `ci/test/` holds
 # sixty-three SHELL gates that nothing measured. Twelve of them were reachable

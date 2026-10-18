@@ -1465,9 +1465,11 @@ reset-layout:
 # sibling checkout at a revision that predates them fails in seconds with a
 # named remedy, instead of as a type mismatch fifteen minutes into a full `ct`
 # build that blames the caller. See the module header for why it asserts
-# signatures rather than behaviour.
+# signatures rather than behaviour.  Runs through the shared lane runner, so its
+# verdict is scored like every other runner-owned lane's: exit status before the
+# [OK]/[FAILED] tally, a scratch CODETRACER_HOME, a per-checkout nimcache.
 test-agent-api-contract:
-  nim c -r --hints:off src/ct/agent_session_api_contract_test.nim
+  bash ci/lib/run-nim-test-lane.sh agent-api-contract
 
 # originally by Pavel/Dimo in ci.sh; the check itself now lives in
 # ci/test/nimsuggest-check.sh so `just test` and ci/lint/nim.sh share one
@@ -3143,8 +3145,11 @@ test-vm: test-vm-native test-vm-js
 # ====
 # Lanes converted from hand-maintained path lists to DISCOVERY.
 #
-# Everything below shares one runner (ci/lib/run-nim-test-lane.sh) and one file
-# selector (ci/lib/test-lane-files.sh).  That split is the point: a lane is now
+# Everything below shares one file selector (ci/lib/test-lane-files.sh), and
+# every lane it does not mark recipe-owned (`test_lane_recipe`) shares one runner
+# (ci/lib/run-nim-test-lane.sh).  A recipe-owned lane, such as
+# `test-book-isonim` below, keeps its own recipe, and the runner refuses it by
+# name rather than running it differently.  That split is the point: a lane is now
 # DATA — "this directory, this pattern, these flags" — so a new test file in a
 # covered directory is picked up by its lane with nobody editing anything, and
 # `just test-lane-coverage` fails BY NAME on any test-shaped file that still
@@ -3325,13 +3330,18 @@ test-plugin-reactive-boundary:
   bash ci/test/plugin-reactive-boundary.sh
 
 # Print what each lane runs, without running anything.  Useful when deciding
-# where a new test file belongs.
+# where a new test file belongs.  A recipe-owned lane (`test_lane_recipe`)
+# also prints the recipe that runs it: ci/lib/run-nim-test-lane.sh refuses it.
 test-lanes:
   #!/usr/bin/env bash
   set -euo pipefail
   source ci/lib/test-lane-files.sh
   while read -r lane; do
     printf '%s — %s\n' "$lane" "$(test_lane_description "$lane")"
+    recipes="$(test_lane_recipe "$lane")"
+    if [ -n "$recipes" ]; then
+      printf '    (run by: just %s)\n' "${recipes// /, just }"
+    fi
     test_lane_files "$lane" | sed 's/^/    /'
   done < <(test_lane_ids)
 

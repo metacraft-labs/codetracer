@@ -43,6 +43,8 @@
 #   test_lane_backend <id>           # "c" or "js"
 #   test_lane_extra_flags <id>       # extra nim flags (may be empty)
 #   test_lane_description <id>       # one-line human description
+#   test_lane_recipe <id>            # `just` recipe(s) that own the lane's
+#                                    # execution; empty = the runner owns it
 #
 # All paths are repo-relative. Callers must run from the repo root.
 
@@ -134,8 +136,18 @@ _tlf_reject() {
 # The lanes
 # ---------------------------------------------------------------------------
 
-# Every lane id. Order is the order a full local sweep would sensibly run them:
-# cheap pure-Nim units first, toolchain- and sibling-dependent lanes last.
+# Every lane id. Order is cheap pure-Nim units first, toolchain- and
+# sibling-dependent lanes last.
+#
+# THIS IS THE COVERAGE QUESTION'S LIST, NOT A LIST OF RUNNER INVOCATIONS. Every
+# lane here answers "which files does this lane claim?", and
+# `ci/test/test-lane-coverage.sh` reads all of them. Only the lanes whose
+# `test_lane_recipe` is EMPTY can also be run as
+# `bash ci/lib/run-nim-test-lane.sh <id>`; the runner refuses the rest by name,
+# because their execution lives in a `just` recipe that does something the
+# generic loop cannot. A full local sweep therefore runs each lane through its
+# `just` recipe (`just test-lanes` prints the recipe-owned ones' recipes), not
+# through the runner.
 test_lane_ids() {
 	cat <<'EOF'
 common-units
@@ -227,6 +239,103 @@ test_lane_description() {
 		echo "unknown lane '$1'" >&2
 		return 1
 		;;
+	esac
+}
+
+# test_lane_recipe ID — the space-separated `just` recipe(s) that OWN this
+# lane's execution, or nothing when `ci/lib/run-nim-test-lane.sh` does.
+#
+# A non-empty answer means the lane's files are listed here for the COVERAGE
+# question only. The runner exits 2 on such a lane and prints the recipe,
+# because running these files through the generic loop is not the lane. Five
+# of them were measured red under the runner for reasons that are artefacts of
+# the runner, not of the product — 3 + 1 + 4 + 10 failures over `frontend-js`,
+# `m16-release-gate`, `bpf` and `book-isonim`, and a mis-scored
+# `vm-recorder-gated`, at codetracer `661744f2c`. The rest are run by their
+# recipe and by nothing else, so the recipe, not the runner, is what the lane
+# means. Each arm says what the recipe does.
+#
+# The marker concedes that these lanes have two definitions — the file list
+# here and the loop in the recipe — which can drift. Some recipes read their
+# set back from `test_lane_files`, and those cannot. For the ones that
+# enumerate their own files, `test-lane-coverage.sh`'s existence check catches
+# a path that no longer exists, but nothing checks that the two lists agree. And
+# `ci/test/recipe-owned-lanes-test.sh` keeps the marker itself honest: every
+# lane is run through the runner by some recipe XOR named here, and every
+# recipe named here exists.
+#
+# The default arm prints nothing, so an unknown id gets whatever the other
+# lookups do with it (`test_lane_description` fails it by name).
+test_lane_recipe() {
+	case "$1" in
+	frontend-js)
+		# Compiles each file with `-d:chronicles_enabled=off -d:ctRenderer
+		# -d:ctInExtension`, and runs several under node with
+		# `globalThis.window = globalThis` aliased first (`types.nim` installs
+		# a `window.data` hook at import). The lane carries neither; under the
+		# runner three files die on `undeclared identifier: 'data'`.
+		echo "test-frontend-js"
+		;;
+	no-sidecar-manifests)
+		# Depends on `vm-test-prereqs` and records with six real recorder
+		# siblings; a sibling that is not checked out is a `MISSING-RECORDER
+		# SKIP:` the suite's own zero-test guard scores.
+		echo "test-no-sidecar-manifests"
+		;;
+	vm-recorder-gated)
+		# Builds the JS recorder sibling and replay-server first, sources
+		# `scripts/detect-siblings.sh`, and classifies an all-`MISSING-RECORDER
+		# SKIP:` file as SKIPPED. The runner scores the same output DID NOT RUN
+		# (9 of its 14 "failures" at `661744f2c`).
+		echo "test-vm-recorder-gated"
+		;;
+	m16-release-gate)
+		# `ci/test/m16-release-gate.sh` runs these in a fixed order, under a
+		# per-file `GLIBC_TUNABLES`, gates two behind CT_M16_HEAVY, and only
+		# COMPILES `ct_test.nim` — it is the `ct-test` CLI later suites use,
+		# not a suite. The runner executes it and scores its usage text.
+		echo "test-m16-release-gate"
+		;;
+	ct-providers)
+		# `ci/test/ct-providers.sh` builds the native/js/ruby recorder siblings
+		# in their own dev shells and needs the C/C++ provider toolchains
+		# (gtest, catch2, cmake, CT_TEST_C{C,XX}) the dev shell supplies.
+		echo "test-ct-providers"
+		;;
+	visual-replay-gate)
+		# `ci/test/visual-replay-gate.sh` checks the codetracer-visual-replay
+		# and native-backend siblings, the private cargo environment and the
+		# Playwright specs, runs the sibling's own suites, and maps each file
+		# to a row of the published gate report.
+		echo "test-visual-replay-gate"
+		;;
+	agentic-headless)
+		# `scripts/test-codetracer-agentic-headless.sh matrix` interleaves
+		# these with Agent Harbor's own contract E2E tests.
+		echo "test-codetracer-agentic-headless-matrix"
+		;;
+	bpf)
+		# Four recipes, one per file: `-d:ssl -d:useOpenssl3 --mm:refc`,
+		# `--passL:-lbpf -lelf -lz` against a built libbpf, BPF objects from
+		# `just build-bpf-programs` and capabilities from `just
+		# developer-setup`. None of that fits a data row.
+		echo "test-bpf"
+		;;
+	book-isonim)
+		# Needs the `isonim-docs` sibling's framework on the path (the book's
+		# nimble requires ../../../isonim-docs) and runs the book's own
+		# Justfile; under the runner every file is a COMPILE ERROR.
+		echo "test-book-isonim"
+		;;
+	screen-oracle)
+		# PLAT-39. `test_plat39_record.nim` is the portable gate
+		# (`plat39-record-gate`); `test_screen_oracle.nim` reads gitignored
+		# captures, needs `--path:../GuiAssert/src` and tesseract, and is
+		# scored against the milestone's case floor by
+		# `ci/test/editor-model-case-floor.sh PLAT-39` (`plat39-case-floor`).
+		echo "plat39-record-gate plat39-case-floor"
+		;;
+	*) ;;
 	esac
 }
 

@@ -16,6 +16,18 @@
 # ci/lib/test-lane-files.sh says which files and which compiler flags, and this
 # script says what running them means. A new lane is a one-line `just` recipe.
 #
+# EXCEPT FOR A RECIPE-OWNED LANE, which this script REFUSES (exit 2) by name.
+# Some lanes are listed in ci/lib/test-lane-files.sh only so the coverage guard
+# can see their files; their execution lives in a bespoke `just` recipe that
+# does what this loop cannot — per-file defines and a `window` alias, a CLI
+# that is compiled and never run, BPF capabilities, a sibling framework's
+# paths, a different scoring of `MISSING-RECORDER SKIP:` output.
+# `test_lane_recipe` names that recipe. Running such a lane here used to report
+# red for reasons that were artefacts of this runner (3 + 1 + 4 + 10 failures
+# over four lanes at codetracer `661744f2c`), indistinguishable in a sweep from
+# product failures; refusing it, and printing the recipe, is the honest answer.
+# ci/test/recipe-owned-lanes-test.sh holds both halves of that to account.
+#
 # Behaviour worth knowing:
 #
 #   * Compile and run are SEPARATE steps, never a single `nim c -r`. Conflating
@@ -58,8 +70,13 @@ source "${repo_root}/ci/lib/test-lane-report.sh"
 lane="${1:-}"
 if [ -z "${lane}" ]; then
 	echo "usage: run-nim-test-lane.sh <lane-id> [--compile-only]" >&2
+	# Only the lanes this script will actually run; listing the recipe-owned
+	# ones here would advertise an invocation the check below refuses.
 	echo "lanes:" >&2
-	test_lane_ids | sed 's/^/  /' >&2
+	while read -r _ct_id; do
+		[ -z "$(test_lane_recipe "${_ct_id}")" ] && printf '  %s\n' "${_ct_id}" >&2
+	done < <(test_lane_ids)
+	echo "(recipe-owned lanes are run by their 'just' recipe; 'just test-lanes' names each one's recipe)" >&2
 	exit 2
 fi
 shift
@@ -75,6 +92,27 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+
+# A RECIPE-OWNED LANE IS REFUSED HERE, BEFORE ANYTHING ELSE HAPPENS — before
+# the cache root, the scratch state directories, the user-state snapshot or a
+# single compiler call — and with `--compile-only` too. Its file list exists
+# for the coverage question only; what running it MEANS is in the recipe, and
+# a partial imitation of that here is exactly the false red this refusal
+# replaces (see the header and `test_lane_recipe`). Exit 2 is this script's
+# usage-error status, so a sweep cannot mistake the refusal for a lane result.
+_ct_lane_recipes="$(test_lane_recipe "${lane}")"
+if [ -n "${_ct_lane_recipes}" ]; then
+	{
+		echo "run-nim-test-lane.sh: lane '${lane}' is recipe-owned; this runner does not run it."
+		echo "  Its files are listed in ci/lib/test-lane-files.sh for coverage accounting"
+		echo "  only. Its execution lives in the recipe below, which does what this"
+		echo "  generic loop cannot (see test_lane_recipe there for what). Run:"
+		for _ct_r in ${_ct_lane_recipes}; do
+			echo "    just ${_ct_r}"
+		done
+	} >&2
+	exit 2
+fi
 
 # THE CACHE ROOT IS PER-CHECKOUT, AND THAT IS THE WHOLE POINT.
 #
