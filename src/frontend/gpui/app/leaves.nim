@@ -2310,6 +2310,22 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
     r.setStyle(el, "height", $(callRowTopPx(k + 1) - callRowTopPx(k)) & "px")
     r.setStyle(el, "items", "center")
     r.setStyle(el, "padding-left", $(CallToggleLeftPx + row.depth * CallIndentPx) & "px")
+    # ONE ROUNDING PER RUN OF TEXT, not one per span. GPUI rounds every text
+    # element's width up to a whole logical pixel, so a row built as one
+    # element per coloured segment accumulates that rounding segment by
+    # segment and drifts right of where the browser puts the same text —
+    # measured at +2.55 device px across this pane, growing left to right.
+    # The renderer draws each maximal run of adjacent plain spans as a single
+    # piece of text (`isonim_gpui/renderer`), which rounds the run once.
+    #
+    # The row is NOT fusable end to end, and does not need to be: the toggle
+    # icon, the 8 px spacer, the `(` carrying `.call-args`' 5 px and the `=>`
+    # in the interface face each keep their own element, so their spacing and
+    # their face are preserved exactly. Only the plain spans between them
+    # fuse. Nor does fusing cost per-span identity — it happens in the render
+    # plan's CONSUMER, so every segment, with its `data-call-part` and its
+    # `data-call-arg`, is still in the plan for hit-testing to resolve.
+    r.setAttribute(el, InlineTextRunsAttribute, "1")
     if selected:
       r.setStyle(el, "background", CallSelectedBackground)
     var afterIndex = false
