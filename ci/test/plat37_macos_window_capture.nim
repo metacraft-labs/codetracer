@@ -76,10 +76,71 @@ import std/[json, os, osproc, streams, strutils, times]
 import gui_assert/screen_capture
 import gui_assert/window_layout
 
+func cropPxOf*(titleBarPoints: int; scale: float): int =
+  ## **THE TRACKED DEFINITION OF THE PARITY HARNESS'S `CROP_PX`** — how many
+  ## DEVICE pixels `build/plat37-parity-*/compare.sh` cuts off the top of a
+  ## GPUI frame before handing it to FLIP beside an Electron one
+  ## (PLAT37-ISSUE-V). Until 2026-10-25 this number existed ONLY as an
+  ## environment variable passed to a script in the gitignored `build/` tree,
+  ## which is how a disputed constant survived a month without being
+  ## examined: there was nothing to review, nothing to grep and nothing to
+  ## diff.
+  ##
+  ## It is the title bar in device pixels, and nothing else:
+  ##
+  ##   CROP_PX = titleBarPoints * pointPixelScale          (58 = 29 * 2.0)
+  ##
+  ## WHY 58 AND NOT 56 — THE BOUNDARY ARITHMETIC. The competing 56 was
+  ## proposed on 2026-10-23 and refused on 2026-10-24, and the refusal is
+  ## the one that holds for the HARNESS even though the window itself is
+  ## wrong (see the next paragraph). `compare.sh` computes
+  ## `gch = gh - CROP_PX` and refuses the pair unless `gch` equals the
+  ## Electron buffer's height. The GPUI PNG is 2880x1858 and the Electron
+  ## page is 2880x1800, so only 58 makes the two extents equal; 56 asks FLIP
+  ## to compare 1802 rows with 1800, which `flipdiff` rejects outright. The
+  ## three chrome boundaries agree with that at the bottom: pane/statusBar
+  ## and the frame bottom both offset by 58 (GPUI 1794/1857 against Electron
+  ## 1736/1799).
+  ##
+  ## WHAT NEITHER DERIVATION SAW, measured 2026-10-25 against codetracer
+  ## 751cbc328 and the GPUI captures in `build/plat37-macos/` (2880x1858):
+  ## **the window's content area is 901 points, not the 900 asked for**, so
+  ## no crop can register both ends. The top bar is NOT short. GPUI's own
+  ## reported geometry (`CODETRACER_GPUI_GEOMETRY_OUT`) places the omnibox
+  ## at y=5 h=28, the menu button at y=6 h=26, the band at 34 and the footer
+  ## at 32, and EVERY one of those lands exactly where the pixels show it if
+  ## and only if the content begins at device row 56 — i.e. a 28-point title
+  ## bar. Seven independent positions close on 56 (omnibox both borders,
+  ## menu button both borders, tab top = band 34 + `TabStripPx`'s
+  ## `TabTopPx` 4 = 38, footer top, frame bottom), replicated on a second
+  ## window size (the 1728x1084 frames, where the light title band again
+  ## ends at row 55 and the omnibox border again sits 10 rows below it).
+  ## Those positions match Electron's point for point — `#menu`'s 34px
+  ## `CAPTION_BAR_HEIGHT_WORKSPACE`, its 6px `padding-top` with a 28px
+  ## `INPUT_HEIGHT_LG` field centred on the 26px content row (6-1 = 5), and
+  ## `#root-container`'s 34 + `LAYOUT_TAB_TOP` 4 = 38.
+  ##
+  ## So 58 is the correct crop for the HARNESS (it is the only one that
+  ## matches the extents) and it is the WRONG registration for the content
+  ## (it aligns the bottom and leaves the top bar and every top-anchored
+  ## pane 2 device pixels high). Measured on the same frames with FLIP:
+  ## top-aligning the same 1800-row extent reads **0.17103530** against
+  ## **0.18282497** bottom-aligned, with a sharp true minimum at 56
+  ## (52: 0.2307, 54: 0.2031, 55: 0.1860, 56: 0.1710, 57: 0.1746,
+  ## 58: 0.1828). Fix the window height and the question disappears.
+  int(float(titleBarPoints) * scale)
+
 const
-  TitleBarPoints* = 29
+  TitleBarPoints* = 28
     ## **The DEFAULT** for how many POINTS a standard titled window's frame is
     ## taller than the content area `--width`/`--height` asked for.
+    ##
+    ## **28 SINCE 2026-10-26, AND IT IS NOW MEASURED RATHER THAN DERIVED.**
+    ## It was 29, which was `frame - requested` on the `laptop` scenario
+    ## (929 - 900) — a subtraction that assumed the window got the content
+    ## area it asked for. It did not. See `theWindowWasOnePointTooTall`
+    ## below; the title bar was 28 all along and the surplus point was
+    ## content.
     ##
     ## IT IS A DEFAULT AND NOT A CONSTANT OF THE PLATFORM, since 2026-10-12,
     ## and the reason is measured. `ci/test/plat37-macos-electron-capture.sh`
@@ -125,6 +186,87 @@ const
     ## viewport report as deviating. That is the correct failure: it is loud,
     ## the record carries `titleBarPoints` and the raw frame beside it, and a
     ## reader can see in one line which of the two numbers moved.
+    ##
+    ## CONFIRMED AT THE PIXELS, 2026-10-24, against codetracer 751cbc328 and
+    ## the preserved GPUI captures in `build/plat37-macos/*.png` (2880x1858).
+    ## A pass proposed replacing 29 with 28 — equivalently the parity
+    ## harness's `CROP_PX` 58 with 56 — on the grounds that the title bar's
+    ## light band (gray 235) ends at device row 55 and the three top-anchored
+    ## panes then read dy 0. THAT DERIVATION IS SUPERSEDED, and the reason is
+    ## that it located the light band rather than the content area:
+    ##
+    ##   * Rows 56 and 57 are FULL-WIDTH UNIFORM (green 0, then 14, the latter
+    ##     a blend into the 27 of the content background, which begins at row
+    ##     58). A row with one distinct value across all 2880 columns is
+    ##     window frame; content rows are not uniform.
+    ##   * The two chrome boundaries disagree, which a pure misregistration
+    ##     cannot produce. Paired by edge MAGNITUDE on all three views: the
+    ##     topBar/pane boundary is Electron y=76 (d=+12.05) -> GPUI y=132
+    ##     (d=+12.05), offset 56; the pane/statusBar boundary is Electron
+    ##     y=1736 (d=-18.26) -> GPUI y=1794 (d=-22.01), offset 58; and the
+    ##     frame's last row pairs Electron 1799 -> GPUI 1857, offset 58.
+    ##   * Those offsets close the arithmetic only at 58. GPUI: topBar
+    ##     58..131 = 74 px, panes 132..1793 = 1662, statusBar 1794..1857 = 64;
+    ##     total 1800. Electron: 76 + 1660 + 64 = 1800. The viewport is GPUI
+    ##     rows 58..1857 — exactly 1800 — so the crop is 58, and the 2 px are
+    ##     moved INTERNALLY out of the topBar into the pane area. That is a
+    ##     GPUI layout defect, not a harness offset, and cropping at 56 hides
+    ##     it while mis-registering the bottom-anchored status bar by 2 px.
+    ##
+    ## The harness enforces this independently: `compare.sh` crops
+    ## `gh - CROP_PX` rows, so only 58 yields the 1800 that matches the
+    ## Electron buffer; 56 and 57 are refused as an extent mismatch. The
+    ## superseded sweep reached 56 only by bypassing that check with a
+    ## fixed-height crop, which is a translation and not this constant.
+    ##
+    ## Note for a future reader: `windowContentHeightPoints` in the record is
+    ## `frame - titleBarPoints`, so the record's height `viewportHonoured` is
+    ## a tautology and CANNOT corroborate this number. The pixel boundaries
+    ## above are the independent evidence; prefer them.
+    ##
+    ## ### theWindowWasOnePointTooTall — 2026-10-26
+    ##
+    ## **Every pixel boundary recorded above is right, and the conclusion
+    ## drawn from them was wrong.** The 2026-10-24 note read "the 2 px are
+    ## moved INTERNALLY out of the topBar into the pane area ... a GPUI
+    ## layout defect". They were not moved out of anything. The pane area
+    ## really did have one extra point, because **the window's content area
+    ## was 901 points for a 900-point request.**
+    ##
+    ## What settles it is the instrument that note said to prefer and did not
+    ## have: the front-end's own `topBar.window.content` from
+    ## `CODETRACER_GPUI_GEOMETRY_OUT`, read from a live `laptop` window on
+    ## 2026-10-26 (codetracer 751cbc328, isonim-gpui c0f6747):
+    ##
+    ##     window.content [1440, 901]    area [4, 34, 1432, 835]
+    ##     footer [0, 869, 1440, 32]     frame 1440x929
+    ##
+    ## The app reports 901, 835 and 869 — not 900, 834 and 868. So the frame
+    ## splits 28 + 901, not 29 + 900, and the same frame's pixels agree with
+    ## the app at content origin 56: footer 56 + 2*869 = 1794 (measured 1794),
+    ## tab strip 56 + 2*38 = 132 (measured 132), omnibar 56 + 2*5 = 66
+    ## (measured 66), menu button 56 + 2*6 = 68 (measured 68). The top bar is
+    ## NOT short — each of those boxes measures its declared height exactly.
+    ## The `wide` scenario corroborates independently: frame 1084, reported
+    ## content 1056, so 28 again.
+    ##
+    ## ROOT CAUSE, driven directly against AppKit with gpui's own style mask:
+    ## `Bounds::centered` put the window at y = (1117-900)/2 = **108.5**, and
+    ## AppKit answers a fractional origin by snapping it to a whole point and
+    ## GROWING the content view by one point. A 900-point content request
+    ## produced 901 at y = 108.25/108.5/108.75 and exactly 900 at y = 108 or
+    ## 109. The width was never wrong only because (1728-1440)/2 = 144 is
+    ## whole. Fixed in isonim-gpui's `gpui_app.rs` by rounding the centred
+    ## origin to whole points, which is correct on every platform.
+    ##
+    ## CONSEQUENCE FOR THE CROP, and why this is not the refuted "crop 56".
+    ## That proposal re-registered an UNCHANGED 1858-row frame and had to
+    ## bypass `compare.sh`'s extent guard to do it; `compare.sh` was right to
+    ## refuse. With the window fixed the frame is 1856 rows, and
+    ## `cropPxOf(28, 2.0)` = 56 gives `1856 - 56 = 1800` — the guard is
+    ## satisfied, not bypassed. 58 remains the only correct crop for a frame
+    ## that is still 1858 rows tall, so a BEFORE capture must still be
+    ## compared at 58.
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -592,6 +734,49 @@ proc runCapture(cfg: Config) =
   node["titleBarPoints"] = %cfg.titleBarPoints
   node["windowContentHeightPoints"] = %contentHeight
   node["viewportHonoured"] = %(honouredW and honouredH)
+  # PLAT37-ISSUE-V. THE HEIGHT HALF OF `viewportHonoured` CANNOT FAIL, so it
+  # is not evidence and must not be read as any. `contentHeight` above is
+  # `frame - titleBarPoints`, and `TitleBarPoints` was itself derived as
+  # `frame - requested` on the `laptop` scenario (see its doc comment). The
+  # test therefore asks whether `requested + k - k == requested`. It is a
+  # tautology for every UNCLAMPED window, and it is flagged here rather than
+  # silently left to a reader, because a pass did read it as corroboration
+  # for the constant it is computed from.
+  #
+  # The WIDTH half is real: `target.bounds[2]` is the frame width, a macOS
+  # window frame is as wide as its content, and no constant is subtracted —
+  # which is exactly why the clamped 1920-point scenarios report `false`.
+  # Every `false` this lane has ever written was decided by the width.
+  #
+  # The remedy is an independently reported content height, not a better
+  # subtraction. One already exists and is not yet wired in: the front-end
+  # writes `topBar.window.content` (its own laid-out viewport, in points) to
+  # `CODETRACER_GPUI_GEOMETRY_OUT`. Comparing THAT with `requestedHeight`
+  # is a test that can fail.
+  node["heightTestIsTautological"] = %true
+  node["heightTestNote"] =
+    %("`viewportHonoured`'s height term is `frame - titleBarPoints == " &
+      "requested`, and `titleBarPoints` was derived as `frame - requested`. " &
+      "It cannot fail on an unclamped window and is NOT evidence that the " &
+      "viewport was honoured or that `titleBarPoints` is right. Only the " &
+      "width term can fail. Set CODETRACER_GPUI_GEOMETRY_OUT and compare " &
+      "its `topBar.window.content[1]` for a height test that can.")
+  node["titleBarPointsProvenance"] =
+    %("MEASURED, 2026-10-26: the front-end's own `topBar.window.content` " &
+      "from CODETRACER_GPUI_GEOMETRY_OUT, subtracted from the attested " &
+      "frame. A live `laptop` window reported content 1440x901 in a " &
+      "1440x929 frame and the `wide` window 1728x1056 in a 1728x1084 " &
+      "frame — 28 in both. The earlier 29 was DERIVED as " &
+      "`frame.height - requestedHeight` (929 - 900), which assumed the " &
+      "very thing it was used to test: the window was one point TALLER " &
+      "than it asked for, so the surplus point was content and not title " &
+      "bar. The window is fixed in isonim-gpui `gpui_app.rs` (the centred " &
+      "origin is rounded to whole points); a frame captured BEFORE that " &
+      "fix is 1858 rows and must still be cropped at 58.")
+  # The parity harness's crop, in DEVICE pixels, stated here so it has a
+  # tracked definition instead of living only as an environment variable in
+  # the gitignored `build/` tree (PLAT37-ISSUE-V).
+  node["cropPx"] = %cropPxOf(cfg.titleBarPoints, scale)
   node["viewportDeviationPoints"] = %*{
     "width": target.bounds[2] - cfg.requestedWidth,
     "height": contentHeight - cfg.requestedHeight,

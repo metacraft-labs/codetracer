@@ -1,0 +1,884 @@
+{
+ "_comment": [
+  "PLAT-37 cross-renderer parity, macOS pass of 2026-10-18b.",
+  "",
+  "WHAT THIS PASS IS. It was asked to decompose the PARITY-P1 residual by",
+  "region BEFORE trying to fix it, and to close PARITY-S10. It did the first.",
+  "The second turned out to be already closed: S10 does not reproduce, and",
+  "this file records the measurement that refutes it rather than a change.",
+  "The brief invited that swap explicitly.",
+  "",
+  "WHAT WAS MEASURED ON WHICH FRAMES. The decomposition was computed on the",
+  "2026-10-18 pass's own captured frames, NOT on frames of its own. That is",
+  "legitimate and the licence is stated rather than assumed: the only",
+  "front-end source difference between the tree those frames were captured",
+  "from (d883db0e2 plus that pass's four uncommitted GPUI files) and this",
+  "pass's subject (025bd9981) is exactly those four files, now committed as",
+  "1a5beb575 -- `git diff --name-only d883db0e2..025bd9981` touches",
+  "src/frontend/ only in gpui/{chrome,window_geometry,app/leaves,",
+  "tests/test_plat47_window_gestures}.nim. So the frames render the subject.",
+  "",
+  "EVERY INSTRUMENT IN THIS FILE IS NEW AND EVERY ONE CARRIES A CONTROL.",
+  "One of them FAILED its control and its numbers are withheld; see",
+  "`instrumentControls.theCellWidthEstimator`. A probe without a live",
+  "control is not reported here at all."
+ ],
+ "schemaVersion": 1,
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. Both capture lanes need a live macOS GUI session and a kTCCServiceScreenCapture grant. A gate that cannot run is not a gate.",
+ "measuredAt": "2026-10-18b (clock 2026-10-17 EEST)",
+ "supersedes": [
+  "src/tests/visual/plat37-parity-readings-2026-10-18.json -- for PARITY-P1's DECOMPOSITION and for PARITY-S10 ONLY. That file's P1 HEADLINE figures (state 0.1845 / calltrace 0.1903 / editorWithMark 0.1792) are not superseded: they are reproduced here to ten decimal places by a second, independently written instrument, which is recorded below as a control rather than as a new reading. Every other finding in it stands unamended; this pass did not re-measure them."
+ ],
+ "subject": {
+  "codetracer": "025bd9981d287652b7d48784831661415e684798 (agents)",
+  "codetracerWorkingTree": "clean at the start of the pass; this pass made NO change to codetracer. Its one source change is in isonim-gpui, below.",
+  "isonimGpui": "ab520c05fccbc08adec17606b201d7db19960eea (agents), PLUS this pass's own uncommitted change to rust/gpui-nim-shim/src/window.rs (+54/-1). No commit was made, as instructed.",
+  "reprobuild": "f974c2e74aee343df76d716602183e994d47b18a (agents)",
+  "codetracerPm": "ee8b69f6ffa5327d6ff4a7a61ff208eafe04721e (latest)",
+  "codetracerImageDiff": "ee9fb397b94155557d730ee6997db60687214988 -- UNCHANGED since the 2026-10-18 pass, which is what licenses building this pass's three new FLIP tools against the same library and comparing their output with that pass's.",
+  "reprobuildPackages": "9f981af6c771ce062de810dcdd3affae21857f22",
+  "whatMovedSinceTheLastPassSSUBJECT": "codetracer d883db0e2 (+ 4 dirty GPUI files) -> 025bd9981, nine commits, of which only 1a5beb575 touches a renderer and it is the commit of those same four files. reprobuild a192a9129 -> f974c2e74a, which is what broke and then fixed the Electron build; see buildOutcomes.electronArm."
+ },
+ "upstreamRecheckedAtTheEnd": {
+  "when": "end of the pass, by `git ls-remote origin` per repo, as instructed",
+  "codetracer": "025bd9981d287652b7d48784831661415e684798 (agents) -- UNCHANGED from the start of the pass; every codetracer figure here is measured against it.",
+  "reprobuild": "f974c2e74aee343df76d716602183e994d47b18a (agents) -- UNCHANGED.",
+  "isonimGpui": "ab520c05fccbc08adec17606b201d7db19960eea (agents) -- UNCHANGED; this pass's change sits on top of it, uncommitted.",
+  "codetracerPm": "MOVED during the pass: ee8b69f6ffa5327d6ff4a7a61ff208eafe04721e -> cdc111a7aceb0a9b75dc037a7a7ef12b5cf71722 (latest). Nothing in this pass reads or writes codetracer-pm, so no finding is affected; recorded because the brief asks for the tips at the end and this one is not the one it named.",
+  "ruling": "The three repos every measurement depends on did not move. No tip was chased mid-pass."
+ },
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 (Darwin 25.5.0 arm64)",
+  "displayPoints": "1728x1117, one display",
+  "pointPixelScale": 2.0,
+  "theEnvironmentWasCHECKEDratherThanTRUSTED": "and it was wrong, exactly as the brief predicted. At session start PATH was led by the Nix /nix/store/m5si3k2v...-reprobuild-0.2.2/bin and ALL FOUR required variables were unset (RUNQUOTA_SOCKET, REPROBUILD_REPRO, REPRO_BOOTSTRAP_CC, REPRO_FOREIGN_ENV_BASH). All four were set before any build.",
+  "reproBootstrapCc": "/nix/store/vl936sd1vj8s008akm3gibkgyqk30qhz-clang-wrapper-21.1.8/bin/clang. PROVEN with AGENTS.md's control pair, each exit code captured into a variable on its own line: under `env -i`, a bare `#include <stdlib.h>` compiled with the wrapper (rc_w=0) and FAILED with the unwrapped /nix/store/rr64nnycczvx7s1b110qmvqrlfcb6lsm-clang-21.1.8/bin/clang (rc_u=1, `probe.c:1:10: fatal error: 'stdlib.h' file not found`).",
+  "reproForeignEnvBash": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (GNU bash 5.3.9, >= 4).",
+  "runquotaSocket": "/tmp/rq-adopt-501/runquota.sock -- ADOPTED, not restarted; the daemon on it (pid 27419) was already running and was left alone.",
+  "reproOnPath": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro, PATH-led as instructed. IT WAS STALE AND THAT BROKE A BUILD -- see buildOutcomes.electronArm. It was rebuilt from reprobuild f974c2e74a during the pass, 0.2.5 -> 0.2.6.",
+  "diskFree": "67G at start, 64G at the low point, 70G at the end. Never near the 20G abort floor; `df -h /` was read between every phase."
+ },
+ "buildOutcomes": {
+  "isonimGpuiShims": {
+   "command": "nix develop --command just plat37-shims, in isonim-gpui",
+   "exit": 0,
+   "whyITwasREQUIRED": "This pass's source change is IN the shim, and ci/lib/build-freshness.sh:114-116 excludes the cdylib from the GPUI input digest BY DESIGN, so the gate cannot see a stale shim. Rebuilding it was not optional.",
+   "andTHEcontrolTHATitTOOK": "The windowed cdylib came out at 66,764,504 bytes against the 66,770,072 the 2026-10-18 pass recorded -- a CONTENT CHANGE, which is the positive control that the rebuild actually carried this pass's edit. (That pass's own rebuild was a byte-for-byte no-op and said so.) 113 gpui_ symbols, unchanged.",
+   "andTHEgateCONFIRMEDtheEXCLUSION": "The GPUI input digest after this is 44f3eaa71094..., IDENTICAL to the 2026-10-18 pass's, although the linked cdylib changed. That is the documented exclusion observed in the wild, and it is why the shim rebuild has to be driven by hand."
+  },
+  "gpuiArm": {
+   "command": "nix develop --command just build-gpui",
+   "environment": "INSIDE the codetracer dev shell; PATH led by reprobuild/build/bin, all four required variables set as in `host`.",
+   "exit": 0,
+   "artefact": "build/bin/codetracer-gpui, 5,935,040 B, input_digest 44f3eaa710948bc0a588b4fe5a5718b4efc4c1878bce705c4de2d36876b0ca0e."
+  },
+  "electronArm": {
+   "command": "nix develop --command env REPROBUILD_PACKAGES_ROOT=/Users/zahary/m/fix-pxor-issues/reprobuild-packages REPRO_DAEMON=off REPRO_NIM_COMPILER=/nix/store/4m0ffd42r0qn0rzpjjibdrb97kadc5j2-nim-unwrapped-2.2.4/bin/nim CODETRACER_REPROBUILD_TARGET=ct-binary just build-once",
+   "exit": 0,
+   "butNOTonTHEfirstTWOattempts": "IT FAILED TWICE FIRST, and the cause is worth more than the build. Both attempts died with `repro build: error: provider exited with code 1: repro project provider: error: unsupported provider graph envelope version 1`.",
+   "theDIAGNOSIS": "scripts/build-once.sh:192-198 prefers the SIBLING reprobuild checkout's build/bin/repro over `command -v repro` (:202). That sibling binary was 0.2.5, compiled 2026-10-16 14:42; reprobuild's tip f974c2e74a is dated 2026-10-17 19:17 and builds 0.2.6, which the dev shell had already built and put on PATH. The provider-graph envelope moved 1 -> 2 (libs/repro_provider_runtime/src/repro_provider_runtime/codec.nim:6). So a 0.2.5 engine was writing v1 requests to a freshly-compiled v2 provider. THE BRIEF'S OWN REQUIREMENT -- PATH led by the local build -- is what put the stale binary in reach; it is AGENTS.md's 'a stale local build is worse than the pin', arriving through build-once's sibling probe rather than through PATH.",
+   "aFALSElead": "Two stale v1 `provider-fragments.rbsz` snapshots were found and moved aside first. That did NOT fix it -- the snapshot path recomputes on an unsupported version by design -- and they are recorded so the next reader does not repeat the step. They were left moved aside; they are derived caches.",
+   "theREMEDY": "`nix develop --command just build` in reprobuild, rebuilding the sibling from its own tip f974c2e74a: 0.2.5 -> 0.2.6. The next build-once attempt exited 0.",
+   "deviationDeclared": "CODETRACER_REPROBUILD_TARGET=ct-binary IS A DEVIATION from an unscoped `just build-once`, and it is flagged as one. It is build-once.sh's own documented knob and it exists here to step past two pre-existing actions outside the Electron bundle's closure (`dmg`, `docs-book-assets`) that earlier passes measured failing for unrelated reasons.",
+   "artefact": "src/build-debug-repro/bin/ct, 11,410,864 B (the 2026-10-18 pass's was 11,410,880 B, so it genuinely rebuilt); bundle stamp input_digest 867b0dcdd46f0944fab3d927484d78b5fc72abe340f2d2549310505edf6fbc62, against that pass's 9090b2c4..., as it should differ over nine commits.",
+   "andTheRuntimeAssetsCheckRAN": "`require-runtime-assets.sh: ok -- src/build-debug-repro/config/ carries default_config.yaml and default_layout.json, both matching src/config/.`"
+  }
+ },
+ "freshnessGates": {
+  "_rule": "Every gate was run INSIDE the dev shell, because bf_gpui_input_digest regenerates the closure with `nim c --genDeps` using whatever nim is on PATH and answers differently outside it. (The ambient nim here is the 2.2.4 wrapper; the shell's is nim-fork-2.3.1-codetracer.)",
+  "gpuiAssert": {
+   "command": "nix develop --command bash ci/lib/build-freshness.sh assert",
+   "exit": 0,
+   "said": "built from THIS tree (inputs 44f3eaa71094, artefact db698a639a3c)"
+  },
+  "electronAssert": {
+   "command": "nix develop --command bash ci/lib/build-freshness.sh electron-assert",
+   "exit": 0,
+   "said": "built from THIS tree (inputs 867b0dcdd46f, artefact 770cd93d8e74)",
+   "oneODDITYworthRECORDING": "The stamp reads `built at 2026-10-17T17:28:33Z by repro 0.1.3`. The binary that actually built it was 0.2.6 -- `repro 0.1.3` appears to be a stale version string in the stamp writer, not the engine that ran. Cosmetic, not blocking, and consistent with AGENTS.md's warning that the version string does not identify the build. Not filed; flagged."
+  },
+  "defaultLayoutFresh": {
+   "command": "nix develop --command bash ci/test/default-layout-fresh.sh",
+   "exit": 0,
+   "said": "default layout is fresh, for both src/config/default_layout.json and src/frontend/headless_app/shared_default_layout.generated.json",
+   "whyItIsINthisFILE": "Not a PLAT-37 gate; run because it is the direct check of PARITY-S1's central claim and costs nothing."
+  }
+ },
+ "laneOutcomes": {
+  "_rule": "Both lanes ran this pass, to completion, on a live GUI session with the Screen Recording grant. Neither is a gate.",
+  "gpui": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<src/build-debug-repro/bin/replay-server> bash ci/test/plat37-macos-window-capture.sh",
+   "exit": 0,
+   "captured": 7,
+   "refused": 0,
+   "viewportHonouring": "The three `laptop` views (state, calltrace, editorWithMark) were honoured at 1440x929 pt frame -> 2880x1858 px. The three `wide` views were CLAMPED BY THE DISPLAY to 1728x1084 pt, which is PARITY-G1 reproducing and is why only three scenarios are comparable.",
+   "theShimITran": "the windowed cdylib rebuilt by this pass at 19:59 (66,764,504 B), carrying the window.rs change; the binary was built at 19:59 and the lane ran at ~20:30."
+  },
+  "electron": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<...> bash ci/test/plat37-macos-electron-capture.sh",
+   "exit": 0,
+   "captured": 6,
+   "refused": 0,
+   "playwright": "6 passed in 15.7m, all six capture specs.",
+   "theRunStampFIRED_asITshould": "0 refusals -- every record's takenAt is later than the run stamp, so no frame in this grading is stale. That guard (a471d4d82) is what the 2026-10-18 pass added after stale frames corrupted the 2026-10-17 P1 numbers.",
+   "viewportHonouring": "ALL SIX honoured, including the three `wide` at a true 1920x1080 pt -> 3840x2160 px. That is the G1 asymmetry stated as a measurement: Electron genuinely obtains 1920x1080 on a 1728-pt display and GPUI does not.",
+   "subjectAttested": "bin/ct 2026-10-17T17:28:25Z, checkout 025bd9981 (agents)"
+  },
+  "theREGRADE": {
+   "command": "CROP_PX=58 ./compare.sh state calltrace editorWithMark editor eventLog shell",
+   "exit": 0,
+   "errors": "none",
+   "cropDerivedNOTinherited": "CROP_PX=58 was re-derived from THIS pass's own capture records: windowFramePoints.height 929 minus windowContentHeightPoints 900, times pointPixelScale 2.0, identical on all three scenarios. compare.sh refuses to default it, by design.",
+   "notComparable": "editor, eventLog, shell -- extent mismatch gpui 3456x2168 (cropped 3456x2110) vs electron 3840x2160. PARITY-G1, unchanged."
+  }
+ },
+ "theDecomposition": {
+  "question": "WHERE does the remaining 0.18 live? Asked by region, not guessed at.",
+  "instrument": "build/plat37-parity-2026-10-18b/flipregion.nim, new this pass, built against codetracer-image-diff ee9fb397b -- the SAME revision the established `flipdiff` binary was built from, which is what makes the two comparable. It is `flipdiff` with the fixed 8x6 tile grid replaced by caller-supplied named rectangles.",
+  "whyOneGlobalErrorMapAndNotAcropPerRegion": "FLIP is a SPATIAL metric: it convolves with contrast-sensitivity kernels, so a pixel's error depends on its neighbourhood. Cropping each region and calling flip() per crop would change every region's answer near its own borders and the regions would not sum to the whole. The map is computed ONCE over the whole frame and every regional figure is an aggregation of that one map, which keeps the decomposition exact and additive.",
+  "rectangles": "Read from the 2026-10-18 pass's own struct.jsonl pane census, in POINTS, x2 to device pixels. The ELECTRON census is used because the flip buffer IS the Electron frame unchanged (1440x900 pt at scale 2) with the GPUI frame cropped to match. PARITY-S3 is closed with the two arms' boundaries identical to the point, and the x/w columns of that census agree exactly across arms.",
+  "perScenario": {
+   "state": {
+    "chrome:topBar": {
+     "areaFrac": 0.04222,
+     "mean": 0.11083,
+     "fracOver0_10": 0.24471,
+     "shareOfError": 0.05262,
+     "errorDensity": 1.246,
+     "inkFracElectron": 0.0595,
+     "inkFracGpui": 0.09091,
+     "inkRatioGpuiOverElectron": 1.5279,
+     "overThresholdPerReferenceInkPixel": 4.1129
+    },
+    "pane:fileTree": {
+     "areaFrac": 0.18508,
+     "mean": 0.01031,
+     "fracOver0_10": 0.02293,
+     "shareOfError": 0.02145,
+     "errorDensity": 0.116,
+     "inkFracElectron": 0.025,
+     "inkFracGpui": 0.02619,
+     "inkRatioGpuiOverElectron": 1.0477,
+     "overThresholdPerReferenceInkPixel": 0.9172
+    },
+    "pane:editor": {
+     "areaFrac": 0.22799,
+     "mean": 0.09824,
+     "fracOver0_10": 0.20491,
+     "shareOfError": 0.25184,
+     "errorDensity": 1.105,
+     "inkFracElectron": 0.10182,
+     "inkFracGpui": 0.11038,
+     "inkRatioGpuiOverElectron": 1.0841,
+     "overThresholdPerReferenceInkPixel": 2.0125
+    },
+    "pane:state": {
+     "areaFrac": 0.12398,
+     "mean": 0.17309,
+     "fracOver0_10": 0.36579,
+     "shareOfError": 0.24129,
+     "errorDensity": 1.946,
+     "inkFracElectron": 0.19759,
+     "inkFracGpui": 0.2113,
+     "inkRatioGpuiOverElectron": 1.0694,
+     "overThresholdPerReferenceInkPixel": 1.8512
+    },
+    "pane:calltrace": {
+     "areaFrac": 0.12494,
+     "mean": 0.21922,
+     "fracOver0_10": 0.37978,
+     "shareOfError": 0.30795,
+     "errorDensity": 2.465,
+     "inkFracElectron": 0.18013,
+     "inkFracGpui": 0.19567,
+     "inkRatioGpuiOverElectron": 1.0863,
+     "overThresholdPerReferenceInkPixel": 2.1084
+    },
+    "pane:eventLog": {
+     "areaFrac": 0.24958,
+     "mean": 0.0282,
+     "fracOver0_10": 0.08338,
+     "shareOfError": 0.07914,
+     "errorDensity": 0.317,
+     "inkFracElectron": 0.04824,
+     "inkFracGpui": 0.0526,
+     "inkRatioGpuiOverElectron": 1.0905,
+     "overThresholdPerReferenceInkPixel": 1.7285
+    },
+    "chrome:statusBar": {
+     "areaFrac": 0.03556,
+     "mean": 0.10712,
+     "fracOver0_10": 0.24372,
+     "shareOfError": 0.04283,
+     "errorDensity": 1.204,
+     "inkFracElectron": 0.22322,
+     "inkFracGpui": 0.23491,
+     "inkRatioGpuiOverElectron": 1.0524,
+     "overThresholdPerReferenceInkPixel": 1.0918
+    },
+    "editor:gutter": {
+     "areaFrac": 0.04675,
+     "mean": 0.02499,
+     "fracOver0_10": 0.08971,
+     "shareOfError": 0.01314,
+     "errorDensity": 0.281,
+     "inkFracElectron": 0.0428,
+     "inkFracGpui": 0.05031,
+     "inkRatioGpuiOverElectron": 1.1752,
+     "overThresholdPerReferenceInkPixel": 2.0958
+    },
+    "editor:codeAndChips": {
+     "areaFrac": 0.18124,
+     "mean": 0.11714,
+     "fracOver0_10": 0.23463,
+     "shareOfError": 0.23871,
+     "errorDensity": 1.317,
+     "inkFracElectron": 0.11704,
+     "inkFracGpui": 0.12588,
+     "inkRatioGpuiOverElectron": 1.0755,
+     "overThresholdPerReferenceInkPixel": 2.0047
+    }
+   },
+   "calltrace": {
+    "chrome:topBar": {
+     "areaFrac": 0.04222,
+     "mean": 0.11083,
+     "fracOver0_10": 0.24471,
+     "shareOfError": 0.05165,
+     "errorDensity": 1.223,
+     "inkFracElectron": 0.0595,
+     "inkFracGpui": 0.09091,
+     "inkRatioGpuiOverElectron": 1.5279,
+     "overThresholdPerReferenceInkPixel": 4.1129
+    },
+    "pane:fileTree": {
+     "areaFrac": 0.18508,
+     "mean": 0.01031,
+     "fracOver0_10": 0.02293,
+     "shareOfError": 0.02105,
+     "errorDensity": 0.114,
+     "inkFracElectron": 0.025,
+     "inkFracGpui": 0.02619,
+     "inkRatioGpuiOverElectron": 1.0477,
+     "overThresholdPerReferenceInkPixel": 0.9172
+    },
+    "pane:editor": {
+     "areaFrac": 0.22799,
+     "mean": 0.10324,
+     "fracOver0_10": 0.22163,
+     "shareOfError": 0.25982,
+     "errorDensity": 1.14,
+     "inkFracElectron": 0.11037,
+     "inkFracGpui": 0.10143,
+     "inkRatioGpuiOverElectron": 0.919,
+     "overThresholdPerReferenceInkPixel": 2.0081
+    },
+    "pane:state": {
+     "areaFrac": 0.12398,
+     "mean": 0.17727,
+     "fracOver0_10": 0.38114,
+     "shareOfError": 0.24259,
+     "errorDensity": 1.957,
+     "inkFracElectron": 0.19705,
+     "inkFracGpui": 0.21205,
+     "inkRatioGpuiOverElectron": 1.0761,
+     "overThresholdPerReferenceInkPixel": 1.9342
+    },
+    "pane:calltrace": {
+     "areaFrac": 0.12494,
+     "mean": 0.21871,
+     "fracOver0_10": 0.37985,
+     "shareOfError": 0.30161,
+     "errorDensity": 2.414,
+     "inkFracElectron": 0.1774,
+     "inkFracGpui": 0.19011,
+     "inkRatioGpuiOverElectron": 1.0717,
+     "overThresholdPerReferenceInkPixel": 2.1413
+    },
+    "pane:eventLog": {
+     "areaFrac": 0.24958,
+     "mean": 0.0282,
+     "fracOver0_10": 0.08338,
+     "shareOfError": 0.0777,
+     "errorDensity": 0.311,
+     "inkFracElectron": 0.04824,
+     "inkFracGpui": 0.0526,
+     "inkRatioGpuiOverElectron": 1.0905,
+     "overThresholdPerReferenceInkPixel": 1.7285
+    },
+    "chrome:statusBar": {
+     "areaFrac": 0.03556,
+     "mean": 0.10766,
+     "fracOver0_10": 0.2409,
+     "shareOfError": 0.04225,
+     "errorDensity": 1.188,
+     "inkFracElectron": 0.22405,
+     "inkFracGpui": 0.23551,
+     "inkRatioGpuiOverElectron": 1.0511,
+     "overThresholdPerReferenceInkPixel": 1.0752
+    },
+    "editor:gutter": {
+     "areaFrac": 0.04675,
+     "mean": 0.03451,
+     "fracOver0_10": 0.11319,
+     "shareOfError": 0.01781,
+     "errorDensity": 0.381,
+     "inkFracElectron": 0.04858,
+     "inkFracGpui": 0.0544,
+     "inkRatioGpuiOverElectron": 1.1199,
+     "overThresholdPerReferenceInkPixel": 2.3302
+    },
+    "editor:codeAndChips": {
+     "areaFrac": 0.18124,
+     "mean": 0.12097,
+     "fracOver0_10": 0.24961,
+     "shareOfError": 0.24201,
+     "errorDensity": 1.335,
+     "inkFracElectron": 0.12631,
+     "inkFracGpui": 0.11356,
+     "inkRatioGpuiOverElectron": 0.8991,
+     "overThresholdPerReferenceInkPixel": 1.9761
+    }
+   },
+   "editorWithMark": {
+    "chrome:topBar": {
+     "areaFrac": 0.04222,
+     "mean": 0.11083,
+     "fracOver0_10": 0.24471,
+     "shareOfError": 0.05431,
+     "errorDensity": 1.286,
+     "inkFracElectron": 0.0595,
+     "inkFracGpui": 0.09091,
+     "inkRatioGpuiOverElectron": 1.5279,
+     "overThresholdPerReferenceInkPixel": 4.1129
+    },
+    "pane:fileTree": {
+     "areaFrac": 0.18508,
+     "mean": 0.01031,
+     "fracOver0_10": 0.02293,
+     "shareOfError": 0.02214,
+     "errorDensity": 0.12,
+     "inkFracElectron": 0.025,
+     "inkFracGpui": 0.02619,
+     "inkRatioGpuiOverElectron": 1.0477,
+     "overThresholdPerReferenceInkPixel": 0.9172
+    },
+    "pane:editor": {
+     "areaFrac": 0.22863,
+     "mean": 0.09314,
+     "fracOver0_10": 0.19463,
+     "shareOfError": 0.24717,
+     "errorDensity": 1.081,
+     "inkFracElectron": 0.10398,
+     "inkFracGpui": 0.10967,
+     "inkRatioGpuiOverElectron": 1.0548,
+     "overThresholdPerReferenceInkPixel": 1.8719
+    },
+    "pane:state": {
+     "areaFrac": 0.12398,
+     "mean": 0.16036,
+     "fracOver0_10": 0.34385,
+     "shareOfError": 0.23075,
+     "errorDensity": 1.861,
+     "inkFracElectron": 0.18944,
+     "inkFracGpui": 0.20118,
+     "inkRatioGpuiOverElectron": 1.062,
+     "overThresholdPerReferenceInkPixel": 1.8151
+    },
+    "pane:calltrace": {
+     "areaFrac": 0.12494,
+     "mean": 0.21922,
+     "fracOver0_10": 0.37978,
+     "shareOfError": 0.31788,
+     "errorDensity": 2.544,
+     "inkFracElectron": 0.18013,
+     "inkFracGpui": 0.19567,
+     "inkRatioGpuiOverElectron": 1.0863,
+     "overThresholdPerReferenceInkPixel": 2.1084
+    },
+    "pane:eventLog": {
+     "areaFrac": 0.24958,
+     "mean": 0.0282,
+     "fracOver0_10": 0.08338,
+     "shareOfError": 0.0817,
+     "errorDensity": 0.327,
+     "inkFracElectron": 0.04824,
+     "inkFracGpui": 0.0526,
+     "inkRatioGpuiOverElectron": 1.0905,
+     "overThresholdPerReferenceInkPixel": 1.7285
+    },
+    "chrome:statusBar": {
+     "areaFrac": 0.03556,
+     "mean": 0.1058,
+     "fracOver0_10": 0.23727,
+     "shareOfError": 0.04366,
+     "errorDensity": 1.228,
+     "inkFracElectron": 0.2225,
+     "inkFracGpui": 0.23461,
+     "inkRatioGpuiOverElectron": 1.0544,
+     "overThresholdPerReferenceInkPixel": 1.0663
+    },
+    "editor:gutter": {
+     "areaFrac": 0.04675,
+     "mean": 0.02464,
+     "fracOver0_10": 0.08796,
+     "shareOfError": 0.01337,
+     "errorDensity": 0.286,
+     "inkFracElectron": 0.04198,
+     "inkFracGpui": 0.04825,
+     "inkRatioGpuiOverElectron": 1.1492,
+     "overThresholdPerReferenceInkPixel": 2.095
+    },
+    "editor:codeAndChips": {
+     "areaFrac": 0.18188,
+     "mean": 0.11075,
+     "fracOver0_10": 0.22205,
+     "shareOfError": 0.2338,
+     "errorDensity": 1.285,
+     "inkFracElectron": 0.11991,
+     "inkFracGpui": 0.12546,
+     "inkRatioGpuiOverElectron": 1.0463,
+     "overThresholdPerReferenceInkPixel": 1.8518
+    }
+   }
+  },
+  "columnsExplained": {
+   "shareOfError": "this region's summed FLIP error over the whole frame's. THE 'what fraction of total error' number the brief asked for.",
+   "errorDensity": "shareOfError / areaFrac. 1.0 = the region carries exactly its proportional share; >1 = hotter than frame average.",
+   "fracOver0_10": "fraction of the region's OWN area over FLIP's ~0.1 just-noticeable-difference. THE 'what fraction of its area is over threshold' number the brief asked for.",
+   "overThresholdPerReferenceInkPixel": "THE KEY COLUMN, and the reason the raw per-pane spread is misleading. See `theInkNormalisation`."
+  }
+ },
+ "theInkNormalisation": {
+  "why": "Read naively, the per-pane table says the panes differ in KIND: pane:calltrace has mean error 0.219 and pane:fileTree 0.010, a factor of 21, and calltrace carries ~31% of all error on 12.5% of the area while fileTree carries ~2% on 18.5%. That reading is wrong, and it is wrong for a reason that would have sent the next pass hunting a calltrace-specific bug. Mean error over a pane is DILUTED BY EMPTY BACKGROUND, and these panes differ enormously in how much of them carries content: fileTree is 2.5% ink, calltrace 18.0%.",
+  "instrument": "build/plat37-parity-2026-10-18b/inkcover.nim, new this pass. Ink is defined against each region's OWN modal colour, not a global threshold, because the panes are not all the same shade.",
+  "theResult": "Normalised by reference ink, the panes STOP differing in kind. Over-threshold pixels per reference ink pixel, across the three scenarios: pane:editor 1.87-2.01, pane:state 1.82-1.93, pane:calltrace 2.11-2.14, pane:eventLog 1.73, editor:gutter 2.10-2.33, editor:codeAndChips 1.85-2.01. Five independent text-bearing regions, drawn by different pane code, all landing between 1.7 and 2.1. The per-pane spread in the raw table is ink density and essentially nothing else.",
+  "soTheANSWER": "THE RESIDUAL IS A CAUSE GENERIC TO DRAWN TEXT. It is not a defect of one pane. Roughly two pixels go over the JND threshold for every pixel of reference ink, everywhere text is drawn.",
+  "theTwoRowsThatAreNOTinThatBand": {
+   "pane:fileTree": "0.92 -- half the others. It is also the region with by far the least ink (2.5%) and the smallest stroke-core disagreement; it is the one pane whose content is mostly short UI labels rather than dense monospaced runs. Recorded, not explained.",
+   "chrome:topBar": "4.11, and this one is NOT a rendering difference: the GPUI top bar carries 1.53x the Electron top bar's ink (inkRatio 1.5279 against 1.05-1.09 everywhere else). The two arms DRAW DIFFERENT THINGS there. That is PARITY-S8's territory -- Electron's browser chrome -- and the brief rules S8 out of scope. Flagged so a later pass does not read 4.11 as a glyph finding."
+  },
+  "andTheGutter": "editor:gutter is 2.10-2.33 per ink pixel -- at the TOP of the band, not the bottom. Its raw mean (0.025) is the second lowest in the frame, so a reader of the raw table would call the gutter clean. It is not clean; it is sparse. The gutter's digits disagree at the same rate as everything else, which is itself evidence for a generic cause, since the gutter is drawn by different code from the code column."
+ },
+ "theAlignmentSearch": {
+  "question": "Is the residual a RIGID MISREGISTRATION -- the two arms drawing the same thing a few pixels apart -- or is it the glyphs? The pass's own shift ladder reads fracOver0_10 0.1077 for ONE pixel of pure translation, which is more than half the measured 0.1845, so an unnoticed one- or two-pixel offset would look exactly like a glyph problem while being nothing of the kind.",
+  "instrument": "build/plat37-parity-2026-10-18b/flipalign.nim, new this pass. Every (dx,dy) in -4..+4 is evaluated on the SAME extent -- a 6-px margin is cropped off all four sides and the candidate window is displaced within it -- so no shift compares a different number of pixels than another and nothing is edge-padded.",
+  "perScenario": {
+   "state": {
+    "bestDx": 0,
+    "bestDy": -2,
+    "fracOver0_10_at_0_0": 0.18637,
+    "fracOver0_10_at_best": 0.17293,
+    "removedByTheBestRigidShift": 0.01344,
+    "fractionOfTheResidualThatIsRigid": 0.0721
+   },
+   "calltrace": {
+    "bestDx": 0,
+    "bestDy": -2,
+    "fracOver0_10_at_0_0": 0.1922,
+    "fracOver0_10_at_best": 0.18049,
+    "removedByTheBestRigidShift": 0.01171,
+    "fractionOfTheResidualThatIsRigid": 0.0609
+   },
+   "editorWithMark": {
+    "bestDx": 0,
+    "bestDy": -2,
+    "fracOver0_10_at_0_0": 0.18103,
+    "fracOver0_10_at_best": 0.16935,
+    "removedByTheBestRigidShift": 0.01167,
+    "fractionOfTheResidualThatIsRigid": 0.0645
+   }
+  },
+  "theANSWER": "dx = 0 ON ALL THREE, dy = -2 ON ALL THREE. There is a real rigid component and it is PURELY VERTICAL, exactly two device pixels (one point), with GPUI's content ABOVE Electron's. But correcting it removes only 6-7% of the residual: 0.1864 -> 0.1729, 0.1922 -> 0.1805, 0.1810 -> 0.1694. ~93% OF THE RESIDUAL SURVIVES THE BEST RIGID TRANSLATION, against an identity control of 0.0000.",
+  "liveness": "The grid is not uniform: it varies smoothly in both axes with a single interior minimum and rises monotonically away from it in all directions (state dy=-2 reads 0.1729, dy=+4 reads 0.2180, dx=-4 reads 0.2082).",
+  "andTheOnePointIsCORROBORATEDthreeWAYS": "Three independent instruments agree that GPUI's content sits one point above Electron's: (1) this search, dy=-2 on all three scenarios; (2) the 2026-10-18 pass's pane census, GPUI pane top 66pt in a 929pt frame less the 29pt title band = 37, against Electron's 38; (3) this pass's own modal-row scan of the top bar, below."
+ },
+ "theTopBarShortfall": {
+  "finding": "GPUI'S CHROME ABOVE THE PANE ARRANGEMENT IS ONE POINT SHORTER THAN THE DESKTOP'S, and that is the whole of the rigid component.",
+  "measured": "The first device row whose MODAL colour across the full frame width is the pane ground #282828: Electron y=76 (38.0 pt), GPUI y=74 (37.0 pt). IDENTICAL on all three scenarios. Measured by modal row colour across the full width rather than by one column, because a single column crosses glyphs.",
+  "theConstant": "src/frontend/gpui/window_top_bar.nim:38 `TopBarPx* = 34`, documented as 'the desktop's caption bar (#menu, 34 px, measured 2026-10-17)'. The painted Electron result is 38 pt, so either that measurement or what sits between the band and the first pane is one point out.",
+  "whyITwasNOTchangedTHISpass": "Changing the top band's height changes the editor pane's body height, which feeds `editorRowsOf`, which is what `src/tests/visual/corpus-pins.json` pins as EXACT SETS. The brief rules corpus-pins out of scope for this pass precisely because the Linux arm re-pinned that file twice on 2026-10-17 and a macOS re-pin would break their readings. A one-point change to TopBarPx is the same hazard arriving by a different door. FILED, not fixed.",
+  "whatItIsWORTH": "0.012 of P1, measured, not estimated -- the alignment search's own removedByTheBestRigidShift."
+ },
+ "whatTheRESIDUALactuallyIS": {
+  "theEliminations": [
+   "NOT rigid translation: the best (dx,dy) removes 6-7%.",
+   "NOT a tone, weight or colour difference: the two arms' luminance histograms over the editor, calltrace and fileTree panes agree in SHAPE, and GPUI if anything carries slightly MORE bright ink (editor 232-255 bin: Electron 0.912%, GPUI 1.214%; calltrace: 3.279% against 4.477%). An earlier tone-class probe in this pass appeared to show GPUI's stroke CORES 100-127 luminance levels darker; that was an ARTEFACT of comparing tone classes at fixed coordinates when the glyphs are not at the same coordinates, and the histogram refutes it. Recorded because it is the wrong turn a later pass would otherwise take again.",
+   "NOT a pane-specific defect: see theInkNormalisation."
+  ],
+  "whatISleft": "THE GLYPHS DRIFT ALONG THE LINE. The local best-fit horizontal shift between the two arms' column-ink profiles GROWS MONOTONICALLY with distance from the editor pane's left edge.",
+  "instrument": "build/plat37-parity-2026-10-18b/advance.py. The editor pane is collapsed to a 1-D column-ink profile per arm; in sliding 60-device-pixel windows across x, the integer shift maximising normalised cross-correlation is found.",
+  "theDRIFT": {
+   "editorWithMark": [
+    {
+     "xPt": 296,
+     "bestDx": 0,
+     "corr": 0.993,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 326,
+     "bestDx": -1,
+     "corr": 0.988,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 356,
+     "bestDx": 3,
+     "corr": 0.985,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 386,
+     "bestDx": 0,
+     "corr": 0.993,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 416,
+     "bestDx": 0,
+     "corr": 0.989,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 446,
+     "bestDx": 1,
+     "corr": 0.985,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 476,
+     "bestDx": 2,
+     "corr": 0.96,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 506,
+     "bestDx": 3,
+     "corr": 0.969,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 536,
+     "bestDx": 4,
+     "corr": 0.943,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 566,
+     "bestDx": 6,
+     "corr": 0.962,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 596,
+     "bestDx": 5,
+     "corr": 0.969,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    }
+   ],
+   "calltrace": [
+    {
+     "xPt": 296,
+     "bestDx": 1,
+     "corr": 0.968,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 326,
+     "bestDx": 0,
+     "corr": 0.991,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 356,
+     "bestDx": 3,
+     "corr": 0.99,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 386,
+     "bestDx": 0,
+     "corr": 0.983,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 416,
+     "bestDx": 0,
+     "corr": 0.989,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 446,
+     "bestDx": 1,
+     "corr": 0.988,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 476,
+     "bestDx": 1,
+     "corr": 0.986,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 506,
+     "bestDx": 2,
+     "corr": 0.981,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 536,
+     "bestDx": 2,
+     "corr": 0.984,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 566,
+     "bestDx": 2,
+     "corr": 0.985,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    },
+    {
+     "xPt": 596,
+     "bestDx": 3,
+     "corr": 0.982,
+     "selfDx": 0,
+     "selfCorr": 1.0
+    }
+   ]
+  },
+  "inWords": "editorWithMark, left to right across the pane: 0, -1, +3, 0, 0, +1, +2, +3, +4, +6, +5 device pixels. calltrace: +1, 0, +3, 0, 0, +1, +1, +2, +2, +2, +3. Monotone in both after the first few windows, reaching +5 to +6 device px by the right of the pane.",
+  "control": "The SAME search run with the Electron profile against ITSELF returns shift 0 with correlation 1.000 in EVERY window of BOTH scenarios. The probe does not answer zero to everything, and it does not answer non-zero to everything.",
+  "theINTERPRETATION": "Progressive horizontal divergence of glyph positions, not a uniform offset. No single rigid dx can correct a line of text, which is precisely why the alignment search found dx=0 and still left 93% of the error standing. The implied per-character advance difference is of order 0.1-0.2 device pixels.",
+  "whatCOULDnotBEpinnedDOWN": "WHICH per-character advance, and therefore which font or metric, is responsible. A direct cell-width estimator was written and is NOT reported: see instrumentControls.theCellWidthEstimator. The Electron lane's own font probe does not help either -- `editorFontMetrics.fontFamily` in build/plat37-macos-electron/*.route.json is the EMPTY STRING, so the face Chromium actually resolved was never captured. That gap is filed."
+ },
+ "theFontCandidates": {
+  "_rule": "Each of the brief's four candidates, with what was measured against it.",
+  "CodeFontPx": "CONFIRMED 16 ON BOTH, not assumed. src/frontend/gpui/chrome.nim:100 `CodeFontPx* = 16`, documented as the desktop's `data.ui.fontSize`; the desktop's own is src/frontend/utils.nim:1039 `fontSize: 16`, handed to Monaco at src/frontend/ui/editor.nim:2286 and :3254. The Electron capture's own live probe agrees: `editorFontMetrics.fontSizePx` = 16, `lineHeightPx` = 24, in build/plat37-macos-electron/editorWithMark.route.json. isonim-gpui defines no CodeFontPx at all; the number lives entirely in codetracer.",
+  "fontFamilyAndWeight": "NOT RESOLVED, and the reason is a gap in the instrument rather than a finding. The Electron lane records `fontFamily: \"\"` (source `monacoEditor.config.lineHeight`), so the face Chromium picked was never measured. Filed as PLAT37-ISSUE-A.",
+  "subpixelGlyphPositioning": "THIS IS THE ONE THE EVIDENCE POINTS AT. See whatTheRESIDUALactuallyIS: the drift is progressive, which is what differing advances produce and what a constant sub-pixel phase does not.",
+  "antialiasingAndGamma": "MEASURED, AND IT IS IN EFFECT -- AND WRONGLY SO ON THIS PLATFORM. See theAntialiasingFinding."
+ },
+ "theAntialiasingFinding": {
+  "theClaimUnderTest": "isonim-gpui 0317536 'feat(shim): per-corner radii, per-side margins, and Chromium's text antialiasing'. The brief asked whether it is actually in effect on this path or merely implemented.",
+  "theANSWER": "IT IS IN EFFECT ON macOS, AND IT FIRES OFF AN INPUT THAT CARRIES NO INFORMATION THERE.",
+  "theMechanism": "rust/gpui-nim-shim/src/gpui_app.rs:~1505 calls window::text_antialiasing(env ISONIM_GPUI_TEXT_RENDERING, window::fontconfig_rgba()) and, on Some(_), calls cx.set_text_rendering_mode(..). fontconfig_rgba() shells out to `fc-match -f '%{rgba}' sans-serif` and returns None ONLY if the COMMAND fails; if fc-match runs and prints nothing it returns Some(\"\"). text_antialiasing maps Some(\"\") to Grayscale, which is correct on Linux, where an empty rgba is fontconfig saying 'this display has no subpixel order'.",
+  "theMEASUREMENT": "Inside codetracer's `nix develop` -- which is where the capture lane runs -- `fc-match -f '%{rgba}' sans-serif` EXITS 0 AND PRINTS THE EMPTY STRING. fc-match is present there (/nix/store/hsmw7yibb4d424rpnpsgsyrmvcjnxskg-fontconfig-2.17.1-bin/bin/fc-match) and resolves sans-serif and monospace alike to CaskaydiaCove Nerd Font. So on macOS the GPUI window was OVERRIDING GPUI's platform default and forcing GRAYSCALE off an answer that said nothing.",
+  "theTRAPthatALMOSTateTHISfinding": "Measured from the AMBIENT shell first, fc-match is ABSENT (exit 127), which would have made fontconfig_rgba() return None and the override a no-op -- the opposite conclusion. The lanes do not run in the ambient shell. The same class of error the brief warns about for the GPUI freshness gate applies to this probe, and it fired.",
+  "whyITisWRONGonMACOS": "The rule is 'as Chromium chooses it ON LINUX', and Chromium only consults fontconfig there; on macOS it renders through CoreText and takes the system's smoothing. A macOS box that happens to have fontconfig installed -- every one that enters this dev shell -- is not a desktop whose text policy fontconfig states. The empty string means 'unset', and only on Linux does 'unset' mean 'grayscale'.",
+  "whatWasCHANGED": {
+   "where": "isonim-gpui rust/gpui-nim-shim/src/window.rs, fontconfig_rgba(), +54/-1 including the comment and a new test. NOT COMMITTED, as instructed.",
+   "what": "`if cfg!(target_os = \"macos\") { return None; }` at the top of fontconfig_rgba(), so macOS keeps GPUI's platform default -- the CoreText path Chromium also takes. ISONIM_GPUI_TEXT_RENDERING still overrides on every platform, so the behaviour stays reachable for a comparison.",
+   "whyTHEinputANDnotTHEmatcher": "text_antialiasing() and all of its existing unit tests are left BIT-IDENTICAL, so Linux behaviour cannot move. Changing Some(\"\") -> Grayscale in the matcher would have been wrong: on Linux that mapping is correct and its test at window.rs:1389 asserts it.",
+   "tests": "`cargo test --lib` in rust/gpui-nim-shim: 186 passed, 0 failed (185 pre-existing + 1 new), at isonim-gpui ab520c05f plus this change.",
+   "andWHATitMEASURABLYdidTOthePIXELS": "NOTHING, ON THIS HOST, AND THAT IS A MEASUREMENT RATHER THAN A GUESS. The GPUI lane was re-run with the rebuilt shim carrying this change, and the resulting GPUI frame for `state` is BYTE-IDENTICAL to the one captured before it (cmp on the decoded 20,736,000-byte RGBA buffers). So forcing Grayscale and GPUI's macOS platform default produce the same pixels here -- unsurprising, since macOS has not done subpixel text antialiasing since Mojave. The change is therefore a LATENT correctness fix: the override was demonstrably firing off an input with no meaning on this platform, and it happens to coincide with the right answer today. It is NOT a P1 lever and is not claimed as one."
+  },
+  "honestCAVEAT": "This change is NOT shown to move P1. The drift finding says the dominant residual is positional, which an antialiasing mode would not fix. It is made because the override is demonstrably firing on a platform whose text policy fontconfig does not state, which is a defect on its own terms."
+ },
+ "instrumentControls": {
+  "_rule": "A uniform result across all rows is a broken probe until proven otherwise. Each entry says what the probe answered DIFFERENTLY, and on what. ONE PROBE FAILED ITS CONTROL THIS PASS AND ITS NUMBERS ARE WITHHELD.",
+  "flipregion": "POSITIVE CONTROL, AGAINST AN ESTABLISHED INSTRUMENT. flipregion was written independently of flipdiff and reproduces flipdiff's frame-wide figures to ten decimal places on all three scenarios (state mean 0.0889379606 vs 0.0889379606; fracOver0_10 0.1845034722 vs 0.1845034722; likewise p90 and max; same for calltrace and editorWithMark). ADDITIVITY CONTROL: the WHOLE region's shareOfError is exactly 1.000000000000 on all three. NOT UNIFORM: errorDensity across regions spans 0.116 (fileTree) to 2.54 (calltrace), a factor of 22.",
+  "inkcover": "NOT UNIFORM, and that is what makes the normalisation meaningful. Ink fraction spans 2.50% (fileTree) to 22.4% (statusBar) within a single frame, and the derived over-per-ink column then COLLAPSES to 1.7-2.1 across five regions whose raw means span a factor of 21. A probe that measured nothing real could not turn a 21-fold spread into a 1.2-fold one.",
+  "flipalign": "NOT UNIFORM IN EITHER AXIS. The 9x9 grid varies smoothly with a single interior minimum: for `state`, dy=-2 reads 0.1729 and dy=+4 reads 0.2180; dx=0 reads 0.1864 and dx=-4 reads 0.2152. IDENTITY CONTROL inherited and still valid: the pass's shift0px negative control reads 0.0000 on every statistic. CONSISTENCY CONTROL: all three scenarios independently return the same optimum (0,-2), and that optimum agrees with two instruments that know nothing about FLIP (the pane census and the modal-row top-bar scan).",
+  "theDriftProbe": "SELF-CONTROL, AND IT IS THE REASON THE RESULT IS BELIEVABLE. The identical search run with the Electron column-ink profile against ITSELF returns shift 0 with correlation 1.000 in EVERY one of the 11 windows in BOTH scenarios. Against the real pair it returns a monotone sequence reaching +5 and +6 device pixels. Two polarities, so it is neither stuck at zero nor answering noise.",
+  "theCellWidthEstimator": "FAILED ITS CONTROL. ITS NUMBERS ARE NOT REPORTED AND NOT USED. The first attempt (advwidth.py) interpolated the SIGNAL linearly at fractional lags; its planted-period control returned 19.02 for a planted 19.30, AND THEN RETURNED 19.02 AGAIN as the 'measured' GPUI cell width on two different scenarios -- the uniform answer that marks a broken probe, caught by the control rather than by inspection. A second estimator (advwidth2.py) replaced signal interpolation with integer-lag normalised autocorrelation plus a parabolic peak fit, and PASSES a five-point planted control (17.00, 18.40, 19.30, 20.00, 21.70 all recovered to within 0.01). But its readings on the real frames are state -0.49%, editorWithMark -0.73%, calltrace +0.66% -- INCONSISTENT IN SIGN across scenarios, with peak correlations of only 0.65-0.77 because text is not a clean periodic grid. Its own cross-scenario spread (~0.7%) exceeds the effect it is being asked to resolve (~0.1-0.2 device px per character). SO THE DIRECT CELL-WIDTH MEASUREMENT IS INCONCLUSIVE and the advance difference is asserted only qualitatively, from the drift probe, which does have a clean control.",
+  "theS10probe": "NOT UNIFORM. Across the six arm/scenario pairs it reports 56, 58, 60, 77 and 101 rows with a non-ground code-column colour, band y-spans from 399 to 718 pt, and right extents of 544, 546, 624, 626 and 648 pt. It nonetheless returns the SAME band colour (#404040), the SAME left edge (403 pt) and the SAME mark colour (#e9c961) on both arms -- which is the finding, and it is credible precisely because the same probe distinguishes the other quantities.",
+  "theAntialiasingProbe": "TWO POLARITIES, AND THE FIRST READING WAS WRONG. Measured from the ambient shell, `fc-match` is absent (exit 127) -> fontconfig_rgba() None -> override inert. Measured inside codetracer's nix develop, where the lane actually runs, fc-match is present, exits 0 and prints the empty string -> Some(\"\") -> Grayscale -> override ACTIVE. The two shells give opposite answers and only one of them is the lane's.",
+  "theRustTestPerturbation": "DONE, AND THE FIRST ATTEMPT PASSED VACUOUSLY -- recorded because it is the trap the brief names. Disabling the macOS guard behind an env var did NOT red the new test, because fc-match is absent from ISONIM-GPUI's dev shell (it is present in codetracer's), so the bypassed call failed anyway and still returned None. The perturbation was redone to return Some(\"\") directly -- the value measured in codetracer's shell -- and the test then FAILED with `left: Some(\"\") right: None`, and passed again with the perturbation removed. Two outcomes from one assertion.",
+  "flipdiffProvenance": "REUSED, the binary built 2026-10-12, copied into this pass's directory. Justified by measurement: it was built from codetracer-image-diff ee9fb397b and `git -C codetracer-image-diff rev-parse HEAD` still reads ee9fb397b94155557d730ee6997db60687214988, so the FLIP implementation in it is byte-identical to this checkout's -- and to the one this pass's three NEW tools were compiled against, which is what makes flipregion's ten-decimal agreement a meaningful control rather than a coincidence.",
+  "theNimUsedForTheNEWtools": "The three new tools were compiled with the AMBIENT nim (2.2.4 wrapper), not the project's nim-fork-2.3.1. That is stated rather than hidden. It is acceptable here and the licence is the control, not an argument: flipregion compiled this way reproduces flipdiff's output to ten decimal places, so the FLIP computation is demonstrably identical. The tools import only std/* and image_diff and are not part of any product closure."
+ },
+ "regrade": [
+  {
+   "id": "PARITY-S10",
+   "previousVerdict": "Stated in the brief as OPEN: 'GPUI draws a grey triangle and highlights the full row width including the gutter; Electron draws an orange triangle and highlights only the code text.'",
+   "verdict": "DOES NOT REPRODUCE. BOTH HALVES ARE REFUTED BY MEASUREMENT ON THIS PASS'S FRAMES. Nothing was changed, because there is nothing wrong.",
+   "measuredThisPass": true,
+   "deficientSide": "neither",
+   "measuredAgainst": "codetracer 025bd9981, on the 2026-10-18 frames (see the licence in _comment), all three laptop scenarios and both arms.",
+   "instrument": "build/plat37-parity-2026-10-18b/s10probe.py and bandextent.py, both new this pass. bandextent.py records the band's extremes on EVERY one of its rows rather than on one chosen row -- reporting a single row is how the 2026-10-13 pass got three readers and three answers.",
+   "theBandCOLOUR": "#404040 ON BOTH ARMS, in all three scenarios, on exactly 48 device rows = 24 points = one editor row at the macOS pitch. #404040 is the value of the shared design token dtEditorThemeExecutionLine, which GPUI reads rather than hardcodes (src/frontend/gpui/app/leaves.nim:206).",
+   "theGUTTERclaim": "REFUTED. The band's left edge is device x=806 (403 pt) on BOTH arms in all three scenarios, on 45-48 of 48 band rows. The gutter's right edge is at 366 pt. The band starts THIRTY-SEVEN POINTS TO THE RIGHT OF THE GUTTER on both arms. Neither renderer highlights the gutter.",
+   "theTRIANGLEclaim": "REFUTED. The nearest colour to the asset's #FCD34D anywhere in the editor's gutter strip is #e9c961 on BOTH arms -- same hex, max-channel delta 20 from the token on both -- with ~100 pixels within 40 of it on each. The mark is amber on both; it is not grey on GPUI. The two arms share the asset by construction: GPUI staticReads the very same highlight_line_arrow.svg (leaves.nim:288).",
+   "theRIGHTextent": "ALSO MEASURED, which RESOLVES the one item the 2026-10-13 re-grade left open as `readerConflictNotRuled` ('reader (2) reports Electron's band reaching the pane edge while GPUI's stops after the text; reader (3) reports both stopping after the text'). The right edges agree within TWO POINTS: state Electron 544 pt / GPUI 546 pt; calltrace both 648 pt; editorWithMark Electron 624 pt / GPUI 626 pt. Reader (3) was right. The remaining 2 pt is the same drift this pass measures elsewhere.",
+   "liveness": "The probe does not answer the same thing to every input: the count of rows with a non-ground code-column colour is 56, 58, 60, 77 and 101 across the six arm/scenario pairs, with band y-spans from 399 to 718 pt.",
+   "whyTHEbriefSTILLcarriedIT": "The wording in the brief is verbatim the 2026-10-12 finding at src/tests/visual/plat37-parity-readings.json:1072. That finding was already downgraded on 2026-10-13 ('DOWNGRADED -- SUBSTANTIALLY REPRODUCES AS PARITY; THE OLD READING WAS WRONG IN BOTH HALVES') and the code-column-only band landed in 58939dbe1 on 2026-09-23. This pass is the first to measure it on fresh frames of both arms rather than re-reading the re-grade.",
+   "soTHEswap": "The brief permits swapping S10 for a better target if the decomposition implicates one. It does, and the swap is recorded in `whatWasDoneInsteadOfS10`."
+  },
+  {
+   "id": "PARITY-P1",
+   "previousVerdict": "0.1845 / 0.1903 / 0.1792, mean 0.1847, at codetracer d883db0e2 (2026-10-18 pass).",
+   "verdict": "HEADLINE UNCHANGED AND INDEPENDENTLY CONFIRMED; DECOMPOSED FOR THE FIRST TIME.",
+   "measuredThisPass": true,
+   "theCONFIRMATION": "flipregion, written independently of flipdiff this pass, reproduces all three scenarios' frame-wide figures to TEN DECIMAL PLACES (state mean 0.0889379606 and fracOver0_10 0.1845034722 against flipdiff's identical values; likewise calltrace and editorWithMark). That is a control on the new instrument, not a new reading.",
+   "didITmove": "NO, AND IT WAS NOT EXPECTED TO. This pass changed no codetracer source at all, and its one isonim-gpui change is argued below NOT to be a P1 lever. Saying P1 'did not move' after changing nothing is not a result; the result is the decomposition.",
+   "whereTheERRORis": "See theDecomposition and theInkNormalisation. In one line: roughly two over-threshold pixels per reference ink pixel in EVERY text-bearing region, a one-point rigid vertical offset worth 6-7%, and the rest a progressive horizontal drift of glyph positions along each line.",
+   "flipAfter": {
+    "state": {
+     "mean": 0.08893796056509018,
+     "p50": 0.0,
+     "p90": 0.35672298073768616,
+     "maxError": 0.990104079246521,
+     "fracOver0_10": 0.18450347222222221
+    },
+    "calltrace": {
+     "mean": 0.0905957967042923,
+     "p50": 0.0,
+     "p90": 0.3631450831890106,
+     "maxError": 0.990104079246521,
+     "fracOver0_10": 0.19026774691358025
+    },
+    "editorWithMark": {
+     "mean": 0.08615865558385849,
+     "p50": 0.0,
+     "p90": 0.34044790267944336,
+     "maxError": 0.990104079246521,
+     "fracOver0_10": 0.17921913580246915
+    }
+   },
+   "numbersInWords": "state fracOver0_10 0.1845 (mean 0.0889, p50 0.000000, p90 0.3567, max 0.9901); calltrace 0.1903 (0.0906 / 0.000000 / 0.3631 / 0.9901); editorWithMark 0.1792 (0.0862 / 0.000000 / 0.3404 / 0.9901). Mean over the three 0.1847.",
+   "DIDitMOVE": "NO, AND IT REPRODUCED TO THE BIT, WHICH IS THE MORE USEFUL RESULT. Both lanes were re-run end to end on this pass's own builds, and the three figures come back at 0.18450347222222221, 0.19026774691358025 and 0.17921913580246915 -- IDENTICAL to the 2026-10-18 pass at full float precision for state and calltrace, and identical to seven decimals for editorWithMark (mean 0.08615865558385849 against 0.08615858107805252). The decoded RGBA buffers for `state` are BYTE-IDENTICAL across the two capture runs on BOTH arms. TWO THINGS FOLLOW. First, 0.1845/0.1903/0.1792 is not capture noise -- both renderers are deterministic on this host across a full rebuild and recapture, so a future pass that moves the number by 0.01 has moved something real. Second, it retroactively licenses this pass's decomposition, which was computed on the 2026-10-18 frames: for state and calltrace those ARE this pass's frames, bit for bit."
+  },
+  {
+   "id": "PARITY-S8",
+   "verdict": "THE BRIEF'S READING IS AGREED, and this pass adds a measurement in its favour rather than only an opinion.",
+   "measuredThisPass": true,
+   "theMEASUREMENT": "chrome:topBar is the only region in the frame where the two arms' INK COVERAGE differs materially: GPUI carries 1.5279x Electron's ink there, against 1.05-1.09 in every pane. The two arms draw genuinely different things in the top bar, and over-threshold-per-ink is 4.11 there against 1.7-2.1 elsewhere. That is consistent with Electron having browser chrome GPUI does not, and it is a reason to EXCLUDE the top bar from a glyph-parity reading, not to make GPUI grow buttons.",
+   "recommendation": "Close as not-a-defect, as the brief proposes."
+  }
+ ],
+ "whatWasDoneInsteadOfS10": {
+  "why": "S10 does not reproduce, so there was nothing to bring onto Electron's behaviour. The brief's instruction in that case is to say so and do the better target.",
+  "whatWasDone": [
+   "The per-region decomposition and its ink normalisation, which is the pass's main deliverable and which overturns the natural reading of the raw per-pane table.",
+   "The alignment search, which bounds the rigid component at 6-7% and is the result that makes a glyph explanation the only one left.",
+   "The drift probe, which identifies the remaining cause as progressive horizontal divergence rather than a uniform offset.",
+   "ONE SOURCE CHANGE, in isonim-gpui: the macOS antialiasing override, which was measured firing off a meaningless input. See theAntialiasingFinding."
+  ],
+  "whatWasDELIBERATELYnotDONE": "TopBarPx was NOT changed, although this pass measured the one-point shortfall three ways and it is worth 0.012 of P1. It feeds editorRowsOf and therefore corpus-pins.json, which the brief rules out of scope. Fixing it is a one-line change behind a re-pin that has to be coordinated with the Linux arm."
+ },
+ "issuesToFile": {
+  "policyConflictDeclared": "These are DRAFTED HERE AND UNFILED. The owning repo is codetracer-pm for the two codetracer ones and isonim-pm for the isonim-gpui one; recording-issues policy wants them pushed to the owning specs repo, and this pass made no commits and no pushes, as instructed.",
+  "new": [
+   {
+    "id": "PLAT37-ISSUE-A",
+    "owningRepo": "codetracer-pm",
+    "title": "The PLAT-37 Electron capture records an empty editor fontFamily, so the face Chromium resolved is never measured",
+    "measured": "build/plat37-macos-electron/*.route.json carries editorFontMetrics = {lineHeightPx: 24, fontSizePx: 16, fontFamily: \"\", source: \"monacoEditor.config.lineHeight\"} at codetracer 025bd9981. The size and line height are captured; the family is the empty string.",
+    "whyItMatters": "This pass established that the P1 residual is a glyph-positioning difference that accumulates along a line, which is what differing per-character advances produce. Advance is a property of the resolved FACE. With fontFamily unrecorded, the single most likely cause cannot be confirmed or excluded from the captures, and the next pass has to re-derive it.",
+    "remedy": "Have the Playwright probe read the computed font-family and the resolved face (e.g. document.fonts / getComputedStyle on the editor's text node) and record both, beside a matching readout of the face GPUI's text system actually selected.",
+    "severity": "moderate -- it blocks the next step of a live investigation"
+   },
+   {
+    "id": "PLAT37-ISSUE-B",
+    "owningRepo": "codetracer-pm",
+    "title": "GPUI's chrome above the pane arrangement is one point shorter than the desktop's, offsetting every pane by two device pixels",
+    "measured": "First device row whose modal colour across the full frame width is the pane ground #282828: Electron y=76 (38.0 pt), GPUI y=74 (37.0 pt), identical on state, calltrace and editorWithMark at codetracer 025bd9981. Independently corroborated by a FLIP alignment search (best dy = -2 on all three) and by the 2026-10-18 pane census (GPUI 66pt in a 929pt frame less a 29pt title band = 37, Electron 38).",
+    "whyItMatters": "It is a measured 0.012 of PARITY-P1 -- the whole of P1's rigid component -- and it is the kind of defect that silently inflates every other pixel reading taken against these frames.",
+    "remedy": "src/frontend/gpui/window_top_bar.nim:38 TopBarPx = 34 is documented as the desktop's #menu measured at 34 px; the painted desktop result is 38 pt to the first pane. Re-derive the constant from the painted geometry. NOTE THE COUPLING: it feeds editorRowsOf and therefore corpus-pins.json's exact row sets, so it needs coordinating with the Linux arm's pins.",
+    "severity": "moderate"
+   },
+   {
+    "id": "ISONIM-GPUI-ISSUE-C",
+    "owningRepo": "isonim-pm",
+    "title": "The shim's text-antialiasing override fires on macOS from a fontconfig answer that carries no meaning there",
+    "measured": "Inside codetracer's nix develop on aarch64-darwin, `fc-match -f '%{rgba}' sans-serif` exits 0 and prints the empty string; window::fontconfig_rgba() therefore returns Some(\"\"), and window::text_antialiasing(None, Some(\"\")) returns Some(Grayscale), so gpui_app.rs calls cx.set_text_rendering_mode(Grayscale). Measured at isonim-gpui ab520c05f. From the AMBIENT shell fc-match is absent (exit 127) and the override is a no-op, which is why this needs measuring inside the shell the lane runs in.",
+    "whyItMatters": "0317536's rule is 'as Chromium chooses it on Linux'; Chromium consults fontconfig only on Linux and uses CoreText on macOS. An empty rgba means 'unset', and only on Linux does 'unset' mean 'grayscale'. The GPUI window was overriding its platform default on a platform whose text policy fontconfig does not state.",
+    "remedyApplied": "A change is in the working tree of this pass and is NOT committed: fontconfig_rgba() returns None on macOS, leaving the platform default; text_antialiasing() and its Linux tests are untouched. 186 of 186 shim lib tests pass, and the new test's perturbation control reds when the guard is disabled.",
+    "severity": "moderate"
+   },
+   {
+    "id": "REPROBUILD-ISSUE-D",
+    "owningRepo": "reprobuild-pm",
+    "title": "codetracer's build-once prefers the sibling reprobuild checkout's build/bin/repro over PATH, so a stale local build silently becomes the build engine",
+    "measured": "At codetracer 025bd9981 with reprobuild f974c2e74a, `just build-once` failed with `repro build: error: provider exited with code 1: repro project provider: error: unsupported provider graph envelope version 1`. scripts/build-once.sh:192-198 probes $reprobuild_root/build/bin/repro BEFORE falling back to `command -v repro` at :202. The sibling build was 0.2.5 (compiled 2026-10-16 14:42) while reprobuild's tip f974c2e74a -- dated 2026-10-17 19:17 -- builds 0.2.6, and the provider-graph envelope moved 1 -> 2 (libs/repro_provider_runtime/.../codec.nim:6). Rebuilding the sibling to 0.2.6 made the build succeed (exit 0).",
+    "whyItMatters": "This is exactly the hazard AGENTS.md names -- 'a stale local build is worse than the pin' -- arriving through a path no one chose: the dev shell's own correctly-pinned 0.2.6 was on PATH and was overridden by a day-old checkout build. The failure message names the provider, not the engine, so it reads as a project defect.",
+    "remedy": "Either compare the sibling binary's version against the engine the shell provides and refuse on skew, or put `command -v repro` first. At minimum, print which repro was chosen and why.",
+    "severity": "moderate -- it cost this pass two failed builds and a full reprobuild rebuild to diagnose"
+   }
+  ]
+ },
+ "carriedForwardNotMeasured": [
+  {
+   "id": "PARITY-S1",
+   "status": "WITHDRAWN by the 2026-10-18 pass as an output-directory artefact. Not re-opened.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S3",
+   "status": "CLOSED (pane boundaries identical to the point). RELIED ON by this pass: it is what licenses using one set of pane rectangles for both arms. Not independently re-measured, but the 2026-10-18 census's x/w columns were re-read and do agree exactly.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S4",
+   "status": "Inherited. The chip detector's negative control still fails on the GPUI side. NO FINDING HERE RESTS ON CHIP COUNTS -- the editor's chip column was deliberately located by an x-profile rather than by the chip detector.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S5",
+   "status": "CLOSED on this platform by the 2026-10-18 pass. Corroborated incidentally: the execution band measures exactly 48 device px = 24 pt on BOTH arms in all three scenarios, which is the macOS Monaco pitch the fix derives.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S6",
+   "status": "OPEN, NOT MEASURED. Breakpoint on source line 32 in GPUI, 28 in Electron.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S7",
+   "status": "OPEN, NOT MEASURED. Ellipsis vs hard clip on an over-long state value.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S13",
+   "status": "CLOSED. Not re-opened.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S14",
+   "status": "CLOSED by the 2026-10-18 pass. Not re-opened.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-G1",
+   "status": "Left alone this pass as instructed: the three `wide` scenarios stay incomparable because Electron obtains a true 1920x1080 pt window while GPUI is clamped to 1728x1084. This pass's own GPUI lane reproduces the clamp on shell, editor and eventLog.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "corpus-pins platform dependence",
+   "status": "Left alone this pass as instructed. Note the coupling recorded in PLAT37-ISSUE-B: the top-bar fix would land on exactly this file.",
+   "measuredThisPass": false
+  }
+ ],
+ "whatIcouldNOTdo": [
+  "I could NOT identify the font face either renderer resolved. The Electron capture records fontFamily as the empty string (PLAT37-ISSUE-A) and I did not add a probe for it, because doing so means editing the capture spec and re-running the lane, and the lane run I had was the one producing this pass's P1 figures. This is the single biggest gap: the drift finding points straight at per-character advance, and advance is a property of the face.",
+  "I could NOT measure the per-character advance difference directly. Two estimators were written; the first failed its planted-period control and the second, which passes a five-point control, is not precise enough -- its cross-scenario spread exceeds the effect. The advance explanation therefore rests on the drift probe's SHAPE (monotone, self-control clean), not on a measured advance number.",
+  "I did NOT fix the one-point top-bar shortfall, although I measured it three independent ways and it is worth 0.012 of P1. It feeds editorRowsOf and therefore corpus-pins.json, which the brief rules out of scope and which the Linux arm re-pinned twice on 2026-10-17. Filed as PLAT37-ISSUE-B instead.",
+  "I did NOT demonstrate that the isonim-gpui antialiasing change moves P1. It is justified as a correctness fix on its own terms -- the override fires on macOS off a fontconfig answer that has no meaning there -- and the evidence says the dominant residual is positional, which an antialiasing mode would not address. A controlled A/B (capture with ISONIM_GPUI_TEXT_RENDERING=platform against the default) is the obvious next experiment and I did not have the budget for a second full capture pass.",
+  "I did NOT measure PARITY-S6 or PARITY-S7. The brief offered them as alternatives to S10; the decomposition pointed elsewhere, so neither was examined and both stay open and unmeasured.",
+  "I made NO git commits, as instructed. The isonim-gpui change is uncommitted in the working tree, and the four drafted issues are UNFILED -- recording-issues policy wants them in the owning specs repos and that needs a push.",
+  "The three new FLIP tools were compiled with the ambient nim 2.2.4 rather than the project's nim-fork-2.3.1. The ten-decimal agreement with flipdiff is offered as the control that this does not matter for the FLIP computation; it is not an argument that it could never matter."
+ ]
+}

@@ -228,6 +228,20 @@ const
   EditorTokenClassAttribute* = "data-ct-token-class"
     ## A code run's `TokenClass`, so a plan reader can check the class a run
     ## was painted as without re-deriving the colour.
+  InlineTextRunsAttribute* = inlineTextRunsAttribute
+    ## `data-inline-text-runs`: the renderer draws this element's coloured
+    ## spans as ONE piece of text (`isonim_gpui/renderer`).
+    ##
+    ## A highlighted code row is split into one span per token run AND one
+    ## per bracket character, so a row can carry a dozen of them. Drawn as a
+    ## dozen text elements, each one's width is rounded up to a whole logical
+    ## pixel and each starts from the inflated total of the ones before it,
+    ## so the row's text creeps right of where the same characters land in
+    ## the browser front-end — measured as a per-row drift growing to several
+    ## device pixels across a window (PLAT-37). Monaco has no such step: a
+    ## browser accumulates inline runs at 1/64 px and rounds once.
+    ##
+    ## This asks for the same thing: one rounding for the whole row.
   GutterLaneAttribute* = "data-ct-gutter-lane"
     ## **WHICH LANE OF THE GUTTER A RUN IS** — `pointer`, `mark` or `number`
     ## (`GutterRunKind`). PLAT-35 / `PLAT35-F13`, `PLAT35-F14`.
@@ -1298,7 +1312,9 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   # later, the pane clips the last rows rather than the flex column squeezing
   # every row and cutting off descenders.
   r.setStyle(el, "flex-shrink", "0")
-  # Monaco's line: 22 px, its text in the line box's middle.
+  # Monaco's line (`chrome.EditorLinePx`: 24 px on macOS, 22 px elsewhere,
+  # derived by `chrome.monacoLineHeightPx`), its text in the line box's
+  # middle.
   r.setStyle(el, "height", $EditorLinePx & "px")
   r.setStyle(el, "line-height", $EditorLinePx & "px")
 
@@ -1502,6 +1518,14 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   # the drawn tree is byte-identical to the one before `PLAT35-F3` until the
   # wheel is turned.
   if row.held and runs.len > 0:
+    # ONE TEXT ELEMENT FOR THE WHOLE ROW, not one per span. The loop below
+    # emits a span per token run and a further one per bracket character,
+    # and the renderer would otherwise round each one's width up to a whole
+    # logical pixel and start the next from the inflated running total. The
+    # attribute asks it to fuse them and round once, as Monaco's inline
+    # layout does; the spans, their classes and their colours are unchanged,
+    # and so is the render plan a test reads.
+    r.setAttribute(code, InlineTextRunsAttribute, "1")
     # Monaco's bracket-pair colours (`editorBracketHighlight.foreground1..3`,
     # by nesting depth from the window's first row), outside strings and
     # comments; every other character keeps its class's colour.

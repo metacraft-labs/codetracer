@@ -162,9 +162,9 @@ done
 # A REFUSAL, NEVER A SKIP
 # ---------------------------------------------------------------------------
 [ "$(uname -s)" = "Darwin" ] ||
-	fail "this lane is macOS-only by construction: it drives ScreenCaptureKit
+	fail 'this lane is macOS-only by construction: it drives ScreenCaptureKit
       and the Quartz window server. The Linux Electron arm is
-      \`just plat35-capture-electron\` (its own Xvfb at -dpi 96)."
+      just plat35-capture-electron (its own Xvfb at -dpi 96).'
 [ -f "${SCENARIOS}" ] || fail "the scenario set is not at ${SCENARIOS}"
 [ -f "${SHARED_DEFAULT_LAYOUT}" ] || fail "the shared default layout is not
       at ${SHARED_DEFAULT_LAYOUT}; the per-view pane census has nothing to
@@ -230,7 +230,7 @@ export CODETRACER_BUILD_DIR="${BUILD_DIR}"
 # side does not.
 echo
 echo "=== the subject: is this bundle of THIS tree? ==="
-# shellcheck source=ci/lib/build-freshness.sh
+# shellcheck source=ci/lib/build-freshness.sh disable=SC1091
 . "${root}/ci/lib/build-freshness.sh"
 bf_electron_assert_fresh "${root}" "${BUILD_DIR}" ||
 	fail "the Electron bundle this lane would have captured is not the one
@@ -429,6 +429,27 @@ if [ "${#sun_probe}" -ge 104 ]; then
 fi
 cleanup_home() { rm -rf "${PLAT37E_HOME}"; }
 trap cleanup_home EXIT
+# A CAPTURE LANE MEASURES PIXELS, NOT SPEED.
+#
+# `lib/performance-limits.ts` gates every `timed` launch step, and
+# `CODETRACER_PERF_LIMIT_SCALE` exists for lanes whose subject is not
+# performance — its own docstring names the visual captures. The sibling
+# PLAT-35 Electron lane has set it since its first run
+# (`Justfile:5012`, `${CODETRACER_PERF_LIMIT_SCALE:-4}`); this lane never did,
+# and paid for it. On 2026-10-17, graded against codetracer 596cb6e50, the
+# `advanced-state` and `returned-calltrace` captures died in the LAUNCH
+# fixture with `Performance limit exceeded: "first window" took 35567ms /
+# 32122ms (limit: 10000ms)` — before the window was driven, before anything
+# was captured, and with nothing whatever to say about the frames this lane
+# exists to take.
+#
+# 6 rather than the sibling's 4: 35567 ms is 89% of the 40 s a scale of 4
+# gives, which `timed` itself would print as SLOW, and a lane that has to be
+# re-run because the host was busy is a lane that does not get run. 6 puts
+# the measured worst case at 59%. A lane that GATES performance must never
+# set this; this one grades pixels.
+export CODETRACER_PERF_LIMIT_SCALE="${CODETRACER_PERF_LIMIT_SCALE:-6}"
+
 # No `--headless`: the point of this lane is a window on the window server.
 # `--disable-gpu-compositing` only; the Linux default also passes `--no-zygote`
 # and `--disable-dev-shm-usage`, neither of which applies on Darwin.
@@ -436,6 +457,37 @@ export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --disa
 
 grep_filter=()
 [ -n "${ONLY}" ] && grep_filter=(--grep "capture ${ONLY}\$")
+
+# ---------------------------------------------------------------------------
+# THE RUN STAMP — what makes a frame on disk THIS run's frame.
+# ---------------------------------------------------------------------------
+#
+# The capture happens inside Playwright, in a separate process, BEFORE the
+# grading loop below ever runs. So unlike the GPUI lane — which deletes
+# `${view}.png`, `${view}.capture.json` and the rest immediately before it
+# captures each view (plat37-macos-window-capture.sh:496) and therefore cannot
+# physically grade a frame it did not just take — this lane's only freshness
+# test used to be `[ -f "${rec}" ]`. A scenario whose Playwright test died
+# before the capture step left the PREVIOUS run's record and PNG untouched,
+# and the loop graded them as if they were this run's.
+#
+# That is not hypothetical. On 2026-10-17, graded against codetracer
+# 596cb6e50, the `state`, `calltrace` and `editor` records carried
+# `takenAt` 2026-10-12T20:29..20:39Z while `shell`, `eventLog` and
+# `editorWithMark` carried 2026-10-17T13:19..13:25Z. The three stale frames
+# predate the `noUserLayout` fixture option (9226bc5ed, 2026-10-15), so they
+# show the raw bundled tree's standing TEST RESULTS / CONSTRAINTS column —
+# and the pane census duly reported "Electron draws seven panes where the
+# shared default places five" for exactly those three views, as PARITY-S1.
+# The reading was an artefact of the output directory, not of the product.
+#
+# The remedy is a stamp, not a delete: the stale frame is kept, because it is
+# the evidence that something went wrong, and the lane REFUSES to grade it and
+# says in one line which two timestamps it compared. `date -u` is ISO-8601 Z,
+# the same spelling the capture driver writes into `takenAt`, so the two sort
+# lexicographically and the comparison needs no date parsing.
+RUN_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "run stamp: frames older than ${RUN_STARTED_AT} will be refused, not graded"
 
 echo
 echo "=== driving ${expected} scenario(s) through the product's own toolbar ==="
@@ -470,6 +522,28 @@ while IFS=$'\t' read -r id view width height vpname; do
 	if [ ! -f "${rec}" ]; then
 		echo "  no capture record at ${rec} — the driver did not reach it" >&2
 		refused=$((refused + 1))
+		continue
+	fi
+	# THE STAMP, CHECKED. See `RUN_STARTED_AT` above for why a record that
+	# merely exists is not evidence. A record this run did not write means
+	# the Playwright test for this view did not reach its capture step, which
+	# is the same condition as a missing record and is counted the same way.
+	rec_taken="$(python3 -c "
+import json,sys; print(json.load(open(sys.argv[1])).get('takenAt',''))" "${rec}")"
+	if [ -z "${rec_taken}" ] || [ "${rec_taken}" \< "${RUN_STARTED_AT}" ]; then
+		echo "  REFUSED AS STALE: ${rec} was taken at '${rec_taken:-<no takenAt>}',
+      before this run began at ${RUN_STARTED_AT}. The Playwright test for
+      this view did not reach its capture step, so the frame on disk is a
+      PREVIOUS run's and grading it would attribute an older build's
+      rendering to this one. Refused rather than graded." >&2
+		refused=$((refused + 1))
+		python3 -c "
+import json,sys
+r=json.load(open(sys.argv[1]))
+r['graded']=False
+r['refusal']=('stale: takenAt %s precedes this run (%s)'
+              % (r.get('takenAt','<none>'), sys.argv[2]))
+print(json.dumps(r))" "${rec}" "${RUN_STARTED_AT}" >>"${RECORDS}"
 		continue
 	fi
 	if [ "$(python3 -c "

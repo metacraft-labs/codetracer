@@ -1,0 +1,429 @@
+{
+ "_comment": [
+  "PLAT-37 cross-renderer visual parity, macOS. THIS PASS LANDED A FIX and measured it.",
+  "The subject is ISONIM-GPUI-ISSUE-E: GPUI ceils every text element's width to a whole",
+  "logical pixel, so an editor code row built from one element per coloured span",
+  "accumulates that rounding span by span and drifts right of the browser arm.",
+  "The remedy landed here draws a declared row as ONE text element carrying per-span",
+  "highlight runs, so the width is rounded once per ROW instead of once per SPAN.",
+  "THE INSTRUMENT IS THE DRIFT LADDER, NOT P1. The ladder flattened; P1 followed, by less.",
+  "Every number below was measured this pass unless marked carriedForward."
+ ],
+ "schemaVersion": 1,
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. One macOS host, one display.",
+ "measuredAt": "2026-10-20 (clock 2026-10-17 EEST)",
+ "measuredThisPass": [
+  "whetherANEWERgpuiPreDropsTheCeil - every published version 0.3.6..0.3.9 downloaded and grepped",
+  "theFixAsLanded - the styled-runs path, its unit tests and its scope",
+  "theDriftLadder - pane-level, BEFORE and AFTER, same instrument, both from buffers decoded this pass",
+  "thePerRowLadder - per-row, BEFORE and AFTER",
+  "parityP1 - all three comparable views, mean/p50/p90/maxError/fracOver0_10",
+  "theInterfaceFaceQuestion (PLAT37-ISSUE-G) - OTF vs WEB TTF metrics compared directly",
+  "buildOutcomes, freshnessGates, laneOutcomes - both arms rebuilt and recaptured"
+ ],
+ "supersedes": [
+  "plat37-parity-readings-2026-10-19.json FOR THE STATE OF THE DRIFT AND OF P1 ONLY. That file's",
+  "DIAGNOSIS is confirmed, not overturned: its theCause section named gpui-pre text.rs's per-element",
+  "ceil, and acting on exactly that cause flattened the ladder, which is the strongest confirmation",
+  "the diagnosis could get. Its ISONIM-GPUI-ISSUE-E is now FIXED rather than drafted. Its",
+  "PLAT37-ISSUE-G is ANSWERED by measurement (no defect). Everything else in it - the eliminations of",
+  "tone/weight/CodeFontPx/rigid translation, the ink normalisation, the antialiasing finding,",
+  "S1/S3/S4/S5/S10/S13/S14, and the font-file identity of the CODE face - stands unamended and was",
+  "not re-measured here."
+ ],
+ "subject": {
+  "codetracer": "025bd9981d (branch agents), plus the working-tree changes listed in theFixAsLanded",
+  "isonimGpui": "ab520c05fc (branch agents), plus the working-tree changes listed in theFixAsLanded",
+  "reprobuild": "f974c2e74a (branch agents)",
+  "codetracerPm": "local ee8b69f6ff; remote latest is c6ce2ff72e and was NOT synced (nothing in this pass touches it; no commits were made)",
+  "gpuiPrePin": "gpui-pre =0.3.5, UNCHANGED. tools/check_gpui_pin.sh passed. This is not a fork: no crate source was patched.",
+  "noCommits": "This pass made no git commits and no pushes, as instructed."
+ },
+ "host": {
+  "platform": "aarch64-darwin (Darwin 25.5.0)",
+  "diskFreeAtStart": "~68 G (abort threshold ~20 G, never approached)",
+  "environment": {
+   "_why": "Four previous passes found PATH led by a Nix reprobuild-0.2.2 with every variable unset; it was so again at the start of this pass and was corrected before any build.",
+   "PATH": "led by /Users/zahary/m/fix-pxor-issues/reprobuild/build/bin (repro 0.2.6)",
+   "REPROBUILD_REPRO": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro",
+   "RUNQUOTA_SOCKET": "/tmp/rq-adopt-501/runquota.sock (exists, socket)",
+   "REPRO_BOOTSTRAP_CC": "/nix/store/vl936sd1vj8s008akm3gibkgyqk30qhz-clang-wrapper-21.1.8/bin/clang",
+   "REPRO_BOOTSTRAP_CC_control": "AGENTS.md's control pair, run under env -i with $? captured into a variable on its own line: WRAPPED compiled '#include <stdlib.h>' rc=0; UNWRAPPED /nix/store/rr64nnycczvx7s1b110qmvqrlfcb6lsm-clang-21.1.8/bin/clang rc=1 with \"'stdlib.h' file not found\". The wrapper is therefore proven, not assumed.",
+   "REPRO_FOREIGN_ENV_BASH": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (BASH_VERSINFO=5)"
+  }
+ },
+ "whetherANEWERgpuiPreDropsTheCeil": {
+  "_question": "The brief asked whether bumping the pin would be the cheaper route, since only 0.3.5 was cached locally and this had never been checked.",
+  "answer": "NO. The ceil is present and unchanged in EVERY published version.",
+  "versionsPublished": [
+   "0.3.0",
+   "0.3.1",
+   "0.3.2",
+   "0.3.3",
+   "0.3.4",
+   "0.3.5",
+   "0.3.6",
+   "0.3.7",
+   "0.3.8",
+   "0.3.9"
+  ],
+  "method": "crates.io sparse index listed the versions; 0.3.6/0.3.7/0.3.8/0.3.9 .crate tarballs were downloaded to a scratch dir (NOT into the cargo registry) and src/elements/text.rs extracted from each.",
+  "theLine": "size.width = size.width.max(line_size.width).ceil();",
+  "where": {
+   "0.3.5": "text.rs:765",
+   "0.3.6": "text.rs:765",
+   "0.3.7": "text.rs:772",
+   "0.3.8": "text.rs:772",
+   "0.3.9": "text.rs:772"
+  },
+  "controls": [
+   "The same expression WITHOUT .ceil() matched 0 times in every version, so the only form present is the ceiling one.",
+   "An absent sentinel string matched 0 times, so the probe is not matching indiscriminately.",
+   "0.3.5's and 0.3.9's text.rs differ (diff exit 1) and byte sizes differ (45913 vs 47129 for 0.3.6/0.3.9), so four distinct files really were read."
+  ],
+  "recommendation": "Do NOT bump the pin for this. It would not help, and tools/check_gpui_pin.sh keeps three copies of the version in agreement with a deliberate '=' - reported as a recommendation, not done."
+ },
+ "theFixAsLanded": {
+  "approach": "ONE TEXT ELEMENT PER ROW, via gpui's with_highlights rather than with_runs.",
+  "whyWithHighlightsAndNotWithRuns": "with_runs requires each TextRun to name a concrete Font. The element builder is a pure function with no Window, and the row's family/size/weight are INHERITED from an ancestor and are only known at layout. with_highlights is resolved against window.text_style() at layout time (gpui-pre/src/elements/text.rs:563-564), so the fused row keeps exactly the face the unfused spans would have used and only the COLOUR is stated by the caller. This is strictly safer than the with_runs route the brief suggested, and needed no new FFI symbol.",
+  "noNewAbiSymbol": "gpui_ exported symbol count stayed 114 before and after; check_bindings.sh and check_exported_symbols.sh both pass. The work is entirely inside the shim plus one attribute at the call site.",
+  "isonimGpuiChanges": {
+   "rust/gpui-nim-shim/src/render_sync.rs": "INLINE_TEXT_RUNS_ATTRIBUTE ('data-inline-text-runs'), struct InlineTextRun{len,color}, fusable_child_text(), inline_text_runs(); GpuiStyles gained PartialEq+Eq (every field is Option<String>).",
+   "rust/gpui-nim-shim/src/gpui_app.rs": "build_plan_div fuses the children when the node declares itself an inline formatting context; new fused_inline_text() maps each span's colour to a HighlightStyle over a byte range. All event, pointer and window-region wiring is reached identically either way.",
+   "src/isonim_gpui/renderer.nim": "inlineTextRunsAttribute, documented, following the windowRegionAttribute precedent."
+  },
+  "codetracerChanges": {
+   "src/frontend/gpui/app/leaves.nim": "InlineTextRunsAttribute re-exported, and set on the editor row's CODE span in the highlighted branch only."
+  },
+  "safetyRule": "A span is fused only if it is text and nothing else: no handler, no window region, and no styling beyond color and flex-shrink. The style test is BY DIFFERENCE FROM THE DEFAULT (clone, blank the two allowed fields, compare to GpuiStyles::default()) rather than by an allow-list, so a property added to GpuiStyles later cannot silently start being fused away - it makes the row fall back instead. Fusing is all-or-nothing per container.",
+  "theRenderPlanIsUNCHANGED": "The fusion happens in render_plan_to_gpui/build_plan_div, which CONSUME the plan. build_render_plan is untouched, so every token span, its EditorTokenClassAttribute and its colour are still in the plan a test or an introspection reader sees; the code span merely gains one attribute.",
+  "unitTests": {
+   "added": 9,
+   "names": [
+    "inline_runs_fuse_a_declared_highlighted_row",
+    "inline_runs_decline_a_row_that_did_not_declare_itself",
+    "inline_runs_decline_a_row_whose_span_has_a_handler",
+    "inline_runs_decline_a_row_whose_span_has_box_styling",
+    "inline_runs_decline_a_row_whose_span_is_a_window_region",
+    "inline_runs_keep_an_uncoloured_span_as_an_inherited_run",
+    "inline_runs_measure_multibyte_spans_in_bytes",
+    "inline_runs_decline_an_empty_container",
+    "inline_runs_honour_a_negative_declaration"
+   ],
+   "negativeControl": "inline_runs_decline_a_row_that_did_not_declare_itself builds the IDENTICAL row without the attribute and requires None, so the fusing is shown to be driven by the declaration rather than happening to every container.",
+   "suite": "cargo test --lib: 195 passed, 0 failed (186 before this pass + the 9 new)."
+  },
+  "whatWasDEFERRED": {
+   "theInlineVALUEchips": "The editor's inline-value annotation is a row of CHIPS, each a box with a background, padding and a corner radius, and some carry a 30px 'view more' button with an <img>. Those are real boxes and correctly decline fusion. Within a chip the name and value are text-only siblings and DO still ceil independently.",
+   "theEvidenceThatThisIsWhatIsLeft": "After the fix, editorWithMark has 16 of 21 ladder rows at exactly 0.000% and 5 rows left at 0.95-1.27%; state has 16 of 24 at 0.000% and 8 left. Those residual rows are the ones carrying inline values.",
+   "theRemedyIfItIsWanted": "Declare each chip an inline formatting context and widen the fusable style set to font-weight and font-style, which HighlightStyle already carries as Option<FontWeight>/Option<FontStyle>. Not done here: it is a wider change to the safety rule, and the brief's scope control asks for the editor code rows first.",
+   "alsoNotDone": "ISONIM-GPUI-ISSUE-F (letter-spacing) was informational and was not chased, as instructed."
+  }
+ },
+ "theDriftLadder": {
+  "_rule": "FLIP_DIR has no default and was set explicitly for each reading. BOTH readings were produced by THIS pass with the SAME instrument: the BEFORE buffers are the pre-change captures, copied to flip-before/ before anything was rebuilt, and decoded by the prior pass's compare.sh run; the AFTER buffers were decoded by this pass's compare.sh. The before figures are therefore re-measured here, not quoted.",
+  "instrument": "build/plat37-parity-2026-10-20/advance.py, pane-level column-ink profile, 60 device-px windows, MAXS=6.",
+  "selfControl": "electron-against-electron gave shift 0 in EVERY window of EVERY view, before and after (selfControlNonZeroWindows: 0). A non-zero self shift would have voided the reading.",
+  "editorWithMark": {
+   "before": [
+    0,
+    -1,
+    3,
+    0,
+    0,
+    1,
+    2,
+    3,
+    4,
+    6,
+    5
+   ],
+   "after": [
+    0,
+    -1,
+    3,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "slopeBeforePct": 0.97,
+   "slopeAfterPct": -0.076,
+   "perGlyphBeforeDevicePx": 0.1899,
+   "perGlyphAfterDevicePx": -0.0148,
+   "reading": "The entire monotone ramp is gone. The two early windows (-1 at x=326, +3 at x=356) are unchanged and were never part of the progressive ladder - they are a fixed local feature at the gutter/mark boundary, flat before and flat after."
+  },
+  "state": {
+   "before": [
+    0,
+    -1,
+    3,
+    0,
+    0,
+    1,
+    2,
+    2,
+    2,
+    4,
+    5
+   ],
+   "after": [
+    0,
+    -1,
+    3,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "slopeBeforePct": 0.727,
+   "slopeAfterPct": -0.076
+  },
+  "calltrace": {
+   "before": [
+    1,
+    0,
+    3,
+    0,
+    0,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3
+   ],
+   "after": [
+    1,
+    0,
+    3,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "slopeBeforePct": 0.303,
+   "slopeAfterPct": -0.212
+  },
+  "correlationImproved": "The tail windows' match improved where the ramp was removed, e.g. editorWithMark x=536 went 0.943 -> 0.995 and x=566 0.962 -> 0.990."
+ },
+ "thePerRowLadder": {
+  "instrument": "bandladder.py, the same search restricted to one text band at a time, only for bands whose two arms start within 3 px.",
+  "editorWithMark": {
+   "medianSlopeBeforePct": 0.833,
+   "medianSlopeAfterPct": 0.0,
+   "rowsAtExactlyZeroBefore": "4 of 21",
+   "rowsAtExactlyZeroAfter": "16 of 21",
+   "residualRows": "5 rows at 0.95-1.27%"
+  },
+  "state": {
+   "medianSlopeBeforePct": 0.833,
+   "medianSlopeAfterPct": 0.0,
+   "rowsAtExactlyZeroBefore": "7 of 24",
+   "rowsAtExactlyZeroAfter": "16 of 24",
+   "residualRows": "8 rows at 0.52-1.27%"
+  },
+  "calltrace": {
+   "medianSlopeBeforePct": 0.43,
+   "medianSlopeAfterPct": 0.369,
+   "rowsAtExactlyZeroBefore": "4 of 24",
+   "rowsAtExactlyZeroAfter": "10 of 24",
+   "note": "the least improved view; its editor pane carries proportionally more inline-value chips, which are not fused"
+  },
+  "theDiscreteSlopesAreGONE": "Before, the per-row slopes took the discrete values 0.000/0.278/0.833/1.071/1.290/1.667 that the diagnosis predicted from an integer number of spans per row. After, the modal value is exactly 0.000 and the survivors cluster at 0.95-1.27 - consistent with a residue in rows whose chips still ceil, not with a per-glyph advance difference."
+ },
+ "parityP1": {
+  "_rule": "CROP_PX=58 was derived from THIS pass's own capture records (titleBarPoints 29 x pointPixelScale 2.0, read from build/plat37-macos/*.capture.json), not inherited.",
+  "command": "CROP_PX=58 ./compare.sh state calltrace editorWithMark editor eventLog shell, in build/plat37-parity-2026-10-20",
+  "exit": 0,
+  "state": {
+   "mean": 0.08571545034646988,
+   "p50": 0.0,
+   "p90": 0.33855265378952026,
+   "p99": 0.9662694931030273,
+   "maxError": 0.990104079246521,
+   "fracOver0_10": 0.1825335648148148,
+   "fracOver0_25": 0.12061226851851851,
+   "fracOver0_50": 0.0716460262345679
+  },
+  "calltrace": {
+   "mean": 0.08858368545770645,
+   "p50": 0.0,
+   "p90": 0.3492356240749359,
+   "p99": 0.9676300287246704,
+   "maxError": 0.990104079246521,
+   "fracOver0_10": 0.18897241512345678,
+   "fracOver0_25": 0.12534452160493828,
+   "fracOver0_50": 0.07338136574074074
+  },
+  "editorWithMark": {
+   "mean": 0.08274901658296585,
+   "p50": 0.0,
+   "p90": 0.31934136152267456,
+   "p99": 0.9659109115600586,
+   "maxError": 0.990104079246521,
+   "fracOver0_10": 0.17696894290123458,
+   "fracOver0_25": 0.1157445987654321,
+   "fracOver0_50": 0.06886091820987654
+  },
+  "meanFracOver0_10": 0.18282497427983538,
+  "meanFracOver0_10Before": 0.18466345164609055,
+  "delta": -0.0018384773662551701,
+  "didItMove": "YES, and in the right direction, on all three views: state 0.18450347 -> 0.18253356, calltrace 0.19026775 -> 0.18897242, editorWithMark 0.17921914 -> 0.17696894. The mean fell 0.18466345 -> 0.18282497, a drop of 0.00183848 (about 1.0% of the metric).",
+  "honestReadingOfTheSize": "The ladder flattened almost completely while P1 moved only ~1%. That is the expected shape rather than a disappointment: P1 counts every pixel whose FLIP error exceeds 0.10, and the sub-pixel horizontal placement the ceil was corrupting is one contributor among several (antialiasing differences, the interface-face rasteriser, and the residual chip rows all still contribute). The ladder is the specific instrument for the specific defect; P1 is the aggregate. Both moved the right way, and NEITHER is claimed to be solved.",
+  "notComparable": [
+   "editor",
+   "eventLog",
+   "shell"
+  ],
+  "whyNotComparable": "extent mismatch: gpui 3456x2168 (cropped 3456x2110) vs electron 3840x2160 - the GPUI window is clamped by the display on every 'wide' viewport. That is G1, out of scope, and unchanged by this pass."
+ },
+ "theInterfaceFaceQuestion": {
+  "issue": "PLAT37-ISSUE-G, drafted by the 2026-10-19 pass: the INTERFACE face is a different FILE on the two arms - the stylesheet loads SpaceGrotesk WEB .ttf, the GPUI front-end registers SpaceGrotesk_OTF/*.otf - and the 'same outlines' claim had never been verified.",
+  "answer": "VERIFIED, AND THERE IS NO LAYOUT DEFECT. The two files agree exactly on the metrics that decide where interface text lands.",
+  "whyTheDivergenceIsFORCED": "src/frontend/gpui/design_fonts.nim:11-16 documents it: the WEB/fonts/*.ttf carry a broken name table whose family is the literal string 'false' (measured with fc-scan). CSS never notices because @font-face assigns the family itself, but a text system reads the family from the file, so GPUI cannot address those files by family at all. This is a deliberate, documented workaround, not an oversight - so there was no one-line resolution change to make.",
+  "measurement": {
+   "method": "A minimal sfnt parser read head.unitsPerEm, hhea.numberOfHMetrics, hmtx advances and the format-4 cmap from each file, and compared the advance of each of 73 ASCII characters NORMALISED TO THE EM.",
+   "unitsPerEm": {
+    "otf": 1000,
+    "webTtf": 1000
+   },
+   "container": {
+    "otf": "OTTO (CFF outlines)",
+    "webTtf": "TrueType (glyf outlines)"
+   },
+   "charactersCompared": 73,
+   "charactersDiffering": 0,
+   "controls": [
+    "A face against ITSELF: 0 of 73 differing (the probe does not invent differences).",
+    "OTF Regular against OTF Bold: 71 of 73 differing, e.g. 'I' 0.243 em vs 0.264 em (the probe CAN see a difference; a uniform 'identical' answer would otherwise be meaningless)."
+   ]
+  },
+  "theRemainingCaveat": "Only HORIZONTAL METRICS were compared - that is what decides glyph positions. The outline curves themselves were not compared, and CFF and glyf can rasterise with slightly different pixel coverage at the same size. The browser also prefers the .woff2 of the same WEB set over the .ttf; the .woff2 was not decoded (no brotli to hand), so this measurement assumes the WEB .ttf and .woff2 are the same font in different containers.",
+  "recommendation": "Close PLAT37-ISSUE-G as 'no layout defect, divergence forced and documented', keeping the rasterisation caveat as the open remainder."
+ },
+ "buildOutcomes": {
+  "isonimGpuiShims": {
+   "command": "cd isonim-gpui && nix develop --command just plat37-shims",
+   "said": "OK: three shims in rust/target/plat37",
+   "whyREQUIRED": "ci/lib/build-freshness.sh:114-116 excludes the cdylib from the GPUI input digest BY DESIGN, so the gate cannot see a stale shim; it has to be rebuilt by hand after any shim change.",
+   "rebuildControl": "windowed cdylib 66,891,976 B -> 67,018,504 B, so the rebuilt artefact is demonstrably not the old one. Symbol count unchanged at 114, as expected for a change that adds no FFI entry point.",
+   "sizes": {
+    "windowed": 67018504,
+    "headless": 71259544,
+    "featureless": 1642568
+   }
+  },
+  "shimChecks": {
+   "check_bindings.sh": 0,
+   "check_exported_symbols.sh": 0,
+   "check_gpui_pin.sh": "0 (gpui-pre 0.3.5)"
+  },
+  "gpuiArm": {
+   "command": "cd codetracer && nix develop --command just build-gpui",
+   "exit": 0,
+   "artefact": "build/bin/codetracer-gpui 5,935,040 B -> 5,935,088 B",
+   "inputDigest": "452a0c0ef1a4 -> 6eb9702c7593"
+  },
+  "electronArm": {
+   "built": true,
+   "whyItHADtoBeRebuiltThisPass": "UNLIKE the previous pass. bf_electron_roots lists src/frontend, and this pass's codetracer change is src/frontend/gpui/app/leaves.nim - inside it. The digest moved 867b0dcdd46f -> f930c17c5898 and electron-assert refused until the bundle was rebuilt. The roots are a deliberate over-approximation: Electron never compiles the gpui/ subtree.",
+   "command": "nix develop --command env REPROBUILD_PACKAGES_ROOT=<workspace reprobuild-packages @9f981af> REPRO_DAEMON=off REPRO_NIM_COMPILER=/nix/store/4m0ffd42r0qn0rzpjjibdrb97kadc5j2-nim-unwrapped-2.2.4/bin/nim CODETRACER_REPROBUILD_TARGET=ct-binary just build-once",
+   "exit": 0,
+   "scopingIsADEVIATION": "CODETRACER_REPROBUILD_TARGET=ct-binary IS A DEVIATION from an unscoped `just build-once`, and is flagged as one, exactly as earlier passes flagged it. It is build-once.sh's own documented knob and exists to step past two pre-existing actions outside the Electron bundle's closure (dmg, docs-book-assets).",
+   "aSTRONGcontrolFellOut": "The Electron ARTEFACT digest is 770cd93d8e74 - IDENTICAL to the previous pass's. The inputs moved but the built bundle is byte-identical, which independently confirms that the leaves.nim change is GPUI-only and cannot have moved the Electron arm's pixels.",
+   "builtBy": "repro 0.1.3, NOT the 0.2.6 on PATH and NOT $REPROBUILD_REPRO - REPROBUILD-ISSUE-D recurred this pass."
+  }
+ },
+ "freshnessGates": {
+  "_rule": "Both gates were run INSIDE the dev shell, and both were re-run after the Electron rebuild.",
+  "gpuiAssert": {
+   "command": "nix develop --command bash ci/lib/build-freshness.sh assert",
+   "exit": 0,
+   "said": "built from THIS tree (inputs 6eb9702c7593, artefact 1abbdcf94089)"
+  },
+  "electronAssertFirst": {
+   "exit": 1,
+   "said": "STALE ELECTRON BUNDLE - artefact inputs 867b0dcdd46f vs this tree's f930c17c5898",
+   "note": "this refusal is the gate working correctly, and is why the bundle was rebuilt"
+  },
+  "electronAssertAfterRebuild": {
+   "exit": 0,
+   "said": "built from THIS tree (inputs f930c17c5898, artefact 770cd93d8e74)"
+  }
+ },
+ "laneOutcomes": {
+  "gpui": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<src/build-debug-repro/bin/replay-server> bash ci/test/plat37-macos-window-capture.sh",
+   "exit": 0,
+   "refused": 0,
+   "shimProbe": "the lane's own two-polarity staged-shim probe passed: font_kit=1, textless-refusal=0, so the windowed shim it swapped in is a real text-rendering build"
+  },
+  "electron": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<src/build-debug-repro/bin/replay-server> bash ci/test/plat37-macos-electron-capture.sh",
+   "exit": 0,
+   "note": "exit 0 this pass; the previous pass's second-run `shell` refusal did not recur"
+  }
+ },
+ "instrumentControls": {
+  "advanceSelfControl": "0 non-zero windows in every view, before and after.",
+  "ceilProbeControls": "see whetherANEWERgpuiPreDropsTheCeil.controls - three of them, including an absent sentinel.",
+  "faceProbeControls": "self=0 differing, Regular-vs-Bold=71 differing.",
+  "shimRebuildControl": "cdylib byte size changed, so a stale-shim reading is excluded.",
+  "electronByteIdentity": "the Electron artefact digest is unchanged, so the reference arm provably did not move.",
+  "theONEthatFAILED": {
+   "instrument": "rowextent.py",
+   "whatHappened": "It declared ITSELF broken, in BOTH the before and the after run: its planted-ratio control recovered 1.040 as 1.0347, which it judges BAD, and it printed 'CONTROL verdict: BROKEN -- rows below are void'.",
+   "consequence": "Its numbers are NOT cited as evidence anywhere in this file, in either direction. It happens to have moved the way the fix predicts (band 14 G/E 1.0130 -> 1.0050), and that is recorded here only so a later pass is not surprised to find it; it carries no weight.",
+   "note": "This is the same instrument the 2026-10-19 pass recorded as its theOneThatFAILED. It is still broken and is still worth repairing or retiring."
+  }
+ },
+ "regressionChecks": {
+  "cargoTestLib": "195 passed, 0 failed (was 186; the 9 new ones are the fix's).",
+  "gpuiPlanTest": {
+   "what": "src/frontend/gpui/tests/test_plat50_gpui_plan.nim, compiled and run against the NEW binary - it drives the shipped codetracer-gpui and reads the window plan, so it is the closest thing to a plan-invariance check.",
+   "result": "15 of 16 tests OK, including every editor, call-trace, event-log, variables and chrome suite. 1 test failed and the derived assertion-count self-check failed with it (CHECKS 100 vs ExpectedAssertions 108).",
+   "whyTheFailureIsNOTthisPassSchange": "The failing test is 'PLAT-50 GPUI: Files', and the assertion that fired is `ck mr.len > 0` where mr = multiRoot(). multiRoot() (line 82) scans test-logs/tui-fixtures for a directory whose name starts with 'multi_root-'; this host has only calc-2f0db4f45192, so it returns the empty string. The test's own `if mr.len > 0:` guard then skips its remaining 8 assertions, which is exactly the 108-100 shortfall. It is a MISSING FIXTURE on this host, environmental and pre-existing, and has nothing to do with text, spans or fusion."
+  }
+ },
+ "carriedForwardNotMeasured": {
+  "_rule": "Stated so a later pass does not read silence as a result. None of the following was measured this pass.",
+  "PLAT37-ISSUE-B": "The GPUI top bar is 1 pt short. Still drafted and UNFILED. Out of scope (it feeds editorRowsOf -> corpus-pins.json).",
+  "ISONIM-GPUI-ISSUE-C": "The macOS antialiasing override. The working-tree fix (fontconfig_rgba() returns None on macOS, with a platform-split unit test) is still uncommitted and was carried through this pass unchanged; it is in every build and capture reported here.",
+  "REPROBUILD-ISSUE-D": "build-once prefers another repro over the one on PATH and over $REPROBUILD_REPRO. RECURRED this pass: the Electron bundle was built by repro 0.1.3 although PATH was led by the local 0.2.6 and REPROBUILD_REPRO named it. Still drafted and UNFILED.",
+  "ISONIM-GPUI-ISSUE-E": "NO LONGER CARRIED - this pass fixed it. See theFixAsLanded. It should be filed as a FIXED issue, or closed with the fix, rather than re-drafted as open.",
+  "ISONIM-GPUI-ISSUE-F": "letter-spacing is parsed and reported but never applied, and gpui-pre has none at all. Informational; the brief said not to chase it, and it was not chased. Still drafted and UNFILED.",
+  "PLAT37-ISSUE-G": "ANSWERED this pass by direct measurement - see theInterfaceFaceQuestion. Recommend closing as 'no layout defect'; the CFF-vs-glyf rasterisation caveat and the undecoded .woff2 remain open remainders.",
+  "theFontReportProbes": "The uncommitted font-resolution probes in both capture lanes, and the gpui_font_report ABI they read, were carried through unchanged and are in every capture here."
+ },
+ "whatIcouldNOTdo": [
+  "No commits and no pushes were made, as instructed, so every change reported here is working-tree only, in codetracer and isonim-gpui.",
+  "codetracer-pm was NOT synced: local ee8b69f6ff, remote latest c6ce2ff72e. Nothing in this pass touches it and no issue was filed, so syncing it would have been an unnecessary action in a repo I was not working in. The six drafted issues remain drafted and unfiled.",
+  "The inline-value CHIPS are still unfused, so 5 of 21 (editorWithMark) and 8 of 24 (state) ladder rows still drift at about 1.0-1.3%. The remedy is written down in theFixAsLanded.whatWasDEFERRED.",
+  "rowextent.py could not be used as evidence: it declares its own control broken, before and after.",
+  "The three 'wide' views stay notComparable (G1), so P1 is a three-view mean, as in previous passes.",
+  "The WEB .woff2 that the browser actually prefers was not decoded; the face comparison used the WEB .ttf beside it.",
+  "No second independent capture run was made this pass (the previous pass's P1 was measured twice). The before/after comparison rests on one capture of each arm, though the pre-change buffers were preserved and re-measured with the same instrument.",
+  "reprobuild's remote agents branch moved from f974c2e74a to b1bf8d2e19 while this pass ran. The checkout was left at f974c2e74a on purpose so the tool would not change under the measurements; nothing here builds or reads reprobuild source."
+ ],
+ "upstreamRecheckedAtTheEnd": {
+  "_method": "git ls-remote only - no fetch into any shared bare clone, no gc, no checkout, no stash. Checked at the START and again at the END of the pass.",
+  "codetracer": "local 025bd9981d == remote agents 025bd9981d (unchanged across the pass)",
+  "isonimGpui": "local ab520c05fc == remote agents ab520c05fc (unchanged across the pass)",
+  "reprobuild": "MOVED DURING THE PASS: local/checked-out f974c2e74a, remote agents was f974c2e74a at the start and is b1bf8d2e19 at the end.",
+  "reprobuildWhyItDoesNotAffectANYreadingHere": "Nothing in this pass builds reprobuild or reads its source. The repro used throughout is the ALREADY-BUILT binary at reprobuild/build/bin/repro (repro 0.2.6), which sits in the working tree and was not rebuilt, re-linked or replaced at any point - and the one build that actually consumed a repro, the Electron bundle, was built by repro 0.1.3 anyway (REPROBUILD-ISSUE-D). The checkout was NOT synced to b1bf8d2e19, deliberately: syncing mid-pass would have changed the tool under the measurements.",
+  "codetracerPm": "local ee8b69f6ff, remote latest c6ce2ff72e - MOVED before the pass began and still unsynced at the end"
+ }
+}

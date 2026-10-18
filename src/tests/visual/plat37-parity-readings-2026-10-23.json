@@ -1,0 +1,648 @@
+{
+ "_comment": [
+  "PLAT-37 cross-renderer parity readings, 2026-10-23. A MEASUREMENT pass: no source was changed,",
+  "no git commit and no push was made.",
+  "THE HEADLINE: 19.65% of the parity error this campaign has been reporting is the HARNESS's own",
+  "vertical misregistration. CROP_PX has been 58 and the measured registration constant is 56.",
+  "Correcting it takes the three-view mean from 0.17044464 to 0.13695216 with no product change at all,",
+  "and it REFUTES the standing 'residual is generic to drawn text' finding: at the correct crop the",
+  "six text regions spread 6.26x (CV 0.485) instead of 1.41x (CV 0.102)."
+ ],
+ "schemaVersion": 1,
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. One macOS host, one display.",
+ "measuredAt": "2026-10-23",
+ "subject": {
+  "codetracer": "751cbc32852690fa925f0203ec4be4a7e8b639cf (agents), clean. NOT MODIFIED; the only artefact added is this readings file. Its push remains blocked by the pre-existing flake_lock_stale on nix-blockchain-development, awaiting a human decision.",
+  "isonimGpui": "c0f674776770063c0f4ea2affbe25454d87310d5 (agents), clean. NOT MODIFIED.",
+  "codetracerPm": "1cee45e7bd0e14a1b15e6710d6879b9c69c1aeae (latest), clean. Not modified.",
+  "reprobuild": "18c9229ad3c7a738ad59e4b6d33c062511f0bfe8 (agents), clean. `git merge-base --is-ancestor 18c9229ad HEAD` exit 0.",
+  "reproNotRebuiltAndNotUsed": "The brief required a rebuild BEFORE USING repro. No repro verb was invoked and no commit was made this pass, so the stale-build hazard (the 18c9229ad commit hook stripping narHash) never arose. The local build at reprobuild/build/bin is dated 2026-10-18T02:46 against a clean tree whose HEAD commit is dated 2026-10-18T00:11.",
+  "noCommits": "This pass made no git commits and no pushes, as instructed."
+ },
+ "environment": {
+  "finding": "A TENTH consecutive pass found the environment unset. PATH was led by /nix/store/m5si3k2vccgw6prb245q3r634r5zy0cf-reprobuild-0.2.2/bin and all four variables were unset.",
+  "correctedTo": {
+   "PATH": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin prepended",
+   "RUNQUOTA_SOCKET": "/tmp/rq-adopt-501/runquota.sock, `test -S` exit 0",
+   "REPROBUILD_REPRO": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro",
+   "REPRO_BOOTSTRAP_CC": "/nix/store/vl936sd1vj8s008akm3gibkgyqk30qhz-clang-wrapper-21.1.8/bin/clang",
+   "REPRO_FOREIGN_ENV_BASH": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (GNU bash 5.3.9)"
+  },
+  "controlPair": "PASSED, with NO command between each probe and its `$?`. Under `env -i`, `#include <stdlib.h>` compiled with the wrapper (exit 0) and FAILED with the unwrapped clang-21.1.8 (exit 1, \"'stdlib.h' file not found\").",
+  "trapThatFired": "`stat -f` is GNU coreutils stat on this PATH, not BSD. It mis-parsed the BSD format string. GNU `stat -c` was used instead."
+ },
+ "theHeadline_THE_CROP_IS_WRONG": {
+  "claim": "CROP_PX has been 58 in every pass of this campaign. The MEASURED registration constant between the GPUI PNG and the Electron buffer is 56. The campaign has therefore been scoring a 2-device-pixel vertical misregistration it introduced itself.",
+  "howCROP58Arose": "CROP_PX was DERIVED, correctly as a derivation, from each pass's own capture records: titleBarPoints 29 x pointPixelScale 2.0 = 58. The derivation is sound; the input is wrong. The GPUI PNG's title bar is bright (row-mean 234.33) through row 55 and drops to 0.00 at row 56, so the band is 56 device px = 28 points, not 29.",
+  "theThreeIndependentConfirmations": {
+   "one_edgePairing": "Row-mean horizontal edges over the FULL frame height, paired by sign and proximity: K = gpuiPNGrow - electronRow has mode 56 (47 of 70 paired edges). It is a PURE TRANSLATION, not a scale: K mode is 56 in each third of the frame and the means are 56.474 (y<600), 56.250 (600<=y<1200), 56.538 (y>=1200), with no trend.",
+   "two_titleBarBoundary": "Decoding the uncropped 2880x1858 GPUI PNG directly, the title bar ends at row 56.",
+   "three_perPaneDy": "At CROP=56 the panes that previously read dy = -2 now read dy = 0.00 (pane:fileTree), -0.07 (pane:editor), -0.07 (editor:codeAndChips)."
+  },
+  "theCost": {
+   "threeViewMean_crop58": 0.17044464,
+   "threeViewMean_crop56": 0.13695216,
+   "delta": -0.03349248,
+   "deltaPercent": -19.65,
+   "perView": {
+    "state": [
+     0.16950328,
+     0.13213677
+    ],
+    "calltrace": [
+     0.17715567,
+     0.14745004
+    ],
+    "editorWithMark": [
+     0.16467496,
+     0.13126968
+    ]
+   }
+  },
+  "theCropSweep": "CROP=56 0.136952, CROP=57 0.159029, CROP=58 0.170445. Monotone, and 56 is the end of the admissible range rather than an interior minimum found by sliding -- which is why it was confirmed by the two NON-metric routes above rather than by the metric.",
+  "oneResidual": "At CROP=56 the status bar reads dy +0.97, so GPUI's content column is ~1 device px taller than Electron's. That is a separate, small, real difference and NOT a crop artefact; it is priced below.",
+  "whatThisDoesNOTinvalidate": "Every BEFORE/AFTER delta this campaign reported. Both arms of every A/B were cropped identically, so the misregistration is common-mode and cancels. What it invalidates is the ABSOLUTE level, the per-region decomposition, and the 'generic to drawn text' conclusion drawn from it."
+ },
+ "taskOne_theDecomposition": {
+  "question": "Re-run the per-region decomposition now that stem-darkening is gone. Is the error still uniform across regions?",
+  "instrument": "flipregion + inkcover from build/plat37-parity-2026-10-18b, reused unchanged so the two passes are comparable. One global FLIP error map per frame, aggregated into caller-supplied named rectangles; ink defined against each region's OWN modal colour.",
+  "positiveControl": "The BEFORE arm (18b GPUI buffers vs the byte-fixed Electron buffers) REPRODUCES the recorded 18b decomposition to 4 dp on every region of every view -- state pane:editor 2.0125, editor:gutter 2.0958; calltrace editor:gutter 2.3302, pane:calltrace 2.1413.",
+  "frameLevelControl": "flipdiff on the held-fixed buffers reproduces the recorded parityP1 to EVERY digit: 0.16950327932098766 / 0.1771556712962963 / 0.16467496141975307.",
+  "columnsExplained": {
+   "A_18b_crop58": "the 2026-10-18b baseline, before the advance/stem-darkening/font-weight fixes.",
+   "B_now_crop58": "current GPUI at the campaign's crop. THE COLUMN THE CAMPAIGN HAS BEEN REPORTING.",
+   "C_now_crop56": "current GPUI at the correct crop. THE HONEST COLUMN.",
+   "metric": "over-threshold pixels per REFERENCE ink pixel -- the ink-normalised figure that makes panes of different ink density comparable."
+  },
+  "perRegion": {
+   "chrome:topBar": {
+    "A_18b_crop58": {
+     "state": 4.1129,
+     "calltrace": 4.1129,
+     "editorWithMark": 4.1129
+    },
+    "B_now_crop58": {
+     "state": 4.0764,
+     "calltrace": 4.0764,
+     "editorWithMark": 4.0764
+    },
+    "C_now_crop56": {
+     "state": 3.4474,
+     "calltrace": 3.4474,
+     "editorWithMark": 3.4474
+    },
+    "inkRatio_C": {
+     "state": 1.4966,
+     "calltrace": 1.4966,
+     "editorWithMark": 1.4966
+    },
+    "shareOfError_C": {
+     "state": 0.06641,
+     "calltrace": 0.06053,
+     "editorWithMark": 0.06713
+    },
+    "fracOver0_10_C": {
+     "state": 0.20512,
+     "calltrace": 0.20512,
+     "editorWithMark": 0.20512
+    }
+   },
+   "pane:fileTree": {
+    "A_18b_crop58": {
+     "state": 0.9172,
+     "calltrace": 0.9172,
+     "editorWithMark": 0.9172
+    },
+    "B_now_crop58": {
+     "state": 0.8526,
+     "calltrace": 0.8526,
+     "editorWithMark": 0.8526
+    },
+    "C_now_crop56": {
+     "state": 0.4005,
+     "calltrace": 0.4005,
+     "editorWithMark": 0.4005
+    },
+    "inkRatio_C": {
+     "state": 1.0034,
+     "calltrace": 1.0034,
+     "editorWithMark": 1.0034
+    },
+    "shareOfError_C": {
+     "state": 0.01192,
+     "calltrace": 0.01087,
+     "editorWithMark": 0.01205
+    },
+    "fracOver0_10_C": {
+     "state": 0.01001,
+     "calltrace": 0.01001,
+     "editorWithMark": 0.01001
+    }
+   },
+   "pane:editor": {
+    "A_18b_crop58": {
+     "state": 2.0125,
+     "calltrace": 2.0081,
+     "editorWithMark": 1.8719
+    },
+    "B_now_crop58": {
+     "state": 1.6628,
+     "calltrace": 1.7724,
+     "editorWithMark": 1.5364
+    },
+    "C_now_crop56": {
+     "state": 0.4602,
+     "calltrace": 1.0482,
+     "editorWithMark": 0.5017
+    },
+    "inkRatio_C": {
+     "state": 0.9847,
+     "calltrace": 0.8341,
+     "editorWithMark": 0.9737
+    },
+    "shareOfError_C": {
+     "state": 0.07011,
+     "calltrace": 0.15929,
+     "editorWithMark": 0.07774
+    },
+    "fracOver0_10_C": {
+     "state": 0.04686,
+     "calltrace": 0.11569,
+     "editorWithMark": 0.05217
+    }
+   },
+   "pane:state": {
+    "A_18b_crop58": {
+     "state": 1.8512,
+     "calltrace": 1.9342,
+     "editorWithMark": 1.8151
+    },
+    "B_now_crop58": {
+     "state": 1.7274,
+     "calltrace": 1.7949,
+     "editorWithMark": 1.6936
+    },
+    "C_now_crop56": {
+     "state": 1.0906,
+     "calltrace": 1.0602,
+     "editorWithMark": 1.056
+    },
+    "inkRatio_C": {
+     "state": 0.984,
+     "calltrace": 0.9927,
+     "editorWithMark": 0.9828
+    },
+    "shareOfError_C": {
+     "state": 0.1923,
+     "calltrace": 0.16619,
+     "editorWithMark": 0.17848
+    },
+    "fracOver0_10_C": {
+     "state": 0.2155,
+     "calltrace": 0.20892,
+     "editorWithMark": 0.20004
+    }
+   },
+   "pane:calltrace": {
+    "A_18b_crop58": {
+     "state": 2.1084,
+     "calltrace": 2.1413,
+     "editorWithMark": 2.1084
+    },
+    "B_now_crop58": {
+     "state": 2.034,
+     "calltrace": 2.0657,
+     "editorWithMark": 2.034
+    },
+    "C_now_crop56": {
+     "state": 2.0271,
+     "calltrace": 2.0729,
+     "editorWithMark": 2.0272
+    },
+    "inkRatio_C": {
+     "state": 0.9913,
+     "calltrace": 0.9783,
+     "editorWithMark": 0.9913
+    },
+    "shareOfError_C": {
+     "state": 0.4388,
+     "calltrace": 0.40072,
+     "editorWithMark": 0.44353
+    },
+    "fracOver0_10_C": {
+     "state": 0.36514,
+     "calltrace": 0.36773,
+     "editorWithMark": 0.36515
+    }
+   },
+   "pane:eventLog": {
+    "A_18b_crop58": {
+     "state": 1.7285,
+     "calltrace": 1.7285,
+     "editorWithMark": 1.7285
+    },
+    "B_now_crop58": {
+     "state": 1.6255,
+     "calltrace": 1.6255,
+     "editorWithMark": 1.6255
+    },
+    "C_now_crop56": {
+     "state": 2.2169,
+     "calltrace": 2.2169,
+     "editorWithMark": 2.2169
+    },
+    "inkRatio_C": {
+     "state": 1.0612,
+     "calltrace": 1.0612,
+     "editorWithMark": 1.0612
+    },
+    "shareOfError_C": {
+     "state": 0.15122,
+     "calltrace": 0.13782,
+     "editorWithMark": 0.15285
+    },
+    "fracOver0_10_C": {
+     "state": 0.10694,
+     "calltrace": 0.10694,
+     "editorWithMark": 0.10694
+    }
+   },
+   "chrome:statusBar": {
+    "A_18b_crop58": {
+     "state": 1.0918,
+     "calltrace": 1.0752,
+     "editorWithMark": 1.0663
+    },
+    "B_now_crop58": {
+     "state": 1.0333,
+     "calltrace": 1.0291,
+     "editorWithMark": 1.0201
+    },
+    "C_now_crop56": {
+     "state": 1.33,
+     "calltrace": 1.3204,
+     "editorWithMark": 1.3161
+    },
+    "inkRatio_C": {
+     "state": 1.1325,
+     "calltrace": 1.1306,
+     "editorWithMark": 1.1345
+    },
+    "shareOfError_C": {
+     "state": 0.06368,
+     "calltrace": 0.05745,
+     "editorWithMark": 0.06295
+    },
+    "fracOver0_10_C": {
+     "state": 0.29689,
+     "calltrace": 0.29584,
+     "editorWithMark": 0.29284
+    }
+   },
+   "editor:gutter": {
+    "A_18b_crop58": {
+     "state": 2.0958,
+     "calltrace": 2.3302,
+     "editorWithMark": 2.095
+    },
+    "B_now_crop58": {
+     "state": 1.8736,
+     "calltrace": 2.1227,
+     "editorWithMark": 1.8581
+    },
+    "C_now_crop56": {
+     "state": 1.5853,
+     "calltrace": 1.9387,
+     "editorWithMark": 1.7319
+    },
+    "inkRatio_C": {
+     "state": 1.0266,
+     "calltrace": 0.9631,
+     "editorWithMark": 1.0051
+    },
+    "shareOfError_C": {
+     "state": 0.01337,
+     "calltrace": 0.01795,
+     "editorWithMark": 0.01469
+    },
+    "fracOver0_10_C": {
+     "state": 0.06786,
+     "calltrace": 0.09417,
+     "editorWithMark": 0.07271
+    }
+   },
+   "editor:codeAndChips": {
+    "A_18b_crop58": {
+     "state": 2.0047,
+     "calltrace": 1.9761,
+     "editorWithMark": 1.8518
+    },
+    "B_now_crop58": {
+     "state": 1.6429,
+     "calltrace": 1.7376,
+     "editorWithMark": 1.5074
+    },
+    "C_now_crop56": {
+     "state": 0.3541,
+     "calltrace": 0.9599,
+     "editorWithMark": 0.391
+    },
+    "inkRatio_C": {
+     "state": 0.9807,
+     "calltrace": 0.8213,
+     "editorWithMark": 0.9709
+    },
+    "shareOfError_C": {
+     "state": 0.05675,
+     "calltrace": 0.14134,
+     "editorWithMark": 0.06305
+    },
+    "fracOver0_10_C": {
+     "state": 0.04144,
+     "calltrace": 0.12124,
+     "editorWithMark": 0.04689
+    }
+   }
+  },
+  "uniformity": {
+   "A_18b_crop58": {
+    "n": 18,
+    "min": 1.7285,
+    "max": 2.3302,
+    "spread": 1.3481,
+    "mean": 1.9661,
+    "CV": 0.0823
+   },
+   "B_now_crop58": {
+    "n": 18,
+    "min": 1.5074,
+    "max": 2.1227,
+    "spread": 1.4082,
+    "mean": 1.7744,
+    "CV": 0.1022
+   },
+   "C_now_crop56": {
+    "n": 18,
+    "min": 0.3541,
+    "max": 2.2169,
+    "spread": 6.2607,
+    "mean": 1.3864,
+    "CV": 0.4845
+   }
+  },
+  "theANSWER": {
+   "atTheCampaignCrop": "Still broadly uniform, slightly LESS so than before: the six text regions spread 1.348x (CV 0.082) at 18b and 1.408x (CV 0.102) now, band 1.507-2.123. Read from this column alone the finding 'a cause generic to drawn text' survives, and pane:calltrace is the mild standout (it improved least, x0.965 against x0.838-0.940 elsewhere).",
+   "atTheCORRECTcrop": "THE UNIFORMITY IS GONE. Spread 6.261x, CV 0.485, band 0.354-2.217. editor:codeAndChips collapses from 2.005 (18b) to 0.354, pane:fileTree to 0.401, pane:editor to 0.460-1.048 -- while pane:calltrace barely moves (2.108 -> 2.034 -> 2.027) and pane:eventLog gets WORSE (1.728 -> 1.625 -> 2.217).",
+   "soTheSTANDINGFINDINGisREFUTED": "'The residual is a cause generic to drawn text' was an artefact of the 2-px misregistration, which applied equally to every text region and so made them look alike. With it removed, the error is CONCENTRATED in particular panes and the best-registered text region is nearly clean.",
+   "whyEventLogAndStatusBarGOTWORSE": "Their own offsets were partially CANCELLED by the harness's -2. pane:eventLog's true offset is +4.33 px and chrome:statusBar's is +0.97; subtracting 2 from each flattered them."
+  }
+ },
+ "taskTwo_theCodeColumnResidual": {
+  "question": "Characterise what the code column's per-pixel difference now consists of: residual sub-pixel phase, vertical placement, hinting, or coverage/gamma. Measure, do not infer.",
+  "theANSWER": "VERTICAL PLACEMENT, and nothing else that is measurable. It was never phase, and it is not coverage. With vertical registration corrected the code column is the CLEANEST text region in the frame.",
+  "horizontalPhase": {
+   "instrument": "subpix2.py -- windowed normalised-SSD minimiser over the column-ink profile, sub-pixel by direct evaluation at 0.01 px. It REPLACES a parabolic-NCC refinement that FAILED its own control.",
+   "theProbeThatBroke": "The first instrument refined the integer NCC peak by parabolic interpolation. Its electron-vs-itself self-control drifted to -0.367 px and manufactured slopes up to +0.40%/px ON IDENTICAL DATA -- the same order as the 0.37-0.59% drift under investigation. The NCC denominator moves with the shift, so the parabola is skewed. RECORDED because a later pass could reach for the same refinement.",
+   "controls": "selfZero dxMean EXACTLY 0.0000 and slope EXACTLY 0.00000 in all 27 bands; planted +1.0 px recovered [0.9333, 1.0000]; planted +0.5 px recovered [0.4582, 0.6025]. Slope noise floor +-0.065%/px.",
+   "result": "Flat rows are registered to |dxMean| <= 0.03 px with a dx span of 0.24 px over the whole row. Median |dxMean| 0.016-0.095 px across the three views. HORIZONTAL REGISTRATION IS ESSENTIALLY PERFECT and there is no residual sub-pixel phase to recover."
+  },
+  "coverageAndGamma": {
+   "inkRatio": "Closed by the stem-darkening fix. gpui/electron ink ratio moved from 1.05-1.09 at 18b to 0.98-1.01 now: pane:fileTree 1.0477 -> 1.0034, chrome:statusBar 1.0524 -> 1.1325 (see caveat), pane:calltrace 1.0863 -> 0.9913, editor:gutter 1.1752 -> 1.0266.",
+   "theToneOracle": "A per-channel global histogram match of GPUI onto Electron -- monotone, PHASE-BLIND, and ALLOWED TO CHEAT by being fitted on the very frame it is scored against. Control: matching Electron onto itself returned a BYTE-IDENTICAL buffer.",
+   "result": "IT MAKES PARITY WORSE IN EVERY VIEW. Whole frame: state +2.00%, calltrace +34.01%, editorWithMark +7.68%. Scoped to the code-column crop and fitted on that crop -- the fairest possible version -- it is still worse: +1.00%, +77.67%, +13.22%.",
+   "soTheCONCLUSION": "Coverage/gamma/stem weight is CLOSED. A cheating oracle cannot improve it, so no real tone fix can."
+  },
+  "verticalPlacement": {
+   "instrument": "subpixy.py -- the same zero-biased estimator on the code column's ROW profile. Controls: self [0.0]; planted +1.0 -> 1.0; planted +0.5 -> ~0.5.",
+   "atTheCampaignCrop": "dy = -2.0 device px in 46 of 54 windows. dyMean -1.876 (state), -2.656 (calltrace), -1.840 (editorWithMark). Band detection, an entirely independent mechanism, agreed: dTop = -2 in 24/25, 14/25 and 21/22 bands.",
+   "atTheCORRECTcrop": "dyMean -0.089 (state), -0.025 (editorWithMark). GONE. calltrace is -0.890 because of its own pitch error, below.",
+   "soTheCODECOLUMNresidual": "editor:codeAndChips falls to 0.354 / 0.960 / 0.391 over-threshold pixels per reference ink pixel, from 2.005 at 18b. Its dy is -0.07, its dx +0.02, its ink ratio 0.9807, and tone cannot improve it. What remains is pure rasteriser shape difference."
+  }
+ },
+ "taskThree_theSevenChiplessDriftingCalltraceRows": {
+  "question": "The seven chipless drifting rows in calltrace (0.37-0.59% slope) are unexplained. What do they have in common?",
+  "theANSWER": "THEY DO NOT DRIFT, AND THEY SHARE NOTHING ABOUT THEIR TEXT. They share ONE sparse off-text element -- Monaco's overview-ruler left border -- in the only window of the row that the ladder's gate admitted past the end of the text. The 'drift' is an artefact of bandladder.py's window gate.",
+  "theLadderIsUnchanged": "Re-run on the current buffers the per-row ladder is essentially identical to the 2026-10-21 record: two slopes moved (calltrace band 18 0.893 -> 0.992, state band 14 1.250 -> 1.270) and three dx0 flipped -1 -> 0. The font-smoothing change moved ink weight, not glyph positions.",
+  "whatTheSUBPIXELseriesSHOWS": "The drifting rows are not gradual. Their dx series reads 0.24, 0, 0, 0, ..., 0, JUMP. For six calltrace rows (bands 3, 5, 6, 7, 8, 17) and state band 22 the jump is EXACTLY +2.500 in the LAST window -- the same value in seven independent rows, which is the signature of one shared feature, not of accumulation.",
+  "theGateIsTheBug": "bandladder.py admits a 60-px window if ANY single column in it exceeds PIX=40. Measured per-window ink mass as a fraction of each row's own median window mass: the terminal window of every one of those rows carries 0.05-0.12. The window sequence also JUMPS (x ... 380, 410, then 500), because the intervening windows are blank. One near-empty window at the end of a flat run is then regressed against ten or eleven flat ones, and the slope is whatever the row's length makes it -- which is why the slopes are quantised by WINDOW COUNT (+0.369 over 7 windows, +0.502 over 5, +0.517 over 4) rather than by drift.",
+  "theSHAREDELEMENT": {
+   "measured": "At profile x 534 (device 1266, point 633.0) Electron draws a ONE-device-pixel vertical hairline, colour #353535 on the editor ground #282828. GPUI draws it TWO device pixels wide at device 1268-1269 (point 634.0-634.5). Centroid difference +2.50 device px = +1.25 pt, identical on every affected row; GPUI's ink mass for it is exactly 2x Electron's (336->672, 378->756, 112->224). The pane's right border at device 1298-1300 is registered to dcx 0.00 on the same rows, which is the positive control that the pane geometry itself is aligned.",
+   "verticalExtent": "Electron inks 1375 of 1660 rows, GPUI 1538-1548 -- it is a continuous rule, not a per-row mark.",
+   "identification": "Monaco's overview-ruler left border (`editorOverviewRuler.border`).",
+   "theTwoDisagreeingConstants": {
+    "xOffset": "Electron 16 px from the pane's right edge = `width: 0.875rem` (14) + `margin-right: 0.125em` (2), codetracer/src/frontend/styles/components/text_editor.styl:274 and :247. GPUI 15, a literal, codetracer/src/frontend/gpui/app/leaves.nim:1965 `$(viewportPx - 15)`. GPUI is +1 pt right.",
+    "width": "Electron `canvasCtx.lineWidth = 1` on a canvas whose backing store is domWidth * pixelRatio, so ONE DEVICE PIXEL (src/public/dist/frontend_bundle.js:127674). GPUI `\"1px\"` -> parse_px -> gpui::px(1.0), and GPUI Pixels are LOGICAL POINTS, so TWO device pixels (leaves.nim:1967). The same numeral 1 in two different unit systems.",
+    "colour": "Electron's is Monaco's default #7f7f7f4d stroked centred on canvas x=0, so half is clipped: 0.302 x 0.5 over #282828 composites to #353535. GPUI hard-codes the composited result #353535 opaquely. Same rendered value, but the GPUI constant is a baked composite rather than a declared token.",
+    "verticalBase": "Electron top = verticalArrowSize (0), height = outerHeight - 2*verticalArrowSize. GPUI top = EditorTopPadPx (4, leaves.nim:1158), height = editorPaneHeightPx - 4. Different bases; this is the 1375 vs ~1540 inked rows."
+   },
+   "itsPRICE": "The five point-columns 632-636 carry shareOfError 0.0072-0.0080 and 8835-9181 over-threshold pixels, = 0.00170-0.00177 of P1 fracOver0_10. About 1.0% of the residual, and MORE THAN TWICE the gutter divergence's <=0.0008."
+  },
+  "theOtherPopulation": "The chip rows are real and different: state bands 11-15 and editorWithMark 17-21 step from ~0 to +3.8 and then +4.4 part-way along and HOLD it to the end of the row, at normal window mass. Those are genuine displaced elements, not a gate artefact."
+ },
+ "taskFour_theJUDGEMENT": {
+  "startingPoint": "0.17044464 as the campaign reports it; 0.13695216 once the harness crop is corrected.",
+  "perPaneRegistration": {
+   "instrument": "panereg.py -- one dy and one dx per pane from each pane's own row/column profile, same zero-biased estimator.",
+   "controls": "self dy = dx = 0.0 and planted +1 -> 1.0 for ALL NINE regions on BOTH axes.",
+   "measuredAtCrop56": {
+    "chrome:topBar": {
+     "dy": -0.35,
+     "dx": 1.57
+    },
+    "pane:fileTree": {
+     "dy": 0.0,
+     "dx": 0.27
+    },
+    "pane:editor": {
+     "dy": -0.07,
+     "dx": -0.06
+    },
+    "pane:state": {
+     "dy": -0.04,
+     "dx": 1.65
+    },
+    "pane:calltrace": {
+     "dy": 7.5,
+     "dx": 0.53
+    },
+    "pane:eventLog": {
+     "dy": 4.33,
+     "dx": -0.45
+    },
+    "chrome:statusBar": {
+     "dy": 0.97,
+     "dx": 1.39
+    },
+    "editor:gutter": {
+     "dy": 0.27,
+     "dx": -0.63
+    },
+    "editor:codeAndChips": {
+     "dy": -0.07,
+     "dx": 0.02
+    }
+   },
+   "reading": "pane:fileTree, pane:editor and editor:codeAndChips are registered to within 0.3 px on both axes. Three panes are NOT: pane:calltrace dy +7.50, pane:eventLog dy +4.33, pane:state dx +1.65, and chrome:statusBar dy +0.97 / dx +1.39."
+  },
+  "theShiftOracle": {
+   "what": "Each pane cropped out and its GPUI side shifted by the measured correction, rounded to integers, then re-scored. Per-pane crops avoid the seams a whole-frame shift would create.",
+   "results": {
+    "pane:eventLog": "dy -4: 0.108096 -> 0.056905. Frame-weighted gain +0.012776. THE LARGEST SINGLE CLOSABLE ITEM.",
+    "pane:state": "dx -2: 0.209088 -> 0.191707. Gain +0.002155.",
+    "chrome:statusBar": "dx -1 dy -1: 0.295399 -> 0.267016. Gain +0.001009.",
+    "pane:calltrace": "dy -8: 0.366308 -> 0.357843. Gain only +0.001058 DESPITE a +7.50 px offset -- which is the measurement that sent the next probe to the right place.",
+    "pane:fileTree_and_pane:editor": "already optimal at (0,0)."
+   },
+   "totalConstantRegistrationHeadroom": 0.01594
+  },
+  "theCALLTRACEpitchERROR": {
+   "why_noShiftFixesIt": "Because the offset is not constant. dy down the pane: 0.00, -0.09, 0.71, 1.32, 3.59, 3.96, 4.61, 6.50, 7.61, 8.00, 8.29, 9.29, 11.26, 11.81, 12.74. Self-control 0.0 in every window. Slope +0.02012 px per px = +13.52 px accumulated over the pane's 672 px.",
+   "theDIRECTconfirmation": "Band pitch measured straight off the row profile. Electron's calltrace rows sit at a regular alternating 50/51 device px (mean 50.6 = 25.3 pt); GPUI's jitter 48-55. Regression pitch over the first 14 bands: Electron 53.3275 px, GPUI 54.4835 px, ratio 1.02168, difference +1.156 device px PER ROW.",
+   "theDIAGNOSIS": "GPUI rounds each calltrace row's height independently -- hence the 48-55 jitter -- where Chromium keeps a fractional accumulator and alternates 50/51 to hold the true 50.6. THIS IS THE VERTICAL ANALOGUE OF THE PER-ELEMENT ceil() ADVANCE DRIFT THAT WAS CLOSED HORIZONTALLY. The vertical axis in the list panes was never checked.",
+   "theEMPIRICALbound": "The pane split into four vertical quarters, error tracking accumulated dy exactly: Q1 (dy~0) 0.1082, Q2 0.3778, Q3 0.4489, Q4 (dy~12.7) 0.5267 -- a 4.87x gradient top to bottom. If the pitch were fixed and the pane behaved throughout as its top quarter already does, the pane goes 0.3654 -> 0.1082, worth +0.032136 of P1.",
+   "andProbablyEventLogToo": "pane:eventLog's windowed dy is noisy (its SELF-CONTROL hit the -12 rail in 3 of 15 windows, so its slope is NOT trustworthy and is not quoted), but its constant-offset gain is large and solid. Whether it also carries a pitch error is NOT MEASURED."
+  },
+  "theACCOUNTING": {
+   "asReported_crop58": 0.17044464,
+   "minus_harnessCropFix": -0.03349248,
+   "minus_perPaneConstantRegistration": -0.01594,
+   "minus_calltracePitchFix": -0.032136,
+   "projectedFloor": 0.0889,
+   "inWords": "Of the 0.17044 the campaign reports, roughly 0.0815 -- just under HALF -- is attributable to causes that are identified, measured and closable, and NONE of them is a rasteriser difference. 0.0335 of that is the harness's own crop constant and costs no product change at all."
+  },
+  "theIRREDUCIBLEFLOOR": {
+   "howItIsEstimated": "From the regions that are now PROVEN clean on every other axis: registered to within 0.3 px on both axes, ink ratio 0.98-1.00, and refractory to a cheating tone oracle. Whatever error those still carry is rasteriser shape and nothing else.",
+   "measured": "editor:codeAndChips 0.354 over-threshold pixels per reference ink pixel (state view), pane:fileTree 0.401, pane:editor 0.460. Against the 1.966 pooled mean at 18b.",
+   "frameLevel": "pane:fileTree scores fracOver0_10 0.0100 and pane:editor 0.0464 in the state view. A frame in which every pane were as well registered as pane:editor already is would land in the region of 0.03-0.05.",
+   "soTheANSWER": "The irreducible CoreText-vs-Skia floor is roughly 0.03-0.05, NOT 0.17 and not 0.089. The residual is NOT dominated by anything inherent to two rasterisers. It is dominated by discrete geometry defects, three of which are now located to a pane and one to two named constants."
+  },
+  "theRECOMMENDATION": "CONTINUE, and do the cheap half first. The single highest-value action is a one-line harness change (CROP_PX 58 -> 56, and fix whatever reports titleBarPoints as 29), which recovers 19.65% of the reported error with no product change and, more importantly, stops every future pass from measuring against a 2-px offset. Then pane:eventLog's +4.33 px (+0.0128) and the calltrace row pitch (+0.0321). Only after those is it worth asking what is left, because every conclusion drawn from the current absolute level -- including 'generic to drawn text' -- was shaped by the misregistration."
+ },
+ "instrumentControls": {
+  "gpuiLaneIsBitDeterministic": "The 2026-10-23 frames-retained PNGs, cropped at 58, are BYTE-IDENTICAL to the 2026-10-22 flip-retained GPUI buffers on all three views (sha256 prefixes 02707167ab90da1a, b08922b7c70e8878, bb4aada59604f10e). The GPUI side of every before/after here is the same state that produced the recorded 0.17044463735.",
+  "electronBuffersHeldByteFixed": "state affcd765098f, calltrace 387d22509b47, editorWithMark 439029b16bff -- the recorded hashes, matched exactly. NOT re-captured.",
+  "theDecompositionReproduces18b": "The BEFORE arm reproduces the recorded 18b per-region table to 4 dp on every region of every view.",
+  "frameMetricReproduces": "flipdiff reproduces the recorded parityP1 to every digit on all three views.",
+  "everyProbeCarriedAPlantedControl": "subpix2 (self 0 exactly, planted +1 and +0.5 recovered), subpixy (same), panereg (self 0 and planted +1 on 9 regions x 2 axes), tone (identity on a self-match, byte-identical output), yshift (dy=0 byte-identical), glyphcentroid (self dx 0, mass ratio 1.0, planted +1 recovered 1.0).",
+  "twoProbesFAILEDtheirControlsAndWereDISCARDED": [
+   "Parabolic-NCC sub-pixel refinement: self-control drifted to -0.367 px and manufactured slopes to +0.40%/px on identical data. Replaced by a normalised-SSD minimiser.",
+   "glyphcentroid.py index-matched segments: scored only 1 of 28 calltrace bands because GPUI's heavier ink merges glyphs and changes the segment COUNT. Its controls passed but n=1 is not a probe. Replaced. The failure is itself a coverage reading."
+  ],
+  "rowextentPy": "Still known-broken (planted 1.040 recovered as 1.0347). NOT used."
+ },
+ "PLAT37_ISSUE_K_REMEASURED": {
+  "finding": "The Electron lane's non-determinism on editorWithMark is REAL but TINY, and is now priced for the first time.",
+  "measured": "The 18b editorWithMark Electron buffer (sha 11c8ccf140bf) differs from the byte-fixed one (439029b16bff) in exactly 10 PIXELS, max channel delta 2, confined to y 82..87 and x 2085..2095 -- an 11x6 box, 0.000193% of the frame.",
+  "consequence": "It cannot move any figure in this report at 4 dp, which is why the BEFORE arm reproduced 18b exactly even on editorWithMark despite a different reference. The hold-the-buffers-fixed discipline remains correct, but the confound it guards against is ~2e-6 of the frame and should not be allowed to cost a pass any more effort than that."
+ },
+ "issuesDraftedThisPass": {
+  "policyConflictDeclared": "DRAFTED HERE AND UNFILED. This pass made no commits and no pushes, as instructed.",
+  "new": [
+   {
+    "id": "PLAT37-ISSUE-O",
+    "owningRepo": "codetracer-pm",
+    "title": "The PLAT-37 parity harness crops 58 device pixels where the measured registration constant is 56",
+    "severity": "HIGH -- it is 19.65% of the reported parity error and it has biased every absolute figure and every per-region conclusion this campaign has drawn.",
+    "measured": "K = gpuiPNGrow - electronRow has mode 56 over 47 of 70 paired full-height edges with no trend in y; the GPUI PNG title bar ends at row 56; and at CROP=56 the previously -2 panes read dy 0.00/-0.07/-0.07. Three-view mean fracOver0_10 0.17044464 -> 0.13695216.",
+    "remedy": "Set CROP_PX from a MEASURED boundary rather than from titleBarPoints, and find why the capture records report titleBarPoints 29 for a 28-point band. Add the edge-pairing check as a standing control so a future pass cannot inherit a wrong crop silently."
+   },
+   {
+    "id": "PLAT37-ISSUE-P",
+    "owningRepo": "codetracer-pm (consumer) / isonim-pm (renderer)",
+    "title": "GPUI rounds each calltrace row's height independently, so the pane accumulates 13.5 device px of vertical drift",
+    "severity": "HIGH -- the largest single product-side item, worth +0.032 of P1.",
+    "measured": "dy grows 0.00 -> 12.74 down the pane, slope +0.02012 px/px, self-control 0.0 in every window. Electron's row pitch alternates 50/51 device px (mean 50.6); GPUI's jitters 48-55. Regression pitch 53.3275 vs 54.4835, +1.156 px per row. Pane error tracks it: quarters 0.1082 / 0.3778 / 0.4489 / 0.5267.",
+    "remedy": "Carry a fractional accumulator for row positions instead of rounding each row, exactly as the per-element ceil() advance defect was fixed on the horizontal axis. Check pane:eventLog for the same defect -- NOT MEASURED here because its windowed self-control hit the rail."
+   },
+   {
+    "id": "PLAT37-ISSUE-Q",
+    "owningRepo": "codetracer-pm (consumer) / isonim-pm (renderer)",
+    "title": "Three panes carry a constant registration offset of their own",
+    "severity": "moderate; +0.0159 of P1 in total.",
+    "measured": "pane:eventLog dy +4.33 (oracle dy -4: 0.108096 -> 0.056905, +0.012776 of P1); pane:state dx +1.65 (oracle dx -2: 0.209088 -> 0.191707, +0.002155); chrome:statusBar dy +0.97 dx +1.39 (oracle -1,-1: 0.295399 -> 0.267016, +0.001009). Controls: self 0.0 and planted +1 -> 1.0 on every pane and both axes.",
+    "remedy": "Locate each pane's origin constant. The status bar's dy +0.97 also says GPUI's content column is ~1 device px taller than Electron's, which is worth confirming independently."
+   },
+   {
+    "id": "PLAT37-ISSUE-R",
+    "owningRepo": "codetracer-pm",
+    "title": "Monaco's overview-ruler border is drawn 1 pt right and 2x wide by the GPUI lane",
+    "severity": "low but CHEAP -- 0.0017 of P1, more than twice the gutter divergence already filed.",
+    "measured": "Electron 1 device px at point 633.0; GPUI 2 device px at point 634.0-634.5. Mass exactly 2x. Point-columns 632-636 carry shareOfError 0.0072-0.0080 and 0.00170-0.00177 of P1.",
+    "theTwoConstants": "x: leaves.nim:1965 `$(viewportPx - 15)` against text_editor.styl:274 `width: 0.875rem` + :247 `margin-right: 0.125em` = 16. width: leaves.nim:1967 `\"1px\"` is a LOGICAL POINT (-> 2 device px) where frontend_bundle.js:127674 `lineWidth = 1` is a DEVICE pixel.",
+    "remedy": "`viewportPx - 16`, and a half-point width (parse_px accepts fractional f32). Also note GPUI hard-codes the composited colour #353535 where Electron composites it from #7f7f7f4d at 50% clipped coverage, so a theme change would desynchronise them."
+   },
+   {
+    "id": "PLAT37-ISSUE-S",
+    "owningRepo": "codetracer-pm",
+    "title": "bandladder.py's window gate admits a near-empty terminal window, manufacturing per-row 'drift'",
+    "severity": "moderate -- it is the sole cause of the seven 'chipless drifting calltrace rows' that two passes have tried to explain.",
+    "measured": "The gate admits a 60-px window if ANY column exceeds PIX=40. The terminal window of each affected row carries 0.05-0.12 of that row's median window mass and sits past a gap in the window sequence. All seven rows read EXACTLY +2.500 there, from one shared off-text element.",
+    "remedy": "Gate on the window's total ink mass relative to the row's median, not on a single-column maximum; and report the dx SERIES, not only a regression slope, since the slope silently encodes row length."
+   },
+   {
+    "id": "PLAT37-ISSUE-T",
+    "owningRepo": "codetracer-pm",
+    "title": "Parabolic NCC refinement is a biased sub-pixel estimator and must not be used here",
+    "severity": "low, preventive.",
+    "measured": "Its electron-vs-itself control drifted to -0.367 px and produced slopes to +0.40%/px on identical data, because the NCC denominator varies with the shift. A normalised-SSD minimiser is exactly zero at d=0 and passed every planted control.",
+    "remedy": "Record it beside rowextent.py in the known-broken list."
+   }
+  ],
+  "carriedUnchangedFromPreviousPasses": [
+   {
+    "id": "PLAT37-ISSUE-H",
+    "status": "Unchanged from 2026-10-22. Landed in isonim-gpui c0f6747; its ink-ratio effect is CONFIRMED here (1.05-1.09 -> 0.98-1.01)."
+   },
+   {
+    "id": "PLAT37-ISSUE-I",
+    "title": "The GPUI editor gutter does not read editor_gutter_lanes.nim",
+    "status": "STILL DRAFTED AND UNFILED. NOT promoted: at the correct crop editor:gutter is 1.585-1.939 per ink pixel, still inside the band and well below pane:calltrace. Its <=0.0008 pricing stands. Note PLAT37-ISSUE-R, in the same pane, is worth twice as much and is cheaper."
+   },
+   {
+    "id": "ISONIM-GPUI-ISSUE-J",
+    "status": "STILL DRAFTED AND UNFILED. Unchanged. OWNED BY isonim-pm, WHICH IS NOT CHECKED OUT IN THIS WORKSPACE, so it cannot be filed from here."
+   },
+   {
+    "id": "PLAT37-ISSUE-K",
+    "status": "STILL DRAFTED AND UNFILED, and now PRICED for the first time -- see PLAT37_ISSUE_K_REMEASURED. 10 pixels, max delta 2. Amend it to say so."
+   },
+   {
+    "id": "PLAT37-ISSUE-M",
+    "status": "STILL DRAFTED AND UNFILED. OWNED BY isonim-pm, WHICH IS NOT CHECKED OUT HERE."
+   },
+   {
+    "id": "PLAT37-ISSUE-N",
+    "status": "STILL DRAFTED AND UNFILED. Unchanged."
+   }
+  ],
+  "cannotBeFiledFromThisWorkspace": "ISONIM-GPUI-ISSUE-J and PLAT37-ISSUE-M are owned by isonim-pm, which is not a checked-out repo in this workspace."
+ },
+ "supersedes": [
+  "plat37-parity-readings-2026-10-18b.json -- its theDecomposition and theInkNormalisation sections are SUPERSEDED. Their NUMBERS are reproduced here exactly (column A), but their CONCLUSION, 'THE RESIDUAL IS A CAUSE GENERIC TO DRAWN TEXT', is REFUTED: the uniformity it rested on was produced by a 2-device-pixel harness misregistration applied equally to every text region.",
+  "plat37-parity-readings-2026-10-21.json -- its open question 'WHAT DRIVES THE SEVEN CHIPLESS DRIFTING CALLTRACE ROWS IS UNKNOWN' is ANSWERED: nothing drives them; the ladder's window gate manufactures the slope.",
+  "plat37-parity-readings-2026-10-22.json -- NOT superseded. Its parityP1 figures are reproduced here to every digit and its font-smoothing findings stand. Only the ABSOLUTE level it reports is restated at the correct crop."
+ ],
+ "measuredThisPass": [
+  "That CROP_PX has been wrong by 2 device pixels for the whole campaign, confirmed by edge pairing, by the PNG's own title-bar boundary, and by per-pane dy -- and that it is 19.65% of the reported error.",
+  "The per-region decomposition at BOTH crops, with the before arm reproducing 18b exactly.",
+  "That the 'residual is generic to drawn text' finding is an artefact of that misregistration.",
+  "That the code column's residual is vertical placement and NOT phase, coverage or gamma -- horizontal registration |dx| <= 0.03 px, and a cheating tone oracle makes it worse.",
+  "That the seven chipless drifting calltrace rows do not drift, and what the shared element is, down to two named constants in two files.",
+  "Per-pane dy and dx for all nine regions, with planted controls on both axes.",
+  "The calltrace row-pitch error: +1.156 device px per row, +13.52 px over the pane, with the pane's error tracking it at 4.87x top to bottom.",
+  "A shift-oracle headroom for every pane, and an empirical bound on the pitch fix.",
+  "PLAT37-ISSUE-K priced: 10 pixels, max channel delta 2."
+ ],
+ "whatIcouldNOTdo": [
+  "pane:eventLog's windowed dy self-control hit the -12 rail in 3 of 15 windows, so I do NOT claim a pitch error there. Only its constant offset is measured, and that via the shift oracle, which is sound.",
+  "chrome:topBar remains PARITY-S8 territory: its ink ratio is 1.4966, so the two arms DRAW DIFFERENT THINGS there and none of its figures should be read as a glyph finding.",
+  "pane:editor in the CALLTRACE VIEW has ink ratio 0.8341 against 0.97-0.99 in the other two views, so that one pane in that one view appears to show different CONTENT between the arms. Not investigated; it is why calltrace's editor figures are the outliers in column C.",
+  "No fix was implemented and nothing was committed, per the brief. Every number above is an oracle or a measurement, not a landed change.",
+  "The projected floor of 0.0889 is an ACCOUNTING of separately-measured oracle gains, not a single measured frame. Gains that overlap spatially could double-count; they are in disjoint panes, which is why I think they mostly add, but that is an argument, not a measurement."
+ ],
+ "host": {
+  "platform": "aarch64-darwin, Darwin 25.5.0, 2880x1800 device px at pointPixelScale 2.0",
+  "diskAtEnd": "86G available on /, above the 20G abort threshold",
+  "electronStamp": "built_by = repro 0.1.3 as expected (the dev-shell PATH caveat, not a defect). No build was run this pass."
+ }
+}

@@ -599,9 +599,15 @@ proc dividerFractionAt*(g: WindowGeometry; divider: int; axisPos: int): float =
 const
   GpuiEditorRowPx* = EditorLinePx
     ## The pitch of one editor row in the window — the desktop's Monaco
-    ## `lineHeight`, 22 px, set as the row's `line-height` (measured on the
-    ## Electron front-end 2026-10-17). 26 px until then: GPUI's default line
-    ## height at 16 px, the shim drawing no `line-height`.
+    ## `lineHeight`, set as the row's `line-height`. **Platform-dependent,
+    ## because Monaco's is**: `chrome.monacoLineHeightPx(chrome.CodeFontPx)`
+    ## transcribes `GOLDEN_LINE_HEIGHT_RATIO * fontSize`, rounded, which is
+    ## 24 px on macOS and 22 px elsewhere. It was the literal 22 from
+    ## 2026-10-17 until the derivation replaced it — Monaco's Linux answer,
+    ## carried onto a macOS host where PLAT-37's pitch instrument then read
+    ## GPUI 22.0-22.5 points against Electron 23.5-24.5 (PARITY-S5, measured
+    ## against codetracer 596cb6e50). 26 px before either: GPUI's default
+    ## line height at 16 px, the shim drawing no `line-height`.
   EditorLinesAbovePx* = 0
     ## What the editor pane draws above its rows: nothing since 2026-10-17,
     ## as the desktop's editor. The source statement (`leaves.renderEditor`)

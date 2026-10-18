@@ -1,0 +1,446 @@
+{
+ "_comment": [
+  "PLAT-37 macOS parity readings, pass of 2026-10-21 (clock 2026-10-18 EEST).",
+  "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. One macOS host, one display.",
+  "This pass was asked to (1) finish the span-fusion by declaring inline-value chips",
+  "fusable, (2) attribute the constant offsets at the left of the shift ladder, and",
+  "(3) measure rasterisation only if (1) and (2) left the residual unexplained.",
+  "(2) and (3) were done. (1) was TESTED BEFORE IT WAS BUILT, and the test changed",
+  "what was built: the premise is half wrong and the filed remedy is not",
+  "implementable as written. What was implemented is the half that is correct.",
+  "NO GIT COMMITS AND NO PUSHES WERE MADE, as instructed."
+ ],
+ "schemaVersion": 1,
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. One macOS host, one display.",
+ "measuredAt": "2026-10-21 (clock 2026-10-18 EEST)",
+ "measuredThisPass": [
+  "theConstantOffsets (taskTwoAttribution) - attributed to the gutter by two independent instruments, and PRICED",
+  "theChipPremise (taskOneTheChipPremise) - the drifting-row/chip-row join, all three views, and the ~8.5 pt intra-chip gap on both arms",
+  "theRasterisation (taskThreeRasterisation) - antialiasing mode and coverage ramp, both arms, all three views",
+  "theCauseOfTheInkExcess - the gpui-pre stem-dilation chain, verified verbatim in the pinned crate sources and shown LIVE on this host",
+  "theABofAppleFontSmoothing - one view, end to end, with a determinism control and a 48-tile regression control",
+  "parityP1 - all three comparable views, mean/p50/p90/p99/maxError/fracOver0_10/0_25/0_50",
+  "thePerRowLadder - before and after, same instrument, same pass",
+  "theFixAsLanded - 198/198 shim tests with a two-polarity perturbation control",
+  "buildOutcomes, freshnessGates, laneOutcomes, instrumentControls"
+ ],
+ "supersedes": [
+  "plat37-parity-readings-2026-10-20.json FOR THE STATE OF P1 AND OF THE LADDERS ONLY, and",
+  "it AMENDS that file's thePerRowLadder.calltrace.note ('its editor pane carries",
+  "proportionally more inline-value chips, which are not fused'), which this pass",
+  "measures to be FALSE: calltrace's editor pane has FIVE chip rows against",
+  "editorWithMark's NINE while drifting on twelve rows against five.",
+  "It also RESOLVES that file's theDriftLadder reading, which named 'a fixed local",
+  "feature at the gutter/mark boundary' as an assertion without an instrument; this",
+  "pass measures it, locates it and prices it.",
+  "Everything else in the 2026-10-20 and 2026-10-18b files - the eliminations of",
+  "tone/weight/CodeFontPx/rigid translation, the ink normalisation, S1/S3/S4/S5/S10/",
+  "S13/S14, PLAT37-ISSUE-G, and the font-file identity of the CODE face - stands",
+  "unamended and was not re-measured here."
+ ],
+ "subject": {
+  "codetracer": "3fce565eb8 (branch agents), CLEAN - this pass changed NO codetracer source",
+  "isonimGpui": "5776cd936f (branch agents) PLUS the uncommitted working-tree change described in theFixAsLanded",
+  "codetracerPm": "38fa8e5e5 (branch latest), clean, not modified",
+  "reprobuild": "f974c2e74a (branch agents), clean, not modified",
+  "gpuiPrePin": "gpui-pre =0.3.5, UNCHANGED. tools/check_gpui_pin.sh exit 0. No crate source was patched.",
+  "noCommits": "This pass made no git commits and no pushes, as instructed."
+ },
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 (25F84)",
+  "displayPoints": "1440x900 honoured for the three comparable views; 1920x1080 clamped to 1728x1084 (G1)",
+  "pointPixelScale": 2.0,
+  "theEnvironmentWasCHECKEDratherThanTRUSTED": "For the SEVENTH consecutive pass the ambient shell was wrong: PATH led by /nix/store/m5si3k2vccgw6prb245q3r634r5zy0cf-reprobuild-0.2.2/bin and ALL FOUR required variables unset. All four were set before any work.",
+  "reproBootstrapCc": "/nix/store/vl936sd1vj8s008akm3gibkgyqk30qhz-clang-wrapper-21.1.8/bin/clang, PROVEN by AGENTS.md's control pair under `env -i` with $? captured on its own line (no PIPESTATUS; this shell is zsh): wrapper exit 0, the sibling unwrapped /nix/store/rr64nnycczvx7s1b110qmvqrlfcb6lsm-clang-21.1.8/bin/clang exit 1 with exactly the predicted \"'stdlib.h' file not found\".",
+  "reproForeignEnvBash": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (GNU bash 5.3.9), checked",
+  "runquotaSocket": "/tmp/rq-adopt-501/runquota.sock, confirmed a socket with test -S; runquotad was NOT restarted",
+  "reproOnPath": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro, repro 0.2.6, with REPROBUILD_REPRO pinned to the same file",
+  "diskFree": "59 GB at the end (58-63 GB throughout), never near the 20 GB abort floor"
+ },
+ "taskTwoAttribution": {
+  "question": "The after-ladder begins 0,-1,+3,0,0 on editorWithMark and state and +1,0,+3,0,0 on calltrace. Those windows were flat BEFORE the row-fusion fix too. What are they, and is a constant +3 device px worth more of the remaining 0.18 than the drift was?",
+  "geometry": "advance.py's windows are 60 device px wide at 30-pt steps from xPt 296. The editor pane starts at 293 pt and EditorGutterPx = 110 (leaves.nim:1030), so the gutter is 293..403 pt and the code begins at 403. The -1 window (326..356) and the +3 window (356..386) lie WHOLLY INSIDE THE GUTTER. The previous pass guessed 'the gutter/mark boundary'; this is the measurement.",
+  "instrumentOne": "gutterprobe.py -- advance.py's correlation, with 24-device-px windows at a 4-px step instead of 60 at 60.",
+  "instrumentTwo": "gutterink.py / gutterdump.py -- the two arms' ink masses located SEPARATELY and differenced, so the answer is not a matcher's output. The gutter's OWN modal luminance is the ground; taking it from the whole pane leaves a ~55k pedestal in every gutter column.",
+  "theAnswer": "FOUR distinct features, not one offset: x 297-315 dx 0 (pointer lane, low ink); x 317-341 dx -1 (THE LINE-NUMBER DIGITS); x 343-357 dx +2 and x 359-385 dx +3 (THE MARKER AND FOLDING LANES); x 393-650 dx 0 (the code column, perfectly registered). Same shape on all three views.",
+  "theDirectConfirmation": "Unthresholded, editorWithMark's four ink peaks in 344..388 pt sit at electron 354.5/357.5/369.5/383.5 and gpui 355.5/358.5/371.0/385.0 -- a constant +1.0 to +1.5 pt = +2 to +3 device px. The line-number digit centroids agree to 0.20-0.33 pt (electron 330.45/338.88, gpui 330.12/338.68).",
+  "theCause": "The two front-ends lay the gutter out from different, unlinked sources. Electron reads src/frontend/viewmodel/viewmodels/editor_gutter_lanes.nim: seven em-derived bands (pointer 0.75em, lineNumber remainder, vcs 0.35em, vcsSplit 0.25em, marker 2.05em, markerGap 0.45em, folding 0.85em) = 12/37/5/4/32/7/13 pt at a 16 px font, the 73 pt fixed total the module's own header records, giving pointer 293..305, lineNumber 305..342, vcs 342..347, vcsSplit 347..351, marker 351..383, markerGap 383..390, folding 390..403. GPUI's leaves.nim instead uses four hand-set pixel constants -- GutterPointerPx 13, GutterNumberPx 38, GutterBreakpointX 62, GutterFoldX 84 -- giving pointer 293..306, number 306..344, mark 344..377, fold 377..403, and has NO vcs, vcs-split or marker-gap band at all. leaves.nim does not import editor_gutter_lanes.nim; src/frontend/utils.nim, src/frontend/ui/trace.nim and ci/test/web_renderer_probe.mjs do.",
+  "whatItIsWORTH": "ESSENTIALLY NOTHING, AND THIS CONTRADICTS THE BRIEF'S EXPECTATION. flipregion over the strip 344..403 pt: shareOfError 0.00464 / 0.00454 / 0.00422 and fracOver0_10 0.0193 / 0.0227 / 0.0214 on editorWithMark / state / calltrace, against frame fracOver0_10 of 0.177 / 0.183 / 0.189. Its errorDensity is 0.11-0.12, among the CLEANEST regions in the frame. Correcting it perfectly would move P1 by at most ~0.0008. The strip is nearly empty: the marker and folding lanes carry ink only on the few rows that have a breakpoint or a fold, and a constant offset of blank pixels costs nothing.",
+  "whereTheErrorACTUALLYis": "The CODE COLUMN, 403..650 pt: shareOfError 0.199 / 0.208 / 0.223 and fracOver0_10 0.238 / 0.254 / 0.275, errorDensity 1.26 / 1.32 / 1.41 -- about 16% of the frame's area carrying about 21% of its error, at the highest density of any region measured. And its best-fit horizontal shift is 0 in EVERY window. So what is left in the code column is not geometry.",
+  "controls": {
+   "additivity": "flipregion's WHOLE region returns shareOfError exactly 1.000000000000 on all three views.",
+   "planted": "gutterink.py displaces the Electron buffer by +4 device px and must recover +2.00 pt on every mass: it recovered +2.00, +2.00, +2.00. gutterprobe.py plants +3 device px and recovered exactly +3 in every non-degenerate window.",
+   "self": "electron-against-electron returns 0 in every non-degenerate window.",
+   "theDegenerateWindows": "2 of ~140 windows per view FAIL both controls, at x 388..392 pt, where both arms are pure ground with no ink at all. They are identified by the controls rather than by inspection and are discarded; they are the same windows on all three views.",
+   "notUniform": "The probe returns 0, -1, +2 and +3 in different places in one pane, so it is not stuck on any value."
+  }
+ },
+ "taskOneTheChipPremise": {
+  "whatTheBriefAsked": "Declare the inline-value chip a fusable inline formatting context and widen the fusable style set to font-weight and font-style, so that calltrace's 14-of-24 drifting rows go toward 0.",
+  "whatWasTESTEDfirst": "Whether the drifting rows ARE the chip rows. bandchips.py is bandladder.py with the band's y extent printed (it reproduces bandladder's per-row slopes exactly, all three views), joined against the GPUI chip census in build/plat37-parity-2026-10-18/struct.jsonl, whose y is mapped to the flip buffer by subtracting the 29-pt title band.",
+  "theJoin": {
+   "editorWithMark": "5 drifting, 16 flat. ALL 5 drifting rows carry a chip at least 40 pt wide. Of the 16 flat rows, 4 carry a chip and EVERY ONE of those is narrow (14-15 pt). Perfect separation on chip WIDTH.",
+   "state": "6 drifting, 16 flat (2 further bands VOID on the self-control). 5 of the 6 drifting rows carry a wide chip; the 6th (slope +0.52) carries none. 1 of the 16 flat rows carries a chip, and it is narrow.",
+   "calltrace": "12 drifting, 10 flat (2 VOID). ONLY 5 of the 12 drifting rows carry a chip. SEVEN DRIFTING ROWS CARRY NO CHIP AT ALL, at slopes 0.37-0.59%, a visibly different population from the chip rows' 0.71-1.27%."
+  },
+  "soTHEpremiseISpartlyWRONG": "The chip hypothesis is confirmed for editorWithMark and state and REFUTED AS A COMPLETE EXPLANATION for calltrace. The previous pass's note that calltrace's 'editor pane carries proportionally more inline-value chips' is contradicted by the census: calltrace's editor pane has FIVE chip rows against editorWithMark's NINE, while drifting on twelve rows against five. 'calltrace going from 14/24 toward 0' is not reachable by fusing chips; at most 5 of its 12 are chip rows.",
+  "andTHEremedyASwrittenISnotIMPLEMENTABLE": {
+   "why": "A chip's name and value are separated by `padding-left: 7px` on the value (leaves.nim). Fusing replaces the two text elements with one StyledText plus one HighlightStyle per range, and a HighlightStyle has colour, weight and style and NO BOX. Fusing them therefore CONCATENATES the two strings and DELETES the gap.",
+   "theMEASUREMENT": "chipgap.py, one chip row (editorWithMark, gpui y 714..728, electron y 713..727), column by column. BOTH ARMS DRAW THE GAP: the ink returns to chip ground for 576.0-584.5 pt on Electron and 578.0-586.5 pt on GPUI, ~8.5 pt wide on each. The chip's own left padding also agrees: electron edge 544.0 first glyph 551.5, gpui edge 546.0 first glyph 553.5, 7.5 pt on both.",
+   "theTRADE": "Fusing would delete ~8.5 pt of real, faithfully-reproduced gap to remove one rounding worth at most 2 device px. That is a regression roughly eight times the size of the defect.",
+   "soWHATwasDONE": "The style set was widened to font-weight ONLY, and the chip was NOT declared an inline formatting context. A new test, inline_runs_decline_a_span_with_leading_padding, makes the padding case an explicit, documented refusal rather than an accident, so a later pass cannot fuse a chip and silently lose the gap.",
+   "andWHYnotFONTstyle": "font-style passes the HighlightStyle test and FAILS a second one the brief did not state: the UNFUSED path never applies it. GpuiStyles parses and stores font-style (lib.rs push_style) but nothing applies it -- there is no `italic` call anywhere in the shim, so an unfused italic span is drawn upright today. Fusing it would make the same markup render italic only when it happened to fuse, which would turn fusing from a pure layout change into a drawing change and break the design property the review verified. Guarded by inline_runs_decline_a_span_with_a_font_style."
+  }
+ },
+ "taskThreeRasterisation": {
+  "whyITwasREACHED": "Task 1 and Task 2 leave the residual unexplained by construction: the code column carries the frame's highest error density (1.26-1.41) and about 21% of its total error, and its best-fit horizontal shift is 0 in every window.",
+  "instrument": "raster.py. Three regions per arm -- the gutter's line-number lane 306..344 pt (ONE grey ink on ONE grey ground, present on every row), the code column 403..650 pt (real syntax colour), and a bare-ground strip 388..402 pt.",
+  "questionOneANTIALIASINGmode": {
+   "observable": "Subpixel (LCD) antialiasing writes different coverage into R, G and B and so leaves colour fringes on neutral text; grayscale antialiasing leaves none. Per-pixel chroma = max(R,G,B) - min(R,G,B).",
+   "theANSWER": "NEITHER ARM DOES SUBPIXEL ANTIALIASING ON THIS PATH. On the neutral line-number lane, chromaMean 0.000, chromaP99 0 and chromaMax 0 on BOTH arms, on ALL THREE views. This is a measurement of Chromium's behaviour on this path, which had never been made.",
+   "controls": "Two polarities, both pass. The SAME statistic over the syntax-coloured code column is LARGE on both arms (chromaMean 1.84-1.98 electron, 2.36-2.53 gpui; chromaP99 62), so the probe can see chroma. Over bare ground it is 0 with edgeFrac 0, so it does not invent any.",
+   "consequence": "The subpixel-mode hypothesis is retired, and the fontconfig_rgba() macOS guard committed in isonim-gpui 5776cd936 is confirmed as a correct but pixel-neutral change rather than a lever."
+  },
+  "questionTwoTHEcoverageRAMP": {
+   "observable": "Each antialiased pixel normalised to t = (l - bg) / (fg - bg), which does NOT require the glyphs to be at the same coordinates -- the failure that made an earlier fixed-coordinate tone-class probe an artefact.",
+   "theANSWER": "A REAL AND CONSISTENT DIFFERENCE: GPUI LAYS DOWN MORE INK. On the neutral line-number lane, GPUI has 10-15% MORE edge pixels than Electron (edgeFrac 0.0733->0.0824 editorWithMark, 0.0707->0.0809 state, 0.0803->0.0923 calltrace) and those pixels sit FURTHER TOWARD THE INK (rampMean 0.2508->0.2581, 0.2490->0.2584, 0.2524->0.2581; rampP50 0.2795->0.2919, 0.2733->0.2919, 0.2795->0.2981). Same direction in the code column, larger (rampP50 0.3055->0.4020, 0.3725->0.4559, 0.2728->0.3464).",
+   "theDIRECTcorroboration": "Total ink over the two line-number digit masses, located independently per arm and agreeing in position to 0.33 pt: Electron 427,268 against GPUI 516,846 -- GPUI lays about 21% MORE INK on the SAME digits, in the same face, at the same size, at the same place.",
+   "soTHEreading": "What is left in the code column is a STROKE-WEIGHT / COVERAGE difference, not a position difference and not a gamma inversion: the two rasterisers disagree about how much of a pixel a glyph covers. It is the right shape to produce the bimodal FLIP distribution (p50 0.0, p90 0.33) with a horizontal shift of exactly 0, and it is consistent with the 2026-10-18b pass's independent finding that GPUI carries slightly more bright ink.",
+   "whatWasNOTdone": "No gamma value was fitted and no A/B capture under ISONIM_GPUI_TEXT_RENDERING=platform was run; this pass measured the two arms as they are and did not try to move them."
+  }
+ },
+ "theCauseOfTheInkExcess": {
+  "standing": "THE CHAIN IS VERIFIED VERBATIM IN THE PINNED CRATE SOURCES AND IS LIVE ON THIS HOST. Whether disabling it closes the measured ink gap is the A/B, reported separately below.",
+  "theChain": [
+   "1. ELECTRON ASKS FOR LIGHT GLYPHS. codetracer/src/public/css/codetracer.css:1515 sets `-webkit-font-smoothing: antialiased` on `body` (beside `background-color: #1b1b1b`). On macOS that selects grayscale antialiasing WITHOUT stem darkening -- deliberately lighter than the platform default.",
+   "2. GPUI ASKS FOR THE OPPOSITE. gpui-pre-macos-0.3.5/src/text_system.rs:502-507: `if params.dilation > 0 { let luminance = params.dilation as f64 * 0.25; cx.set_should_smooth_fonts(true); cx.set_gray_fill_color(luminance, 1.0); } else { cx.set_gray_fill_color(0.0, 1.0); }`. Note it changes the FILL COLOUR as well as the smoothing flag, so the effect is on how much coverage is written, which is exactly what was measured.",
+   "3. DILATION IS DERIVED FROM THE TEXT COLOUR. gpui-pre-0.3.5/src/window.rs:4570 calls `glyph_dilation_for_color(color)`; the macOS implementation (text_system.rs:218-229) computes `level = ((4.0 * luminance) + 0.5).floor()` clamped 0..4. The trait default for every other platform (gpui-pre-0.3.5/src/platform.rs:1203) returns 0, so this is macOS-only. CodeTracer's light text on #1b1b1b lands high: the line-number grey measured at fg 200/255 = 0.784 gives level 3, and the code's 243/255 = 0.953 gives level 4.",
+   "4. THE LEVER. text_system.rs:222 short-circuits to 0 on `!font_smoothing_allowed_by_user()`, and that predicate (line 232-253) reads `AppleFontSmoothing` through `CFPreferencesCopyAppValue(key, kCFPreferencesCurrentApplication)`, memoised in a `OnceLock`: null means true, a non-number means true, and `number.to_i64() != Some(0)` -- so ONLY an explicit 0 disables it."
+  ],
+  "itIsLIVEonTHIShost": "MEASURED, not assumed. `defaults read -g AppleFontSmoothing` reports 'The domain/default pair of (kCFPreferencesAnyApplication, AppleFontSmoothing) does not exist' (exit 1), and no per-app domain carries it either. The preference is therefore NULL, the predicate returns true, dilation is computed, and GPUI is smoothing and dilating every glyph. It also means forcing it to 0 would NOT be overriding an explicit user choice -- there is none to override.",
+  "itAGREESwithTheINDEPENDENTmeasurement": "This pass measured, before seeing the lead, that GPUI lays ~21% more ink on the SAME line-number digits at the SAME position (427,268 against 516,846) with 10-15% more edge pixels and a ramp shifted toward the ink, and that NEITHER arm does subpixel antialiasing (chroma exactly 0 on neutral ink, both arms, all three views). Stem dilation on one arm and `-webkit-font-smoothing: antialiased` on the other is the right shape for exactly that: same mode, same positions, different coverage.",
+  "theLAUNCHargumentROUTEisBLOCKED": "MEASURED. The coordinator's cheaper route -- passing `-AppleFontSmoothing 0` so it lands in NSArgumentDomain -- cannot be used as the binary stands: codetracer/src/frontend/gpui/main.nim:648 ends its argument loop with `elif arg.startsWith(\"-\"): return GpuiCommand(kind: gckUsageError, message: \"codetracer-gpui: unknown option '\" & arg & \"'\")`, so the process refuses to start. The A/B was therefore done through the per-app preference domain instead, written and deleted around the run.",
+  "whatWasNOTverified": "That disabling it makes the two arms MATCH rather than merely moves GPUI. Electron's own appearance was not re-measured under any change, because nothing was changed on the Electron side; the A/B moves GPUI only, which is the intended direction."
+ },
+ "theABofAppleFontSmoothing": {
+  "standing": "THE LARGEST SINGLE LEVER FOUND IN THIS CAMPAIGN SO FAR, measured end to end on ONE view. It was NOT landed: nothing in any repo was changed to effect it, and the preference was written and removed around the capture.",
+  "howItWasDone": "The launch-argument route is blocked (see theCauseOfTheInkExcess.theLAUNCHargumentROUTEisBLOCKED), so the preference was written to the per-app domain instead: `defaults write codetracer-gpui AppleFontSmoothing -int 0`, one capture of editorWithMark into build/plat37-parity-2026-10-21/frames-ab, then `defaults delete`. THE DOMAIN NAME IS CONFIRMED CORRECT rather than guessed: the domain ALREADY EXISTED, carrying NSAutoFillHeuristicControllerEnabled = 0 written on 2026-09-29, so codetracer-gpui is demonstrably the domain this process's CFPreferences writes land in.",
+  "theControlThatMakesITcredible": "The baseline GPUI buffer was captured TWICE in this pass, by two independent lane runs, and came out BYTE-IDENTICAL both times (sha256 f2816795ea55...). So a byte difference in the A/B arm is the preference and not capture noise. The A/B arm's buffer is bb4aada59604... -- DIFFERENT.",
+  "theINKcollapses": {
+   "instrument": "raster.py, unchanged, same regions, against the SAME Electron frame",
+   "gutterNumbersNeutralInk": {
+    "edgeFrac": "electron 0.07330; gpui baseline 0.08235 (+12.3%); gpui with the preference 0.07345 (+0.2%)",
+    "rampMean": "electron 0.2508; gpui baseline 0.2581; gpui with the preference 0.2508 -- an exact match",
+    "rampP50": "electron 0.2795; gpui baseline 0.2919; gpui with the preference 0.2733"
+   },
+   "codeSyntaxColour": {
+    "edgeFrac": "electron 0.07393; baseline 0.08100; with the preference 0.07386",
+    "chromaMean": "electron 1.841; baseline 2.357; with the preference 1.838",
+    "rampMean": "electron 0.3602; baseline 0.3889; with the preference 0.3580",
+    "rampP50": "electron 0.3055; baseline 0.4020; with the preference 0.3039"
+   },
+   "inWords": "Every rasterisation statistic that was 10-30% away from Electron's lands within 0.2-0.5% of it. The ~21% ink excess is the stem dilation, and disabling it removes essentially all of it."
+  },
+  "andP1MOVES": {
+   "view": "editorWithMark only -- ONE view was A/B'd, and the three-view mean was NOT re-measured under the preference",
+   "command": "./flipdiff flip{,-ab}/editorWithMark.{electron,gpui}.rgba 2880 1800, the same binary for both arms, the same Electron buffer for both arms",
+   "fracOver0_10": "0.17696894 -> 0.16467496, delta -0.01229398 (-6.9%)",
+   "mean": "0.08274893 -> 0.07505948 (-9.3%)",
+   "p90": "0.31934136 -> 0.26755214 (-16.2%)",
+   "p99": "0.96591091 -> 0.94923496 (-1.7%)",
+   "p50": "0.0 -> 0.0 (unchanged)",
+   "maxError": "0.990104079246521 -> 0.990104079246521 (unchanged)",
+   "fracOver0_25": "0.11574460 -> 0.10391319 (-10.2%)",
+   "fracOver0_50": "0.06886092 -> 0.06124942 (-11.1%)",
+   "forSCALE": "The whole row-fusion fix of the previous pass moved the THREE-VIEW MEAN by -0.00184. This one preference moves ONE VIEW by -0.01229, about 6.7 times as much.",
+   "theREGRESSIONcontrol": "Over flipdiff's fixed 8x6 tile grid: 43 tiles BETTER, 5 UNCHANGED (the five that are identically zero -- empty regions), 0 WORSE. So it does not trade one region against another, and the interface text in the top bar and pane titles improves with the rest rather than regressing."
+  },
+  "theCAUTIONSansWERED": {
+   "doesITmoveTHEelectronARM": "No. Nothing on the Electron side was touched and the SAME Electron buffer was used for both arms, so the comparison moves GPUI toward Electron rather than moving both.",
+   "doesITdisturbTHEuser": "The user has NO AppleFontSmoothing anywhere -- `defaults read -g AppleFontSmoothing` reports the pair does not exist, and no per-app domain carried it. So this would not override an explicit user choice. It IS still a per-application behaviour change and is reported rather than landed.",
+   "whatITdidTOtheUSERSprefsANDhowITwasPUTback": "MY MISTAKE, CAUGHT AND REPAIRED. The cleanup line `rm -f ~/Library/Preferences/codetracer-gpui.plist` assumed the domain would not pre-exist; it did, holding NSAutoFillHeuristicControllerEnabled = 0 since 2026-09-29. The plist was backed up before the cleanup ran and the key was written back immediately afterwards; `defaults read codetracer-gpui` now returns exactly { NSAutoFillHeuristicControllerEnabled = 0; } with no AppleFontSmoothing. Net change to the user's preferences: none."
+  },
+  "whatWasNOTdone": "The preference was NOT landed anywhere. The in-process route the coordinator preferred (CFPreferencesSetAppValue from the shim before the first rasterisation, ahead of the OnceLock at text_system.rs:233) was not implemented or tested, and the other two views were not A/B'd."
+ },
+ "parityP1": {
+  "_rule": "CROP_PX=58 was DERIVED from THIS pass's own capture records -- titleBarPoints 29 x pointPixelScale 2.0, identical across all six build/plat37-macos/*.capture.json -- and not inherited.",
+  "command": "CROP_PX=58 ./compare.sh state calltrace editorWithMark editor eventLog shell, in build/plat37-parity-2026-10-21",
+  "exit": 0,
+  "state": {
+   "mean": 0.08571545034646988,
+   "p50": 0.0,
+   "p90": 0.33855265378952026,
+   "p99": 0.9662694931030273,
+   "maxError": 0.990104079246521,
+   "fracOver0_10": 0.1825335648148148,
+   "fracOver0_25": 0.12061226851851851,
+   "fracOver0_50": 0.0716460262345679
+  },
+  "calltrace": {
+   "mean": 0.08858368545770645,
+   "p50": 0.0,
+   "p90": 0.3492356240749359,
+   "p99": 0.9676300287246704,
+   "maxError": 0.990104079246521,
+   "fracOver0_10": 0.18897241512345678,
+   "fracOver0_25": 0.12534452160493828,
+   "fracOver0_50": 0.07338136574074074
+  },
+  "editorWithMark": {
+   "mean": 0.08274893462657928,
+   "p50": 0.0,
+   "p90": 0.31934136152267456,
+   "p99": 0.9659109115600586,
+   "maxError": 0.990104079246521,
+   "fracOver0_10": 0.17696894290123458,
+   "fracOver0_25": 0.1157445987654321,
+   "fracOver0_50": 0.06886091820987654
+  },
+  "meanFracOver0_10": 0.18282497427983538,
+  "meanFracOver0_10PreviousPass": 0.18282497427983538,
+  "delta": 0.0,
+  "didItMove": "NO, AND THAT IS THE CORRECT RESULT FOR WHAT WAS CHANGED. The mean is identical to the previous pass's to all seventeen digits. The change this pass makes to the renderer widens the fusable style set to font-weight; nothing currently drawn has sibling runs that differ only in weight, so it is a deliberate pixel no-op on this corpus. The determinism control confirms it independently: all three GPUI buffers came back BYTE-IDENTICAL to the ones preserved before the rebuild.",
+  "notComparable": [
+   "editor",
+   "eventLog",
+   "shell"
+  ],
+  "whyNotComparable": "extent mismatch: the GPUI window is clamped by the display on every 'wide' viewport (gpui 3456x2168 against electron 3840x2160). That is G1, out of scope, unchanged.",
+  "theONEnonDeterminism": "editorWithMark.electron came back DIFFERENT from the buffer preserved before the rebuild, while state.electron and calltrace.electron came back byte-identical and the Electron ARTEFACT is byte-identical (sha256 770cd93d8e74...). So the Electron capture lane is not bit-deterministic on that view. It did not change fracOver0_10 (0.17696894290123458 both times) but it did change `mean` in the 8th digit (0.08274901658296585 -> 0.08274893462657928). Recorded because a future before/after on editorWithMark has a confound on the REFERENCE side, and because nothing in the corpus had shown this before."
+ },
+ "theFixAsLanded": {
+  "where": "isonim-gpui, UNCOMMITTED working tree on top of 5776cd936f: rust/gpui-nim-shim/src/render_sync.rs (+114/-8) and rust/gpui-nim-shim/src/gpui_app.rs (+7).",
+  "what": "`font-weight` joins the fusable style set. `InlineTextRun` gains `font_weight`; `fusable_child_text` blanks it in the by-difference probe; `fused_inline_text` resolves it with `parse_font_weight`, THE SAME parser the unfused path uses at `el.font_weight(..)`, into `HighlightStyle.font_weight`.",
+  "whatWasDELIBERATELYnotDONE": "The chip was NOT declared an inline formatting context, and `font-style` was NOT added. Both refusals are measured, both are documented in the code, and both now have a test.",
+  "theTWOdesignPROPERTIESwerePRESERVED": {
+   "fusionIsInTheCONSUMER": "inline_text_runs() still reads a finished RenderNode; build_render_plan is untouched, so the render plan still carries every span and every test that reads it sees them.",
+   "theStyleTestIsBYdifference": "Still clone, blank the allowed fields, compare the WHOLE struct to GpuiStyles::default(). A field added to GpuiStyles later still causes fallback rather than silent fusion. The widening added one more blanked field; it did not become an allow-list."
+  },
+  "tests": "198/198 shim lib tests pass (`cargo test --lib`), 12/12 in the inline_runs family. Three are new: inline_runs_fuse_spans_that_differ_only_in_weight (positive), inline_runs_decline_a_span_with_leading_padding (the chip guard), inline_runs_decline_a_span_with_a_font_style.",
+  "thePERTURBATIONcontrol": "BOTH POLARITIES, run and reverted. Blanking padding_left and font_style in the probe makes EXACTLY the two new negative controls fail (10 passed, 2 failed) and nothing else. Removing `probe.font_weight = None` makes EXACTLY the new positive test fail (11 passed, 1 failed). The file was restored from a byte-for-byte copy and `diff` confirmed the revert.",
+  "andWHATitMEASURABLYdidTOthePIXELS": "NOTHING, BY CONSTRUCTION AND BY MEASUREMENT. All three GPUI capture buffers are byte-identical to the pre-change ones and P1 is unchanged to seventeen digits. It is a correctness and safety change that unblocks weight-varying fusion; it is NOT a P1 lever and is not claimed as one."
+ },
+ "thePerRowLadder": {
+  "instrument": "bandladder.py, inherited BYTE-IDENTICAL from the 2026-10-20 pass (sha256 beb733f1d4ce...), run by this pass on both the preserved pre-change buffers (flip-before/) and this pass's own (flip/), so before and after come from one instrument.",
+  "theBEFOREreproducesTHEpreviousPASSexactly": "editorWithMark 16 of 21 at exactly 0.000 with 5 residual at 0.95-1.27; state 16 of 24 with 8 residual from 0.52; calltrace median 0.369 with 10 of 24 at zero. Identical to the 2026-10-20 file.",
+  "editorWithMark": {
+   "rowsAtExactlyZeroBefore": "16 of 21",
+   "rowsAtExactlyZeroAfter": "16 of 21",
+   "stillDriftingBefore": 5,
+   "stillDriftingAfter": 5,
+   "medianSlopeBeforePct": 0.0,
+   "medianSlopeAfterPct": 0.0,
+   "residualRows": "5 rows at 0.95-1.27%"
+  },
+  "state": {
+   "rowsAtExactlyZeroBefore": "16 of 24",
+   "rowsAtExactlyZeroAfter": "16 of 24",
+   "stillDriftingBefore": 8,
+   "stillDriftingAfter": 8,
+   "medianSlopeBeforePct": 0.0,
+   "medianSlopeAfterPct": 0.0,
+   "residualRows": "8 rows at 0.52-1.27%, of which 2 are VOID on the self-control"
+  },
+  "calltrace": {
+   "rowsAtExactlyZeroBefore": "10 of 24",
+   "rowsAtExactlyZeroAfter": "10 of 24",
+   "stillDriftingBefore": 14,
+   "stillDriftingAfter": 14,
+   "medianSlopeBeforePct": 0.369,
+   "medianSlopeAfterPct": 0.369,
+   "residualRows": "14 rows from -1.43 to 0.89%, of which 2 are VOID on the self-control"
+  },
+  "whyNOTHINGmoved": "Because the change was a deliberate pixel no-op (theFixAsLanded). The ladder is reported before and after anyway, because 'the direct test is the per-row ladder' and an unchanged ladder beside byte-identical buffers is the consistent reading. The counts did NOT go toward 0 and this pass does not claim they did.",
+  "theRELEVANTnumberFORtheNEXTpass": "The paneLevel ladder (advance.py) is unchanged too: editorWithMark -0.076%, state -0.076%, calltrace -0.212%, self-control 0 non-zero windows on all three."
+ },
+ "issuesDraftedThisPass": {
+  "policyConflictDeclared": "DRAFTED HERE AND UNFILED. This pass made no commits and no pushes, as instructed.",
+  "new": [
+   {
+    "id": "PLAT37-ISSUE-H",
+    "owningRepo": "isonim-pm (and codetracer-pm for the consumer decision)",
+    "title": "GPUI dilates glyph stems on macOS while the Electron front-end asks Chromium not to, costing ~7% of PLAT-37 P1",
+    "measured": "gpui-pre-macos-0.3.5 text_system.rs:502-507 sets should_smooth_fonts and a luminance gray fill whenever glyph_dilation_for_color > 0; that level is ((4*luminance)+0.5).floor() (text_system.rs:226), and CodeTracer's light-on-#1b1b1b text lands at 3-4. codetracer.css:1515 sets -webkit-font-smoothing: antialiased on body, which is the opposite request. Measured on this host: GPUI lays ~21% more ink on the same line-number digits at the same position, 10-15% more edge pixels, ramp shifted toward the ink. Setting AppleFontSmoothing=0 in the process's preference domain collapses every one of those to within 0.2-0.5% of Electron and moves editorWithMark's fracOver0_10 from 0.17696894 to 0.16467496 (-6.9%), p90 -16.2%, with 43 of 48 tiles better and 0 worse.",
+    "remedy": "Disable the dilation for this process. text_system.rs:222 short-circuits on !font_smoothing_allowed_by_user(), which reads AppleFontSmoothing via CFPreferencesCopyAppValue and memoises it in a OnceLock at line 233, so it must be set before the first glyph is rasterised. A launch argument cannot be used: codetracer-gpui refuses unknown '-' options (main.nim:648). No fork is needed and the =0.3.5 pin is untouched.",
+    "severity": "MAJOR for parity -- the largest single lever measured in this campaign, about 6.7x the whole row-fusion fix."
+   },
+   {
+    "id": "PLAT37-ISSUE-I",
+    "owningRepo": "codetracer-pm",
+    "title": "The GPUI editor gutter does not read editor_gutter_lanes.nim, so its marker and folding lanes sit 2-3 device px right of Electron's",
+    "measured": "Two independent instruments with passing planted controls: everything from 344 to 388 pt is a rigid +1.0 to +1.5 pt right on all three views, while the line-number digits agree to 0.33 pt and the code column to 0. leaves.nim uses GutterPointerPx 13 / GutterNumberPx 38 / GutterBreakpointX 62 / GutterFoldX 84; editor_gutter_lanes.nim derives 12/37/5/4/32/7/13 from em fractions and is read by src/frontend/utils.nim, src/frontend/ui/trace.nim and ci/test/web_renderer_probe.mjs but NOT by leaves.nim, which also has no vcs, vcs-split or marker-gap band at all.",
+    "remedy": "Have the GPUI leaf renderer resolve its lanes from editor_gutter_lanes.nim, which declares itself the single place the order and the owners live.",
+    "severity": "MINOR for parity, worth at most ~0.0008 of P1 (the strip is 0.42-0.46% of frame error); MODERATE as a second source of truth."
+   },
+   {
+    "id": "ISONIM-GPUI-ISSUE-J",
+    "owningRepo": "isonim-pm",
+    "title": "font-style is parsed and stored but never applied",
+    "measured": "GpuiStyles carries font_style and lib.rs:1443 pushes it, but no code path applies it: there is no `italic` anywhere in rust/gpui-nim-shim/src. An unfused italic span is drawn upright.",
+    "remedy": "Apply it in the unfused styling path; that is also the precondition for font-style joining the fusable set, which this pass refused for exactly this reason.",
+    "severity": "minor; informational. Exact sibling of the already-filed letter-spacing issue."
+   },
+   {
+    "id": "PLAT37-ISSUE-K",
+    "owningRepo": "codetracer-pm",
+    "title": "The Electron capture lane is not bit-deterministic on editorWithMark",
+    "measured": "Two captures from a byte-identical bundle (artefact sha256 770cd93d8e74...) produced byte-identical state.electron and calltrace.electron but a DIFFERENT editorWithMark.electron. fracOver0_10 was unchanged but `mean` moved in the 8th digit.",
+    "remedy": "Find the nondeterminism before any future before/after reading is taken on that view; today it is a silent confound on the REFERENCE side.",
+    "severity": "moderate for the harness."
+   },
+   {
+    "id": "PLAT37-ISSUE-L",
+    "owningRepo": "codetracer-pm",
+    "title": "The filed inline-value-chip remedy is not implementable as written",
+    "measured": "codetracer-pm/issues/2026-10-17-inline-value-chips-still-round-per-span-so-their-rows-keep-drifting.md asks for each chip to be declared an inline formatting context. A chip's name and value are separated by padding-left: 7px and a HighlightStyle cannot carry padding, so fusing concatenates them and deletes the gap. Measured on both arms: the gap is real and ~8.5 pt wide on each (Electron blank 576.0-584.5 pt, GPUI 578.0-586.5 pt). The trade would be ~8.5 pt of correct geometry for at most 2 device px of rounding. Separately, the same issue's premise that calltrace drifts because it carries proportionally more chips is false: calltrace has 5 chip rows against editorWithMark's 9 while drifting on 12 rows against 5, and 7 of its 12 drifting rows carry no chip at all.",
+    "remedy": "Amend the issue. Either move the separation off the two text runs so they become adjacent, or accept that chips do not fuse. The guard test inline_runs_decline_a_span_with_leading_padding now encodes the refusal.",
+    "severity": "moderate -- as written the issue would have been implemented into a regression."
+   }
+  ]
+ },
+ "carriedForwardNotMeasured": [
+  {
+   "id": "PLAT37-ISSUE-B",
+   "status": "still drafted and UNFILED (GPUI top bar 1 pt short, worth ~0.012 of P1)",
+   "measuredThisPass": "no -- explicitly out of scope in the brief"
+  },
+  {
+   "id": "ISONIM-GPUI-ISSUE-C",
+   "status": "FIXED AND COMMITTED. The cfg!(target_os=\"macos\") early return in fontconfig_rgba() is in isonim-gpui 5776cd936, verified in the committed source this pass.",
+   "measuredThisPass": "partly -- this pass's antialiasing measurement CONFIRMS it was a correct but pixel-neutral change: neither arm does subpixel AA on this path."
+  },
+  {
+   "id": "REPROBUILD-ISSUE-D",
+   "status": "RECURRED AGAIN, and this pass found the reason it is invisible",
+   "measuredThisPass": "yes. The Electron stamp records built_by = 'repro 0.1.3' although PATH led this workspace's 0.2.6 build and REPROBUILD_REPRO named it. build-freshness.sh:583 derives that string from a BARE `repro` on PATH, and everything ran inside `nix develop`, whose own PATH wins over the ambient prepend. So the recorded builder is the dev shell's repro, and the PATH prepend from the ambient shell does NOT reach a `nix develop --command` build."
+  },
+  {
+   "id": "ISONIM-GPUI-ISSUE-E",
+   "status": "FILED as isonim-gpui/issues/2026-10-17-every-published-gpui-pre-ceils-a-text-elements-width.md (open, worked around). Do not re-draft.",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "ISONIM-GPUI-ISSUE-F",
+   "status": "FILED as isonim-gpui/issues/2026-10-17-letter-spacing-is-parsed-and-reported-but-never-applied.md. Do not re-draft.",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "PLAT37-ISSUE-G",
+   "status": "ANSWERED by measurement in a previous pass; recommend close",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "PARITY-G1",
+   "status": "OPEN, out of scope, unchanged -- editor/eventLog/shell remain notComparable",
+   "measuredThisPass": "observed again: the GPUI window clamps to 1728x1084 on every wide viewport"
+  },
+  {
+   "id": "corpus-pins platform dependence",
+   "status": "FILED in codetracer-pm; out of scope",
+   "measuredThisPass": "no"
+  }
+ ],
+ "buildOutcomes": {
+  "isonimGpuiShims": {
+   "command": "cd isonim-gpui && nix develop --command just plat37-shims",
+   "exit": 0,
+   "whyREQUIRED": "ci/lib/build-freshness.sh:114-116 excludes the cdylib from the GPUI input digest BY DESIGN, so the gate cannot see a stale shim; it must be rebuilt by hand after any shim change, and this pass's change IS a shim change.",
+   "rebuildControl": "windowed cdylib 67,018,504 -> 67,019,320 B and headless 71,259,544 -> 71,260,360 B, so the staged artefacts are demonstrably not the old ones. featureless unchanged at 1,642,568 B, which is what the recipe intends to leave at the shared target/debug path.",
+   "theTwoPolarityFontKitProbe": "on the STAGED windowed shim: `font_kit` count 1 (must be >0), `no text will be rendered` count 0 (must be 0)."
+  },
+  "shimChecks": {
+   "check_bindings.sh": 0,
+   "check_exported_symbols.sh": 0,
+   "check_gpui_pin.sh": "0 (gpui-pre 0.3.5)"
+  },
+  "gpuiArm": {
+   "command": "cd codetracer && nix develop --command just build-gpui",
+   "exit": 0,
+   "artefact": "build/bin/codetracer-gpui 5,935,088 B, input digest 6eb9702c7593 -- BOTH UNCHANGED, because this pass changed no Nim source, only the Rust cdylib."
+  },
+  "electronArm": {
+   "built": true,
+   "whyItHADtoBeRebuilt": "electron-assert REFUSED at the start of the pass: the stamp was from inputs f930c17c5898 built at repo head 025bd9981d, and this tree's inputs are 7ed12464c619. No Electron SOURCE changed since -- the digest moved because commits 36cc5d6fc and 3fce565eb rewrote flake.lock, and the input closure digests Nix store paths BY PATH.",
+   "command": "nix develop --command env REPROBUILD_PACKAGES_ROOT=<workspace reprobuild-packages @9f981af> REPRO_DAEMON=off REPRO_NIM_COMPILER=/nix/store/4m0ffd42r0qn0rzpjjibdrb97kadc5j2-nim-unwrapped-2.2.4/bin/nim CODETRACER_REPROBUILD_TARGET=ct-binary just build-once",
+   "exit": 0,
+   "scopingIsADEVIATION": "CODETRACER_REPROBUILD_TARGET=ct-binary IS A DEVIATION from an unscoped `just build-once`, flagged as one exactly as earlier passes flagged it. It is build-once.sh's own documented knob (scripts/build-once.sh:466) and steps past two pre-existing failing actions outside the bundle's closure.",
+   "theSTRONGcontrol": "The Electron ARTEFACT sha256 is 770cd93d8e749b99c43647f2daaa9987c7b8d9059a91f3e4a9559d1299fe1193 -- IDENTICAL to the previous pass's. Inputs moved, the bundle did not, which independently confirms the reference arm did not move across either the flake-lock bump or this pass's work.",
+   "builtBy": "the stamp records 'repro 0.1.3', which is the dev shell's repro and not the 0.2.6 this workspace's PATH and REPROBUILD_REPRO named -- see carriedForwardNotMeasured REPROBUILD-ISSUE-D."
+  }
+ },
+ "freshnessGates": {
+  "_rule": "BOTH gates were run INSIDE `nix develop`, because the digest regenerates the compiler's own dependency closure with whatever nim is on PATH.",
+  "atTheSTARTofThePass": {
+   "gpuiAssert": "exit 0, 'built from THIS tree (inputs 6eb9702c7593, artefact 1abbdcf94089)'",
+   "electronAssert": "REFUSED: 'STALE ELECTRON BUNDLE ... built at repo head codetracer 025bd9981d'. This is why the Electron arm was rebuilt."
+  },
+  "afterTheRebuildAndTheChange": {
+   "gpuiAssert": "exit 0, inputs 6eb9702c7593, artefact 1abbdcf94089",
+   "electronAssert": "exit 0, inputs 7ed12464c619, artefact 770cd93d8e74"
+  }
+ },
+ "laneOutcomes": {
+  "_rule": "Both lanes ran inside `nix develop` with REPLAY_SERVER_BIN naming src/build-debug-repro/bin/replay-server.",
+  "gpui": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<...> bash ci/test/plat37-macos-window-capture.sh",
+   "exit": 0,
+   "captured": 7,
+   "refused": 0,
+   "viewportHonouring": "state, calltrace, editorWithMark, gutterLanes honoured 1440x900; shell, editor, eventLog CLAMPED BY THE DISPLAY to 1728x1084 (G1).",
+   "theShimRestore": "the lane's EXIT trap restored rust/target/debug/libgpui_nim_shim.dylib, confirmed in the log."
+  },
+  "electron": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<...> bash ci/test/plat37-macos-electron-capture.sh",
+   "exit": 0,
+   "captured": 6,
+   "refused": 0,
+   "subjectAttested": "bin/ct 2026-10-17T21:28:00Z, ui.js 2026-10-17T12:35:12Z, checkout 3fce565eb (agents)",
+   "viewportHonouring": "all six honoured what they asked for; the Electron window frame equals its content rect so the lane passes --title-bar-points=0.",
+   "timing": "first window 6.7-6.8 s against a 60 s ceiling on every view -- no S14-style rushed launch."
+  },
+  "theABlane": {
+   "command": "same lane, --only editorWithMark --out build/plat37-parity-2026-10-21/frames-ab, with AppleFontSmoothing=0 in the per-app domain",
+   "exit": 0,
+   "captured": 1,
+   "refused": 0
+  }
+ },
+ "instrumentControls": {
+  "_rule": "A uniform result across all rows is a broken probe until proven otherwise. Each entry says what the probe answered DIFFERENTLY, and on what.",
+  "inheritedUNCHANGED": "advance.py, bandladder.py, compare.sh, flipdiff and flipregion were copied from the 2026-10-20 pass and their sha256 verified EQUAL to the originals before use (advance.py 0420fcb7197d..., bandladder.py beb733f1d4ce..., compare.sh 3c48e16574..., flipdiff 567bc2a4c44d...). The before and after ladders therefore come from one instrument.",
+  "gutterprobe": "TWO POLARITIES. Planted +3 device px recovered as exactly +3 in every non-degenerate window; electron-against-itself returns 0 in every non-degenerate window. NOT UNIFORM: it returns 0, -1, +2 and +3 in different places within one pane. 2 of ~140 windows per view fail BOTH controls, at 388-392 pt where both arms are pure ground; they are discarded, and they are the same windows on all three views.",
+  "gutterink": "PLANTED CONTROL EXACT. Displacing the Electron buffer by +4 device px moved every reported centroid by exactly +2.00 pt (three of three masses). Its thresholded mass COUNTS disagreed between arms, which gutterdump.py then showed to be a threshold artefact on faint features rather than a structural difference -- recorded because the thresholded reading alone would have been wrong.",
+  "bandchips": "REPRODUCTION CONTROL. bandchips.py is bandladder.py plus printed band extents; it returns per-row slope lists IDENTICAL to bandladder.py's on all three views, so the join is against the same rows the ladder scored.",
+  "raster": "TWO POLARITIES. The chroma statistic is ~0 on neutral ink and on bare ground, and LARGE (chromaMean 1.84-1.98, p99 62) on the syntax-coloured code column, on both arms -- so a zero reading is a measurement and not a dead probe. edgeFrac is 0 on bare ground.",
+  "flipregion": "ADDITIVITY. The WHOLE region's shareOfError is exactly 1.000000000000 on all three views. NOT UNIFORM: errorDensity spans 0.095 (gut:pointer) to 1.41 (code), a factor of 15.",
+  "theRustTestPerturbation": "BOTH POLARITIES, described in theFixAsLanded.thePERTURBATIONcontrol.",
+  "theDeterminismControl": "The GPUI lane was run twice in this pass over an unchanged Nim binary and produced BYTE-IDENTICAL buffers on all three comparable views. That is what licenses reading the A/B's byte difference as the preference rather than as noise -- and it is also what exposed the Electron lane's nondeterminism on editorWithMark.",
+  "theONEthatFAILED": {
+   "instrument": "rowextent.py",
+   "whatHappened": "NOT RUN AND NOT CITED. It declared itself broken in both the 2026-10-19 and 2026-10-20 passes (planted 1.040 recovered as 1.0347) and the brief forbids citing it.",
+   "consequence": "no number anywhere in this file comes from it."
+  }
+ },
+ "whatIcouldNOTdo": [
+  "THE CHIPS WERE NOT FUSED, and this pass argues they should not be. The measurement that decided it (an ~8.5 pt gap drawn by BOTH arms inside every chip) is in theChipRemedyIsNotImplementable; the filed issue needs amending rather than implementing. PLAT37-ISSUE-L.",
+  "THE PER-ROW LADDER DID NOT MOVE. 5/21, 8/24 and 14/24 rows still drift, exactly as before. The brief's target of 'calltrace going from 14/24 toward 0' is not reachable by the chip fix at all -- 7 of its 12 genuinely drifting rows carry no chip -- and nothing else this pass changed touches glyph positions.",
+  "WHAT DRIVES THE SEVEN CHIPLESS DRIFTING CALLTRACE ROWS IS UNKNOWN. They sit at 0.37-0.59%, a visibly separate population from the chip rows' 0.71-1.27%, and no cause was found for them.",
+  "THE AppleFontSmoothing LEVER WAS NOT LANDED. It was A/B'd through the per-app preference domain and reverted. The in-process route (CFPreferencesSetAppValue from the shim before the first rasterisation, ahead of the OnceLock at gpui-pre-macos-0.3.5 text_system.rs:233) was neither written nor tested.",
+  "THE A/B COVERED ONE VIEW. Only editorWithMark was captured under the preference; state and calltrace were not, so the three-view P1 under it is NOT measured and the -6.9% must not be read as a three-view figure.",
+  "THE GUTTER LANE DIVERGENCE WAS NOT FIXED. It is attributed and priced (~0.4% of P1) and left as PLAT37-ISSUE-I; changing lane geometry risks the corpus pins, which are out of scope.",
+  "NO GAMMA VALUE WAS FITTED. The coverage ramp was measured and compared; no transfer function was estimated, and no A/B under ISONIM_GPUI_TEXT_RENDERING was run.",
+  "I BRIEFLY DELETED A PRE-EXISTING USER PREFERENCE FILE. My A/B cleanup assumed ~/Library/Preferences/codetracer-gpui.plist would not pre-exist; it did, holding NSAutoFillHeuristicControllerEnabled = 0 since 2026-09-29. It was backed up before the cleanup ran and restored immediately after; the domain now reads exactly { NSAutoFillHeuristicControllerEnabled = 0; }. Net change: none, but it was a real mistake and the cleanup line should have been a scoped `defaults delete <key>` only.",
+  "rowextent.py was neither run nor cited: it declares its own control broken and the brief forbids it."
+ ],
+ "upstreamRecheckedAtTheEnd": {
+  "when": "2026-10-18 01:0x EEST, by `git ls-remote` per repo, after all measurement",
+  "codetracer": "local 3fce565eb == remote agents 3fce565eb. CLEAN working tree; this pass changed no codetracer source. (The readings file itself is the only addition.)",
+  "isonimGpui": "local 5776cd936 == remote agents 5776cd936, plus TWO uncommitted files: rust/gpui-nim-shim/src/{render_sync.rs,gpui_app.rs}.",
+  "codetracerPm": "local 38fa8e5e5, remote latest has MOVED to e4bbc2e6f. Not synced after the initial sweep; nothing in this pass depends on it and no commits were made.",
+  "reprobuildPm": "local 0cc77b55d, remote latest has MOVED to d38a84b5b. Same.",
+  "reprobuild": "local f974c2e74, remote agents has MOVED to 18c9229ad. Same.",
+  "ruling": "Both repositories that were MEASURED AGAINST -- codetracer and isonim-gpui -- are exactly at their published tips, so every figure in this file is anchored to a revision a reader can fetch. The three that moved were not measured against and were not modified."
+ },
+ "theFlakeLockHookTrap": "NOT TRIGGERED. The brief warned that codetracer/flake.lock's nix-blockchain-development node can be reverted by the managed pre-commit hook. No commit was attempted in any repo this pass, and codetracer's working tree is clean apart from this readings file."
+}

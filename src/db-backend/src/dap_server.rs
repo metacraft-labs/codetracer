@@ -525,7 +525,7 @@ fn setup(
                 // §P5 — user-provided variable rename list.
                 handler.load_rename_list(trace_folder, rename_list_path);
                 if for_launch {
-                    handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+                    handler.run_to_launch_position(restore_location, sender)?;
                 }
                 handler.initialized = true;
                 return Ok(handler);
@@ -634,7 +634,7 @@ fn setup(
         // §P5 — user-provided variable rename list.
         handler.load_rename_list(trace_folder, rename_list_path);
         if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+            handler.run_to_launch_position(restore_location, sender)?;
         }
         handler.initialized = true;
         return Ok(handler);
@@ -688,7 +688,7 @@ fn setup(
         handler.load_rename_list(trace_folder, rename_list_path);
         if for_launch {
             eprintln!("[db-backend setup] calling run_to_entry");
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+            handler.run_to_launch_position(restore_location, sender)?;
             eprintln!("[db-backend setup] run_to_entry completed");
         }
         handler.initialized = true;

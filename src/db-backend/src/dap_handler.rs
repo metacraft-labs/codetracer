@@ -61,6 +61,32 @@ use crate::value::{Type, Value, to_ct_value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
+/// The geid a launched session opens at, when set: the environment variable
+/// `ct host` exports from a manifest's `replay_start.geid` and the replay
+/// agent sets on the hosted replay (codetracer-pm `spec/CLI/ct/host.md`, "The
+/// start position"). Read by [`Handler::run_to_launch_position`].
+pub const START_GEID_ENV: &str = "CODETRACER_START_GEID";
+
+/// The start geid an environment value names: `Ok(None)` when it is unset or
+/// blank, the geid when it is an unsigned integer, and an error naming the
+/// variable and the value otherwise. Whether the geid is a position the
+/// replay can reach is the replay's to answer (a native replay refuses geid 0
+/// as it refuses any other geid it cannot stop after), not the parser's: a
+/// correlation coordinate for a materialized trace may be 0, and such a
+/// replay does not seek to it at all.
+pub fn start_geid_from(value: Option<&str>) -> Result<Option<u64>, String> {
+    let Some(text) = value.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(None);
+    };
+    match text.parse::<u64>() {
+        Ok(geid) => Ok(Some(geid)),
+        Err(_) => Err(format!(
+            "the session's start position {START_GEID_ENV}={text:?} is not an unsigned integer geid; \
+             the session is at the recording's entry instead"
+        )),
+    }
+}
+
 /// Resolve the personal-overrides path for origin patterns per spec §7.4.
 ///
 /// Honours `$XDG_CONFIG_HOME` when set; otherwise falls back to
@@ -1041,6 +1067,79 @@ impl Handler {
         }
         self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
         self.complete_move(true, sender)?;
+        Ok(())
+    }
+
+    /// Position a freshly launched session: where a launch opens.
+    ///
+    /// * A launch carrying a `restoreLocation` (a subsystem restart) goes back
+    ///   to that location, exactly as [`Handler::run_to_entry`] always did.
+    /// * Otherwise, when the process was started with a start geid
+    ///   ([`START_GEID_ENV`], which `ct host` exports from a manifest's
+    ///   `replay_start` and the replay agent sets for the queued replay), the
+    ///   session opens at that geid: the replay runs to its entry, then seeks
+    ///   through the same path as `ct/seek-to-geid`, and the one stop the
+    ///   client sees is the one at the geid.
+    /// * A start geid the replay cannot reach, or a malformed value, leaves
+    ///   the session at the entry and says so in an error notification naming
+    ///   the variable, its value and the replay's reason. The recording stays
+    ///   usable; only the start position is lost.
+    /// * A replay with no geid positions (a materialized trace's,
+    ///   [`ReplaySession::serves_geid_positions`]) opens at the entry and
+    ///   does not seek: the geid a dive-in carries for such a recording is a
+    ///   correlation coordinate, not a position of its replay, so there is
+    ///   nothing to refuse and no notification.
+    ///
+    /// Only the launch reads the start geid. `restart` and `ct/run-to-entry`
+    /// keep meaning "the entry".
+    ///
+    /// Spec: codetracer-pm `spec/CLI/ct/host.md`, "The start position".
+    pub fn run_to_launch_position(
+        &mut self,
+        restore_location: Option<Location>,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let restoring = restore_location
+            .as_ref()
+            .is_some_and(|location| location.path != NO_PATH && location.line != NO_POSITION);
+        let start = if restoring {
+            Ok(None)
+        } else {
+            start_geid_from(std::env::var(START_GEID_ENV).ok().as_deref())
+        };
+        let geid = match start {
+            Ok(Some(geid)) if self.replay.serves_geid_positions() => geid,
+            Ok(Some(geid)) => {
+                info!(
+                    "launch: {START_GEID_ENV}={geid} is not a position of this replay (it serves no geid \
+                     positions); opening at the entry"
+                );
+                return self.run_to_entry(dap::Request::default(), restore_location, sender);
+            }
+            Ok(None) => return self.run_to_entry(dap::Request::default(), restore_location, sender),
+            Err(message) => {
+                self.run_to_entry(dap::Request::default(), None, sender.clone())?;
+                error!("{message}");
+                return self.send_notification(NotificationKind::Error, &message, false, sender);
+            }
+        };
+        info!("launch: opening the session at its start geid {geid} ({START_GEID_ENV})");
+        self.replay.run_to_entry()?;
+        self.step_id = StepId(0);
+        let refusal = match self.replay.seek_to_geid(geid) {
+            Ok(true) => None,
+            Ok(false) => Some("the replay did not reach it".to_string()),
+            Err(e) => Some(e.to_string()),
+        };
+        self.complete_move(true, sender.clone())?;
+        if let Some(reason) = refusal {
+            let message = format!(
+                "the session's start position {START_GEID_ENV}={geid} could not be reached: {reason}; \
+                 the session is at the recording's entry instead"
+            );
+            error!("{message}");
+            self.send_notification(NotificationKind::Error, &message, false, sender)?;
+        }
         Ok(())
     }
 
@@ -7083,6 +7182,27 @@ mod tests {
     use codetracer_trace_writer::trace_writer::TraceWriter;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
+
+    /// The start geid a launch opens at: unset and blank mean none; an
+    /// unsigned integer is the geid; anything else is refused with a message naming the
+    /// variable and the value it was given.
+    #[test]
+    fn start_geid_is_an_unsigned_integer_or_absent() {
+        assert_eq!(start_geid_from(None), Ok(None));
+        assert_eq!(start_geid_from(Some("")), Ok(None));
+        assert_eq!(start_geid_from(Some("  ")), Ok(None));
+        assert_eq!(start_geid_from(Some("4990")), Ok(Some(4990)));
+        assert_eq!(start_geid_from(Some(" 4990\n")), Ok(Some(4990)));
+        // 0 is well formed; whether it is a position is the replay's answer.
+        assert_eq!(start_geid_from(Some("0")), Ok(Some(0)));
+        for bad in ["-3", "49x", "1e3", "18446744073709551616"] {
+            let refusal = start_geid_from(Some(bad)).expect_err(bad);
+            assert!(
+                refusal.contains(START_GEID_ENV) && refusal.contains(&format!("{bad:?}")),
+                "the refusal names the variable and the value: {refusal}"
+            );
+        }
+    }
 
     /// Terminal output is the program's stdout and stderr, each under its
     /// own DAP output category; no other kind is terminal output.

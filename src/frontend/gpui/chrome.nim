@@ -97,6 +97,66 @@ type
       ## `srTabBarFocused`.
 
 const
+  CodeFontPx* = 16
+    ## The code font's size, in device pixels, in BOTH front-ends: the
+    ## desktop's `data.ui.fontSize` (`frontend/utils.nim:1039`), which it
+    ## hands Monaco as `fontSize`, and this front-end's own default
+    ## (`leaves.nim`'s `if sizePx != 16` — 16 is the size it does not bother
+    ## to set). One number because the two have to agree for a row to hold
+    ## the same text.
+
+  MonacoGoldenLineHeightRatio* = when defined(macosx): 1.5 else: 1.35
+    ## Monaco's `GOLDEN_LINE_HEIGHT_RATIO`, VERBATIM from the copy this
+    ## product ships
+    ## (`node_modules/monaco-editor/esm/vs/editor/common/config/fontInfo.js:12`,
+    ## `platform.isMacintosh ? 1.5 : 1.35`, commented there "Determined from
+    ## empirical observations").
+    ##
+    ## **IT IS PLATFORM-DEPENDENT, AND THAT IS THE WHOLE POINT.** Parity is
+    ## with the Electron front-end ON THE SAME HOST, and the Electron front-end
+    ## draws a different row pitch on macOS than on Linux because Monaco does.
+
+func monacoLineHeightPx*(fontSizePx: int; lineHeightOption: int = 0): int =
+  ## **Monaco's own line-height rule, transcribed.** The row pitch the desktop
+  ## editor draws for a given font size, so this front-end can DERIVE the
+  ## pitch the reference uses instead of carrying a copy of one platform's
+  ## answer.
+  ##
+  ## The source is `BareFontInfo._create` in the Monaco this product ships,
+  ## `node_modules/monaco-editor/esm/vs/editor/common/config/fontInfo.js:34-45`:
+  ##
+  ## ```js
+  ## if (lineHeight === 0) { lineHeight = GOLDEN_LINE_HEIGHT_RATIO * fontSize; }
+  ## else if (lineHeight < MINIMUM_LINE_HEIGHT) { lineHeight = lineHeight * fontSize; }
+  ## lineHeight = Math.round(lineHeight);
+  ## if (lineHeight < MINIMUM_LINE_HEIGHT) { lineHeight = MINIMUM_LINE_HEIGHT; }
+  ## ```
+  ##
+  ## `lineHeightOption` is Monaco's `editor.lineHeight`, and the desktop
+  ## leaves it at its default: `editor.nim`'s `createMonacoEditor` call passes
+  ## `fontSize` and `fontFamily` and NO `lineHeight`, so the option is
+  ## `EDITOR_FONT_DEFAULTS.lineHeight`, which is 0
+  ## (`editorOptions.js:2917`) — the automatic branch. The other two branches
+  ## are transcribed anyway, because a rule with its cases missing is a rule
+  ## that silently stops being Monaco's the day somebody sets the option.
+  ##
+  ## The editor zoom multiplier is deliberately NOT here: this front-end has
+  ## no zoom control, so transcribing `EditorZoom.getZoomLevel()` would be
+  ## inventing a second answer for a level that is always 0.
+  const MinimumLineHeightPx = 8  ## Monaco's `MINIMUM_LINE_HEIGHT`.
+  var h: float
+  if lineHeightOption == 0:
+    h = MonacoGoldenLineHeightRatio * float(fontSizePx)
+  elif lineHeightOption < MinimumLineHeightPx:
+    # "Values too small to be line heights in pixels are in ems."
+    h = float(lineHeightOption) * float(fontSizePx)
+  else:
+    h = float(lineHeightOption)
+  result = int(round(h))
+  if result < MinimumLineHeightPx:
+    result = MinimumLineHeightPx
+
+const
   WindowChrome*: array[ChromeRole, string] = [
     # PLAT-50 (the user, 2026-10-02: "design tokens only; TUI and GPUI"): the
     # window's own four colours were chosen here (PLAT-37's #12161c /
@@ -267,11 +327,24 @@ const
     ## re-graded here, and recording a digest without a re-grade is
     ## `Verification-Harness-Traps` §39.
 
-  EditorLinePx* = 22
-    ## One editor line: the desktop's Monaco `lineHeight` (measured on the
-    ## Electron front-end 2026-10-17). The window's row pitch
-    ## (`window_geometry.GpuiEditorRowPx`) and the row's drawn `line-height`
-    ## (`leaves.renderEditorRow`) are this one number.
+  EditorLinePx* = monacoLineHeightPx(CodeFontPx)
+    ## One editor line: the row pitch the desktop's Monaco computes for
+    ## `CodeFontPx`, DERIVED rather than copied — 24 px on macOS, 22 px
+    ## elsewhere. The window's row pitch (`window_geometry.GpuiEditorRowPx`)
+    ## and the row's drawn `line-height` (`leaves.renderEditorRow`) are this
+    ## one number.
+    ##
+    ## ## Why this is a derivation and not the constant it replaced
+    ##
+    ## It WAS the literal `22` from 2026-10-17 until this change, recorded as
+    ## "the desktop's Monaco `lineHeight`, measured on the Electron
+    ## front-end". 22 is `round(1.35 * 16)` — Monaco's **Linux** answer. On
+    ## macOS Monaco answers `round(1.5 * 16)` = 24, and the PLAT-37 parity
+    ## lane measured exactly that gap: against codetracer 596cb6e50 on
+    ## aarch64-darwin the OCR-free pitch instrument read GPUI 22.0-22.5 points
+    ## against Electron 23.5-24.5 across six scenario frames, with the Electron
+    ## side at 24.0 or 24.5 in four of the five that hold an editor
+    ## (PARITY-S5). A literal cannot be right on both platforms; the rule can.
   EditorPadSidePx* = 0
     ## The editor reaches its pane's left and right edges (the desktop's
     ## Monaco fills its panel).

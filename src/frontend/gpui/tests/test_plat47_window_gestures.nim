@@ -164,7 +164,8 @@ suite "PLAT-47: the window's geometry is total and exact":
 suite "the editor pane shows whole rows":
 
   test "the editor's fetch window is the rows its pane shows at the row pitch":
-    # Every row a full line high (`GpuiEditorRowPx`, Monaco's 22 px), below
+    # Every row a full line high (`GpuiEditorRowPx`, Monaco's line height:
+    # 24 px on macOS, 22 px elsewhere), below
     # the editor's top padding (`EditorPadTopPx`; nothing above the rows
     # since the source statement became the pane's attribute). As Monaco
     # does, the fetch window counts the last row when it is only partly in

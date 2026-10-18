@@ -217,6 +217,16 @@ pub trait ReplaySession: std::fmt::Debug {
         self.restore_at(geid, None, None, None)
     }
 
+    /// Whether a geid names a position this replay can seek to: true only
+    /// for a replay that serves [`ReplaySession::seek_to_geid`] (a native
+    /// recording's live replay). A materialized trace's replay has no geid
+    /// positions: the geid a link carries for it is a correlation coordinate,
+    /// not a replay position, so a launch does not seek to it
+    /// (`Handler::run_to_launch_position`).
+    fn serves_geid_positions(&self) -> bool {
+        false
+    }
+
     fn current_step_id(&mut self) -> StepId;
 
     /// Enumerate the processes captured in this trace.
