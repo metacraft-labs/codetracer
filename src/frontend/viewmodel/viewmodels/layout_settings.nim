@@ -1,11 +1,15 @@
-## viewmodels/layout_settings.nim — PLAT-51 deliverables 9 and 11: the two
+## viewmodels/layout_settings.nim — PLAT-51 deliverables 9 and 11: the
 ## LAYOUT PREFERENCES the native front-ends share, as values.
 ##
 ##   * `focus-highlight` (Native-Front-End-Parity.md §2): whether the focused
 ##     pane's tab strip takes the focus colour and its ring is drawn;
 ##   * `live-resize` (Layout-ViewModel §4.3a): whether dragging a divider
 ##     reflows the panes at every pointer position (the default) or draws a
-##     guide and reflows on release.
+##     guide and reflows on release;
+##   * `overflow-markers` (PLAT-70, Horizontal-Overflow.md §4.6): whether a
+##     text pane's rows cut by its horizontal view show `‹` / `›`. On by
+##     default in the terminal, off in GPUI (OQ-H1) — the one setting whose
+##     default is the front-end's (`defaultLayoutSettings(overflowMarkers)`).
 ##
 ## Each is decided three ways, in increasing order of reach: a CLI flag
 ## (`--focus-highlight=on|off`, `--live-resize=on|off`) for one session; a
@@ -23,10 +27,12 @@ type
   LayoutSetting* = enum
     lsFocusHighlight = "focus-highlight"
     lsLiveResize = "live-resize"
+    lsOverflowMarkers = "overflow-markers"
 
   LayoutSettings* = object
     focusHighlight*: bool
     liveResize*: bool
+    overflowMarkers*: bool
 
   SettingOverride* = enum
     ## A CLI flag's answer for one setting. The zero value is "not given".
@@ -47,10 +53,17 @@ type
 const
   LayoutSettingCommandPrefix* = "layoutSetting:"
     ## The omnibox entries' target prefix: `layoutSetting:<name>:<on|off>`.
+  LayoutSettingTogglePrefix* = "layoutSettingToggle:"
+    ## A palette entry that FLIPS a setting: `layoutSettingToggle:<name>`
+    ## (**View: Toggle Overflow Markers**).
+  ToggleOverflowMarkersLabel* = "View: Toggle Overflow Markers"
+    ## Horizontal-Overflow.md §4.6's palette entry.
 
-func defaultLayoutSettings*(): LayoutSettings =
-  ## Both on: the highlight shows, the divider reflows live.
-  LayoutSettings(focusHighlight: true, liveResize: true)
+func defaultLayoutSettings*(overflowMarkers = true): LayoutSettings =
+  ## The highlight shows, the divider reflows live; the overflow markers are
+  ## the front-end's default (on in the terminal, off in GPUI — OQ-H1).
+  LayoutSettings(focusHighlight: true, liveResize: true,
+                 overflowMarkers: overflowMarkers)
 
 func settingNames*(): string =
   var parts: seq[string] = @[]
@@ -74,11 +87,13 @@ func valueOf*(s: LayoutSettings; which: LayoutSetting): bool =
   case which
   of lsFocusHighlight: s.focusHighlight
   of lsLiveResize: s.liveResize
+  of lsOverflowMarkers: s.overflowMarkers
 
 proc assign*(s: var LayoutSettings; which: LayoutSetting; on: bool) =
   case which
   of lsFocusHighlight: s.focusHighlight = on
   of lsLiveResize: s.liveResize = on
+  of lsOverflowMarkers: s.overflowMarkers = on
 
 func describe*(which: LayoutSetting; on: bool): string =
   $which & " " & (if on: "on" else: "off")
@@ -144,24 +159,23 @@ func encodeLayoutSettings*(s: LayoutSettings): string =
   for which in LayoutSetting:
     result.add $which & "=" & (if s.valueOf(which): "on" else: "off") & "\n"
 
-func decodeLayoutSettings*(text: string): tuple[ok: bool;
-                                                settings: LayoutSettings;
-                                                message: string] =
+func decodeLayoutSettings*(text: string; defaults = defaultLayoutSettings()):
+    tuple[ok: bool; settings: LayoutSettings; message: string] =
   ## The remembered preference, read back. Lines it does not know are
   ## refused by name (never silently dropped); a setting it does not mention
   ## keeps the default.
-  result = (true, defaultLayoutSettings(), "")
+  result = (true, defaults, "")
   for raw in text.splitLines():
     let line = raw.strip
     if line.len == 0 or line.startsWith("#"):
       continue
     let at = line.find('=')
     if at < 0:
-      return (false, defaultLayoutSettings(), "not a setting line: '" & line & "'")
+      return (false, defaults, "not a setting line: '" & line & "'")
     let (known, which) = parseSettingName(line[0 ..< at])
     let (okValue, on) = parseOnOff(line[at + 1 .. ^1])
     if not known or not okValue:
-      return (false, defaultLayoutSettings(),
+      return (false, defaults,
               "unknown stored setting '" & line & "'")
     result.settings.assign(which, on)
 
@@ -188,4 +202,15 @@ func settingCommandLabel*(which: LayoutSetting; on: bool): string =
   let name = case which
     of lsFocusHighlight: "Focus highlight"
     of lsLiveResize: "Live resize"
+    of lsOverflowMarkers: "Overflow markers"
   name & ": " & (if on: "on" else: "off")
+
+func settingToggleTarget*(which: LayoutSetting): string =
+  LayoutSettingTogglePrefix & $which
+
+func parseSettingToggleTarget*(target: string): tuple[ok: bool;
+                                                     setting: LayoutSetting] =
+  ## `layoutSettingToggle:<name>` -> the setting it flips.
+  if not target.startsWith(LayoutSettingTogglePrefix):
+    return (false, lsFocusHighlight)
+  parseSettingName(target[LayoutSettingTogglePrefix.len .. ^1])

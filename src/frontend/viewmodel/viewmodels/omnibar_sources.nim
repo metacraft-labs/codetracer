@@ -138,7 +138,7 @@ proc baseKeymapCommands*(): seq[OmnibarEntry] =
                             target: baseKeymapCommandTarget(m))
 
 proc layoutSettingCommands*(): seq[OmnibarEntry] =
-  ## PLAT-51: the two layout preferences as omnibox commands, on and off —
+  ## PLAT-51: the layout preferences as omnibox commands, on and off —
   ## `:set focus-highlight …` and `:set live-resize …` without the prompt, on
   ## both native front-ends (`layout_settings`).
   for which in LayoutSetting:
@@ -147,3 +147,9 @@ proc layoutSettingCommands*(): seq[OmnibarEntry] =
                               label: settingCommandLabel(which, on),
                               detail: ":set " & describe(which, on),
                               target: settingCommandTarget(which, on))
+  # PLAT-70 (Horizontal-Overflow.md §4.6): the markers' toggle, by the
+  # specification's name.
+  result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                          label: ToggleOverflowMarkersLabel,
+                          detail: ":set " & $lsOverflowMarkers & " on|off",
+                          target: settingToggleTarget(lsOverflowMarkers))

@@ -2,10 +2,10 @@
 # subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-eb25731df5354896930d578ea5995ab71e5ffd2270bec05081f8b6a75cd665a7  src/frontend/viewmodel/headless_session.nim
-6fdac153639147d5ac92d56ed5b7598612772f7af7f10b902bbf21a0cf1eedb0  src/frontend/viewmodel/store/replay_data_store.nim
-bb497af5ddd95ea6ee8bab4899ebce7d3160e9794b5424666317de51f576217e  src/frontend/tui/host/native_host.nim
-43467d1b29d712142a61091e2bf784b999017ae4b8be14bbec7cb443b53a1f3e  src/frontend/tui/host/tui_session.nim
+deccaf02f6664e11d2aa63b54adcd23b4d6d4408b05b47472c01097723f406e0  src/frontend/viewmodel/headless_session.nim
+3a237adf62bc8da90bd6821b039ab7456eaf9c194cce851eaa66245a709adb3a  src/frontend/viewmodel/store/replay_data_store.nim
+8e6ae949f399a6e104c37ac54757062fa93e8d13bb948d6215f02e59cec68d8b  src/frontend/tui/host/native_host.nim
+8e12e5cb227237be21a90ac5c0527348e967ed9652d265d4d618dedc47e9424d  src/frontend/tui/host/tui_session.nim
 e0fad030b69da5a312f41c88846fc9d81d708740da1d7b385aa0fb0de9723029  src/frontend/tui/app/views/shell.nim
 0bf5f4bd17512207c38775a820baceaf7502cc51161680621ffb4cfa5efb4fee  src/frontend/viewmodel/viewmodels/point_list_vm.nim
 5d7de7648c2679d1395c2e1ec70e1818ccb4b3993de9527adc3650640d68f0a7  src/frontend/tui/tests/test_plat40_producers.nim

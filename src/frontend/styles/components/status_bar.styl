@@ -258,7 +258,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     font-family: "SpaceMono", monospace !important
     font-size: 14px
     line-height: 24px
-    white-space: pre-wrap
+    // PLAT-70 (Horizontal-Overflow.md §4): a text pane — its lines are not
+    // wrapped; a line wider than the pane is reached by the horizontal bar.
+    white-space: pre
 
     .build-stdout, .build-stderr, .build-output-line
       min-height: 24px
@@ -1297,3 +1299,15 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 // sidebar toggle's icon (auto_hide.styl).  Goes with the rule above.
 #status #status-base .test-certificate-status
   margin-right: 0 !important
+
+// PLAT-70 (Horizontal-Overflow.md §4): Build Output (`#build`) is a TEXT
+// pane — its lines are not wrapped, and a line wider than the pane is reached
+// by its overflow-only horizontal bar (`list_scrubber_dom
+// .attachHorizontalScrubber`). Later than the shared `#build, #build-errors`
+// block above, at the same specificity, so it wins for `#build` alone; the
+// Problems list (`#build-errors`) keeps wrapping.
+#build
+  white-space: pre
+
+  .build-stdout, .build-stderr, .build-error, .build-output-line
+    white-space: pre

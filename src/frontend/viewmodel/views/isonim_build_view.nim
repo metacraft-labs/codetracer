@@ -182,7 +182,12 @@ proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  import std/jsffi
+  import ./list_scrubber_dom
+
   proc scrollToBottom(node: isonim_dom.Element) {.importjs: "(function(node) { if (node) { node.scrollTop = node.scrollHeight; } })(#)".}
+  proc outputContainerOf(panel: JsObject): JsObject {.importjs:
+    "(#.querySelector('.build-output-container') || null)".}
 
   proc renderBuildPanel*(r: WebRenderer; vm: BuildVM): isonim_dom.Element =
     ## Render the panel for the real DOM.  Uses ``innerHTML`` for each
@@ -260,3 +265,10 @@ when defined(js):
     let r = WebRenderer()
     let panel = renderBuildPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+    # PLAT-70 (Horizontal-Overflow.md §4): Build Output is a text pane — its
+    # lines are not wrapped, and its overflow-only horizontal bar is the
+    # shared scrubber's, along the output's bottom.
+    let output = outputContainerOf(cast[JsObject](panel))
+    if not output.isNil:
+      discard attachHorizontalScrubber(output, cast[JsObject](panel),
+                                       paneId = "buildOutput")

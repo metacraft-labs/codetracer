@@ -117,7 +117,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1819
+const ExpectedAssertions = 1822
+  ## *1819 -> 1822 on 2026-10-16 (PLAT-70 Part A): one new production module
+  ## under `viewmodels/` — `horizontal_scroll.nim` (a text pane's horizontal
+  ## view and its overflow-only bar) — x three assertions. It calls no
+  ## `rebase(` and spells no `mapOver`.*
   ## *1813 -> 1819 on 2026-10-16 (PLAT-57): two new production modules under
   ## `host/` — `find_in_files.nim` (the one search runner) and
   ## `text_match.nim` (its matcher) — x three assertions. Neither calls

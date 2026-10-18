@@ -32,7 +32,7 @@ import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 52
+const ExpectedAssertions = 66
 
 var countedAssertions = 0
 
@@ -42,10 +42,13 @@ template ck(condition: untyped) =
 
 const
   Cols = 200
+  WideCols = 280
   Rows = 50
   NoVerifiedSource = "No verified source"
 
 var spawned = 0
+var width = Cols
+  ## The open session's width (`open`'s `cols`).
 
 proc multiRoot(): string =
   let resolved = resolveFixture(FixtureSpec(
@@ -59,7 +62,7 @@ proc multiRoot(): string =
   doAssert resolved.outcome == foRecorded, resolved.detail
   resolved.tracePath
 
-proc open(tracePath = ""): TuiTestSession =
+proc open(tracePath = ""; cols = Cols): TuiTestSession =
   let trace = if tracePath.len > 0: tracePath else: multiRoot()
   inc spawned
   let state = getTempDir() / ("dotdot-stop-" & $getCurrentProcessId() &
@@ -67,7 +70,7 @@ proc open(tracePath = ""): TuiTestSession =
   removeDir(state)
   createDir(state)
   result = newTuiTest(tuiBinary(), @["--theme=dark", trace])
-    .width(Cols).height(Rows).transcript()
+    .width(cols).height(Rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
                "NERD_FONT", "NERDFONT", "COLORFGBG")
     .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
@@ -76,13 +79,14 @@ proc open(tracePath = ""): TuiTestSession =
     .envSet("CODETRACER_HOME", state / "ct-home")
     .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
     .spawn()
-  settleOnDebugger(result, Cols, Rows)
+  width = cols
+  settleOnDebugger(result, cols, Rows)
 
 proc screen(sess: var TuiTestSession): seq[string] =
   discard sess.drainOutput(80)
   for r in 0 ..< Rows:
     var line = ""
-    for c in 0 ..< Cols:
+    for c in 0 ..< width:
       let cell = sess.cellAt(r, c)
       line.add(if int(cell.rune) == 0: " " else: $cell.rune)
     result.add line
@@ -201,6 +205,18 @@ suite "a stop path with a `..` component, in a real terminal":
     sess.clickCallAndExpect(Add[0], Add[1], Add[2], Add[3], Add[4])
     sess.clickCallAndExpect(Scale[0], Scale[1], Scale[2], Scale[3], Scale[4])
     sess.clickCallAndExpect(Add[0], Add[1], Add[2], Add[3], Add[4])
+    sess.quit()
+
+  test "add, then scale, wide enough that neither file overflows the editor":
+    # At 200 columns extra.py's widest line (79) overflows the editor and
+    # helpers.py's (72) does not, so between `add` and `scale` the editor's
+    # horizontal bar (PLAT-70) comes, the source window loses a row and is
+    # asked for again — which would hide a window that kept the previous
+    # file's line count. Wide enough for both, the window stays as it is,
+    # and every line of extra.py must still arrive.
+    var sess = open(cols = WideCols)
+    sess.clickCallAndExpect(Add[0], Add[1], Add[2], Add[3], Add[4])
+    sess.clickCallAndExpect(Scale[0], Scale[1], Scale[2], Scale[3], Scale[4])
     sess.quit()
 
   test "a file opened from Files first, then `add`: the call's file, not the open one":

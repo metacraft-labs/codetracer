@@ -347,8 +347,11 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     let buildCol = s0.text(StatusRow).cellFind("BUILD")
     ck buildCol > 0
     # Before: the editor runs to the row above the status line (its left
-    # divider is PLAT-50's `DividerGlyph`).
-    ck s0.text(StatusRow - 1).contains(DividerGlyph & "  47 ")
+    # divider is PLAT-50's `DividerGlyph`). `calc`'s widest line is wider
+    # than the code area, so that row is the editor's horizontal bar
+    # (PLAT-70, Horizontal-Overflow.md §4.7) and the last line drawn is on
+    # the row above it.
+    ck s0.text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     sess.click(StatusRow, buildCol + 1)
     let (br, bc) = sess.waitFor(" BUILD ", timeoutMs = 5000, below = StatusRow)
     ck br > StatusRow div 2 and bc == 0
@@ -357,8 +360,8 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     # the arrangement ends above it — the editor's last rows are gone, not
     # covered (the row above the band is still the editor's, renumbered
     # nothing: it is line `br - 2`'s).
-    ck s1.text(br - 1).contains(DividerGlyph & "  " & $(br - 2) & " ")
-    ck not s1.text(StatusRow - 1).contains(DividerGlyph & "  47 ")
+    ck s1.text(br - 2).contains(DividerGlyph & "  " & $(br - 3) & " ")
+    ck not s1.text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     ck s1.findRow("no build has been run", below = StatusRow)[0] > br
     # The label lit while its pane is open.
     ck s1[StatusRow][buildCol + 1].bgHex ==
@@ -372,7 +375,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     sess.click(StatusRow, buildCol + 1)
     discard sess.waitFor(" BUILD ", present = false, timeoutMs = 5000,
                          below = StatusRow)
-    ck sess.snap().text(StatusRow - 1).contains(DividerGlyph & "  47 ")
+    ck sess.snap().text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     sess.quit()
 
 suite "PLAT-49 part B on a real terminal: GoldenLayout's drop zones":

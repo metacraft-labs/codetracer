@@ -145,6 +145,9 @@ type
         ## remembered preference; `soUnset` when absent.
       liveResize*: SettingOverride
         ## PLAT-51: `--live-resize=on|off`, likewise.
+      overflowMarkers*: SettingOverride
+        ## PLAT-70: `--overflow-markers=on|off` (Horizontal-Overflow.md §4.6),
+        ## likewise.
       noFlowOverlay*: bool
         ## `--no-flow-overlay` — the flow overlay hidden for this session.
         ## PLAT-42 built the overlay on both native front-ends and shows it by
@@ -351,6 +354,10 @@ options:
   --live-resize=on|off
                      panes reflow while a divider is dragged (default on);
                      off draws a guide and reflows on release
+  --overflow-markers=on|off
+                     mark a text row cut by the pane's left or right edge
+                     with ‹ / › (default on; remembered by :set
+                     overflow-markers)
   --headless         render one screen as plain text and exit — for CI
   --pane-server      serve CodeTracer's panes to an editor over stdio
                      (JSON-RPC with LSP framing); started by the Neovim and
@@ -833,11 +840,15 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                replayKeys: replayKeys, layoutBinding: layoutBinding,
                noFlowOverlay: noFlowOverlay, dividers: dividers,
                focusHighlight: settingOverrides[lsFocusHighlight],
-               liveResize: settingOverrides[lsLiveResize], keymap: keymap)
+               liveResize: settingOverrides[lsLiveResize],
+               overflowMarkers: settingOverrides[lsOverflowMarkers],
+               keymap: keymap)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
                noFlowOverlay: noFlowOverlay, dividers: dividers,
                focusHighlight: settingOverrides[lsFocusHighlight],
-               liveResize: settingOverrides[lsLiveResize], keymap: keymap)
+               liveResize: settingOverrides[lsLiveResize],
+               overflowMarkers: settingOverrides[lsOverflowMarkers],
+               keymap: keymap)

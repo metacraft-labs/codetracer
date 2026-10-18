@@ -351,16 +351,20 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
     editorScrollbarShown = saved
 
   test "the thumb's share of the track is the viewport's share of the content":
-    # Monaco's own formula (`scrollbarState.js`, `_computeValues`), with
-    # `representableSize == visibleSize` because this scrollbar has no
-    # arrows. Asserted over a RANGE of content widths, so a constant thumb
-    # cannot pass.
+    # PLAT-70 (Horizontal-Overflow.md §4.2): THE BAR IS THE SHARED SCRUBBER
+    # MODEL on the column axis — the thumb is `viewportCols / contentCols`
+    # of the track, at least Monaco's 20 px. It replaced Monaco's slider
+    # formula (`scrollbarState.js`), which PLAT35-F3 first transcribed, so
+    # every bar in the product is one arithmetic. Restated here from the
+    # specification's sentence, over a RANGE of content widths, so a
+    # constant thumb cannot pass.
     var widths: seq[int] = @[]
+    let viewCols = editorViewCols(326)
     for cols in [40, 60, 80, 120, 200, 400]:
       let scroll = editorHScrollOf(rowsOfWidth(cols, 3), 1, 326)
       ck scroll.present
       ck scroll.thumbPx == min(326, max(EditorScrollbarMinThumbPx,
-        int(floor(326.0 * 326.0 / float(scroll.contentPx)))))
+        int(round(326.0 * float(viewCols) / float(cols)))))
       widths.add scroll.thumbPx
     # STRICTLY NARROWER as the content grows, until the floor binds. A thumb
     # that ignored the content would be flat here.
@@ -371,7 +375,7 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
     # content in a 326 px pane is 0.8% of the track, 2 px without it.
     let huge = editorHScrollOf(rowsOfWidth(4000, 3), 1, 326)
     ck huge.thumbPx == EditorScrollbarMinThumbPx
-    ck int(floor(326.0 * 326.0 / float(huge.contentPx))) <
+    ck int(round(326.0 * float(viewCols) / 4000.0)) <
        EditorScrollbarMinThumbPx
 
   test "the scroll is clamped by the model, in both directions":
@@ -380,8 +384,11 @@ suite "PLAT-35 tier 3 — PLAT35-F3: the editor's horizontal scrollbar":
     ck rest.present
     ck rest.maxLeftCols > 0
     ck editorHScrollOf(rows, 1, 326, -5).leftCols == 0
+    # Past the end, the model keeps ONE column beyond `maxLeftCols` and no
+    # more: the cell after the widest line's last character, where only the
+    # caret's follow puts the view (Horizontal-Overflow.md §4.5, HO-5).
     ck editorHScrollOf(rows, 1, 326, rest.maxLeftCols + 50).leftCols ==
-       rest.maxLeftCols
+       rest.maxLeftCols + 1
     ck editorHScrollOf(rows, 1, 326, 7).leftCols == 7
     # `maxLeftCols` is exactly the code columns that do not fit, with the
     # gutter's own width taken out of the pane. Since 2026-10-17 the gutter

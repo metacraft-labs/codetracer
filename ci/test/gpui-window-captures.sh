@@ -2,12 +2,12 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69]
-#   just gpui-window-captures                 # all five
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a]
+#   just gpui-window-captures                 # all six
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
 # `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
-# `test_plat68_cua_window.nim`) assert
+# `test_plat68_cua_window.nim`, `test_plat70a_gpui_window.nim`) assert
 # COMMITTED records measured off a real window on a headless sway. A record
 # nobody re-takes stops describing the product the first time the window
 # changes — which is how PLAT-45's and PLAT-47's records came to predate the
@@ -60,11 +60,11 @@ fail() {
 }
 
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat68 | plat69) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69)" ;;
+	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a)" ;;
 	esac
 done
 
@@ -107,6 +107,7 @@ nim c --hints:off --warnings:off --mm:orc -d:release \
 fixtures=(calc)
 for w in "${which[@]}"; do
 	[ "${w}" = "plat47" ] && fixtures+=(call_pages)
+	[ "${w}" = "plat70a" ] && fixtures+=(wide_lines)
 done
 work="$(mktemp -d "${root}/build/gpui-window-captures.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
@@ -183,6 +184,15 @@ for w in "${which[@]}"; do
 		in_compositor_shell "CODETRACER_PLAT68_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/plat68-cua-window.sh" &&
 			bash ci/test/plat68-cua-window.sh --record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat68_cua_window.nim ||
+			failed+=("${w}")
+		;;
+	plat70a)
+		# PLAT-70 Part A: the editor and Terminal Output on `wide_lines`,
+		# scrolled sideways by the virtual pointer's `hwheel`, Shift + wheel
+		# and a press on the editor's bar.
+		in_compositor_shell "bash ci/test/plat70a-gpui-window.sh" &&
+			python3 ci/test/plat70a_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat70a_gpui_window.nim ||
 			failed+=("${w}")
 		;;
 	plat45)

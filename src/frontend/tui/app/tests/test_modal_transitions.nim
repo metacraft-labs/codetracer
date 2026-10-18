@@ -51,7 +51,7 @@ import ../views/status_bar
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 134
+const ExpectedAssertions = 135
 
 var countedAssertions = 0
 
@@ -354,8 +354,10 @@ suite "CTUI-9: the modal state machine decides every event":
     # The prefixes are DERIVED from the table, not listed beside it.
     let prefixes = table.prefixChords(mmNormal)
     checkpoint("NORMAL prefixes: " & prefixes.join(", "))
-    ck prefixes.len == 3
-    for p in ["g", "r", "Ctrl+w"]:
+    # `z` since PLAT-70: over the output panes it starts `z h` / `z l` /
+    # `z H` / `z L` (Horizontal-Overflow.md §4.4).
+    ck prefixes.len == 4
+    for p in ["g", "r", "Ctrl+w", "z"]:
       checkpoint("prefix present: " & p)
       ck p in prefixes
     # …and a mode with no multi-chord binding has none, which is the negative
@@ -518,20 +520,22 @@ suite "CTUI-9: the modal state machine decides every event":
     # neither this file nor `resolve`. Until it is repaired, RUN THE `tui` LANE
     # ALONE — the number above is what it says otherwise.
     ck worstNs < 2_000_000
-    # THE NON-VACUITY FLOOR: 95 bindings x 13 tokens = 1235. A sweep that
+    # THE NON-VACUITY FLOOR: 100 bindings x 13 tokens = 1300. A sweep that
     # measured nothing would satisfy the gate above trivially.
     #
     # 1105 UNTIL PLAT-16 ADDED ONE BINDING (`Ctrl+F5`, the product-mode
     # toggle), 1118 until the session tabs added FOUR (`g t`, `g T`,
     # `Ctrl+Tab`, `Ctrl+Shift+Tab` — CodeTracer-TUI.md §3.3.1), 1170 until
     # PLAT-68 added THREE (`F6`, `Shift+F6`, `Ctrl+Shift+p`), 1209 until the
-    # shared jump history added TWO (`Alt+Left`, `Alt+Right`). The literal
+    # shared jump history added TWO (`Alt+Left`, `Alt+Right`), 1235 until
+    # PLAT-70 added FIVE (the output panes' `z h`, `z l`, `z H`, `z L`, `0`).
+    # The literal
     # moves with `ExpectedBindingCount` in `test_keymap_no_conflicts.nim`,
     # and it is still written as a literal BESIDE the computed form rather
     # than replacing it: the line above is satisfied by any binding count,
     # and this one is what notices that the count changed.
     ck dispatches == table.bindings.len * 13
-    ck dispatches == 1235
+    ck dispatches == 1300
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

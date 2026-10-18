@@ -19,10 +19,20 @@
 ## `data-ct-scrub-total`, `-first`, `-visible`, `-current`, and the thumb's
 ## `data-ct-thumb-top` / `-px`; `window.__ctScrubberJumps` counts the view
 ## moves the scrubber made (a test bounds a drag's fetches against them).
+##
+## PLAT-70 (Horizontal-Overflow.md §4): the text panes' overflow-only
+## HORIZONTAL bar is this module's too (`attachHorizontalScrubber`) — the
+## same model on the column axis (`viewmodels/horizontal_scroll`), drawn as
+## the vertical track is, along the container's bottom, only while its
+## content is wider than it; a press centres, a held thumb follows, and the
+## square where it meets a vertical track belongs to neither. The browser's
+## own wheel, Shift + wheel and touchpad swipe scroll the container, and the
+## bar follows them.
 
 import std/math
 
 import ../viewmodels/scrollbar_scrubber
+import ../viewmodels/horizontal_scroll
 
 when defined(js):
   import std/jsffi
@@ -58,6 +68,12 @@ when defined(js):
   const
     MinThumbPx = 20
     MarkPx = 3
+    TrackPx = 8
+      ## A track's thickness: the app-wide scrollbar's (`PANEL_SCROLLBAR_SIZE`,
+      ## 0.5rem — `shared_widgets.styl`), which `list_scrubber.styl` gives the
+      ## vertical track and the horizontal bar. Read here where a bar is laid
+      ## out beside the other: the vertical track's row lost to the bar, the
+      ## corner square neither takes.
 
   proc createDiv(cls: cstring): JsObject
     {.importjs: "(function(c){const d=document.createElement('div');d.className=c;return d;})(#)".}
@@ -116,10 +132,16 @@ when defined(js):
     scrubberModel(total, first, visible, s.current(),
                   totalKnown = s.totalKnown())
 
+  proc hbarShown(el: JsObject): bool {.importjs:
+    "(#.getAttribute('data-ct-hbar') === '1')".}
+
   proc trackHeight(s: ListScrubberDom): int =
     let full = max(1, int(s.container.clientHeightOf()))
-    if s.visibleHeight.isNil: full
-    else: max(1, min(full, s.visibleHeight()))
+    # PLAT-70 (HO-7): a horizontal bar along the bottom keeps its row; the
+    # corner square is neither track's.
+    let bar = if s.container.hbarShown: TrackPx else: 0
+    if s.visibleHeight.isNil: max(1, full - bar)
+    else: max(1, min(full - bar, s.visibleHeight()))
 
   proc refresh*(s: ListScrubberDom) =
     ## Place the track over the container, the thumb at the view, the mark
@@ -233,3 +255,162 @@ when defined(js):
     everyMs(proc() = s.refresh(), 250)
     s.refresh()
     s
+
+
+  # -------------------------------------------------------------------------
+  # PLAT-70: a text pane's horizontal bar (Horizontal-Overflow.md §4)
+  # -------------------------------------------------------------------------
+
+  type
+    HorizontalScrubberDom* = ref object
+      container*: JsObject
+        ## The element that scrolls sideways (`overflow-x: auto`, its own
+        ## horizontal scrollbar hidden by `.ct-hscrubbed`).
+      host*: JsObject
+      track, thumb: JsObject
+      grab: float
+      dragging: bool
+      verticalTrack*: bool
+        ## A vertical scrubber shares the container's right edge: the bar
+        ## stops short of it, leaving the corner square to neither.
+
+  proc scrollLeftOf(el: JsObject): float {.importjs: "(#.scrollLeft || 0)".}
+  proc setScrollLeft(el: JsObject; v: float) {.importjs: "#.scrollLeft = #".}
+  proc scrollWidthOf(el: JsObject): float {.importjs: "(#.scrollWidth || 0)".}
+  proc clientWidthOf(el: JsObject): float {.importjs: "(#.clientWidth || 0)".}
+  proc offsetLeftIn(el, host: JsObject): float {.importjs:
+    "(function(e,h){const a=e.getBoundingClientRect(),b=h.getBoundingClientRect();return a.left-b.left;})(#,#)".}
+  proc trackLeftOf(el: JsObject): float {.importjs: "#.getBoundingClientRect().left".}
+  proc clientXOf(ev: JsObject): float {.importjs: "(#.clientX || 0)".}
+  proc removeAttrJs(el: JsObject; name: cstring) {.importjs: "#.removeAttribute(#)".}
+
+  proc horizontalViewOf(container: JsObject): HorizontalView =
+    ## A scroll container as the shared model sees it, in pixels: the
+    ## content's width, the view's, how far it is scrolled.
+    result = HorizontalView(contentCols: int(container.scrollWidthOf()),
+                            leftCol: int(round(container.scrollLeftOf())))
+    result.setViewport(int(container.clientWidthOf()))
+
+  proc view(s: HorizontalScrubberDom): HorizontalView =
+    s.container.horizontalViewOf()
+
+  proc barWidth(s: HorizontalScrubberDom): int =
+    max(1, int(s.container.clientWidthOf()) -
+           (if s.verticalTrack: TrackPx else: 0))
+
+  proc refresh*(s: HorizontalScrubberDom) =
+    ## The bar exists only while the content is wider than the container
+    ## (HO-1); the thumb where the model says; the attributes a reader of
+    ## the DOM reads the model from.
+    let v = s.view
+    if not v.overflows or s.container.clientHeightOf() < 2.0:
+      s.track.setStyleJs("display", "none")
+      s.container.removeAttrJs("data-ct-hbar")
+      return
+    s.container.setAttrJs("data-ct-hbar", "1")
+    s.track.setStyleJs("display", "block")
+    let w = s.barWidth
+    let top = s.container.offsetTopIn(s.host) + s.container.clientHeightOf() -
+              float(TrackPx)
+    s.track.setStyleJs("left", cstring($int(s.container.offsetLeftIn(s.host)) & "px"))
+    s.track.setStyleJs("top", cstring($int(top) & "px"))
+    s.track.setStyleJs("width", cstring($w & "px"))
+    let span = v.barModel.thumbSpan(w, MinThumbPx)
+    s.thumb.setStyleJs("left", cstring($span.start & "px"))
+    s.thumb.setStyleJs("width", cstring($span.length & "px"))
+    s.track.setAttrJs("data-ct-hscrub-content", cstring($v.contentCols))
+    s.track.setAttrJs("data-ct-hscrub-viewport", cstring($v.viewportCols))
+    s.track.setAttrJs("data-ct-hscrub-left", cstring($v.leftCol))
+    s.thumb.setAttrJs("data-ct-thumb-left", cstring($span.start))
+    s.thumb.setAttrJs("data-ct-thumb-px", cstring($span.length))
+
+  proc moveTo(s: HorizontalScrubberDom; v: HorizontalView) =
+    ## The VIEW to `v.leftCol` — the container's scroll, and nothing else
+    ## (HO-4).
+    s.container.setScrollLeft(float(v.leftCol))
+    s.refresh()
+
+  proc attachHorizontalScrubber*(container, host: JsObject; paneId = "";
+                                 verticalTrack = false): HorizontalScrubberDom =
+    ## Draw the overflow-only horizontal bar along `container`'s bottom
+    ## inside `host`, and route its presses.
+    let s = HorizontalScrubberDom(container: container, host: host,
+                                  verticalTrack: verticalTrack)
+    # The container's own HORIZONTAL bar is hidden (`.ct-hscrubbed`); its
+    # vertical one stays unless a list scrubber also hides it.
+    container.addClassJs("ct-hscrubbed")
+    container.setStyleJs("overflow-x", "auto")
+    host.setStyleJs("position", "relative")
+    s.track = createDiv("ct-hscrubber")
+    s.thumb = createDiv("ct-hscrubber-thumb")
+    s.track.setAttrJs("data-ct-hscrubber", cstring(paneId))
+    s.track.appendChildJs(s.thumb)
+    host.appendChildJs(s.track)
+    var onMove: proc(ev: JsObject)
+    var onUp: proc(ev: JsObject)
+    onMove = proc(ev: JsObject) =
+      if not s.dragging:
+        return
+      let w = s.barWidth
+      var v = s.view
+      let x = int(ev.clientXOf() - s.track.trackLeftOf() - s.grab)
+      # §4.2: the thumb follows the pointer — its start where the pointer
+      # is, less where on the thumb it was grabbed.
+      discard v.dragThumb(trackFractionAt(clamp(x, 0, w - 1), w))
+      s.moveTo(v)
+    onUp = proc(ev: JsObject) =
+      s.dragging = false
+      unlistenDoc("mousemove", onMove)
+      unlistenDoc("mouseup", onUp)
+    s.track.listen("mousedown", proc(ev: JsObject) =
+      if ev.buttonOf() != 0:
+        return
+      ev.stopEv()
+      let w = s.barWidth
+      let x = ev.clientXOf() - s.track.trackLeftOf()
+      var v = s.view
+      let span = v.barModel.thumbSpan(w, MinThumbPx)
+      if x >= float(span.start) and x < float(span.start + span.length):
+        s.dragging = true
+        s.grab = x - float(span.start)
+        listenDoc("mousemove", onMove)
+        listenDoc("mouseup", onUp)
+      else:
+        # §4.2: a press on the track centres the column under it.
+        discard v.clickTrack(trackFractionAt(clamp(int(x), 0, w - 1), w))
+        s.moveTo(v))
+    container.listen("scroll", proc(ev: JsObject) = s.refresh())
+    everyMs(proc() = s.refresh(), 250)
+    s.refresh()
+    s
+
+  proc columnPxOf(el: JsObject): float {.importjs: """
+    (function(e){
+      const s = document.createElement('span');
+      s.textContent = 'MMMMMMMMMM';
+      s.style.visibility = 'hidden'; s.style.position = 'absolute';
+      s.style.whiteSpace = 'pre';
+      e.appendChild(s);
+      const w = s.getBoundingClientRect().width / 10;
+      e.removeChild(s);
+      return w > 0 ? w : 8;
+    })(#)""".}
+
+  proc viewOperation*(container: JsObject; operation: string): bool =
+    ## §4.4's `view.*` operations on a desktop output pane's scroll container
+    ## — through the shared model, in pixels: `WheelColumns` of the pane's
+    ## own monospaced column a step, half the view, or back to the start.
+    ## Answers whether the view moved.
+    var v = container.horizontalViewOf()
+    let step = int(round(float(WheelColumns) * container.columnPxOf()))
+    let moved =
+      case operation
+      of "view.scroll-left": v.scrollBy(-step)
+      of "view.scroll-right": v.scrollBy(step)
+      of "view.scroll-left-half": v.scrollHalf(right = false)
+      of "view.scroll-right-half": v.scrollHalf(right = true)
+      of "view.scroll-to-line-start": v.scrollToLineStart()
+      else: false
+    if moved:
+      container.setScrollLeft(float(v.leftCol))
+    moved

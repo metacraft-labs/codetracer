@@ -31,6 +31,9 @@ type
     chords*: seq[string]
       ## Canonical key names, as the router matches them.
     action*: KeyAction
+    whenText*: string
+      ## The row's `when` (PLAT-70: the output panes' `z h` / `z l` / `0`
+      ## hold only where `z` does not maximize).
 
   NavKeymap* = object
     bindings*: seq[NavBinding]
@@ -70,7 +73,8 @@ proc navigationKeymap*(): NavKeymap =
     for m in row.navModes:
       result.bindings.add NavBinding(mode: modalOf(m), spelling: spelling,
                                      chords: names.splitWhitespace(),
-                                     action: actionOfOperation(row.operation))
+                                     action: actionOfOperation(row.operation),
+                                     whenText: row.whenText)
 
 proc bindingsFor*(km: NavKeymap; mode: ModalMode): seq[NavBinding] =
   for b in km.bindings:

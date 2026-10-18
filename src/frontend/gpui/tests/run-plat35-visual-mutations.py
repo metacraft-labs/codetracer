@@ -152,13 +152,20 @@ ARMS = [
     # spans two lines and the old one-line needle occurs ZERO times — which
     # the needle scan caught by name (`M1.find: occurs 0 time(s)`) rather
     # than letting the arm run unaimed.
+    # RE-AIMED 2026-10-18, PLAT-70 Part A: `renderEditorRow` also takes the
+    # view its overflow markers are drawn against; the claim and the
+    # mutation (the row loop draws nothing) are unchanged.
     Arm("M1", LEAVES,
         "    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,\n"
         "                                          scroll.leftCols,\n"
         "                                          (if row.line == surface.caretLine:\n"
         "                                             surface.caretColumn else: 0),\n"
         "                                          selected, folds[i], depths[i],\n"
-        "                                          guideCounts[i]))",
+        "                                          guideCounts[i],\n"
+        "                                          markersView =\n"
+        "                                            (if overflowMarkers and\n"
+        "                                                scroll.present: scroll.view\n"
+        "                                             else: HorizontalView())))",
         "    discard selected",
         SUITE,
         "stepped-editor / editor-row-count",

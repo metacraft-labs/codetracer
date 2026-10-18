@@ -152,3 +152,81 @@ proc scrubTo*(sm: ScrubberModel; hit: ScrubberHit; dragging: bool): int =
   ## §3.3, the thumb follows the pointer, centred on it).
   if dragging: sm.dragTo(hit.fraction - sm.thumbLength / 2.0)
   else: sm.clickAt(hit.fraction)
+
+
+# ---------------------------------------------------------------------------
+# A horizontal bar in one row (Horizontal-Overflow.md §4)
+# ---------------------------------------------------------------------------
+
+proc currentMarkCol*(sm: ScrubberModel; left, cols: int): int =
+  ## The screen column the bar's mark (the editor's caret column) is painted
+  ## on, or -1.
+  let f = sm.currentFraction
+  if f < 0.0 or cols <= 0: -1
+  else: left + min(cols - 1, int(floor(f * float(cols))))
+
+proc paintHorizontalBar*(g: var StyledGrid; row, left, cols: int;
+                         sm: ScrubberModel) =
+  ## The overflow-only horizontal bar (§4.7): along `row` from column `left`
+  ## for `cols` cells, the thumb in eighth blocks (`▏▎▍▌▋▊▉█`) so its ends
+  ## are sub-cell — the vertical scrubber's drawing on the other axis — and
+  ## the editor's caret column marked as the vertical scrubber marks "now".
+  if cols <= 0 or row < 0:
+    return
+  let span = sm.thumbSpan(cols * 8, MinThumbEighths)
+  for i, cell in thumbCells(span, cols, vertical = false):
+    g.paint(row, left + i, cell.glyph, styleOf(cell.kind))
+  let markCol = sm.currentMarkCol(left, cols)
+  if markCol >= 0:
+    g.paint(row, markCol, ThumbFullGlyph, MarkStyle)
+
+proc horizontalBarHit*(sm: ScrubberModel; left, cols, col: int;
+                       cellX = -1.0): ScrubberHit =
+  ## A press at screen column `col` on a bar drawn by `paintHorizontalBar`:
+  ## on the thumb (a drag starts) or on the track (a click centres), with the
+  ## fraction the model takes. `cellX` is the pointer in fractional CELLS
+  ## when the terminal reported pixels (SGR-pixel, DECSET 1016): the fraction
+  ## is then taken to an eighth of a cell, the thumb's own resolution.
+  if cols <= 0 or col < left or col >= left + cols:
+    return ScrubberHit(kind: shNone)
+  let span = sm.thumbSpan(cols * 8, MinThumbEighths)
+  let unit = if cellX >= 0.0:
+               clamp(int(floor((cellX - float(left)) * 8.0)), 0, cols * 8 - 1)
+             else: (col - left) * 8 + 4
+  let fraction = if cellX >= 0.0: trackFractionAt(unit, cols * 8)
+                 else: trackFractionAt(col - left, cols)
+  if unit >= span.start and unit < span.start + span.length:
+    ScrubberHit(kind: shThumb, fraction: fraction)
+  else:
+    ScrubberHit(kind: shTrack, fraction: fraction)
+
+proc barScrollTo*(v: var HorizontalView; hit: ScrubberHit;
+                  dragging: bool): bool =
+  ## What a press (`dragging = false`: the column at the fraction centred) or
+  ## a held thumb (`dragging = true`: the thumb follows, centred on the
+  ## pointer) does to the view — the view only (HO-4).
+  if dragging: v.dragThumb(hit.fraction - v.barModel.thumbLength / 2.0)
+  else: v.clickTrack(hit.fraction)
+
+const
+  PrecedesGlyph* = "‹"
+    ## §4.6: U+2039, in the first text column of a row whose text continues
+    ## left of the view (Vim's `listchars` `precedes:`); `<` on the ASCII tier.
+  ExtendsGlyph* = "›"
+    ## U+203A, in the last text column of a row that continues right of it
+    ## (`extends:`); `>` on the ASCII tier.
+  OverflowMarkerStyle* = CellStyle(role: srChromeMuted)
+    ## The dimmed chrome style.
+
+proc paintOverflowMarkers*(g: var StyledGrid; row, left: int;
+                           rowWidth: int; v: HorizontalView) =
+  ## §4.6: the `‹` / `›` markers of one row drawn from column `left` over a
+  ## view `v` (its `viewportCols` wide), each replacing the text cell it is
+  ## drawn on.
+  if v.viewportCols <= 0:
+    return
+  let marks = overflowMarkers(rowWidth, v)
+  if marks.precedes:
+    g.paint(row, left, PrecedesGlyph, OverflowMarkerStyle)
+  if marks.extends:
+    g.paint(row, left + v.viewportCols - 1, ExtendsGlyph, OverflowMarkerStyle)

@@ -77,6 +77,8 @@ import ./gutter
 import ./heatmap
 import ./inline_annotations
 import ./styled_row
+import ./scrubber_track
+from codetracer_embed import HorizontalView, setViewport, overflows, barModel
 
 export gutter, heatmap, inline_annotations, styled_row, highlighter, profile
 
@@ -164,6 +166,15 @@ type
       ## Page-Descriptions.md §14's row, when there is one. Rendered in the
       ## body rather than invented here: the string comes from the binding,
       ## which reads `EditorVM.degradedState`.
+    hview*: HorizontalView
+      ## PLAT-70 (Horizontal-Overflow.md §4): the read-only editor's
+      ## horizontal view — its document's, after the runtime's caret-follow.
+      ## The code is drawn from `hview.leftCol`; the bar while it overflows.
+    caretViewColumn*: int
+      ## The caret's 0-based view column (`editing_core.caretViewColumn`):
+      ## the bar's mark (§4.2).
+    overflowMarkers*: bool
+      ## `view.overflow-markers` (§4.6).
 
   SourcePaneScreen* = object
     ## One painted pane, plus the counts a test asserts on.
@@ -178,6 +189,8 @@ type
       ## Visible lines the model did not hold. Never rendered blank.
     annotatedLines*: int
       ## Lines that carried an inline annotation.
+    barRow*: int
+      ## PLAT-70: the horizontal bar's row, -1 when the content fits.
 
 const
   SourcePaneTitle* = "SOURCE"
@@ -412,6 +425,18 @@ proc restyleClamped(g: var StyledGrid; row, col, width, lo, hi: int;
   if stop > start:
     g.restyle(row, start, stop - start, transform)
 
+proc sourceBarOf*(model: SourcePaneModel; area: CellArea):
+    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
+  ## PLAT-70: where `paintSourcePane` draws the horizontal bar in `area`, and
+  ## the view it is drawn over — what a press on it is hit-tested against.
+  let gutW = min(area.width, model.paneGutterWidth())
+  let codeW = max(0, area.width - gutW)
+  var view = model.hview
+  view.setViewport(codeW)
+  (shown: view.overflows and area.height >= 3,
+   row: area.row + area.height - 1, left: area.col + gutW, cols: codeW,
+   view: view)
+
 proc paintSourcePane*(g: var StyledGrid; area: CellArea;
                       model: SourcePaneModel;
                       cache: HighlighterCache = nil): SourcePaneScreen =
@@ -422,7 +447,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
   ## which is what the cold-parse benchmark measures.
   result = SourcePaneScreen(rows: @[], area: area, gutterWidth: 0,
                             codeWidth: 0, materializedLines: 0,
-                            loadingLines: 0, annotatedLines: 0)
+                            loadingLines: 0, annotatedLines: 0, barRow: -1)
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -449,11 +474,16 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       cache.highlight(model.path, 0, "", model.firstHeldLine, model.heldLines,
                       model.entryContext)
 
+  # PLAT-70: THE HORIZONTAL VIEW, at this pane's code width; the bar takes
+  # the last row only while the content overflows (Horizontal-Overflow §4.7).
+  let bar = model.sourceBarOf(area)
+  let view = bar.view
+  let left = view.leftCol
   # Absent (§14's `savAbsent`): no line of this file will arrive, so no row is
   # drawn as `⋯ loading` — the degraded message below names the missing file.
   let bodyRows =
     if model.provenance == gpAbsent and model.heldLines.len == 0: 0
-    else: area.height - 1
+    else: area.height - 1 - (if bar.shown: 1 else: 0)
   for i in 0 ..< bodyRows:
     let row = area.row + 1 + i
     let line = model.viewportTop + i
@@ -496,14 +526,14 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
     else:
       inc result.materializedLines
       let raw = model.heldTextAt(line)
-      let text = truncateToCells(raw, codeW)
+      let text = cellSlice(raw, left, left + codeW)
       g.paint(row, codeCol, text, DefaultCellStyle)
       let shown = cellWidthOf(text)
       for span in file.spansForLine(line):
         if span.class == tcPlain:
           continue
-        let lo = codeCol + max(0, span.startCell)
-        let hi = codeCol + min(shown, span.endCell)
+        let lo = codeCol + max(0, span.startCell - left)
+        let hi = codeCol + min(shown, span.endCell - left)
         if hi <= lo:
           continue
         let style = tokenStyle(span.class)
@@ -525,8 +555,8 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       # breakpoint's colour — the desktop's inline `ct-column-breakpoint-
       # marker` on the one character the breakpoint is anchored at.
       for (ml, mc) in model.columnMarks:
-        if ml == line and mc >= 1 and mc <= shown:
-          g.restyle(row, codeCol + mc - 1, 1, proc(s: CellStyle): CellStyle =
+        if ml == line and mc - left >= 1 and mc - left <= shown:
+          g.restyle(row, codeCol + mc - left - 1, 1, proc(s: CellStyle): CellStyle =
             var out2 = s
             out2.role = srGutterBreakpoint
             out2.underline = true
@@ -541,6 +571,8 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
         if span.text.len > 0:
           inc result.annotatedLines
           g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)
+      if model.overflowMarkers:
+        paintOverflowMarkers(g, row, codeCol, cellWidthOf(raw), view)
 
     if line == model.executionLine and line > 0:
       # §3.3.2's "background highlight on current active execution line",
@@ -573,21 +605,27 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
     # the caret.
     for sel in model.selected:
       if sel.line == line and sel.toColumn > sel.fromColumn:
-        let first = max(1, sel.fromColumn)
-        let last = min(codeW + 1, sel.toColumn)
+        let first = max(1, sel.fromColumn - left)
+        let last = min(codeW + 1, sel.toColumn - left)
         if last > first:
           g.restyle(row, codeCol + first - 1, last - first,
                     proc(s: CellStyle): CellStyle =
                       s.withBackground(srSurfaceSelection))
     # PLAT-51: THE CARET, over everything — its cell reversed (a caret past
     # the line's end sits on the blank cell after it).
-    if line == model.caretLine and line > 0 and model.caretColumn >= 1 and
-       model.caretColumn <= codeW:
-      g.restyle(row, codeCol + model.caretColumn - 1, 1,
+    if line == model.caretLine and line > 0 and
+       model.caretColumn - left >= 1 and model.caretColumn - left <= codeW:
+      g.restyle(row, codeCol + model.caretColumn - left - 1, 1,
                 proc(s: CellStyle): CellStyle =
                   var out2 = s
                   out2.reverse = true
                   out2)
+
+  if bar.shown and bodyRows > 0:
+    # §4.7: the last row, one cell high, over the code columns.
+    result.barRow = bar.row
+    paintHorizontalBar(g, bar.row, bar.left, bar.cols,
+                       view.barModel(model.caretViewColumn))
 
   if model.degradedMessage.len > 0 and area.height >= 2:
     if bodyRows == 0:
@@ -634,24 +672,29 @@ proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
      row >= area.row + area.height or col < area.col or
      col >= area.col + area.width:
     return
+  let gutW = min(area.width, model.paneGutterWidth())
+  let codeW = max(0, area.width - gutW)
+  let bar = model.sourceBarOf(area)
+  let view = bar.view
+  # PLAT-70: the horizontal bar's row is the bar's, never a line.
+  if bar.shown and row == bar.row:
+    return
   let line = model.viewportTop + (row - area.row - 1)
   if line < 1 or (model.totalLineCount > 0 and line > model.totalLineCount):
     return
   result.line = line
-  let gutW = min(area.width, model.paneGutterWidth())
-  let codeW = max(0, area.width - gutW)
   if col < area.col + gutW:
     result.onGutter = true
     return
   let codeCol = area.col + gutW
-  result.column = col - codeCol + 1
+  result.column = col - codeCol + 1 + view.leftCol
   if not model.holdsLine(line):
     return
   let raw = model.heldTextAt(line)
   result.lineText = raw
   let annotations = model.annotationsAt(line, raw)
   if annotations.len > 0:
-    let shown = cellWidthOf(truncateToCells(raw, codeW))
+    let shown = cellWidthOf(cellSlice(raw, view.leftCol, view.leftCol + codeW))
     let start = codeCol + shown + AnnotationGap
     let targets = shownAnnotationTargets(annotations, codeW, shown)
     for t in targets:

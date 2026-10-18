@@ -472,7 +472,12 @@ proc terminalOutputModelOf*(vm: TerminalOutputVM; ticks: uint64;
                                    # the debugger live: it is still held
                                    # across the refresh each move makes.
                                    previewing: prior.previewing,
-                                   scrubSent: prior.scrubSent)
+                                   scrubSent: prior.scrubSent,
+                                   # PLAT-70: the horizontal view and the
+                                   # widest line measured so far are the
+                                   # pane's own, carried too.
+                                   hview: prior.hview, widths: prior.widths,
+                                   overflowMarkers: prior.overflowMarkers)
   if vm.isNil:
     return
   result.loading = vm.initialLoad.val
@@ -488,6 +493,9 @@ proc terminalOutputModelOf*(vm: TerminalOutputVM; ticks: uint64;
     if result.windowed: vm.currentLine() else: lineOfTick(result.lines, ticks)
   if not vm.screen.isNil:
     result.shownWrite = vm.screen.writeAtTick(ticks)
+  # The output's identity is its ViewModel: another session's (a tab
+  # switch) is another output, and is measured from nothing.
+  result.measureContent(cast[int](vm))
 
 proc terminalLinesRefetch(s: TuiSession):
     proc(m: TerminalOutputPaneModel; rows: int): TerminalOutputPaneModel =

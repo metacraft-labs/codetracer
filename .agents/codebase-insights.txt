@@ -7326,3 +7326,80 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   symlinked to the pins; `npm install`, `npx napi build --release
   --manifest-path crates/recorder_native/Cargo.toml --output-dir
   crates/recorder_native/`, `npm run build`) and export the CLI path.
+- Horizontal scroll (PLAT-70 Part A) is ONE model:
+  `viewmodel/viewmodels/horizontal_scroll.nim` (`HorizontalView` over
+  `scrollbar_scrubber`'s column axis, `CaretFollow`, `ContentWidth`,
+  `wheelColumnsOf`, `overflowMarkers`). The editor's content width is exact
+  and maintained per line in `editing_core.drainJournal` (`LineWidths`,
+  re-measured per change set once `contentCols` has measured the document);
+  the output panes keep the widest line measured so far, reset when the
+  session (generation) changes. `settle` allows `maxLeftCol + 1` so a caret
+  just past the widest line's end stays in view; explicit scrolls clamp to
+  `maxLeftCol`.
+- GPUI wheel deltas arrive as pixels (`pixel_delta(window.line_height())`);
+  a Wayland wheel notch is 3 lines, so one hardware notch is 18 editor
+  columns (6 per line-equivalent, Horizontal-Overflow §4.3). A sway headless
+  output is 1920x1080 whatever `--width`/`--height` the window asks for; the
+  virtual pointer must be started with the OUTPUT's size or every `abs` lands
+  scaled (`ci/test/plat70a_gpui_window.py`).
+- `isonim-gpui/tools/virtual_pointer.c` needs `hwheel N`
+  (WL_POINTER_AXIS_HORIZONTAL_SCROLL) for the PLAT-70 window capture; the
+  windowed capture driver (`ci/test/gpui-window-captures.sh plat70a`) builds
+  the virtual pointer from the isonim-gpui checkout, so that change must land
+  there first.
+- In the TUI, Shift-modified mouse reports stand down EXCEPT the wheel:
+  Shift + wheel-up/down is converted to wheel-left/right in `runtime.nim`
+  (`routeHorizontalWheel`). Terminal Output's `Left`/`Right` (step by write)
+  are screen-view only; in the line view CUA's `Left`/`Right` are
+  `view.scroll-left/right` (`OutputPanesWhen`), and Vim's single `z`
+  maximize is narrowed with `!(OutputPanesWhen)` so `z h`/`z l` resolve.
+- Capture scripts and harnesses pick the first X display with no
+  `/tmp/.X<n>-lock`. Dead Xvfbs of this user leave locks AND sockets; once
+  they pile up (99..139 here) the next free number can be one another user's
+  Xvfb holds through the ABSTRACT socket namespace (`:140`, github-runner):
+  our Xvfb then fails ("SocketCreateListener() failed") while DISPLAY still
+  points there, and the Electron controls go red at random. Remove this
+  user's stale locks/sockets (pid dead) before grading Electron gates.
+- plat50-stop-path / plat50-clicks engine arms: point `CT_STOP_PATH_ENGINE_DIR`
+  / `CT_P50_ENGINE_DIR` at a real-copy sandbox `src/db-backend` whose
+  `../../../codetracer-trace-format*` are the repro.lock revisions and whose
+  `src` is a symlink to the worktree's `src/db-backend/src` (the mutation
+  lands there; Cargo resolves path deps from the real manifest).
+- plat68's `isonim-tui:` propagation suite compiles in `$ISONIM_TUI_SRC/..`
+  and needs `build/grammars/libisonim_tui_grammars.a` there plus the
+  siblings (isonim-examples, isonim-render-serve, nim-pty, nim-faststreams,
+  nim-stew, nim-everywhere) beside it at their pins.
+- A malformed `tui-layout.json` left in the lanes' shared
+  `CODETRACER_TUI_LAYOUT_DIR` makes every frame's status row say "saved
+  layout ignored (MissingField)" and turns ~7 pty suites red; empty the
+  directory before a whole lane run.
+- The horizontal view counts VIEW columns (`editing_core.ViewColumnPolicy`,
+  tab = one column, wide glyph two), not the editing settings' policy (tabs
+  to the next multiple of 4, which decides goal columns): the terminal's grid
+  (`styled_row.cellWidthOf`) and GPUI's rows (`leaves.dropColumns`, by rune)
+  both draw a tab in one column, so measuring with tab stops made a tabbed
+  line's bar promise columns no pane draws. `caretViewColumn` is the bar's
+  mark and the caret-follow's caret.
+- The ASCII tier degrades by GLYPH (`borders.AsciiFallbackTable`), and `▏`
+  is a divider's `|` there. A scrollbar thumb's cells are therefore degraded
+  by their STYLE instead (`theme/degradation.degradeRow`: role
+  `srScrubberThumb` or surface `srScrubberThumbGround` → `#` per cell), so a
+  horizontal thumb that starts or ends one eighth into a cell is not drawn
+  with a track-looking `|` inside it. Every scrubber, vertical or horizontal,
+  is `#` in ASCII; the horizontal track is the box-drawing `─` → `-`.
+- The output panes' content width is `horizontal_scroll.measureLines` (the
+  lines not yet measured, from nothing again for another output or one that
+  shrank) on every front-end: TUI Terminal Output and Build Output, GPUI
+  Terminal Output. Their output identity is the ViewModel / BuildSession
+  reference.
+- GPUI reports a wheel in PIXELS, `ScrollDelta.pixel_delta(window
+  .line_height())`, and the window's line height is GPUI's default text
+  style's (16 px × φ ≈ 25.9 px), not the editor's row pitch. The horizontal
+  view converts by that (`main.GpuiWheelLinePx`): dividing by `EditorLinePx`
+  (22 px since the redesign) made a Wayland notch 21 columns instead of 18.
+- The desktop prefixes the Electron capture gates build
+  (`scripts/plat45-desktop-prefix.sh`) LINK `src/build-debug/public/css` and
+  `frontend/styles` — a stale `src/build-debug` makes every desktop gate red
+  (the renderer runs old CSS/JS around new `ui.js`). Run `just build-once`
+  first; under CI load set `CODETRACER_PERF_LIMIT_SCALE` for capture runs
+  only (never for a lane that gates performance).

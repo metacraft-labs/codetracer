@@ -979,6 +979,11 @@ const
     ## (`horizontal`) rather than `"true"`, so a vertical one can be added
     ## later without a reader of this one silently counting it.
   EditorScrollbarThumbAttribute* = "data-ct-editor-scrollbar-thumb"
+  EditorScrollbarMarkAttribute* = "data-ct-editor-scrollbar-mark"
+    ## PLAT-70: the caret's display column on the track (§4.2's mark).
+  EditorScrollbarMarkPx* = 3
+  EditorScrollbarMarkColour* = DesignTokenHex[dtColorsEditorActionSecondary][dmDark]
+    ## The execution pointer's colour, as every scrubber's mark is drawn.
   EditorScrollMetricAttribute* = "data-ct-editor-scroll"
     ## **WHAT THE EDITOR'S HORIZONTAL EXTENT ACTUALLY IS**, stamped on the
     ## editor's own node on EVERY frame — including the frames with no
@@ -1013,6 +1018,9 @@ type
       ## a bare existence check would not notice was missing.
     thumbPx*: int
     thumbLeftPx*: int
+    view*: HorizontalView
+      ## PLAT-70: the horizontal view the bar is drawn over (zero while the
+      ## content fits) — what a press on the bar is handed back to.
 
 func columnsPx*(cols: int): int =
   ## `cols` columns of the editor's face, in whole pixels.
@@ -1072,48 +1080,54 @@ func editorCodeColumns*(rows: openArray[EditorRow]): int =
   for row in rows:
     result = max(result, drawnCodeText(row).runeLen)
 
+func editorViewCols*(viewportPx: int): int =
+  ## How many CODE columns an editor pane `viewportPx` wide shows: its width
+  ## less the gutter (`EditorGutterPx`, which does not scroll, as the
+  ## desktop's line-number margin does not), in whole columns of the face.
+  let visibleCodePx = max(0, viewportPx - EditorGutterPx)
+  int(floor(float(visibleCodePx) / EditorColumnPx))
+
 func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
-                      viewportPx: int; leftCols = 0): EditorHScroll =
+                      viewportPx: int; leftCols = 0;
+                      contentCols = -1): EditorHScroll =
   ## **THE WHOLE DECISION, IN ONE PLACE.** Given the rows as drawn, the
-  ## gutter's width and the pane's inner width: whether anything is off the
-  ## right-hand edge, how far it can be scrolled, and the thumb that says so.
+  ## gutter's width, the pane's inner width and — when the window holds the
+  ## document — its exact content width (PLAT-70, Horizontal-Overflow.md
+  ## §4.1: the widest line of the WHOLE document, `editing_core.contentCols`;
+  ## the drawn rows' widest when no document is open): whether anything is
+  ## off the right-hand edge, how far it can be scrolled, and the thumb that
+  ## says so.
   ##
-  ## The slider arithmetic is Monaco's, quoted from `scrollbarState.js`
-  ## (`_computeValues`): `sliderSize = round(max(MINIMUM_SLIDER_SIZE,
-  ## floor(visibleSize * representableSize / scrollSize)))` with
-  ## `representableSize == visibleSize` (this scrollbar has no arrows), and
-  ## `sliderPosition = floor(scrollPosition * (representableSize - sliderSize)
-  ## / (scrollSize - visibleSize))`.
-  ##
-  ## **ONE DEVIATION, AND IT IS MEASURED RATHER THAN PREFERRED:** the
-  ## position is taken as a fraction of `maxLeftCols` and not of
-  ## `contentPx - viewportPx`. In Monaco the whole content scrolls; here the
-  ## GUTTER DOES NOT — the desktop editor's line-number margin is fixed and
-  ## this one's is too — so the two denominators differ by the gutter, and
-  ## using Monaco's would leave the thumb short of the track's end at the
-  ## last column.
+  ## **The bar is the shared scrubber model on the column axis** (§4.2,
+  ## `horizontal_scroll.barModel`): the thumb is `viewportCols / contentCols`
+  ## of the track, at least Monaco's 20 px (`EditorScrollbarMinThumbPx`), at
+  ## `leftCol / contentCols` along it. It replaced Monaco's own slider
+  ## formula here (PLAT35-F3), so every bar in the product — the list
+  ## scrubbers, the terminal's eighth blocks, this one — is one arithmetic.
+  ## `leftCols` is clamped by the model: to `0 .. maxLeftCols`, and the one
+  ## column past it that only the caret's follow reaches.
   result.viewportPx = max(0, viewportPx)
   result.gutterCols = editorGutterColumns(numberWidth)
-  result.codeCols = editorCodeColumns(rows)
+  result.codeCols = if contentCols >= 0: contentCols
+                    else: editorCodeColumns(rows)
   result.contentPx = EditorGutterPx + columnsPx(result.codeCols)
-  if rows.len == 0 or result.viewportPx <= 0 or
-     result.contentPx <= result.viewportPx:
-    # Nothing off the edge — or nobody said how wide the pane is. Either way
-    # no scrollbar, and `leftCols` falls back to 0 so a stale scroll offset
-    # cannot survive the pane growing wide enough to hold the file.
+  var view = HorizontalView(leftCol: max(0, leftCols),
+                            contentCols: result.codeCols)
+  # Nobody passing a width means NO SCROLLBAR, not a guessed one; neither
+  # does a surface with no rows. (Content first, then the width: the view
+  # is settled once, with both known.)
+  view.setViewport(if rows.len == 0 or result.viewportPx <= 0: 0
+                   else: editorViewCols(result.viewportPx))
+  if not view.overflows:
     return
   result.present = true
-  let visibleCodePx = max(0, result.viewportPx - EditorGutterPx)
-  let visibleCodeCols = int(floor(float(visibleCodePx) / EditorColumnPx))
-  result.maxLeftCols = max(0, result.codeCols - visibleCodeCols)
-  result.leftCols = clamp(leftCols, 0, result.maxLeftCols)
-  let track = result.viewportPx
-  result.thumbPx = min(track, max(EditorScrollbarMinThumbPx,
-    int(floor(float(track) * float(result.viewportPx) /
-              float(result.contentPx)))))
-  result.thumbLeftPx =
-    if result.maxLeftCols <= 0: 0
-    else: (track - result.thumbPx) * result.leftCols div result.maxLeftCols
+  result.maxLeftCols = view.maxLeftCol
+  result.leftCols = view.leftCol
+  let span = view.barModel.thumbSpan(result.viewportPx,
+                                     EditorScrollbarMinThumbPx)
+  result.thumbPx = span.length
+  result.thumbLeftPx = span.start
+  result.view = view
 
 func scrollMetricText*(scroll: EditorHScroll): string =
   ## `EditorScrollMetricAttribute`'s value.
@@ -1158,8 +1172,8 @@ var editorScrollbarShown* = false
 const EditorTopPadPx = 4
   ## The editor's top inset at rest (`window_geometry.EditorPadTopPx`).
 
-proc renderEditorScrollbar(r: GpuiRenderer;
-                           scroll: EditorHScroll): GpuiElement =
+proc renderEditorScrollbar(r: GpuiRenderer; scroll: EditorHScroll;
+                           caretMark = -1): GpuiElement =
   ## The track, and the thumb inside it at its offset.
   ##
   ## **THE TRACK IS NOT FILLED**, which is the reference's own look: Monaco's
@@ -1211,6 +1225,44 @@ proc renderEditorScrollbar(r: GpuiRenderer;
   if not editorScrollbarShown:
     r.setStyle(thumb, "opacity", "0")
   r.appendChild(result, thumb)
+  # PLAT-70 (Horizontal-Overflow.md §4.2): THE CARET'S COLUMN, marked on the
+  # track as the vertical scrubber marks "now" — absolutely placed, so the
+  # thumb's flow is untouched. It fades with the thumb.
+  if caretMark >= 0:
+    let f = scroll.view.barModel(caretMark).currentFraction
+    if f >= 0.0:
+      let mark = r.createElement("div")
+      r.setAttribute(mark, EditorScrollbarMarkAttribute, $caretMark)
+      r.setStyle(mark, "position", "absolute")
+      r.setStyle(mark, "left", $min(scroll.viewportPx - EditorScrollbarMarkPx,
+                                    int(f * float(scroll.viewportPx))) & "px")
+      r.setStyle(mark, "top", "0px")
+      r.setStyle(mark, "width", $EditorScrollbarMarkPx & "px")
+      r.setStyle(mark, "height", $EditorScrollbarPx & "px")
+      r.setStyle(mark, "background-color", EditorScrollbarMarkColour)
+      if not editorScrollbarShown:
+        r.setStyle(mark, "opacity", "0")
+      r.appendChild(result, mark)
+
+proc markRuns(runs: seq[TokenRun]; view: HorizontalView;
+              width: int): seq[TokenRun] =
+  ## PLAT-70 (Horizontal-Overflow.md §4.6): the runs of a row drawn from the
+  ## view's left column, cut at its right edge, with `‹` / `›` replacing the
+  ## first / last shown character when the line continues past that edge.
+  let marks = overflowMarkers(width, view)
+  var left = view.viewportCols
+  for run in runs:
+    if left <= 0: break
+    let n = run.text.runeLen
+    let take = min(n, left)
+    result.add TokenRun(text: run.text.runeSubstr(0, take), class: run.class)
+    left -= take
+  if result.len == 0: return
+  if marks.precedes:
+    result[0].text = "‹" & result[0].text.runeSubstr(1)
+  if marks.extends and left == 0:
+    let t = result[^1].text
+    result[^1].text = t.runeSubstr(0, t.runeLen - 1) & "›"
 
 const
   BracketColours = ["#EAB308", "#8B5CF6", "#3B82F6"]
@@ -1275,7 +1327,8 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      caretColumn = 0;
                      selected: openArray[tuple[fromColumn, toColumn: int]] = [];
                      foldable = false; bracketDepth = 0;
-                     guides = 0; stickyHeader = false):
+                     guides = 0; stickyHeader = false;
+                     markersView = HorizontalView()):
                      GpuiElement =
   ## One row of the source editor. `stickyHeader`: drawn as Monaco's sticky
   ## widget draws a scope's first line — no number, a dim chevron after the
@@ -1517,7 +1570,10 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
   # line-number margin does not. Zero on every frame nobody has scrolled, so
   # the drawn tree is byte-identical to the one before `PLAT35-F3` until the
   # wheel is turned.
-  if row.held and runs.len > 0:
+  # PLAT-70: with the overflow markers on (Horizontal-Overflow.md §4.6) the
+  # shown runs are cut at the view's right edge and carry `‹` / `›`.
+  let markers = markersView.viewportCols > 0 and row.held
+  if row.held and (runs.len > 0 or markers):
     # ONE TEXT ELEMENT FOR THE WHOLE ROW, not one per span. The loop below
     # emits a span per token run and a further one per bracket character,
     # and the renderer would otherwise round each one's width up to a whole
@@ -1526,11 +1582,17 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     # layout does; the spans, their classes and their colours are unchanged,
     # and so is the render plan a test reads.
     r.setAttribute(code, InlineTextRunsAttribute, "1")
+    let shownRuns =
+      if not markers: dropColumns(runs, skipCols)
+      else: markRuns(dropColumns(
+              (if runs.len > 0: runs
+               else: @[TokenRun(text: row.text, class: tcPlain)]), skipCols),
+              markersView, row.text.runeLen)
     # Monaco's bracket-pair colours (`editorBracketHighlight.foreground1..3`,
     # by nesting depth from the window's first row), outside strings and
     # comments; every other character keeps its class's colour.
     var depth = bracketDepth
-    for run in dropColumns(runs, skipCols):
+    for run in shownRuns:
       var pending = ""
       proc flush(r: GpuiRenderer; cls: TokenClass) =
         if pending.len == 0: return
@@ -1881,7 +1943,8 @@ proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
 
 proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                    escape: ViewNode; surface: EditorSurface;
-                   viewportPx = 0; scrollLeftCols = 0;
+                   viewportPx = 0; scrollLeftCols = 0; contentCols = -1;
+                   caretMark = -1; overflowMarkers = false;
                    sticky: seq[tuple[line: int; text: string; top: int]] = @[]): bool =
   ## Draw the source editor into `parent`. Answers whether it drew ROWS.
   ##
@@ -1948,7 +2011,7 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
   # value — so a clamped offset and the thumb that reports it cannot
   # disagree (§30).
   let scroll = editorHScrollOf(surface.rows, widest, viewportPx,
-                               scrollLeftCols)
+                               scrollLeftCols, contentCols)
   r.setAttribute(parent, EditorScrollMetricAttribute, scrollMetricText(scroll))
   let runs = editorRunsOf(surface)
   let folds = foldableRows(surface.rows)
@@ -1980,9 +2043,13 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                                           (if row.line == surface.caretLine:
                                              surface.caretColumn else: 0),
                                           selected, folds[i], depths[i],
-                                          guideCounts[i]))
+                                          guideCounts[i],
+                                          markersView =
+                                            (if overflowMarkers and
+                                                scroll.present: scroll.view
+                                             else: HorizontalView())))
   if scroll.present:
-    r.appendChild(parent, renderEditorScrollbar(r, scroll))
+    r.appendChild(parent, renderEditorScrollbar(r, scroll, caretMark))
   if editorPaneHeightPx > 0 and viewportPx > 0:
     # The editor's top inset is ground: a row scrolled partly above the
     # viewport is cut at its top edge, as Monaco's lines are, rather than
@@ -3612,7 +3679,9 @@ proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
 proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
                 surface: EditorSurface;
                 editorViewportPx = 0;
-                editorScrollLeftCols = 0): (GpuiElement, bool) =
+                editorScrollLeftCols = 0;
+                editorContentCols = -1;
+                editorCaretMark = -1): (GpuiElement, bool) =
   ## One leaf's subtree, and whether it is a REPORT rather than a live pane.
   ##
   ## Three states and not two, which is PLAT-9's `PaneRefKind` arriving at a
@@ -3660,7 +3729,8 @@ proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
       r.appendChild(node, heading)
       let drewRows = renderEditor(r, node, sourcePaneView(GpuiMedium).root,
                                   surface, editorViewportPx,
-                                  editorScrollLeftCols)
+                                  editorScrollLeftCols, editorContentCols,
+                                  editorCaretMark)
       return (node, not drewRows)
     # **AN ACCEPTED EXCEPTION SAYS WHICH EXCEPTION IT IS** (PLAT-41's LAW-P3),
     # in every product mode. `fileTree` and `buildOutput` have no replay
@@ -3752,7 +3822,9 @@ proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
                    surface = EditorSurface(medium: GpuiMedium,
                                            report: NoSurfaceSuppliedReport);
                    editorViewportPx = 0;
-                   editorScrollLeftCols = 0):
+                   editorScrollLeftCols = 0;
+                   editorContentCols = -1;
+                   editorCaretMark = -1):
                    LeafRenderOutcome =
   ## Build the element tree for one window.
   ##
@@ -3779,7 +3851,8 @@ proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
     return
   for leaf in leafSet.leaves:
     let (node, reported) = renderLeaf(r, leaf, surface, editorViewportPx,
-                                      editorScrollLeftCols)
+                                      editorScrollLeftCols,
+                                      editorContentCols, editorCaretMark)
     # PLAT-35's focus-order row. The index is the leaf's position in the
     # projected document's own order — the order this front-end would move
     # focus in — stamped so the question can be answered from the RENDERED

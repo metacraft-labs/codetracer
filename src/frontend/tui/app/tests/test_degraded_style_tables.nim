@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3445
+const ExpectedAssertions = 3449
   ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
   ## current-line and inspection triangles, the role table traded the `[MOD]`
   ## tag for the editor-text role, and one permitted merge was added.
@@ -548,8 +548,8 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # PLAT-50: `▏` and `▕`, the divider and edge lines (27); PLAT-52: the
     # thirteen eighth blocks a scrubber's thumb ends are drawn with (40);
     # PLAT-51: the current-line triangle `▸` (`>`) and the inspection
-    # cursor's `▹` (`)`) (42).
-    ck mapped == 42
+    # cursor's `▹` (`)`) (42); PLAT-70: the overflow markers `‹` / `›` (44).
+    ck mapped == 44
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.

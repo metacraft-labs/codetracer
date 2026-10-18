@@ -1,0 +1,19 @@
+# Control digests for run-plat70a-hscroll-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+786dedb5e41208f88db8a12b7ffd51251f950335ac7c1c19429b93be908f16bd  src/frontend/viewmodel/viewmodels/horizontal_scroll.nim
+0525c9d8f4344138fcc8bf6a3d65b4c1f2f23260681cea82c2d887aa94ad1edc  src/frontend/viewmodel/editing_core.nim
+82bcc03201e8aa43dea917fef1b73bdf3f2eb4771f8e7d46193e1955e945c3f3  src/frontend/viewmodel/host/layout_preferences.nim
+9357299ebbadc2a4c1e992d8524458cc7e762a543b7d42d55bd24cb99f5eb929  src/frontend/viewmodel/keymap/cua_keymap.nim
+ee358b413428a63b0205b3a4ff18d3187eab9ac50d31a7dc5e535e8c7b26cb74  src/frontend/viewmodel/keymap/navigation_keymap.nim
+a92db8e5e3de47853757de8a52ed9c89568a2fc14ab372015f30bbd9f785907a  src/frontend/tui/app/input/mouse.nim
+ff1e627415c0e630c118a45a7e85b5f31336b58c8099334ba18ca759ab46badb  src/frontend/tui/app/runtime.nim
+d9f5304db5ee3022460ea126e83a03f91452ec2b7abc24f625851e0f63d1e34d  src/frontend/tui/app/views/terminal_output_pane.nim
+6f50e4df7e16443722e2f98cb24cd260956b919403c7e24288fe0735e12e7ee0  src/frontend/tui/app/views/source_pane.nim
+24f5556c78a640ea4f7400324b0d3dbe908d1794f8d05d6b91108479c814aa9b  src/frontend/gpui/main.nim
+5253cf9903d44f5ee9f7695262180dc8cf7c7d6b8079a1bcefb6911f40ffebdd  src/frontend/gpui/terminal_output_leaf.nim
+b71c7fa8b562fa40644b4e205ef83e4dd281c2980e0c5f4c16e062b21eb66ef6  src/frontend/viewmodel/tests/unit/test_plat70a_horizontal_scroll.nim
+c84ccccbe26f97f142e9e6b1863651ec3f92b54a80c615ba9deaff7e7a26e493  src/frontend/tui/tests/test_plat70a_hscroll.nim
+dcc17b802f40d2cfd9d9afb4c48e8c8edb3a301b8544c13c04a70e2b073cdb6e  src/frontend/tui/tests/real_terminal/test_plat70a_hscroll_pty.nim
+1304ce9e5318909e4d2f1ee02cb9600383c4a5a4fb19bd8c4205a7d98e3e1405  src/frontend/gpui/tests/test_plat70a_gpui_plan.nim

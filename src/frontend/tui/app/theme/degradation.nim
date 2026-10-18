@@ -327,6 +327,12 @@ proc degradeText*(text: string; caps: TerminalCapabilities): string =
   for r in text.utf8:
     result.add asciiFor(r)
 
+func isScrubberThumb(style: CellStyle): bool =
+  ## A cell of a scrubber's thumb: the thumb's own role, or an end cell the
+  ## thumb covers in part, drawn in the track's colour on the thumb's ground
+  ## (`scrubber_track.ThumbReversedStyle`).
+  style.role == srScrubberThumb or style.surface == srScrubberThumbGround
+
 proc degradeRow*(row: StyledRow; caps: TerminalCapabilities): StyledRow =
   ## One composited screen row at the resolved tier.
   ##
@@ -335,10 +341,18 @@ proc degradeRow*(row: StyledRow; caps: TerminalCapabilities): StyledRow =
   ## `LayoutEntry` and keeps this function a map rather than a re-encode. The
   ## compositor's `allText` branch emits them at adjacent columns either way, so
   ## the screen is identical; only the entry count differs.
+  ##
+  ## A SCROLLBAR THUMB'S CELLS ARE THE THUMB'S GLYPH on the ASCII tier
+  ## (Scrollbar-Scrubbers.md §4), whatever eighth block drew them: the glyph
+  ## table alone maps `▏` to a divider's `|`, which put a track-looking cell
+  ## inside a horizontal thumb that starts or ends one eighth into a cell.
   result = @[]
   for span in row:
-    result.add StyledSpan(text: degradeText(span.text, caps),
-                          style: degradeStyle(span.style, caps))
+    let text =
+      if caps.borders == bmAscii and span.style.isScrubberThumb:
+        repeat(asciiFor("█"), span.text.runeLen)
+      else: degradeText(span.text, caps)
+    result.add StyledSpan(text: text, style: degradeStyle(span.style, caps))
 
 proc degradeRows*(rows: seq[StyledRow];
                   caps: TerminalCapabilities): seq[StyledRow] =

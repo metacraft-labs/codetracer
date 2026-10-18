@@ -52,6 +52,7 @@ import ../viewmodel/keymap/alt_tap
 from ../viewmodel/viewmodels/omnibar_vm import paletteFieldOf
 import ../../common/key_names
 import ../viewmodel/viewmodels/video_player_vm
+from ../viewmodel/views/list_scrubber_dom import viewOperation
 
 type
   NativeKind = enum
@@ -300,6 +301,23 @@ proc traceOperation(op: string) =
   {.emit: ["(window.__ctKeyTrace = window.__ctKeyTrace || []).push(",
            entry, ");"].}
 
+proc focusedOutputScroller(): JsObject {.importjs: """
+  (function(){
+    const a = document.activeElement;
+    const pane = a && a.closest ? a.closest('[data-scope-kind="pane"]') : null;
+    if (!pane) return null;
+    const id = pane.getAttribute('data-scope-id');
+    let el = null;
+    if (id === 'terminalOutput')
+      el = pane.querySelector('.isonim-terminal-output > pre');
+    else if (id === 'buildOutput')
+      el = pane.querySelector('.build-output-container');
+    return el && el.clientHeight > 1 ? el : null;
+  })()""".}
+  ## PLAT-70: the scroll container of the focused output pane — the
+  ## Terminal Output's LINE view (its screen view has no bar and keeps its
+  ## step-by-write arrows) or Build Output's lines — or nil.
+
 proc registerHostOperation*(operation: string; run: proc()) =
   ## How THIS build performs `operation` — a catalogued operation whose rows
   ## hold only where a build supplies it (the web studio's
@@ -392,6 +410,16 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
       return nkHandled
   of "session.toggle-product-mode":
     if not data.functions.toggleMode.isNil: data.functions.toggleMode(data)
+    return nkHandled
+  of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
+     "view.scroll-right-half", "view.scroll-to-line-start":
+    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view, through
+    # the shared model (`list_scrubber_dom.viewOperation`). Outside a line
+    # view the key is the element's own (the screen view's write steps).
+    let scroller = focusedOutputScroller()
+    if scroller.isNil:
+      return nkLeaveToElement
+    discard viewOperation(scroller, res.operation)
     return nkHandled
   else: discard
   let action = clientActionOf(op)

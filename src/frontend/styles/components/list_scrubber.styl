@@ -47,3 +47,36 @@
   right: 0
   // The execution pointer's colour, as the terminal's and GPUI's marks.
   background: colors-editor-action-secondary
+
+// PLAT-70 (Horizontal-Overflow.md §4.7): a text pane's overflow-only
+// HORIZONTAL bar — the vertical track's drawing on the other axis, along the
+// scroll container's bottom (`views/list_scrubber_dom.attachHorizontalScrubber`),
+// only while the content is wider than the pane. The square where it meets
+// the vertical track belongs to neither.
+// The container's own horizontal bar is hidden (its vertical one is the list
+// scrubber's to hide, `.ct-scrubbed`); `scrollbar-width` stays unset for the
+// reason given above.
+.ct-hscrubbed
+  &::-webkit-scrollbar
+    height: 0
+
+.ct-hscrubber
+  position: absolute
+  // The app-wide scrollbar's thickness, as the vertical track's
+  // (`list_scrubber_dom.TrackPx` lays the two out against each other).
+  height: PANEL_SCROLLBAR_SIZE
+  z-index: 30
+  cursor: pointer
+  background: transparent
+
+.ct-hscrubber-thumb
+  // Drawn as the vertical thumb is: the track's full height, square, the
+  // app-wide scrollbar's tokens.
+  position: absolute
+  top: 0
+  bottom: 0
+  background: colors-ui-surface-primary-tertiary
+
+  &:hover,
+  .ct-hscrubber:active &
+    background: colors-ui-surface-primary-tertiary-hover

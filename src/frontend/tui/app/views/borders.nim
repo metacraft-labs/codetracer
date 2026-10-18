@@ -144,8 +144,11 @@ const AsciiFallbacks: array[21, (string, string)] = [
   ("●", "*"), ("○", "o"), ("◆", "+"),
   ("▶", ">"), ("▼", "v"), ("▲", "^")]
 
-const ExtraAsciiFallbacks: array[20, (string, string)] = [
+const ExtraAsciiFallbacks: array[22, (string, string)] = [
   ("█", "#"), ("…", "."), ("·", "."),
+  # PLAT-70: a text row's overflow markers (`scrubber_track.PrecedesGlyph` /
+  # `ExtendsGlyph`, Horizontal-Overflow.md §4.6): `<` and `>`.
+  ("‹", "<"), ("›", ">"),
   # PLAT-51: the execution pointer's mark (`gutter.ExecutionPointerMark`) and
   # the inspection cursor's (`gutter.InspectionPointerMark`) — §3.3.2: `>` on
   # the ASCII tier; the inspection mark keeps a distinct one.

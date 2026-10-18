@@ -36,10 +36,15 @@ type
 proc layoutPreferencesPath*(product: LayoutProduct): string =
   nativeStateRoot() / ($product & "-preferences")
 
+func productDefaults*(product: LayoutProduct): LayoutSettings =
+  ## The defaults of `product`: the overflow markers are on in the terminal
+  ## and off in GPUI (Horizontal-Overflow.md §4.6, OQ-H1).
+  defaultLayoutSettings(overflowMarkers = product == lpTerminal)
+
 proc loadLayoutPreferences*(product: LayoutProduct): LayoutPreferencesLoad =
   let path = layoutPreferencesPath(product)
   result = LayoutPreferencesLoad(status: lpsAbsent,
-                                 settings: defaultLayoutSettings(),
+                                 settings: productDefaults(product),
                                  path: path)
   if not fileExists(path):
     return
@@ -51,7 +56,7 @@ proc loadLayoutPreferences*(product: LayoutProduct): LayoutPreferencesLoad =
     result.message = "the stored layout preferences could not be read: " &
                      path & ": " & e.msg
     return
-  let decoded = decodeLayoutSettings(text)
+  let decoded = decodeLayoutSettings(text, productDefaults(product))
   if decoded.ok:
     result.status = lpsLoaded
     result.settings = decoded.settings
@@ -65,7 +70,7 @@ proc saveLayoutPreference*(product: LayoutProduct; which: LayoutSetting;
   ## else why it could not be saved.
   var current = loadLayoutPreferences(product)
   var s = if current.status == lpsLoaded: current.settings
-          else: defaultLayoutSettings()
+          else: productDefaults(product)
   s.assign(which, on)
   let failure = writeStaged(layoutPreferencesPath(product),
                             encodeLayoutSettings(s))

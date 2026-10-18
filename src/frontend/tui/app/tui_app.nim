@@ -143,6 +143,14 @@ type
       ## PLAT-51 (Native-Front-End-Parity.md §2): the focus highlight is off
       ## (`--focus-highlight=off`, `:set focus-highlight off`, the remembered
       ## preference). The zero value is ON, the default.
+    overflowMarkersOff*: bool
+      ## PLAT-70 (Horizontal-Overflow.md §4.6, OQ-H1): the `‹` / `›` markers
+      ## of the text panes are off (`--overflow-markers=off`, `:set
+      ## overflow-markers off`, the palette's toggle, the remembered
+      ## preference). The zero value is ON — the terminal's default.
+    buildView*: BuildView
+      ## PLAT-70: Build Output's horizontal view and the widest line measured
+      ## so far of the build it shows.
     contextMenu*: ContextMenuState
       ## PLAT-50: the open right-click menu, if any.
     content*: ContentOverlay
@@ -162,6 +170,9 @@ type
     terminalDrag*: TerminalDragKind
       ## PLAT-52: a press held on one of the pane's scrubbers.
     listScrub*: tuple[active: bool, pane: PaneKind]
+    hbarDrag*: tuple[active: bool, pane: PaneKind]
+      ## PLAT-70: a press held on a text pane's horizontal bar thumb — the
+      ## view follows the pointer until the release (Horizontal-Overflow §4.2).
     textDrag*: bool
       ## PLAT-68: a left press on the editor's text is held — the pointer's
       ## motion extends the selection from where it was pressed.
@@ -500,6 +511,12 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
       app.editSession.activeBuffer().path
     else: app.source.path
   let fullInfo = footerFileInfoText(infoPath)
+  # PLAT-70: the output panes' horizontal views and the markers setting.
+  var terminalOutput = app.terminalOutput
+  terminalOutput.overflowMarkers = not app.overflowMarkersOff
+  var build = buildPaneModelFor(app.build)
+  build.hview = app.buildView.hview
+  build.overflowMarkers = not app.overflowMarkersOff
   result = ShellModel(
     header: header,
     dividers: app.dividers,
@@ -556,12 +573,12 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     eventLog: app.eventLog,
     points: app.points,
     scratchpad: app.scratchpad,
-    terminalOutput: app.terminalOutput,
+    terminalOutput: terminalOutput,
     frameViewer: app.frameViewer,
     fileTree: app.fileTree,
     vcs: app.vcs,
     search: app.search,
-    build: buildPaneModelFor(app.build),
+    build: build,
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()
            else: editPaneModelFor(app.editSession,
