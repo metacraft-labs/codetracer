@@ -398,8 +398,21 @@
     # path, beside which there is no catalog either. `.envrc` overrides it with
     # a `../reprobuild-packages` sibling when one exists, so a workspace uses
     # its own checkout.
+    # PINNED BY REVISION, NOT BY BRANCH, and the revision is the one
+    # reprobuild's own lock declares (`runquota-package-catalog`). Tracking
+    # `dev` is what broke this shell: `shellcheck`, `shfmt` and `prek` left
+    # reprobuild's stdlib, so a recipe that `uses:` them needs their
+    # `packages/interfaces/<pkg>/repro.nim` from this catalog — and those
+    # interfaces were added on the catalog's `agents` branch (5cb3f71026c5,
+    # 2026-09-30) and have never been promoted to `dev`, whose tip has not
+    # moved since 2026-09-29. So re-resolving `dev` cannot fix it: the content
+    # is not on that branch to be resolved to. Re-pinning the PARENT
+    # (reprobuild) forward while this child stayed on a branch that never
+    # received the matching recipes is the same stale-child class as
+    # `io-mon-src` (f79853ec2); the fix is the same single-node graft onto the
+    # revision reprobuild itself declares.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/dev";
+      url = "github:metacraft-labs/reprobuild-packages/4e2fd1dcabf8ae8eac28a2d27c3160233589c1e6";
       flake = false;
     };
 

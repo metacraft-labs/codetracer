@@ -73,7 +73,14 @@ done
 for tool in nix nim tesseract python3; do
 	command -v "${tool}" >/dev/null 2>&1 || fail "'${tool}' is not on PATH (run inside the dev shell)"
 done
-export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${root}/src/build-debug/bin/replay-server}"
+# The repro output root FIRST, then the tup tree. `src/build-debug` does not
+# exist in a checkout only ever built through `repro`, which is why this used
+# to refuse a replay-server that was in fact built (codetracer-pm
+# `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
+_ct_replay_default="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}/bin/replay-server"
+[ -x "${_ct_replay_default}" ] ||
+	_ct_replay_default="${root}/src/build-debug/bin/replay-server"
+export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 [ -x "${REPLAY_SERVER_BIN}" ] || fail "no replay-server at ${REPLAY_SERVER_BIN} (just build-once)"
 
 # ---- 1. the windowed shim and the virtual pointer, in isonim-gpui's shell ---

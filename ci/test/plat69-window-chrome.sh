@@ -13,7 +13,8 @@
 #     to isonim-gpui's WINDOWED shim (`ci/test/gpui-window-captures.sh` builds
 #     it; CODETRACER_WINDOW_BIN_PINS_SHIM=1 says it was);
 #   * the `calc` recording under test-logs/tui-fixtures/, and REPLAY_SERVER_BIN
-#     (default: src/build-debug/bin/replay-server);
+#     (default: src/build-debug-repro/bin/replay-server, falling back to the
+#     tup tree's src/build-debug/bin/replay-server);
 #   * src/build-debug/bin/ct and its Electron bundle (`just build-once`), for
 #     the desktop half of plat69-initial-window;
 #   * the isonim-gpui checkout (ISONIM_GPUI_DIR, default ../isonim-gpui), whose
@@ -41,7 +42,14 @@ fail() {
 BIN="${CODETRACER_PLAT69_BIN:-${root}/build/bin/codetracer-gpui-window}"
 TRACE="${CODETRACER_PLAT69_TRACE:-${root}/test-logs/tui-fixtures/calc-2f0db4f45192}"
 CT="${CODETRACER_PLAT69_CT:-${root}/src/build-debug/bin/ct}"
-export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${root}/src/build-debug/bin/replay-server}"
+# The repro output root FIRST, then the tup tree. `src/build-debug` does not
+# exist in a checkout only ever built through `repro`, which is why this used
+# to refuse a replay-server that was in fact built (codetracer-pm
+# `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
+_ct_replay_default="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}/bin/replay-server"
+[ -x "${_ct_replay_default}" ] ||
+	_ct_replay_default="${root}/src/build-debug/bin/replay-server"
+export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 OUT="${root}/build/plat69"
 
 [ -n "${ISONIM_GPUI}" ] && [ -d "${ISONIM_GPUI}/rust/gpui-nim-shim" ] ||

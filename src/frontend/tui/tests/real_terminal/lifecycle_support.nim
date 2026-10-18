@@ -306,20 +306,46 @@ proc reapableChildren*(): int =
 proc replayServerPath*(): string =
   ## Where `replay-server` is, or "" when it has not been built.
   ##
-  ## The same search order `host/native_host.findReplayServer` uses —
-  ## `REPLAY_SERVER_BIN`, then the debug build tree, then cargo's own output
+  ## `REPLAY_SERVER_BIN`, then the debug build trees, then cargo's own output
   ## directories. Spelled again rather than imported because reaching `host/`
   ## from here would pull the entrypoint's module graph into a suite that only
-  ## wants a path, and a divergence shows up as the detector's positive arm
-  ## failing to start a process.
+  ## wants a path.
+  ##
+  ## IT IS NO LONGER THE SAME ORDER `host/native_host.findReplayServer` USES,
+  ## and that is said here rather than left to be discovered: this proc looks
+  ## in `CODETRACER_BUILD_DIR` and `src/build-debug-repro` first, and
+  ## `native_host` still looks only in `src/build-debug`. The orders agree
+  ## wherever the tup tree exists and wherever `REPLAY_SERVER_BIN` is set; they
+  ## disagree in a checkout built only through `repro`, where these suites now
+  ## find an engine the TUI's own host would not. That is the divergence this
+  ## comment used to say spelling the order twice risks, and it is accepted
+  ## only because the alternative is suites that cannot run at all. The
+  ## remaining twenty-nine call sites of the old order, `native_host`
+  ## included, are recorded on codetracer-pm
+  ## `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`.
   let envBin = getEnv("REPLAY_SERVER_BIN", "")
   if envBin.len > 0 and fileExists(envBin):
     return envBin
   let root = repoRoot()
-  for candidate in [
-      root / "src" / "build-debug" / "bin" / "replay-server",
-      root / "src" / "db-backend" / "target" / "debug" / "replay-server",
-      root / "src" / "db-backend" / "target" / "release" / "replay-server"]:
+  # `CODETRACER_BUILD_DIR` FIRST, then the repro output root, then the tup one.
+  #
+  # `src/build-debug-repro` is where a `repro`-driven `just build-once` puts
+  # its output — `ci/lib/build-freshness.sh` defaults
+  # `CODETRACER_BUILD_DIR` to exactly that — while `src/build-debug` is the
+  # tup build's tree and does not even exist in a checkout that has only ever
+  # been built through repro. Searching only the latter is why a built
+  # `replay-server` is reported as "not built" and every caller refuses until
+  # `REPLAY_SERVER_BIN` is supplied by hand
+  # (codetracer-pm `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
+  var candidates: seq[string] = @[]
+  let buildDir = getEnv("CODETRACER_BUILD_DIR", "")
+  if buildDir.len > 0:
+    candidates.add(buildDir / "bin" / "replay-server")
+  candidates.add(root / "src" / "build-debug-repro" / "bin" / "replay-server")
+  candidates.add(root / "src" / "build-debug" / "bin" / "replay-server")
+  candidates.add(root / "src" / "db-backend" / "target" / "debug" / "replay-server")
+  candidates.add(root / "src" / "db-backend" / "target" / "release" / "replay-server")
+  for candidate in candidates:
     if fileExists(candidate):
       return candidate
   ""

@@ -9,8 +9,10 @@
 #   3. the capture, in GuiAssert's shell (`GUI_ASSERT_DIR`, default
 #      ../GuiAssert), into `build/plat35/gpui-window/<view>.ppm`, and each
 #      frame converted to `<view>.png`.
-# Needs `src/build-debug/bin/replay-server` (`just build-once`) and the `calc`
-# recording (`just test-tui` once). Run inside this repo's dev shell.
+# Needs a built `replay-server` — `src/build-debug-repro/bin` (a `repro`
+# build) or `src/build-debug/bin` (a tup build), either from `just
+# build-once`, or `REPLAY_SERVER_BIN` — and the `calc` recording (`just
+# test-tui` once). Run inside this repo's dev shell.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WS="$(cd "${root}/.." && pwd)"
@@ -18,7 +20,14 @@ ISONIM_GPUI="$(cd "${ISONIM_GPUI_DIR:-${WS}/isonim-gpui}" && pwd)"
 GUI_ASSERT="$(cd "${GUI_ASSERT_DIR:-${WS}/GuiAssert}" && pwd)"
 OUT="${root}/build/plat35/gpui-window"
 TRACE="${CODETRACER_PLAT35_TRACE:-${root}/test-logs/tui-fixtures/calc-2f0db4f45192}"
-REPLAY="${REPLAY_SERVER_BIN:-${root}/src/build-debug/bin/replay-server}"
+# The repro output root FIRST, then the tup tree. `src/build-debug` does not
+# exist in a checkout only ever built through `repro`, which is why this used
+# to refuse a replay-server that was in fact built (codetracer-pm
+# `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
+_ct_replay_default="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}/bin/replay-server"
+[ -x "${_ct_replay_default}" ] ||
+	_ct_replay_default="${root}/src/build-debug/bin/replay-server"
+REPLAY="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 fail() {
 	echo "FAIL: $*" >&2
 	exit 1
