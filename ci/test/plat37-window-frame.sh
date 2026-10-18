@@ -260,6 +260,15 @@ use_shim() {
 		SHIM_BACKUP="${LIVE_SHIM}.plat37-backup"
 		cp -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
 	fi
+	# UNLINK FIRST, NEVER COPY ONTO IT. Cargo uplifts `target/debug/
+	# libgpui_nim_shim.so` as a HARDLINK to `target/debug/deps/…`, so a `cp`
+	# onto the live path rewrites cargo's own cached output through the shared
+	# inode. Cargo judges freshness by fingerprint, not by bytes, so the next
+	# `cargo build` reports the unit fresh and re-uplifts THIS arm's bytes —
+	# measured 2026-10-18: after a capture, `isonim-gpui`'s `plat37-shims`
+	# staged a "featureless" shim byte-identical to the headless one
+	# (341,153,248 bytes; a genuine featureless link is 8,083,520).
+	rm -f "${LIVE_SHIM}"
 	cp -f "${src}" "${LIVE_SHIM}"
 	echo "shim in place: ${config} ($(wc -c <"${LIVE_SHIM}") bytes, \
 $(ldd "${LIVE_SHIM}" | wc -l) ldd entries)"
