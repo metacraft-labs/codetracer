@@ -365,7 +365,10 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     # NOT CLAIMED AT ALL, which is the whole difference from the case above.
     ck counts.enters == 0
     ck counts.leaves == 0
-    ck screen.contains("not a CodeTracer recording")
+    # Read across the screen's row breaks: the message names the folder, so
+    # where it wraps depends on the checkout's path (`/home/…/codetracer`
+    # put the break inside "CodeTracer" on an 80-column screen).
+    ck screen.replace("\n", "").contains("not a CodeTracer recording")
     sess.close()
 
   test "assertion count":

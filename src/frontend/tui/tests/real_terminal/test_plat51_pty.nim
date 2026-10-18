@@ -281,12 +281,20 @@ suite "PLAT-51 on a real terminal: the editor, its menu, the omnibox, values":
     for _ in 0 ..< 3:
       sess.send("n")
       sleep(400)
-    discard sess.waitFor("__name__")
-    s = sess.snap()
+    # WAITED FOR BY WHAT IS ASSERTED. `__name__` used to be the signal that
+    # the steps had landed (the Variables pane drew it), but since the
+    # flow's inline values are drawn on every reached line the module's
+    # `__builtins__` value spells it on line 29 at launch, so the snapshot
+    # was taken before the first step. The changed-value colour itself is
+    # what the steps produce; it is polled for, up to the deadline.
     var lit = 0
-    for r in 0 ..< Rows:
-      for c in 0 ..< Cols:
-        if s[r][c].fgHex == changedColour: inc lit
+    let deadline = getMonoTime() + initDuration(seconds = 60)
+    while lit == 0 and getMonoTime() < deadline:
+      sleep(250)
+      s = sess.snap()
+      for r in 0 ..< Rows:
+        for c in 0 ..< Cols:
+          if s[r][c].fgHex == changedColour: inc lit
     checkpoint("cells in the changed colour: " & $lit)
     ck lit > 0
     var all = ""
