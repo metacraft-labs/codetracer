@@ -59,7 +59,7 @@ const
     ## check its own assumption. Moving this file four directories up from the
     ## checkout root would otherwise make `CheckoutRoot` quietly wrong.
 
-  SpecRepoDirName* = "codetracer-specs"
+  SpecRepoDirName* = "codetracer-pm"
     ## The sibling checkout's directory name, beside this one.
 
   SpecSubdir* = "spec"
