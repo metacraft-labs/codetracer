@@ -55,18 +55,31 @@
 ## scale, and a reader that ignores it is contradicting a field rather than
 ## missing one.
 ##
-## ## The viewport that cannot be honoured, recorded rather than hidden
+## ## The viewport that is larger than the display, graded rather than assumed
 ##
-## A window cannot be wider than the display. `scenarios.json`'s `wide`
-## viewport is 1920x1080 and the display is 1728x1117 points, so macOS clamps
-## it — measured, not assumed: `--width=1920 --height=1080` produced a window
-## frame of **1728x1084** points. `laptop` (1440x900) is honoured exactly: a
-## frame of **1440x929**, the 29 extra points being the title bar.
+## `scenarios.json`'s `wide` viewport is 1920x1080 and the display is 1728x1117
+## points. Until PARITY-G1 (2026-10-18) `--width=1920 --height=1080` produced a
+## window frame of **1728x1084**, and this comment concluded that *"a window
+## cannot be wider than the display"*. **That inference was wrong.** 1728x1084
+## is the screen's VISIBLE FRAME — the full width, the height less the
+## 33-point menu bar — which is what AppKit's
+## `-[NSWindow constrainFrameRect:toScreen:]` fits a window to by default. It
+## was a default, not a limit; Chromium overrides that method, which is why
+## Electron got its full 1920x1080 on this same display all along.
 ##
-## `viewportHonoured` is therefore computed from the window the system actually
-## made, not from the flag that asked for it, and a clamped run is `false` with
-## the deviation spelled out. Labelling a 1728-point window `1920` is the
-## defect class this campaign exists to catch.
+## GPUI's window class now overrides it too
+## (`isonim-gpui/rust/gpui-nim-shim/src/mac_window_frame.rs`), so BOTH
+## viewports are honoured exactly — measured 2026-10-18 on this host:
+## `wide` gives a **1920x1108** frame at x = -96 (it hangs off both edges, and
+## the capture is of the window's own surface, so that costs nothing), and
+## `laptop` gives **1440x928**. The extra 28 points are the title bar in both.
+##
+## `viewportHonoured` is still computed from the window the system actually
+## made, not from the flag that asked for it, and a clamped run would still be
+## `false` with the deviation spelled out. Labelling a 1728-point window `1920`
+## is the defect class this campaign exists to catch, and nothing here has been
+## relaxed to let the new number through: the deviation is 0 because the window
+## is 1920 wide.
 
 when defined(js):
   {.error: "plat37_macos_window_capture is native-only.".}
@@ -772,7 +785,15 @@ proc runCapture(cfg: Config) =
       "than it asked for, so the surplus point was content and not title " &
       "bar. The window is fixed in isonim-gpui `gpui_app.rs` (the centred " &
       "origin is rounded to whole points); a frame captured BEFORE that " &
-      "fix is 1858 rows and must still be cropped at 58.")
+      "fix is 1858 rows and must still be cropped at 58. " &
+      "RE-CONFIRMED 2026-10-18 (PARITY-G1) AT A SECOND FRAME SIZE, which " &
+      "is what makes 28 a title bar rather than a coincidence of one " &
+      "window: with the `wide` viewport no longer clamped, a live window " &
+      "reported content 1920x1080 in a 1920x1108 frame — 28 again, now " &
+      "across two different WIDTHS (1440, 1920) and two different HEIGHTS " &
+      "(900, 1080). A constant derived from one window could have been any " &
+      "function of that window's size; one that holds over four distinct " &
+      "extents cannot be.")
   # The parity harness's crop, in DEVICE pixels, stated here so it has a
   # tracked definition instead of living only as an environment variable in
   # the gitignored `build/` tree (PLAT37-ISSUE-V).

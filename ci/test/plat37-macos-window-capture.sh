@@ -71,20 +71,40 @@
 # grim, Apple Vision replaces tesseract, and the window server replaces sway.
 #
 # ===========================================================================
-# POINTS AND PIXELS, AND THE VIEWPORT THAT CANNOT BE HONOURED
+# POINTS AND PIXELS, AND THE VIEWPORT THAT IS LARGER THAN THE DISPLAY
 # ===========================================================================
 #
 # Measured on this host (aarch64-darwin, macOS 26.5.2 build 25F84,
 # 2026-10-12): ONE display, **1728x1117 POINTS**, `pointPixelScale` **2.000**.
 #
 #  * `scenarios.json`'s `laptop` viewport (1440x900) is honoured EXACTLY. The
-#    window frame is 1440x929 points — the 29 extra points are the title bar,
+#    window frame is 1440x928 points — the 28 extra points are the title bar,
 #    which the frame includes and the content area does not.
-#  * `scenarios.json`'s `wide` viewport (1920x1080) **CANNOT BE HONOURED**. A
-#    window cannot be wider than its display. Asked for 1920x1080, macOS made
-#    a 1728x1084-point window. The lane captures it anyway and records
-#    `viewportHonoured: false` with the deviation in points. **It is never
-#    relabelled 1920.**
+#  * `scenarios.json`'s `wide` viewport (1920x1080) **IS ALSO HONOURED, SINCE
+#    PARITY-G1 (2026-10-18), THOUGH IT IS WIDER THAN THE DISPLAY.** The window
+#    frame is 1920x1108 points at x = -96: it hangs off both side edges, and
+#    the capture is unaffected because this lane photographs the window's OWN
+#    surface through `SCContentFilter(desktopIndependentWindow:)` rather than
+#    a crop of the display.
+#
+#    **THIS PARAGRAPH USED TO SAY THE OPPOSITE, AND THE REASON IT WAS WRONG IS
+#    WORTH KEEPING.** It read *"CANNOT BE HONOURED. A window cannot be wider
+#    than its display"*, and the second sentence does not follow from the
+#    first. macOS was not refusing an impossible window; AppKit was applying
+#    `-[NSWindow constrainFrameRect:toScreen:]`, which fits a window to the
+#    screen's VISIBLE FRAME — and 1728x1084 was exactly that visible frame
+#    (the full width, the height less the 33-point menu bar), not a limit of
+#    the window server. Chromium's window class overrides that method, which
+#    is why the Electron front-end always got its full 1920x1080 here; GPUI's
+#    class did not, and now does, through
+#    `isonim-gpui/rust/gpui-nim-shim/src/mac_window_frame.rs`. A measured
+#    number was read as a law, and the law was a default.
+#
+#    What has NOT changed: the grading. A window that comes back smaller than
+#    the request is still recorded `viewportHonoured: false` with the
+#    deviation in points, and is still **never relabelled** with the figure it
+#    could not reach. The deviation is now 0 because the window is 1920 wide,
+#    not because the test was relaxed.
 #  * Every PNG is in DEVICE pixels — 2x here, so a 1440-point window is a
 #    2880-pixel PNG. A second frame is written beside it, downscaled to the
 #    window's POINT extent (`<view>.points.png`), and that is the one the

@@ -66,16 +66,31 @@
 #     is 39.7 dB. A differ that weights alpha will see corners and nothing
 #     else.
 #
-# AND THE DIVERGENCE THAT IS NOT THIS LANE'S TO FIX. `scenarios.json`'s `wide`
-# viewport is 1920x1080 POINTS. **Electron honours it and GPUI cannot.**
-# Measured the same day, same display (1728x1117 points): the Electron window
-# is 1920x1080 points (3840x2160 pixels) and the GPUI window asked for the
-# same thing is 1728x1084 (3456x2168) — macOS clamped it. So three of the six
-# scenarios produce reference frames of DIFFERENT EXTENT on the two sides, and
-# a parity step that diffs them pixel-for-pixel is comparing two different
-# pictures. Both lanes record `viewportHonoured` and the deviation; neither
-# relabels. Resolving it is the parity step's decision — scale, letterbox, or
-# add a viewport that fits this display — and it must be made explicitly.
+# THE DIVERGENCE THAT WAS NOT THIS LANE'S TO FIX — AND IS NOW CLOSED.
+# `scenarios.json`'s `wide` viewport is 1920x1080 POINTS. This block used to
+# read *"Electron honours it and GPUI cannot"*: measured on this display
+# (1728x1117 points), the Electron window was 1920x1080 points (3840x2160
+# pixels) and the GPUI window asked for the same thing came back 1728x1084
+# (3456x2168). Three of the six scenarios therefore had reference frames of
+# DIFFERENT EXTENT on the two sides and could not be diffed at all.
+#
+# The cause was never this host and never Electron being special: it is
+# `-[NSWindow constrainFrameRect:toScreen:]`, AppKit's fit-to-visible-frame
+# default, which Chromium's window class overrides and gpui's did not — the
+# diagnosis already written out at `whyViewports` below. PARITY-G1
+# (2026-10-18) adds that override to gpui's `GPUIWindow` from the shim
+# (`isonim-gpui/rust/gpui-nim-shim/src/mac_window_frame.rs`), and the GPUI
+# window is now 1920x1108 points (3840x2216) — the same 1920x1080 of content,
+# plus the 28-point title bar its frame includes and Electron's capture does
+# not. Cropping those 56 device pixels makes the two extents equal, which is
+# the guard `build/plat37-parity-*/compare.sh` enforces and never bypasses.
+#
+# So the resolution was none of the three this comment used to offer. It was
+# not scale, not letterbox, and NOT "add a viewport that fits this display" —
+# that last one would have made the suite pass by measuring something else,
+# and would still have differed from Electron on every display smaller than
+# the viewport. Both lanes still record `viewportHonoured` and the deviation;
+# neither relabels.
 #
 # ===========================================================================
 # ITS STANDING: HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE
@@ -932,12 +947,16 @@ manifest = {
                 "OWN surface through SCContentFilter(desktopIndependentWindow:), "
                 "so the off-screen strip is captured and is real rendered "
                 "product, not padding. The GPUI window asked for the same "
-                "thing is clamped to 1728x1084. That asymmetry is a property "
-                "of the two FRONT-ENDS and not of this host: gpui builds a "
-                "titled NSWindow and does not override "
-                "`constrainFrameRect:toScreen:`, so AppKit's default "
-                "visible-frame constraint applies to it and not to Electron, "
-                "which overrides that hook. Read `viewportsHonoured` and "
+                "thing WAS clamped to 1728x1084, and is no longer: that "
+                "asymmetry was a property of the two FRONT-ENDS and not of "
+                "this host — gpui built a titled NSWindow and did not "
+                "override `constrainFrameRect:toScreen:`, so AppKit's "
+                "default visible-frame constraint applied to it and not to "
+                "Electron, which overrides that hook. Since PARITY-G1 "
+                "(2026-10-18) the shim adds the same override to gpui's "
+                "`GPUIWindow`, and the GPUI window is 1920x1108 points — "
+                "1920x1080 of content plus its 28-point title bar, which "
+                "the parity crop removes. Read `viewportsHonoured` and "
                 "`viewportsClamped` below rather than this sentence: they are "
                 "computed from the records. Whatever is clamped is recorded "
                 "as viewportHonoured:false with the deviation in CONTENT "
