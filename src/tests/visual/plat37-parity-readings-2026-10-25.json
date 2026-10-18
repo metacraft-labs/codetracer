@@ -185,7 +185,7 @@
       },
       {
         "id": "PLAT37-ISSUE-I",
-        "status": "STILL DRAFTED AND UNFILED. <=0.0008, out of scope by the brief."
+        "status": "FILED, and every reading from 2026-10-19 on was wrong to say otherwise. The file has existed since codetracer-pm 388d604f6 (2026-10-18) as issues/2026-10-18-the-gpui-editor-gutter-does-not-read-editor-gutter-lanes-nim-so-its-lanes-sit-right-of-electrons.md. Substance unchanged: <=0.0008, out of scope by the brief."
       },
       {
         "id": "ISONIM-GPUI-ISSUE-J",
@@ -193,7 +193,7 @@
       },
       {
         "id": "PLAT37-ISSUE-K",
-        "status": "STILL DRAFTED AND UNFILED. Relied on again: the Electron lane was held byte-fixed and re-verified byte-identical."
+        "status": "FILED, and every reading from 2026-10-19 on was wrong to say otherwise. The file has existed since codetracer-pm 388d604f6 (2026-10-18) as issues/2026-10-18-the-plat37-electron-capture-lane-is-not-bit-deterministic-on-editorwithmark.md. Substance unchanged: relied on again, the Electron lane was held byte-fixed and re-verified byte-identical."
       },
       {
         "id": "PLAT37-ISSUE-M",
@@ -201,7 +201,7 @@
       },
       {
         "id": "PLAT37-ISSUE-N",
-        "status": "STILL DRAFTED AND UNFILED. Unchanged."
+        "status": "FILED, and every reading from 2026-10-19 on was wrong to say otherwise. The file has existed since codetracer-pm 388d604f6 (2026-10-18) as issues/2026-10-18-the-plat37-gpui-capture-lane-sigterms-the-app-so-no-process-exit-cleanup-can-run.md. Substance unchanged."
       },
       {
         "id": "PLAT37-ISSUE-P",
@@ -220,7 +220,8 @@
         "status": "STILL DRAFTED AND UNFILED. Honoured: only the normalised-SSD minimiser was used."
       }
     ],
-    "cannotBeFiledFromThisWorkspace": "ISONIM-GPUI-ISSUE-J, PLAT37-ISSUE-M and the renderer half of PLAT37-ISSUE-U are owned by isonim-pm, which is not a checked-out repo in this workspace (verified absent again this pass)."
+    "cannotBeFiledFromThisWorkspace": "ISONIM-GPUI-ISSUE-J, PLAT37-ISSUE-M and the renderer half of PLAT37-ISSUE-U are owned by isonim-pm, which is not a checked-out repo in this workspace (verified absent again this pass).",
+    "ledgerCorrection2026_10_18": "Issues I, K and N were carried as 'STILL DRAFTED AND UNFILED' by every reading from 2026-10-19 onward. That was false the whole time: all three have had real files in codetracer-pm/issues/ since 388d604f6, which is an ancestor of origin/latest. Verified 2026-10-18 by matching each drafted title to a file on disk. The carried-forward status string was copied from pass to pass without being re-checked, which is how a fact can be wrong in seven consecutive records; a carried status is a claim and needs re-testing like any other."
   },
   "supersedes": [
     "plat37-parity-readings-2026-10-24.json's Task-1 finding ('the GPUI top bar is 74 device pixels tall where Electron's is 76'). The 74-vs-76 MEASUREMENT stands; its ATTRIBUTION to the bar does not.",
