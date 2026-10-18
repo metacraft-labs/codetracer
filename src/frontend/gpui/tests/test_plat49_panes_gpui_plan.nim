@@ -43,7 +43,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 139
+  ExpectedAssertions = 140
+    ## 139 -> 140 (2026-10-17, PLAT-49 arm TC5b): the + case also asserts
+    ## the session tabs' grounds, active and not (+1). Measured.
     ## 128 -> 136 (2026-10-04): the call-trace cases find their rows by what
     ## the call is rather than by number (+5 in the first case: the row
     ## indices are asserted, and the selected row is checked to be the only
@@ -604,6 +606,15 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
       if t.attr("data-ct-tab-active") == "true": active = t.attr("data-ct-session-tab")
     ck titles == @["calc-2f0db4f45192", "call_pages-d6745afd1e2e"]
     ck active == "call_pages-d6745afd1e2e"
+    # The ACTIVE session tab on a ground of its own (`chrome.tabStyle`, the
+    # strips' selected-tab rule the band's tabs apply), the other on the
+    # strip's (PLAT-49 arm TC5's surviving half, graded since 2026-10-17).
+    var grounds: seq[(string, string)] = @[]
+    for t in two.nodesWith("data-ct-session-tab"):
+      grounds.add (t.attr("data-ct-tab-active"), t.style("bg"))
+    checkpoint("session tab grounds: " & $grounds)
+    ck grounds == @[("false", chromeOf(crTabStripBackground)),
+                    ("true", chromeOf(crTabActiveBackground))]
     ck two.nodesWith("data-ct-session-tab-close").len == 2
     ck two.nodesWith("data-ct-session-tab-add").len == 1
     let pagesRows = two.callRows.len

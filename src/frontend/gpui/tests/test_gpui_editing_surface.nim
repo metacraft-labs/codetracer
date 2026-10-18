@@ -69,6 +69,7 @@ import isonim_gpui/bindings
 import codetracer_embed
 
 import ../app/leaves
+import ../app/shell
 import ../host/gpui_host
 import ../../view_vocabulary/pane_views
 import ../../../common/view_vocabulary
@@ -906,7 +907,23 @@ suite "PLAT-22: the GPUI editing surface":
     # caption row (the desktop draws no such row), so the exact check reads
     # that attribute — which the notice cannot satisfy.
     ck getAttribute(root, EditorSourceStatementAttribute) == contract.statement
-    expectCount(25)
+    # **AND THE LEAF IS DECIDED BY THE SURFACE, NOT BY `leaf.live`** — arm
+    # U2's claim, graded here since 2026-10-17: the redesigned window redraws
+    # the editor's rows itself after the leaf is rendered, so the shipped
+    # binary no longer shows a leaf that took the wrong branch, and only
+    # `renderLeaf` asked directly can. Edit mode builds no ViewModel, so the
+    # editor's leaf is NOT live; it must still draw the surface, never the
+    # not-launched sentence.
+    gpui_reset_tree()
+    resetCallbacks()
+    var lr: GpuiRenderer
+    let (leafNode, reported) = renderLeaf(lr,
+      GpuiLeaf(kind: glkBuiltin, paneId: $paneEditor, builtin: paneEditor,
+               title: "Editor"), s)
+    ck getAttribute(leafNode, StateAttribute) == "live"
+    ck not reported
+    ck editorRowNodes(leafNode).len == 4
+    expectCount(28)
 
   test "THE SHIPPED BINARY draws the editor — Tier 2, through --report-plan":
     resetCount()
@@ -974,7 +991,10 @@ suite "PLAT-22: the GPUI editing surface":
 #
 # 324 -> 335 on 2026-09-23: PLAT-28's two projection cases, seven and four.
 
-const ExpectedAssertions = 335
+# 335 -> 338 on 2026-10-17: the edit-mode case also renders the editor's
+# LEAF, not live, through `renderLeaf` (arm U2's re-aimed killer), three.
+
+const ExpectedAssertions = 338
 
 suite "PLAT-28: the rows ARE a projection, asserted against a direct build":
 

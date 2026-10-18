@@ -518,7 +518,7 @@ suite "PLAT-47: --goto centres the stop, and auto-detection keeps Dark":
     ck pointer > 0
     # The source view's rows: from its tab strip (the file's tab, PLAT-49) to
     # the last row with a gutter.
-    let title = rowOf(sess, Cols, Rows, " main.py ")
+    let title = rowOf(sess, Cols, Rows, " calc/main.py ")
     var last = title
     for r in title + 1 ..< Rows - 1:
       let t = sess.regionText(r, 0, Cols, 1)

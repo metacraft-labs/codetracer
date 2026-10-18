@@ -41,7 +41,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | 1 terminal host | TS1 (collapsed folders still list their files), TS2 (an opened file never shown), TS3 (the status line does not say where), TS4 (the gutter right-click always enables), TS6 (Delete ALL deletes nothing) |
   | 1 shared ops | HS1 (a disabled breakpoint still sent), HS2 (Run to Cursor sent as backward), HS3 (clearing a file sends nothing), HS4 (a jump with no step that way hangs), SD1 (a disabled row stored enabled), NH1 (the tree opens collapsed), PV1 (the vocabulary tree ignores the VM's expansion) |
   | 1 terminal input | MO1 (Ctrl read from the Alt bit), FT1 (a collapsed folder's twisty), PL1 (the selected point not drawn), CM1 (menu rows off by the frame), CM2 (disabled entries not italic), CM3 (the menu far from the press), CM4 (the overlay shows the title for the text) |
-  | 1 GPUI | GW1 (right button read as left), GW2 (ancestors act on the same press), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
+  | 1 GPUI | GW1 (right button read as left), GW2 (RETIRED 2026-10-17, below), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
   | 2 colours | RO1 (inactive tabs black), RO2 (the field the raised slab), RO3 (the menu on the card), RO4 (the strip divider in the border colour), RO6 (the strip on raised), RO7 (the top bar on the card), RO8 (the menu frame in the subtle border), SH4 (row 0 on the card), TB3 (controls filled), TB5 (no dropdown frame), GC1 (GPUI's window ground the old raised), GC2 (GPUI's menu on the card), GM11 (GPUI's band on the pane ground), GM12 (GPUI's omnibox border the menu's) |
   | 3 the omnibox | TB1 (not centred), TB2 (a third, not the desktop's share), TB4 (no field edge), GT1 (GPUI not centred), GT2 (GPUI a third wide) |
   | 4 dividers | BD1 (the strip is no divider), BD2 (a lone pane's whole strip is its label), SH1 (a strip-row divider on the panel), SH2 (body dividers in the subtle colour by default), SH3 (body dividers on the canvas), SH5 (a box-drawing line), RO5 (subtle is the strip colour), BO1 (the field edge degrades to `!`), CL1 (`--dividers` inverted), TM1 (the terminal never reads `--dividers`), TA1 (the shell never gets the choice), GM10 (GPUI never draws subtle lines) |
@@ -75,6 +75,18 @@ NO DECLARED SURVIVORS.
 
 PLAT-51 retired RT10, RT30, GM7, GL1 and TS5 with the Timeline panel they
 mutated (K30 / K45 and GPUI's track; a seek's host route is PLAT-51's TS1).
+
+THE ELECTRON-PARITY REDESIGN (2026-10-17) RETIRED GW2 — `window_clicks.admit`
+made off (`if false`), so "every ancestor row acts on the same press". It
+SURVIVED its re-run, and not for want of an assertion: the redesigned GPUI
+panes draw their rows FLAT (the file tree's rows are siblings under one
+unwired `fileTree` mark, as are the call trace's and the state pane's), so no
+listened row has a listened ancestor and the press the dedupe drops is never
+heard twice. `admit` remains, guarding a nesting no pane builds; an arm on it
+can only survive. Should a pane nest listened rows again, restore GW2 with
+that pane's case as its killer. PV1 moved from `pane_views` to
+`leaves.renderFileTree` the same day, and `pane_views.nim` left the subjects
+(no arm aims at it any more).
 
 No mocks: every suite graded here runs the product's own models, the
 product's own runtime and shell, a real PTY with real recordings, the shipped
@@ -153,6 +165,10 @@ T1 = "src/frontend/tui/tests/test_plat50_shell.nim"
 PTYK = "src/frontend/tui/tests/real_terminal/test_plat50_clicks.nim"
 PTYC = "src/frontend/tui/tests/real_terminal/test_plat50_chrome.nim"
 GPLAN = "src/frontend/gpui/tests/test_plat50_gpui_plan.nim"
+# ADDED 2026-10-17: the redesign's caption bar centres the omnibox only where
+# the share exceeds the controls (1920 px, not this plan's 1440), and the case
+# that measures the centring is PLAT-69's — a layout case, no binary.
+G69 = "src/frontend/gpui/tests/test_plat69_gpui_chrome.nim"
 COLVM = "src/frontend/viewmodel/tests/unit/test_plat50_column_ops_vm.nim"
 ENGT = EVENTDB + "#event_order_tests"
 SHIMT = str(SHIM_CRATE / "tests" / "gpui_rendering.rs")
@@ -162,13 +178,13 @@ DESKTOP_GATE = "scripts/plat50-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat50-desktop-capture.spec.ts"
 
 SUBJECTS = [PANECLICKS, RUNTIME, TUISESSION, HSESSION, STORE, NATIVEHOST,
-            PANEVIEWS, MOUSE, BINDING, SHELL, ROLES, TOPBAR, CTXMENU,
+            MOUSE, BINDING, SHELL, ROLES, TOPBAR, CTXMENU,
             FILETREE, POINTLIST, BORDERS, CLI, TUIAPP, TUIMAIN, CHROME,
             WINTOP, WINCLICKS, GPUIMAIN, GPUILEAVES, DESKEDITOR, GRENDERER,
             DESKEVENTLOG, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
             EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP]
-SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, IGT, ENGT, SHIMT, CLIPT,
-          DESKTOP_GATE]
+SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, G69, IGT, ENGT, SHIMT,
+          CLIPT, DESKTOP_GATE]
 
 
 def suite_file(path: str) -> str:
@@ -193,6 +209,7 @@ SUITE_KIND = {
     PTYK: ("c", "tui-real-terminal"),
     PTYC: ("c", "tui-real-terminal"),
     GPLAN: ("c", "gpui-shell"),
+    G69: ("c", "gpui-shell"),
     # isonim-gpui's own suite, compiled in ITS checkout with its `nim.cfg`.
     IGT: ("isonim-gpui", ""),
     # The real desktop, filtered to its one case (a regex without spaces).
@@ -288,7 +305,10 @@ G_CALL = "a call's menu: Collapse Call Children collapses it"
 G_TAB = "a tab's menu: Close removes the tab"
 G_VALUE = "a value expands; a variable's menu"
 G_FILES = "a file opens in the editor; a folder collapses; a node's menu"
-G_CHROME = "the desktop's grounds, a centred bordered omnibox"
+# RENAMED 2026-10-17 with the redesign: at this plan's 1440 px the omnibox
+# follows the controls (it is centred only where the share exceeds them).
+G_CHROME = "the desktop's grounds, a bordered omnibox after the controls"
+G69_CENTRED = "the omnibar is centred in what the buttons leave of the band"
 G_DIVIDERS = ("--dividers=subtle draws a line in each gap between side-by-side "
               "panes")
 I_POINTER = ("a pointer event decodes its window position, and a wheel its "
@@ -322,7 +342,7 @@ CASE_SUITE = {
     C_BAR: PTYC, C_MENU: PTYC, C_STRIPS: PTYC, C_BODY: PTYC,
     G_EVENT: GPLAN, G_GUTTER: GPLAN, G_CTRL: GPLAN, G_TEXTMENU: GPLAN,
     G_CALL: GPLAN, G_TAB: GPLAN, G_VALUE: GPLAN,
-    G_FILES: GPLAN, G_CHROME: GPLAN, G_DIVIDERS: GPLAN,
+    G_FILES: GPLAN, G_CHROME: GPLAN, G_DIVIDERS: GPLAN, G69_CENTRED: G69,
     G_SCRATCH: GPLAN, G_ORDER: GPLAN, G_COLUMN: GPLAN, G_FLOW: GPLAN,
     G_SWEEP: GPLAN, G_VCS: GPLAN,
     I_POINTER: IGT,
@@ -499,9 +519,13 @@ ARMS = [
         "    expandAllFolders(files)\n",
         "    discard files\n",
         K_FILES, "the native tree opens with its folders collapsed"),
-    Arm("PV1", PANEVIEWS,
-        "               expanded = kids.len > 0 and vm.isExpanded(e.path))\n",
-        "               expanded = kids.len > 0)\n",
+    # PV1 RE-AIMED 2026-10-17: the Electron-parity redesign draws the GPUI
+    # file tree natively (`leaves.renderFileTree` over `fileTreeRows`), not
+    # through the vocabulary tree `pane_views` builds, so the old mutation
+    # SURVIVED as a no-op. The same defect where the rows are decided now.
+    Arm("PV1", GPUILEAVES,
+        "  let open = e.children.len > 0 and vm.isExpanded(e.path)\n",
+        "  let open = e.children.len > 0\n",
         G_FILES, "the vocabulary tree ignores the VM's expansion"),
     # --- 1. terminal input and painters ------------------------------------
     Arm("MO1", MOUSE,
@@ -537,10 +561,7 @@ ARMS = [
         "  of gekContextMenu: gbRight\n",
         "  of gekContextMenu: gbLeft\n",
         G_TEXTMENU, "GPUI reads the right button as the left"),
-    Arm("GW2", WINCLICKS,
-        "  if d.armed and d.kind == ev.kind and d.key == ev.key:\n    return false\n",
-        "  if false:\n    return false\n",
-        G_FILES, "every ancestor row acts on the same press"),
+    # GW2 RETIRED 2026-10-17 — see the module docstring.
     Arm("GW3", WINCLICKS,
         "                       gcpCode else: gcpGutter),\n",
         "                       gcpGutter else: gcpCode),\n",
@@ -920,10 +941,15 @@ ARMS = [
         '  FieldEdgeLeft* = "▕"\n',
         '  FieldEdgeLeft* = " "\n',
         C_BAR, "the field's left border not drawn"),
+    # GT1 RE-AIMED 2026-10-17: the redesigned caption bar centres the slot
+    # between two equal shares (`share`) unless the controls are wider; the
+    # defect drops the share, so the slot always follows the controls. Its
+    # killer is PLAT-69's centring case (1920 px), since at the plan's 1440
+    # px the slot follows the controls anyway.
     Arm("GT1", WINTOP,
-        "    x = max(x, min(centred, latest))\n",
-        "    x = max(x, min(x, latest))\n",
-        G_CHROME, "GPUI's omnibox left, not centred"),
+        "  let slotX = controlsStart + max(share, controlsW) + MenuPartGapPx\n",
+        "  let slotX = controlsStart + controlsW + MenuPartGapPx\n",
+        G69_CENTRED, "GPUI's omnibox left, not centred"),
     Arm("GT2", WINTOP,
         "  clamp(int(float(width) * OmnibarDesktopShare + 0.5), OmnibarDesktopFloorPx,\n",
         "  clamp(int(float(width) * 0.3 + 0.5), OmnibarDesktopFloorPx,\n",

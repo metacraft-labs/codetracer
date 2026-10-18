@@ -167,8 +167,11 @@ proc clickCallAndExpect(sess: var TuiTestSession;
   ck sess.waitFor(sourceLine)
   let settled = sess.waitGone("⋯ loading")
   let s = sess.screen()
-  ck s[1].contains(" " & tab & " ")
-  ck not s[1].contains(" " & otherTab & " ")
+  # Since 2026-10-17 the lone editor's tab is the file's FOLDER and name
+  # (`product_mode.editorTabLabel`, as the desktop's), so the name follows a
+  # `/` on the strip.
+  ck s[1].contains("/" & tab & " ")
+  ck not s[1].contains("/" & otherTab & " ")
   # From the recording itself: no degraded-source banner, no unloaded line.
   ck not s.anyRow(NoVerifiedSource)
   ck settled and not s.anyRow("⋯ loading")
@@ -244,7 +247,7 @@ suite "a stop path with a `..` component, in a real terminal":
     checkpoint("the message: " & s.wrappedMessage("No source for "))
     ck s.wrappedMessage("No source for ").contains(
       "/multi_root/app/../shared/helpers.py in this recording.")
-    ck s[1].contains(" helpers.py ")
+    ck s[1].contains("/helpers.py ")
     ck not s.anyRow("def scale(value, factor):")
     ck not s.anyRow(NoVerifiedSource)
     sess.quit()

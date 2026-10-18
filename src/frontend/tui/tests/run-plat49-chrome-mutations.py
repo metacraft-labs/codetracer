@@ -169,9 +169,15 @@ GPLAN2 = "src/frontend/gpui/tests/test_plat49_panes_gpui_plan.nim"
 DESKTOP_GATE_B = DESKTOP_GATE + "#panes"
 SPEC_B = "src/tests/gui/tests/visual/plat49-panes-capture.spec.ts"
 
+# PANEVIEWS LEFT THE SUBJECTS 2026-10-17: its two arms (TI5, EL7) graded
+# what the GPUI window drew through the vocabulary's State and Event Log
+# views, and the Electron-parity redesign draws both panes natively
+# (`leaves.renderState`, `leaves.renderEventLog`), so both arms SURVIVED as
+# no-ops and were re-aimed at those procs. No arm of this harness aims at
+# `pane_views.nim` any more, and a subject with no arm is refused.
 SUBJECTS = [TOPBAR, SHELL, BINDING, RUNTIME, ROLES, STATUS, VARS, TUIMAIN,
             DCVM, OMNIVM, STATEVM, DESKPALETTE, WINTOP, WINGEOM, CHROME,
-            GPUIMAIN, PRODMODE, PANEVIEWS, CARET,
+            GPUIMAIN, PRODMODE, CARET,
             CALLVM, EVLOGVM, STORE, INTERACT, LAYMODEL, HOVER, SESSTABS,
             CALLVIEW, EVLOGVIEW, TUISESSION, NATIVEHOST, GPUILEAVES,
             GESTURES, DESKEVLOG, DESKCALL, OMNISRC,
@@ -262,8 +268,10 @@ P_VARS = ("no category rows, no lone first column: each row starts with its "
 G_MENU = ("one root menu button; the first level below it; submenus cascade "
           "right")
 G_HEADINGS = "no heading in any pane; every pane box has a strip naming it"
-G_STRIPS = ("strips on their own ground; the selected tab its own background "
-            "and foreground")
+# RENAMED 2026-10-17 with the Electron-parity redesign: the desktop's strip
+# is transparent over the window's ground, the selected tab on its pane's.
+G_STRIPS = ("strips on the window's ground; the selected tab one shape with its "
+            "pane")
 G_EDITORTAB = "a lone editor's tab is its file; an Edit window's marks it dirty"
 G_TOOLTIP = "the pointer over a control: the ViewModel's tooltip"
 G_OMNIBAR = "the omnibar: the ViewModel's placeholder; the query with its caret"
@@ -452,9 +460,15 @@ ARMS = [
         G_HEADINGS,
         "a bare pane in the GPUI window has no strip naming it"),
 
-    Arm("TI5", PANEVIEWS,
-        '  result.root = viewCollapsible("state", "", @[tabs, tree],\n',
-        '  result.root = viewCollapsible("state", "State", @[tabs, tree],\n',
+    # TI5 RE-AIMED 2026-10-17: the redesigned GPUI State pane is drawn
+    # natively by `leaves.renderState` (the desktop's head, code line and
+    # rows); the vocabulary's collapsible root it used to title no longer
+    # reaches the window, so the old mutation SURVIVED as a no-op. The same
+    # defect, planted where the pane is drawn now: a "State" row at its top.
+    Arm("TI5", GPUILEAVES,
+        '  r.setAttribute(body, "data-ct-state", "desktop")\n',
+        '  r.setAttribute(body, "data-ct-state", "desktop")\n'
+        '  r.appendChild(body, r.createTextNode("State"))\n',
         G_HEADINGS,
         "GPUI's State pane titles itself again under its strip"),
 
@@ -464,9 +478,14 @@ ARMS = [
         "    if false:\n      lone = file\n",
         P_STRIPS,
         "the terminal's lone editor tab names the pane, not its file"),
+    # ET2 RE-AIMED 2026-10-17: the label is the file's folder and name now
+    # (`calc/main.py`, the desktop's), so the dirty mark closes a two-line
+    # expression; the defect still drops it.
     Arm("ET2", PRODMODE,
-        '  name & (if dirty: " ●" else: "")\n',
-        '  name\n',
+        '  (if folder.len > 0: folder & "/" & name else: name) &\n'
+        '    (if dirty: " ●" else: "")\n',
+        '  (if folder.len > 0: folder & "/" & name else: name) &\n'
+        '    ""\n',
         G_EDITORTAB,
         "the shared editor tab label drops the unsaved-changes mark"),
     Arm("ET3", GPUIMAIN,
@@ -501,14 +520,31 @@ ARMS = [
         "                      mono = {raBold}),\n    # PLAT-50 (the user, 2026-10-02: \"the black",
         P_MONO,
         "monochrome: the selected tab without reverse video"),
-    Arm("TC5", CHROME,
-        '       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]\n',
-        '       chromeOf(if focused: crTabStripBackground else: crTabStripBackground))]\n',
+    # TC5 RE-AIMED 2026-10-17: the window's strips no longer read
+    # `chrome.tabStyle` (only the root menu button does); the selected tab's
+    # ground is set in `main`'s strip loop — lifted onto the window's ground
+    # on a focused strip, its pane's ground elsewhere. The defect leaves the
+    # focused strip's selected tab on the strip's own (focus) ground.
+    Arm("TC5", GPUIMAIN,
+        '          r.setStyle(tab, "background-color", chromeOf(crTabStripBackground))\n',
+        '          discard\n',
         G_STRIPS,
         "GPUI's selected tab on the strip's own ground"),
+    # TC5b ADDED 2026-10-17: TC5's original defect, kept on `chrome.tabStyle`
+    # where the band's SESSION tabs still read it (the window's strips no
+    # longer do); graded by the session-tab grounds the + case now asserts.
+    Arm("TC5b", CHROME,
+        '       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]\n',
+        '       chromeOf(if focused: crTabStripBackground else: crTabStripBackground))]\n',
+        G3_ADD,
+        "GPUI's active session tab on the strip's own ground"),
+    # TC6 RE-AIMED 2026-10-17: the desktop's strip is transparent over the
+    # window's ground, so only the FOCUSED strip takes `stripStyle` now (the
+    # focus colour); the defect drops that ground.
     Arm("TC6", GPUIMAIN,
-        "      for (key, value) in stripStyle(focusedHere):\n        r.setStyle(strip, key, value)\n",
-        "      discard stripStyle(focusedHere)\n",
+        "      if focusedHere:\n        for (key, value) in stripStyle(focusedHere):\n"
+        "          r.setStyle(strip, key, value)\n",
+        "      if focusedHere:\n        discard stripStyle(focusedHere)\n",
         G_STRIPS,
         "GPUI's strip without its own ground"),
 
@@ -570,9 +606,11 @@ ARMS = [
         "        if false:\n",
         P_DRAWN,
         "no caret at all where the terminal does not shape its cursor"),
+    # OB7 RE-AIMED 2026-10-17: the redesigned field picks its caret once
+    # (`let caret`), for the query and the open placeholder alike.
     Arm("OB7", GPUIMAIN,
-        '            (if gOmnibar.overwrite: "█" else: "▏") &\n            gOmnibar.query[c .. ^1]\n',
-        '            (if gOmnibar.overwrite: "▏" else: "█") &\n            gOmnibar.query[c .. ^1]\n',
+        '        let caret = if gOmnibar.overwrite: "█" else: "▏"\n',
+        '        let caret = if gOmnibar.overwrite: "▏" else: "█"\n',
         G_OMNIBAR,
         "GPUI's caret glyphs swapped between insert and overwrite"),
     Arm("CR1", CARET,
@@ -734,7 +772,10 @@ ARMS = [
         "  describeColumns(c)\n",
         P2_LOG,
         "`:column-show` reports a change it never makes"),
-    Arm("EL7", PANEVIEWS,
+    # EL7 RE-AIMED 2026-10-17: the GPUI event log is drawn natively by
+    # `leaves.renderEventLog` (the desktop's table); the vocabulary table
+    # this arm hid columns in no longer reaches the window. Same defect there.
+    Arm("EL7", GPUILEAVES,
         "  let shown = vm.columns.val.visibleColumns\n",
         "  let shown = vm.columns.val.order\n",
         G2_LOG,
@@ -866,9 +907,11 @@ ARMS = [
         "        let cmd = cmdCloseDocked(was.source)\n",
         G2_DOCK,
         "a GPUI label click never docks its pane open"),
+    # FT12 RE-AIMED 2026-10-17: the desktop's layout runs directly into its
+    # status bar (no gap), so the area's cut is at the footer's own top.
     Arm("FT12", WINGEOM,
-        "    result.area.h = max(1, bottom - result.area.y)\n",
-        "    discard bottom\n",
+        "    result.area.h = max(1, result.footer.y - result.area.y)\n",
+        "    discard\n",
         G2_FOOTER,
         "GPUI's layout area runs under its footer"),
     Arm("FT13", GPUIMAIN,
@@ -1073,8 +1116,10 @@ ARMS = [
         "  discard gShell.app.activateTab(index)\n",
         G3_ADD,
         "GPUI's tab click switches the strip, not the window"),
+    # NT8 RE-AIMED 2026-10-17: the caption bar's row ends at `x1` (the
+    # measured desktop bar); the "+" is laid out against it.
     Arm("NT8", WINTOP,
-        "  if canAddTab and x + SessionTabAddPx <= band.x + band.w:\n",
+        "  if canAddTab and x + SessionTabAddPx <= x1:\n",
         "  if false:\n",
         G3_ADD,
         "GPUI's band has no \"+\""),

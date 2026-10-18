@@ -74,11 +74,11 @@ const
     BaseRow(chords: "Escape", operation: "editor.keep-primary-selection",
             whenText: "editorTextFocus && editorHasMultipleSelections && !dragActive"),
     BaseRow(chords: "Shift+Escape", operation: "editor.keep-primary-selection",
-            whenText: "editorTextFocus && editorHasMultipleSelections"),
+            whenText: "editorTextFocus && editorHasMultipleSelections && !dragActive"),
     BaseRow(chords: "Escape", operation: "editor.simplify-selection",
             whenText: "editorTextFocus && editorHasSelection && !editorHasMultipleSelections && !dragActive"),
     BaseRow(chords: "Shift+Escape", operation: "editor.simplify-selection",
-            whenText: "editorTextFocus && editorHasSelection && !editorHasMultipleSelections"),
+            whenText: "editorTextFocus && editorHasSelection && !editorHasMultipleSelections && !dragActive"),
 
     # --- §3.2 Editor — multiple cursors ------------------------------------
     BaseRow(chords: "Ctrl+Alt+Up", operation: "editor.add-cursor-above",

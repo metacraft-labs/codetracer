@@ -43,7 +43,13 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 212
+  ExpectedAssertions = 216
+    ## 213 -> 216 (2026-10-17, arm GW4's re-grade): the popover case also
+    ## focuses the Files pane and asserts its outline is painted under the
+    ## first level (+3). Measured.
+    ## 212 -> 213 (2026-10-17, the PLAT-48 mutation harness's GW9 re-aim):
+    ## the Ctrl+O case also presses a pin under the revealed pane and asserts
+    ## it docked nothing (+1). Measured.
     ## 203 -> 212 (the Electron-parity redesign, 2026-10-17), measured. The
     ## pins are icons in their tabs now, not buttons of their own: the cases
     ## that walked `data-ct-pin` walk the drawn pins (one check per pin under
@@ -332,6 +338,27 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
           checkpoint("pin " & pane & " under a popover")
           ck root < edit.topIndex(p)
     ck overlapped >= 1
+    # NOR IS ANY OTHER PART OF THE WINDOW painted over it (PLAT-48 arm GW4,
+    # re-graded 2026-10-17: with the pins in the pane tree, a popover moved
+    # to the FRONT of the window's top elements still clears every pin, and
+    # what it then falls under is the rest of the chrome). The Files pane is
+    # focused first, so its focus outline is drawn over the pane the first
+    # level opens over; the outline is painted BEFORE the popover.
+    var filesBody: PxRect
+    for n in g.nodes:
+      if n.kind == gnTabs and $paneFileTree in n.panes: filesBody = n.body
+    let fx = filesBody.x + filesBody.w div 2
+    let fy = filesBody.y + filesBody.h div 2
+    let focused = windowPlan("press:" & $fx & ":" & $fy & ",release:" & $fx &
+                             ":" & $fy & ",menu:Edit")
+    let first = focused.nodesWith("data-ct-menu-popover")
+    let outlines = focused.nodesWith("data-ct-focus-outline")
+    ck first.len >= 1 and outlines.len == 1
+    if first.len >= 1 and outlines.len == 1:
+      checkpoint("outline " & $outlines[0].rectOf & " popover " &
+                 $first[0].rectOf)
+      ck outlines[0].rectOf.overlaps(first[0].rectOf)
+      ck focused.topIndex(outlines[0]) < focused.topIndex(first[0])
 
   test "a key walks the open menu: the highlight is drawn where the ViewModel has it":
     let plan = windowPlan("menu:Debug,key:down")
@@ -396,6 +423,12 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       for (_, root) in leftPins:
         if root > left.topIndex(lrev[0]): inc over
     ck leftPins.len > 0 and over == 0
+    # Nor is a pin PRESSED through it (`pinButtonShown` gates the press as it
+    # gated the old button's drawing): Files' pin lies under the left third,
+    # and a press on it while State is revealed there docks nothing.
+    let through = windowPlan("hover-label:state,wait:350,pin:fileTree",
+                             @["--layout-ops=dock:state:left"])
+    ck $paneFileTree in through.tabPanes()
 
   test "the pointer resting on a strip label reveals that pane; Esc hides it":
     # PLAT-49 part B (finding 9): as on the desktop, a HOVER previews the

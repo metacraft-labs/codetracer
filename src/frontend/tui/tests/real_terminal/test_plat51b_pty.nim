@@ -43,6 +43,10 @@ import ./lifecycle_support
 import ../../app/theme/colour_math
 import ../../../styles/generated/design_tokens
 
+const EditorTabText = " calc/main.py "
+  ## The lone editor's tab: the file's folder and name since 2026-10-17
+  ## (`product_mode.editorTabLabel`, as the desktop's tab), not the name alone.
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
 const ExpectedAssertions = 38
@@ -320,7 +324,7 @@ suite "PLAT-51 part B on a real terminal: live reflow while a divider is dragged
     let divs = s0.dividerCols(row)
     ck divs.len >= 2
     let d = divs[0]
-    let srcAt = s0.text(1).cellFind(" main.py ")
+    let srcAt = s0.text(1).cellFind(EditorTabText)
     sess.cellReport(0, row, d)
     for dc in [2, 4, 6, 8]:
       sess.cellReport(32, row, d + dc)
@@ -332,7 +336,7 @@ suite "PLAT-51 part B on a real terminal: live reflow while a divider is dragged
     # was laid out again: its tab label moved with it.
     ck d notin midDivs and (d + 8 in midDivs or d + 7 in midDivs or
                             d + 9 in midDivs)
-    ck mid.text(1).cellFind(" main.py ") > srcAt
+    ck mid.text(1).cellFind(EditorTabText) > srcAt
     # The committed layout has not been written yet.
     ck not fileExists(dir / "tui-layout.json")
     sess.cellReport(0, row, d + 8, release = true)
@@ -421,7 +425,7 @@ proc editorBox(s: Snapshot): Box =
   ## The Source pane's BOX, read off the screen: its tab on the strip row,
   ## the dividers either side of it on a body row (its own divider column is
   ## a splitter, in no stack's area); the whole body tall.
-  let at = s.text(1).cellFind(" main.py ")
+  let at = s.text(1).cellFind(EditorTabText)
   let divs = s.dividerCols(10)
   var left = 0
   var right = Cols - 1

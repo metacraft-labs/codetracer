@@ -92,10 +92,21 @@ ARMS = [
      "          g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)",
      "          g.paint(row, codeCol, span.text, span.style)",
      [LAWS], "the terminal paints the value at a fixed column over the code"),
-    ("E3", LEAVES, "    r.appendChild(column, ann)",
-     "    r.setStyle(ann, \"position\", \"absolute\")\n    r.appendChild(column, ann)",
-     [LAWS], "GPUI draws the value absolutely positioned: no reflow"),
-    ("W1", LEAVES, '  r.setStyle(el, "white-space", "nowrap")', "  discard",
+    # E3 RE-AIMED 2026-10-17: the redesign places the chips ABSOLUTELY, as
+    # the desktop's flow does (`calc(<line length>ch + 1ch)`), so "made
+    # absolute" is no longer the overlay — the old mutation was a no-op and
+    # SURVIVED. LAW-E2's claim now rests on the computed `left`: the defect
+    # pins every chip at one fixed x, whatever the code's length.
+    ("E3", LEAVES,
+     "    r.setStyle(ann, \"left\", $(int(round(float(row.text.runeLen + 1) *",
+     "    r.setStyle(ann, \"left\", $(int(round(float(40) *",
+     [LAWS], "GPUI draws the value at a fixed x over the code: no reflow"),
+    # W1 RE-AIMED 2026-10-17: the redesign's other rows (calltrace, event
+    # log, file tree) are `nowrap` too, so the one-line needle occurred four
+    # times; it now quotes `renderEditorRow`'s comment line above it.
+    ("W1", LEAVES,
+     '  # it (`test_plat42_window.nim`).\n  r.setStyle(el, "white-space", "nowrap")',
+     '  # it (`test_plat42_window.nim`).\n  discard',
      [LAWS], "GPUI rows soft-wrap again: one line takes the rows below it"),
     # --- per-line status on the shipped terminal ---------------------------
     ("L1", HOST, "    points = s.points,\n", "", [LINE_TERM],

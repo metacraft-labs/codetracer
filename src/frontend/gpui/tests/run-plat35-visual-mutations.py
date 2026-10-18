@@ -143,6 +143,9 @@ ARMS = [
     # ------------------------------------------------------------------
     # THE PANE MUTATION — the milestone's own gate, half one
     # ------------------------------------------------------------------
+    # RE-AIMED 2026-10-17: the redesign gave `renderEditorRow` the fold,
+    # indent-depth and guide-count arguments, so the call gained a line and
+    # the needle occurred zero times. Same loop, same mutation.
     # RE-AIMED 2026-10-03, `PLAT35-F3`. The claim and the mutation are
     # unchanged; the loop they are aimed at gained an argument.
     # `renderEditorRow` now takes the horizontal scroll offset, so the call
@@ -154,7 +157,8 @@ ARMS = [
         "                                          scroll.leftCols,\n"
         "                                          (if row.line == surface.caretLine:\n"
         "                                             surface.caretColumn else: 0),\n"
-        "                                          selected))",
+        "                                          selected, folds[i], depths[i],\n"
+        "                                          guideCounts[i]))",
         "    discard selected",
         SUITE,
         "stepped-editor / editor-row-count",

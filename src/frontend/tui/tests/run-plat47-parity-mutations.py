@@ -829,8 +829,12 @@ ARMS += [
         C_G_DISMISS,
         "a press outside the revealed pane leaves it over the tree"),
     # --- GPUI's editor rows are whole lines ---------------------------------------
+    # D4 RE-AIMED 2026-10-17: the redesign counts the partly visible last
+    # row as Monaco does (`EditorPadTopPx`, rounded up), so the count's
+    # expression spans two lines; the defect is unchanged.
     Arm("D4", WINGEOM,
-        "  max(1, (h - 2 * ChromePaddingPx - EditorLinesAbovePx) div GpuiEditorRowPx)\n",
+        "  max(1, (h - EditorPadTopPx - EditorLinesAbovePx + GpuiEditorRowPx - 1) div\n"
+        "         GpuiEditorRowPx)\n",
         "  max(1, g.viewport.h div 20)\n",
         C_G_ROWS,
         "the fetch window counted from the WINDOW's height at a nominal 20 px "

@@ -311,12 +311,18 @@ proc readWide(sess: var TuiTestSession): Fidelity =
   # The editor body: the last cell of a short source line (line 3 is empty)
   # before the Source pane's separator — found by the separator, because the
   # shared default's Source pane is narrower than a fixed offset.
-  # Searched in the Source pane's own columns (from its `main.py` tab on):
+  # Searched in the Source pane's own columns (from its `calc/main.py` tab on):
   # since PLAT-49 part B the event log's `#` column spells `   3 ` too.
+  # Since 2026-10-17 the lone editor's tab names the file's folder and name
+  # (`product_mode.editorTabLabel`: `calc/main.py`, as the desktop's does),
+  # so the tab is found by `/main.py ` and its start is the space before the
+  # folder.
   var srcRow = -1
-  let tabRow = rowOf(sess, cols, rows, " main.py ")
+  let tabRow = rowOf(sess, cols, rows, "/main.py ")
   if tabRow >= 0:
-    let srcCol = max(0, colOf(sess, tabRow, cols, " main.py ") - 1)
+    let tabText = sess.regionText(tabRow, 0, cols, 1)
+    let lead = max(0, tabText.rfind(' ', last = tabText.find("/main.py ")))
+    let srcCol = max(0, tabText[0 ..< lead].runeLen - 1)
     for r in tabRow + 1 ..< rows:
       if sess.regionText(r, srcCol, 8, 1).contains("   3 "):
         srcRow = r

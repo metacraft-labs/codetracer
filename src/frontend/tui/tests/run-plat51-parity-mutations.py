@@ -250,7 +250,10 @@ G_CHANGED = "a changed value takes the desktop's accent; nothing at the entry"
 G_HISTORY = "the value history opens under its row; its entries are navigation rows"
 G_CARET = "a click in the code places the caret, apart from the pointer"
 G_MENU = "Shift + right-click opens the same menu, with no hint row"
-G_OMNIBOX = "the omnibox is on the editor's ground and foreground in every state"
+# RENAMED 2026-10-17 with the redesign: the field is on the BAR's ground (the
+# desktop's `.command-input-row`, measured), its results on the editor's.
+G_OMNIBOX = ("the omnibox is on the bar's ground in every state; its results on "
+             "the editor's")
 G_POINTER = "the execution pointer is the desktop's arrow, never ▶"
 # Part B's killer cases.
 H_SURFACE = "the SMALLEST surface under the point wins; x2 / y2 are outside"
@@ -462,9 +465,11 @@ ARMS = [
         "      r.setAttribute(lane, PointerMarkAttribute, \"highlight_line_arrow.svg\")\n",
         "      r.setAttribute(lane, PointerMarkAttribute, \"▶\")\n",
         G_POINTER, "GPUI marks the current line with a glyph"),
+    # G4 RE-AIMED 2026-10-17: the redesigned state row draws its value
+    # through `stateText`, choosing the colour inline.
     Arm("G4", GLEAVES,
-        "                                (if changed: StateChangedColour\n",
-        "                                (if false: StateChangedColour\n",
+        "                          if changed: StateChangedColour else: StateValueTextColour)\n",
+        "                          if false: StateChangedColour else: StateValueTextColour)\n",
         G_CHANGED, "GPUI paints a changed value in the plain value colour"),
     Arm("G5", GMAIN,
         "  if path in open:\n    open.excl path\n  else:\n    try:\n      discard gSession.loadValueHistory(path, gpuiRowBudget())\n",
@@ -478,8 +483,10 @@ ARMS = [
         "  gCtxMenu.openAt(menu, y, x)\n",
         "  var hinted = menu\n  hinted.entries.add ContextMenuEntry(label: \"Terminal menu: Shift + right-click\")\n  gCtxMenu.openAt(hinted, y, x)\n",
         G_MENU, "GPUI's menus gain the terminal's hint row"),
+    # G8 RE-AIMED 2026-10-17: the field is on the bar's ground now (it was
+    # the editor's); the defect still puts it on the input surface.
     Arm("G8", GMAIN,
-        "      let b = absBox(r, sg.rect, EditorGround)\n",
+        "      let b = absBox(r, sg.rect, chromeOf(crWindowBackground))\n",
         "      let b = absBox(r, sg.rect, chromeOf(crInputBackground))\n",
         G_OMNIBOX, "GPUI's omnibox field is on the input surface"),
     # --- the desktop, the real Electron app --------------------------------
@@ -612,8 +619,10 @@ ARMS += [
         "     chromeOf(if focused: crFocusOutline else: crTabStripBackground))]\n",
         "     chromeOf(crTabStripBackground))]\n",
         W_FOCUS, "the window's focused strip keeps the unfocused ground"),
+    # W2 RE-AIMED 2026-10-17: the press also re-shows a focus outline that
+    # is hidden (`gFocusShown`); the defect still moves no focus.
     Arm("W2", GMAIN,
-        "    if pressedPane.len > 0 and pressedPane != gFocusPane:\n",
+        "    if pressedPane.len > 0 and (pressedPane != gFocusPane or not gFocusShown):\n",
         "    if false:\n",
         W_FOCUS, "a press in the window moves no focus"),
     Arm("W3", GMAIN,

@@ -398,8 +398,13 @@ ARMS = [
         "    if leaf.kind == glkBuiltin and leaf.builtin == paneEditor:",
         "    if leaf.kind == glkBuiltin and leaf.builtin == paneFlow:",
         SUITE_EDIT,
-        "THE SHIPPED BINARY draws the editor — Tier 2, through --report-plan",
+        "EDIT mode reaches this front-end, reads the CORE's contract, and says what it cannot do",
         CTL[LEAVES][0], CTL[LEAVES][1],
+        "(KILLER MOVED 2026-10-17: the redesigned window redraws the editor's "
+        "rows itself after the leaf is rendered (`main.redrawEditorRows`), so "
+        "the Tier-2 plan no longer shows a leaf that took the wrong branch and "
+        "the arm SURVIVED there; the edit-mode case now renders the editor's "
+        "leaf, not live, through `renderLeaf` and requires the surface.) "
         "UNDECLARED, AND IT RESTORES A DEFECT THIS MILESTONE MEASURED ON THE "
         "BINARY. Deciding the editor by `leaf.live` rather than by the surface "
         "made `ct edit --ui=gpui <project>` draw 'Editor — waiting for the "

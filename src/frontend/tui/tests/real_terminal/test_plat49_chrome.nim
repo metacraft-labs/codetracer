@@ -51,6 +51,10 @@ import ../../app/theme/colour_math
 import ../../../styles/generated/design_tokens
 import ../../../viewmodel/viewmodels/omnibar_vm
 import ../../../viewmodel/viewmodels/transport_icons
+
+const EditorTabText = " calc/main.py "
+  ## The lone editor's tab: the file's folder and name since 2026-10-17
+  ## (`product_mode.editorTabLabel`, as the desktop's tab), not the name alone.
 from ../../../viewmodel/viewmodels/debug_controls_vm import transportLabel
 from ../../../viewmodel/viewmodels/state_vm import VariableCategory,
   categoryTag, vcLocal
@@ -272,7 +276,7 @@ suite "PLAT-49 on a real terminal: a click is a click":
     # PLAT-51: aimed at the editor's LEFT quarter (GoldenLayout's left
     # segment, a split that tints the pane's left half); its middle third now
     # joins, tinting the strip where the tab would land.
-    let editorAt = strip.cellFind(" main.py ") + 1
+    let editorAt = strip.cellFind(EditorTabText) + 1
     ck editorAt > filesAt
     sess.mouse(0, 1, filesAt + 1)
     for c in [filesAt + 5, filesAt + 20, editorAt + 2]:
@@ -322,7 +326,7 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     let row1 = s.text(1)
     let filesAt = row1.cellFind(" Files ") + 1
     let vcsAt = row1.cellFind(" VCS ") + 1
-    let editorAt = row1.cellFind(" main.py ") + 1
+    let editorAt = row1.cellFind(EditorTabText) + 1
     ck filesAt > 0 and vcsAt > 0 and editorAt > 0
     # 4. The strip's own ground, distinct from the pane body below it — the
     # focused one on the focus colour.
@@ -414,7 +418,7 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     ck caReverse notin s[1][vcsAt + 1].attrs
     # PLAT-51: the Files strip is the FOCUSED one; an unfocused strip's
     # selected tab (the editor's lone tab) is reverse + bold too.
-    let editorAt = row1.cellFind(" main.py ") + 1
+    let editorAt = row1.cellFind(EditorTabText) + 1
     ck editorAt > 0
     ck caReverse in s[1][editorAt + 1].attrs and caBold in s[1][editorAt + 1].attrs
     sess.quit()

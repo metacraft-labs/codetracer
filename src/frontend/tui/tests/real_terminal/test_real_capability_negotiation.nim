@@ -263,7 +263,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     let text = screenText(sess)
     checkpoint("status row: " & statusRowText(sess))
     ck text.contains(" Call Trace ")
-    ck text.contains(" main.py ")
+    ck text.contains(" calc/main.py ")
     ck text.contains(" Variables ")
     ck text.contains("Event Log")   # PLAT-51: the Timeline tab is removed
 
@@ -289,7 +289,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # protocol and not the application.
     let text = screenText(sess)
     ck text.contains(" Call Trace ")
-    ck text.contains(" main.py ")
+    ck text.contains(" calc/main.py ")
     sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
     ck status.isSome
@@ -380,7 +380,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # The positive twin for that loop, through the same haystack: the Unicode
     # glyphs really would have been findable if they were there.
     ck text.len > 0
-    ck text.contains(" main.py ")
+    ck text.contains(" calc/main.py ")
 
     sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     let status = sess.waitExit(initDuration(seconds = 15))
@@ -519,7 +519,7 @@ suite "CTUI-11 Tier 2: what the terminal was actually told":
     # and not a no-op.
     let after = screenText(sess)
     checkpoint("after step: " & statusRowText(sess))
-    ck after.contains(" main.py ")
+    ck after.contains(" calc/main.py ")
     ck statusRowText(sess).len > 0
     sess.send("\x11")  # Ctrl+Q, the CUA base's quit
     discard sess.waitExit(initDuration(seconds = 15))

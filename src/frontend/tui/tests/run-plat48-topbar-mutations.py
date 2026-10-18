@@ -544,9 +544,13 @@ ARMS = [
         "      r.setAttribute(icon, \"src\", markSvgPath(sg.index, false))\n",
         W_BAND,
         "an enabled control is drawn in the disabled ink"),
+    # GW3 RE-AIMED 2026-10-17: the redesign draws the desktop's LOGO
+    # (`#menu-logo-img`) where the root button drew "≡", so its mark is the
+    # logo image; the defect drops it, leaving an empty button.
     Arm("GW3", GPUIMAIN,
-        '      r.appendChild(b, r.createTextNode("≡"))\n',
-        '      r.appendChild(b, r.createTextNode(""))\n',
+        '      r.setStyle(logo, "height", "20px")\n'
+        '      r.appendChild(b, logo)\n',
+        '      r.setStyle(logo, "height", "20px")\n',
         W_BAND,
         "the band's root menu button is drawn without its mark"),
     Arm("GW4", GPUIMAIN,
@@ -591,18 +595,26 @@ ARMS = [
         "      let shown = false or\n",
         W_REVEAL,
         "the footer does not mark which docked pane is revealed"),
+    # GW9 RE-AIMED 2026-10-17: the redesign retired the pin BUTTON drawn
+    # over each box (and its `pinButtonShown` drawing guard); a pin is now an
+    # icon in its tab, painted with the pane tree and so under every overlay
+    # by paint order (which the case still asserts). What `pinButtonShown`
+    # still guards is the PRESS: a pin under a revealed pane must not be
+    # pressed through it. The defect drops that guard; the case presses
+    # Files' pin under a revealed State and requires that nothing docked.
     Arm("GW9", GPUIMAIN,
-        "    if not pinButtonShown(pr, covers):\n"
-        "      continue\n",
-        "    discard covers\n",
+        "      let onPin = n.pins[t].contains(x, y) and pinButtonShown(n.pins[t], covers)\n",
+        "      let onPin = n.pins[t].contains(x, y)\n",
         # PLAT-51 part B: graded on the footer's reveal (Ctrl+O) — the top
         # strip's reveal is not reachable from a scripted run since a drag no
         # longer docks (and a pane docked at start has no element: filed).
         W_REVEAL,
-        "the window draws the tree's pin buttons over a revealed pane"),
+        "the window presses the tree's pins through a revealed pane"),
+    # GW10 RE-AIMED 2026-10-17: the pin is a tab icon since the redesign,
+    # and its press docks through one conditional command (pin or close).
     Arm("GW10", GPUIMAIN,
-        "          applyGestureCommand(r, cmdDock(k, leBottom))\n",
-        "          applyGestureCommand(r, cmdDock(k, leRight))\n",
+        "          applyGestureCommand(r, if onPin: cmdDock(k, leBottom)\n",
+        "          applyGestureCommand(r, if onPin: cmdDock(k, leRight)\n",
         W_PIN,
         "the pin button docks the pane to the right edge, not the footer"),
 ]

@@ -259,7 +259,15 @@ suite "PLAT-57 on a real terminal: Find in Files":
     ck extraRow > 0
     sess.press(extraRow, 3)
     s = sess.waitScreen("opened " & expected[3][0] & ":4")
-    ck s[1].contains(" extra.py ")
+    # The lone editor's tab is the file's folder and name since 2026-10-17
+    # (`product_mode.editorTabLabel`), so the name follows a `/`. The strip
+    # can repaint a frame after the status line says "opened", so the tab is
+    # waited for (on row 1, the strip) rather than read once.
+    let tabDeadline = getMonoTime() + initDuration(milliseconds = 5000)
+    while not s[1].contains("/extra.py ") and getMonoTime() < tabDeadline:
+      sleep(50)
+      s = sess.screen()
+    ck s[1].contains("/extra.py ")
     var shown = false
     for r in 2 ..< 30:
       # The editor's row: its gutter's line number after the Files pane's
