@@ -188,7 +188,8 @@ proc newGpuiSourceService*(session: HeadlessDebugSession;
   ## Build the source window for a live session.
   let store = session.session.store
   let vm = createSourceVM(store, session.session.editorVM)
-  vm.setViewport(height = max(1, viewportHeight), overscan = GpuiSourceOverscan)
+  vm.setOverscan(GpuiSourceOverscan)
+  vm.setViewport(vm.viewport.withRows(max(1, viewportHeight)))
   GpuiSourceService(
     vm: vm,
     provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
@@ -375,10 +376,10 @@ proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int):
   if result.total <= 0:
     return
   let body = max(1, rows)
-  vm.viewportHeight.val = body
   result.top = clamp(int(vm.scrollPosition.val) + delta, 0,
                      max(0, result.total - body))
-  vm.scroll(int64(result.top))
+  vm.setViewport(Viewport(rows: body, cols: vm.viewport.val.cols,
+                          firstRow: result.top))
   let first = int(store.calltrace.startLineIndex.val)
   let held = store.calltrace.lines.val.len
   let last = result.top + min(body, result.total - result.top)
@@ -393,7 +394,7 @@ proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int):
   except CatchableError:
     # The rows stay unlisted; the next scroll asks again.
     discard
-  vm.scroll(int64(result.top))
+  vm.setViewport(vm.viewport.val.scrolledTo(result.top))
 
 # ---------------------------------------------------------------------------
 # PLAT-51: the Event Log's window, for its scrollbar scrubber

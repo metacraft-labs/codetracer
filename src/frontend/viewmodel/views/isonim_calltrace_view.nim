@@ -588,7 +588,8 @@ when defined(js):
         if h > 0.0:
           vm.setRowHeightPx(h)
         if rowH > 0.0:
-          vm.scroll(int64(scrollContainer.scrollTop() / rowH)))
+          vm.setViewport(vm.viewport.val.scrolledTo(
+            int(scrollContainer.scrollTop() / rowH))))
 
   proc renderTraceSvg(r: WebRenderer; svgContainer: isonim_dom.Element;
                       vm: CalltraceVM) =

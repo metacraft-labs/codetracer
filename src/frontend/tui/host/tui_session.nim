@@ -162,7 +162,8 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
   let src = createSourceVM(store, sess.session.editorVM)
   if not sess.session.editorVM.isNil:
     sess.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
-  src.setViewport(height = max(1, viewportHeight), overscan = SourceOverscan)
+  src.setOverscan(SourceOverscan)
+  src.setViewport(src.viewport.withRows(max(1, viewportHeight)))
   var nav = new(OriginNavigator)
   nav[] = initOriginNavigator()
   TuiSession(
@@ -209,7 +210,8 @@ proc setViewportHeight*(s: TuiSession; height: int) =
   ## line 55 and the pane was showing 23-51. The height therefore comes from the
   ## PROJECTION, once the shell has been laid out, and is re-set on every
   ## resize.
-  s.source.setViewport(height = max(1, height), overscan = SourceOverscan)
+  s.source.setOverscan(SourceOverscan)
+  s.source.setViewport(s.source.viewport.withRows(max(1, height)))
 
 proc pumpMove*(s: TuiSession) =
   ## Consume the `stopped` + `ct/complete-move` pair a navigation command

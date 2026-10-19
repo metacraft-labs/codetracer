@@ -26,7 +26,7 @@
 ## Usage:
 ##   let vm = createCalltraceVM(store)
 ##   echo vm.scrollPosition.val     # 0
-##   vm.scroll(100)
+##   vm.setViewport(Viewport(rows: 30, firstRow: 100))
 ##   echo vm.visibleLines.val       # lines around index 100
 
 import std/[json, sets, options, strutils, tables]
@@ -35,22 +35,24 @@ import std/[json, sets, options, strutils, tables]
 # package graph (CodeTracer-Embed-SDK.md §3.2). See vm_log.nim.
 import ../vm_log
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, graph, batch]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../collab/[runtime_role, session_core, types]
 import ../store/[replay_data_store, request_tracker, types]
+import ../viewport
+export viewport
 
 const
-  ## Default panel depth (columns) used when requesting calltrace sections.
-  ## The real UI computes this from the panel's pixel width; the VM uses a
-  ## sensible default that the view layer can override via viewportDepth.
+  ## The depth (columns) asked for while the pane's width is unknown
+  ## (`Viewport.cols = 0`). Depth shapes indentation only; the ROWS of an
+  ## unmeasured pane are never requested.
   DEFAULT_VIEWPORT_DEPTH* = 20
 
-  ## Number of extra rows to request above and below the visible viewport.
-  ## Keeps scrolling smooth by pre-fetching nearby data.
-  CALLTRACE_BUFFER* = 20
+  ## Rows pre-fetched after the visible ones — `viewport.LeadRows`, kept
+  ## under this name for the hosts that page the call trace themselves.
+  CALLTRACE_BUFFER* = LeadRows
 
 type
   CalltraceVM* = ref object of ViewModel
@@ -79,6 +81,10 @@ type
     runtimeRole*: ViewModelRuntimeRole
 
     # -- Mutable state --
+    viewport*: Signal[Viewport]
+      ## What the view was given (`setViewport`). The three signals below
+      ## are its parts, kept for the many readers of each.
+    viewportGate: ViewportGate
     scrollPosition*: Signal[int64]
     viewportHeight*: Signal[int]
     viewportDepth*: Signal[int]
@@ -271,13 +277,39 @@ func callRowText*(r: CallRow; indent = false): string =
 # Actions
 # ---------------------------------------------------------------------------
 
-proc scroll*(vm: CalltraceVM; position: int64) =
-  ## Update the scroll position. The auto-load effect watches this signal
-  ## and will trigger a `store.requestCalltraceSection` when it changes.
-  if position < 0:
-    vm.scrollPosition.val = 0'i64
-  else:
-    vm.scrollPosition.val = position
+proc setViewport*(vm: CalltraceVM; v: Viewport) =
+  ## The size and scroll position the view was given — the ONE way a view
+  ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). Reports
+  ## are debounced on the store's `viewportScheduler`; the auto-load effect
+  ## then asks for the window `viewport.listWindow` derives.
+  vm.viewportGate.submit(v)
+
+proc callWindowArgs(vm: CalltraceVM): tuple[ok: bool; start: int64;
+                                             height, depth: int] =
+  ## The window the Electron GUI asks for (`ui/calltrace.nim` `loadLines`):
+  ## `TrailRows` above the first visible row and `LeadRows` below the last,
+  ## at the pane's measured depth. `ok` is false for an unmeasured pane.
+  let v = vm.viewport.val
+  let w = listWindow(v)
+  if w.count <= 0:
+    return (false, 0'i64, 0, 0)
+  (true, w.start.int64, w.count,
+   if v.cols > 0: v.cols else: DEFAULT_VIEWPORT_DEPTH)
+
+proc requestWindow(vm: CalltraceVM) =
+  ## Ask for the window the viewport shows, at the debugger's position, with
+  ## the pane's filter.
+  let (ok, start, height, depth) = vm.callWindowArgs()
+  if not ok:
+    return
+  let dbg = vm.store.debugger.val
+  vm.store.requestCalltraceSection(
+    start, height, depth,
+    rrTicks = dbg.rrTicks,
+    file = dbg.location.file,
+    line = dbg.location.line,
+    rawIgnorePatterns = vm.rawIgnorePatterns.val,
+  )
 
 proc selectEntry*(vm: CalltraceVM; lineIndex: Option[int64]) =
   ## Set the currently selected calltrace entry.
@@ -347,25 +379,12 @@ proc toggleExpandCallChildren*(vm: CalltraceVM; lineIndex: int64) =
     }
     discard vm.store.backend.send(command, toggleArgs)
 
-    # Reload the calltrace section. Clear the request tracker first so
-    # the store doesn't deduplicate this as a redundant request (the
-    # auto-load effect may have already sent the same parameters).
-    vm.store.requestTracker.markComplete("load-calltrace")
-    let scrollPos = vm.scrollPosition.val
-    let vpHeight = vm.viewportHeight.val
-    let depth = vm.viewportDepth.val
-    let dbg = vm.store.debugger.val
-    let patterns = vm.rawIgnorePatterns.val
-    let effectiveHeight = if vpHeight > 0: vpHeight else: 50
-    let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
-    let totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
-    vm.store.requestCalltraceSection(
-      bufferStart, totalHeight, depth,
-      rrTicks = dbg.rrTicks,
-      file = dbg.location.file,
-      line = dbg.location.line,
-      rawIgnorePatterns = patterns,
-    )
+    # Reload the section: the engine changed it under the SAME arguments,
+    # so the request in flight for them (if any) answers the old tree. The
+    # entry is cleared whatever it records — this is the one deliberate
+    # re-ask of an identical request.
+    vm.store.requestTracker.forget("load-calltrace")
+    vm.requestWindow()
 
 proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
   ## Navigate to the source location of the calltrace entry at `lineIndex`.
@@ -418,17 +437,6 @@ proc setBackendSearchResults*(vm: CalltraceVM;
   ## Update the backend search results. Called by the legacy calltrace
   ## component when it receives CtCalltraceSearchResponse.
   vm.backendSearchResults.val = results
-
-proc setViewportHeight*(vm: CalltraceVM; height: int) =
-  ## Update the viewport height (number of visible rows).
-  ## Triggers the auto-load effect if the value changes.
-  if height > 0:
-    vm.viewportHeight.val = height
-
-proc setViewportDepth*(vm: CalltraceVM; depth: int) =
-  ## Update the viewport depth (number of indentation columns).
-  if depth > 0:
-    vm.viewportDepth.val = depth
 
 proc setRawIgnorePatterns*(vm: CalltraceVM; patterns: string) =
   ## Update the calltrace filter patterns (e.g. "path~lib/system;path~chronicles").
@@ -507,9 +515,19 @@ proc createCalltraceVM*(store: ReplayDataStore;
           "stub-to-real-backend VM replacement)"
       dispose()
 
+    let viewport = createSignal(Viewport())
     let scrollPosition = createSignal(0'i64)
     let viewportHeight = createSignal(0)
     let viewportDepth = createSignal(DEFAULT_VIEWPORT_DEPTH)
+    let viewportGate = newViewportGate(
+      proc(): ViewportScheduler = store.viewportScheduler,
+      proc(v: Viewport) =
+        batch(proc() =
+          viewport.val = v
+          scrollPosition.val = max(0, v.firstRow).int64
+          viewportHeight.val = max(0, v.rows)
+          viewportDepth.val =
+            if v.cols > 0: v.cols else: DEFAULT_VIEWPORT_DEPTH))
     let selectedEntry = createSignal(none(int64))
     let expandedNodes = createSignal(initHashSet[int64]())
     let searchQuery = createSignal("")
@@ -608,6 +626,8 @@ proc createCalltraceVM*(store: ReplayDataStore;
       store: store,
       collabCore: collabCore,
       runtimeRole: runtimeRole,
+      viewport: viewport,
+      viewportGate: viewportGate,
       scrollPosition: scrollPosition,
       viewportHeight: viewportHeight,
       viewportDepth: viewportDepth,
@@ -627,64 +647,27 @@ proc createCalltraceVM*(store: ReplayDataStore;
       disposeProc: wrappedDispose,
     )
 
-    # Auto-load effect: whenever scrollPosition, viewportHeight, or the
-    # debugger's rrTicks position changes, request the appropriate
-    # calltrace section from the backend.  This replaces the old
-    # scroll-handler + loadLines pattern and the loadLines call in
-    # onCompleteMove.  The debugger position is watched so that a move
-    # (step/jump) automatically triggers a fresh calltrace request,
-    # mirroring the same pattern used by the StateVM's auto-load effect.
+    # Auto-load effect: whenever the viewport, the filter or the debugger's
+    # position changes, ask for the window the viewport shows
+    # (Viewport-Driven-Loading V2). A move (step/jump) re-asks, as the
+    # desktop's `loadLines` in `onCompleteMove` did. An UNMEASURED pane asks
+    # nothing: the rows of a pane nobody has sized are not this ViewModel's
+    # to guess, and a headless consumer that never renders must not
+    # over-fetch. There is no whole-trace load either: the views render the
+    # held window inside a scroll area sized from the trace's total.
     createEffect proc() =
-      let scrollPos = scrollPosition.val
-      let vpHeight = viewportHeight.val
-      let depth = viewportDepth.val
+      let v = viewport.val
       let dbg = store.debugger.val
       let patterns = rawIgnorePatterns.val
       when defined(js):
         vmDebug "[PIPELINE] CalltraceVM.autoLoad: storeId=" &
-          $store.storeId & " rrTicks=" & $dbg.rrTicks & " vpHeight=" &
-          $vpHeight & " scrollPos=" & $scrollPos & " depth=" & $depth
+          $store.storeId & " rrTicks=" & $dbg.rrTicks & " rows=" &
+          $v.rows & " firstRow=" & $v.firstRow & " cols=" & $v.cols &
+          " patterns=" & patterns
       # No rrTicks guard — DB-based traces always have rrTicks=0.
       # RequestTracker deduplicates redundant backend requests.
       if not mayIssueBackendCommands(runtimeRole):
         return
-      let effectiveHeight = if vpHeight > 0: vpHeight else: 50
-      var bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
-      var totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
-      # When the store already knows the total number of calls (this
-      # happens after the first response arrives), expand the request
-      # window to cover the entire trace whenever it fits in a
-      # generous cap.  The IsoNim WebRenderer renders the full window
-      # without DOM virtualization (see `isonim_calltrace_view.nim`
-      # `indexEach` over `vm.store.calltrace.lines.val`), so the
-      # number of `.calltrace-call-line` elements in the DOM is
-      # bounded by the section we ask the backend to send.  Without
-      # this expansion, calltrace navigation (Playwright `findEntry`)
-      # cannot see entries beyond the initial 25-row viewport on DB
-      # traces such as Python / Ruby sudoku, where `solve_sudoku`
-      # lives well past row 25 of the global call-line index.  Once a
-      # translateY-based virtualised renderer lands the cap can be
-      # lowered again.
-      #
-      # When we're loading the entire trace, also pin `bufferStart=0`.
-      # Otherwise scrollPos>BUFFER (after a `calltraceJump` that
-      # re-anchors the view inside a function's body) makes the request
-      # start mid-trace and the response — even with `height=totalCalls`
-      # — only covers `[scrollPos-BUFFER .. totalCalls)`, dropping the
-      # caller frames that came before.  Playwright's `findEntry` then
-      # races a DOM that lacks the parent function entirely.  See
-      # TODO 5.1(a) in the migration handoff.
-      const FULL_WINDOW_CAP = 500
-      let totalCalls = store.calltrace.totalCallsCount.val
-      if totalCalls > 0'u64 and totalCalls.int <= FULL_WINDOW_CAP:
-        totalHeight = max(totalHeight, totalCalls.int)
-        bufferStart = 0'i64
-      store.requestCalltraceSection(
-        bufferStart, totalHeight, depth,
-        rrTicks = dbg.rrTicks,
-        file = dbg.location.file,
-        line = dbg.location.line,
-        rawIgnorePatterns = patterns,
-      )
+      untrack(proc() = vm.requestWindow())
 
     vm

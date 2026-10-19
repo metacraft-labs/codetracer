@@ -70,8 +70,8 @@ suite "collaborative ViewModel M2 session core":
   test "test_collab_collaborator_role_does_not_send_backend_autoload":
     let (session, mock) = makeSession(vrrCollaborator)
 
-    session.calltraceVM.setViewportHeight(25)
-    session.calltraceVM.scroll(10)
+    session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(25))
+    session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(10))
     var dbg = session.store.debugger.val
     dbg.rrTicks = 99'u64
     session.store.debugger.val = dbg

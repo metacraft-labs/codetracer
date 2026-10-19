@@ -667,7 +667,8 @@ suite "PLAT-22: the GPUI editing surface":
     resetCount()
     let h = openLive(BigViewportLines, big = true)
     try:
-      h.service.vm.setViewport(height = BigViewportLines, overscan = BigOverscan)
+      h.service.vm.setOverscan(BigOverscan)
+      h.service.vm.setViewport(h.service.vm.viewport.withRows(BigViewportLines))
       h.pointAt(1, RecordedBigPath)
       discard h.surfaceOf()
 

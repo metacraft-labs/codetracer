@@ -230,8 +230,8 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
   test "CalltraceVM: viewport signals drive the visibleLines memo":
     createRoot proc(dispose: proc()) =
       let p = openPanes()
-      p.calltrace.setViewportHeight(3)
-      p.calltrace.scroll(-4)
+      p.calltrace.setViewport(p.calltrace.viewport.val.withRows(3))
+      p.calltrace.setViewport(p.calltrace.viewport.val.scrolledTo(-4))
       check p.calltrace.scrollPosition.val == 0'i64
       check p.calltrace.visibleLines.val.len == 0
       p.store.updateCalltraceSection(@[
@@ -244,7 +244,7 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
       check p.calltrace.visibleLines.val[0].name == "main"
       check p.calltrace.hasMoreAbove.val == false
       check p.calltrace.hasMoreBelow.val == true
-      p.calltrace.scroll(1)
+      p.calltrace.setViewport(p.calltrace.viewport.val.scrolledTo(1))
       check p.calltrace.hasMoreAbove.val == true
       p.calltrace.setSearchQuery("wri")
       check p.calltrace.highlightedMatches.val == @[2'i64]
@@ -312,7 +312,7 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
   test "EventLogVM: paging, sorting and filtering are pure derivations":
     createRoot proc(dispose: proc()) =
       let p = openPanes()
-      p.eventLog.setPageSize(2)
+      p.eventLog.setViewport(Viewport(rows: 2))
       p.eventLog.appendLiveDebuggerStop(storageWriteRow(0, "a.nr", 1, 10'u64))
       p.eventLog.appendLiveDebuggerStop(storageWriteRow(1, "a.nr", 2, 11'u64))
       p.eventLog.appendLiveDebuggerStop(storageWriteRow(2, "b.nr", 3, 12'u64))

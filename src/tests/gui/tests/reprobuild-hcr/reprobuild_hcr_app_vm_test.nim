@@ -102,7 +102,7 @@ proc configureLiveSession(app: AppViewModel; rrTicks: uint64) =
     status: dsIdle,
     threadId: 1'u32,
   )
-  app.session.calltraceVM.setViewportHeight(20)
+  app.session.calltraceVM.setViewport(app.session.calltraceVM.viewport.val.withRows(20))
   drain()
 
 proc publishStop(app: AppViewModel; marker: string; generation: int;

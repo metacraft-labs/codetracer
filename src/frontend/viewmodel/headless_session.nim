@@ -476,8 +476,8 @@ proc getCalltraceLines*(s: HeadlessDebugSession): seq[CallLine] =
 
 proc getVisibleCalltraceLines*(s: HeadlessDebugSession): seq[CallLine] =
   ## Get the visible calltrace lines from the CalltraceVM's viewport memo.
-  ## Requires that ``calltraceVM.viewportHeight`` is set to a value > 0
-  ## (e.g. via ``calltraceVM.setViewportHeight(50)``).
+  ## Requires a measured viewport
+  ## (e.g. ``calltraceVM.setViewport(Viewport(rows: 50))``).
   s.session.calltraceVM.visibleLines.val
 
 proc getCurrentFile*(s: HeadlessDebugSession): string =

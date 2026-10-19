@@ -58,9 +58,27 @@ suite "RequestTracker":
     let t = newRequestTracker()
     t.markPending("load-locals", "100")
     check t.isDuplicate("load-locals", "100")
-    t.markComplete("load-locals")
+    t.markComplete("load-locals", "100")
     check not t.isDuplicate("load-locals", "100")
     check not t.hasPending("load-locals")
+
+  test "a completion retires only its own request, not a newer one":
+    # The answer to an OLDER request arrives after a newer one was issued
+    # under the same key: the newer request is still in flight, so a
+    # duplicate of it must still be refused.
+    let t = newRequestTracker()
+    t.markPending("load-locals", "100")
+    t.markPending("load-locals", "200")
+    t.markComplete("load-locals", "100")
+    check t.isDuplicate("load-locals", "200")
+    t.markComplete("load-locals", "200")
+    check not t.hasPending("load-locals")
+
+  test "forget clears whatever request is pending":
+    let t = newRequestTracker()
+    t.markPending("load-calltrace", "a")
+    t.forget("load-calltrace")
+    check not t.hasPending("load-calltrace")
 
   test "clear removes all pending entries":
     let t = newRequestTracker()

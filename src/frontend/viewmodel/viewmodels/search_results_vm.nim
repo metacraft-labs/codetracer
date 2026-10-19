@@ -30,6 +30,8 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
+import ../viewport
+export viewport
 
 export types.TextMatchOptions
 
@@ -88,12 +90,19 @@ type
     note*: Signal[string]
     selected*: Signal[int]
     recentSearches*: Signal[seq[RecentSearch]]
+    viewport*: Signal[Viewport]
+      ## What the view was given (`setViewport`). The results are not
+      ## fetched by window — the host's runner streams every match into
+      ## memory — so the viewport decides only which rows a windowed view
+      ## renders (`visibleResults`).
     runId*: int
 
     # -- Derived state --
     resultCount*: Memo[int]
     fileCount*: Memo[int]
     groups*: Memo[seq[SearchResultGroup]]
+    visibleResults*: Memo[seq[SearchResultLine]]
+      ## The results the viewport shows; every result while unmeasured.
 
     # -- Callbacks installed by the host --
     onSearch*: proc(runId: int; query: string; options: TextMatchOptions)
@@ -102,6 +111,11 @@ type
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
+
+proc setViewport*(vm: SearchResultsVM; v: Viewport) =
+  ## The size and scroll position the view was given (Viewport-Driven-Loading
+  ## V1): which rows a windowed view renders.
+  vm.viewport.val = v
 
 proc setQuery*(vm: SearchResultsVM; query: string) =
   ## Set the active workspace search query (without searching).
@@ -426,6 +440,7 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
     let note = createSignal("")
     let selected = createSignal(-1)
     let recentSearches = createSignal(newSeq[RecentSearch]())
+    let viewport = createSignal(Viewport())
 
     let resultCount = createMemo[int] proc(): int =
       results.val.len
@@ -435,6 +450,15 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
 
     let fileCount = createMemo[int] proc(): int =
       groups.val.len
+
+    let visibleResults = createMemo[seq[SearchResultLine]] proc(): seq[SearchResultLine] =
+      let v = viewport.val
+      let all = results.val
+      if not v.measured:
+        return all
+      let lo = clamp(v.firstRow, 0, all.len)
+      let hi = clamp(v.firstRow + v.rows, 0, all.len)
+      all[lo ..< hi]
 
     SearchResultsVM(
       store: store,
@@ -447,6 +471,8 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
       note: note,
       selected: selected,
       recentSearches: recentSearches,
+      viewport: viewport,
+      visibleResults: visibleResults,
       resultCount: resultCount,
       fileCount: fileCount,
       groups: groups,

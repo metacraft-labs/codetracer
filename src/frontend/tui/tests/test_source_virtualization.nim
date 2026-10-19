@@ -173,7 +173,8 @@ proc openHarness(tracePath: string): VHarness =
   let bigTrace = writeBigPayload(root)
   let session = newHeadlessDebugSession(tracePath, findReplayServer())
   let vm = createSourceVM(session.session.store, session.session.editorVM)
-  vm.setViewport(height = ViewportLines, overscan = Overscan)
+  vm.setOverscan(Overscan)
+  vm.setViewport(vm.viewport.withRows(ViewportLines))
   VHarness(
     session: session,
     vm: vm,

@@ -57,16 +57,16 @@
 
 import std/[json, options, strutils, tables, unicode]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, batch]
 import isonim/core/async_compat
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ../viewport
+export viewport
 
 const
-  ## Default number of rows per page in the event log panel.
-  DEFAULT_PAGE_SIZE* = 50
   ## Default `format` hint applied when a marker omits the field
   ## (spec §5.2). Read by `formatShowValue` to truncate values with a
   ## middle ellipsis for compact display.
@@ -297,14 +297,16 @@ type
     ##
     ## Mutable signals:
     ##   selectedRow      — index of the selected row, or none
-    ##   currentPage      — zero-based page index
-    ##   pageSize         — number of rows per page
+    ##   viewport         — what the view was given (`setViewport`)
+    ##   currentPage      — zero-based page index, `firstRow div rows`
+    ##   pageSize         — the viewport's rows (0 until measured)
     ##   searchQuery      — current search/filter text
     ##   sortColumn       — column index to sort by
     ##   sortAscending    — whether sort is ascending
     ##
     ## Derived memos:
     ##   totalPages       — total pages based on event count and page size
+    ##   visibleRows      — the held rows the viewport shows
     ##   isLoading        — whether a request is in flight
     ##
     ## The store reference is kept for the auto-load effect and
@@ -313,6 +315,10 @@ type
 
     # -- Mutable state --
     selectedRow*: Signal[Option[int]]
+    viewport*: Signal[Viewport]
+      ## What the view was given (`setViewport`); `currentPage` and
+      ## `pageSize` are derived from it for the pager and collaboration.
+    viewportGate: ViewportGate
     currentPage*: Signal[int]
     pageSize*: Signal[int]
     searchQuery*: Signal[string]
@@ -382,6 +388,9 @@ type
     visibleMarkerRows*: Memo[seq[MarkerEventRow]]
       ## §5.4 filter result. Computed reactively from `markerRows` +
       ## `filterBar` + `counterpartCache`.
+    visibleRows*: Memo[seq[EventLogRow]]
+      ## The held rows the viewport shows (`viewport.firstRow` onwards,
+      ## `viewport.rows` of them); every held row while unmeasured.
 
     # -- Host bridge --
     onSwitchProcessProc*: proc(recordingId: string)
@@ -450,18 +459,27 @@ proc doubleClickRow*(vm: EventLogVM; row: int) =
     }
     vm.store.requestHistoricalNavigation("ct/event-jump", args)
 
+proc setViewport*(vm: EventLogVM; v: Viewport) =
+  ## The size and scroll position the view was given — the ONE way a view
+  ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). Reports
+  ## are debounced on the store's `viewportScheduler`; the auto-load effect
+  ## then asks for the window `viewport.listWindow` derives.
+  vm.viewportGate.submit(v)
+
 proc nextPage*(vm: EventLogVM) =
-  ## Advance to the next page, clamped to totalPages - 1.
+  ## Show the next screenful of rows, clamped to the last page.
+  let v = vm.viewport.val
   let maxPage = vm.totalPages.val - 1
   let next = vm.currentPage.val + 1
-  if maxPage >= 0 and next <= maxPage:
-    vm.currentPage.val = next
+  if v.rows > 0 and maxPage >= 0 and next <= maxPage:
+    vm.setViewport(v.scrolledTo(next * v.rows))
 
 proc prevPage*(vm: EventLogVM) =
-  ## Go back one page, clamped to 0.
+  ## Show the previous screenful of rows, clamped to the first page.
+  let v = vm.viewport.val
   let prev = vm.currentPage.val - 1
-  if prev >= 0:
-    vm.currentPage.val = prev
+  if v.rows > 0 and prev >= 0:
+    vm.setViewport(v.scrolledTo(prev * v.rows))
 
 proc sort*(vm: EventLogVM; column: int) =
   ## Sort by the given column. If already sorting by this column,
@@ -515,16 +533,11 @@ proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
   if result: vm.columns.val = c
 
 proc setSearchQuery*(vm: EventLogVM; query: string) =
-  ## Update the search query. Resets to page 0 since the result
-  ## set changes.
-  vm.searchQuery.val = query
-  vm.currentPage.val = 0
-
-proc setPageSize*(vm: EventLogVM; size: int) =
-  ## Update the page size. Resets to page 0 to avoid stale offsets.
-  if size > 0:
-    vm.pageSize.val = size
-    vm.currentPage.val = 0
+  ## Search the log: the engine returns only the matching events
+  ## (`ct/event-load`'s `search`), and the pane shows them from the top.
+  batch(proc() =
+    vm.searchQuery.val = query
+    vm.setViewport(vm.viewport.val.scrolledTo(0)))
 
 # ---------------------------------------------------------------------------
 # M25b — Marker-row metadata + counterpart cache helpers
@@ -977,12 +990,21 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
   ## Sets up:
   ## 1. Mutable signals with sensible defaults
   ## 2. Derived memos for `totalPages` and `isLoading`
-  ## 3. An auto-load effect that requests event log data when
-  ##    page, sort, search, or debugger position changes
+  ## 3. An auto-load effect that requests the viewport's window of the
+  ##    log when the viewport, the sort or the search changes
   withViewModel proc(dispose: proc()): EventLogVM =
     let selectedRow = createSignal(none(int))
+    let viewport = createSignal(Viewport())
     let currentPage = createSignal(0)
-    let pageSize = createSignal(DEFAULT_PAGE_SIZE)
+    let pageSize = createSignal(0)
+    let viewportGate = newViewportGate(
+      proc(): ViewportScheduler = store.viewportScheduler,
+      proc(v: Viewport) =
+        batch(proc() =
+          viewport.val = v
+          pageSize.val = max(0, v.rows)
+          currentPage.val =
+            if v.rows > 0: max(0, v.firstRow) div v.rows else: 0))
     let searchQuery = createSignal("")
     let sortColumn = createSignal(0)
     let sortAscending = createSignal(true)
@@ -1016,6 +1038,19 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let isLoading = createMemo[bool] proc(): bool =
       loadingState.val == lsLoading
 
+    # Derived: the rows the viewport shows, cut from the held window (which
+    # carries `TrailRows` above and `LeadRows` below them).
+    let loadedStart = store.eventLog.loadedStart
+    let visibleRows = createMemo[seq[EventLogRow]] proc(): seq[EventLogRow] =
+      let v = viewport.val
+      let rows = eventRows.val
+      if v.rows <= 0:
+        return rows
+      let first = max(0, v.firstRow) - loadedStart.val
+      let lo = clamp(first, 0, rows.len)
+      let hi = clamp(first + v.rows, 0, rows.len)
+      if lo >= hi: @[] else: rows[lo ..< hi]
+
     # M25b — §5.4 visible-rows derivation. Reactive on markerRows +
     # filterBar + counterpartCache (the `unmatched` shorthand needs
     # the cache to know which rows have empty counterpart sets).
@@ -1039,6 +1074,9 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let vm = EventLogVM(
       store: store,
       selectedRow: selectedRow,
+      viewport: viewport,
+      viewportGate: viewportGate,
+      visibleRows: visibleRows,
       currentPage: currentPage,
       pageSize: pageSize,
       searchQuery: searchQuery,
@@ -1108,74 +1146,61 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     # rows at all.  That is the pane vanishing, and it explains why only
     # *some* jumps do it: it takes a lost race, not merely a jump.
     #
-    # Keying on (page, pageSize, searchQuery, sortColumn, sortAscending)
-    # alone means a move now issues no request, so there is no race to lose.
+    # Keying on the window, the search and the sort alone means a move
+    # issues no request, so there is no race to lose.
     # Nothing is given up by dropping ``rrTicks``: the backend's ``event_load``
     # reads only ``start``/``count`` and never looked at it. Growth in a live
     # session is not this effect's job either — ``event_log.nim``'s
     # CtCompleteMove subscriber emits ``CtEventLoad`` for a first load or a
     # source revision, which is where a genuinely growing event set is picked
     # up.
-    var lastPage = -1
-    var lastPageSize = -1
-    var lastQuery = ""
-    var lastCol = -1
-    var lastAsc = false
-    var hasFired = false
+    # THE WINDOW IS THE VIEWPORT'S (Viewport-Driven-Loading V2): `start` /
+    # `count` from `listWindow` — the Electron GUI's 10 above / 20 below,
+    # every windowed list's policy (Q1) — with the sort and the search, the
+    # only arguments `ct/event-load` reads. An unmeasured pane asks nothing.
+    # The request key is every one of those arguments (Pattern 5).
+    var lastKey = ""
     createEffect proc() =
-      let page = currentPage.val
-      let ps = pageSize.val
+      let v = viewport.val
       let query = searchQuery.val
       let col = sortColumn.val
       let asc = sortAscending.val
-      let debuggerState = store.debugger.val
-      let location = debuggerState.location
-      let hasDebuggerPosition =
-        debuggerState.rrTicks > 0'u64 or location.file.len > 0 or
-        location.line != 0
-      if hasDebuggerPosition or not hasFired:
-        if hasFired and page == lastPage and
-            ps == lastPageSize and query == lastQuery and
-            col == lastCol and asc == lastAsc:
-          return
-        lastPage = page
-        lastPageSize = ps
-        lastQuery = query
-        lastCol = col
-        lastAsc = asc
-        hasFired = true
-        var args = %*{
-          "page": page,
-          "pageSize": ps,
-          "searchQuery": query,
-          "sortColumn": col,
-          "sortAscending": asc,
-        }
-        # PLAT-50: the engine orders by a column NAME (`sortKey`); the
-        # column index alone was never read, so a sorted pane got the
-        # recorded order back.
-        let shown = vm.columns.val.visibleColumns
-        if col >= 0 and col < shown.len:
-          args["sortKey"] = %($shown[col])
-        let future = store.backend.send("ct/event-load", args)
-        let vmRef = vm
-        let storeRef = store
-        onComplete(future,
-          proc(response: JsonNode) =
-            # BOTH PROJECTIONS OF THE SAME ANSWER. The response carries
-            # `events` and `markers`; this effect used to read only the second
-            # and the first was dropped on the floor, which is why
-            # `eventRows` had no producer at all and *"no events have been
-            # loaded"* was the CORRECT output of every front-end.
-            #
-            # The rows go through the store rather than into `vm.eventRows`
-            # directly, so this effect is one producer among several rather
-            # than a second decoder. `applyEventLogResponse` leaves the store
-            # alone when the payload has no `events` key, so a marker-only
-            # answer cannot empty the log.
-            storeRef.applyEventLogResponse(response)
-            vmRef.applyMarkerRowsResponse(response),
-          proc(message: string) =
-            discard)
+      let shown = vm.columns.val.visibleColumns
+      let w = listWindow(v)
+      if w.count <= 0:
+        return
+      var args = %*{
+        "start": w.start,
+        "count": w.count,
+        "sortAscending": asc,
+      }
+      # PLAT-50: the engine orders by a column NAME (`sortKey`); the
+      # column index alone was never read, so a sorted pane got the
+      # recorded order back.
+      if col >= 0 and col < shown.len:
+        args["sortKey"] = %($shown[col])
+      if query.len > 0:
+        args["search"] = %query
+      let key = $args
+      if key == lastKey:
+        return
+      lastKey = key
+      let future = store.backend.send("ct/event-load", args)
+      let vmRef = vm
+      let storeRef = store
+      let start = w.start
+      let searched = query.len > 0
+      onComplete(future,
+        proc(response: JsonNode) =
+          # BOTH PROJECTIONS OF THE SAME ANSWER. The response carries
+          # `events` and `markers`; the rows go through the store rather
+          # than into `vm.eventRows` directly, so this effect is one
+          # producer among several rather than a second decoder.
+          # `applyEventLogResponse` leaves the store alone when the payload
+          # has no `events` key, so a marker-only answer cannot empty the log.
+          storeRef.applyEventLogResponse(response, start, searched = searched)
+          vmRef.applyMarkerRowsResponse(response),
+        proc(message: string) =
+          discard)
 
     vm

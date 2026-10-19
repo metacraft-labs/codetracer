@@ -262,6 +262,7 @@ proc hideWelcomeScreenSurface() =
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
 import viewmodel/sdk/[debugger_session, trace_source]
+from viewmodel/viewport import timeoutScheduler
 from viewmodel/sdk/stop_loader import claimLocalsLoading
 import viewmodel/backend/[backend_service, real_backend]
 import dap_backend
@@ -2319,6 +2320,10 @@ when not defined(ctInExtension):
               recordVmBackendRequest(command, argsJs))
       activeDebuggerSession = newDebuggerSession(realBackend)
       activeSessionVM = activeDebuggerSession.session
+      # The DOM reports a pane's size on every resize and scroll event, so the
+      # windowed ViewModels debounce those reports on the browser's timer
+      # (Viewport-Driven-Loading V2, Pattern 6).
+      activeSessionVM.store.viewportScheduler = timeoutScheduler()
       # The panel ViewModels are the session's, built once by
       # `initializePanelViewModels` — in edit mode too, where no trace is open
       # and the session is not yet attached. The stop loader is the one

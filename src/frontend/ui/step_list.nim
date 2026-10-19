@@ -25,7 +25,7 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/step_list_vm import
   StepListVM, createStepListVM,
   setLineSteps, appendLineSteps, clearLineSteps,
-  setCurrentLocation, setPanelHeight,
+  setCurrentLocation, setViewport, Viewport,
   loadStepLinesFor, jumpToStepLine, DEFAULT_STEP_LIST_PANEL_HEIGHT
 when defined(js):
   from isonim/web/dom_api import nil
@@ -107,7 +107,7 @@ proc lineStepsToVm(lines: seq[LineStep]): seq[StepLine] =
 # Legacy panel-height helper kept verbatim — the GL container's
 # ``offsetHeight`` cannot be measured from the headless ViewModel layer,
 # so we still consult the live DOM here and forward the result into the
-# VM via ``setPanelHeight``.
+# VM via ``setViewport``.
 # ---------------------------------------------------------------------------
 
 proc panelHeight*(self: StepListComponent): int =
@@ -156,7 +156,7 @@ proc loadStepLinesFor*(self: StepListComponent, location: types.Location) =
   self.service.loadStepLines(location, count)
 
   if not stepListVMInstance.isNil:
-    stepListVMInstance.setPanelHeight(count)
+    stepListVMInstance.setViewport(Viewport(rows: count))
     let vmLoc = locationToVm(location)
     stepListVMInstance.setCurrentLocation(vmLoc)
     stepListVMInstance.clearLineSteps()

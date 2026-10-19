@@ -106,7 +106,8 @@ proc newHarness(): Harness =
   store.updateDebuggerPosition(rrTicks = 0, file = RecordedPath, line = 1)
   let editor = createEditorVM(store)
   let vm = createSourceVM(store, editor)
-  vm.setViewport(height = 10, overscan = 2)
+  vm.setOverscan(2)
+  vm.setViewport(vm.viewport.withRows(10))
 
   let provider = newCtfsSourceProvider(traceDir, allowWorkingTree = false)
   provider.registerSourceRevision(RecordedPath, 1, patched, Generation1Digest)

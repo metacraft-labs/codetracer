@@ -26,6 +26,8 @@
 ## Works on both the C and JS backends.
 
 import std/[json, jsonutils, options, sets, tables]
+
+import isonim/core/signals   # `Signal.val`: a pane's held viewport
   # `sets` / `tables`: in scope for `jsonutils`' hooks; see `synced_signals`.
 
 import ../session_vm
@@ -95,18 +97,23 @@ proc applyViewport(session: SessionViewModel; args: JsonNode): bool =
   let rows = args.arg("rows", 0)
   let depth = args.arg("depth", 0)
   let firstRow = args.arg("firstRow", -1)
+  # Each pane's ONE size report (Viewport-Driven-Loading V1): a field the
+  # mirror did not send keeps the value the primary already holds.
+  proc merged(held: Viewport): Viewport =
+    result = held
+    if rows > 0: result.rows = rows
+    if depth > 0: result.cols = depth
+    if firstRow >= 0: result.firstRow = firstRow
   case args.arg("pane", "")
   of "calltrace":
     let vm = session.calltraceVM
     if vm.isNil: return false
-    if rows > 0: vm.setViewportHeight(rows)
-    if depth > 0: vm.setViewportDepth(depth)
-    if firstRow >= 0: vm.scroll(firstRow.int64)
+    vm.setViewport(merged(vm.viewport.val))
     true
   of "eventLog":
     let vm = session.eventLogVM
     if vm.isNil: return false
-    if rows > 0: vm.setPageSize(rows)
+    vm.setViewport(merged(vm.viewport.val))
     true
   else:
     false
@@ -129,7 +136,8 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     let v = session.calltraceVM
     if v.isNil: return false
     case action
-    of "scroll": v.scroll(a.arg("position", 0'i64))
+    of "scroll":
+      v.setViewport(v.viewport.val.scrolledTo(a.arg("position", 0)))
     of "selectEntry": v.selectEntry(a.arg("lineIndex", none(int64)))
     of "toggleExpand": v.toggleExpand(a.arg("lineIndex", 0'i64))
     of "toggleExpandCallChildren":
@@ -138,8 +146,10 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setSearchQuery": v.setSearchQuery(a.arg("query", ""))
     of "setRawIgnorePatterns": v.setRawIgnorePatterns(a.arg("patterns", ""))
     # Kept for mirrors that predate the `viewport` action.
-    of "setViewportHeight": v.setViewportHeight(a.arg("height", 0))
-    of "setViewportDepth": v.setViewportDepth(a.arg("depth", 0))
+    of "setViewportHeight":
+      v.setViewport(v.viewport.val.withRows(a.arg("height", 0)))
+    of "setViewportDepth":
+      v.setViewport(v.viewport.val.withCols(a.arg("depth", 0)))
     else: return false
 
   of "state":
@@ -191,7 +201,8 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setFilterInput": v.setFilterInput(a.arg("raw", ""))
     of "dismissToast": v.dismissToast(a.arg("workspaceId", ""))
     # Kept for mirrors that predate the `viewport` action.
-    of "setPageSize": v.setPageSize(a.arg("size", 0))
+    of "setPageSize":
+      v.setViewport(v.viewport.val.withRows(a.arg("size", 0)))
     else: return false
 
   of "flow":

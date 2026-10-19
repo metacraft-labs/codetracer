@@ -6482,8 +6482,8 @@ proc refitEditorRows(r: GpuiRenderer) =
   elif not gSourceService.isNil and not gSourceService.vm.isNil:
     if rows == gSourceService.vm.viewportHeight.val:
       return
-    gSourceService.vm.setViewport(height = rows,
-                                  overscan = GpuiSourceOverscan)
+    gSourceService.vm.setOverscan(GpuiSourceOverscan)
+    gSourceService.vm.setViewport(gSourceService.vm.viewport.withRows(rows))
     gSourceService.visibleRows = editorVisibleRowsOf(gGeom)
     gSourceService.fullRows = editorFullRowsOf(gGeom)
     if gViewedFile.len > 0:

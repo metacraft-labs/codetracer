@@ -150,10 +150,10 @@ suite "CalltraceVM scroll":
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
 
-      vm.scroll(50)
+      vm.setViewport(vm.viewport.val.scrolledTo(50))
       check vm.scrollPosition.val == 50'i64
 
-      vm.scroll(200)
+      vm.setViewport(vm.viewport.val.scrolledTo(200))
       check vm.scrollPosition.val == 200'i64
 
       dispose()
@@ -163,7 +163,7 @@ suite "CalltraceVM scroll":
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
 
-      vm.scroll(-10)
+      vm.setViewport(vm.viewport.val.scrolledTo(-10))
       check vm.scrollPosition.val == 0'i64
 
       dispose()
@@ -182,7 +182,7 @@ suite "CalltraceVM scroll":
       store.updateDebuggerPosition(100'u64, "main.nim", 1)
 
       # Set viewport height so the effect will request data.
-      vm.setViewportHeight(25)
+      vm.setViewport(vm.viewport.val.withRows(25))
       drain()
 
       # The effect should have fired calltrace section requests.
@@ -191,14 +191,15 @@ suite "CalltraceVM scroll":
       check mock.receivedCommands[^1].command == "ct/load-calltrace-section"
 
       # Now scroll — this should trigger another request.
-      vm.scroll(100)
+      vm.setViewport(vm.viewport.val.scrolledTo(100))
       drain()
 
       check mock.receivedCommands.len == countAfterSetup + 1
       check mock.receivedCommands[^1].command == "ct/load-calltrace-section"
-      # The start index should account for the buffer.
+      # The window starts `TrailRows` above the first visible row (the
+      # Electron GUI's `START_BUFFER`).
       let startIdx = mock.receivedCommands[^1].args["startCallLineIndex"].getBiggestInt
-      check startIdx == 100 - CALLTRACE_BUFFER
+      check startIdx == 100 - TrailRows
 
       dispose()
 
@@ -437,7 +438,7 @@ suite "CalltraceVM hasMoreAbove/hasMoreBelow":
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
 
-      vm.scroll(10)
+      vm.setViewport(vm.viewport.val.scrolledTo(10))
       check vm.hasMoreAbove.val == true
 
       dispose()
@@ -622,36 +623,30 @@ suite "CalltraceVM auto-load effect":
       # Set a debugger position so the auto-load effect re-fires.
       store.updateDebuggerPosition(100'u64, "main.nim", 1)
 
-      vm.setViewportHeight(30)
+      vm.setViewport(vm.viewport.val.withRows(30))
       drain()
 
       # The effect should have fired with the explicit viewport height.
       let cmd = mock.receivedCommands[^1]
       check cmd.command == "ct/load-calltrace-section"
-      check cmd.args["height"].getInt ==
-            30 + CALLTRACE_BUFFER * 2
+      # The GUI's window: the visible rows, `LeadRows` after them, and the
+      # rows above the first visible one that `TrailRows` reached (none at
+      # the top of the trace).
+      check cmd.args["height"].getInt == 30 + LeadRows
 
       dispose()
 
-  test "effect uses default height when viewport height is 0":
+  test "an unmeasured pane asks for nothing":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
       drain()
-
-      # The auto-load effect fires even with viewport height 0,
-      # using effectiveHeight=50 as fallback. Clear initial commands.
-      mock.clearReceivedCommands()
-
-      # Set a debugger position; the effect fires with default height.
+      # No view has reported a size: the rows of a pane nobody sized are not
+      # the ViewModel's to guess (Viewport-Driven-Loading V2).
       store.updateDebuggerPosition(100'u64, "main.nim", 1)
       drain()
-
-      check mock.receivedCommands.len >= 1
-      # The height should use the default (50) + buffer.
-      let cmd = mock.receivedCommands[^1]
-      check cmd.command == "ct/load-calltrace-section"
-      check cmd.args["height"].getInt == 50 + CALLTRACE_BUFFER * 2
+      check mock.receivedCommands.len == 0
+      check vm.viewport.val.rows == 0
 
       dispose()
 
@@ -661,10 +656,10 @@ suite "CalltraceVM auto-load effect":
       let vm = createCalltraceVM(store)
       drain()
 
-      # The auto-load effect no longer guards on rrTicks > 0 because
-      # DB-based traces always have rrTicks=0. RequestTracker handles
-      # deduplication of redundant requests. The effect fires on
-      # creation, so at least one request should already exist.
+      # The auto-load effect does not guard on rrTicks > 0 because DB-based
+      # traces always have rrTicks=0: a measured pane at tick 0 asks.
+      vm.setViewport(Viewport(rows: 10))
+      drain()
       check mock.receivedCommands.len >= 1
       check mock.receivedCommands[0].command == "ct/load-calltrace-section"
 
@@ -678,7 +673,7 @@ suite "CalltraceVM auto-load effect":
 
       # Set up viewport and initial debugger position.
       store.updateDebuggerPosition(100'u64, "main.nim", 1)
-      vm.setViewportHeight(20)
+      vm.setViewport(vm.viewport.val.withRows(20))
       drain()
       let countAfterInit = mock.receivedCommands.len
 
@@ -701,17 +696,18 @@ suite "CalltraceVM auto-load effect":
       # Set a debugger position so the auto-load effect's guard passes.
       store.updateDebuggerPosition(100'u64, "main.nim", 1)
 
-      vm.setViewportHeight(20)
+      vm.setViewport(vm.viewport.val.withRows(20))
       drain()
       let countAfterInit = mock.receivedCommands.len
 
-      vm.scroll(50)
+      vm.setViewport(vm.viewport.val.scrolledTo(50))
       drain()
 
       check mock.receivedCommands.len == countAfterInit + 1
       let lastCmd = mock.receivedCommands[^1]
       check lastCmd.command == "ct/load-calltrace-section"
-      # Buffer start: max(0, 50 - 20) = 30
-      check lastCmd.args["startCallLineIndex"].getBiggestInt == 50 - CALLTRACE_BUFFER
+      # Window start: 50 - TrailRows = 40; height: rows + LeadRows + TrailRows.
+      check lastCmd.args["startCallLineIndex"].getBiggestInt == 50 - TrailRows
+      check lastCmd.args["height"].getInt == 20 + LeadRows + TrailRows
 
       dispose()

@@ -242,7 +242,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "the first fill asks for the viewport plus overscan, and nothing else":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     check h.vm.visibleFirstLine.val == 1
     # Overscan cannot reach above line 1, so the first window is
     # 1 .. 20 + 5 = 1 .. 25.
@@ -260,7 +261,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "overscan is honoured on both sides once the viewport is off the top":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     h.vm.scrollTo(100)
     discard h.fillWindow()
@@ -273,11 +275,13 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "changing the overscan changes the window and nothing else":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.checkHeldRangeIs(95, 124)
-    h.vm.setViewport(height = 20, overscan = 12)
+    h.vm.setOverscan(12)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     let requests = h.fillWindow()
     checkRequestsAre(requests, @[(88, 94), (125, 131)])
     h.checkHeldRangeIs(88, 131)
@@ -286,7 +290,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "scrolling down requests exactly the newly visible lines":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.checkHeldRangeIs(95, 124)
@@ -308,7 +313,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     ## end and extends the other, and back.
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     for r in h.vm.requestMissing(): h.serveWithContexts(r)
     for delta in [20, -35, 7]:
@@ -332,7 +338,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "scrolling up requests exactly the newly visible lines":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.vm.scrollBy(-20)
@@ -344,7 +351,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "a scroll beyond the held window requests one contiguous range":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.vm.scrollTo(300)
@@ -356,7 +364,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "a settled window requests nothing at all":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     checkRequestsAre(h.vm.requestMissing(), newSeq[(int, int)]())
     checkRequestsAre(h.vm.requestMissing(), newSeq[(int, int)]())
@@ -364,7 +373,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "the window follows cursorLine, by the smallest scroll that works":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     check h.vm.visibleFirstLine.val == 1
 
@@ -401,7 +411,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     # and asserted to MOVE DIFFERENTLY.
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
 
     h.store.updateDebuggerPosition(rrTicks = 1, file = RecordedPath, line = 250)
@@ -436,7 +447,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "a line outside the window is a REQUEST, never an empty string":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.checkHeldRangeIs(95, 124)
@@ -458,7 +470,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "every visible line is answered, and the answers are all held":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     let reads = h.vm.visibleReads()
@@ -473,7 +486,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "the identity triple travels with every request the VM emits":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     let requests = h.vm.requestMissing()
     check requests.len == 1
     if requests.len == 1:
@@ -491,7 +505,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     # IMMEDIATELY — not after the next fetch returns.
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     h.checkLineIsHeld(10)
 
@@ -515,7 +530,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     const ShortPath = "/opt/ctui4/window_fixture/short.src"
     let short = h.traceDir / "files" / ShortPath[1 .. ^1]
     writeFile(short, "one\ntwo\nthree\n")
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.store.updateDebuggerPosition(rrTicks = 1, file = ShortPath, line = 1)
     discard h.fillWindow()
     check h.vm.totalLineCount.val == 3
@@ -531,7 +547,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "fulfilling with the wrong revision is refused, and changes nothing":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     h.checkHeldRangeIs(1, 25)
 

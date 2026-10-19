@@ -52,14 +52,17 @@
 ## Usage:
 ##   let editor = createEditorVM(store)
 ##   let vm = createSourceVM(store, editor)
-##   vm.setViewport(height = 20, overscan = 5)
+##   vm.setOverscan(5)
+##   vm.setViewport(vm.viewport.withRows(20))
 ##   for request in vm.requestMissing():
 ##     discard   # hand `request` to a SourceProvider, then call `vm.fulfill(...)`
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, batch]
 import isonim/viewmodel
 
 import ../store/replay_data_store
+import ../viewport
+export viewport
 import editor_vm
 
 type
@@ -332,17 +335,33 @@ proc visibleReads*(vm: SourceVM): seq[SourceRead] =
 # Actions
 # ---------------------------------------------------------------------------
 
-proc setViewport*(vm: SourceVM; height: int; overscan: int = -1) =
-  ## Set the pane's height in lines, and optionally the overscan.
+proc viewport*(vm: SourceVM): Viewport =
+  ## The pane's viewport as this ViewModel holds it: its height in lines and
+  ## its first visible line (0-based `firstRow` for 1-based `viewportTop`).
+  ## A view that reports only its size changes the rows of THIS and leaves
+  ## the scroll where the ViewModel put it (it follows the execution line).
+  Viewport(rows: vm.viewportHeight.val, firstRow: max(0, vm.viewportTop.val - 1))
+
+proc setViewport*(vm: SourceVM; v: Viewport) =
+  ## The size and scroll position the view was given — the ONE way a view
+  ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). The
+  ## window it then holds is the visible lines plus `overscan` either side.
   ##
-  ## A negative or zero height is clamped to 1: a viewport of zero lines would
-  ## make every window empty and every read a request, which reads exactly like
-  ## a provider that never answers.
-  vm.viewportHeight.val = max(1, height)
+  ## An unmeasured viewport (`rows = 0`) changes nothing: a viewport of zero
+  ## lines would make every window empty and every read a request, which
+  ## reads exactly like a provider that never answers.
+  if v.rows <= 0:
+    return
+  batch(proc() =
+    vm.viewportHeight.val = v.rows
+    vm.viewportTop.val = clampTop(max(0, v.firstRow) + 1, vm.viewportHeight.val,
+                                  vm.totalLineCount.val))
+
+proc setOverscan*(vm: SourceVM; overscan: int) =
+  ## The lines held beyond the visible ones on either side — the medium's
+  ## choice (a terminal pages differently from a window), not a size.
   if overscan >= 0:
     vm.overscan.val = overscan
-  vm.viewportTop.val = clampTop(vm.viewportTop.val, vm.viewportHeight.val,
-                                vm.totalLineCount.val)
 
 proc scrollTo*(vm: SourceVM; top: int) =
   ## Put `top` at the top of the viewport, clamped to the file.

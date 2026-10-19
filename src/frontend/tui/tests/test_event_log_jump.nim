@@ -164,7 +164,8 @@ proc openHarness(tracePath: string): JumpHarness =
   let session = newHeadlessDebugSession(tracePath, findReplayServer())
   let store = session.session.store
   let source = createSourceVM(store, session.session.editorVM)
-  source.setViewport(height = SourceViewport, overscan = 4)
+  source.setOverscan(4)
+  source.setViewport(source.viewport.withRows(SourceViewport))
   JumpHarness(
     session: session,
     timeline: createTimelineVM(store),

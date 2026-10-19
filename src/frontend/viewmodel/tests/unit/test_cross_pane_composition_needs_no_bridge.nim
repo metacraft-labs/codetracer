@@ -140,7 +140,7 @@ suite "M2b — cross-pane composition needs no bridge":
       check composed.val == "true:0"
       let afterFirst = recomputes
 
-      calltrace.scroll(12)
+      calltrace.setViewport(calltrace.viewport.val.scrolledTo(12))
       check composed.val == "true:12"
       check recomputes > afterFirst
 

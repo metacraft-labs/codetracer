@@ -593,7 +593,7 @@ proc applyEventLog(vm: EventLogVM) =
   vm.selectRow(some(0))
 
 proc applyCalltrace(vm: CalltraceVM) =
-  vm.setViewportHeight(48)
+  vm.setViewport(Viewport(rows: 48))
   vm.selectEntry(some(0'i64))
   vm.setSearchQuery("")
   vm.setBackendSearchResults(@[])

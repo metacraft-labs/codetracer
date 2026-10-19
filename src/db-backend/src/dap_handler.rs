@@ -2737,9 +2737,31 @@ impl Handler {
 
         // Determine the slice to return: the requested window of the
         // ordered list, or (legacy, `count` 0) its first 20 events.
-        let positions = match order {
+        let positions: Vec<usize> = match order {
             Some(order) => crate::event_db::ordered_event_positions(all_events.len(), |i| &all_events[i], order),
             None => (0..all_events.len()).collect(),
+        };
+        // The pane's search (`search`): only the events whose content or
+        // source path contains it, case-insensitively — what the GUI's
+        // DataTables global search matched. The window, `total` and
+        // `indexAtTick` are all cut from the MATCHING list, so a pane that
+        // pages through a search pages through its results.
+        let search = req
+            .arguments
+            .get("search")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_lowercase)
+            .filter(|q| !q.is_empty());
+        let positions: Vec<usize> = match search {
+            Some(query) => positions
+                .into_iter()
+                .filter(|&i| {
+                    let event = &all_events[i];
+                    event.content.to_lowercase().contains(&query)
+                        || event.high_level_path.to_lowercase().contains(&query)
+                })
+                .collect(),
+            None => positions,
         };
         let (skip, take) = if count > 0 { (start, count) } else { (0, 20) };
         // The WHOLE log's size, which a list pane's scrollbar scrubber spans

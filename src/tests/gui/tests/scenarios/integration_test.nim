@@ -73,7 +73,7 @@ suite "Integration: debugger move loads locals and calltrace":
 
       # Set a viewport height on calltrace so its auto-load effect
       # will fire when the debugger position changes.
-      session.calltraceVM.setViewportHeight(25)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(25))
       drain()
 
       # Clear initial commands to isolate the position change.
@@ -268,7 +268,7 @@ suite "Integration: calltrace double-click triggers navigation":
       session.store.calltrace.totalCallsCount.val = 50'u64
 
       # Set viewport so visibleLines computes correctly.
-      session.calltraceVM.setViewportHeight(10)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(10))
 
       let visible = session.calltraceVM.visibleLines.val
       check visible.len == 3
@@ -510,7 +510,7 @@ suite "Integration: cross-VM coordination":
       drain()
 
       # Set up calltrace viewport.
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       mock.clearReceivedCommands()
@@ -539,7 +539,7 @@ suite "Integration: cross-VM coordination":
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
       let session = app.session
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       # 1. Initial debugger position.
@@ -641,7 +641,7 @@ suite "Integration: all ViewModel commands are valid DAP commands":
       for dir in StepDirection:
         mock.clearReceivedCommands()
         # Reset request tracker so deduplication doesn't block.
-        store.requestTracker.markComplete("step")
+        store.requestTracker.forget("step")
         # Reset debugger status to idle so the step is accepted.
         store.debugger.val = DebuggerState(
           rrTicks: 100'u64,

@@ -169,7 +169,8 @@ proc openHarness(tracePath: string): StepHarness =
   let session = newHeadlessDebugSession(tracePath, findReplayServer())
   let store = session.session.store
   let vm = createSourceVM(store, session.session.editorVM)
-  vm.setViewport(height = ViewportLines, overscan = Overscan)
+  vm.setOverscan(Overscan)
+  vm.setViewport(vm.viewport.withRows(ViewportLines))
   StepHarness(
     session: session,
     vm: vm,

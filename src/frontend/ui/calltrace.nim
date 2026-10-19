@@ -23,7 +23,7 @@ from ../viewmodel/store/replay_data_store import
 from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
-  scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns,
+  setViewport, Viewport, scrolledTo, setRawIgnorePatterns,
   setBackendSearchResults, selectEntry
 from isonim/web/dom_api import nil
 from isonim/core/batch as isoBatch import batch
@@ -753,7 +753,8 @@ proc scroll(self: CalltraceComponent) =
   # effect triggers a fresh requestCalltraceSection.  This replaces
   # the direct self.loadLines(fromScroll=true) call.
   if calltraceVMInstance != nil:
-    calltraceVMInstance.scroll(index.int64)
+    calltraceVMInstance.setViewport(
+      calltraceVMInstance.viewport.val.scrolledTo(index))
   else:
     self.loadLines(fromScroll=true)
 
@@ -802,20 +803,12 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
           try:
             let index = self.scrollLineIndex()
             self.startCallLineIndex = index
-            # Update the VM's scroll position and viewport dimensions
-            # so the auto-load effect re-requests data for the new size.
-            # Wrap the three writes in `batch(...)` so the autoLoad effect
-            # invalidates and re-runs at most once for this resize event
-            # (see the matching comment in onCompleteMove).
+            # Report the pane's size and scroll position as one viewport,
+            # so the auto-load effect re-requests data for the new size once.
             if calltraceVMInstance != nil:
-              let vm = calltraceVMInstance
-              let viewportHeight = self.panelHeight()
-              let viewportDepth = self.panelDepth()
-              let scrollIndex = index.int64
-              isoBatch.batch proc() =
-                vm.setViewportHeight(viewportHeight)
-                vm.setViewportDepth(viewportDepth)
-                vm.scroll(scrollIndex)
+              calltraceVMInstance.setViewport(Viewport(
+                rows: self.panelHeight(), cols: self.panelDepth(),
+                firstRow: index))
             else:
               self.loadLines(fromScroll=false)
           except:
@@ -1024,8 +1017,8 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
 
   # Wrap every signal write that feeds the CalltraceVM's autoLoad effect
   # in a single `batch(...)`.  The autoLoad effect depends on
-  # viewportHeight, viewportDepth, scrollPosition (via store), the
-  # debugger position (rrTicks/file/line), and rawIgnorePatterns — without
+  # the viewport, the debugger position (rrTicks/file/line), and
+  # rawIgnorePatterns — without
   # batching, each individual write schedules its own autoLoad re-run,
   # producing several backend round-trips per CtCompleteMove that
   # overwrite the calltrace store mid-render and leave Playwright holding
@@ -1043,8 +1036,8 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
       location.rrTicks, location.path, location.line,
       location.sourceGeneration, location.sourceDigest)
     if hasVM:
-      vm.setViewportHeight(viewportHeight)
-      vm.setViewportDepth(viewportDepth)
+      vm.setViewport(Viewport(rows: viewportHeight, cols: viewportDepth,
+                              firstRow: vm.viewport.val.firstRow))
       if hasIgnorePatterns:
         vm.setRawIgnorePatterns(ignorePatterns)
 

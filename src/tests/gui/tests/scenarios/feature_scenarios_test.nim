@@ -208,6 +208,7 @@ suite "Event Log: row selection and navigation":
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
       let store = app.session.store
+      app.session.eventLogVM.setViewport(Viewport(rows: 30))
       drain()
       check mock.findCommand("ct/event-load").isSome
       mock.clearReceivedCommands()
@@ -218,35 +219,29 @@ suite "Event Log: row selection and navigation":
       check mock.findCommand("ct/event-load").isNone
       dispose()
 
-  test "event log request includes current page and sort parameters":
-    ## The auto-load effect should pass along pagination and sort state
-    ## so the backend returns the correct slice of events.
+  test "event log request carries the viewport's window and the sort":
+    ## The auto-load effect asks for the window the pane shows — `start` /
+    ## `count` from its viewport — and the order, the arguments
+    ## `ct/event-load` reads.
     createRoot proc(dispose: proc()) =
       let (app, store, mock) = makeAppWithMock()
       let vm = app.session.eventLogVM
       drain()
 
-      # Configure page 2 with custom page size and sort.
       vm.totalEventCount.val = 300
-      vm.currentPage.val = 2
-      vm.setPageSize(25)
-      # setPageSize resets page to 0, so set it again.
-      vm.currentPage.val = 2
       vm.sort(3)  # Sort by column 3, ascending.
       mock.clearReceivedCommands()
-
-      # Trigger the auto-load via debugger move.
-      var dbg = store.debugger.val
-      dbg.rrTicks = 700'u64
-      store.debugger.val = dbg
+      # A 25-row pane showing its third page (rows 50..74).
+      vm.setViewport(Viewport(rows: 25, firstRow: 50))
       drain()
 
       let cmd = mock.findCommand("ct/event-load")
       check cmd.isSome
-      check cmd.get.args["page"].getInt == 2
-      check cmd.get.args["pageSize"].getInt == 25
-      check cmd.get.args["sortColumn"].getInt == 3
+      check cmd.get.args["start"].getInt == 50 - TrailRows
+      check cmd.get.args["count"].getInt == 25 + LeadRows + TrailRows
       check cmd.get.args["sortAscending"].getBool == true
+      check cmd.get.args.hasKey("sortKey")
+      check vm.currentPage.val == 2
 
       dispose()
 
@@ -256,6 +251,7 @@ suite "Event Log: row selection and navigation":
     createRoot proc(dispose: proc()) =
       let (app, store, _) = makeAppWithMock()
       let vm = app.session.eventLogVM
+      vm.setViewport(Viewport(rows: 50))
 
       vm.totalEventCount.val = 200
 
@@ -290,12 +286,13 @@ suite "Event Log: row selection and navigation":
     createRoot proc(dispose: proc()) =
       let (app, store, _) = makeAppWithMock()
       let vm = app.session.eventLogVM
+      vm.setViewport(Viewport(rows: 50))
 
       vm.totalEventCount.val = 120
       # 120 / 50 = 3 pages (0, 1, 2).
       check vm.totalPages.val == 3
 
-      vm.currentPage.val = 2  # Last page.
+      vm.setViewport(Viewport(rows: 50, firstRow: 100))  # Last page.
       vm.nextPage()
       check vm.currentPage.val == 2  # Clamped.
 
@@ -310,22 +307,20 @@ suite "Event Log: row selection and navigation":
       drain()
 
       vm.totalEventCount.val = 200
-      vm.currentPage.val = 3
+      vm.setViewport(Viewport(rows: 50, firstRow: 150))
+      drain()
+      mock.clearReceivedCommands()
 
       vm.setSearchQuery("TypeError")
       check vm.searchQuery.val == "TypeError"
       check vm.currentPage.val == 0  # Reset to first page.
-
-      # Trigger auto-load to verify search is included.
-      mock.clearReceivedCommands()
-      var dbg = store.debugger.val
-      dbg.rrTicks = 100'u64
-      store.debugger.val = dbg
       drain()
 
+      # The search is asked of the engine, from the top of the results.
       let cmd = mock.findCommand("ct/event-load")
       check cmd.isSome
-      check cmd.get.args["searchQuery"].getStr == "TypeError"
+      check cmd.get.args["search"].getStr == "TypeError"
+      check cmd.get.args["start"].getInt == 0
 
       dispose()
 
@@ -1275,7 +1270,7 @@ suite "Editor: multi-file navigation and state":
       session.store.calltrace.startLineIndex.val = 0'i64
       session.store.calltrace.totalCallsCount.val = 100'u64
 
-      session.calltraceVM.setViewportHeight(10)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(10))
 
       mock.clearReceivedCommands()
 
@@ -1469,7 +1464,7 @@ suite "Full workflow: record -> replay -> debug":
       drain()
 
       # Set up calltrace viewport.
-      session.calltraceVM.setViewportHeight(30)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(30))
       drain()
 
       # Set up timeline range (simulating a recording).
@@ -1640,7 +1635,7 @@ suite "Full workflow: record -> replay -> debug":
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
       let session = app.session
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       # Navigate through 5 positions rapidly.

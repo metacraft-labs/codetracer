@@ -27,6 +27,7 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import types, request_tracker, degraded_state, stop_timeline
+import ../viewport   # the windowed panes' debounce timer
 # PLAT-49 part B: a call's arguments and return value, rendered by the one
 # presenter at the `calltrace-arg` budget — the desktop renders its chips with
 # the same budget (`ui/presented_value.callArgValue`).
@@ -379,6 +380,11 @@ type
       ## back to `LoadLocalsDefaultLang`. A hook rather than an import
       ## because this module is in the Embed SDK's package graph and does not
       ## import `common_lang` (see `LoadLocalsDefaultLang`).
+    viewportScheduler*: ViewportScheduler
+      ## The timer every windowed ViewModel over this store debounces its
+      ## viewport reports with (Viewport-Driven-Loading V2). Immediate by
+      ## default; a host that reports on every resize and scroll event (the
+      ## DOM's) installs a deferring one, a test a `TestClock`'s.
     localsLoadedByHost*: bool
       ## The host requests and applies the locals itself, synchronously, after
       ## each stop (`headless_session.fetchLocals` / `applyLocals`, which the
@@ -793,12 +799,12 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   let s = store
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, $cursor)
       s.applyRequestSpanDelta(response)
       if s.requestSpans.loadingState.val == lsLoading:
         s.requestSpans.loadingState.val = lsIdle,
     onError = proc(msg: string) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, $cursor)
       s.requestSpans.loadingState.val = lsError,
   )
 
@@ -876,6 +882,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
     let store = ReplayDataStore(
       storeId: assignedId,
       stops: initStopTimeline(),
+      viewportScheduler: immediateScheduler(),
       # -- top-level state --
       session: createSignal(SessionState(
         connectionStatus: csDisconnected,
@@ -1087,11 +1094,11 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   let ticks = rrTicks
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       s.locals.loadingState.val = lsIdle
       s.locals.loadedForRRTicks.val = ticks,
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       s.locals.loadingState.val = lsError,
   )
 
@@ -1115,13 +1122,6 @@ proc requestCalltraceSection*(store: ReplayDataStore;
   ## The backend responds with CtUpdatedCalltrace which is handled by
   ## the existing event-bus subscription in calltrace.nim.
   let key = "load-calltrace"
-  let argsStr = $startIndex & "|" & $height & "|" & $depth & "|" & $rrTicks
-  if store.requestTracker.isDuplicate(key, argsStr):
-    return
-
-  store.requestTracker.markPending(key, argsStr)
-  store.calltrace.loadingState.val = lsLoading
-
   # Build a location sub-object matching the legacy CalltraceLoadArgs format.
   let args = %*{
     "location": {
@@ -1137,15 +1137,25 @@ proc requestCalltraceSection*(store: ReplayDataStore;
     "autoCollapsing": autoCollapsing,
     "renderCallLineIndex": renderCallLineIndex,
   }
+  # THE KEY IS EVERY FIELD THE ANSWER DEPENDS ON — the canonical
+  # serialisation of the arguments themselves (Pattern 5). It used to be
+  # `start|height|depth|rrTicks`, so a change of filter patterns, location or
+  # collapsing at the same window was taken for the request already in flight.
+  let argsStr = $args
+  if store.requestTracker.isDuplicate(key, argsStr):
+    return
+
+  store.requestTracker.markPending(key, argsStr)
+  store.calltrace.loadingState.val = lsLoading
   let fut = store.backend.send("ct/load-calltrace-section", args)
 
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       s.calltrace.loadingState.val = lsIdle,
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       s.calltrace.loadingState.val = lsError,
   )
 
@@ -1729,7 +1739,8 @@ proc applyEventLogRows*(store: ReplayDataStore;
 
 proc applyEventLogResponse*(store: ReplayDataStore;
                             payload: JsonNode;
-                            start: int = 0) =
+                            start: int = 0;
+                            searched: bool = false) =
   ## Write ONE `ct/event-load` answer into the store.
   ##
   ## THE `applyLocalsResponse` OF THE EVENT LOG, and it exists for the same
@@ -1744,6 +1755,9 @@ proc applyEventLogResponse*(store: ReplayDataStore;
   ## load" are different facts and only one of them means the log is empty; the
   ## marker-only answers `EventLogVM`'s own effect routes through here are the
   ## second kind.
+  ##
+  ## `searched`: the answer is to a search (`ct/event-load`'s `search`), so
+  ## its `total` counts the matching events only.
   if payload.isNil:
     return
   var hasEvents = false
@@ -1771,8 +1785,11 @@ proc applyEventLogResponse*(store: ReplayDataStore;
   if total >= 0:
     store.eventLog.totalReported.val = true
 
+  # A SEARCHED answer's `total` is the number of MATCHING events — the
+  # filtered count, not the log's size, which stays what it was.
   store.applyEventLogRows(eventLogRowsFromJson(payload, start), start,
-                          recordsTotal = total,
+                          recordsTotal = (if searched: -1 else: total),
+                          recordsFiltered = (if searched: total else: -1),
                           source = elwsEventLoad)
 
 proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
@@ -2358,9 +2375,9 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key),
+      s.requestTracker.markComplete(key, dirStr),
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, dirStr)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,
@@ -2382,11 +2399,11 @@ proc requestRecordingHead*(store: ReplayDataStore) =
   let s = store
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, "")
       let head = response.readRRTicks(s.session.val.recordingHeadRRTicks)
       s.updateRecordingHead(head),
     onError = proc(msg: string) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, "")
       var failedSession = s.session.val
       failedSession.recordingHeadLoadingState = lsError
       s.session.val = failedSession,
@@ -2417,10 +2434,10 @@ proc requestLiveToolbarAction*(store: ReplayDataStore; actionId: string) =
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, actionId)
       s.setDebuggerSnapshot(s.debugger.val.rrTicks, dsIdle),
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, actionId)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,
@@ -2453,7 +2470,7 @@ proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
 
       var session = s.session.val
       if not jumpToLive and session.debugSessionMode in {liveMcr, liveMaterialized}:
@@ -2471,7 +2488,7 @@ proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
       s.timeline.val = timeline
       s.setDebuggerSnapshot(rrTicks, dsIdle),
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,

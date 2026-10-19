@@ -1559,7 +1559,7 @@ suite "Noir Space Ship: calltrace search":
     session.requestAndLoadCalltrace(depth = 30)
 
     # Use the CalltraceVM's search feature to find "main".
-    session.session.calltraceVM.setViewportHeight(50)
+    session.session.calltraceVM.setViewport(session.session.calltraceVM.viewport.val.withRows(50))
     session.session.calltraceVM.setSearchQuery("main")
 
     # Drain reactive updates.

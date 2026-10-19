@@ -69,7 +69,7 @@ proc seedStreamingSession(): tuple[app: AppViewModel,
   session.store.calltrace.startLineIndex.val = 0'i64
   session.store.calltrace.totalCallsCount.val = 6'u64
   session.store.calltrace.finished.val = true
-  session.calltraceVM.setViewportHeight(20)
+  session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
 
   session.store.locals.locals.val = @[
     makeVariable("n", "8"),

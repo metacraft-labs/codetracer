@@ -1923,7 +1923,7 @@ suite "IsoNim Calltrace Panel — call lines":
       )
 
       # Set viewport height so lines are visible
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -1967,7 +1967,7 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -1999,7 +1999,7 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 2'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2027,7 +2027,7 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 2'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2058,7 +2058,7 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 2'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2086,7 +2086,7 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2109,7 +2109,7 @@ suite "IsoNim Calltrace Panel — call lines":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2137,7 +2137,7 @@ suite "IsoNim Calltrace Panel — call lines":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       # Initially no selection
       check vm.selectedEntry.val.isNone
@@ -2177,7 +2177,7 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 3'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2259,7 +2259,7 @@ suite "IsoNim Calltrace Panel — call arguments":
         args = argsTable,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2313,7 +2313,7 @@ suite "IsoNim Calltrace Panel — call arguments":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2339,7 +2339,7 @@ suite "IsoNim Calltrace Panel — call arguments":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
@@ -2383,7 +2383,7 @@ suite "IsoNim Calltrace Panel — scroll indicators":
         totalCount = 20'u64,
       )
 
-      vm.setViewportHeight(5)
+      vm.setViewport(vm.viewport.val.withRows(5))
 
       let panel = renderCalltracePanel(r, vm)
       let moreAbove = findByClass(panel, "more-above")
@@ -2392,7 +2392,7 @@ suite "IsoNim Calltrace Panel — scroll indicators":
       check moreAbove.styles["display"] == "none"
 
       # Scroll down
-      vm.scroll(5)
+      vm.setViewport(vm.viewport.val.scrolledTo(5))
 
       check moreAbove.styles["display"] == "block"
 
@@ -2414,7 +2414,7 @@ suite "IsoNim Calltrace Panel — scroll indicators":
         totalCount = 20'u64,
       )
 
-      vm.setViewportHeight(3)
+      vm.setViewport(vm.viewport.val.withRows(3))
 
       let panel = renderCalltracePanel(r, vm)
       let moreBelow = findByClass(panel, "more-below")
@@ -7051,7 +7051,7 @@ suite "IsoNim Step List Panel — backend requests":
       let (store, mock) = makeStoreWithMock()
       let vm = createStepListVM(store)
 
-      vm.setPanelHeight(20)
+      vm.setViewport(Viewport(rows: 20))
       mock.clearReceivedCommands()
 
       vm.loadStepLinesFor(StepLineLocation(
@@ -7091,31 +7091,21 @@ suite "IsoNim Step List Panel — backend requests":
 
       dispose()
 
-  test "loadStepLinesFor falls back to default panel height when unset":
+  test "an unmeasured step list asks for nothing":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createStepListVM(store)
 
-      # Force the panelHeight signal to 0 so the legacy
-      # offset-not-yet-measured path engages.
-      vm.setPanelHeight(0)
+      # No view has reported a size: the fallback is the view binding's to
+      # apply (`ui/step_list.nim` reports `DEFAULT_STEP_LIST_PANEL_HEIGHT`
+      # when it cannot measure), so the ViewModel itself asks nothing
+      # (Viewport-Driven-Loading V2).
       mock.clearReceivedCommands()
-
       vm.loadStepLinesFor(StepLineLocation(
         path: "a.nim", line: 1, rrTicks: 1))
 
-      let req = mock.findCommand("ct/load-step-lines")
-      check req.isSome
-      let args = req.get.args
-
-      # The default is the conservative row capacity the VM exports, and it
-      # is asserted BY NAME. This used to read `.getInt > 0`, which any
-      # non-zero number satisfies — including a number that had nothing to do
-      # with the fallback. `DEFAULT_STEP_LIST_PANEL_HEIGHT` is exported
-      # precisely so the host and the VM cannot hold two different ideas of
-      # what "unmeasured" means, so that is what to compare against.
-      check args{"forwardCount"}.getInt == DEFAULT_STEP_LIST_PANEL_HEIGHT
-      check args{"backwardCount"}.getInt == DEFAULT_STEP_LIST_PANEL_HEIGHT
+      check mock.findCommand("ct/load-step-lines").isNone
+      check vm.currentLocation.val.path == "a.nim"
 
       dispose()
 
