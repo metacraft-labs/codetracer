@@ -1320,6 +1320,46 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # about a stop the debugger has left.
   store.stops.observe(store.debugger.val)
 
+proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
+  ## Adopt the position a `ct/complete-move` event reports, and mark the
+  ## debugger idle again.
+  ##
+  ## The event body is a `MoveState` (`src/db-backend/src/task.rs`): the
+  ## position is nested under `location` (`path`, `line`, `rrTicks`,
+  ## `geid`, `sourceGeneration`, `sourceDigest`), with the global event id
+  ## optionally on the body itself (`geid` / `currentGeid`). One decoder for
+  ## every host that reads the event itself — the native harness that pumps
+  ## it, and a host whose session follows its backend's events
+  ## (`DebuggerSession.followBackendMoves`).
+  if body.isNil or body.kind != JObject:
+    return
+  var rrTicks: uint64 = 0
+  var file = ""
+  var line = 0
+  var sourceGeneration = 0
+  var sourceDigest = ""
+  var geid = none(uint64)
+  let loc = body.getOrDefault("location")
+  if not loc.isNil and loc.kind == JObject:
+    file = loc.getOrDefault("path").getStr("")
+    line = loc.getOrDefault("line").getInt(0)
+    sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
+    sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
+    if loc.hasKey("rrTicks"):
+      rrTicks = loc["rrTicks"].getBiggestInt().uint64
+    if loc.hasKey("geid"):
+      geid = some(loc["geid"].getBiggestInt().uint64)
+  if body.hasKey("geid"):
+    geid = some(body["geid"].getBiggestInt().uint64)
+  elif body.hasKey("currentGeid"):
+    geid = some(body["currentGeid"].getBiggestInt().uint64)
+  store.updateDebuggerPosition(rrTicks, file, line, geid,
+                               sourceGeneration = sourceGeneration,
+                               sourceDigest = sourceDigest)
+  var dbg = store.debugger.val
+  dbg.status = dsIdle
+  store.debugger.val = dbg
+
 proc updateCurrentGeid*(store: ReplayDataStore; geid: Option[uint64]) =
   ## Update the current visual replay GEID independently of rrTicks. MCR
   ## backends can report a graphics event id for the debugger stop even when

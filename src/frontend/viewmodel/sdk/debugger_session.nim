@@ -317,6 +317,32 @@ proc markReady(s: DebuggerSession; trace: TraceSource) =
     s.stops.follow()
   s.recordPosition("launch")
 
+const
+  CompleteMoveEventNames* = ["ct/complete-move", "CtCompleteMove"]
+    ## The move event as the engine names it, and as `RealBackendService`
+    ## (the renderer's transport) spells it in `kind`.
+
+proc followBackendMoves*(s: DebuggerSession) =
+  ## Take every move the backend reports (`ct/complete-move`) into the
+  ## store, and into the navigation history, by the session itself.
+  ##
+  ## For a host with no other reader of that event: a server that owns the
+  ## session for a remote page (`ct host`), or an editor's extension host.
+  ## The desktop's legacy components and the native harness feed the store
+  ## themselves and must not call this, or each move is applied twice.
+  if s.phase.val == dspDisposed:
+    return
+  let session = s
+  s.backend.onEvent proc(event: JsonNode) =
+    if session.phase.val == dspDisposed or event.isNil or
+       event.kind != JObject:
+      return
+    if event{"kind"}.getStr("") notin CompleteMoveEventNames:
+      return
+    let body = if event.hasKey("data"): event["data"] else: event
+    session.store.applyCompleteMove(body)
+    session.recordPosition("move")
+
 proc attach*(s: DebuggerSession; trace: TraceSource) =
   ## Adopt a trace that some other code already launched on this transport.
   ##

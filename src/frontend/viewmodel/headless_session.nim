@@ -107,43 +107,11 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
   ## The ``ct/complete-move`` event body is a ``MoveState`` JSON object
   ## with ``location.path``, ``location.line``, ``location.rrTicks``, etc.
   ## See ``src/db-backend/src/task.rs`` for the Rust definition.
-  let body = completeMoveEvent.getOrDefault("body")
   session.lastCompleteMoveEvent = completeMoveEvent
+  let body = completeMoveEvent.getOrDefault("body")
   if body.isNil:
     return
-
-  var rrTicks: uint64 = 0
-  var file = ""
-  var line = 0
-  var sourceGeneration = 0
-  var sourceDigest = ""
-  var geid = none(uint64)
-
-  # The location is nested under body.location (MoveState.location).
-  if body.hasKey("location"):
-    let loc = body["location"]
-    file = loc.getOrDefault("path").getStr("")
-    line = loc.getOrDefault("line").getInt(0)
-    sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
-    sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
-    if loc.hasKey("rrTicks"):
-      rrTicks = loc["rrTicks"].getBiggestInt().uint64
-    if loc.hasKey("geid"):
-      geid = some(loc["geid"].getBiggestInt().uint64)
-  if body.hasKey("geid"):
-    geid = some(body["geid"].getBiggestInt().uint64)
-  elif body.hasKey("currentGeid"):
-    geid = some(body["currentGeid"].getBiggestInt().uint64)
-
-  session.session.store.updateDebuggerPosition(
-    rrTicks, file, line, geid,
-    sourceGeneration = sourceGeneration,
-    sourceDigest = sourceDigest)
-
-  # Update the debugger status back to idle after the step completes.
-  var dbg = session.session.store.debugger.val
-  dbg.status = dsIdle
-  session.session.store.debugger.val = dbg
+  session.session.store.applyCompleteMove(body)
   # Tell the SDK session where the move landed. The SDK cannot observe this
   # itself on the stdio transport — the position arrives on an event this
   # harness pumps — so the host reports it rather than the session guessing.
