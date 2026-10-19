@@ -12,6 +12,7 @@
 ##
 ## Messages a mirror sends:
 ##
+##   {"type": "hello"}                      → `activate` for the active session
 ##   {"type": "subscribe", "session": id}   → a snapshot of `id`, then its batches
 ##   {"type": "action", "session": id, …}   → run on that primary (`action_relay`)
 ##
@@ -73,6 +74,12 @@ proc onMirrorMessage(host: SyncHost; a: Attached; msg: JsonNode) =
   if msg.isNil or msg.kind != JObject:
     return
   case msg{"type"}.getStr("")
+  of "hello":
+    # A mirror created after its channel was attached — a page builds its
+    # mirror well after its socket connected — missed the `activate` sent at
+    # attach. It asks, and is told again.
+    if host.active.len > 0:
+      a.channel.send(%*{"type": "activate", "session": host.active})
   of "subscribe":
     host.subscribe(a, msg{"session"}.getStr(""))
   of "action":

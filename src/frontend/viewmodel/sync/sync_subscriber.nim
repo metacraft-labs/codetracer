@@ -25,11 +25,14 @@ import std/[json, options]
 import isonim/core/batch as batchModule
 
 import ../session_vm
+import ../collab/[codec, session_core]
 import synced_signals
 
 type
   SyncSubscriber* = ref object
     registry*: SyncRegistry
+    collabCore: CollaborativeSessionCore
+      ## The mirror's shared view state, replaced by a snapshot's.
     sessionId*: string
       ## The primary session followed; "" before `follow`.
     revision*: int
@@ -44,7 +47,8 @@ type
 proc createSyncSubscriber*(session: SessionViewModel): SyncSubscriber =
   ## A subscriber that writes `session`'s mirrored signals. Purely
   ## imperative: it creates no effect.
-  SyncSubscriber(registry: syncedSignalsOf(session))
+  SyncSubscriber(registry: syncedSignalsOf(session),
+                 collabCore: session.collabCore)
 
 proc follow*(sub: SyncSubscriber; sessionId: string) =
   ## Follow `sessionId` from its next snapshot on. Until that snapshot
@@ -97,6 +101,16 @@ proc onMessage*(sub: SyncSubscriber; msg: JsonNode): bool =
     inc sub.refused
     return false
   if kind == "signal-snapshot":
+    # The view state first: loading it projects the chosen tab, the expanded
+    # rows and the watches into the panes, and the signal entries written
+    # after it are then the primary's, whatever the projection set.
+    let collab = msg{"collab"}
+    if not collab.isNil and collab.kind == JObject and
+       not sub.collabCore.isNil:
+      try:
+        sub.collabCore.loadJoinSnapshot(parseSharedSessionSnapshot(collab))
+      except CatchableError:
+        discard
     sub.applyEntries(entries)
     sub.revision = revision
     sub.inStep = true

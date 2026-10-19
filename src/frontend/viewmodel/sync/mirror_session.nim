@@ -27,6 +27,7 @@ import isonim/core/[async_compat, owner]
 
 import ../backend/backend_service
 import ../collab/runtime_role
+import ../collab/[codec, session_core, types as collab_types]
 import ../session_vm
 import action_relay, sync_subscriber, transport
 
@@ -97,6 +98,24 @@ proc createMirrorSession*(channel: SyncChannel): MirrorSession =
     m.session.initializePanelViewModels()
   m.subscriber = createSyncSubscriber(m.session)
   channel.setHandler(proc(msg: JsonNode) = m.onHostMessage(msg))
+  # THE VIEW STATE IS THE PRIMARY'S. A tab chosen, a row expanded or a watch
+  # added in a mirror's pane goes through the session's collaboration core
+  # (`dispatchLocalViewOp`), which applies it locally at once; publishing it
+  # here sends it on to the primary (`action_relay`'s `collab` arm), whose
+  # next batch confirms it for every mirror. Without it the primary's next
+  # batch would undo the user's click.
+  let core = m.session.collabCore
+  if not core.isNil:
+    core.collaborationEnabled = true
+    core.publishLocalViewOp = proc(op: ViewOpEnvelope): bool =
+      if m.following.len == 0:
+        return false
+      m.channel.send(serializeAction("collab", "viewop", op.toJson,
+                                     m.following))
+      true
+  # Ask which session to follow: the host's `activate` at attach may have
+  # been sent before this mirror existed to hear it.
+  channel.send(%*{"type": "hello"})
   m
 
 proc relay*(m: MirrorSession; vm, action: string;

@@ -32,6 +32,7 @@ import isonim/core/signals   # `Signal.val`: a pane's held viewport
 
 import ../session_vm
 import ../store/types as store_types
+import ../collab/[codec, reducer, session_core, types as collab_types]
 import ../viewmodels/[
   calltrace_vm,
   debug_controls_vm,
@@ -136,6 +137,25 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
   case vm
   of "viewport":
     return action == "set" and session.applyViewport(a)
+
+  of "collab":
+    # A view operation a mirror's own ViewModel performed — a tab chosen, a
+    # row expanded, a watch added — on the shared view state its
+    # collaboration core keeps (`mirror_session.relayViewOps`). The primary
+    # applies it as it applies a peer's, and the result reaches every mirror
+    # as the primary's next batch.
+    if action != "viewop" or session.collabCore.isNil:
+      return false
+    var op: collab_types.ViewOpEnvelope
+    try:
+      op = parseViewOpEnvelope(a)
+    except CatchableError:
+      return false
+    # The mirror's collaboration core is its own document, with its own
+    # session id; the operation was sent to THIS session (the relay names
+    # it), so it is applied as one of this document's.
+    op.sessionId = session.collabCore.document.state.sessionId
+    return session.collabCore.applyRemoteViewOp(op).status != asRejected
 
   of "calltrace":
     let v = session.calltraceVM

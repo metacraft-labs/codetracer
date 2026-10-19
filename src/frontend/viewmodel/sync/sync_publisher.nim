@@ -28,6 +28,7 @@ import std/[json, tables]
 import isonim/core/[computation, owner]
 
 import ../session_vm
+import ../collab/[codec, session_core]
 import synced_signals
 
 type
@@ -37,6 +38,10 @@ type
   SyncPublisher* = ref object
     sessionId*: string
     registry*: SyncRegistry
+    collabCore: CollaborativeSessionCore
+      ## The session's shared view state (chosen tabs, expanded rows,
+      ## watches), sent whole with every snapshot: it is a document, not a
+      ## set of signals, and the panes' view signals are projections of it.
     revision*: int
       ## The revision of the last batch published (0: none yet).
     publishProc: proc(msg: JsonNode)
@@ -77,8 +82,10 @@ proc snapshot*(pub: SyncPublisher): JsonNode =
   ## published first, so the snapshot's revision is the last batch's and the
   ## next batch follows it.
   pub.flush()
-  %*{"type": "signal-snapshot", "session": pub.sessionId,
-     "revision": pub.revision, "batch": pub.registry.snapshot()}
+  result = %*{"type": "signal-snapshot", "session": pub.sessionId,
+              "revision": pub.revision, "batch": pub.registry.snapshot()}
+  if not pub.collabCore.isNil:
+    result["collab"] = pub.collabCore.joinSnapshot.toJson
 
 proc observe(pub: SyncPublisher; signal: SyncedSignal) =
   ## One effect per signal. A proc of its own, not a closure built in the
@@ -102,6 +109,7 @@ proc createSyncPublisher*(session: SessionViewModel; sessionId: string;
   let pub = SyncPublisher(
     sessionId: sessionId,
     registry: syncedSignalsOf(session),
+    collabCore: session.collabCore,
     publishProc: publish,
     schedule: (if schedule.isNil: defaultScheduler() else: schedule),
     pending: initOrderedTable[string, JsonNode](),

@@ -814,15 +814,22 @@ proc createStateVM*(store: ReplayDataStore;
     # tick; the real answer REPLACES that snapshot when it lands
     # (`ValueTimeline.observe` replaces a re-observed tick), so the marks
     # settle on the right rows.
-    createEffect proc() =
-      discard stop.val
-      let locals = store.locals.locals.val
-      untrack(proc() =
-        let d = store.debugger.val
-        if d.rrTicks == 0'u64 and locals.len == 0:
-          return
-        vm.changeTimeline.observe(d.rrTicks, snapshotOf(locals))
-        vm.valueChanges.val = vm.changeTimeline.diffAt(d.rrTicks))
+    #
+    # Derived only where the backend's facts originate. A collaborator — a
+    # mirror of a session another process owns — receives `valueChanges` from
+    # its owner with the locals, and deriving it again here would diff against
+    # the stops THIS process happened to see: a batch that merges several moves
+    # shows a mirror one stop where the owner saw three.
+    if ownsBackend(runtimeRole):
+      createEffect proc() =
+        discard stop.val
+        let locals = store.locals.locals.val
+        untrack(proc() =
+          let d = store.debugger.val
+          if d.rrTicks == 0'u64 and locals.len == 0:
+            return
+          vm.changeTimeline.observe(d.rrTicks, snapshotOf(locals))
+          vm.valueChanges.val = vm.changeTimeline.diffAt(d.rrTicks))
 
     createEffect proc() =
       discard stop.val
