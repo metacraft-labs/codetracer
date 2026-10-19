@@ -1457,6 +1457,9 @@ impl Handler {
         };
         let patterns_fingerprint_snapshot = self.patterns_fingerprint_cached();
         let mut flow_update = flow_update;
+        // The update names the query it answers, so a client holding a call
+        // flow and a diff flow can tell the two apart on the one event.
+        flow_update.mode = arg.flow_mode;
         if self.trace_kind == TraceKind::Materialized {
             for view in flow_update.view_updates.iter_mut() {
                 for step in view.steps.iter_mut() {

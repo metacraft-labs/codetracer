@@ -32,7 +32,7 @@
 
 use std::path::{Path, PathBuf};
 
-use db_backend::task::{CtLoadFlowArguments, FLOW_MODE_WIRE_NAMES, FlowMode};
+use db_backend::task::{CtLoadFlowArguments, FLOW_MODE_WIRE_NAMES, FlowMode, FlowUpdate};
 use serde_json::json;
 
 fn repo_root() -> PathBuf {
@@ -211,4 +211,25 @@ fn the_view_model_no_longer_stringifies_its_own_enum_onto_the_wire() {
         request.contains("\"location\""),
         "{NIM_VIEW_ENUM} must send the required `location`",
     );
+}
+
+/// A flow update names the query it answers, by the same wire name, so a
+/// client holding a call flow and a diff flow can tell the two apart on the
+/// one `ct/updated-flow` event (`FlowVM.isDiffFlowUpdate`).
+#[test]
+fn an_update_names_the_query_it_answers() {
+    let mut update = FlowUpdate::new();
+    assert_eq!(serde_json::to_value(&update).unwrap()["mode"], json!("call"));
+    update.mode = FlowMode::Diff;
+    assert_eq!(serde_json::to_value(&update).unwrap()["mode"], json!("diff"));
+}
+
+/// A diff index written before `FlowUpdate.mode` existed still parses; the
+/// handler stamps the mode it served on the way out.
+#[test]
+fn an_update_without_a_mode_parses_as_call() {
+    let mut value = serde_json::to_value(FlowUpdate::new()).unwrap();
+    value.as_object_mut().unwrap().remove("mode");
+    let update: FlowUpdate = serde_json::from_value(value).unwrap();
+    assert_eq!(update.mode, FlowMode::Call);
 }

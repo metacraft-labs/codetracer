@@ -280,7 +280,7 @@ from ui/process_tree import
 import viewmodel/viewmodels/state_vm
 import viewmodel/viewmodels/origin_chain_types
 from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, openSidePanel, onCancelLoad
-from isonim/core/signals import val
+from isonim/core/signals import val, `val=`
 from isonim/core/computation import val
 from viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
@@ -3078,6 +3078,12 @@ proc onTraceLoaded(
       configureMiddleware()
       middlewareConfigured = true
     attachLoadedTrace($data.trace.outputFolder)
+    # A session started with a diff (`ct run --diff`): its diff flow is the
+    # session's to load, once (the stop loader's `spDiffFlow`), not the
+    # editor's redraw hook's.
+    if not data.startOptions.diff.isNil and not activeSessionVM.isNil and
+       not activeSessionVM.flowVM.isNil:
+      activeSessionVM.flowVM.diffSession.val = true
 
   dapSessionSelectionReady = true
   flushPendingDapSessionSelections()

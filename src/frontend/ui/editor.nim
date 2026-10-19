@@ -3742,12 +3742,14 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     if not self.loadPendingFlowIfReady():
       discard self.loadInitialFlowIfReady()
 
+    # The diff's view zones are this editor's; the diff FLOW is the session's
+    # (`FlowVM.diffSession`, loaded once by the stop loader), and its answer
+    # reaches the flow overlay through the `ct/updated-flow` subscription.
     if not self.data.startOptions.diff.isNil and
       self.diffViewZones.len() == 0 and
       self.diffAddedLines.len() == 0:
         self.clearDiffViewZones()
         self.makeDiffViewZones()
-        self.loadFlow(FlowMode.Diff, types.Location())
 
     self.addTestActions()
     self.applyEventualStylesLines()

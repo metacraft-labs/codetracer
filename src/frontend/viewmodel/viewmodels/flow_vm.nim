@@ -170,6 +170,18 @@ type
       ## The debugger tick the current window was loaded for. This is the
       ## input the active iteration is derived from.
 
+    # -- The trace diff's flow (a `--diff` session) --
+    diffSession*: Signal[bool]
+      ## The session was started with a diff (`ct run --diff`): the flow of
+      ## the changed lines is loaded once, beside the call flow
+      ## (the stop loader's `spDiffFlow`).
+    diffLoadingState*: Signal[LoadingState]
+    diffStyledLines*: Signal[seq[FlowStyledLine]]
+      ## The diff flow's per-line facts, across the recording's changed lines
+      ## — never the call window's (`styledLines`).
+    diffSteps*: Signal[seq[FlowStepEntry]]
+      ## The diff flow's steps.
+
     # -- Derived state --
     isLoading*: Memo[bool]
     totalIterations*: Memo[int]
@@ -203,7 +215,8 @@ proc engineFlowModeWireName*(mode: FlowMode): string =
   ## All three view granularities are call flow as far as the engine is
   ## concerned — they differ in how the returned steps are laid out, which
   ## is a rendering decision this panel makes locally. `diff` has no view
-  ## granularity behind it yet and is reached from the legacy Karax editor.
+  ## granularity behind it: it is a separate query (the stop loader's
+  ## `spDiffFlow`), whose answer is held apart from the call window.
   ##
   ## The `case` is exhaustive on purpose: a fourth `fm*` member will not
   ## compile until someone decides what it means to the engine, which is the
@@ -211,6 +224,14 @@ proc engineFlowModeWireName*(mode: FlowMode): string =
   case mode
   of fmCall, fmLine, fmFunction:
     FlowModeWireCall
+
+proc isDiffFlowUpdate*(update: JsonNode): bool =
+  ## Whether a `ct/updated-flow` payload answers the `diff` query. The engine
+  ## names the query it answered (`FlowUpdate.mode`); an update without the
+  ## field is a call flow, which is all an engine that predates it served on
+  ## that path.
+  not update.isNil and update.kind == JObject and
+    update{"mode"}.getStr(FlowModeWireCall) == FlowModeWireDiff
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -512,6 +533,24 @@ proc flowStepEventsOf*(view: JsonNode): seq[FlowStepEvent] =
         loop: jsonInt(st{"loop"}, 0),
         iteration: jsonInt(st{"iteration"}, 0))
 
+proc applyDiffFlowUpdate*(vm: FlowVM; response: JsonNode) =
+  ## Adopt the answer to the `diff` query: the flow of the recording's
+  ## changed lines (`diffStyledLines`, `diffSteps`). The call window is left
+  ## as it is.
+  let viewUpdates = response{"viewUpdates"}
+  if response{"error"}.getBool(false) or viewUpdates.isNil or
+     viewUpdates.kind != JArray or viewUpdates.len == 0:
+    vm.diffLoadingState.val = lsError
+    return
+  var lines: seq[FlowStyledLine] = @[]
+  var steps: seq[FlowStepEntry] = @[]
+  for view in viewUpdates:
+    lines.add flowLineFacts(view)
+    steps.add flowStepEntriesOf(view)
+  vm.diffStyledLines.val = lines
+  vm.diffSteps.val = steps
+  vm.diffLoadingState.val = lsIdle
+
 proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## Adopt a `ct/load-flow` response.
   ##
@@ -526,6 +565,12 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## sends alongside the window, is what keeps the two in agreement.
   if response.isNil or response.kind != JObject:
     vm.loadingState.val = lsError
+    return
+  # A DIFF FLOW IS NOT THE CALL WINDOW. It arrives on the same event, and
+  # adopting it here replaced the window of the call the debugger is in with
+  # the changed lines of the whole recording.
+  if isDiffFlowUpdate(response):
+    vm.applyDiffFlowUpdate(response)
     return
 
   let viewUpdates = response{"viewUpdates"}
@@ -601,6 +646,10 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
     let focusedLoop = createSignal(-1)
     let windowRRTicks = createSignal(0)
     let styledLines = createSignal(newSeq[FlowStyledLine]())
+    let diffSession = createSignal(false)
+    let diffLoadingState = createSignal(lsIdle)
+    let diffStyledLines = createSignal(newSeq[FlowStyledLine]())
+    let diffSteps = createSignal(newSeq[FlowStepEntry]())
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -625,6 +674,10 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
       windowRRTicks: windowRRTicks,
       appliedWindows: 0,
       styledLines: styledLines,
+      diffSession: diffSession,
+      diffLoadingState: diffLoadingState,
+      diffStyledLines: diffStyledLines,
+      diffSteps: diffSteps,
       isLoading: isLoading,
       totalIterations: totalIterations,
       disposeProc: dispose,

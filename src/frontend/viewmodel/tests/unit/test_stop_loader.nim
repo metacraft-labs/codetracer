@@ -30,14 +30,14 @@
 ##   nim js -d:nodejs -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_stop_loader.nim
 
-import std/[json, options, unittest]
+import std/[json, options, strutils, unittest]
 
 import isonim/core/[signals, async_compat]
 
 import backend/[backend_service, mock_backend]
 import session_vm
 import store/[replay_data_store, types]
-import viewmodels/[state_vm, calltrace_vm]
+import viewmodels/[state_vm, calltrace_vm, flow_vm]
 import sdk/[debugger_session, stop_loader, trace_source]
 
 proc localsAnswer(names: varargs[string]): JsonNode =
@@ -212,6 +212,89 @@ suite "HSF-S1: DebuggerSession runs the stop loader":
     store.moveTo(50, 1)
     drainPlatformCallbacks()
     check mock.sent("ct/load-locals") == 0
+
+proc flowUpdate(mode: string; line: int): JsonNode =
+  ## A `ct/updated-flow` payload with one step at `line`, naming the query it
+  ## answers as the engine does (`FlowUpdate.mode`).
+  %*{"mode": mode, "error": false, "finished": true,
+     "location": {"path": "/src/main.py", "line": line, "rrTicks": 1},
+     "viewUpdates": [{
+       "location": {"path": "/src/main.py", "line": line},
+       "loops": [],
+       "steps": [{"position": line, "stepCount": 1, "exprOrder": ["x"],
+                  "beforeValues": {},
+                  "afterValues": {"x": {"kind": 0, "i": "1",
+                                        "typ": {"langType": "int"}}}}]}]}
+
+proc diffRequests(mock: MockBackendService): int =
+  for c in mock.receivedCommands:
+    if c.command == "ct/load-flow" and c.args{"flowMode"}.getStr("") == "diff":
+      inc result
+
+suite "HSF-D4: the trace diff's flow":
+
+  test "a diff session asks for the diff flow once, whatever the stops":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.flowVM.diffSession.val = true
+    let loader = createStopLoader(session)
+    # `FlowVM`'s own call-flow effect sends `ct/load-flow` on every move too,
+    # and the mock answers by command, in order: queue a diff answer for each
+    # request either sender can make. A diff answer to the call request is
+    # routed to the diff signals by its `mode`, so it cannot fake the count.
+    for _ in 1 .. 8:
+      mock.expect("ct/load-flow", %*{"success": true,
+                                      "body": flowUpdate("diff", 4)})
+    for i in 1 .. 3:
+      session.store.moveTo(uint64(i), i)
+      loader.loadStop()
+      drainPlatformCallbacks()
+    check mock.diffRequests() == 1
+    check loader.status[spDiffFlow].val == plsApplied
+    check session.flowVM.diffSteps.val.len == 1
+    check session.flowVM.diffLoadingState.val == lsIdle
+
+  test "a session without a diff never asks for one":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    let loader = createStopLoader(session)
+    for i in 1 .. 3:
+      session.store.moveTo(uint64(i), i)
+      loader.loadStop()
+    drainPlatformCallbacks()
+    check mock.diffRequests() == 0
+    check loader.status[spDiffFlow].val == plsNone
+
+  test "a following loader asks when the host marks the session a diff":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(3, 3)
+    let loader = createStopLoader(session)
+    loader.follow()
+    drainPlatformCallbacks()
+    check mock.diffRequests() == 0
+    session.flowVM.diffSession.val = true
+    drainPlatformCallbacks()
+    check mock.diffRequests() == 1
+
+  test "a diff answer on the event never replaces the call window":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    let flow = session.flowVM
+    mock.emitEvent(%*{"kind": UpdatedFlowCommandName,
+                      "data": flowUpdate("call", 7)})
+    check flow.steps.val.len == 1
+    let callWindow = flow.steps.val
+    mock.emitEvent(%*{"kind": UpdatedFlowCommandName,
+                      "data": flowUpdate("diff", 12)})
+    check flow.steps.val == callWindow
+    check flow.diffSteps.val.len == 1
+    check flow.diffSteps.val[0].location.endsWith(":12")
+
+  test "an update without a mode (an older engine) is a call flow":
+    check not isDiffFlowUpdate(%*{"viewUpdates": []})
+    check isDiffFlowUpdate(%*{"mode": "diff"})
+    check not isDiffFlowUpdate(%*{"mode": "call"})
 
 suite "BackendService response envelopes":
 

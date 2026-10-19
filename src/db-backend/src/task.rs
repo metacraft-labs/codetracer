@@ -1247,6 +1247,14 @@ pub struct FlowUpdate {
     pub error_message: String,
     pub finished: bool,
     pub status: FlowUpdateState,
+    /// Which query this update answers (`call` or `diff`). A client that
+    /// asked for both receives both on the same `ct/updated-flow` event, and
+    /// the update itself is the only thing that can say which is which: a
+    /// diff flow covers the changed lines of the whole recording, not the
+    /// debugger's current call. Defaulted so a diff index written before
+    /// this field existed still parses (the handler stamps the mode it served).
+    #[serde(default)]
+    pub mode: FlowMode,
 }
 
 impl FlowUpdate {
@@ -1261,6 +1269,7 @@ impl FlowUpdate {
                 kind: FlowUpdateStateKind::FlowNotLoading,
                 steps: 0,
             },
+            mode: FlowMode::Call,
         }
     }
 
@@ -1275,6 +1284,7 @@ impl FlowUpdate {
                 kind: FlowUpdateStateKind::FlowNotLoading,
                 steps: 0,
             },
+            mode: FlowMode::Call,
         }
     }
 }

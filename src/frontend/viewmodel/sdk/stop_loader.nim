@@ -17,6 +17,7 @@
 ## | --------------------- | -------------------------------- | ---------- |
 ## | `spLocals`            | `ct/load-locals`, the GUI's budgets (`localsLoadArgs`) and the state pane's watch list | `ReplayDataStore.applyLocalsResponse`, against the stop it was SENT at (PLAT-29), and `StateVM.updateOriginSummaries` |
 ## | `spCallStackFallback` | `stackTrace`, only when the recording has no call trace | `CalltraceVM.fallbackStack` (PLAT-47) |
+## | `spDiffFlow`          | `ct/load-flow` with `flowMode: diff`, ONCE per session, when the session has a diff (`FlowVM.diffSession`) | `FlowVM.applyDiffFlowUpdate` |
 ##
 ## The locals are the Electron GUI's behaviour, which is the reference
 ## (SDF-AREQ7): one request per stop identity and watch list, at 3000/50/7.
@@ -48,7 +49,8 @@ import ../backend/backend_service
 import ../collab/runtime_role
 import ../session_vm
 import ../store/[replay_data_store, types, stop_timeline, locals_answer]
-import ../viewmodels/[state_vm, calltrace_vm]
+import ../viewmodels/[state_vm, calltrace_vm, flow_vm]
+import ../../../common/flow_mode_wire   # `FlowModeWireDiff`
 
 type
   StopPane* = enum
@@ -58,6 +60,11 @@ type
     spCallStackFallback
       ## The call-trace pane's call STACK, shown when the recording has no
       ## call trace (PLAT-47). Native front-ends only.
+    spDiffFlow
+      ## The trace diff's flow, for a session started with a diff. Not a
+      ## per-stop load: the diff flow covers the recording's changed lines,
+      ## so it is asked for once, whatever the stop. Open on every host; it
+      ## sends nothing unless `FlowVM.diffSession` is set.
 
   PaneLoadStatus* = enum
     plsNone       ## nothing issued for the current stop
@@ -80,8 +87,9 @@ type
       ## The loader's reactive root, so `follow`'s effect is disposed with it.
 
 const
-  DefaultStopPanes* = {spLocals}
-    ## What the Electron GUI loads on every stop.
+  DefaultStopPanes* = {spLocals, spDiffFlow}
+    ## What the Electron GUI loads: the locals on every stop, and a diff
+    ## session's diff flow once.
   CallStackFallbackLevels* = 400
     ## Frames asked for by the call-stack fallback — the native hosts'
     ## `RecordingCalltraceLevels`.
@@ -126,6 +134,11 @@ proc stopKey(l: StopLoader; pane: StopPane): string =
     # gave a call trace: a section that arrives (or is cleared) at the same
     # stop changes what the pane must show.
     result.add "\x02" & $(store.calltrace.lines.val.len > 0)
+  of spDiffFlow:
+    # The same key at every stop: the diff flow is asked for once. A
+    # session that is not a diff session holds no key, and asks nothing.
+    let flow = l.session.flowVM
+    result = if flow.isNil or not flow.diffSession.val: "" else: "diff"
 
 proc mayLoad(l: StopLoader): bool =
   ## A collaboration follower renders the leader's answers and asks nothing.
@@ -199,6 +212,32 @@ proc loadCallStackFallback(l: StopLoader; key: string) =
       vm.fallbackStack.val = newSeq[string]()
       loader.settle(spCallStackFallback, key, plsFailed))
 
+proc loadDiffFlow(l: StopLoader; key: string) =
+  ## The trace diff's flow: `ct/load-flow` with the `diff` query. The engine
+  ## serves it from the diff index written at record time, so it names no
+  ## position; `CtLoadFlowArguments` still requires a `location`, and an
+  ## empty one is what the desktop's editor sent. The answer also arrives as
+  ## a `ct/updated-flow` event, which `FlowVM`'s handler routes by its `mode`
+  ## to the same applier.
+  let vm = l.session.flowVM
+  let loader = l
+  vm.diffLoadingState.val = lsLoading
+  onComplete(l.session.store.backend.send("ct/load-flow", %*{
+      "flowMode": FlowModeWireDiff,
+      "location": {"path": "", "line": 0, "rrTicks": 0, "callstackDepth": 0}}),
+    onSuccess = proc(resp: JsonNode) =
+      let body = responseBody(resp)
+      if not responseSucceeded(resp) or not isDiffFlowUpdate(body):
+        vm.diffLoadingState.val = lsError
+        loader.settle(spDiffFlow, key, plsFailed)
+        return
+      vm.applyDiffFlowUpdate(body)
+      loader.settle(spDiffFlow, key,
+        if vm.diffLoadingState.val == lsIdle: plsApplied else: plsFailed),
+    onError = proc(message: string) =
+      vm.diffLoadingState.val = lsError
+      loader.settle(spDiffFlow, key, plsFailed))
+
 proc loadStop*(l: StopLoader) =
   ## Issue each open pane's load for the stop the store is at, once per stop.
   ## On a transport whose futures settle through the platform callback queue
@@ -215,9 +254,14 @@ proc loadStop*(l: StopLoader) =
       continue
     l.sentFor[pane] = key
     l.status[pane].val = plsInFlight
+    if key.len == 0:
+      # Nothing to load for this pane in this session (`spDiffFlow` outside a
+      # diff session).
+      continue
     case pane
     of spLocals: l.loadLocals(key)
     of spCallStackFallback: l.loadCallStackFallback(key)
+    of spDiffFlow: l.loadDiffFlow(key)
 
 proc reload*(l: StopLoader; pane: StopPane) =
   ## Load `pane` for the current stop even if it was already loaded there —
@@ -257,4 +301,8 @@ proc follow*(l: StopLoader) =
       discard loader.watchList()
       if spCallStackFallback in loader.openPanes.val:
         discard loader.session.store.calltrace.lines.val.len > 0
+      # A host may mark the session as a diff after it attached.
+      if spDiffFlow in loader.openPanes.val and
+         not loader.session.flowVM.isNil:
+        discard loader.session.flowVM.diffSession.val
       untrack(proc() = loader.loadStop()))
