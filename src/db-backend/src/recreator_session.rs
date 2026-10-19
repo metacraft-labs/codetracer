@@ -28,9 +28,9 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 #[cfg(windows)]
 use crate::paths::CODETRACER_PATHS;
-use crate::paths::log_path_for;
+use crate::paths::log_path_in;
 #[cfg(unix)]
-use crate::paths::recreator_socket_path;
+use crate::paths::recreator_socket_path_in;
 use crate::query::{
     MaterializeIntervalResponse, ReplayQuery, TtdTracepointEvalMode, TtdTracepointEvalRequest,
     TtdTracepointEvalResponseEnvelope, TtdTracepointFunctionCallRequest, TtdTracepointValueClass,
@@ -229,6 +229,11 @@ pub struct ReplayWorker {
     /// spawner side when computing the socket path).  Empty before
     /// `start` is called.
     run_id: String,
+    /// The runtime base directory this worker's run directory (its socket
+    /// and log) is under, chosen by `start` so that the socket fits in
+    /// `sun_path` (`paths::worker_runtime_base_dir`) and handed to the
+    /// worker as `$CODETRACER_RUNTIME_DIR`.  Empty before `start`.
+    runtime_dir: PathBuf,
     /// M-REC-11: the trace's UUIDv7 — used by `start` to reserve a
     /// unique-within-this-process `run_id`.  May be empty for callers
     /// that have not yet been migrated; in that case the worker falls
@@ -289,6 +294,7 @@ impl ReplayWorker {
             live_cwd: None,
             live_recording_dir: None,
             run_id: String::new(),
+            runtime_dir: PathBuf::new(),
             recording_id: recording_id.to_string(),
             process: None,
             stream: None,
@@ -326,7 +332,25 @@ impl ReplayWorker {
         // Co-locate with the worker's UDS in the per-run directory so the
         // socket and its stderr log share lifecycle (XDG_RUNTIME_DIR on
         // Linux, fallback tmp_path elsewhere — see paths::run_dir_for).
-        let log_path = log_path_for("ct-native-replay", &self.name, self.index, &self.run_id)?;
+        //
+        // The base directory is chosen here, before the worker exists, so
+        // that its socket fits in `sun_path`; both sides then use it (see
+        // `paths::worker_runtime_base_dir`).
+        let runtime_dir = crate::paths::runtime_base_dir()?;
+        #[cfg(unix)]
+        let runtime_dir = crate::paths::worker_runtime_base_dir(
+            runtime_dir,
+            &self.run_id,
+            &crate::paths::recreator_socket_file_name("", &self.name, self.index),
+        )?;
+        self.runtime_dir = runtime_dir;
+        let log_path = log_path_in(
+            &self.runtime_dir,
+            "ct-native-replay",
+            &self.name,
+            self.index,
+            &self.run_id,
+        )?;
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
@@ -385,7 +409,7 @@ impl ReplayWorker {
         // `setup_worker_sockets` connects to only if both resolve the same
         // base directory; name it to the worker rather than rely on that
         // (see `paths::runtime_base_dir`).
-        let runtime_dir = crate::paths::runtime_base_dir()?;
+        let runtime_dir = self.runtime_dir.clone();
         let ct_worker = command
             // M-REC-11: the worker (ct-native-replay) reads
             // $CODETRACER_RUN_ID to compute the socket path; falls
@@ -443,7 +467,7 @@ impl ReplayWorker {
         // M-REC-11: use the same run-id that was passed to the child
         // via $CODETRACER_RUN_ID in `start`, so spawner and worker
         // compute the same socket path.
-        let socket_path = recreator_socket_path("", &self.name, self.index, &self.run_id)?;
+        let socket_path = recreator_socket_path_in(&self.runtime_dir, "", &self.name, self.index, &self.run_id)?;
 
         eprintln!("[rr-worker] connecting to socket {}", socket_path.display());
 
@@ -1783,6 +1807,7 @@ mod tests {
                 live_cwd: None,
                 live_recording_dir: None,
                 run_id: "test-run".to_string(),
+                runtime_dir: PathBuf::new(),
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
@@ -1856,6 +1881,7 @@ mod tests {
                 live_cwd: None,
                 live_recording_dir: None,
                 run_id: "test-run".to_string(),
+                runtime_dir: PathBuf::new(),
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
