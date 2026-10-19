@@ -735,6 +735,30 @@ proc createStateVM*(store: ReplayDataStore;
         store.requestLocals(store.debugger.val.rrTicks,
                             watchExpressions = watches))
 
+    # A VALUE HISTORY IS ABOUT THE STOP IT WAS ASKED AT: the engine answers
+    # with the history of the variable in the CALL the debugger is in. A
+    # history cached under the expression alone and kept across moves showed
+    # the previous call's history after a move to another call. So a new stop
+    # drops every cached history, and each one the reader has open is asked
+    # for again, at the new stop (UI-Data-Loading-Guidelines Pattern 5).
+    var historyStop = ""
+    var historyStopSeen = false
+    createEffect proc() =
+      let at = stop.val
+      untrack(proc() =
+        if not historyStopSeen:
+          historyStopSeen = true
+          historyStop = at
+          return
+        if at == historyStop:
+          return
+        historyStop = at
+        if vm.valueHistory.val.len > 0:
+          vm.valueHistory.val = initTable[string, seq[ValueHistoryRow]]()
+        if not vm.onToggleHistory.isNil:
+          for expression in vm.expandedHistories.val:
+            vm.onToggleHistory(expression))
+
     vm
 
 proc isChanged*(vm: StateVM; path: string): bool =

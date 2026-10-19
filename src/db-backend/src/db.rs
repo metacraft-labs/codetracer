@@ -2920,17 +2920,33 @@ impl ReplaySession for MaterializedReplaySession {
             .expect("load_history: invalid step_id")
             .call_key;
 
+        // THE HISTORY IS THE CURRENT CALL'S, so only the call's own steps are
+        // read: from its first step until the call returns — the first step
+        // that belongs to neither the call nor a call it made. This used to
+        // walk every step of the recording to find them.
+        let (first_step, call_depth) = match self.reader.call(current_call_key) {
+            Some(call) => (call.step_id.0.max(0) as usize, call.depth),
+            None => (0, 0),
+        };
         let step_count = self.reader.step_count();
-        for step_idx in 0..step_count {
+        // The last value kept, serialised: a step is an entry of the history
+        // only when the value DIFFERS from the previous entry's.
+        let mut last_kept: Option<String> = None;
+        for step_idx in first_step..step_count {
             let sid = StepId(step_idx as i64);
             let step = *self.reader.step(sid).expect("load_history: step out of range");
-            // for now limit to current call: seems most correct
-            // TODO: hopefully a more reliable value history for global search
-            info!(
-                "step call key {:?} current call key {:?}",
-                step.call_key, current_call_key
-            );
-            if step.call_key == current_call_key {
+            if step.call_key != current_call_key {
+                let inside = self
+                    .reader
+                    .call(step.call_key)
+                    .map(|c| c.depth > call_depth)
+                    .unwrap_or(false);
+                if inside {
+                    continue;
+                }
+                break;
+            }
+            {
                 let var_list = self.reader.variables_at(sid).unwrap_or(&[]);
                 if let Some(var) = var_list
                     .iter()
@@ -2954,24 +2970,19 @@ impl ReplaySession for MaterializedReplaySession {
                     // anything about the recorded program's timeline.
                     let time_seconds = crate::wall_clock::unix_seconds();
                     let value_with_record = self.to_value_record_with_type(&var.value);
-                    if history_results.len() > 1 {
-                        if true {
-                            // TODO: partial eq or directly other way? history_results[history_results.len() - 1].value != ct_value {
-                            history_results.push(HistoryResultWithRecord {
-                                location: step_location.clone(),
-                                value: value_with_record,
-                                time: time_seconds,
-                                description: self.id_to_name(var.variable_id).to_string(),
-                            });
-                        }
-                    } else {
-                        history_results.push(HistoryResultWithRecord {
-                            location: step_location.clone(),
-                            value: value_with_record,
-                            time: time_seconds,
-                            description: self.id_to_name(var.variable_id).to_string(),
-                        });
+                    // ONLY WHEN THE VALUE CHANGED: a step that leaves the
+                    // variable as it was is not an entry of its history.
+                    let serialised = serde_json::to_string(&value_with_record).unwrap_or_default();
+                    if last_kept.as_deref() == Some(serialised.as_str()) {
+                        continue;
                     }
+                    last_kept = Some(serialised);
+                    history_results.push(HistoryResultWithRecord {
+                        location: step_location.clone(),
+                        value: value_with_record,
+                        time: time_seconds,
+                        description: self.id_to_name(var.variable_id).to_string(),
+                    });
                 }
             }
         }

@@ -3164,7 +3164,18 @@ impl Handler {
             ));
             self.tracepoint_rr_worker_index += 1;
         };
-        let (history_results_with_records, address) = self.replay.load_history(&load_history_arg)?;
+        let (all_history, address) = self.replay.load_history(&load_history_arg)?;
+        // THE WINDOW the pane asked for (`start` / `count`), cut before the
+        // per-entry origin summaries are built, so only the entries shown pay
+        // for one. `count` 0 is every entry from `start` (the older callers).
+        let total = all_history.len();
+        let window_start = load_history_arg.start.min(total);
+        let window_end = if load_history_arg.count == 0 {
+            total
+        } else {
+            (window_start + load_history_arg.count).min(total)
+        };
+        let history_results_with_records = &all_history[window_start..window_end];
         // Per spec §3.2.3 (and the M2 deliverable expanding
         // `ct/load-history` with per-entry origin summaries), each
         // historic value carries its own `OriginSummary`. On a
@@ -3254,7 +3265,9 @@ impl Handler {
             });
         }
 
-        let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), address, &history_results);
+        let mut history_update = HistoryUpdate::new(load_history_arg.expression.clone(), address, &history_results);
+        history_update.total = total;
+        history_update.start = window_start;
         let raw_event = self.dap_client.updated_history_event(history_update.clone())?;
 
         sender.send(raw_event)?;

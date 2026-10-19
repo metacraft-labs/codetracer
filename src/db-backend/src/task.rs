@@ -1504,6 +1504,14 @@ pub struct LoadHistoryArg {
     pub expression: String,
     pub location: Location,
     pub is_forward: bool,
+    /// The first history entry to answer with (the pane's window); 0 when
+    /// absent.
+    #[serde(default)]
+    pub start: usize,
+    /// How many entries to answer with; every entry from `start` when absent
+    /// or 0 (the older callers, which ask for the whole history).
+    #[serde(default)]
+    pub count: usize,
 }
 
 impl fmt::Display for SourceCallJumpTarget {
@@ -1925,6 +1933,13 @@ pub struct HistoryUpdate {
     pub address: i64,
     pub results: Vec<HistoryResult>,
     pub finish: bool,
+    /// How many entries the whole history has, of which `results` is the
+    /// requested window (`LoadHistoryArg::start` / `count`).
+    #[serde(default)]
+    pub total: usize,
+    /// Where `results` starts in the whole history.
+    #[serde(default)]
+    pub start: usize,
 }
 
 impl HistoryUpdate {
@@ -1934,6 +1949,8 @@ impl HistoryUpdate {
             address,
             results: results.to_vec(),
             finish: true,
+            total: results.len(),
+            start: 0,
         }
     }
 }
