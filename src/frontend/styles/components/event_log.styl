@@ -635,16 +635,45 @@ label
     // column. `ui/event_log.renderColumnHeader` draws this strip instead, one
     // cell per column with the column's own class, so the class rules that
     // size a body cell size its header cell too.
+    // Styled as the Requests panel's column header (`.request-table-header`,
+    // request_panel.styl) — small uppercase Space Grotesk on the primary
+    // surface over a 1px line — so the two tables read alike (Nikolay,
+    // 2026-10-15).  The type sits on `.eventLog-column-label` (ui/event_log.nim)
+    // and not on the cell, whose `ch`/`em` width must stay its body column's.
     .eventLog-column-header
       display: flex
       align-items: center
-      border-bottom: 0.0625em solid colors-ui-border-secondary
+      min-height: 1.75rem
+      // No fill of its own: the header sits on the panel (Nikolay, 2026-10-15).
+      background: transparent
+      border-bottom: 1px solid colors-ui-border-secondary
+      user-select: none
       .eventLog-cell
-        font-weight: 600
-        color: colors-ui-text-default-label
+        color: colors-ui-text-primary-label
         overflow: hidden
         // PLAT-50: a header click orders the log by the column.
         cursor: pointer
+        // Every label on one centre line: the body's `.eventLog-text` rules
+        // (its 1.1em line box and 0.1em padding) lifted OUTPUT above TICK and #.
+        display: flex
+        align-items: center
+        align-self: stretch
+        padding-top: 0 !important
+        padding-bottom: 0 !important
+        max-height: none !important
+        line-height: normal !important
+      // The body's index column centres its numbers; a flex cell ignores
+      // `text-align`, so its label is centred the flex way.
+      .eventLog-index
+        justify-content: center
+      .eventLog-column-label
+        font-family: "SpaceGrotesk"
+        font-size: 0.6875rem
+        font-weight: 500
+        line-height: 1.125rem
+        letter-spacing: 0.06em
+        text-transform: uppercase
+        white-space: nowrap
     tr
       border-top: none !important
       align-items: center !important

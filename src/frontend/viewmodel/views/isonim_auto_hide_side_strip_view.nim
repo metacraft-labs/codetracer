@@ -16,6 +16,10 @@ type
   AutoHideSideStripRecord* = object
     title*: string
     active*: bool
+    ## Opened by a click (docked, or the overlay pinned open) rather than shown
+    ## as a hover preview.  Only such a tab gets the × (Nikolay, 2026-10-17):
+    ## a preview closes itself when the pointer leaves.
+    pinned*: bool
 
   AutoHideSideStripCallbacks* = object
     modeLabel*: string
@@ -24,7 +28,14 @@ type
     onSelect*: proc(index: int)
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
+    ## The × on the active tab: hide its panel, keeping the tab pinned — what
+    ## the × on the selected row of the status bar's tab-list menu does.
+    onHide*: proc(index: int)
     onCollapsedSelect*: proc()
+    ## Called when the mouse enters the collapsed line — starts the same
+    ## hover-preview timer a tab does, so the line opens its edge's overlay
+    ## (with the edge's tabs down its side) on hover as well as on click.
+    onCollapsedHoverEnter*: proc()
     ## Called when mouse enters a tab — starts the hover-preview timer.
     onHoverEnter*: proc(index: int)
     ## Called when mouse leaves a tab — cancels the pending hover-preview timer.
@@ -38,6 +49,11 @@ const
   AutoHideSideStripTabClass* = "auto-hide-strip-tab"
   AutoHideSideStripTabActiveClass* = "auto-hide-strip-tab active"
   AutoHideSideStripTabLabelClass* = "auto-hide-strip-tab-label"
+  ## The × on the active tab (Nikolay, 2026-10-16): the same `close_sm` icon
+  ## and behaviour as `auto-hide-tablist-close` in the status bar's tab-list
+  ## menu — it hides the panel that is showing and leaves the tab pinned.
+  AutoHideSideStripTabHideClass* = "auto-hide-strip-tab-hide"
+  HideTabLabel = "Close panel"
   ## The four button classes below have **no producer**.  `f214d703b` added
   ## the tab context menu and `1af471302` then removed the inline close /
   ## unpin buttons from `renderSideStripTab`, so a strip tab is now just its
@@ -67,9 +83,20 @@ proc invokeClose(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onClose.isNil:
     callbacks.onClose(index)
 
+proc invokeHide(callbacks: AutoHideSideStripCallbacks; index: int) =
+  if not callbacks.onHide.isNil:
+    callbacks.onHide(index)
+
+proc showsHide(callbacks: AutoHideSideStripCallbacks; tab: AutoHideSideStripRecord): bool =
+  tab.active and tab.pinned and not callbacks.onHide.isNil
+
 proc invokeUnpin(callbacks: AutoHideSideStripCallbacks; index: int) =
   if not callbacks.onUnpin.isNil:
     callbacks.onUnpin(index)
+
+proc invokeCollapsedHoverEnter(callbacks: AutoHideSideStripCallbacks) =
+  if not callbacks.onCollapsedHoverEnter.isNil:
+    callbacks.onCollapsedHoverEnter()
 
 proc invokeCollapsedSelect(callbacks: AutoHideSideStripCallbacks) =
   if not callbacks.onCollapsedSelect.isNil:
@@ -94,12 +121,18 @@ proc renderSideStripTab(
     callbacks: AutoHideSideStripCallbacks): MockNode =
   let cls = if tab.active: AutoHideSideStripTabActiveClass
             else: AutoHideSideStripTabClass
-  ui(r):
+  result = ui(r):
     tdiv(
         class = cls,
         onclick = proc() = callbacks.invokeSelect(index)):
       span(class = AutoHideSideStripTabLabelClass):
         text tab.title
+  if callbacks.showsHide(tab):
+    let hide = ui(r):
+      span(class = AutoHideSideStripTabHideClass, role = "button",
+          title = HideTabLabel, `aria-label` = HideTabLabel,
+          onclick = proc() = callbacks.invokeHide(index))
+    r.appendChild(result, hide)
 
 proc renderCollapsedLine(
     r: MockRenderer;
@@ -107,7 +140,8 @@ proc renderCollapsedLine(
   ui(r):
     tdiv(
         class = AutoHideCollapsedStripLineClass,
-        onclick = proc() = callbacks.invokeCollapsedSelect())
+        onclick = proc() = callbacks.invokeCollapsedSelect(),
+        onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 
 when defined(js):
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
@@ -130,6 +164,19 @@ when defined(js):
            onclick = proc() = callbacks.invokeSelect(index)):
         span(class = AutoHideSideStripTabLabelClass):
           text tab.title
+    if callbacks.showsHide(tab):
+      var hideEl: isonim_dom.Element
+      let hide = ui(r):
+        span(ref = hideEl, class = AutoHideSideStripTabHideClass, role = "button",
+            title = HideTabLabel, `aria-label` = HideTabLabel)
+      # Its own listener, stopped there: the tab's click would reopen the
+      # panel the × just closed.
+      isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          ev.preventDefault()
+          ev.stopPropagation()
+          callbacks.invokeHide(index))
+      discard isonim_dom.appendChild(isonim_dom.Node(result), isonim_dom.Node(hide))
     isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
       proc(ev: isonim_dom.Event) =
         callbacks.invokeHoverEnter(index))
@@ -148,7 +195,8 @@ when defined(js):
     ui(r):
       tdiv(
           class = AutoHideCollapsedStripLineClass,
-          onclick = proc() = callbacks.invokeCollapsedSelect())
+          onclick = proc() = callbacks.invokeCollapsedSelect(),
+          onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 
 proc renderModeButton(r: MockRenderer; callbacks: AutoHideSideStripCallbacks): MockNode =
   ui(r):
@@ -204,15 +252,23 @@ when defined(js):
       tabs: seq[AutoHideSideStripRecord];
       collapsed: bool;
       callbacks: AutoHideSideStripCallbacks =
-        AutoHideSideStripCallbacks()) =
+        AutoHideSideStripCallbacks();
+      revealed = false;
+      revealClosing = false) =
+    ## `revealed`: a minimal edge shown with its tabs while one of its panels
+    ## is open — `revealed` keeps the strip's layout footprint at the thin
+    ## line's (auto_hide.styl) so the tabs float over the layout instead of
+    ## pushing it; `revealClosing` slides it out with the panel.
     let containerNode = isonim_dom.Node(container)
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
-    isonim_dom.setAttribute(
-      container,
-      cstring"class",
-      cstring sideStripClass(tabs.len > 0, collapsed and tabs.len > 0))
+    var cls = sideStripClass(tabs.len > 0, collapsed and tabs.len > 0)
+    if revealed and not collapsed and tabs.len > 0:
+      cls.add(" revealed")
+      if revealClosing:
+        cls.add(" reveal-closing")
+    isonim_dom.setAttribute(container, cstring"class", cstring cls)
 
     let panel = renderAutoHideSideStripPanel(r, tabs, collapsed, callbacks)
     let panelNode = isonim_dom.Node(panel)

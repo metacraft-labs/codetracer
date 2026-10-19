@@ -5,15 +5,22 @@
 // track over the container's right edge: a click JUMPS there, the thumb
 // drags the view, a tick marks where the debugger is.
 
+// Only the VERTICAL bar is the scrubber's: the horizontal one stays, so a
+// list wider than its pane (the Call Trace's long argument lists) can still
+// be scrolled sideways (Nikolay, 2026-10-16).  It was `scrollbar-width: none`
+// + `display: none`, which removed both.  `scrollbar-width` must stay unset:
+// once it is, Chromium ignores the `::-webkit-scrollbar` rules entirely.  The
+// remaining bar takes the app-wide scrollbar look (shared_widgets.styl).
 .ct-scrubbed
-  scrollbar-width: none
-
   &::-webkit-scrollbar
-    display: none
+    width: 0
 
 .ct-list-scrubber
   position: absolute
   right: 0
+  // The app-wide scrollbar's thickness (PANEL_SCROLLBAR_SIZE, 8px —
+  // shared_widgets.styl): a scrubber is the pane's scrollbar and reads as one.
+  width: PANEL_SCROLLBAR_SIZE
   // Above the pane's own overlays (the event log's DataTables footer sits
   // over the bottom of its scroll body): the track takes the press there.
   z-index: 30
@@ -21,16 +28,18 @@
   background: transparent
 
 .ct-list-scrubber-thumb
+  // Drawn exactly as the app-wide scrollbar thumb (shared_widgets.styl):
+  // the track's full width, square, flush with the panel's right edge, and
+  // the same tokens — `tertiary`, stepping LIGHTER to `tertiary-hover` under
+  // the pointer and while dragged.
   position: absolute
-  left: 2px
-  right: 2px
-  border-radius: 3px
-  // The window's scrollbar thumb (Monaco's `scrollbarSlider.background`,
-  // the GPUI and terminal scrubbers' thumb).
-  background: rgba(121, 121, 121, 0.4)
+  left: 0
+  right: 0
+  background: colors-ui-surface-primary-tertiary
 
-  &:hover
-    background: rgba(100, 100, 100, 0.7)
+  &:hover,
+  .ct-list-scrubber:active &
+    background: colors-ui-surface-primary-tertiary-hover
 
 .ct-list-scrubber-mark
   position: absolute

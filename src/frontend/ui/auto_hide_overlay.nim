@@ -46,6 +46,11 @@ proc wireOverlayButtons*(layout: GoldenLayout) =
 
   # Store layout globally so strip-tab unpin callbacks can reach it.
   autoHideLayout = layout
+  # The side strips first render before the layout exists, so the size update
+  # a strip asks for when its footprint changes (`requestAutoHideSideStripRender`)
+  # is dropped then; GoldenLayout kept its first guess and ran 12px under the
+  # right-hand collapsed line until the window was resized.  Measure once now.
+  deferredUpdateGLSize()
 
   # Unpin button: re-attach the panel to GL.
   let unpinBtn = document.getElementById(cstring"auto-hide-overlay-unpin-btn")
@@ -143,20 +148,39 @@ proc setupZoneTracking() =
     // full height (or width) of the window, so treating the whole thing as
     // the zone kept a preview open while the pointer sat in empty space well
     // away from any tab.
-    var CT_HOVER_ZONE = '#auto-hide-overlay, .auto-hide-strip-tab';
+    // The collapsed line counts as a tab: it opens the overlay on hover, so
+    // resting on it must hold that preview open too.
+    // A revealed strip is one whole surface floating over the layout, so the
+    // pointer between its tabs is still on it.
+    var CT_HOVER_ZONE = '#auto-hide-overlay, .auto-hide-strip-tab, .collapsed-strip-line, .revealed';
     var ctInZone = false;
 
     function ctZoneUpdate(target) {
       var inZone = !!(target && target.closest && target.closest(CT_HOVER_ZONE));
-      // Only on a transition.  `startDismissal` restarts its timer each call,
-      // so running it on every mousemove would keep pushing the close back and
-      // the preview would hang about for as long as the pointer kept moving.
+      // Inside the zone, any pending close is cancelled on every event, not
+      // only on entering it: the overlay's own `mouseleave` (attachHoverZone)
+      // starts that timer too, without this tracker seeing a transition — the
+      // pointer goes from the overlay to a tab or the collapsed line, zone to
+      // zone — and a sliding-in overlay passes under a pointer resting on the
+      // line, so that happened on every hover-open of a collapsed edge.
+      // Cancelling is free when no timer is set.
+      if (inZone) { `cancelDismissal`(); }
+      // The rest only on a transition.  `startDismissal` restarts its timer
+      // each call, so running it on every mousemove would keep pushing the
+      // close back and the preview would hang about for as long as the pointer
+      // kept moving.
       if (inZone === ctInZone) { return; }
       ctInZone = inZone;
       if (inZone) {
         `cancelDismissal`();
       } else {
         `cancelHoverPreview`();
+        // Only once the pointer is off the side strips altogether: while a
+        // strip re-renders, the pointer resting on its line is briefly over
+        // the strip itself, and that is not leaving.
+        if (!(target && target.closest && target.closest('#auto-hide-strip-left, #auto-hide-strip-right'))) {
+          `clearLineHoverSuppress`();
+        }
         `startDismissal`();
       }
     }
