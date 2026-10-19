@@ -30,7 +30,8 @@ import store/types as store_types   # `CallLine`
 from ../app/origin_binding import OriginEventName
 from viewmodels/debug_controls_vm import DebugControlsVM, transportAvailable,
   stepForward, stepBackward, stepIn, stepOut, reverseStepIn, reverseStepOut,
-  continueExecution, reverseContinue
+  continueExecution, reverseContinue, moveInHistory, HistoryDirection,
+  nextHistoryIndex
 
 export native_host, OriginEventName
 
@@ -91,6 +92,17 @@ proc runDebugControl*(s: HeadlessDebugSession; id: string): bool =
   of "continue": vm.continueExecution()
   of "reverse-continue": vm.reverseContinue()
   else: return false
+  s.settleMove()
+
+proc historyMove*(s: HeadlessDebugSession; direction: HistoryDirection): bool =
+  ## History back or forward through the session's one jump history
+  ## (`DebugControlsVM`, the desktop's rule), then the move settled. `false`
+  ## when there is no entry that way, or the move did not arrive.
+  let vm = s.session.debugControlsVM
+  if vm.isNil or nextHistoryIndex(vm.history.val.len, vm.historyIndex.val,
+                                  direction) == 0:
+    return false
+  vm.moveInHistory(direction)
   s.settleMove()
 
 proc heldCallLine(s: HeadlessDebugSession; index: int64;

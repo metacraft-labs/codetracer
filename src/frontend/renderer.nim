@@ -549,7 +549,6 @@ proc createUILayoutComponents(content: JsObject) =
 
 proc createUIComponents*(data: Data) =
   # create singletons
-  discard data.makeDebugComponent()
   discard data.makeMenuComponent()
   discard data.makeBuildComponent()
   discard data.makeErrorsComponent()
@@ -828,7 +827,7 @@ proc step*(
     cdebug &"renderer: step call for step {action}", taskId
 
   # FU-E: gate rapid successive DAP step requests on the same in-flight
-  # signal used by `dapStep` in ``ui/debug.nim``.  Without this guard,
+  # signal used by `dapStep` in ``ui/debug_toolbar.nim``.  Without this guard,
   # holding F10 (or rapid-clicking the toolbar) could queue several
   # `DapNext` requests before the previous `stopped` / `CtCompleteMove`
   # notification landed, racing the UI's `currentStep` / location state

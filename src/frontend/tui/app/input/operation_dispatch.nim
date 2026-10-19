@@ -53,6 +53,8 @@ const
     ("debugger.jump-to-start", kaJumpToStart),
     ("debugger.jump-to-end", kaJumpToEnd),
     ("debugger.seek-to-tick", kaSeekToTick),
+    ("navigation.back", kaHistoryBack),
+    ("navigation.forward", kaHistoryForward),
     ("editor.jump-to-value-origin", kaValueOrigin),
     ("debugger.reverse-origin", kaReverseOrigin),
     ("editor.scroll-line-down", kaScrollLineDown),

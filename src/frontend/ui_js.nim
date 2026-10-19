@@ -29,7 +29,7 @@ import
   options, json,
   ui/[agent_activity, agent_workspace, layout, editor, trace, event_log,
       state, calltrace, menu, status,
-      debug, flow, filesystem, vcs, value, repl,
+      debug_toolbar, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, chord_display, step_list, low_level_code,
@@ -1525,12 +1525,10 @@ proc switchToEdit*(data: Data) =
   data.finishReadOnlyTransition(false, readOnlyChanged,
                                 rearrangePanels = not switched)
   redrawAfterModeSwitch()
-  # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
-  # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
-  # leaves whichever panel is mounted exactly where it is. Every one of these
-  # three call sites has just assigned `data.ui.mode`, so this is where the
-  # surface can have become wrong. A no-op when it has not.
-  debug.refreshTopbarSurface()
+  # THE TOPBAR'S SURFACE FOLLOWS THE MODE. Every one of these three call sites
+  # has just assigned `data.ui.mode`; the toolbar ViewModel's `topbarSurface`
+  # memo does the rest. A no-op when the mode did not change.
+  debug_toolbar.syncToolbarMode()
 
 proc switchToDebug*(data: Data) =
   # THE FLAG BEFORE THE LAYOUT, for the reason `beginReadOnlyTransition` gives:
@@ -1576,12 +1574,10 @@ proc switchToDebug*(data: Data) =
   data.finishReadOnlyTransition(true, readOnlyChanged,
                                 rearrangePanels = not switched)
   redrawAfterModeSwitch()
-  # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
-  # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
-  # leaves whichever panel is mounted exactly where it is. Every one of these
-  # three call sites has just assigned `data.ui.mode`, so this is where the
-  # surface can have become wrong. A no-op when it has not.
-  debug.refreshTopbarSurface()
+  # THE TOPBAR'S SURFACE FOLLOWS THE MODE. Every one of these three call sites
+  # has just assigned `data.ui.mode`; the toolbar ViewModel's `topbarSurface`
+  # memo does the rest. A no-op when the mode did not change.
+  debug_toolbar.syncToolbarMode()
 
 proc toggleMode*(data: Data) =
   if data.ui.mode == DebugMode:
@@ -1618,12 +1614,10 @@ proc toggleReadOnly*(data: Data) =
   let goingReadOnly = not data.ui.readOnly
   data.setEditorsReadOnlyState(goingReadOnly)
   redrawAfterModeSwitch()
-  # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
-  # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
-  # leaves whichever panel is mounted exactly where it is. Every one of these
-  # three call sites has just assigned `data.ui.mode`, so this is where the
-  # surface can have become wrong. A no-op when it has not.
-  debug.refreshTopbarSurface()
+  # THE TOPBAR'S SURFACE FOLLOWS THE MODE. Every one of these three call sites
+  # has just assigned `data.ui.mode`; the toolbar ViewModel's `topbarSurface`
+  # memo does the rest. A no-op when the mode did not change.
+  debug_toolbar.syncToolbarMode()
 
 data.functions.toggleMode = toggleMode
 # NOTHING CALLS THIS ONE ANY MORE, and that is worth saying here rather than
@@ -2157,14 +2151,6 @@ proc onReady(event: dom.Event) =
           scrollAssembly = -1
           jq(".low-level").toJs.scrollTop = cast[int](jqall(".assembly-offset")[index].toJs.offsetTop) - 300, 500)
 
-      # TODO different debug?
-
-      # TODO next few lines are for live notifications/warnings in the app
-      # let debugComponent = data.debugComponent
-      # if debugComponent.message.message.len > 0 and
-      #   delta(now(), debugComponent.message.time) > 5_000:
-      #     debugComponent.message.message = ""
-      #     redrawAll()
 
 proc sleepMs(ms: int): Future[void] {.importjs: "new Promise(resolve => setTimeout(resolve, #))".}
 
@@ -2332,6 +2318,13 @@ when not defined(ctInExtension):
       # request's language hook is installed before anything can ask.
       state.installSourceLanguage(activeSessionVM.store)
       activeSessionVM.store.claimLocalsLoading()
+      # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
+      # builds `DebugControlsVM` with them: steps through the DAP mediator
+      # with the status bar's operation status, the replay server's restart,
+      # Stop, and test runs in a new window.
+      activeSessionVM.debugCommands = desktopDebugCommands(data,
+        activeSessionVM.store,
+        setupLocalViewToMiddlewareApi(cstring"debug toolbar api", data.viewsApi))
       activeSessionVM.initializePanelViewModels()
       # PLAT-40: the debugger service's `setBreakpoints` answers go to the
       # ViewModel store's one breakpoint decoder — the point list then holds
@@ -2502,8 +2495,8 @@ when not defined(ctInExtension):
       initPanelVM("mountProcessTree"):
         mountProcessTree(activeSessionVM)
 
-      initPanelVM("initDebugControlsVMFromSession"):
-        debug.initDebugControlsVMFromSession(activeSessionVM.debugControlsVM)
+      initPanelVM("bindDebugToolbar"):
+        debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
       initPanelVM("initCalltraceVMFromSession"):
         calltrace.initCalltraceVMFromSession(activeSessionVM.calltraceVM)
       initPanelVM("initEventLogVMFromSession"):
@@ -4182,6 +4175,7 @@ proc onTestRunSettled(
   ## in `index/traces.nim`, and the Test Results pane subscribes to none of it;
   ## a settle keyed on it would fire for re-records that have nothing to do
   ## with a test.
+  debug_toolbar.settleToolbarTestRun($response.errorMessage == "")
   if desktopTestRunHost.isNil:
     return
   desktopTestRunHost.settleDesktopTestRun(
@@ -5659,20 +5653,19 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aVerification: proc(actionData: JsObject) = # aVerification
     data.openLayoutTab(Content.Verification),
   aHistoryBack: # The five debug-toolbar controls that gained chords. Each one hands the
-  # toolbar's own action id to `ui/debug.nim`'s dispatcher — the same `case`
-  # the button's `onAction` bridge reaches — so the chord cannot drift from
-  # the click. Appended at the end, in enum order, matching the five members
+  # toolbar's own action id to `DebugControlsVM.invokeToolbarAction` — the
+  # route the button's click takes — so the chord cannot drift from the click. Appended at the end, in enum order, matching the five members
   # added at the end of `ClientAction`.
   proc(actionData: JsObject) = # aHistoryBack
-    debug.invokeDebugToolbarAction("history-back"),
+    debug_toolbar.invokeDebugToolbarAction("history-back"),
   aHistoryForward: proc(actionData: JsObject) = # aHistoryForward
-    debug.invokeDebugToolbarAction("history-forward"),
+    debug_toolbar.invokeDebugToolbarAction("history-forward"),
   aRunToEntry: proc(actionData: JsObject) = # aRunToEntry
-    debug.invokeDebugToolbarAction("run-to-entry"),
+    debug_toolbar.invokeDebugToolbarAction("run-to-entry"),
   aResetOperation: proc(actionData: JsObject) = # aResetOperation
-    debug.invokeDebugToolbarAction("reset-operation"),
+    debug_toolbar.invokeDebugToolbarAction("reset-operation"),
   aRunTests: proc(actionData: JsObject) = # aRunTests
-    debug.invokeDebugToolbarAction("run-tests"),
+    debug_toolbar.invokeDebugToolbarAction("run-tests"),
   aKeyboardShortcuts: proc(actionData: JsObject) = # aKeyboardShortcuts
     openShortcutsDialog(),
   aToggleReadOnly: proc(actionData: JsObject) = # aToggleReadOnly
@@ -6765,38 +6758,9 @@ when defined(ctWeb) and not defined(ctInExtension):
                 cerror "replay: could not re-open the source tab " &
                   $sourceTabBeforeRun & ": " & getCurrentExceptionMsg()
           requestInitialPanelData(data)
-          # The toolbar's own mount gave up during boot, against a document
-          # that had not drawn the menu shell yet. Now that the surface exists
-          # and has just been rebuilt, ask again — a no-op if it is already up.
-          # AND THE TOOLBAR'S BUTTONS HAVE TO REACH SOMETHING.
-          #
-          # `DebugControlsVM.onDapStep` and `.onAction` are the bridge every
-          # button in the debugger panel dispatches through — `stepClick` and
-          # `actionClick` in `isonim_debug_controls_view.nim` both begin
-          # `if not vm.onX.isNil`, so a nil bridge is a SILENT no-op behind a
-          # fully painted, hit-testable toolbar.
-          #
-          # `initDebugControlsVMFromSession` wires that bridge, but only inside
-          # `if not debugComponentForBridge.isNil and not
-          # debugApiForBridge.isNil`, and on the web that guard does not hold
-          # when it runs. Measured in a browser against the assembled bundle:
-          # the console carries `debug.nim | DebugControlsVM: parallel
-          # ViewModel instance created (shared store)` and does NOT carry the
-          # `re-wired onDapStep/onAction bridge after replacement` line that
-          # follows it eight lines later.
-          #
-          # `rewireDebugControlsBridgeForActiveSession` is the repair, and it
-          # already existed and was already exported — it reads the active
-          # session's `DebugComponent` out of `componentMapping` and installs
-          # the callbacks. It had ONE caller, `session_switch.switchSession`,
-          # and the web never switches sessions, so it never ran here.
-          #
-          # HERE is where it can: the loop above has just constructed the
-          # components the debug layout names, so `componentMapping[Content
-          # .Debug][0]` exists. Before `remountDebugControls`, so the panel
-          # mounts over a bridge that is already live.
-          debug.rewireDebugControlsBridgeForActiveSession(data)
-          debug.remountDebugControls()
+          # The menu shell has just been rebuilt with this surface's chrome:
+          # the toolbar host is filled if it is new (`ensureDebugToolbar`).
+          debug_toolbar.ensureDebugToolbar()
 
           # AND THE BUILD OVERLAY IS DISMISSED, BECAUSE THE SESSION IT WAS
           # REPORTING ON IS NOW ON SCREEN.

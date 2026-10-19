@@ -95,7 +95,7 @@ from ../viewmodel/platform/displayed_product import sessionDocumentTitle
 import ./window_clicks
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
-import ../ui/history_cursor   # history back / forward: the desktop's cursor rule
+import ../viewmodel/viewmodels/history_cursor   # history back / forward: the desktop's cursor rule
 import ../viewmodel/viewmodels/[certificate_indicator_vm,
                                 certificate_indicator_source]
 import ../viewmodel/host/desktop_native   # the certificate indicator's host
@@ -2844,13 +2844,6 @@ var
   gCertVm: CertificateIndicatorVm = nil
     ## The status bar's certificate indicator, over `gCertDir`.
   gCertDir = ""
-  gJumpHistory: seq[uint64] = @[]
-    ## The ticks the debugger has stopped at, oldest first — the desktop's
-    ## `DebugComponent.jumpHistory`, for history back and forward.
-  gHistoryIndex = 1
-    ## Where the cursor is, counted back from the newest (`[^gHistoryIndex]`).
-  gHistoryMoving = false
-    ## A history move is landing: its stop is not a new entry.
   gHoverTab = -1
   gHoverTabAdd = false
     ## PLAT-49 part B: the pointer is on the strip's "+".
@@ -3864,16 +3857,6 @@ proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
     if row.pointer == eptExecution and row.held:
       gSession.session.store.updateCodeStateLine(row.line, row.text.strip())
 
-proc noteHistoryStop() =
-  ## A stop the debugger reached, appended to the history unless it is where
-  ## the newest entry already is or a history move brought the replay here.
-  if gSession.isNil or gHistoryMoving:
-    return
-  let tick = gSession.getCurrentRRTicks()
-  if gJumpHistory.len == 0 or gJumpHistory[^1] != tick:
-    gJumpHistory.add tick
-  gHistoryIndex = 1
-
 proc refreshReplayWindow(r: GpuiRenderer) =
   ## After the debugger moved: the source window, the stop's panes, every
   ## live leaf drawn again from its ViewModel (the call trace with its whole
@@ -3907,7 +3890,6 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu) &
                     gRecordings)
-  noteHistoryStop()
   drawTopBar(r)
 
 proc attachVcs(leafSet: var GpuiLeafSet; directory: string)
@@ -4378,17 +4360,19 @@ proc toolAvailable(tool: GToolButton): bool =
   ## session, and not while a run it started is still going.
   case tool
   of gtbBack:
-    nextHistoryIndex(gJumpHistory.len, gHistoryIndex, hdOlder) > 0
+    not gSession.isNil and not gSession.session.debugControlsVM.isNil and
+      gSession.session.debugControlsVM.canGoBack.val
   of gtbForward:
-    nextHistoryIndex(gJumpHistory.len, gHistoryIndex, hdNewer) > 0
+    not gSession.isNil and not gSession.session.debugControlsVM.isNil and
+      gSession.session.debugControlsVM.canGoForward.val
   of gtbReset, gtbStop: not gSession.isNil
   of gtbRunTests: not gSession.isNil and (gTestJob.isNil or gTestJob.done)
 
 proc performTool(r: GpuiRenderer; tool: GToolButton) =
   ## A tool button's press — the desktop's `DebugComponent.action`:
-  ##   * history back / forward: the cursor moves one stop through the stops
-  ##     the debugger has been at (`ui/history_cursor`, the desktop's rule)
-  ##     and the replay goes there;
+  ##   * history back / forward: the cursor moves one stop through the
+  ##     session's jump history (`DebugControlsVM`, the desktop's) and the
+  ##     replay goes there;
   ##   * reset: the replay restarted — the recording opened afresh, at the
   ##     tick it was at — and the old session closed;
   ##   * stop: the debugging session ended — the recording's folder opened as
@@ -4402,13 +4386,11 @@ proc performTool(r: GpuiRenderer; tool: GToolButton) =
     return
   case tool
   of gtbBack, gtbForward:
+    # The session's one jump history (`DebugControlsVM`), which records every
+    # stop the store reaches — the desktop's history, on this front-end too.
     let direction = if tool == gtbBack: hdOlder else: hdNewer
-    let next = nextHistoryIndex(gJumpHistory.len, gHistoryIndex, direction)
-    gHistoryIndex = next
-    gHistoryMoving = true
-    gSession.gotoTick(gJumpHistory[^next])
+    discard gSession.historyMove(direction)
     refreshReplayWindow(r)
-    gHistoryMoving = false
   of gtbReset:
     let tick = gSession.getCurrentRRTicks()
     let old = gShell.app.activeSessionId()

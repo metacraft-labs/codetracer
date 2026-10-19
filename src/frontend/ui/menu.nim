@@ -1,7 +1,7 @@
 from std / dom import Document
 import std / [tables, times]
 import
-  ui_imports, debug, command, chord_display, menu_keys
+  ui_imports, debug_toolbar, command, chord_display, menu_keys
 # PLAT-48: the menu's logical state is the shared Menu ViewModel's.
 import ../viewmodel/viewmodels/menu_vm
 
@@ -742,10 +742,10 @@ when defined(js):
       ensureMenuDismissWiring(self)
       requestSessionTabsRenderSoon()
       if not self.data.startOptions.shellUi:
-        self.debug.requestDebugShellRender()
+        debug_toolbar.requestDebugShellRender()
         if not self.data.ui.commandPalette.isNil:
           self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
-        self.debug.requestDebugControlsRender()
+        debug_toolbar.ensureDebugToolbar()
       return
 
     let callbacks = MenuShellCallbacks(
@@ -779,10 +779,10 @@ when defined(js):
     menuShellGate.noteRendered(signature)
     requestSessionTabsRenderSoon()
     if not self.data.startOptions.shellUi:
-      self.debug.requestDebugShellRender()
+      debug_toolbar.requestDebugShellRender()
       if not self.data.ui.commandPalette.isNil:
         self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
-      self.debug.requestDebugControlsRender()
+      debug_toolbar.ensureDebugToolbar()
     wireMenuKeyboard(container, self)
     if self.vm.keyNavigation:
       focusNavigationSoon()

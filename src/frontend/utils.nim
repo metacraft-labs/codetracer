@@ -619,14 +619,6 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
   when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
     data.registerComponent(result, Content.AgentActivity)
 
-proc makeDebugComponent*(data: Data): DebugComponent =
-  result = DebugComponent(
-    id: data.generateId(Content.Debug),
-    message: LogMessage(message: "", level: MsgInfo, time: -1),
-    service: data.services.debugger)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
-    data.registerComponent(result, Content.Debug)
-
 proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
   result = FilesystemComponent(
     id: id,
@@ -816,7 +808,6 @@ proc makeMenuComponent*(data: Data): MenuComponent =
     activePathOffsets: JsAssoc[int,int]{},
     prepared: @[],
     nameMap: JsAssoc[cstring, ClientAction]{},
-    debug: data.debugComponent,
     service: data.services.editor,
     iconWidth: 24,
     mainMenuWidth: 18,
@@ -1049,7 +1040,9 @@ when defined(ctRenderer):
 proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", noInfoMessage: cstring = ""): Component =
   case content:
   # singletons
-  of Content.Debug:           data.makeDebugComponent()
+  # The debugger toolbar is not a component: its state is the session's
+  # `DebugControlsVM` and the menu shell renders it (`ui/debug_toolbar`).
+  of Content.Debug:           nil
   of Content.Build:           data.makeBuildComponent()
   of Content.BuildErrors:     data.makeErrorsComponent()
   of Content.Status:          data.makeStatusComponent(

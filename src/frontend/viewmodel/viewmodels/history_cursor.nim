@@ -51,17 +51,17 @@
 ##
 ## ## No imports, deliberately
 ##
-## Every caller is inside `ui/`, whose modules pull in kdom, Monaco and the
-## Electron bridge and cannot be compiled by a unit lane. Keeping this file
-## free of them is what lets `viewmodel/tests/unit/test_history_cursor.nim`
+## It sits with the ViewModels because `DebugControlsVM` owns the jump
+## history for every front-end. Keeping this file free of imports is what
+## lets `viewmodel/tests/unit/test_history_cursor.nim`
 ## assert the LOCATION A GESTURE LANDS ON, on both the C and JS backends,
 ## rather than assert that a command was dispatched.
 
 type
   HistoryDirection* = enum
-    ## Which way the cursor moves through `DebugComponent.jumpHistory`.
+    ## Which way the cursor moves through `DebugControlsVM.history`.
     ##
-    ## Named for the SEQUENCE, not for the gesture. `jumpHistory` grows at the
+    ## Named for the SEQUENCE, not for the gesture. `history` grows at the
     ## end, so "older" is toward index 0 and "newer" is toward `[^1]`.
     hdOlder
       ## Toward entries recorded EARLIER. This is what a Back gesture does,

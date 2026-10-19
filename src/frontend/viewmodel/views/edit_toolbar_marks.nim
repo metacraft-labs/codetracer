@@ -234,6 +234,21 @@ when defined(js):
       svg.appendChild(p)
     svg
 
+  proc attachEditMark*(btn: isonim_dom.Element; buttonId: string): bool
+      {.discardable.} =
+    ## Put the mark of the button `buttonId` on `btn`, the button just
+    ## rendered (a toolbar whose buttons come and go with its model attaches
+    ## them one by one). `false` when the button carries no mark.
+    for m in EditToolbarMarks:
+      if m.buttonId == buttonId:
+        let existing = btn.firstElementChild
+        if existing.isNil:
+          btn.appendChild(buildEditMark(m))
+        else:
+          discard btn.insertBefore(buildEditMark(m), existing)
+        return true
+    false
+
   proc attachEditToolbarMarks*(panel: isonim_dom.Element): int {.discardable.} =
     ## Put each mark on its button, and answer how many were placed.
     ##

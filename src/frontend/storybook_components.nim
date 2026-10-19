@@ -1345,7 +1345,7 @@ proc mountDebugControls(container: isonim_dom.Element; fixture: string): Dispose
         threadId: 1'u32,
       )
       vm = createDebugControlsVM(store)
-      mountIsoNimDebugControls(container, vm)
+      renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(), container, vm)
       discard isonim_dom.appendChild(isonim_dom.Node(container),
                                      isonim_dom.Node(logNode))
       store.requestRecordingHead()
@@ -1358,7 +1358,7 @@ proc mountDebugControls(container: isonim_dom.Element; fixture: string): Dispose
 
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createDebugControlsVM(store)
-    mountIsoNimDebugControls(container, vm)
+    renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(), container, vm)
     return proc() = vm.dispose())
 
 proc mountPointList(container: isonim_dom.Element; fixture: string): DisposeProc =

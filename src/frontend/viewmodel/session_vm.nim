@@ -115,6 +115,11 @@ type
     editorVM*: EditorVM
     timelineVM*: TimelineVM
     debugControlsVM*: DebugControlsVM
+    debugCommands*: DebugCommands
+      ## What the toolbar's actions do on this host, set by the host BEFORE
+      ## `initializePanelViewModels` builds `debugControlsVM` with it (D6: no
+      ## callback is assigned onto a VM afterwards). Left unset, the VM gets
+      ## `defaultDebugCommands` over the session's backend.
     searchVM*: SearchVM
     searchResultsVM*: SearchResultsVM
       ## PLAT-57. The Find in Files pane's ViewModel on the native
@@ -266,7 +271,11 @@ proc initializePanelViewModels*(session: SessionViewModel) =
   if session.timelineVM.isNil:
     session.timelineVM = createTimelineVM(session.store)
   if session.debugControlsVM.isNil:
-    session.debugControlsVM = createDebugControlsVM(session.store)
+    session.debugControlsVM = createDebugControlsVM(session.store,
+      if session.debugCommands.step.isNil:
+        defaultDebugCommands(session.store)
+      else:
+        session.debugCommands)
   if session.searchVM.isNil:
     session.searchVM = createSearchVM(session.store)
   if session.searchResultsVM.isNil:

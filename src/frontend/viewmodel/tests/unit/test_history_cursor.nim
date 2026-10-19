@@ -43,7 +43,7 @@
 
 import std/unittest
 
-import ../../../ui/history_cursor
+import ../../viewmodels/history_cursor
 
 # ---------------------------------------------------------------------------
 # A counted `check` — Verification-Harness-Traps.md §4c.

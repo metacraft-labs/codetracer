@@ -118,7 +118,7 @@ from ../viewmodel/store/types import BuildProblemLine
 from ../viewmodel/viewmodels/edit_mode_toolbar import
   editModeToolbar, EditToolbarModel, ToolbarMode
 from ../viewmodel/platform/web_platform import currentWasmRegistry
-import ./debug
+import ./debug_toolbar
 
 export noir_build_producer
 

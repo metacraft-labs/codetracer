@@ -1,6 +1,6 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, options,
-  state, editor, debug, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
+  state, editor, debug_toolbar, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
   # The five panes whose mount was moved into this file's component factory.
   # `state` was already imported; `calltrace`, `trace`, `event_log` and

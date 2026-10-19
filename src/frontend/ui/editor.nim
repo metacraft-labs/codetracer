@@ -1,6 +1,6 @@
 import
   std/[ cstrutils, jsre, options ],
-  ui_imports, trace, debug, menu, flow, value, no_source, kdom,
+  ui_imports, trace, debug_toolbar, menu, flow, value, no_source, kdom,
   shortcut_labels,
   trace_macro, trace_static,
   column_click_resolver, editor_scope,

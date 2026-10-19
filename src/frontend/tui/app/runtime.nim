@@ -723,7 +723,7 @@ proc movesTheDebugger*(action: KeyAction): bool =
   of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
      kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
      kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
-     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
+     kaJumpToStart, kaJumpToEnd, kaSeekToTick, kaHistoryBack, kaHistoryForward,
      kaValueOrigin, kaReverseOrigin: true
   else: false
 

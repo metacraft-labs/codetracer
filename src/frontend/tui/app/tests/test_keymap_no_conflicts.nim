@@ -63,7 +63,9 @@ import ./navigation_table
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 312
+const ExpectedAssertions = 318
+  ## The shared jump history: +6 — `Alt+Left` / `Alt+Right` bound (two chord
+  ## checks), two xterm sequences decoded, and their two reachability checks.
   ## PLAT-68 Phase B: +2 — the `.cttui-keys` case is the one-time importer
   ## now (the file translated, laid over the Vim base through the router,
   ## its gaps reported), and the planted-`r` arm is the loader's refusal (one
@@ -93,12 +95,12 @@ const
   SpecSectionHeading = "### 4.2 Keybindings Reference Table"
   SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
-  ExpectedSpecRows = 33
+  ExpectedSpecRows = 34
     ## §4.2's row count, counted from the document on 2026-09-06. Asserted so
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 93
+  ExpectedBindingCount = 95
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -118,6 +120,9 @@ const
     ## 93 SINCE PLAT-68: `F6` / `Shift+F6` (focus the next / previous pane —
     ## the way off an editor whose `Tab` now indents) and `Ctrl+Shift+p` (the
     ## command palette, VS Code's chord, beside `F1`), CodeTracer-TUI.md §4.2.
+    ##
+    ## 95 SINCE the shared jump history: `Alt+Left` / `Alt+Right`, history
+    ## back / forward (CodeTracer-TUI.md §4.2's "History Back / Forward").
 
   # Real xterm byte sequences, and the canonical name each must decode to.
   # This list is the "reachability" oracle of check 4, and it is written from
@@ -159,6 +164,9 @@ const
     # PLAT-68's pane and palette chords: `CSI 17 ~` is F6, and Ctrl+Shift+p
     # has no legacy encoding (it is `0x10`, Ctrl+p) — the Kitty `CSI u` form
     # carries it, which is why the palette keeps `F1` beside it.
+    # The history's chords: an arrow with a modifier is `CSI 1 ; m D|C`
+    # (ctlseqs, "PC-Style Function Keys"), Alt is `1 + 2 = 3`.
+    ("\x1b[1;3D", "Alt+Left"), ("\x1b[1;3C", "Alt+Right"),
     ("\x1b[17~", "F6"), ("\x1b[17;2~", "Shift+F6"),
     ("\x1b[112;6u", "Ctrl+Shift+p"),
   ]
@@ -471,7 +479,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 71
+    ck decoded == 73
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0

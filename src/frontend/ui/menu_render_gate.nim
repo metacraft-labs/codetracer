@@ -156,15 +156,10 @@ proc invalidate*(gate: var MenuRenderGate) =
   gate.hasRendered = false
   gate.lastSignature = ""
 
-proc shouldRemountDebugControls*(mounted: bool; hostHasChildren: bool): bool =
-  ## The repair decision in `ui/debug.nim`'s `requestDebugControlsRender`.
-  ##
-  ## The toolbar has to be re-mounted whenever we have never mounted it, or
-  ## whenever the `#isonim-debug-controls` host that survives in the DOM is
-  ## empty — which is what a full menu-shell rebuild leaves behind, since the
-  ## host node itself is re-created by the shell view.
-  ##
-  ## Kept here, next to the gate that decides whether such a rebuild happens at
-  ## all, because the two are one story: while the gate suppresses the rebuild
-  ## the host keeps its children and this predicate answers `false`.
-  not (mounted and hostHasChildren)
+proc shouldFillToolbarHost*(hostIsNew: bool; hostHasChildren: bool): bool =
+  ## Whether the menu shell's toolbar host needs the topbar rendered into it
+  ## (`ui/debug_toolbar.ensureDebugToolbar`): when it is a host this session
+  ## has not filled, or one that lost its children. The shell carries the host
+  ## across its own re-renders, so while the render gate holds the host keeps
+  ## its toolbar and this answers `false`.
+  hostIsNew or not hostHasChildren

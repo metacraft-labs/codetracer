@@ -674,6 +674,22 @@ proc dispatchAction*(d: Dispatcher; ctx: CommandContext; action: KeyAction;
     rejected(action, "nothing to dispatch")
 
   # ---- §4.2 Omniscient Stepping -----------------------------------------
+  of kaHistoryBack, kaHistoryForward:
+    # The desktop's history back / forward, through the one history every
+    # front-end shares (`DebugControlsVM`); the host settles the move.
+    if d.controls.isNil:
+      return unavailable(action, "no DebugControlsVM is wired, so the " &
+                         "history cannot reach the engine")
+    let direction = if action == kaHistoryBack: hdOlder else: hdNewer
+    let possible =
+      if direction == hdOlder: d.controls.canGoBack.val
+      else: d.controls.canGoForward.val
+    if not possible:
+      return unavailable(action, if direction == hdOlder:
+                                   "no earlier position in the history"
+                                 else: "no later position in the history")
+    d.controls.moveInHistory(direction)
+    done(action, if direction == hdOlder: "history back" else: "history forward")
   of kaStepOver: stepWith(d, action, true, "step over")
   of kaReverseStepOver: stepWith(d, action, false, "reverse step over")
   of kaStepInto: stepWith(d, action, true, "step into")

@@ -29,10 +29,8 @@ import
   std/[strutils, options],
   isonim/core/signals,
   ui_imports, trace,
-  # `debug` FOR `handleHistoryJump`: without this import the call bound to a
-  # `{.base.}` method whose body was `discard`, and both mouse side-button
-  # handlers below did nothing.
-  ./debug,
+  # The toolbar's history, for the mouse's back and forward buttons.
+  ./debug_toolbar,
   ./shortcut_labels,
   ./shortcut_presets,
   ./shortcut_dialog,
@@ -130,7 +128,5 @@ proc configureShortcuts* =
 
     let mouseButton = cast[int](e.toJs.button)
     if mouseButton == MouseButtonBack or mouseButton == MouseButtonForward:
-      if data.ui.componentMapping[Content.Debug].len > 0:
-        cast[DebugComponent](data.ui.componentMapping[Content.Debug][0])
-          .handleHistoryJump(historyDirectionOfMouseButton(mouseButton))
+      moveInDebugHistory(historyDirectionOfMouseButton(mouseButton))
   )

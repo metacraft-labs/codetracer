@@ -16,7 +16,7 @@ import
   ../dap,
   ../renderer,
   menu,
-  debug,
+  debug_toolbar,
   welcome_screen,
   search_results,
   ../utils,
@@ -275,7 +275,6 @@ proc createNewSession*(data: Data) =
   # so initialise the new session while it is temporarily active.
   let previousActiveSessionIndex = data.activeSessionIndex
   data.activeSessionIndex = sessionId
-  discard data.makeDebugComponent()
   discard data.makeMenuComponent()
   discard data.makeBuildComponent()
   discard data.makeErrorsComponent()
@@ -439,7 +438,7 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    Empty welcome sessions also own the singleton shared components, so
   #    redraw them even though they do not create a GoldenLayout instance.
   refreshSessionTabBar()
-  debug.rewireDebugControlsBridgeForActiveSession(data)
+  debug_toolbar.ensureDebugToolbar()
   if not data.activeSession.ui.layout.isNil or data.activeSession.startOptions.welcomeScreen:
     if data.activeSession.startOptions.welcomeScreen:
       if not data.ui.welcomeScreen.isNil:
@@ -451,5 +450,5 @@ proc switchSession*(data: Data, targetIndex: int) =
     if not data.ui.menu.isNil:
       discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
       discard windowSetTimeout(proc() =
-        debug.rewireDebugControlsBridgeForActiveSession(data), 0)
+        debug_toolbar.ensureDebugToolbar(), 0)
     discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)

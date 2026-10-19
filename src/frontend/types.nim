@@ -771,23 +771,6 @@ type
     extensionRendererId*: cstring
 
 
-  DebugComponent* = ref object of Component
-    service*:       DebuggerService
-    message*:       LogMessage
-    # TODO dropdown
-    after*: bool
-    before*: bool
-    listHistory*: bool
-    fullHistory*: bool
-    historyIndex*: int
-    usingContextMenu*: bool
-    historyDirection*: bool
-    activeHistory*: cstring
-    finished*: bool
-    jumpHistory*: seq[JumpHistory]
-    currentOperation*: cstring
-    isLoading*: bool
-
 
 
   ChartComponent* = ref object of Component
@@ -1917,7 +1900,6 @@ type
     activePathOffsets*: JsAssoc[int, int]
     prepared*: seq[js]
     nameMap*: JsAssoc[cstring, ClientAction]
-    debug*: DebugComponent
     service*: EditorService
     iconWidth*: int
     mainMenuWidth*: int
@@ -3098,17 +3080,11 @@ method onUploadTraceProgress*(self: Component, uploadProgress: UploadProgress) {
 # `handleHistoryJump` WAS HERE, AS A `{.base.}` METHOD RETURNING `discard`,
 # AND IT ATE A GESTURE.
 #
-# `ui/debug.nim` implements history navigation as a `proc` on
-# `DebugComponent`, not as a `method`, so this base was never overridden.
-# `ui/shortcuts.nim` does not import `ui/debug` — it gets `Component` from
-# `ui_imports`' re-export of this module — so its two mouse side-button
-# handlers bound to THIS declaration, dispatched dynamically, and discarded.
-# The browser Back and Forward mouse buttons did nothing for the whole period,
-# and the call sites read as if they worked.
-#
-# Deleted rather than fixed, so the compiler is the thing that answers. With
-# no base here, `shortcuts.nim` must import `ui/debug` to call it, and a
-# missing implementation is a build error instead of a silent `discard`.
+# The debugger's history was a `proc` on the debug component, so this base was
+# never overridden: `ui/shortcuts.nim`'s two mouse side-button handlers bound
+# to THIS declaration, dispatched dynamically, and discarded. Deleted rather
+# than fixed; the history now belongs to `DebugControlsVM`, which the mouse
+# handlers reach through `ui/debug_toolbar.moveInDebugHistory`.
 method redrawForExtension*(self: Component) {.base.} =
   discard
 
@@ -3122,9 +3098,6 @@ method redraw*(self: Component) {.base.} =
     self.redrawForSinglePage()
 
 # templates for singletons
-template debugComponent*(data: Data): DebugComponent =
-  DebugComponent(data.ui.componentMapping[Content.Debug][0])
-
 template welcomeScreen*(data: Data): WelcomeScreenComponent =
   WelcomeScreenComponent(data.ui.componentMapping[Content.WelcomeScreen][0])
 

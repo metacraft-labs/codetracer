@@ -74,6 +74,10 @@ const
     BaseRow(chords: "g g", operation: "debugger.jump-to-start", table: G, navModes: N),
     BaseRow(chords: "Shift+G", operation: "debugger.jump-to-end", table: G, navModes: N),
     BaseRow(chords: "t", operation: "debugger.seek-to-tick", table: G, navModes: N),
+    # History: the positions the debugger has stopped at, as the desktop's
+    # back / forward buttons walk them (the browser's chords).
+    BaseRow(chords: "Alt+Left", operation: "navigation.back", table: G, navModes: N),
+    BaseRow(chords: "Alt+Right", operation: "navigation.forward", table: G, navModes: N),
     # Value Origin Tracking
     BaseRow(chords: "o", operation: "editor.jump-to-value-origin", table: G, navModes: N),
     BaseRow(chords: "Shift+O", operation: "debugger.reverse-origin", table: G, navModes: N),
@@ -196,4 +200,3 @@ const
     BaseRow(chords: "Ctrl+O", operation: "layout.reveal-next-docked", table: G,
             navModes: N),
   ]
-

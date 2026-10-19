@@ -385,6 +385,10 @@ type
       ## viewport reports with (Viewport-Driven-Loading V2). Immediate by
       ## default; a host that reports on every resize and scroll event (the
       ## DOM's) installs a deferring one, a test a `TestClock`'s.
+    sessionGeneration*: Signal[int]
+      ## Bumped each time a backend becomes reachable for a different trace
+      ## (`resetForNewSession`). What a ViewModel remembers across stops —
+      ## the toolbar's jump history — starts again on it.
     localsLoadedByHost*: bool
       ## The host requests and applies the locals itself, synchronously, after
       ## each stop (`headless_session.fetchLocals` / `applyLocals`, which the
@@ -761,6 +765,7 @@ proc resetForNewSession*(store: ReplayDataStore) =
   ## never answered.
   store.requestTracker.clear()
   store.locals.loadingState.val = lsIdle
+  store.sessionGeneration.val = store.sessionGeneration.val + 1
   # AND THE PREVIOUS RECORDING'S EVENT ROWS GO WITH THEM. All three call sites
   # in `ui_js.nim` run at the moment a backend first becomes reachable for a
   # DIFFERENT trace — two immediately before `DapLaunch`, one on the web path
@@ -880,6 +885,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
     when defined(js):
       vmDebug "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
     let store = ReplayDataStore(
+      sessionGeneration: createSignal(0),
       storeId: assignedId,
       stops: initStopTimeline(),
       viewportScheduler: immediateScheduler(),

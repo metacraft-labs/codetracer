@@ -92,6 +92,10 @@ type
     kaJumpToStart = "jump-to-start"
     kaJumpToEnd = "jump-to-end"
     kaSeekToTick = "seek-to-tick"
+    kaHistoryBack = "history-back"
+      ## The jump history's previous position (`DebugControlsVM`, every
+      ## front-end's history).
+    kaHistoryForward = "history-forward"
 
     # ---- §4.2 Value Origin Tracking ---------------------------------------
     kaValueOrigin = "value-origin"
@@ -256,7 +260,7 @@ proc scopeOf*(action: KeyAction): ActionScope =
   of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
      kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
      kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
-     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
+     kaJumpToStart, kaJumpToEnd, kaSeekToTick, kaHistoryBack, kaHistoryForward,
      kaValueOrigin, kaReverseOrigin,
      kaCenterOnPointer,
      kaToggleHexDec, kaViewMemoryDump, kaEnterInspect:
@@ -317,6 +321,7 @@ proc specAction*(action: KeyAction): string =
   of kaPrevMutation, kaNextMutation: "Jump Prev / Next Mutation"
   of kaJumpToStart, kaJumpToEnd: "Jump to Start / End"
   of kaSeekToTick: "Seek to Tick"
+  of kaHistoryBack, kaHistoryForward: "History Back / Forward"
   of kaValueOrigin: "Jump to Value Origin"
   of kaReverseOrigin: "Reverse Origin"
   of kaScrollLineDown, kaScrollLineUp: "Scroll Line Down / Up"

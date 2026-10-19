@@ -6,8 +6,14 @@
 ## the store and exposes convenient booleans and text for the UI.
 ## Action procs delegate to `store.requestStep`.
 ##
-## Holds no mutable signals of its own; everything is derived from
-## the store's debugger and timeline signals.
+## Its own state is what the toolbar remembers beyond the debugger's
+## position, for every front-end alike (Shared-DOM-Front-Ends D7.1): the jump
+## history and its cursor, the open history list, whether a test run is
+## pending, and the toolbar surface the layout mode selects. Everything else
+## is derived from the store's debugger and timeline signals.
+##
+## Actions go to the backend through `DebugCommands`, handed in at
+## construction (D6): a host never assigns a callback onto the VM afterwards.
 ##
 ## Derives:
 ## - `canStepForward`: whether a forward step is possible
@@ -31,12 +37,58 @@
 ##   vm.stepForward()
 ##   echo vm.isRunning.val       # true (while stepping)
 
-import isonim/core/[signals, computation, owner]
+import std/[json, options]
+
+import isonim/core/[signals, computation, owner, batch]
 import isonim/viewmodel
 
-import ../store/[replay_data_store, types]
+import ../backend/backend_service
+import ../store/[replay_data_store, types, stop_timeline]
+import ./history_cursor
+from ./edit_mode_toolbar import EditToolbarModel, ToolbarMode, TopbarSurface,
+  topbarSurface, DebugMode
+export history_cursor
+
+const
+  HistoryJumpOperation* = "history-jump"
+    ## `pendingOperation` while a history jump's move is in flight: the move
+    ## it makes is not recorded.
 
 type
+  DebugCommands* = object
+    ## What the toolbar asks the backend (or the host) to do. Built by whoever
+    ## builds the session — `defaultDebugCommands` over the session's
+    ## `BackendService`, with a host's own entries where only the host can do
+    ## the thing — and handed to `createDebugControlsVM`. A nil entry is an
+    ## action this host does not offer; its button is unavailable.
+    step*: proc(actionId: string)
+      ## A step or continue, by its toolbar id (`next`, `step-in`, …).
+    runToEntry*: proc()
+    reset*: proc()
+      ## Restart the replay (the desktop restarts its replay server).
+    stop*: proc()
+    runTests*: proc(done: proc(succeeded: bool))
+      ## Start the tests of the file the debugger is in; call `done` when the
+      ## run finishes, however it finishes.
+    historyJump*: proc(entry: JumpEntry)
+      ## Go to a position of the jump history.
+
+  JumpEntry* = object
+    ## One position the user has been at, as the jump history holds it.
+    location*: Location
+    rrTicks*: uint64
+    lastOperation*: string
+      ## What moved the debugger here (`next`, `run-to-entry`, …); "" when
+      ## nothing the toolbar issued did.
+
+  HistoryListKind* = enum
+    ## Which jump-history list is open (`jump-before` / `jump-after`).
+    hlNone
+    hlBefore
+      ## The entries older than the cursor, most recent first.
+    hlAfter
+      ## The entries newer than the cursor, oldest first.
+
   DebugControlsVM* = ref object of ViewModel
     ## Reactive state for the debug control toolbar.
     ##
@@ -92,19 +144,44 @@ type
       ## a deeper profile", which stays meaningful under a divergence
       ## banner that outranks it in `degradedState`.
 
-    # -- Legacy bridge callbacks --
-    # These are set by the Karax debug component to delegate stepping
-    # to the existing DAP-based event mediator, which is the only path
-    # that actually reaches the replay backend today.
-    # When the new ct/step backend path is wired end-to-end, these
-    # callbacks can be removed and the VM action procs used directly.
-    onDapStep*: proc(action: cstring)
-      ## Called by IsoNim view buttons for DAP-based step actions.
-      ## Maps to `dapStep(api, action)` in the legacy system.
-    onAction*: proc(action: string)
-      ## Called by IsoNim view buttons for non-step actions
-      ## (e.g. "run-to-entry", "reset-operation", "history-back").
-      ## Maps to `DebugComponent.action(id)` in the legacy system.
+    commands*: DebugCommands
+      ## The actions' route to the backend; set at construction.
+
+    # -- Jump history (the GUI's, now every front-end's) --
+    history*: Signal[seq[JumpEntry]]
+      ## Every position the debugger stopped at, oldest first. A move made by
+      ## a history jump is not recorded; a move made while the cursor is back
+      ## in the history first drops the entries newer than the cursor, as a
+      ## browser does.
+    historyIndex*: Signal[int]
+      ## The cursor, counted back from the newest entry: 1 is `history[^1]`
+      ## (`history_cursor.nextHistoryIndex`'s convention).
+    canGoBack*: Memo[bool]
+    canGoForward*: Memo[bool]
+    historyList*: Signal[HistoryListKind]
+      ## The open history list (`jump-before` / `jump-after`), or `hlNone`.
+    historyListEntries*: Memo[seq[JumpEntry]]
+      ## The open list's entries, in the order the list shows them.
+    pendingOperation*: string
+      ## The toolbar action whose move has not arrived yet; recorded on the
+      ## history entry that move creates.
+
+    # -- Test runs --
+    runTestsPending*: Signal[bool]
+      ## A test run started from the toolbar has not finished. Cleared by the
+      ## run's own completion (`DebugCommands.runTests`' callback).
+
+    # -- Which surface the toolbar host carries --
+    toolbarMode*: Signal[ToolbarMode]
+      ## The layout mode the host is in; set by the host on every mode change.
+    editToolbar*: Signal[Option[EditToolbarModel]]
+      ## The edit-mode toolbar a platform composed, or none when none was
+      ## installed (the debugger controls then stay in every mode).
+    editToolbarInvoke*: proc(id: string)
+      ## The edit-mode toolbar's action route, installed with its model.
+    topbarSurface*: Memo[TopbarSurface]
+      ## What the toolbar host shows: the debugger controls or the edit-mode
+      ## commands (`edit_mode_toolbar.topbarSurface`).
 
     # -- Keyboard-chord lookup, for the toolbar tooltips --
     #
@@ -293,8 +370,9 @@ proc invokeToolbarStep*(vm: DebugControlsVM; actionId: string) =
       vm.store.requestLiveToolbarAction(actionId)
     return
 
-  if not vm.onDapStep.isNil:
-    vm.onDapStep(cstring(actionId))
+  if not vm.commands.step.isNil:
+    vm.pendingOperation = actionId
+    vm.commands.step(actionId)
     return
 
   case actionId
@@ -309,10 +387,176 @@ proc invokeToolbarStep*(vm: DebugControlsVM; actionId: string) =
   else: discard
 
 # ---------------------------------------------------------------------------
+# Jump history
+# ---------------------------------------------------------------------------
+
+proc recordStop*(vm: DebugControlsVM; location: Location; rrTicks: uint64) =
+  ## Record the debugger's arrival at a stop, with the desktop's rules
+  ## (`DebugComponent.onCompleteMove` before this VM held the history): the
+  ## same position twice is one entry; a move a history jump made is not
+  ## recorded; a move made while the cursor is back in the history drops the
+  ## entries newer than the cursor first.
+  var entries = vm.history.val
+  if entries.len > 0 and entries[^1].rrTicks == rrTicks and
+     entries[^1].location == location:
+    vm.pendingOperation = ""
+    return
+  if vm.pendingOperation == HistoryJumpOperation:
+    vm.pendingOperation = ""
+    return
+  let cursor = vm.historyIndex.val
+  if cursor > 1 and entries.len >= cursor:
+    entries.setLen(entries.len - cursor + 1)
+  entries.add JumpEntry(location: location, rrTicks: rrTicks,
+                        lastOperation: vm.pendingOperation)
+  vm.pendingOperation = ""
+  vm.history.val = entries
+  vm.historyIndex.val = 1
+
+proc resetHistory*(vm: DebugControlsVM) =
+  ## Forget the history (a restarted replay starts a new one).
+  vm.history.val = newSeq[JumpEntry]()
+  vm.historyIndex.val = 1
+  vm.historyList.val = hlNone
+  vm.pendingOperation = ""
+
+proc jumpToHistoryIndex(vm: DebugControlsVM; index: int) =
+  let entries = vm.history.val
+  if index < 1 or index > entries.len or vm.commands.historyJump.isNil:
+    return
+  vm.historyIndex.val = index
+  vm.pendingOperation = HistoryJumpOperation
+  vm.commands.historyJump(entries[^index])
+
+proc moveInHistory*(vm: DebugControlsVM; direction: HistoryDirection) =
+  ## Move the cursor one entry and jump there. Refused — nothing happens —
+  ## at either end (`nextHistoryIndex`).
+  let next = nextHistoryIndex(vm.history.val.len, vm.historyIndex.val,
+                              direction)
+  if next != 0:
+    vm.jumpToHistoryIndex(next)
+
+proc goBack*(vm: DebugControlsVM) = vm.moveInHistory(hdOlder)
+proc goForward*(vm: DebugControlsVM) = vm.moveInHistory(hdNewer)
+
+proc jumpBefore*(vm: DebugControlsVM) =
+  ## Open the list of the positions before the cursor (`jump-before`).
+  vm.historyList.val = hlBefore
+
+proc jumpAfter*(vm: DebugControlsVM) =
+  ## Open the list of the positions after the cursor (`jump-after`).
+  vm.historyList.val = hlAfter
+
+proc stopJump*(vm: DebugControlsVM) =
+  ## Close the open history list.
+  vm.historyList.val = hlNone
+
+proc chooseHistoryEntry*(vm: DebugControlsVM; position: int) =
+  ## Jump to the entry at `position` of the open list
+  ## (`historyListEntries[position]`) and close the list.
+  let kind = vm.historyList.val
+  let entries = vm.history.val
+  let cursor = vm.historyIndex.val
+  vm.historyList.val = hlNone
+  if position < 0:
+    return
+  case kind
+  of hlNone: discard
+  of hlBefore:
+    # Most recent first: list position 0 is the entry just older than the
+    # cursor, `[^(cursor + 1)]`.
+    let index = cursor + 1 + position
+    if index <= entries.len:
+      vm.jumpToHistoryIndex(index)
+  of hlAfter:
+    # Oldest first: list position 0 is the entry just newer than the cursor.
+    let index = cursor - 1 - position
+    if index >= 1:
+      vm.jumpToHistoryIndex(index)
+
+# ---------------------------------------------------------------------------
+# Toolbar actions other than steps
+# ---------------------------------------------------------------------------
+
+proc runTests*(vm: DebugControlsVM) =
+  ## Start the tests; pending until the run reports back.
+  if vm.commands.runTests.isNil or vm.runTestsPending.val:
+    return
+  vm.runTestsPending.val = true
+  let vmRef = vm
+  vm.commands.runTests(proc(succeeded: bool) =
+    vmRef.runTestsPending.val = false)
+
+proc runToEntry*(vm: DebugControlsVM) =
+  if not vm.commands.runToEntry.isNil:
+    vm.pendingOperation = "run-to-entry"
+    vm.commands.runToEntry()
+
+proc resetOperation*(vm: DebugControlsVM) =
+  ## Restart the replay; the history starts again with it.
+  if not vm.commands.reset.isNil:
+    vm.resetHistory()
+    vm.commands.reset()
+
+proc stopOperation*(vm: DebugControlsVM) =
+  if not vm.commands.stop.isNil:
+    vm.commands.stop()
+
+proc setEditToolbar*(vm: DebugControlsVM; model: EditToolbarModel;
+                     invoke: proc(id: string)) =
+  ## Install (or replace) the composed edit-mode toolbar.
+  vm.editToolbarInvoke = invoke
+  vm.editToolbar.val = some(model)
+
+proc invokeToolbarAction*(vm: DebugControlsVM; actionId: string) =
+  ## Every toolbar action by the id its button carries — the one route a
+  ## button, a key chord and a menu item take, on every front-end.
+  case actionId
+  of "next", "reverse-next", "step-in", "step-out", "continue",
+     "reverse-continue", "reverse-step-in", "reverse-step-out":
+    vm.invokeToolbarStep(actionId)
+  of "run-to-entry": vm.runToEntry()
+  of "reset-operation", "full-reset-operation": vm.resetOperation()
+  of "stop": vm.stopOperation()
+  of "run-tests": vm.runTests()
+  of "jump-before": vm.jumpBefore()
+  of "jump-after": vm.jumpAfter()
+  of HistoryBackActionId, HistoryForwardActionId:
+    vm.moveInHistory(historyDirectionOfAction(actionId))
+  of "jump-to-live": vm.jumpToLive()
+  else: discard
+
+proc defaultDebugCommands*(store: ReplayDataStore): DebugCommands =
+  ## The commands every host can issue over the session's `BackendService`:
+  ## steps (`requestStep`), run to entry and history jumps. Reset, stop and
+  ## test runs are a host's to supply.
+  DebugCommands(
+    step: proc(actionId: string) =
+      let direction =
+        case actionId
+        of "reverse-next": sdBackward
+        of "step-in": sdStepIn
+        of "step-out": sdStepOut
+        of "continue": sdContinue
+        of "reverse-continue": sdReverseContinue
+        of "reverse-step-in": sdReverseStepIn
+        of "reverse-step-out": sdReverseStepOut
+        else: sdForward
+      store.requestStep(direction),
+    runToEntry: proc() =
+      discard store.backend.send("ct/run-to-entry", newJObject()),
+    historyJump: proc(entry: JumpEntry) =
+      discard store.backend.send("ct/history-jump", %*{
+        "path": entry.location.file, "line": entry.location.line,
+        "rrTicks": entry.rrTicks,
+        "sourceGeneration": entry.location.sourceGeneration}))
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
-proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
+proc createDebugControlsVM*(store: ReplayDataStore;
+                            commands: DebugCommands): DebugControlsVM =
   ## Create a DebugControlsVM inside a reactive root owned by `withViewModel`.
   ## The reactive root is disposed via `vm.dispose()`.
   ##
@@ -454,7 +698,37 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
         session.recordingHeadRRTicks > 0'u64 and
         dbg.status == dsIdle
 
-    DebugControlsVM(
+    # -- The jump history and the toolbar surface (own state) --
+    let history = createSignal(newSeq[JumpEntry]())
+    let historyIndex = createSignal(1)
+    let historyList = createSignal(hlNone)
+    let toolbarMode = createSignal(DebugMode)
+    let editToolbar = createSignal(none(EditToolbarModel))
+    let canGoBack = createMemo[bool] proc(): bool =
+      nextHistoryIndex(history.val.len, historyIndex.val, hdOlder) != 0
+    let canGoForward = createMemo[bool] proc(): bool =
+      nextHistoryIndex(history.val.len, historyIndex.val, hdNewer) != 0
+    let historyListEntries = createMemo[seq[JumpEntry]] proc(): seq[JumpEntry] =
+      let entries = history.val
+      let cursor = historyIndex.val
+      case historyList.val
+      of hlNone: discard
+      of hlBefore:
+        var index = cursor + 1
+        while index <= entries.len:
+          result.add entries[^index]
+          inc index
+      of hlAfter:
+        var index = cursor - 1
+        while index >= 1:
+          result.add entries[^index]
+          dec index
+    let surface = createMemo[TopbarSurface] proc(): TopbarSurface =
+      topbarSurface(toolbarMode.val, editToolbar.val.isSome)
+
+    var vm: DebugControlsVM
+    let vmRef = proc(): DebugControlsVM = vm
+    vm = DebugControlsVM(
       store: store,
       canStepForward: canStepForward,
       canStepBackward: canStepBackward,
@@ -473,5 +747,43 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       divergenceDetected: divergenceDetected,
       traceTruncated: traceTruncated,
       shortcutsRevision: createSignal(0),
+      commands: commands,
+      history: history,
+      historyIndex: historyIndex,
+      canGoBack: canGoBack,
+      canGoForward: canGoForward,
+      historyList: historyList,
+      historyListEntries: historyListEntries,
+      runTestsPending: createSignal(false),
+      toolbarMode: toolbarMode,
+      editToolbar: editToolbar,
+      topbarSurface: surface,
       disposeProc: dispose,
     )
+    # A different trace behind the same store starts a new history.
+    var seenGeneration = store.sessionGeneration.val
+    createEffect proc() =
+      let generation = store.sessionGeneration.val
+      if generation != seenGeneration:
+        seenGeneration = generation
+        untrack(proc() = vmRef().resetHistory())
+
+    # Every stop the debugger reaches is offered to the history; a stop is
+    # its position AND its tick (`stopIdentityOf`), so two lines at one tick
+    # are two entries. Untracked beyond the identity, as the stop loader is.
+    var lastIdentity = ""
+    createEffect proc() =
+      let state = store.debugger.val
+      let identity = stopIdentityOf(state)
+      if state.rrTicks == 0'u64 and state.location.file.len == 0:
+        return
+      if identity == lastIdentity:
+        return
+      lastIdentity = identity
+      untrack(proc() = vmRef().recordStop(state.location, state.rrTicks))
+    vm
+
+proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
+  ## A DebugControlsVM over the commands every host can issue through the
+  ## session's backend (`defaultDebugCommands`).
+  createDebugControlsVM(store, defaultDebugCommands(store))
