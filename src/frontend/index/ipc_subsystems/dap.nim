@@ -59,6 +59,27 @@ proc nextWireSeq(): int =
   inc wireSeqCounter
   return wireSeqCounter
 
+# --- Server-side DAP clients ---
+#
+# A server that owns a session for a remote page (`ct host`) talks to the
+# Backend Manager itself, beside the page, over the same multiplexed
+# connection. Its requests carry their own wire `seq`, and their answers go
+# back to it alone: the page never asked them, and fanning them out would hand
+# the page responses to questions it does not recognise. Events, which carry
+# no request identity, go to the page AND to the session's local listeners.
+
+type
+  LocalDapResponseHandler* = proc(response: JsObject)
+  LocalDapEventListener* = proc(event: JsObject)
+
+var localResponseHandlers: Table[int, LocalDapResponseHandler] =
+    initTable[int, LocalDapResponseHandler]()
+  ## Keyed by the wire `seq` of a request a server-side client sent.
+
+var localEventListeners: Table[int, seq[LocalDapEventListener]] =
+    initTable[int, seq[LocalDapEventListener]]()
+  ## Keyed by the session whose events the listener receives.
+
 proc registerStartReplayHandler*(handler: proc(body: JsObject)) =
   replayStartHandler = handler
 
@@ -82,6 +103,25 @@ proc getSessionId*(body: JsObject): int =
     return body["sessionId"].to(int)
   return 0
 
+proc selectSession(sessionId: int) =
+  ## Point the Backend Manager at `sessionId`'s replay, when it is serving
+  ## another one.
+  ##
+  ## The routing decision is keyed solely on the target sessionId vs the
+  ## one the BM is currently serving. Earlier code special-cased
+  ## `sessionId == 0` and skipped the switch, which mis-targeted the
+  ## default session whenever a non-zero session had previously been
+  ## selected on the BM (issue #327). The routing must be symmetric:
+  ## session 0 needs the same switch logic as any other session.
+  if sessionId != currentDapSessionId:
+    backendManagerSocket.write(wrapJsonForSending(js{
+      "type": cstring"request",
+      "command": cstring"ct/select-replay",
+      "arguments": sessionId,
+      "seq": nextWireSeq()
+    }))
+    currentDapSessionId = sessionId
+
 proc sendDapForSession*(sessionId: int, message: JsObject) =
   ## Forward a DAP request to the Backend Manager on behalf of
   ## `sessionId`.  If the BM is currently serving a different session,
@@ -91,23 +131,7 @@ proc sendDapForSession*(sessionId: int, message: JsObject) =
       sessionId, ": ", message.toJs
     return
 
-  # Switch the BM to the requested session when necessary.
-  #
-  # The routing decision is keyed solely on the target sessionId vs the
-  # one the BM is currently serving.  Earlier code special-cased
-  # `sessionId == 0` and skipped the switch, which mis-targeted the
-  # default session whenever a non-zero session had previously been
-  # selected on the BM (issue #327).  The routing must be symmetric:
-  # session 0 needs the same switch logic as any other session.
-  if sessionId != currentDapSessionId:
-    let selectMsg = js{
-      "type": cstring"request",
-      "command": cstring"ct/select-replay",
-      "arguments": sessionId,
-      "seq": nextWireSeq()
-    }
-    backendManagerSocket.write(wrapJsonForSending(selectMsg))
-    currentDapSessionId = sessionId
+  selectSession(sessionId)
 
   # Track which session owns this request so the response can be tagged:
   # the frame goes out under a wire `seq` unique across sessions, recorded
@@ -121,6 +145,37 @@ proc sendDapForSession*(sessionId: int, message: JsObject) =
     frame["seq"] = wireSeq
 
   backendManagerSocket.write(wrapJsonForSending(frame))
+
+proc sendLocalDapRequest*(sessionId: int; command: cstring;
+                          arguments: JsObject;
+                          onResponse: LocalDapResponseHandler): bool =
+  ## Send a DAP request for `sessionId` on behalf of a server-side client;
+  ## `onResponse` receives the whole DAP response. `false` when there is no
+  ## Backend Manager connection to send on.
+  if backendManagerSocket.isNil:
+    return false
+  selectSession(sessionId)
+  let wireSeq = nextWireSeq()
+  localResponseHandlers[wireSeq] = onResponse
+  backendManagerSocket.write(wrapJsonForSending(js{
+    "type": cstring"request",
+    "command": command,
+    "arguments": arguments,
+    "seq": wireSeq
+  }))
+  true
+
+proc addLocalDapEventListener*(sessionId: int;
+                               listener: LocalDapEventListener): proc() =
+  ## Receive every DAP event of `sessionId`. Returns the proc that stops it.
+  if not localEventListeners.hasKey(sessionId):
+    localEventListeners[sessionId] = @[]
+  localEventListeners[sessionId].add listener
+  result = proc() =
+    if localEventListeners.hasKey(sessionId):
+      let i = localEventListeners[sessionId].find(listener)
+      if i >= 0:
+        localEventListeners[sessionId].delete(i)
 
 proc onDapRawMessage*(sender: js, response: JsObject) {.async.} =
   ## IPC handler for "dap-raw-message" from the renderer.
@@ -170,6 +225,13 @@ proc handleFrame(frame: string) =
       if command == cstring("ct/select-replay"):
         return
 
+    # A server-side client's request: its answer is its own.
+    if jsHasKey(body, cstring"request_seq"):
+      var handler: LocalDapResponseHandler
+      if localResponseHandlers.pop(body["request_seq"].to(int), handler):
+        handler(body)
+        return
+
     # M9: Tag the response with the session that issued the request.
     let sessionId = resolveSessionId(body)
     body["sessionId"] = sessionId
@@ -182,6 +244,12 @@ proc handleFrame(frame: string) =
     body["sessionId"] = sessionId
     # M16: Fan out to all windows displaying this session.
     broadcastToSession(sessionId, "CODETRACER::dap-receive-event", body)
+    if localEventListeners.hasKey(sessionId):
+      # A COPY: a listener may add another (the server's session attaches on
+      # its first stop, and the ViewModels it builds subscribe).
+      let listeners = localEventListeners[sessionId]
+      for listener in listeners:
+        listener(body)
 
   else:
     echo "unknown DAP message: ", body

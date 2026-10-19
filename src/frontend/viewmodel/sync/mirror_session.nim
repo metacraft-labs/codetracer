@@ -29,6 +29,7 @@ import ../backend/backend_service
 import ../collab/runtime_role
 import ../collab/[codec, session_core, types as collab_types]
 import ../session_vm
+import ../viewmodels/debug_controls_vm
 import action_relay, sync_subscriber, transport
 
 when defined(js):
@@ -88,13 +89,26 @@ proc onHostMessage(m: MirrorSession; msg: JsonNode) =
   else:
     discard
 
-proc createMirrorSession*(channel: SyncChannel): MirrorSession =
+proc createMirrorSession*(
+    channel: SyncChannel;
+    debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil
+): MirrorSession =
   ## A mirror over `channel`. It follows the session the host activates, or
   ## the one `switchTo` names.
+  ##
+  ## `debugCommandsFor` gives the toolbar the host's own commands, for a host
+  ## that drives the replay itself while another process owns the session
+  ## (the page under `ct host`). It is called before the panel ViewModels are
+  ## built, because `DebugControlsVM` takes its commands when it is created
+  ## and the synced-signal registry walks the ViewModels that exist then.
+  ## Without it the toolbar has the defaults over the inert backend, and
+  ## its steps go nowhere.
   let m = MirrorSession(channel: channel)
   createRoot proc(dispose: proc()) =
     m.disposeRoot = dispose
     m.session = createSessionVM(inertBackend(), vrrCollaborator)
+    if not debugCommandsFor.isNil:
+      m.session.debugCommands = debugCommandsFor(m.session)
     m.session.initializePanelViewModels()
   m.subscriber = createSyncSubscriber(m.session)
   channel.setHandler(proc(msg: JsonNode) = m.onHostMessage(msg))

@@ -264,6 +264,9 @@ import viewmodel/session_vm
 import viewmodel/sdk/[debugger_session, trace_source]
 from viewmodel/viewport import timeoutScheduler
 from viewmodel/sdk/stop_loader import claimLocalsLoading
+import viewmodel/sync/[mirror_session, socket_transport]
+from viewmodel/platform/deployment_descriptor import SessionPlacement,
+  spServer, decodePlacement, DescriptorError
 import viewmodel/backend/[backend_service, real_backend]
 import dap_backend
 import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
@@ -294,8 +297,32 @@ var activeDebuggerSession: DebuggerSession
   ## `configureMiddleware`; adopts the trace the host process opened when
   ## `onTraceLoaded` runs (`attachLoadedTrace`).
 var activeSessionVM: SessionViewModel
-  ## `activeDebuggerSession.session`, kept as its own name for the many
-  ## readers of the panel ViewModels and the store.
+  ## `activeDebuggerSession.session` — or, when the server owns the session,
+  ## `activeMirror.session` — kept as its own name for the many readers of
+  ## the panel ViewModels and the store.
+var activeMirror: MirrorSession
+  ## The mirror of the server's session, in a server-managed deployment
+  ## (`ct host`); nil wherever the page owns its session.
+var pageSocket: JsObject
+  ## The socket to the page's server, when it has one; the mirror's channel
+  ## rides on it.
+var sessionPlacementName {.importc: "CODETRACER_SESSION_PLACEMENT".}: cstring
+  ## The deployment descriptor's `session.placement`, recorded by the page's
+  ## `/deployment.json` fetch; undefined where nothing recorded it.
+
+proc placementRecorded(): bool {.importjs:
+  "(typeof CODETRACER_SESSION_PLACEMENT === 'string')".}
+
+proc serverOwnsSession(): bool =
+  ## Whether the deployment said its server owns the session. A page with no
+  ## socket cannot mirror one, and an unknown placement is refused by the
+  ## descriptor's decoder; both keep the session in the page.
+  if pageSocket.isNil or not placementRecorded():
+    return false
+  try:
+    decodePlacement($sessionPlacementName) == spServer
+  except DescriptorError:
+    false
 # Backend-reported `supportsStepBack` capability from the DAP `initialize`
 # response. The response can arrive (synchronously, via the in-process DAP
 # transport) before `activeSessionVM` exists, in which case the handler cannot
@@ -2305,28 +2332,44 @@ when not defined(ctInExtension):
           when defined(js):
             if data.startOptions.inTest:
               recordVmBackendRequest(command, argsJs))
-      activeDebuggerSession = newDebuggerSession(realBackend)
-      activeSessionVM = activeDebuggerSession.session
-      # The DOM reports a pane's size on every resize and scroll event, so the
-      # windowed ViewModels debounce those reports on the browser's timer
-      # (Viewport-Driven-Loading V2, Pattern 6).
-      activeSessionVM.store.viewportScheduler = timeoutScheduler()
-      # The panel ViewModels are the session's, built once by
-      # `initializePanelViewModels` — in edit mode too, where no trace is open
-      # and the session is not yet attached. The stop loader is the one
-      # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
-      # exists (its effect would otherwise send on its first run), and the
-      # request's language hook is installed before anything can ask.
-      state.installSourceLanguage(activeSessionVM.store)
-      activeSessionVM.store.claimLocalsLoading()
       # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
       # builds `DebugControlsVM` with them: steps through the DAP mediator
       # with the status bar's operation status, the replay server's restart,
-      # Stop, and test runs in a new window.
-      activeSessionVM.debugCommands = desktopDebugCommands(data,
-        activeSessionVM.store,
-        setupLocalViewToMiddlewareApi(cstring"debug toolbar api", data.viewsApi))
-      activeSessionVM.initializePanelViewModels()
+      # Stop, and test runs in a new window. A mirror takes them too: under
+      # `ct host` the page still drives the replay, and the server's session
+      # follows the moves it makes.
+      let toolbarApi = setupLocalViewToMiddlewareApi(
+        cstring"debug toolbar api", data.viewsApi)
+      if serverOwnsSession():
+        # SERVER-MANAGED (`ct host`): the server owns the session and this
+        # page mirrors it over its socket. The mirror's ViewModels are the
+        # ones the panels read; its locals are the server's, so the page's
+        # own decoders stand down (`claimLocalsLoading`).
+        activeMirror = createMirrorSession(newSocketSyncChannel(pageSocket),
+          debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
+            desktopDebugCommands(data, session.store, toolbarApi))
+        activeSessionVM = activeMirror.session
+        activeSessionVM.store.claimLocalsLoading()
+      else:
+        activeDebuggerSession = newDebuggerSession(realBackend)
+        activeSessionVM = activeDebuggerSession.session
+      # The DOM reports a pane's size on every resize and scroll event, so the
+      # windowed ViewModels debounce those reports on the browser's timer
+      # (Viewport-Driven-Loading V2, Pattern 6) — a mirror's as well, whose
+      # viewports travel to the server's session.
+      activeSessionVM.store.viewportScheduler = timeoutScheduler()
+      if activeMirror.isNil:
+        # The panel ViewModels are the session's, built once by
+        # `initializePanelViewModels` — in edit mode too, where no trace is
+        # open and the session is not yet attached. The stop loader is the one
+        # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
+        # exists (its effect would otherwise send on its first run), and the
+        # request's language hook is installed before anything can ask.
+        state.installSourceLanguage(activeSessionVM.store)
+        activeSessionVM.store.claimLocalsLoading()
+        activeSessionVM.debugCommands = desktopDebugCommands(data,
+          activeSessionVM.store, toolbarApi)
+        activeSessionVM.initializePanelViewModels()
       # PLAT-40: the debugger service's `setBreakpoints` answers go to the
       # ViewModel store's one breakpoint decoder — the point list then holds
       # what the engine verified, as it does on the native front-ends.
@@ -7107,6 +7150,7 @@ when not defined(ctInExtension) and not defined(ctWeb):
         address,
         js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}")})
       socketdebug = socket
+      pageSocket = socket.toJs
       socket.on(cstring"disconnect") do (reason: cstring):
         updateConnectionState(data, false, ConnectionLossUnknown, reason)
       socket.on(cstring"CODETRACER::connection-disconnected") do (payload: cstring):
@@ -7205,6 +7249,9 @@ when not defined(ctInExtension) and not defined(ctWeb):
     fetch('/deployment.json', { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
+        if (d && d.session && typeof d.session.placement === 'string') {
+          globalThis.CODETRACER_SESSION_PLACEMENT = d.session.placement;
+        }
         if (d && d.connection) {
           if (typeof d.connection.frontendSocketPort === 'number') {
             frontendSocketPort = d.connection.frontendSocketPort;

@@ -35,7 +35,8 @@ import ../../store/replay_data_store
 import ../../store/types
 import ../../sync/[action_relay, mirror_session, sync_host, sync_publisher,
                    sync_subscriber, synced_signals, transport]
-import ../../viewmodels/[calltrace_vm, event_log_vm, state_vm]
+import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
+                         state_vm]
 
 var checks = 0
 template ck(cond: untyped) =
@@ -281,6 +282,34 @@ suite "a primary and its mirror":
       link.settle()
       ck host.actionsApplied == 4
       ck agree(primary, mirror.session).len == 0
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a mirror's toolbar runs the commands of the host that drives the replay":
+    # The page under `ct host`: the server owns the session, the page steps
+    # the replay itself. Its toolbar must step through the page's own route,
+    # not the defaults over the mirror's inert backend.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      var hostSteps: seq[string]
+      let mirror = createMirrorSession(link.b,
+        debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
+          result = defaultDebugCommands(session.store)
+          result.step = proc(actionId: string) = hostSteps.add actionId)
+      link.settle()
+
+      mock.clearReceivedCommands()
+      mirror.session.debugControlsVM.invokeToolbarStep("next")
+      link.settle()
+      ck hostSteps == @["next"]
+      # It was the page's step, not one relayed to the session's owner.
+      ck mock.findCommand("next").isNone
+      ck host.actionsApplied == 0
       mirror.dispose()
       host.dispose()
       done()

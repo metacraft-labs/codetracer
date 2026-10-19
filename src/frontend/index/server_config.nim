@@ -15,6 +15,7 @@ proc flushStdoutSync() {.importjs:
 
 from ../viewmodel/platform/web_deployment import cacheClassFor, headerFor
 import ../viewmodel/platform/deployment_descriptor
+import hosted_session   # the session the server owns for its page
 
 proc nodeRelative(fromPath, toPath: cstring): cstring {.importjs:
   "require('path').relative(require('path').resolve(#), #)".}
@@ -121,7 +122,10 @@ when defined(server):
           # WD4's per-project record, which this deployment does not read. An
           # invented value here would be a statement nothing acts on.
           traceId: "", projectId: "",
-          runtime: ProjectRuntime(kind: prkStatic)),
+          runtime: ProjectRuntime(kind: prkStatic),
+          # The server owns the session; the page mirrors it
+          # (`hosted_session`).
+          placement: spServer),
         connection: ConnectionParameters(
           frontendSocketPort: data.startOptions.frontendSocket.port,
           # `.isNil` first: the field is a `cstring` and its default is null,
@@ -270,6 +274,10 @@ when defined(server):
     var socketAttached = false
     var idleTimer: JsObject
     var activeSocket: base_handlers.WebSocket
+    var hosted: HostedPrimary
+      ## The session this server owns for the page (`hosted_session`). Made on
+      ## the first connection — the trace is known by then — and kept across
+      ## connections, so a reloaded page resumes it.
 
     proc resetActivity() =
       lastActivityMs = nowMs()
@@ -322,6 +330,13 @@ when defined(server):
         resetActivity()
       ipc.attachSocket(client)
 
+      # The page mirrors the server's session. It talks to the replay the page
+      # itself drives — the default session, 0, the one `ct host` serves.
+      if hosted.isNil and not data.trace.isNil:
+        hosted = openHostedSession(0, $data.trace.outputFolder)
+      if not hosted.isNil:
+        hosted.connectPage(client.toJs)
+
       # THE FACADE ENDPOINT, on the SAME socket — §6.1.
       #
       # `UI-Bundle-And-Endpoints.md` §6.1 chose this connection rather than a
@@ -345,6 +360,8 @@ when defined(server):
 
       client.on(cstring"disconnect") do ():
         debugPrint "socket disconnect"
+        if not hosted.isNil:
+          hosted.disconnectPage(client.toJs)
         ipc.detachSocket()
         socketAttached = false
         if client == activeSocket:
