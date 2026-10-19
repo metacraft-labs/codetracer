@@ -205,9 +205,51 @@ build_sibling() {
 
 	local artifact_path="$repo_dir/$artifact"
 	if [ "$FORCE" -eq 0 ] && [ -e "$artifact_path" ]; then
-		RESULT_STATE[$key]="SKIP"
-		RESULT_DETAIL[$key]="already built ($artifact)"
-		return 0
+		# EXISTENCE IS NOT FRESHNESS, and treating it as freshness cost a whole
+		# investigation.  This arm used to be `[ -e "$artifact_path" ]` alone, so
+		# a sibling built against an older dependency reported
+		# `SKIP … already built` forever: a codetracer-js-recorder emitting
+		# meta.dat v3 while ct accepted only v4/v5 was skipped on every run, and
+		# every recording spec died inside importTraceFolder naming THE TRACE
+		# rather than the stale recorder.  The only workaround was to know to
+		# pass `--force --only <sibling>`, which means knowing the answer first.
+		#
+		# The rule: an artifact older than the commit its repo is sitting on, or
+		# built from a tree with uncommitted changes, is not known to be current.
+		# Both comparisons are cheap and need no network.  Neither is perfect —
+		# a commit that touched only documentation triggers a rebuild that was
+		# not needed — and that direction is the right one to err in: a needless
+		# rebuild costs minutes, while a stale artifact reported as built costs
+		# a false defect and the session spent chasing it.
+		local stale_reason=""
+		if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+			local head_epoch artifact_epoch
+			head_epoch=$(git -C "$repo_dir" log -1 --format=%ct 2>/dev/null || echo 0)
+			artifact_epoch=$(date -r "$artifact_path" +%s 2>/dev/null || echo 0)
+			if [ "$head_epoch" -gt 0 ] && [ "$artifact_epoch" -gt 0 ] &&
+				[ "$artifact_epoch" -lt "$head_epoch" ]; then
+				stale_reason="artifact predates HEAD ($artifact_epoch < $head_epoch)"
+			elif [ -n "$(git -C "$repo_dir" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+				stale_reason="repo has uncommitted changes"
+			fi
+			# TRACKED modifications only, and the reason is not style.  The
+			# artifact itself usually lives INSIDE the sibling (here:
+			# target/release/…), so a plain `status --porcelain` counts the
+			# build output as a dirty tree and every run rebuilds forever —
+			# which ci/test/sibling-artifact-freshness-test.sh case (A) caught
+			# on the first draft of this very check.  Real repos gitignore
+			# their build directories, so the bug hid behind that; depending on
+			# every sibling's .gitignore for correctness is not a dependency
+			# worth having.
+		fi
+		if [ -z "$stale_reason" ]; then
+			RESULT_STATE[$key]="SKIP"
+			RESULT_DETAIL[$key]="already built ($artifact)"
+			return 0
+		fi
+		# Say WHY it is rebuilding.  A rebuild with no stated reason is
+		# indistinguishable from the script ignoring its own short-circuit.
+		echo "  $key: rebuilding — $stale_reason" >&2
 	fi
 
 	if [ "$CHECK_ONLY" -eq 1 ]; then

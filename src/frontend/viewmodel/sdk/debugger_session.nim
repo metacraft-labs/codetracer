@@ -16,7 +16,10 @@
 ##     -> `ReplayDataStore` + the panel VMs);
 ##   * the launch handshake and its typed failures (§6.3);
 ##   * navigation state that is not per-panel: position, granularity and the
-##     history of where the session has been.
+##     history of where the session has been;
+##   * what is loaded when the debugger stops (`stops`, `sdk/stop_loader`) —
+##     by itself on every stop (`slmFollow`), or when a host with its own
+##     refresh loop asks (`slmHostDriven`).
 ##
 ## What it deliberately does not own: rendering, layout, a chain concept of
 ## any kind (§3.2). It does not know what a trace *is about*.
@@ -36,7 +39,8 @@ import ../backend/backend_service
 import ../app/app_vm
 import ../session_vm
 import ../store/[replay_data_store, types]
-import trace_source
+import trace_source, stop_loader
+export stop_loader
 
 type
   DebuggerSessionErrorKind* = enum
@@ -103,6 +107,14 @@ type
       ## Why the session moved here ("launch", "step", "goto"). Free text:
       ## it is for a consumer's breadcrumb UI, not for branching on.
 
+  StopLoadingMode* = enum
+    ## Who decides when a stop's data is loaded (`sdk/stop_loader`).
+    slmFollow
+      ## The session loads on every stop by itself — a reactive host.
+    slmHostDriven
+      ## The host calls `stops.loadStop()` when its own loop has settled a
+      ## stop (the terminal and GPUI hosts).
+
   DebuggerSession* = ref object of ViewModel
     ## One debugger over one trace.
     id*: int
@@ -127,6 +139,9 @@ type
     history*: Signal[seq[NavigationEntry]]
     historyLimit*: int
       ## Cap on `history`, so a long session does not grow without bound.
+    stopLoading*: StopLoadingMode
+    stops*: StopLoader
+      ## What is loaded per stop; nil until a trace is open.
 
 const
   DefaultHistoryLimit* = 512
@@ -189,7 +204,8 @@ proc unsetTraceSource(): TraceSource =
 
 proc newDebuggerSession*(backend: BackendService;
                          clock: ClockBase = nil;
-                         historyLimit: int = DefaultHistoryLimit): DebuggerSession =
+                         historyLimit: int = DefaultHistoryLimit;
+                         stopLoading = slmFollow): DebuggerSession =
   ## Create a session over `backend`: the shared `ReplayDataStore` exists,
   ## no trace is open, and the panel ViewModels are not yet constructed.
   ##
@@ -214,6 +230,7 @@ proc newDebuggerSession*(backend: BackendService;
       granularity: createSignal(ngLine),
       history: createSignal(newSeq[NavigationEntry]()),
       historyLimit: (if historyLimit > 0: historyLimit else: DefaultHistoryLimit),
+      stopLoading: stopLoading,
       disposeProc: dispose,
     )
 
@@ -289,7 +306,15 @@ proc markReady(s: DebuggerSession; trace: TraceSource) =
   # Only now do the panels start asking the backend for data. Before a trace
   # is open there is nothing to ask about, and a request sent then is answered
   # by an engine in the wrong state.
+  # The stop loader is the session's one per-stop sender; it claims the
+  # locals BEFORE the panels exist, because `StateVM`'s effect sends on its
+  # first run unless they are claimed.
+  s.app.session.store.claimLocalsLoading()
   s.app.session.initializePanelViewModels()
+  if s.stops.isNil:
+    s.stops = createStopLoader(s.app.session)
+  if s.stopLoading == slmFollow:
+    s.stops.follow()
   s.recordPosition("launch")
 
 proc attach*(s: DebuggerSession; trace: TraceSource) =
@@ -460,6 +485,8 @@ proc dispose*(s: DebuggerSession; disconnectBackend: bool = true) =
   if s.isNil or s.phase.val == dspDisposed:
     return
   s.phase.val = dspDisposed
+  if not s.stops.isNil:
+    s.stops.dispose()
   if not s.app.isNil:
     # The flag has to be forwarded, not merely honoured on the line below:
     # `AppViewModel.dispose` reaches `SessionViewModel.dispose`, which used

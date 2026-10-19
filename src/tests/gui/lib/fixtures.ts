@@ -1380,6 +1380,21 @@ function importTraceFolder(traceFolder: string): string {
   return traceId;
 }
 
+/** Restart an owned test app using the fixture's process-tree cleanup, keeping
+ * its isolated profile and saved layout. Graceful app.close() can wait for
+ * debugger children; the normal fixture teardown uses this same cleanup. */
+export async function restartTraceFolderElectron(
+  app: ElectronApplication,
+  traceFolderPath: string,
+): Promise<LaunchResult> {
+  const closed = app.waitForEvent("close");
+  const pid = app.process().pid;
+  if (!pid) throw new Error("Cannot restart an Electron app without its process");
+  killProcessTree(pid);
+  await closed;
+  return launchTraceFolderElectron(traceFolderPath);
+}
+
 /**
  * Launch Electron against a pre-existing CTFS trace folder rather than
  * recording on demand.  Used by the BEAM (Elixir/Erlang) UI smoke specs that

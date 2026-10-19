@@ -381,11 +381,17 @@ impl ReplayWorker {
         } else {
             command.arg(&self.rr_trace_folder);
         }
+        // The directory the worker creates its socket in is the one
+        // `setup_worker_sockets` connects to only if both resolve the same
+        // base directory; name it to the worker rather than rely on that
+        // (see `paths::runtime_base_dir`).
+        let runtime_dir = crate::paths::runtime_base_dir()?;
         let ct_worker = command
             // M-REC-11: the worker (ct-native-replay) reads
             // $CODETRACER_RUN_ID to compute the socket path; falls
             // back to getppid() only when unset (transitional).
             .env(crate::paths::CODETRACER_RUN_ID_ENV, &self.run_id)
+            .env(crate::paths::CODETRACER_RUNTIME_DIR_ENV, &runtime_dir)
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr_file))
             .spawn()?;

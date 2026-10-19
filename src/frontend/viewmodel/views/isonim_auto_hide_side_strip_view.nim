@@ -18,6 +18,9 @@ type
     active*: bool
 
   AutoHideSideStripCallbacks* = object
+    modeLabel*: string
+    modeGlyph*: string
+    onToggleMode*: proc()
     onSelect*: proc(index: int)
     onClose*: proc(index: int)
     onUnpin*: proc(index: int)
@@ -147,6 +150,21 @@ when defined(js):
           class = AutoHideCollapsedStripLineClass,
           onclick = proc() = callbacks.invokeCollapsedSelect())
 
+proc renderModeButton(r: MockRenderer; callbacks: AutoHideSideStripCallbacks): MockNode =
+  ui(r):
+    button(class = "auto-hide-mode-button", `type` = "button",
+        title = callbacks.modeLabel, `aria-label` = callbacks.modeLabel,
+        onclick = proc() = callbacks.onToggleMode()):
+      text callbacks.modeGlyph
+
+when defined(js):
+  proc renderModeButton(r: WebRenderer; callbacks: AutoHideSideStripCallbacks): isonim_dom.Element =
+    ui(r):
+      button(class = "auto-hide-mode-button", `type` = "button",
+          title = callbacks.modeLabel, `aria-label` = callbacks.modeLabel,
+          onclick = proc() = callbacks.onToggleMode()):
+        text callbacks.modeGlyph
+
 proc renderAutoHideSideStripPanel*(
     r: MockRenderer;
     tabs: seq[AutoHideSideStripRecord];
@@ -160,6 +178,8 @@ proc renderAutoHideSideStripPanel*(
   else:
     for i, tab in tabs:
       r.appendChild(result, renderSideStripTab(r, tab, i, callbacks))
+    if tabs.len > 0 and not callbacks.onToggleMode.isNil:
+      r.appendChild(result, renderModeButton(r, callbacks))
 
 when defined(js):
   proc renderAutoHideSideStripPanel*(
@@ -175,6 +195,8 @@ when defined(js):
     else:
       for i, tab in tabs:
         r.appendChild(result, renderSideStripTab(r, tab, i, callbacks))
+      if tabs.len > 0 and not callbacks.onToggleMode.isNil:
+        r.appendChild(result, renderModeButton(r, callbacks))
 
   proc renderAutoHideSideStripInto*(
       r: WebRenderer;

@@ -1471,12 +1471,21 @@ proc renderModelButton[R](r: R; vm: AgentActivityVM;
                   else: AvailableAgentModels[0]
   let panel = ui(r):
     tdiv(ref = wrapperRef, class = "agent-model-wrapper"):
+      # `title`: the name on hover, which is the only place it shows when a
+      # narrow panel leaves the button as just its icon (agent_activity.styl,
+      # "Narrow Agent panel").
       button(class = "ct-button-md-tertiary agent-button agent-model-select",
              `type` = "button",
+             title = modelName,
              onclick = proc() =
                vm.modelDropdownOpen.val = not vm.modelDropdownOpen.val):
-        span(class = "agent-model-text"):
-          text modelName
+        # The agent icon before the model name, as the branch button carries
+        # the branch icon before the branch name (design system, Icons page:
+        # `icons-lg=agent`).
+        span(class = "agent-model-label"):
+          span(class = "agent-model-icon")
+          span(class = "agent-model-text"):
+            text modelName
         tdiv(class = "agent-model-img")
       if isOpen:
         tdiv(ref = listRef, class = "agent-model-dropdown")
@@ -1672,7 +1681,10 @@ proc renderBranchOption[R](r: R; vm: AgentActivityVM;
   let itemClass = if isActive: "agent-branch-item agent-branch-item--active"
                   else: "agent-branch-item"
   ui(r):
+    # `title`: the full name on hover — a long one is cut with "…" in the row
+    # (agent_activity.styl, `.agent-branch-item`).
     tdiv(class = itemClass,
+         title = branchName,
          onclick = proc() =
            vm.branchDropdownOpen.val = false
            if callbacks.onCheckoutBranch != nil:
@@ -1696,6 +1708,7 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
     tdiv(ref = wrapperRef, class = "agent-branch-wrapper"):
       button(class = "ct-button-md-tertiary agent-button agent-branch-button",
              `type` = "button",
+             title = branchName,
              onclick = proc() =
                vm.toggleBranchDropdown()
                if callbacks.onBranchSelect != nil:

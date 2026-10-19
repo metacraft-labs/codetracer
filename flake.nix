@@ -144,55 +144,97 @@
       flake = true;
     };
 
-    runquota = {
-      # runquota/main is stale and lacks the bounded grant-stream API
-      # (pollNextGrantBounded / GrantPollResult) that current reprobuild uses.
-      #
-      # PINNED to the exact revision that the `reprobuild` input below locks as
-      # its own `runquota-src`, and it must be kept equal to it. This is NOT a
-      # "keep it recent" pin, and a branch is the wrong thing here: the
-      # `inputs.runquota-src.follows = "runquota"` line below means REPROBUILD
-      # IS COMPILED AGAINST WHATEVER THIS RESOLVES TO, so any drift in either
-      # direction is a compile error inside reprobuild's own sources, minutes
-      # into `nix develop`, naming an identifier nobody here has heard of:
-      #
-      #   behind  -> repro_runquota.nim(932): undeclared identifier: 'ExtensionCellWire'
-      #   ahead   -> repro_runquota.nim(501): undeclared identifier: 'LeaseFinishOutcome'
-      #
-      # Both were observed on this tree: `dev` had moved past the pinned
-      # reprobuild and REMOVED LeaseFinishOutcome, so tracking the branch tip
-      # was no more correct than lagging behind it.
-      #
-      # Bump this in lockstep with `reprobuild` below — read the new
-      # reprobuild revision's own flake.lock and mirror its `runquota-src`.
-      # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
-      # equality so the two pins cannot silently diverge again.
-      url = "github:metacraft-labs/runquota/bf799831a1e7898b83765784ef513e05f75135ea";
-      inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-parts.follows = "flake-parts";
-      inputs.git-hooks.follows = "git-hooks-nix";
-      # runquota's release dev shell takes reprobuild's packaging sources as
-      # `release-packaging-src`, pinned to a reprobuild revision of its own.
-      # Here that would be a second, competing reprobuild pin in this lock, so
-      # point it at the one `reprobuild` input below (reprobuild's own flake
-      # makes the same override for the same reason).
-      inputs.release-packaging-src.follows = "reprobuild";
-      flake = true;
-    };
+    # runquota is DERIVED, not pinned: it is whatever the `reprobuild` input
+    # below locks as its own `runquota-src`. No revision for it appears in
+    # this file, and flake.lock grows no independent node for it — the
+    # `follows` edge means the closure holds exactly ONE runquota, and it is
+    # the one reprobuild was compiled against.
+    #
+    # ## Why derived rather than pinned
+    #
+    # reprobuild COMPILES AGAINST runquota's sources. This repo used to pin
+    # runquota to an exact revision here and, separately, override
+    # `inputs.runquota-src.follows = "runquota"` on the reprobuild input — so
+    # reprobuild was compiled against whatever THIS file said, rather than
+    # against what reprobuild itself had locked and been developed on. Drift
+    # in either direction is a compile error inside reprobuild's own sources,
+    # minutes into `nix develop`, naming an identifier nobody here has heard
+    # of:
+    #
+    #   behind  -> repro_runquota.nim(932): undeclared identifier: 'ExtensionCellWire'
+    #   ahead   -> repro_runquota.nim(501): undeclared identifier: 'LeaseFinishOutcome'
+    #
+    # Both were observed on this tree — commit c9cb186c bumped reprobuild
+    # while runquota stayed put — which is why
+    # `scripts/test-flake-pin-alignment.sh` exists. That check compares two
+    # revisions, so it can only report divergence AFTER someone has written
+    # it. The `follows` edge makes the divergence UNREPRESENTABLE instead:
+    # there is no second revision left to disagree with. The check now asserts
+    # that structure rather than comparing two numbers.
+    #
+    # ## Two overrides deliberately given up
+    #
+    # `follows` replaces the whole input node, so the four overrides this
+    # block used to carry (`nixos-modules`, `nixpkgs`, `flake-parts`,
+    # `git-hooks`) are gone with it. runquota is now evaluated as reprobuild's
+    # own lock parameterises it — its nixpkgs resolves through
+    # `runquota-src/nixos-modules/nixpkgs-unstable` rather than through this
+    # repo's `nixpkgs`. That is the intended trade, not an oversight:
+    # `inputs'.runquota.packages.runquota` (nix/shells/ci-base.nix) and
+    # `RUNQUOTA_SRC` (ci-base.nix, nix/packages/default.nix) now resolve to
+    # the runquota the shipped `repro` was actually built against, instead of
+    # a separately-parameterised rebuild of it.
+    runquota.follows = "reprobuild/runquota-src";
 
     reprobuild = {
-      # PINNED to the exact revision that metacraft-labs/nixos-modules pins,
-      # so every repo in the org builds the same `repro`. nixos-modules is the
-      # single source of truth for this SHA — bump it there first, then mirror
-      # the new SHA here.
+      # NAMES A BRANCH, NOT A REVISION. The revision lives in flake.lock and
+      # only there; this URL says WHICH LINE flake.lock is allowed to hold a
+      # revision from. Moving the pin is a re-lock, never a transcribed SHA.
       #
-      # This mirrors the SHA rather than `follows`-ing nixos-modules' own
-      # reprobuild node, because a bare `follows` replaces the whole input node
-      # and would drop the six overrides below: reprobuild would then be built
-      # against a different nixpkgs and against its own runquota /
-      # native-recorder pins, producing a different `repro` binary than the one
-      # this repo's shells are meant to ship.
+      # ## Why `agents` and not `release/0.2.10`
+      #
+      # THIS REPO NOW TRACKS AN UNRELEASED REPROBUILD. That is the point, and
+      # it is a deliberate trade rather than an oversight.
+      #
+      # Until 2026-10-15 this said `release/0.2.10`, mirroring the revision
+      # metacraft-labs/nixos-modules pins for the whole org
+      # (064daf5b154ea6a0758ddb2dcbcbc07685216e44). Tracking the release was
+      # faithful and still failed the gate: `repro check --mode=pre-push`
+      # compares every SUBSTITUTED input against the SIBLING CHECKOUT's HEAD
+      # (`verifyFlakeLockAgainstSiblings`, repro_cli_support.nim:50897), and
+      # the `../reprobuild` sibling every workspace here has is on `agents`,
+      # 136 ahead / 7 behind that release. A faithful release pin was therefore
+      # reported `flake_lock_stale` on every push, permanently.
+      #
+      # The repo was also already carrying both answers at once: `repro.lock`
+      # records reprobuild at `f248842443e09cd` with `ref = "agents"` while
+      # this file said `release/0.2.10` — two revisions of one dependency for
+      # two purposes, with nothing keeping them equal. Tracking `agents` here
+      # converges them.
+      #
+      # What is given up: the `repro` this repo's shells ship is no longer the
+      # one `nixos-modules` pins for the rest of the org, so a reprobuild
+      # regression reaches this repo before it reaches a release. The ONE
+      # thing that must not happen as a result is a lock naming a revision
+      # nobody else can obtain; `repro flake refresh-lock` already refuses to
+      # record an unpublished sibling HEAD (`flakeClassifyPublication`), and
+      # the revision below is on `origin/agents`.
+      #
+      # Why a ref and not the SHA: a URL carrying `rev=` sets `original.rev` in
+      # flake.lock, and nothing may then move the node — `repro flake
+      # refresh-lock` declines it by design ("the revision is the author's
+      # statement and lives there"), while `repro check --mode=pre-push`
+      # independently fails `flake_lock_stale` for the very same node. The two
+      # halves are provably unsatisfiable together, so a commit-pinned URL
+      # cannot satisfy both gates at once.
+      # reprobuild's own flake takes this same shape for its `runquota-src`
+      # (`url = "github:metacraft-labs/runquota/dev"`).
+      #
+      # This still does NOT `follows` nixos-modules' own reprobuild node,
+      # because a bare `follows` replaces the whole input node and would drop
+      # the overrides below: reprobuild would then be built against a different
+      # nixpkgs and against its own native-recorder pins, producing a different
+      # `repro` binary than the one this repo's shells are meant to ship.
       #
       # This pin is also a FLOOR, not only a mirror: `repro.nim` is compiled by
       # the `repro` this resolves to, so a recipe here cannot use a DSL
@@ -226,12 +268,28 @@
       # single pin: a second `nim-fork-src` pin here would be two pins for one
       # thing with nothing keeping them equal — the failure mode
       # `scripts/test-flake-pin-alignment.sh` exists to catch for `runquota`.)
-      url = "github:metacraft-labs/reprobuild/064daf5b154ea6a0758ddb2dcbcbc07685216e44";
+      url = "github:metacraft-labs/reprobuild/agents";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
-      inputs.runquota-src.follows = "runquota";
+      # runquota's REVISION is reprobuild's to state — that is the whole point
+      # of the `runquota.follows = "reprobuild/runquota-src"` edge above. Its
+      # PARAMETERISATION is still ours, and these three restore exactly the
+      # overrides the old standalone `runquota` input carried, without
+      # reintroducing a second revision for them to disagree about.
+      #
+      # Without them runquota is evaluated against
+      # `runquota-src/nixos-modules/nixpkgs-unstable` (measured 2026-10-14:
+      # nixpkgs 3497aa5c) rather than this repo's nixpkgs (687f05a9,
+      # nixos-25.11), which would build `inputs'.runquota.packages.runquota`
+      # — used by nix/shells/ci-base.nix — from a second nixpkgs.
+      # `nixos-modules` needs no line here: runquota-src's already follows
+      # reprobuild's, which follows `nix-blockchain-development/nixos-modules`
+      # above.
+      inputs.runquota-src.inputs.nixpkgs.follows = "nixpkgs";
+      inputs.runquota-src.inputs.flake-parts.follows = "flake-parts";
+      inputs.runquota-src.inputs.git-hooks.follows = "git-hooks-nix";
       flake = true;
     };
 

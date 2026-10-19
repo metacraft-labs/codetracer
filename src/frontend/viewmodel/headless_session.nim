@@ -32,10 +32,11 @@ import std/[json, options, asyncdispatch, osproc, os, streams, strutils]
 
 import isonim/core/[signals, computation, async_compat]
 
-import backend/stdio_backend
+import backend/[backend_service, stdio_backend]
 export stdio_backend.DapReadBound, stdio_backend.DapStalledError,
        stdio_backend.DapInterruptedError, stdio_backend.DapLaunchRefusedError
-import store/[replay_data_store, types]
+import store/[replay_data_store, types, locals_answer]
+export locals_answer
 # PLAT-2's value-presentation pipeline. `json_adapter` is qualified at its call
 # sites because `toPValue` also exists on the `Value` side of the bridge, and a
 # reader of `headless_session` has to be able to tell which one is meant — this
@@ -257,15 +258,16 @@ proc newHeadlessDebugSession*(
     #    DAP handshake on the raw channel, because they need the blocking
     #    `waitForEvent` that `BackendService.onEvent` does not provide.
     let backendService = backend.toBackendService()
-    let sdkSession = newDebuggerSession(backendService)
-    # THE LOCALS ARE THIS HOST'S TO ASK FOR, in the language of the file the
-    # debugger is stopped in. Set before `attach`, which builds the StateVM
-    # whose auto-load would otherwise send its own `ct/load-locals` — naming
-    # `c` whatever the file — on every stop, over a transport whose answer to
-    # it no decoder reads: `fetchLocals` / `applyLocals` are how the terminal
-    # and GPUI front-ends load the locals (`native_host.loadStopPanes`).
+    # HOST-DRIVEN STOP LOADING: the terminal's and GPUI's loops decide when a
+    # stop has settled and then call `native_host.loadStopPanes`, which runs
+    # the SDK's stop loader (`sdk/stop_loader`) — the same sender and decoder
+    # the web uses, driven by this host's clock instead of by an effect. The
+    # loader claims the locals, so `StateVM`'s own request stands down.
+    let sdkSession = newDebuggerSession(backendService,
+                                        stopLoading = slmHostDriven)
+    # The locals are asked for in the language of the file the debugger is
+    # stopped in.
     let store = sdkSession.session.store
-    store.localsLoadedByHost = true
     store.sourceLanguageOf = proc(file: string): string =
       langWireName(toLangFromFilename(file))
     sdkSession.attach(localFolderTrace(tracePath))
@@ -278,6 +280,10 @@ proc newHeadlessDebugSession*(
       tracePath: tracePath,
       replayServerBin: replayServerBin,
     )
+
+    # PLAT-47: the native front-ends show the call STACK when a recording has
+    # no call trace; the GUI has no such pane, so only this host opens it.
+    sdkSession.stops.setPaneOpen(spCallStackFallback, true)
 
     # Push initial position into the store from the ct/complete-move event.
     let completeMoveEvent = backend.waitForEvent("ct/complete-move")
@@ -518,113 +524,17 @@ proc getDebuggerStatus*(s: HeadlessDebugSession): DebuggerStatus =
   s.session.store.debugger.val.status
 
 # ---------------------------------------------------------------------------
-# DAP response parsing helpers
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # `ct/load-locals` value decoding — PLAT-2
 #
-# THIS MODULE NO LONGER RENDERS VALUES. It decodes the wire into `PValue` and
-# hands it to the ONE presenter, at a budget it declares by name.
-#
-# What used to be here was `extractValueText`: a 130-line, kind-directed
-# renderer that reproduced `common_types/utils/text_representation.textRepr`'s
-# conventions over `JsonNode` because it could not import them (`common_types`
-# is `include`d twice under incompatible `langstring` bindings). It was the
-# FOURTH of seven independent implementations of "value -> string" in this
-# repository, and the divergences were not stylistic: it wrote a struct `{…}`
-# where the desktop wrote `Type(…)`, it had no member cap at all, and it was
-# not language-aware, so a Rust `Vec` read `[…]` in the terminal and `vec![…]`
-# in the desktop.
-#
-# `../../common/value_presentation/json_adapter.toPValue` is the decode half of
-# that function with the renderer removed. The wire ordinals it needs moved
-# with it — `src/common/value_presentation_bridge_test.nim` asserts the
-# transcription still matches `TypeKind` (suite "PLAT-2: the wire ordinals in
-# json_adapter ARE TypeKind's", which walks every member of the enum and
-# asserts the COUNT is 34). That is the check that was missing when the
-# PREVIOUS set of ordinals was wrong on six kinds; the sixty lines of
-# measurement that used to stand here are preserved in that file's header,
-# where the assertion that would catch a recurrence now lives beside them.
+# The decoder is `store/locals_answer`, shared with every front-end (the stop
+# loader applies the same answer on the web); it is re-exported here so the
+# suites and hosts that name `variableFromValue` & co. through this module
+# keep compiling.
 # ---------------------------------------------------------------------------
-
-proc valueTypeName*(valueNode: JsonNode): string =
-  ## `Value.typ.langType`, or "" when the response carries no type.
-  json_adapter.typeNameOf(valueNode)
-
-proc valuePresentation*(valueNode: JsonNode; budget: Budget): Presentation =
-  ## One wire value, presented at `budget`. THE decoding entry point.
-  present(json_adapter.toPValue(valueNode), budget)
-
-proc presentedValueText*(valueNode: JsonNode;
-                         budget: Budget = tuiValueBudget()): string =
-  ## The single-line rendering a `store/types.Variable` carries.
-  valuePresentation(valueNode, budget).root.text
-
-
-proc variableFromPValue*(name: string; pv: PValue): Variable =
-  ## One `Variable` and, RECURSIVELY, its members.
-  ##
-  ## THE RECURSION IS THE POINT, and its absence was a real limitation rather
-  ## than a simplification: an earlier implementation built children with
-  ## neither `hasChildren` nor `children` set, so a compound member — every
-  ## entry of `wide_state`'s `wide_mapping`, which is a `(key, value)` tuple —
-  ## arrived at a tree view as a leaf that could not be opened. The engine's
-  ## own answer already carries the whole subtree (bounded by the request's
-  ## `depthLimit`), so nothing extra is fetched; it was being discarded.
-  ##
-  ## PLAT-2: THE ROW CARRIES THE VALUE, NOT ONLY ITS RENDERING. `presented` is
-  ## the normalised value, so a pane that knows its own width can ask the
-  ## presenter for a rendering that fits IT rather than clipping a string
-  ## rendered for somebody else. `value` remains, and is the presenter's answer
-  ## at `tui-value` — it is pipeline output, not a second formatter.
-  result = Variable(name: name,
-                    value: present(pv, tuiValueBudget()).root.text,
-                    typeName: (if pv.isNil: "" else: pv.typeName),
-                    presented: pv)
-  if pv.isNil:
-    return
-  if pv.kind == pvkMap:
-    if pv.entries.len == 0:
-      return
-    result.hasChildren = true
-    for idx, entry in pv.entries:
-      # A map's child is named by its KEY's own rendering, at the same budget
-      # the row uses. Before PLAT-2 a map had no children at all here: the
-      # decoder looked for `elements`, and a `TableKind` carries `items`.
-      result.children.add variableFromPValue(
-        present(entry.key, tuiValueBudget()).root.text, entry.val)
-    return
-  if not isContainer(pv.kind) or pv.members.len == 0:
-    return
-  result.hasChildren = true
-  for idx, m in pv.members:
-    let childName = if m.label.len > 0: m.label else: "[" & $idx & "]"
-    result.children.add variableFromPValue(childName, m.value)
-
-proc variableFromValue*(name: string; valueNode: JsonNode): Variable =
-  ## One wire variable, decoded and presented.
-  variableFromPValue(name, json_adapter.toPValue(valueNode))
-
-proc parseVariable(localNode: JsonNode): Variable =
-  ## Parse a single variable entry from the ct/load-locals response.
-  variableFromValue(localNode.getOrDefault("expression").getStr(""),
-                    localNode.getOrDefault("value"))
 
 # ---------------------------------------------------------------------------
 # Data loading — send DAP requests and feed responses into the store
 # ---------------------------------------------------------------------------
-
-type
-  LocalsAnswer = object
-    ## One `ct/load-locals` answer, not yet applied. The TYPE is not exported
-    ## — only `fetchLocals` makes one and only `applyLocals` consumes one —
-    ## while its fields are, so a caller can inspect what it holds.
-    ok*: bool
-      ## The backend answered with a locals list.
-    rows*: seq[Variable]
-    requestedAt*: StopStamp
-      ## The stop the request was SENT at — see `fetchLocals`.
 
 proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
   ## Send ``ct/load-locals`` to the backend and parse the answer, WITHOUT
@@ -649,35 +559,15 @@ proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
   var watches: seq[string] = @[]
   if not s.session.isNil and not s.session.stateVM.isNil:
     watches = s.session.stateVM.watchExpressions.val
-  let args = %*{
-    "rrTicks": s.getCurrentRRTicks().int64,
-    "countBudget": 3000,
-    "minCountLimit": 50,
-    "depthLimit": 7,
-    "watchExpressions": watches,
-    # The language's wire name (LRS-1) — of the file the debugger is stopped
-    # in (`sourceLanguageOf`, installed by `newHeadlessDebugSession`). This used
-    # to be `LoadLocalsDefaultLang` (`c`) for every trace: `Db::load_locals`
-    # does not read it for a materialized trace, but the native replay
-    # backend renders values through the named language's printers.
-    "lang": s.session.store.localsLanguage(),
-  }
-  result.requestedAt = s.session.store.stopStamp()
+  # The language is the stopped-in file's wire name (LRS-1,
+  # `sourceLanguageOf`, installed by `newHeadlessDebugSession`): the native
+  # replay backend renders values through the named language's printers.
+  let args = s.session.store.localsLoadArgs(s.getCurrentRRTicks(), watches)
+  let requestedAt = s.session.store.stopStamp()
   let resp = s.backend.sendDapRequest("ct/load-locals", args)
-  if resp.getOrDefault("success").getBool(false):
-    let body = resp.getOrDefault("body")
-    if not body.isNil and body.kind == JObject:
-      let localsNode = body.getOrDefault("locals")
-      if not localsNode.isNil and localsNode.kind == JArray:
-        # Watch answers ride the same list, marked `value.isWatch`. The
-        # split itself is `applyLocalsResponse`'s — the one place every
-        # host does it.
-        for localNode in localsNode:
-          var parsed = parseVariable(localNode)
-          parsed.isWatch =
-            localNode.getOrDefault("value").getOrDefault("isWatch").getBool(false)
-          result.rows.add(parsed)
-        result.ok = true
+  if responseSucceeded(resp):
+    result = localsAnswerOf(responseBody(resp))
+  result.requestedAt = requestedAt
 
 proc applyLocals*(s: HeadlessDebugSession; answer: LocalsAnswer): bool =
   ## Apply a fetched answer through the store's reconciliation. `false` when
@@ -688,6 +578,8 @@ proc applyLocals*(s: HeadlessDebugSession; answer: LocalsAnswer): bool =
   if not s.session.store.applyLocalsResponse(answer.rows, answer.requestedAt):
     return false
   s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
+  if not s.session.stateVM.isNil:
+    s.session.stateVM.updateOriginSummaries(answer.origins)
   drain()
   true
 

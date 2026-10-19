@@ -449,8 +449,20 @@ mod tests {
         let dat = meta_dat::serialize_meta_dat(&meta);
         let (paths_dat, paths_off) = paths_table(paths);
         let ct_path = dir.join("trace.ct");
-        let mut members: Vec<(&str, &[u8])> =
-            vec![("meta.dat", &dat), ("paths.dat", &paths_dat), ("paths.off", &paths_off)];
+        // The other three interning tables, empty: a container carries the
+        // four all together or none (`internal-files.md` "Interning Tables").
+        let empty_off = 0u64.to_le_bytes();
+        let mut members: Vec<(&str, &[u8])> = vec![
+            ("meta.dat", &dat),
+            ("paths.dat", &paths_dat),
+            ("paths.off", &paths_off),
+            ("funcs.dat", &[]),
+            ("funcs.off", &empty_off),
+            ("types.dat", &[]),
+            ("types.off", &empty_off),
+            ("varnames.dat", &[]),
+            ("varnames.off", &empty_off),
+        ];
         members.extend_from_slice(extra);
         meta_dat::write_minimal_ctfs(&ct_path, &members).expect("write minimal ctfs");
 

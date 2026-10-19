@@ -45,14 +45,19 @@ when defined(js):
 import std/[algorithm, json, os, osproc, posix, sets, streams, strutils]
 
 import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
+import isonim/core/async_compat   # `drainPlatformCallbacks`: applies the answers
 
 import headless_session
+import sdk/stop_loader   # the SDK's per-stop loads, which `loadStopPanes` runs
 import store/types as store_types   # `FilesystemEntryNode`
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
+import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
+from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
+import ../../../ct/trace/recorder_output   # `ct record-test`'s recording id
 export headless_session
 
 type
@@ -140,6 +145,11 @@ type
     done*: bool
     ok*: bool
     message*: string
+    testRun*: bool
+      ## A `ct record-test` (`startRecordTestJob`): it records into the
+      ## trace store, and says where by the recording id it prints.
+    recordingId*: string
+      ## That id, once the run finished.
 
 proc startRecordJob*(program: string; args: seq[string];
                      outputFolder: string): NativeRecordJob =
@@ -175,6 +185,49 @@ proc startRecordJob*(program: string; args: seq[string];
     result.message = "could not start ct record: " & e.msg
     result.process = nil
 
+proc startRecordTestJob*(path: string): NativeRecordJob =
+  ## THE DESKTOP'S RUN-TESTS (`ui/debug.nim`'s `run-tests` action, answered
+  ## by `index/traces.onRunTest`): `ct record-test "" <path> 0 0
+  ## --with-diff=HEAD --store-trace-folder-for-pid=<pid>` in the background —
+  ## the tests of the file the debugger is in, recorded. Its log is a
+  ## temporary file; `recordingId` names the recording when it finishes.
+  result = NativeRecordJob(program: path, testRun: true)
+  let ct = findCtBinary()
+  if ct.len == 0:
+    result.done = true
+    result.message = "no ct found to run the tests with; set CT_BIN"
+    return
+  result.logPath = getTempDir() / ("codetracer-record-test-" &
+                                   $getCurrentProcessId() & ".log")
+  try:
+    writeFile(result.logPath, "")
+    result.process = startProcess(ct, workingDir = path.parentDir,
+      args = @["record-test", "", path, "0", "0", "--with-diff=HEAD",
+               "--store-trace-folder-for-pid=" & $getCurrentProcessId()],
+      options = {poStdErrToStdOut})
+  except CatchableError as e:
+    result.done = true
+    result.message = "could not start ct record-test: " & e.msg
+    result.process = nil
+
+proc recordingFolderOf*(recordingId: string): string =
+  ## Where the trace store keeps a recording (`ct trace-metadata --id`, as
+  ## the desktop's `findTraceWithCodetracer` asks), or "".
+  let ct = findCtBinary()
+  if ct.len == 0 or recordingId.len == 0:
+    return ""
+  try:
+    let (output, code) = execCmdEx(quoteShellCommand(
+      [ct, "trace-metadata", "--id=" & recordingId]))
+    if code != 0:
+      return ""
+    let start = output.find('{')
+    if start < 0:
+      return ""
+    result = parseJson(output[start .. ^1]){"outputFolder"}.getStr("")
+  except CatchableError:
+    result = ""
+
 proc pollRecordJob*(job: NativeRecordJob): bool =
   ## Whether the job FINISHED on this poll (once): `ok` and `message` say
   ## how. The recorder's output is drained so a chatty program cannot fill
@@ -205,9 +258,19 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
   if code == -1:
     return false
   job.done = true
-  job.ok = code == 0 and traceFolderProblem(job.outputFolder).len == 0
+  if job.testRun:
+    var log = ""
+    try: log = readFile(job.logPath)
+    except CatchableError: discard
+    job.recordingId = recordingIdFromOutput(log)
+    job.ok = code == 0 and job.recordingId.len > 0
+    if code == 0 and job.recordingId.len == 0:
+      job.message = "ct record-test finished without reporting a " &
+                    "recording id, so there is nothing to replay"
+  else:
+    job.ok = code == 0 and traceFolderProblem(job.outputFolder).len == 0
   job.process.close()
-  if not job.ok:
+  if not job.ok and job.message.len == 0:
     var last = ""
     try:
       for l in readFile(job.logPath).splitLines():
@@ -215,7 +278,8 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
           last = l.strip
     except CatchableError:
       discard
-    job.message = "recording " & job.program & " failed (exit " & $code &
+    job.message = (if job.testRun: "running the tests of " else: "recording ") &
+                  job.program & " failed (exit " & $code &
                   ")" & (if last.len > 0: ": " & last else: "")
   true
 
@@ -478,6 +542,18 @@ proc outermostRoots(roots: seq[string]): seq[string] =
     if not inside and r notin result:
       result.add r
 
+proc recordedSourcePaths(traceFolder: string): seq[string] =
+  ## The recording's source paths: its `paths.json`, else its `files/`
+  ## store's own listing (the desktop's `loadFilenames` fallback).
+  let pathsFile = traceFolder / "paths.json"
+  if fileExists(pathsFile):
+    try:
+      for p in parseJson(readFile(pathsFile)): result.add p.getStr("")
+    except CatchableError:
+      result = @[]
+  if result.len == 0:
+    result = storedSourcePaths(traceFolder / "files")
+
 proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   ## **The replay session's file tree**: the recording's own source folders,
   ## derived from its `paths.json` by the rule the desktop's Files pane uses
@@ -495,15 +571,7 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   result = FilesystemEntryNode(text: "source folders", isFolder: true,
                                isExpanded: true)
   let store = traceFolder / "files"
-  let pathsFile = traceFolder / "paths.json"
-  var recorded: seq[string] = @[]
-  if fileExists(pathsFile):
-    try:
-      for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
-    except CatchableError:
-      recorded = @[]
-  if recorded.len == 0:
-    recorded = storedSourcePaths(store)
+  let recorded = recordedSourcePaths(traceFolder)
   for root in outermostRoots(sourceFolderRootsOf(recorded)):
     let dir = store / root
     if dirExists(dir):
@@ -512,6 +580,32 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
       result.children.add FilesystemEntryNode(text: root.extractFilename,
                                               path: "/" & root)
 
+
+# ---------------------------------------------------------------------------
+# PLAT-57: Find in Files on the native front-ends
+# ---------------------------------------------------------------------------
+
+proc recordingSearchScope*(traceFolder: string): FindInFilesScope =
+  ## What Find in Files reads for this recording — the runner's
+  ## `findInFilesScope`, the desktop's rule: the recording's `files/` store
+  ## (every recording the native front-ends open is read from it), else its
+  ## source folders.
+  findInFilesScope(traceFolder / "files", preferStore = true,
+                   sourceFolderRootsOf(recordedSourcePaths(traceFolder)))
+
+var nativeFindInFiles* = newFindInFilesService()
+  ## The process's one runner service: a front-end runs one search at a
+  ## time, and a new one cancels the one in flight. The host's loop pumps it.
+
+proc wireFindInFiles*(vm: SearchResultsVM; scope: proc(): FindInFilesScope) =
+  ## Hand `vm`'s searches to the shared runner: each runs over `scope()` and
+  ## streams its batches into `vm`, which drops any that are not its latest.
+  if vm.isNil:
+    return
+  vm.onSearch = proc(runId: int; query: string; options: TextMatchOptions) =
+    discard nativeFindInFiles.search(runId, query, options, scope(),
+      proc(b: FindInFilesBatch) =
+        discard vm.acceptBatch(b.runId, b.rows, b.done, b.note))
 
 proc expandAllFolders*(vm: FilesystemVM) =
   ## PLAT-50: mark every folder of `vm`'s tree expanded.
@@ -556,26 +650,11 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
 
 proc refreshCallStackFallback*(s: HeadlessDebugSession) =
   ## PLAT-47: hand the calltrace pane the call STACK when — and only when —
-  ## the recording provides no call trace (`CalltraceVM.fallbackStack`). Per
-  ## stop, because the stack is a fact about the stop. A recording WITH a
-  ## trace pays nothing here: the store's lines are checked first.
-  let vm = s.session.calltraceVM
-  if vm.isNil:
-    return
-  if s.session.store.calltrace.lines.val.len > 0:
-    if vm.fallbackStack.val.len > 0:
-      vm.fallbackStack.val = newSeq[string]()
-    return
-  var names: seq[string] = @[]
-  try:
-    let response = s.sendRawDapRequest("stackTrace", %*{
-      "threadId": 1, "startFrame": 0, "levels": RecordingCalltraceLevels})
-    discard s.drainEvents()
-    for f in response{"body", "stackFrames"}.getElems:
-      names.add f{"name"}.getStr("")
-  except CatchableError:
-    names = @[]
-  vm.fallbackStack.val = names
+  ## the recording provides no call trace (`CalltraceVM.fallbackStack`),
+  ## re-asked now even at an unchanged stop. The load itself is the SDK stop
+  ## loader's (`StopPane.spCallStackFallback`).
+  s.sdk.stops.reload(spCallStackFallback)
+  drainPlatformCallbacks()
 
 proc selectCurrentCall*(s: HeadlessDebugSession) =
   ## PLAT-49 part B: select the call the debugger is in, as the desktop does
@@ -598,14 +677,15 @@ proc selectCurrentCall*(s: HeadlessDebugSession) =
   vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), names))
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
-  ## The per-STOP producer: the values in scope where the debugger now is,
-  ## which the state pane and the editor's inline values both read.
-  try:
-    s.requestAndLoadLocals()
-    result.locals = true
-  except CatchableError:
-    result.locals = false
-  refreshCallStackFallback(s)
+  ## The per-STOP producers — the values in scope where the debugger now is
+  ## (the state pane and the editor's inline values) and the PLAT-47 call
+  ## stack fallback — through the SDK's stop loader, the one per-stop loader
+  ## of every front-end. Each is asked once per stop; the stdio transport's
+  ## answers are applied when the platform callbacks are drained, below.
+  let loader = s.sdk.stops
+  loader.loadStop()
+  drainPlatformCallbacks()
+  result.locals = loader.status[spLocals].val == plsApplied
 
 proc stdoutIsTerminal*(): bool =
   ## Whether standard output is a terminal.

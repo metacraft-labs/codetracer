@@ -132,6 +132,7 @@ const
   StatusRootClass* = "status-shell"
   StatusBaseId* = "status-base"
   CollapsedIconZoneHostId* = "auto-hide-collapsed-icon-zone"
+  CollapsedIconZoneRightHostId* = "auto-hide-collapsed-icon-zone-right"
   CollapsedIconZoneClass* = "collapsed-icon-zone"
   BottomStripHostId* = "auto-hide-bottom-strip"
   BottomStripClass* = "auto-hide-bottom-strip"
@@ -425,6 +426,9 @@ template renderStatusShellImpl(
                 discard
               tdiv(class = copyTooltipClass(model.base.copyTooltipActive)):
                 text "Path copied to clipboard"
+
+        tdiv(id = CollapsedIconZoneRightHostId, class = CollapsedIconZoneClass):
+          discard
 
       if model.showNotifications:
         tdiv(id = "notifications-container"):

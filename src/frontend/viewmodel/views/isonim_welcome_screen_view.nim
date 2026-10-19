@@ -594,11 +594,63 @@ when defined(js):
   proc readInputValue(node: isonim_dom.Node): string =
     $node.inputValue()
 
+  # One Recent traces row, and one start option, each built in a proc of its
+  # own rather than inline in `renderWelcomeModeWeb`'s `for` loops.  Their
+  # `class` expressions read the hover state, so the `ui` DSL gives each one a
+  # live effect (a closure).  Nim's JS backend shares one closure environment
+  # across a loop's iterations, so effects created inline in the loop all saw
+  # the LAST row's element and id: hovering any row could only ever mark the
+  # last tooltip.  A proc call gets a fresh environment per row.
+  proc renderRecentTraceRowWeb(r: WebRenderer; vm: WelcomeScreenVM;
+                               callbacks: WelcomeScreenCallbacks;
+                               trace: RecentTraceRecord):
+      isonim_dom.Element =
+    let recordingId = trace.recordingId
+    ui(r):
+      tdiv(class = "recent-trace-container"):
+        tdiv(class = "recent-trace",
+             onclick = traceClickHandler(vm, callbacks, recordingId),
+             onmouseover = traceMouseOverHandler(vm, recordingId),
+             onmouseleave = proc() = vm.clearHoveredTrace()):
+          tdiv(class = "recent-trace-title"):
+            span(class = "recent-trace-title-time"):
+              text formatWelcomeTimeAgo(trace.date)
+            tdiv(class = "separate-bar"):
+              discard
+            span(class = "recent-trace-title-content"):
+              text traceCommandText(trace)
+          tdiv(class = traceTooltipClass(vm.hoveredRecording.val == recordingId)):
+            text traceTooltipText(trace)
+
+  proc renderStartOptionWeb(r: WebRenderer; vm: WelcomeScreenVM;
+                            callbacks: WelcomeScreenCallbacks;
+                            opt: WelcomeStartOptionRecord):
+      isonim_dom.Element =
+    ui(r):
+      button(class = "ct-button-sm-tertiary " &
+                     startOptionClass(opt, vm.hoveredOption.val == opt.key),
+             title = opt.disabledReason,
+             `aria-disabled` = startOptionAriaDisabled(opt),
+             onclick = startOptionClickHandler(vm, callbacks, opt),
+             onmouseover = startOptionMouseOverHandler(vm, opt.key),
+             onmouseleave = proc() =
+               vm.clearHoveredOption()):
+        text opt.name
+
   proc renderWelcomeModeWeb(r: WebRenderer; vm: WelcomeScreenVM;
                             callbacks: WelcomeScreenCallbacks):
       isonim_dom.Element =
-    let hoveredRecordingId = vm.hoveredRecording.val
-    let hoveredOptionKey = vm.hoveredOption.val
+    # The hover state is NOT read here.  This proc runs inside
+    # `renderWelcomeScreenPanel`'s `createRenderEffect`, which clears and
+    # rebuilds the whole screen whenever a signal read directly in its body
+    # changes.  Reading `vm.hoveredRecording` / `vm.hoveredOption` here rebuilt
+    # the screen on every row and button enter/leave, and the rebuilt Recent
+    # traces list started back at the top — scrolling it with the wheel moved
+    # rows under the pointer, changed the hover, and snapped the list back.
+    # Each hover read now sits in its element's `class` expression instead
+    # (`renderRecentTraceRowWeb`, `renderStartOptionWeb`), where the `ui` DSL
+    # wraps it in an effect of its own that only re-sets that one attribute
+    # (see `isDynamic`, isonim/dsl/transform.nim).
     let traces = vm.recentTraces.val
     let folders = vm.recentFolders.val
     let options = vm.startOptions.val
@@ -650,39 +702,14 @@ when defined(js):
                 tdiv(class = "recent-traces-list"):
                   if traces.len > 0:
                     for trace in traces:
-                      let traceCopy = trace
-                      let recordingId = traceCopy.recordingId
-                      tdiv(class = "recent-trace-container"):
-                        tdiv(class = "recent-trace",
-                             onclick = traceClickHandler(vm, callbacks, recordingId),
-                             onmouseover = traceMouseOverHandler(vm, recordingId),
-                             onmouseleave = proc() = vm.clearHoveredTrace()):
-                          tdiv(class = "recent-trace-title"):
-                            span(class = "recent-trace-title-time"):
-                              text formatWelcomeTimeAgo(traceCopy.date)
-                            tdiv(class = "separate-bar"):
-                              discard
-                            span(class = "recent-trace-title-content"):
-                              text traceCommandText(traceCopy)
-                          tdiv(class = traceTooltipClass(hoveredRecordingId == recordingId)):
-                            text traceTooltipText(traceCopy)
+                      renderRecentTraceRowWeb(r, vm, callbacks, trace)
                   else:
                     tdiv(class = "empty-state-message"):
                       tdiv(class = "empty-state-text"):
                         text RecentTracesEmptyText
           tdiv(class = "start-options"):
             for opt in options:
-              let hovered = hoveredOptionKey == opt.key
-              let optCopy = opt
-              button(class = "ct-button-sm-tertiary " &
-                             startOptionClass(optCopy, hovered),
-                     title = optCopy.disabledReason,
-                     `aria-disabled` = startOptionAriaDisabled(optCopy),
-                     onclick = startOptionClickHandler(vm, callbacks, optCopy),
-                     onmouseover = startOptionMouseOverHandler(vm, optCopy.key),
-                     onmouseleave = proc() =
-                       vm.clearHoveredOption()):
-                text optCopy.name
+              renderStartOptionWeb(r, vm, callbacks, opt)
           if startOptionsNote.len > 0:
             tdiv(class = StartOptionsNoteClass):
               text startOptionsNote

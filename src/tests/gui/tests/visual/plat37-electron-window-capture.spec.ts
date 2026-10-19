@@ -243,6 +243,83 @@ async function readProgramState(
   });
 }
 
+/**
+ * THE REFERENCE'S OWN ROW PITCH, read from the live editor rather than
+ * estimated from the frame.
+ *
+ * PARITY-S5 is "the two front-ends draw editor rows at different pitches",
+ * and every reading of it so far has been an INFERENCE from ink: the
+ * OCR-free instrument's mode of consecutive line-band centre deltas. That is
+ * a sound estimator, but it is an estimator on both sides, so a disagreement
+ * between the two arms could always have been the estimator rather than the
+ * product.
+ *
+ * Monaco knows the answer exactly. `editor.getOption(EditorOption.lineHeight)`
+ * is the resolved `fontInfo.lineHeight` — the value after
+ * `BareFontInfo._create` has applied `GOLDEN_LINE_HEIGHT_RATIO * fontSize`
+ * and rounded it (`monaco-editor/esm/vs/editor/common/config/fontInfo.js`).
+ * Recording it makes the Electron side of S5 a MEASUREMENT of the reference
+ * and not a reading of a photograph of it, and it is what the GPUI side's
+ * `chrome.monacoLineHeightPx` derivation has to reproduce.
+ *
+ * Soft on purpose: a scenario with no editor (entry-shell draws none) must
+ * record `null` and not fail a capture lane over a diagnostic.
+ */
+async function readEditorFontMetrics(
+  page: import("playwright").Page,
+): Promise<{
+  lineHeightPx: number;
+  fontSizePx: number;
+  fontFamily: string;
+  source: string;
+} | null> {
+  return page.evaluate(() => {
+    // `EditorOption.lineHeight` is 75 and `.fontSize` is 61 in the Monaco
+    // this product ships (`editorOptions.js`); `config` is the snapshot
+    // `editor.nim` keeps as `monacoEditor.config` (`getConfiguration`).
+    const w = window as unknown as {
+      data?: {
+        ui?: {
+          monacoEditors?: Array<{
+            config?: { lineHeight?: number; fontInfo?: Record<string, unknown> };
+            getOption?: (id: number) => unknown;
+          }>;
+        };
+      };
+    };
+    const editors = w.data?.ui?.monacoEditors ?? [];
+    for (const ed of editors) {
+      if (!ed) continue;
+      const fromOption =
+        typeof ed.getOption === "function"
+          ? (ed.getOption(75) as number | undefined)
+          : undefined;
+      const lh = ed.config?.lineHeight ?? fromOption;
+      if (typeof lh !== "number" || !(lh > 0)) continue;
+      const fi = (ed.config?.fontInfo ?? {}) as {
+        fontSize?: number;
+        fontFamily?: string;
+      };
+      const fs =
+        fi.fontSize ??
+        (typeof ed.getOption === "function"
+          ? (ed.getOption(61) as number | undefined)
+          : undefined) ??
+        -1;
+      return {
+        lineHeightPx: lh,
+        fontSizePx: fs,
+        fontFamily: fi.fontFamily ?? "",
+        source:
+          ed.config?.lineHeight !== undefined
+            ? "monacoEditor.config.lineHeight"
+            : "editor.getOption(EditorOption.lineHeight)",
+      };
+    }
+    return null;
+  });
+}
+
 const fmtState = (s: ProgramState) =>
   `line ${s.line} @ ticks ${s.rrTicks}${s.busy === true ? " (busy)" : ""}`;
 
@@ -617,7 +694,46 @@ function pngSize(file: string): { width: number; height: number } {
 
 for (const scenario of definition.scenarios) {
   test.describe(`plat37-electron ${scenario.id}`, () => {
-    test.use({ sourcePath: recordingPath, launchMode: "trace-folder" });
+    // `noUserLayout: true` — THE PRODUCT'S OWN FIRST-RUN LAYOUT, NOT THE
+    // BUNDLED TREE. Without it the launch fixture calls
+    // `layout-reset.ensureDefaultLayout`, which copies
+    // `src/config/default_layout.json` VERBATIM into the run's
+    // `$CODETRACER_HOME/config`. The index process then finds a saved layout
+    // and loads it as-is, so `index/config.installModeDefault` — and with it
+    // `mode_default_layout.modeDefaultLayout` — never runs.
+    //
+    // That matters here and nowhere else in this lane, because the bundled
+    // tree is the one the product's own source calls "nobody's layout": it
+    // gives TEST RESULTS and CONSTRAINTS a top-level column of their own
+    // (`src/config/default_layout.json`, third column, 25%), which the
+    // editing surface wants and a REPLAY does not. Debug mode's default
+    // moves TESTS into the FILES stack (`frontend.paneHomesForMode`) and
+    // omits CONSTRAINTS outright (`frontend.modeDefaultOmittedContentIds`),
+    // and that derived tree is what `headless_app/layout_model`'s
+    // `sharedDefaultLayout` is generated from — the arrangement every
+    // CodeTracer front-end opens with.
+    //
+    // MEASURED COST OF NOT SETTING IT (2026-10-12/13 passes, re-read
+    // 2026-10-14): every Electron frame carried a standing TESTS ("no tests
+    // found") / CONSTRAINTS ("No circuit has been compiled for this project
+    // yet.") column at x1165-1440 that no mode draws. The screen oracle
+    // counted 7 panes against the GPUI window's 5, and that census was filed
+    // as PARITY-S1, "GPUI draws 5 panes where Electron draws 7", with GPUI
+    // named the deficient side. It was an artefact of this line. The control
+    // that settles it is PLAT-45's own first-run capture
+    // (`src/tests/visual/answers/plat45-default-arrangement.electron.json`),
+    // taken with `noUserLayout: true` against the real app: five stacks,
+    // `[9,41,48] [2] [4,17] [6,35] [8,24]`, TESTS a tab of FILES and no
+    // CONSTRAINTS component anywhere.
+    //
+    // Eleven of the sixteen specs under `tests/visual/` already set this;
+    // this lane was the capture whose frames parity is measured against, and
+    // the one that did not.
+    test.use({
+      sourcePath: recordingPath,
+      launchMode: "trace-folder",
+      noUserLayout: true,
+    });
     test.setTimeout(600_000);
 
     test(`capture ${scenario.view}`, async ({ ctPage, electronApp }) => {
@@ -704,6 +820,8 @@ for (const scenario of definition.scenarios) {
         movesPerformed: driven.moves,
         editorSettledBetweenOperations: driven.settled,
         finalState: driven.final,
+        // PARITY-S5's reference value, from Monaco rather than from ink.
+        editorFontMetrics: await readEditorFontMetrics(ctPage),
         viewport: viewportRecord,
         pageRoute: {
           how: "page.screenshot() over CDP — Chromium's own raster of the web contents, no window chrome, no compositor",

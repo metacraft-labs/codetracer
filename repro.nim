@@ -236,6 +236,7 @@ const
     projectRootPath / "libs/nim-serialization",
     projectRootPath / "libs/nim-stew",
     projectRootPath / "libs/nim-unicodedb/src",
+    projectRootPath / "libs/nim-regex/src",
     projectRootPath / "libs/poly",
     projectRootPath / "libs/quicktest",
     projectRootPath / "libs/chronos",
@@ -401,6 +402,29 @@ package codeTracer:
     "rustup >=1"
     "sh >=1"
     "wasm-opt >=0"
+    # Zstandard's DEVELOPMENT channel -- `zstd.h` on the include path and
+    # `libzstd` on the library path. NOT the same thing as `zstd` (declared
+    # further down, under the POSIX-only block): that selector is the CLI
+    # TOOL, and under nix provisioning it realizes only nixpkgs' default
+    # output for this derivation, which is `bin` -- `bin/zstd` and nothing
+    # else. `zstd.h` is in the `dev` output and `libzstd` in `out`.
+    #
+    # This build compiles against the header, so it must say so. The
+    # `codetracer-trace-format-nim` sources declared below are consumed as
+    # SOURCE (the SC-11 `nimPathDirs` channel), which means THIS project's
+    # `nim c` is what compiles `codetracer_ctfs/zstd_bindings.nim`,
+    # `codetracer_trace_writer/record_chunk.nim` and
+    # `codetracer_trace_writer/span_stream.nim` -- each of whose generated C
+    # `#include`s `<zstd.h>`. Measured 2026-10-14 on aarch64-darwin against
+    # codetracer `4e2201692`: all three died at the C stage with
+    # `'zstd.h' file not found` while `uses: "zstd >=0"` was the only zstd
+    # declaration here.
+    #
+    # It is unconditional, unlike `zstd`, because every platform compiles
+    # those three modules. On Windows `zstd-dev` realizes the same
+    # facebook/zstd v1.5.6 archive the `zstd` selector does and selects
+    # `include/zstd.h` out of it.
+    "zstd-dev >=0"
 
     # Sibling library dependencies (SC-11 develop-mode from-source consumption)
     "isonim >=0"
@@ -411,6 +435,90 @@ package codeTracer:
     # others (provision-repro-lock-siblings clones only what the lock pins;
     # its header asks for exactly this once isonim-tui became one).
     "isonim-tui >=0"
+    # `codetracer-trace-format-nim` is consumed exactly as the siblings above
+    # are, and for the same two reasons.
+    #
+    # It was the odd one out: its importable `src/` reached this build only
+    # through `config.nims:76`
+    # (`addPathIfDir(workspaceRoot / "codetracer-trace-format-nim" / "src")`),
+    # a hand-maintained `--path:` outside the build graph. That is precisely
+    # the splice the SC-11 Nim library-source channel exists to replace
+    # (Cross-Repo-Source-Consumption.md §4.2a): the producer already declares
+    # `library codetracer_trace_format_nim`
+    # (`codetracer-trace-format-nim/repro.nim:302`), so a bare `uses:` entry
+    # threads its `src/` onto this project's `nim c --path:` through the
+    # `nimPathDirs` aux channel, in develop mode AND in lock-pinned mode.
+    #
+    # The second reason is that `config.nims` CANNOT FAIL LOUDLY.
+    # `addPathIfDir` is by construction a no-op on a missing directory, so a
+    # checkout without the sibling got silence at configure time and
+    # `cannot open file: codetracer_ctfs/...` much later, attributed to the
+    # compile rather than to the missing dependency. A `uses:` entry is
+    # admitted and materialized before the edge runs, so the same situation
+    # is a named resolution failure.
+    #
+    # (Unlike `isonim-tui`'s case above, lock PINNING was already covered:
+    # `codetracer-trace-format-nim` is a flake input of this repo and is
+    # already listed in this repo's `repro.lock` `depends`. What was missing
+    # was the in-graph DECLARATION, not the pin.)
+    #
+    # !! THIS DECLARATION DOES NOT BUILD YET, and the reason is worth reading
+    # before you either delete it or refresh the lock to make it pass.
+    #
+    # Declaring the producer imports the PRODUCER'S OWN version constraints
+    # into this project's solve. `codetracer-trace-format-nim/repro.nim:291`
+    # declares `"nim >=2.2 <3.0"` (mirroring its nimble `requires`), and this
+    # repo's committed `repro.lock` pins `nim` to `2.0.0`, so the solve is
+    # refused before any compile runs (measured 2026-10-14 against
+    # `reprobuild` `agents` `f24884244`):
+    #
+    #   Error: the committed lock '.../codetracer/repro.lock' pins 'nim' to
+    #   2.0.0, but package 'codetracer_trace_format_nim' declares
+    #   `uses: nim >=2.2 <3.0`, which 2.0.0 does not satisfy. [ELockConflict]
+    #
+    # RESOLVED 2026-10-15 by correcting the single pin, NOT by a re-solve.
+    #
+    # `2.0.0` was stale rather than chosen. The lock's `version` field records
+    # the SOLVED version, and the solver grounds an unbounded-above constraint
+    # at the HIGHEST FLOOR the develop set declares — measured against this
+    # repo's own lock at `4e2201692`: `python3 = 3.9.0` is `isonim`'s and
+    # `nim-agents`' `"python3 >=3.9"`, `cargo = 1.85.0` is the recorders'
+    # `"cargo >=1.85"`, `bash = 4.0.0` is this file's `"bash >=4"`. For `nim`
+    # the highest floor WAS 2.0 (`isonim`, `isonim-tui`, `nim-everywhere`,
+    # `nim-agent-harbor`, `nim-agents`, `nim-acp` all declare `"nim >=2.0"`),
+    # and declaring the producer above raises it to 2.2, because
+    # `codetracer-trace-format-nim/repro.nim:291` says `"nim >=2.2 <3.0"`.
+    # So the pin is now `2.2.0`.
+    #
+    # This is the third time this exact correction has been made by hand in
+    # this lock — `4b237ac16` for `cargo`, `4fceba7e4` for `python3` — and for
+    # the same reason both of those give: the remedy the error prints,
+    # `repro lock refresh`, re-solves EVERY pin in the lock (79 version pins
+    # plus 39 sibling revision pins — a "118" quoted for this lock elsewhere
+    # is those two counts added together, not 118 versions) and PUBLISHES the
+    # result. That is a project-wide change as the price of declaring one
+    # dependency, so the single conflicting entry is corrected instead.
+    #
+    # The toolchain the build actually provisions is unchanged by this and is
+    # NOT 2.2.0. Under this project's default `tool-provisioning=nix` it is
+    # `nixpkgs#nim`, measured 2026-10-15 from the compile's own command line
+    # as `/nix/store/4m0ffd42…-nim-unwrapped-2.2.4`. (An earlier note here
+    # named `tool-store/prefixes/nim_2.2.10/…/bin/nim`; that prefix exists on
+    # this host but is the TARBALL realization, which this project does not
+    # select by default.) The lock's version space is the CONSTRAINT space,
+    # not the realization space — which is also why `zstd = 0.0.0` sits beside
+    # a realization of zstd 1.5.7.
+    #
+    # NOTE, so the next reader does not mistake what this fixed: this does
+    # NOT by itself resolve the `'zstd.h' file not found` failure in
+    # `zstd_bindings.nim.c` / `record_chunk.nim.c` / `span_stream.nim.c`.
+    # That was a separate defect — `uses: "zstd >=0"` under nix provisioning
+    # realizes zstd's `bin` OUTPUT, which carries no `include/`, and zstd's
+    # headers live in the `dev` output nothing asked for. It is closed by
+    # the `uses: "zstd-dev >=0"` entry above, which names the development
+    # channel as a selector of its own; see
+    # `repro_dsl_stdlib/packages/zstd_dev.nim`.
+    "codetracer-trace-format-nim >=0"
     "nim-everywhere >=0"
     "nim-agent-harbor >=0"
     "nim-agents >=0"
@@ -433,6 +541,18 @@ package codeTracer:
     # ``appimage-scripts/`` / ``nix bundle`` (see ``build-app-image``).
     when defined(macosx):
       "create-dmg >=1"
+      # The Mach-O debug-info pass. `nim c` with `debugInfo = true` compiles
+      # and links through `clang` and then shells out AGAIN, by bare name, to
+      # `dsymutil` to build the `.dSYM` bundle. Both `ct` and
+      # `db-backend-record` go through the `ctNative` template below, which
+      # declares tool refs and is therefore hermetic, so the second tool has
+      # to be declared exactly as the first one is.
+      #
+      # It is NOT reachable through `clang`: measured 2026-10-16 on
+      # aarch64-darwin, the realized `clang-wrapper-21.1.8/bin` carries 17
+      # binaries and `dsymutil` is not among them. It comes from
+      # `nixpkgs#llvm` (reprobuild `repro_dsl_stdlib/packages/dsymutil.nim`).
+      "dsymutil >=0"
 
     # POSIX-only / Nix-only tools — guarded off the Windows branch.
     when not defined(windows):
@@ -579,6 +699,18 @@ package codeTracer:
     if dirExists(traceFormat):
       prependPath nativeLibraryPathEnvName(), traceFormat
 
+    # The BUILD-time half of this dependency is declared, not hand-rolled:
+    # `uses: "codetracer-trace-format-nim >=0"` above threads the producer's
+    # `src/` onto `nim c --path:` through the SC-11 `nimPathDirs` channel, and
+    # its realized library dir through SC-3's `libDirs`.
+    #
+    # What remains here is the DEV-SHELL RUNTIME half, which no build channel
+    # covers: the aux channels are spliced into build ACTIONS, while this is
+    # `devEnv:`, the interactive shell a developer types `ct` into. The
+    # already-built `libcodetracer_trace_writer.{dylib,so}` has to be on the
+    # dynamic loader's search path for that process to start. Deleting this
+    # on the strength of the `uses:` entry above would break `ct` in the dev
+    # shell while every build still passed.
     let traceFormatNim = siblingPath(workspaceRoot,
       "codetracer-trace-format-nim")
     let traceWriterLib =
@@ -736,6 +868,30 @@ package codeTracer:
 
     template ctNative(outputPath, sourcePath, nimcachePath: string):
         BuildActionDef =
+      # ZSTD IS NAMED PER ACTION, NOT ONLY PER PACKAGE.
+      #
+      # `uses: "zstd-dev >=0"` in the package block above is necessary and not
+      # sufficient. `scopedToolArtifact` realizes only the tool identities the
+      # SELECTED ACTIONS reference — measured 2026-10-15 on aarch64-darwin,
+      # `repro build ct-binary` printed `selected tool identities: 1/61` and
+      # `.repro/build/repro/nix-tool-identities.inspect.json` held exactly one
+      # profile, `nim`. So a package-level declaration alone puts NOTHING on
+      # this edge's CPATH, and the C stage died on `'zstd.h' file not found`
+      # with the package-level entry already in place.
+      #
+      # `appendRegisteredActionToolIdentityRefs` is the recipe-facing way to
+      # say "this edge uses that tool", and it is what `nim.c` itself uses for
+      # the two sub-tools it knows about: `openssl` on a `-d:ssl` edge, and the
+      # backend C compiler (`repro_dsl_stdlib/packages/nim.nim:716,757`).
+      # `vm-harness/repro.nim:112` spells it the same way for `pcre-config`.
+      # An unmatched ref is inert — the resolver returns `none` for a name no
+      # `uses:` entry declares — so this is a no-op on a tree whose package
+      # block does not declare `zstd-dev`.
+      #
+      # It belongs on EVERY native edge rather than on `ct` alone:
+      # `codetracer_ctfs/zstd_bindings.nim` arrives through
+      # `CodeTracerNimPaths`, so any `src/ct*` entry point that reaches the
+      # CTFS reader or the trace writer compiles those same three modules.
       # Windows: drop the Linux/Nix dynlibOverride+passL set (no system
       # libssl/libcrypto/libsqlite3/libpcre/libzip available on the DIY
       # toolchain); pin -lz + zlib include/lib paths via passC/passL so the
@@ -743,48 +899,116 @@ package codeTracer:
       # The DSL output role for nim.c does NOT auto-append .exe on Windows;
       # add it explicitly so the cache lookup and downstream consumers see the
       # real file path emitted by the Nim compiler.
-      when defined(windows):
-        nim.c(
-          defines = NativeDefines,
-          mm = "refc",
-          hintsOff = true,
-          warningsOff = true,
-          disabledHints = DisabledNimHints,
-          disabledWarnings = DisabledCaseTransitionWarning,
-          debugInfo = true,
-          lineDirOn = true,
-          stacktraceOn = true,
-          linetraceOn = true,
-          boundChecksOn = true,
-          warningsOn = true,
-          hintsOn = true,
-          passC = WindowsExtraPassC,
-          passL = WindowsExtraPassL,
-          nimcache = nimcachePath,
-          paths = CodeTracerNimPaths,
-          output = outputPath & ".exe",
-          source = sourcePath)
-      else:
-        nim.c(
-          defines = NativeDefines,
-          mm = "refc",
-          hintsOff = true,
-          warningsOff = true,
-          disabledHints = DisabledNimHints,
-          disabledWarnings = DisabledCaseTransitionWarning,
-          debugInfo = true,
-          lineDirOn = true,
-          stacktraceOn = true,
-          linetraceOn = true,
-          boundChecksOn = true,
-          warningsOn = true,
-          hintsOn = true,
-          dynlibOverrides = NativeDynlibOverrides,
-          passL = NativePassL,
-          nimcache = nimcachePath,
-          paths = CodeTracerNimPaths,
-          output = outputPath,
-          source = sourcePath)
+      block:
+        let ctNativeAction =
+          when defined(windows):
+            nim.c(
+              defines = NativeDefines,
+              mm = "refc",
+              hintsOff = true,
+              warningsOff = true,
+              disabledHints = DisabledNimHints,
+              disabledWarnings = DisabledCaseTransitionWarning,
+              debugInfo = true,
+              lineDirOn = true,
+              stacktraceOn = true,
+              linetraceOn = true,
+              boundChecksOn = true,
+              warningsOn = true,
+              hintsOn = true,
+              passC = WindowsExtraPassC,
+              passL = WindowsExtraPassL,
+              nimcache = nimcachePath,
+              paths = CodeTracerNimPaths,
+              output = outputPath & ".exe",
+              source = sourcePath)
+          else:
+            nim.c(
+              defines = NativeDefines,
+              mm = "refc",
+              hintsOff = true,
+              warningsOff = true,
+              disabledHints = DisabledNimHints,
+              disabledWarnings = DisabledCaseTransitionWarning,
+              debugInfo = true,
+              lineDirOn = true,
+              stacktraceOn = true,
+              linetraceOn = true,
+              boundChecksOn = true,
+              warningsOn = true,
+              hintsOn = true,
+              dynlibOverrides = NativeDynlibOverrides,
+              passL = NativePassL,
+              nimcache = nimcachePath,
+              paths = CodeTracerNimPaths,
+              output = outputPath,
+              source = sourcePath)
+        # NAMING ANY REF MAKES THIS EDGE'S `PATH` HERMETIC, SO IT MUST ALSO
+        # NAME THE C COMPILER.
+        #
+        # `actionPathDecision` (repro_cli_support.nim:1579) states the rule:
+        # "DECLARING A TOOL REF IS THE OPT-IN TO A HERMETIC `PATH`. An edge
+        # that names what it runs gets a value composed only of the
+        # directories those tools resolved into … An edge that names nothing
+        # has stated nothing to compose from, so it inherits."
+        #
+        # Before this, `ctNative`'s edge named NOTHING, so it inherited the
+        # developer's `$PATH` and found a C compiler there by luck. Measured
+        # 2026-10-15 on aarch64-darwin: adding `zstd-dev` alone fixed the
+        # three `'zstd.h' file not found` errors and replaced them with nine
+        # `/bin/sh: clang: command not found`, exit 127 — the edge had become
+        # hermetic and the compiler it shells out to was not declared.
+        #
+        # `nim c` does not emit machine code; it emits C and shells out to a
+        # bare `clang`/`gcc`. `repro_dsl_stdlib/packages/nim.nim:757` declares
+        # exactly this for the edges IT lowers, with the same per-platform
+        # default and the same reasoning ("THE C BACKEND IS A SUB-TOOL, AND IT
+        # HAS TO SAY SO"). That append sits on nim.nim's `binary`-shorthand
+        # overload, which this recipe does not call — it passes `output =` —
+        # so the declaration has to be made here.
+        #
+        # The platform split mirrors nim's own default C backend: `gcc` on
+        # Linux and on the mingw toolchain, `clang` on macOS. Declaring the
+        # wrong one injects the wrong directory and the edge dies with
+        # `<compiler>: command not found` even though the compiler is
+        # installed.
+        #
+        # Inheriting the ambient `PATH` was not merely untidy: it made this
+        # edge's inputs depend on the developer's login shell, which is the
+        # unkeyed channel `actionPathDecision` exists to close. Becoming
+        # hermetic here is a gain, not a cost — but it is a REAL behaviour
+        # change, and anything else this compile shells out to by bare name
+        # has to be declared beside the two below.
+        const CtBackendCompiler =
+          when defined(macosx): "clang"
+          else: "gcc"
+        appendRegisteredActionToolIdentityRefs(ctNativeAction.id,
+          [CtBackendCompiler, "zstd-dev"])
+        # THE DEBUG-INFO PASS IS A SECOND SUB-TOOL, AND ONLY ON MACOS.
+        #
+        # `debugInfo = true` above is not free on darwin. The linker leaves
+        # DWARF in the object files and writes only a debug map; `dsymutil`
+        # is the separate pass that turns that map into `ct.dSYM`. `nim c`
+        # runs it by BARE NAME after the link, so on a hermetic edge it is
+        # subject to exactly the same rule as `clang` three lines up.
+        #
+        # This failure mode reads unlike the compiler one and is worth
+        # recognising: the action has ALREADY WRITTEN A WORKING BINARY when
+        # it dies. Measured 2026-10-16 on aarch64-darwin, `ct` existed at
+        # 11,389,600 bytes and answered `ct --version` -> `26.10.1(debug)`,
+        # while `ct.dSYM` was empty and the edge exited non-zero. Do not read
+        # "the binary is there" as "the edge succeeded".
+        #
+        # Gated on macOS because it is a Mach-O concern: ELF and PE builds
+        # keep their debug info in the image and never invoke it. On Linux
+        # and Windows the ref would be inert anyway (the resolver returns
+        # `none` for a name no `uses:` entry declares, and the entry above is
+        # itself `when defined(macosx)`), but saying so here keeps the
+        # declaration honest rather than accidentally harmless.
+        when defined(macosx):
+          appendRegisteredActionToolIdentityRefs(ctNativeAction.id,
+            ["dsymutil"])
+        ctNativeAction
 
     template ctStylus(name: string): BuildActionDef =
       # Project-local ``yarn install`` drops ``node_modules/stylus/bin/stylus``

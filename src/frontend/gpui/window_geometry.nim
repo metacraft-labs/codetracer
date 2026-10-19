@@ -40,20 +40,37 @@
 ##
 ## Pure: integers and the model's values, no renderer, no window.
 
-import std/[json, options, strutils]
-from std/unicode import runeLen
+import std/[json, math, options, strutils]
 
 import headless_app/layout_model
 import headless_app/layout_interaction
 import ./chrome
+import ./design_font_metrics
 import ./app/pane_names
 
 export layout_model, layout_interaction
 
 const
-  TabStripPx* = 30
-    ## PLAT-45. The height of a stack's tab strip in the window: one line of
-    ## the pane-title face plus the strip's own padding.
+  TabStripPx* = 32
+    ## PLAT-45. The height of a stack's tab strip in the window — the
+    ## desktop's GoldenLayout header (`.lm_header`, 32 px, measured on the
+    ## Electron front-end 2026-10-17; 30 until then).
+  TabTopPx* = 4
+    ## How far below the strip's top a tab starts (`LAYOUT_TAB_TOP`).
+  TabHeightPx* = 24
+    ## One tab's height (`.lm_tab` `height: 1.5rem`). The active tab reaches
+    ## on down to its pane's body, joined to it (`.lm_active`'s box-shadow
+    ## bridge).
+  TabGapPx* = 4
+    ## Between two tabs of a strip (`LAYOUT_TAB_GAP`, 0.25em).
+  TabTitleInsetPx* = 8
+    ## A tab's title from its left edge (`.lm_tab` `padding: 0 0.5em`).
+  TabPinPx* = 14
+    ## A tab's pin icon (`.lm_pin_tab`, 0.85em: 13.6 px drawn as 14).
+  TabClosePx* = 10
+    ## A tab's close icon (`.lm_close_tab`, 0.6em).
+  TabRadiusPx* = 6
+    ## A tab's and a pane body's corner radius (0.36em, 5.76 px).
   TabPadPx* = 10
     ## The padding either side of a tab's label.
   TabCharPx* = 10
@@ -74,8 +91,9 @@ const
   DockedOpenSharePercent* = 21
     ## PLAT-49 part B: the desktop's docked panel, 280 px of a 1334 px layout
     ## (measured, `plat49-panes-capture.spec.ts`).
-  FooterPx* = DockStripPx + 4
-    ## PLAT-49 part B: the window's footer (status bar) height.
+  FooterPx* = 32
+    ## PLAT-49 part B: the window's footer (status bar) height — the
+    ## desktop's `#status-base`, 32 px (measured 2026-10-17; 28 until then).
   DockCharPx* = 16
     ## One character's row in a left or right strip, whose labels read
     ## top to bottom one character per row (GPUI draws no rotated text).
@@ -119,6 +137,10 @@ type
         ## no heading of its own (the user, 2026-10-01: the tab strip
         ## identifies the pane, as the desktop's GoldenLayout header does).
       tabs*: seq[PxRect]
+      pins*: seq[PxRect]
+        ## Each tab's pin icon (`.lm_pin_tab`): docks the tab's pane.
+      closes*: seq[PxRect]
+        ## Each tab's close icon (`.lm_close_tab`).
       body*: PxRect
         ## The pane's own content box: inside the border, below the strip.
 
@@ -224,14 +246,19 @@ proc addNode(g: var WindowGeometry; layout: Layout; n: JsonNode;
     var used = 0
     var cursor = if horizontal: x else: y
     var sizes: seq[int] = @[]
+    # THE DESKTOP'S ROUNDING (golden-layout's `calculateAbsoluteSizes`):
+    # each child its share floored, and the pixels left over handed out one
+    # apiece to the FIRST children — not all of them to the last, which put
+    # every divider of a 1920 px window a pixel left of the desktop's.
     for i in 0 ..< kids.len:
       let share =
         if total > 0.0: stack{"sizes"}[i].getFloat / total
         else: 1.0 / float(kids.len)
-      let px = if i == kids.high: extent - used
-               else: int(float(extent) * share)
+      let px = int(floor(float(extent) * share))
       used += px
       sizes.add px
+    for i in 0 ..< min(kids.len, max(0, extent - used)):
+      inc sizes[i]
     let at = g.nodes.len
     g.nodes.add node
     var childIdx: seq[int] = @[]
@@ -271,16 +298,28 @@ proc addNode(g: var WindowGeometry; layout: Layout; n: JsonNode;
           if pane == id and lone.len > 0:
             label = lone
       node.labels.add label
-    let inner = PxRect(x: x + FocusOutlinePx, y: y + FocusOutlinePx,
-                       w: max(1, w - 2 * FocusOutlinePx),
-                       h: max(1, h - 2 * FocusOutlinePx))
+    # No frame inset since 2026-10-17: the focused pane's outline is drawn
+    # OVER the pane (`main.drawFocusOutline`), as the desktop's
+    # `.ct-selected-outline` overlay is, so the strip and the body start at
+    # the pane's own edge like GoldenLayout's.
+    let inner = PxRect(x: x, y: y, w: max(1, w), h: max(1, h))
     if tabs.len >= 1:
       node.strip = PxRect(x: inner.x, y: inner.y, w: inner.w, h: TabStripPx)
-      var tx = inner.x + StripInsetPx
-      for label in node.labels:
-        let tw = tabWidthPx(label)
-        node.tabs.add PxRect(x: tx, y: inner.y, w: tw, h: TabStripPx)
-        tx += tw
+      # THE DESKTOP'S TABS SHARE THE STRIP EQUALLY (`.lm_tab` `flex: 1`,
+      # `LAYOUT_TAB_GAP` between): three tabs in a 339 px strip are 110 px
+      # each, one tab is the strip's whole width (measured 2026-10-17).
+      let n = node.labels.len
+      let share = max(1, (inner.w - (n - 1) * TabGapPx) div n)
+      var tx = inner.x
+      for i in 0 ..< n:
+        let tw = if i == n - 1: max(1, inner.x + inner.w - tx) else: share
+        let tab = PxRect(x: tx, y: inner.y + TabTopPx, w: tw, h: TabHeightPx)
+        node.tabs.add tab
+        node.pins.add PxRect(x: tab.x + tab.w - 36, y: tab.y + 5,
+                             w: TabPinPx, h: TabPinPx)
+        node.closes.add PxRect(x: tab.x + tab.w - 18, y: tab.y + 7,
+                               w: TabClosePx, h: TabClosePx)
+        tx += tw + TabGapPx
       node.body = PxRect(x: inner.x, y: inner.y + TabStripPx, w: inner.w,
                          h: max(1, inner.h - TabStripPx))
     else:
@@ -289,20 +328,36 @@ proc addNode(g: var WindowGeometry; layout: Layout; n: JsonNode;
     return g.nodes.high
   -1
 
+const
+  SlotPadPx* = 8
+    ## A horizontal strip label's padding either side
+    ## (`.auto-hide-strip-tab` `padding: 0 8px`).
+  SlotGapPx* = 4
+    ## Between two horizontal strip labels.
+  SlotTextPx* = 14.0
+    ## Their text size.
+  FooterFileInfoX* = 10
+    ## Where the footer's file info starts (`#file-info-status`).
+  FooterFileInfoPx* = 329
+    ## Its width, the same whatever it says (measured at 1440 and 1920 px).
+
 func slotExtentPx*(edge: LayoutEdge; label: string): int =
   ## How long one strip label is along its strip: a horizontal (top/bottom)
-  ## strip's is a tab's width, a vertical one's a character per row.
+  ## strip's is its text in the label face, padded (the desktop's
+  ## `.auto-hide-strip-tab`: BUILD is 54 px); a vertical one's a character
+  ## per row.
   case edge
-  of leTop, leBottom: tabWidthPx(label)
+  of leTop, leBottom:
+    2 * SlotPadPx + groteskTextPx(label, SlotTextPx, LabelLetterSpacing)
   of leLeft, leRight: 2 * TabPadPx + DockCharPx * label.len
 
 func footerLeadPx*(fileInfo: string): int =
   ## How far into the footer the bottom labels start: past the status bar's
-  ## FILE INFO (`headless_app/footer_info`), padded a tab's padding each
-  ## side, as the desktop's status bar opens with its language and encoding
-  ## and its labels follow them. None without a file.
+  ## FILE INFO (`headless_app/footer_info`), as the desktop's status bar opens
+  ## with its language and encoding and its labels follow them — the strip at
+  ## 338 px, its first label at 342 (measured 2026-10-17). None without a file.
   if fileInfo.len == 0: 0
-  else: 2 * TabPadPx + TabCharPx * fileInfo.runeLen
+  else: FooterFileInfoX + FooterFileInfoPx - 1
 
 proc stripsOf(layout: Layout; area, footer: PxRect; footerLead = 0):
     tuple[strips: seq[GeomStrip], inner: PxRect] =
@@ -339,18 +394,21 @@ proc stripsOf(layout: Layout; area, footer: PxRect; footerLead = 0):
         PxRect(x: footer.x + lead, y: footer.y, w: footer.w - lead,
                h: footer.h)
     var strip = GeomStrip(edge: edge, rect: rect, slots: @[])
-    var cursor = (if edge in {leTop, leBottom}: rect.x else: rect.y) +
-                 StripInsetPx
+    let horizontal = edge in {leTop, leBottom}
+    var cursor = (if horizontal: rect.x + SlotGapPx else: rect.y + StripInsetPx)
     for d in layout.dockedAt(edge):
       let label = if d.title.len > 0: d.title else: labelOf($d.pane)
       let extent = slotExtentPx(edge, label)
+      # A footer label is a 24 px chip on the bar's content row.
+      let inset = if edge == leBottom: max(0, (rect.h - TabHeightPx) div 2)
+                  else: 0
       let slot =
-        if edge in {leTop, leBottom}:
-          PxRect(x: cursor, y: rect.y, w: extent, h: rect.h)
+        if horizontal:
+          PxRect(x: cursor, y: rect.y + inset, w: extent, h: rect.h - 2 * inset)
         else:
           PxRect(x: rect.x, y: cursor, w: rect.w, h: extent)
       strip.slots.add GeomSlot(pane: $d.pane, label: label, rect: slot)
-      cursor += extent
+      cursor += extent + (if horizontal: SlotGapPx else: 0)
     result.strips.add strip
 
 proc revealRectOf*(g: WindowGeometry; edge: LayoutEdge): PxRect
@@ -367,17 +425,18 @@ proc windowGeometryOf*(layout: Layout; dock: JsonNode;
   ## above the arrangement; 0 for a window drawn without one.
   result = WindowGeometry(
     viewport: PxRect(x: 0, y: 0, w: width, h: height),
-    area: PxRect(x: ChromePaddingPx, y: ChromePaddingPx + topBandPx,
-                 w: max(1, width - 2 * ChromePaddingPx),
-                 h: max(1, height - 2 * ChromePaddingPx - topBandPx)),
+    area: PxRect(x: WindowEdgePx, y: topBandPx,
+                 w: max(1, width - 2 * WindowEdgePx),
+                 h: max(1, height - topBandPx)),
     nodes: @[], root: -1, dividers: @[], loneLabels: loneLabels)
   # PLAT-49 part B (finding 9): THE BOTTOM LABELS LIVE IN A FOOTER — the
   # window's status bar, along its bottom edge, full width — as the
   # desktop's live in its status bar. The layout area ends a gap above it.
-  if layout.dockedAt(leBottom).len > 0:
+  # The desktop's status bar is always there under a caption bar, and the
+  # layout runs directly into it (`#ROOT` ends where `#status-base` begins).
+  if topBandPx > 0 or layout.dockedAt(leBottom).len > 0:
     result.footer = PxRect(x: 0, y: height - FooterPx, w: width, h: FooterPx)
-    let bottom = result.footer.y - ChromeGapPx
-    result.area.h = max(1, bottom - result.area.y)
+    result.area.h = max(1, result.footer.y - result.area.y)
   let (strips, inner) = stripsOf(layout, result.area, result.footer,
                                  footerLead)
   result.strips = strips
@@ -538,15 +597,37 @@ proc dividerFractionAt*(g: WindowGeometry; divider: int; axisPos: int): float =
   clamp(float(content) / float(d.extent), 0.0, 1.0)
 
 const
-  GpuiEditorRowPx* = 26
-    ## The pitch of one editor row in the window: one line of the editor's
-    ## text face at the shim's default size, measured off the window (26 px
-    ## from one row to the next on `call_pages`, where every line fits). The
-    ## call trace pages by the same pitch.
-  EditorLinesAbovePx* = GpuiEditorRowPx
-    ## What the editor pane draws above its rows: the source statement
-    ## (`leaves.renderEditor` draws it always). Its heading went with
-    ## PLAT-49 — the pane's tab strip, outside its body, names it.
+  GpuiEditorRowPx* = EditorLinePx
+    ## The pitch of one editor row in the window — the desktop's Monaco
+    ## `lineHeight`, set as the row's `line-height`. **Platform-dependent,
+    ## because Monaco's is**: `chrome.monacoLineHeightPx(chrome.CodeFontPx)`
+    ## transcribes `GOLDEN_LINE_HEIGHT_RATIO * fontSize`, rounded, which is
+    ## 24 px on macOS and 22 px elsewhere. It was the literal 22 from
+    ## 2026-10-17 until the derivation replaced it — Monaco's Linux answer,
+    ## carried onto a macOS host where PLAT-37's pitch instrument then read
+    ## GPUI 22.0-22.5 points against Electron 23.5-24.5 (PARITY-S5, measured
+    ## against codetracer 596cb6e50). 26 px before either: GPUI's default
+    ## line height at 16 px, the shim drawing no `line-height`.
+  EditorLinesAbovePx* = 0
+    ## What the editor pane draws above its rows: nothing since 2026-10-17,
+    ## as the desktop's editor. The source statement (`leaves.renderEditor`)
+    ## is on the pane's element and its tab rather than in a row of its own.
+  EditorPadTopPx* = 4
+    ## The editor's first row from its pane's top at the top of a file: the
+    ## desktop's `.lm_content:has(> .code-editor)` padding. Scrolled, Monaco's
+    ## sub-row offset is added (`main.editorTopInsetPx`).
+
+
+func paneInsetOf*(pane: string): tuple[top, right, bottom, left: int] =
+  ## The padding inside a pane's body before its content — the desktop's
+  ## `.lm_content` (8 px at the top) plus the pane's own: the editor's
+  ## (`EditorPadTopPx`, edge to edge), the call trace's and the state pane's
+  ## (their content reaches the sides and draws its own insets). Every other
+  ## pane keeps `ChromePaddingPx` on all four sides.
+  case pane
+  of "editor": (EditorPadTopPx, EditorPadSidePx, 0, EditorPadSidePx)
+  of "calltrace", "state", "eventLog", "fileTree": (8, 0, 0, 0)
+  else: (ChromePaddingPx, ChromePaddingPx, ChromePaddingPx, ChromePaddingPx)
 
 proc editorRowsOf*(g: WindowGeometry): int =
   ## **How many source rows the editor pane SHOWS**: its body, less its
@@ -559,7 +640,33 @@ proc editorRowsOf*(g: WindowGeometry): int =
   ## draws no editor answers for the tree area.
   let i = g.tabsNodeOfPane("editor")
   let h = if i >= 0: g.nodes[i].body.h else: g.inner.h
-  max(1, (h - 2 * ChromePaddingPx - EditorLinesAbovePx) div GpuiEditorRowPx)
+  # The last row is counted when it is only partly in view, as Monaco draws
+  # it (clipped by the pane): 45 rows in the 982 px body at 1920x1080, which
+  # also puts the centred execution line where Monaco reveals it — its top at
+  # the editor's middle (`SourceVM`'s `(rows - 1) div 2` above it).
+  max(1, (h - EditorPadTopPx - EditorLinesAbovePx + GpuiEditorRowPx - 1) div
+         GpuiEditorRowPx)
+
+const
+  EditorHScrollBandPx* = 12
+    ## Monaco's horizontal scrollbar band along the editor's bottom, which its
+    ## viewport excludes (`scrollbar.horizontalScrollbarSize`).
+
+proc editorFullRowsOf*(g: WindowGeometry): int =
+  ## How many WHOLE rows the editor shows: its body over the row pitch, the
+  ## partial last row not counted — where Monaco stops at a file's end.
+  let i = g.tabsNodeOfPane("editor")
+  let h = if i >= 0: g.nodes[i].body.h else: g.inner.h
+  max(1, (h - EditorPadTopPx - EditorLinesAbovePx) div GpuiEditorRowPx)
+
+proc editorVisibleRowsOf*(g: WindowGeometry): int =
+  ## How many of the editor's rows are WHOLLY in view above that band — the
+  ## rows Monaco counts as inside its viewport when it decides whether a
+  ## stop must be revealed (`GpuiSourceService.visibleRows`).
+  let i = g.tabsNodeOfPane("editor")
+  let h = if i >= 0: g.nodes[i].body.h else: g.inner.h
+  max(1, (h - EditorPadTopPx - EditorLinesAbovePx - EditorHScrollBandPx) div
+         GpuiEditorRowPx)
 
 proc editorBodyWidthOf*(g: WindowGeometry): int =
   ## **How wide the editor pane's CONTENT area is**: its body, less the
@@ -576,10 +683,11 @@ proc editorBodyWidthOf*(g: WindowGeometry): int =
   ## editor pane's ground measures 466 px wide at 1920x1080 and 346 px at
   ## 1440x900 on `build/plat35/gpui/*.png`, and the rightmost ink on any row
   ## sits at exactly 10 px inside the right edge (853 of 863, 637 of 647) —
-  ## which is `ChromePaddingPx`, and is why it is subtracted twice here.
+  ## which was `ChromePaddingPx`. Since 2026-10-17 the editor fills its pane
+  ## to both edges (`EditorPadSidePx`).
   let i = g.tabsNodeOfPane("editor")
   let w = if i >= 0: g.nodes[i].body.w else: g.inner.w
-  max(1, w - 2 * ChromePaddingPx)
+  max(1, w - 2 * EditorPadSidePx)
 
 # ---------------------------------------------------------------------------
 # §5 obligation 2, first direction: PIXELS -> `LayoutPointer`
@@ -757,9 +865,12 @@ proc dropIndicationRects*(g: WindowGeometry; ind: DropIndication;
     if placeholderPx > 0:
       # PLAT-51: GoldenLayout's placeholder is open there — the caret IS the
       # gap the tabs moved apart for (GoldenLayout highlights it).
+      # Held inside the stack's strip, as GoldenLayout's header clips it:
+      # never into the splitter or the window's edge past it.
+      let w = min(placeholderPx, n.strip.w)
+      let x = clamp(cx, n.strip.x, n.strip.x + n.strip.w - w)
       return (tint: n.strip,
-              caret: PxRect(x: cx, y: n.strip.y, w: placeholderPx,
-                            h: n.strip.h))
+              caret: PxRect(x: x, y: n.strip.y, w: w, h: n.strip.h))
     (tint: n.strip,
      caret: PxRect(x: max(n.strip.x, cx - DropCaretPx div 2), y: n.strip.y,
                    w: DropCaretPx, h: n.strip.h))
