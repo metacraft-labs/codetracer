@@ -34,7 +34,7 @@ if [ ! -f "$lock" ]; then
 	exit 1
 fi
 
-depends="$(grep -o 'name = "codetracer", path = "\."[^}]*depends = "[^"]*"' "$lock" |
+depends="$(grep -o 'name = "codetracer", \(self = "true"\|path = "\."\)[^}]*depends = "[^"]*"' "$lock" |
 	sed 's/.*depends = "//; s/"$//' | head -n 1)"
 if [ -z "$depends" ]; then
 	echo "repro-lock-build-input-siblings: $lock declares no develop set for codetracer" >&2

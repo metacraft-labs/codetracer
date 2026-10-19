@@ -944,6 +944,21 @@ expect_rc 0 "committed/healthy-verified"
 expect_contains "Each of the 2 pinned commit(s) was fetched" "committed/healthy-verified"
 ok "a committed lock pinning every declared repo passes — no manifests repo exists at all"
 
+# A v3 lock carries only portable identities and an explicit self marker.
+V3_LOCK="${CL_DIR}/v3.lock"
+sed -e 's/solved-graph-lock.v2/solved-graph-lock.v3/' \
+	-e 's/path = "\.", /self = "true", /g' \
+	-e 's/path = "[^" ]*", //g' "$GOOD_LOCK" >"$V3_LOCK"
+run_committed "$V3_LOCK" --verify-remote
+expect_rc 0 "committed/v3-verified"
+expect_contains "Each of the 2 pinned commit(s) was fetched" "committed/v3-verified"
+V3_SELF_LIST="${DECL_DIR}/v3-declares-self"
+printf '%s\n' "codetracer" "$SECOND_SIBLING" >"$V3_SELF_LIST"
+run_committed "$V3_LOCK" --sibling-list "$V3_SELF_LIST"
+expect_rc 4 "committed/v3-self-excluded"
+expect_contains "  - codetracer" "committed/v3-self-excluded"
+ok "path-free v3 pins are fetched and self is excluded"
+
 # --- 10b. a declared repo the lock does not pin ------------------------------
 MISSING_LOCK="${CL_DIR}/missing.lock"
 committed_lock "$MISSING_LOCK" "$(dep_entry "$PROBE_SIBLING" "$TF_URL" "$TF_REV")"
@@ -1014,25 +1029,22 @@ expect_not_contains "  - ${PROBE_SIBLING}:" "committed/unpushed"
 ok "--verify-remote reports a pinned commit its remote does not have (exit 1), by name"
 
 # --- 10e2. how an entry is matched to a declared name ------------------------
-# The reader must find an entry the way `clone-siblings`' `committed_lock_rev`
-# does: by `name`, OR by `path = "../<name>"`, and never by the repo's own entry
-# (`path = "."`). A reader that matched by name alone would report a renamed
-# entry as missing; one that did not skip `path = "."` would accept the repo's
-# own entry as a sibling pin.
+# Names are stable identities. A stale legacy path cannot impersonate one,
+# and either schema's root marker excludes the consuming repo.
 RENAMED_LOCK="${CL_DIR}/renamed.lock"
 committed_lock "$RENAMED_LOCK" \
 	"$(printf '{ name = "renamed-entry", path = "../%s", coord_kind = "vcs", url = "%s", ref = "dev", revision = "%s", integrity = "git-sha1:%s", version = "", visibility = "public", participation = "" }' \
 		"$PROBE_SIBLING" "$TF_URL" "$TF_REV" "$TF_REV")" \
 	"$(dep_entry "$SECOND_SIBLING" "$NB_URL" "$NB_REV")"
 run_committed "$RENAMED_LOCK"
-expect_rc 0 "committed/matched-by-path"
-expect_contains "pins all 2 declared sibling repo(s)" "committed/matched-by-path"
+expect_rc 4 "committed/stale-path-is-not-an-identity"
+expect_contains "  - ${PROBE_SIBLING}" "committed/stale-path-is-not-an-identity"
 SELF_DECL_LIST="${DECL_DIR}/declares-self"
 printf '%s\n' "codetracer" "$SECOND_SIBLING" >"$SELF_DECL_LIST"
 run_committed "$GOOD_LOCK" --sibling-list "$SELF_DECL_LIST"
 expect_rc 4 "committed/self-entry-is-not-a-pin"
 expect_contains "  - codetracer" "committed/self-entry-is-not-a-pin"
-ok "an entry is matched by name or by ../<name> path, and the repo's own entry never counts"
+ok "entries match by name, legacy sibling paths are ignored, and the root is excluded"
 
 # --- 10f. which store: derived from the workflows' lock-store inputs ---------
 echo "committed lock: the store is derived from the workflows, like the declared set"
@@ -1107,7 +1119,7 @@ ok "the default derivation reads this repo's real workflows and names a store"
 # result; comparing against a number derived from the file is what tells the two
 # apart. If your count comes out LOWER than this, the suite stopped early or a
 # contract was deleted — find out which. Never lower this to make it match.
-readonly EXPECTED_ASSERTIONS=47
+readonly EXPECTED_ASSERTIONS=48
 
 echo
 echo "workspace-lock-freshness-test summary: executed=${pass_count} failed=0"

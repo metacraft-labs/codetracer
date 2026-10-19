@@ -30,12 +30,12 @@
 # # What is asserted (lock-store: committed, the default)
 #
 #   1. THE COMMIT CARRIES A READABLE LOCK: `repro.lock` exists at the repo root
-#      and declares `schema = "reprobuild.solved-graph-lock.v2"`.
+#      and declares a solved-graph-lock v2 or v3 schema.
 #
 #   2. IT PINS EVERY SIBLING REPO THIS COMMIT DECLARES, and pins each the way
 #      `clone-siblings` requires (§14.5): a full commit id, and a VCS-native
-#      `integrity` that names the same commit. The entry is found by `name` or
-#      by `path = "../<name>"`, as `clone-siblings` finds it. See "THE DECLARED
+#      `integrity` that names the same commit. The entry is found by `name`,
+#      ignoring legacy sibling paths, as `clone-siblings` finds it. See "THE DECLARED
 #      SIBLING SET" below for how the declared set is derived.
 #
 #   3. With `--verify-remote`, EACH OF THOSE PINS RESOLVES: the pinned commit can
@@ -578,7 +578,7 @@ fi
 CL_STATE=""
 CL_WHY=""
 CL_NAMES=()
-CL_PATHS=()
+CL_SELF=()
 CL_URLS=()
 CL_REVS=()
 CL_INTEGS=()
@@ -594,7 +594,7 @@ cl_field() { # <inline-table-body> <key> -> value on stdout; rc 1 when absent
 }
 
 load_committed_lock() {
-	local line deps entry body schema_ok=0
+	local line deps entry body schema_ok=0 legacy=0 self
 	if [ ! -f "${LOCK_FILE}" ]; then
 		CL_STATE="absent"
 		return 0
@@ -603,13 +603,17 @@ load_committed_lock() {
 	while IFS= read -r line || [ -n "${line}" ]; do
 		line="${line%$'\r'}"
 		case "${line}" in
-		'schema = "reprobuild.solved-graph-lock.v2"') schema_ok=1 ;;
+		'schema = "reprobuild.solved-graph-lock.v2"')
+			schema_ok=1
+			legacy=1
+			;;
+		'schema = "reprobuild.solved-graph-lock.v3"') schema_ok=1 ;;
 		'deps = ['*) deps="${line#deps = [}" ;;
 		esac
 	done <"${LOCK_FILE}"
 	if [ "${schema_ok}" -ne 1 ]; then
 		CL_STATE="unreadable"
-		CL_WHY="it does not declare schema = \"reprobuild.solved-graph-lock.v2\" (regenerate it with 'repro lock refresh')"
+		CL_WHY="it does not declare a supported solved-graph-lock schema (v2 or v3) (regenerate it with 'repro lock refresh')"
 		return 0
 	fi
 	deps="${deps%]}"
@@ -628,7 +632,12 @@ load_committed_lock() {
 		deps="${deps#"${entry} }"}"
 		deps="${deps#", "}"
 		CL_NAMES+=("$(cl_field "${body}" name)")
-		CL_PATHS+=("$(cl_field "${body}" path)")
+		self="$(cl_field "${body}" self || true)"
+		# Only v2's root marker survives migration; sibling paths are not identities.
+		if [ "${legacy}" -eq 1 ] && [ "$(cl_field "${body}" path || true)" = "." ]; then
+			self="true"
+		fi
+		CL_SELF+=("${self}")
 		CL_URLS+=("$(cl_field "${body}" url)")
 		CL_REVS+=("$(cl_field "${body}" revision)")
 		CL_INTEGS+=("$(cl_field "${body}" integrity)")
@@ -654,8 +663,8 @@ committed_pin() {
 	PIN_URL=""
 	PIN_WHY=""
 	for i in "${!CL_NAMES[@]}"; do
-		[ "${CL_PATHS[$i]}" = "." ] && continue
-		if [ "${CL_NAMES[$i]}" = "${name}" ] || [ "${CL_PATHS[$i]}" = "../${name}" ]; then
+		[ "${CL_SELF[$i]}" = "true" ] && continue
+		if [ "${CL_NAMES[$i]}" = "${name}" ]; then
 			rev="${CL_REVS[$i]}"
 			integ="${CL_INTEGS[$i]}"
 			if ! is_commit_id "${rev}"; then

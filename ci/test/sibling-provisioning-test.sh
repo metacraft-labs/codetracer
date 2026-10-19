@@ -546,7 +546,7 @@ fi
 # The lock itself: the `codetracer` node's `depends` field is the declaration
 # `repro develop --all` resolves.
 if [ -f "$REPRO_LOCK" ]; then
-	actual_deps="$(grep -o 'name = "codetracer", path = "\."[^}]*depends = "[^"]*"' "$REPRO_LOCK" |
+	actual_deps="$(grep -o 'name = "codetracer", \(self = "true"\|path = "\."\)[^}]*depends = "[^"]*"' "$REPRO_LOCK" |
 		sed 's/.*depends = "//; s/"$//' | head -n 1)"
 else
 	actual_deps="<repro.lock not found>"
@@ -578,6 +578,20 @@ else
 		"actual:   $actual_build_inputs"
 fi
 
+# The same build-input set must survive v3's removal of all dependency paths.
+path_free_lock="$(mktemp)"
+sed -e 's/solved-graph-lock.v2/solved-graph-lock.v3/' \
+	-e 's/path = "\.", /self = "true", /g' \
+	-e 's/path = "[^" ]*", //g' "$REPRO_LOCK" >"$path_free_lock"
+path_free_inputs="$("$BUILD_INPUT_SELECTOR" "$path_free_lock" 2>&1)" || true
+rm -f "$path_free_lock"
+if [ "$path_free_inputs" = "$actual_build_inputs" ]; then
+	ok "path-free v3 locks select the same build-input siblings"
+else
+	fail "path-free v3 locks select the same build-input siblings" \
+		"expected: $actual_build_inputs" "actual: $path_free_inputs"
+fi
+
 # ... and each of them at an IMMUTABLE revision. A branch name here would be
 # the same defect the ceiling above exists to prevent, arriving through the
 # other lock.
@@ -585,7 +599,7 @@ unpinned_deps=()
 if [ -f "$REPRO_LOCK" ]; then
 	IFS=',' read -r -a _declared <<<"$LOCK_DECLARED_DEPS"
 	for dep in "${_declared[@]}"; do
-		rev="$(grep -o "name = \"$dep\", path = \"[^\"]*\"[^}]*revision = \"[^\"]*\"" "$REPRO_LOCK" |
+		rev="$(grep -o "name = \"$dep\"[^}]*revision = \"[^\"]*\"" "$REPRO_LOCK" |
 			sed 's/.*revision = "//; s/"$//' | head -n 1)"
 		if [ "${#rev}" -ne 40 ] || [ -n "${rev//[0-9a-f]/}" ]; then
 			unpinned_deps+=("$dep -> '${rev:-<no revision record>}' is not a 40-hex commit SHA")
@@ -1822,7 +1836,7 @@ echo
 # flake.lock locked.rev"), added with the trace-format conversion. It reports
 # exactly once, either as the agreement or as the vacuity refusal, so this
 # number grows by one and not by two.
-readonly EXPECTED_ASSERTIONS=31
+readonly EXPECTED_ASSERTIONS=32
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
