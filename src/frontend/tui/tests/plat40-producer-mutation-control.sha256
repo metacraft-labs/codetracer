@@ -1,0 +1,11 @@
+# Control digests for run-plat40-producer-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the needle
+# scan (§39a).
+84599f19d8c533cafc0e90cf629f3aab4fb45b6a6d59dadd434e0d8acdaaf8fc  src/frontend/viewmodel/headless_session.nim
+6fdac153639147d5ac92d56ed5b7598612772f7af7f10b902bbf21a0cf1eedb0  src/frontend/viewmodel/store/replay_data_store.nim
+3d38882e4e3b0e0892a4a84e7abc777d6b96638dfd89bd7eeb021f2ef524f313  src/frontend/tui/host/native_host.nim
+b5fad155cd2f11654c1ecf84e9c399d2b5635f9e63c5569f2a5d414393668c8f  src/frontend/tui/host/tui_session.nim
+9edc9695c12fd0b21a3cb1b9e9d12bb47e2166d7ca6f60bbfb38cd7660751a56  src/frontend/tui/app/views/shell.nim
+0bf5f4bd17512207c38775a820baceaf7502cc51161680621ffb4cfa5efb4fee  src/frontend/viewmodel/viewmodels/point_list_vm.nim
+5d7de7648c2679d1395c2e1ec70e1818ccb4b3993de9527adc3650640d68f0a7  src/frontend/tui/tests/test_plat40_producers.nim

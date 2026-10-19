@@ -1,0 +1,699 @@
+{
+ "_comment": [
+  "PLAT-47 part B \u2014 the GPUI window, read from its own pixels.",
+  "Captured by `just plat47-gpui-window` (headless sway, a virtual",
+  "pointer device, wtype) and measured by `just plat47-gpui-window-record`",
+  "(ci/test/plat47_gpui_window.py). Asserted by",
+  "src/frontend/gpui/tests/test_plat47_gpui_window.nim."
+ ],
+ "frame": [
+  1920,
+  1080
+ ],
+ "settled": {
+  "base": true,
+  "resize-live": true,
+  "resize-done": true,
+  "press-body": true,
+  "drop-base": true,
+  "drop-split": true,
+  "drop-whole": true,
+  "drop-slot": true,
+  "drop-dock": true,
+  "drop-cancel": true,
+  "drop-released": true,
+  "drop-commit": true,
+  "vcs": true,
+  "vcs-refresh": true,
+  "dock-committed": true,
+  "dock-revealed": true,
+  "dock-dismissed": true,
+  "pages-base": true,
+  "pages-end": true
+ },
+ "focusRing": {
+  "bbox": [
+   396,
+   54,
+   470,
+   990
+  ],
+  "sides": {
+   "top": {
+    "ring": 462,
+    "of": 462,
+    "inside": 0
+   },
+   "bottom": {
+    "ring": 462,
+    "of": 462,
+    "inside": 0
+   },
+   "left": {
+    "ring": 982,
+    "of": 982,
+    "inside": 0
+   },
+   "right": {
+    "ring": 982,
+    "of": 982,
+    "inside": 0
+   }
+  }
+ },
+ "editor": {
+  "body": [
+   397,
+   55,
+   468,
+   988
+  ],
+  "pixelsByDesktopColour": {
+   "keyword": 130,
+   "string": 3307,
+   "comment": 133,
+   "identifier": 443,
+   "delimiter": 15,
+   "lineNumber": 778,
+   "activeLineNumber": 11,
+   "ground": 397122,
+   "oldBand4f4f4f": 0,
+   "chromePaneFill": 0
+  },
+  "desktop": {
+   "background": "#282828",
+   "keyword": "#5a9dd4",
+   "string": "#d6a38d",
+   "comment": "#78a96c",
+   "number": "",
+   "identifier": "#f3f3f3",
+   "delimiter": "#b6c0cb",
+   "lineNumber": "#575757",
+   "activeLineNumber": "#c8c8c8",
+   "executionLine": "#404040",
+   "selection": "#353535"
+  },
+  "text": "main.py b\nthe recording's source\n> 1 #'/usr/bin/env python3\n\"\"\"calc \u2014 the small, fast, determinis\nWHY THIS PROGRAM EXISTS, AND WHY IT L\n"
+ },
+ "band": {
+  "rows": [
+   123,
+   148
+  ],
+  "startX": 497,
+  "endX": 852,
+  "activeNumberMaxX": 455,
+  "gutterAtBandRow": "#282828",
+  "afterBandAtRow": "#282828",
+  "bodyLeft": 397,
+  "bodyRight": 864
+ },
+ "tabs": {
+  "fileTree": {
+   "rect": [
+    19,
+    55,
+    70,
+    30
+   ],
+   "base": {
+    "mass": 240.7,
+    "ink": "#f3f3f3",
+    "ground": "#333333"
+   },
+   "vcs": {
+    "mass": 124.2,
+    "ink": "#727272",
+    "ground": "#1b1b1b"
+   }
+  },
+  "vcs": {
+   "rect": [
+    89,
+    55,
+    50,
+    30
+   ],
+   "base": {
+    "mass": 112.4,
+    "ink": "#727272",
+    "ground": "#1b1b1b"
+   },
+   "vcs": {
+    "mass": 204.7,
+    "ink": "#f3f3f3",
+    "ground": "#333333"
+   }
+  }
+ },
+ "resize": {
+  "baseRingLeft": 396,
+  "liveRingLeft": 476,
+  "doneRingLeft": 476,
+  "pressBodyRingLeft": 476,
+  "pressBodyChanged": 52,
+  "pressBodyChangedBox": [
+   664,
+   539,
+   2,
+   26
+  ],
+  "savedLayout": {
+   "version": 6,
+   "layout": {
+    "kind": "row",
+    "children": [
+     {
+      "kind": "stack",
+      "activeIndex": 1,
+      "weight": 24.25531914893617,
+      "children": [
+       {
+        "kind": "pane",
+        "pane": "fileTree"
+       },
+       {
+        "kind": "pane",
+        "pane": "vcs"
+       },
+       {
+        "kind": "pane",
+        "pane": "testResults"
+       }
+      ]
+     },
+     {
+      "kind": "pane",
+      "pane": "editor",
+      "weight": 20.74468085106383
+     },
+     {
+      "kind": "column",
+      "weight": 55.0,
+      "children": [
+       {
+        "kind": "row",
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "scratchpad"
+           }
+          ]
+         },
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "calltrace"
+           },
+           {
+            "kind": "pane",
+            "pane": "agentActivity"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "kind": "stack",
+        "activeIndex": 0,
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "pane",
+          "pane": "eventLog"
+         },
+         {
+          "kind": "pane",
+          "pane": "terminalOutput"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "docked": [
+    {
+     "pane": "buildOutput",
+     "edge": "bottom",
+     "order": 0,
+     "title": "BUILD"
+    },
+    {
+     "pane": "problems",
+     "edge": "bottom",
+     "order": 1,
+     "title": "PROBLEMS"
+    },
+    {
+     "pane": "search",
+     "edge": "bottom",
+     "order": 2,
+     "title": "FIND IN FILES"
+    },
+    {
+     "pane": "requests",
+     "edge": "bottom",
+     "order": 3,
+     "title": "REQUESTS"
+    },
+    {
+     "pane": "state",
+     "edge": "left",
+     "order": 0,
+     "beside": "editor",
+     "weight": 20.74468085106383
+    }
+   ]
+  }
+ },
+ "drop": {
+  "editorBody": [
+   477,
+   55,
+   387,
+   988
+  ],
+  "pointers": {
+   "drop-split": [
+    860,
+    564
+   ],
+   "drop-whole": [
+    670,
+    564
+   ],
+   "drop-slot": [
+    1601,
+    70
+   ],
+   "drop-dock": [
+    4,
+    540
+   ]
+  },
+  "drop-split": {
+   "tintBBox": [
+    670,
+    85,
+    194,
+    958
+   ],
+   "changedPixels": 185852,
+   "ghostChangedPixels": 1795,
+   "ghostCentre": [
+    51,
+    51,
+    51
+   ]
+  },
+  "drop-whole": {
+   "tintBBox": [
+    477,
+    85,
+    387,
+    958
+   ],
+   "changedPixels": 365626,
+   "ghostChangedPixels": 5120,
+   "ghostCentre": [
+    51,
+    51,
+    51
+   ]
+  },
+  "drop-slot": {
+   "tintBBox": [
+    1395,
+    55,
+    512,
+    30
+   ],
+   "changedPixels": 14880,
+   "ghostChangedPixels": 2370,
+   "ghostCentre": [
+    51,
+    51,
+    51
+   ]
+  },
+  "drop-dock": {
+   "tintBBox": [
+    12,
+    54,
+    48,
+    990
+   ],
+   "changedPixels": 46112,
+   "ghostChangedPixels": 2188,
+   "ghostCentre": [
+    51,
+    51,
+    51
+   ]
+  },
+  "cancelChangedPixels": 0,
+  "releasedChangedPixels": 0,
+  "commitRing": [
+   476,
+   54,
+   190,
+   990
+  ],
+  "commitArrangement": [
+   {
+    "panes": [
+     "fileTree",
+     "vcs",
+     "testResults"
+    ],
+    "rect": [
+     12,
+     54,
+     456,
+     990
+    ]
+   },
+   {
+    "panes": [
+     "editor"
+    ],
+    "rect": [
+     476,
+     54,
+     190,
+     990
+    ]
+   },
+   {
+    "panes": [
+     "state"
+    ],
+    "rect": [
+     674,
+     54,
+     191,
+     990
+    ]
+   },
+   {
+    "panes": [
+     "scratchpad"
+    ],
+    "rect": [
+     873,
+     54,
+     513,
+     491
+    ]
+   },
+   {
+    "panes": [
+     "calltrace",
+     "agentActivity"
+    ],
+    "rect": [
+     1394,
+     54,
+     514,
+     491
+    ]
+   },
+   {
+    "panes": [
+     "eventLog",
+     "terminalOutput"
+    ],
+    "rect": [
+     873,
+     553,
+     1035,
+     491
+    ]
+   }
+  ]
+ },
+ "vcs": {
+  "text": "plat47-vcs\n\nWorking Tree (3)\n\nA added.txt\n\nM notes.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
+  "active": "vcs"
+ },
+ "vcsRefresh": {
+  "text": "plat47-vcs\n\nWorking Tree (4)\n\nA added.txt\n\nM notes.txt\n\n? late.txt\n\n? scratch.txt\n\nCommits (1)\n\n496ddf7 Initial fixture commit\n",
+  "refreshes": 1,
+  "changedPixels": 4544,
+  "changedBBox": [
+   25,
+   130,
+   239,
+   168
+  ],
+  "paneBody": [
+   13,
+   85,
+   454,
+   958
+  ]
+ },
+ "dock": {
+  "strips": [
+   {
+    "edge": "left",
+    "rect": [
+     12,
+     54,
+     24,
+     990
+    ],
+    "slots": [
+     {
+      "pane": "state",
+      "label": "State",
+      "rect": [
+       12,
+       60,
+       24,
+       100
+      ]
+     }
+    ]
+   },
+   {
+    "edge": "bottom",
+    "rect": [
+     160,
+     1052,
+     1760,
+     28
+    ],
+    "slots": [
+     {
+      "pane": "buildOutput",
+      "label": "BUILD",
+      "rect": [
+       166,
+       1052,
+       70,
+       28
+      ]
+     },
+     {
+      "pane": "problems",
+      "label": "PROBLEMS",
+      "rect": [
+       236,
+       1052,
+       100,
+       28
+      ]
+     },
+     {
+      "pane": "search",
+      "label": "FIND IN FILES",
+      "rect": [
+       336,
+       1052,
+       150,
+       28
+      ]
+     },
+     {
+      "pane": "requests",
+      "label": "REQUESTS",
+      "rect": [
+       486,
+       1052,
+       100,
+       28
+      ]
+     }
+    ]
+   }
+  ],
+  "treePanes": [
+   "agentActivity",
+   "calltrace",
+   "editor",
+   "eventLog",
+   "fileTree",
+   "scratchpad",
+   "terminalOutput",
+   "testResults",
+   "vcs"
+  ],
+  "stripGround": "#282828",
+  "stripInk": 141,
+  "slotText": "=\nt\na\nt\ne\n",
+  "savedLayout": {
+   "version": 6,
+   "layout": {
+    "kind": "row",
+    "children": [
+     {
+      "kind": "stack",
+      "activeIndex": 1,
+      "weight": 24.25531914893617,
+      "children": [
+       {
+        "kind": "pane",
+        "pane": "fileTree"
+       },
+       {
+        "kind": "pane",
+        "pane": "vcs"
+       },
+       {
+        "kind": "pane",
+        "pane": "testResults"
+       }
+      ]
+     },
+     {
+      "kind": "pane",
+      "pane": "editor",
+      "weight": 20.74468085106383
+     },
+     {
+      "kind": "column",
+      "weight": 55.0,
+      "children": [
+       {
+        "kind": "row",
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "scratchpad"
+           }
+          ]
+         },
+         {
+          "kind": "stack",
+          "activeIndex": 0,
+          "weight": 50.0,
+          "children": [
+           {
+            "kind": "pane",
+            "pane": "calltrace"
+           },
+           {
+            "kind": "pane",
+            "pane": "agentActivity"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "kind": "stack",
+        "activeIndex": 0,
+        "weight": 50.0,
+        "children": [
+         {
+          "kind": "pane",
+          "pane": "eventLog"
+         },
+         {
+          "kind": "pane",
+          "pane": "terminalOutput"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "docked": [
+    {
+     "pane": "buildOutput",
+     "edge": "bottom",
+     "order": 0,
+     "title": "BUILD"
+    },
+    {
+     "pane": "problems",
+     "edge": "bottom",
+     "order": 1,
+     "title": "PROBLEMS"
+    },
+    {
+     "pane": "search",
+     "edge": "bottom",
+     "order": 2,
+     "title": "FIND IN FILES"
+    },
+    {
+     "pane": "requests",
+     "edge": "bottom",
+     "order": 3,
+     "title": "REQUESTS"
+    },
+    {
+     "pane": "state",
+     "edge": "left",
+     "order": 0,
+     "beside": "editor",
+     "weight": 20.74468085106383
+    }
+   ]
+  },
+  "revealed": {
+   "pane": "state",
+   "rect": [
+    44,
+    54,
+    621,
+    990
+   ]
+  },
+  "revealChangedBBox": [
+   12,
+   54,
+   653,
+   990
+  ],
+  "revealChangedPixels": 42875,
+  "revealText": "State Unpin\nLocals\n\nGlobals\n\nWatches\n",
+  "dismissChangedPixels": 0
+ },
+ "calltrace": {
+  "baseText": "<toplevel> #0() == 0 |\nv < main_ > #1()\nmain #2()\nstep #3(i=0) =>1\nleaf #4(i=0) => 0\nstep #5(i=1) => 3\nleaf #6(i=1) => 2\nstep #7(i=2) =>5\nleaf #8(i=2) =>4\nstep #9(i=3) =>7\nleaf #10(i=3) => 6\nstep #11(i=4) == 9\nleaf #12(i=4) => 8\nstep #13(i=5) => 11\nleaf #14(i=5) => 10\nstep #15(i=6) => 13\nleaf #16(i=6) => 12\n",
+  "endText": "v step #587(i=292) => 585 -\n\n- leaf #588(i=292) => 584\nv step #589(i=293) => 587\n\n- leaf #590(i=293) => 586\nv step #591(i=294) => 589\n\n- leaf #592(i=294) => 588\nv step #593(i=295) => 591\n\n- leaf #594(i=295) => 590\nv step #595(i=296) => 593\n\n- leaf #596(i=296) => 592\nv step #597(i=297) => 595\n\n- leaf #598(i=297) => 594\nv step #599(i=298) => 597\n\n- leaf #600(i=298) => 596\nv step #601(i=299) => 599\n\n- leaf #602(i=299) => 598\n",
+  "sectionLoads": 9,
+  "lastTop": "gesture calltrace top=587 rows=16 total=603"
+ }
+}

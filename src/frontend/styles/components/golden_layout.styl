@@ -1,0 +1,453 @@
+// The space between two tabs.
+LAYOUT_TAB_GAP = 0.25em
+
+// The radius of the curve that joins a tab to its panel.
+//
+// This is the *painted* radius.  The connectors on a GoldenLayout tab are
+// box-shadows with a -0.25em spread, and a negative spread shrinks a shadow's
+// corners, so their 0.625em border-radius reaches the screen as 0.375em.  The
+// stroked outline used to trace the 0.625em instead and cut across the curve it
+// was meant to follow.  One value now, read by the CSS below and by the path
+// builder in `ui/layout.nim` through the custom property.
+LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
+
+.lm_goldenlayout
+  background: colors-ui-surface-primary-default !important
+  // border-right: 1px solid colors-ui-surface-primary-tertiary
+
+.lm_header
+  background-color: transparent !important
+  color: colors-ui-text-primary-label !important
+  position: relative
+  // height: 2em !important
+  box-shadow: 2px 0 0 0 colors-ui-surface-primary-tertiary !important
+  z-index: 3 !important
+
+.lm_splitter
+  background: colors-ui-surface-primary-default !important
+  opacity: unset !important
+  transition: background 150ms ease !important
+  z-index: 4 !important
+  cursor: col-resize
+
+  &.lm_vertical
+    cursor: row-resize
+
+  &:hover
+    background: colors-ui-border-action !important
+
+.lm_stack
+  overflow: hidden !important
+
+.lm_tabs
+  width: 100%
+  display: flex
+  // Tabs are separated with the flex container's `gap`, NOT margin-right.
+  //
+  // GoldenLayout totals the strip by reading the ACTIVE tab's `margin-right`
+  // and charging it to every tab, so any margin at all pushes the sum over the
+  // header width and a nested tab is banished to the overflow list (see
+  // `stackCreated` in `ui/layout.nim`).  Zeroing the active tab's margin to
+  // dodge that is what left it with no gap to its right neighbour — the two
+  // read as one fused tab.  `gap` is invisible to GL's arithmetic and applies
+  // to every pair regardless of which tab is active, so it settles both.
+  //
+  // `gap` also sits only BETWEEN tabs, so the last one still ends flush with
+  // the panel's right edge — which is what keeps that corner square.
+  gap: LAYOUT_TAB_GAP
+
+.lm_splitter.lm_dragging
+  background: #444444;
+  z-index: 11
+
+// EVERY PANE TAB IN THE APP TAKES ITS COLOUR FROM HERE, and the name this
+// rule used — `colors-ui-text-default-tab` — is not a token. Stylus emitted it
+// verbatim, the browser dropped the declaration, and the tab strip painted in
+// whatever GoldenLayout's own stylesheet left behind.
+//
+// `colors-ui-text-primary-label` is the label tier, which is what a tab is:
+// #c8c8c8 on this rule's own #282828 background, measured at 8.81:1.
+.lm_tab
+  font-family: "SpaceGrotesk" !important
+  font-size: inherit !important
+  font-style: normal
+  font-weight: 600 !important
+  letter-spacing: -0.14px !important
+  //height: 25px !important
+  background-color: colors-ui-surface-base-panel !important
+  color: colors-ui-text-primary-label !important
+  margin: 0 !important
+  border: 0 !important
+  // margin-top: 2px !important
+  // padding-top: 2px !important
+  // padding-bottom: 2px !important
+  padding: 0 0.5em !important
+  box-shadow: none !important
+  line-height: normal !important
+  // max-width: min(200px, 30%)
+  overflow: hidden
+  border-radius: 0.36em
+  // margin-left: 2px !important
+  margin-right: 0 !important
+  margin-bottom: 0px !important
+  flex: 1
+  text-align: center
+  display: flex !important
+  align-items: center !important
+  // box-sizing: border-box
+
+.lm_tabdropdown::before
+  color: LAYOUT_DROPDOWN_ICON_COLOR !important
+  vertical-align: text-top !important
+
+.lm_item
+  background-color: transparent !important
+  // outline: 1px solid colors-ui-border-primary !important
+  z-index: 3 !important
+
+.lm_items
+  // transform: translateX(-2px)
+  // box-shadow: inset -1px 0 0 0 colors-ui-border-primary
+  // width: calc(100% - 6px)
+  border-radius: 0.36em
+
+.lm_content
+  background-color: colors-ui-surface-base-panel !important
+  // box-shadow: inset 2px 0px 0px 0px colors-ui-border-primary
+  border: 0 !important
+  border-radius: 0.36em
+  font-size: inherit
+  // Every panel's first row starts PANEL_INSET (8px) below the panel's top
+  // edge — the top third of the panel inset (button.styl).  It was 4px.  The
+  // panels' own first rows carry no top padding of their own, so this is the
+  // whole gap.  `box-sizing: border-box` is already in effect here, so the
+  // padding comes out of the height GoldenLayout sets rather than adding to it.
+  padding: PANEL_INSET 0 0 0
+
+// The code editor is not a panel: it keeps the 4px it had, and its gutter and
+// first line sit where they did.
+.lm_content:has(> .code-editor)
+  padding-top: 0.25rem
+
+.lm_items
+  background-color: transparent
+  // outline: 2px solid colors-ui-surface-primary-tertiary
+
+.lm_splitter.lm_horizontal
+  width: 4px !important
+
+.lm_splitter.lm_vertical
+  height: 4px !important
+
+.lm_splitter.lm_vertical .lm_drag_handle
+  top: 0 !important
+  height: 2px !important
+  background-color: colors-ui-surface-primary-default
+
+.lm_splitter.lm_horizontal .lm_drag_handle
+  //left: -5px
+  left: 0 !important
+  width: 4px !important
+  background-color: colors-ui-surface-primary-default
+
+.lm_title
+  color: colors-ui-text-primary-disabled !important
+  // font-family: sans-serif !important
+  // 14px.  Set here and not on `.lm_tab`: the tab's padding, its pin and close
+  // icons and the active tab's connector curves are all sized in `em` off the
+  // tab's font size, so shrinking the tab would shrink all of them with the
+  // text.  `rem` so the title does not depend on what the tab inherits.
+  font-size: 0.875rem !important
+  font-weight: 400 !important
+  overflow: hidden
+  white-space: nowrap
+  text-overflow: ellipsis
+  width: 100%
+  // At least 8px between the title and the tab's pin / close icons.  The title
+  // stretches to the icons (`width: 100%`), so a long title was cut off right
+  // against the pin; with the margin it shrinks to stop 8px short of it.
+  margin-right: 0.5rem
+  padding-top: 0em !important
+  text-align: start !important
+// direction: rtl
+
+.lm_active
+  background-color: colors-ui-surface-base-panel !important
+  color: colors-ui-text-primary-label !important
+  //border-radius: 2px
+  border-top-left-radius: 0.36em
+  border-top-right-radius: 0.36em
+  border-bottom-right-radius: 0em
+  border-bottom-left-radius: 0em
+  box-shadow: 0em 0.48em 0em 0em colors-ui-surface-base-panel !important
+  overflow: visible !important
+  // The concave connectors that flare the active tab into its panel — the
+  // curve is part of the product's identity, so it is deliberate geometry, not
+  // decoration.  Each is a box-shadow bled off the side of the tab; where a tab
+  // is flush against the panel's edge there is no room for one and the rules
+  // further down switch that side off.
+  &::before
+    content: " ";
+    pointer-events: none;
+    position: absolute;
+    display: block;
+    height: 80%;
+    width: 1.625em
+    bottom: 0em
+    z-index: 1
+    left: -1.625em
+    border-radius: 0 0 0.625em 0
+    opacity: 1
+    box-shadow: 0.625em 0.34em 0 -0.25em colors-ui-surface-base-panel
+    transform: translate(0em, 0.25625em)
+
+  &::after
+    content: " ";
+    pointer-events: none;
+    position: absolute;
+    display: block;
+    height: 80%;
+    width: 1.625em
+    bottom: 0em
+    z-index: 1
+    right: -1.625em
+    border-radius: 0 0 0 0.625em
+    opacity: 1
+    box-shadow: -0.625em 0.34em 0 -0.25em colors-ui-surface-base-panel
+    transform: translate(0em, 0.25625em)
+
+.lm_header .lm_active .lm_title
+  color: colors-ui-text-primary-label !important
+
+.lm_header .lm_controls
+  height: 100% !important
+  align-items: center !important
+
+.lm_controls > *
+  // Secondary button style — matches [class*="-button-"][class*="-secondary"] in button.styl
+  opacity: 1 !important
+  background-color: colors-ui-surface-primary-default !important
+  border: 0.03125em solid colors-ui-border-tertiary !important
+  border-radius: 0.375em !important
+  background-position: center !important
+  background-repeat: no-repeat !important
+  background-size: 1em 1em !important
+  width: 1.5em !important
+  height: 1.5em !important
+  cursor: pointer
+
+  &:focus
+    outline: none !important
+    box-shadow: none !important
+
+  &:focus-visible
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
+
+  &:hover
+    background-color: colors-ui-surface-primary-default-hover !important
+
+.lm_maximise
+  background-image: LAYOUT_MAXIMIZE_ICON_PATH !important
+
+.lm_popout
+  display: none !important
+
+.lm_close
+  background-image: LAYOUT_CLOSE_ICON_PATH !important
+
+/* based on https://codepen.io/sosuke/pen/Pjoqqp : CSS filter generator to convert from black to target hex color
+    Barrett Sonntag  found from
+    https://stackoverflow.com/a/53336754/438099
+  */
+// converts to white
+// .menu-button-svg, .menu-node-svg
+//   filter: MENU_BUTTON_SVG_FILTER
+
+.lm_header .lm_tab .lm_close_tab
+  tab-icon(LAYOUT_TAB_CLOSE_ICON_PATH, 0.6em 0.6em)
+  width: 0.6em !important
+  height: 0.6em !important
+  position: static !important
+  cursor: pointer
+  // `.lm_tab` is a flex row and `.lm_title` asks for `width: 100%`, so the row
+  // is always over-constrained and every shrinkable item gives up width. Without
+  // this the close box — the only child that could shrink, since `.lm_pin_tab`
+  // already opts out — collapsed with the tab: 9.6px nominal, but measured at
+  // 8.95px on a 421px tab and 2.01px on a 41.8px one. The mask keeps its fixed
+  // 0.6em size and stays centred, so the cross was cropped, not scaled, and read
+  // as an icon that shrinks with the tab. Opt out exactly as the pin does; the
+  // title absorbs the shortfall instead, which is what its ellipsis is for.
+  flex-shrink: 0
+
+.lm_header .lm_tab .lm_pin_tab
+  tab-icon(LAYOUT_TAB_PIN_ICON_PATH, 0.85em 0.85em)
+  width: 0.85em !important
+  height: 0.85em !important
+  position: static !important
+  cursor: pointer
+  margin-right: 0.3em
+  flex-shrink: 0
+
+// On a tab at the BACK of its group, both icons rest at 40% and come up to full
+// strength under the pointer; on the active tab they stay at full strength.
+//
+// This is the close icon's existing behaviour, but it was never ours: it comes
+// from GoldenLayout's bundled theme (goldenlayout-light-theme.css), which dims
+// `.lm_close_tab` only.  The pin was left at full strength beside a dimmed
+// close, so the two icons of one tab looked unrelated.  Stated here for both,
+// so they cannot drift and neither depends on that sheet loading after ours.
+.lm_header .lm_tab:not(.lm_active)
+  .lm_close_tab,
+  .lm_pin_tab
+    opacity: 0.4
+
+    &:hover
+      opacity: 1
+
+// 24px tab, centred in the 32px header: 4px + 24px + 4px.
+//
+// `height` is the whole tab: vertical padding is 0 (see `.lm_tab`), and the
+// title is centred by the tab's own flexbox, so padding would only push the
+// total off 1.5rem.  The header's 32px is set from JavaScript (`headerHeight`,
+// ui/layout.nim), not here.
+//
+// The gap UNDER the tab matters as much as the height.  The active tab's
+// `box-shadow` bridge and its `::before`/`::after` connectors are tuned to meet
+// the panel body about 4px below the tab; a top-aligned 24px tab would have
+// left 8px, floating the connectors above the panel's edge.
+.lm_header .lm_tab
+  height: 1.5rem !important
+  margin-top: 0.25rem !important
+
+// ---------------------------------------------------------------------------
+// Busy tab
+//
+// The panel is loading. Shown by breathing the title's opacity, and by
+// nothing else — no badge, no spinner, no added element and no change to the
+// title text.
+//
+// That restraint is a constraint, not taste. `.lm_tabs` is asserted to hold
+// only `.lm_tab` children (`tests/layout/tab_strip_geometry.spec.ts`, which
+// also measures per-tab widths), the tab row is over-constrained enough that
+// `.lm_close_tab` needs `flex-shrink: 0` to survive, and the title TEXT is an
+// identity key: `ui/auto_hide.nim` matches a docked panel by its exact
+// `textContent`, and several Playwright specs compare `.lm_title` to
+// "CALLTRACE" exactly. An opacity animation costs no layout and changes no
+// string, so it cannot reach any of them.
+//
+// The class is applied by `views/isonim_calltrace_view.nim`'s
+// `setCalltraceTabBusy`, keyed on `data-ct-panel-content`.
+.lm_header .lm_tab.lm_tab_busy .lm_title
+  animation: lm-tab-busy-pulse 1.4s ease-in-out infinite
+
+@keyframes lm-tab-busy-pulse
+  0%
+    opacity: 1
+  50%
+    opacity: 0.45
+  100%
+    opacity: 1
+
+// Honour a reduced-motion preference: keep the state legible, drop the
+// motion. A dimmed title still reads as "this panel is working".
+@media (prefers-reduced-motion: reduce)
+  .lm_header .lm_tab.lm_tab_busy .lm_title
+    animation: none
+    opacity: 0.6
+
+// ---------------------------------------------------------------------------
+// Selected panel
+//
+// Selection is shown by the outline alone — one stroked path around the tab,
+// its connectors and the panel body.  The surface is deliberately left at its
+// resting colour: the line carries the state on its own.
+//
+// The geometry is generated in `ui/layout.nim` (`setupSelectedPanelOutline`),
+// because the tab's width and position are only known at runtime; the colour
+// and weight live here, on tokens.
+// ---------------------------------------------------------------------------
+// 1px, not a hairline.  The outline is now the *only* selection cue — the panel
+// surface no longer changes — and a sub-pixel stroke is antialiased down to
+// roughly half strength, which read as no indicator at all against the panel.
+SELECTED_PANEL_BORDER = 0.0625rem
+SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
+
+// A last tab sits flush with its panel's right edge, so it runs straight down
+// into the body: there is no corner to round, and no room to its right for a
+// connector to curve into.  This is the rule that was missing — the right-hand
+// connector was drawn anyway, flaring past the panel's edge into the corner of
+// the window, which is the stray curl that showed at the end of the tab.
+//
+// The mirror of the first-child rule below; between them they switch off only
+// the connector that has nowhere to go.  A tab with panel either side keeps
+// both curves.
+.lm_stack:has(> .lm_header .lm_tabs > .lm_tab.lm_active:last-child)
+  > .lm_items,
+  > .lm_items .lm_content
+    border-top-right-radius: 0
+
+  > .lm_header .lm_tabs > .lm_tab.lm_active:last-child::after
+    display: none
+
+// A first tab sits flush with its panel's left edge, so the tab runs straight
+// down into the body and there is nothing for the left connector to reach.
+// Leaving both in place puts a curve where the two meet — the panel bending
+// away from a tab that does not bend with it.
+//
+// Applies to every stack, not only the selected one: the seam is there whether
+// or not the panel is highlighted.
+.lm_stack:has(> .lm_header .lm_tabs > .lm_tab.lm_active:first-child)
+  // Both elements: `.lm_items` clips the panel, `.lm_content` paints it.  Only
+  // this one corner is squared — the other three keep their radius.
+  > .lm_items,
+  > .lm_items .lm_content
+    border-top-left-radius: 0
+
+  > .lm_header .lm_tabs > .lm_tab.lm_active:first-child::before
+    display: none
+
+// The selected panel's outline — one stroked path covering the tab and the panel
+// body as a single shape.  The geometry is generated in `ui/layout.nim`
+// (`setupSelectedPanelOutline`) because the tab's width and position are only
+// known at runtime; colour and weight stay here, on tokens.
+//
+// The path is inset by half the stroke width, so the line falls inside the shape
+// rather than straddling its edge.  Unlike a CSS border, an SVG stroke is not
+// clamped to a minimum width.
+.ct-selected-outline
+  position: absolute
+  top: 0
+  left: 0
+  pointer-events: none
+  z-index: 6
+  overflow: visible
+
+// All three outlines — the one around a GL stack, the one around a docked
+// auto-hide panel and its strip tab, and the one around the slide-in overlay
+// and its strip tab (`.ct-docked-outline` / `.ct-overlay-outline`, positioned
+// in auto_hide.styl) — are the same line, so they are stroked from one rule.
+//
+// One rule rather than three is the point: the reported defect was an
+// auto-hide panel whose border did not match the same panel docked, and a
+// second declaration of the same line is how they drift apart again.
+.ct-selected-outline,
+.ct-docked-outline,
+.ct-overlay-outline
+  path
+    fill: none
+    stroke: SELECTED_PANEL_BORDER_COLOR
+    stroke-width: SELECTED_PANEL_BORDER
+    // Rounded joins keep the corners continuous where the arcs meet the lines.
+    stroke-linejoin: round
+    // Carries the connector radius to the path builder already resolved to
+    // pixels.  It has to ride on a real length property: `getComputedStyle`
+    // hands back a custom property's `em` token unresolved, and the builder
+    // needs pixels.  Draws nothing — an SVG path has no border to round.
+    border-top-left-radius: LAYOUT_TAB_CONNECTOR_RADIUS
+
+// PLAT-68: a pane is focusable (`tabindex="-1"`, `ui/layout.markPaneScope`)
+// so a click into its body puts the keyboard's scope there; the selected
+// panel already has its own outline, so the browser's focus ring is not drawn.
+[data-scope-kind="pane"]:focus
+  outline: none

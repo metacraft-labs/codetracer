@@ -1,0 +1,661 @@
+## test_real_launcher_exec.nim — CTUI-12, Tier 2. THE END-TO-END ONE.
+##
+## ## What only this file can say
+##
+## CTUI-12: "TermAssert spawns `ct tui <fixture>` and asserts a real TUI frame
+## appears, proving the exec path end to end including terminal setup." And its
+## verification gate: "`ct tui <trace.ct>` starts the TUI from a packaged
+## install."
+##
+## Both, with nothing between the two ends. The process TermAssert puts in the
+## pty is `codetracer-launcher/out/launcher` — the real `ct` — and the frame
+## parsed out of that pty is painted by `build/bin/codetracer-tui`, the real
+## shipped binary, on a real recording, through a component bundle
+## `scripts/build-tui-component.sh` assembled from `packaging/
+## codetracer-tui.caps`. Five artifacts, one process, no stubs.
+##
+## ## WHY THE PTY IS WHERE `execv` IS PROVEN, AND NOT JUST WHERE IT IS SHOWN
+##
+## `src/tests/launcher/test_launcher_routes_tui.nim` proves exec-not-fork
+## arithmetically: the component's `$$` equals the pid `startProcess` returned
+## for the launcher, which only holds if the process image was replaced. That
+## is the clean proof and it belongs at Tier 1, where a stub can print its pid.
+##
+## This file proves the same thing a second way, and the second way is the one
+## that matters to a user: **`main.nim` refuses to draw when stdout is not a
+## terminal.** It calls `stdoutIsTerminal()` (an `isatty` on fd 1) and exits 3
+## with "standard output is not a terminal" rather than painting into a pipe. A
+## launcher that spawned the front-end as a subprocess — with pipes, as any
+## ordinary `startProcess` would — would hand it a non-tty stdout and get
+## exactly that refusal. So a frame appearing on this pty is evidence that the
+## TUI INHERITED THE LAUNCHER'S OWN FILE DESCRIPTORS, which is what `execv`
+## does and what "no subprocess indirection" means in practice. The terminal
+## setup — raw mode, the alternate screen, mouse negotiation — is on the far
+## side of that same inheritance, which is why the gate names it.
+##
+## ## THE TWO FRAME BARRIERS, AND WHY THERE ARE TWO
+##
+## `main.nim` paints TWICE on startup, on purpose: frame 0 is the shell saying
+## which trace is being opened, painted BEFORE `replay-server` is spawned;
+## frame 1 is the debugger. Both end with the cursor on the bottom-right cell,
+## so `waitForCompleteFrame` alone cannot tell them apart — it returns on frame
+## 0. `settleOnDebugger` waits for the STATUS ROW to stop saying `opening ` and
+## then for the cursor barrier. This is CTUI-11's shape
+## (`test_real_capability_negotiation.nim`), reproduced here rather than shared
+## because the two suites disagree about what they spawn and sharing it would
+## mean a helper that takes the subject as a parameter — which is how a barrier
+## ends up waiting for the wrong thing.
+##
+## ## THE ROUTING CONTROL IS IN THIS FILE, NOT ONLY AT TIER 1
+##
+## "A frame appeared" is satisfied by any arrangement that starts the TUI,
+## including one where the launcher ignored the capability file entirely. So
+## the same pty, the same launcher and the same arguments are run against an
+## EMPTY component root, and the terminal is asserted to show
+## `ct: no component handles 'tui'` and nothing else. The difference between
+## the two cases is one directory, and that directory is the packaged install.
+##
+## ## THE SIZE AND DEPENDENCY GATE, AND THE TWO ARMS THAT FALSIFY IT
+##
+## CTUI-12's second gate — a recorded size with a regression threshold, and no
+## dynamic dependency beyond libc, the C++ runtime and tree-sitter — is asserted
+## in the second suite below rather than written into a report, and it lives in
+## THIS lane because `just test-tui-real-terminal` depends on `just build-tui`
+## while the Tier-1 lane does not. A gate that reads a binary the lane does not
+## guarantee is a gate that reports whatever was left in `build/bin` last week.
+##
+## Both halves were made to fail before the numbers were written down, by
+## copying this file to `real_terminal/mutant_probe.nim` (a name neither lane's
+## discovery collects), editing the copy, compiling and running it. THE FILE
+## ITSELF WAS NEVER EDITED — `docs/tui-testing.md` records what a
+## timestamp-preserving restore does to the Tier-2 binary cache, and the cheap
+## way to not meet it is to never mutate the original. Measured 2026-09-06:
+##
+##   * `BinaryCeilingBytes` 14_500_000 -> 1_000_000
+##     => `[FAILED] the binary's size is inside the recorded regression band`
+##   * `cxxStems` `["libstdc++.", "libgcc_s.", …]` -> `["libNOSUCH."]`
+##     => `[FAILED] it needs libc, the C++ runtime and tree-sitter — and
+##        nothing else`, reporting
+##        `UNEXPLAINED dynamic dependencies: libstdc++.so.6 libgcc_s.so.1`
+##
+## The `DT_NEEDED` set the second arm reads is, verbatim: `libm.so.6
+## librt.so.1 libstdc++.so.6 libtree-sitter.so.0.25 libdl.so.2 libgcc_s.so.1
+## libpthread.so.0 libc.so.6`.
+##
+## ## Templates, not procs, for anything that calls `check`
+##
+## `std/unittest`'s `check` assigns `testStatusIMPL`, which the `test` template
+## injects into its own scope; inside a `proc` that symbol is invisible, `check`
+## takes its `else` branch, and the case still prints `[OK]` while
+## `programResult` goes to 1.
+
+import std/[monotimes, options, os, osproc, streams, strutils, times, unittest]
+
+import term_assert
+
+import ../../testing/dual_snap
+import ../fixtures/fixture_provider
+
+# One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
+# spelling as a RUNTIME assertion count, and inside a `const` block the
+# declaration is invisible to it.
+const ExpectedAssertions = 44
+
+var countedAssertions = 0
+
+template ck(condition: untyped) =
+  inc countedAssertions
+  check condition
+
+const
+  TuiBuildRecipe = "just build-tui"
+  LauncherRecipe = "cd ../codetracer-launcher && just build"
+  FixtureName = "calc"
+  Cols = 120
+  Rows = 40
+    ## 120x40 is where the shared default (PLAT-45) opens UNFOLDED — every
+    ## region of it gets its cell minimum. The same geometry CTUI-11's suite
+    ## uses, so a frame that differs between the two files differs for a
+    ## reason other than size.
+  NoHandlerText = "ct: no component handles 'tui'"
+    ## `S_ERR_NO_HANDLER` + the command, from
+    ## `codetracer-launcher/src/install.nim`'s emit block. Not importable: that
+    ## string lives in C inside an `--os:standalone` module.
+  PaneTitles: array[4, string] = [" Call Trace ", " main.py ", " Variables ",
+                                  "Event Log"]   # PLAT-51: was the Timeline tab
+    ## §3.1's screen, as the shared default draws it: the panes' tab labels
+    ## (PLAT-49: no pane carries a title row; a lone editor's tab names its
+    ## file), and the timeline as a tab label of the events stack (PLAT-45). Asserted as a
+    ## counted sweep rather than four loose `contains` calls so a partially
+    ## painted screen cannot satisfy "at least one".
+
+  MeasurementDate = "2026-10-08"
+  MeasuredBinaryBytes = 17_282_128
+    ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
+    ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
+    ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
+    ## `MeasurementDate`. Stripped it is 12_833_072; the shipped artifact is the
+    ## unstripped one, so that is what the band below is drawn around.
+    ##
+    ## This REPLACES the draft's "<15 MB stripped, no dynamic dependencies
+    ## except libc/libSystem", which CTUI-0 falsified by reading the link line.
+    ## The number is measured rather than budgeted, which is the point: it says
+    ## what the product costs today so a change can be seen, not what somebody
+    ## hoped it would cost.
+    ##
+    ## RE-MEASURED AFTER CTUI-13 WAS CUT, and it came back down. The withdrawn
+    ## web bridge had taken this to 14_055_704 — `isonim-tui-serve`, the
+    ## `std/asynchttpserver` + `asyncnet` + `asyncdispatch` closure,
+    ## `isonim-tui`'s `WebDriver`, and 288 KB of `staticRead` xterm.js. All of
+    ## it is gone with the feature.
+    ##
+    ##   13_355_200  CTUI-12
+    ##   14_055_704  CTUI-13's bridge + embedded xterm bundle (withdrawn)
+    ##   13_364_232  CTUI-13's cut: the bridge removed, `--headless` KEPT
+    ##   13_422_696  CTUI-14
+    ##   13_423_040  today: CTUI-14's verification pass
+    ##
+    ## The +9_032 bytes CTUI-13's cut left over CTUI-12 (+0.068%) is what
+    ## `--headless` costs on its own. CTUI-14 adds 58_464 more
+    ## (+0.437%) for `host/ssh_tuning.nim`, `host/key_journal.nim`, three
+    ## theme palettes, four §6.2 flags and the bounded DAP reads — RE-MEASURED
+    ## from a fresh `just build-tui` rather than predicted, and the ceiling is
+    ## unchanged because the band still has 8.0% of headroom.
+    ##
+    ## The last +344 bytes (+0.0026%) are the verification pass making
+    ## `--headless` honour `--goto` and refuse `--record-keys` /
+    ## `--replay-keys` instead of accepting all three and acting on none — two
+    ## usage-error messages and one `seekToStartupTick` call. Re-measured from
+    ## a fresh build rather than left at the previous anchor, because an anchor
+    ## nobody moves is how a band stops measuring anything: the point of
+    ## re-measuring a 344-byte change is that the NEXT one is compared against
+    ## what the product actually costs. Stripped, unchanged at 12_833_072 —
+    ## the whole delta is in the not-stripped sections.
+    ##
+    ##   15_066_024  2026-09-23: the editing core (PLAT-16, PLAT-24…44)
+    ##
+    ## RE-ANCHORED LATE, and the lateness is the finding: the band tripped
+    ## somewhere in PLAT-16…44 and no change moved it, so this lane was red
+    ## for a reason nobody had recorded. The +1_642_984 bytes (+12.2%) were
+    ## ATTRIBUTED before the band moved, by summing `nm --size-sort` per Nim
+    ## module: the editor's named-operation vocabulary (`editor/operations`,
+    ## ~150 KB, and its state, history, change sets and wrap model), the Vim
+    ## and Kakoune keymaps and the `.vimrc` importer (~160 KB together), the
+    ## collaboration reducer and the headless layout model — the Edit mode
+    ## this binary gained, and no data: no corpus, fixture or `staticRead`
+    ## table is linked in. Stripped: 14_143_088. The ceiling keeps the band's
+    ## 8.02% over the new anchor.
+    ##
+    ##   15_224_400  2026-09-26: `dev` at 83a11a590, built fresh for the
+    ##               comparison below (PLAT-4/6/45 growth since 09-23, never
+    ##               re-anchored; inside the band)
+    ##   15_247_872  2026-09-26: PLAT-46, the terminal painted from the design
+    ##               system
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. PLAT-46 costs +23_472 bytes (+0.154%) over
+    ## the same `dev` built the same way: the generated token module
+    ## (`src/frontend/styles/generated/design_tokens.nim`, 137 tokens x 2
+    ## modes of `#rrggbb` strings and their enum names), the role table
+    ## (`app/theme/roles.nim`), the derived-rung cache and OKLab arithmetic
+    ## (`palette.nim`, `colour_math.nim`; ~62 KB of symbols between them, most
+    ## of it two 24 KB `.bss` tables that occupy no file bytes), and the query
+    ## round (`host/terminal_probe.nim`), less the four hand-written tint
+    ## tables and `roleFor` it deleted. The ceiling keeps 8.02% over the anchor.
+    ##
+    ##   15_371_840  2026-09-29: `agents` at 836efe206 (PLAT-47 part A),
+    ##               built fresh for the comparison below; inside the band
+    ##   15_855_880  2026-09-29: PLAT-47 part B
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. Part B costs +484_040 bytes (+3.15%) over
+    ## part A built the same way, attributed by summing `nm -S` per Nim
+    ## module: the desktop's Monaco tokenizers — the generated Monarch
+    ## definitions `staticRead` into read-only data (~87 KB,
+    ## `app/syntax/monarch_languages.json`), the Monarch engine and its
+    ## JavaScript-regex matcher (`monarch.nim`, `js_regex.nim`, ~104 KB of
+    ## code between them) and `lexical.nim`, less the hand port of Python's
+    ## tokenizer they replace (-19 KB in `highlighter.nim`); the VCS pane on
+    ## the desktop's `VCSVM` (`vcs_vm`, `platform/vcs`, `host/native_vcs`,
+    ## `views/vcs_pane`, ~85 KB); and the drop overlay (isonim-tui's
+    ## `overlay.nim` and the compositor's overlay pass, ~15 KB). A data table
+    ## this time, and said so: the Monarch definitions are the one thing linked
+    ## in as data, deliberately — they ARE the desktop's tokenizers, exported
+    ## from the pinned `monaco-editor` and gated fresh
+    ## (`ci/test/monarch-languages-fresh.sh`). The ceiling keeps 8.02% over the
+    ## anchor.
+    ##
+    ##   17_011_664  2026-10-08: `agents` at 35b08e67e (PLAT-51 part A), built
+    ##               fresh; inside the band (PLAT-48…52 growth, never
+    ##               re-anchored: 7.29% over the 15_855_880 anchor)
+    ##   17_282_128  2026-10-08: PLAT-51 part B
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. Part B costs +270_464 bytes (+1.59%) over
+    ## part A, which tripped the band. Attributed by summing `nm -S` per Nim
+    ## module: the Welcome Screen of a new tab — `welcome_screen_vm` linked
+    ## into the terminal for the first time (~60 KB, the desktop's own
+    ## ViewModel and the store types it brings), `native_welcome` (~14 KB),
+    ## `welcome_view` (~8 KB), `welcome_tabs` (~5 KB); the port of
+    ## GoldenLayout's hit-testing (`golden_layout_hit`, ~10 KB); the layout
+    ## settings and their remembered preference (`layout_settings`,
+    ## `layout_preferences`, ~15 KB); and growth in `binding`, `runtime`,
+    ## `main`, `native_host` (the `ct record` job), `terminal_probe` (the 1016
+    ## and cell-size answers), `shell` and `palette` (the focused strip, the
+    ## dimmed future), ~44 KB between them. No data table is linked in. The
+    ## ceiling keeps 8.02% over the anchor.
+
+  BinaryCeilingBytes = 18_668_200
+    ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
+    ## formatter, a grammar's parser table growing — does not redden the lane on
+    ## the day it lands, narrow enough that a link-line accident (a second
+    ## grammar archive, a stdlib module pulling in a subsystem) does. When it
+    ## trips, RE-MEASURE and move the band in the same change as the growth,
+    ## with the new number and the date; do not raise it to make a run green.
+    ##
+    ## BACK TO CTUI-12'S CEILING, because the growth it had been widened for
+    ## (15_300_000) no longer exists. Lowering a ceiling is the same discipline
+    ## as raising one: the band is anchored to `MeasuredBinaryBytes`, and
+    ## leaving 15_300_000 against a 13_364_232 anchor would have widened the
+    ## margin to 14.5% — a band loose enough to let a real link-line accident
+    ## through unnoticed.
+
+  BinaryFloorBytes = 6_000_000
+    ## The other half of the band, and not a formality. The single largest
+    ## member of the grammar archive — `ct_ts_nim_parser.o` — is 8.4 MB on its
+    ## own, so a binary under 6 MB cannot be the ten-grammar build: it is a
+    ## link that lost the archive, or a stub. Without a floor, "size <= ceiling"
+    ## is satisfied by exactly the regression that would matter most.
+
+type
+  DepBucket = enum
+    ## The three justifications CTUI-12's gate allows, plus everything else.
+    blLibc
+    blCxx
+    blTreeSitter
+    blUnexplained
+
+proc repoRoot(): string =
+  var dir = currentSourcePath().parentDir
+  while true:
+    if dirExists(dir / "src" / "db-backend") and fileExists(dir / "justfile"):
+      return dir
+    let parent = dir.parentDir
+    if parent == dir:
+      break
+    dir = parent
+  raise newException(IOError,
+    "could not locate the codetracer checkout from " & currentSourcePath())
+
+let
+  root = repoRoot()
+  tuiBinary = root / "build" / "bin" / "codetracer-tui"
+  launcherBin = root.parentDir / "codetracer-launcher" / "out" / "launcher"
+  artifactDir = root / "test-logs" / "ctui12-launcher-exec"
+  componentsRoot = artifactDir / "components"
+  emptyRoot = artifactDir / "components-empty"
+
+proc buildComponent(): tuple[rc: int, output: string] =
+  ## Run the REAL packaging producer over the REAL binary.
+  ##
+  ## `--link` rather than `--copy`: `host/native_host.repoRoot` walks up from
+  ## `currentSourcePath()` — a path baked in at compile time — so the symlink
+  ## costs the binary nothing when it looks for `replay-server`, and it saves
+  ## the lane a 13 MB copy per run.
+  let p = startProcess("/usr/bin/env",
+                       args = @["bash", "-euo", "pipefail",
+                                root / "scripts" / "build-tui-component.sh",
+                                "--out-root", componentsRoot,
+                                "--tui-bin", tuiBinary, "--link"],
+                       options = {poStdErrToStdOut})
+  let output = p.outputStream.readAll()
+  let rc = p.waitForExit()
+  p.close()
+  (rc, output)
+
+proc bucketOf(lib: string): DepBucket =
+  ## Which of CTUI-12's three justifications covers `lib`.
+  ##
+  ## Matched on the library's STEM rather than on a full soname, because a
+  ## soname carries a version (`libtree-sitter.so.0.25`, `libc.so.6`) that moves
+  ## with the toolchain and has nothing to do with what the gate is about.
+  const
+    libcStems = ["libc.", "libm.", "librt.", "libdl.", "libpthread.",
+                 "ld-linux", "ld.so", "libSystem."]
+    cxxStems = ["libstdc++.", "libgcc_s.", "libc++.", "libc++abi."]
+    treeSitterStems = ["libtree-sitter."]
+  let name = lib.extractFilename
+  for stem in libcStems:
+    if name.startsWith(stem): return blLibc
+  for stem in cxxStems:
+    if name.startsWith(stem): return blCxx
+  for stem in treeSitterStems:
+    if name.startsWith(stem): return blTreeSitter
+  blUnexplained
+
+proc runCapture(exe: string; args: seq[string]): tuple[rc: int, output: string] =
+  let p = startProcess(exe, args = args, options = {poUsePath})
+  let output = p.outputStream.readAll()
+  let rc = p.waitForExit()
+  p.close()
+  (rc, output)
+
+proc neededLibraries(binary: string): seq[string] =
+  ## The libraries `binary` DECLARES it needs — `DT_NEEDED` on ELF, the load
+  ## commands on Mach-O.
+  ##
+  ## `readelf -d` rather than `ldd`: `ldd` resolves the whole transitive graph,
+  ## and CTUI-12's gate is about what this binary declares. `objdump -p` is the
+  ## fallback because a toolchain that ships one usually ships the other, and a
+  ## host with NEITHER fails by name rather than silently reporting an empty
+  ## list — which would satisfy "nothing unexplained" for free.
+  result = @[]
+  when defined(macosx):
+    let (rc, output) = runCapture("otool", @["-L", binary])
+    if rc != 0:
+      raise newException(IOError, "otool -L failed on " & binary)
+    for line in output.splitLines():
+      let trimmed = strutils.strip(line)
+      if trimmed.len == 0 or trimmed.endsWith(":"): continue
+      let space = trimmed.find(' ')
+      result.add(if space < 0: trimmed else: trimmed[0 ..< space])
+  else:
+    var output = ""
+    var got = false
+    for tool in ["readelf", "objdump"]:
+      let args = if tool == "readelf": @["-d", binary] else: @["-p", binary]
+      try:
+        let (rc, captured) = runCapture(tool, args)
+        if rc == 0:
+          output = captured
+          got = true
+          break
+      except OSError:
+        discard
+    if not got:
+      raise newException(IOError,
+        "neither `readelf` nor `objdump` is on PATH, so the dynamic " &
+        "dependencies of " & binary & " cannot be read — enter the dev shell")
+    for line in output.splitLines():
+      # readelf: " 0x0000...0001 (NEEDED)  Shared library: [libc.so.6]"
+      # objdump: "  NEEDED               libc.so.6"
+      if line.contains("(NEEDED)"):
+        let open = line.rfind('[')
+        let close = line.rfind(']')
+        if open >= 0 and close > open:
+          result.add line[open + 1 ..< close]
+      elif strutils.strip(line).startsWith("NEEDED"):
+        let rest = strutils.strip(strutils.strip(line)[len("NEEDED") .. ^1])
+        if rest.len > 0:
+          result.add rest
+
+proc launcherSession(componentRoot: string; args: seq[string]): TuiTestBuilder =
+  ## A pty session running the REAL launcher with a KNOWN environment.
+  ##
+  ## `CODETRACER_COMPONENTS_ROOT` replaces the user level and suppresses the
+  ## absolute system/distro paths (`launcher.collectLevels`); the three
+  ## `envRemove`d variables would otherwise let an inherited value add a
+  ## discovery level or a registry. The terminal variables are pinned for the
+  ## same reason CTUI-11 pins them: the lane inherits whatever terminal the
+  ## developer is in, and a case that depended on `COLORTERM` would be
+  ## asserting the runner's environment.
+  newTuiTest(launcherBin, args)
+    .width(Cols).height(Rows)
+    .envRemove("COLORTERM", "TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE",
+               "CODETRACER_COMPONENTS_PATH", "CODETRACER_REGISTRY_PATH",
+               "CODETRACER_COMPONENT_DIR")
+    .envSet("TERM", "xterm-256color")
+    .envSet("LANG", "en_US.UTF-8")
+    .envSet("CODETRACER_COMPONENTS_ROOT", componentRoot)
+
+proc statusRowText(sess: var TuiTestSession): string =
+  ## The bottom row, right-trimmed.
+  ##
+  ## `strutils.strip` EXPLICITLY: `docs/tui-testing.md` records that
+  ## `unicode.strip` returns an ALL-whitespace string unchanged where
+  ## `strutils.strip` returns "". A blank row would otherwise read as 120
+  ## characters long and this barrier would never fire.
+  strutils.strip(sess.regionText(Rows - 1, 0, Cols, 1), leading = false)
+
+proc screenText(sess: var TuiTestSession): string =
+  sess.regionText(0, 0, Cols, Rows)
+
+proc settleOnDebugger(sess: var TuiTestSession; timeoutMs = 60000) =
+  ## Wait for FRAME 1 — the debugger — rather than for frame 0.
+  ##
+  ## The failure is a diagnosis and not a timeout: it names the status row it
+  ## saw, whether the child is alive and its exit code, so "the launcher
+  ## refused to route", "still opening the trace" and "the binary died" are
+  ## three different reports.
+  discard sess.drainOutput(30)
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  var last = ""
+  while getMonoTime() < deadline:
+    discard sess.drainOutput(40)
+    last = statusRowText(sess)
+    if last.len > 0 and not last.contains("opening "):
+      waitForCompleteFrame(sess, Cols, Rows, timeoutMs = 15000)
+      return
+    if not sess.isAlive:
+      raise newException(AssertionFailedError,
+        "the launcher's child exited before painting the debugger: status row" &
+        " was '" & last & "', exit code " & $sess.exitCode() &
+        ", screen:\n" & screenText(sess))
+  raise newException(AssertionFailedError,
+    "no debugger frame within " & $timeoutMs & " ms: status row was '" &
+    last & "', child alive=" & $sess.isAlive & ", screen:\n" & screenText(sess))
+
+template ckDebuggerFrame(sess: var TuiTestSession) =
+  ## §3.1's screen, as a counted sweep over `PaneTitles`.
+  ##
+  ## A sweep rather than four loose assertions, and the count is asserted
+  ## against the array's own length: "at least one pane title appeared" is
+  ## satisfied by a screen that is three quarters blank.
+  let text = screenText(sess)
+  checkpoint("status row: " & statusRowText(sess))
+  var compared = 0
+  for title in PaneTitles:
+    inc compared
+    ck text.contains(title)
+  ck compared == PaneTitles.len
+
+template ckQuitsCleanly(sess: var TuiTestSession) =
+  ## `Ctrl+Q` is the CUA base's quit. Exit 0 EXACTLY: `main.nim` separates a usage error (2)
+  ## from "no terminal" (3) and from an unhandled exception (1), and `rc != 0`
+  ## would be satisfied by the binary crashing on the way out.
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
+  let status = sess.waitExit(initDuration(seconds = 15))
+  checkpoint("exit: " & (if status.isSome: $status.get() else: "none"))
+  ck status.isSome
+  ck status.get() == 0
+  sess.close()
+
+var
+  tracePath = ""
+  ctSuffixTrace = ""
+
+suite "CTUI-12 Tier 2: `ct tui <trace>` paints the debugger through a packaged install":
+
+  test "every artifact this lane composes exists":
+    # FIRST AND SEPARATELY, so a missing build reports as a missing build
+    # rather than as a spawn failure inside libvterm several assertions later.
+    # None of these is a skip — `docs/tui-testing.md` rule 1.
+    if not fileExists(tuiBinary):
+      checkpoint("missing " & tuiBinary & " — run `" & TuiBuildRecipe & "`")
+    ck fileExists(tuiBinary)
+    if not fileExists(launcherBin):
+      checkpoint("missing " & launcherBin & " — run `" & LauncherRecipe & "`")
+    ck fileExists(launcherBin)
+    ck fileExists(root / "packaging" / "codetracer-tui.caps")
+
+    let resolved = resolveFixture(FixtureName)
+    if resolved.outcome != foRecorded:
+      checkpoint("the `" & FixtureName & "` fixture is unavailable: " &
+                 resolved.detail &
+                 " — `just test-tui` records and caches it, or set $CT_BIN")
+    ck resolved.outcome == foRecorded
+    tracePath = resolved.tracePath
+    checkpoint("trace: " & tracePath)
+    ck dirExists(tracePath)
+
+  test "the packaging script assembles the component from the shipped caps":
+    removeDir(artifactDir)
+    createDir(artifactDir)
+    let built = buildComponent()
+    checkpoint("build-tui-component.sh exit " & $built.rc & "\n" & built.output)
+    ck built.rc == 0
+
+    var bundle = ""
+    for kind, path in walkDir(componentsRoot):
+      if kind == pcDir: bundle = path
+    checkpoint("bundle: " & bundle)
+    ck bundle.len > 0
+    ck bundle.extractFilename.startsWith("codetracer-tui@")
+    # BYTE-FOR-BYTE, so the routing below is a statement about the file the
+    # product ships rather than about one the test wrote.
+    ck readFile(bundle / "capabilities") ==
+       readFile(root / "packaging" / "codetracer-tui.caps")
+    # The symlink resolves to the binary asserted above.
+    ck expandFilename(bundle / "bin" / "codetracer-tui") ==
+       expandFilename(tuiBinary)
+
+    # The empty root the control case needs, created here so both cases are
+    # looking at directories built in the same place by the same run.
+    createDir(emptyRoot)
+    var emptyCount = 0
+    for kind, path in walkDir(emptyRoot):
+      inc emptyCount
+    ck emptyCount == 0
+
+  test "`ct tui <trace>` paints §3.1's screen in a real terminal":
+    # THE MILESTONE, end to end: the launcher is the process in the pty, the
+    # capability file chose the component, `execv` replaced the image, and the
+    # frame below was painted by the shipped binary onto the launcher's own
+    # inherited tty.
+    var sess = launcherSession(componentsRoot, @["tui", tracePath]).spawn()
+    settleOnDebugger(sess)
+    ckDebuggerFrame(sess)
+    # THE TERMINAL WAS SET UP, read from the terminal's side rather than from
+    # the application's. `mpSgr` is what `?1000h ?1006h` leaves in libvterm's
+    # extended state, and it is unreachable for a process whose stdout is a
+    # pipe: `main.nim` would have refused with exit 3 before claiming anything.
+    checkpoint("mouseProtocol=" & $sess.mouseProtocol())
+    ck sess.mouseProtocol() == mpSgr
+    ckQuitsCleanly(sess)
+
+  test "`ct tui <trace.ct>` — the gate's own spelling — paints it too":
+    # CTUI-12's verification gate names a `.ct` path, and that path takes a
+    # DIFFERENT route through the capability file: the `.ct` extension token
+    # rather than the `noext` one a suffix-less recorded fixture uses. A
+    # symlink to the real recording, so the binary opens a real trace.
+    ctSuffixTrace = artifactDir / "recording.ct"
+    if symlinkExists(ctSuffixTrace) or dirExists(ctSuffixTrace):
+      removeFile(ctSuffixTrace)
+    createSymlink(tracePath, ctSuffixTrace)
+    ck dirExists(ctSuffixTrace)
+    var sess = launcherSession(componentsRoot, @["tui", ctSuffixTrace]).spawn()
+    settleOnDebugger(sess)
+    ckDebuggerFrame(sess)
+    ckQuitsCleanly(sess)
+
+  test "CONTROL: with an empty component root the same command paints NOTHING":
+    # The difference between this case and the two above is one directory. It
+    # is what makes "a frame appeared" evidence about the packaged install
+    # rather than about the binary being on the machine somewhere.
+    var sess = launcherSession(emptyRoot, @["tui", tracePath]).spawn()
+    let status = sess.waitExit(initDuration(seconds = 30))
+    discard sess.drainOutput(60)
+    let text = screenText(sess)
+    checkpoint("exit: " & (if status.isSome: $status.get() else: "none") &
+               ", screen:\n" & text)
+    ck status.isSome
+    ck status.get() == 1
+    ck text.contains(NoHandlerText)
+    # NO FRAME. The positive twin of every `contains` in `ckDebuggerFrame`,
+    # through the same reader — a blank screen would satisfy this for free, so
+    # the line above asserts what IS there before these assert what is not.
+    var compared = 0
+    for title in PaneTitles:
+      inc compared
+      ck not text.contains(title)
+    ck compared == PaneTitles.len
+    sess.close()
+
+suite "CTUI-12: what the shipped binary costs and what it needs at load time":
+
+  test "the binary's size is inside the recorded regression band":
+    # CTUI-12'S OTHER GATE, and the one the 2026-09-05 revision restated:
+    # "binary size is RECORDED and a regression threshold set from the MEASURED
+    # value". A number in a report is not a threshold, so it is here, in the
+    # lane that guarantees the binary is fresh — `just test-tui-real-terminal`
+    # depends on `just build-tui`, which the Tier-1 lane does not.
+    #
+    # A BAND, not a ceiling. A ceiling alone is satisfied by a binary that
+    # linked none of the ten grammars, or by a stub; the floor is what makes
+    # "this is still the product" part of the assertion.
+    let size = getFileSize(tuiBinary)
+    checkpoint("build/bin/codetracer-tui: " & $size & " bytes (measured " &
+               $MeasuredBinaryBytes & " on " & MeasurementDate & "), band [" &
+               $BinaryFloorBytes & ", " & $BinaryCeilingBytes & "]")
+    ck size <= BinaryCeilingBytes
+    ck size >= BinaryFloorBytes
+
+  test "it needs libc, the C++ runtime and tree-sitter — and nothing else":
+    # THE GATE'S OWN WORDING: "no dynamic dependencies beyond libc, libstdc++
+    # and the tree-sitter runtime, each justified". Read from the ELF's DT_NEEDED
+    # entries rather than from `ldd`, because `ldd` also reports what the
+    # dependencies themselves pull in; the claim is about what THIS binary
+    # declares.
+    #
+    # CLASSIFIED, not listed. A literal allow-list would carry `libtree-sitter.
+    # so.0.25` — a soname that moves with the runtime's minor version and would
+    # redden this on a nixpkgs bump for no product reason. Each entry is put in
+    # one of three JUSTIFIED buckets instead, and anything that lands in none is
+    # named in the failure.
+    let needed = neededLibraries(tuiBinary)
+    checkpoint("DT_NEEDED: " & needed.join(" "))
+    # A binary with no dependencies at all would satisfy every "is in a bucket"
+    # test below for free. It would also be a different product.
+    ck needed.len > 0
+
+    var libc, cxx, treeSitter, unexplained: seq[string] = @[]
+    var classified = 0
+    for lib in needed:
+      inc classified
+      if lib.bucketOf == blLibc: libc.add lib
+      elif lib.bucketOf == blCxx: cxx.add lib
+      elif lib.bucketOf == blTreeSitter: treeSitter.add lib
+      else: unexplained.add lib
+    # The sweep's size against its parameter.
+    ck classified == needed.len
+    ck libc.len + cxx.len + treeSitter.len + unexplained.len == needed.len
+
+    if unexplained.len > 0:
+      checkpoint("UNEXPLAINED dynamic dependencies: " & unexplained.join(" ") &
+                 " — CTUI-12's gate allows only libc, the C++ runtime and the" &
+                 " tree-sitter runtime, each justified. Widening this list is" &
+                 " a product decision, not a test fix.")
+    ck unexplained.len == 0
+
+    # THE POSITIVE HALF, one assertion per justified bucket. Without these,
+    # `unexplained.len == 0` is satisfied by a binary that needs nothing.
+    #
+    #   libc         — the platform C library. Nim's runtime is built on it.
+    #   C++ runtime  — Yoga is C++ (`isonim/src/isonim/layout/yoga_bindings.nim`
+    #                  compiles ~40 `.cpp` files and passes `-lstdc++`), and the
+    #                  unwinder comes with it. CTUI-0 recorded this as the
+    #                  reason the draft's "libc only" gate was unachievable.
+    #   tree-sitter  — `isonim_tui/syntax/treesitter_ffi.nim` ends its
+    #                  `{.passl.}` with `-ltree-sitter`; the ten grammars are
+    #                  statically archived, the RUNTIME is not.
+    checkpoint("libc=" & libc.join(",") & "  c++=" & cxx.join(",") &
+               "  tree-sitter=" & treeSitter.join(","))
+    ck libc.len > 0
+    ck cxx.len > 0
+    # If this ever goes to zero it means the runtime was linked statically.
+    # That is a legitimate change — measured on 2026-09-06 at +180224 bytes
+    # stripped — but it MUST arrive together with a re-measured size band
+    # above, so it reddens here rather than passing quietly.
+    ck treeSitter.len > 0
+
+  test "assertion count":
+    echo "CHECKS: " & $countedAssertions
+    checkpoint("counted assertions: " & $countedAssertions)
+    check countedAssertions == ExpectedAssertions

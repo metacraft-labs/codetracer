@@ -1,0 +1,224 @@
+## keep this in sync with types.nim Config def
+## a file with config code for the c backend, used mostly by ui_data for repl/tests
+
+import std / [ strutils, sequtils, streams, strformat, os ]
+import json_serialization/std/tables, yaml
+import .. / common / [paths, types]
+
+type
+  RRBackendConfig* = object
+    enabled*:           bool
+    path*:              string
+
+  FlowConfigObjWrapper* = object
+    enabled*:                             bool
+    ui*:                                  string
+    FlowUI* {.defaultVal: FlowParallel}:  types.FlowUI
+
+  TraceSharingConfigObj* = object
+    enabled*:               bool
+    ## The four keys below named a sharing service that no longer exists.
+    ## The shipped default config no longer carries them; they stay in the
+    ## schema, each optional, so a config file written by an older release
+    ## still loads (the loader is strict, and a key it does not know would
+    ## make it reject the file).  Online sharing uses the API base from
+    ## `ct login`'s remote config, not these.
+    baseUrl* {.defaultVal: "".}:          string
+    getUploadUrlApi* {.defaultVal: "".}:  string
+    downloadApi* {.defaultVal: "".}:      string
+    deleteApi* {.defaultVal: "".}:        string
+
+  ConfigObject* = object
+    ## The config object is the schema for config yaml files
+    theme*:                                               string
+    version*:                                             string
+
+    flow* {.defaultVal: FlowConfigObjWrapper(
+      enabled: true,
+      ui: "parallel",
+      FlowUI: FlowParallel
+    ).}:                                                  FlowConfigObjWrapper
+
+    callArgs*:                                            bool
+    history*:                                             bool
+    repl*:                                                bool
+    trace*:                                               bool
+    default*:                                             string
+    calltrace*:                                           bool
+    layout*:                                              string
+    telemetry*:                                           bool
+    test*:                                                bool
+    debug*:                                               bool
+    events*:                                              bool
+    bindings*:                                            InputShortcutMap
+    shortcutMap* {.defaultVal: ShortcutMap().}:           ShortcutMap
+    defaultBuild*:                                        string
+    showMinimap*:                                         bool
+
+    traceSharing* {.defaultVal: TraceSharingConfigObj(
+      enabled: false
+    ).}:                                                  TraceSharingConfigObj
+
+    rrBackend* {.defaultVal: RRBackendConfig(
+      enabled: false,
+      path: "",
+    ).}:                                                  RRBackendConfig
+    skipInstall:                                          bool
+
+    ## Controls whether a second `ct run` / `ct replay` invocation opens
+    ## the trace in a new tab within the existing window ("tab") or
+    ## spawns a new Electron window ("window").  Default: "tab".
+    newTracePolicy* {.defaultVal: "tab".}:                string
+
+    ## PLAT-1: the third layer of `--ui`'s resolution order
+    ## (`codetracer-specs/CLI/ct/ui-selection.md` §5) -- one of
+    ## `electron`, `gui`, `tui`, `webui`.  Empty means "not configured",
+    ## which is the state that falls through to the built-in default.
+    ##
+    ## DECLARED HERE EVEN THOUGH THE SELECTOR DOES NOT READ IT FROM
+    ## HERE.  The prologue reads the key with a narrow reader
+    ## (`ct/launch/ui_dispatch.configuredUiValue`) because it runs
+    ## before any configuration is loaded; but NimYAML loads this schema
+    ## strictly, so a user who writes `ui: tui` into their config would
+    ## otherwise make `loadConfig` throw -- and its recovery path COPIES
+    ## THE DEFAULT CONFIG OVER THEIR FILE.  A setting the product
+    ## publishes must not be able to delete the file it is written in.
+    ui* {.defaultVal: "".}:                               string
+
+  Config* = ref ConfigObject
+
+  FlowUI* = enum FlowParallel, FlowInline, FlowMultiline
+
+  BreakpointSave* = ref object
+    # Serialized breakpoint
+    line*:   int
+    path*:   int
+
+let configPath* = ".config.yaml"
+
+let testConfigPath* = ".config.yaml"
+
+let defaultConfigPath* = "default_config.yaml"
+
+let defaultLayoutPath* = "default_layout.json"
+
+let configDir* = codetracerPrefix / "config"
+
+# `$CODETRACER_HOME/config`, else `$XDG_CONFIG_HOME/codetracer`, else
+# `~/.config/codetracer` (`ct_home.ctConfigDir`).
+let userConfigDir* = ctConfigDir()
+let userLayoutDir* = ctConfigDir()
+
+proc userConfigFilePath*: string =
+  ## Absolute path to the user's active configuration file.
+  userConfigDir / configPath
+
+proc rrBackendMissingGuidanceLines*: seq[string] =
+  ## Standard guidance for missing rr backend installations, including the user config path.
+  let configFile = userConfigFilePath()
+  @[
+    "This functionality requires a ct-native-replay installation.",
+    fmt"To fix this issue either add ct-native-replay to your PATH or open {configFile} and set:",
+    "rrBackend:",
+    "  enabled: true",
+    "  path:<ct-native-replay binary or AppImage location>",
+  ]
+
+func normalize(shortcut: string): string =
+  # for now we expect to write editor-style monaco shortcuts
+  shortcut
+
+func initShortcutMap*(map: InputShortcutMap): ShortcutMap =
+  result = ShortcutMap()
+  var conflicts = initTable[string, seq[ClientAction]]()
+  for key, value in map:
+    let rawShortcuts = ($value).splitWhitespace()
+    var action: ClientAction
+    try:
+      action = parseEnum[ClientAction]($key)
+    except:
+      debugecho "config.nim: invalid action ", $key
+      continue
+    for raw in rawShortcuts:
+      let normalShortcut = normalize(raw)
+      let shortcut = Shortcut(renderer: ($normalShortcut).toLowerAscii, editor: normalShortcut)
+      if result.shortcutActions.hasKey(normalShortcut):
+        if not conflicts.hasKey(normalShortcut):
+          conflicts[normalShortcut] = @[result.shortcutActions[normalShortcut], action]
+        else:
+          conflicts[normalShortcut] = conflicts[normalShortcut].concat(@[action])
+      else:
+        result.shortcutActions[normalShortcut] = action
+        result.actionShortcuts[action].add(shortcut)
+  for key, value in conflicts:
+    result.conflictList.add((key, value))
+  return result
+
+proc findConfig*(folder: string, configPath: string): string =
+  var current = folder
+  var config = false
+  while true:
+    let path = current / configPath
+    if fileExists(path):
+      return path
+    else:
+      if config:
+        return ""
+      current = current.parentDir
+      if current == "":
+        current = userConfigDir
+        config = true
+
+proc parseConfig*(raw: string): Config =
+  ## Parse the text of a config file against the schema.  Raises on a file
+  ## the schema rejects; `loadConfig` owns what happens then.
+  var config: ConfigObject
+  var stream = newStringStream(raw)
+  try:
+    load(stream, config)
+  finally:
+    stream.close()
+  result = Config()
+  result[] = config
+  result.shortcutMap = initShortcutMap(config.bindings)
+
+proc loadConfig*(folder: string, inTest: bool): Config =
+  # ignore inTest from now: TODO eventually remove?
+  var file = findConfig(folder, configPath)
+  if file.len == 0:
+    file = userConfigDir / configPath
+    createDir(userConfigDir)
+    copyFile(configDir / defaultConfigPath, file)
+  # if inTest:
+  #   file = codetracerTestDir / testConfigPath
+  var raw = ""
+  try:
+    raw = readFile(file)
+  except CatchableError as e:
+    echo "error: ", e.msg
+    quit(1)
+  try:
+    var c = parseConfig(raw)
+
+    # Auto-discover ct-native-replay from PATH if not configured.
+    if c.rrBackend.path == "":
+      let nativeReplayPath = findExe("ct-native-replay")
+      if nativeReplayPath != "":
+        c.rrBackend.enabled = true
+        c.rrBackend.path = nativeReplayPath
+
+    return c
+  except Exception as e:
+    echo "ERROR: loading config: ", e.msg
+    echo "  if the schema has changed, and you have an existing config file, you might get an error here"
+    # echo "  you can manually adapt your config file or"
+    # echo "  you can reset it by deleting $HOME/.config/codetracer/.config.yaml"
+    let backupFilePath = userConfigDir / "backup_config.yaml"
+    createDir(userConfigDir)
+    try:
+      copyFile(file, backupFilePath)
+      echo fmt"   for now we now have directly copied your existing config file to {backupFilePath}"
+    except Exception as copyError:
+      echo "ERROR: couldn't backup your existing config file; error: ", copyError.msg
+    copyFile(configDir / defaultConfigPath, file)
+    echo "  REPLACED with new up to date default config file"

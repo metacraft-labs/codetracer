@@ -1,0 +1,259 @@
+# === mode
+test: false
+
+# === features
+
+calltrace: true
+flow:
+  enabled: true
+  # preload flow:
+  #   you can have parallel, inline or multiline
+  ui: "parallel"
+trace: true
+events: true
+# history: experimental support
+history: true
+repl: true
+
+# online sharing (`ct upload` / `ct download`); the server is chosen with
+# `ct login --base-url`, CODETRACER_REMOTE_BASE_URL or remote.config.
+traceSharing:
+  enabled: true
+
+# === feature settings
+
+# orthogonal to calltrace:
+#   should we load args/return values for
+#   callstack/calltrace
+callArgs: true
+
+# enable or disable telemetry:
+# if you enable it, it will collect colored logs
+#   in your terminal (and comlog.txt) which are visible when you directly ./run.sh id
+#   yaml logs in telemetry.log which can be converted back to colored logs with format.js
+#   if you have a problem you can send back telemetry.log
+#
+# MAKE SURE THERE IS NO SENSITIVE INFO IN
+# telemetry.log
+telemetry: false
+
+# debug message
+debug: true
+
+# layout:
+#   currently we miss the changed layout: TODO
+layout: "default_layout"
+
+# theme:
+#   you can also choose default_white or default_dark
+theme: "default_dark"
+
+# project open
+default: ""
+
+# what commands to use by default for build and update while editing
+defaultBuild: ""
+
+# === editor/shortcut settings
+showMinimap: true
+
+# # you can use KEY+OTHER
+# # use PageUp, PageDown, CTRL, ALT, SHIFT
+# # we'll fix it, but for now have to match to two apis and to process it more
+# LEGACY DATA SINCE PLAT-68. No key is delivered through this table any more:
+# every front-end's keys go through ONE router over the shared base keymaps
+# (CUA by default; codetracer-specs GUI/CUA-Keymap.md) and the user's
+# `keybindings.json`. This block is read only by the ONE-TIME IMPORT of a
+# user's customised `bindings:` into `keybindings.json`
+# (`index/keybindings.importOldConfigsOnce`) and, on macOS, for the native
+# menu's accelerators. The notes below record why each chord was chosen under
+# the Mousetrap / Monaco registries the router replaced; they describe that
+# history, not the running product.
+bindings:
+  forwardContinue: "F8 F2"
+  reverseContinue: "SHIFT+F8"
+  forwardNext: "F10"
+  reverseNext: "SHIFT+F10"
+  forwardStep: "F11"
+  reverseStep: "SHIFT+F11"
+  forwardStepOut: "F12"
+  reverseStepOut: "SHIFT+F12"
+  stop: "SHIFT+F5"
+  build: "CTRL+B"
+  switchTabLeft: "CTRL+PageUp"
+  switchTabRight: "CTRL+PageDown"
+  switchTabHistory: "CTRL+Tab"
+  openFile: "CTRL+O"
+  newTab: "CTRL+N"
+  reopenTab: "CTRL+SHIFT+T"
+  closeTab: "CTRL+W"
+  goUp: "Up"
+  goDown: "Down"
+  pageUp: "PageUp"
+  pageDown: "PageDown"
+  # CTRL+E TOGGLES READ-ONLY, and it used to say `switchEdit` here.
+  # `ui_js.nim` bound the chord in code to `data.toggleReadOnly()` and
+  # `ui/editor.nim`'s Monaco `commands` table bound it to the same proc, so the
+  # key toggled read-only inside the editor and dispatched `switchEdit` outside
+  # it -- one chord, two actions, chosen by where the caret was. Toggle
+  # read-only is the behaviour the specs describe and the one a user in the
+  # editor gets, so it is the claim that keeps the chord; it is an action here
+  # rather than a hardcoded bind so that it is rebindable and so that
+  # `renderChord` can print it.
+  #
+  # `switchEdit` IS NOW UNBOUND, DELIBERATELY, and that is symmetric rather
+  # than a loss: its twin `switchDebug` has never been bound here either, and
+  # the pair is reached by `toggleMode` on CTRL+F5. A one-way "enter Edit mode"
+  # chord with no "leave" beside it is what CTRL+E was, and it is why handing
+  # the chord to `switchEdit` would have been the wrong resolution.
+  aToggleReadOnly: "CTRL+E"
+  fileSearch: "CTRL+P"
+  commandSearch: "ALT+P"
+  fixedSearch: "CTRL+SHIFT+P"
+  goRight: "Right"
+  goLeft: "Left"
+  gotoStart: "Home"
+  gotoEnd: "End"
+  aEnter: "Enter"
+  aEscape: "Esc"
+  findOrFilter: "CTRL+F"
+  zoomIn: "CTRL+="
+  zoomOut: "CTRL+-"
+  example: "CTRL+L"
+  aMenu: "CTRL+M"
+  aLowLevel1: "ALT+1"
+  switchFocusedLoopLevelUp: "CTRL+SHIFT+Q"
+  switchFocusedLoopLevelDown: "CTRL+SHIFT+A"
+  setFlowTypeToMultiline: "ALT+SHIFT+M"
+  setFlowTypeToParallel: "ALT+SHIFT+P"
+  setFlowTypeToInline: "ALT+SHIFT+I"
+  findInFiles: "CTRL+SHIFT+F"
+  findSymbol: "CTRL+T"
+  aRestart: "CTRL+F4"
+
+  # Build-error navigation. The whole F8 family was unavailable, twice over,
+  # and both refusals were measured rather than assumed.
+  #
+  # NOT F8 / SHIFT+F8 -- what VS Code uses and what this feature's spec
+  # proposed. `forwardContinue` above already claims "F8 F2" and
+  # `reverseContinue` claims "SHIFT+F8", and `initShortcutMap`
+  # (common/config.nim:112-135) is FIRST-WRITER-WINS: a second claim on a
+  # chord is not registered at all, it is pushed into `conflictList`, which
+  # nothing reads. Binding F8 here would have produced an action with no
+  # chord and a menu item showing no shortcut -- indistinguishable from a
+  # feature that was never wired.
+  #
+  # NOT ALT+F8 either, which was the next choice and which MONACO ITSELF
+  # BINDS to its marker-navigation action. Measured in a browser tab: with
+  # the chord added to MONACO_SHORTCUTS_WHITELIST it fired TWICE per press
+  # (once through the delegated Monaco command, once through Mousetrap), so a
+  # single press of "next error" on a one-error build advanced and then
+  # wrapped; with the chord removed from the whitelist it fired NOT AT ALL,
+  # because Monaco consumed the key before it reached the document.
+  #
+  # CTRL+ALT+N / CTRL+ALT+P are outside the F8 family entirely, are claimed by
+  # nothing in this file, are not hard-bound in `ui/shortcuts.nim`, and are not
+  # Monaco defaults -- so exactly one handler runs, and it runs with the caret
+  # in the editor, which is the only place anyone presses "next error" from.
+  # N/P for next/previous; the pair is symmetric, which the SHIFT+ convention
+  # used by the stepping chords could not be here (`shortcut()` in
+  # `ui/shortcuts.nim:17` splits on "+" with maxsplit 2, so a four-token chord
+  # like CTRL+ALT+SHIFT+N parses its key as "SHIFT+N" and resolves to nothing).
+  aGotoNextError: "CTRL+ALT+N"
+  aGotoPreviousError: "CTRL+ALT+P"
+
+  # Visual Replay / Video Player keyboard shortcuts (spec: GUI/Debugging-Features/Visual-Replay.md §Keyboard Shortcuts).
+  # Each handler in ui_js.nim guards on `videoPlayerHasFocus()` so the
+  # bindings only fire when the Video Player panel is focused or the cursor
+  # is hovering its frame canvas.  This prevents collisions with the
+  # debugger's global F10/F11 step shortcuts and with Monaco's arrow keys.
+  videoPlayerTogglePlay: "Space K"
+  videoPlayerRewind: "J"
+  videoPlayerFastForward: "L"
+  videoPlayerStepFrameBack: "Left"
+  videoPlayerStepFrameForward: "Right"
+  videoPlayerStepDrawBack: "SHIFT+Left"
+  videoPlayerStepDrawForward: "SHIFT+Right"
+  videoPlayerJumpStart: "Home"
+  videoPlayerJumpEnd: "End"
+  videoPlayerTogglePicker: "P"
+  videoPlayerCancelPicker: "Esc"
+
+  # The five debug-toolbar controls that had no chord to display.
+  #
+  # WHY THESE FIVE AND NOT THE OTHER EIGHT. The toolbar has 13 buttons. Eight
+  # of them — the stepping pairs — already resolve to actions bound above with
+  # the conventional chords (F10/SHIFT+F10, F11/SHIFT+F11, F12/SHIFT+F12,
+  # F8/SHIFT+F8), so the tooltips that had been *restating* those chords as
+  # literal strings could simply start reading them instead. The remaining five
+  # had no `ClientAction` at all, so `loadShortcut` had nothing to return and a
+  # tooltip could only have lied or stayed silent. NOTHING WAS DISPLACED to fit
+  # them in.
+  #
+  # WHY THE CTRL+ALT+<letter> FAMILY. It is the one family this file has
+  # already measured as clean. The build-error-navigation note above records
+  # why the obvious picks are not available: `initShortcutMap`
+  # (`common/config.nim:112-135`) is FIRST-WRITER-WINS and pushes a second
+  # claim into `conflictList`, which nothing reads, so a chord already taken
+  # yields an action with NO chord — and now, therefore, a BLANK TOOLTIP,
+  # indistinguishable from a control that was never wired. Every chord below
+  # was checked against all 57 entries in this file AND against the ~24 chords
+  # hard-bound in `ui/shortcuts.nim` and `ui_js.nim`, which this file cannot
+  # see and which silently win by binding later.
+  #
+  # Arrow keys are deliberately NOT used with CTRL+ALT (GNOME takes
+  # CTRL+ALT+Left/Right for workspace switching), and no chord here is in
+  # `ui/editor.nim`'s MONACO_SHORTCUTS_WHITELIST — Monaco binds no
+  # CTRL+ALT+<letter> natively, so the ALT+F8 double-fire measured by the
+  # error-navigation work cannot recur here.
+  # NO TRAILING COMMENTS ON THESE LINES, and that is not a style preference.
+  # `frontend/config.nim`'s `parseSimpleYamlConfig` — the parser a browser tab
+  # uses on this file, via `staticRead` — takes everything after the colon as
+  # the value and only strips quotes when the LAST character is one. A trailing
+  # `#` comment therefore becomes part of the chord, `splitWhitespace` shreds
+  # it into half a dozen bogus shortcuts, and they collide with each other in
+  # `initShortcutMap`. Measured: adding four such comments took `conflictList`
+  # from 5 entries to 12. The parser's own doc comment warns that "a fixture
+  # that grew an unsupported construct loses a key silently here"; this is that
+  # construct, and `shortcut_bindings_test.nim` is what caught it.
+  #
+  # CTRL+B is `build` and CTRL+ALT+B is free.
+  aHistoryBack: "CTRL+ALT+B"
+  # CTRL+F is `findOrFilter` and CTRL+ALT+F is free.
+  aHistoryForward: "CTRL+ALT+F"
+  # CTRL+E is `aToggleReadOnly` and ALT+E is hard-bound to `focusEventLog`;
+  # CTRL+ALT+E is free.
+  aRunToEntry: "CTRL+ALT+E"
+  # CTRL+R is hard-bound to re-record; CTRL+ALT+R is free.
+  aResetOperation: "CTRL+ALT+R"
+  # Opens the keyboard-shortcuts dialog. CTRL+ALT+K is free in this file and is
+  # not hard-bound anywhere; K for keyboard. VS Code's CTRL+K CTRL+S is a chord
+  # SEQUENCE, which `initShortcutMap` cannot express -- one action per key, and
+  # no sequence syntax -- so it is not available until Planned Changes' "key
+  # chord support" lands.
+  #
+  # NOT in MONACO_SHORTCUTS_WHITELIST, deliberately, like every other
+  # CTRL+ALT+<letter> chord here: Monaco binds nothing in that family, so the
+  # global bind already reaches the editor, and delegating it as well is what
+  # made ALT+F8 fire twice.
+  aKeyboardShortcuts: "CTRL+ALT+K"
+  # MOVED HERE OUT OF `ui/shortcuts.nim`, where it was `Mousetrap.bind("alt+l")`
+  # with no `ClientAction` behind it. The chord is unchanged, so no user's
+  # muscle memory moves; what changes is that it is now readable — a hard-bound
+  # chord is invisible to `loadShortcut`, so the Run-tests tooltip could not
+  # have named it without hardcoding it, which is the defect this work removes.
+  aRunTests: "ALT+L"
+
+rrBackend:
+  enabled: false
+  path: ""
+
+skipInstall: true
+
+# Policy for opening traces when a CodeTracer window already exists.
+# "tab"    — open as a new tab in the existing window (default)
+# "window" — spawn a new Electron window
+newTracePolicy: "tab"
+
+# TODO: Use this somehow
+version: "0.1alpha"

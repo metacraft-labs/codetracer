@@ -1,0 +1,1718 @@
+{
+  "_comment": [
+    "PLAT-42 — the four surfaces read off real GPUI windows through PLAT-39's",
+    "reader, and two pixel twins. Regenerate: `just plat42-surfaces-window`",
+    "then `just plat42-window-record`. Asserted by test_plat42_window.nim."
+  ],
+  "takenAt": "2026-09-30T00:19:37Z",
+  "host": "gpu-server-001",
+  "pixelDelta": 16,
+  "manifest": [
+    {
+      "id": "blank",
+      "trace": "",
+      "ops": "",
+      "extra": "",
+      "rc": 0,
+      "settled": true,
+      "settledAfterS": 0
+    },
+    {
+      "id": "entry-shell",
+      "trace": "calc-2f0db4f45192",
+      "ops": "",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 12
+    },
+    {
+      "id": "stepped-editor",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=6",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 39
+    },
+    {
+      "id": "advanced-state",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=6,next=3",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 51
+    },
+    {
+      "id": "returned-calltrace",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=21,stepOut=1",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 120
+    },
+    {
+      "id": "continued-event-log",
+      "trace": "calc-2f0db4f45192",
+      "ops": "continueForward=1",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 18
+    },
+    {
+      "id": "breakpoint-editor",
+      "trace": "calc-2f0db4f45192",
+      "ops": "stepIn=6,setBreakpoint@1",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 45
+    },
+    {
+      "id": "noir-flow",
+      "trace": "noir_space_ship-f9f31b01a0d2",
+      "ops": "stepIn=33",
+      "extra": "",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 39
+    },
+    {
+      "id": "noir-flow-off",
+      "trace": "noir_space_ship-f9f31b01a0d2",
+      "ops": "stepIn=33",
+      "extra": "--no-flow-overlay",
+      "rc": 143,
+      "settled": true,
+      "settledAfterS": 42
+    }
+  ],
+  "frames": {
+    "blank": {
+      "frame": "blank.ppm",
+      "present": true,
+      "executionLine": -1,
+      "editorLocated": false,
+      "rows": []
+    },
+    "entry-shell": {
+      "frame": "entry-shell.ppm",
+      "present": true,
+      "executionLine": 1,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 30,
+        "rows": 30
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "» 1 #!/usr/bin/env python3"
+        },
+        {
+          "line": 2,
+          "text": "\"\"\"calc — the small, fast, deterministic program b"
+        },
+        {
+          "line": 3,
+          "text": "3 |"
+        },
+        {
+          "line": 4,
+          "text": "WHY THIS PROGRAM EXISTS, AND WHY IT LOOKS"
+        },
+        {
+          "line": 5,
+          "text": "I R R R R R R"
+        },
+        {
+          "line": 6,
+          "text": "\" codetracer-specs/Front-Ends/CodeTracer-TUl.mil"
+        },
+        {
+          "line": 7,
+          "text": "a fixture that is \"small, fast, deterministic; the del"
+        },
+        {
+          "line": 8,
+          "text": "layout tests\". Every constraint in that sentence is"
+        },
+        {
+          "line": 9,
+          "text": "9 |"
+        },
+        {
+          "line": 10,
+          "text": "‘ * *ksmall / fast** — the fixture is recorded on der ‘"
+        },
+        {
+          "line": 11,
+          "text": "*“src/frontend/tui/tests/fixtures/fixture_provider."
+        },
+        {
+          "line": 12,
+          "text": "lane pays for that recording the first time it run¢"
+        },
+        {
+          "line": 13,
+          "text": "whole program is a few hundred recorded steps"
+        },
+        {
+          "line": 14,
+          "text": "‘ seconds rather than minutes. ‘"
+        },
+        {
+          "line": 15,
+          "text": "‘ * *kdeterministic** — no clock, no randomness, r ‘"
+        },
+        {
+          "line": 16,
+          "text": "other than *“print™*. A fixture whose trace diffe"
+        },
+        {
+          "line": 17,
+          "text": "cannot be the ground truth for a stepping test."
+        },
+        {
+          "line": 18,
+          "text": "‘ * *kstepping and layout®* — it is written as a cha ‘"
+        },
+        {
+          "line": 19,
+          "text": "‘ (*“main’\" -> ““evaluate™” -> “Tapply op™\" -> ‘"
+        },
+        {
+          "line": 20,
+          "text": "rather than as one flat loop, because a calltrace"
+        },
+        {
+          "line": 21,
+          "text": "it exercises nothing. Every step lands in a nam"
+        },
+        {
+          "line": 22,
+          "text": "| 22 |"
+        },
+        {
+          "line": 23,
+          "text": "Nothing here asserts anything. The assertions li\\"
+        },
+        {
+          "line": 24,
+          "text": "*“src/frontend/tui/tests/test_fixture_corpus.nim™\""
+        },
+        {
+          "line": 25,
+          "text": "trace through a real \" \"HeadlessDebugSession™ ."
+        },
+        {
+          "line": 27,
+          "text": "| 27 |"
+        },
+        {
+          "line": 28,
+          "text": "28 |"
+        },
+        {
+          "line": 29,
+          "text": "def add(left, right):"
+        },
+        {
+          "line": 30,
+          "text": "\"\"\"Integer addition, as its own frame so steppi"
+        },
+        {
+          "line": 31,
+          "text": "return left + right"
+        },
+        {
+          "line": 32,
+          "text": "| 32 |"
+        },
+        {
+          "line": 33,
+          "text": "33 |"
+        },
+        {
+          "line": 34,
+          "text": "def sub(left, right):"
+        },
+        {
+          "line": 35,
+          "text": "‘ \"\"\"Integer subtraction.\"\"\" ‘"
+        },
+        {
+          "line": 36,
+          "text": "return left - right"
+        },
+        {
+          "line": 37,
+          "text": "| 37 |"
+        },
+        {
+          "line": 38,
+          "text": "| |"
+        }
+      ]
+    },
+    "stepped-editor": {
+      "frame": "stepped-editor.ppm",
+      "present": true,
+      "executionLine": 44,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 25,
+        "support": 20,
+        "rows": 21
+      },
+      "rows": [
+        {
+          "line": 25,
+          "text": "the recording's source"
+        },
+        {
+          "line": 27,
+          "text": "| 27 |"
+        },
+        {
+          "line": 28,
+          "text": "28 |"
+        },
+        {
+          "line": 29,
+          "text": "def add(left, right):"
+        },
+        {
+          "line": 30,
+          "text": "\"\"\"Integer addition, as its own frame so steppi"
+        },
+        {
+          "line": 31,
+          "text": "return left + right"
+        },
+        {
+          "line": 32,
+          "text": "| 32 |"
+        },
+        {
+          "line": 33,
+          "text": "33 |"
+        },
+        {
+          "line": 34,
+          "text": "def sub(left, right):"
+        },
+        {
+          "line": 35,
+          "text": "‘ \"\"\"Integer subtraction.\"\"\" ‘"
+        },
+        {
+          "line": 36,
+          "text": "return left - right"
+        },
+        {
+          "line": 37,
+          "text": "| 37 |"
+        },
+        {
+          "line": 38,
+          "text": "38 |"
+        },
+        {
+          "line": 39,
+          "text": "def mul(left, right):"
+        },
+        {
+          "line": 40,
+          "text": "‘ \"“\"Integer multiplication.\"\"\" ‘"
+        },
+        {
+          "line": 41,
+          "text": "return left * right"
+        },
+        {
+          "line": 42,
+          "text": "| 42 |"
+        },
+        {
+          "line": 43,
+          "text": "|43 —|"
+        },
+        {
+          "line": 44,
+          "text": "p 44  def div(left, right):"
+        },
+        {
+          "line": 45,
+          "text": "‘ \"\"\"Floor division. //°\" rather than ~*/\"\" keeps ‘"
+        },
+        {
+          "line": 46,
+          "text": "“Yint® \": a float would make the printed output"
+        },
+        {
+          "line": 47,
+          "text": "repr, and this program's whole job is to be idel"
+        },
+        {
+          "line": 48,
+          "text": "return left // right"
+        },
+        {
+          "line": 49,
+          "text": "49 |"
+        },
+        {
+          "line": 50,
+          "text": "50 |"
+        },
+        {
+          "line": 51,
+          "text": "‘ 51 # The dispatch table is deliberately module-level ‘"
+        },
+        {
+          "line": 52,
+          "text": "‘ 52 # lookup is then a value the debugger can show, ‘"
+        },
+        {
+          "line": 53,
+          "text": "OPERATIONS = {"
+        },
+        {
+          "line": 54,
+          "text": "“+\": add,"
+        },
+        {
+          "line": 55,
+          "text": "“-\": sub,"
+        },
+        {
+          "line": 56,
+          "text": "\"+ mul,"
+        },
+        {
+          "line": 57,
+          "text": "‘\" div,"
+        },
+        {
+          "line": 58,
+          "text": "|58} |"
+        },
+        {
+          "line": 59,
+          "text": "59 |"
+        },
+        {
+          "line": 60,
+          "text": "60 |"
+        },
+        {
+          "line": 61,
+          "text": "def apply_op(symbol, left, right):"
+        },
+        {
+          "line": 62,
+          "text": "\"\"\"Resolve one operator symbol and apply it."
+        },
+        {
+          "line": 63,
+          "text": "| |"
+        }
+      ]
+    },
+    "advanced-state": {
+      "frame": "advanced-state.ppm",
+      "present": true,
+      "executionLine": 56,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 37,
+        "support": 18,
+        "rows": 19
+      },
+      "rows": [
+        {
+          "line": 37,
+          "text": "the recording's source"
+        },
+        {
+          "line": 38,
+          "text": "38 |"
+        },
+        {
+          "line": 39,
+          "text": "def mul(left, right):"
+        },
+        {
+          "line": 40,
+          "text": "‘ \"“\"Integer multiplication.\"\"\" ‘"
+        },
+        {
+          "line": 41,
+          "text": "return left * right"
+        },
+        {
+          "line": 42,
+          "text": "| 42 |"
+        },
+        {
+          "line": 43,
+          "text": "43 |"
+        },
+        {
+          "line": 44,
+          "text": "def div(left, right):"
+        },
+        {
+          "line": 45,
+          "text": "‘ \"\"\"Floor division. //°\" rather than ~*/\"\" keeps ‘"
+        },
+        {
+          "line": 46,
+          "text": "“Yint® \": a float would make the printed output"
+        },
+        {
+          "line": 47,
+          "text": "repr, and this program's whole job is to be idel"
+        },
+        {
+          "line": 48,
+          "text": "return left // right"
+        },
+        {
+          "line": 49,
+          "text": "49 |"
+        },
+        {
+          "line": 50,
+          "text": "50 |"
+        },
+        {
+          "line": 51,
+          "text": "‘ 51 # The dispatch table is deliberately module-level ‘"
+        },
+        {
+          "line": 52,
+          "text": "‘ 52 # lookup is then a value the debugger can show, ‘"
+        },
+        {
+          "line": 53,
+          "text": "OPERATIONS = {"
+        },
+        {
+          "line": 54,
+          "text": "“+\": add,"
+        },
+        {
+          "line": 55,
+          "text": "“-\": sub,"
+        },
+        {
+          "line": 56,
+          "text": "» 56 “#: mul,/* mul: <function mul at Ox7fffe7..."
+        },
+        {
+          "line": 57,
+          "text": "‘\" div,"
+        },
+        {
+          "line": 58,
+          "text": "| 58 } |"
+        },
+        {
+          "line": 59,
+          "text": "59 |"
+        },
+        {
+          "line": 60,
+          "text": "60 |"
+        },
+        {
+          "line": 61,
+          "text": "def apply_op(symbol, left, right):"
+        },
+        {
+          "line": 62,
+          "text": "\"\"\"Resolve one operator symbol and apply it."
+        },
+        {
+          "line": 63,
+          "text": "63 |"
+        },
+        {
+          "line": 64,
+          "text": "This frame exists so that the calltrace has a m"
+        },
+        {
+          "line": 65,
+          "text": "“left”” visibly flows main -> evaluate -> apply"
+        },
+        {
+          "line": 66,
+          "text": "shape a value-origin or a call-stack pane is rea"
+        },
+        {
+          "line": 68,
+          "text": "operation = OPERATIONS[symbol]"
+        },
+        {
+          "line": 69,
+          "text": "return operation(left, right)"
+        },
+        {
+          "line": 70,
+          "text": "70 |"
+        },
+        {
+          "line": 71,
+          "text": "71 |"
+        },
+        {
+          "line": 72,
+          "text": "def evaluate(expression):"
+        },
+        {
+          "line": 73,
+          "text": "\"\"\"Evaluate a strictly left-to-right space-separz"
+        },
+        {
+          "line": 74,
+          "text": "74 |"
+        },
+        {
+          "line": 75,
+          "text": "| |"
+        }
+      ]
+    },
+    "returned-calltrace": {
+      "frame": "returned-calltrace.ppm",
+      "present": true,
+      "executionLine": 110,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 79,
+        "support": 26,
+        "rows": 27
+      },
+      "rows": [
+        {
+          "line": 79,
+          "text": "the recording's source"
+        },
+        {
+          "line": 80,
+          "text": "total = int(tokens[0])"
+        },
+        {
+          "line": 81,
+          "text": "index = 1"
+        },
+        {
+          "line": 82,
+          "text": "while index < len(tokens):"
+        },
+        {
+          "line": 83,
+          "text": "symbol = tokens[index]"
+        },
+        {
+          "line": 84,
+          "text": "operand = int(tokens[index + 1])"
+        },
+        {
+          "line": 85,
+          "text": "total = apply_op(symbol, total, operand)"
+        },
+        {
+          "line": 86,
+          "text": "index += 2"
+        },
+        {
+          "line": 87,
+          "text": "return total"
+        },
+        {
+          "line": 88,
+          "text": "| 88 |"
+        },
+        {
+          "line": 89,
+          "text": "| 89 |"
+        },
+        {
+          "line": 90,
+          "text": "EXPRESSIONS = ["
+        },
+        {
+          "line": 92,
+          "text": "\"10-4 + 1\","
+        },
+        {
+          "line": 94,
+          "text": "\\ )4 “100/5 - 3\", \\"
+        },
+        {
+          "line": 95,
+          "text": "\\ ) \"1+2%3-4/2\", \\"
+        },
+        {
+          "line": 96,
+          "text": "96 1 |"
+        },
+        {
+          "line": 97,
+          "text": "97 |"
+        },
+        {
+          "line": 98,
+          "text": "| 98 |"
+        },
+        {
+          "line": 99,
+          "text": "def main():"
+        },
+        {
+          "line": 100,
+          "text": "\"\"\"Evaluate every expression and print the re"
+        },
+        {
+          "line": 101,
+          "text": "| 101 |"
+        },
+        {
+          "line": 102,
+          "text": "Called unconditionally at module level rather"
+        },
+        {
+          "line": 103,
+          "text": "“Uif _name__ ==\"_main_ \"\"\" guard: record"
+        },
+        {
+          "line": 104,
+          "text": "! different ways (as a script, as a module, throi"
+        },
+        {
+          "line": 105,
+          "text": "is one more way for a recording to come bacl"
+        },
+        {
+          "line": 106,
+          "text": "| 106 |"
+        },
+        {
+          "line": 107,
+          "text": "results =[]"
+        },
+        {
+          "line": 108,
+          "text": "for expression in EXPRESSIONS:"
+        },
+        {
+          "line": 109,
+          "text": "value = evaluate(expression)"
+        },
+        {
+          "line": 110,
+          "text": "p» 110 results.append(value)/* results: @[], v..."
+        },
+        {
+          "line": 111,
+          "text": "print(\"%s = %d\" % (expression, value))"
+        },
+        {
+          "line": 112,
+          "text": "print(“checksum = %d\" % sum(results))"
+        },
+        {
+          "line": 113,
+          "text": "return results"
+        },
+        {
+          "line": 114,
+          "text": "114 |"
+        },
+        {
+          "line": 115,
+          "text": "115 |"
+        },
+        {
+          "line": 116,
+          "text": "main()"
+        },
+        {
+          "line": 117,
+          "text": "| |"
+        }
+      ]
+    },
+    "continued-event-log": {
+      "frame": "continued-event-log.ppm",
+      "present": true,
+      "executionLine": 113,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 79,
+        "support": 26,
+        "rows": 27
+      },
+      "rows": [
+        {
+          "line": 79,
+          "text": "the recording's source"
+        },
+        {
+          "line": 80,
+          "text": "total = int(tokens[0])"
+        },
+        {
+          "line": 81,
+          "text": "index = 1"
+        },
+        {
+          "line": 82,
+          "text": "while index < len(tokens):"
+        },
+        {
+          "line": 83,
+          "text": "symbol = tokens[index]"
+        },
+        {
+          "line": 84,
+          "text": "operand = int(tokens[index + 1])"
+        },
+        {
+          "line": 85,
+          "text": "total = apply_op(symbol, total, operand)"
+        },
+        {
+          "line": 86,
+          "text": "index += 2"
+        },
+        {
+          "line": 87,
+          "text": "return total"
+        },
+        {
+          "line": 88,
+          "text": "| 88 |"
+        },
+        {
+          "line": 89,
+          "text": "| 89 |"
+        },
+        {
+          "line": 90,
+          "text": "EXPRESSIONS = ["
+        },
+        {
+          "line": 92,
+          "text": "\"10-4 + 1\","
+        },
+        {
+          "line": 94,
+          "text": "\\ )4 “100/5 - 3\", \\"
+        },
+        {
+          "line": 95,
+          "text": "\\ ) \"1+2%3-4/2\", \\"
+        },
+        {
+          "line": 96,
+          "text": "96 1 |"
+        },
+        {
+          "line": 97,
+          "text": "97 |"
+        },
+        {
+          "line": 98,
+          "text": "| 98 |"
+        },
+        {
+          "line": 99,
+          "text": "def main():"
+        },
+        {
+          "line": 100,
+          "text": "\"\"\"Evaluate every expression and print the re"
+        },
+        {
+          "line": 101,
+          "text": "| 101 |"
+        },
+        {
+          "line": 102,
+          "text": "Called unconditionally at module level rather"
+        },
+        {
+          "line": 103,
+          "text": "“Uif _name__ ==\"_main_ \"\"\" guard: record"
+        },
+        {
+          "line": 104,
+          "text": "! different ways (as a script, as a module, throi"
+        },
+        {
+          "line": 105,
+          "text": "is one more way for a recording to come bacl"
+        },
+        {
+          "line": 106,
+          "text": "| 106 |"
+        },
+        {
+          "line": 107,
+          "text": "results =[]"
+        },
+        {
+          "line": 108,
+          "text": "for expression in EXPRESSIONS:"
+        },
+        {
+          "line": 109,
+          "text": "value = evaluate(expression)"
+        },
+        {
+          "line": 110,
+          "text": "results.append(value)"
+        },
+        {
+          "line": 111,
+          "text": "print(\"%s = %d\" % (expression, value))"
+        },
+        {
+          "line": 112,
+          "text": "print(“checksum = %d\" % sum(results))"
+        },
+        {
+          "line": 113,
+          "text": "p 113 return results/* results: @[5, 7, 42, 17, 2] ¥/"
+        },
+        {
+          "line": 114,
+          "text": "| 114 |"
+        },
+        {
+          "line": 115,
+          "text": "| 115 |"
+        },
+        {
+          "line": 116,
+          "text": "main()"
+        },
+        {
+          "line": 117,
+          "text": "| |"
+        }
+      ]
+    },
+    "breakpoint-editor": {
+      "frame": "breakpoint-editor.ppm",
+      "present": true,
+      "executionLine": 44,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 25,
+        "support": 19,
+        "rows": 20
+      },
+      "rows": [
+        {
+          "line": 25,
+          "text": "the recording's source"
+        },
+        {
+          "line": 27,
+          "text": "| @27 |"
+        },
+        {
+          "line": 28,
+          "text": "28 |"
+        },
+        {
+          "line": 29,
+          "text": "def add(left, right):"
+        },
+        {
+          "line": 30,
+          "text": "\"\"\"Integer addition, as its own frame so steppi"
+        },
+        {
+          "line": 31,
+          "text": "return left + right"
+        },
+        {
+          "line": 32,
+          "text": "| 32 |"
+        },
+        {
+          "line": 33,
+          "text": "33 |"
+        },
+        {
+          "line": 34,
+          "text": "def sub(left, right):"
+        },
+        {
+          "line": 35,
+          "text": "‘ \"\"\"Integer subtraction.\"\"\" ‘"
+        },
+        {
+          "line": 36,
+          "text": "return left - right"
+        },
+        {
+          "line": 37,
+          "text": "| 37 |"
+        },
+        {
+          "line": 38,
+          "text": "38 |"
+        },
+        {
+          "line": 39,
+          "text": "def mul(left, right):"
+        },
+        {
+          "line": 40,
+          "text": "‘ \"“\"Integer multiplication.\"\"\" ‘"
+        },
+        {
+          "line": 41,
+          "text": "return left * right"
+        },
+        {
+          "line": 42,
+          "text": "| 42 |"
+        },
+        {
+          "line": 43,
+          "text": "|43 —|"
+        },
+        {
+          "line": 44,
+          "text": "p 44  def div(left, right):"
+        },
+        {
+          "line": 45,
+          "text": "‘ \"\"\"Floor division. //°\" rather than ~*/\"\" keeps ‘"
+        },
+        {
+          "line": 46,
+          "text": "“Yint® \": a float would make the printed output"
+        },
+        {
+          "line": 47,
+          "text": "repr, and this program's whole job is to be idel"
+        },
+        {
+          "line": 48,
+          "text": "return left // right"
+        },
+        {
+          "line": 49,
+          "text": "49 |"
+        },
+        {
+          "line": 50,
+          "text": "50 |"
+        },
+        {
+          "line": 51,
+          "text": "‘ 51 # The dispatch table is deliberately module-level ‘"
+        },
+        {
+          "line": 52,
+          "text": "‘ 52 # lookup is then a value the debugger can show, ‘"
+        },
+        {
+          "line": 53,
+          "text": "OPERATIONS = {"
+        },
+        {
+          "line": 54,
+          "text": "“+\": add,"
+        },
+        {
+          "line": 55,
+          "text": "“-\": sub,"
+        },
+        {
+          "line": 56,
+          "text": "\"+ mul,"
+        },
+        {
+          "line": 57,
+          "text": "‘\" div,"
+        },
+        {
+          "line": 58,
+          "text": "|58} |"
+        },
+        {
+          "line": 59,
+          "text": "59 |"
+        },
+        {
+          "line": 60,
+          "text": "60 |"
+        },
+        {
+          "line": 61,
+          "text": "def apply_op(symbol, left, right):"
+        },
+        {
+          "line": 62,
+          "text": "\"\"\"Resolve one operator symbol and apply it."
+        },
+        {
+          "line": 63,
+          "text": "| |"
+        }
+      ]
+    },
+    "noir-flow": {
+      "frame": "noir-flow.ppm",
+      "present": true,
+      "executionLine": 29,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 30,
+        "rows": 30
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "pub fn iterate_asteroids(initial_shield: Field, shiel"
+        },
+        {
+          "line": 2,
+          "text": "let mut remaining_shield = initial_shield;"
+        },
+        {
+          "line": 3,
+          "text": "3 |"
+        },
+        {
+          "line": 4,
+          "text": "foriin 0..8 {"
+        },
+        {
+          "line": 5,
+          "text": "let mass = masseslil;"
+        },
+        {
+          "line": 6,
+          "text": "let damage = calculate_damage(initial_shie"
+        },
+        {
+          "line": 7,
+          "text": "remaining_shield -= damage;"
+        },
+        {
+          "line": 8,
+          "text": "8 |"
+        },
+        {
+          "line": 9,
+          "text": "let mut regeneration = 0;"
+        },
+        {
+          "line": 10,
+          "text": "it (remaining_shield as u32 > 0){"
+        },
+        {
+          "line": 11,
+          "text": "regeneration = calculate_shield_regeneratit"
+        },
+        {
+          "line": 12,
+          "text": "remaining_shield += regeneration;"
+        },
+        {
+          "line": 13,
+          "text": "|13 } |"
+        },
+        {
+          "line": 14,
+          "text": "status_report(i,initial_shield, remaining_shi¢"
+        },
+        {
+          "line": 15,
+          "text": "|15 } |"
+        },
+        {
+          "line": 16,
+          "text": "16 |"
+        },
+        {
+          "line": 17,
+          "text": "‘ 17 // We need to have at least 1 unit of shields lef ‘"
+        },
+        {
+          "line": 18,
+          "text": "let result = remaining_shield as u32 > 0;"
+        },
+        {
+          "line": 19,
+          "text": "result"
+        },
+        {
+          "line": 20,
+          "text": "|20} |"
+        },
+        {
+          "line": 21,
+          "text": "21 |"
+        },
+        {
+          "line": 22,
+          "text": "fn calculate_damage(initial_shield: Field, remain"
+        },
+        {
+          "line": 23,
+          "text": "‘ 23 // Shields get exponentially less efficient ‘"
+        },
+        {
+          "line": 24,
+          "text": "\\ 24 /I At 100% shields 1 unit of mass will drain 1 p \\"
+        },
+        {
+          "line": 25,
+          "text": "\\ 25 /I At 50% shields 1 unit of mass will drain 50 p \\"
+        },
+        {
+          "line": 26,
+          "text": "let shield_pct = calculate_remaining_shield_p«"
+        },
+        {
+          "line": 27,
+          "text": "let mut damage = 0;"
+        },
+        {
+          "line": 28,
+          "text": "if(shield_pct == 100){"
+        },
+        {
+          "line": 29,
+          "text": "» 29 damage = mass * 1;/* damage: \"0x000..."
+        },
+        {
+          "line": 30,
+          "text": "|3o } |"
+        },
+        {
+          "line": 31,
+          "text": "| 31 else{ |"
+        },
+        {
+          "line": 32,
+          "text": "’ 32 damage = mass * (100 - shield_pct); ‘"
+        },
+        {
+          "line": 33,
+          "text": "|33 } |"
+        },
+        {
+          "line": 34,
+          "text": "if(damage as u32 > remaining_shield as u32"
+        },
+        {
+          "line": 35,
+          "text": "‘ 35 damage = remaining_shield; ‘"
+        },
+        {
+          "line": 36,
+          "text": "|36 } |"
+        },
+        {
+          "line": 37,
+          "text": "damage as Field"
+        },
+        {
+          "line": 38,
+          "text": "| |"
+        }
+      ]
+    },
+    "noir-flow-off": {
+      "frame": "noir-flow-off.ppm",
+      "present": true,
+      "executionLine": 29,
+      "editorLocated": true,
+      "lineVote": {
+        "firstLine": 1,
+        "support": 30,
+        "rows": 30
+      },
+      "rows": [
+        {
+          "line": 1,
+          "text": "pub fn iterate_asteroids(initial_shield: Field, shiel"
+        },
+        {
+          "line": 2,
+          "text": "let mut remaining_shield = initial_shield;"
+        },
+        {
+          "line": 3,
+          "text": "3 |"
+        },
+        {
+          "line": 4,
+          "text": "foriin 0..8 {"
+        },
+        {
+          "line": 5,
+          "text": "let mass = masseslil;"
+        },
+        {
+          "line": 6,
+          "text": "let damage = calculate_damage(initial_shie"
+        },
+        {
+          "line": 7,
+          "text": "remaining_shield -= damage;"
+        },
+        {
+          "line": 8,
+          "text": "8 |"
+        },
+        {
+          "line": 9,
+          "text": "let mut regeneration = 0;"
+        },
+        {
+          "line": 10,
+          "text": "it (remaining_shield as u32 > 0){"
+        },
+        {
+          "line": 11,
+          "text": "regeneration = calculate_shield_regeneratit"
+        },
+        {
+          "line": 12,
+          "text": "remaining_shield += regeneration;"
+        },
+        {
+          "line": 13,
+          "text": "|13 } |"
+        },
+        {
+          "line": 14,
+          "text": "status_report(i,initial_shield, remaining_shi¢"
+        },
+        {
+          "line": 15,
+          "text": "|15 } |"
+        },
+        {
+          "line": 16,
+          "text": "16 |"
+        },
+        {
+          "line": 17,
+          "text": "‘ 17 // We need to have at least 1 unit of shields lef ‘"
+        },
+        {
+          "line": 18,
+          "text": "let result = remaining_shield as u32 > 0;"
+        },
+        {
+          "line": 19,
+          "text": "result"
+        },
+        {
+          "line": 20,
+          "text": "|20} |"
+        },
+        {
+          "line": 21,
+          "text": "21 |"
+        },
+        {
+          "line": 22,
+          "text": "fn calculate_damage(initial_shield: Field, remain"
+        },
+        {
+          "line": 23,
+          "text": "‘ 23 // Shields get exponentially less efficient ‘"
+        },
+        {
+          "line": 24,
+          "text": "\\ 24 /I At 100% shields 1 unit of mass will drain 1 p \\"
+        },
+        {
+          "line": 25,
+          "text": "\\ 25 /I At 50% shields 1 unit of mass will drain 50 p \\"
+        },
+        {
+          "line": 26,
+          "text": "let shield_pct = calculate_remaining_shield_p«"
+        },
+        {
+          "line": 27,
+          "text": "let mut damage = 0;"
+        },
+        {
+          "line": 28,
+          "text": "if(shield_pct == 100){"
+        },
+        {
+          "line": 29,
+          "text": "» 29 damage = mass * 1;/* damage: \"0x000..."
+        },
+        {
+          "line": 30,
+          "text": "|3o } |"
+        },
+        {
+          "line": 31,
+          "text": "| 31 else{ |"
+        },
+        {
+          "line": 32,
+          "text": "damage = mass * (100 - shield_pct);"
+        },
+        {
+          "line": 33,
+          "text": "|33 } |"
+        },
+        {
+          "line": 34,
+          "text": "if(damage as u32 > remaining_shield as u32"
+        },
+        {
+          "line": 35,
+          "text": "damage = remaining_shield;"
+        },
+        {
+          "line": 36,
+          "text": "|36 } |"
+        },
+        {
+          "line": 37,
+          "text": "damage as Field"
+        },
+        {
+          "line": 38,
+          "text": "| |"
+        }
+      ]
+    }
+  },
+  "markTwin": [
+    {
+      "line": 25,
+      "changed": 0.0
+    },
+    {
+      "line": 27,
+      "changed": 0.7589285714285714
+    },
+    {
+      "line": 28,
+      "changed": 0.0
+    },
+    {
+      "line": 29,
+      "changed": 0.0
+    },
+    {
+      "line": 30,
+      "changed": 0.0
+    },
+    {
+      "line": 31,
+      "changed": 0.0
+    },
+    {
+      "line": 32,
+      "changed": 0.0
+    },
+    {
+      "line": 33,
+      "changed": 0.0
+    },
+    {
+      "line": 34,
+      "changed": 0.0
+    },
+    {
+      "line": 35,
+      "changed": 0.0
+    },
+    {
+      "line": 36,
+      "changed": 0.0
+    },
+    {
+      "line": 37,
+      "changed": 0.0
+    },
+    {
+      "line": 38,
+      "changed": 0.0
+    },
+    {
+      "line": 39,
+      "changed": 0.0
+    },
+    {
+      "line": 40,
+      "changed": 0.0
+    },
+    {
+      "line": 41,
+      "changed": 0.0
+    },
+    {
+      "line": 42,
+      "changed": 0.0
+    },
+    {
+      "line": 43,
+      "changed": 0.0
+    },
+    {
+      "line": 44,
+      "changed": 0.0
+    },
+    {
+      "line": 45,
+      "changed": 0.0
+    },
+    {
+      "line": 46,
+      "changed": 0.0
+    },
+    {
+      "line": 47,
+      "changed": 0.0
+    },
+    {
+      "line": 48,
+      "changed": 0.0
+    },
+    {
+      "line": 49,
+      "changed": 0.0
+    },
+    {
+      "line": 50,
+      "changed": 0.0
+    },
+    {
+      "line": 51,
+      "changed": 0.0
+    },
+    {
+      "line": 52,
+      "changed": 0.0
+    },
+    {
+      "line": 53,
+      "changed": 0.0
+    },
+    {
+      "line": 54,
+      "changed": 0.0
+    },
+    {
+      "line": 55,
+      "changed": 0.0
+    },
+    {
+      "line": 56,
+      "changed": 0.0
+    },
+    {
+      "line": 57,
+      "changed": 0.0
+    },
+    {
+      "line": 58,
+      "changed": 0.0
+    },
+    {
+      "line": 59,
+      "changed": 0.0
+    },
+    {
+      "line": 60,
+      "changed": 0.0
+    },
+    {
+      "line": 61,
+      "changed": 0.0
+    },
+    {
+      "line": 62,
+      "changed": 0.0
+    },
+    {
+      "line": 63,
+      "changed": 0.0
+    }
+  ],
+  "flowTwin": [
+    {
+      "line": 1,
+      "changed": 0.0
+    },
+    {
+      "line": 2,
+      "changed": 0.0
+    },
+    {
+      "line": 3,
+      "changed": 0.0
+    },
+    {
+      "line": 4,
+      "changed": 0.0
+    },
+    {
+      "line": 5,
+      "changed": 0.0
+    },
+    {
+      "line": 6,
+      "changed": 0.0
+    },
+    {
+      "line": 7,
+      "changed": 0.0
+    },
+    {
+      "line": 8,
+      "changed": 0.0
+    },
+    {
+      "line": 9,
+      "changed": 0.0
+    },
+    {
+      "line": 10,
+      "changed": 0.0
+    },
+    {
+      "line": 11,
+      "changed": 0.0
+    },
+    {
+      "line": 12,
+      "changed": 0.0
+    },
+    {
+      "line": 13,
+      "changed": 0.0
+    },
+    {
+      "line": 14,
+      "changed": 0.0
+    },
+    {
+      "line": 15,
+      "changed": 0.0
+    },
+    {
+      "line": 16,
+      "changed": 0.0
+    },
+    {
+      "line": 17,
+      "changed": 0.0
+    },
+    {
+      "line": 18,
+      "changed": 0.0
+    },
+    {
+      "line": 19,
+      "changed": 0.0
+    },
+    {
+      "line": 20,
+      "changed": 0.0
+    },
+    {
+      "line": 21,
+      "changed": 0.0
+    },
+    {
+      "line": 22,
+      "changed": 0.0
+    },
+    {
+      "line": 23,
+      "changed": 0.0
+    },
+    {
+      "line": 24,
+      "changed": 0.0
+    },
+    {
+      "line": 25,
+      "changed": 0.0
+    },
+    {
+      "line": 26,
+      "changed": 0.0
+    },
+    {
+      "line": 27,
+      "changed": 0.0
+    },
+    {
+      "line": 28,
+      "changed": 0.0
+    },
+    {
+      "line": 29,
+      "changed": 0.0
+    },
+    {
+      "line": 30,
+      "changed": 0.0
+    },
+    {
+      "line": 31,
+      "changed": 0.0
+    },
+    {
+      "line": 32,
+      "changed": 0.9438622754491018
+    },
+    {
+      "line": 33,
+      "changed": 0.975
+    },
+    {
+      "line": 34,
+      "changed": 0.0
+    },
+    {
+      "line": 35,
+      "changed": 0.9229422066549913
+    },
+    {
+      "line": 36,
+      "changed": 0.975
+    },
+    {
+      "line": 37,
+      "changed": 0.0
+    },
+    {
+      "line": 38,
+      "changed": 0.0
+    }
+  ]
+}

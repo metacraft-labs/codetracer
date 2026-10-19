@@ -1,0 +1,19 @@
+# Control digests for run-plat42-surface-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the needle
+# scan (§39a).
+ee93dab0784a27068b6b90270f1b7c88a0621a7b86d5060135c1115b96f7558b  src/frontend/view_vocabulary/editor_surface.nim
+37f6cce67f8e420f194ece95f5156845f99df67057cee5eed20bb795afb61c6a  src/frontend/gpui/app/leaves.nim
+f4e48de96dcfe43ce9f50a811155edbc250d01a90ad0aa85badc93c217907110  src/frontend/tui/app/views/source_pane.nim
+b5fad155cd2f11654c1ecf84e9c399d2b5635f9e63c5569f2a5d414393668c8f  src/frontend/tui/host/tui_session.nim
+59a835e3a525657e9abef241c2bf7426edd39bfd1ab70f03cb2034d67082bf63  src/frontend/viewmodel/backend/stdio_backend.nim
+c9d9a4a35391d222f471db2fab2702ac7f3916f8280db3f1d6e886ad4034ea52  src/common/flow_line_rule.nim
+4fc9ec8d3dc76203235a298f70ec37f3a2d9ddfe88569cad22a26f68f8c41ada  src/frontend/viewmodel/viewmodels/flow_vm.nim
+dd097fede9a22bd8b797cffd2cbc66709fb48226840a181740b2a4b09a201af9  src/frontend/tui/app/runtime.nim
+84599f19d8c533cafc0e90cf629f3aab4fb45b6a6d59dadd434e0d8acdaaf8fc  src/frontend/viewmodel/headless_session.nim
+b1b55ece1f9e384ee600448ca16042b34f5bb83de8c5e9147d40fe5ad885ad92  src/frontend/tui/tests/test_plat42_laws.nim
+df0164613f2d60b9c7505fd8684934a37cf1ff2ddbc2dcce77585e1e142c1c1c  src/frontend/tui/tests/test_plat42_flow_overlay_terminal.nim
+bf71af38607bf580d8baf983977a6d5b738a3ad30c607e7f4b2a0b36cf14d908  src/frontend/tui/tests/test_plat42_inline_values_terminal.nim
+132a6fcd984949052f8d55db943c9f7c4bc500d748e6384b178313a918553651  src/frontend/viewmodel/tests/unit/test_flow_line_facts.nim
+6e4a56721273463b5287ca6d7ce715714aab1af446ec79b49c8534ed50659a8e  src/frontend/gpui/tests/test_gpui_editing_surface.nim
+4be90368685ef121f7297b5aba729b88bec329b2f1aa1a680bfc6c1cc08f22bd  src/frontend/tui/tests/test_plat42_line_status_terminal.nim

@@ -1,0 +1,13 @@
+# Control digests for run-plat43-selector-mutations.py —
+# the subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the needle
+# scan (§39a).
+87d56b404425487fd8d6f0ac598dad1a1385ac7f5ec02fd9d2f4f41d4449ab71  src/frontend/viewmodel/keymap/keymap_selection.nim
+ba76e5129862d1da730a1201085cfc95a5698b597c42aedab4104c0843ea86bb  src/frontend/viewmodel/host/keymap_preference.nim
+dd097fede9a22bd8b797cffd2cbc66709fb48226840a181740b2a4b09a201af9  src/frontend/tui/app/runtime.nim
+33db01cbcd1286bbee4e1c1d700cd7eb67d3f40fd198ee0648ad05fc19477627  src/frontend/tui/app/edit_binding.nim
+520f6f5cb0b0083c8c68089e2168a186bb09dc4900582ef883e8148c5093e3f9  src/frontend/viewmodel/editing_core.nim
+6dab81cdfcec79e9016a4ab2d7c0d05dabdc357f935d61f4ca00339e5d87a8bc  src/frontend/viewmodel/keymap/cua_keymap.nim
+c3cca74d827e0643ed25bcbf2c301d154963bdff6bc7de250e5fb15fe919006a  src/frontend/viewmodel/keymap/keymap_router.nim
+c72791d9763bea79c1d38e0b3ce3dcc6017b1b504acdf35182e2726738f771a7  src/frontend/tui/tests/test_plat43_keymap_selector.nim
+143415d095cd417628a3632a2fc63d96315b251432cffee9410f2be962b20107  src/frontend/tui/tests/test_plat43_selector_sources.nim

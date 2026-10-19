@@ -1,0 +1,599 @@
+# TODO(windows): The flags --jsbigint64:off and -d:nimStringHash2 are needed
+# on Windows (Nim 2.2.6) to prevent BigInt errors in the JS frontend, but they
+# are Nim 2.0+ only and cause fatal errors on Nim 1.6.20 (used by Nix CI).
+# A per-platform mechanism is needed to include them only for Windows builds.
+NIM_COMMON_FLAGS=\
+-d:asyncBackend=asyncdispatch\
+-d:chronicles_sinks=json\
+-d:chronicles_line_numbers=true\
+-d:chronicles_timestamps=UnixTime\
+-d:ssl\
+--mm:refc\
+-d:nimNoLentIterators\
+-d:nimOldCaseObjects\
+--hints:off\
+--warnings:off\
+--hint[Processing]:off\
+--hint[Conf]:off\
+--hint[CC]:off\
+--hint[Pattern]:off\
+--hint[XDeclaredButNotUsed]:off\
+--hint[XCannotRaiseY]:off\
+--warning[CaseTransition]:off
+
+ROOT = $(TUP_CWD)/../../
+
+# The Nim search path for every binary this build produces.
+#
+# On the runquota entries at the end of the list: `src/ct/codetracer.nim`
+# imports `../ct_test/ct_test`, which reaches `src/ct_test/process_exec.nim` ->
+# `import runquota_process`, so every `ct` build needs runquota's libraries
+# here. They are declared in this file, rather than left to a config file,
+# because neither config that mentions runquota is consulted for this compile:
+#
+#   * `src/ct_test/nim.cfg` and `src/ct_test/config.nims` are read only when the
+#     PROJECT DIRECTORY is `src/ct_test` -- which is how
+#     `ci/test/m16-release-gate.sh` compiles the ct_test suites, so there they
+#     are load-bearing and must stay. Tup's project directory is `src/ct`, a
+#     SIBLING of `src/ct_test`, and Nim reads config files from the project
+#     directory and its ANCESTORS only, so they contribute nothing to `ct`.
+#   * the repo-root `config.nims` IS read here (it is an ancestor) and does
+#     carry a runquota block -- but its two sources are `getEnv("RUNQUOTA_SRC")`
+#     and the `../runquota` sibling checkout. Tup sanitizes the environment down
+#     to the `export` list further down this file, which does not name
+#     `RUNQUOTA_SRC`, so under tup only the sibling checkout can ever resolve.
+#
+# Listing them here makes the tup build state its own dependency instead of
+# inheriting it from a config whose env half is stripped. It does NOT remove the
+# need for the checkout: `$(ROOT)/../runquota` still has to exist, which is what
+# `scripts/require-siblings.sh` checks for by name and what the `siblings:`
+# lists in .github/workflows/codetracer.yml provision.
+NIM_REPO_PATH_FLAGS=\
+--path:$(ROOT)/libs/NimYAML\
+--path:$(ROOT)/libs/asynctools\
+--path:$(ROOT)/libs/nim\
+--path:$(ROOT)/libs/nim-chronicles\
+--path:$(ROOT)/libs/nim-faststreams\
+--path:$(ROOT)/libs/nim-json-serialization\
+--path:$(ROOT)/libs/nim-serialization\
+--path:$(ROOT)/libs/nim-prompt\
+--path:$(ROOT)/libs/nim-stew\
+--path:$(ROOT)/libs/nim-unicodedb/src\
+--path:$(ROOT)/libs/poly\
+--path:$(ROOT)/libs/quicktest\
+--path:$(ROOT)/libs/chronos\
+--path:$(ROOT)/libs/parsetoml/src\
+--path:$(ROOT)/libs/nim-result\
+--path:$(ROOT)/libs/nim-confutils\
+--path:$(ROOT)/libs/nimcrypto\
+--path:$(ROOT)/libs/zip\
+--path:$(ROOT)/libs/jsony/src\
+--path:$(ROOT)/libs/nim-uuid4/src\
+--path:$(ROOT)/../isonim/src\
+--path:$(ROOT)/../isonim-tui/src\
+--path:$(ROOT)/../isonim-gpui/src\
+--path:$(ROOT)/../nim-termctl/src\
+--path:$(ROOT)/../nim-pty/src\
+--path:$(ROOT)/../nim-everywhere/src\
+--path:$(ROOT)/../nim-acp/src\
+--path:$(ROOT)/../nim-agent-harbor/src\
+--path:$(ROOT)/../nim-agents/src\
+--path:$(ROOT)/../runquota/libs/runquota_process/src\
+--path:$(ROOT)/../runquota/libs/runquota_core/src\
+--path:$(ROOT)/../runquota/libs/runquota_host/src\
+--path:$(ROOT)/../runquota/libs/runquota_host_linux/src\
+--path:$(ROOT)/../runquota/libs/runquota_host_macos/src\
+--path:$(ROOT)/../runquota/libs/runquota_host_windows/src\
+--path:$(ROOT)/../runquota/libs/runquota_codec/src\
+--path:$(ROOT)/../runquota/libs/runquota_protocol/src
+
+NIM_DEBUG_FLAGS=\
+$(NIM_COMMON_FLAGS)\
+$(NIM_REPO_PATH_FLAGS)\
+-d:debug\
+--debugInfo\
+--lineDir:on\
+--stacktrace:on\
+--linetrace:on\
+
+NIM_RELEASE_FLAGS=\
+$(NIM_COMMON_FLAGS)\
+$(NIM_REPO_PATH_FLAGS)\
+-d:release\
+--boundChecks:on
+
+NIM_DANGER_FLAGS=\
+-d:danger\
+-d:chronicles_log_level=DEBUG\
+--stacktrace:off\
+--linetrace:off
+
+NIM_BIN = nim
+
+# Windows port: `libs/zip/zip/libzip.nim` compiles `libzip_all.c` directly on
+# Windows (the dynamic-libzip path is gated on `defined(unix)`), and that .c
+# file `#include`s `<zlib.h>`. MinGW UCRT does not ship zlib, and env.ps1 does
+# not yet install it, so the build vendors a zlib build under
+# D:/metacraft-dev-deps/zlib/<ver>/ — `non-nix-build/windows/ensure-zlib.ps1`
+# is the longer-term home for the bootstrap, but pinning the path here keeps
+# the change inside this repo (env.ps1's logic is currently fixed by user
+# contract). The path is matched to ensure-zstd's layout (version dir +
+# include/lib subdirs).
+ifeq (@(TUP_PLATFORM),win32)
+# `ensure-zlib.ps1` installs under whatever root `Get-DefaultInstallRoot`
+# resolved, which is only `D:/metacraft-dev-deps` on a box with a real,
+# WRITABLE D: dev drive. tup refuses environment reads at parse time by
+# design, so the seam is a tup.config entry: set `CONFIG_WINDOWS_ZLIB_DIR` in
+# `src/build-<variant>/tup.config` on a machine whose root is elsewhere. Unset
+# keeps the historical literal, so nothing moves for existing dev boxes.
+WINDOWS_ZLIB_DIR = @(WINDOWS_ZLIB_DIR)
+ifeq ($(WINDOWS_ZLIB_DIR),)
+WINDOWS_ZLIB_DIR = D:/metacraft-dev-deps/zlib/1.3.1
+endif
+# `-Wno-implicit-function-declaration` and the matching `-Wno-error` are
+# needed because the bundled `libs/zip/zip/private/libzip_all.c` uses POSIX
+# helpers (`getpid`, `unlink`, `mkstemp`) that MinGW UCRT either renames
+# (`_getpid`) or omits, and GCC 14+ treats implicit declarations as errors
+# by default. Demoting back to a warning lets the call sites resolve to the
+# MinGW intrinsic via the linker's import-library wrappers (UCRT exports
+# `_getpid` etc. and gcc/ld will match the name at link time without the
+# header declaration).
+NIM_WINDOWS_CFLAGS = \
+--passC:"-I$(WINDOWS_ZLIB_DIR)/include" \
+--passC:"-Wno-implicit-function-declaration" \
+--passC:"-Wno-error=implicit-function-declaration" \
+--passL:"-L$(WINDOWS_ZLIB_DIR)/lib" \
+--passL:"-lz"
+else
+NIM_WINDOWS_CFLAGS =
+endif
+
+NIM_DEBUG = $(NIM_BIN) $(NIM_DEBUG_FLAGS)
+NIM_RELEASE = $(NIM_BIN) $(NIM_RELEASE_FLAGS)
+NIM_DANGER  = $(NIM_BIN) $(NIM_DANGER_FLAGS)
+
+# NIM_SELECTED is the Nim compiler the build-graph macros use. It is chosen by
+# the tup variant's configuration: the `build-release` variant
+# (src/build-release/tup.config) sets `CONFIG_DEBUG=0` → `@(DEBUG)` is "0" →
+# release flags; every other variant (notably `build-debug`, CONFIG_DEBUG=1,
+# and any variant that omits it) keeps the debug compiler, so behaviour is
+# unchanged for the default debug build. This is how a single Tuprules drives
+# both `tup build-debug` and `tup build-release`.
+ifeq (@(DEBUG),0)
+NIM_SELECTED = $(NIM_RELEASE)
+else
+NIM_SELECTED = $(NIM_DEBUG)
+endif
+
+ifeq (@(TUP_PLATFORM),win32)
+EXE_SUFFIX = .exe
+else
+EXE_SUFFIX =
+endif
+
+# Windows rustc writes intermediate files (rmeta, symbols.o, linker-arguments)
+# into %LOCALAPPDATA%\Temp\rustc<random>\... — outside the cargo target dir but
+# legitimate temp scratch. Ignore them so tup doesn't fail the build over
+# transient compiler temp. Pattern matches `C:/Users/<user>/AppData/Local/Temp/rustc<random>/...`.
+WINDOWS_RUSTC_TMP_IGNORE = ([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]AppData[/\\]Local[/\\]Temp[/\\]rustc[^/\\]*[/\\].*
+
+# rustc's Windows parallel frontend creates short-lived file-backed pipe
+# endpoints in Cargo's working directory. They are named
+# `<hash>-<pid>-pipe-nt-0x<handle>` and are removed as soon as the compiler
+# exits; they are transport scratch, not build products.
+WINDOWS_RUSTC_PIPE_IGNORE = ([A-Fa-f0-9]+)-[0-9]+-pipe-nt-0x[A-Fa-f0-9]+
+
+# The `codetracer_trace_writer_nim` crate's build.rs compiles a Nim static
+# library. Two kinds of side writes happen outside the cargo target dir:
+#
+#   1. Nim emits per-module `.c`/`.obj` scratch into a nimcache that build.rs
+#      deliberately keeps in a short path under the system temp dir
+#      (`<temp>/ctnw/<hash>/...`) — a deep nimcache under the cargo OUT_DIR
+#      makes Nim's C compiler fall back to relative paths and fail with C1083.
+#   2. build.rs first runs `nimble install --depsOnly -y` to resolve the Nim
+#      sources' nimble dependencies; on a fresh checkout nimble installs the
+#      `requires` packages into the global nimble store (`~/.nimble/pkgs2`,
+#      with download scratch under `~/.nimble/...`).
+#
+# Both are legitimate transient/dependency scratch, not build outputs, so tup
+# must ignore writes anywhere under a `ctnw` directory or a `.nimble` dir.
+NIM_FFI_CACHE_IGNORE = (([A-Za-z]:)?[/\\].*[/\\]ctnw[/\\].*|([A-Za-z]:)?[/\\].*[/\\]\.nimble[/\\].*)
+
+# Cargo writes to CARGO_HOME (registry cache, git checkouts, package-cache
+# mutex) during build. tup considers these undeclared outputs. Allow writes
+# under either `~/.cargo` (user-default) or any path whose last segment is
+# `cargo` and contains the standard subdirs (covers env.ps1's managed
+# `D:/metacraft-dev-deps/cargo`).
+WINDOWS_CARGO_HOME_IGNORE = (([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]\.cargo[/\\].*|.+[/\\]\.?cargo[/\\](registry|git|\.crates.*|\.package-cache.*|\.global-cache.*|bin|env)([/\\].*)?|.+[/\\]\.?cargo[/\\]\.[^/\\]+)
+
+NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
+
+# The CodeTracer Nim fork's C backend writes a MACRO SOURCEMAP for every
+# binary it links, `macro_sourcemap_<out name>.json`, where <out name> is the
+# output file's name without its extension (`macro_sourcemap_ct.json` for
+# `bin/ct`). It does so UNCONDITIONALLY; `--sourcemap:on` only decides whether
+# the file has expansions in it. Stock Nim writes nothing. Fork revisions up to
+# 0b5b5ec5 (the one reprobuild's `nim-fork` package builds) put it beside the
+# binary (`bin/macro_sourcemap_ct.json`); later revisions put it in the
+# nimcache, beside the per-module `.c.map` source maps, which every rule here
+# points at /tmp/ct-nim-cache (already excluded by NIM_SIDE_OUTPUTS_IGNORE).
+#
+# That is a side output tup was never told about, and since the `ci` / default
+# dev shells switched `nim` to the fork (ccbb85a0a, landed on dev 2026-09-20)
+# every tup build under them has failed the ct and db-backend-record jobs with
+#
+#   tup error: File '.../src/build-debug/bin/macro_sourcemap_ct.json' was
+#   written to, but is not in .tup/db. You probably should specify it as an output
+#
+# (desktop edge run 35974652142 and every launcher-recorder-e2e run since).
+#
+# It is an EXCLUSION, not a declared output, on purpose. A declared output is a
+# promise the command writes the file, and tup fails any command that does not
+# ("Expected to write to file ... but didn't"): the Windows lane (win32) and any
+# build whose `nim` is stock 2.2.x would break instead. An exclusion tells tup
+# to accept the write when it happens, record the file as ignored, and move it
+# into place like any other output (tup's own t5091/t5092 cover exactly this),
+# so it holds whichever compiler the shell provides. Nothing in the tup graph
+# reads the file; it exists for recording `ct` itself with CodeTracer.
+#
+# 47f37ed52 had instead DECLARED the two files in src/ct/Tupfile
+# (`| ../bin/macro_sourcemap_ct.json`). That holds only while every shell's
+# `nim` is the fork, and the Windows lane pins stock Nim 2.2.8
+# (non-nix-build/windows/toolchain-versions.env). Measured with the Windows
+# lane's own tup (v0.8-25-g2867b66e) on a one-rule project:
+#   - declared `| macro_sourcemap_ct.json`, command does not write it:
+#     "tup error: Expected to write to file 'macro_sourcemap_ct.json' ... but
+#     didn't", job failed;
+#   - this exclusion, command writes the file: Updated;
+#   - this exclusion, command does not write it: Updated;
+#   - declared AND excluded: "tup error: Unable to exclude a generated file",
+#     job failed.
+# So the Tupfile must NOT also declare them while this exclusion is here.
+#
+# For the same reason no rule declares the file, whichever directory the
+# compiler in the shell writes it to.
+NIM_MACRO_SOURCEMAP_IGNORE = ^.*[/\\]macro_sourcemap_[^/\\]*\.json$
+# Cargo writes CACHEDIR.TAG (and other metadata) into a temp directory whose
+# name is `<target_dir><RANDOM>` (e.g. `db_backend_targetF5RTUl/`) while
+# preparing the target dir, then atomically renames it to `<target_dir>`.
+# The trailing-random-suffix variant must be included in the IGNORE pattern
+# or tup reports the transient writes as undeclared outputs. The patterns
+# below intentionally allow either `target/...` (final layout) or
+# `target<6-char-suffix>/...` (cargo's atomic-prep layout).
+BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_RUSTC_PIPE_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
+VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+
+ifeq (@(TUP_PLATFORM),win32)
+CARGO_TARGET_BASE = C:/tmp/codetracer
+else
+CARGO_TARGET_BASE = /tmp/codetracer
+endif
+
+ifeq (@(TUP_PLATFORM),win32)
+TSC = tsc.cmd
+STYLUS = stylus.cmd
+else
+TSC = tsc
+STYLUS = stylus
+endif
+
+# misc rules
+!cp = |> ^ %f^ cp %f %o |>
+ifeq (@(TUP_PLATFORM),win32)
+!stylus = |> ^ %f^ $(STYLUS) -p %f > %o |>
+else
+!stylus = |> ^ %f^ $(STYLUS) %f -o %o |>
+endif
+# workaround for errors, file seems to be still generated
+!ts = |> ^ %f^ $(TSC) %f |> %o
+
+# JS Rules:
+#
+# `-d:ctHmr` activates the codetracer hot-module-reload integration
+# (`src/frontend/hmr_runtime.nim`). It transitively enables
+# `-d:isonimHmr` so isonim's `{.uiComponent.}` pragmas register slots
+# and `mountUiHot` boundaries listen for swaps.
+#
+# The transport is opt-OUT at runtime, not opt-in: `hmr_runtime.
+# isHmrRequested()` returns true when CT_HMR is unset and only
+# CT_HMR=0/false/off suppresses it. So a binary built with these flags
+# dials ws://localhost:35729 on every launch, and when no LiveReload
+# daemon is listening Chromium logs a console error from its network
+# stack that no page-level code can demote. Set CT_HMR=0 for launches
+# that have no daemon — the GUI test harness does this in
+# `makeCleanEnv`.
+#
+# (This comment used to claim the opposite — that the transport is
+# installed "only when the renderer's environment also has CT_HMR=1".
+# It never matched the implementation; it is corrected here rather than
+# by flipping the default, which would change every developer's
+# `just build` workflow.)
+#
+# Production builds go through the nix flake's release path, which does
+# not include these flags, so `installCtHmrTransport` there is the
+# no-op stub and no connection is attempted.
+#
+# Note: `--hotCodeReloading:on` is intentionally NOT set in ANY of the
+# JavaScript rules below, and must not be re-added to one.
+#
+# Two independent reasons:
+#
+#   1. Correctness. Under HCR the JS backend names routines from a hash of
+#      their type and owning module only, with a collision counter reset per
+#      Nim module, while the backend emits one bundle in one global scope.
+#      Distinct routines therefore get byte-identical JS names and the later
+#      `function` declaration silently replaces the earlier one — see the note
+#      on `ctNimJs` in `repro.nim`, and
+#      `src/frontend/tests/renderer_js_symbol_uniqueness_test.nim`, which
+#      fails if the flag reappears in this file.
+#   2. HMR. Nim's JS HCR wraps each module's init in a
+#      `if (loaded == undefined)` guard, which makes module init code run only
+#      once per process — the opposite of what our HMR pipeline needs (we want
+#      every bundle re-evaluation to re-run module init so changed Nim source
+#      actually takes effect). No code in the codebase calls the Nim HCR
+#      runtime, so dropping the flag is a no-op for everything except HMR.
+!nim_js = |> ^ %f^ $(NIM_SELECTED)\
+-d:chronicles_enabled=off\
+-d:ctRenderer\
+-d:ctHmr\
+-d:isonimHmr\
+--debugInfo:on\
+--lineDir:on\
+--hints:off \
+--warnings:off \
+--nimcache:/tmp/ct-nim-cache/%B_nim_js\
+--out:%o\
+js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
+
+!nim_node = |> ^ %f^ $(NIM_SELECTED)\
+-d:nodejs\
+--out:%o\
+js %f |> %B.js
+
+!nim_node_index = |> ^ %f^ $(NIM_SELECTED)\
+-d:ctIndex\
+-d:nodejs\
+--sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_nim_node_index\
+--out:%o\
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
+
+!nim_node_subwindow = |> ^ %f^ $(NIM_SELECTED)\
+-d:chronicles_enabled=off\
+-d:ctRenderer\
+--debugInfo:on\
+--lineDir:on\
+--sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_nim_node_subwindow\
+--out:%o\
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
+
+!nim_node_index_server = |> ^ %f^ $(NIM_SELECTED)\
+-d:ctIndex\
+-d:server\
+-d:nodejs\
+--sourcemap:on\
+--nimcache:/tmp/ct-nim-cache/%B_nim_node_index_server\
+--out:%o \
+js %f |> %B.js %B.js.map | $(NIM_SIDE_OUTPUTS_IGNORE)
+
+!codetracer_shell = |> $(NIM_SELECTED)\
+-d:nodejs\
+--out:%o\
+js %f |> %o
+
+!nim_test_js = |> ^ %f^ $(NIM_SELECTED) \
+-d:ctTest\
+-d:chronicles_log_level=DEBUG\
+--verbosity:1\
+--hint:Processing:on\
+--stacktrace:on\
+--linetrace:on \
+--lineDir:on\
+--debugInfo\
+--nimcache:/tmp/ct-nim-cache/%B_test_nimcache2\
+--out:%o\
+js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
+
+# C rules:
+# Traditional linking flags for libraries that Nim would otherwise load via
+# dlopen at runtime. --dynlibOverride tells the Nim compiler to skip its
+# runtime dlopen() and instead emit a standard -l flag for the linker.
+# --passL provides the corresponding linker flag. This approach:
+#   1. Catches missing libraries at build time, not at runtime
+#   2. Works correctly with Nix, where libraries live in /nix/store paths
+#      that Nim's dlopen search heuristics can't find
+#   3. Matches the AppImage build (see appimage-scripts/build_with_nim.sh)
+ifeq (@(TUP_PLATFORM),win32)
+# Windows port: libs/zip/zip/libzip.nim's Windows branch compiles
+# libzip_all.c directly (rather than dynlibbing libzip), so we drop the
+# -lzip passL (no system libzip is available on the DIY toolchain) and
+# instead add -lz to satisfy the zlib symbols that libzip_all.c uses.
+# The zlib include + library paths come from $(NIM_WINDOWS_CFLAGS).
+# We also drop -lcrypto/-lssl/-lsqlite3/-lpcre because env.ps1 does not
+# ship those static libs; the Nim runtime falls back to dynlib loading
+# for these. The corresponding --dynlibOverride flags are also dropped
+# so that Nim restores its default dlopen path.
+DYNLIB_OVERRIDE_FLAGS = \
+$(NIM_WINDOWS_CFLAGS) \
+--passL:"-lz"
+else
+DYNLIB_OVERRIDE_FLAGS = \
+--dynlibOverride:libcrypto \
+--dynlibOverride:libssl \
+--dynlibOverride:sqlite3 \
+--dynlibOverride:pcre \
+--dynlibOverride:libzip \
+--passL:"-lssl" \
+--passL:"-lcrypto" \
+--passL:"-lsqlite3" \
+--passL:"-lpcre" \
+--passL:"-lzip"
+endif
+
+!nim_c = |> ^ %f^ $(NIM_SELECTED)\
+-d:ssl \
+-d:useOpenssl3 \
+$(DYNLIB_OVERRIDE_FLAGS) \
+--nimcache:/tmp/ct-nim-cache/%B_c\
+--out:%o\
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
+
+# Shared flags for CodeTracer entrypoint binaries (ct, db-backend-record).
+CODETRACER_FLAGS = \
+-d:testing\
+--boundChecks:on\
+--stacktrace:on\
+--linetrace:on\
+--warnings:on\
+--hints:on\
+-d:ctEntrypoint \
+-d:withTup \
+-d:useOpenssl3 \
+-d:ssl \
+$(DYNLIB_OVERRIDE_FLAGS)
+
+# Standard CodeTracer binary build (e.g. db-backend-record).
+!codetracer = |> $(NIM_SELECTED)\
+$(CODETRACER_FLAGS) \
+--nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
+--out:%o\
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
+
+# CodeTracer binary with BPF capabilities (ct).
+# BPF capabilities (cap_bpf+cap_perfmon+cap_dac_read_search) are applied as a
+# post-build step in scripts/build-once.sh, NOT here: tup runs each rule's
+# command in a sandbox (mount namespace) that mounts filesystems `nosuid`, so
+# the setuid `sudo` wrapper cannot elevate inside a rule — even the explicit
+# /run/wrappers/bin/sudo fails with "sudo must be owned by uid 0 and have the
+# setuid bit set". codetracer-setcap needs sudo (it runs `setcap`), so it can
+# only run outside the build sandbox, as a post-materialization step.
+!codetracer_bpf = |> $(NIM_SELECTED)\
+$(CODETRACER_FLAGS) \
+--nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
+--out:%o\
+c %f\
+|> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
+
+# The ORC test runner (ct-test), installed beside `ct` (CTC-3i).
+#
+# `ct test run` hands the run to this binary (src/ct_test/ct_test_delegate.nim):
+# the parallel runner shares sequences across worker threads, which refc's
+# per-thread heaps make unsafe, so `ct` stays refc and the runner is a separate
+# ORC build of src/ct_test/ct_test.nim. It deliberately does NOT use
+# $(NIM_SELECTED): NIM_COMMON_FLAGS carries `--mm:refc` and the define set
+# CodeTracer's own binaries need, none of which the runner links. The flags are
+# the ones `repro build ct-test` (repro.nim) and the package recipes
+# (nix/packages/default.nix, appimage-scripts/build_with_nim.sh) use; only the
+# search path is shared, for runquota.
+!ct_test_orc = |> $(NIM_BIN) $(NIM_REPO_PATH_FLAGS)\
+--mm:orc \
+--threads:on \
+--hints:off \
+--warnings:off \
+--debugInfo \
+--lineDir:on \
+--boundChecks:on \
+--stacktrace:on \
+--linetrace:on \
+--nimcache:/tmp/ct-nim-cache/%B_ct_test_orc_binary\
+--out:%o\
+c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
+
+!nim_tester = |> ^ %f^ $(NIM_SELECTED) \
+--nimcache:/tmp/ct-nim-cache/tester \
+--warnings:on \
+--hints:on \
+--out:%o\
+c %f |> %B | $(NIM_SIDE_OUTPUTS_IGNORE) $(NIM_MACRO_SOURCEMAP_IGNORE)
+
+# mypy
+!mypy = |> ^ %f^ mypy --implicit-optional --cache-dir /tmp/.mypy-cache %f; |>
+
+# gcc
+!trace_object_file = |> ^ %f^ gcc -fPIC -g3 -c -o %o %f |> %o
+
+# !shell_preload = |> gcc -O0 -g3 -fPIC -nostdlib -shared \
+#   -o %o %f -ldl |> %o
+
+# rust
+export RUSTUP_HOME
+# CARGO_HOME must propagate so cargo writes to the managed install root
+# (e.g. D:/metacraft-dev-deps/cargo on Windows) instead of the user-level
+# default ~/.cargo, which tup doesn't allow as an undeclared output.
+export CARGO_HOME
+export PATH
+export LIB
+export LIBPATH
+export INCLUDE
+export CC
+export CXX
+export NIMFLAGS
+
+# LIBRARY_PATH is the standard gcc/ld mechanism for compile-time library
+# search (distinct from LD_LIBRARY_PATH which is runtime). The Nix dev shell
+# sets this to include paths to OpenSSL and other dependencies so that
+# -lssl/-lcrypto resolve during linking. Without this export, tup's
+# environment sanitization strips it and the linker cannot find libraries
+# that live in the Nix store.
+export LIBRARY_PATH
+
+# The Repro environment may bind a locally built Nim compiler whose runtime
+# loads PCRE from the activated library path. Tup must preserve that existing
+# path, just as it preserves PATH; otherwise even `nim --version` fails.
+export LD_LIBRARY_PATH
+export DYLD_LIBRARY_PATH
+
+# C_INCLUDE_PATH is the standard gcc/cc header search path. The Nix dev shell
+# sets this to include libbpf headers so that #include <bpf/libbpf.h> resolves
+# during compilation. Without this export, tup's environment sanitization
+# strips it and gcc cannot find libbpf headers from the Nix store.
+export C_INCLUDE_PATH
+export NIX_CFLAGS_COMPILE
+
+# db-backend's Cargo build scripts may generate the native-recorder emulator
+# and trace-format Nim bridge. Keep their explicitly configured, hermetic
+# build mode and vendored Nim import paths when Tup sanitizes the environment.
+export CODETRACER_DB_BACKEND_SKIP_DIRENV
+export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL
+export CT_EMULATOR_EXTRA_NIM_PATHS
+export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS
+
+# Keep linker selection in Cargo config/env instead of inline --config args.
+# This avoids shell-quoting differences between Windows environments.
+RUST_WINDOWS_LINKER_CONFIG =
+
+# The `nim-reader` default feature pulls in `codetracer_trace_writer_nim`,
+# which compiles the Nim FFI library from the sibling
+# `codetracer-trace-format-nim` repo at build time. db-backend needs it to
+# open CTFS bundles in the *new* steps.dat format (which every materialized
+# DB trace now uses); without it `ctfs_trace_reader::open_new_format` fails
+# with a "nim-reader feature is not enabled" error.
+#
+# Windows builds it like every other platform: the crate's build.rs emits
+# MSVC-ABI Nim objects via `--cc:vcc`, takes its `zstd.h` from the
+# `zstd-sys` dependency (built from source with the active toolchain), and
+# runs `nimble install --depsOnly -y` to resolve the Nim sources' nimble
+# dependencies before invoking `nim c`. Default features apply everywhere.
+DB_BACKEND_CARGO_FEATURES =
+
+!rust_cargo_backend_manager = |> \
+    cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/backend_manager_target && \
+    cp $(CARGO_TARGET_BASE)/backend_manager_target/release/session-manager$(EXE_SUFFIX) %o |> %o | $(BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS)
+ifeq (@(TUP_PLATFORM),win32)
+!debug_rust_cargo_db_backend = |> \
+    cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/mcr_emulator.dll %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+else
+!debug_rust_cargo_db_backend = |> \
+    cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+endif
+!rust_cargo_db_backend = |> \
+    cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/release/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+!rust_cargo_virtualization_layers = |> \
+    cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/virtualization_layers_target && \
+    cp $(CARGO_TARGET_BASE)/virtualization_layers_target/release/virtualization-layers$(EXE_SUFFIX) %o |> %o | $(VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS)
