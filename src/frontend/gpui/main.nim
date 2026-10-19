@@ -101,6 +101,7 @@ import ../viewmodel/viewmodels/[certificate_indicator_vm,
 import ../viewmodel/host/desktop_native   # the certificate indicator's host
 import ./design_font_metrics
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
+import ../tui/host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
 import ../styles/generated/design_tokens
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
@@ -2134,35 +2135,23 @@ proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
   let toggleX = body.x + CallToggleLeftPx + row.depth * CallIndentPx
   let store = gSession.session.store
   let local = row.index - store.calltrace.startLineIndex.val
-  let lines = store.calltrace.lines.val
-  if local < 0 or local >= lines.len.int64:
+  if local < 0 or local >= store.calltrace.lines.val.len.int64:
     return false
-  let line = lines[local.int]
   if row.toggle != crtLeaf and x >= toggleX and x < toggleX + 14:
-    let command = if line.isExpanded: "ct/collapse-calls"
-                  else: "ct/expand-calls"
-    traceGesture("calltrace " & command & " #" & $row.index)
-    try:
-      # Fire and forget: the engine answers these with no response (the
-      # terminal host's `toggleCallChildren` says how that was measured).
-      gSession.backend.sendDapRequestNoResponse(command, %*{
-        "callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
-      discard gSession.backend.drainEvents()
-      gSession.requestAndLoadCalltrace(
-        startIndex = max(0'i64, vm.scrollPosition.val -
-                                 GpuiCalltraceBuffer.int64),
-        height = max(1, rows.len) + 2 * GpuiCalltraceBuffer,
-        depth = RecordingCalltraceDepth)
-    except CatchableError as e:
-      traceGesture("calltrace toggle failed: " & e.msg)
+    traceGesture("calltrace toggle #" & $row.index)
+    let why = gSession.toggleCallChildren(
+      row.index,
+      startIndex = vm.scrollPosition.val - GpuiCalltraceBuffer.int64,
+      height = max(1, rows.len) + 2 * GpuiCalltraceBuffer)
+    if why.len > 0:
+      traceGesture("calltrace toggle failed: " & why)
     redrawCalltrace(r)
     return true
   traceGesture("calltrace jump #" & $row.index)
   vm.selectEntry(some(row.index))
-  try:
-    gSession.calltraceJumpByLine(line)
-  except CatchableError as e:
-    traceGesture("calltrace jump failed: " & e.msg)
+  let why = gSession.jumpToCall(row.index)
+  if why.len > 0:
+    traceGesture("calltrace jump failed: " & why)
     return true
   refreshReplayWindow(r)
   true
@@ -4460,33 +4449,15 @@ proc performTool(r: GpuiRenderer; tool: GToolButton) =
 
 proc performControl(r: GpuiRenderer; id: string) =
   ## A debugger control (or its menu item), through the transport
-  ## ViewModel the desktop's toolbar calls (`DebugControlsVM`), then the
-  ## engine's `stopped` + `ct/complete-move` consumed as the terminal's host
-  ## consumes them.
+  ## ViewModel the desktop's toolbar calls (`DebugControlsVM`), with the move
+  ## settled as every native host settles it (`session_driver`).
   if gSession.isNil:
     return
   let vm = gSession.session.debugControlsVM
   if vm.isNil or not vm.transportAvailable(id):
     traceGesture("control " & id & " unavailable")
     return
-  case id
-  of "run-to-entry":
-    gSession.gotoTick(0'u64)
-  else:
-    case id
-    of "next": vm.stepForward()
-    of "reverse-next": vm.stepBackward()
-    of "step-in": vm.stepIn()
-    of "step-out": vm.stepOut()
-    of "reverse-step-in": vm.reverseStepIn()
-    of "reverse-step-out": vm.reverseStepOut()
-    of "continue": vm.continueExecution()
-    of "reverse-continue": vm.reverseContinue()
-    else: discard
-    try:
-      gSession.consumeNextCompleteMove()
-    except CatchableError:
-      discard
+  discard gSession.runDebugControl(id)
   traceGesture("control " & id & " tick=" & $gSession.getCurrentRRTicks())
   refreshReplayWindow(r)
 

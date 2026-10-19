@@ -76,6 +76,7 @@ import ../app/timeline_binding
 import ../app/variables_binding
 import ../app/syntax/highlighter   # lexerContexts: the window's entry state
 import ./native_host
+import ./session_driver
 
 export native_host
 
@@ -166,15 +167,24 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
   src.setViewport(src.viewport.withRows(max(1, viewportHeight)))
   var nav = new(OriginNavigator)
   nav[] = initOriginNavigator()
+  # THE PANES READ THE SESSION'S VIEWMODELS — the ones
+  # `initializePanelViewModels` built when the session attached — not a
+  # second set over the same store (Shared-DOM-Front-Ends D1). A second
+  # `StateVM` was what the inline values were drawn from while the stop
+  # loader wrote the origin summaries into the session's. The origin chain is
+  # not a panel VM; the session holds the one the host attaches.
+  let panels = sess.session
+  if panels.originChainVM.isNil:
+    panels.attachOriginChainVM(createOriginChainVM(store))
   TuiSession(
     session: sess,
     source: src,
-    calltrace: createCalltraceVM(store),
-    state: createStateVM(store),
-    timeline: createTimelineVM(store),
-    events: createEventLogVM(store),
-    controls: createDebugControlsVM(store),
-    origin: createOriginChainVM(store),
+    calltrace: panels.calltraceVM,
+    state: panels.stateVM,
+    timeline: panels.timelineVM,
+    events: panels.eventLogVM,
+    controls: panels.debugControlsVM,
+    origin: panels.originChainVM,
     provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
     lexerContexts: newLexerContextCache(),
     valueTimeline: initValueTimeline(),
@@ -187,16 +197,10 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
     valueGate: InlineValueGate())
 
 proc close*(s: TuiSession) =
-  ## Tear the session down. Ordered VM-first because each `dispose` drops a
-  ## reactive root that still reads the store.
+  ## Tear the session down. The source window is this host's; the panel
+  ## ViewModels are the session's, and `session.close` disposes them with it.
   if s.isNil:
     return
-  s.origin.dispose()
-  s.controls.dispose()
-  s.events.dispose()
-  s.timeline.dispose()
-  s.state.dispose()
-  s.calltrace.dispose()
   s.source.dispose()
   s.session.close()
 
@@ -222,10 +226,7 @@ proc pumpMove*(s: TuiSession) =
   ## terminal it was restoring on a command the engine merely declined. The
   ## caller sees an unchanged position instead, which is what the screen would
   ## show anyway.
-  try:
-    s.session.consumeNextCompleteMove()
-  except CatchableError:
-    discard
+  discard s.session.settleMove()
 
 proc serveSourceWindow(s: TuiSession) =
   ## Follow the execution pointer and serve every line the window then lacks,
@@ -911,35 +912,16 @@ proc setFlowOverlay*(s: TuiSession; shown: bool) =
 
 proc toggleCallChildren*(s: TuiSession; rt: TuiRuntime; index: int64) =
   ## PLAT-49 part B: expand or collapse the children of the call at trace
-  ## `index` — the desktop's toggle (`CalltraceVM.toggleExpandCallChildren`:
-  ## `ct/expand-calls` or `ct/collapse-calls` for the call's key, then the
-  ## section again) — and redraw the pane from the reloaded section.
-  let store = s.session.session.store
-  let at = index - store.calltrace.startLineIndex.val
-  let lines = store.calltrace.lines.val
-  if at < 0 or at >= lines.len.int64:
-    return
-  let line = lines[at.int]
-  if not line.hasChildren:
-    return
-  let command = if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"
-  try:
-    # FIRE AND FORGET, as the desktop's `backend.send` is: the engine sends
-    # no response to `ct/expand-calls` / `ct/collapse-calls` (measured — a
-    # blocking `sendDapRequest` never returned), only the changed section
-    # the next load reads.
-    s.session.backend.sendDapRequestNoResponse(command, %*{
-      "callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
-    discard s.session.backend.drainEvents()
-    let body = rt.paneBodyRows(paneCalltrace)
-    let start = max(0, rt.app.callTrace.visibleTop(max(1, body)) -
-                       CallTraceBuffer)
-    s.session.requestAndLoadCalltrace(
-      startIndex = start.int64, height = max(1, body) + 2 * CallTraceBuffer,
-      depth = RecordingCalltraceDepth)
-  except CatchableError as e:
-    rt.app.notification = "could not " &
-      (if line.isExpanded: "collapse" else: "expand") & " the call: " & e.msg
+  ## `index` (`session_driver.toggleCallChildren`, the desktop's toggle) and
+  ## redraw the pane from the section the pane shows, read again.
+  let body = rt.paneBodyRows(paneCalltrace)
+  let start = max(0, rt.app.callTrace.visibleTop(max(1, body)) -
+                     CallTraceBuffer)
+  let why = s.session.toggleCallChildren(
+    index, startIndex = start.int64,
+    height = max(1, body) + 2 * CallTraceBuffer)
+  if why.len > 0:
+    rt.app.notification = why
     return
   rt.app.callTrace = s.callTraceModelOf(rt)
 
@@ -1153,47 +1135,32 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.refresh(rt)
     s.noteWhere(rt)
 
-const OriginWaitMs = 20_000
-  ## How long `o` waits for the engine's origin chain.
-
 proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
-  ## What the host does with one token's outcome, in ONE place so the shipped
-  ## loop (`main.nim`) and the suites that drive the host run the same rule: a
-  ## navigation is pumped and then refreshed; a change to what the session
-  ## holds without a move (a breakpoint) is refreshed and NOT pumped — a pump
-  ## there would wait on a `stopped` event no engine sends.
+  ## What the host does with one token's outcome. The session-level half —
+  ## settling a move, going to a call, toggling its children, waiting for an
+  ## origin chain — is `session_driver`'s, shared with GPUI and the pane
+  ## server; this proc adds the terminal's half: the notification line, the
+  ## viewed file and the panes rebuilt from the session. A change to what the
+  ## session holds without a move (a breakpoint) is refreshed and NOT pumped —
+  ## a pump there would wait on a `stopped` event no engine sends.
   if outcome.paneClick.kind != pcNone:
     s.applyPaneClick(rt, outcome.paneClick)
   elif outcome.jumpsToCall:
     # PLAT-49 part B: a click on a call-trace row goes to that call, as the
-    # desktop's click does (`CalltraceVM.doubleClickEntry`'s
-    # `ct/calltrace-jump`); `calltraceJump` waits for the move itself.
-    let store = s.session.session.store
-    let at = outcome.callIndex - store.calltrace.startLineIndex.val
-    let lines = store.calltrace.lines.val
-    if at >= 0 and at < lines.len.int64:
-      try:
-        s.session.calltraceJumpByLine(lines[at.int])
-      except CatchableError as e:
-        rt.app.notification = "could not go to the call: " & e.msg
-      rt.app.viewedFile = ""
-      s.refresh(rt)
-      s.noteWhere(rt)
+    # desktop's click does.
+    let why = s.session.jumpToCall(outcome.callIndex)
+    if why.len > 0:
+      rt.app.notification = why
+    rt.app.viewedFile = ""
+    s.refresh(rt)
+    s.noteWhere(rt)
   elif outcome.togglesCall:
     s.toggleCallChildren(rt, outcome.callIndex)
   elif outcome.awaitsOrigin:
     # PLAT-50: the chain `o` / `:origin` asked for — its event taken into
     # the Origin ViewModel, then the action run again to walk it. Bounded:
     # an engine that never answers leaves the note saying it is querying.
-    var event: JsonNode = nil
-    let saved = s.session.backend.bound
-    if saved.timeoutMs == 0 or saved.timeoutMs > OriginWaitMs:
-      s.session.backend.bound.timeoutMs = OriginWaitMs
-    try:
-      event = s.session.backend.waitForEvent(OriginEventName)
-    except CatchableError:
-      discard
-    s.session.backend.bound = saved
+    let event = s.session.awaitOriginEvent()
     if event.isNil or applyOriginEvents(s.origin, @[event]) == 0:
       rt.app.notification = "no origin arrived for the query"
       return
