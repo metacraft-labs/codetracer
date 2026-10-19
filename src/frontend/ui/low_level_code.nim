@@ -414,18 +414,19 @@ proc showGeneratedListing*(rows: seq[LowLevelInstruction];
       lowLevelCodeVMInstance.setActiveOffset(rows[first].offset)
   true
 
-proc initLowLevelCodeVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``LowLevelCodeVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initLowLevelCodeVM`` before the real backend
-  ## was available) it is replaced so the panel uses the real backend.
+proc initLowLevelCodeVMFromSession*(vm: LowLevelCodeVM) =
+  ## Hand the pane the session's `LowLevelCodeVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if lowLevelCodeVMInstance != nil:
     clog "LowLevelCodeVM: replacing existing instance with shared-store version"
     isoNimLowLevelCodeMountedIds = JsAssoc[int, bool]{}
   lowLevelCodeVMStore = store
-  lowLevelCodeVMInstance = createLowLevelCodeVM(store)
+  lowLevelCodeVMInstance = vm
   clog "LowLevelCodeVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimLowLevelCodePanel()
 

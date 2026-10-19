@@ -40,7 +40,7 @@
 ##    ``requestPanelComponent-{id}`` container and the reactive
 ##    effects keep the DOM in sync with the VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initRequestPanelVMWithStore`` so
+##    store version of the VM via ``initRequestPanelVMFromSession`` so
 ##    the panel uses the production ``ReplayDataStore``.
 ## ---------------------------------------------------------------------------
 
@@ -444,18 +444,19 @@ else:
     ## ``pollRequestSpans`` / the store directly.
     discard
 
-proc initRequestPanelVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``RequestPanelVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initRequestPanelVM`` before the real backend
-  ## was available) it is replaced so the panel uses the real backend.
+proc initRequestPanelVMFromSession*(vm: RequestPanelVM) =
+  ## Hand the pane the session's `RequestPanelVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if requestPanelVMInstance != nil:
     clog "RequestPanelVM: replacing existing instance with shared-store version"
     isoNimRequestPanelMountedIds = JsAssoc[int, bool]{}
   requestPanelVMStore = store
-  requestPanelVMInstance = createRequestPanelVM(store)
+  requestPanelVMInstance = vm
   clog "RequestPanelVM: parallel ViewModel instance created (shared store)"
   # RS-M3 — a row whose execution lives in another container cannot be reached
   # by seeking inside this one, so activating it opens that container instead.

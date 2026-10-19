@@ -25,7 +25,7 @@
 ##    ``replComponent-{id}`` container and the reactive effects keep
 ##    the DOM in sync with the VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initReplVMWithStore`` so the panel
+##    store version of the VM via ``initReplVMFromSession`` so the panel
 ##    uses the production ``ReplayDataStore``.
 ## ---------------------------------------------------------------------------
 
@@ -190,18 +190,22 @@ proc replDispatcher(): ReplDispatcher =
   result = proc(input: string) =
     debugRepl(cstring(input))
 
-proc initReplVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``ReplVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initReplVM`` before the real backend was
-  ## available) it is replaced so the panel uses the real backend.
+proc initReplVMFromSession*(vm: ReplVM) =
+  ## Hand the pane the session's `ReplVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  ## The REPL's dispatcher is the renderer's (`replDispatcher`), so it is
+  ## installed here, before the pane can send anything.
+  let store = vm.store
   if replVMInstance != nil:
     clog "ReplVM: replacing existing instance with shared-store version"
     isoNimReplMountedIds = JsAssoc[int, bool]{}
   replVMStore = store
-  replVMInstance = createReplVM(store, replDispatcher())
+  vm.dispatcher = replDispatcher()
+  replVMInstance = vm
   clog "ReplVM: parallel ViewModel instance created (shared store)"
   syncReplConfigIntoVM()
   tryMountIsoNimReplPanel()

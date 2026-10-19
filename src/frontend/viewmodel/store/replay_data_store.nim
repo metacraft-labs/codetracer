@@ -375,7 +375,7 @@ type
       ## value through the language's own printers (a Rust `String` or `Vec`
       ## as Rust, not as a C struct), so a request that says `c` about a Rust
       ## stop gets C-shaped values back. Installed by every host that can
-      ## answer (the web's `ui/state.initStateVMWithStore`, the native hosts'
+      ## answer (the web's `ui/state.installSourceLanguage`, the native hosts'
       ## `headless_session`); nil means "unknown", and `localsLanguage` falls
       ## back to `LoadLocalsDefaultLang`. A hook rather than an import
       ## because this module is in the Embed SDK's package graph and does not

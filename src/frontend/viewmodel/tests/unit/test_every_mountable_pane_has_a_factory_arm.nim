@@ -8,7 +8,7 @@
 ## `#<x>Component-<id>` — and then dispatches on `state.content` to mount the
 ## pane's IsoNim view into it. Twenty-five panes were mounted that way. Five
 ## were not: `State`, `Calltrace`, `Timeline`, `EventLog` and `TerminalOutput`
-## mounted from their `register` method, or from their `initXVMWithStore`, and
+## mounted from their `register` method, or from their `initXVMFromSession`, and
 ## then POLLED for a container neither of those moments can guarantee.
 ##
 ## Measured on 25 real Electron desktop session logs (2026-09), on the modern

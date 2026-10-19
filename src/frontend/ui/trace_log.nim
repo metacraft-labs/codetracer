@@ -23,7 +23,7 @@
 ##    ``traceLogComponent-{id}`` container and the reactive effects
 ##    keep the DOM in sync with the VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initTraceLogVMWithStore`` so the
+##    store version of the VM via ``initTraceLogVMFromSession`` so the
 ##    panel uses the production ``ReplayDataStore``.
 ## ---------------------------------------------------------------------------
 
@@ -168,18 +168,19 @@ proc syncLegacyTraceLogIntoVM*(self: TraceLogComponent) =
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initTraceLogVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``TraceLogVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initTraceLogVM`` before the real backend
-  ## was available) it is replaced so the panel uses the real backend.
+proc initTraceLogVMFromSession*(vm: TraceLogVM) =
+  ## Hand the pane the session's `TraceLogVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if traceLogVMInstance != nil:
     clog "TraceLogVM: replacing existing instance with shared-store version"
     isoNimTraceLogMountedIds = JsAssoc[int, bool]{}
   traceLogVMStore = store
-  traceLogVMInstance = createTraceLogVM(store)
+  traceLogVMInstance = vm
   clog "TraceLogVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimTraceLogPanel()
 

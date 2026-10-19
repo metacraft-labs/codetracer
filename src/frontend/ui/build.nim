@@ -110,17 +110,19 @@ proc installBuildVMJumpCallback(vm: BuildVM) =
   vm.onJumpToLine = proc(path: string, line: int) =
     discard data.openLocation(cstring(path), line)
 
-proc initBuildVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel ``BuildVM`` using an externally-provided
-  ## ``ReplayDataStore`` (typically the shared store from
-  ## ``SessionViewModel``).  If a stub-backed instance already exists
-  ## (created by ``initBuildVM`` before the real backend was available)
-  ## it is replaced so the panel uses the real backend.
+proc initBuildVMFromSession*(vm: BuildVM) =
+  ## Hand the pane the session's `BuildVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if buildVMInstance != nil:
     clog "BuildVM: replacing existing instance with shared-store version"
     isoNimBuildMounted = false
   buildVMStore = store
-  buildVMInstance = createBuildVM(store)
+  buildVMInstance = vm
   installBuildVMJumpCallback(buildVMInstance)
   clog "BuildVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimBuildPanel()
@@ -128,7 +130,7 @@ proc initBuildVMWithStore*(store: ReplayDataStore) =
 proc initBuildVM() =
   ## Lazily create the parallel ``BuildVM`` backed by a stub
   ## ``BackendService``.  Fallback when no shared store has been
-  ## provided via ``initBuildVMWithStore``.
+  ## provided via ``initBuildVMFromSession``.
   if buildVMInstance != nil:
     return
 

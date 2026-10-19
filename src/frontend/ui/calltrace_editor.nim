@@ -65,19 +65,19 @@ proc tryMountIsoNimCalltraceEditorPanel*()
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initCalltraceEditorVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``CalltraceEditorVM`` using
-  ## an externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initCalltraceEditorVM`` before the real
-  ## backend was available) it is replaced so the panel uses the real
-  ## backend.
+proc initCalltraceEditorVMFromSession*(vm: CalltraceEditorVM) =
+  ## Hand the pane the session's `CalltraceEditorVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if calltraceEditorVMInstance != nil:
     clog "CalltraceEditorVM: replacing existing instance with shared-store version"
     isoNimCalltraceEditorMountedIds = JsAssoc[int, bool]{}
   calltraceEditorVMStore = store
-  calltraceEditorVMInstance = createCalltraceEditorVM(store)
+  calltraceEditorVMInstance = vm
   clog "CalltraceEditorVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimCalltraceEditorPanel()
 

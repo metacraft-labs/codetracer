@@ -51,17 +51,19 @@ proc installErrorsVMCallbacks*(vm: ErrorsVM)
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initErrorsVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel ``ErrorsVM`` using an externally-provided
-  ## ``ReplayDataStore`` (typically the shared store from
-  ## ``SessionViewModel``).  If a stub-backed instance already exists
-  ## (created by ``initErrorsVM`` before the real backend was available)
-  ## it is replaced so the panel uses the real backend.
+proc initErrorsVMFromSession*(vm: ErrorsVM) =
+  ## Hand the pane the session's `ErrorsVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if errorsVMInstance != nil:
     clog "ErrorsVM: replacing existing instance with shared-store version"
     isoNimErrorsMounted = false
   errorsVMStore = store
-  errorsVMInstance = createErrorsVM(store)
+  errorsVMInstance = vm
   installErrorsVMCallbacks(errorsVMInstance)
   clog "ErrorsVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimErrorsPanel()
@@ -69,7 +71,7 @@ proc initErrorsVMWithStore*(store: ReplayDataStore) =
 proc initErrorsVM*() =
   ## Lazily create the parallel ``ErrorsVM`` backed by a stub
   ## ``BackendService``.  Fallback when no shared store has been
-  ## provided via ``initErrorsVMWithStore``.
+  ## provided via ``initErrorsVMFromSession``.
   if errorsVMInstance != nil:
     return
 

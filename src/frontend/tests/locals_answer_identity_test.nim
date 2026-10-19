@@ -33,7 +33,7 @@
 ## and the native replay backend renders values through the named language's
 ## printers. Now B is the ONE request per move, naming the stop's tick and
 ## the file's language (`ReplayDataStore.sourceLanguageOf`, installed by
-## `initStateVMWithStore`), and A stands down once the StateVM runs over the
+## `installSourceLanguage`), and A stands down once the StateVM runs over the
 ## session's store. Where it does not — the stub-backed StateVM a host that
 ## never builds the session's store is left with (the VS Code extension) — A
 ## is still the one sender, and the first suite asserts it still asks.
@@ -212,7 +212,7 @@ doAssert rustWire != LoadLocalsDefaultLang
 suite "where the StateVM runs over a stub store, the State component asks":
 
   test "the stub-store host still asks once per move, in the file's language":
-    # Before `initStateVMWithStore` the StateVM's auto-load goes to a stub
+    # Before `initStateVMFromSession` the StateVM's auto-load goes to a stub
     # backend that sends nothing, so the legacy component is the only
     # sender: it must still ask, and name the file's language.
     let base = localsRequests().len

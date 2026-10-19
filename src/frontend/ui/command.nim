@@ -27,7 +27,7 @@
 ##    ``commandPaletteComponent-{id}`` container and the reactive
 ##    effects keep the DOM in sync with the VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initCommandPaletteVMWithStore`` so
+##    store version of the VM via ``initCommandPaletteVMFromSession`` so
 ##    the panel uses the production ``ReplayDataStore``.
 ##
 ## NOTE: rich per-kind row rendering (program-search HTML fragment,
@@ -375,19 +375,19 @@ proc wireCommandPaletteResultRunner(self: CommandPaletteComponent) =
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initCommandPaletteVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``CommandPaletteVM`` using
-  ## an externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance
-  ## already exists (created by ``initCommandPaletteVM`` before the
-  ## real backend was available) it is replaced so the panel uses
-  ## the real backend.
+proc initCommandPaletteVMFromSession*(vm: CommandPaletteVM) =
+  ## Hand the pane the session's `CommandPaletteVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if commandPaletteVMInstance != nil:
     clog "CommandPaletteVM: replacing existing instance with shared-store version"
     isoNimCommandPaletteMountedIds = JsAssoc[int, bool]{}
   commandPaletteVMStore = store
-  commandPaletteVMInstance = createCommandPaletteVM(store)
+  commandPaletteVMInstance = vm
   if not commandPaletteComponentRef.isNil:
     commandPaletteComponentRef.wireCommandPaletteResultRunner()
   clog "CommandPaletteVM: parallel ViewModel instance created (shared store)"

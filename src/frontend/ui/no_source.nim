@@ -43,7 +43,7 @@ const
   NO_CODE = -1
   NO_PATH = ""
 
-# Shared ViewModel instance.  Created once via ``initNoSourceVMWithStore``
+# Shared ViewModel instance.  Created once via ``initNoSourceVMFromSession``
 # from ``ui_js.configureMiddleware`` so the panel uses the real DapApi
 # backend.  A stub-backed lazy fallback is also provided so unit tests
 # and early-render paths can still construct the panel.
@@ -212,14 +212,14 @@ when defined(js):
 # VM lifecycle hooks called from ui_js.configureMiddleware.
 # ---------------------------------------------------------------------------
 
-proc initNoSourceVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or reset) the shared NoSourceVM with the provided
-  ## ``ReplayDataStore``.  Called from
-  ## ``ui_js.configureMiddleware`` after the SessionVM is created.
+proc initNoSourceVMFromSession*(vm: NoSourceVM) =
+  ## Hand the pane the session's `NoSourceVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## Replacing an existing VM clears the per-id mount table so the
-  ## next render call re-mounts the panel against the new VM (mirrors
-  ## the calltrace / state pattern after a session swap).
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if noSourceVMInstance != nil:
     # Clear the per-id mount table so the next render re-mounts the
     # panel against the new VM.  ``JsAssoc`` does not provide
@@ -227,7 +227,7 @@ proc initNoSourceVMWithStore*(store: ReplayDataStore) =
     # equivalent.
     isoNimNoSourceMountedIds = JsAssoc[int, bool]{}
   noSourceVMStore = store
-  noSourceVMInstance = createNoSourceVM(store)
+  noSourceVMInstance = vm
   clog "NoSourceVM: parallel ViewModel instance created (shared store)"
 
 proc initNoSourceVM*() =

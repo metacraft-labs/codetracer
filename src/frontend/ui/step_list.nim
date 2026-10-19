@@ -189,18 +189,19 @@ proc syncLegacyStepListIntoVM*(self: StepListComponent) =
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initStepListVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``StepListVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initStepListVM`` before the real backend was
-  ## available) it is replaced so the panel uses the real backend.
+proc initStepListVMFromSession*(vm: StepListVM) =
+  ## Hand the pane the session's `StepListVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if stepListVMInstance != nil:
     clog "StepListVM: replacing existing instance with shared-store version"
     isoNimStepListMountedIds = JsAssoc[int, bool]{}
   stepListVMStore = store
-  stepListVMInstance = createStepListVM(store)
+  stepListVMInstance = vm
   clog "StepListVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimStepListPanel()
 

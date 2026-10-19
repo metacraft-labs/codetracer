@@ -58,6 +58,16 @@ import viewmodels/[
   origin_chain_vm,
   origin_chain_types,
   terminal_output_vm,
+  build_vm,
+  errors_vm,
+  no_source_vm,
+  step_list_vm,
+  calltrace_editor_vm,
+  repl_vm,
+  low_level_code_vm,
+  request_panel_vm,
+  trace_log_vm,
+  command_palette_vm,
 ]
 
 type
@@ -124,6 +134,23 @@ type
       ## program's output as lines and as a screen. Filled by the native
       ## hosts' `loadRecordingPanes` (`ct/load-terminal`); the desktop keeps
       ## its own instance in `ui/terminal_output.nim`.
+    buildVM*: BuildVM
+    errorsVM*: ErrorsVM
+    noSourceVM*: NoSourceVM
+    stepListVM*: StepListVM
+    calltraceEditorVM*: CalltraceEditorVM
+    replVM*: ReplVM
+    lowLevelCodeVM*: LowLevelCodeVM
+    requestPanelVM*: RequestPanelVM
+    traceLogVM*: TraceLogVM
+    commandPaletteVM*: CommandPaletteVM
+      ## The remaining panes' ViewModels, built with the others by
+      ## `initializePanelViewModels` so every front-end reads one instance
+      ## per session. None sends anything on construction. Not here: the
+      ## visual-replay panes (frame viewer, pixel history, shader debugger,
+      ## video player), built over their producer's `VisualReplayClient`
+      ## rather than the session's store; and the agent activity and agent
+      ## workspace panes, which keep one ViewModel per pane instance.
     originChainVM*: OriginChainVM
       ## Optional Value Origin Tracking VM. The host attaches it via
       ## `attachOriginChainVM` so the derived `crossProcessSpans`
@@ -254,6 +281,26 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     session.fileTreeVM = createFilesystemVM(session.store)
   if session.terminalOutputVM.isNil:
     session.terminalOutputVM = createTerminalOutputVM(session.store)
+  if session.buildVM.isNil:
+    session.buildVM = createBuildVM(session.store)
+  if session.errorsVM.isNil:
+    session.errorsVM = createErrorsVM(session.store)
+  if session.noSourceVM.isNil:
+    session.noSourceVM = createNoSourceVM(session.store)
+  if session.stepListVM.isNil:
+    session.stepListVM = createStepListVM(session.store)
+  if session.calltraceEditorVM.isNil:
+    session.calltraceEditorVM = createCalltraceEditorVM(session.store)
+  if session.replVM.isNil:
+    session.replVM = createReplVM(session.store)
+  if session.lowLevelCodeVM.isNil:
+    session.lowLevelCodeVM = createLowLevelCodeVM(session.store)
+  if session.requestPanelVM.isNil:
+    session.requestPanelVM = createRequestPanelVM(session.store)
+  if session.traceLogVM.isNil:
+    session.traceLogVM = createTraceLogVM(session.store)
+  if session.commandPaletteVM.isNil:
+    session.commandPaletteVM = createCommandPaletteVM(session.store)
 
 # ---------------------------------------------------------------------------
 # M29 §5.3 — multi-process session management
@@ -469,6 +516,26 @@ proc dispose*(session: SessionViewModel; disconnectBackend: bool = true) =
     session.fileTreeVM.dispose()
   if not session.terminalOutputVM.isNil:
     session.terminalOutputVM.dispose()
+  if not session.buildVM.isNil:
+    session.buildVM.dispose()
+  if not session.errorsVM.isNil:
+    session.errorsVM.dispose()
+  if not session.noSourceVM.isNil:
+    session.noSourceVM.dispose()
+  if not session.stepListVM.isNil:
+    session.stepListVM.dispose()
+  if not session.calltraceEditorVM.isNil:
+    session.calltraceEditorVM.dispose()
+  if not session.replVM.isNil:
+    session.replVM.dispose()
+  if not session.lowLevelCodeVM.isNil:
+    session.lowLevelCodeVM.dispose()
+  if not session.requestPanelVM.isNil:
+    session.requestPanelVM.dispose()
+  if not session.traceLogVM.isNil:
+    session.traceLogVM.dispose()
+  if not session.commandPaletteVM.isNil:
+    session.commandPaletteVM.dispose()
   if not session.processTree.isNil:
     session.processTree.dispose()
   if not session.store.isNil:

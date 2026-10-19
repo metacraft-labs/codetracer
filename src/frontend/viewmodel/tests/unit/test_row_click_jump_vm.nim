@@ -216,7 +216,7 @@ suite "row-click jumps move the debugger (real replay-server)":
     check session.getCurrentLine() == away.line
 
     # The pane's own VM, built on the same store production builds it on
-    # (`ui/low_level_code.nim::initLowLevelCodeVMWithStore`).
+    # (`ui/low_level_code.nim::initLowLevelCodeVMFromSession`).
     let vm = createLowLevelCodeVM(session.session.store)
     defer: vm.dispose()
 

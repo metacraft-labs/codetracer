@@ -2522,33 +2522,33 @@ when not defined(ctInExtension):
         trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
       initPanelVM("initTerminalOutputVMFromSession"):
         terminal_output.initTerminalOutputVMFromSession(activeSessionVM.terminalOutputVM)
-      initPanelVM("initBuildVMWithStore"):
-        build.initBuildVMWithStore(activeSessionVM.store)
+      initPanelVM("initBuildVMFromSession"):
+        build.initBuildVMFromSession(activeSessionVM.buildVM)
         build.buildVMInstance.runBuild = proc() = data.update(build=true)
-      initPanelVM("initErrorsVMWithStore"):
-        errors.initErrorsVMWithStore(activeSessionVM.store)
+      initPanelVM("initErrorsVMFromSession"):
+        errors.initErrorsVMFromSession(activeSessionVM.errorsVM)
       initPanelVM("initSearchResultsVMFromSession"):
         search_results.initSearchResultsVMFromSession(activeSessionVM.searchResultsVM)
-      initPanelVM("initNoSourceVMWithStore"):
-        no_source.initNoSourceVMWithStore(activeSessionVM.store)
-      initPanelVM("initStepListVMWithStore"):
-        step_list.initStepListVMWithStore(activeSessionVM.store)
-      initPanelVM("initCalltraceEditorVMWithStore"):
-        calltrace_editor.initCalltraceEditorVMWithStore(activeSessionVM.store)
-      initPanelVM("initReplVMWithStore"):
-        repl.initReplVMWithStore(activeSessionVM.store)
-      initPanelVM("initLowLevelCodeVMWithStore"):
-        low_level_code.initLowLevelCodeVMWithStore(activeSessionVM.store)
-      initPanelVM("initRequestPanelVMWithStore"):
-        request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
-      initPanelVM("initTraceLogVMWithStore"):
-        trace_log.initTraceLogVMWithStore(activeSessionVM.store)
+      initPanelVM("initNoSourceVMFromSession"):
+        no_source.initNoSourceVMFromSession(activeSessionVM.noSourceVM)
+      initPanelVM("initStepListVMFromSession"):
+        step_list.initStepListVMFromSession(activeSessionVM.stepListVM)
+      initPanelVM("initCalltraceEditorVMFromSession"):
+        calltrace_editor.initCalltraceEditorVMFromSession(activeSessionVM.calltraceEditorVM)
+      initPanelVM("initReplVMFromSession"):
+        repl.initReplVMFromSession(activeSessionVM.replVM)
+      initPanelVM("initLowLevelCodeVMFromSession"):
+        low_level_code.initLowLevelCodeVMFromSession(activeSessionVM.lowLevelCodeVM)
+      initPanelVM("initRequestPanelVMFromSession"):
+        request_panel.initRequestPanelVMFromSession(activeSessionVM.requestPanelVM)
+      initPanelVM("initTraceLogVMFromSession"):
+        trace_log.initTraceLogVMFromSession(activeSessionVM.traceLogVM)
       initPanelVM("initScratchpadVMFromSession"):
         scratchpad.initScratchpadVMFromSession(activeSessionVM.scratchpadVM)
       initPanelVM("initFilesystemVMFromSession"):
         filesystem.initFilesystemVMFromSession(activeSessionVM.fileTreeVM)
-      initPanelVM("initCommandPaletteVMWithStore"):
-        command.initCommandPaletteVMWithStore(activeSessionVM.store)
+      initPanelVM("initCommandPaletteVMFromSession"):
+        command.initCommandPaletteVMFromSession(activeSessionVM.commandPaletteVM)
       initPanelVM("initFrameViewerVMWithStore"):
         frame_viewer.initFrameViewerVMWithStore(activeSessionVM.store)
       initPanelVM("initPixelHistoryVMWithStore"):
@@ -6243,9 +6243,9 @@ when defined(ctWeb) and not defined(ctInExtension):
         if not test_results.testResultsVMInstance.isNil:
           # THE INSTANCE IS READ AT FIRE TIME, NOT CAPTURED.
           #
-          # `initTestResultsVMWithStore` REPLACES `testResultsVMInstance` when
-          # the shared store arrives, exactly as `initBuildVMWithStore` replaces
-          # `buildVMInstance` — the hazard `web_noir_build.producerFor` guards
+          # A pane's instance can be REPLACED after this line — as
+          # `initBuildVMFromSession` replaces `buildVMInstance` with the
+          # session's — the hazard `web_noir_build.producerFor` guards
           # against with a comment that names it ("a producer captured earlier
           # would be writing into a VM no view is bound to — a build that ran,
           # succeeded, and painted nothing"). These callbacks used to hold the
@@ -6770,7 +6770,7 @@ when defined(ctWeb) and not defined(ctInExtension):
           # `if not vm.onX.isNil`, so a nil bridge is a SILENT no-op behind a
           # fully painted, hit-testable toolbar.
           #
-          # `initDebugControlsVMWithStore` wires that bridge, but only inside
+          # `initDebugControlsVMFromSession` wires that bridge, but only inside
           # `if not debugComponentForBridge.isNil and not
           # debugApiForBridge.isNil`, and on the web that guard does not hold
           # when it runs. Measured in a browser against the assembled bundle:

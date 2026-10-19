@@ -1826,7 +1826,7 @@ proc mountPaneForState(state: GoldenItemState) =
       # `#<x>Component-<id>`, and defers this dispatch by 200 ms. Every
       # other pane in `isDirectMountComponent` has been mounted from here
       # all along. These five mounted from their `register` method or from
-      # their `initXVMWithStore`, and then POLLED for a container that
+      # their `initXVMFromSession`, and then POLLED for a container that
       # neither of those moments can guarantee.
       #
       # Measured on 25 real Electron desktop session logs (2026-09), on the

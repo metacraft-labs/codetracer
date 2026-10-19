@@ -345,7 +345,7 @@ proc paneRowCounts(): string =
   ##
   ## Two numbers rather than one, because they are two different objects and a
   ## disagreement between them is a specific, silent defect:
-  ## `initBuildVMWithStore` REPLACES `build.buildVMInstance` when the shared
+  ## `initBuildVMFromSession` REPLACES `build.buildVMInstance` when the shared
   ## store arrives, and a producer captured before that would write rows into a
   ## view model no mounted view is bound to — a build that ran, succeeded, and
   ## painted nothing. `producerFor` rebuilds the producer to prevent it; this
@@ -440,7 +440,7 @@ proc ensureBuildPaneVisible() =
   ## has dragged BUILD into the layout gets the first.
   ##
   ## `tryMountIsoNimBuildPanel` is called again rather than relied upon from
-  ## start-up: it retries for ~2 s after `initBuildVMWithStore` and then gives
+  ## start-up: it retries for ~2 s after `initBuildVMFromSession` and then gives
   ## up, which is long expired by the time a user clicks anything. It is
   ## idempotent (`isoNimBuildMounted` guards it), so calling it here costs
   ## nothing when the pane was already mounted and is the difference between a
@@ -454,7 +454,7 @@ proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
   ## One producer per pane, rebuilt if the VM was replaced underneath it OR if
   ## it is holding a different project's paths.
   ##
-  ## `initBuildVMWithStore` replaces `buildVMInstance` when the shared store
+  ## `initBuildVMFromSession` replaces `buildVMInstance` when the shared store
   ## arrives, so a producer captured earlier would be writing into a VM no
   ## view is bound to — a build that ran, succeeded, and painted nothing.
   ##
@@ -1245,7 +1245,7 @@ proc installNoirBuildCommands*() =
   ##
   ## Called after `enterTemplateEditMode`, which is when `buildVMInstance`
   ## exists: `onNoTrace` runs `configureMiddleware()`, and that is what calls
-  ## `initBuildVMWithStore` and installs the DESKTOP `runBuild`
+  ## `initBuildVMFromSession` and installs the DESKTOP `runBuild`
   ## (`data.update(build=true)`, which sends `CODETRACER::update` to a host
   ## this tab does not have). Overwriting it here rather than branching inside
   ## `ui_js.nim` keeps the desktop's wiring exactly as it was.

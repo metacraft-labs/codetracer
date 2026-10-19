@@ -78,7 +78,7 @@ func isoNimPanelMountIsLive*(mountedVMIsCurrent: bool;
   ## The three replay panes — State, Call Trace, Timeline — never had the
   ## id-keyed table above. Each kept one module-level `isoNimXMounted: bool`,
   ## set on mount and cleared at exactly one place: the pane's
-  ## `initXVMWithStore`, when the stub-backed ViewModel is replaced by the
+  ## `initXVMFromSession` (or `initXVMWithStore`), when the stub-backed ViewModel is replaced by the
   ## real one. So the boolean answered a question about the module's own
   ## history and nothing else.
   ##
