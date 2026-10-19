@@ -95,6 +95,19 @@ and communicating via stdin/stdout with newline-delimited JSON-RPC 2.0.
   working directory and is skipped. There is no override variable: put the wanted
   interpreter's directory earlier in `PATH`. On Windows the same lookup
   looks for `python3.exe`.
+- `CODETRACER_CI_BASE_URL` - The codetracer-ci origin (`scheme://host[:port]`)
+  that a dive-in URL given as `trace_path` may be fetched from. A URL whose
+  host, or whose `gatewayBaseUrl` parameter, names any other origin is
+  refused before a connection is opened; unset, every dive-in URL is refused.
+- `CODETRACER_GATEWAY_TOKEN` - The bearer token for that gateway, when the
+  dive-in URL carries none (`authToken`). It is sent to the configured origin
+  only.
+- `CODETRACER_GATEWAY_SHARE_TOKEN` - A codetracer-ci share token (the token
+  of a Trace share link with download permission), sent as `X-Share-Token`
+  when the dive-in URL carries none (`shareToken`). The gateway reads a
+  recording for an authenticated caller only with it (or as a signed-in
+  member of the recording's tenant). Both tokens must be RFC 6750
+  b64tokens.
 - `CODETRACER_DAEMON_SOCK` - Override the daemon socket path (used in tests).
 - `TMPDIR` - Affects where the daemon socket and PID files are created.
 

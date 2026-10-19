@@ -101,7 +101,7 @@ fn exec_script_tool() -> Value {
             "properties": {
                 "trace_path": {
                     "type": "string",
-                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL produced by `ct-observe` / `find_recordings_by_window` / `find_recording_by_id` (e.g. `http://host/observability/v0/debug-session?recording_id=...&trace_id=...&span_id=...`). URLs are fetched once and cached under `$XDG_CACHE_HOME/codetracer/traces/<recording_id>/`."
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL produced by `ct-observe` / `find_recordings_by_window` / `find_recording_by_id` (e.g. `http://host/observability/v0/debug-session?recording_id=...&trace_id=...&span_id=...`). URLs are fetched once and cached under `$XDG_CACHE_HOME/codetracer/traces/<recording_id>/`. A URL is fetched only from the codetracer-ci origin `CODETRACER_CI_BASE_URL` configures (its host and any `gatewayBaseUrl` must name that origin); any other URL is refused. The gateway token (`authToken` or `CODETRACER_GATEWAY_TOKEN`) authenticates, and a codetracer-ci share token for the recording (`shareToken` or `CODETRACER_GATEWAY_SHARE_TOKEN`) authorizes the read."
                 },
                 "script": {
                     "type": "string",
@@ -333,7 +333,7 @@ fn resolve_variable_step_tool() -> Value {
 fn read_source_file_tool() -> Value {
     json!({
         "name": "read_source_file",
-        "description": "Read a source file from a CodeTracer trace. Traces include copies of all source files at recording time.",
+        "description": "Read a source file of a CodeTracer trace: an embedded copy the trace carries, or a file its source list names (see list_source_files), read at its recorded location. Any other path, and any path with a `..` component, is refused as not in the recording.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -343,7 +343,7 @@ fn read_source_file_tool() -> Value {
                 },
                 "file_path": {
                     "type": "string",
-                    "description": "Path of the source file within the trace"
+                    "description": "Path of the source file as the trace lists it (absolute, or relative to the recorded working directory)"
                 }
             },
             "required": ["trace_path", "file_path"]
@@ -1524,11 +1524,19 @@ fn handle_resources_read<'a>(
                 return jsonrpc_error(id, -32603, &format!("Failed to open trace: {message}"));
             }
 
+            // A path the recording does not carry is refused before
+            // anything reads it (see `resolve_recorded_source`).
+            if let Err(refusal) = resolve_recorded_source(trace_path, file_path)
+                && refusal.starts_with(NOT_IN_RECORDING)
+            {
+                return jsonrpc_error(id, -32602, &refusal);
+            }
+
             // Read the source file via ct/py-read-source.  The daemon
             // handles this command by forwarding it to the backend as
             // ct/read-source and returning the result.  If the backend
-            // does not support ct/read-source, fall back to reading
-            // from the trace directory's `files/` subdirectory.
+            // does not support ct/read-source, fall back to reading the
+            // file the recording carries (`read_source_from_trace_dir`).
             let read_resp = dap_request(
                 &mut stream,
                 "ct/py-read-source",
@@ -2558,11 +2566,19 @@ async fn handle_read_source_file(
         );
     }
 
+    // A path the recording does not carry is refused before anything reads
+    // it, the daemon included (see `resolve_recorded_source`).
+    if let Err(refusal) = resolve_recorded_source(trace_path, file_path)
+        && refusal.starts_with(NOT_IN_RECORDING)
+    {
+        let duration_ms = start.elapsed().as_millis();
+        return jsonrpc_result(id, tool_result_error_with_timing(&refusal, duration_ms));
+    }
+
     // Send ct/py-read-source to the daemon.  If the backend does not
     // support the ct/read-source command (e.g. the replay-server for RR
-    // traces), fall back to reading the file directly from the trace
-    // directory's `files/` subdirectory, where CodeTracer stores copies
-    // of all source files at recording time.
+    // traces), fall back to reading the file the recording carries:
+    // its embedded copy under `files/`, or a path its source list names.
     let read_resp = dap_request(
         &mut stream,
         "ct/py-read-source",
@@ -2591,9 +2607,9 @@ async fn handle_read_source_file(
     let content = match daemon_content {
         Some(c) => c,
         None => {
-            // Fallback: read directly from the trace directory.
-            // CodeTracer traces store source files under
-            // `<trace_dir>/files/<absolute_path>`, stripping any leading `/`.
+            // Fallback: read the file the recording carries, an embedded
+            // copy under `<trace_dir>/files/<absolute_path>` (leading `/`
+            // stripped) or a path its source list names.
             match read_source_from_trace_dir(trace_path, file_path) {
                 Ok(c) => c,
                 Err(fs_err) => {
@@ -3141,79 +3157,138 @@ fn strip_path_root(file_path: &str) -> std::path::PathBuf {
     }
 }
 
-/// Reads a source file from a trace, trying multiple resolution strategies.
-///
-/// This function serves as a fallback when the daemon's `ct/read-source`
-/// command is not supported by the backend (e.g. replay-server for Python traces).
-///
-/// Resolution strategies (tried in order):
-///
-/// 1. **Embedded files**: Check `<trace_dir>/files/<path>`.  RR traces store
-///    copies of all source files at recording time under this directory.
-///    For example, `/home/user/project/main.rs` is stored at
-///    `<trace_dir>/files/home/user/project/main.rs`.
-///
-/// 2. **Absolute path on disk**: If `file_path` is absolute and exists on disk,
-///    read it directly.  This is the common case for DB traces (Python) where
-///    sources are still at their original recording-time locations.
-///
-/// 3. **Workdir-relative**: Resolve `file_path` against the `workdir`
-///    recorded in the trace's `meta.dat` (M-REC-1.5; previously read
-///    from the retired `trace_metadata.json` sidecar).
-///
-/// 4. **Parent-relative**: Resolve `file_path` against the trace directory's
-///    parent (e.g. trace at `/tmp/foo/trace/`, source at
-///    `/tmp/foo/program/src/main.py`).
-fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<String, String> {
-    let trace_dir = std::path::Path::new(trace_path);
+/// The error prefix every refusal of [`resolve_recorded_source`] carries, so
+/// a client (and a test) can tell "not part of this recording" from an I/O
+/// failure on a file that is.
+const NOT_IN_RECORDING: &str = "source file not in the recording";
 
-    // Strip the absolute-path root (Unix `/` or Windows `C:\`) so the
-    // `files/` join nests instead of escaping back to an absolute path.
-    let relative = strip_path_root(file_path);
+/// Resolves `file_path` to the on-disk file the recording carries for it.
+///
+/// `read_source_file` (and the `trace:///<path>/source/<file>` resource)
+/// serves source *as recorded*. The path is a tool argument, so it is chosen
+/// by the agent, and therefore by anything the agent read, and it must not
+/// reach files the recording does not carry. Only two kinds of file qualify:
+///
+/// 1. **An embedded copy** under `<trace_dir>/files/<path>`, the layout in
+///    which a recording stores copies of its sources. The copy is resolved
+///    through symlinks and must still lie inside `files/`.
+/// 2. **A path in the recording's source list** (`paths.dat`, the list
+///    `list_source_files` returns), read at its recorded location. A
+///    relative recorded path is located against the recorded working
+///    directory, then against the trace directory's parent. The request may
+///    name the entry exactly, as the absolute path a relative entry stands
+///    for under the recorded working directory, or as the path relative to
+///    that directory an absolute entry has.
+///
+/// Anything else is refused with [`NOT_IN_RECORDING`]: an absolute host
+/// path the source list does not name, a relative path that matches no
+/// entry, and every path with a `..` component, which is refused before
+/// any lookup. A source-list entry that itself contains `..` is ignored.
+fn resolve_recorded_source(
+    trace_path: &str,
+    file_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    use std::path::{Component, Path};
 
-    // Strategy 1: Check the trace's files/ subdirectory (RR traces embed source copies here).
-    let files_dir = trace_dir.join("files");
-    let embedded_path = files_dir.join(&relative);
-    if embedded_path.exists() {
-        return std::fs::read_to_string(&embedded_path)
-            .map_err(|e| format!("failed to read {}: {e}", embedded_path.display()));
+    let requested = Path::new(file_path);
+    if file_path.is_empty() {
+        return Err(format!("{NOT_IN_RECORDING}: the file path is empty"));
     }
-
-    // Strategy 2: If the path is absolute and the file exists on disk, read it directly.
-    // This is the common case for DB traces (Python) where sources are still at their
-    // original recording-time locations.
-    let file_path_buf = std::path::Path::new(file_path);
-    if file_path_buf.is_absolute() && file_path_buf.exists() {
-        return std::fs::read_to_string(file_path_buf)
-            .map_err(|e| format!("failed to read {}: {e}", file_path_buf.display()));
-    }
-
-    // Strategy 3: Try resolving against the workdir recorded in
-    // `meta.dat`.  M-REC-1.5 retired the JSON sidecar fallback.
-    if let Ok(meta) = crate::trace_metadata::read_trace_metadata(trace_dir)
-        && !meta.workdir.is_empty()
+    if requested
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
     {
-        let workdir_resolved = std::path::Path::new(&meta.workdir).join(&relative);
-        if workdir_resolved.exists() {
-            return std::fs::read_to_string(&workdir_resolved)
-                .map_err(|e| format!("failed to read {}: {e}", workdir_resolved.display()));
-        }
+        return Err(format!(
+            "{NOT_IN_RECORDING}: {file_path:?} has a `..` component; \
+             name the file as the recording lists it (see list_source_files)"
+        ));
     }
 
-    // Strategy 4: Try the trace directory's parent (e.g. trace at /tmp/foo/trace/,
-    // source at /tmp/foo/program/src/main.py).
-    if let Some(parent) = trace_dir.parent() {
-        let parent_resolved = parent.join(&relative);
-        if parent_resolved.exists() {
-            return std::fs::read_to_string(&parent_resolved)
-                .map_err(|e| format!("failed to read {}: {e}", parent_resolved.display()));
+    let trace_dir = Path::new(trace_path);
+
+    // 1. An embedded copy under `files/`. Canonicalizing resolves symlinks,
+    //    so a link planted under `files/` cannot point out of it.
+    let files_dir = trace_dir.join("files");
+    if let Ok(files_root) = files_dir.canonicalize()
+        && let Ok(embedded) = files_dir.join(strip_path_root(file_path)).canonicalize()
+        && embedded.starts_with(&files_root)
+        && embedded != files_root
+        && embedded.is_file()
+    {
+        return Ok(embedded);
+    }
+
+    // 2. A path the recording's source list names.
+    let meta = crate::trace_metadata::read_trace_metadata(trace_dir).map_err(|e| {
+        format!("{NOT_IN_RECORDING}: {file_path:?} has no embedded copy, and the recording's source list could not be read: {e}")
+    })?;
+    let workdir = Path::new(&meta.workdir);
+    let has_workdir = !meta.workdir.is_empty() && workdir.is_absolute();
+    // `Path` equality compares components, so `a//b` and `a/./b` match `a/b`.
+    let names_entry = |entry: &Path| -> bool {
+        if requested == entry {
+            return true;
         }
+        if !has_workdir {
+            return false;
+        }
+        match (requested.is_absolute(), entry.is_absolute()) {
+            (true, false) => requested == workdir.join(entry),
+            (false, true) => workdir.join(requested) == entry,
+            _ => false,
+        }
+    };
+
+    for recorded in &meta.source_files {
+        let entry = Path::new(recorded);
+        if recorded.is_empty()
+            || entry
+                .components()
+                .any(|c| matches!(c, Component::ParentDir))
+            || !names_entry(entry)
+        {
+            continue;
+        }
+        let mut locations = Vec::new();
+        if entry.is_absolute() {
+            locations.push(entry.to_path_buf());
+        } else {
+            if has_workdir {
+                locations.push(workdir.join(entry));
+            }
+            if let Some(parent) = trace_dir.parent() {
+                locations.push(parent.join(entry));
+            }
+        }
+        if let Some(found) = locations.iter().find(|p| p.is_file()) {
+            return Ok(found.clone());
+        }
+        let tried: Vec<String> = locations.iter().map(|p| p.display().to_string()).collect();
+        return Err(format!(
+            "source file not found: {recorded:?} is in the recording's source list, \
+             but it has no embedded copy under {} and is not on disk at {}",
+            files_dir.display(),
+            tried.join(", ")
+        ));
     }
 
     Err(format!(
-        "source file not found: tried {}, absolute path, workdir, and parent dir",
-        embedded_path.display()
+        "{NOT_IN_RECORDING}: {file_path:?} has no embedded copy under {} \
+         and is not in the recording's source list (see list_source_files)",
+        files_dir.display()
     ))
+}
+
+/// Reads a source file the recording carries; see [`resolve_recorded_source`]
+/// for which files those are.
+///
+/// This is the fallback that serves `read_source_file` when the daemon's
+/// `ct/read-source` command is not supported by the backend (e.g. the
+/// replay-server).
+fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<String, String> {
+    let location = resolve_recorded_source(trace_path, file_path)?;
+    std::fs::read_to_string(&location)
+        .map_err(|e| format!("failed to read {}: {e}", location.display()))
 }
 
 // ---------------------------------------------------------------------------
@@ -4023,77 +4098,125 @@ mod tests {
         std::fs::create_dir_all(tmp.join("files")).unwrap();
 
         let result = read_source_from_trace_dir(tmp.to_str().unwrap(), "/nonexistent/file.rs");
-        assert!(result.is_err());
         let err_msg = result.unwrap_err();
         assert!(
-            err_msg.contains("not found"),
-            "error should mention 'not found', got: {err_msg}"
+            err_msg.starts_with(NOT_IN_RECORDING),
+            "error should report the file as not in the recording, got: {err_msg}"
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    #[test]
-    fn test_read_source_from_trace_dir_absolute_path_fallback() {
-        // Strategy 2: If the file_path is absolute and exists on disk, read it directly.
-        // This simulates a DB trace (Python) where source files are at their original
-        // locations.
-        let tmp = std::env::temp_dir().join("ct-test-read-source-absolute");
-        let _ = std::fs::remove_dir_all(&tmp);
+    /// A trace directory under a fresh `tmp`, whose `trace.ct` lists
+    /// `paths` with `workdir` as its recorded working directory.
+    fn trace_dir_listing(tmp: &std::path::Path, workdir: &str, paths: &[&str]) -> PathBuf {
+        let _ = std::fs::remove_dir_all(tmp);
         let trace_dir = tmp.join("trace");
         std::fs::create_dir_all(&trace_dir).unwrap();
+        crate::trace_metadata::tests::write_trace_ct(
+            &trace_dir,
+            "app.py",
+            workdir,
+            &[],
+            paths,
+            &[],
+        );
+        trace_dir
+    }
 
-        // Create a source file at an absolute path outside the trace dir.
-        let source_dir = tmp.join("project");
-        std::fs::create_dir_all(&source_dir).unwrap();
-        std::fs::write(source_dir.join("main.py"), "print('hello')").unwrap();
+    #[test]
+    fn test_read_source_from_trace_dir_listed_absolute_path() {
+        // A DB trace (Python) usually carries no `files/` copies: its sources
+        // are read at the absolute paths the source list records.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-absolute");
+        let source_path = tmp.join("project/main.py");
+        let source = source_path.to_str().unwrap().to_owned();
+        let trace_dir = trace_dir_listing(&tmp, "", &[&source]);
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "print('hello')").unwrap();
 
-        let source_path = source_dir.join("main.py");
-        let result =
-            read_source_from_trace_dir(trace_dir.to_str().unwrap(), source_path.to_str().unwrap());
-        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), &source);
         assert_eq!(result.unwrap(), "print('hello')");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
-    fn test_read_source_from_trace_dir_workdir_fallback() {
-        // Strategy 3: Resolve relative paths against the workdir from meta.dat.
-        // M-REC-1.5 retired the legacy trace_metadata.json sidecar; the
-        // fallback now reads the workdir out of the CTFS meta.dat.
-        let tmp = std::env::temp_dir().join("ct-test-read-source-workdir");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let trace_dir = tmp.join("trace");
-        std::fs::create_dir_all(&trace_dir).unwrap();
+    fn test_read_source_from_trace_dir_refuses_unlisted_absolute_path() {
+        // The file exists and is readable, but the recording does not list it.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-unlisted");
+        let listed = tmp.join("project/main.py");
+        let trace_dir = trace_dir_listing(&tmp, "", &[listed.to_str().unwrap()]);
+        let outside = tmp.join("secret.txt");
+        std::fs::write(&outside, "not a source").unwrap();
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "not a source");
 
-        // Create the source file under a separate workdir.
+        let err =
+            read_source_from_trace_dir(trace_dir.to_str().unwrap(), outside.to_str().unwrap())
+                .unwrap_err();
+        assert!(err.starts_with(NOT_IN_RECORDING), "got: {err}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_refuses_parent_components() {
+        // Every `..` form is refused, including one that climbs back into a
+        // listed file and one that would climb out of `files/`.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-dotdot");
+        let workdir = tmp.join("project");
+        let trace_dir = trace_dir_listing(&tmp, workdir.to_str().unwrap(), &["src/app.py"]);
+        std::fs::create_dir_all(workdir.join("src")).unwrap();
+        std::fs::write(workdir.join("src/app.py"), "import os").unwrap();
+        std::fs::write(tmp.join("secret.txt"), "not a source").unwrap();
+        std::fs::create_dir_all(trace_dir.join("files")).unwrap();
+
+        let back_in = format!("{}/src/../src/app.py", workdir.display());
+        for path in [
+            "../secret.txt",
+            "../../secret.txt",
+            "src/../src/app.py",
+            back_in.as_str(),
+        ] {
+            let err = read_source_from_trace_dir(trace_dir.to_str().unwrap(), path).unwrap_err();
+            assert!(err.starts_with(NOT_IN_RECORDING), "{path}: {err}");
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_read_source_from_trace_dir_refuses_symlink_out_of_files() {
+        let tmp = std::env::temp_dir().join("ct-test-read-source-symlink");
+        let trace_dir = trace_dir_listing(&tmp, "", &[]);
+        std::fs::create_dir_all(trace_dir.join("files")).unwrap();
+        std::fs::write(tmp.join("secret.txt"), "not a source").unwrap();
+        std::os::unix::fs::symlink(tmp.join("secret.txt"), trace_dir.join("files/link.txt"))
+            .unwrap();
+
+        let err = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "link.txt").unwrap_err();
+        assert!(err.starts_with(NOT_IN_RECORDING), "got: {err}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_source_from_trace_dir_workdir_fallback() {
+        // A relative source-list entry is located against the workdir
+        // recorded in `meta.dat`, by its relative name or by the absolute
+        // path it stands for there.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-workdir");
         let workdir = tmp.join("workdir");
+        let trace_dir = trace_dir_listing(&tmp, workdir.to_str().unwrap(), &["src/app.py"]);
         std::fs::create_dir_all(workdir.join("src")).unwrap();
         std::fs::write(workdir.join("src/app.py"), "import os").unwrap();
 
-        // Build a minimal trace.ct with meta.dat carrying that workdir.
-        let meta = crate::meta_dat::MetaDat {
-            version: crate::meta_dat::META_DAT_VERSION,
-            flags: 0,
-            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
-            program: "app.py".to_owned(),
-            args: vec![],
-            workdir: workdir.to_str().unwrap().to_owned(),
-            recorder_id: "test".to_owned(),
-            ext_flags: 0,
-            mcr: None,
-            replay_launch: None,
-            layout_snapshot: None,
-            filter_provenance: vec![],
-            has_filter_provenance: false,
-        };
-        let dat = crate::meta_dat::serialize_meta_dat(&meta);
-        crate::meta_dat::write_minimal_ctfs(&trace_dir.join("trace.ct"), &[("meta.dat", &dat)])
-            .unwrap();
-
         let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "src/app.py");
-        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert_eq!(result.unwrap(), "import os");
+        let absolute = workdir.join("src/app.py");
+        let result =
+            read_source_from_trace_dir(trace_dir.to_str().unwrap(), absolute.to_str().unwrap());
         assert_eq!(result.unwrap(), "import os");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -4101,41 +4224,40 @@ mod tests {
 
     #[test]
     fn test_read_source_from_trace_dir_parent_fallback() {
-        // Strategy 4: Resolve relative paths against the trace directory's parent.
+        // A relative source-list entry with no recorded workdir is located
+        // against the trace directory's parent.
         let tmp = std::env::temp_dir().join("ct-test-read-source-parent");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let trace_dir = tmp.join("trace");
-        std::fs::create_dir_all(&trace_dir).unwrap();
-
-        // Create a source file next to the trace dir, under the parent.
+        let trace_dir = trace_dir_listing(&tmp, "", &["program/src/main.py"]);
         std::fs::create_dir_all(tmp.join("program/src")).unwrap();
         std::fs::write(tmp.join("program/src/main.py"), "x = 1").unwrap();
+        std::fs::write(tmp.join("program/other.py"), "y = 2").unwrap();
 
         let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "program/src/main.py");
-        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
         assert_eq!(result.unwrap(), "x = 1");
+        // A sibling the source list does not name stays out of reach.
+        let err = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "program/other.py")
+            .unwrap_err();
+        assert!(err.starts_with(NOT_IN_RECORDING), "got: {err}");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn test_read_source_from_trace_dir_strategy_priority() {
-        // When a file exists both in files/ and at its absolute path, the embedded
-        // copy (strategy 1) should win.
+        // When a listed file exists both in files/ and at its recorded
+        // absolute path, the embedded copy wins.
         let tmp = std::env::temp_dir().join("ct-test-read-source-priority");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let trace_dir = tmp.join("trace");
-        std::fs::create_dir_all(&trace_dir).unwrap();
+        let source_dir = tmp.join("src");
+        let abs_source = source_dir.join("lib.py");
+        let trace_dir = trace_dir_listing(&tmp, "", &[abs_source.to_str().unwrap()]);
 
         // Create the "real" source file on disk.
-        let source_dir = tmp.join("src");
         std::fs::create_dir_all(&source_dir).unwrap();
-        std::fs::write(source_dir.join("lib.py"), "# disk version").unwrap();
+        std::fs::write(&abs_source, "# disk version").unwrap();
 
         // Also embed it under files/, at the same `files/`-relative
         // location `read_source_from_trace_dir` derives — strip the
         // absolute-path root cross-platform (Unix `/` or Windows `C:\`).
-        let abs_source = source_dir.join("lib.py");
         let relative = strip_path_root(abs_source.to_str().unwrap());
         let embedded = trace_dir.join("files").join(&relative);
         std::fs::create_dir_all(embedded.parent().unwrap()).unwrap();
@@ -4147,7 +4269,7 @@ mod tests {
         assert_eq!(
             result.unwrap(),
             "# embedded version",
-            "strategy 1 (embedded) should take priority over strategy 2 (absolute)"
+            "the embedded copy should take priority over the recorded location"
         );
 
         let _ = std::fs::remove_dir_all(&tmp);

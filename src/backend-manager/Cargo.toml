@@ -8,6 +8,9 @@ edition = "2024"
 ct-home = { path = "../../libs/ct-home" }
 clap = { version = "4.5.42", features = ["derive"] }
 libc = "0.2"
+# Chunk-size lines of chunked gateway responses (already in the tree via
+# tungstenite; observability_fetch.rs decodes the framing around it).
+httparse = "1.10"
 log = "0.4.27"
 flexi_logger = "0.31"
 serde = { version = "1.0", features = ["derive"] }
@@ -42,5 +45,8 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = [
   "connect",
 ] }
 tempfile = "3"
+# The gateway test uploads a recording to codetracer-ci and creates its
+# share link (already in the tree via codetracer_ctfs, same features).
+ureq = { version = "2.12", features = ["json"] }
 # Reads `record-web`'s recordings back the way any CTFS consumer does.
 codetracer_trace_reader = { path = "../../../codetracer-trace-format/codetracer_trace_reader" }

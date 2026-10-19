@@ -912,7 +912,13 @@ test-rust:
   popd
   pushd src/backend-manager
   cargo nextest run --release
-  cargo nextest run --release --run-ignored ignored-only || \
+  # mcp_dive_in_fetch_gateway_test needs a running codetracer-ci as its
+  # gateway; it is excluded here, by name, and runs through
+  # `just t_mcp_dive_in_fetch_sends_token_only_to_gateway` in the sibling
+  # codetracer-observability-e2e checkout, which brings one up.
+  echo "NOT RUN in this lane: mcp_dive_in_fetch_gateway_test (needs a running codetracer-ci;"
+  echo "  codetracer-observability-e2e: just t_mcp_dive_in_fetch_sends_token_only_to_gateway)"
+  cargo nextest run --release --run-ignored ignored-only -E 'not binary(mcp_dive_in_fetch_gateway_test)' || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in backend-manager; treating as no-op)"; \
     else \

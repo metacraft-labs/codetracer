@@ -874,8 +874,8 @@ sibling_upstream() {
 	local up="${CL_DIR}/$1.git" work="${CL_DIR}/$1-work"
 	git_q -c init.defaultBranch=dev init --quiet --bare "$up"
 	git_q -c init.defaultBranch=dev init --quiet "$work"
-	git_q -C "$work" commit --quiet --allow-empty -m one
-	git_q -C "$work" commit --quiet --allow-empty -m two
+	git_q -C "$work" commit --quiet --allow-empty -m "$1 one"
+	git_q -C "$work" commit --quiet --allow-empty -m "$1 two"
 	git_q -C "$work" push --quiet "$up" HEAD:dev
 	UP_URL="file://${up}"
 	UP_HEAD="$(git -C "$work" rev-parse HEAD)"
@@ -886,6 +886,12 @@ TF_REV="$UP_HEAD"
 sibling_upstream "$SECOND_SIBLING"
 NB_URL="$UP_URL"
 NB_REV="$UP_HEAD"
+# The integrity contradiction below substitutes one sibling's revision for
+# the other's. Empty commits made in the same second must still differ.
+if [ "$TF_REV" = "$NB_REV" ]; then
+	echo "fixture error: sibling upstream revisions must differ" >&2
+	exit 1
+fi
 
 # dep_entry <name> <url> <revision> [<integrity>] — one inline table, keys in
 # the order `repro lock refresh` writes them. Integrity defaults to the
