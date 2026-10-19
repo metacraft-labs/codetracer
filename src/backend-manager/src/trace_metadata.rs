@@ -385,7 +385,7 @@ impl std::error::Error for TraceMetadataError {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::path::PathBuf;
 
@@ -430,7 +430,21 @@ mod tests {
             .join(format!("{}-{}", test_name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create test dir");
+        write_trace_ct(&dir, program, workdir, args, paths, extra);
+        dir
+    }
 
+    /// Write `dir/trace.ct` carrying the given metadata, `paths` as its
+    /// `paths.dat`, and `extra` members after the interning tables.  `dir`
+    /// must exist.
+    pub(crate) fn write_trace_ct(
+        dir: &Path,
+        program: &str,
+        workdir: &str,
+        args: &[&str],
+        paths: &[&str],
+        extra: &[(&str, &[u8])],
+    ) {
         let meta = meta_dat::MetaDat {
             version: meta_dat::META_DAT_VERSION,
             flags: 0,
@@ -465,8 +479,6 @@ mod tests {
         ];
         members.extend_from_slice(extra);
         meta_dat::write_minimal_ctfs(&ct_path, &members).expect("write minimal ctfs");
-
-        dir
     }
 
     #[test]
