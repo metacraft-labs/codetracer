@@ -101,7 +101,7 @@ fn exec_script_tool() -> Value {
             "properties": {
                 "trace_path": {
                     "type": "string",
-                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL produced by `ct-observe` / `find_recordings_by_window` / `find_recording_by_id` (e.g. `http://host/observability/v0/debug-session?recording_id=...&trace_id=...&span_id=...`). URLs are fetched once and cached under `$XDG_CACHE_HOME/codetracer/traces/<recording_id>/`."
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL produced by `ct-observe` / `find_recordings_by_window` / `find_recording_by_id` (e.g. `http://host/observability/v0/debug-session?recording_id=...&trace_id=...&span_id=...`). URLs are fetched once and cached under `$XDG_CACHE_HOME/codetracer/traces/<recording_id>/`. A URL is fetched only from the codetracer-ci origin `CODETRACER_CI_BASE_URL` configures (its host and any `gatewayBaseUrl` must name that origin); any other URL is refused. The gateway token (`authToken` or `CODETRACER_GATEWAY_TOKEN`) authenticates, and a codetracer-ci share token for the recording (`shareToken` or `CODETRACER_GATEWAY_SHARE_TOKEN`) authorizes the read."
                 },
                 "script": {
                     "type": "string",

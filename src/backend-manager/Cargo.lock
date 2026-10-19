@@ -1513,6 +1513,7 @@ dependencies = [
  "ct-home",
  "flexi_logger",
  "futures-util",
+ "httparse",
  "libc",
  "log",
  "serde",
@@ -1520,6 +1521,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "ureq",
 ]
 
 [[package]]
