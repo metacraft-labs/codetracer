@@ -27,7 +27,7 @@
   "B32": "r.press(debugFacts(), EditorPath, \"Enter\").op == \"editor.toggle-tracepoint\"",
   "B4": "Unhandled exception: never: the tracepoint editor [AssertionFailedError]",
   "B5": "TabGroundContrastFloor` the focused strip's selected tab is below the tab-contrast floor in Dark mode [AssertionDefect]",
-  "B6": "own.len > 0 and own != ground",
+  "B6": "contrastRatio(own, other) >= TabGroundContrastFloor",
   "B7": "Unhandled exception: never: Home to 3 [AssertionFailedError]",
   "B8": "plan.values(\"data-ct-selection\") == @[\"1:1-24\", \"2:1-84\"]",
   "B9": "Unhandled exception: never: a two-line selection [AssertionFailedError]",

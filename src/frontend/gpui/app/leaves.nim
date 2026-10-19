@@ -120,8 +120,6 @@ import ../../tui/app/theme/editor_theme
 import ../../styles/generated/design_tokens
 import ../devicon_marks
 from std/hashes import hash
-from ../../viewmodel/viewmodels/origin_chain_types import
-  iconClassForTerminator
 
 export shell, editor_surface
 # `value_presentation` is re-exported because the BUDGETS are this medium's
