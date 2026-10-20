@@ -1161,7 +1161,7 @@
       {
         "row": "configurations[id=sway-gles2]",
         "from": "this file at codetracer a92806308 (writtenAt 2026-10-02T07:04:12Z, manifest /home/zahary/m/codetracer-gui/codetracer-plat49a/build/plat37/manifest.json)",
-        "why": "the host that re-took this record on 2026-10-20 (nixos-ci-bare-002) exposes no /dev/dri node, so sway logged \"Cannot create GLES2 renderer: no DRM FD available\" and the gles2 configuration produced no frame. The row is carried verbatim from the previous record rather than re-measured. It probes the WINDOWED binary under a compositor that sets WAYLAND_DISPLAY, a path the 2026-10-20 change (the window-launch preflight) does not alter. Re-take it on a host with a DRM render node."
+        "why": "the host that re-took this record on 2026-10-20 (nixos-ci-bare-002) exposes no /dev/dri node, so sway logged \"Cannot create GLES2 renderer: no DRM FD available\" and the gles2 configuration produced no frame. The row is carried verbatim from the previous record rather than re-measured. It probes the WINDOWED binary under a compositor that sets WAYLAND_DISPLAY, a path the 2026-10-20 change (the window-launch preflight) does not alter, so the carried reading still describes the code this record was re-taken against. The next full re-record on a host with a DRM render node replaces it like every other row."
       }
     ]
   }

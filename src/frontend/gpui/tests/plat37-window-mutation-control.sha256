@@ -121,7 +121,7 @@
 # both sides; measured red-then-green in a second worktree of this commit at a
 # different path. The line also moved — 985 -> 1020 — because the constant's
 # own note above grew.
-3955929e285052dccad6f50269e42a51bb798a4d7e87e9864f217d8aa33b90b4  src/tests/visual/plat37-measurements.json
+cb49f90c2b780d59d5bd9b8d6f8950b18087f13987cfafcd80ad58cfa4dc5b94  src/tests/visual/plat37-measurements.json
 6691efa7f680d879a9ffc9f4ceb4b95f0c07c5550f982c206658b9ffeb4e60df  src/tests/visual/plat37-thresholds.json
 0587764dba7f18066eeb0ff826504824bdad1db9b8e8ae07c3054fa3c7d90be8  src/frontend/gpui/chrome.nim
 cb6c5462e917d2e9e33645f68bbcb97e97bbfc7535260fa0a0f1ca8718e7329c  src/frontend/gpui/replay_ops.nim
