@@ -29,6 +29,13 @@ type
     frame*: Option[int]
     width*: int
     height*: int
+      ## The image's own size — the framebuffer scaled to fit the size the
+      ## client asked for (`maxFrameWidth` / `maxFrameHeight`).
+    sourceWidth*: int
+    sourceHeight*: int
+      ## The framebuffer's size (`X-Source-Width` / `X-Source-Height`), the
+      ## space pixel coordinates are in; 0 when the player did not say (the
+      ## image is then the framebuffer).
 
   VisualReplayDrawCall* = object
     index*: int
@@ -92,6 +99,12 @@ type
 
   VisualReplayClient* = ref object
     playerUrl*: string
+    maxFrameWidth*: int
+    maxFrameHeight*: int
+      ## The size, in device pixels, the frames are shown at: every frame
+      ## request asks the player to scale the framebuffer to fit it
+      ## (Viewport-Driven-Loading, Decided Q5 — "Frames sized"). 0 for no
+      ## limit. Set by `FrameViewerVM.setFrameSize`.
     getInfoProc*: proc(): VisualReplayFuture[VisualReplayInfo]
     getFrameByGeidProc*: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame]
     getFrameByFrameProc*: proc(frame: int): VisualReplayFuture[VisualReplayFrame]
@@ -118,6 +131,35 @@ proc frameByFrameUrl*(playerUrl: string; frame: int): string =
 
 proc frameByDrawUrl*(playerUrl: string; draw: int): string =
   normalizedPlayerUrl(playerUrl) & "/frame?draw=" & $draw
+
+proc fittedFrameSize*(sourceWidth, sourceHeight,
+                      maxWidth, maxHeight: int): tuple[width, height: int] =
+  ## The size the player scales a `sourceWidth` x `sourceHeight` framebuffer
+  ## to for `maxWidth` x `maxHeight` (MCR-Visual-Replay.md, `GET /frame`):
+  ## the largest that fits both, aspect kept, never enlarged, each side
+  ## rounded down and at least 1. A limit of 0 is no limit on that side.
+  var scale = 1.0
+  if maxWidth > 0 and sourceWidth > maxWidth:
+    scale = min(scale, maxWidth / sourceWidth)
+  if maxHeight > 0 and sourceHeight > maxHeight:
+    scale = min(scale, maxHeight / sourceHeight)
+  if scale >= 1.0:
+    return (sourceWidth, sourceHeight)
+  (max(1, int(float(sourceWidth) * scale)),
+   max(1, int(float(sourceHeight) * scale)))
+
+proc sizedFrameUrl*(url: string; maxWidth, maxHeight: int): string =
+  ## `url` (a `/frame?…` request) asking the player to scale the frame to
+  ## fit `maxWidth` x `maxHeight` (MCR-Visual-Replay.md, `GET /frame`'s
+  ## reply format); unchanged for no limit.
+  result = url
+  if maxWidth > 0:
+    result.add "&maxWidth=" & $maxWidth
+  if maxHeight > 0:
+    result.add "&maxHeight=" & $maxHeight
+
+proc sizedFrameUrl*(client: VisualReplayClient; url: string): string =
+  sizedFrameUrl(url, client.maxFrameWidth, client.maxFrameHeight)
 
 proc drawCallsUrl*(playerUrl: string; frame: int): string =
   ## The draw calls of ONE frame (MCR-Visual-Replay.md, `GET
@@ -254,6 +296,8 @@ proc frameFromJson*(node: JsonNode): VisualReplayFrame =
     imageSrc: node{"imageSrc"}.getStr(node{"url"}.getStr("")),
     width: node{"width"}.getInt(0),
     height: node{"height"}.getInt(0),
+    sourceWidth: node{"sourceWidth"}.getInt(0),
+    sourceHeight: node{"sourceHeight"}.getInt(0),
   )
   if node.hasKey("geid"):
     result.geid = some(uint64(node["geid"].getBiggestInt))
@@ -402,9 +446,8 @@ proc createJsonVisualReplayClient*(
   ## adapter shape because tests can assert exact endpoint URLs independently
   ## of HTTP mechanics.
   let baseUrl = normalizedPlayerUrl(playerUrl)
-  VisualReplayClient(
-    playerUrl: baseUrl,
-    getInfoProc: proc(): VisualReplayFuture[VisualReplayInfo] =
+  let client = VisualReplayClient(playerUrl: baseUrl)
+  client.getInfoProc = proc(): VisualReplayFuture[VisualReplayInfo] =
       let fut = getJson(infoUrl(baseUrl))
       when defined(js):
         result = newPromise proc(resolve: proc(value: VisualReplayInfo)) =
@@ -419,9 +462,8 @@ proc createJsonVisualReplayClient*(
           onSuccess = proc(node: JsonNode) = outFuture.complete(infoFromJson(node)),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
-    ,
-    getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
-      let fut = getJson(frameByGeidUrl(baseUrl, geid))
+  client.getFrameByGeidProc = proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
+      let fut = getJson(client.sizedFrameUrl(frameByGeidUrl(baseUrl, geid)))
       when defined(js):
         result = newPromise proc(resolve: proc(value: VisualReplayFrame)) =
           async_compat.onComplete(fut,
@@ -435,9 +477,8 @@ proc createJsonVisualReplayClient*(
           onSuccess = proc(node: JsonNode) = outFuture.complete(frameFromJson(node)),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
-    ,
-    getFrameByFrameProc: proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
-      let fut = getJson(frameByFrameUrl(baseUrl, frame))
+  client.getFrameByFrameProc = proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
+      let fut = getJson(client.sizedFrameUrl(frameByFrameUrl(baseUrl, frame)))
       when defined(js):
         result = newPromise proc(resolve: proc(value: VisualReplayFrame)) =
           async_compat.onComplete(fut,
@@ -451,9 +492,8 @@ proc createJsonVisualReplayClient*(
           onSuccess = proc(node: JsonNode) = outFuture.complete(frameFromJson(node)),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
-    ,
-    getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
-      let fut = getJson(frameByDrawUrl(baseUrl, draw))
+  client.getFrameByDrawProc = proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
+      let fut = getJson(client.sizedFrameUrl(frameByDrawUrl(baseUrl, draw)))
       when defined(js):
         result = newPromise proc(resolve: proc(value: VisualReplayFrame)) =
           async_compat.onComplete(fut,
@@ -467,8 +507,7 @@ proc createJsonVisualReplayClient*(
           onSuccess = proc(node: JsonNode) = outFuture.complete(frameFromJson(node)),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
-    ,
-    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+  client.getDrawCallsProc = proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       let fut = getJson(drawCallsUrl(baseUrl, frame))
       when defined(js):
         result = newPromise proc(resolve: proc(value: seq[VisualReplayDrawCall])) =
@@ -491,8 +530,7 @@ proc createJsonVisualReplayClient*(
             outFuture.complete(calls),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
-    ,
-    getPixelHistoryProc: proc(x, y, frame: int):
+  client.getPixelHistoryProc = proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
       let fut = getJson(pixelHistoryUrl(baseUrl, x, y, frame))
       when defined(js):
@@ -527,8 +565,7 @@ proc createJsonVisualReplayClient*(
             outFuture.complete(entries),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
-    ,
-    getShaderDebugProc: proc(request: VisualReplayShaderDebugRequest):
+  client.getShaderDebugProc = proc(request: VisualReplayShaderDebugRequest):
         VisualReplayFuture[VisualReplayShaderDebugInfo] =
       assert postJson != nil,
         "VisualReplayClient shader debug transport requires JSON POST"
@@ -547,5 +584,4 @@ proc createJsonVisualReplayClient*(
             outFuture.complete(shaderDebugInfoFromJson(node)),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
-    ,
-  )
+  client

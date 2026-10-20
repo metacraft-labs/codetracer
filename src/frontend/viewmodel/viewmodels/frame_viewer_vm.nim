@@ -48,6 +48,11 @@ type
       ## fetched when that load lands, the latest request winning.
     lastStoreGeid: Option[uint64]
     fetchRing: FrameFetchRing
+    imageWidth, imageHeight: int
+      ## The shown image's own size — the framebuffer scaled to the size it
+      ## was asked for (`setFrameSize`).
+    reloadShown: proc() {.closure.}
+      ## Fetch the frame shown again (at a new size): the last load's target.
 
     visualReplayAvailable*: Signal[bool]
     playerUrl*: Signal[string]
@@ -150,8 +155,15 @@ proc recordFetchLatency(vm: FrameViewerVM; startMs: float) =
 
 proc setFrame(vm: FrameViewerVM; frame: VisualReplayFrame) =
   vm.frameImageSrc.val = frame.imageSrc
-  vm.frameWidth.val = frame.width
-  vm.frameHeight.val = frame.height
+  # PIXELS ARE THE FRAMEBUFFER'S: a click on a scaled image maps to the
+  # framebuffer's coordinates, which pixel history and the shader debugger
+  # take. The image's own size is kept to know when it is too small.
+  vm.frameWidth.val = (if frame.sourceWidth > 0: frame.sourceWidth
+                       else: frame.width)
+  vm.frameHeight.val = (if frame.sourceHeight > 0: frame.sourceHeight
+                        else: frame.height)
+  vm.imageWidth = frame.width
+  vm.imageHeight = frame.height
   if frame.geid.isSome:
     vm.currentGeid.val = frame.geid
   if frame.frame.isSome:
@@ -196,6 +208,7 @@ proc loadDrawCalls*(vm: FrameViewerVM) =
       vm.selectedDrawCall.val = none(int))
 
 proc loadFrameForGeid*(vm: FrameViewerVM; geid: uint64) =
+  vm.reloadShown = proc() = vm.loadFrameForGeid(geid)
   let serial = vm.beginFrameLoad()
   let startMs = nowMs()
   vm.currentGeid.val = some(geid)
@@ -220,6 +233,7 @@ proc loadFrameByIndex*(vm: FrameViewerVM; frame: int) =
   ## pending one instead of being sent, and the latest is fetched when the
   ## in-flight load lands.
   let nextFrame = max(frame, 0)
+  vm.reloadShown = proc() = vm.loadFrameByIndex(nextFrame)
   if vm.frameInFlight:
     vm.pendingFrame = some(nextFrame)
     vm.currentFrame.val = nextFrame
@@ -260,6 +274,7 @@ proc loadFrameForDraw*(vm: FrameViewerVM; draw: int;
                        seekSource: bool = false;
                        sourceGeid: Option[uint64] = none(uint64)) =
   let nextDraw = max(draw, 0)
+  vm.reloadShown = proc() = vm.loadFrameForDraw(nextDraw)
   let serial = vm.beginFrameLoad()
   let startMs = nowMs()
   vm.selectedDrawCall.val = some(nextDraw)
@@ -285,6 +300,25 @@ proc loadFrameForDraw*(vm: FrameViewerVM; draw: int;
       vm.recordFetchLatency(startMs)
       if vm.isCurrentFrameRequest(serial):
         vm.failFrame(message))
+
+proc setFrameSize*(vm: FrameViewerVM; width, height: int) =
+  ## The size, in device pixels, the frame is shown at (Viewport-Driven-
+  ## Loading, Decided Q5 — "Frames sized"): every frame is asked for scaled
+  ## to fit it. 0 for no limit (the framebuffer as it is — the loupe's 1:1
+  ## pixels). The frame shown is fetched again only when the pane grew past
+  ## the image while the framebuffer is larger still; a smaller pane keeps
+  ## the larger image.
+  let w = max(0, width)
+  let h = max(0, height)
+  if w == vm.client.maxFrameWidth and h == vm.client.maxFrameHeight:
+    return
+  vm.client.maxFrameWidth = w
+  vm.client.maxFrameHeight = h
+  if vm.frameImageSrc.val.len == 0 or vm.reloadShown.isNil:
+    return
+  let want = fittedFrameSize(vm.frameWidth.val, vm.frameHeight.val, w, h)
+  if want.width > vm.imageWidth or want.height > vm.imageHeight:
+    vm.reloadShown()
 
 proc loadInfo*(vm: FrameViewerVM) =
   let fut = vm.client.getInfo()

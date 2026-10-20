@@ -682,6 +682,20 @@ when defined(js):
     renderVideoPlayerPanelImpl(r, vm,
       "video-player-component isonim-video-player")
 
+  proc observeDevicePixelSize(el: isonim_dom.Element;
+                              cb: proc(width, height: int)) {.importjs: """
+    (function(el, cb) {
+      if (!el) return;
+      const report = function() {
+        const ratio = window.devicePixelRatio || 1;
+        cb(Math.round(el.clientWidth * ratio), Math.round(el.clientHeight * ratio));
+      };
+      if (typeof ResizeObserver === 'function') new ResizeObserver(report).observe(el);
+      report();
+    })(#, #)""".}
+  proc parentOf(el: isonim_dom.Element): isonim_dom.Element
+      {.importjs: "#.parentElement".}
+
   proc mountIsoNimVideoPlayer*(container: isonim_dom.Element;
                                vm: VideoPlayerVM) =
     let r = WebRenderer()
@@ -708,6 +722,13 @@ when defined(js):
           ## selection — useful for the existing pixel-history workflow.
           vm.frameVm.selectPixelFromRenderedPoint(
             renderedX, renderedY, renderedWidth, renderedHeight))
+
+    # FRAMES SIZED (Viewport-Driven-Loading, Decided Q5): the stage the
+    # image is shown in, which the VM turns into the frame size it asks for.
+    let image = querySelector(panel, cstring".video-player-image")
+    if not isNilElement(image):
+      observeDevicePixelSize(parentOf(image), proc(width, height: int) =
+        vm.setStageSize(width, height))
 
     let scrub = querySelector(panel, cstring".video-player-scrub-range")
     if not isNilElement(scrub):

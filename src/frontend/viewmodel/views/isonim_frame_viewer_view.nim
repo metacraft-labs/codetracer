@@ -174,6 +174,18 @@ when defined(js):
 
   proc isNilElement(node: isonim_dom.Element): bool {.importjs: "# == null".}
 
+  proc observeDevicePixelSize(el: isonim_dom.Element;
+                              cb: proc(width, height: int)) {.importjs: """
+    (function(el, cb) {
+      if (!el) return;
+      const report = function() {
+        const ratio = window.devicePixelRatio || 1;
+        cb(Math.round(el.clientWidth * ratio), Math.round(el.clientHeight * ratio));
+      };
+      if (typeof ResizeObserver === 'function') new ResizeObserver(report).observe(el);
+      report();
+    })(#, #)""".}
+
   proc renderFrameViewerPanel*(r: WebRenderer;
                                vm: FrameViewerVM): isonim_dom.Element =
     renderFrameViewerPanelImpl(r, vm,
@@ -191,3 +203,11 @@ when defined(js):
     let frameRange = querySelector(panel, cstring".frame-viewer-frame-range")
     if not isNilElement(frameRange):
       setFrameRangeInputHandler(frameRange, vm)
+    # FRAMES SIZED (Viewport-Driven-Loading, Decided Q5): the player scales
+    # each frame to the stage the image is shown in. A hidden stage reports
+    # no size and changes nothing.
+    let stage = querySelector(panel, cstring".frame-viewer-frame-stage")
+    if not isNilElement(stage):
+      observeDevicePixelSize(stage, proc(width, height: int) =
+        if width > 0 and height > 0:
+          vm.setFrameSize(width, height))
