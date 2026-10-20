@@ -1302,35 +1302,21 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
 
 .collapsed-icon
   font-size: 14px
-  // The glyph needs its own colour, because the chip it sits on has its own
-  // background. `.collapsed-icon-zone.has-icons` paints `#3a5070`; the button
-  // declared no `color`, so it inherited — black before `#status-base`
-  // declared one (**2.56:1** on that blue), and grey-300 after, which is
-  // **2.60:1** and still under the 3:1 floor for a non-text control. The bar
-  // fix does not reach this one: inheriting a colour chosen for `#1b1b1b`
-  // onto a `#3a5070` chip is how it stayed dark either way.
+  // The glyph declares its own colour rather than inheriting one. It once sat
+  // on a fixed `#3a5070` chip and inherited black (2.56:1) and then
+  // grey-300 (2.60:1) from the bar; the chip is gone (the group now sits on
+  // the status bar's own background, see `.collapsed-icon-zone.has-icons`),
+  // so its ground is the bar's, which follows the theme.
   //
-  // `colors-ui-icon-primary-default` (grey-100, `#dddddd`) is the design
-  // system's own default icon colour and gives 6.04:1 here, and 4.72:1
-  // against the `#4a6080` this lightens to on hover — so both resting and
-  // hover states clear the threshold, which is why the hover background did
-  // not have to move. Hover is the tighter of the two and the only reason
-  // this rule is not simply grey-150: `#c8c8c8` would land at 3.83:1 once
-  // the chip lightens, i.e. legible at rest and not while being pointed at,
-  // which is the wrong way round. It clears 4.5:1 as well, which matters
-  // because these
-  // are rendered as TEXT glyphs (`text icon.icon` in
-  // `isonim_auto_hide_collapsed_icons_view.nim`), not as background images,
-  // so the stricter text threshold is the honest one to hold them to.
-  //
-  // It is spelled through the design system's grey-100 directly rather than
-  // through the icon role, because the chip (resting and hovered) is a FIXED
-  // colour in both themes and the role is not: the light theme paints from
-  // the Light palette, whose `colors-ui-icon-primary-default` is a near-black
-  // (#353430) that sits on `#3a5070` at 1.52:1. The glyph's ground decides its
-  // colour, and that ground does not change with the theme. In the dark theme
-  // the two spellings are the same #dddddd.
-  color: colors-neutral-cold-100
+  // `colors-ui-icon-primary-default` is the design system's default icon
+  // colour, and like the bar it takes each theme's mode: grey-100 (`#dddddd`)
+  // on the dark bar, and the Light mode's near-black (`#353430`) on the light
+  // bar (`#f8f6f2`). A fixed light grey would be 1.26:1 there. These are
+  // rendered as TEXT glyphs (`text icon.icon` in
+  // `isonim_auto_hide_collapsed_icons_view.nim`), not as background images, so
+  // the stricter text threshold is the one `footer-contrast-guard.spec.ts`
+  // holds them to.
+  color: colors-ui-icon-primary-default
   cursor: pointer
   padding: 1px 3px
   border-radius: 2px
