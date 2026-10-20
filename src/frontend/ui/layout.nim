@@ -2802,33 +2802,25 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let host = kdom.document.getElementById(cstring"auto-hide-standalone-host")
 
     for panelDef in standaloneAutoHidePanels:
-      # Skip if this content is already in the auto-hide state (e.g.
-      # restored from a saved layout or previously pinned by the user).
+      # Skip if this content already has a LIVE pane in the auto-hide state
+      # (registered earlier in this process, or a restored entry the user
+      # revealed before this timer fired).
+      #
+      # A restored entry with no live element is NOT skipped and NOT dropped:
+      # it is what the previous session saved about this pane — its edge, its
+      # place in the strip order, its overlay size — and
+      # `addStandaloneAutoHidePanel` below adopts it.  This used to drop it
+      # and register the pane on Bottom, on the strength of a comment saying
+      # a standalone pane "has no GL config to re-attach from"; M46 (#692)
+      # gave these four a real `standaloneComponentConfig`, and dropping the
+      # entry is what sent a pane re-pinned to Left back to Bottom (#807).
+      var restoredEntry: AutoHidePanel = nil
       if not autoHideState.isNil:
         let existing = autoHideState.findPanelByContent(panelDef.content)
         if not existing.isNil:
           if existing.standalone or not existing.liveElement.isNil:
             continue
-          # A pinned-state entry restored from disk for one of the four
-          # standalone panes, with no live element yet.  Drop it and let the
-          # registration below run instead.
-          #
-          # THE REASON IS SUPPRESSION, NOT THE CONFIG, and it used to be
-          # written the other way round ("unlike a restored GL panel there is
-          # no component config the overlay could build one from").  That
-          # stopped being true twice over: M46 (#692) gave these four a real
-          # `standaloneComponentConfig`, and M47 (#691) taught the reveal path
-          # to build a host from any re-attachable config.  What still holds is
-          # that these panes get a live element from the block below on EVERY
-          # launch, and `findPanelByContent` lets only one entry per content
-          # exist — so a restored entry left in place would win the slot and
-          # the fresh registration would never run.
-          #
-          # The entry is only ever seen when an older build persisted one:
-          # `serializeAutoHideState` skips `standalone` panels.
-          cwarn "auto_hide: replacing a restored entry for standalone pane '" &
-            $panelDef.title & "' with a fresh registration"
-          autoHideState.panels = autoHideState.panels.filterIt(it != existing)
+          restoredEntry = existing
 
       # Check if GL created a container for this component (from a saved
       # layout that still includes it). If so, find the GL content item
@@ -2861,6 +2853,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # `mountIsoNimErrors` has no owner and no disposal. Any of the five
         # sites that reset `isoNimErrorsMounted` could then remount into a
         # different node and leave the previous subtree live. One id, one node.
+        # A saved layout that holds the pane as a GoldenLayout tab is the
+        # newer statement of where it is, so a restored auto-hide entry for
+        # the same content is stale; leaving it would shadow the pin below
+        # in `findPanelByContent`.
+        if not restoredEntry.isNil:
+          cwarn "auto_hide: dropping a restored auto-hide entry for '" &
+            $panelDef.title & "': the saved layout holds it as a tab"
+          autoHideState.panels = autoHideState.panels.filterIt(it != restoredEntry)
         let component = data.ui.componentMapping[panelDef.content][0]
         if not component.isNil and not component.layoutItem.isNil:
           cdebug "auto_hide: pinning GL panel '" & $panelDef.title & "' to bottom auto-hide"
@@ -2945,6 +2945,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # it cannot be derived from the content — PROBLEMS is
         # `Content.BuildErrors` and mounts into `errorsComponent-0`.
         componentLabel = panelDef.label,
+        # The DEFAULT edge only: a restored entry keeps the edge it was saved
+        # with (#807).
         edge = AutoHideEdge.Bottom)
   , 500)  # 500ms delay lets GL finish its internal layout cycle
 
