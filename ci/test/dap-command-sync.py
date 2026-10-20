@@ -141,7 +141,6 @@ EXPECTED_RESIDUE = {
     # CodeTracer extension requests answered by the engine and driven from
     # `headless_session.nim` / the origin-mode bridge rather than from a VM.
     "ct/originMode",
-    "ct/load-request-spans",
     # `source` (CTUI-4). The engine answers it in `Handler::source` and the
     # Embed SDK's `sdk/source_provider.nim` sends it through `BackendService`,
     # but it produces no EVENT, so it has no `CtEventKind` and
