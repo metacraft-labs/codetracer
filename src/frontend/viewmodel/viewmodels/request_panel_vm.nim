@@ -94,11 +94,14 @@
 
 import std/[json, strutils]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ../viewport
+
+export viewport
 
 const NO_SELECTED_INDEX* = -1
   ## Sentinel that mirrors the legacy ``panelState.selectedIndex`` "no
@@ -115,6 +118,21 @@ type
     filterStatus*: Signal[string]
     searchText*: Signal[string]
     selectedIndex*: Signal[int]
+
+    # -- The window (Viewport-Driven-Loading V2) --
+    viewport*: Signal[Viewport]
+      ## The rows the view shows (`setViewport`).
+    viewportGate: ViewportGate
+    windowStart*: Signal[int]
+      ## The filtered row `filteredRequests[0]` is, when windowed.
+    windowTotal*: Signal[int]
+      ## How many requests match the filters, -1 when the panel is not
+      ## windowed (a live session's tail, or a view that reports no size):
+      ## `filteredRequests` is then every matching row, filtered here.
+    windowRows: Signal[seq[RequestRecord]]
+    selectedId: int
+      ## The selected request's id, so a selection survives the window
+      ## moving under it; 0 for none.
 
     # -- Derived state --
     filteredRequests*: Memo[seq[RequestRecord]]
@@ -267,6 +285,7 @@ proc clearRequests*(vm: RequestPanelVM) =
     vm.store.clearRequestSpans()
   vm.requests.val = @[]
   vm.selectedIndex.val = NO_SELECTED_INDEX
+  vm.selectedId = 0
 
 proc selectRequest*(vm: RequestPanelVM; index: int) =
   ## Refresh the selected-row reference.  ``index`` is interpreted
@@ -274,6 +293,30 @@ proc selectRequest*(vm: RequestPanelVM; index: int) =
   ## maps directly onto this signal.  ``NO_SELECTED_INDEX`` clears
   ## the selection.
   vm.selectedIndex.val = index
+  let rows = vm.filteredRequests.val
+  vm.selectedId = if index >= 0 and index < rows.len: rows[index].id else: 0
+
+proc windowed*(vm: RequestPanelVM): bool =
+  ## The engine serves the rows by window (a completed recording).
+  vm.windowTotal.val >= 0
+
+proc matchingCount*(vm: RequestPanelVM): int =
+  ## How many requests match the filters — the list's scroll range.
+  if vm.windowed: vm.windowTotal.val else: vm.filteredRequests.val.len
+
+proc recordedCount*(vm: RequestPanelVM): int =
+  ## How many requests the recording served.
+  if vm.windowed and not vm.store.isNil and
+     vm.store.requestSpans.recordedTotal.val >= 0:
+    vm.store.requestSpans.recordedTotal.val
+  else:
+    vm.requests.val.len
+
+proc setViewport*(vm: RequestPanelVM; v: Viewport) =
+  ## The rows the view shows — the ONE way a view tells this ViewModel what
+  ## it shows (Viewport-Driven-Loading V1). For a completed recording the
+  ## window of matching requests is then asked for, filtered by the engine.
+  vm.viewportGate.submit(v)
 
 proc setFilterMethod*(vm: RequestPanelVM; methodFilter: string) =
   ## Update the method filter and reset the selected-row reference —
@@ -281,12 +324,14 @@ proc setFilterMethod*(vm: RequestPanelVM; methodFilter: string) =
   ## list whose index may no longer be valid.
   vm.filterMethod.val = methodFilter
   vm.selectedIndex.val = NO_SELECTED_INDEX
+  vm.selectedId = 0
 
 proc setFilterStatus*(vm: RequestPanelVM; statusFilter: string) =
   ## Update the status-bucket filter; same selection-reset reasoning
   ## as ``setFilterMethod``.
   vm.filterStatus.val = statusFilter
   vm.selectedIndex.val = NO_SELECTED_INDEX
+  vm.selectedId = 0
 
 proc setDetailTab*(vm: RequestPanelVM; tab: string) =
   ## Switch the active tab in the request detail panel.
@@ -297,6 +342,7 @@ proc setSearchText*(vm: RequestPanelVM; searchText: string) =
   ## ``setFilterMethod``.
   vm.searchText.val = searchText
   vm.selectedIndex.val = NO_SELECTED_INDEX
+  vm.selectedId = 0
 
 proc jumpToHandler*(vm: RequestPanelVM; index: int) =
   ## Activate the filtered row at ``index`` — the double-click action.
@@ -351,7 +397,19 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
     let selectedIndex = createSignal(NO_SELECTED_INDEX)
     let detailTab = createSignal("headers")
 
+    let viewport = createSignal(Viewport())
+    let windowStart = createSignal(0)
+    let windowTotal = createSignal(-1)
+    let windowRows = createSignal(newSeq[RequestRecord]())
+    let viewportGate = newViewportGate(
+      proc(): ViewportScheduler =
+        if store.isNil: nil else: store.viewportScheduler,
+      proc(v: Viewport) = viewport.val = v)
+
     let filteredRequests = createMemo[seq[RequestRecord]] proc(): seq[RequestRecord] =
+      if windowTotal.val >= 0:
+        # The engine filtered and windowed them (a completed recording).
+        return windowRows.val
       let all = requests.val
       let m = filterMethod.val
       let s = filterStatus.val
@@ -380,15 +438,67 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
       createEffect proc() =
         requests.val = store.requestSpans.requests.val
 
-    RequestPanelVM(
+    let vm = RequestPanelVM(
       store: store,
       requests: requests,
       filterMethod: filterMethod,
       filterStatus: filterStatus,
       searchText: searchText,
       selectedIndex: selectedIndex,
+      viewport: viewport,
+      viewportGate: viewportGate,
+      windowStart: windowStart,
+      windowTotal: windowTotal,
+      windowRows: windowRows,
       filteredRequests: filteredRequests,
       detailTab: detailTab,
       openExternalTrace: nil,
       disposeProc: dispose,
     )
+
+    if not store.isNil and not store.backend.isNil:
+      # THE WINDOW OF A COMPLETED RECORDING (Viewport-Driven-Loading V2;
+      # issue 2026-10-20 "the request panel loads a whole snapshot and
+      # filters it on the client"): the rows the view shows plus the 20/10
+      # buffers, filtered by the engine (`ct/load-request-spans`), once per
+      # distinct window and filter. A live session keeps its tail
+      # (`requestRequestSpansSince`), which the panel filters itself; an
+      # unmeasured view asks nothing.
+      var lastKey = ""
+      createEffect proc() =
+        let w = listWindow(viewport.val)
+        let m = filterMethod.val
+        let st = filterStatus.val
+        let q = searchText.val
+        let live = store.session.val.debugSessionMode.historicalModeTarget()
+        if w.count <= 0 or live:
+          return
+        let args = %*{"start": w.start, "limit": w.count,
+                      "filters": {"method": m, "statusClass": st,
+                                  "urlContains": q}}
+        let key = $args
+        if key == lastKey:
+          return
+        lastKey = key
+        onComplete(store.backend.send("ct/load-request-spans", args),
+          proc(response: JsonNode) =
+            if not responseSucceeded(response) or key != lastKey:
+              return
+            let body = responseBody(response)
+            var rows: seq[RequestRecord] = @[]
+            for item in body{"requests"}.getElems:
+              rows.add parseRequestRecord(item)
+            batch(proc() =
+              windowStart.val = w.start
+              windowTotal.val = body{"total"}.getInt(0)
+              windowRows.val = rows
+              # The selection follows its request, wherever the window put it.
+              var at = NO_SELECTED_INDEX
+              if vm.selectedId != 0:
+                for i, r in rows:
+                  if r.id == vm.selectedId:
+                    at = i
+              selectedIndex.val = at),
+          proc(message: string) = discard)
+
+    vm

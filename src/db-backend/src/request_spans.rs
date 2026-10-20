@@ -198,6 +198,11 @@ pub struct LoadRequestSpansArguments {
     /// Maximum number of records to return. Omitted or `0` means "no limit".
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Matching records to skip before the page starts: a pane's window by
+    /// row (Viewport-Driven-Loading V2), where `fromSpanId` is a cursor for
+    /// walking pages. Omitted means none. Applied after `fromSpanId`.
+    #[serde(default)]
+    pub start: Option<usize>,
     /// Optional method / status-class / URL-substring filters.
     #[serde(default)]
     pub filters: Option<RequestSpanFilters>,
@@ -294,7 +299,8 @@ impl RequestSpans {
         let limit = args.limit.unwrap_or(0);
         let mut page: Vec<RequestRecord> = Vec::new();
         let mut next_span_id: Option<u64> = None;
-        for record in matching.into_iter().filter(|r| r.id >= from) {
+        let skip = args.start.unwrap_or(0);
+        for record in matching.into_iter().filter(|r| r.id >= from).skip(skip) {
             if limit > 0 && page.len() >= limit {
                 // The first record we did NOT return is where the next page
                 // starts, so a caller that follows the cursor never skips or
@@ -1180,11 +1186,34 @@ mod tests {
                 from_span_id: Some(from),
                 limit: Some(1),
                 filters: Some(filters.clone()),
+                start: None,
             });
             walked.extend(page.requests.iter().map(|r| r.id));
             cursor = page.next_span_id;
         }
         assert_eq!(walked, full.requests.iter().map(|r| r.id).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_window_by_row_skips_the_matching_rows_before_it() {
+        let spans = fixture();
+        let all = spans.page(&LoadRequestSpansArguments::default());
+        let window = spans.page(&LoadRequestSpansArguments {
+            start: Some(2),
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(window.total, all.total);
+        assert_eq!(
+            window.requests.iter().map(|r| r.id).collect::<Vec<_>>(),
+            all.requests[2..4].iter().map(|r| r.id).collect::<Vec<_>>()
+        );
+        let past = spans.page(&LoadRequestSpansArguments {
+            start: Some(99),
+            ..Default::default()
+        });
+        assert!(past.requests.is_empty());
+        assert_eq!(past.total, all.total);
     }
 
     #[test]

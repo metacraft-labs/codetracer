@@ -300,6 +300,10 @@ type
     snapshotAnswered*: bool
       ## The first poll (the snapshot) has been answered. A completed
       ## recording is not polled again (`requestRequestSpansSince`).
+    recordedTotal*: Signal[int]
+      ## How many requests a COMPLETED recording served, -1 until known. Its
+      ## rows are not tailed: the panel asks for the window it shows
+      ## (`RequestPanelVM.setViewport`, `ct/load-request-spans`).
 
   DegradedStateStore* = object
     ## The degraded-state catalogue's four axes, as signals
@@ -725,6 +729,7 @@ proc clearRequestSpans*(store: ReplayDataStore) =
   store.requestSpans.requests.val = @[]
   store.requestSpans.cursor.val = 0'i64
   store.requestSpans.snapshotAnswered = false
+  store.requestSpans.recordedTotal.val = -1
   store.requestSpans.source.val = ""
   store.requestSpans.loadingState.val = lsIdle
 
@@ -845,6 +850,23 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   # polling (UI-Data-Loading-Guidelines anti-pattern 3).
   if store.requestSpans.snapshotAnswered and
       not store.session.val.debugSessionMode.historicalModeTarget():
+    return
+  # A COMPLETED RECORDING IS READ BY WINDOW (Viewport-Driven-Loading V2): its
+  # requests are not loaded whole into a snapshot. One `limit: 1` page says
+  # how many there are; the panel asks for the rows it shows.
+  if not store.session.val.debugSessionMode.historicalModeTarget():
+    store.requestTracker.markPending(key, $cursor)
+    let s = store
+    async_compat.onComplete(
+      store.backend.send("ct/load-request-spans", %*{"limit": 1}),
+      onSuccess = proc(response: JsonNode) =
+        s.requestTracker.markComplete(key, $cursor)
+        s.requestSpans.snapshotAnswered = true
+        if responseSucceeded(response):
+          s.requestSpans.recordedTotal.val =
+            responseBody(response){"total"}.getInt(0),
+      onError = proc(msg: string) =
+        s.requestTracker.markComplete(key, $cursor))
     return
 
   store.requestTracker.markPending(key, $cursor)
@@ -1020,6 +1042,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         cursor: createSignal(0'i64),
         source: createSignal(""),
         loadingState: createSignal(lsIdle),
+        recordedTotal: createSignal(-1),
       ),
 
       # -- degraded state (Page-Descriptions.md §14) --

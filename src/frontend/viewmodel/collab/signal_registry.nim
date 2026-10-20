@@ -1062,7 +1062,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # Each viewer's window is its own; a mirror reports its own through the
   # `viewport` action (`sync/action_relay.applyViewport`).
   for vm in ["CalltraceVM", "EventLogVM", "SearchResultsVM", "StateVM",
-             "StepListVM", "TraceLogVM"]:
+             "StepListVM", "TraceLogVM", "RequestPanelVM"]:
     entries.addEntry(vm, "viewport", vscRendererLocal,
       "The size and scroll position of this viewer's pane.")
   entries.addEntry("VCSVM", "historyViewport", vscRendererLocal,
@@ -1071,6 +1071,11 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("SearchResultsVM", ["visibleResults"])
   entries.addEntry("StateVM", "loadingMore", vscRendererLocal,
     "Which rows' next elements this viewer is fetching: request bookkeeping.")
+  entries.addMany("RequestPanelVM", ["windowStart", "windowTotal"],
+    vscRendererLocal,
+    "The window of requests this viewer's pane holds and the engine's count.")
+  entries.addEntry("RequestSpansStore", "recordedTotal", vscBackendAuthoritative,
+    "How many requests the recording served.")
   entries.addEntry("ReplayDataStore", "symbols", vscBackendAuthoritative,
     "The recording's functions (`ct/load-symbols`) are trace data.")
   entries.addEntry("ReplayDataStore", "sessionGeneration",

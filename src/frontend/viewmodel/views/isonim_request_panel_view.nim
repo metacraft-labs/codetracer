@@ -58,6 +58,7 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import std/[jsffi, math]
 
 import ../store/types
 import ../viewmodels/request_panel_vm
@@ -124,7 +125,9 @@ proc countText*(vm: RequestPanelVM): string =
   ## Both counts are shown: with a filter active, "how many of how many"
   ## is the question the badge answers, and a live session makes the
   ## unfiltered total move on its own.
-  countText(vm.filteredRequests.val.len, vm.requests.val.len)
+  ## A completed recording's rows are read by window, so the counts are the
+  ## engine's (`matchingCount`, `recordedCount`), not the rows held.
+  countText(vm.matchingCount, vm.recordedCount)
 
 proc statusText*(req: RequestRecord): string =
   ## Status-column text.  An in-flight row has no status code yet (the open
@@ -864,6 +867,21 @@ when defined(js):
 
     panel
 
+  proc requestTableBody(panel: JsObject): JsObject {.importjs:
+    "(#.querySelector('.request-table-body') || null)".}
+  proc requestRowHeight(body: JsObject): float {.importjs:
+    "(function(b){const r=b.querySelector('.request-row');return r?r.getBoundingClientRect().height:0;})(#)".}
+  proc requestClientHeight(body: JsObject): float {.importjs: "#.clientHeight".}
+  proc requestScrollTop(body: JsObject): float {.importjs: "#.scrollTop".}
+  proc setRequestPadding(body: JsObject; top, bottom: cstring) {.importjs:
+    "(function(b,t,o){b.style.paddingTop=t;b.style.paddingBottom=o;})(#,#,#)".}
+  proc onRequestRowsScrollOrResize(body: JsObject; cb: proc()) {.importjs: """
+    (function(b, cb) {
+      b.addEventListener('scroll', function() { cb(); }, {passive: true});
+      if (typeof ResizeObserver === 'function') new ResizeObserver(function() { cb(); }).observe(b);
+      cb();
+    })(#, #)""".}
+
   proc mountIsoNimRequestPanel*(container: isonim_dom.Element;
                                  vm: RequestPanelVM) =
     ## Mount the IsoNim Request panel as a child of ``container``.
@@ -873,3 +891,26 @@ when defined(js):
     let panel = renderRequestPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))
+    # THE ROWS IT SHOWS (Viewport-Driven-Loading V2): the table body's size
+    # and scroll, in rows; the held window is padded to every matching row.
+    let body = requestTableBody(cast[JsObject](panel))
+    if not body.isNil:
+      proc rowHeight(): float =
+        let h = requestRowHeight(body)
+        if h > 0.0: h else: 24.0
+      onRequestRowsScrollOrResize(body, proc() =
+        let h = rowHeight()
+        let height = requestClientHeight(body)
+        vm.setViewport(Viewport(
+          rows: (if height <= 0.0: 0 else: int(ceil(height / h))),
+          firstRow: int(floor(requestScrollTop(body) / h)))))
+      createEffect proc() =
+        let held = vm.filteredRequests.val.len
+        let start = vm.windowStart.val
+        let total = vm.matchingCount
+        let h = rowHeight()
+        if vm.windowed:
+          setRequestPadding(body, cstring($(float(start) * h) & "px"),
+            cstring($(float(max(0, total - start - held)) * h) & "px"))
+        else:
+          setRequestPadding(body, cstring"", cstring"")

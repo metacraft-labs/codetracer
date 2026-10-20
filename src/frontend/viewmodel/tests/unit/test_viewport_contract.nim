@@ -365,14 +365,18 @@ suite "the current position's event index is asked once per tick":
 
 suite "the request-span tail":
 
-  test "a completed recording is not polled after its snapshot":
+  test "a completed recording is counted once and never tailed":
+    # Its rows are the panel's window (`RequestPanelVM.setViewport`); the
+    # poll only learns how many requests there are, once.
     let mock = newMockBackendService(autoRespond = true)
     let store = createReplayDataStore(mock.toBackendService())
     store.requestRequestSpansSince()
     drain()
     store.requestRequestSpansSince()
     store.requestRequestSpansSince()
-    check mock.sent("ct/load-request-spans-since").len == 1
+    check mock.sent("ct/load-request-spans-since").len == 0
+    check mock.sent("ct/load-request-spans").len == 1
+    check mock.sent("ct/load-request-spans")[0]["limit"].getInt == 1
 
   test "a live session keeps polling":
     let mock = newMockBackendService(autoRespond = true)
