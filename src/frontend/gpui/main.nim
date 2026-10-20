@@ -3489,6 +3489,84 @@ proc drawFooter(r: GpuiRenderer) =
       text(r, c, cert)
       gTopEls.add c
 
+proc wrapWords(text: string; maxChars: int): seq[string] =
+  ## `text` broken at spaces into lines of at most `maxChars` characters, the
+  ## way a desktop tooltip wraps at its maximum width. A word longer than
+  ## `maxChars` keeps a line of its own, uncut (cutting could split a UTF-8
+  ## sequence). Joining the lines with one space gives back the words.
+  var line = ""
+  for word in text.splitWhitespace:
+    if line.len == 0:
+      line = word
+    elif line.len + 1 + word.len <= maxChars:
+      line.add ' '
+      line.add word
+    else:
+      result.add line
+      line = word
+  if line.len > 0:
+    result.add line
+
+proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
+  ## EMT-D14: the open menu's highlighted item, when it is disabled — its
+  ## reason, and where the hover label shows it: beside the item's row, to
+  ## the right of its popover, or to the left where the window ends first (a
+  ## desktop menu's tooltip on a greyed-out item). Where neither side holds
+  ## it on one line it wraps, into `lines`, on the roomier side, so it never
+  ## covers the menu it explains; only a window too narrow for even that
+  ## puts it over the popover, wrapped to the window. `lines` has one entry
+  ## per drawn line. `("", @[], _)` when the highlighted item is enabled, a
+  ## folder, or not drawn.
+  const MinSidePx = 20 * TabCharPx + 2 * TabPadPx
+    ## The narrowest side a wrapped reason is put on: about three words a
+    ## line. Narrower than that, it reads better over the popover.
+  if gMenu.isNil or not gMenu.isOpen:
+    return
+  let it = gMenu.highlightedItem()
+  if refusalOf(it).len == 0:
+    return
+  let text = if it.reason.len > 0: it.reason else: MenuUnavailableReason
+  var lv: MenuLevelView
+  for l in gMenu.openLevels():
+    if l.folderPath == gMenu.path: lv = l
+  for p in gpuiMenuPopovers(gMenu, gTopLayout, pendingViewportWidth,
+                            pendingViewportHeight):
+    if p.folderPath != gMenu.path:
+      continue
+    for row in p.rows:
+      if row.item < 0 or lv.items[row.item].index != gMenu.highlight:
+        continue
+      let winW = pendingViewportWidth
+      let oneLine = textPx(text) + 2 * TabPadPx
+      let rightX = p.rect.x + p.rect.w + 4
+      let rightRoom = winW - rightX
+      let leftRoom = p.rect.x - 4
+      # The side: the right where the one line fits, else the left, else
+      # wrapped on the roomier of the two; over the popover only when both
+      # are too narrow even for that.
+      type Side = enum sRight, sLeft, sOver
+      let (side, room) =
+        if oneLine <= rightRoom: (sRight, rightRoom)
+        elif oneLine <= leftRoom: (sLeft, leftRoom)
+        elif rightRoom >= MinSidePx and rightRoom >= leftRoom:
+          (sRight, rightRoom)
+        elif leftRoom >= MinSidePx: (sLeft, leftRoom)
+        else: (sOver, winW)
+      let lines = wrapWords(text, max(1, (room - 2 * TabPadPx) div TabCharPx))
+      var widest = 0
+      for l in lines:
+        widest = max(widest, textPx(l))
+      let w = min(widest + 2 * TabPadPx, max(1, winW))
+      let wanted = case side
+        of sRight: rightX
+        of sLeft: leftRoom - w # flush against the popover's left edge
+        of sOver: 0
+      let x = max(0, min(wanted, winW - w))
+      let h = lines.len * HoverLabelPx
+      let y = max(0, min(row.rect.y + (row.rect.h - HoverLabelPx) div 2,
+                         pendingViewportHeight - h))
+      return (text, lines, PxRect(x: x, y: y, w: w, h: h))
+
 proc drawTopBar(r: GpuiRenderer) =
   ## The band and everything over it, from the shared ViewModels.
   if gRoot.isNil or gMenu.isNil:
@@ -3876,11 +3954,19 @@ proc drawTopBar(r: GpuiRenderer) =
     for (k, v) in tabStyle(true): r.setStyle(ub, k, v)
     r.appendChild(ub, r.createTextNode("Unpin"))
     gTopEls.add ub
-  # THE HOVER LABEL: a control's tooltip and key, or an auto-hide label's
-  # pane, beside the pointer's target.
+  # THE HOVER LABEL: a disabled menu item's reason, a control's tooltip and
+  # key, or an auto-hide label's pane, beside the pointer's target.
   var hoverText = ""
   var hoverAt = PxRect()
-  if gHoverControl >= 0:
+  var hoverLines: seq[string] = @[]
+    ## Set only by a wrapped reason: one entry per line drawn.
+  let refusal = menuRefusalLabel()
+  if refusal.text.len > 0:
+    # EMT-D14: the highlighted menu item is disabled, by the keyboard or the
+    # pointer — the open menu lies over the band, so its reason comes first.
+    (hoverText, hoverAt) = (refusal.text, refusal.at)
+    hoverLines = refusal.lines
+  elif gHoverControl >= 0:
     let sg = gTopLayout.segOf(gtControl, gHoverControl)
     hoverText = controlTooltip(gHoverControl,
                                gMenu.shortcutFor(
@@ -3907,7 +3993,20 @@ proc drawTopBar(r: GpuiRenderer) =
     r.setStyle(hb, "padding-left", $TabPadPx & "px")
     r.setStyle(hb, "white-space", "nowrap")
     for (k, v) in paneOutlineStyle(true): r.setStyle(hb, k, v)
-    r.appendChild(hb, r.createTextNode(hoverText))
+    if hoverLines.len > 1:
+      # A wrapped reason: one row per line, stacked.
+      r.setStyle(hb, "flex-direction", "column")
+      r.setStyle(hb, "items", "start")
+      for l in hoverLines:
+        let lb = r.createElement("div")
+        r.setAttribute(lb, "data-ct-hover-label-line", l)
+        r.setStyle(lb, "height", $HoverLabelPx & "px")
+        r.setStyle(lb, "items", "center")
+        r.setStyle(lb, "white-space", "nowrap")
+        r.appendChild(lb, r.createTextNode(l))
+        r.appendChild(hb, lb)
+    else:
+      r.appendChild(hb, r.createTextNode(hoverText))
     gTopEls.add hb
   for e in gTopEls:
     # PLAT-69 (C2): EVERY PART AND POPOVER IS `no-drag`, so a press on one
@@ -5071,6 +5170,10 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
           return true
         if refusalOf(chosen).len > 0:
           traceGesture("menu refused: " & refusalOf(chosen))
+          # The menu stays open on the refused row, highlighted, so the
+          # redraw shows its reason beside it (EMT-D14) — also for a press
+          # no pointer motion led to.
+          gMenu.hoverPath(path)
       drawTopBar(r)
       return true
     if not band.contains(x, y):
