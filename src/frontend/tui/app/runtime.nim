@@ -404,6 +404,14 @@ type
       ## answered by overwriting it on exit would destroy a user's arrangement
       ## because they opened an older binary once. See
       ## `app/layout/persistence.LayoutPersistIntent`.
+    hostedRows*: Table[PaneKind, int]
+      ## HSF-E1: THE PANE SERVER'S PANES, each sized by the editor window it
+      ## is shown in (Editor-Hosted-Front-Ends §E5). Empty in the terminal.
+      ## When any pane is hosted, a pane's content rows are its window's
+      ## (`paneBodyRows`, `sourcePaneRows`) and not a rectangle of this
+      ## runtime's own screen — so every viewport the session sets from them
+      ## follows the editor's windows, and a pane the editor does not show
+      ## has none.
 
 const
   QuitDetail* = "quit"
@@ -4488,6 +4496,8 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
   ## below it): the rectangle `shell.paintPane` hands its painter, less the
   ## divider row a pane with a neighbour below gives up (`shell.paneFrame`).
   ## Zero when the pane is not on the screen.
+  if rt.hostedRows.len > 0:
+    return rt.hostedRows.getOrDefault(pane)
   let model = rt.app.shellModel(rt.width, rt.height)
   let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
                else: model.layout
@@ -4513,6 +4523,8 @@ proc sourcePaneRows*(rt: TuiRuntime): int =
   ##
   ## Zero when no profile gives the editor a rectangle, which the caller must
   ## clamp — `setViewport(0)` would hold no lines at all.
+  if rt.hostedRows.len > 0:
+    return rt.hostedRows.getOrDefault(paneEditor)
   let model = rt.app.shellModel(rt.width, rt.height)
   let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
                else: model.layout
@@ -4550,3 +4562,208 @@ proc retryOrigin*(rt: TuiRuntime; line: string): RuntimeOutcome =
   else:
     rt.performAction(kaValueOrigin, result)
   result.repaint = true
+
+# ---------------------------------------------------------------------------
+# HSF-E1: a pane hosted by an editor (Editor-Hosted-Front-Ends §E5, §E6)
+# ---------------------------------------------------------------------------
+#
+# The pane server shows each pane in an editor window of the editor's size.
+# A pane's content is the terminal's own painting of that pane MAXIMIZED at
+# that size (`z`'s one-pane layout), less the header, the pane's tab strip and
+# the status row — the window's own frame names the pane. So the editor gets
+# exactly the rows the terminal would draw at that size, from the same
+# painters, and a click is read against the same rectangle the rows were
+# painted into.
+
+type
+  PaneOpArgs* = object
+    ## The arguments of a pane operation (`runPaneOperation`): whichever of
+    ## them the operation names.
+    index*: int64
+    tick*: uint64
+    path*: string
+    line*: int
+    text*: string
+
+  PaneHotspot* = object
+    ## A cell range of a hosted pane's row that does something when clicked
+    ## (§E6): `[startCol, endCol)` in cells, the pane operation and its
+    ## arguments.
+    startCol*, endCol*: int
+    operation*: string
+    args*: PaneOpArgs
+
+const
+  PaneOperations* = [
+    ("calltrace.go-to-call", "Go to this call"),
+    ("calltrace.toggle-call", "Expand or collapse this call"),
+    ("event-log.jump", "Go to this event"),
+    ("variables.toggle-expand", "Expand or collapse this value"),
+    ("variables.value-history", "Show this value's history"),
+    ("variables.value-origin", "Show this value's origin"),
+    ("variables.load-more", "Load more members"),
+    ("history.seek-to-tick", "Go to this moment")]
+    ## The operations a hosted pane's rows offer: what a click on the same
+    ## cells of the terminal's pane does (`routeMouseReport`,
+    ## `routePaneClick`), named so an editor can bind them.
+
+proc hostedArea(height, width: int): CellArea =
+  ## The rectangle a hosted pane's painter is handed: its heading row (row 0,
+  ## which the terminal's tab strip covers and the editor does not show) and
+  ## the `height` content rows under it.
+  CellArea(col: 0, row: 0, width: width, height: height + 1)
+
+proc hostedPaneRows*(rt: TuiRuntime; pane: PaneKind;
+                     width, height: int): seq[StyledRow] =
+  ## The `height` content rows of `pane` at `width` cells: the terminal's own
+  ## screen with that pane maximized, without the header, the pane's strip
+  ## and the status row.
+  if width <= 0 or height <= 0:
+    return @[]
+  let savedMaximize = rt.maximize
+  let savedWidth = rt.width
+  let savedHeight = rt.height
+  rt.maximize = MaximizeState(active: true, pane: pane)
+  rt.width = width
+  rt.height = height + ChromeRows + 1
+  try:
+    let screen = rt.shellScreenOf()
+    for r in HeaderRows + 1 .. HeaderRows + height:
+      result.add (if r < screen.styledRows.len: screen.styledRows[r] else: @[])
+  finally:
+    rt.maximize = savedMaximize
+    rt.width = savedWidth
+    rt.height = savedHeight
+
+proc addRun(spots: var seq[PaneHotspot]; col: int; operation: string;
+            args: PaneOpArgs) =
+  ## Extend the hotspot ending at `col` when it is the same operation on the
+  ## same target, else start one.
+  if spots.len > 0 and spots[^1].endCol == col and
+     spots[^1].operation == operation and spots[^1].args == args:
+    spots[^1].endCol = col + 1
+  else:
+    spots.add PaneHotspot(startCol: col, endCol: col + 1,
+                          operation: operation, args: args)
+
+proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
+                     width, height: int): seq[seq[PaneHotspot]] =
+  ## What a click on each cell of `pane`'s `height` content rows does, as
+  ## hotspots per row — read off the same hit tests the terminal's mouse
+  ## uses, against the rectangle `hostedPaneRows` painted.
+  result = newSeq[seq[PaneHotspot]](max(0, height))
+  if width <= 0 or height <= 0:
+    return
+  let area = hostedArea(height, width)
+  case pane
+  of paneCalltrace:
+    if rt.app.callTrace.isEmpty:
+      return
+    for r in 0 ..< height:
+      for c in 0 ..< width:
+        let hit = rt.app.callTrace.callTraceHitAt(area, r + 1, c)
+        case hit.kind
+        of cthRow:
+          result[r].addRun(c, "calltrace.go-to-call", PaneOpArgs(index: hit.index))
+        of cthToggle:
+          result[r].addRun(c, "calltrace.toggle-call", PaneOpArgs(index: hit.index))
+        else: discard
+  of paneEventLog:
+    if not rt.app.eventLog.hasContent:
+      return
+    for r in 0 ..< height:
+      let (ok, row, _) = eventRowAt(rt.app.eventLog, area, r + 1)
+      if ok:
+        let ev = row.event
+        result[r].add PaneHotspot(startCol: 0, endCol: width,
+          operation: "event-log.jump",
+          args: PaneOpArgs(index: int64(ev.index), tick: ev.tick,
+                           path: ev.file, line: ev.line, text: ev.content))
+  of paneState:
+    if rt.app.variables.isEmpty:
+      return
+    var g = newStyledGrid(width, height + 1)
+    let screen = paintVariables(g, area, rt.app.variables)
+    for r in 0 ..< height:
+      let (anyRow, prow) = screen.rowAtScreenRow(r + 1)
+      if not anyRow:
+        continue
+      case prow.kind
+      of vrkHistory:
+        result[r].add PaneHotspot(startCol: 0, endCol: width,
+          operation: "history.seek-to-tick", args: PaneOpArgs(tick: prow.ticks))
+      of vrkMore:
+        result[r].add PaneHotspot(startCol: 0, endCol: width,
+          operation: "variables.load-more", args: PaneOpArgs(path: prow.node.path))
+      of vrkVariable:
+        for c in 0 ..< width:
+          case screen.controlAt(rt.app.variables, r + 1, c)
+          of vcHistory:
+            result[r].addRun(c, "variables.value-history",
+                             PaneOpArgs(path: prow.node.path))
+          of vcOrigin:
+            result[r].addRun(c, "variables.value-origin",
+                             PaneOpArgs(path: prow.node.path))
+          of vcNone:
+            if prow.expandable:
+              result[r].addRun(c, "variables.toggle-expand",
+                               PaneOpArgs(path: prow.node.path))
+          else: discard
+      else: discard
+  else:
+    discard
+
+proc runPaneOperation*(rt: TuiRuntime; operation: string; args: PaneOpArgs;
+                       outcome: var RuntimeOutcome): bool =
+  ## A hosted pane's operation (`PaneOperations`), as the outcome the same
+  ## click on the terminal's pane produces; the host applies it as it applies
+  ## a click's (`tui_session.applyOutcome`). False for an unknown operation.
+  outcome.repaint = true
+  case operation
+  of "calltrace.go-to-call":
+    outcome.jumpsToCall = true
+    outcome.callIndex = args.index
+  of "calltrace.toggle-call":
+    outcome.togglesCall = true
+    outcome.callIndex = args.index
+  of "event-log.jump":
+    outcome.requestClick(PaneClickRequest(kind: pcEventJump, index: args.index,
+                                          tick: args.tick, path: args.path,
+                                          line: args.line, text: args.text))
+  of "variables.toggle-expand":
+    discard rt.app.variables.toggleNode(args.path)
+  of "variables.value-history":
+    outcome.requestClick(PaneClickRequest(kind: pcValueHistory, path: args.path))
+  of "variables.value-origin":
+    outcome.requestClick(PaneClickRequest(kind: pcValueOrigin, path: args.path))
+  of "variables.load-more":
+    discard rt.app.variables.expandMore(args.path)
+  of "history.seek-to-tick":
+    outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: args.tick))
+  else:
+    outcome.repaint = false
+    return false
+  true
+
+proc runNamedOperation*(rt: TuiRuntime; operation, argument: string;
+                        nowMs: int64): RuntimeOutcome =
+  ## A catalogued operation (`operation_catalogue`) by name — what a key bound
+  ## to it runs, through the same dispatch (`runOperation`).
+  result = RuntimeOutcome(action: kaNone)
+  rt.runOperation(EditingResolution(kind: erOperation, operation: operation,
+                                    argument: argument), nowMs, result)
+
+proc focusHostedPane*(rt: TuiRuntime; pane: PaneKind): bool =
+  ## Give `pane` the keyboard focus, as a click in it does: the operations
+  ## that act on the focused pane then act on it.
+  rt.rebuildFocus()
+  rt.focus.focusPaneKind(pane)
+
+proc paneShortcutReference*(rt: TuiRuntime; pane: PaneKind): seq[ReferenceEntry] =
+  ## Every binding live while `pane` has the focus (the router's shortcut
+  ## reference at that scope path): the bindings an editor installs in the
+  ## pane's buffer (§E6). The focus is put back afterwards.
+  let saved = rt.focus
+  discard rt.focusHostedPane(pane)
+  result = rt.router.shortcutReference(rt.sessionFacts, rt.scopePath, rt.navMode)
+  rt.focus = saved

@@ -80,6 +80,7 @@ import ./host/file_worker
 import ./host/key_journal
 import ./host/layout_store
 import ./host/native_host
+import ./host/pane_server
 from ../viewmodel/host/find_in_files import running   # PLAT-57
 import ./host/terminal_driver
 import ./host/terminal_probe
@@ -1367,6 +1368,10 @@ proc run(args: seq[string]): int =
       ExitUsage
   of tckCapabilities:
     reportCapabilities(command.flags)
+  of tckPaneServer:
+    # HSF-E1: an editor's pane server. Its stdio is the protocol, so a
+    # refusal is written to stderr like every other diagnostic here.
+    runPaneServer()
 
 when isMainModule:
   # The ONLY `quit` in the entrypoint, and it is reached on every path. An

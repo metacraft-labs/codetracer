@@ -101,6 +101,10 @@ type
       ## session would — the start-up query round included — and print what
       ## was decided and why, the key protocol among it
       ## (Base-Keymaps-And-Layer-Stack.md §7.2), then exit.
+    tckPaneServer
+      ## HSF-E1: `--pane-server`. Serve an editor that hosts CodeTracer's
+      ## panes over stdio (`host/pane_server.nim`, Editor-Hosted-Front-Ends
+      ## §E1). Takes no trace: the editor opens sessions over the protocol.
     tckUsageError
       ## The arguments do not name a command. Carries the message a user reads.
 
@@ -348,6 +352,9 @@ options:
                      panes reflow while a divider is dragged (default on);
                      off draws a guide and reflows on release
   --headless         render one screen as plain text and exit — for CI
+  --pane-server      serve CodeTracer's panes to an editor over stdio
+                     (JSON-RPC with LSP framing); started by the Neovim and
+                     Emacs plugins
 
 The capability flags always beat the environment probe. With none of them, the
 colour depth comes from COLORTERM / TERM / TERM_PROGRAM, the border set from
@@ -442,6 +449,18 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
     # gets, for the same reason: a debugger front-end with no trace has
     # nothing to show.
     return TuiCommand(kind: tckHelp)
+
+  # HSF-E1: `--pane-server` is the whole command line. The editor that
+  # started it opens recordings over the protocol, and a terminal option
+  # (a theme, a size, a trace) would be one it never reads.
+  for i in first .. high(args):
+    if args[i] == "--pane-server":
+      if high(args) - first > 0:
+        return TuiCommand(
+          kind: tckUsageError,
+          message: "'--pane-server' takes no other argument; the editor " &
+                   "opens recordings over the protocol")
+      return TuiCommand(kind: tckPaneServer)
 
   var tracePath = ""
   var flags = initCapabilityFlags()
