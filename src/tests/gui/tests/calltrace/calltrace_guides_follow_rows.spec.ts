@@ -34,6 +34,13 @@ import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 
+// Recording, then three measured layout phases (default, zoomed in, zoomed
+// out), each read after two animation frames and retried while the view
+// re-measures. That is about 80 s on an idle-ish host and has run past the
+// 90 s default on a loaded one, so this file takes the 180 s the other
+// multi-phase specs take.
+test.setTimeout(180_000);
+
 interface GuideFit {
   rows: number;
   connectors: number;
