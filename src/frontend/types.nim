@@ -1127,9 +1127,6 @@ type
     forceCollapse*: bool
     depthStart*: int
     coordinates*: seq[(float, float, float)]
-    startPositionX*: float
-    startPositionY*: float
-    scrollLeftOffset*: float
     callValuePosition*: JsAssoc[cstring, float]
     width*: cstring
     resizeObserver*: ResizeObserver

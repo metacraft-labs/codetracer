@@ -113,13 +113,16 @@ type
     backendSearchResults*: Signal[seq[tuple[name: string, rrTicks: int, key: string]]]
 
     # -- Measured layout --
-    # Actual rendered row height in CSS pixels, measured from the DOM after
-    # the first batch of rows renders and updated on every zoom/resize.
+    # The rows' measured ADVANCE (top to top) in CSS pixels, measured from
+    # the DOM after rows render and on every zoom/resize. Not the row box:
+    # the two differ on the desktop (~25.28 vs 25 px), and only the advance
+    # places the n-th row.
     # Defaults to 24.0 (the legacy CALL_HEIGHT_PX constant) until measured.
     # Used by the view to compute the virtual-scroll container height
     # (totalCallsCount * rowHeightPx) and the translateY offset
     # (startLineIndex * rowHeightPx) so the loaded window is positioned
-    # correctly regardless of font-size / em scaling.
+    # correctly regardless of font-size / em scaling, and by the guide
+    # lines, which are laid out one advance per row.
     rowHeightPx*: Signal[float]
 
     # -- The call-stack fallback (PLAT-47) --
@@ -516,12 +519,24 @@ proc setRawIgnorePatterns*(vm: CalltraceVM; patterns: string) =
   ## Triggers the auto-load effect if the value changes.
   vm.rawIgnorePatterns.val = patterns
 
+const RowHeightEpsilonPx* = 0.01
+  ## Below this, two measured row advances are the same advance. Browsers lay
+  ## out in 1/64 px units and the view averages the advance over every
+  ## rendered row, so a stable layout re-measures to well within this.
+  ## It must stay far below the per-row error it is meant to see: the
+  ## guide lines and the virtual scroll multiply the advance by the row index,
+  ## so an ignored difference of d px is d * n px off by row n. (It was
+  ## 0.5 px, which let a 24 px default stand in for a 24.4 px advance — 40 px
+  ## off by row 100.)
+
 proc setRowHeightPx*(vm: CalltraceVM; h: float) =
-  ## Update the measured row height in CSS pixels.  Called from the view after
-  ## the first batch of rows renders and whenever a zoom or resize is detected.
-  ## Only updates the signal when the value meaningfully changes (> 0.5 px
-  ## delta) to avoid oscillating reactive cycles from sub-pixel rounding.
-  if h > 0.0 and abs(h - vm.rowHeightPx.val) > 0.5:
+  ## Update the measured row advance in CSS pixels.  Called from the view
+  ## after rows render, on scroll, and whenever a zoom or resize is detected.
+  ## Only updates the signal when the value changes by more than
+  ## `RowHeightEpsilonPx`, so re-measuring an unchanged layout re-runs no
+  ## effect. Nothing the signal drives changes the rows' own advance, so
+  ## publishing a new value cannot feed back into the next measurement.
+  if h > 0.0 and abs(h - vm.rowHeightPx.val) > RowHeightEpsilonPx:
     vm.rowHeightPx.val = h
 
 func currentCallOf*(lines: openArray[CallLine]; tick: uint64;

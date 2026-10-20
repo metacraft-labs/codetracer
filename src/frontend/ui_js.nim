@@ -4731,13 +4731,6 @@ proc updateDataTables(data: Data) =
       let trace = TraceComponent(component)
       trace.refreshTraceComponentLayout()
 
-proc refreshCalltraceOverlays(data: Data) =
-  for _, component in data.ui.componentMapping[Content.Calltrace]:
-    if not component.isNil:
-      let calltrace = CalltraceComponent(component)
-      if calltrace.usesMaterializedTracesTrace:
-        calltrace.refreshTraceOverlay()
-
 proc updateLayout(data: Data) =
   dom.document.documentElement.style.fontSize = &"{data.ui.fontSize}px"
   data.updateGoldenLayoutHeaderHeight(2)
@@ -4753,7 +4746,6 @@ proc zoomInEditors*(data: Data) =
     redrawAll()
     discard setTimeout(proc =
       data.updateDataTables()
-      data.refreshCalltraceOverlays()
     , 0)
     clog "editor: zoom in!"
 
@@ -4767,7 +4759,6 @@ proc zoomOutEditors*(data: Data) =
     redrawAll()
     discard setTimeout(proc =
       data.updateDataTables()
-      data.refreshCalltraceOverlays()
     , 0)
     clog "editor: zoom out!"
 

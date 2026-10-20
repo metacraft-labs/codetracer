@@ -2368,6 +2368,66 @@ suite "IsoNim Calltrace Panel — call arguments":
       dispose()
 
 # ---------------------------------------------------------------------------
+# Calltrace guide-line geometry (#849)
+# ---------------------------------------------------------------------------
+#
+# `callGuideSegments` is what the web view's SVG layer draws. These cases pin
+# that it is laid out from the advance and anchor it is given, and nothing
+# else: the bug was a drawer with a 25 px pitch and a 12.5 px centre baked in.
+# Whether the view feeds it the advance the browser actually laid out, and
+# re-feeds it on a zoom, is a layout question and is answered in a real browser
+# by `src/frontend/tests/calltrace_guides_chromium_test.nim`.
+
+suite "IsoNim Calltrace Panel — guide-line geometry":
+
+  test "segments follow the given pitch and anchor exactly":
+    let a = CallGuideAnchor(originX: 13.0, centerY: 15.0)
+    let segs = callGuideSegments([0, 1, 1, 0], 30.0, a)
+    # Row 0: centre to bottom, then connector to row 1's depth.
+    # Rows 1-2: top to bottom, then a connector. Row 3: top to centre.
+    check segs == @[
+      (x1: 13.0, y1: 15.0, x2: 13.0, y2: 30.0),
+      (x1: 13.0, y1: 30.0, x2: 21.0, y2: 30.0),
+      (x1: 21.0, y1: 30.0, x2: 21.0, y2: 60.0),
+      (x1: 21.0, y1: 60.0, x2: 21.0, y2: 60.0),
+      (x1: 21.0, y1: 60.0, x2: 21.0, y2: 90.0),
+      (x1: 21.0, y1: 90.0, x2: 13.0, y2: 90.0),
+      (x1: 13.0, y1: 90.0, x2: 13.0, y2: 105.0),
+    ]
+
+  test "connector k sits at (k+1) * pitch for a sub-pixel pitch, at any row":
+    # The desktop's measured advance. A 25 px drawer is 0.28 px off per row,
+    # more than a whole row by row 100.
+    const pitch = 25.28
+    var depths: seq[int]
+    for i in 0 ..< 120: depths.add(i mod 3)
+    let segs = callGuideSegments(depths, pitch, defaultCallGuideAnchor(pitch))
+    var k = 0
+    for s in segs:
+      if s.y1 == s.y2:
+        check abs(s.y1 - float(k + 1) * pitch) < 1e-9
+        inc k
+    check k == depths.len - 1
+
+  test "the same rows at a new pitch (a zoom) move every segment":
+    let depths = [0, 1, 2, 1]
+    let a16 = CallGuideAnchor(originX: 13.0, centerY: 12.5)
+    let a20 = CallGuideAnchor(originX: 16.25, centerY: 15.625)
+    let at16 = callGuideSegments(depths, 25.0, a16)
+    let at20 = callGuideSegments(depths, 31.25, a20)
+    check at16.len == at20.len
+    for i in 0 ..< at16.len:
+      check at20[i] != at16[i]
+    # The connector into the last row is at the bottom of row 2 at 31.25 px.
+    check at20[^2].y1 == 3.0 * 31.25
+
+  test "fewer than two rows, or no pitch, draw nothing":
+    let a = defaultCallGuideAnchor(25.0)
+    check callGuideSegments(newSeq[int](), 25.0, a).len == 0
+    check callGuideSegments([3], 25.0, a).len == 0
+    check callGuideSegments([0, 1], 0.0, a).len == 0
+
+# ---------------------------------------------------------------------------
 # Calltrace scroll indicator tests
 # ---------------------------------------------------------------------------
 
