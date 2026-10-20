@@ -67,9 +67,13 @@
     color colors-ui-text-primary-body
     opacity 1.0
     background-color colors-ui-surface-primary-secondary-hover
+  // The active session. The dark theme keeps its #3c3c3c (no token has that
+  // Dark value; `by-mode`, defaults.styl); the light one takes
+  // `surface/primary/tertiary`, one step above the hover surface as #3c3c3c is
+  // in the dark, and body text, since white would not read on it.
   &.active
-    background-color #3c3c3c
-    color #ffffff
+    background-color by-mode(#3c3c3c, colors-ui-surface-primary-tertiary)
+    color by-mode(#ffffff, colors-ui-text-primary-body)
     opacity 1.0
 
 .session-tab-label
@@ -168,9 +172,12 @@
     &::before
       opacity 1
 
+  // The active tab's colours, as the note above says. In the light theme
+  // that fill is also this button's resting one, so a press shows only as the
+  // ink and the mark's opacity.
   &:active
-    background-color #3c3c3c
-    color #ffffff
+    background-color by-mode(#3c3c3c, colors-ui-surface-primary-tertiary)
+    color by-mode(#ffffff, colors-ui-text-primary-body)
 
     &::before
       opacity 1
@@ -237,9 +244,10 @@
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
+  // The active session, in its tab's colours.
   &.active
-    background-color #3c3c3c
-    color #ffffff
+    background-color by-mode(#3c3c3c, colors-ui-surface-primary-tertiary)
+    color by-mode(#ffffff, colors-ui-text-primary-body)
   // The list hover (LIST_HOVER_BG, button.styl): background only, square.
   &:hover
     background-color LIST_HOVER_BG

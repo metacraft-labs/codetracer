@@ -233,9 +233,13 @@
 //
 // One declaration block, two selectors, because a second block is how the two
 // halves of one band drift into two colours.
+//
+// #3a3a3a is `divider/primary`'s Dark value, so the token paints it exactly in
+// the dark theme and the band follows the light one (its Light value) instead
+// of staying the dark theme's grey; the fold band below does the same.
 .ct-diff-line-hunk-header,
 .monaco-diff-editor .modified-in-monaco-diff-editor .margin-view-overlays div.ct-diff-line-hunk-header
-  background-color #3a3a3a
+  background-color colors-ui-divider-primary
   box-shadow inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.14)
 
 // A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
@@ -492,8 +496,13 @@
   // otherwise leave the band unpainted — but change the THEME key, not this
   // one, and do not spend a round on the alpha the way a previous reader
   // nearly did.
-  background-color rgba(58, 58, 58, 0.92)
-  color rgba(232, 232, 232, 0.98)
+  //
+  // `codetracerWhite.json` does NOT set that key, so under the light theme
+  // this fallback is what paints: `divider/primary` (whose Dark value is the
+  // #3a3a3a above, so the dark sheets are unchanged), matching the `@@` band,
+  // with body text on it (`by-mode`, defaults.styl, keeps the dark ink).
+  background-color rgba(colors-ui-divider-primary, 0.92)
+  color by-mode(rgba(232, 232, 232, 0.98), colors-ui-text-primary-body)
   cursor pointer
   transition background-color 0.1s ease-out
   // 16px + the two 3px handles is one 22px code row, so the band occupies a
@@ -531,7 +540,7 @@
   // walk past it; at the accent colour it is the thing the eye lands on, and
   // it is where two of them said they would click.
   .codicon
-    color rgba(210, 210, 210, 1) !important
+    color by-mode(rgba(210, 210, 210, 1), colors-ui-icon-primary-default) !important
 
   // The band says what pressing it does.
   //
@@ -602,11 +611,13 @@
     // Neutral, for the reason on `.ct-diff-line-hunk-header` above: this is
     // chrome on a grey band, and a blue outline made two reviewers inventory it
     // as something from a different product.
-    color rgba(226, 226, 226, 1)
+    color by-mode(rgba(226, 226, 226, 1), colors-ui-text-primary-body)
 
+  // A step further from the editor surface than the band: lighter in the
+  // dark theme, `border/primary` (darker) in the light one.
   &:hover
-    background-color rgba(74, 74, 74, 0.98)
-    color rgba(246, 246, 246, 1)
+    background-color by-mode(rgba(74, 74, 74, 0.98), rgba(colors-ui-border-primary, 0.98))
+    color by-mode(rgba(246, 246, 246, 1), colors-ui-text-primary-body)
 
     &::after
       background-color rgba(255, 255, 255, 0.14)
@@ -628,8 +639,10 @@
   min-width 15em
   padding 0.25em 0
   border-radius 4px
-  background-color #252526
-  border 1px solid rgba(255, 255, 255, 0.12)
+  // A popup: the raised surface and the primary border in the light theme;
+  // the dark theme keeps its colours (`by-mode`, defaults.styl).
+  background-color by-mode(#252526, colors-ui-surface-base-raised)
+  border 1px solid by-mode(rgba(255, 255, 255, 0.12), colors-ui-border-primary)
   box-shadow 0 4px 14px rgba(0, 0, 0, 0.45)
 
 .ct-diff-expand-menu-item

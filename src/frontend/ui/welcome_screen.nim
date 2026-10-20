@@ -372,7 +372,10 @@ proc resetView*(self: WelcomeScreenComponent) =
 
 method onUploadTraceProgress*(self: WelcomeScreenComponent, uploadProgress: UploadProgress) {.async.} =
   let progressBar = document.getElementById(&"progress-bar-{uploadProgress.id}")
-  progressBar.style.backgroundImage = fmt"conic-gradient(#6B6B6B {uploadProgress.progress}% 0%, #2C2C2C {uploadProgress.progress}% 100%)"
+  # The ring's colours come from the stylesheet (`.progress-circle`,
+  # welcome_screen.styl): the light theme defines both custom properties, and
+  # the dark theme, which does not, paints the greys given as fallbacks.
+  progressBar.style.backgroundImage = fmt"conic-gradient(var(--ct-upload-ring-fill, #6B6B6B) {uploadProgress.progress}% 0%, var(--ct-upload-ring-track, #2C2C2C) {uploadProgress.progress}% 100%)"
 
   if uploadProgress.progress == 100:
     self.isUploading[uploadProgress.id] = false
