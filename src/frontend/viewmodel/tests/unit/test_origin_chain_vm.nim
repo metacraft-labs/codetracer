@@ -1361,7 +1361,8 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       drain()
       check originChainRequests(w.mock).len == 1
       check not w.origin.sidePanelOpen.val
-      check not w.origin.latestRequestOpensSidePanel
+      check w.origin.activeChain.val.isNone
+      check not w.origin.loading.val
       check w.origin.breadcrumbStack.val.len == 0
       dispose()
 
@@ -1382,6 +1383,126 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       let blocks = findAllByClass(panel, "ct-origin-inline-chain")
       check blocks.len == 1 and
         findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 2
+      dispose()
+
+  test "expanding one row does not empty another":
+    # Each row draws its own chain (`OriginChainVM.rowChains`), not the
+    # single active chain, so the second fetch leaves the first row drawn.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.store.updateLocals(@[makeVariable("c", "10", "int"),
+                             makeVariable("d", "10", "int")])
+      w.state.updateOriginSummaries(@[
+        ("c", OriginSummary(terminatorKind: tkwLiteral,
+                            terminatorExpr: "10", hopCount: 2)),
+        ("d", OriginSummary(terminatorKind: tkwLiteral,
+                            terminatorExpr: "10", hopCount: 2)),
+      ])
+      drain()
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      w.mock.expect("ct/originChain", twoHopChainPayload("d"))
+      let panel = renderStatePanel(MockRenderer(), w.state)
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      findBadgeForRow(panel, "d").fireEvent("click")
+      drain()
+      check originChainRequests(w.mock).len == 2
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 2
+      for b in blocks:
+        check b.styles.getOrDefault("display", "") == "block"
+        check findAllByClass(b, "ct-origin-inline-chain-hop").len == 2
+      dispose()
+
+  test "after a move an expanded row never draws the previous stop's chain, and is asked again there":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel(MockRenderer(), w.state)
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      check w.state.originChainLookup("c").isSome
+      w.mock.clearReceivedCommands()
+
+      # The debugger moves. Nothing is queued for the re-ask the move
+      # triggers, so the mock answers it with no chain: the old stop's
+      # chain must not be drawn in the meantime.
+      var d = w.store.debugger.val
+      d.rrTicks = d.rrTicks + 9
+      d.location.line = d.location.line + 1
+      w.store.debugger.val = d
+      drain()
+      check originChainRequests(w.mock).len == 1
+      check w.state.originChainLookup("c").isNone
+
+      # The new stop's locals and summaries arrive (as the stop loader
+      # delivers them): the row, still expanded, is asked once more — the
+      # chainless answer above may be retried — and draws this stop's chain.
+      var oneHop = twoHopChainPayload("c")
+      oneHop["hops"].elems.setLen(1)
+      w.mock.expect("ct/originChain", oneHop)
+      w.store.updateLocals(@[makeVariable("c", "11", "int")])
+      w.state.updateOriginSummaries(@[
+        ("c", OriginSummary(terminatorKind: tkwLiteral,
+                            terminatorExpr: "10", hopCount: 1)),
+      ])
+      drain()
+      check originChainRequests(w.mock).len == 2
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 1
+      check blocks.len == 1 and
+        blocks[0].styles.getOrDefault("display", "") == "block"
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 1
+
+      # Summaries arriving again at the same stop ask nothing more.
+      w.state.updateOriginSummaries(@[
+        ("c", OriginSummary(terminatorKind: tkwLiteral,
+                            terminatorExpr: "10", hopCount: 1)),
+      ])
+      drain()
+      check originChainRequests(w.mock).len == 2
+      dispose()
+
+  test "a row's chain, asked after a move, leaves the side panel's chain alone":
+    # The in-row block and the side panel are separate surfaces (§3.2.1,
+    # §3.2.2): the re-ask a move triggers for an expanded row must not
+    # replace the chain the side panel shows, nor its breadcrumb.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("d")
+      # "Show value origin": `StateVM.onShowOrigin` sends on the wire, and its
+      # bridge sends the OriginChainVM's own request.
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      w.state.onShowOrigin("c", Location(file: "fixture.py", line: 3))
+      drain()
+      check w.origin.sidePanelOpen.val
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c"
+      w.mock.expect("ct/originChain", twoHopChainPayload("d"))
+      let panel = renderStatePanel(MockRenderer(), w.state)
+      findBadgeForRow(panel, "d").fireEvent("click")
+      drain()
+      check w.state.originChainLookup("d").isSome
+
+      w.mock.clearReceivedCommands()
+      w.mock.expect("ct/originChain", twoHopChainPayload("d"))
+      var d = w.store.debugger.val
+      d.rrTicks = d.rrTicks + 9
+      d.location.line = d.location.line + 1
+      w.store.debugger.val = d
+      drain()
+      check originChainRequests(w.mock).len == 1
+      check w.state.originChainLookup("d").isSome
+      check w.origin.sidePanelOpen.val
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c"
+      check w.origin.breadcrumbStack.val.len == 1 and
+        w.origin.breadcrumbStack.val[0].variableName == "c"
+      check not w.origin.loading.val
       dispose()
 
   test "Pin to scratchpad, through the production bridge, reaches ScratchpadVM.chainEntries":
@@ -1416,12 +1537,12 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
     check second.chainEntries.val.len == 1
     check originVM.pinnedChains.val.len == 3
 
-  test "on the transport, only the badge's answer leaves the side panel shut":
+  test "on the transport, a row's request is never the side panel's":
     # The renderer applies `ct/originChain` answers from the DAP channel
-    # (`ui_js.nim`: `applyChainAnswer`, then `openSidePanel` only when
-    # `latestRequestOpensSidePanel`). The DAP transport names every tracked
-    # request from INSIDE `send`, before it writes the frame
-    # (`dap.dispatchCtRequest` → the `trackCtRequests` hook → `ui_js`'s
+    # (`ui_js.nim`: `applyChainAnswer`, then `openSidePanel`;
+    # `rejectChainAnswer` for an answer with no chain). The DAP transport
+    # names every tracked request from INSIDE `send`, before it writes the
+    # frame (`dap.dispatchCtRequest` → the `trackCtRequests` hook → `ui_js`'s
     # `noteChainRequestSent`). The backend below does exactly that in front
     # of the mock, so the VM sees the hook at the moment the real transport
     # calls it; a legacy menu, which sends on the mediator without the VM,
@@ -1449,19 +1570,37 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
     drain()
     let loc = Location(file: "fixture.py", line: 3)
 
-    stateVM.onLoadOriginChainProc("c", loc)            # the badge
+    # The badge: its answer is not the side panel's to show.
+    stateVM.onLoadOriginChainProc("c", loc)
     check sentIds == 1
-    check not originVM.latestRequestOpensSidePanel
-    check originVM.applyChainAnswer(
+    check not originVM.loading.val
+    check not originVM.applyChainAnswer(
       parseOriginChain(twoHopChainPayload("c")), "req-1")
-    check not originVM.latestRequestOpensSidePanel
+    check originVM.activeChain.val.isNone
     check not originVM.sidePanelOpen.val
 
-    originVM.noteChainRequestSent("menu-1")            # a legacy menu
-    check originVM.latestRequestOpensSidePanel
+    # A legacy menu's request, then another row's badge while it is
+    # outstanding: the badge supersedes nothing, and its failed answer
+    # cancels nothing, so the menu's answer still lands in the side panel.
+    originVM.noteChainRequestSent("menu-1")
+    check originVM.loading.val
+    stateVM.onLoadOriginChainProc("d", loc)
+    check sentIds == 2
+    check not originVM.rejectChainAnswer("req-2")
+    check originVM.loading.val
+    check originVM.applyChainAnswer(
+      parseOriginChain(twoHopChainPayload("x")), "menu-1")
+    check originVM.activeChain.val.isSome and
+      originVM.activeChain.val.get.queryVariable == "x"
+    check not originVM.loading.val
 
-    stateVM.onLoadOriginChainProc("c", loc)            # the badge again
-    check not originVM.latestRequestOpensSidePanel
-    stateVM.onShowOrigin("c", loc)                     # the context menu
-    check originVM.latestRequestOpensSidePanel
+    # The context menu: `StateVM.onShowOrigin` sends on the wire, and its
+    # bridge sends the OriginChainVM's own request — the side panel's, which
+    # opens the panel and whose failed answer ends the wait.
+    stateVM.onShowOrigin("c", loc)
+    check sentIds == 4
     check originVM.sidePanelOpen.val
+    check originVM.loading.val
+    check not originVM.rejectChainAnswer("req-3")
+    check originVM.rejectChainAnswer("req-4")
+    check not originVM.loading.val

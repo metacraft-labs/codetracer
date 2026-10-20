@@ -283,7 +283,7 @@ from ui/process_tree import
 import viewmodel/viewmodels/state_vm
 import viewmodel/viewmodels/origin_chain_types
 from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, applyChainAnswer,
-  noteChainRequestSent, openSidePanel, onCancelLoad
+  noteChainRequestSent, openSidePanel, rejectChainAnswer
 from isonim/core/signals import val, `val=`
 from isonim/core/computation import val
 from viewmodel/viewmodels/trace_open import
@@ -2478,14 +2478,18 @@ when not defined(ctInExtension):
                 # Spec §3.2.2 — "Show value origin" opens the dedicated side
                 # panel, whichever menu asked; a chain only arrives because a
                 # user asked for one. The origin badge is the one asker that
-                # does not: it expands its row in place (§3.2.1), and the VM
-                # recorded that when the request was sent.
+                # does not: it expands its row in place (§3.2.1), so the VM
+                # never makes its request the side panel's
+                # (`noteChainRequestSent`) and `applyChainAnswer` declines its
+                # answer, which reaches the row through the request's own
+                # future instead.
                 if ocvm.applyChainAnswer(parseOriginChain(body),
-                                         $ctRequestIdOf(raw)) and
-                    ocvm.latestRequestOpensSidePanel:
+                                         $ctRequestIdOf(raw)):
                   ocvm.openSidePanel()
               else:
-                ocvm.onCancelLoad()
+                # Only the side panel's own request ends its wait: a row's
+                # failed fetch leaves a pending "Show value origin" alone.
+                discard ocvm.rejectChainAnswer($ctRequestIdOf(raw))
                 cerror "ct/originChain: query returned no chain: " & $body
             except CatchableError as e:
               cerror "ct/originChain: failed to decode response: " & e.msg)

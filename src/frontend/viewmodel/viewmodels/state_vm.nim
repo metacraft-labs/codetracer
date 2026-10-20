@@ -815,6 +815,36 @@ proc createStateVM*(store: ReplayDataStore;
     let stop = createMemo[string] proc(): string =
       stopIdentityOf(store.debugger.val)
 
+    # VALUE ORIGIN (spec §3.2.1): A ROW LEFT EXPANDED ACROSS A MOVE SHOWS ITS
+    # CHAIN AT THE NEW STOP. The in-row block draws only a chain answered at
+    # the current stop (`originChainLookup`), so after a move an expanded row
+    # would otherwise sit open and empty until it was collapsed and expanded
+    # again. The new stop's summaries arrive with its locals, after the move,
+    # so this runs on both: each expanded row that has a loaded summary here
+    # and no chain is asked once (`onLoadOriginChainProc` asks at most once
+    # per row per stop). Placeholder rows are left to their own fill.
+    #
+    # Only where this process may issue backend commands, as the watch effect
+    # below: a collaborator mirrors a session another process owns.
+    # Iterating `expandedOrigins.val` walks a copy, so a request that answers
+    # synchronously cannot disturb the walk.
+    if mayIssueBackendCommands(runtimeRole):
+      createEffect proc() =
+        discard stop.val
+        let summaries = originSummaries.val
+        untrack(proc() =
+          if vm.onLoadOriginChainProc.isNil:
+            return
+          let location = store.debugger.val.location
+          for row in expandedOrigins.val:
+            if not summaries.hasKey(row.name) or
+                summaries[row.name].isPlaceholder:
+              continue
+            if not vm.originChainLookup.isNil and
+                vm.originChainLookup(row.name).isSome:
+              continue
+            vm.onLoadOriginChainProc(row.name, location))
+
     # PLAT-51: THE CHANGED VALUES. Every answer for the locals is observed at
     # the stop it belongs to — an answer is admitted only while the debugger
     # is still at the stop it was requested at (PLAT-29), so the position read

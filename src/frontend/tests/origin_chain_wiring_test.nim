@@ -36,7 +36,7 @@
 ## `-d:nodejs`), run by `jsdom-run.mjs` over a real DOM. Without `-d:nodejs`
 ## `std/unittest` cannot set the exit status, so this suite sets it.
 
-import std/[unittest, jsffi]
+import std/[unittest, jsffi, asyncjs, options]
 
 import ../types
 import ../dap
@@ -118,8 +118,66 @@ suite "the renderer's origin bridges (ui/state.nim, ui/scratchpad.nim)":
     ck sent.len == before + 1 and
       sent[^1]["arguments"]["variableName"].to(cstring) == cstring"total"
     ck not originVM.sidePanelOpen.val
-    ck not originVM.latestRequestOpensSidePanel
+    ck originVM.activeChain.val.isNone
+    ck not originVM.loading.val
 
-echo "CHECKS: ", checks
-if failedChecks > 0:
-  {.emit: "process.exitCode = 1;".}
+proc settle(): Future[void] =
+  ## Yield to the event loop until pending microtasks have run: a request's
+  ## future settles in a continuation, never inside the delivering call.
+  newPromise proc(resolve: proc()) =
+    {.emit: "setTimeout(`resolve`, 0);".}
+
+proc chainAnswer(requestSeq: int; variable: cstring): JsObject =
+  ## The Backend Manager's response frame for one `ct/originChain`, in the
+  ## shape `locals_answer_identity_test.nim` writes for `ct/load-locals`:
+  ## `type`, `command`, `request_seq` echoing the request's `seq`,
+  ## `success`, and a body in the backend's chain shape.
+  let location = JsObject{path: cstring"fixture.py", line: 3, rrTicks: 3}
+  let hop = JsObject{kind: cstring"trivialCopy", targetExpr: variable,
+                     sourceExpr: cstring"a", stepId: 3, location: location}
+  let terminator = JsObject{kind: cstring"literal", expression: cstring"10"}
+  let body = newJsObject()
+  body[cstring"queryVariable"] = variable
+  body[cstring"queryStepId"] = 3
+  body[cstring"hops"] = [hop].toJs
+  body[cstring"terminator"] = terminator
+  JsObject{`type`: cstring"response", request_seq: requestSeq,
+           success: true, command: cstring"ct/originChain", body: body}
+
+proc answerChecks() {.async.} =
+  # THE ANSWER ON THE REAL TRANSPORT REACHES THE ROW. The badge asks for
+  # `counter`; its answer, delivered as `ui_js.onDapReceiveResponse`
+  # delivers it, settles the request's future, and the row's chain at this
+  # stop is the one the in-row block then draws (§3.2.1).
+  let stateVM: StateVM = activeStateVM()
+  stateVM.onLoadOriginChainProc("counter",
+    store_types.Location(file: "fixture.py", line: 3))
+  let sent = originChainRequests()
+  ck sent.len > 0
+  if sent.len == 0:
+    return
+  ck sent[^1]["arguments"]["variableName"].to(cstring) == cstring"counter"
+  ck stateVM.originChainLookup("counter").isNone
+  deliverDapResponse(dapApi, dapApi,
+    chainAnswer(sent[^1]["seq"].to(int), cstring"counter"))
+  await settle()
+  let held = stateVM.originChainLookup("counter")
+  ck held.isSome
+  ck held.isSome and held.get.hops.len == 1
+  # The row's answer is the row's alone: the side panel stays shut, with no
+  # chain of its own.
+  let originVM = activeOriginChainVM()
+  ck not originVM.sidePanelOpen.val
+  ck originVM.activeChain.val.isNone
+  # Asked once per row per stop: a second expand of the held row sends
+  # nothing.
+  let before = originChainRequests().len
+  stateVM.onLoadOriginChainProc("counter",
+    store_types.Location(file: "fixture.py", line: 3))
+  ck originChainRequests().len == before
+
+  echo "CHECKS: ", checks
+  if failedChecks > 0:
+    {.emit: "process.exitCode = 1;".}
+
+discard answerChecks()

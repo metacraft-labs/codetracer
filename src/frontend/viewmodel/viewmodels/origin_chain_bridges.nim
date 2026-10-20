@@ -18,6 +18,7 @@ import std/options
 import isonim/core/signals
 
 import ../store/types
+from ../store/stop_timeline import stopIdentityOf
 import origin_chain_types
 import origin_chain_vm
 import state_vm
@@ -30,11 +31,14 @@ proc wireOriginChainBridges*(stateVM: StateVM; originVM: OriginChainVM;
   ## - `StateVM.onShowOriginProc` — "Show value origin" (the row's context
   ##   menu, the command palette, `origin(expr)` watches): fetch the chain
   ##   and open the side panel (§3.1, §3.2.2).
-  ## - `StateVM.onLoadOriginChainProc` — the badge expanding a row whose
-  ##   chain is not held: fetch the chain for the in-row block, without
-  ##   opening the side panel (§3.2.1).
+  ## - `StateVM.onLoadOriginChainProc` — the badge expanding a row, or a row
+  ##   left expanded across a move (`StateVM`'s re-ask effect), whose
+  ##   chain at this stop is not held: fetch it for the in-row block, once
+  ##   per row per stop, leaving the side panel, its chain and its pending
+  ##   request alone (§3.2.1).
   ## - `StateVM.originChainLookup` — the chain the in-row block draws: the
-  ##   active chain, when it is about the row's variable.
+  ##   row's own chain, answered at the current stop
+  ##   (`OriginChainVM.rowChainAt`).
   ## - `OriginChainVM.onPinChainProc` — "Pin to scratchpad" (§3.3, §3.5):
   ##   append the chain to the Scratchpad's chain cards.
   ##
@@ -46,13 +50,13 @@ proc wireOriginChainBridges*(stateVM: StateVM; originVM: OriginChainVM;
     originVM.onShowOrigin(expression, location)
   stateVM.onLoadOriginChainProc = proc(expression: string;
                                        location: Location) =
-    originVM.onShowOrigin(expression, location, openSidePanel = false)
+    originVM.loadRowChain(expression, location)
   stateVM.originChainLookup = proc(name: string): Option[OriginChain] =
-    let active = originVM.activeChain.val
-    if active.isSome and active.get.queryVariable == name:
-      active
-    else:
-      none(OriginChain)
+    # Reactive in both the stop and the answers: a move hides the previous
+    # stop's chain at once, and an answer draws as soon as it lands.
+    if stateVM.store.isNil:
+      return none(OriginChain)
+    originVM.rowChainAt(name, stopIdentityOf(stateVM.store.debugger.val))
   originVM.onPinChainProc = proc(chain: OriginChain) =
     let target = if scratchpad.isNil: nil else: scratchpad()
     if not target.isNil:
