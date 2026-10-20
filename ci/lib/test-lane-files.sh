@@ -927,7 +927,11 @@ test_lane_files() {
 		# `locals_answer_identity_test.nim` drives the web renderer's
 		# `ct/load-locals` senders through the real response fan-out: one
 		# request per stop, in the stopped-in file's language.
+		# `origin_chain_wiring_test.nim` holds `ui/state.nim` to installing the
+		# origin badge's chain fetch and the "Pin to scratchpad" bridge into the
+		# Scratchpad pane's ViewModel (codetracer#856).
 		echo src/frontend/tests/locals_answer_identity_test.nim
+		echo src/frontend/tests/origin_chain_wiring_test.nim
 		;;
 
 	renderer-chromium)
@@ -1003,6 +1007,14 @@ test_lane_files() {
 		# could not satisfy.
 		echo src/frontend/tests/index_serves_one_deployment_descriptor_test.nim
 		echo src/frontend/tests/index_reports_the_port_it_bound_test.nim
+		#
+		# `file_tree_root_load_test.nim` loads the Files pane's root over a
+		# real temporary directory (GitHub #785): a fallback onto a live
+		# repository gets the live-filesystem limits, a trace payload is
+		# still loaded whole, and a root load that rejects still answers
+		# `filesystem-loaded` with an `error`. Writes only under one `mkdtemp`
+		# directory, which it removes.
+		echo src/frontend/tests/file_tree_root_load_test.nim
 		;;
 
 	frontend-native-units)

@@ -53,7 +53,7 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
-  setExpandedPaths, isExpanded, setDiffEntries, emptyEntry
+  setExpandedPaths, isExpanded, setDiffEntries, emptyEntry, failLoad
 when defined(js):
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_filesystem_view import
@@ -392,7 +392,13 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
     for path in openedPaths:
       mergedPaths.incl(path)
     filesystemVMInstance.setExpandedPaths(mergedPaths)
+  elif not self.service.isNil and not self.service.filesystemLoadError.isNil and
+      self.service.filesystemLoadError.len > 0:
+    # The root load answered with a failure: end the pane on it rather
+    # than on "Loading..." (GitHub #785).
+    filesystemVMInstance.failLoad($self.service.filesystemLoadError)
   else:
+    # No answer yet: the pane waits for ``filesystem-loaded``.
     filesystemVMInstance.clearRoot()
   filesystemVMInstance.setDiffEntries(legacyDiffEntries())
 

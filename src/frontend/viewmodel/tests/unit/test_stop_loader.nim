@@ -56,6 +56,12 @@ proc sent(mock: MockBackendService; command: string): int =
     if c.command == command:
       inc result
 
+proc findLast(mock: MockBackendService; command: string): JsonNode =
+  ## The arguments of the most recent `command` sent; nil when none was.
+  for i in countdown(mock.receivedCommands.high, 0):
+    if mock.receivedCommands[i].command == command:
+      return mock.receivedCommands[i].args
+
 proc newLoaderSession(mock: MockBackendService): SessionViewModel =
   ## A session built the way `DebuggerSession.markReady` builds it: the
   ## locals claimed before the panels exist.
@@ -150,6 +156,153 @@ suite "HSF-S1: an answer is applied to the stop it was asked at":
     drainPlatformCallbacks()
     check loader.status[spLocals].val == plsDropped
     check session.store.locals.locals.val.len == 0
+
+proc watchRows(store: ReplayDataStore): seq[string] =
+  ## What the Watches tab shows (`StateVM.currentVariables`' `stWatches` arm
+  ## reads exactly this signal): each watch row as `name=value`.
+  for row in store.locals.watches.val:
+    result.add row.name & "=" & row.value
+
+proc answeringFromTheRequest(mock: MockBackendService): BackendService =
+  ## The mock's transport, except that a `ct/load-locals` is answered FROM ITS
+  ## OWN ARGUMENTS, the way the engine answers it
+  ## (`db-backend/src/watch_expression.rs`): the stop's one local `x`, plus one
+  ## row marked `value.isWatch` for each expression the request named in
+  ## `watchExpressions` — and none for an expression it did not name.
+  ##
+  ## WHY NOT A CANNED ANSWER. Issue #855 is a request that drops the watch
+  ## list after a move. A canned answer carrying a watch row would put the
+  ## watch back on screen whatever the request asked, which is exactly the
+  ## defect such a test could not see. Answering from the request is what
+  ## makes "the watch is still shown" mean "the watch was still asked for".
+  ## The value is the request's tick, so each answer is also tied to its stop.
+  ##
+  ## Every request still goes through the mock first, so it is validated
+  ## against `VALID_DAP_COMMANDS` and recorded in `receivedCommands`.
+  result = mock.toBackendService()
+  let inner = result.sendProc
+  result.sendProc = proc(command: string;
+                         args: JsonNode): BackendFuture[JsonNode] =
+    let viaMock = inner(command, args)
+    if command != "ct/load-locals":
+      return viaMock
+    let ticks = $args{"rrTicks"}.getBiggestInt(0)
+    var rows = newJArray()
+    rows.add %*{"expression": "x", "value": {
+      "kind": 7, "i": ticks, "typ": {"kind": 7, "langType": "int"}}}
+    for w in args{"watchExpressions"}.getElems:
+      rows.add %*{"expression": w.getStr, "value": {
+        "kind": 7, "i": ticks, "isWatch": true,
+        "typ": {"kind": 7, "langType": "int"}}}
+    newCompletedFuture[JsonNode](%*{"success": true, "body": {"locals": rows}})
+
+suite "#855: a watch's result survives a move":
+  # Reported (GitHub #855): add a watch, step, and the Watches tab is empty
+  # until another watch is added, which brings every watch back. The answer
+  # to a move must still carry the user's watches, because the store writes
+  # `store.locals.watches` from every answer (`writeLocalsResponse`).
+
+  test "host-driven loader: a watch added and answered is still shown after a move":
+    # The terminal's and GPUI's shape: `native_host.loadStopPanes` calls
+    # `loadStop` once the stop has settled.
+    let mock = newMockBackendService(autoRespond = true)
+    let session = createSessionVM(mock.answeringFromTheRequest())
+    session.store.claimLocalsLoading()
+    session.initializePanelViewModels()
+    let loader = createStopLoader(session)
+    session.store.moveTo(10, 1)
+    loader.loadStop()
+    drainPlatformCallbacks()
+    check session.store.watchRows().len == 0
+    # Added the way the watch input form adds it (`StateVM.addWatch`, which on
+    # a session with a collaboration core goes through the shared document
+    # and its projection).
+    session.stateVM.addWatch("total")
+    loader.loadStop()
+    drainPlatformCallbacks()
+    check session.store.watchRows() == @["total=10"]
+    session.store.moveTo(11, 2)
+    loader.loadStop()
+    drainPlatformCallbacks()
+    check loader.status[spLocals].val == plsApplied
+    check session.store.locals.locals.val.len == 1
+    check session.store.watchRows() == @["total=11"]
+    check mock.findLast("ct/load-locals")["watchExpressions"] == %*["total"]
+
+  test "following session: a watch added and answered is still shown after a move":
+    # The web renderer's shape: `ui_js` builds a `DebuggerSession` whose stop
+    # loader follows the store (`slmFollow`).
+    let mock = newMockBackendService(autoRespond = true)
+    let s = newDebuggerSession(mock.answeringFromTheRequest())
+    s.attach(localFolderTrace("/tmp/trace"))
+    s.store.moveTo(20, 1)
+    drainPlatformCallbacks()
+    s.session.stateVM.addWatch("total")
+    drainPlatformCallbacks()
+    check s.store.watchRows() == @["total=20"]
+    mock.clearReceivedCommands()
+    s.store.moveTo(21, 2)
+    drainPlatformCallbacks()
+    check mock.sent("ct/load-locals") == 1
+    check s.store.watchRows() == @["total=21"]
+    # A second move, and a move back to the first stop, keep it too.
+    s.store.moveTo(22, 3)
+    drainPlatformCallbacks()
+    check s.store.watchRows() == @["total=22"]
+    s.store.moveTo(20, 1)
+    drainPlatformCallbacks()
+    check s.store.watchRows() == @["total=20"]
+    s.dispose()
+
+  test "after the session-load process list, a watch is still shown after a move":
+    # Every launch is answered with an unsolicited `ct/listProcesses`, a
+    # single-trace one too (`dap_server.rs::dispatch_session_load_event`,
+    # over `wrap_single_trace_as_session`), and the renderer hands it to
+    # `applyListProcessesResponse` (`ui_js`'s `subscribeListProcesses`). The
+    # views, the watch input and the collaboration projection hold the
+    # StateVM the session was built with, so that is the one the watch is
+    # added to here.
+    let mock = newMockBackendService(autoRespond = true)
+    let s = newDebuggerSession(mock.answeringFromTheRequest())
+    s.attach(localFolderTrace("/tmp/trace"))
+    let shown = s.session.stateVM
+    check not shown.isNil
+    s.session.applyListProcessesResponse(%*{"processes": [{
+      "recordingId": "main", "role": "", "displayName": "trace",
+      "defaultThreadPrefix": "", "threadCount": 1, "threadIds": [1]}]})
+    s.store.moveTo(40, 1)
+    drainPlatformCallbacks()
+    shown.addWatch("total")
+    drainPlatformCallbacks()
+    check s.store.watchRows() == @["total=40"]
+    s.store.moveTo(41, 2)
+    drainPlatformCallbacks()
+    check mock.findLast("ct/load-locals")["watchExpressions"] == %*["total"]
+    check s.store.watchRows() == @["total=41"]
+    s.dispose()
+
+  test "a stop where the watch no longer resolves still clears its old value":
+    # The rule `writeLocalsResponse` documents, which a fix for #855 must not
+    # undo: an answer that carries no row for a watch is not papered over
+    # with the previous stop's value.
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.stateVM.addWatch("total")
+    let loader = createStopLoader(session)
+    session.store.moveTo(30, 1)
+    mock.expect("ct/load-locals", %*{"success": true, "body": {"locals": [
+      {"expression": "total", "value": {"kind": 7, "i": "5", "isWatch": true,
+                                        "typ": {"kind": 7, "langType": "int"}}}]}})
+    loader.loadStop()
+    drainPlatformCallbacks()
+    check session.store.watchRows() == @["total=5"]
+    session.store.moveTo(31, 2)
+    mock.expect("ct/load-locals", localsAnswer("x"))
+    loader.loadStop()
+    drainPlatformCallbacks()
+    check loader.status[spLocals].val == plsApplied
+    check mock.findLast("ct/load-locals")["watchExpressions"] == %*["total"]
+    check session.store.watchRows().len == 0
 
 suite "HSF-S1: the call-stack fallback (PLAT-47)":
 

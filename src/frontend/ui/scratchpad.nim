@@ -68,6 +68,14 @@ var scratchpadComponentRef: ScratchpadComponent
 var isoNimScratchpadMountedIds {.used.}: JsAssoc[int, bool] =
   JsAssoc[int, bool]{}
 
+# "Pin to scratchpad" (Value-Origin-Tracking.md §3.3, §3.5) lands in THIS
+# pane's ViewModel, whichever instance it is when the pin happens: the
+# stub-backed one `initScratchpadVM` builds, or the session's once
+# `initScratchpadVMFromSession` replaces it. `ui/state.nim` owns the
+# OriginChainVM that pins and cannot import this module (this module imports
+# it), so the target is handed over as a resolver.
+installScratchpadForPins(proc(): ScratchpadVM = scratchpadVMInstance)
+
 proc tryMountIsoNimScratchpadPanel*()
 
 # ---------------------------------------------------------------------------

@@ -898,6 +898,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Filesystem tree/diff contents are local repository facts.")
   entries.addEntry("FilesystemVM", "loadingState", vscBackendAuthoritative,
     "Tree/diff load status belongs to the index-process request that fills `rootEntry`.")
+  entries.addEntry("FilesystemVM", "loadError", vscBackendAuthoritative,
+    "Why the root load failed is the index process's answer to that same request.")
   entries.addEntry("FilesystemVM", "expandedPaths", vscSharedSessionViewState,
     "Filesystem expansion can be shared as logical path state.",
     requiresStableId = true,

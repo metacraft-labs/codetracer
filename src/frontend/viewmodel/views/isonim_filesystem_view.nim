@@ -31,6 +31,10 @@
 ##           div.filesystem-entry-children               (recursive)
 ##       div.filesystem-empty-overlay[.hidden]
 ##           text "No filesystem loaded yet."
+##       div.filesystem-loading-overlay[.hidden]   (while lsLoading)
+##           text "Loading..."
+##       div.filesystem-error-overlay[.hidden]     (while lsError)
+##           text FilesystemLoadFailedText, then the reason
 ##     div.diff-files-list                          (when hasDiff)
 ##       div.diff-file-path[.path-even|.path-odd]
 ##                                       (one per FilesystemDiffEntry)
@@ -72,6 +76,11 @@ const FilesystemEmptyStateText* = "No filesystem loaded yet."
   ## builder share one source of truth.  Name-spaced (vs. the
   ## ``EmptyStateText`` in trace_log_view) so importing both modules
   ## from the test suite does not collide.
+
+const FilesystemLoadFailedText* = "The file tree could not be loaded: "
+  ## Lead-in of the error overlay shown when a root load failed
+  ## (``FilesystemVM.loadError`` follows it).  A load ends on a tree, the
+  ## empty state or this — never on a permanent "Loading..." (GitHub #785).
 
 const FilesystemTreeContainerClass* = "filesystem-tree"
   ## CSS class on the tree's outer wrapper.  Kept distinct from the
@@ -233,6 +242,7 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
   var treeContainer: MockNode
   var emptyContainer: MockNode
   var loadingContainer: MockNode
+  var errorContainer: MockNode
   var filesystemContainer: MockNode
   var diffContainer: MockNode
 
@@ -245,6 +255,9 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
           text FilesystemEmptyStateText
         tdiv(ref = loadingContainer, class = "filesystem-loading-overlay"):
           text "Loading..."
+        tdiv(ref = errorContainer, class = "filesystem-error-overlay hidden",
+             role = "alert"):
+          discard
       tdiv(ref = diffContainer, class = "diff-files-list"):
         discard
 
@@ -252,10 +265,13 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     # -- Tree --
     let isLoading = vm.loadingState.val == lsLoading
     let root = vm.rootEntry.val
-    let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
+    let isFailed = vm.loadingState.val == lsError
+    let showEmpty = not isLoading and not isFailed and isEmptyRoot(root) and
       vm.diffEntries.val.len == 0
     r.clearChildren(treeContainer)
-    if root.text.len > 0 and root.text != "/":
+    if isEmptyRoot(root):
+      discard
+    elif root.text.len > 0 and root.text != "/":
       let node = renderMockEntry(r, vm, root)
       r.appendChild(treeContainer, node)
     elif root.children.len > 0:
@@ -281,6 +297,16 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     else:
       r.setAttribute(loadingContainer, "class",
                      "filesystem-loading-overlay hidden")
+
+    # -- Load-failed overlay --
+    r.clearChildren(errorContainer)
+    if isFailed:
+      r.setAttribute(errorContainer, "class", "filesystem-error-overlay")
+      r.appendChild(errorContainer,
+                    r.createTextNode(FilesystemLoadFailedText & vm.loadError.val))
+    else:
+      r.setAttribute(errorContainer, "class",
+                     "filesystem-error-overlay hidden")
 
     let busyVal = if isLoading: "true" else: "false"
     r.setAttribute(filesystemContainer, "aria-busy", busyVal)
@@ -422,6 +448,7 @@ when defined(js):
     var treeContainer: isonim_dom.Element
     var emptyContainer: isonim_dom.Element
     var loadingContainer: isonim_dom.Element
+    var errorContainer: isonim_dom.Element
     var filesystemContainer: isonim_dom.Element
     var diffContainer: isonim_dom.Element
 
@@ -442,6 +469,9 @@ when defined(js):
             text FilesystemEmptyStateText
           tdiv(ref = loadingContainer, class = "filesystem-loading-overlay"):
             text "Loading..."
+          tdiv(ref = errorContainer, class = "filesystem-error-overlay hidden",
+               role = "alert"):
+            discard
         tdiv(ref = diffContainer, class = "diff-files-list"):
           discard
 
@@ -449,10 +479,13 @@ when defined(js):
       # -- Tree --
       let isLoading = vm.loadingState.val == lsLoading
       let root = vm.rootEntry.val
-      let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
+      let isFailed = vm.loadingState.val == lsError
+      let showEmpty = not isLoading and not isFailed and isEmptyRoot(root) and
         vm.diffEntries.val.len == 0
       clearWebChildren(treeContainer)
-      if root.text.len > 0 and root.text != "/":
+      if isEmptyRoot(root):
+        discard
+      elif root.text.len > 0 and root.text != "/":
         let node = renderWebEntry(vm, root, 1, true)
         isonim_dom.appendChild(isonim_dom.Node(treeContainer),
                                isonim_dom.Node(node))
@@ -482,6 +515,19 @@ when defined(js):
       else:
         isonim_dom.setAttribute(loadingContainer, cstring"class",
                                 cstring"filesystem-loading-overlay hidden")
+
+      # -- Load-failed overlay --
+      clearWebChildren(errorContainer)
+      if isFailed:
+        isonim_dom.setAttribute(errorContainer, cstring"class",
+                                cstring"filesystem-error-overlay")
+        isonim_dom.appendChild(
+          isonim_dom.Node(errorContainer),
+          isonim_dom.createTextNode(isonim_dom.document,
+            cstring(FilesystemLoadFailedText & vm.loadError.val)))
+      else:
+        isonim_dom.setAttribute(errorContainer, cstring"class",
+                                cstring"filesystem-error-overlay hidden")
 
       let busyVal = if isLoading: cstring"true" else: cstring"false"
       isonim_dom.setAttribute(filesystemContainer, cstring"aria-busy", busyVal)

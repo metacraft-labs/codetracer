@@ -214,6 +214,15 @@ type
     onShowOriginProc*: proc(expression: string; location: store_types.Location)
       ## Optional bridge invoked by `onShowOrigin` — installed by
       ## `state.nim` to forward into `OriginChainVM.onShowOrigin`.
+    onLoadOriginChainProc*: proc(expression: string;
+                                 location: store_types.Location)
+      ## Optional bridge the origin badge invokes when it expands a row
+      ## whose chain `originChainLookup` does not hold (spec §3.2.1:
+      ## "Clicking the badge (when loaded) expands the row in place to show
+      ## the full hop chain"). It fetches the chain for the in-row block
+      ## WITHOUT opening the side panel, which is the context menu's
+      ## target (§3.1). Installed by
+      ## `origin_chain_bridges.wireOriginChainBridges`.
     onWatchesChangedProc*: proc(expressions: seq[string])
       ## Optional bridge invoked whenever the watch list changes, so the
       ## host can re-issue the locals request that carries them.

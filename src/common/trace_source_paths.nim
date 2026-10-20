@@ -194,3 +194,119 @@ proc sourceFolderRootsOf*(tracePaths: openArray[string]): seq[string] =
     let root = if slash <= 0: path else: path[0 ..< slash]
     if root notin result:
       result.add root
+
+# ---------------------------------------------------------------------------
+# Root folders of an imported (self-contained) trace's file tree
+# ---------------------------------------------------------------------------
+
+type
+  ImportedTraceTreeInputs* = object
+    ## What the index process knows about an imported trace when it picks
+    ## the roots of the Files pane (`index/traces.sourceFoldersFromTracePaths`).
+    ##
+    ## ``recordedSourceFolders`` — the trace's ``source_folders`` column.
+    ##                             These are folders ON THE RECORDING HOST:
+    ##                             the git root of the recorded program, or
+    ##                             absolute parent folders of its sources.
+    ## ``workdir``               — the recorded working directory.
+    ## ``tracePathsRead``        — whether the ``paths.json`` sidecar next
+    ##                             to the trace was read and parsed.
+    ## ``tracePaths``            — its entries, when it was.
+    ## ``payloadTopLevel``       — the names directly under the trace's
+    ##                             ``files/`` payload.
+    ## ``liveFallback``          — `fallbackLiveSourceFolders` of the trace:
+    ##                             the program or workdir, when they exist
+    ##                             on this machine.
+    recordedSourceFolders*: seq[string]
+    workdir*: string
+    tracePathsRead*: bool
+    tracePaths*: seq[string]
+    payloadTopLevel*: seq[string]
+    liveFallback*: seq[string]
+
+proc addUniqueRoot(roots: var seq[string]; root: string) =
+  if root.len > 0 and root notin roots:
+    roots.add root
+
+proc resolveAgainstWorkdir(workdir: string;
+                           folders: openArray[string]): seq[string] =
+  ## A relative payload root resolved to the live folder it was recorded
+  ## from.  Absolute roots, and every root when there is no workdir, are
+  ## kept as they are.
+  for folder in folders:
+    if folder.len == 0:
+      continue
+    if isAbsoluteTraceSourcePath(folder) or workdir.len == 0:
+      result.addUniqueRoot folder
+    else:
+      result.addUniqueRoot(
+        normalizeForCompare(workdir) & "/" & normalizeSourcePath(folder))
+
+proc importedTraceTreeRoots*(
+    input: ImportedTraceTreeInputs;
+    payloadHasEntries: proc(root: string): bool): seq[string] =
+  ## **The roots of an imported trace's Files pane.**
+  ##
+  ## ``payloadHasEntries(root)`` answers whether ``files/<root>`` exists in
+  ## the trace payload and is a file or a non-empty folder.
+  ##
+  ## An imported trace carries its sources in its payload, so the roots
+  ## are payload folders whenever the payload holds any.  The recorded
+  ## source folders are paths on the RECORDING host; a root that names one
+  ## of them sends the loader to the live disk, which on another machine
+  ## does not exist and on the recording machine is the whole repository
+  ## (GitHub #785: a Noir program inside a git checkout got the checkout's
+  ## root, and the Files pane listed every file in it).  In order:
+  ##
+  ## 1. the workdir, when the payload mirrors it (the root-stripped
+  ##    absolute layout, ``files/home/dev/project/...``) and it lies in a
+  ##    recorded source folder;
+  ## 2. the recorded source folders, when the payload mirrors all of them;
+  ## 3. the folders of the ``paths.json`` entries (`sourceFolderRootsOf`)
+  ##    that hold files in the payload — a root the payload lacks (nargo
+  ##    lists ``std/lib.nr`` but does not copy it) is dropped, not looked
+  ##    up on the live disk;
+  ## 4. without a usable ``paths.json``, the payload's own top-level
+  ##    folders that hold files;
+  ## 5. only when the payload holds nothing at all, the live folders: the
+  ##    ``paths.json`` roots resolved against the workdir, the recorded
+  ##    source folders, or ``liveFallback`` — the loader reads those with
+  ##    the live-filesystem limits (`index/files.loadFile`).
+  var sourceFolders = input.recordedSourceFolders
+
+  if input.workdir.len > 0 and payloadHasEntries(input.workdir):
+    var workdirInsideKnownSource = sourceFolders.len == 0
+    for folder in sourceFolders:
+      if isPathWithinRoot(folder, input.workdir):
+        workdirInsideKnownSource = true
+    if workdirInsideKnownSource:
+      return @[input.workdir]
+
+  if sourceFolders.len > 0:
+    var allInPayload = true
+    for folder in sourceFolders:
+      if not payloadHasEntries(folder):
+        allInPayload = false
+    if allInPayload:
+      return sourceFolders
+
+  let folders =
+    if input.tracePathsRead: sourceFolderRootsOf(input.tracePaths)
+    else: @[]
+  for folder in folders:
+    if payloadHasEntries(folder):
+      result.addUniqueRoot folder
+  if result.len > 0:
+    return
+
+  for name in input.payloadTopLevel:
+    if payloadHasEntries(name):
+      result.addUniqueRoot name
+  if result.len > 0:
+    return
+
+  if folders.len > 0:
+    sourceFolders = resolveAgainstWorkdir(input.workdir, folders)
+  if sourceFolders.len == 0:
+    sourceFolders = input.liveFallback
+  sourceFolders

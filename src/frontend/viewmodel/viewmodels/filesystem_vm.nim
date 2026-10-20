@@ -40,6 +40,9 @@
 ##                             ``EditorService.filesystem`` assignment).
 ## - ``clearRoot``           — wipe the tree (used during a session
 ##                             switch / fresh debugging run).
+## - ``failLoad``            — end a root load that failed: ``lsError``
+##                             plus the reason, so the pane never waits
+##                             forever (GitHub #785).
 ## - ``toggleExpanded``      — toggle a path's expansion state.  No-op
 ##                             when the path is not present in the
 ##                             tree.
@@ -75,6 +78,9 @@ type
     # -- Mutable state --
     rootEntry*: Signal[FilesystemEntryNode]
     loadingState*: Signal[LoadingState]
+    loadError*: Signal[string]
+      ## Why the last root load failed, when ``loadingState`` is ``lsError``;
+      ## ``""`` otherwise.  The view shows it in place of "Loading...".
     expandedPaths*: Signal[HashSet[string]]
     diffEntries*: Signal[seq[FilesystemDiffEntry]]
     onOpenFile*: proc(path: string)
@@ -119,6 +125,15 @@ proc emptyEntry*(): FilesystemEntryNode =
     diffClass: fdcNone,
     children: @[],
   )
+
+proc isEmptyRoot*(root: FilesystemEntryNode): bool =
+  ## Does ``root`` hold nothing to show?  True for the empty placeholder
+  ## (``emptyEntry``) and for a synthetic container — the "source
+  ## folders" group ``loadFilesystem`` builds, whose ``path`` is empty
+  ## because it is not a folder on disk — that came back with no
+  ## children.  A load that found nothing must end on the empty state,
+  ## not on one bare container row (GitHub #785).
+  root.children.len == 0 and (root.text.len == 0 or root.path.len == 0)
 
 proc collectSmartExpansionPaths(node: FilesystemEntryNode; paths: var HashSet[string]) =
   ## Recursively collect folder paths where node has exactly one child and that
@@ -177,6 +192,7 @@ proc setRoot*(vm: FilesystemVM; root: FilesystemEntryNode) =
   ## tree as a side effect.
   vm.rootEntry.val = root
   vm.loadingState.val = lsIdle
+  vm.loadError.val = ""
 
   # Perform smart auto-expansion for single-child folders on load
   var paths = vm.expandedPaths.val
@@ -188,6 +204,22 @@ proc clearRoot*(vm: FilesystemVM) =
   ## call ``isEmpty`` is true so the empty-state placeholder shows.
   vm.rootEntry.val = emptyEntry()
   vm.loadingState.val = lsLoading
+  vm.loadError.val = ""
+
+proc failLoad*(vm: FilesystemVM; reason: string) =
+  ## End a root load that failed.  The index process answers every root
+  ## load on ``CODETRACER::filesystem-loaded``, with the tree or with an
+  ## ``error`` naming the reason it has none; this is the second answer.
+  ## Without it the pane had no state to end in but the ``lsLoading`` it
+  ## starts in, and showed "Loading..." for good (GitHub #785).
+  ##
+  ## The tree is dropped: whatever it held belonged to an earlier load.
+  ## The next ``setRoot`` clears the failure; a ``clearRoot`` (session
+  ## reset) puts the pane back to waiting.
+  vm.rootEntry.val = emptyEntry()
+  vm.loadError.val = if reason.len > 0: reason
+                     else: "The file tree could not be loaded."
+  vm.loadingState.val = lsError
 
 proc toggleExpanded*(vm: FilesystemVM; path: string) =
   ## Toggle ``path``'s expanded state.  Folders not yet in the
@@ -286,13 +318,12 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     # compile under Nim's side-effect inference for compound types.
     let rootEntry = createSignal(emptyEntry())
     let loadingState = createSignal(lsLoading)
+    let loadError = createSignal("")
     let expandedPaths = createSignal(initHashSet[string]())
     let diffEntries = createSignal(newSeq[FilesystemDiffEntry]())
 
     let isEmpty = createMemo[bool] proc(): bool =
-      let r = rootEntry.val
-      let rootEmpty = r.text.len == 0 and r.children.len == 0
-      rootEmpty and diffEntries.val.len == 0
+      isEmptyRoot(rootEntry.val) and diffEntries.val.len == 0
 
     let hasDiff = createMemo[bool] proc(): bool =
       diffEntries.val.len > 0
@@ -304,6 +335,7 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
       store: store,
       rootEntry: rootEntry,
       loadingState: loadingState,
+      loadError: loadError,
       expandedPaths: expandedPaths,
       diffEntries: diffEntries,
       isEmpty: isEmpty,
