@@ -1191,6 +1191,12 @@ type
     thinkingEndedAt*: float
     images*: seq[string]
       ## Base64 data URLs of images the user attached to this message.
+    failed*: bool
+      ## #862: the agent refused or aborted this turn (`session/prompt`
+      ## answered with an error) — `AgentFailed` in
+      ## `DeepReview/Agentic-Coding-Integration.md` §3.2.
+    errorMessage*: cstring
+      ## The agent's reason when `failed`, as the main process described it.
 
   AgentTerminal* = object
     id*: cstring

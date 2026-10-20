@@ -1370,6 +1370,16 @@ type
     thinkingEndedAt*: float
     toolName*: string
     createdAt*: float
+    failed*: bool
+      ## #862: the agent refused or aborted this turn — its `session/prompt`
+      ## was answered with an error rather than a stop reason.  This is
+      ## `AgentFailed` ("Task failed with error") in
+      ## `DeepReview/Agentic-Coding-Integration.md` §3.2, painted with §3.3's
+      ## red X.  Only ever set on an agent message.
+    errorMessage*: string
+      ## The agent's reason when `failed`, shown verbatim.  May be empty when
+      ## the agent gave none; the view then says so rather than showing
+      ## nothing.
     duration*: float
       ## Seconds the agent spent generating this response. Set when stopReason
       ## arrives; 0.0 while streaming or for user messages.
@@ -1612,7 +1622,11 @@ proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
     a.thinkingEndedAt == b.thinkingEndedAt and
     a.toolName == b.toolName and
     a.toolCallId == b.toolCallId and
-    a.status == b.status
+    a.status == b.status and
+    # The messages signal notifies only on a difference under this `==`, so
+    # a finished turn that turns failed (#862) must compare unequal.
+    a.failed == b.failed and
+    a.errorMessage == b.errorMessage
 
 proc `==`*(a, b: AgentActivityTerminalEntry): bool {.noSideEffect.} =
   a.id == b.id and a.shellId == b.shellId

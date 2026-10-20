@@ -426,6 +426,32 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
 .agent-thought-collapsed
   display: none !important
 
+// #862 — a turn the agent ended with an error (`AgentFailed`,
+// DeepReview/Agentic-Coding-Integration.md §3.2/§3.3: "Red X replaces icon").
+// The same error tokens as a failed tool call (`agent-tc-dot-failed`) and a
+// failed recording (`agent-test-row-recording-failed`), so every failure in
+// the pane reads alike.
+.agent-turn-failed
+  .agent-thought-label
+    color: colors-ui-text-error-primary
+
+  .agent-turn-failed-icon
+    color: colors-ui-icon-error-primary
+    font-size: 0.8125rem
+    font-weight: bold
+    line-height: 1
+
+.agent-turn-error
+  border-left: 0.1875em solid colors-ui-border-error
+  border-radius: 0.125em
+  padding: 0.375em 0.5em
+  margin: 0.25em 0 0.25em
+  color: colors-ui-text-primary-body
+  font-size: 0.8125rem
+  line-height: 1.4
+  white-space: pre-wrap
+  overflow-wrap: anywhere
+
 .agent-inline-code
   display: inline
   font-family: "SpaceMono", monospace
@@ -1961,4 +1987,3 @@ agent-status-pill()
     font-size: 0.875rem
     line-height: 1.25rem
     padding: 0.25rem 0
-
