@@ -619,6 +619,23 @@
         "type": "github"
       }
     },
+    "codetracer-native-backend": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792358198,
+        "narHash": "sha256-JD5+XUqjXcSwDpoI5kFK+dYsu+x/dnZbjb/JKj5EBQI=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-native-backend",
+        "rev": "4e433f6c77455f433eebc98df217bdfb5daa86fc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "agents",
+        "repo": "codetracer-native-backend",
+        "type": "github"
+      }
+    },
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
@@ -847,6 +864,23 @@
         "owner": "metacraft-labs",
         "ref": "agents",
         "repo": "codetracer-trace-format-nim",
+        "type": "github"
+      }
+    },
+    "codetracer-visual-replay": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792482810,
+        "narHash": "sha256-Z9pSYBhNs9/dk13MUb9S9pKxqYsviXzsgY0youOBxQg=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-visual-replay",
+        "rev": "6388a4df49b3805b5b77df14516c6c15975aa4e3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "agents",
+        "repo": "codetracer-visual-replay",
         "type": "github"
       }
     },
@@ -4260,6 +4294,23 @@
         "type": "github"
       }
     },
+    "native-license-lldb-sys": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780839811,
+        "narHash": "sha256-50yQSco6DD0c0fTWWnxq971hByqtkoseMl7W8n4C2BY=",
+        "owner": "metacraft-labs",
+        "repo": "lldb-sys.rs",
+        "rev": "7db095133fc4a03b39822de33907f5d25efcbd7c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "lldb-sys.rs",
+        "rev": "7db095133fc4a03b39822de33907f5d25efcbd7c",
+        "type": "github"
+      }
+    },
     "nim-acp": {
       "flake": false,
       "locked": {
@@ -7625,6 +7676,7 @@
       "inputs": {
         "appimage-channel": "appimage-channel",
         "codetracer-js-recorder": "codetracer-js-recorder",
+        "codetracer-native-backend": "codetracer-native-backend",
         "codetracer-native-recorder": "codetracer-native-recorder",
         "codetracer-python-recorder": "codetracer-python-recorder",
         "codetracer-ruby-recorder": "codetracer-ruby-recorder",
@@ -7632,6 +7684,7 @@
         "codetracer-toolchains": "codetracer-toolchains",
         "codetracer-trace-format": "codetracer-trace-format",
         "codetracer-trace-format-nim": "codetracer-trace-format-nim",
+        "codetracer-visual-replay": "codetracer-visual-replay",
         "fenix": "fenix_6",
         "flake-parts": "flake-parts_5",
         "flake-utils": "flake-utils_6",
@@ -7641,6 +7694,7 @@
         "isonim-gpui": "isonim-gpui",
         "isonim-tui": "isonim-tui",
         "isonim-yoga": "isonim-yoga",
+        "native-license-lldb-sys": "native-license-lldb-sys",
         "nim-acp": "nim-acp",
         "nim-agent-harbor": "nim-agent-harbor",
         "nim-agents": "nim-agents",

@@ -351,6 +351,22 @@
       url = "github:metacraft-labs/codetracer-trace-format-nim/agents";
       flake = false;
     };
+    # The native CLI used by backend-manager's recording tests imports the
+    # production CTFS visual-stream reader, even for a non-graphics recording.
+    codetracer-visual-replay = {
+      url = "github:metacraft-labs/codetracer-visual-replay/agents";
+      flake = false;
+    };
+    codetracer-native-backend = {
+      url = "github:metacraft-labs/codetracer-native-backend/agents";
+      flake = false;
+    };
+    # Match native-backend's Cargo.lock. Fetch this private source through
+    # Nix's authenticated flake fetcher, rather than fetchgit in the sandbox.
+    native-license-lldb-sys = {
+      url = "github:metacraft-labs/lldb-sys.rs/7db095133fc4a03b39822de33907f5d25efcbd7c";
+      flake = false;
+    };
 
     # codetracer_trace_writer_nim imports both `results` and `stew/*` while
     # building the locked Python recorder. The main source input does not
