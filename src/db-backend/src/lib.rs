@@ -233,6 +233,7 @@ pub mod session_manifest;
 pub mod stack_unwinder;
 pub mod step_lines_loader;
 pub mod task;
+pub mod terminal_lines;
 pub mod trace_processor;
 pub mod trace_reader;
 pub mod tracepoint_interpreter;

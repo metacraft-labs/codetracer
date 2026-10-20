@@ -56,6 +56,7 @@ use crate::task::{
     Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, TracepointResultsAggregate, UpdateTableArgs,
     Variable,
 };
+use crate::terminal_lines::CachedTerminalLines;
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{Type, Value, to_ct_value};
 use crate::value_budget;
@@ -210,6 +211,10 @@ pub struct Handler {
     /// When `cached_events` is already populated, Write events are extracted
     /// from it instead.
     cached_terminal_events: Option<Vec<ProgramEvent>>,
+
+    /// The terminal output split into lines (`ct/load-terminal-lines`), with
+    /// each write's text and tick; built once from `cached_terminal_events`.
+    cached_terminal_lines: Option<CachedTerminalLines>,
 
     /// Macro sourcemaps loaded from the trace directory.
     /// Used for resolving macro expansion locations (ALT+E shortcut).
@@ -598,6 +603,7 @@ impl Handler {
             event_tick_index: None,
             full_locals: None,
             cached_terminal_events: None,
+            cached_terminal_lines: None,
             macro_sourcemaps: MacroSourceMapCollection::default(),
             sourcemap_cache: SourcemapCache::new(),
             sourcemap_cache_dir: None,
@@ -6428,6 +6434,36 @@ impl Handler {
 
         // Include terminal data in the response body for customRequest().
         self.respond_dap(req, &page, sender)?;
+        Ok(())
+    }
+
+    /// Answers a window of the terminal output's LINES with their total
+    /// (Viewport-Driven-Loading, Decided Q3): the line view asks for the lines
+    /// it shows instead of every write. Arguments: `start`, `count` (lines),
+    /// and optionally `atRRTicks`, for which the answer names the line of the
+    /// current position (`currentLine`, -1 before the first write). `count` 0
+    /// answers no lines — the totals and the current line only.
+    pub fn load_terminal_lines(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        let arg_usize = |name: &str| {
+            req.arguments
+                .get(name)
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0)
+                .max(0) as usize
+        };
+        let start = arg_usize("start");
+        let count = arg_usize("count");
+        let at_ticks = req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64);
+        if self.cached_terminal_lines.is_none() {
+            self.ensure_terminal_events_loaded();
+            let events = self.cached_terminal_events.as_deref().unwrap_or(&[]);
+            self.cached_terminal_lines = Some(CachedTerminalLines::of(events));
+        }
+        let Some(cached) = self.cached_terminal_lines.as_ref() else {
+            return Err("internal error: cached_terminal_lines is None after population".into());
+        };
+        let answer = cached.window(start, count, at_ticks);
+        self.respond_dap(req, &answer, sender)?;
         Ok(())
     }
 

@@ -159,6 +159,7 @@ mod session_manifest;
 mod stack_unwinder;
 mod step_lines_loader;
 mod task;
+mod terminal_lines;
 mod trace_processor;
 mod trace_reader;
 mod tracepoint_interpreter;

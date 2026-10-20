@@ -2199,16 +2199,33 @@ proc drawTerminalPane(r: GpuiRenderer) =
   let vm = terminalVM()
   if pane.isNil or vm.isNil:
     return
-  if drawTerminalOutput(r, pane, vm, gTerminal, terminalBody()):
+  # THE LINE VIEW HOLDS THE LINES IT SHOWS (Viewport-Driven-Loading Q3): the
+  # rows the body fits from the line drawn first. A following view's first
+  # line depends on the current line the first answer names, so it reports
+  # again until that holds still.
+  let body = terminalBody()
+  if body.w > 0 and not vm.screenShown:
+    let rows = terminalLayout(body, vm).rows
+    var reported = -1
+    for _ in 0 ..< 3:
+      let top = vm.visibleTop(gTerminal, rows)
+      if rows <= 0 or top == reported:
+        break
+      reported = top
+      vm.showTerminalLines(Viewport(rows: rows, firstRow: top))
+  if drawTerminalOutput(r, pane, vm, gTerminal, body):
     applyTextFaces(r, pane)
 
 proc terminalJump(r: GpuiRenderer; write: int): bool =
   ## Go to the moment write `write` was produced (`ct/event-jump`, K32), and
   ## the window follows.
   let vm = terminalVM()
-  if vm.isNil or write < 0 or write >= vm.events.val.len:
+  if vm.isNil:
     return false
-  let ev = vm.events.val[write]
+  # The write is known from the held lines when the writes are not loaded.
+  let ev = vm.eventOf(write)
+  if ev.eventIndex < 0:
+    return false
   try:
     gSession.eventJump(EventLogEntry(content: "", rrTicks: ev.rrTicks,
                                      line: ev.line, file: ev.path,
@@ -2683,7 +2700,7 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       if not vm.isNil and not vm.screenShown:
         let lay = terminalLayout(terminalBody(), vm)
         let rows = int(round(-dy / float(TerminalRowPx)))
-        let maxTop = max(0, vm.lines.val.len - lay.rows)
+        let maxTop = max(0, vm.lineCount - lay.rows)
         gTerminal.scrollTop = max(0, min(maxTop,
           vm.visibleTop(gTerminal, lay.rows) + (if rows == 0: (if dy < 0: 1
                                                               else: -1)
@@ -3933,10 +3950,9 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
     opened.session.editorVM.showFlowOverlay.val =
       FlowOverlayShownByDefault and not gOpenCmd.noFlowOverlay
   discard opened.loadRecordingPanes()
-  try:
-    discard opened.loadTerminalOutput()   # PLAT-52
-  except CatchableError:
-    discard
+  # PLAT-52 / Q3: the Terminal Output's lines are asked for as the pane is
+  # drawn (`drawTerminalPane`), the window it shows.
+  opened.openTerminalOutput()
   let idx = gShell.windows.indexOf(gWindow)
   let layout = if idx >= 0: gShell.windows.windows[idx].layout
                else: sharedDefaultValue()
@@ -7852,12 +7868,9 @@ proc runOpen(cmd: GpuiCommand): int =
   # 2026-09-23 this asked for the locals alone, and the call-trace pane drew
   # "no call trace has been loaded" on every recording.
   discard session.loadRecordingPanes()
-  # PLAT-52: the recorded program's terminal output — the Terminal Output
-  # pane's lines and screen, the producer the terminal calls too.
-  try:
-    discard session.loadTerminalOutput()
-  except CatchableError:
-    discard
+  # PLAT-52 / Q3: the Terminal Output pane asks for the lines it shows as it
+  # is drawn (`drawTerminalPane`), as the terminal's does.
+  session.openTerminalOutput()
   discard session.loadStopPanes()
   session.selectCurrentCall()
   # PLAT-37. THE BREAKPOINT IS RESOLVED AGAINST THE RECORDING'S OWN SOURCE,

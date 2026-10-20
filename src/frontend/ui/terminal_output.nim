@@ -16,6 +16,7 @@ import
 # ---------------------------------------------------------------------------
 
 import std/json
+from std/options import isSome, get
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
@@ -23,7 +24,7 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/terminal_output_vm import
   TerminalOutputVM, createTerminalOutputVM, setEvents, clearLines,
   setCurrentRRTicks, setRecordingKey, recordingKeyOf, viewMemoryFromJson,
-  viewMemoryToJson,
+  viewMemoryToJson, windowed, heldLine, jumpToEvent,
   TerminalView
 import std/tables
 import isonim/core/signals
@@ -45,6 +46,7 @@ var terminalOutputComponentRef: TerminalOutputComponent
 var isoNimTerminalOutputMounted*: bool = false
 
 proc tryMountIsoNimTerminalOutputPanel*()
+proc rememberTerminalViews(vm: TerminalOutputVM; data: Data)
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -63,6 +65,7 @@ proc initTerminalOutputVMFromSession*(vm: TerminalOutputVM) =
     isoNimTerminalOutputMounted = false
   terminalOutputVMStore = store
   terminalOutputVMInstance = vm
+  rememberTerminalViews(vm, data)
   clog "TerminalOutputVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimTerminalOutputPanel()
 
@@ -179,8 +182,9 @@ when defined(ctInExtension):
       terminalOutputComponentForExtension.bindTerminalOutputExtensionHost()
     result = terminalOutputComponentForExtension
 
-proc getLines(self: TerminalOutputComponent) =
-  self.api.emit(CtLoadTerminal, EmptyArg())
+when defined(ctInExtension):
+  proc getLines(self: TerminalOutputComponent) =
+    self.api.emit(CtLoadTerminal, EmptyArg())
 
 proc terminalOutputEventsOf*(eventList: seq[ProgramEvent]):
     seq[TerminalOutputEvent] =
@@ -222,24 +226,36 @@ proc writeTerminalViews(key, value: cstring) {.importjs: """
     } catch (e) { }
   })(#, #)""".}
 
-proc syncTerminalOutputVM(self: TerminalOutputComponent) =
-  ## Hand the recorded writes to the ``TerminalOutputVM``, the recording's
-  ## remembered view choice first.
-  if terminalOutputVMInstance.isNil:
+proc rememberTerminalViews(vm: TerminalOutputVM; data: Data) =
+  ## Key the view choice (lines / screen) by the recording, seeded from what
+  ## this browser remembered, and remember every later choice. Before the
+  ## pane's first lines arrive, which pick the view.
+  if vm.isNil or vm.recordingKey.len > 0:
     return
   let recordingKey =
-    if self.data.isNil or self.data.trace.isNil: ""
-    else: recordingKeyOf(self.data.trace.outputFolder)
+    if data.isNil or data.trace.isNil: ""
+    else: recordingKeyOf(data.trace.outputFolder)
   # A recording without an output folder (one made in a browser tab) has no
   # key to remember a view choice under; the choice still applies, unfiled.
-  if terminalOutputVMInstance.recordingKey.len == 0 and recordingKey.len > 0:
-    terminalOutputVMInstance.setRecordingKey(
-      recordingKey,
-      viewMemoryFromJson($readTerminalViews(cstring(TerminalViewsStorageKey))))
-    terminalOutputVMInstance.onViewChosen =
-      proc(memory: Table[string, TerminalView]) =
-        writeTerminalViews(cstring(TerminalViewsStorageKey),
-                           cstring(viewMemoryToJson(memory)))
+  if recordingKey.len == 0:
+    return
+  vm.setRecordingKey(
+    recordingKey,
+    viewMemoryFromJson($readTerminalViews(cstring(TerminalViewsStorageKey))))
+  vm.onViewChosen =
+    proc(memory: Table[string, TerminalView]) =
+      writeTerminalViews(cstring(TerminalViewsStorageKey),
+                         cstring(viewMemoryToJson(memory)))
+
+proc syncTerminalOutputVM(self: TerminalOutputComponent) =
+  ## Hand the recorded writes to the ``TerminalOutputVM``, the recording's
+  ## remembered view choice first — where the ViewModel does not load its
+  ## own lines (the VS Code extension's stub store). A ViewModel the engine
+  ## serves by line window loads its writes itself, when its screen view is
+  ## shown.
+  if terminalOutputVMInstance.isNil or terminalOutputVMInstance.windowed:
+    return
+  rememberTerminalViews(terminalOutputVMInstance, self.data)
   terminalOutputVMInstance.setEvents(terminalOutputEventsOf(self.cachedEvents))
 
 proc syncTerminalOutputDebuggerPosition(rrTicks: int) =
@@ -279,12 +295,9 @@ method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.
   ## The shell asks for line `response`: go to the write that started it.
   if terminalOutputVMInstance.isNil:
     return
-  let lines = terminalOutputVMInstance.lines.val
-  if response >= 0 and response < lines.len and
-     lines[response].fragments.len > 0:
-    let index = lines[response].fragments[0].eventIndex
-    if index >= 0 and index < self.cachedEvents.len:
-      self.onTerminalEventClick(self.cachedEvents[index])
+  let line = terminalOutputVMInstance.heldLine(response)
+  if line.isSome and line.get.fragments.len > 0:
+    terminalOutputVMInstance.jumpToEvent(line.get.fragments[0].eventIndex)
 
 method restart*(self: TerminalOutputComponent) =
   self.cachedLines = JsAssoc[int, seq[TerminalEvent]]{}
@@ -321,11 +334,15 @@ method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtLoadedTerminal, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
     discard self.onLoadedTerminal(response)
   )
-  api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
-    if self.initialUpdate:
-      self.getLines()
-      self.initialUpdate = false
-  )
+  # The VS Code extension's stub store cannot serve the line window, so the
+  # extension still asks for every write once; elsewhere the pane asks for
+  # the lines it shows (`TerminalOutputVM.setViewport`).
+  when defined(ctInExtension):
+    api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
+      if self.initialUpdate:
+        self.getLines()
+        self.initialUpdate = false
+    )
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     self.location = response.location
     syncTerminalOutputDebuggerPosition(response.location.rrTicks)

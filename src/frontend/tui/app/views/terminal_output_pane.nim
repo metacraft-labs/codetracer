@@ -64,8 +64,14 @@ type
       ## The output contains screen control: the screen view is offered.
     view*: TerminalView
     lines*: seq[TerminalLine]
-      ## Every line of the output (the whole population: the output is
-      ## loaded whole).
+      ## The lines held: the window the engine answered from `linesStart`
+      ## (Viewport-Driven-Loading Q3) when `windowed`, else every line.
+    windowed*: bool
+      ## The engine serves the lines by window.
+    linesStart*: int
+      ## The output line `lines[0]` is (windowed).
+    total*: int
+      ## Lines in the whole output (windowed).
     currentTicks*: uint64
       ## The debugger's position: fragments are past / active / future
       ## against it.
@@ -89,6 +95,17 @@ type
       ## The write the held scrubber last moved the debugger to — the
       ## scrubber is REAL-TIME (the user, 2026-10-06): a drag moves the
       ## recording position to each write it crosses, one jump per write.
+    writeOf*: proc(write: int): TerminalOutputEvent {.closure.}
+      ## The host's: write `write` (its tick and place in the event log),
+      ## known from the held lines when the writes are not loaded; an event
+      ## with `eventIndex` -1 for an unknown one. Nil without a host.
+    refetch*: proc(m: TerminalOutputPaneModel;
+                   rows: int): TerminalOutputPaneModel {.closure.}
+      ## The host's: bring the held lines to the ones `rows` rows of the line
+      ## view show from `m`'s position, and answer the model with them (nil
+      ## when the lines are held whole). Painting never calls it — the pane
+      ## stays a pure function of what is held; a caller that scrolls does,
+      ## through `ensureShown`.
 
   TerminalPaneGeometry* = object
     ## Where each part of the pane is, for a model painted into an area.
@@ -178,13 +195,20 @@ proc terminalPaneGeometry*(m: TerminalOutputPaneModel;
     else:
       result.textWidth = area.width
 
-func lineCount*(m: TerminalOutputPaneModel): int = m.lines.len
+func lineCount*(m: TerminalOutputPaneModel): int =
+  ## Lines in the whole output — the view's scroll range.
+  if m.windowed: m.total else: m.lines.len
+
+func heldAt*(m: TerminalOutputPaneModel; index: int): int =
+  ## Where output line `index` is in `lines`, -1 when it is not held.
+  let at = index - (if m.windowed: m.linesStart else: 0)
+  if at >= 0 and at < m.lines.len: at else: -1
 
 proc visibleTop*(m: TerminalOutputPaneModel; rows: int): int =
   ## The first line shown in `rows` rows: the reader's position, or — when
   ## following — the current line at the bottom of the view, as a terminal
   ## shows the output up to now.
-  let maxTop = max(0, m.lines.len - rows)
+  let maxTop = max(0, m.lineCount - rows)
   if m.follow:
     # Before the first write nothing is "up to now": the view starts at the
     # top, where the output will begin.
@@ -193,10 +217,16 @@ proc visibleTop*(m: TerminalOutputPaneModel; rows: int): int =
   else:
     max(0, min(maxTop, m.scrollTop))
 
+proc ensureShown*(m: var TerminalOutputPaneModel; rows: int) =
+  ## Hold the lines `rows` rows of the line view show (Viewport-Driven-
+  ## Loading Q3) — after the reader scrolled, or the pane was resized.
+  if not m.refetch.isNil and rows > 0 and not m.screenShown:
+    m = m.refetch(m, rows)
+
 proc scrubberOf*(m: TerminalOutputPaneModel; rows: int): ScrubberModel =
   ## The line view's scrollbar scrubber: the WHOLE output (every line), the
   ## view's first row and height, the current line.
-  scrubberModel(m.lines.len, m.visibleTop(rows), rows, m.currentLine)
+  scrubberModel(m.lineCount, m.visibleTop(rows), rows, m.currentLine)
 
 # ---------------------------------------------------------------------------
 # Thumb cells, in eighths
@@ -275,7 +305,7 @@ proc paintToggle(g: var StyledGrid; geo: TerminalPaneGeometry;
              $m.screen.writes[m.shownWrite].rrTicks) &
       (if m.previewing: " · scrubbing" else: "") & clipNote(m, geo, area)
     else:
-      $m.lines.len & " line" & (if m.lines.len == 1: "" else: "s")
+      $m.lineCount & " line" & (if m.lineCount == 1: "" else: "s")
   let used = geo.linesToggle.width + geo.screenToggle.width + 1
   let room = area.width - used
   if room > 0:
@@ -352,7 +382,7 @@ proc paintTerminalOutput*(g: var StyledGrid; area: CellArea;
     return
   let geo = terminalPaneGeometry(m, area)
   paintToggle(g, geo, m, area)
-  if m.lines.len == 0 and not m.screenShown:
+  if m.lineCount == 0 and not m.screenShown:
     if geo.contentTop < area.row + area.height:
       g.paint(geo.contentTop, area.col, fitCells(emptyText(m), area.width),
               TerminalMutedStyle)
@@ -367,10 +397,15 @@ proc paintTerminalOutput*(g: var StyledGrid; area: CellArea;
   let top = m.visibleTop(geo.contentRows)
   for i in 0 ..< geo.contentRows:
     let li = top + i
-    if li >= m.lines.len: break
+    if li >= m.lineCount: break
+    # A line outside the held window is painted when its window arrives.
+    let at = m.heldAt(li)
+    if at < 0:
+      result.add ""
+      continue
     paintLineAt(g, geo.contentTop + i, geo.textCol, geo.textWidth,
-                m.lines[li], m.currentTicks)
-    result.add truncateToCells(lineText(m.lines[li]), geo.textWidth)
+                m.lines[at], m.currentTicks)
+    result.add truncateToCells(lineText(m.lines[at]), geo.textWidth)
   paintLineScrubber(g, geo, m)
 
 # ---------------------------------------------------------------------------
@@ -428,10 +463,11 @@ proc terminalOutputHitAt*(m: TerminalOutputPaneModel; area: CellArea;
     return TerminalHit(kind: thLineTrack, eventIndex: -1, line: -1,
                        fraction: fraction)
   let li = m.visibleTop(geo.contentRows) + (row - geo.contentTop)
-  if li < 0 or li >= m.lines.len:
+  let at = m.heldAt(li)
+  if at < 0:
     return
-  let fi = fragmentAt(m.lines[li], col - geo.textCol)
+  let fi = fragmentAt(m.lines[at], col - geo.textCol)
   if fi < 0:
     return
   result = TerminalHit(kind: thFragment, line: li,
-                       eventIndex: m.lines[li].fragments[fi].eventIndex)
+                       eventIndex: m.lines[at].fragments[fi].eventIndex)

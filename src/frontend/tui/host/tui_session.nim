@@ -336,10 +336,9 @@ proc learnExtent*(s: TuiSession) =
   # PLAT-52: the recorded program's terminal output — the Terminal Output
   # pane's lines and screen model (`terminal_output_source`, which GPUI asks
   # through too). A refusal leaves the pane in its loading state.
-  try:
-    discard s.session.loadTerminalOutput()
-  except CatchableError:
-    discard
+  # Its lines are asked for when the pane first reports what it shows
+  # (`refreshTerminalOutput`): the window, not every write (Q3).
+  s.session.openTerminalOutput()
   s.files = fileTreeModelOf(s.session.session.fileTreeVM)
   s.callTraceAsked = true
   var rows: seq[EventRow] = @[]
@@ -478,18 +477,53 @@ proc terminalOutputModelOf*(vm: TerminalOutputVM; ticks: uint64;
     return
   result.loading = vm.initialLoad.val
   result.lines = vm.lines.val
+  result.windowed = vm.windowed
+  result.linesStart = vm.linesStart.val
+  result.total = vm.lineCount
   result.screen = vm.screen
   result.offered = vm.screenOffered.val
   result.view = vm.view.val
   result.currentTicks = ticks
-  result.currentLine = lineOfTick(result.lines, ticks)
+  result.currentLine =
+    if result.windowed: vm.currentLine() else: lineOfTick(result.lines, ticks)
   if not vm.screen.isNil:
     result.shownWrite = vm.screen.writeAtTick(ticks)
+
+proc terminalLinesRefetch(s: TuiSession):
+    proc(m: TerminalOutputPaneModel; rows: int): TerminalOutputPaneModel =
+  ## The pane's `refetch`: report the rows the line view shows from `m`'s
+  ## position and adopt the window the engine answers. A following view's
+  ## position depends on the current line, which the first answer names, so
+  ## it is reported again until it holds still (twice at most in practice).
+  let sess = s
+  result = proc(m: TerminalOutputPaneModel; rows: int): TerminalOutputPaneModel =
+    let vm = sess.session.session.terminalOutputVM
+    result = m
+    if vm.isNil or rows <= 0:
+      return
+    var reported = -1
+    for _ in 0 ..< 3:
+      let top = result.visibleTop(rows)
+      if top == reported:
+        break
+      reported = top
+      vm.showTerminalLines(Viewport(rows: rows, firstRow: top))
+      result = terminalOutputModelOf(vm, sess.session.getCurrentRRTicks(),
+                                     result)
+      result.refetch = m.refetch
+      result.writeOf = m.writeOf
 
 proc refreshTerminalOutput*(s: TuiSession; rt: TuiRuntime) =
   rt.app.terminalOutput = terminalOutputModelOf(
     s.session.session.terminalOutputVM, s.session.getCurrentRRTicks(),
     rt.app.terminalOutput)
+  rt.app.terminalOutput.refetch = s.terminalLinesRefetch()
+  let vm = s.session.session.terminalOutputVM
+  if not vm.isNil:
+    rt.app.terminalOutput.writeOf = proc(write: int): TerminalOutputEvent =
+      vm.eventOf(write)
+  # The line view holds the lines the pane shows at this position.
+  rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
 
 proc showViewedFile(s: TuiSession; rt: TuiRuntime; force = false)
 
@@ -1175,6 +1209,10 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
     s.refresh(rt)
   elif outcome.pagesCallTrace:
     s.pageCallTrace(rt)
+  # THE LINE VIEW HOLDS WHAT THE PANE SHOWS after whatever this token did to
+  # the layout — a tab switch that reveals it, a resize, a maximise. A no-op
+  # while the window it shows is held (Viewport-Driven-Loading Q3).
+  rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
 
 proc disarmHandshakeInterrupt*(s: TuiSession) =
   ## Take the ESCAPE HATCH off the DAP channel now that the session is open,

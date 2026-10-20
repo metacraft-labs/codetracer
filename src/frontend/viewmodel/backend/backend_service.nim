@@ -70,7 +70,7 @@ proc disconnect*(b: BackendService) =
 # guess is made.
 # ---------------------------------------------------------------------------
 
-func isResponseEnvelope(resp: JsonNode): bool =
+func isResponseEnvelope*(resp: JsonNode): bool =
   ## A whole DAP response, as opposed to a bare body. DAP makes `success` a
   ## mandatory boolean on every response
   ## (https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_Response),

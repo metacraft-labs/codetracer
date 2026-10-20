@@ -27,7 +27,7 @@
 ## (`data-ct-terminal-*`): the view, the first row and row count, the total,
 ## each fragment's write, tense and attributes, the thumb's pixels.
 
-import std/[math, strutils, unicode]
+import std/[math, options, strutils, unicode]
 
 import isonim_gpui/renderer
 
@@ -153,7 +153,7 @@ proc terminalLayout*(body: PxRect; vm: TerminalOutputVM): TerminalLayout =
 proc visibleTop*(vm: TerminalOutputVM; st: GTerminalPane; rows: int): int =
   ## The first line shown: the reader's position, or — following — the
   ## current line at the bottom (the top before the first write).
-  let total = vm.lines.val.len
+  let total = vm.lineCount
   let maxTop = max(0, total - rows)
   if st.follow:
     let current = vm.currentLine()
@@ -164,7 +164,7 @@ proc visibleTop*(vm: TerminalOutputVM; st: GTerminalPane; rows: int): int =
 proc scrubberFor*(vm: TerminalOutputVM; st: GTerminalPane;
                   rows: int): ScrubberModel =
   ## The line view's scrubber: the WHOLE output.
-  scrubberModel(vm.lines.val.len, vm.visibleTop(st, rows), rows,
+  scrubberModel(vm.lineCount, vm.visibleTop(st, rows), rows,
                 vm.currentLine())
 
 proc screenThumbX*(vm: TerminalOutputVM; track: PxRect): int =
@@ -257,25 +257,30 @@ proc drawToggle(r: GpuiRenderer; pane: GpuiElement; lay: TerminalLayout;
        else: "write " & $(w + 1) & " / " & $n & " · tick " &
              $vm.events.val[w].rrTicks) &
       (if vm.scrubPreview.val >= 0: " · scrubbing" else: "")
-    else: $vm.lines.val.len & " lines"))
+    else: $vm.lineCount & " lines"))
   r.appendChild(row, info)
   r.appendChild(pane, row)
 
 proc drawLines(r: GpuiRenderer; pane: GpuiElement; lay: TerminalLayout;
                vm: TerminalOutputVM; st: GTerminalPane) =
-  let lines = vm.lines.val
+  let total = vm.lineCount
   let top = vm.visibleTop(st, lay.rows)
   let current = vm.currentRRTicks.val
   r.setAttribute(pane, "data-ct-terminal-top", $top)
   r.setAttribute(pane, "data-ct-terminal-rows", $lay.rows)
-  r.setAttribute(pane, "data-ct-terminal-total", $lines.len)
+  r.setAttribute(pane, "data-ct-terminal-total", $total)
   for i in 0 ..< lay.rows:
     let li = top + i
-    if li >= lines.len: break
+    if li >= total: break
     let row = rowElement(r, TerminalRowPx)
     r.setAttribute(row, TerminalLineAttribute, $li)
     r.setStyle(row, "width", $lay.content.w & "px")
-    for f in lines[li].fragments:
+    # A line outside the held window is drawn when its window arrives.
+    let line = vm.heldLine(li)
+    if line.isNone:
+      r.appendChild(pane, row)
+      continue
+    for f in line.get.fragments:
       if f.text.len == 0: continue
       let span = r.createElement("span")
       r.setAttribute(span, TerminalWriteAttribute, $f.eventIndex)
@@ -376,7 +381,7 @@ proc drawTerminalOutput*(r: GpuiRenderer; pane: GpuiElement;
   r.setAttribute(pane, TerminalAttribute,
                  (if vm.screenShown: $tvScreen else: $tvLines))
   drawToggle(r, pane, lay, vm)
-  if vm.lines.val.len == 0 and not vm.screenShown:
+  if vm.lineCount == 0 and not vm.screenShown:
     let note = r.createElement("div")
     r.setStyle(note, "color", TerminalFutureColour)
     r.setStyle(note, "opacity", "0.6")
@@ -447,12 +452,12 @@ proc terminalHitAt*(vm: TerminalOutputVM; st: GTerminalPane; body: PxRect;
   if not lay.content.contains(x, y):
     return
   let li = vm.visibleTop(st, lay.rows) + (y - lay.content.y) div TerminalRowPx
-  let lines = vm.lines.val
-  if li < 0 or li >= lines.len:
+  let line = vm.heldLine(li)
+  if line.isNone:
     return
   let column = int(float(x - lay.content.x) / EditorColumnPx)
-  let fi = lineFragmentAt(lines[li], column)
+  let fi = lineFragmentAt(line.get, column)
   if fi < 0:
     return
   result = GTerminalHit(kind: ghWrite,
-                        write: lines[li].fragments[fi].eventIndex)
+                        write: line.get.fragments[fi].eventIndex)

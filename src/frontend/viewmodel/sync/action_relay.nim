@@ -115,6 +115,11 @@ proc applyViewport(session: SessionViewModel; args: JsonNode): bool =
     if vm.isNil: return false
     vm.setViewport(merged(vm.viewport.val))
     true
+  of "terminalOutput":
+    let vm = session.terminalOutputVM
+    if vm.isNil: return false
+    vm.setViewport(merged(vm.viewport.val))
+    true
   else:
     false
 

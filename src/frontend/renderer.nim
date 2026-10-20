@@ -565,7 +565,11 @@ proc createUIComponents*(data: Data) =
 proc requestInitialPanelData*(data: Data) =
   ## Ask backend to resend panel data that isn't automatically replayed.
   data.viewsApi.emit(CtEventLoad, EmptyArg())
-  data.viewsApi.emit(CtLoadTerminal, EmptyArg())
+  # The terminal output's line view asks for the lines it shows
+  # (`TerminalOutputVM.setViewport`); only the extension's stub-backed pane
+  # is still handed every write.
+  when defined(ctInExtension):
+    data.viewsApi.emit(CtLoadTerminal, EmptyArg())
 
 # proc saveNew(data: Data, file: SaveFile) =
 #   ipc.send "CODETRACER::save-new", file

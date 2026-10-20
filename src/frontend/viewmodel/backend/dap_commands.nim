@@ -68,6 +68,7 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "ct/updated-events",
   "ct/updated-events-content",
   "ct/load-terminal",
+  "ct/load-terminal-lines",
   "ct/loaded-terminal",
   "ct/collapse-calls",
   "ct/expand-calls",

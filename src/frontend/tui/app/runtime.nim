@@ -1300,14 +1300,30 @@ proc terminalOutputArea(rt: TuiRuntime; geometry: LayoutGeometry): CellArea =
       return paneUnderStrip(geometry, i)
   CellArea()
 
+proc terminalOutputRows*(rt: TuiRuntime): int =
+  ## How many lines the Terminal Output's line view shows on the current
+  ## screen — what its viewport reports (Viewport-Driven-Loading Q3); 0 when
+  ## the pane is not on the screen.
+  let area = rt.terminalOutputArea(rt.layoutGeometry())
+  if area.width <= 0:
+    return 0
+  terminalPaneGeometry(rt.app.terminalOutput, area).contentRows
+
 proc terminalWriteJump(rt: TuiRuntime; write: int;
                        outcome: var RuntimeOutcome): bool =
   ## Go to the moment write `write` was produced: the host's `ct/event-jump`
   ## (`pcEventJump`), the desktop's fragment click (K32).
   let m = rt.app.terminalOutput
-  if m.screen.isNil or write < 0 or write >= m.screen.writes.len:
+  var ev: TerminalOutputEvent
+  if not m.screen.isNil and write >= 0 and write < m.screen.writes.len:
+    ev = m.screen.writes[write]
+  elif not m.writeOf.isNil:
+    # The line view's writes are not loaded: the held lines name them.
+    ev = m.writeOf(write)
+    if ev.eventIndex < 0:
+      return false
+  else:
     return false
-  let ev = m.screen.writes[write]
   outcome.requestClick(PaneClickRequest(
     kind: pcEventJump, index: ev.logIndex, tick: ev.rrTicks, path: ev.path,
     line: ev.line))
@@ -1320,9 +1336,10 @@ proc scrollTerminalOutput(rt: TuiRuntime; delta: int;
   let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
   let rows = max(1, geo.contentRows)
   let m = rt.app.terminalOutput
-  let top = max(0, min(max(0, m.lines.len - rows), m.visibleTop(rows) + delta))
+  let top = max(0, min(max(0, m.lineCount - rows), m.visibleTop(rows) + delta))
   rt.app.terminalOutput.scrollTop = top
   rt.app.terminalOutput.follow = false
+  rt.app.terminalOutput.ensureShown(rows)
   outcome.repaint = true
 
 proc scrubTerminalLines(rt: TuiRuntime; area: CellArea; row: int;
@@ -1342,6 +1359,7 @@ proc scrubTerminalLines(rt: TuiRuntime; area: CellArea; row: int;
     else: sm.dragTo(f - sm.thumbLength / 2.0)
   rt.app.terminalOutput.scrollTop = top
   rt.app.terminalOutput.follow = false
+  rt.app.terminalOutput.ensureShown(geo.contentRows)
 
 proc scrubTerminalScreen(rt: TuiRuntime; area: CellArea; col: int;
                          outcome: var RuntimeOutcome) =
@@ -2679,6 +2697,9 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
        rt.app.terminalOutput.loaded and not rt.app.terminalOutput.screenShown:
       if action == kaCenterOnPointer:
         rt.app.terminalOutput.follow = true
+        rt.app.terminalOutput.ensureShown(terminalPaneGeometry(
+          rt.app.terminalOutput,
+          rt.terminalOutputArea(rt.layoutGeometry())).contentRows)
         rt.note("terminal output follows the current position")
         outcome.repaint = true
         return true

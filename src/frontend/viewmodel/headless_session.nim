@@ -93,6 +93,12 @@ proc drain() =
     discard
   drainPlatformCallbacks()
 
+proc pumpCallbacks*() =
+  ## Apply the answers to requests a ViewModel sent on its own (a viewport's
+  ## window): the native backend answers synchronously, and the callbacks
+  ## that apply each answer run here.
+  drain()
+
 proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
                                     completeMoveEvent: JsonNode) =
   ## Extract the debugger position from a ``ct/complete-move`` event

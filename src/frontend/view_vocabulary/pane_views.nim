@@ -689,8 +689,16 @@ proc terminalOutputPaneView*(vm: TerminalOutputVM): PaneView =
                 else: -1
     options.add ViewOption(id: "line-" & $line.lineIndex & "-write-" & $write,
                            label: lineText(line))
+  # THE HELD WINDOW (Viewport-Driven-Loading Q3): the options are the lines
+  # the pane's viewport holds, each id naming its line in the whole output;
+  # the highlight is the current line's place among them.
+  let start = if vm.windowed: vm.linesStart.val else: 0
+  let current = vm.currentLine() - start
   result.root = viewList("terminalOutput", options,
-                         highlight = max(0, vm.currentLine()))
+                         highlight = (if current >= 0 and current < options.len:
+                                        current
+                                      else: max(0, min(options.len - 1,
+                                                       current))))
   result.entries = entriesOf(result.root)
 
 proc shellPaneView*(vm: ShellVM): PaneView =

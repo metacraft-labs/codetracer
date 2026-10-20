@@ -2062,6 +2062,7 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?, sender.clone())?,
         "ct/event-load" => handler.event_load(req.clone(), sender.clone())?,
         "ct/load-terminal" => handler.load_terminal(req.clone(), sender.clone())?,
+        "ct/load-terminal-lines" => handler.load_terminal_lines(req.clone(), sender.clone())?,
         "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         // NOT `req.load_args::<Location>()`. `Location` is `#[serde(default)]`
@@ -3656,6 +3657,7 @@ where
                 | "ct/setup-trace-session"
                 | "ct/update-table"
                 | "ct/load-terminal"
+                | "ct/load-terminal-lines"
                 | "ct/tracepoint-toggle"
                 | "ct/tracepoint-delete"
                 | "ct/load-history" => {

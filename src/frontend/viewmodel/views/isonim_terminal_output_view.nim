@@ -26,7 +26,8 @@
 ##   div#terminalComponent-0.component-container.terminal[.isonim-terminal-output]
 ##     div.terminal-view-toggle               ← shown when the screen is offered
 ##       button.terminal-view-button[data-view=lines|screen][.active]
-##     pre                                    ← the LINE view
+##     pre                                    ← the LINE view: the held
+##                                               window, padded to every line
 ##       div.terminal-line#terminal-line-{lineIndex}
 ##         div.{past|active|future}[data-event-index]  ← click → jumpToEvent
 ##           div
@@ -46,7 +47,7 @@
 ## (`change` → `releaseScrub`) ends the drag; ArrowLeft / ArrowRight on the
 ## screen step a write back / forward.
 
-import std/[strutils, tables]
+import std/[math, strutils, tables]
 
 import isonim/core/[signals, computation]
 import isonim/testing/mock_dom
@@ -279,7 +280,7 @@ proc buildPanel[R](r: R; vm: TerminalOutputVM; webClass: string): auto =
                    (if screenShown: $tvScreen else: $tvLines))
 
   createRenderEffect proc() =
-    let empty = vm.lines.val.len == 0
+    let empty = vm.lineCount() == 0
     r.setStyle(overlay, "display", displayIf(empty))
     r.clearChildren(overlay)
     r.appendChild(overlay, r.createTextNode(emptyOverlayText(vm)))
@@ -379,6 +380,17 @@ when defined(js):
     "#.style.setProperty(#, #)".}
   proc firstLineHeight(el: JsObject): float {.importjs:
     "(function(e){const l=e.querySelector('.terminal-line');return l ? l.getBoundingClientRect().height : 0;})(#)".}
+  proc scrollTopOf(el: JsObject): float {.importjs: "#.scrollTop".}
+  proc clientHeightOf(el: JsObject): float {.importjs: "#.clientHeight".}
+  proc onScrollOrResize(el: JsObject; cb: proc()) {.importjs: """
+    (function(e, cb) {
+      e.addEventListener('scroll', function() { cb(); }, {passive: true});
+      if (typeof ResizeObserver === 'function')
+        new ResizeObserver(function() { cb(); }).observe(e);
+    })(#, #)""".}
+
+  const FallbackLineHeightPx = 18.0
+    ## A line's height before one is drawn to measure.
 
   proc mountIsoNimTerminalOutput*(container: isonim_dom.Element;
                                   vm: TerminalOutputVM) =
@@ -399,10 +411,38 @@ when defined(js):
       setStyles(pre, "flex", "1 1 auto")
       setStyles(pre, "min-height", "0")
       setStyles(pre, "overflow-y", "auto")
+      proc lineHeight(): float =
+        let h = firstLineHeight(pre)
+        if h > 0.0: h else: FallbackLineHeightPx
       discard attachListScrubber(pre, p,
-        total = proc(): int = vm.lines.val.len,
+        total = proc(): int = vm.lineCount(),
         current = proc(): int = vm.currentLine(),
-        rowHeight = proc(): float =
-          let h = firstLineHeight(pre)
-          if h > 0.0: h else: 18.0,
+        rowHeight = lineHeight,
         paneId = "terminalOutput")
+      # THE LINE VIEW ASKS FOR THE LINES IT SHOWS (Viewport-Driven-Loading
+      # Q3): the visible lines and the first of them, from the `pre`'s size
+      # and scroll, in lines. A hidden pane (no height) reports none and asks
+      # nothing until it is shown.
+      proc report() =
+        let h = lineHeight()
+        let height = clientHeightOf(pre)
+        vm.setViewport(Viewport(
+          rows: (if height <= 0.0: 0 else: int(ceil(height / h))),
+          firstRow: int(floor(scrollTopOf(pre) / h))))
+      onScrollOrResize(pre, report)
+      report()
+      # The held window sits at its own place in the output: the `pre` is
+      # padded by the lines above and below it, so its scroll range is every
+      # line's.
+      createEffect proc() =
+        let held = vm.lines.val.len
+        let start = vm.linesStart.val
+        let total = vm.lineCount()
+        let h = lineHeight()
+        if vm.windowed:
+          setStyles(pre, "padding-top", cstring($(float(start) * h) & "px"))
+          setStyles(pre, "padding-bottom",
+                    cstring($(float(max(0, total - start - held)) * h) & "px"))
+        else:
+          setStyles(pre, "padding-top", "")
+          setStyles(pre, "padding-bottom", "")

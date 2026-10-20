@@ -25,7 +25,7 @@
 ## `shellScreenOf` for the frame). No mocks: the state directory is a scratch
 ## one (`CODETRACER_TUI_LAYOUT_DIR`), the engine and the recordings are real.
 
-import std/[os, strutils, unicode, unittest]
+import std/[options, os, strutils, unicode, unittest]
 
 import isonim/core/[signals, computation]
 
@@ -51,7 +51,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 112
+const ExpectedAssertions = 131
 
 var countedAssertions = 0
 
@@ -160,9 +160,22 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     let (rt, s) = open(colours.tracePath)
     defer: s.close()
     let vm = s.session.session.terminalOutputVM
-    let lines = vm.lines.val
-    checkpoint($lines.len & " lines")
-    ck lines.len == 129
+    # THE LINE VIEW IS WINDOWED (Viewport-Driven-Loading Q3): nothing is read
+    # until the pane shows, and then the lines it shows and the total.
+    ck vm.lineCount == 0
+    ck s.showTerminalOutput(rt)
+    ck vm.windowed
+    checkpoint($vm.lineCount & " lines, " & $vm.lines.val.len & " held")
+    ck vm.lineCount == 129
+    ck vm.lines.val.len < vm.lineCount
+    var lines = newSeq[TerminalLine](vm.lineCount)
+    for i in 0 ..< 8:
+      ck vm.heldLine(i).isSome
+      lines[i] = vm.heldLine(i).get
+    # The end of the output, where following the last write puts the view.
+    s.send(rt, "G")
+    ck vm.heldLine(vm.lineCount - 1).isSome
+    lines[^1] = vm.heldLine(vm.lineCount - 1).get
     ck lines[0].lineText == "red plain bold green"
     let f0 = lines[0].fragments
     ck f0.len == 3
@@ -215,6 +228,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     s.send(rt, "G")
     rt.app.terminalOutput.follow = false
     rt.app.terminalOutput.scrollTop = 0
+    rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
     row = rt.rowWith("red plain bold green")
     ck row > 0
     let red = rt.styleAtText(row, "red")
@@ -236,6 +250,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     # The line "row  10 ###..." — written by `print(row(i))` with i == 10.
     rt.app.terminalOutput.follow = false
     rt.app.terminalOutput.scrollTop = 10
+    rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
     let row = rt.rowWith("row  10 ")
     ck row > 0
     let col = rt.shellScreenOf().rows[row].cellOf("row  10 ")
@@ -246,7 +261,10 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
       if l.lineText.startsWith("row  10 "):
         write = l.fragments[0].eventIndex
     ck write >= 0
-    let ev = vm.events.val[write]
+    # The write is known from the held lines: the writes are not loaded.
+    ck vm.events.val.len == 0
+    let ev = vm.eventOf(write)
+    ck ev.eventIndex == write
     let after = s.session.getCurrentRRTicks()
     checkpoint("before " & $before & " after " & $after & " write tick " &
                $ev.rrTicks)
@@ -278,9 +296,9 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     let a = rt.terminalArea()
     let geo = terminalPaneGeometry(rt.app.terminalOutput, a)
     checkpoint("content rows " & $geo.contentRows & ", lines " &
-               $rt.app.terminalOutput.lines.len)
+               $rt.app.terminalOutput.lineCount)
     ck geo.contentRows > 5
-    ck geo.contentRows < rt.app.terminalOutput.lines.len
+    ck geo.contentRows < rt.app.terminalOutput.lineCount
     ck geo.trackCol == a.col + a.width - 1
     # Away from the entry (where the first write's jump would land too), so
     # a scrub that moved the debugger anywhere is seen.
@@ -305,7 +323,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     for i in 1 ..< tops.len:
       if tops[i] < tops[i - 1]: mono = false
     ck mono
-    ck tops[^1] == rt.app.terminalOutput.lines.len - geo.contentRows
+    ck tops[^1] == rt.app.terminalOutput.lineCount - geo.contentRows
     # None of it moved the debugger.
     ck s.session.getCurrentRRTicks() == tick
 
@@ -341,7 +359,7 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     let a = rt.terminalArea()
     let m = rt.app.terminalOutput
     let geo = terminalPaneGeometry(m, a)
-    ck m.currentLine == m.lines.len - 1
+    ck m.currentLine == m.lineCount - 1
     let sm = m.scrubberOf(geo.contentRows)
     let markRow = geo.contentTop + min(geo.contentRows - 1,
       int(sm.currentFraction * float(geo.contentRows)))
@@ -360,15 +378,19 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     let (rt, s) = open(colours.tracePath)
     defer: s.close()
     let vm = s.session.session.terminalOutputVM
+    # The lines the pane holds (Q3): the window its viewport shows.
+    ck s.showTerminalOutput(rt)
     var pv = paneView(paneTerminalOutput, vm, Budget(name: "plat52", lines: 1, cells: 80), "terminal")
     ck pv.report.len == 0
     ck pv.root.kind == pkList
-    ck pv.root.options.len == 129
+    ck pv.root.options.len == vm.lines.val.len
     ck pv.root.options[0].label == "red plain bold green"
-    ck pv.root.options[^1].label == "done"
+    ck pv.root.options[0].id.startsWith("line-0-")
     s.send(rt, "G")
     pv = paneView(paneTerminalOutput, vm, Budget(name: "plat52", lines: 1, cells: 80), "terminal")
-    ck pv.root.highlight == 128
+    ck pv.root.options[^1].label == "done"
+    ck pv.root.options[^1].id.startsWith("line-128-")
+    ck pv.root.highlight == 128 - vm.linesStart.val
 
 suite "PLAT-52: a full-screen program's SCREEN, and its scrubber":
 
@@ -379,10 +401,13 @@ suite "PLAT-52: a full-screen program's SCREEN, and its scrubber":
     let (rt, s) = open(screenRec.tracePath)
     defer: s.close()
     let vm = s.session.session.terminalOutputVM
+    # Nothing is read until the pane shows (Q3); then the engine says the
+    # output drives a screen, the screen view opens and loads every write.
+    ck vm.events.val.len == 0
+    ck s.showTerminalOutput(rt)
     ck vm.screenOffered.val
     ck vm.view.val == tvScreen
     ck vm.screen.marks.len >= 3
-    ck s.showTerminalOutput(rt)
     ck rt.app.terminalOutput.screenShown
     # Seek to the end: the program has left the alternate screen.
     s.send(rt, "G")

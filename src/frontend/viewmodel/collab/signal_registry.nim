@@ -546,6 +546,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["events", "lines", "currentRRTicks", "screenVersion"],
     vscBackendAuthoritative,
     "Terminal output (the writes, their lines, the screen model's rebuild count) is backend trace data.")
+  entries.addMany("TerminalOutputVM",
+    ["linesStart", "linesTotal", "windowCurrentLine", "offeredByEngine",
+     "writesTotal"],
+    vscBackendAuthoritative,
+    "The line window the engine answered (Viewport-Driven-Loading Q3): " &
+    "its place, the totals, the current line and whether a screen is offered.")
+  entries.addEntry("TerminalOutputVM", "viewport", vscRendererLocal,
+    "What one viewer's pane shows; each viewer's window is its own.")
   entries.addEntry("TerminalOutputVM", "initialLoad", vscRendererLocal,
     "Initial-load flag controls local render behavior.")
   entries.addEntry("TerminalOutputVM", "view", vscRendererLocal,
@@ -1049,6 +1057,46 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Shader step selection can be shared with stable step ids.",
     requiresStableId = true,
     stableIdNote = "Current field is an index; needs stable shader-step id.")
+
+  # VIEWPORTS (Viewport-Driven-Loading V1): what ONE viewer's pane shows.
+  # Each viewer's window is its own; a mirror reports its own through the
+  # `viewport` action (`sync/action_relay.applyViewport`).
+  for vm in ["CalltraceVM", "EventLogVM", "SearchResultsVM", "StateVM",
+             "StepListVM"]:
+    entries.addEntry(vm, "viewport", vscRendererLocal,
+      "The size and scroll position of this viewer's pane.")
+  entries.addEntry("VCSVM", "historyViewport", vscRendererLocal,
+    "The size and scroll position of this viewer's commit list.")
+  entries.addDerived("EventLogVM", ["visibleRows"])
+  entries.addDerived("SearchResultsVM", ["visibleResults"])
+  entries.addEntry("StateVM", "loadingMore", vscRendererLocal,
+    "Which rows' next elements this viewer is fetching: request bookkeeping.")
+  entries.addEntry("ReplayDataStore", "symbols", vscBackendAuthoritative,
+    "The recording's functions (`ct/load-symbols`) are trace data.")
+  entries.addEntry("ReplayDataStore", "sessionGeneration",
+    vscBackendAuthoritative,
+    "Which debugger session the store holds: a fact of the session, not a view.")
+
+  # THE DIFF FLOW (HSF-D4) is the engine's answer for a diff session.
+  entries.addMany("FlowVM",
+    ["events", "diffSession", "diffLoadingState", "diffStyledLines",
+     "diffSteps"],
+    vscBackendAuthoritative,
+    "The flow's events and the diff session's flow are backend output.")
+
+  # THE TOOLBAR (HSF-D2). The jump history is the session's: every viewer
+  # of one session steps back and forward through the same jumps. Which
+  # history list is open, a pending test run and the edit toolbar a viewer
+  # shows are that viewer's own.
+  entries.addMany("DebugControlsVM", ["history", "historyIndex"],
+    vscSharedSessionViewState,
+    "The session's jump history and the place in it.")
+  entries.addMany("DebugControlsVM",
+    ["historyList", "runTestsPending", "toolbarMode", "editToolbar"],
+    vscRendererLocal,
+    "An open history list, a pending run and the toolbar a viewer shows are local.")
+  entries.addDerived("DebugControlsVM",
+    ["canGoBack", "canGoForward", "historyListEntries", "topbarSurface"])
 
   entries
 
