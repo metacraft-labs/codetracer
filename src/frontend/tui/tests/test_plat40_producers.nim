@@ -56,6 +56,7 @@ import store/types as store_types
 import store/replay_data_store
 import backend/stdio_backend
 import viewmodels/[calltrace_vm, event_log_vm, point_list_vm]
+import viewport
 import headless_app/layout_model
 import ../../view_vocabulary/pane_views
 import ../../../common/value_presentation
@@ -131,6 +132,13 @@ suite "PLAT-40 1 — the producers, on the shipped path, over the recording's ow
   for k in ExpectedPanes: before[k] = paneOf(k, s).report
   let loaded = s.loadRecordingPanes()
   let stop = s.loadStopPanes()
+  # VIEWPORT-DRIVEN LOADING (HSF-V1): the open reads only what it needs to
+  # learn the recording's extent; each pane then holds the window it shows.
+  # The event log's ViewModel is told a 40-row pane; the call trace is paged
+  # as the terminal's call-trace pane pages it (`tui_session.pageCallTrace`).
+  s.session.eventLogVM.setViewport(Viewport(rows: 40))
+  s.requestAndLoadCalltrace(height = 40, depth = RecordingCalltraceDepth)
+  pumpCallbacks()
 
   test "the census is ARMED: over a store no producer has written, each pane is a report":
     # The census's "no". Fresh ViewModels over a FRESH store on the live
@@ -146,15 +154,15 @@ suite "PLAT-40 1 — the producers, on the shipped path, over the recording's ow
       checkpoint($k & ": " & report)
       ck report.len > 0
 
-  test "before the shared producers run, the call trace and the breakpoints are reports and the event log is not":
-    # MEASURED, and recorded as the fact it is: the event log is fed AT OPEN,
-    # by `EventLogVM`'s own `ct/event-load` effect — the desktop's producer —
-    # before either native producer is called. The other two panes are
-    # reports until theirs run.
+  test "before the shared producers run, every pane is a report":
+    # Viewport-Driven-Loading V2: no pane asks for anything before it is
+    # measured, so the event log is no longer fed at open by `EventLogVM`'s
+    # own `ct/event-load` effect — like the other two, it is a report until
+    # a producer or a viewport fills it.
     checkpoint($before)
     ck before[paneCalltrace].len > 0
     ck before[panePointList].len > 0
-    ck before[paneEventLog].len == 0
+    ck before[paneEventLog].len > 0
 
   test "a producer that runs and loads nothing fails BY NAME":
     # `PLAT35-PD3`'s lesson: "ran" is a claim about raising, and the gate is
