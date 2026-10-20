@@ -19,8 +19,12 @@
 
 import std/strutils
 
+# M71 (#838): the pane's ordinary scrollbar is the shared scrubber model.
+from codetracer_embed import ScrubberModel, scrubberModel
+
 import ../layout/profile
 import ./styled_row
+import ./scrubber_track
 
 export styled_row, profile
 
@@ -61,6 +65,15 @@ type
     rows*: seq[StyledRow]
     area*: CellArea
     renderedRows*: int
+    bodyRows*: int
+      ## M71 (#838): the rows under the heading.
+    totalRows*: int
+      ## M71: every row the tree lists (`rowCount`), on screen or not.
+    top*: int
+      ## M71: the list index of the first body row (`scrollTop`, clamped).
+    trackCol*: int
+      ## M71: the scrollbar's column (down the body rows), -1 while the list
+      ## fits.
 
 const
   FileTreeTitle* = "FILES"
@@ -100,9 +113,25 @@ proc initFileTreeModel*(entries: seq[FileTreeEntry]): FileTreeModel =
   ## A replay session's file tree.
   FileTreeModel(entries: entries, selected: -1)
 
+proc rowCount*(model: FileTreeModel): int =
+  ## How many rows the tree lists: the replay tree's entries, else Edit
+  ## mode's paths.
+  if model.entries.len > 0: model.entries.len else: model.files.len
+
+proc clampScrollTop*(model: FileTreeModel; top, bodyRows: int): int =
+  ## M71 (#838): `top` kept inside the list — never above its first row, and
+  ## never so far down that the pane's last row is past its last.
+  clamp(top, 0, max(0, model.rowCount - max(1, bodyRows)))
+
+proc scrubberOf*(screen: FileTreeScreen): ScrubberModel =
+  ## M71: the pane's ordinary scrollbar over what `paintFileTree` drew — the
+  ## population is every row the tree lists, the view its body from `top`.
+  scrubberModel(screen.totalRows, screen.top, screen.bodyRows)
+
 proc paintFileTree*(g: var StyledGrid; area: CellArea;
                     model: FileTreeModel): FileTreeScreen =
-  result = FileTreeScreen(rows: @[], area: area, renderedRows: 0)
+  result = FileTreeScreen(rows: @[], area: area, renderedRows: 0,
+                          trackCol: -1)
   if area.width <= 0 or area.height <= 0:
     return
   var title = @[StyledSpan(text: FileTreeTitle, style: FileTreeTitleStyle)]
@@ -122,22 +151,38 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
   result.rows.add title
 
   let bodyRows = area.height - 1
+  let top = model.clampScrollTop(model.scrollTop, bodyRows)
+  result.bodyRows = max(0, bodyRows)
+  result.totalRows = model.rowCount
+  result.top = top
+  # M71 (#838): WHILE THE LIST OVERFLOWS, THE RIGHTMOST COLUMN IS ITS
+  # SCROLLBAR (Scrollbar-Scrubbers.md §2: a pane whose whole content is in
+  # hand keeps an ordinary scrollbar; §4: the pane's rightmost column, inside
+  # its own rectangle), and the rows are drawn in the cells left of it. A
+  # list that fits keeps the whole width.
+  let overflow = bodyRows > 0 and model.rowCount > bodyRows and
+                 area.width > ScrubberTrackCells
+  let width = if overflow: area.width - ScrubberTrackCells else: area.width
+  if overflow:
+    result.trackCol = area.col + width
+    g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyRows,
+                            result.scrubberOf)
   if model.entries.len > 0:
     for i in 0 ..< bodyRows:
-      let idx = model.scrollTop + i
+      let idx = top + i
       if idx < 0 or idx >= model.entries.len:
         break
       let e = model.entries[idx]
       let isOpen = not e.isFolder and model.openPath.len > 0 and
                    e.path.endsWith(model.openPath)
       let style = if isOpen: FileTreeOpenStyle else: FileTreePlainStyle
-      let text = truncateToCells(entryText(e), area.width)
+      let text = truncateToCells(entryText(e), width)
       g.paint(area.row + 1 + i, area.col, text, style)
       inc result.renderedRows
       result.rows.add @[StyledSpan(text: text, style: style)]
     return
   for i in 0 ..< bodyRows:
-    let idx = model.scrollTop + i
+    let idx = top + i
     if idx < 0 or idx >= model.files.len:
       break
     let row = area.row + 1 + i
@@ -145,13 +190,22 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
     let isOpen = path == model.openPath and path.len > 0
     let marker = if isOpen: OpenMarker else: " "
     let style = if isOpen: FileTreeOpenStyle else: FileTreePlainStyle
-    let text = truncateToCells(marker & path, area.width)
+    let text = truncateToCells(marker & path, width)
     g.paint(row, area.col, text, style)
     if idx == model.selected:
-      g.restyle(row, area.col, area.width,
+      g.restyle(row, area.col, width,
                 proc(s: CellStyle): CellStyle =
                   var out2 = s
                   out2.surface = FileTreeSelectedBackground
                   out2)
     inc result.renderedRows
     result.rows.add @[StyledSpan(text: text, style: style)]
+
+proc entryIndexAt*(screen: FileTreeScreen; row: int): int =
+  ## M71: the index of the row a press on screen row `row` is on — by the
+  ## `top` the painter drew from — or -1 off the list.
+  let i = screen.top + (row - screen.area.row - 1)
+  if row <= screen.area.row or i < screen.top or
+     i >= screen.top + screen.renderedRows:
+    -1
+  else: i

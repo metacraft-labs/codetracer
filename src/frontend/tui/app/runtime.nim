@@ -1997,6 +1997,112 @@ proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
     rt.app.search.scrollTop + delta, screen.listRows)
   outcome.repaint = true
 
+# ---------------------------------------------------------------------------
+# M71 (#838): the panes whose whole content is in hand — State, Files, VCS —
+# keep an ORDINARY scrollbar (Scrollbar-Scrubbers.md §2), drawn by their
+# painters in their last column while they overflow (§4), pressed by the
+# same §3 rule as every list pane's (a press centres the row at its
+# fraction, the held thumb drags), and scrolled by the wheel without focus
+# (CodeTracer-TUI.md §4.4). Each is read back from its own painter, re-run on
+# a scratch grid, so a press and the drawing cannot disagree.
+# ---------------------------------------------------------------------------
+
+const InHandPanes = {paneState, paneFileTree, paneVcs}
+
+type InHandTrack = object
+  ## An in-hand pane's scrollbar as its painter drew it.
+  model: ScrubberModel
+    ## Every row the pane lists, the view's top and height.
+  col, top, rows: int
+    ## The track's column and its rows; `col` is -1 while the rows fit.
+
+proc inHandTrack(rt: TuiRuntime; pane: PaneKind; under: CellArea):
+    InHandTrack =
+  ## Pane `pane`'s scrollbar, for the pane painted in `under` (its strip row
+  ## first, as `shell.paintPane` hands it out).
+  result = InHandTrack(col: -1)
+  if under.width <= 0 or under.height <= 1:
+    return
+  var g = newStyledGrid(under.col + under.width, under.row + under.height)
+  case pane
+  of paneState:
+    let s = paintVariables(g, under, rt.app.variables)
+    result = InHandTrack(model: s.scrubberOf, col: s.trackCol,
+                         top: under.row + 1, rows: s.bodyHeight)
+  of paneFileTree:
+    let s = paintFileTree(g, under, rt.app.fileTree)
+    result = InHandTrack(model: s.scrubberOf, col: s.trackCol,
+                         top: under.row + 1, rows: s.bodyRows)
+  of paneVcs:
+    # The VCS pane has no heading of its own: it is painted BELOW the strip
+    # (`shell`'s `belowStrip`).
+    let content = CellArea(col: under.col, row: under.row + 1,
+                           width: under.width, height: under.height - 1)
+    let s = paintVcsPane(g, content, rt.app.vcs)
+    result = InHandTrack(model: s.scrubberOf, col: s.trackCol,
+                         top: content.row, rows: content.height)
+  else: discard
+
+proc setInHandTop(rt: TuiRuntime; pane: PaneKind; top: int) =
+  case pane
+  of paneState: rt.app.variables.scrollTop = top
+  of paneFileTree: rt.app.fileTree.scrollTop = top
+  of paneVcs: rt.app.vcs.scrollTop = top
+  else: discard
+
+proc inHandLoaded(rt: TuiRuntime; pane: PaneKind): bool =
+  ## Whether the pane draws its rows (else the shell left its rectangle to
+  ## something else, and a gesture there is not the pane's).
+  case pane
+  of paneState: not rt.app.variables.isEmpty
+  of paneFileTree: not rt.app.fileTree.isEmpty
+  of paneVcs: rt.app.vcs.loaded
+  else: false
+
+proc scrubInHand(rt: TuiRuntime; pane: PaneKind; under: CellArea; row: int;
+                 dragging: bool): bool =
+  ## §3: the pane's track pressed (the view jumps, centring the row at the
+  ## fraction) or its thumb held (the view follows). The VIEW moves only.
+  let t = rt.inHandTrack(pane, under)
+  if t.col < 0 or t.rows <= 0:
+    return false
+  let at = clamp(row, t.top, t.top + t.rows - 1)
+  let hit = t.model.verticalScrubberHit(t.top, t.rows, at)
+  if hit.kind == shNone:
+    return false
+  rt.setInHandTop(pane, t.model.scrubTo(hit, dragging))
+  true
+
+proc pressInHandTrack(rt: TuiRuntime; pane: PaneKind; under: CellArea;
+                      event: MouseEvent; outcome: var RuntimeOutcome): bool =
+  ## A press on the pane's track column: the track's, never a row's. A left
+  ## press jumps (the track) or starts a drag (the thumb); any other button
+  ## is taken and does nothing.
+  if not rt.inHandLoaded(pane):
+    return false
+  let t = rt.inHandTrack(pane, under)
+  if t.col < 0 or event.col != t.col or event.row < t.top or
+     event.row >= t.top + t.rows:
+    return false
+  if event.button != mbLeft:
+    return true
+  let hit = t.model.verticalScrubberHit(t.top, t.rows, event.row)
+  if hit.kind == shThumb:
+    rt.app.listScrub = (active: true, pane: pane)
+  discard rt.scrubInHand(pane, under, event.row,
+                         dragging = hit.kind == shThumb)
+  outcome.repaint = true
+  true
+
+proc scrollInHand(rt: TuiRuntime; pane: PaneKind; under: CellArea;
+                  delta: int; outcome: var RuntimeOutcome) =
+  ## The wheel over the pane: rows, as a scroll does (§3.4 — only the track
+  ## and the thumb are scrubber gestures), kept inside the pane's rows.
+  let t = rt.inHandTrack(pane, under)
+  rt.setInHandTop(pane, clamp(t.model.firstVisible + delta, 0,
+                              t.model.maxFirstVisible))
+  outcome.repaint = true
+
 proc routeVariablesResize(rt: TuiRuntime; event: MouseEvent;
                           outcome: var RuntimeOutcome): bool =
   ## PLAT-51: the Variables pane's name / value separator held — each motion
@@ -2042,6 +2148,9 @@ proc routeListScrubDrag(rt: TuiRuntime; event: MouseEvent;
     of paneEditor:
       # M73 (#840): the source pane's vertical bar, held.
       discard rt.scrubSource(event.row, dragging = true, outcome)
+    of InHandPanes:
+      # M71 (#838): State, Files and VCS — the same drag.
+      discard rt.scrubInHand(pane, area, event.row, dragging = true)
     else: discard
   outcome.repaint = true
   true
@@ -2441,6 +2550,11 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     return true
   if not under.contains(event.row, event.col):
     return false   # the divider
+  # M71 (#838): a press on an in-hand pane's scrollbar is the scrollbar's,
+  # never a click on the row it is drawn beside.
+  if region.pane in InHandPanes and
+     rt.pressInHandTrack(region.pane, under, event, outcome):
+    return true
   case region.pane
   of paneFileTree:
     # K17 / K18 (K19: the desktop has no Files menu).
@@ -2449,7 +2563,10 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     let tree = rt.app.fileTree
     if tree.entries.len == 0:
       return false
-    let i = tree.scrollTop + (event.row - under.row - 1)
+    # The row under the press, by the top the painter drew from (M71: the
+    # pane scrolls, and `scrollTop` is clamped there).
+    var g = newStyledGrid(under.col + under.width, under.row + under.height)
+    let i = paintFileTree(g, under, tree).entryIndexAt(event.row)
     if i < 0 or i >= tree.entries.len:
       return false
     let e = tree.entries[i]
@@ -2924,6 +3041,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     let at = geometry.paneAt(event.row, event.col)
     if at.found and at.region.pane == paneSearch and rt.app.search.loaded:
       rt.scrollSearch(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # M71 (#838): the wheel scrolls the State, Files and VCS panes — the pane
+    # beneath the pointer, focused or not (CodeTracer-TUI.md §4.4).
+    if at.found and at.region.pane in InHandPanes and
+       rt.inHandLoaded(at.region.pane):
+      rt.scrollInHand(at.region.pane, at.under,
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return

@@ -76,13 +76,22 @@ proc newVcsSource*(directory: string;
     src.vm = createVCSVM()
     src.dispose = dispose
 
+proc publish(s: VcsSource; rt: TuiRuntime) =
+  ## Hand the app layer the pane's value. M71 (#838): the reading position
+  ## (`scrollTop`) is the reader's, not the repository's, so a re-read —
+  ## every `VcsRefreshMs`, or a commit opened — keeps it (the painter clamps
+  ## it to whatever the new value lists).
+  let top = rt.app.vcs.scrollTop
+  rt.app.vcs = paneModelOf(s.vm)
+  rt.app.vcs.scrollTop = top
+
 proc refresh*(s: VcsSource; rt: TuiRuntime) =
   ## Read the repository now and publish the pane's value.
   if s.isNil:
     return
   s.vm.refreshFromFacade(s.facade, s.directory)
   s.lastRefresh = getMonoTime()
-  rt.app.vcs = paneModelOf(s.vm)
+  s.publish(rt)
 
 proc tick*(s: VcsSource; rt: TuiRuntime): bool =
   ## Refresh when `VcsRefreshMs` has passed; whether the pane's value changed.
@@ -122,7 +131,7 @@ proc toggleCommit*(s: VcsSource; rt: TuiRuntime; index: int) =
     s.vm.syncCommitFilesMap([])
     s.vm.setCommitFiles(index, rows)
     s.vm.setCommits(commits, [index], index)
-  rt.app.vcs = paneModelOf(s.vm)
+  s.publish(rt)
 
 proc fileDiff*(s: VcsSource; status, path: string; hash = ""): string =
   ## PLAT-50 (K34): a changed file's diff — the working tree's (`hash` "")

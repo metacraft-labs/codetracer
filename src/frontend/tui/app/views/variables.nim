@@ -78,9 +78,12 @@ import isonim_tui
 import ../../../../common/value_presentation
 from codetracer_embed import VariableCategory, vcLocal, vcArgument,
   vcGlobal, vcReturnValue, vcRegister, vcWatch, categoryTag
+# M71 (#838): the pane's ordinary scrollbar is the shared scrubber model.
+from codetracer_embed import ScrubberModel, scrubberModel
 import ../layout/profile
 import ./styled_row
 import ./tree_node
+import ./scrubber_track
 
 export tree_node, styled_row, profile
 
@@ -244,6 +247,15 @@ type
       ## gone). REPORTED rather than recomputed by the caller, for the reason
       ## `frame_item.FrameItem` records.
     nameColumn*: int
+    top*: int
+      ## M71 (#838): the first row shown — `scrollTop`, clamped.
+    contentWidth*: int
+      ## M71: the cells the rows are laid out in: the area's width, less the
+      ## scrollbar's column while the rows overflow. The row controls
+      ## (`controlAt`) are found in it, as `rowSpecFor` placed them.
+    trackCol*: int
+      ## M71: the scrollbar's column (the body's rows, `bodyHeight` of them,
+      ## from the row under the title), -1 while the rows fit.
 
 const
   ProvenanceBudgetCells* = 40
@@ -761,6 +773,13 @@ proc clampScrollTop*(scrollTop, totalRows, bodyHeight: int): int =
   elif scrollTop > totalRows - bodyHeight: totalRows - bodyHeight
   else: scrollTop
 
+proc scrubberOf*(screen: VariablesScreen): ScrubberModel =
+  ## M71 (#838): the pane's scrollbar over what `paintVariables` drew — the
+  ## population is every row of the pane (`totalRows`), the view its body
+  ## from `top`. No current-position mark: the rows are values, not a
+  ## timeline.
+  scrubberModel(screen.totalRows, screen.top, screen.bodyHeight)
+
 proc paintVariables*(g: var StyledGrid; area: CellArea;
                      model: VariablesModel): VariablesScreen =
   ## Paint the pane into `area` of `g`, and report what it painted.
@@ -768,7 +787,8 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     rows: @[], area: area, visible: @[], bodyHeight: 0, totalRows: 0,
     scopeRows: 0, variableRows: 0, moreRows: 0, noteRows: 0, modifiedRows: 0,
     valueColumn: area.col + valueFieldColumn(area.width, model.nameCells),
-    nameColumn: area.col + nameFieldColumn())
+    nameColumn: area.col + nameFieldColumn(), top: 0,
+    contentWidth: area.width, trackCol: -1)
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -795,13 +815,25 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     return
 
   let top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
+  result.top = top
+  # M71 (#838): WHILE THE ROWS OVERFLOW, THE RIGHTMOST COLUMN IS THE PANE'S
+  # SCROLLBAR (Scrollbar-Scrubbers.md §2: a pane whose whole content is in
+  # hand keeps an ordinary scrollbar; §4: the terminal's track is the pane's
+  # rightmost column, inside its own rectangle) and the rows are laid out in
+  # the cells left of it. The population is every row `paneRows` lists — an
+  # open value history's entries included, which is what makes a long
+  # history overflow. Rows that fit keep the whole width.
+  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells
+  let width = if overflow: area.width - ScrubberTrackCells else: area.width
+  result.contentWidth = width
+  result.valueColumn = area.col + valueFieldColumn(width, model.nameCells)
   for i in 0 ..< bodyHeight:
     let rowIndex = top + i
     if rowIndex >= rows.len:
       break
     let screenRow = area.row + 1 + i
     let modelRow = rows[rowIndex]
-    let spec = rowSpecFor(model, modelRow, area.width)
+    let spec = rowSpecFor(model, modelRow, width)
     var at = area.col
     for span in treeRow(spec):
       g.paint(screenRow, at, span.text, span.style)
@@ -814,6 +846,10 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     of vrkNote, vrkHistory, vrkOrigin, vrkAddWatch: inc result.noteRows
     if spec.modified:
       inc result.modifiedRows
+  if overflow:
+    result.trackCol = area.col + width
+    g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,
+                            result.scrubberOf)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
@@ -874,16 +910,17 @@ proc controlAt*(screen: VariablesScreen; model: VariablesModel;
                 screenRow, col: int): VariablesControl =
   ## PLAT-51: which of a variable row's controls a press at `col` is on —
   ## the history button, the origin badge, a watch's remove control — or the
-  ## name column's separator (a drag resizes it).
+  ## name column's separator (a drag resizes it). Found in the width the rows
+  ## were laid out in (`contentWidth`: M71's scrollbar column excluded).
   let (ok, row) = screen.rowAtScreenRow(screenRow)
   if not ok or row.kind != vrkVariable:
     return vcNone
-  let at = screen.area.col + controlColumn(screen.area.width)
+  let at = screen.area.col + controlColumn(screen.contentWidth)
   if col == at: return vcHistory
   if col == at + 1: return vcOrigin
   if col == at + 2 and row.scope == skWatches and row.depth == 1:
     return vcRemoveWatch
-  if col == screen.area.col + nameSeparatorColumn(screen.area.width,
+  if col == screen.area.col + nameSeparatorColumn(screen.contentWidth,
                                                   model.nameCells):
     return vcNameSeparator
   vcNone

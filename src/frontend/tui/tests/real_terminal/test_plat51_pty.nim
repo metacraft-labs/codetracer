@@ -16,7 +16,10 @@
 ##   * the omnibox field on the EDITOR's ground (24-bit, read off the cells);
 ##   * a changed value on the terminal in the desktop's changed-value colour;
 ##   * a click places the read-only editor's caret and Alt+T, sent as the one
-##     `ESC t` burst a terminal sends, opens the tracepoint editor on its line.
+##     `ESC t` burst a terminal sends, opens the tracepoint editor on its line;
+##   * M71 (codetracer#838): with `call_pages`' long value history of `total`
+##     open in the State pane, the pane's rightmost column is a scrollbar
+##     track (Scrollbar-Scrubbers.md §4) whose thumb the wheel moves.
 ##
 ## No mocks: the binary, the engine and the recordings are real. State in a
 ## scratch directory.
@@ -33,7 +36,8 @@ import styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 25
+const ExpectedAssertions = 30
+  ## +5: M71 (#838), the State pane's track read back with a long history open.
 
 var countedAssertions = 0
 
@@ -50,8 +54,20 @@ type Snapshot = seq[seq[Cell]]
 
 var spawned = 0
 
-proc open(name: string; extra: seq[string] = @[]): TuiTestSession =
-  let resolved = resolveFixture(name)
+proc pythonFixture(name: string): FixtureSpec =
+  ## A program of `test-programs/` recorded with the Python recorder (M71's
+  ## `call_pages`, as `test_plat51_scrubbers.nim` declares it).
+  FixtureSpec(
+    name: name, program: "test-programs/" & name & "/main.py",
+    recorder: "codetracer-python-recorder",
+    probe: FixtureProbe(kind: pkPythonRecorder),
+    buildHint: "Install codetracer_python_recorder into the interpreter " &
+               "`ct` will use (the repo's .python-recorder-venv, or " &
+               "$CODETRACER_PYTHON_INTERPRETER).",
+    blockedOn: "")
+
+proc openSpec(spec: FixtureSpec; extra: seq[string] = @[]): TuiTestSession =
+  let resolved = resolveFixture(spec)
   doAssert resolved.outcome == foRecorded, resolved.detail
   inc spawned
   let state = getTempDir() / ("plat51-pty-" & $getCurrentProcessId() & "-" &
@@ -70,6 +86,9 @@ proc open(name: string; extra: seq[string] = @[]): TuiTestSession =
     .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
     .spawn()
   settleOnDebugger(result, Cols, Rows)
+
+proc open(name: string; extra: seq[string] = @[]): TuiTestSession =
+  openSpec(fixtureSpec(name), extra)
 
 proc snap(sess: var TuiTestSession): Snapshot =
   discard sess.drainOutput(80)
@@ -300,6 +319,87 @@ suite "PLAT-51 on a real terminal: the editor, its menu, the omnibox, values":
     var all = ""
     for r in 0 ..< Rows: all.add s.text(r)
     ck not all.contains("[MOD]")
+
+suite "M71 (#838) on a real terminal: the State pane's scrollbar":
+
+  test "a long value history open in the State pane draws a track whose thumb the wheel moves":
+    # `call_pages`' `main` adds to `total` once per loop round, so the value
+    # history of `total` is hundreds of rows — the reporter's case
+    # (codetracer#838). The State pane's rightmost column must be the track
+    # (Scrollbar-Scrubbers.md §4), read back off the pty's cells.
+    var sess = openSpec(pythonFixture("call_pages"))
+    defer: sess.quit()
+    # Step until `main`'s `total` is listed with its history control (`↺`,
+    # drawn by the State pane only), each step waited for by the top bar's
+    # tick before the screen is read.
+    var row, ctl = -1
+    for _ in 0 ..< 80:
+      let s = sess.snap()
+      for r in 0 ..< Rows:
+        let at = s.text(r).cellFind(" total ")
+        if at < 0: continue
+        for c in at ..< Cols:
+          if $s[r][c].rune == "↺":
+            row = r
+            ctl = c
+            break
+        if row >= 0: break
+      if row >= 0: break
+      let before = sess.tick()
+      sess.send("s")
+      let deadline = getMonoTime() + initDuration(seconds = 10)
+      while sess.tick() == before and getMonoTime() < deadline:
+        sleep(40)
+      sleep(250)
+    checkpoint("`total` row " & $row & " history control col " & $ctl)
+    if row <= 0:
+      let s = sess.snap()
+      for r in 0 ..< Rows: checkpoint(s.text(r))
+    ck row > 0
+    sess.press(row, ctl)
+    discard sess.waitFor("↳ ")
+    sleep(400)
+    var s = sess.snap()
+    # The pane's last column: the cell before the divider to the right of
+    # the control (or the screen's last column).
+    var right = Cols - 1
+    for x in ctl + 1 ..< Cols:
+      if $s[row][x].rune == "▏":
+        right = x - 1
+        break
+    # Its body rows: up from `total`'s row and down to the pane's end, as
+    # long as the column holds a track, thumb or mark glyph.
+    var top = row
+    while top - 1 > 0 and $s[top - 1][right].rune in TrackGlyphs:
+      dec top
+    var bottom = row
+    while bottom + 1 < Rows and $s[bottom + 1][right].rune in TrackGlyphs:
+      inc bottom
+    var thumb: seq[int] = @[]
+    var track = 0
+    for r in top .. bottom:
+      if $s[r][right].rune == "│": inc track
+      elif $s[r][right].rune in TrackGlyphs: thumb.add r
+    checkpoint("track col " & $right & " rows " & $top & ".." & $bottom &
+               " thumb " & $thumb)
+    # A track down the pane's body (more than the few rows `total` and its
+    # neighbours span), mostly track: the history is far longer than the pane.
+    ck bottom - top + 1 >= 8
+    ck track > thumb.len
+    ck thumb.len > 0 and thumb[0] == top
+    # The wheel over the pane, as a terminal reports it, scrolls the rows:
+    # the thumb moves down.
+    for _ in 0 ..< 10:
+      sess.mouse(65, row + 1, ctl - 6)
+      sleep(60)
+    sleep(400)
+    s = sess.snap()
+    var moved: seq[int] = @[]
+    for r in top .. bottom:
+      if $s[r][right].rune != "│" and $s[r][right].rune in TrackGlyphs:
+        moved.add r
+    checkpoint("thumb after the wheel " & $moved)
+    ck moved.len > 0 and moved[0] > thumb[0]
 
 suite "PLAT-51 PTY: assertion count":
   test "every assertion ran":
