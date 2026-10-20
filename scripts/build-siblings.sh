@@ -364,14 +364,29 @@ build_sibling \
 	"nimble buildCtPrint" \
 	codetracer-trace-format-nim/ct-print
 
-# Native backend (ct-native-replay). Its own repro/flake can reject freshly
-# initialized submodules in repo-managed checkouts, so build it the same way
-# the local justfile does: borrow codetracer's dev shell and compile in-place.
+# Native backend (ct-native-replay). Built by codetracer's own
+# `just ensure-ct-native-replay`, the one recipe that knows how: it compiles
+# inside the backend's Nix dev shell, so the binary's glibc, LLDB and
+# libstdc++ come from one pinned nixpkgs, and that shell's hook exports the
+# `CT_NATIVE_REPLAY_RPATH` its build.rs bakes in. The recipe header has the
+# per-platform detail and its fallbacks.
+#
+# This used to be a second, hand-written build: `cargo build` in codetracer's
+# dev shell, with LLVM/LLDB fetched by `nix build nixpkgs#lldb` (and
+# `#lldb.dev`, `#llvm.dev`). A bare `nixpkgs#` resolves the machine's FLAKE
+# REGISTRY, not any lock, so it linked whatever LLDB that machine had against
+# codetracer's pinned glibc. Measured 2026-10-21 on a Linux host: LLDB
+# 21.1.8 from a glibc-2.42 nixpkgs, interpreter glibc 2.40, and the reported
+# `PASS … built target/debug/ct-native-replay` could not start:
+#   ct-native-replay: …/glibc-2.40-224/lib/libc.so.6: version `GLIBC_2.42'
+#   not found (required by …/lldb-21.1.8/lib/liblldb.so.21.1)
+# so every GUI spec that records a native trace failed in `ct record`.
+# ci/test/build-siblings-native-backend-runs-test.sh holds the binary to
+# starting with an empty environment.
 if ! should_skip codetracer-native-backend; then
 	ensure_submodules codetracer-native-backend libs/rr libs/delve
 fi
-# shellcheck disable=SC2016
-native_backend_cmd='if [ -z "${LLVM_CONFIG:-}" ]; then llvm_dev="$(nix build --no-link --print-out-paths nixpkgs#llvm.dev)"; export LLVM_CONFIG="$llvm_dev/bin/llvm-config"; fi; if [ -z "${LLDB_LIB_PATH:-}" ]; then lldb_out="$(nix build --no-link --print-out-paths nixpkgs#lldb)"; export LLDB_LIB_PATH="$lldb_out/lib"; fi; if [ -z "${LLDB_ADDITIONAL_INCLUDE_DIRS:-}" ]; then lldb_dev="$(nix build --no-link --print-out-paths nixpkgs#lldb.dev)"; export LLDB_ADDITIONAL_INCLUDE_DIRS="$lldb_dev/include"; fi; export LIBRARY_PATH="$LLDB_LIB_PATH${LIBRARY_PATH:+:$LIBRARY_PATH}"; export LD_LIBRARY_PATH="$LLDB_LIB_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; cargo build --bin ct-native-replay'
+native_backend_cmd="CT_CODETRACER_NATIVE_BACKEND_SIBLING=\"\$PWD\" just --justfile '$CT_ROOT/justfile' --working-directory '$CT_ROOT' ensure-ct-native-replay"
 build_sibling \
 	codetracer-native-backend \
 	target/debug/ct-native-replay \
