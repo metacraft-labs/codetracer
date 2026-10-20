@@ -612,6 +612,30 @@ fn locatable_extent(branch: &Branch) -> Option<BranchExtent> {
     })
 }
 
+thread_local! {
+    /// How many source files [`ExprLoader::parse_file`] has parsed on this
+    /// thread. See [`tree_sitter_parses_on_this_thread`].
+    static TREE_SITTER_PARSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of tree-sitter parses [`ExprLoader::parse_file`] has run on the
+/// calling thread since it started.
+///
+/// This is the observable for the parse budget of a flow walk. Parsing is a
+/// whole-file cost, so it has to be paid once per file a request touches, not
+/// once per step it visits: a flow walk that parsed its file on every step
+/// made `ct/load-flow` over a loop-heavy function take about thirty seconds
+/// (codetracer-pm `issues/2026-10-06-a-stop-inside-a-loop-heavy-python-function-takes-thirty-seconds.md`).
+/// A caller reads it before and after a request and compares the difference
+/// with the number of files involved.
+///
+/// It is per thread so that tests running in parallel in one binary do not
+/// see each other's parses; a request handled in-process runs on the caller's
+/// thread.
+pub fn tree_sitter_parses_on_this_thread() -> u64 {
+    TREE_SITTER_PARSES.with(|count| count.get())
+}
+
 #[derive(Debug, Clone)]
 pub struct ExprLoader {
     // parser: Parser,
@@ -776,6 +800,7 @@ impl ExprLoader {
 
     #[cfg(feature = "syntax-highlight")]
     pub fn parse_file(&self, path: &PathBuf) -> Result<Tree, Box<dyn Error>> {
+        TREE_SITTER_PARSES.with(|count| count.set(count.get() + 1));
         let raw = &self.processed_files[path].source_code;
         let lang = self.get_current_language(path);
         info!(

@@ -3,7 +3,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{CallKey, Line, NO_KEY, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 
 use crate::{
     db::DbRecordEvent,
@@ -302,6 +302,22 @@ pub struct CallFlowPreloader<'a> {
     /// DROPPED — a walk that stopped is not evidence about the branch it
     /// stopped on.
     pending_branches: Vec<PendingBranch>,
+    /// The loader every `load_location` of this walk is given.
+    ///
+    /// `load_location` populates the loader it is handed: it calls
+    /// `load_file`, which reads the step's source file and parses it with
+    /// tree-sitter unless the loader already holds it. The walk used to hand
+    /// it a fresh loader on every step, so a file was re-read and re-parsed
+    /// twice per walked step — a ~1100-step walk of a loop-heavy function
+    /// parsed ~2200 times and took about thirty seconds (codetracer-pm
+    /// `issues/2026-10-06-a-stop-inside-a-loop-heavy-python-function-takes-thirty-seconds.md`).
+    /// One loader per walk parses each file once.
+    ///
+    /// It is the preloader's own loader that cannot be used here:
+    /// `load_location` needs `&mut ExprLoader`, and this type holds only
+    /// `&'a FlowPreloader`. It is per walk, not per session, so a source
+    /// rewritten on disk between two flow loads is read again by the next one.
+    walk_expr_loader: ExprLoader,
 }
 
 impl<'a> CallFlowPreloader<'a> {
@@ -326,6 +342,7 @@ impl<'a> CallFlowPreloader<'a> {
             trace_kind,
             lang: lang_from_context(Path::new(&location.path)),
             pending_branches: vec![],
+            walk_expr_loader: ExprLoader::new(CoreTrace::default()),
         }
     }
 
@@ -535,7 +552,7 @@ impl<'a> CallFlowPreloader<'a> {
     }
 
     fn move_to_first_step(
-        &self,
+        &mut self,
         from_step_id: StepId,
         replay: &mut dyn ReplaySession,
     ) -> Result<(StepId, bool, bool), Box<dyn Error>> {
@@ -564,8 +581,7 @@ impl<'a> CallFlowPreloader<'a> {
                 let hit = replay.step(Action::Continue, true)?;
                 let _ = replay.delete_breakpoint(&bp);
                 if hit {
-                    let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                    let at_line_loc = replay.load_location(&mut expr_loader)?;
+                    let at_line_loc = replay.load_location(&mut self.walk_expr_loader)?;
                     match replay.jump_to_call(&at_line_loc) {
                         Ok(call_start_loc) => {
                             step_id = StepId(call_start_loc.rr_ticks.0);
@@ -604,8 +620,7 @@ impl<'a> CallFlowPreloader<'a> {
                 // makes the window — and hence the iteration count — invariant
                 // under movement inside the call.
                 replay.jump_to(step_id)?;
-                let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                match replay.load_location(&mut expr_loader) {
+                match replay.load_location(&mut self.walk_expr_loader) {
                     Ok(current_location) => match replay.jump_to_call(&current_location) {
                         Ok(call_start_loc) => {
                             step_id = StepId(call_start_loc.rr_ticks.0);
@@ -647,8 +662,7 @@ impl<'a> CallFlowPreloader<'a> {
                         move_error = true;
                     }
                 } else {
-                    let mut expr_loader = ExprLoader::new(CoreTrace::default());
-                    match replay.load_location(&mut expr_loader) {
+                    match replay.load_location(&mut self.walk_expr_loader) {
                         Ok(current_location) => match replay.jump_to_call(&current_location) {
                             Ok(call_start_loc) => {
                                 step_id = StepId(call_start_loc.rr_ticks.0);
@@ -705,11 +719,10 @@ impl<'a> CallFlowPreloader<'a> {
                     return (from_step_id, false, true); // assume we will break the flow loop if `progressing` is false
                 }
 
-                let mut expr_loader = ExprLoader::new(CoreTrace::default());
                 // for MaterializedReplaySession actually those replay methods shouldn't fail;
                 //   but this might be unreliable/change in the future
                 //   and for RR they can also surely fail
-                match replay.load_location(&mut expr_loader) {
+                match replay.load_location(&mut self.walk_expr_loader) {
                     Ok(location) => {
                         let new_step_id = StepId(location.rr_ticks.0);
                         let progressing = if self.trace_kind == TraceKind::Materialized {
@@ -807,22 +820,24 @@ impl<'a> CallFlowPreloader<'a> {
             }
 
             iter_step_id = step_id;
-            // THIS LOADER IS DELIBERATELY EMPTY, AND THAT COSTS THE WINDOW ITS
-            // EXTENT — see the re-derivation below.
+            // THE WALK'S OWN LOADER, NOT THE PRELOADER'S — see the
+            // re-derivation below.
             //
             // `load_location` takes `&mut ExprLoader` and is called once per
             // step of the flow walk; handing it the preloader's own loader
             // would need a mutable borrow that `CallFlowPreloader` (which holds
-            // `&'a FlowPreloader`) does not have. A throwaway is fine for the
-            // per-step work — `load_location` only needs it to look up variable
-            // names, and the trace-embedded fallback covers that.
+            // `&'a FlowPreloader`) does not have, so it gets
+            // `walk_expr_loader`, which it fills on the first step and reuses
+            // on every later one (see the field for why that matters: a fresh
+            // loader per step re-parsed the file on every step).
             //
-            // It is NOT fine for the function boundaries, because an empty
-            // `ExprLoader` has an empty `processed_files`, so
-            // `get_first_last_fn_lines` returns `(-1, -1)` and
-            // `use_trace_function_boundaries` (`trace_reader.rs`) always wins.
-            let mut expr_loader = ExprLoader::new(CoreTrace::default());
-            let new_location = replay.load_location(&mut expr_loader)?;
+            // That loader is built without the trace's context, and
+            // `load_location` loads the step's RECORDED path into it, so the
+            // function boundaries it derives can fall through to the
+            // trace-record heuristic (`use_trace_function_boundaries`,
+            // `trace_reader.rs`). The window's extent is therefore taken from
+            // the preloader's loader instead, below.
+            let new_location = replay.load_location(&mut self.walk_expr_loader)?;
             if step_count == 0 {
                 self.location = new_location.clone();
 
@@ -832,8 +847,8 @@ impl<'a> CallFlowPreloader<'a> {
                 // WHAT WAS WRONG. `step_count == 0` is the first step after
                 // `move_to_first_step` widened to the ENCLOSING CALL'S ENTRY,
                 // so this assignment is what sets the extent the frontend
-                // draws. Taken from the throwaway loader above, it always fell
-                // through to the trace-record derivation, which computes:
+                // draws. Taken from the walk's loader above, it fell through
+                // to the trace-record derivation, which computes:
                 //
                 //   function_first = FunctionRecord.line
                 //   function_last  = max line over the CONTIGUOUS run of steps
@@ -865,8 +880,8 @@ impl<'a> CallFlowPreloader<'a> {
                 // WHY TREE-SITTER IS THE RIGHT SOURCE AND IS AVAILABLE HERE.
                 // `FlowPreloader::load` has already called
                 // `self.expr_loader.load_file(...)` for this path, so the
-                // preloader's loader holds the parsed AST — it is only the
-                // per-step throwaway that does not. `get_first_last_fn_lines`
+                // preloader's loader holds the parsed AST under the path the
+                // window is keyed by — the walk's loader need not. `get_first_last_fn_lines`
                 // takes `&self`, so the shared borrow this type already holds
                 // is enough. The AST knows the function's real end line, which
                 // is precisely the thing the trace format cannot store.
@@ -938,7 +953,7 @@ impl<'a> CallFlowPreloader<'a> {
                 //   should be fixed/improved in ct-native-replay
                 if self.trace_kind == TraceKind::Materialized {
                     replay.step(Action::StepIn, false)?; // hopefully go back to the end of our original function
-                    let return_location = replay.load_location(&mut expr_loader)?;
+                    let return_location = replay.load_location(&mut self.walk_expr_loader)?;
                     // maybe this can be improved with a limited loop/jump to return/exit of call in the future
                     if let Ok(return_call_key) = self.call_key_from(&return_location)
                         && return_call_key == tracked_call_key
@@ -1022,15 +1037,19 @@ impl<'a> CallFlowPreloader<'a> {
             flow_view_update.add_step_count(line, step_count);
             info!("  process loops");
             let path_buf = &PathBuf::from(&new_location.path);
+            // Both helpers take the update by value and hand it back, so it is
+            // MOVED through them. Cloning it here copied every step walked so
+            // far — values included — on every step: quadratic in the walk,
+            // and a large share of a loop-heavy function's flow time.
             flow_view_update = self.process_loops(
-                flow_view_update.clone(),
+                flow_view_update,
                 Position(new_location.line),
                 replay.current_step_id(),
                 path_buf,
                 step_count,
             );
             flow_view_update = self.log_expressions(
-                flow_view_update.clone(),
+                flow_view_update,
                 Position(new_location.line),
                 replay,
                 step_id,
@@ -1171,7 +1190,10 @@ impl<'a> CallFlowPreloader<'a> {
         // here is registered against the pass this step belongs to.
         self.resolve_pending_branches(&mut flow_view_update, line, path_buf);
         self.register_pending_branch(&flow_view_update, line, path_buf);
-        info!("    branches taken {:?}", flow_view_update.branches_taken);
+        // `debug!`, not `info!`: the table grows with the walk, so formatting
+        // all of it on every step is quadratic, and the replay server logs
+        // `info!` unconditionally.
+        debug!("    branches taken {:?}", flow_view_update.branches_taken);
         flow_view_update
     }
 
@@ -1806,7 +1828,7 @@ mod tests {
         let current_location = request_location.clone();
         let call_entry_location = make_location(10, 17, 0);
         let mut replay = MockReplay::new(current_location, call_entry_location);
-        let preloader = CallFlowPreloader::new(
+        let mut preloader = CallFlowPreloader::new(
             &flow_preloader,
             request_location,
             HashSet::new(),
@@ -1834,7 +1856,7 @@ mod tests {
         let current_location = request_location.clone();
         let call_entry_location = make_location(19, 64, 7);
         let mut replay = MockReplay::new(current_location, call_entry_location);
-        let preloader = CallFlowPreloader::new(
+        let mut preloader = CallFlowPreloader::new(
             &flow_preloader,
             request_location,
             HashSet::new(),
