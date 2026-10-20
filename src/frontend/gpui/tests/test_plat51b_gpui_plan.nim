@@ -38,10 +38,12 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 33
+  ExpectedAssertions = 39
     ## 32 -> 33 (2026-10-17): the focus case asserts that NOTHING is outlined
     ## before the first press (the desktop's behaviour since the redesign),
     ## then that a press outlines the pressed pane — one check more.
+    ## 33 -> 39 (2026-10-20): the File menu case (codetracer#841) — the
+    ## welcome tab and form each of three File items opens, six checks.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   DesktopAnswers = "src/tests/visual/answers/plat51-desktop.electron.json"
@@ -331,6 +333,30 @@ suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
       if kind == pcDir and path.extractFilename.startsWith("greeter-"):
         inc found
     ck found == 1
+
+suite "M74 (#841) GPUI: the File menu reaches the welcome flow":
+  # codetracer#841: the window's menu enabled a static list without a single
+  # File item. Here File is opened with `Alt+F` (CUA-Keymap.md §3.8, the
+  # window's default CUA base) and an item chosen with `Down` / `Enter`,
+  # through the window's own key handlers (`--window-ops`).
+
+  proc welcomeForm(plan: JsonNode): string =
+    for n in plan.nodesWith("data-ct-welcome-form"):
+      return n.attr("data-ct-welcome-form")
+    ""
+
+  test "New Trace Tab opens the Welcome Screen; Open Trace… and Record New Trace… open its forms":
+    # File's items in order: Open Trace…, Open Trace in New Tab…, Record New
+    # Trace…, New Trace Tab. The folder opens on the first.
+    let tab = windowPlan("key:f:alt,key:down,key:down,key:down,key:enter")
+    ck tab.nodesWith("data-ct-welcome").len == 1
+    ck tab.welcomeForm == ""
+    let open = windowPlan("key:f:alt,key:enter")
+    ck open.nodesWith("data-ct-welcome").len == 1
+    ck open.welcomeForm == "open-local-trace"
+    let record = windowPlan("key:f:alt,key:down,key:down,key:enter")
+    ck record.nodesWith("data-ct-welcome").len == 1
+    ck record.welcomeForm == "record-new-trace"
 
 suite "PLAT-51 part B GPUI: assertion count":
   test "every assertion ran":

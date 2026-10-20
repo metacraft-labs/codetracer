@@ -233,6 +233,20 @@ proc activate*(w: NativeWelcome; row: int; folderDefault = "") =
     of wsoRecordNewTrace: w.openForm(nwfRecord)
     else: w.message = r.label & ": " & StartOptionUnavailableHereReason
 
+proc chooseOption*(w: NativeWelcome; kind: WelcomeStartOptionKind;
+                   folderDefault = "") =
+  ## Choose the start option `kind` as a click on its row would — a live
+  ## option opens its form, a refused one says why on the message line. What
+  ## the program menu's File items reach (codetracer#841): *Open Trace…* is
+  ## "Open local trace", *Record New Trace…* is "Record new trace", so a menu
+  ## item and the screen's own option cannot do different things.
+  let key = startOptionKey(kind)
+  for i, r in w.rowsOf():
+    if r.kind == nwrOption and r.key == key:
+      w.activate(i, folderDefault)
+      return
+  w.message = "this screen has no " & key & " option"
+
 proc splitCommandLine*(text: string): seq[string] =
   ## `prog "an arg" b` -> @["prog", "an arg", "b"]: whitespace separates,
   ## double quotes group.

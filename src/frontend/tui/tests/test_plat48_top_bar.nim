@@ -18,22 +18,38 @@
 ## those cases assert — which tabs are drawn, which one is active, what a
 ## click, `g t` / `g T` or `Ctrl+Tab` does to the active slot — is a function
 ## of the real slots and the real key path, never of the transport.
+##
+## M74 (codetracer#841), the File menu, runs over a REAL session (`calc`, a
+## real `replay-server`) and a real project on disk read through the host's
+## own `edit_host` reader. ONE MORE STAND-IN, the host's welcome seam: those
+## cases install a capturing `welcomeHost` closure (as `test_plat51b_parity`
+## does) that records the intent the runtime hands over and performs nothing.
+## What is asserted — which items are enabled in which state, the reason a
+## disabled one gives, the welcome tab and form a choice opens, the buffer a
+## choice makes active — is the runtime's and the shared models' own; the
+## host performing the intent end to end is `real_terminal/test_plat51b_pty`.
 
 import std/[base64, os, strutils, tables, unicode, unittest]
 
 import ../app/runtime
+import ../app/tui_app
+import ../app/edit_binding
 import ../app/views/shell
 import ../app/layout/binding
 import ../app/theme/capabilities
 import ../host/control_icons
+import ../host/edit_host
+import ../host/tui_session
 import ../../../common/terminal_graphics/[raster, path_raster]
 import headless_app/session_tabs
 import headless_app/layout_model
+import headless_app/welcome_tabs
 import codetracer_embed
+import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 318
+const ExpectedAssertions = 379
 
 var countedAssertions = 0
 
@@ -212,7 +228,8 @@ suite "PLAT-48: the menu":
     ck not rt.app.menu.isOpen
     # No session: the dispatcher answers, by name, that it cannot step.
     ck outcome.action == kaStepOver
-    # File > Open Trace... is not something the terminal does: disabled.
+    # File > Open Trace... needs a host to open a recording in, and this
+    # runtime has none: disabled (M74's cases below give it one).
     discard rt.handleToken(F12, 0)
     discard rt.handleToken(Right, 0)
     ck rt.app.menu.path == @[1]
@@ -520,6 +537,220 @@ suite "PLAT-48: the graphics rendering's bytes":
     # Nothing moved: nothing is sent again.
     ck controlIconBytes(state, lay, newSeq[bool](TransportControls.len),
                         ink, ink).len == 0
+
+suite "M74 (#841): the File menu follows what the terminal can do":
+  # codetracer#841: every File item but Exit was greyed out, because the
+  # enabled set was a static table fixed at start-up that omitted the tab and
+  # trace actions the terminal performs. These cases drive the File menu
+  # through the bar's own keys (`F12`, `Right`, `Down`, `Enter`) over a REAL
+  # recording (`calc`, a real `replay-server`), with the menu re-read each
+  # time it opens — which is when the state these items depend on is read.
+
+  proc fileItem(rt: TuiRuntime; action: string): MenuItem =
+    ## The File item that runs `action`, as the menu holds it now.
+    rt.app.menu.itemAt(rt.app.menu.pathOfAction(action))
+
+  proc openFileMenu(rt: TuiRuntime) =
+    ## `F12`, then `Right` into File (the first shown folder).
+    if rt.app.menu.isOpen:
+      discard rt.handleToken(Esc, 0)
+      discard rt.handleToken(Esc, 0)
+    discard rt.handleToken(F12, 0)
+    discard rt.handleToken(Right, 0)
+
+  proc chooseFileItem(rt: TuiRuntime; label: string): RuntimeOutcome =
+    ## Open File and press `Enter` on `label`, walked to with `Down`.
+    rt.openFileMenu()
+    for _ in 0 ..< 16:
+      if rt.app.menu.highlightedItem().label == label:
+        break
+      discard rt.handleToken(Down, 0)
+    checkpoint("chose " & rt.app.menu.highlightedItem().label)
+    result = rt.handleToken(Enter, 0)
+    # A disabled item does nothing and leaves the menu open (the Menu
+    # ViewModel's rule); close it, so the case's next key is not the menu's.
+    for _ in 0 ..< 3:
+      if rt.app.menu.isOpen:
+        discard rt.handleToken(Esc, 0)
+
+  proc enabledNow(rt: TuiRuntime; action: string): bool =
+    ## Whether `action`'s item is enabled in the menu as it OPENS now.
+    rt.openFileMenu()
+    result = rt.fileItem(action).enabled
+    discard rt.handleToken(Esc, 0)
+    discard rt.handleToken(Esc, 0)
+
+  let calc = resolveFixture("calc")
+
+  proc open(path: string): (TuiRuntime, TuiSession) =
+    let rt = newRuntime(200, 50)
+    let s = openTuiSession(path, viewportHeight = 42)
+    s.header(rt)
+    s.learnExtent()
+    s.refresh(rt)
+    (rt, s)
+
+  test "the trace and tab items are enabled where a host performs them; New Trace Tab adds a welcome tab":
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    # No host to open a recording with: the four trace and tab items are
+    # disabled, and choosing one SAYS why (EMT-D14) rather than nothing.
+    for action in ["aOpenTrace", "aOpenTraceInNewTab", "aRecordNewTrace",
+                   "aNewTraceTab"]:
+      checkpoint(action)
+      ck not rt.enabledNow(action)
+    discard rt.chooseFileItem("New Trace Tab")
+    ck rt.app.notification.startsWith("New Trace Tab: ")
+    ck rt.app.notification.len > "New Trace Tab: ".len
+    ck rt.app.welcomeTabs.tabs.len == 0
+    # The host's welcome flow arrives: the same items, enabled — the state
+    # changed, and the menu follows it the next time it opens.
+    var asked: seq[NativeWelcomeIntent] = @[]
+    rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
+      asked.add intent
+      ""
+    for action in ["aOpenTrace", "aOpenTraceInNewTab", "aRecordNewTrace",
+                   "aNewTraceTab", "aExit"]:
+      checkpoint(action)
+      ck rt.enabledNow(action)
+    # File › New Trace Tab is the strip's "+" (Multi-Window-Tab-Management.md
+    # rule 3): a new tab showing the Welcome Screen, its forms closed.
+    discard rt.chooseFileItem("New Trace Tab")
+    ck not rt.app.menu.isOpen
+    ck rt.app.welcomeTabs.tabs.len == 1
+    ck rt.app.welcomeTabs.welcomeShown
+    let w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfNone
+    ck rt.shellScreenOf().rows.join("\n").contains(NativeWelcomeHeading)
+    ck asked.len == 0
+
+  test "Open Trace…, Open Trace in New Tab… and Record New Trace… reach the welcome flow":
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    var asked: seq[NativeWelcomeIntent] = @[]
+    rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
+      asked.add intent
+      ""
+    # From the session tab, Open Trace in New Tab…: a new welcome tab with its
+    # "Open local trace" form open — the terminal's trace dialog.
+    discard rt.chooseFileItem("Open Trace in New Tab...")
+    ck rt.app.welcomeTabs.tabs.len == 1
+    var w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfOpenTrace
+    # The form is the real one: the recording typed and Enter reach the host
+    # as the intent to open it.
+    if not w.isNil:
+      for ch in calc.tracePath:
+        discard rt.handleToken($ch, 0)
+      discard rt.handleToken(Enter, 0)
+    ck asked.len == 1 and asked[0].kind == niOpenTrace and
+       asked[0].path == calc.tracePath
+    # With a welcome tab shown, Open Trace… opens the form IN that tab (it
+    # becomes the session it starts, rule 3); Open Trace in New Tab… does not.
+    discard rt.chooseFileItem("Open Trace...")
+    ck rt.app.welcomeTabs.tabs.len == 1
+    w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfOpenTrace
+    discard rt.handleToken(Esc, 0)
+    ck not w.isNil and w.form == nwfNone
+    # Record New Trace…: the same tab's record form (the desktop shows the
+    # welcome screen's New Recording form).
+    discard rt.chooseFileItem("Record New Trace...")
+    ck rt.app.welcomeTabs.tabs.len == 1
+    w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfRecord
+    discard rt.handleToken(Esc, 0)
+    # Back on the recording's tab, Open Trace… has no welcome tab to use: it
+    # opens one, and its form, rather than replacing the recording
+    # (Multi-Window-Tab-Management.md: a replay opens in a new tab by default;
+    # replacement is never automatic).
+    var o = RuntimeOutcome()
+    rt.showSessionTab(0, o)
+    ck not rt.app.welcomeTabs.welcomeShown
+    discard rt.chooseFileItem("Open Trace...")
+    ck rt.app.welcomeTabs.tabs.len == 2
+    w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfOpenTrace
+    ck asked.len == 1
+
+  test "the file items act on the edit session's buffers, and say why when they cannot":
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    # A real project on disk, read through the host's own reader
+    # (`edit_host`), as `main.nim` wires it.
+    let project = getTempDir() / "ct-m74-project-" & $getCurrentProcessId()
+    createDir(project)
+    defer: removeDir(project)
+    writeFile(project / "a.py", "print('a')\n")
+    writeFile(project / "b.py", "print('b')\n")
+    rt.app.projectRoot = project
+    rt.editServices.listFiles = proc(): EditListResult =
+      let listing = listProjectFiles(project)
+      EditListResult(files: listing.files, truncated: listing.truncated)
+    rt.editServices.readFile = proc(relative: string): EditReadResult =
+      try:
+        EditReadResult(ok: true, text: readProjectFile(project, relative))
+      except CatchableError as e:
+        EditReadResult(ok: false, message: e.msg)
+    # In Debug mode the editor shows the file the recording is at: there is
+    # no list of open files to step, and Next File says so.
+    ck not rt.enabledNow("switchTabRight")
+    discard rt.chooseFileItem("Next File")
+    ck rt.app.notification.startsWith("Next File: ")
+    ck rt.app.notification.len > "Next File: ".len
+    # Edit mode (`Ctrl+F5`) arrives at the project's first file: ONE buffer.
+    discard rt.handleToken("\x1b[15;5~", 0)
+    ck rt.app.modes.product == pmEdit
+    require not rt.app.editSession.isNil
+    ck rt.app.editSession.buffers.len == 1
+    ck rt.enabledNow("closeTab")
+    for action in ["switchTabRight", "switchTabLeft", "switchTabHistory",
+                   "reopenTab"]:
+      checkpoint(action)
+      ck not rt.enabledNow(action)
+    discard rt.chooseFileItem("Previous File")
+    ck rt.app.notification.startsWith("Previous File: ")
+    ck rt.app.notification.len > "Previous File: ".len
+    # A second file: the stepping items are enabled — the same menu, a new
+    # state.
+    discard rt.typeLine("e b.py")
+    ck rt.app.editSession.buffers.len == 2
+    let first = rt.app.editSession.activeBuffer().path
+    for action in ["switchTabRight", "switchTabLeft", "switchTabHistory"]:
+      checkpoint(action)
+      ck rt.enabledNow(action)
+    discard rt.chooseFileItem("Next File")
+    ck not rt.app.menu.isOpen
+    ck rt.app.editSession.activeBuffer().path != first
+    discard rt.chooseFileItem("Previous File")
+    ck rt.app.editSession.activeBuffer().path == first
+    discard rt.chooseFileItem("Switch File")
+    ck rt.app.editSession.activeBuffer().path != first
+    # Close Current File closes the shown buffer; Reopen File brings it back.
+    let closing = rt.app.editSession.activeBuffer().path
+    discard rt.chooseFileItem("Close Current File")
+    ck rt.app.editSession.buffers.len == 1
+    ck rt.app.editSession.indexOfPath(closing) < 0
+    ck rt.enabledNow("reopenTab")
+    discard rt.chooseFileItem("Reopen File")
+    ck rt.app.editSession.buffers.len == 2
+    ck rt.app.editSession.activeBuffer().path == closing
+    ck not rt.enabledNow("reopenTab")
+    # A buffer with unsaved changes is not closed — the desktop would ask in
+    # a save dialog, and closing it here would discard the edit: Close
+    # Current File is disabled, and says why.
+    discard rt.handleToken("i", 0)
+    discard rt.handleToken("x", 0)
+    discard rt.handleToken(Esc, 0)
+    ck rt.app.editSession.activeBuffer().isDirty
+    ck not rt.enabledNow("closeTab")
+    discard rt.chooseFileItem("Close Current File")
+    ck rt.app.notification.startsWith("Close Current File: ")
+    ck rt.app.notification.contains("unsaved changes")
+    ck rt.app.editSession.buffers.len == 2
 
 suite "PLAT-48 top bar: assertion count":
   test "every assertion ran":

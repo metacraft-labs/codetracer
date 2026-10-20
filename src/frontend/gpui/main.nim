@@ -3100,16 +3100,88 @@ var
   gChromeSpec = ""
     ## PLAT-69: `--window-chrome`, the frame `--report-window-plan` draws.
 
-proc gpuiMenuActionAvailable(action: string): bool =
-  ## What this window performs from the menu: the debugger's transport and
-  ## the panes it can bring forward, and the omnibar's two searches. The
+type
+  GpuiMenuRouteKind = enum
+    ## How this window performs a menu item (`gpuiMenuRouteOf`).
+    gmrNone
+    gmrControl
+      ## A debugger control (`control`), through `performControl`.
+    gmrPane
+      ## A View-menu pane brought forward (`pane`).
+    gmrFindSymbol
+    gmrFindInFiles
+    gmrExit
+      ## File › Exit CodeTracer: the event loop stopped (`gpui_quit`), which
+      ## ends the window as its own close does.
+    gmrNewTab
+      ## File › New Trace Tab: the strip's "+" (`openWelcomeTab`).
+    gmrWelcomeOption
+      ## File › Open Trace… / Open Trace in New Tab… / Record New Trace…: the
+      ## welcome tab's start option (`option`), in a new tab or the shown one.
+
+  GpuiMenuRoute = object
+    ## The window's answer for one menu item, now: how it is performed and,
+    ## when it cannot be, why (EMT-D14).
+    kind: GpuiMenuRouteKind
+    control: string
+    pane: PaneKind
+    option: WelcomeStartOptionKind
+    newTab: bool
+    reason: string
+
+const
+  GpuiFileListReason =
+    "the window's editor holds one file per tab; there is no list of open " &
+    "files to step through"
+    ## Close / Reopen / Next / Previous / Switch File act on an editor's open
+    ## files; a GPUI edit tab is one file (`GpuiEditArm`).
+
+proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
+  ## THE ONE TABLE from a menu item's `ClientAction` to what this window does
+  ## with it, read by both `gpuiMenuAvailability` (what the menu shows
+  ## enabled) and `runGpuiMenuAction` (what choosing it does) — the
+  ## terminal's `menuRouteOf`, with the performers this window has
+  ## (codetracer#841: the enabled set was a separate static list, and it
+  ## omitted even Exit).
+  for c in TransportControls:
+    if c.clientAction.len > 0 and c.clientAction == action:
+      return GpuiMenuRoute(kind: gmrControl, control: c.id)
+  case action
+  of "findSymbol": GpuiMenuRoute(kind: gmrFindSymbol)
+  of "findInFiles": GpuiMenuRoute(kind: gmrFindInFiles)
+  of "aFilesystem": GpuiMenuRoute(kind: gmrPane, pane: paneFileTree)
+  of "aFullCalltrace": GpuiMenuRoute(kind: gmrPane, pane: paneCalltrace)
+  of "aState": GpuiMenuRoute(kind: gmrPane, pane: paneState)
+  of "aEventLog": GpuiMenuRoute(kind: gmrPane, pane: paneEventLog)
+  of "aTerminal": GpuiMenuRoute(kind: gmrPane, pane: paneTerminalOutput)
+  of "aScratchpad": GpuiMenuRoute(kind: gmrPane, pane: paneScratchpad)
+  of "aPointList": GpuiMenuRoute(kind: gmrPane, pane: panePointList)
+  of "aAgentActivity": GpuiMenuRoute(kind: gmrPane, pane: paneAgentActivity)
+  of "aExit": GpuiMenuRoute(kind: gmrExit)
+  # File: the Welcome Screen's own flows (Multi-Window-Tab-Management.md rule
+  # 3, Welcome-Screen.md § The native front-ends), as in the terminal.
+  of "aNewTraceTab": GpuiMenuRoute(kind: gmrNewTab)
+  of "aOpenTrace", "aOpenTraceInNewTab":
+    GpuiMenuRoute(kind: gmrWelcomeOption, option: wsoOpenLocalTrace,
+                  newTab: action == "aOpenTraceInNewTab")
+  of "aRecordNewTrace":
+    GpuiMenuRoute(kind: gmrWelcomeOption, option: wsoRecordNewTrace)
+  of "closeTab", "reopenTab", "switchTabRight", "switchTabLeft",
+     "switchTabHistory":
+    GpuiMenuRoute(kind: gmrNone, reason: GpuiFileListReason)
+  else: GpuiMenuRoute(kind: gmrNone, reason: "not available in this window")
+
+proc gpuiMenuAvailability(action: string): MenuAvailability =
+  ## Whether this window can perform menu item `action` now, and why not.
+  let route = gpuiMenuRouteOf(action)
+  if route.reason.len > 0: unavailable(route.reason) else: availableNow()
+
+proc refreshGpuiMenuAvailability() =
+  ## Mark the menu's items from `gpuiMenuRouteOf` — at start-up and whenever
+  ## the menu opens, so what is enabled is what the window can do then. The
   ## rest are drawn disabled — the same menu, honestly marked.
-  action in ["forwardContinue", "reverseContinue", "forwardNext",
-             "reverseNext", "forwardStep", "reverseStep", "forwardStepOut",
-             "reverseStepOut", "findSymbol", "findInFiles", "aFilesystem",
-             "aFullCalltrace",
-             "aState", "aEventLog", "aTerminal", "aScratchpad",
-             "aPointList", "aAgentActivity"]
+  if not gMenu.isNil:
+    gMenu.setAvailability(gpuiMenuAvailability)
 
 const
   MenuLogoIcon = staticRead("../../public/resources/menu/ct_logo_dark.svg")
@@ -4690,6 +4762,8 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
 
 proc openOmnibar(r: GpuiRenderer; query = "") =
   if gMenu.isOpen: gMenu.close()
+  # The omnibar lists the menu's ENABLED commands: read them for now.
+  refreshGpuiMenuAvailability()
   if not gSession.isNil:
     gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                      gSession.session.store, gMenu) &
@@ -4755,22 +4829,37 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
             redrawWindowLeaf(r, pane, leaf)
     drawTopBar(r)
     return
-  for c in TransportControls:
-    if c.clientAction.len > 0 and c.clientAction == action:
-      performControl(r, c.id)
-      return
-  case action
-  of "findSymbol": openOmnibar(r, ":sym ")
-  of "findInFiles": openFindInFiles(r)
-  of "aFilesystem": showPaneFromMenu(r, paneFileTree)
-  of "aFullCalltrace": showPaneFromMenu(r, paneCalltrace)
-  of "aState": showPaneFromMenu(r, paneState)
-  of "aEventLog": showPaneFromMenu(r, paneEventLog)
-  of "aTerminal": showPaneFromMenu(r, paneTerminalOutput)
-  of "aScratchpad": showPaneFromMenu(r, paneScratchpad)
-  of "aPointList": showPaneFromMenu(r, panePointList)
-  of "aAgentActivity": showPaneFromMenu(r, paneAgentActivity)
-  else: traceGesture("menu action " & action & " is not available here")
+  # The table the menu was enabled from (`gpuiMenuRouteOf`), so a command the
+  # omnibar listed and an item chosen do what "enabled" promised.
+  let route = gpuiMenuRouteOf(action)
+  if route.reason.len > 0:
+    traceGesture("menu action " & action & " refused: " & route.reason)
+    drawTopBar(r)
+    return
+  case route.kind
+  of gmrControl:
+    performControl(r, route.control)
+    return
+  of gmrFindSymbol: openOmnibar(r, ":sym ")
+  of gmrFindInFiles: openFindInFiles(r)
+  of gmrPane: showPaneFromMenu(r, route.pane)
+  of gmrExit:
+    traceGesture("exit")
+    gpui_quit()
+  of gmrNewTab: openWelcomeTab(r)
+  of gmrWelcomeOption:
+    # The start option's form, the window's dialog — in the shown welcome
+    # tab, or a new one (Open Trace in New Tab…, or none shown).
+    if route.newTab or shownWelcome().isNil:
+      openWelcomeTab(r)
+    let w = shownWelcome()
+    if not w.isNil:
+      w.chooseOption(route.option, getCurrentDir())
+      traceGesture("welcome form " & $w.form)
+      discard drawArrangement(r)
+  of gmrNone:
+    # Unreachable: `gpuiMenuRouteOf` gives `gmrNone` a reason.
+    traceGesture("menu action " & action & " is not available here")
   drawTopBar(r)
 
 proc showContent(r: GpuiRenderer; title, text: string; diff = false)
@@ -4892,6 +4981,9 @@ proc runMenuOperation(operation, argument: string) =
   ## A menu key, whether the menu is open or not: `menu.open-folder(x)`
   ## opens folder x; `menu.open` and `menu.toggle` open the menu when it is
   ## closed and close it when it is open (VS Code's Alt and F10 both toggle).
+  # What is enabled is read for the state the menu opens in (codetracer#841).
+  if not gMenu.isOpen or operation == "menu.open-folder":
+    refreshGpuiMenuAvailability()
   if operation == "menu.open-folder":
     let i = gMenu.folderIndexOf(argument)
     if i >= 0:
@@ -4939,10 +5031,13 @@ proc handleTopKey(r: GpuiRenderer; key: string;
     case k
     of "escape", "esc": gMenu.escape()
     of "enter", "return":
+      let chosen = gMenu.highlightedItem()
       let act = gMenu.activate()
       if act.ran:
         runGpuiMenuAction(r, act.action)
         return true
+      if refusalOf(chosen).len > 0:
+        traceGesture("menu refused: " & refusalOf(chosen))
     of "up": gMenu.moveHighlight(-1)
     of "down": gMenu.moveHighlight(1)
     of "right": discard gMenu.enterFolder()
@@ -4969,10 +5064,13 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
     let (inside, path) = gpuiMenuHitAt(pops, gMenu, x, y)
     if inside:
       if path.len > 0:
+        let chosen = gMenu.itemAt(path)
         let act = gMenu.clickPath(path)
         if act.ran:
           runGpuiMenuAction(r, act.action)
           return true
+        if refusalOf(chosen).len > 0:
+          traceGesture("menu refused: " & refusalOf(chosen))
       drawTopBar(r)
       return true
     if not band.contains(x, y):
@@ -5031,7 +5129,11 @@ proc handleTopPress(r: GpuiRenderer; x, y: int): bool =
     return true
   case hit.part
   of gtMenuButton:
-    if gMenu.isOpen: gMenu.close() else: gMenu.open(keyboard = false)
+    if gMenu.isOpen:
+      gMenu.close()
+    else:
+      refreshGpuiMenuAvailability()
+      gMenu.open(keyboard = false)
   of gtControl:
     performControl(r, TransportControls[hit.index].id)
     return true
@@ -6296,7 +6398,7 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     return
   else: discard
   let action = clientActionOf(op)
-  if action.len > 0 and gpuiMenuActionAvailable(action):
+  if action.len > 0 and gpuiMenuAvailability(action).enabled:
     runGpuiMenuAction(r, action)
     return
   traceGesture("`" & op & "` (" & operationLabelOf(res.operation) &
@@ -8311,7 +8413,7 @@ proc runOpen(cmd: GpuiCommand): int =
   # session's files, the held call-trace section and the menu's commands —
   # the index the terminal builds for the same recording.
   gMenu = newMenuVM(nativeFrontEndMenu("CodeTracer"))
-  gMenu.setEnabled(gpuiMenuActionAvailable)
+  refreshGpuiMenuAvailability()
   # PLAT-68: the window's keys resolve through the one router, under the
   # base this session starts with and the user's `keybindings.json`; the
   # menu shows the chords it resolves (`refreshMenuShortcuts`).

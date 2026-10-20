@@ -207,6 +207,14 @@ type
       ## re-walk the filesystem on every single `Ctrl+F5`. It also keeps the
       ## §6 property the register has by construction — the *n*th transition
       ## behaves as the first — from being bought back with a filesystem walk.
+    shown*: seq[string]
+      ## The paths of the buffers made active, oldest first, each once (a path
+      ## shown again moves to the end) — what *File › Switch File* reads, the
+      ## desktop's editor tab history (`switchTabHistory`). Paths, not
+      ## indices, so closing a buffer cannot make an entry name another file.
+    closed*: seq[string]
+      ## The paths of the buffers closed, oldest first — what *File › Reopen
+      ## File* reopens, the desktop's `closedTabs` (`reopenLastTab`).
 
 const
   NoBuffer* = -1
@@ -555,6 +563,88 @@ proc indexOfPath*(s: EditSession; path: string): int =
     if b.path == path:
       return i
 
+proc activateBuffer*(s: EditSession; index: int) =
+  ## Make buffer `index` the active one, and remember it was shown (`shown`).
+  ## Out of range does nothing.
+  if s.isNil or index < 0 or index >= s.buffers.len:
+    return
+  s.active = index
+  let path = s.buffers[index].path
+  let at = s.shown.find(path)
+  if at >= 0:
+    s.shown.delete(at)
+  s.shown.add path
+
+# ---------------------------------------------------------------------------
+# codetracer#841: the File menu's five file items, over the open buffers.
+#
+# The desktop's *Close Current File*, *Reopen File*, *Next File*, *Previous
+# File* and *Switch File* act on its editor's tabs (`closeActiveTab`,
+# `reopenLastTab`, `switchTab(±1)`, `switchTabHistory`). The terminal's open
+# documents are this session's buffers, so the same five act on them. Each
+# operation here is pure over the session; the runtime decides when they apply
+# (Edit mode) and reads the file a reopen needs.
+# ---------------------------------------------------------------------------
+
+proc stepBuffer*(s: EditSession; delta: int): bool =
+  ## *Next File* (`1`) / *Previous File* (`-1`): the neighbouring buffer,
+  ## wrapping, as the desktop's `switchTab` wraps. False when there is no
+  ## other buffer to step to.
+  if s.isNil or s.buffers.len < 2:
+    return false
+  let start = max(0, s.active)
+  s.activateBuffer(((start + delta) mod s.buffers.len + s.buffers.len) mod
+                   s.buffers.len)
+  true
+
+proc previouslyShownBuffer*(s: EditSession): int =
+  ## *Switch File*'s target: the most recently shown buffer other than the
+  ## active one that is still open, or `NoBuffer`. Choosing it makes it the
+  ## most recent, so a second *Switch File* goes back — the quick toggle
+  ## between the two files last worked on.
+  if s.isNil:
+    return NoBuffer
+  let current = if s.activeBuffer().isNil: "" else: s.activeBuffer().path
+  for i in countdown(s.shown.high, 0):
+    if s.shown[i] != current:
+      let at = s.indexOfPath(s.shown[i])
+      if at >= 0:
+        return at
+  NoBuffer
+
+proc closeActiveBuffer*(s: EditSession): string =
+  ## *Close Current File*: remove the active buffer and remember its path for
+  ## *Reopen File*; the buffer that took its place becomes active. Answers
+  ## the closed path, or "" when no buffer is open. The caller refuses a
+  ## buffer with unsaved changes first — closing one would discard them.
+  let buf = s.activeBuffer()
+  if buf.isNil:
+    return ""
+  let at = s.active
+  result = buf.path
+  s.buffers.delete(at)
+  let gone = s.shown.find(result)
+  if gone >= 0:
+    s.shown.delete(gone)
+  let wasClosed = s.closed.find(result)
+  if wasClosed >= 0:
+    s.closed.delete(wasClosed)
+  s.closed.add result
+  if s.buffers.len == 0:
+    s.active = NoBuffer
+  else:
+    s.activateBuffer(min(at, s.buffers.high))
+
+proc reopenCandidate*(s: EditSession): string =
+  ## *Reopen File*'s target: the most recently closed path that is not open
+  ## again, or "".
+  if s.isNil:
+    return ""
+  for i in countdown(s.closed.high, 0):
+    if s.indexOfPath(s.closed[i]) < 0:
+      return s.closed[i]
+  ""
+
 proc openFile*(s: EditSession; path, text: string; viewportHeight = 20): int =
   ## Open `path`, or activate it if it is already open.
   ##
@@ -566,14 +656,14 @@ proc openFile*(s: EditSession; path, text: string; viewportHeight = 20): int =
     return NoBuffer
   let existing = s.indexOfPath(path)
   if existing >= 0:
-    s.active = existing
+    s.activateBuffer(existing)
     return existing
   s.buffers.add newEditBuffer(path, text, viewportHeight, s.model, s.delivery)
   inc s.nextSerial
   s.buffers[^1].serial = s.nextSerial
   if not s.imported.isNil:
     s.buffers[^1].doc.installImported(s.imported)
-  s.active = s.buffers.high
+  s.activateBuffer(s.buffers.high)
   s.active
 
 proc recordEdit*(s: EditSession; path: string) =

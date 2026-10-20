@@ -3115,12 +3115,17 @@ const
     ## click on `≡` or a folder title.
 
 proc probeKey*(rt: TuiRuntime; name: string): EditingResolution
+proc refreshMenuAvailability*(rt: TuiRuntime)
+  ## Forward-declared; defined beside the menu's action table below.
 
 proc runMenuOperation(rt: TuiRuntime; operation, argument: string) =
   ## A menu key, whether the menu is open or not: `menu.open-folder(x)`
   ## opens folder x; `menu.open` and `menu.toggle` open the menu when it is
   ## closed and close it when it is open (VS Code's Alt and F10 both toggle).
   let vm = rt.app.menu
+  # What is enabled is read for the state the menu opens in (codetracer#841).
+  if not vm.isOpen or operation == "menu.open-folder":
+    rt.refreshMenuAvailability()
   if operation == "menu.open-folder":
     let i = vm.folderIndexOf(argument)
     if i < 0:
@@ -3190,11 +3195,166 @@ proc menuOmnibarQuery*(action: string): (bool, string) =
   of "findInFiles": (true, ":grep ")
   else: (false, "")
 
-proc menuActionAvailable*(action: string): bool =
-  ## Whether the terminal performs a menu item. The rest are drawn DISABLED,
-  ## not dropped, so every front-end shows the same menu.
-  menuKeyAction(action) != kaNone or menuPaneOf(action)[0] or
-    menuPromptLine(action).len > 0 or menuOmnibarQuery(action)[0]
+type
+  MenuRouteKind* = enum
+    ## How the terminal performs a menu item (`menuRouteOf`).
+    mrNone
+      ## Not something the terminal does.
+    mrKey
+      ## A key action (`menuKeyAction`), through `performAction`.
+    mrPane
+      ## A View-menu pane brought forward (`menuPaneOf`).
+    mrPromptLine
+      ## A `:` line (`menuPromptLine`).
+    mrFindInFiles
+      ## Find in Files shown, its field open.
+    mrOmnibar
+      ## The omnibar opened on a query (`menuOmnibarQuery`).
+    mrNewTab
+      ## File › New Trace Tab: the strip's "+".
+    mrWelcomeOption
+      ## File › Open Trace… / Open Trace in New Tab… / Record New Trace…: a
+      ## welcome tab's start option (`option`), in a new tab or the shown one.
+    mrBuffer
+      ## File › Close / Reopen / Next / Previous / Switch File: Edit mode's
+      ## open buffers (`buffer`).
+
+  MenuBufferOp* = enum
+    mboClose, mboReopen, mboNext, mboPrevious, mboSwitch
+
+  MenuRoute* = object
+    ## THE TERMINAL'S ANSWER FOR ONE MENU ITEM, NOW: how it is performed and,
+    ## when it cannot be performed in the current state, why not.
+    kind*: MenuRouteKind
+    key*: KeyAction
+    pane*: PaneKind
+    line*: string
+      ## `mrPromptLine`'s line; `mrOmnibar`'s query.
+    option*: WelcomeStartOptionKind
+    newTab*: bool
+      ## `mrWelcomeOption`: always a new welcome tab (Open Trace in New Tab…),
+      ## or the shown welcome tab when there is one.
+    buffer*: MenuBufferOp
+    reason*: string
+      ## Non-empty when the item cannot run now — what the menu shows it
+      ## disabled with and says when it is chosen (EMT-D14).
+
+const
+  NoMenuHostReason* =
+    "this terminal has no host to open a recording or record a program in"
+    ## The trace and tab items in a runtime no host has given a welcome flow
+    ## (an in-process caller with no engine to spawn).
+  BufferItemsInDebugReason* =
+    "in Debug mode the editor shows the file the recording is at; the open " &
+    "files are Edit mode's"
+  NoFileOpenReason* = "no file is open"
+  OneFileOpenReason* = "only one file is open"
+  NoOtherFileShownReason* = "no other open file has been shown"
+  NoClosedFileReason* = "no file has been closed"
+  NoFileReaderReason* = "this session has no file reader to reopen it with"
+
+func unsavedCloseReason(path: string): string =
+  ## Close Current File on a buffer with unsaved changes. The desktop asks in a
+  ## save dialog (`closeActiveTab`); the terminal has none, and closing would
+  ## discard the changes — Mode-Transitions.md §5's data loss by name — so the
+  ## item is refused, and says how to make it run.
+  path & " has unsaved changes: write it (:w) or reload it (:e!) first"
+
+proc menuBufferReason(rt: TuiRuntime; op: MenuBufferOp): string =
+  ## Why buffer item `op` cannot run now, or "" when it can.
+  if rt.app.modes.product != pmEdit:
+    return BufferItemsInDebugReason
+  let s = rt.app.editSession
+  if op == mboReopen:
+    if s.reopenCandidate().len == 0: return NoClosedFileReason
+    if rt.editServices.readFile.isNil: return NoFileReaderReason
+    return ""
+  if s.isNil or s.activeBuffer().isNil:
+    return NoFileOpenReason
+  case op
+  of mboClose:
+    if s.activeBuffer().isDirty:
+      return unsavedCloseReason(s.activeBuffer().path)
+  of mboNext, mboPrevious:
+    if s.buffers.len < 2: return OneFileOpenReason
+  of mboSwitch:
+    if s.previouslyShownBuffer() == NoBuffer: return NoOtherFileShownReason
+  of mboReopen:
+    discard
+  ""
+
+proc menuRouteOf*(rt: TuiRuntime; action: string): MenuRoute =
+  ## THE ONE TABLE from a menu item's `ClientAction` to what the terminal does
+  ## with it, read by BOTH `menuAvailability` (what the menu shows enabled)
+  ## and `runMenuAction` (what choosing it does), so "enabled" and "can run"
+  ## are one answer and cannot drift (codetracer#841: the enabled set was a
+  ## second, static copy that had stopped listing what the terminal performs).
+  ##
+  ## STATE-AWARE: an item that depends on the session's state — a host to open
+  ## a recording with, the files open in Edit mode — carries the reason it
+  ## cannot run now, and the menu re-reads this whenever it opens.
+  let ka = menuKeyAction(action)
+  if ka != kaNone:
+    return MenuRoute(kind: mrKey, key: ka)
+  let (isPane, pane) = menuPaneOf(action)
+  if isPane:
+    return MenuRoute(kind: mrPane, pane: pane)
+  let line = menuPromptLine(action)
+  if line.len > 0:
+    return MenuRoute(kind: mrPromptLine, line: line)
+  if action == "findInFiles":
+    return MenuRoute(kind: mrFindInFiles)
+  let (isOmni, query) = menuOmnibarQuery(action)
+  if isOmni:
+    return MenuRoute(kind: mrOmnibar, line: query)
+  # File. The trace and tab items are the Welcome Screen's own flows
+  # (Multi-Window-Tab-Management.md rule 3, Welcome-Screen.md § The native
+  # front-ends): a new tab showing it, or one of its start options' forms —
+  # the terminal's dialog — whose choice the host performs. A recording opens
+  # in the welcome tab's place, so in a new session tab: the spec's default
+  # (§ Which tab a replay opens in), never an automatic replacement.
+  case action
+  of "aNewTraceTab":
+    # The "+" (`thTabAdd`): the welcome flow, or the `:open ` omnibar of a
+    # host that opens recordings but has no welcome flow.
+    result = MenuRoute(kind: mrNewTab)
+    if rt.app.welcomeHost.isNil and rt.app.recordingOpener.isNil:
+      result.reason = NoMenuHostReason
+  of "aOpenTrace", "aOpenTraceInNewTab", "aRecordNewTrace":
+    result = MenuRoute(kind: mrWelcomeOption,
+                       option: (if action == "aRecordNewTrace": wsoRecordNewTrace
+                                else: wsoOpenLocalTrace),
+                       newTab: action == "aOpenTraceInNewTab")
+    if rt.app.welcomeHost.isNil:
+      result.reason = NoMenuHostReason
+  of "closeTab", "reopenTab", "switchTabRight", "switchTabLeft",
+     "switchTabHistory":
+    let op = case action
+             of "closeTab": mboClose
+             of "reopenTab": mboReopen
+             of "switchTabRight": mboNext
+             of "switchTabLeft": mboPrevious
+             else: mboSwitch
+    result = MenuRoute(kind: mrBuffer, buffer: op)
+    result.reason = rt.menuBufferReason(op)
+  else:
+    result = MenuRoute(kind: mrNone, reason: "not available in the terminal")
+
+proc menuAvailability*(rt: TuiRuntime; action: string): MenuAvailability =
+  ## Whether the terminal can perform menu item `action` now, and why not.
+  let route = rt.menuRouteOf(action)
+  if route.reason.len > 0: unavailable(route.reason) else: availableNow()
+
+proc refreshMenuAvailability*(rt: TuiRuntime) =
+  ## Mark the menu's items from `menuRouteOf` for the CURRENT state. Run
+  ## whenever the menu is about to be shown or listed — it opens, the omnibar
+  ## lists its commands — so what is enabled follows what the terminal can do
+  ## now, not what it could do at start-up. The rest are drawn DISABLED, not
+  ## dropped, so every front-end shows the same menu.
+  if rt.isNil or rt.app.isNil or rt.app.menu.isNil:
+    return
+  rt.app.menu.setAvailability(proc(action: string): MenuAvailability =
+    rt.menuAvailability(action))
 
 proc chordOf*(rt: TuiRuntime; action: KeyAction): string =
   ## The chord that RUNS `action` where the focus is now — what the menu
@@ -3210,7 +3370,9 @@ proc chordOf*(rt: TuiRuntime; action: KeyAction): string =
 
 proc refreshMenuForKeymap*(rt: TuiRuntime) =
   ## Enable the items the terminal performs and show the ACTIVE keymap's
-  ## chords beside them. Run at start-up and after every keymap switch.
+  ## chords beside them. Run at start-up and after every keymap switch; what
+  ## is enabled is read again whenever the menu opens
+  ## (`refreshMenuAvailability`).
   var chords = initTable[string, string]()
   for (_, it) in rt.app.menu.root.actionItems():
     let chord = rt.chordOf(menuKeyAction(it.action))
@@ -3221,7 +3383,7 @@ proc refreshMenuForKeymap*(rt: TuiRuntime) =
     let chord = rt.chordOf(kaCommandPalette)
     if chord.len > 0:
       chords["findSymbol"] = chord
-  rt.app.menu.setEnabled(menuActionAvailable)
+  rt.refreshMenuAvailability()
   rt.app.menu.setShortcuts(chords)
   rt.app.refreshOmnibarIndex()
 
@@ -3400,12 +3562,76 @@ proc routeWelcomeMouse(rt: TuiRuntime; event: MouseEvent;
 proc openOmnibar*(rt: TuiRuntime; query = "") =
   if rt.app.menu.isOpen:
     rt.app.menu.close()
+  # The omnibar lists the menu's ENABLED commands: read them for now.
+  rt.refreshMenuAvailability()
   rt.app.refreshOmnibarIndex()
   rt.app.omnibar.open(query)
   if query == OpenRecordingQuery:
     rt.note("new tab: choose a recording, or type its folder")
   else:
     rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
+
+proc addTab*(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## The strip's "+" and *File › New Trace Tab*, one performer
+  ## (Multi-Window-Tab-Management.md rule 3: "The "+" button (and File › New
+  ## Trace Tab) opens a new tab showing the Welcome Screen"). PLAT-49 part B
+  ## opened the omnibar on `:open ` instead; a host with no welcome flow still
+  ## does.
+  if not rt.app.welcomeHost.isNil:
+    rt.openWelcomeTab(outcome)
+  else:
+    rt.openOmnibar(OpenRecordingQuery)
+    outcome.repaint = true
+
+proc openWelcomeOption(rt: TuiRuntime; option: WelcomeStartOptionKind;
+                       newTab: bool; outcome: var RuntimeOutcome) =
+  ## *File › Open Trace…* / *Open Trace in New Tab…* / *Record New Trace…*:
+  ## the Welcome Screen's start option `option`, chosen — its form opened, the
+  ## terminal's dialog, whose choice the host performs (`runWelcomeIntent`).
+  ## In the shown welcome tab unless `newTab` or none is shown, the desktop's
+  ## *Open Trace in New Tab…* being a new tab and then the dialog.
+  if newTab or rt.app.shownWelcome().isNil:
+    rt.openWelcomeTab(outcome)
+  let w = rt.app.shownWelcome()
+  if w.isNil:
+    rt.note("there is no welcome tab to open the form in")
+    outcome.repaint = true
+    return
+  w.chooseOption(option, rt.welcomeFolderDefault())
+  rt.note(if w.form != nwfNone: formPrompt(w.form) & "type it, Enter to " &
+            "choose, Esc to close"
+          else: w.message)
+  outcome.repaint = true
+
+proc runBufferOp(rt: TuiRuntime; op: MenuBufferOp;
+                 outcome: var RuntimeOutcome) =
+  ## *File › Close / Reopen / Next / Previous / Switch File* over Edit mode's
+  ## buffers (the session's `EditSession`). `menuRouteOf` has already said the
+  ## operation can run; what it cannot know in advance — a reopened file that
+  ## is no longer readable — is said here.
+  let s = rt.app.editSession
+  outcome.repaint = true
+  case op
+  of mboNext, mboPrevious:
+    discard s.stepBuffer(if op == mboNext: 1 else: -1)
+  of mboSwitch:
+    s.activateBuffer(s.previouslyShownBuffer())
+  of mboClose:
+    let closed = s.closeActiveBuffer()
+    rt.note("closed " & closed)
+  of mboReopen:
+    let path = s.reopenCandidate()
+    let read = rt.editServices.readFile(path)
+    if not read.ok:
+      rt.note(read.message)
+      return
+    discard s.openFile(path, read.text, max(1, rt.sourcePaneRows()))
+  let buf = s.activeBuffer()
+  if not buf.isNil:
+    rt.app.fileTree.openPath = buf.path
+    if op != mboClose:
+      rt.note("editing " & buf.path)
+    discard rt.focus.focusPaneKind(paneEditor)
 
 proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
   ## A View-menu item: bring `pane` forward — reveal it when it is docked,
@@ -3513,31 +3739,40 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
     rt.chooseKeymap($base.model)
     outcome.repaint = true
     return
-  let ka = menuKeyAction(action)
-  if ka != kaNone:
-    rt.performAction(ka, outcome)
+  # THE SAME TABLE THE MENU WAS ENABLED FROM (`menuRouteOf`), read again for
+  # now: a command the omnibar listed, or an item chosen after the state
+  # moved, is refused with the reason the menu would show it disabled with.
+  let route = rt.menuRouteOf(action)
+  outcome.repaint = true
+  if route.reason.len > 0:
+    let at = rt.app.menu.pathOfAction(action)
+    let label = if at.len > 0: rt.app.menu.itemAt(at).label else: action
+    rt.note(label & ": " & route.reason)
+    outcome.detail = rt.app.notification
     return
-  let (isPane, pane) = menuPaneOf(action)
-  if isPane:
-    rt.showPane(pane, outcome)
-    return
-  let line = menuPromptLine(action)
-  if line.len > 0:
-    rt.runPromptLine(line, outcome)
+  case route.kind
+  of mrKey:
+    rt.performAction(route.key, outcome)
+  of mrPane:
+    rt.showPane(route.pane, outcome)
+  of mrPromptLine:
+    rt.runPromptLine(route.line, outcome)
     if outcome.action != kaNone:
       discard rt.applyLocalAction(outcome.action, outcome)
     outcome.repaint = true
-    return
-  if action == "findInFiles":
+  of mrFindInFiles:
     rt.openFindInFiles(outcome)
-    return
-  let (isOmni, query) = menuOmnibarQuery(action)
-  if isOmni:
-    rt.openOmnibar(query)
-    outcome.repaint = true
-    return
-  rt.note(action & " is not available in the terminal")
-  outcome.repaint = true
+  of mrOmnibar:
+    rt.openOmnibar(route.line)
+  of mrNewTab:
+    rt.addTab(outcome)
+  of mrWelcomeOption:
+    rt.openWelcomeOption(route.option, route.newTab, outcome)
+  of mrBuffer:
+    rt.runBufferOp(route.buffer, outcome)
+  of mrNone:
+    # Unreachable: `menuRouteOf` gives `mrNone` a reason.
+    rt.note(action & " is not available in the terminal")
 
 proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## `Enter` in the omnibar: act on the chosen entry. A tick and a symbol go
@@ -3596,6 +3831,15 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   else:
     rt.note(entry.label)
 
+proc sayRefusal(rt: TuiRuntime; chosen: MenuItem) =
+  ## A DISABLED item was chosen: it does nothing (the menu stays open), and
+  ## the status line says why — `"<label>: <reason>"` (EMT-D14: a disabled
+  ## state carries a reason, and a choice that does nothing says so rather
+  ## than nothing). Silent for a folder, which opened.
+  let refusal = refusalOf(chosen)
+  if refusal.len > 0:
+    rt.note(refusal)
+
 proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
                    outcome: var RuntimeOutcome) =
   ## Every key while the menu is open belongs to it. The menu is the
@@ -3614,9 +3858,12 @@ proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
   case name
   of "Esc": vm.escape()
   of "Enter":
+    let chosen = vm.highlightedItem()
     let act = vm.activate()
     if act.ran:
       rt.runMenuAction(act.action, outcome)
+    else:
+      rt.sayRefusal(chosen)
   of "Up": vm.moveHighlight(-1)
   of "Down": vm.moveHighlight(1)
   of "Right": discard vm.enterFolder()
@@ -3785,9 +4032,12 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
       rt.topBarPressConsumed = true
       outcome.repaint = true
       if path.len > 0:
+        let chosen = vm.itemAt(path)
         let act = vm.clickPath(path)
         if act.ran:
           rt.runMenuAction(act.action, outcome)
+        else:
+          rt.sayRefusal(chosen)
       return true
     if event.row != 0:
       vm.close()
@@ -3817,7 +4067,11 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     rt.app.welcomeTabs))
   case hit.kind
   of thMenuButton:
-    if vm.isOpen: vm.close() else: vm.open(keyboard = false)
+    if vm.isOpen:
+      vm.close()
+    else:
+      rt.refreshMenuAvailability()
+      vm.open(keyboard = false)
   of thControl:
     let c = TransportControls[hit.index]
     let ka = transportKeyAction(c.id)
@@ -3855,13 +4109,9 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
   of thTabAdd:
     # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
     # strip's "+" opens a new tab showing the WELCOME SCREEN, as the
-    # desktop's does. (PLAT-49 part B opened the omnibar on `:open ` here; a
-    # host with no welcome flow still does.)
+    # desktop's does — the performer File › New Trace Tab shares.
     rt.app.hoveredTabAdd = false
-    if not rt.app.welcomeHost.isNil:
-      rt.openWelcomeTab(outcome)
-    else:
-      rt.openOmnibar(OpenRecordingQuery)
+    rt.addTab(outcome)
   of thTabMore:
     rt.app.tabScroll = max(0, rt.app.tabScroll + hit.index)
   of thNone:
