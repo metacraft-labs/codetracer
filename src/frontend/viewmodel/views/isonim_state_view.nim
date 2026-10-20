@@ -8,21 +8,21 @@
 ## state, watch expressions), the DOM updates automatically via
 ## IsoNim's `createRenderEffect`.
 ##
-## Two structures are produced:
+## ONE generic view (Shared-DOM-Front-Ends D1): `renderStatePanel[R, N]`
+## renders under `MockRenderer` in the headless tests
+## (`src/tests/gui/tests/views/isonim_views_test.nim`), under `WebRenderer`
+## on the desktop and the web page (mounted by `ui/panel_host`), and under
+## PLAT-18's `FrameRenderer`. The browser-only parts — the watch form's
+## submit, the row context menu, the history auto-scroll — are decorations
+## applied when `N` is the DOM element. The markup is the legacy Karax
+## `value-component`'s, so Playwright's queries (`.value-expanded`,
+## `.value-name`, `.value-expanded-text`, …) read it unchanged.
 ##
-## - `MockRenderer` — simple test-friendly DOM used by headless unit
-##   tests (see `src/tests/gui/tests/views/isonim_views_test.nim`).
-##
-## - `WebRenderer` — Karax-compatible DOM for the real browser. The
-##   DOM matches the legacy Karax `value-component` markup so that
-##   Playwright tests (which query `.value-expanded`, `.value-name`,
-##   `.value-expanded-text`, etc.) continue to work unchanged.
-##
-## In both cases the panel structure is expressed in single `ui()`
-## blocks; per-row content is also expressed via the DSL inside the
-## `indexEach` body so the structure is visible at a glance.
+## The panel is expressed in one `ui()` block; per-row content is also
+## expressed via the DSL inside the `indexEach` body so the structure is
+## visible at a glance.
 
-import std/options
+import std/[options, sets]
 from std/strutils import find
 
 import isonim/core/[signals, computation]
@@ -46,6 +46,9 @@ import ../store/types as store_types
 # views/isonim_state_view`` can read ``OriginSummary`` / ``placeholderSummary``
 # without an extra import line (same convenience the scratchpad view uses).
 export origin_chain_types
+# The generic procs expand the DSL (`val=`, `createRenderEffect`, `indexEach`)
+# at their instantiation site, in the caller's module.
+export signals, computation, components
 
 when defined(js):
   proc preventDefault*(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
@@ -57,10 +60,10 @@ else:
 
 when defined(ctPlat18Slice):
   # PLAT-18's third renderer. THE IMPORT AND THIS TEMPLATE HAVE TO BE HERE,
-  # ahead of `renderVariableRowImpl`, and that is a fact about Nim rather than
+  # ahead of `renderVariableRow`, and that is a fact about Nim rather than
   # a preference: a template binds the symbols in its body at its DEFINITION
   # site, so an overload of `BadgeEvent` declared further down is not in the
-  # set `renderVariableRowImpl` resolves against and the instantiation fails
+  # set `renderVariableRow` resolves against and the instantiation fails
   # with `Expected one of: template BadgeEvent(r: MockRenderer)`. Measured on
   # the C backend; the JS backend accepted it, which is worse, because it
   # means the two targets disagree about when the overload set closes.
@@ -569,6 +572,21 @@ proc onSelectTab(vm: StateVM; tab: StateTab): proc() =
   let t = tab
   result = proc() = vm.selectTab(t)
 
+proc loadMoreDisplay(vm: StateVM; item: proc(): VariableViewState): string =
+  ## The row's "Load more" shows while the locals budget left part of its
+  ## collection unloaded and the row is open.
+  let v = item()
+  if v.moreElements and v.isExpanded: "inline-block" else: "none"
+
+proc loadMoreText(vm: StateVM; item: proc(): VariableViewState): string =
+  let v = item()
+  if v.path in vm.loadingMore.val: "Loading…"
+  else: "Load more (" & $v.heldElements & " of " & $v.elementsTotal & ")"
+
+proc onLoadMore(vm: StateVM; item: proc(): VariableViewState): proc() =
+  ## Reads `item()` when clicked, so a reused row loads the variable it shows.
+  result = proc() = vm.loadMore(item().path)
+
 proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
   ## The expand-button only reacts when the variable has children.
   ## Reading `item()` inside the closure ensures the toggle targets the
@@ -608,7 +626,7 @@ proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
 # on the State panel means every debugger step — destroying focus and
 # expansion state. Position-keyed reuse is what this panel wants.
 
-template renderOriginChainLineImpl*(r, line: untyped): untyped =
+proc renderOriginChainLine[R, N](r: R; line: proc(): OriginChainLineView): N =
   ## One line of the in-row origin chain (hop or terminator).
   ui(r):
     tdiv(class = chainLineClass(line)):
@@ -617,7 +635,8 @@ template renderOriginChainLineImpl*(r, line: untyped): untyped =
       span(class = chainLineTextClass(line)):
         text line().text
 
-template renderHistoryRowImpl*(r, row, vm: untyped): untyped =
+proc renderHistoryRow[R, N](r: R; row: proc(): VariableHistoryRowView;
+                           vm: StateVM): N =
   ## One value-history line: "<rrTicks>  <value>". PLAT-51: A NAVIGATION ROW
   ## (Variable-State-Pane.md: "a click moves the recording position to it on
   ## every front-end") — a click goes to the tick its value was recorded at.
@@ -631,56 +650,36 @@ template renderHistoryRowImpl*(r, row, vm: untyped): untyped =
       tdiv(class = "history-value"):
         text row().valueText
 
-proc renderOriginChainLines(r: MockRenderer; container: MockNode;
-                            item: proc(): VariableViewState;
-                            vm: StateVM) =
-  indexEach[OriginChainLineView, MockRenderer, MockNode](r, container,
+proc renderOriginChainLines[R, N](r: R; container: N;
+                                  item: proc(): VariableViewState;
+                                  vm: StateVM) =
+  indexEach[OriginChainLineView, R, N](r, container,
     proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
-    proc(line: proc(): OriginChainLineView, index: int): MockNode =
-      renderOriginChainLineImpl(r, line))
+    proc(line: proc(): OriginChainLineView, index: int): N =
+      renderOriginChainLine[R, N](r, line))
 
-proc renderHistoryRows(r: MockRenderer; container: MockNode;
-                       item: proc(): VariableViewState; vm: StateVM) =
-  indexEach[VariableHistoryRowView, MockRenderer, MockNode](r, container,
+proc renderHistoryRows[R, N](r: R; container: N;
+                             item: proc(): VariableViewState; vm: StateVM) =
+  indexEach[VariableHistoryRowView, R, N](r, container,
     proc(): seq[VariableHistoryRowView] = item().history,
-    proc(row: proc(): VariableHistoryRowView, index: int): MockNode =
-      renderHistoryRowImpl(r, row, vm))
+    proc(row: proc(): VariableHistoryRowView, index: int): N =
+      renderHistoryRow[R, N](r, row, vm))
+
+# ---------------------------------------------------------------------------
+# Variable row
+# ---------------------------------------------------------------------------
 
 when defined(js):
-  proc renderOriginChainLines(r: WebRenderer; container: isonim_dom.Element;
-                              item: proc(): VariableViewState;
-                              vm: StateVM) =
-    indexEach[OriginChainLineView, WebRenderer, isonim_dom.Element](
-      r, container,
-      proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
-      proc(line: proc(): OriginChainLineView, index: int): isonim_dom.Element =
-        renderOriginChainLineImpl(r, line))
+  proc scrollNodeToBottom(el: isonim_dom.Element)
+      {.importjs: "(function(el){el.scrollTop=el.scrollHeight;})(#)".}
 
-  proc renderHistoryRows(r: WebRenderer; container: isonim_dom.Element;
-                         item: proc(): VariableViewState; vm: StateVM) =
-    indexEach[VariableHistoryRowView, WebRenderer, isonim_dom.Element](
-      r, container,
-      proc(): seq[VariableHistoryRowView] = item().history,
-      proc(row: proc(): VariableHistoryRowView, index: int): isonim_dom.Element =
-        renderHistoryRowImpl(r, row, vm))
-
-# ---------------------------------------------------------------------------
-# Variable row component (shared between Mock and Web renderers)
-# ---------------------------------------------------------------------------
-#
-# Implemented as a template so the body — which uses the `ui()` macro
-# and therefore must know the renderer's concrete element type at
-# compile time — can be expanded once per concrete renderer (Mock,
-# Web) without duplicating the markup.
-
-template renderVariableRowImpl*(r, vm, item,
-                                chainContainer, historyContainer: untyped): untyped =
-  ## Build a single variable row using the Karax-compatible markup.
+proc renderVariableRow*[R, N](r: R; vm: StateVM;
+                              item: proc(): VariableViewState): N =
+  ## One variable row, under any renderer, in the Karax-compatible markup.
   ##
-  ## `chainContainer` / `historyContainer` are OUT parameters: the two
-  ## sub-list containers are captured via the DSL's `ref =` form so the
-  ## caller can attach the reactive `indexEach` lists to them once the
-  ## element exists (see the GOTCHA above `renderOriginChainLineImpl`).
+  ## The two sub-list containers are captured via the DSL's `ref =` form so
+  ## the reactive `indexEach` lists are attached to them once the element
+  ## exists (see the GOTCHA above `renderOriginChainLine`).
   ##
   ## DOM structure (matches legacy `value-component`):
   ##   div.value-expanded.value-expanded-name.border-value-{depth}
@@ -697,6 +696,7 @@ template renderVariableRowImpl*(r, vm, item,
   ##           if atomTypeVisible:
   ##             span.value-type : "{typeName}"
   ##           button#value-history
+  ##           button.value-load-more[display: when moreElements and expanded]
   ##           button.ct-origin-badge[.{terminator-icon}|.ct-origin-badge-placeholder]
   ##             span.ct-origin-badge-icon
   ##             span.ct-origin-badge-text
@@ -718,10 +718,12 @@ template renderVariableRowImpl*(r, vm, item,
   ## Every attribute and text expression that reads `item()` becomes
   ## reactive via the DSL macro — the row is rebuilt incrementally as
   ## the underlying VariableViewState signal updates.
+  mixin BadgeEvent
+  var chainContainer, historyContainer: N
   let onToggle = onToggleExpand(vm, item)
   let onBadgeClick = onToggleOriginBadge(vm, item, BadgeEvent(r))
   let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
-  let rowResult = ui(r):
+  let row = ui(r):
     tdiv(class = rowClass(item),
          `data-variable-name` = item().name,
          padding_left = rowPaddingLeft(item, 16),
@@ -749,6 +751,12 @@ template renderVariableRowImpl*(r, vm, item,
                    onclick = proc() = vm.toggleHistory(item().path)):
               tdiv(class = "custom-tooltip"):
                 text "Toggle history value"
+            # A collection the locals budget cut short (HSF-V1): fetch the
+            # next elements, appended as further child rows.
+            button(class = "value-load-more ct-button-text-xs-tertiary ct-ml-2",
+                   display = loadMoreDisplay(vm, item),
+                   onclick = onLoadMore(vm, item)):
+              text loadMoreText(vm, item)
             # per spec §3.2.1 + M4 deliverable #3: inline origin badge.
             # The badge is the same DOM contract that
             # ``ui/origin_badge.nim::renderBadgeDom`` would emit. We
@@ -785,154 +793,46 @@ template renderVariableRowImpl*(r, vm, item,
            display = (if item().isHistoryExpanded: "block" else: "none"),
            ref = historyContainer):
         discard
-  rowResult
-
-proc renderVariableRow*(r: MockRenderer; vm: StateVM;
-                        item: proc(): VariableViewState): MockNode =
-  var chainContainer, historyContainer: MockNode
-  let row = renderVariableRowImpl(r, vm, item,
-                                  chainContainer, historyContainer)
   # Attach the reactive sub-lists AFTER the row exists — a plain `for`
   # inside the `ui()` block would only ever run once (see #558).
-  renderOriginChainLines(r, chainContainer, item, vm)
-  renderHistoryRows(r, historyContainer, item, vm)
+  renderOriginChainLines[R, N](r, chainContainer, item, vm)
+  renderHistoryRows[R, N](r, historyContainer, item, vm)
+  when defined(js):
+    when N is isonim_dom.Element:
+      # Scroll the history container to the bottom whenever rows arrive or
+      # grow. Reads item().history to track the signal; fires after
+      # indexEach updates.
+      createRenderEffect(proc() =
+        let h = item().history
+        if h.len > 0 and
+           not isonim_dom.isNodeNil(isonim_dom.Node(historyContainer)):
+          scrollNodeToBottom(historyContainer))
+      # Wire the right-click context menu on the row's outer element so
+      # the spec §3.1 entry-point "right-click → Show value origin"
+      # surfaces through ``showContextMenu`` — the same primitive
+      # ``ui/value.nim`` uses on the value-hover row.
+      wireRowContextMenu(vm, row, item)
   row
 
-when defined(js):
-  proc scrollNodeToBottom(el: isonim_dom.Element)
-      {.importjs: "(function(el){el.scrollTop=el.scrollHeight;})(#)".}
-
-  proc renderVariableRow*(r: WebRenderer; vm: StateVM;
-                          item: proc(): VariableViewState): isonim_dom.Element =
-    var chainContainer, historyContainer: isonim_dom.Element
-    let row = renderVariableRowImpl(r, vm, item,
-                                    chainContainer, historyContainer)
-    renderOriginChainLines(r, chainContainer, item, vm)
-    renderHistoryRows(r, historyContainer, item, vm)
-    # Scroll the history container to the bottom whenever rows arrive or grow.
-    # Reads item().history to track the signal; fires after indexEach updates.
-    createRenderEffect(proc() =
-      let h = item().history
-      if h.len > 0 and
-         not isonim_dom.isNodeNil(isonim_dom.Node(historyContainer)):
-        scrollNodeToBottom(historyContainer))
-    # Wire the right-click context menu on the row's outer element so
-    # the spec §3.1 entry-point "right-click → Show value origin"
-    # surfaces through ``showContextMenu`` — the same primitive
-    # ``ui/value.nim`` uses on the value-hover row.
-    wireRowContextMenu(vm, row, item)
-    row
-
 # ---------------------------------------------------------------------------
-# MockRenderer panel
-# ---------------------------------------------------------------------------
-
-template renderStatePanelImpl(r, vm, RendererT, NodeT: untyped): untyped =
-  ## THE MOCK/HEADLESS PANEL BODY, ONCE.
-  ##
-  ## Extracted from `renderStatePanel(MockRenderer, …)` below so a SECOND
-  ## concrete renderer can be given the same markup instead of a copy of it.
-  ## That second renderer is PLAT-18's `FrameRenderer` (see the
-  ## `ctPlat18Slice` block at the end of this file), and the evaluation it
-  ## serves is about how many bytes this markup puts on a module boundary —
-  ## a question a copy of the markup could answer only about the copy.
-  ##
-  ## The WebRenderer panel further down is deliberately NOT folded in here:
-  ## it is different markup (`#gdb-evaluate`, an always-visible watch input),
-  ## for reasons its own comments give, and merging two panels that differ
-  ## would be the opposite of this extraction.
-  ##
-  ## Structure:
-  ##   div.state-component
-  ##     div.state-tabs
-  ##       button.tab-locals[.active]   onclick = selectTab(stLocals)   "Locals"
-  ##       button.tab-globals[.active]  onclick = selectTab(stGlobals)  "Globals"
-  ##       button.tab-watches[.active]  onclick = selectTab(stWatches)  "Watches"
-  ##     div.watch-input-container[display: block when activeTab == stWatches]
-  ##       input.watch-input[placeholder = "Add watch expression..."]
-  ##     div.loading-indicator[display: block when isLoading]
-  ##       text "Loading..."
-  ##     div.value-components-container
-  ##       div.empty-overlay[display: block when no variables]
-  ##         text "No local variables..."
-  ##       div                                         (row container)
-  ##         indexEach VariableViewState -> renderVariableRow(...)
-  ##
-  ## `mixin` because a template binds the symbols in its body at its
-  ## DEFINITION site, and the renderer-specific `renderVariableRow` overloads
-  ## are declared BELOW this point. Without it the C backend reports
-  ## `Expected one of: proc renderVariableRow(r: MockRenderer, …)` at the
-  ## second instantiation, and the JS backend does not — a disagreement about
-  ## when the overload set closes, which is worse than either answer.
-  mixin renderVariableRow
-  var rowContainer: NodeT
-
-  let panel = ui(r):
-    tdiv(id = "stateComponent-0",
-         class = "component-container active-state state-component"):
-      tdiv(class = "state-tabs"):
-        button(class = tabClass(vm, stLocals),
-               onclick = onSelectTab(vm, stLocals)):
-          text tabLabel(stLocals)
-        button(class = tabClass(vm, stGlobals),
-               onclick = onSelectTab(vm, stGlobals)):
-          text tabLabel(stGlobals)
-        button(class = tabClass(vm, stWatches),
-               onclick = onSelectTab(vm, stWatches)):
-          text tabLabel(stWatches)
-      # Code-state-line: always present in the DOM so Playwright can
-      # locate `#code-state-line-0` regardless of trace kind. The
-      # inner span text and outer class are reactive on
-      # vm.codeStateLine.val (empty -> "no-code" fallback).
-      tdiv(id = "code-state-line-0",
-           class = codeStateLineClass(vm)):
-        span(class = "code-state-arrow")
-        span(class = "code-state-number"):
-          text codeStateLineNumber(vm)
-        span(class = "code-state-separator"):
-          text codeStateLineSeparator(vm)
-        span(class = "code-state-source"):
-          text codeStateLineSource(vm)
-      tdiv(class = "watch-input-container",
-           display = displayIf(vm.activeTab.val == stWatches)):
-        input(class = "watch-input",
-              placeholder = "Add watch expression...")
-      tdiv(class = "loading-indicator",
-           display = displayIf(vm.isLoading.val)):
-        text "Loading..."
-      tdiv(class = "value-components-container"):
-        tdiv(class = "empty-overlay",
-             display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
-          text emptyOverlayText(vm.activeTab.val)
-        tdiv(ref = rowContainer):
-          discard
-
-  indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,
-    proc(): seq[VariableViewState] = getStateViewState(vm).variables,
-    proc(item: proc(): VariableViewState, index: int): NodeT =
-      renderVariableRow(r, vm, item))
-
-  panel
-
-proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
-  ## Render the full State panel for headless tests. The markup is
-  ## `renderStatePanelImpl` above; this is the MockRenderer instantiation of
-  ## it and behaves exactly as it did when the body was written out here.
-  renderStatePanelImpl(r, vm, MockRenderer, MockNode)
-
-# ---------------------------------------------------------------------------
-# WebRenderer panel
+# The panel
 # ---------------------------------------------------------------------------
 #
-# The web version produces the same Karax-compatible markup the legacy
-# component used. Notable differences from the Mock structure:
+# ONE markup for every renderer (Shared-DOM-Front-Ends D1): the headless
+# tests, the desktop, the web page and PLAT-18's handle renderer instantiate
+# the same proc. The Mock and Web panels used to differ (the Mock one showed
+# a `.watch-input` only on the Watches tab; the Web one an always-visible
+# `#gdb-evaluate > form > input#watch-0`); the shipped Web markup is the one
+# kept, because the Playwright page objects and the users read it.
 #
-# - Watch input is always visible (matches the Karax behaviour).
-# - The watch input lives inside `div#gdb-evaluate > form > input#watch-0`
-#   and submitting the form calls `vm.addWatch(...)` then clears the
-#   input. The form's `submit` event needs `preventDefault`, which the
-#   DSL's `onclick = ...` shape (no event arg) cannot express; it is
-#   wired imperatively after capturing the input via `ref = var`.
+# The view takes no id. The element GoldenLayout creates for the pane is
+# `#stateComponent-0`, and an id names one element
+# (https://html.spec.whatwg.org/multipage/dom.html#the-id-attribute); the
+# view is found by its class, `isonim-state`.
+#
+# The watch input's form needs `preventDefault` on its `submit` event, which
+# the DSL's `onclick = …` shape (no event argument) cannot express, so the
+# browser wires it after the elements exist (`wireWatchInputForm`).
 
 when defined(js):
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
@@ -952,81 +852,88 @@ when defined(js):
           vm.addWatch($expression)
           inputNode.setInputValue(cstring""))
 
-  proc renderStatePanel*(r: WebRenderer; vm: StateVM): isonim_dom.Element =
-    ## Render the State panel using real DOM elements.
-    var
-      formEl, inputEl: isonim_dom.Element
-      rowContainer: isonim_dom.Element
+proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
+  ## The State panel.
+  ##
+  ## Structure:
+  ##   div.state-component.isonim-state
+  ##     div.state-tabs
+  ##       button.tab-locals[.active]   onclick = selectTab(stLocals)   "Locals"
+  ##       button.tab-globals[.active]  onclick = selectTab(stGlobals)  "Globals"
+  ##       button.tab-watches[.active]  onclick = selectTab(stWatches)  "Watches"
+  ##     div#code-state-line-0.code-state-line[.no-code]
+  ##     div#gdb-evaluate.watch-input-container
+  ##       form > input#watch-0.watch-input
+  ##     div.loading-indicator[display: block when isLoading]
+  ##     div.value-components-container
+  ##       div.empty-overlay[display: flex when no variables]
+  ##       div                                         (row container)
+  ##         indexEach VariableViewState -> renderVariableRow(...)
+  var formEl, inputEl, rowContainer: N
 
-    let panel = ui(r):
-      tdiv(id = "stateComponent-0",
-           class = "component-container active-state state-component isonim-state"):
-        # THE TAB BAR. It was in the MockRenderer's panel above and NOT
-        # here, which meant the three tabs existed in headless tests and
-        # in no shipping product: `stWatches` could only be reached by a
-        # test calling `vm.selectTab`, so the watch input right below was
-        # an input whose answers had nowhere to appear. Same markup and
-        # the same handlers as the Mock panel, so both renderers agree.
-        tdiv(class = "state-tabs"):
-          button(class = tabClass(vm, stLocals),
-                 onclick = onSelectTab(vm, stLocals)):
-            text tabLabel(stLocals)
-          button(class = tabClass(vm, stGlobals),
-                 onclick = onSelectTab(vm, stGlobals)):
-            text tabLabel(stGlobals)
-          button(class = tabClass(vm, stWatches),
-                 onclick = onSelectTab(vm, stWatches)):
-            text tabLabel(stWatches)
-        # Code-state-line: rendered before the watch input so that the
-        # Playwright `#code-state-line-0` lookup finds the populated
-        # element (with text "<line> | <source>") matching the legacy
-        # `excerpt` proc output. Outer class flips between
-        # `code-state-line` and `code-state-line no-code` depending on
-        # whether source is available; the inner spans are
-        # `vm.codeStateLine.val` split into arrow / number / separator /
-        # source (see `codeStateLineParts`).
-        tdiv(id = "code-state-line-0",
-             class = codeStateLineClass(vm)):
-          span(class = "code-state-arrow")
-          span(class = "code-state-number"):
-            text codeStateLineNumber(vm)
-          span(class = "code-state-separator"):
-            text codeStateLineSeparator(vm)
-          span(class = "code-state-source"):
-            text codeStateLineSource(vm)
-        tdiv(id = "gdb-evaluate"):
-          form(ref = formEl):
-            input(ref = inputEl,
-                  `type` = "text",
-                  placeholder = "Enter a watch expression",
-                  id = "watch-0",
-                  class = "ct-input-panel ct-fill-available")
-        tdiv(class = "loading-indicator",
-             display = displayIf(vm.isLoading.val)):
-          text "Loading..."
-        tdiv(class = "value-components-container"):
-          tdiv(class = "empty-overlay",
-               display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
-            text emptyOverlayText(vm.activeTab.val)
-          tdiv(ref = rowContainer):
-            discard
+  let panel = ui(r):
+    tdiv(class = "component-container active-state state-component isonim-state"):
+      tdiv(class = "state-tabs"):
+        button(class = tabClass(vm, stLocals),
+               onclick = onSelectTab(vm, stLocals)):
+          text tabLabel(stLocals)
+        button(class = tabClass(vm, stGlobals),
+               onclick = onSelectTab(vm, stGlobals)):
+          text tabLabel(stGlobals)
+        button(class = tabClass(vm, stWatches),
+               onclick = onSelectTab(vm, stWatches)):
+          text tabLabel(stWatches)
+      # Code-state-line: always present so `#code-state-line-0` is found
+      # whatever the trace kind, and before the watch input so the lookup
+      # finds the populated element ("<line> | <source>", the legacy
+      # `excerpt`). The outer class flips to `no-code` while there is no
+      # source; the spans are `vm.codeStateLine.val` split into arrow /
+      # number / separator / source (`codeStateLineParts`).
+      tdiv(id = "code-state-line-0",
+           class = codeStateLineClass(vm)):
+        span(class = "code-state-arrow")
+        span(class = "code-state-number"):
+          text codeStateLineNumber(vm)
+        span(class = "code-state-separator"):
+          text codeStateLineSeparator(vm)
+        span(class = "code-state-source"):
+          text codeStateLineSource(vm)
+      tdiv(id = "gdb-evaluate", class = "watch-input-container"):
+        form(ref = formEl):
+          input(ref = inputEl,
+                `type` = "text",
+                placeholder = "Enter a watch expression",
+                id = "watch-0",
+                class = "ct-input-panel ct-fill-available watch-input")
+      tdiv(class = "loading-indicator",
+           display = displayIf(vm.isLoading.val)):
+        text "Loading..."
+      tdiv(class = "value-components-container"):
+        tdiv(class = "empty-overlay",
+             display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
+          text emptyOverlayText(vm.activeTab.val)
+        tdiv(ref = rowContainer):
+          discard
 
-    indexEach[VariableViewState, WebRenderer, isonim_dom.Element](r, rowContainer,
-      proc(): seq[VariableViewState] = getStateViewState(vm).variables,
-      proc(item: proc(): VariableViewState, index: int): isonim_dom.Element =
-        renderVariableRow(r, vm, item))
+  indexEach[VariableViewState, R, N](r, rowContainer,
+    proc(): seq[VariableViewState] = getStateViewState(vm).variables,
+    proc(item: proc(): VariableViewState, index: int): N =
+      renderVariableRow[R, N](r, vm, item))
 
-    wireWatchInputForm(formEl, inputEl, vm)
+  when defined(js):
+    when N is isonim_dom.Element:
+      wireWatchInputForm(formEl, inputEl, vm)
 
-    panel
+  panel
 
+when defined(js):
   proc mountIsoNimStatePanel*(container: isonim_dom.Element;
                               vm: StateVM) =
-    ## Mount the IsoNim State panel as a child of `container`. Reactive
-    ## effects handle every subsequent update — no manual redraw is
-    ## needed. Call once after the `StateVM` exists.
+    ## Mount the State panel as a child of `container` — for the VS Code
+    ## extension's webview, whose host is not the panel host. Reactive
+    ## effects handle every subsequent update.
     let r = WebRenderer()
-    let panel = renderStatePanel(r, vm)
+    let panel = renderStatePanel[WebRenderer, isonim_dom.Element](r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
 
 # ---------------------------------------------------------------------------
@@ -1052,33 +959,5 @@ when defined(js):
 # succeeds it. A define that outlives its evaluation is how an evaluation
 # becomes a migration.
 
-when defined(ctPlat18Slice):
-  proc renderOriginChainLines(r: FrameRenderer; container: FrameNode;
-                              item: proc(): VariableViewState;
-                              vm: StateVM) =
-    indexEach[OriginChainLineView, FrameRenderer, FrameNode](r, container,
-      proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
-      proc(line: proc(): OriginChainLineView, index: int): FrameNode =
-        renderOriginChainLineImpl(r, line))
-
-  proc renderHistoryRows(r: FrameRenderer; container: FrameNode;
-                         item: proc(): VariableViewState; vm: StateVM) =
-    indexEach[VariableHistoryRowView, FrameRenderer, FrameNode](r, container,
-      proc(): seq[VariableHistoryRowView] = item().history,
-      proc(row: proc(): VariableHistoryRowView, index: int): FrameNode =
-        renderHistoryRowImpl(r, row, vm))
-
-  proc renderVariableRow*(r: FrameRenderer; vm: StateVM;
-                          item: proc(): VariableViewState): FrameNode =
-    var chainContainer, historyContainer: FrameNode
-    let row = renderVariableRowImpl(r, vm, item,
-                                    chainContainer, historyContainer)
-    renderOriginChainLines(r, chainContainer, item, vm)
-    renderHistoryRows(r, historyContainer, item, vm)
-    row
-
-  proc renderStatePanel*(r: FrameRenderer; vm: StateVM): FrameNode =
-    ## The SAME markup the MockRenderer panel draws — `renderStatePanelImpl`,
-    ## instantiated for the handle renderer. If this ever stops being the same
-    ## markup, the slice is measuring a different pane than the product has.
-    renderStatePanelImpl(r, vm, FrameRenderer, FrameNode)
+# The slice instantiates `renderStatePanel[FrameRenderer, FrameNode]`, the
+# same generic proc the product renders, so it measures the product's markup.

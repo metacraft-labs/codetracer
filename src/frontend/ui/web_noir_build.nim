@@ -1221,8 +1221,9 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
   ## correct capability that nothing reached, which is this campaign's most
   ## common defect and was the user's bug report in its visible form.
   ##
-  ## Composed HERE rather than in `ui/debug.nim` because a model needs three
-  ## things only a platform knows, and `debug.nim` is shared with the desktop:
+  ## Composed HERE rather than in `ui/debug_toolbar.nim` because a model needs
+  ## three things only a platform knows, and the toolbar is shared with the
+  ## desktop:
   ##
   ##   * the PROFILE — `capProcessArbitraryPrograms` vs the browser's
   ##     `capProcessSpawn`, which is what makes Build enabled or refused;
@@ -1238,9 +1239,9 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
   ##
   ## THAT SENTENCE WAS FALSE WHEN IT WAS WRITTEN. This proc had exactly one
   ## call site — the one-shot `if wantsTemplate and mounted:` block in `ui_js`
-  ## — and `EditToolbarModel` is a plain `object`, so `debug.editToolbarModel`
+  ## — and `EditToolbarModel` is a plain `object`, so the toolbar's model
   ## held a snapshot composed from the startup listing and the startup mode.
-  ## `debug.setEditModeToolbar`'s own comment made the matching assumption
+  ## `setEditModeToolbar`'s own comment made the matching assumption
   ## ("every change a user makes that could alter it... arrives as a NEW model")
   ## and no new model ever arrived. A visitor who created a `Nargo.toml`
   ## mid-session got a toolbar computed before it existed.

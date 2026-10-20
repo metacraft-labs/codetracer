@@ -87,13 +87,15 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   let shell = renderIsoNimAppShell(r)
   isonim_dom.appendChild(isonim_dom.Node(root), isonim_dom.Node(shell.root))
 
-  # Debug controls are mounted separately into `#isonim-debug-controls`
-  # (defined in index.html) by `tryMountIsoNimDebugControls` in debug.nim.
+  # Debug controls are rendered separately into `#isonim-debug-controls`
+  # by the menu shell (`ui/debug_toolbar.ensureDebugToolbar`).
   # Do NOT mount them here — that would create duplicate elements with the
   # same IDs (e.g. `#next-debug`), breaking Playwright locators.
 
   mountIsoNimStatePanel(shell.sections[0].content, session.stateVM)
-  mountIsoNimCalltrace(shell.sections[1].content, session.calltraceVM)
+  isonim_dom.appendChild(isonim_dom.Node(shell.sections[1].content),
+    isonim_dom.Node(renderCalltracePanel[WebRenderer, isonim_dom.Element](
+      r, session.calltraceVM)))
   mountIsoNimEventLog(shell.sections[2].content, session.eventLogVM)
   mountIsoNimFlow(shell.sections[3].content, session.flowVM)
   # (PLAT-51: the Timeline panel is removed from every product.)

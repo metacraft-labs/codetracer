@@ -1,6 +1,7 @@
 import
   std/[ cstrutils, jsre, options ],
-  ui_imports, trace, debug_toolbar, menu, flow, value, no_source, kdom,
+  ui_imports, trace, debug_toolbar, menu, flow, value, no_source, kdom, panel_host,
+  ../viewmodel/session_vm,
   shortcut_labels,
   trace_macro, trace_static,
   column_click_resolver, editor_scope,
@@ -3172,26 +3173,25 @@ proc initialCachedMoveFlowLocation(self: EditorViewComponent): tuple[found: bool
     if location.found:
       return location
 
-proc initialCalltraceFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
-  if self.data.isNil or self.data.ui.isNil:
-    return
-  if self.data.ui.componentMapping[Content.Calltrace].len == 0:
-    return
+from isonim/core/signals import val
 
-  for _, component in self.data.ui.componentMapping[Content.Calltrace]:
-    let calltrace = CalltraceComponent(component)
-    if calltrace.isNil:
-      continue
-    for callLine in calltrace.callLines:
-      if callLine.isNil or callLine.content.isNil:
-        continue
-      if callLine.content.kind != CallLineContentKind.Call or callLine.content.call.isNil:
-        continue
-      let location = callLine.content.call.location
-      let usableLocation = self.usableInitialFlowLocation(location)
-      if usableLocation.found:
-        if usableLocation.location.rrTicks > 0:
-          return usableLocation
+proc initialCalltraceFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  ## The first call of the section the session's store holds whose location
+  ## the flow can use (the call-trace pane renders the same lines).
+  let session = panelSession()
+  if session.isNil or session.store.isNil:
+    return
+  for line in session.store.calltrace.lines.val:
+    let location = types.Location(
+      path: cstring(line.location.file), line: line.location.line,
+      highLevelPath: cstring(line.location.file),
+      highLevelLine: line.location.line,
+      rrTicks: int(line.rrTicks),
+      sourceGeneration: line.location.sourceGeneration,
+      sourceDigest: cstring(line.location.sourceDigest))
+    let usableLocation = self.usableInitialFlowLocation(location)
+    if usableLocation.found and usableLocation.location.rrTicks > 0:
+      return usableLocation
 
 proc initialEventLogFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   if self.data.isNil:

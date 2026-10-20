@@ -1178,7 +1178,7 @@ suite "IsoNim State Panel — structure":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -1194,7 +1194,7 @@ suite "IsoNim State Panel — structure":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let tabBar = findByClass(panel, "state-tabs")
       check tabBar != nil
@@ -1225,7 +1225,7 @@ suite "IsoNim State Panel — structure":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let container = findByClass(panel, "value-components-container")
       check container != nil
@@ -1240,7 +1240,7 @@ suite "IsoNim State Panel — structure":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "loading-indicator")
       check indicator != nil
@@ -1248,17 +1248,34 @@ suite "IsoNim State Panel — structure":
 
       dispose()
 
-  test "renders watch input container (hidden by default)":
+  test "the watch input is shown on every tab":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let watchContainer = findByClass(panel, "watch-input-container")
       check watchContainer != nil
-      check watchContainer.styles.getOrDefault("display", "none") == "none"
+      check watchContainer.attributes.getOrDefault("id") == "gdb-evaluate"
+      check watchContainer.styles.getOrDefault("display", "") != "none"
+
+      dispose()
+
+  test "the view takes no id: the pane's host has it":
+    # `#stateComponent-0` is the element GoldenLayout creates for the pane;
+    # the view repeating it made two elements with one id
+    # (codetracer-pm issues/2026-10-18-state-pane-renders-the-id-of-its-own-host.md).
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
+
+      check not panel.attributes.hasKey("id")
+      check "isonim-state" in panel.attributes["class"]
 
       dispose()
 
@@ -1274,7 +1291,7 @@ suite "IsoNim State Panel — tab switching":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let globalsBtn = findByClass(panel, "tab-globals")
       check globalsBtn != nil
@@ -1290,54 +1307,31 @@ suite "IsoNim State Panel — tab switching":
 
       dispose()
 
-  test "clicking watches tab shows watch input":
+  test "clicking watches tab selects it, the watch input stays":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let watchesBtn = findByClass(panel, "tab-watches")
       check watchesBtn != nil
       watchesBtn.fireEvent("click")
 
       check vm.activeTab.val == stWatches
+      check "active" in watchesBtn.attributes["class"]
 
       let watchContainer = findByClass(panel, "watch-input-container")
       check watchContainer != nil
-      check watchContainer.styles["display"] == "block"
+      check watchContainer.styles.getOrDefault("display", "") != "none"
+
+      # Back to Locals: the input is still there to add a watch from.
+      findByClass(panel, "tab-locals").fireEvent("click")
+      check vm.activeTab.val == stLocals
+      check watchContainer.styles.getOrDefault("display", "") != "none"
 
       dispose()
-
-  test "switching back to locals hides watch input":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createStateVM(store)
-      let r = MockRenderer()
-
-      let panel = renderStatePanel(r, vm)
-
-      # Go to watches
-      let watchesBtn = findByClass(panel, "tab-watches")
-      watchesBtn.fireEvent("click")
-
-      let watchContainer = findByClass(panel, "watch-input-container")
-      check watchContainer.styles["display"] == "block"
-
-      # Go back to locals
-      let localsBtn = findByClass(panel, "tab-locals")
-      localsBtn.fireEvent("click")
-
-      check watchContainer.styles["display"] == "none"
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# Variable rendering tests
-# ---------------------------------------------------------------------------
-
-suite "IsoNim State Panel — variables":
 
   test "renders local variables":
     createRoot proc(dispose: proc()) =
@@ -1350,7 +1344,7 @@ suite "IsoNim State Panel — variables":
         makeVariable("y", "hello", "string"),
       ])
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "value-components-container")
       check container != nil
 
@@ -1387,7 +1381,7 @@ suite "IsoNim State Panel — variables":
         makeVariable("x", "42", "int"),
       ])
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let button = findById(panel, "value-history")
       check button != nil
       check button.tag == "button"
@@ -1416,7 +1410,7 @@ suite "IsoNim State Panel — variables":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       # Initially no variables — use value-expanded class to find rows
       let container = findByClass(panel, "value-components-container")
@@ -1459,7 +1453,7 @@ suite "IsoNim State Panel — variables":
                  hasChildren: false, children: @[]),
       ]
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       # Initially shows locals
       let container = findByClass(panel, "value-components-container")
@@ -1491,7 +1485,7 @@ suite "IsoNim State Panel — variables":
           ]),
       ])
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "value-components-container")
 
       # Initially collapsed: only the parent row
@@ -1587,7 +1581,7 @@ suite "IsoNim State Panel — variables":
       vm.originChainLookup = proc(name: string): Option[OriginChain] =
         if name == "x": some(chain) else: none(OriginChain)
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let badge = findByClass(panel, "ct-origin-badge")
       check badge != nil
       check "ct-origin-icon-quotation" in badge.attributes["class"]
@@ -1629,7 +1623,7 @@ suite "IsoNim State Panel — loading":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "loading-indicator")
 
       check indicator.styles["display"] == "none"
@@ -1654,7 +1648,7 @@ suite "IsoNim State Panel — text content":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let localsBtn = findByClass(panel, "tab-locals")
       let globalsBtn = findByClass(panel, "tab-globals")
@@ -1672,7 +1666,7 @@ suite "IsoNim State Panel — text content":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "loading-indicator")
 
       check indicator.textContent == "Loading..."
@@ -1685,11 +1679,12 @@ suite "IsoNim State Panel — text content":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let input = findByClass(panel, "watch-input")
 
       check input != nil
-      check input.attributes["placeholder"] == "Add watch expression..."
+      check input.attributes["id"] == "watch-0"
+      check input.attributes["placeholder"] == "Enter a watch expression"
 
       dispose()
 
@@ -1728,7 +1723,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let line = findCodeStateLine(panel)
       check line != nil
@@ -1742,7 +1737,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let line = findCodeStateLine(panel)
 
       # Initial value: empty string → no-code class is present.
@@ -1760,7 +1755,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let line = findCodeStateLine(panel)
 
       # Simulate the DB-trace move handler in ``state.nim``: it pushes
@@ -1786,7 +1781,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let line = findCodeStateLine(panel)
 
       store.updateCodeStateLine(10, "fn main() {")
@@ -1833,31 +1828,32 @@ suite "IsoNim Calltrace Panel — structure":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "calltrace-component"
+      check "id" notin panel.attributes   # the host carries the pane's id
+      check "isonim-calltrace" in panel.attributes["class"]
 
       dispose()
 
-  test "renders scroll indicators":
+  test "renders the scroll area sized to the whole trace":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
-      let moreAbove = findByClass(panel, "more-above")
-      let moreBelow = findByClass(panel, "more-below")
-
-      check moreAbove != nil
-      check moreBelow != nil
-
-      # Both hidden by default (scroll at 0, no data)
-      check moreAbove.styles.getOrDefault("display", "none") == "none"
-      check moreBelow.styles.getOrDefault("display", "none") == "none"
+      # The shipped panel has no "more above / below" markers: the scrollbar
+      # (a scrubber on the web) shows where the section is in the trace.
+      check findByIdOrNil(panel, "calltraceScroll-0") != nil
+      check findByClassOrNil(panel, "more-above") == nil
+      store.updateCalltraceSection(@[makeTestCallLine(0, "main", depth = 0)],
+                                   startIndex = 0'i64, totalCount = 30'u64)
+      let area = findByClass(panel, "local-calltrace")
+      check area.styles["height"] ==
+        $(int(30.0 * vm.rowHeightPx.val)) & "px"
 
       dispose()
 
@@ -1867,7 +1863,7 @@ suite "IsoNim Calltrace Panel — structure":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       let container = findByClass(panel, "calltrace-lines")
       check container != nil
@@ -1881,11 +1877,11 @@ suite "IsoNim Calltrace Panel — structure":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       let input = findByClass(panel, "calltrace-search-input")
       check input != nil
-      check input.attributes["placeholder"] == "Search calltrace..."
+      check input.attributes["placeholder"] == "Search"
 
       dispose()
 
@@ -1896,7 +1892,7 @@ suite "IsoNim Calltrace Panel — structure":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "calltrace-loading")
       check indicator != nil
@@ -1929,7 +1925,7 @@ suite "IsoNim Calltrace Panel — call lines":
       # Set viewport height so lines are visible
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       check container != nil
 
@@ -1973,7 +1969,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 1
@@ -2005,14 +2001,15 @@ suite "IsoNim Calltrace Panel — call lines":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 2
 
-      # depth 0 => "0px", depth 3 => "48px"
-      check rows[0].styles["padding-left"] == "0px"
-      check rows[1].styles["padding-left"] == "48px"
+      # The depth offset is the row's first child, 8px a level:
+      # depth 0 => "0px", depth 3 => "24px".
+      check rows[0].children[0].styles["min-width"] == "0px"
+      check rows[1].children[0].styles["min-width"] == "24px"
 
       dispose()
 
@@ -2033,14 +2030,15 @@ suite "IsoNim Calltrace Panel — call lines":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
       check vm.selectedEntry.val.isNone
 
-      # Click the second row
-      rows[1].fireEvent("click")
+      # Click the second row's name — the row's click target.
+      check rows.len == 2
+      findById(panel, "local-call-text-1").fireEvent("click")
 
       check vm.selectedEntry.val.isSome
       check vm.selectedEntry.val.get == 1'i64
@@ -2064,7 +2062,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
@@ -2092,13 +2090,14 @@ suite "IsoNim Calltrace Panel — call lines":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
       let beforeCount = mock.receivedCommands.len
 
-      rows[0].fireEvent("dblclick")
+      check rows.len == 1
+      findById(panel, "local-call-text-0").fireEvent("dblclick")
 
       drain()
 
@@ -2115,7 +2114,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
 
       # Initially no lines
@@ -2183,7 +2182,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
@@ -2222,7 +2221,7 @@ suite "IsoNim Calltrace Panel — search results":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       vm.setBackendSearchResults(@[
         CalltraceSearchResult(name: "calculate_damage", key: "2",
           rrTicks: 27'u64, codeGeneration: 0,
@@ -2402,7 +2401,7 @@ suite "IsoNim Calltrace Panel — call arguments":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 2
@@ -2456,7 +2455,7 @@ suite "IsoNim Calltrace Panel — call arguments":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 1
@@ -2482,7 +2481,7 @@ suite "IsoNim Calltrace Panel — call arguments":
 
       vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 1
@@ -2586,16 +2585,13 @@ suite "IsoNim Calltrace Panel — scroll indicators":
 
       vm.setViewport(vm.viewport.val.withRows(5))
 
-      let panel = renderCalltracePanel(r, vm)
-      let moreAbove = findByClass(panel, "more-above")
-
-      # Initially at position 0
-      check moreAbove.styles["display"] == "none"
-
-      # Scroll down
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
+      # The panel draws no marker for it (the scrollbar shows the position);
+      # the ViewModel's answer is what a host reads.
+      check panel != nil
+      check not vm.hasMoreAbove.val
       vm.setViewport(vm.viewport.val.scrolledTo(5))
-
-      check moreAbove.styles["display"] == "block"
+      check vm.hasMoreAbove.val
 
       dispose()
 
@@ -2617,11 +2613,10 @@ suite "IsoNim Calltrace Panel — scroll indicators":
 
       vm.setViewport(vm.viewport.val.withRows(3))
 
-      let panel = renderCalltracePanel(r, vm)
-      let moreBelow = findByClass(panel, "more-below")
-
-      # At position 0 with 3 visible and 20 total, there should be more below
-      check moreBelow.styles["display"] == "block"
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
+      # At position 0 with 3 visible and 20 total, there is more below.
+      check panel != nil
+      check vm.hasMoreBelow.val
 
       dispose()
 
@@ -2638,7 +2633,7 @@ suite "IsoNim Calltrace Panel — loading":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "calltrace-loading")
 
       check indicator.styles["display"] == "none"

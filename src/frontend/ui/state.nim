@@ -1,7 +1,6 @@
 import
   ui_imports,
   value,
-  isonim_panel_mount,
   ../communication,
   ../event_helpers,
   ../../common/ct_event,
@@ -26,25 +25,23 @@ import ../viewmodel/viewmodels/origin_chain_bridges as origin_chain_bridges
 from ../viewmodel/viewmodels/scratchpad_vm import ScratchpadVM
 import isonim/core/[signals, computation]
 from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_state_view import
-  mountIsoNimStatePanel
+when defined(ctInExtension):
+  from ../viewmodel/views/isonim_state_view import
+    mountIsoNimStatePanel
+else:
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 import isonim_origin_chain
 import origin_chain_runtime
 
-# Module-level StateVM instance. Created once in `register()` and
-# fed data whenever the legacy event-bus handlers fire.  Rendering
-# still reads from the legacy `self.locals` so behaviour is unchanged.
+# The pane's StateVM. On the desktop and the web page it is the session's
+# (`initStateVMFromSession`), rendered by the panel host (`ui/panel_host`).
+# The VS Code extension's webview has no session store: `register` builds a
+# stub-backed one (`initStateVM`) that the component's events feed.
 var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
-var stateHistoryBridge: proc(expression: string)
-
-# WAS `var isoNimStateMounted: bool = false`, and then a module-level pair
-# `mountedStateVM` / `mountedStateHost`. See `isoNimPanelMountIsLive` in
-# `ui/isonim_panel_mount.nim` for why a boolean could not answer the question
-# it was being asked — and the pair could describe only ONE host, while every
-# tab of the window has its own `stateComponent-0`. What was mounted now lives
-# on each host (the mount mark plus `recordIsoNimPanelHostSource`), so the
-# answer is re-derived from the host in front of the mount, per tab.
+when defined(ctInExtension):
+  var stateHistoryBridge: proc(expression: string)
 
 when defined(js):
   proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
@@ -104,9 +101,14 @@ proc submitWatchExpression(self: StateComponent) =
 method restart*(self: StateComponent) =
   discard
 
-proc tryMountIsoNimStatePanel*()
-
 when defined(ctInExtension):
+  var mountedStateVM: StateVM
+    ## The ViewModel the webview's State pane shows, or `nil`.
+  var mountedStateHost: dom_api.Element
+    ## The element it was mounted into.
+
+  proc mountStatePanelForExtension()
+
   var stateComponentForExtension* {.exportc.}: StateComponent
 
   proc bindStateExtensionHost(component: StateComponent) =
@@ -118,9 +120,8 @@ when defined(ctInExtension):
       return
 
     # Mount the IsoNim state panel into the container the extension webview
-    # provides.  tryMountIsoNimStatePanel is idempotent — it skips the work
-    # if the panel is already mounted and still in the document.
-    tryMountIsoNimStatePanel()
+    # provides. Idempotent: a host already showing this VM is left alone.
+    mountStatePanelForExtension()
 
   proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
     if stateComponentForExtension.isNil:
@@ -138,85 +139,15 @@ when defined(ctInExtension):
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
-type
-  StateMountData = ref object
-    key: cstring
-    retryCount: int
-    tab: int
-      ## The tab the mount was requested for — see `findIsoNimPaneHost`.
-
-proc statePanelIsLive(host: dom_api.Element): bool =
-  ## Does `host` — this tab's `stateComponent-0` — hold a State view built
-  ## on the ViewModel that is current?
-  isoNimPanelMountIsLive(
-    mountedVMIsCurrent = isoNimPanelHostHolds(host, stateVMInstance),
-    hostCarriesMark = isoNimPanelContainerIsMounted(host))
-
-proc doMountStatePanel(data: StateMountData) {.cdecl.} =
-  data.retryCount += 1
-  let container = findIsoNimPaneHost(data.key, data.tab)
-  if dom_api.isNodeNil(dom_api.Node(container)):
-    if data.retryCount mod 10 == 0:
-      # Legitimate, hence DEBUG.  `tryMountIsoNimStatePanel` is
-      # called before GoldenLayout has necessarily created the panel's
-      # container, so polling for it is the design, not a fault.  Only
-      # exhausting the retry budget below is a failure.
-      cdebug "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $data.retryCount
-    if data.retryCount > 200:
-      # WARN, AND IT ENDS THIS POLL RATHER THAN THE SESSION.
-      #
-      # This said ERROR and called itself "a terminal failure with a
-      # permanently blank panel as its symptom". That is false, and
-      # `ui/layout.nim`'s component factory is what falsifies it: its
-      # `Content.State` arm calls `tryMountIsoNimStatePanel()` 200 ms after
-      # `mountComponentContainer` has built `#stateComponent-0`, which is the
-      # one moment the container is known to exist. That call re-enters with a
-      # FRESH `StateMountData(retryCount: 0)`, so the cap below is per-ATTEMPT
-      # and not per-session, and `statePanelIsLive(host)` is a mounted guard rather
-      # than a failed one — reaching the cap latches nothing.
-      #
-      # So what has happened here is that an EARLIER, redundant poll lost a
-      # race it was always going to lose: it started before the container
-      # could exist. The pane is mounted moments later by the factory arm, and
-      # a populated State pane above this line is the normal case, not a
-      # contradiction of it.
-      #
-      # The level is deliberate in both directions. It must not go back to
-      # `clog`/DEBUG — that is what hid the Timeline's identical give-up
-      # through 25 sessions. It must not stay at ERROR either: ERROR is for a
-      # capability the user has lost, this fires in healthy sessions, and an
-      # error that is printed on every good run is how a real one gets
-      # scrolled past. `ci/test/noir-replay-in-browser.sh` already records
-      # these give-ups rather than asserting their absence, for exactly this
-      # reason ("asserting no give-up would fail over a working product") —
-      # this line is now spelled the way that gate already reads it.
-      cwarn "[PIPELINE] tryMountIsoNimStatePanel: container absent after 200 " &
-        "retries; abandoning THIS poll — layout.nim's factory arm mounts the " &
-        "pane once its container exists"
-      return
-    setTimeoutWithArg(doMountStatePanel, 10, data)
-    return
-
-  if statePanelIsLive(container):
-    return
-
-  let containerNode = dom_api.Node(container)
-  while not dom_api.isNodeNil(containerNode.firstChild):
-    discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
-  mountIsoNimStatePanel(container, stateVMInstance)
-  markIsoNimPanelContainerMounted(container)
-  recordIsoNimPanelHostSource(container, stateVMInstance)
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
-
+proc observePlaceholderBadges(container: dom_api.Element; vm: StateVM) =
+  ## Value Origin Tracking (spec §3.2.3): hand each placeholder badge the pane
+  ## shows to the lazy-fill observer (`origin_chain_runtime`), again whenever
+  ## a new batch of locals — and so of placeholder tokens — arrives. Runs in
+  ## the mount's reactive root.
   let panelContainer = container
   createEffect proc() =
-    # Reading the signal subscribes us so we re-fire whenever a new
-    # batch of locals (and therefore a new batch of placeholder
-    # tokens) arrives.
-    discard stateVMInstance.originSummaries.val
-    # Defer the DOM walk via setTimeoutWithArg
+    discard vm.originSummaries.val
+    # After the rows for the new summaries are drawn.
     setTimeoutWithArg(proc(containerEl: dom_api.Element) {.cdecl.} =
       let nodeList = containerEl.toJs.querySelectorAll(
         cstring"button.ct-origin-badge.ct-origin-badge-placeholder")
@@ -225,32 +156,29 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
         observePlaceholderBadgeJs(nodeList[i])
     , 0, panelContainer)
 
-proc tryMountIsoNimStatePanel*() =
-  ## Mount the IsoNim state panel view into the GoldenLayout-managed
-  ## state component container. The container is created by GoldenLayout
-  ## with the id `stateComponent-0`. The IsoNim view is the primary
-  ## renderer — no Karax renderer is involved.
-  ##
-  ## After mounting:
-  ## - `statePanelIsLive(host)` answers true for that host until it is
-  ##   rebuilt or the ViewModel is replaced; another tab's host is asked
-  ##   separately
-  ## - `registerLocals` still feeds data into the store, and IsoNim's
-  ##   reactive effects update the DOM automatically
-  ##
-  ## Safe to call multiple times — mounts only once.
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: called, vmIsNil=" &
-    $stateVMInstance.isNil
-  if stateVMInstance.isNil:
-    cdebug "[PIPELINE] tryMountIsoNimStatePanel: skipping (VM nil)"
-    return
-
-  let mountData = StateMountData(
-    key: cstring"stateComponent-0",
-    retryCount: 0,
-    tab: data.activeSessionIndex
-  )
-  doMountStatePanel(mountData)
+when defined(ctInExtension):
+  proc mountStatePanelForExtension() =
+    ## Mount the State pane into the element the extension's webview names
+    ## (`extensionRendererId`) — the webview is not the panel host.
+    if stateVMInstance.isNil or stateComponentForExtension.isNil:
+      return
+    let container = dom_api.getElementById(
+      dom_api.document, stateComponentForExtension.extensionRendererId)
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      return
+    if mountedStateVM == stateVMInstance and mountedStateHost == container:
+      return
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+    mountedStateVM = stateVMInstance
+    mountedStateHost = container
+    mountIsoNimStatePanel(container, stateVMInstance)
+    observePlaceholderBadges(container, stateVMInstance)
+else:
+  setPanelDecorator(Content.State,
+    proc(host: dom_api.Element; session: SessionViewModel) =
+      observePlaceholderBadges(host, session.stateVM))
 
 # ---------------------------------------------------------------------------
 # Origin Chain side-panel mount (M4 deliverable #9). The panel lives
@@ -410,41 +338,18 @@ proc initStateVMFromSession*(vm: StateVM) =
   ## If a stub-backed instance already exists (created before the session
   ## was available), it is replaced so the panel uses the real backend.
   let store = vm.store
-  if stateVMInstance != nil:
-    clog "StateVM: replacing existing instance with shared-store version"
-    # No flag to reset. `statePanelIsLive` compares the ViewModel recorded on
-    # the host (`recordIsoNimPanelHostSource`) against `stateVMInstance`, so the assignment below IS the invalidation: the next
-    # `tryMountIsoNimStatePanel` sees a live host holding the old VM's DOM and
-    # remounts. This was the one and only site that cleared `isoNimStateMounted`
-    # and it is the reason the flag could not simply be deleted.
   stateVMStore = store
   stateVMInstance = vm
   # From here on the session's stop loader is the ONE sender of
   # `ct/load-locals` — see `storeSendsLocals` and `loadLocals`.
   storeSendsLocals = true
-  stateVMInstance.onToggleHistory = stateHistoryBridge
-  # WATCHES: re-issue the request whose response this module renders.
-  #
-  # The watch input form calls `StateVM.addWatch`, but the reply the
-  # product actually paints comes from `StateComponent.loadLocals` ->
-  # `CtLoadLocalsResponse` -> `registerLocals`. Without this bridge the
-  # two never met: `loadLocals` read `StateComponent.watchExpressions`,
-  # which only the call-site-less `submitWatchExpression` wrote, so a
-  # typed watch reached no answered request. `loadLocals` now reads the
-  # ViewModel's list (below), and this makes a change to it re-ask.
-  stateVMInstance.onWatchesChangedProc = proc(expressions: seq[string]) =
-    # `componentMapping` is an `array[Content, JsAssoc[int, Component]]`,
-    # so the per-content map can be nil before the State pane mounts and
-    # the id lookup can miss. Both are ordinary during start-up, hence the
-    # guards rather than an assertion.
-    if data.isNil or data.ui.componentMapping[Content.State].isNil:
-      return
-    if not data.ui.componentMapping[Content.State].hasKey(0):
-      return
-    let component = data.stateComponent(0)
-    if component.isNil:
-      return
-    component.loadLocals()
+  # A row's value history is asked for and applied by the ViewModel
+  # (`ct/load-history` at the current stop), as on every front-end.
+  let theVm = vm
+  stateVMInstance.onToggleHistory = proc(expression: string) =
+    theVm.loadValueHistory(expression)
+  # The watch list needs no bridge here: the stop loader re-asks
+  # `ct/load-locals` when it changes.
   # Create the companion OriginChainVM and wire the bridges so the
   # State Pane row renderer can dispatch ``ct/originChain`` requests
   # through the same VM the side-panel uses (M4 deliverable §3.2.1 +
@@ -461,49 +366,45 @@ proc initStateVMFromSession*(vm: StateVM) =
   setOriginChainVM(originChainVMInstance)
   tryMountOriginSidePanel()
   cdebug "[PIPELINE] initStateVMFromSession: storeId=" & $store.storeId
-  clog "StateVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimStatePanel()
+  clog "StateVM: the session's instance installed"
 
-proc initStateVM() =
-  ## Lazily create the parallel StateVM instance backed by a stub
-  ## BackendService.  This fallback is used when no shared store has
-  ## been provided via `initStateVMFromSession` (e.g. in the VS Code
-  ## extension where the SessionViewModel is not yet wired).
-  if stateVMInstance != nil:
-    return
+when defined(ctInExtension):
+  proc initStateVM() =
+    ## The VS Code extension's webview: a StateVM over a stub BackendService,
+    ## fed by the component's events (it has no session store).
+    if stateVMInstance != nil:
+      return
 
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    # Return an immediately-resolved future so the store's loading
-    # state transitions correctly but no real I/O happens.
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
+    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+      # Return an immediately-resolved future so the store's loading
+      # state transitions correctly but no real I/O happens.
+      when defined(js):
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          resolve(%*{})
+      else:
+        var fut = newFuture[JsonNode]("stub-backend")
+        fut.complete(%*{})
+        result = fut
 
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
+    let stubBackend = BackendService(
+      sendProc: stubSend,
+      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+      disconnectProc: proc() = discard,
+    )
 
-  stateVMStore = createReplayDataStore(stubBackend)
-  stateVMInstance = createStateVM(stateVMStore)
-  # Companion OriginChainVM + bridges so the inline badge click
-  # handler can dispatch through the same VM the side-panel uses
-  # (M4 deliverable §3.2.1 + §3.2.3) even on the stub-backend code path.
-  originChainVMInstance = createOriginChainVM(stateVMStore)
-  wireOriginChainBridges(stateVMInstance, originChainVMInstance)
-  setOriginChainVM(originChainVMInstance)
-  # The origin side panel mounts into a floating aside appended to
-  # document.body and expects the full desktop DOM.  Extension webviews
-  # have a minimal, panel-only DOM, so skip this in that context.
-  when not defined(ctInExtension):
-    tryMountOriginSidePanel()
-  clog "StateVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimStatePanel()
+    stateVMStore = createReplayDataStore(stubBackend)
+    stateVMInstance = createStateVM(stateVMStore)
+    # Companion OriginChainVM + bridges so the inline badge click
+    # handler can dispatch through the same VM the side-panel uses
+    # (M4 deliverable §3.2.1 + §3.2.3) even on the stub-backend code path.
+    originChainVMInstance = createOriginChainVM(stateVMStore)
+    wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+    setOriginChainVM(originChainVMInstance)
+    # The origin side panel mounts into a floating aside appended to
+    # document.body and expects the full desktop DOM; the webview has a
+    # minimal, panel-only DOM, so it is not mounted here.
+    clog "StateVM: parallel ViewModel instance created (stub backend)"
+    mountStatePanelForExtension()
 
 proc valueDisplayText*(v: Value): string =
   ## What the State pane's value cell says a recorded value IS.
@@ -945,72 +846,44 @@ proc toValueHistoryRows(results: seq[HistoryResult]): seq[ValueHistoryRow] =
       valueText: if r.value.isNil: "" else: statePanelValue(r.value).root.text)
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
+  ## On the desktop and the web page the pane subscribes to nothing: the panel
+  ## host mounts the session's StateVM (`ui/panel_host`, from GoldenLayout's
+  ## factory), the session's stop loader loads its locals, `ui_js` moves the
+  ## store's debugger position, and the ViewModel asks for value histories.
+  ##
+  ## The VS Code extension's webview has no session store, so there the
+  ## component still feeds a stub-backed StateVM from the events below; its
+  ## methods (`onCompleteMove`, `loadLocals`, `registerLocals`) are that path.
   self.api = api
 
-  # Initialize the parallel ViewModel instance (no-op if already created).
-  initStateVM()
+  when defined(ctInExtension):
+    initStateVM()
 
-  # THE MOUNT USED TO BE HERE, AND IT IS NOW IN `ui/layout.nim`'s COMPONENT
-  # FACTORY — the one site that knows `#stateComponent-0` exists, because it
-  # has just created it.
-  #
-  # `1cb7b9d6` added a `tryMountIsoNimStatePanel()` call at this point and it
-  # genuinely fixed the deployed Noir Studio, where `register` runs after
-  # GoldenLayout has built the pane. It cannot fix the Electron desktop, where
-  # `register` runs at component-CONSTRUCTION time — `createUIComponents` in
-  # `types.nim`, from `onInit` — which is EARLIER than the container, not
-  # later. 25 desktop session logs (2026-09) show the container absent at retry
-  # #1 in all 25, and `CalltraceComponent.register` has always made the
-  # equivalent call and still gave up at retry #200 in both runs that reached a
-  # verdict. A second poll window opened ahead of the container is still a poll
-  # that loses.
-  #
-  # THE CALL WAS REMOVED RATHER THAN LEFT AS A HARMLESS SECOND MECHANISM, and
-  # it was measured before it was removed. Three web bundles were assembled
-  # from this tree and driven through Run → replay by
-  # `ci/test/pane_children_probe.mjs`, reading `childElementCount` on
-  # `#stateComponent-0`:
-  #
-  #   pre-fix (with this call, no factory arm)  state: 10 descendants
-  #   fixed   (with this call AND the arm)      state: 10 descendants
-  #   fixed   (arm only, THIS CALL DELETED)     state: 10 descendants
-  #
-  # The factory arm alone mounts the pane, on the surface `1cb7b9d6` was proven
-  # on. Keeping both would have left two callers for one mount and no way to
-  # tell which one was doing the work — the state of affairs that let this
-  # defect survive in the first place.
+    let stateComponent = self
+    stateHistoryBridge = proc(expression: string) =
+      if not stateComponent.api.isNil:
+        stateComponent.api.emit(
+          CtLoadHistory,
+          LoadHistoryArg(expression: cstring(expression),
+                         location: stateComponent.location))
+    stateVMInstance.onToggleHistory = stateHistoryBridge
 
-  let stateComponent = self
-  stateHistoryBridge = proc(expression: string) =
-    if not stateComponent.api.isNil:
-      stateComponent.api.emit(
-        CtLoadHistory,
-        LoadHistoryArg(expression: cstring(expression),
-                       location: stateComponent.location))
-  stateVMInstance.onToggleHistory = stateHistoryBridge
-
-  # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
-    # discard self.onMove())
-  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    discard self.onCompleteMove(response)
-  )
-  api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
-    self.registerLocals(response)
-  )
-  api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
-    if not stateVMInstance.isNil:
-      stateVMInstance.updateHistory($response.expression,
-                                    toValueHistoryRows(response.results))
-  )
-  api.emit(InternalLastCompleteMove, EmptyArg())
+    api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+      discard self.onCompleteMove(response)
+    )
+    api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
+      self.registerLocals(response)
+    )
+    api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
+      if not stateVMInstance.isNil:
+        stateVMInstance.updateHistory($response.expression,
+                                      toValueHistoryRows(response.results))
+    )
+    api.emit(InternalLastCompleteMove, EmptyArg())
 
 # think if it's possible to directly exportc in this way the method
 proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
-
-# StateComponent.render() removed: IsoNim is the primary renderer.
-# Generic callers are expected to use direct IsoNim mount paths. All
-# real rendering is handled by tryMountIsoNimStatePanel().
 
 when defined(ctInExtension):
   method redrawForExtension*(self: StateComponent) =

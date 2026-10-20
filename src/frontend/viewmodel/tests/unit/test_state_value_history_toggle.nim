@@ -21,7 +21,7 @@
 ## reproduce — render once, mutate the VM, assert on the SAME node tree.
 ## Never re-render to observe an update in this file.
 
-import std/[sets, tables, unittest, strutils]
+import std/[sets, tables, unittest, strutils, json, options]
 
 import isonim/core/async_compat
 import isonim/core/signals
@@ -122,7 +122,7 @@ suite "State component value history toggle":
       drain()
 
       # Mount the panel ONCE. Everything below asserts on this tree.
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let button = findByClass(panel, "value-history-button")
       check button != nil
 
@@ -213,7 +213,7 @@ suite "State component value history toggle":
       ]
       drain()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       # Response first, expansion second.
       vm.updateHistory("x", sampleHistory())
@@ -264,7 +264,7 @@ suite "State component value history toggle":
       ]
       drain()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       # Expand the compound so the child row is materialised.
       vm.toggleExpand("obj")
@@ -299,4 +299,111 @@ suite "State component value history toggle":
       # parent's own sub-tree must carry no history rows at all.
       check historyRowsOf(parentRow).len == 0
 
+      dispose()
+
+suite "the ViewModel asks for a value history itself":
+  # `StateVM.loadValueHistory` is what the desktop and the web page install as
+  # `onToggleHistory` (`ui/state.initStateVMFromSession`): the request goes out
+  # through the store's backend and the answer is applied by the ViewModel,
+  # with no component subscription between them.
+
+  proc historyAnswer(): JsonNode =
+    ## The `ct/load-history` response envelope, in the shape the replay
+    ## server's `load_history` answers (`HistoryUpdate`: `results`, each
+    ## with its `location` and its `value`).
+    %*{"type": "response", "command": "ct/load-history", "success": true,
+       "body": {"expression": "x", "results": [
+         {"location": {"path": "/src/main.rs", "line": 3, "rrTicks": 100},
+          "value": {"kind": 7, "i": "10", "typ": {"kind": 7, "langType": "int"}}},
+         {"location": {"path": "/src/main.rs", "line": 5, "rrTicks": 110},
+          "value": {"kind": 7, "i": "42", "typ": {"kind": 7, "langType": "int"}}}],
+         "total": 2, "start": 0}}
+
+  test "a row's history is asked for at the current stop and applied":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService()
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createStateVM(store)
+      store.updateDebuggerPosition(120'u64, "/src/main.rs", 7)
+      drain()
+      mock.expect("ct/load-history", historyAnswer())
+      mock.clearReceivedCommands()
+
+      vm.loadValueHistory("x")
+      drain()
+
+      let sent = mock.findCommand("ct/load-history")
+      check sent.isSome
+      if sent.isSome:
+        let args = sent.get.args
+        check args["expression"].getStr == "x"
+        check args["location"]["rrTicks"].getInt == 120
+        check args["location"]["path"].getStr == "/src/main.rs"
+        check args["location"]["line"].getInt == 7
+      check vm.valueHistory.val.hasKey("x")
+      if vm.valueHistory.val.hasKey("x"):
+        let rows = vm.valueHistory.val["x"]
+        check rows.len == 2
+        check rows.len == 2 and rows[0].locationTicks == 100
+        check rows.len == 2 and rows[1].locationTicks == 110
+        check rows.len == 2 and rows[1].valueText.contains("42")
+      dispose()
+
+  test "a refused request leaves the history unanswered, not empty":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService()
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createStateVM(store)
+      mock.expect("ct/load-history",
+        %*{"type": "response", "command": "ct/load-history",
+           "success": false, "message": "no history"})
+      vm.loadValueHistory("x")
+      drain()
+      check not vm.valueHistory.val.hasKey("x")
+      dispose()
+
+  test "toggling a row open asks through the installed loader":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createStateVM(store)
+      let theVm = vm
+      vm.onToggleHistory = proc(expression: string) =
+        theVm.loadValueHistory(expression)
+      mock.clearReceivedCommands()
+      vm.toggleHistory("x")
+      drain()
+      check mock.findCommand("ct/load-history").isSome
+      dispose()
+
+suite "a collection the locals budget cut short":
+
+  test "its open row offers Load more, which asks for the next elements":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createStateVM(store)
+      store.locals.locals.val = @[
+        store_types.Variable(name: "xs", value: "[1, 2, …]", typeName: "seq",
+          hasChildren: true, moreElements: true, elementsTotal: 5,
+          children: @[
+            store_types.Variable(name: "[0]", value: "1", typeName: "int"),
+            store_types.Variable(name: "[1]", value: "2", typeName: "int")])]
+      drain()
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), vm)
+      let row = findRowByName(panel, "xs")
+      let button = findByClass(row, "value-load-more")
+      check button != nil
+      # Closed, the row's elements are not shown, and neither is the offer.
+      check button.styles.getOrDefault("display", "") == "none"
+      vm.toggleExpand("xs")
+      drain()
+      check button.styles.getOrDefault("display", "") == "inline-block"
+      check button.textContent == "Load more (2 of 5)"
+      mock.clearReceivedCommands()
+      button.fireEvent("click")
+      drain()
+      let sent = mock.findCommand("ct/load-value-elements")
+      check sent.isSome
+      check sent.isSome and sent.get.args["startIndex"].getInt == 2
       dispose()

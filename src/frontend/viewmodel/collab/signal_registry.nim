@@ -222,9 +222,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addMany("CalltraceVM", ["searchQuery", "rawIgnorePatterns"],
     vscSharedSessionViewState,
     "Calltrace filter/search settings are logical shared view state.")
-  entries.addEntry("CalltraceVM", "backendSearchResults",
+  entries.addMany("CalltraceVM", ["backendSearchResults", "backendSearchTotal"],
     vscBackendAuthoritative,
-    "Search result payloads come from backend queries.")
+    "Search result payloads and the whole-trace match count come from " &
+    "the ct/search-calltrace answer.")
   entries.addEntry("CalltraceVM", "revealScroll", vscRendererLocal,
     "codetracer#860: the scroll this pane's own search-result activation " &
     "asks its view for; one reader's pane position, not session intent.")

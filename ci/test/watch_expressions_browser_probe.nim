@@ -10,7 +10,7 @@
 ## what a headless test calls — and from no gesture in any shipping product.
 ## A mock-only suite was green over a tab no user could open.
 ##
-## So this mounts `renderStatePanel(WebRenderer, ...)`: the procedure the
+## So this mounts `renderStatePanel[WebRenderer, Element]`: the procedure the
 ## browser actually runs. The probe asserts nothing; it paints, and
 ## `ci/test/watch-expressions-in-browser.sh` reads what painted.
 ##

@@ -70,7 +70,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 36
+const ExpectedAssertions = 34
   ## PLAT-51: 42 -> 36. The Timeline panel is removed: its arm, its mount
   ## proc and its give-up lines went (the control-data loop -1, the mount
   ## proc -1, the give-up triple -3, the two `clog` guards -2), and one
@@ -141,11 +141,32 @@ proc directMountContents(source: string): seq[string] =
     result.add t["Content.".len ..< t.len].strip(chars = {',', ' '})
   result.sort()
 
+const
+  PanelHostPath = "src/frontend/ui/panel_host.nim"
+  PanelHostArm = "if state.content in PanelHostKinds:"
+    ## The ONE arm for every pane the panel host mounts (Shared-DOM-Front-Ends
+    ## D4): its kinds are read out of `panel_host.nim` below.
+
+proc panelHostKinds(): seq[string] =
+  ## `PanelHostKinds`' members, as `panel_host.nim` declares them.
+  let source = readFile(PanelHostPath)
+  let at = source.find("PanelHostKinds* = {")
+  if at < 0:
+    return
+  let close = source.find("}", at)
+  for part in source[at + "PanelHostKinds* = {".len ..< close].split(','):
+    let t = part.strip()
+    if t.startsWith("Content."):
+      result.add t["Content.".len ..< t.len]
+
 proc dispatchArms(source: string): seq[string] =
   ## The `Content` values the factory dispatches on.
   result = @[]
   for line in dispatchRegion(source).splitLines:
     let t = line.strip()
+    if t == PanelHostArm:
+      result.add panelHostKinds()
+      continue
     if not t.startsWith("if state.content == Content."):
       continue
     let tail = t["if state.content == Content.".len ..< t.len]
@@ -180,7 +201,8 @@ proc withArmsRemoved(source: string; contents: openArray[string]): string =
     let t = line.strip()
     var dropped = false
     for content in contents:
-      if t == "if state.content == Content." & content & ":":
+      if t == "if state.content == Content." & content & ":" or
+         (t == PanelHostArm and content in panelHostKinds()):
         dropped = true
         skipNext = true
         break
@@ -277,11 +299,16 @@ suite "the factory mounts every mountable pane":
     # so the scan asserts them rather than trusting that a green build implies
     # it, since this suite does not build `layout.nim`.
     let source = layoutSource()
-    counted source.contains("calltrace, trace, event_log, terminal_output,")
-    for procName in ["tryMountIsoNimStatePanel", "tryMountIsoNimCalltrace",
-                     "tryMountIsoNimEventLogPanel",
+    counted source.contains("trace, event_log, terminal_output,")
+    for procName in ["tryMountIsoNimEventLogPanel",
                      "tryMountIsoNimTerminalOutputPanel"]:
       counted dispatchRegion(source).contains(procName & "()")
+    # The panel host's panes: mounted by the factory synchronously, and here
+    # by id for a container the factory never saw.
+    counted dispatchRegion(source).contains("ensurePanelMountedById(containerId, state.content,")
+    counted source.contains("discard mountPanel(")
+    counted "Calltrace" in panelHostKinds()
+    counted "State" in panelHostKinds()
 
   test "all three give-ups are audible, and none of them claims the session":
     # Not a dispatch property, and here anyway because it is this dispatch seen
@@ -309,19 +336,11 @@ suite "the factory mounts every mountable pane":
     # A log that asserts terminal failure on every good run is how a real
     # failure gets scrolled past, so WARN is the level that is both true and
     # audible, and this test pins both walls.
-    for (path, procName) in [
-        ("src/frontend/ui/state.nim", "tryMountIsoNimStatePanel"),
-        ("src/frontend/ui/calltrace.nim", "tryMountIsoNimCalltrace")]:
-      let source = readFile(path)
-      # Audible, and at the level that does not overclaim.
-      counted source.contains("cwarn \"[PIPELINE] " & procName &
-                              ": container absent after ")
-      # Never ERROR again. Matched on the call, not on prose: the surrounding
-      # comments discuss the old ERROR spelling on purpose.
-      counted not source.contains("cerror \"[PIPELINE] " & procName)
-      # And it says what actually ended, which is this poll and not the pane.
-      counted source.contains("abandoning THIS poll")
-    # PLAT-51: the third, the Timeline's, went with the panel.
+    # The State and Call Trace polls went with the panel host, which mounts
+    # them into the container it creates; PLAT-51: the Timeline's went with
+    # the panel.
+    counted not readFile("src/frontend/ui/state.nim").contains("tryMountIsoNimStatePanel")
+    counted not readFile("src/frontend/ui/calltrace.nim").contains("tryMountIsoNimCalltrace")
     let trace = readFile("src/frontend/ui/trace.nim")
     counted not trace.contains("tryMountIsoNimTimelinePanel")
 

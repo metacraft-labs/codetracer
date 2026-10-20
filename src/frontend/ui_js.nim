@@ -266,6 +266,7 @@ proc hideWelcomeScreenSurface() =
 # individual panels so they all share a single real backend connection.
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
+import ui/panel_host   # the panes it mounts render the session's ViewModels
 import viewmodel/sdk/[debugger_session, trace_source]
 from viewmodel/viewport import timeoutScheduler
 from viewmodel/sdk/stop_loader import claimLocalsLoading
@@ -2538,8 +2539,10 @@ when not defined(ctInExtension):
 
       initPanelVM("bindDebugToolbar"):
         debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
-      initPanelVM("initCalltraceVMFromSession"):
-        calltrace.initCalltraceVMFromSession(activeSessionVM.calltraceVM)
+      initPanelVM("setPanelSession"):
+        # The panes the panel host mounts render this session's ViewModels;
+        # a pane whose container was built before now is mounted here.
+        panel_host.setPanelSession(activeSessionVM)
       initPanelVM("initEventLogVMFromSession"):
         event_log.initEventLogVMFromSession(activeSessionVM.eventLogVM)
         # §5.3 — an Event Log boundary chip whose counterpart lives in
@@ -2608,12 +2611,6 @@ when not defined(ctInExtension):
       # order-dependent and can miss events).
       # -----------------------------------------------------------------
       cdebug "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
-      data.viewsApi.subscribe(CtUpdatedCalltrace,
-        proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
-          cdebug ("[PIPELINE] viewsApi.CtUpdatedCalltrace: received " &
-            $response.callLines.len & " lines, totalCalls=" &
-            $response.totalCallsCount)
-          calltrace.syncCalltraceData(response))
 
       # The locals answer's direct subscription, and the request tracking
       # that lets it tell which request each answer is for.
@@ -2649,8 +2646,6 @@ when not defined(ctInExtension):
             else:
               none(uint64)
           isoBatch.batch proc() =
-            calltrace.syncCalltraceDebuggerPosition(
-              rrTicks, path, line, sourceGeneration, sourceDigest)
             state.syncStoreDebuggerPosition(
               rrTicks, path, line, sourceGeneration, sourceDigest)
             if geid.isSome and not activeSessionVM.isNil:

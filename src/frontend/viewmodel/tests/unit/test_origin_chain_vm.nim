@@ -702,7 +702,7 @@ suite "M4 — State Pane renders inline origin badge per row":
         ("sum", OriginSummary(terminatorKind: tkwComputational,
                               terminatorExpr: "a + b", hopCount: 2)),
       ])
-      let panel = renderStatePanel(r, stateVM)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, stateVM)
       let totalBadge = findBadgeForRow(panel, "total")
       let sumBadge = findBadgeForRow(panel, "sum")
       check totalBadge != nil
@@ -728,7 +728,7 @@ suite "M4 — State Pane renders inline origin badge per row":
       stateVM.updateOriginSummaries(@[
         ("pending", placeholderSummary("tok-XYZ")),
       ])
-      let panel = renderStatePanel(r, stateVM)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, stateVM)
       let badge = findBadgeForRow(panel, "pending")
       check badge != nil
       # Placeholder badges carry the ``ct-origin-badge-placeholder``
@@ -770,7 +770,7 @@ suite "M4 — State Pane renders inline origin badge per row":
       stateVM.originChainLookup = proc(name: string): Option[OriginChain] =
         if name == "c": some(chain) else: none(OriginChain)
 
-      let panel = renderStatePanel(r, stateVM)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, stateVM)
       let badge = findBadgeForRow(panel, "c")
       check badge != nil
       # Before the click the in-row chain block is present in the DOM
@@ -824,7 +824,7 @@ suite "M4 — State Pane renders inline origin badge per row":
       stateVM.originChainLookup = proc(name: string): Option[OriginChain] =
         if name == "x": some(chain) else: none(OriginChain)
 
-      let panel = renderStatePanel(r, stateVM)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, stateVM)
       let badge = findBadgeForRow(panel, "x")
       check badge != nil
 
@@ -870,7 +870,7 @@ suite "M4 — State Pane renders inline origin badge per row":
       wireOriginChainBridges(stateVM, originVM,
         proc(): ScratchpadVM = nil)
 
-      let panel = renderStatePanel(r, stateVM)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, stateVM)
       let badge = findBadgeForRow(panel, "pending")
       check badge != nil
 
@@ -915,7 +915,7 @@ suite "M4 — State Pane renders inline origin badge per row":
       wireOriginChainBridges(stateVM, originVM,
         proc(): ScratchpadVM = nil)
 
-      let panel = renderStatePanel(r, stateVM)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, stateVM)
       # Locate the row by its ``data-variable-name`` attribute.
       var row: MockNode = nil
       proc findRow(node: MockNode) =

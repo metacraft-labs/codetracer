@@ -61,6 +61,7 @@ import std/[asyncjs, math, strutils]
 
 import isonim/core/owner
 import isonim/web/dom_api
+import isonim/web/web_renderer
 
 import ../viewmodel/backend/backend_service
 import ../viewmodel/backend/mock_backend
@@ -269,7 +270,8 @@ proc mountPanel(): (Element, Element, CalltraceVM) =
     vm = createCalltraceVM(store)
     store.updateCalltraceSection(fixtureLines(), startIndex = 0'i64,
                                  totalCount = uint64(RowCount))
-    mountIsoNimCalltrace(host, vm)
+    discard appendChild(Node(host), Node(
+      renderCalltracePanel[WebRenderer, Element](WebRenderer(), vm)))
   let panel = host.qsIn(cstring".isonim-calltrace")
   (host, panel, vm)
 

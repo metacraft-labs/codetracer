@@ -37,7 +37,7 @@ import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types as store_types]
 from ../store/stop_timeline import stopIdentityOf
-from ../store/locals_answer import variableFromValue
+from ../store/locals_answer import variableFromValue, presentedValueText
 import ../viewport
 export viewport
 import origin_chain_types
@@ -46,8 +46,8 @@ import value_changes
 # `common_types`, which is also included by `frontend/types.nim` under
 # different `langstring`/`TableLike` bindings — so every type in it exists
 # twice and the two copies are incompatible. Value-history rows therefore
-# cross into this VM as `ValueHistoryRow` (see below), normalised by the
-# host at `ui/state.nim`.
+# cross into this VM as `ValueHistoryRow` (see below), decoded from the wire
+# JSON by `historyRowsOf` (or, in the VS Code extension, by `ui/state.nim`).
 
 type
   StateTab* = enum
@@ -610,6 +610,41 @@ proc updateHistory*(vm: StateVM; expression: string;
     h[k] = oldH[k]
   h[expression] = rows
   vm.valueHistory.val = h
+
+proc historyRowsOf*(body: JsonNode): seq[ValueHistoryRow] =
+  ## Decode the `body` of a `ct/load-history` answer
+  ## (`{"results": [{"location": {"rrTicks"}, "value"}, …]}`) into the rows the
+  ## pane shows, each value presented as the locals rows present theirs.
+  if body.isNil or body.kind != JObject:
+    return
+  for r in body.getOrDefault("results").getElems:
+    let value = r.getOrDefault("value")
+    result.add ValueHistoryRow(
+      locationTicks: r{"location", "rrTicks"}.getBiggestInt(0),
+      valueText: (if value.isNil: "" else: presentedValueText(value)))
+
+proc loadValueHistory*(vm: StateVM; expression: string) =
+  ## Ask the engine for the history of `expression`'s value at the current
+  ## stop (`ct/load-history`) and store the answer under the same key
+  ## (`updateHistory`). A host installs it as `onToggleHistory`, so opening a
+  ## row's history and the new-stop refresh both ask through it. A failed
+  ## request leaves the history unanswered rather than empty: an empty history
+  ## is an answer ("the value never changed") that the engine did not give.
+  if vm.isNil or vm.store.isNil or vm.store.backend.isNil or
+     expression.len == 0:
+    return
+  let dbg = vm.store.debugger.val
+  let fut = vm.store.backend.send("ct/load-history", %*{
+    "expression": expression,
+    "location": {"path": dbg.location.file, "line": dbg.location.line,
+                 "rrTicks": dbg.rrTicks},
+    "isForward": false})
+  let theVm = vm
+  async_compat.onComplete(fut,
+    proc(response: JsonNode) =
+      if responseSucceeded(response):
+        theVm.updateHistory(expression, historyRowsOf(responseBody(response))),
+    proc(message: string) = discard)
 
 # ---------------------------------------------------------------------------
 # Value Origin Tracking (M4) actions — keep adjacent to `toggleHistory`

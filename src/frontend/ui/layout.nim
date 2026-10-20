@@ -2,11 +2,9 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, options,
   state, editor, debug_toolbar, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
-  # The five panes whose mount was moved into this file's component factory.
-  # `state` was already imported; `calltrace`, `trace`, `event_log` and
-  # `terminal_output` are new here and are imported for exactly one symbol
-  # each — their `tryMountIsoNim…` proc. See the factory arms below.
-  calltrace, trace, event_log, terminal_output,
+  # Panes the component factory below mounts by their `tryMountIsoNim…`
+  # proc. See the factory arms below.
+  trace, event_log, terminal_output,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   test_results, constraints, point_list,
   frame_viewer, pixel_history, shader_debug, video_player,
@@ -35,6 +33,10 @@ when not defined(ctWeb):
   import panel_transfer
 
 import kdom except Location
+# The panel host (Shared-DOM-Front-Ends D4): the factory below mounts the
+# converted panes into the container it creates, and disposes them with it.
+import ./panel_host
+from isonim/web/dom_api import nil
 from ../headless_app/layout_model import sharedDefaultDocked, DockedPane
 from ../headless_app/desktop_panes import PaneContent, paneOfContent
 from dom import Element, getAttribute, Node, preventDefault, document,
@@ -1828,60 +1830,24 @@ proc mountPaneForState(state: GoldenItemState) =
         cwarn "layout: genericUiComponent has no direct mount for " &
           $state.content & " id " & $state.id
 
-      # THE FIVE PANES THAT HAD NO ARM HERE.
-      #
-      # This proc is the only site that KNOWS the container exists: the
-      # `genericUiComponent` registration below calls
-      # `element.mountComponentContainer(editorLabel)`, which builds
-      # `#<x>Component-<id>`, and defers this dispatch by 200 ms. Every
-      # other pane in `isDirectMountComponent` has been mounted from here
-      # all along. These five mounted from their `register` method or from
-      # their `initXVMFromSession`, and then POLLED for a container that
-      # neither of those moments can guarantee.
-      #
-      # Measured on 25 real Electron desktop session logs (2026-09), on the
-      # modern shared-store path: `#stateComponent-0`,
-      # `#calltraceComponent-0` and `#timelineComponent-0` were absent at
-      # retry #1 in ALL 25 runs. The two that ran long enough to reach a
-      # verdict gave up at retry #200, 10.9 s and 30.4 s of runway in:
-      #
-      #   ERROR | state.nim     | tryMountIsoNimStatePanel: not ready after 200 retries, giving up
-      #   ERROR | calltrace.nim | tryMountIsoNimCalltrace: not ready after 200 retries, giving up
-      #   DEBUG | trace.nim     | IsoNim timeline panel: not ready after 200 retries, giving up
-      #
-      # A 2026-09 TRANSCRIPT, PRE-DATING THE ARMS BELOW. Do not grep the
-      # source for those three strings: the arms below made their claim
-      # false — a give-up ends one poll, because each mount re-enters with a
-      # fresh retry counter — and all three now `cwarn` that they abandoned
-      # THIS poll rather than the pane. The transcript stays because it is
-      # the measurement that put these arms here.
-      #
-      # The other 23 ended mid-poll between retry #20 and #110 with the
-      # container still absent. There is no retry margin to widen: the poll
-      # starts before the thing it polls for can exist, so it is not a race
-      # a faster machine wins. The State, Call Trace and Timeline panes were
-      # blank on the desktop for every one of those sessions.
-      #
-      # `1cb7b9d6` added the `register`-time call in `ui/state.nim` and it
-      # genuinely fixed Noir Studio — but `CalltraceComponent.register` has
-      # ALWAYS made the equivalent call, and calltrace still gave up on the
-      # desktop in both runs above. On the desktop `register` runs at
+      # Polling for the container from a pane's `register` or
+      # `initXVMFromSession` loses: on the desktop `register` runs at
       # component-construction time (`types.createUIComponents` in `onInit`),
-      # which is EARLIER than the container, not later. A second poll window
-      # opened before the container exists is still a poll that loses.
+      # before GoldenLayout builds the container. Measured on 25 Electron
+      # session logs (2026-09): the State, Call Trace and Timeline containers
+      # were absent at the first retry in all 25, and those panes stayed
+      # blank. So every direct-mount pane is mounted from here, where the
+      # container is known to exist.
       #
-      # Called unqualified: the module `state` is shadowed inside this
-      # closure by its own `state: GoldenItemState` parameter, so
-      # `state.tryMountIsoNimStatePanel()` would resolve against the wrong
-      # `state`.
-      if state.content == Content.State:
-        tryMountIsoNimStatePanel()
+      # The panel host's panes: reached here only for a container rebuilt
+      # outside GoldenLayout (an auto-hide panel restored from its saved
+      # state), which the factory never saw.
+      if state.content in PanelHostKinds:
+        ensurePanelMountedById(containerId, state.content,
+                               data.activeSessionIndex)
 
-      if state.content == Content.Calltrace:
-        tryMountIsoNimCalltrace()
-
-      # EventLog and TerminalOutput are the same shape as Calltrace: both
-      # mount from `register` and nowhere else, and both are in
+      # EventLog and TerminalOutput mount from `register` and nowhere else,
+      # and both are in
       # `isDirectMountComponent`. They are joined here so the invariant
       # `test_every_mountable_pane_has_a_factory_arm.nim` asserts — every
       # direct-mount `Content` has an arm — holds without an allowlist of
@@ -2488,6 +2454,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     else:
       cdebug "[GENERIC_REG] Regular mount (non-reparenting)"
       element.mountComponentContainer(editorLabel)
+      # THE PANEL HOST (Shared-DOM-Front-Ends D4): the container exists now,
+      # because it was just built, so the pane is mounted into it now.
+      if state.content in PanelHostKinds:
+        discard mountPanel(cast[dom_api.Element](element.firstChild),
+                           state.content)
+
+    # Whatever pane is still inside this container when GoldenLayout destroys
+    # it is disposed with it (a reparented pane has already moved out).
+    container.on(cstring"destroy") do ():
+      disposePanelsIn(cast[dom_api.Element](element))
 
     container.on(cstring"tab") do (tab: GoldenTab):
       # prepare layout to be saved on upcoming stateChanged event
@@ -2546,7 +2522,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let isReparentingObj = isReparenting
 
     discard windowSetTimeout((proc =
-      if isReparentingObj:
+      # The panel host mounted its panes synchronously above; the deferred
+      # dispatch is for the panes whose views are not converted yet.
+      if isReparentingObj or state.content in PanelHostKinds:
         return
       mountPaneForState(state)
       ), 200)

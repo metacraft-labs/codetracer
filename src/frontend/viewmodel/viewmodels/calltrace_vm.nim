@@ -36,11 +36,13 @@ import std/[json, sets, options, strutils, tables]
 import ../vm_log
 
 import isonim/core/[signals, computation, owner, graph, batch]
+from isonim/core/async_compat import nil
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../collab/[runtime_role, session_core, types]
 import ../store/[replay_data_store, request_tracker, types]
+from ../store/stop_timeline import stopIdentityOf
 import ../viewport
 export viewport
 
@@ -163,11 +165,19 @@ type
     rawIgnorePatterns*: Signal[string]
 
     # -- Backend search results --
-    # Populated by the legacy calltrace component when it receives
-    # CtCalltraceSearchResponse (`ui/calltrace.registerSearchRes`). Each
-    # entry carries the matched call's frame identity so a click on it can
-    # jump to that frame (`jumpToSearchResult`).
+    # The answer to the last `ct/search-calltrace` (`setSearchQuery`): at most
+    # the pane's window of matches. Each entry carries the matched call's
+    # frame identity so a click on it can jump to that frame
+    # (`jumpToSearchResult`).
     backendSearchResults*: Signal[seq[CalltraceSearchResult]]
+    backendSearchTotal*: Signal[int]
+      ## How many calls match in the whole trace — more than
+      ## `backendSearchResults` holds when the window cut the answer short.
+    followsDebuggerCall*: bool
+      ## Whether the selection follows the call the debugger is in after
+      ## every move (`followDebuggerCall`). The desktop and the web turn it
+      ## on; the terminal does not, because it keeps its call-stack cursor in
+      ## `selectedEntry`.
 
     # -- Search-result reveal (codetracer#860) --
     revealScroll*: Signal[RevealScroll]
@@ -220,7 +230,7 @@ type
 # PLAT-49 part B (finding 8): ONE CALL ROW, SEMANTICALLY
 # ---------------------------------------------------------------------------
 #
-# The desktop's calltrace row (`views/isonim_calltrace_view.renderCallLineRowWeb`)
+# The desktop's calltrace row (`views/isonim_calltrace_view.renderCallLineRow`)
 # is: a depth offset; a toggle (`.collapse-call-img` / `.expand-call-img` /
 # `.dot-call-img`); `.call-text` — `name #index`; `.call-args` — `(` then each
 # `.call-arg` as `name=` + value, `, ` between them, `)`; and `.return` — ` => `
@@ -452,6 +462,12 @@ proc selectCall*(vm: CalltraceVM; callKey: string) =
   vm.selectedCallKey.val = callKey
   vm.followSelectedCall()
 
+proc followDebuggerCall*(vm: CalltraceVM; follow = true) =
+  ## Make the selection follow the call the debugger is in after every move
+  ## (Click-Navigation.md: the desktop marks the current call). Off by
+  ## default: the terminal keeps its call-stack cursor in `selectedEntry`.
+  vm.followsDebuggerCall = follow
+
 proc toggleExpand*(vm: CalltraceVM; lineIndex: int64) =
   ## Toggle whether a calltrace node is expanded or collapsed.
   ## If the index is currently in the expanded set it is removed;
@@ -566,11 +582,27 @@ proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
     vm.store.requestHistoricalNavigation("ct/calltrace-jump",
       calltraceJumpArgs(line.location, line.rrTicks, line.codeGeneration))
 
+proc applySearchAnswer*(vm: CalltraceVM; body: JsonNode) =
+  ## Apply the body of a `ct/search-calltrace` answer (`{"calls": [...],
+  ## "total"}`, the replay server's `CallSearchResponseBody`). Each call is
+  ## named and located as the calltrace row for the same call is
+  ## (`callLineOf`), so a click on it sends the same `ct/calltrace-jump`.
+  var results: seq[CalltraceSearchResult] = @[]
+  for call in body{"calls"}.getElems:
+    let wire = callLineWireOf(%*{"content": {"call": call}})
+    if wire.isNone:
+      continue
+    let row = callLineOf(wire.get, 0'i64)
+    results.add CalltraceSearchResult(
+      name: row.name, key: row.callKey, rrTicks: row.rrTicks,
+      location: row.location, codeGeneration: row.codeGeneration)
+  vm.backendSearchResults.val = results
+  vm.backendSearchTotal.val = max(results.len, body{"total"}.getInt(results.len))
+
 proc setSearchQuery*(vm: CalltraceVM; query: string) =
   ## Update the search query. Sends the query to the backend via
-  ## ct/search-calltrace and also updates the local highlightedMatches.
-  ## The backend response arrives via registerSearchRes in calltrace.nim
-  ## which calls setBackendSearchResults.
+  ## ct/search-calltrace and applies the answer (`applySearchAnswer`) unless
+  ## the query changed while it was in flight.
   if not vm.collabCore.isNil:
     discard vm.collabCore.dispatchLocalViewOp(
       vokSetCalltraceSearch,
@@ -591,13 +623,22 @@ proc setSearchQuery*(vm: CalltraceVM; query: string) =
     let w = listWindow(vm.viewport.val)
     if w.count > 0:
       args["limit"] = %w.count
-    discard vm.store.backend.send("ct/search-calltrace", args)
+    let theVm = vm
+    async_compat.onComplete(vm.store.backend.send("ct/search-calltrace", args),
+      proc(response: JsonNode) =
+        if theVm.searchQuery.val == query and responseSucceeded(response):
+          theVm.applySearchAnswer(responseBody(response)),
+      proc(message: string) = discard)
+  else:
+    vm.backendSearchResults.val = @[]
+    vm.backendSearchTotal.val = 0
 
 proc setBackendSearchResults*(vm: CalltraceVM;
     results: seq[CalltraceSearchResult]) =
-  ## Update the backend search results. Called by the legacy calltrace
-  ## component when it receives CtCalltraceSearchResponse.
+  ## Install search results decoded elsewhere — the VS Code extension's
+  ## component, and fixtures.
   vm.backendSearchResults.val = results
+  vm.backendSearchTotal.val = results.len
 
 proc revealRow(vm: CalltraceVM; row: int64) =
   ## Scroll the pane so `row` is in the middle of the rows it shows: the
@@ -983,6 +1024,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       rawIgnorePatterns: rawIgnorePatterns,
       backendSearchResults: backendSearchResults,
       revealScroll: revealScroll,
+      backendSearchTotal: createSignal(0),
       rowHeightPx: rowHeightPx,
       fallbackStack: fallbackStack,
       visibleLines: visibleLines,
@@ -1025,6 +1067,27 @@ proc createCalltraceVM*(store: ReplayDataStore;
       if not mayIssueBackendCommands(runtimeRole):
         return
       untrack(proc() = vm.requestWindow())
+
+    # Following the debugger's call (`followsDebuggerCall`): after each move,
+    # once a section answered for the new stop names the line of the call
+    # the debugger is in (the engine's `currentCallLineIndex`), the selection
+    # follows that call by its key — what the desktop's
+    # `CalltraceComponent.onCompleteMove` did with the move's location key.
+    # Once per stop, so a row the reader selects afterwards stays selected.
+    var followedStop = ""
+    createEffect proc() =
+      let lines = store.calltrace.lines.val
+      let start = store.calltrace.startLineIndex.val
+      let current = store.calltrace.currentLineIndex.val
+      let stop = stopIdentityOf(store.debugger.val)
+      untrack(proc() =
+        if not vm.followsDebuggerCall or stop == followedStop or current < 0:
+          return
+        let at = current - start
+        if at < 0 or at >= lines.len.int64:
+          return
+        followedStop = stop
+        vm.selectCall(lines[at.int].callKey))
 
     # Search-result reveal (codetracer#860): each change to the section held,
     # to where the engine says the current call is, or to the debugger's
