@@ -3083,6 +3083,13 @@ jobs:
         # read.
         run: nix develop .#devShells.x86_64-linux.default --command just test-css-token-resolution
 
+      - name: The light theme paints its panels and editor ground from the light palette
+        # The light stylesheet once carried every design-token surface in its
+        # DARK value (#282828 behind codetracerWhite's text, 1.56:1) and
+        # compiled clean, so only the compiled output shows it. Same
+        # dependencies as the step above: the dev shell's `stylus`.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-light-theme-grounds
+
       - name: Enforce the platform facade's host-free build (NS1)
         # Noir-Studio.milestones.org NS1: "A build configuration that **does
         # not link the host modules**, so a direct call fails to compile" and

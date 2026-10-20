@@ -803,8 +803,13 @@
     padding-right: 0.5em
 
 // TODO: Fix event-selected
+//
+// The selected row's ground is the design system's selection surface,
+// `colors-editor-surface-select` — the token whose Dark value is the #3E3E3B
+// this rule used to spell as a literal. As a literal it stayed dark in the
+// light theme, a dark bar under the light theme's dark text.
 .event-selected
-  background: #3E3E3B !important
+  background: colors-editor-surface-select !important
 
 .code-state-line
   color:colors-ui-text-primary-body

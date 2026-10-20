@@ -9,6 +9,9 @@
 #   * stylus, into src/frontend/styles/generated/ — the desktop's stylesheets
 #     import it. The stylus keeps its references symbolic (`a = b`) and lets
 #     stylus resolve them; its bytes are unchanged by the second emitter.
+#     Each layer whose tokens publish a `Light` mode also gets
+#     `<layer>-light.styl`, which `index.styl` imports when the stylesheet sets
+#     `COLOR_MODE = "Light"` (the desktop's light theme does).
 #   * (optional, `--nim-out FILE`) a Nim module of RESOLVED token constants,
 #     every colour token of the `mapped` layer resolved through `alias` and
 #     `brand` to a `#rrggbb` hex in BOTH colour modes (Dark and Light). The
@@ -36,13 +39,28 @@ POSITIONAL=()
 NIM_OUT=""
 EDITOR_THEME_DIR=""
 while [ $# -gt 0 ]; do
-  case "$1" in
-    --nim-out) NIM_OUT="${2:?--nim-out needs a file path}"; shift 2 ;;
-    --nim-out=*) NIM_OUT="${1#--nim-out=}"; shift ;;
-    --editor-theme) EDITOR_THEME_DIR="${2:?--editor-theme needs a directory}"; shift 2 ;;
-    --editor-theme=*) EDITOR_THEME_DIR="${1#--editor-theme=}"; shift ;;
-    *) POSITIONAL+=("$1"); shift ;;
-  esac
+	case "$1" in
+	--nim-out)
+		NIM_OUT="${2:?--nim-out needs a file path}"
+		shift 2
+		;;
+	--nim-out=*)
+		NIM_OUT="${1#--nim-out=}"
+		shift
+		;;
+	--editor-theme)
+		EDITOR_THEME_DIR="${2:?--editor-theme needs a directory}"
+		shift 2
+		;;
+	--editor-theme=*)
+		EDITOR_THEME_DIR="${1#--editor-theme=}"
+		shift
+		;;
+	*)
+		POSITIONAL+=("$1")
+		shift
+		;;
+	esac
 done
 set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
@@ -263,6 +281,44 @@ for name in layers:
 
 emitted_layers = layers
 
+# ---------------------------------------------------------------------------
+# The LIGHT colour mode, for the desktop's light theme.
+#
+# The files above carry each token's default `$value`, which is the design
+# system's Dark mode, and every stylesheet imports them — the light one too,
+# so until this existed the light theme painted its panels and its editor's
+# ground with the DARK surfaces. For each layer whose tokens publish a
+# `Light` mode (today: `mapped`), `<layer>-light.styl` re-assigns exactly the
+# tokens whose Light value differs from their default, and `index.styl`
+# imports it after the layers when the importing stylesheet has set
+# `COLOR_MODE = "Light"` (the light theme's palette file does, before any
+# import). Because the override lives INSIDE the index, it is re-applied by
+# every `@import "../generated/index"` a component makes — a re-assignment
+# placed in the theme file instead would be clobbered by the next re-import.
+#
+# Only with no mode argument: a stylus generated for ONE mode already is that
+# mode. The dark stylesheets never set `COLOR_MODE`, so their output is
+# unchanged by this.
+# ---------------------------------------------------------------------------
+LIGHT_MODE = "Light"
+light_layers = []
+if not SELECT_MODE:
+    for name in layers:
+        light = flatten_tokens(documents[name], mode=LIGHT_MODE)
+        changed = {p: t for p, t in light.items() if t["value"] != flats[name][p]["value"]}
+        if not changed:
+            continue
+        body = render_file(name, changed, known_vars).split("\n", 3)
+        header = [
+            f"// Auto-generated from {name}.json: its `{LIGHT_MODE}` colour mode.",
+            f"// Source layer: {name}",
+            f"// Only the tokens whose {LIGHT_MODE} value differs from their default $value",
+            f"// (= {name}.styl). index.styl imports this after the layers when",
+            f"// COLOR_MODE == \"{LIGHT_MODE}\".",
+        ]
+        (OUT_DIR / f"{name}-light.styl").write_text("\n".join(header + body[2:]), encoding="utf-8")
+        light_layers.append(name)
+
 # Font paths are relative to the compiled CSS output location
 # (src/build-debug/frontend/styles/), so ../../../../libs/codetracer-design-system/
 # resolves back to the design system submodule at the repo root.
@@ -327,12 +383,21 @@ index_out = "\n".join([
     "// Note: fonts.styl is NOT included here to avoid duplicate @font-face rules.",
     "// Fonts are imported once via components/font_family.styl in codetracer.styl.",
     *[f'@import "{name}.styl"' for name in emitted_layers],
+    *([
+        f"// The {LIGHT_MODE} colour mode: set `COLOR_MODE = \"{LIGHT_MODE}\"` before the first",
+        "// import (the light theme's palette file does) and every import of this",
+        f"// index paints from the design system's {LIGHT_MODE} palette.",
+        f'if COLOR_MODE is defined and COLOR_MODE == "{LIGHT_MODE}"',
+        *[f'  @import "{name}-light.styl"' for name in light_layers],
+    ] if light_layers else []),
     "",
 ])
 (OUT_DIR / "index.styl").write_text(index_out, encoding="utf-8")
 
 for name in emitted_layers:
     print(f"[OK] wrote      : {OUT_DIR / (name + '.styl')}")
+for name in light_layers:
+    print(f"[OK] wrote      : {OUT_DIR / (name + '-light.styl')}")
 print(f"[OK] wrote      : {OUT_DIR / 'fonts.styl'}")
 print(f"[OK] wrote      : {OUT_DIR / 'index.styl'}")
 

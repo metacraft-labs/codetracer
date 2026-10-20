@@ -1,5 +1,14 @@
 @import "defaults"
 
+// The design system's colour mode this theme paints in. Every rule that reads
+// a design-token variable (`colors-ui-surface-base-panel`, …) gets its value
+// from `generated/index.styl`, and that index re-assigns the `Light` mode's
+// values (`generated/mapped-light.styl`) whenever this is set — on every
+// import, including the ones components make themselves. Without it the
+// tokens keep their default value, which is the DARK mode, and the panels and
+// the editor's ground paint dark under this light palette.
+COLOR_MODE = "Light"
+
 BOLD_WEIGHT=500
 
 // Design system light-mode palette (clay / warm neutral)

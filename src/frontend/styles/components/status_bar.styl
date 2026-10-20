@@ -98,8 +98,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 // what compiler output is read in. It costs nothing here — every `-primary`
 // severity token clears AA on this surface by a wide margin.
 //
-// The measured result, identical in both themes (see the note on Block B below
-// for why "both themes" is one number here):
+// The measured result, in the DARK themes (the light theme paints the same
+// tokens in their Light mode; see the note on Block B below):
 //
 //   tier                            before    after   token
 //   `.build-output-line`            1.42:1   13.29:1  colors-ui-text-primary-body
@@ -266,17 +266,17 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 // does not inherit the base colour declared there; without the `color` on this
 // block it would keep inheriting `canvastext`.
 //
-// ONE PALETTE, BOTH THEMES — so the "check the other theme" question has a
-// short answer here and it is not "it's fine". `colors-*` are Stylus
-// compile-time variables from `styles/generated/`, and neither
-// `default_white_theme.styl` nor `default_dark_theme.styl` redefines a single
-// one of them (`grep '^colors-' on both returns nothing`). Compiling
-// `default_dark_theme_electron.styl` and `default_white_theme_electron.styl`
-// and diffing the two `.build-panel`/`#build` blocks gives ZERO differing
-// bytes. The panel is `#282828` with the same ink in the light theme as in the
-// dark one, so every ratio in the table above is one number, not two — and a
-// future Light-mode token set will move both blocks together because both
-// blocks name tokens.
+// ONE SET OF TOKENS, TWO MODES. `colors-*` are Stylus compile-time variables
+// from `styles/generated/`. The dark themes take each token's default (Dark)
+// value; `default_white_theme.styl` sets `COLOR_MODE = "Light"`, so the light
+// theme takes the design system's Light value of the SAME tokens
+// (`generated/mapped-light.styl`): this panel is `#282828` in the dark builds
+// and `ui/surface/base/panel` Light (`#e6e2db`) in the light one, and the ink
+// follows. The table above is the dark measurement. On the Light panel some of
+// the design system's own Light text tiers (error, warning, success, caption,
+// label-subtle) fall below AA; those pairs are filed against the design system
+// and counted by `build-panel-contrast-guard.spec.ts` (`LIGHT_FILED_PAIRS`),
+// not adjusted here.
 #build, #build-errors
   background-color: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body

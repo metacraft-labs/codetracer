@@ -31,14 +31,13 @@
  * needs no Electron, no `ct`, no recorded trace — it applies the BUILT theme
  * stylesheet to the panel's own markup in a plain browser page.
  *
- * IT RUNS BOTH THEMES, and the answer is more interesting than "both pass".
- * `colors-*` are Stylus compile-time variables and neither
- * `default_white_theme.styl` nor `default_dark_theme.styl` redefines one, so
- * the compiled `.build-panel` block is byte-identical in the light and dark
- * builds — the panel is a dark island in the light theme.  That is asserted
- * directly by `verify_the_light_theme_is_not_a_different_panel`, so the day a
- * Light-mode token set does land, this file goes red rather than quietly
- * measuring the dark theme twice and reporting it as coverage.
+ * IT RUNS BOTH THEMES, on different palettes.  The light theme sets
+ * `COLOR_MODE = "Light"`, so its `colors-*` take the design system's Light
+ * values: the panel sits on `ui/surface/base/panel` Light (`#e6e2db`) where the
+ * dark builds have `#282828`.  `verify_the_light_theme_paints_the_light_palette`
+ * asserts that, so the light run is never the dark run measured twice.  Some
+ * of the design system's Light text tiers fail AA on that ground; those pairs
+ * are filed, not adjusted, and COUNTED in `LIGHT_FILED_PAIRS`.
  *
  * WHAT MAKES IT A GATE RATHER THAN A THRESHOLD.  A minimum nothing can violate
  * is not a check.  Two arms re-paint the panel with the colours that actually
@@ -66,6 +65,13 @@ import {
   type ContrastRegion,
 } from "../../page-objects/status-footer-contrast";
 import { resolveBuiltThemeCss } from "../../lib/built-theme-css";
+import {
+  DESIGN_SYSTEM_CONTRAST_ISSUE,
+  designTokenHex,
+  rgbToHex,
+  unfiledLightFailures,
+  type FiledLightPair,
+} from "../../lib/light-theme-contrast";
 
 /** Repo root, from `src/tests/gui/tests/build`. */
 const repoRoot = path.resolve(__dirname, "../../../../..");
@@ -90,6 +96,22 @@ const THEMES = [
   "default_dark_theme_extension.css",
   "default_white_theme_electron.css",
 ] as const;
+
+/**
+ * The light theme's BUILD-panel pairs that the DESIGN SYSTEM fails: its Light
+ * status and caption tiers on `ui/surface/base/panel` Light (#e6e2db), filed
+ * in `DESIGN_SYSTEM_CONTRAST_ISSUE`. COUNTED — see `lib/light-theme-contrast.ts`.
+ */
+const LIGHT_FILED_PAIRS: readonly FiledLightPair[] = [
+  { selector: "#panel-failed .build-header.build-failed .build-command-label", ratio: 3.74, measured: "ui/text/error/primary #dc2626, 3.74:1" },
+  { selector: "#build .build-stderr", ratio: 3.74, measured: "ui/text/error/primary #dc2626, 3.74:1" },
+  { selector: "#build .build-line-error", ratio: 3.74, measured: "ui/text/error/primary #dc2626, 3.74:1" },
+  { selector: "#panel-succeeded .build-header.build-succeeded .build-command-label", ratio: 2.55, measured: "ui/text/success/primary #16a34a, 2.55:1" },
+  { selector: "#panel-running .build-scroll-btn.active", ratio: 2.55, measured: "ui/text/success/primary #16a34a, 2.55:1" },
+  { selector: "#build .build-line-warning", ratio: 2.76, measured: "ui/text/warning/primary #ea580c, 2.76:1" },
+  { selector: "#panel-running .build-duration", ratio: 3.55, measured: "ui/text/primary/caption #7a756a, 3.55:1" },
+  { selector: "#panel-running .build-stop-btn.disabled", ratio: 2.76, measured: "ui/text/primary/label-subtle #8e8778, 2.76:1" },
+];
 
 /**
  * The built stylesheet is the artefact under test, so it is resolved by
@@ -324,6 +346,29 @@ test.describe("build panel contrast (WCAG 1.4.3), /noir/demo BUILD pane", () => 
           "spec is measuring nothing",
       ).toEqual([]);
 
+      if (theme === "default_white_theme_electron.css") {
+        // The design system's own Light failures are filed, not adjusted;
+        // every other tier must clear AA here exactly as in the dark builds.
+        const { unfiled, nowPassing } = unfiledLightFailures(
+          contrastFailures(probes, BUILD_PANEL_REGIONS),
+          LIGHT_FILED_PAIRS,
+        );
+        expect(
+          nowPassing,
+          "these filed light-theme pairs no longer fail at their registered " +
+            "ratio. If they now pass, the palette was fixed: remove them from " +
+            "LIGHT_FILED_PAIRS and from " + DESIGN_SYSTEM_CONTRAST_ISSUE + ". If " +
+            "they fail at another ratio, their colours changed: re-measure and " +
+            "re-file them" + "\n\n" + formatContrastTable(probes),
+        ).toEqual([]);
+        expect(
+          unfiled,
+          `build panel tiers below 4.5:1 in ${theme} that the design system ` +
+            "is not filed as failing\n\n" + formatContrastTable(probes),
+        ).toEqual([]);
+        return;
+      }
+
       expect(
         contrastFailures(probes, BUILD_PANEL_REGIONS),
         `build panel tiers below 4.5:1 in ${theme}\n\n` +
@@ -332,29 +377,21 @@ test.describe("build panel contrast (WCAG 1.4.3), /noir/demo BUILD pane", () => 
     });
   }
 
-  test("verify_the_light_theme_is_not_a_different_panel", async ({ page }) => {
-    // `colors-*` are Stylus compile-time variables and no theme redefines one,
-    // so this panel compiles identically into the light and dark builds. That
-    // is a fact worth asserting rather than assuming: it is the reason "we
-    // checked both themes" above is honest, and the day it stops being true is
-    // the day the light-theme numbers have to be re-derived instead of
-    // inherited from the dark run.
-    await layOutPanel(page, "default_dark_theme_electron.css");
-    const dark = await probeBarContrast(page, BUILD_PANEL_REGIONS);
-
-    await layOutPanel(page, "default_white_theme_electron.css");
-    const light = await probeBarContrast(page, BUILD_PANEL_REGIONS);
-
-    const shape = (probes: typeof dark) =>
-      probes.map((p) => `${p.selector} ${p.composited} on ${p.background}`);
-
-    expect(
-      shape(light),
-      "the white theme redefines no `colors-*` token today, so the BUILD " +
-        "panel is the same ink on the same `#282828` in both builds. If this " +
-        "fails, a Light-mode palette has landed and every ratio in this file " +
-        "must be re-measured against it rather than assumed from the dark run.",
-    ).toEqual(shape(dark));
+  test("verify_the_light_theme_paints_the_light_palette", async ({ page }) => {
+    // The panel's ground is `ui/surface/base/panel` in both builds, in each
+    // build's own mode. Until the light theme set `COLOR_MODE`, both compiled
+    // the same `#282828` panel and the light run measured the dark one twice.
+    const grounds: Record<string, string> = {};
+    for (const theme of ["default_dark_theme_electron.css", "default_white_theme_electron.css"]) {
+      await layOutPanel(page, theme);
+      const probes = await probeBarContrast(page, BUILD_PANEL_REGIONS);
+      const grounded = probes.filter((p) => p.found).map((p) => rgbToHex(p.background));
+      grounds[theme] = [...new Set(grounded)].join(",");
+    }
+    expect(grounds).toEqual({
+      "default_dark_theme_electron.css": designTokenHex(repoRoot, "dtColorsUiSurfaceBasePanel", "Dark"),
+      "default_white_theme_electron.css": designTokenHex(repoRoot, "dtColorsUiSurfaceBasePanel", "Light"),
+    });
   });
 
   test("verify_the_guard_refuses_the_hexes_that_shipped", async ({ page }) => {

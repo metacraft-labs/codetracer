@@ -3611,6 +3611,19 @@ test-css-token-resolution:
 test-css-token-resolution-contract:
   bash ci/test/css-token-resolution-test.sh
 
+# The desktop's light theme paints its panels, splitters, tabs and the editor's
+# ground from the design system's LIGHT palette, and the light editor's text is
+# readable on that ground. It shipped painting every one of them with the DARK
+# surfaces (#282828 behind the editor, 1.56:1 text) while both themes compiled
+# clean. Compiles the two Electron stylesheets and reads the output, like its
+# sibling above; needs `stylus`, so it runs in the dev shell; a few seconds.
+test-css-light-theme-grounds:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-css-light-theme-grounds.log) 2>&1
+  bash ci/test/css-light-theme-grounds.sh
+
 # The thirteen `test_collab_*.nim` suites, split by what they need.  The unit
 # half is pure Nim and cheap; the integration/soak half opens real localhost
 # sockets and links the GPUI shim, so it is a separate recipe rather than a

@@ -162,7 +162,11 @@ const
     (dmLight, dtEditorThemeRuleComment, dtEditorThemeExecutionLine, DesktopIssue),
     (dmLight, dtEditorThemeLineNumber, dtEditorThemeGround, DesktopIssue),
     (dmLight, dtEditorThemeRuleString, dtEditorThemeGround, DesktopIssue),
-    (dmLight, dtEditorThemeRuleDefault, dtEditorThemeGround, DesktopIssue)]
+    # Since the desktop's light theme paints from the Light palette, its
+    # editor ground is the light panel (#e6e2db): the default text clears AA
+    # there (7.31:1, no longer filed) and codetracerWhite's keyword blue,
+    # chosen for a near-white ground, does not (2.09:1).
+    (dmLight, dtEditorThemeRuleKeyword, dtEditorThemeGround, DesktopIssue)]
     ## PLAT-47: THE PAIRS THE DESKTOP ITSELF RENDERS BELOW THE FLOOR, which the
     ## terminal now reproduces because it must EQUAL the desktop: its editor is
     ## the desktop's Monaco theme (measured resting line numbers 2.04:1, a
@@ -171,7 +175,8 @@ const
     ## the desktop's own panel, 2.35:1 against the terminal's divider ground).
     ## Light is opt-in (`--theme=light`; detection never selects it) and its
     ## editor is the desktop's `codetracerWhite` theme on the ground the
-    ## desktop's light theme measurably draws (its dark panel, #282828). A
+    ## desktop's light theme measurably draws (the design system's Light
+    ## panel, `ui/surface/base/panel`, as in the dark theme). A
     ## SEPARATE register from the design system's, which does
     ## not grow: these are the desktop's pairs, filed against the desktop.
     ## COUNTED, like the other.
@@ -501,16 +506,13 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
       # DELIVERABLE 8: NO CELL shows the terminal's own background.
       ck f.cells == Wide.cols * Wide.rows
       ck f.unfilled == 0
-      # THE EDITOR SITS WHERE THE DESKTOP'S DOES (PLAT-47). Dark: on the
-      # pane's own surface — the desktop renders Monaco transparent over its
-      # pane (PLAT-46 had kept the two apart by OKLab distance). Light: on the
-      # ground the desktop's light theme MEASURABLY draws, its dark panel
-      # (`plat47-desktop-parity-light.electron.json`), which is not the design
-      # system's light panel the terminal's chrome uses.
-      if mode == dmDark:
-        ck f.editorBg == f.panelBg
-      else:
-        ck f.editorBg != f.panelBg
+      # THE EDITOR SITS WHERE THE DESKTOP'S DOES (PLAT-47): on the pane's own
+      # surface, in both modes — the desktop renders Monaco transparent over
+      # its pane (PLAT-46 had kept the two apart by OKLab distance), and its
+      # light theme paints that pane from the design system's Light palette
+      # (`plat47-desktop-parity-light.electron.json` measures it), the same
+      # light panel the terminal's chrome uses.
+      ck f.editorBg == f.panelBg
       # CONTRAST, over every painted pair on this screen.
       var pairs = 0
       let bad = contrastViolations(sess, Wide.cols, Wide.rows, mode, pairs)
@@ -802,8 +804,8 @@ suite "PLAT-46 Tier 2: the terminal painted from the design system":
         # (PLAT-47, `AutoDetectSelectsLight`) still painted Dark.
         let ed = parseHexColour(hexT(dtEditorThemeGround, dmDark))
         ck capture.contains("48;2;" & $ed.r & ";" & $ed.g & ";" & $ed.b)
-        # The LIGHT panel is the marker: the light editor's ground is the
-        # desktop's measured #282828, the same as the dark one.
+        # The LIGHT panel is the marker: it is the light editor's ground and
+        # the light chrome's, and nothing in the Dark mode paints it.
         let light = parseHexColour(hexT(dtColorsUiSurfaceBasePanel, dmLight))
         ck not capture.contains("48;2;" & $light.r & ";" & $light.g & ";" &
                                 $light.b)

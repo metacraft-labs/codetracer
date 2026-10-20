@@ -1013,7 +1013,15 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   // are rendered as TEXT glyphs (`text icon.icon` in
   // `isonim_auto_hide_collapsed_icons_view.nim`), not as background images,
   // so the stricter text threshold is the honest one to hold them to.
-  color: colors-ui-icon-primary-default
+  //
+  // It is spelled through the design system's grey-100 directly rather than
+  // through the icon role, because the chip (resting and hovered) is a FIXED
+  // colour in both themes and the role is not: the light theme paints from
+  // the Light palette, whose `colors-ui-icon-primary-default` is a near-black
+  // (#353430) that sits on `#3a5070` at 1.52:1. The glyph's ground decides its
+  // colour, and that ground does not change with the theme. In the dark theme
+  // the two spellings are the same #dddddd.
+  color: colors-neutral-cold-100
   cursor: pointer
   padding: 1px 3px
   border-radius: 2px
