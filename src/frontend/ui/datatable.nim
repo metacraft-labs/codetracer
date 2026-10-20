@@ -76,6 +76,25 @@ proc measuredNodeHeight(node: Node): int =
   if result == 0:
     result = node.toJs.clientHeight.to(int)
 
+proc viewportSiblingsHeight(viewport, container: js): float {.importjs: """
+  (function(v, c) {
+    let total = 0;
+    for (const child of v.children) {
+      if (child === c) continue;
+      const style = getComputedStyle(child);
+      if (style.display === "none" || style.position === "absolute" ||
+          style.position === "fixed") continue;
+      const r = child.getBoundingClientRect();
+      total += r.height + (parseFloat(style.marginTop) || 0) +
+        (parseFloat(style.marginBottom) || 0);
+    }
+    return total;
+  })(#, #)""".}
+  ## The height of what shares the viewport with the table — a strip the
+  ## panel draws above it (the event log's column header) or below it — that
+  ## the table must leave room for.  Out-of-flow children overlay rather than
+  ## take room, so they are not counted.
+
 proc measureRenderedRowHeight(self: DataTableComponent): int =
   let scrollBody = self.tableScrollBody()
 
@@ -189,7 +208,14 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
     # surrounding `.data-table` flex item. Reusing the wrapper height keeps the
     # previous explicit size around, which breaks visible-row calculations after zooming.
     let viewport = self.tableViewport()
-    let viewportHeight = measuredNodeHeight(viewport)
+    # Less whatever else stands in the viewport with the table: without this
+    # the event log's column header (drawn above the table, inside the same
+    # `.data-table`) made the scroll body exactly that much too tall, so its
+    # bottom — and the horizontal scrollbar on it — slid under the footer.
+    let siblings =
+      if viewport.isNil or viewport == container: 0
+      else: roundLayoutPixels(viewportSiblingsHeight(viewport.toJs, container.toJs))
+    let viewportHeight = max(measuredNodeHeight(viewport) - siblings, 0)
     let containerHeight =
       if viewportHeight > 0:
         viewportHeight

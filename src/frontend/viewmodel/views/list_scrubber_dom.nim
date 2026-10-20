@@ -56,7 +56,6 @@ when defined(js):
       dragging: bool
 
   const
-    TrackPx = 10
     MinThumbPx = 20
     MarkPx = 3
 
@@ -135,6 +134,10 @@ when defined(js):
     s.track.setStyleJs("top", cstring($int(s.container.offsetTopIn(s.host)) & "px"))
     s.track.setStyleJs("height", cstring($h & "px"))
     let span = m.thumbSpan(h, MinThumbPx)
+    # Nothing to scroll — every row is in view — shows no thumb, as the
+    # app-wide scrollbar shows none; the track stays for the "now" mark.
+    let fits = m.totalKnown and m.visible >= m.total
+    s.thumb.setStyleJs("display", if fits: cstring"none" else: cstring"block")
     s.thumb.setStyleJs("top", cstring($span.start & "px"))
     s.thumb.setStyleJs("height", cstring($span.length & "px"))
     s.track.setAttrJs("data-ct-scrub-total", cstring($m.total))
@@ -185,7 +188,7 @@ when defined(js):
     s.thumb = createDiv("ct-list-scrubber-thumb")
     s.mark = createDiv("ct-list-scrubber-mark")
     s.track.setAttrJs("data-ct-list-scrubber", cstring(paneId))
-    s.track.setStyleJs("width", cstring($TrackPx & "px"))
+    # The track's width is the app-wide scrollbar's (`list_scrubber.styl`).
     s.mark.setStyleJs("height", cstring($MarkPx & "px"))
     s.track.appendChildJs(s.thumb)
     s.track.appendChildJs(s.mark)

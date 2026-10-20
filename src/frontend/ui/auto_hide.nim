@@ -67,6 +67,7 @@ import
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
+  from std/strutils import nil
   from ../viewmodel/views/isonim_auto_hide_bottom_strip_view import
     AutoHideBottomStripRecord, AutoHideBottomStripCallbacks,
     renderAutoHideBottomStripInto
@@ -348,8 +349,8 @@ proc clearDockedFocusClass() =
 
 proc hideDockedPanel*()
 proc cancelHoverPreview*()
-proc hideOverlay*()
-proc deferredUpdateGLSize()
+proc hideOverlay*(slideOut = true)
+proc deferredUpdateGLSize*()
 
 
 # ---------------------------------------------------------------------------
@@ -840,7 +841,7 @@ proc updateGLSize() =
   if not autoHideLayout.isNil:
     {.emit: "`autoHideLayout`.updateSize();".}
 
-proc deferredUpdateGLSize() =
+proc deferredUpdateGLSize*() =
   ## Schedule two GL size updates: one on the next animation frame (so the
   ## browser has reflowed the new docked-panel width before GL reads it)
   ## and one after the 150ms CSS transition completes.  Both are needed:
@@ -902,9 +903,13 @@ proc showDockedPanel*(panel: AutoHidePanel) =
   if autoHideState.dockedVisible:
     hideDockedPanel()
 
-  # If this panel is currently shown in the hover overlay, close that too.
+  # If this panel is currently shown in the hover overlay, close that too —
+  # at once, without the slide-out.  It is a hand-off, not a close: the panel's
+  # content moves from the overlay into the docked area right below, in the
+  # same place, so a slide-out only swept an emptied grey overlay down across
+  # the panel that had just docked (Nikolay, 2026-10-15: footer tab glitch).
   if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
-    hideOverlay()
+    hideOverlay(slideOut = false)
 
   let contentEl = document.getElementById(dockedContentId(panel.edge))
   let containerEl = document.getElementById(dockedContainerId(panel.edge))
@@ -1186,8 +1191,25 @@ proc cancelHoverPreview*() =
     windowClearTimeout(hoverPreviewTimerId)
     hoverPreviewTimerId = -1
 
-proc isEdgeCollapsed*(edge: AutoHideEdge): bool =
-  ## Returns true when the given edge should render in collapsed (1px) mode.
+## REVEALED EDGES.  A minimal (collapsed) edge is drawn as a thin line, but
+## while one of its panels is open the edge is REVEALED: its strip comes back
+## with its ordinary tabs, floating over the layout rather than pushing it
+## aside, and the panel opens attached to its tab exactly as on an expanded
+## edge (Nikolay, 2026-10-15).  So there is one tab-and-panel design, hidden
+## until you reach for it, instead of a second one — the collapsed overlay's
+## own tab column (`overlay side tabs`), which a revealed edge never shows.
+##
+## Set whenever an overlay opens on a minimal edge (`doShowOverlayImpl`) and
+## cleared when that overlay has finished closing (`hideOverlay`'s teardown).
+## `revealClosing` covers the slide-out in between, so the strip leaves with
+## the panel.
+var edgeRevealed: array[AutoHideEdge, bool]
+var revealClosing: array[AutoHideEdge, bool]
+
+proc isEdgeMinimal*(edge: AutoHideEdge): bool =
+  ## The edge's saved presentation preference: a thin line instead of a strip.
+  ## Unaffected by a temporary reveal — this is what the « / » toggle and the
+  ## saved state mean.
   if autoHideState.isNil:
     return false
   case edge
@@ -1195,41 +1217,136 @@ proc isEdgeCollapsed*(edge: AutoHideEdge): bool =
   of Right:  autoHideState.rightMinimal
   of Bottom: false  # Bottom uses status bar icons, not 1px strip
 
-proc hideOverlay*() =
+proc isEdgeRevealed*(edge: AutoHideEdge): bool =
+  edge != Bottom and edgeRevealed[edge]
+
+proc isEdgeRevealClosing*(edge: AutoHideEdge): bool =
+  edge != Bottom and revealClosing[edge]
+
+proc isEdgeCollapsed*(edge: AutoHideEdge): bool =
+  ## Returns true when the given edge should render in collapsed (thin line)
+  ## mode right now: minimal, and not revealed by an open panel.
+  isEdgeMinimal(edge) and not isEdgeRevealed(edge)
+
+## Set when a click on a collapsed line CLOSES its overlay; cleared once the
+## pointer leaves the hover zone (auto_hide_overlay.nim, `ctZoneUpdate`).
+## Closing re-renders the strip, which puts a fresh line element under the
+## pointer, and the browser reports that as the pointer entering the line —
+## which would start the hover preview and reopen the panel just closed.
+var suppressLineHoverUntilLeave* = false
+
+proc clickModeActive*(edge: AutoHideEdge): bool =
+  ## A panel of THIS edge — a sidebar or the status bar — is open BY CLICK:
+  ## pinned open in the overlay, or docked.  While one is, hovering that
+  ## edge's tabs (and a sidebar's collapsed line) opens nothing: the tab text
+  ## only brightens to say it is clickable, and another panel opens on a
+  ## click.  Scoped to the edge: a panel held open on another edge leaves
+  ## this one opening on hover as before (Nikolay, 2026-10-15).
+  if autoHideState.isNil:
+    return false
+  (autoHideState.overlayVisible and autoHideState.pinnedOpen and
+     not autoHideState.activeOverlay.isNil and
+     autoHideState.activeOverlay.edge == edge) or
+  (autoHideState.dockedVisible and not autoHideState.dockedPanel.isNil and
+     autoHideState.dockedPanel.edge == edge)
+
+proc clearLineHoverSuppress*() =
+  suppressLineHoverUntilLeave = false
+  # Off the strips altogether: the tab-level pause is over too (it is normally
+  # cleared on leaving its tab, which a collapsing revealed strip removes).
+  suppressHoverAfterClose = false
+
+## How long the overlay takes to slide out when it closes — the same as it
+## takes to slide in (`OVERLAY_SLIDE_DURATION`, auto_hide.styl; keep the two
+## equal).  The panel stays on screen, content and all, for this long.
+const OVERLAY_SLIDE_OUT_MS = 100
+
+## Pending end-of-slide cleanup for a closing overlay; -1 when none.
+var overlayCloseTimerId = -1
+
+proc cancelOverlayClose() =
+  ## A panel is opening while the previous one is still sliding out: drop the
+  ## pending cleanup (the opening panel owns the overlay now) and the slide-out.
+  if overlayCloseTimerId != -1:
+    windowClearTimeout(overlayCloseTimerId)
+    overlayCloseTimerId = -1
+  let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+  if not overlayEl.isNil:
+    overlayEl.classList.remove(cstring"closing")
+
+proc hideOverlay*(slideOut = true) =
   ## Hide the currently visible auto-hide overlay.
+  ##
+  ## `slideOut = false` removes it at once — for a hand-off such as docking
+  ## the same panel (`showDockedPanel`), where there is nothing to animate.
   ## The live DOM element is detached from the overlay but NOT destroyed —
   ## it remains referenced by the AutoHidePanel and will be reparented
   ## back into the overlay on next show, or into GL on unpin.
+  ##
+  ## A visible overlay slides back out to its edge first (`closing`,
+  ## auto_hide.styl), the way it slid in (Nikolay, 2026-10-15).  The STATE is
+  ## closed at once — every caller and the strip re-render see a closed
+  ## overlay immediately — and only the DOM teardown waits out the slide, so
+  ## the panel leaves with its content rather than emptying first.
   if autoHideState.isNil:
     return
 
   cancelHoverPreview()
   autoHideState.pinnedOpen = false
 
-  # Before clearing state, detach the live element from the overlay so it
-  # survives. We must NOT use innerHTML = "" which would destroy child nodes.
   let activePanel = autoHideState.activeOverlay
-  let contentEl = document.getElementById(cstring"auto-hide-overlay-content")
-  if not contentEl.isNil and not activePanel.isNil and not activePanel.liveElement.isNil:
-    # Detach the live element — removeChild returns the node, keeping it alive.
-    if activePanel.liveElement.parentNode == cast[Node](contentEl):
-      contentEl.removeChild(activePanel.liveElement)
-  elif not contentEl.isNil:
-    # No live element to preserve — safe to clear.
-    contentEl.innerHTML = cstring""
-
   autoHideState.activeOverlay = nil
   autoHideState.overlayVisible = false
+  let revealedEdge = if not activePanel.isNil and isEdgeRevealed(activePanel.edge):
+      activePanel.edge
+    else:
+      Bottom
 
-  # Remove the "visible" CSS class from the overlay container.
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
-  if not overlayEl.isNil:
-    overlayEl.classList.remove(cstring"visible")
-    # Remove edge-specific classes.
-    overlayEl.classList.remove(cstring"auto-hide-overlay-left")
-    overlayEl.classList.remove(cstring"auto-hide-overlay-right")
-    overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
-    overlayEl.classList.remove(cstring"collapsed-overlay")
+
+  proc teardown() =
+    overlayCloseTimerId = -1
+    # Re-opened while sliding out: the overlay belongs to the new panel now,
+    # and `doShowOverlayImpl` has already detached this one if it had to.
+    if autoHideState.overlayVisible:
+      return
+    # The revealed strip leaves with its panel: back to the thin line.
+    if revealedEdge != Bottom:
+      edgeRevealed[revealedEdge] = false
+      revealClosing[revealedEdge] = false
+      if not autoHideState.onChanged.isNil:
+        autoHideState.onChanged()
+    # Detach the live element from the overlay so it survives. We must NOT use
+    # innerHTML = "" which would destroy child nodes.
+    let contentEl = document.getElementById(cstring"auto-hide-overlay-content")
+    if not contentEl.isNil and not activePanel.isNil and not activePanel.liveElement.isNil:
+      # Detach the live element — removeChild returns the node, keeping it alive.
+      if activePanel.liveElement.parentNode == cast[Node](contentEl):
+        contentEl.removeChild(activePanel.liveElement)
+    elif not contentEl.isNil:
+      # No live element to preserve — safe to clear.
+      contentEl.innerHTML = cstring""
+
+    # Remove the "visible" CSS class from the overlay container.
+    if not overlayEl.isNil:
+      overlayEl.classList.remove(cstring"visible")
+      overlayEl.classList.remove(cstring"closing")
+      # Remove edge-specific classes.
+      overlayEl.classList.remove(cstring"auto-hide-overlay-left")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-right")
+      overlayEl.classList.remove(cstring"auto-hide-overlay-bottom")
+      overlayEl.classList.remove(cstring"collapsed-overlay")
+
+  if overlayCloseTimerId != -1:
+    windowClearTimeout(overlayCloseTimerId)
+    overlayCloseTimerId = -1
+  if slideOut and not overlayEl.isNil and overlayEl.classList.contains(cstring"visible"):
+    overlayEl.classList.add(cstring"closing")
+    if revealedEdge != Bottom:
+      revealClosing[revealedEdge] = true
+    overlayCloseTimerId = windowSetTimeout(teardown, OVERLAY_SLIDE_OUT_MS)
+  else:
+    teardown()
 
   if not autoHideState.onChanged.isNil:
     autoHideState.onChanged()
@@ -1240,13 +1357,17 @@ proc setEdgeMinimal*(edge: AutoHideEdge; minimal: bool) =
   if edge == Bottom:
     return
   initAutoHideState()
-  if isEdgeCollapsed(edge) == minimal:
+  if isEdgeMinimal(edge) == minimal:
     return
   cancelHoverPreview()
   if edge == Left:
     autoHideState.leftMinimal = minimal
   else:
     autoHideState.rightMinimal = minimal
+  # A reveal belongs to minimal mode; an edge leaving it has nothing to reveal.
+  if not minimal:
+    edgeRevealed[edge] = false
+    revealClosing[edge] = false
   if minimal:
     if not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay.edge == edge:
       hideOverlay()
@@ -1268,6 +1389,18 @@ proc doShowOverlayImpl(panel: AutoHidePanel) =
   ## Capture the previously active panel before updating state, so we can
   ## safely detach its live element from the overlay without destroying it.
   let previousPanel = autoHideState.lastActivePanel
+
+  # A panel may still be sliding out (`hideOverlay`); this one takes over.
+  cancelOverlayClose()
+
+  # Opening on a minimal edge reveals that edge's strip (see `edgeRevealed`);
+  # any other edge still revealed by the previous panel goes back to its line.
+  for e in [Left, Right]:
+    revealClosing[e] = false
+    if e != panel.edge:
+      edgeRevealed[e] = false
+  if isEdgeMinimal(panel.edge):
+    edgeRevealed[panel.edge] = true
 
   autoHideState.activeOverlay = panel
   autoHideState.lastActivePanel = panel
@@ -1482,10 +1615,13 @@ proc revealOverlay*(panel: AutoHidePanel) =
 
   if autoHideState.activeOverlay == panel and autoHideState.overlayVisible:
     # Already visible.  Promote a hover preview to a click-pinned overlay so it
-    # survives the pointer leaving, but re-render nothing: `pinnedOpen` feeds no
-    # rendered output, so signalling `onChanged` here would only rebuild the
-    # strip for no observable change.
-    autoHideState.pinnedOpen = true
+    # survives the pointer leaving.  `pinnedOpen` now feeds the strip (the ×
+    # shows on a pinned tab only), so the promotion re-renders it — once: a
+    # repeat call finds it pinned already and returns without signalling.
+    if not autoHideState.pinnedOpen:
+      autoHideState.pinnedOpen = true
+      if not autoHideState.onChanged.isNil:
+        autoHideState.onChanged()
     return
 
   autoHideState.pinnedOpen = true
@@ -1494,6 +1630,15 @@ proc revealOverlay*(panel: AutoHidePanel) =
 # ---------------------------------------------------------------------------
 # Strip rendering (called from layout.nim or a dedicated Karax renderer)
 # ---------------------------------------------------------------------------
+
+proc isPanelPinnedOpen*(panel: AutoHidePanel): bool =
+  ## `panel` is open because it was clicked open — docked, or in the overlay
+  ## pinned open — not shown as a hover preview.  A strip tab shows its × only
+  ## then (Nikolay, 2026-10-17): a preview goes away by itself.
+  not autoHideState.isNil and not panel.isNil and (
+    (autoHideState.dockedVisible and autoHideState.dockedPanel == panel) or
+    (autoHideState.overlayVisible and autoHideState.pinnedOpen and
+     autoHideState.activeOverlay == panel))
 
 proc contentIcon*(content: Content): cstring =
   ## Return a Unicode icon character for a Content type, used in the
@@ -1550,16 +1695,23 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive))
+      records.add(AutoHideSideStripRecord(title: $panel.title, active: isActive,
+        pinned: isPanelPinnedOpen(panel)))
 
     let panels = model.panels
     let callbacks = AutoHideSideStripCallbacks(
-      modeLabel: "Use minimal " & (if edge == Left: "left" else: "right") & " sidebar",
-      modeGlyph: (if edge == Left: "«" else: "»"),
-      onToggleMode: proc() = setEdgeMinimal(edge, true),
+      # No mode button on the strip: the sidebar toggle is in the status bar
+      # in both modes (`requestCollapsedIconZoneRender`).
+      # On a minimal edge the tabs are only up while a panel is open, so a tab
+      # click opens (pins) that panel in the overlay rather than docking it:
+      # docking would put the strip back to its line and leave a panel with
+      # no tab.  An expanded edge docks, as before.
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
-          showDockedPanel(panels[index]),
+          if isEdgeMinimal(edge):
+            showOverlay(panels[index])
+          else:
+            showDockedPanel(panels[index]),
       onClose: proc(index: int) =
         if index >= 0 and index < panels.len:
           closePanelFromStrip(panels[index]),
@@ -1568,6 +1720,24 @@ when defined(js):
           hideOverlay()
           hideDockedPanel()
           unpinPanel(autoHideLayout, panels[index]),
+      # The × on the active tab: hide the panel, docked or in the overlay, and
+      # keep the tab pinned — as the × in the status bar's tab-list menu does
+      # (Nikolay, 2026-10-16).  Not `closePanelFromStrip`, which discards it.
+      onHide: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          let panel = panels[index]
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+            hideDockedPanel()
+          if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
+            hideOverlay(),
+      # Clicking the collapsed line opens the edge's last panel (or its first)
+      # in the overlay, which on a collapsed edge carries the edge's tabs down
+      # its side (`requestOverlaySideEdgeTabsRender`) — so the click reveals
+      # the sidebar's tabs and you pick the panel.  It used to dock the panel
+      # inline: with the strip collapsed that panel had no tab and no title,
+      # so an empty one (Scratchpad) read as nothing having opened (Nikolay,
+      # 2026-10-15).  `showOverlay` is the click path: pinned open, and a
+      # second click on the line closes it again.
       onCollapsedSelect: proc() =
         if panels.len > 0:
           let target = if not autoHideState.isNil and
@@ -1575,7 +1745,35 @@ when defined(js):
               autoHideState.lastPanelByEdge[edge]
             else:
               panels[0]
-          showDockedPanel(target),
+          # This click closes it (pinned and showing → `showOverlay` toggles
+          # it off): keep the hover from reopening it until the pointer leaves.
+          let closing = not autoHideState.isNil and autoHideState.overlayVisible and
+                        autoHideState.pinnedOpen and autoHideState.activeOverlay == target
+          if closing:
+            suppressLineHoverUntilLeave = true
+          showOverlay(target),
+      # Hovering the line opens the same overlay as a preview, after the same
+      # delay as a tab (Nikolay, 2026-10-15): the edge's tabs appear on hover,
+      # and the preview closes again when the pointer leaves the line and the
+      # overlay (`.collapsed-strip-line` is in the hover zone,
+      # auto_hide_overlay.nim).  A click while it is up pins it open.
+      onCollapsedHoverEnter: proc() =
+        # Only the line's own pause applies here.  `suppressHoverAfterClose`
+        # belongs to a strip tab and is cleared when the pointer leaves that
+        # tab — but a revealed strip's tabs are gone once it collapses back to
+        # the line, so that leave never comes and the line would stay dead.
+        if panels.len > 0 and not suppressLineHoverUntilLeave and
+            not clickModeActive(edge):
+          let target = if not autoHideState.isNil and
+                          autoHideState.lastPanelByEdge[edge] in panels:
+              autoHideState.lastPanelByEdge[edge]
+            else:
+              panels[0]
+          cancelHoverPreview()
+          hoverPreviewTimerId = windowSetTimeout(proc() =
+            hoverPreviewTimerId = -1
+            showOverlayPreview(target)
+          , HOVER_PREVIEW_DELAY_MS),
       onHoverEnter: proc(index: int) =
         if index >= 0 and index < panels.len:
           # Its panel is already on screen, docked, so there is nothing to
@@ -1589,7 +1787,7 @@ when defined(js):
             return
           # Suppress re-open if the panel was just explicitly closed; wait for
           # the mouse to leave and re-enter before allowing the hover preview.
-          if suppressHoverAfterClose:
+          if suppressHoverAfterClose or clickModeActive(edge):
             return
           cancelHoverPreview()
           let capturedPanel = panels[index]
@@ -1632,8 +1830,23 @@ when defined(js):
               closePanelFromStrip(capturedPanel)))
           showContextMenu(items, x, y))
     let r = WebRenderer()
+    # The strip's footprint in the layout row: none, the thin line (also what
+    # a revealed strip keeps), or a full expanded strip.  When it changes, the
+    # layout's room changes with it — and GoldenLayout sizes itself from
+    # JavaScript, so it has to be told; otherwise it keeps the old width and
+    # runs under the line until the next window resize.  Not on a reveal: that
+    # floats over the layout and leaves the footprint as it was.
+    proc footprint(cls: cstring): int =
+      let c = if cls.isNil: "" else: $cls
+      if strutils.contains(c, "collapsed-mode") or strutils.contains(c, "revealed"): 1
+      elif strutils.contains(c, "has-tabs"): 2
+      else: 0
+    let before = footprint(dom_api.getAttribute(container, cstring"class"))
     renderAutoHideSideStripInto(
-      r, container, records, model.collapsed, callbacks)
+      r, container, records, model.collapsed, callbacks,
+      revealed = isEdgeRevealed(edge), revealClosing = isEdgeRevealClosing(edge))
+    if footprint(dom_api.getAttribute(container, cstring"class")) != before:
+      deferredUpdateGLSize()
 else:
   proc requestAutoHideSideStripRender*(containerId: cstring, edge: AutoHideEdge) =
     discard
@@ -1657,7 +1870,8 @@ when defined(js):
       let isActive = not autoHideState.isNil and (
         (not autoHideState.dockedPanel.isNil and autoHideState.dockedPanel == panel) or
         (not autoHideState.activeOverlay.isNil and autoHideState.activeOverlay == panel))
-      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive))
+      records.add(AutoHideBottomStripRecord(title: $panel.title, active: isActive,
+        pinned: isPanelPinnedOpen(panel)))
 
     let callbacks = AutoHideBottomStripCallbacks(
       onSelect: proc(index: int) =
@@ -1671,6 +1885,15 @@ when defined(js):
           hideOverlay()
           hideDockedPanel()
           unpinPanel(autoHideLayout, panels[index]),
+      # The × on the active tab, as on the side strips: hide the panel and
+      # keep the tab pinned (Nikolay, 2026-10-17).
+      onHide: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          let panel = panels[index]
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+            hideDockedPanel()
+          if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
+            hideOverlay(),
       onHoverEnter: proc(index: int) =
         if index >= 0 and index < panels.len:
           # Its panel is already on screen, docked, so there is nothing to
@@ -1682,7 +1905,7 @@ when defined(js):
             if autoHideState.overlayVisible and not autoHideState.pinnedOpen:
               hideOverlay()
             return
-          if suppressHoverAfterClose:
+          if suppressHoverAfterClose or clickModeActive(Bottom):
             return
           cancelHoverPreview()
           let capturedPanel = panels[index]
@@ -1733,11 +1956,69 @@ proc collapsedIconZoneModel*(edge: AutoHideEdge = Left): seq[AutoHidePanel] =
   if autoHideState.isNil:
     return @[]
 
-  if edge == Bottom or not isEdgeCollapsed(edge):
+  if edge == Bottom or not isEdgeMinimal(edge):
     return @[]
   autoHideState.panelsForEdge(edge)
 
+## The status bar's tab-list dropdown (Figma `icons-lg=tab_list_sm`, beside
+## each sidebar toggle): which edge's menu is open, if any.  One at a time.
+var tabListOpenEdge: array[AutoHideEdge, bool]
+
 when defined(js):
+  proc requestCollapsedIconZoneRender*(containerId: cstring, edge: AutoHideEdge = Left)
+
+  proc refreshTabListZones() =
+    requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone", Left)
+    requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone-right", Right)
+
+  proc closeTabLists*() =
+    ## Close whichever tab-list menu is open (outside click, Escape, a pick).
+    if tabListOpenEdge[Left] or tabListOpenEdge[Right]:
+      tabListOpenEdge[Left] = false
+      tabListOpenEdge[Right] = false
+      refreshTabListZones()
+
+  proc clearTabListMenus(edge: AutoHideEdge) {.importjs: """
+    (function(left) {
+      document.querySelectorAll('body > .auto-hide-tablist-menu' +
+        (left ? '.align-left' : '.align-right')).forEach(m => m.remove());
+    })(# == 0)""".}
+    ## Drop this edge's lifted menu before the zone is drawn again.
+
+  proc liftTabListMenu(zone: js; left: bool) {.importjs: """
+    (function(zone, left) {
+      const menu = zone.querySelector('.auto-hide-tablist-menu');
+      if (!menu) return;
+      const z = zone.getBoundingClientRect();
+      document.body.appendChild(menu);
+      menu.style.bottom = (window.innerHeight - z.top + 6) + 'px';
+      if (left) menu.style.left = (z.left + 6) + 'px';
+      else menu.style.right = (window.innerWidth - z.right + 6) + 'px';
+    })(#, #)""".}
+    ## ON TOP OF EVERY PANEL (Nikolay, 2026-10-16): the menu is moved out of
+    ## the status bar to the top of the page and placed with fixed
+    ## coordinates — 6px (DROPDOWN_TRIGGER_GAP) above the zone, inset 6px from
+    ## its outer edge.  Inside the bar it was trapped in the layout's own
+    ## layering, and a panel docked at the bottom covered it.  Its rows keep
+    ## their handlers; the dismissal test finds it by class wherever it is.
+
+  var tabListDismissInstalled = false
+
+  proc installTabListDismiss() =
+    ## Once: a press outside an open menu (and its button) or Escape closes it,
+    ## as every dropdown in the app does.
+    if tabListDismissInstalled: return
+    tabListDismissInstalled = true
+    proc inTabList(ev: kdom.Event): bool {.importjs: """
+      (function(e) { const t = e && e.target;
+        return !!(t && t.closest &&
+          t.closest('.auto-hide-tablist-menu, .auto-hide-tablist-button')); })(#)""".}
+    proc isEscape(ev: kdom.Event): bool {.importjs: "(#.key === 'Escape')".}
+    kdom.document.addEventListener(cstring"mousedown", proc(ev: kdom.Event) =
+      if not inTabList(ev): closeTabLists(), true)
+    kdom.document.addEventListener(cstring"keydown", proc(ev: kdom.Event) =
+      if isEscape(ev): closeTabLists())
+
   proc requestCollapsedIconZoneRender*(containerId: cstring, edge: AutoHideEdge = Left) =
     ## Refresh the collapsed status-bar icon zone through IsoNim direct DOM.
     let container = dom_api.getElementById(dom_api.document, containerId)
@@ -1751,15 +2032,74 @@ when defined(js):
         icon: $contentIcon(panel.content),
         title: $panel.title))
 
-    let callbacks = AutoHideCollapsedIconCallbacks(
-      restoreFirst: edge == Right,
-      restoreLabel: "Use normal " & (if edge == Left: "left" else: "right") & " sidebar",
-      onRestore: proc() = setEdgeMinimal(edge, false),
+    # The sidebar toggle lives here in BOTH modes, at the zone's outer end
+    # (first on the left, last on the right), so it never moves when the
+    # sidebar switches between expanded and minimal or gains icons (Nikolay,
+    # 2026-10-15).  Shown only for an edge that has panels to toggle.
+    let minimal = isEdgeMinimal(edge)
+    let side = if edge == Left: "left" else: "right"
+    let hasPanels = edge != Bottom and not autoHideState.isNil and
+                    autoHideState.panelsForEdge(edge).len > 0
+    var onToggle: proc() = nil
+    if hasPanels:
+      onToggle = proc() = setEdgeMinimal(edge, not minimal)
+    var callbacks = AutoHideCollapsedIconCallbacks(
+      restoreFirst: edge == Left,
+      sidebarOpen: not minimal,
+      restoreLabel: (if minimal: "Use normal " else: "Use minimal ") & side & " sidebar",
+      onRestore: onToggle,
       onSelect: proc(index: int) =
         if index >= 0 and index < panels.len:
           showOverlay(panels[index]))
+    # The tab-list dropdown: this sidebar's pinned tabs, in strip order.  A pick
+    # opens the panel exactly as its strip tab would — in the overlay on a
+    # minimal edge, docked on a normal one (`onSelect` of the side strip).
+    # Only while the sidebar is collapsed (minimal): expanded, its tabs are
+    # on the strip already, so the button goes (Nikolay, 2026-10-16).  A menu
+    # left open when the sidebar expands goes with it.
+    if not minimal:
+      tabListOpenEdge[edge] = false
+    if hasPanels and minimal:
+      installTabListDismiss()
+      let pinned = autoHideState.panelsForEdge(edge)
+      var titles: seq[string] = @[]
+      var active = -1
+      for i, panel in pinned:
+        titles.add($panel.title)
+        if (autoHideState.dockedVisible and autoHideState.dockedPanel == panel) or
+           (autoHideState.overlayVisible and autoHideState.activeOverlay == panel):
+          active = i
+      callbacks.tabListLabel = "Pinned " & side & " sidebar tabs"
+      callbacks.tabListOpen = tabListOpenEdge[edge]
+      callbacks.tabListItems = titles
+      callbacks.tabListActive = active
+      callbacks.onTabList = proc() =
+        let opening = not tabListOpenEdge[edge]
+        tabListOpenEdge[Left] = false
+        tabListOpenEdge[Right] = false
+        tabListOpenEdge[edge] = opening
+        refreshTabListZones()
+      # The × on the selected row: close the panel that is showing — hide it,
+      # docked or in the overlay — leaving the tab pinned (Nikolay,
+      # 2026-10-16).  Not `closePanelFromStrip`, which discards the tab.
+      callbacks.onTabListClose = proc() =
+        closeTabLists()
+        if active >= 0 and active < pinned.len:
+          let panel = pinned[active]
+          if autoHideState.dockedVisible and autoHideState.dockedPanel == panel:
+            hideDockedPanel()
+          if autoHideState.overlayVisible and autoHideState.activeOverlay == panel:
+            hideOverlay()
+          refreshTabListZones()
+      callbacks.onTabListSelect = proc(index: int) =
+        closeTabLists()
+        if index >= 0 and index < pinned.len:
+          if isEdgeMinimal(edge): showOverlay(pinned[index])
+          else: showDockedPanel(pinned[index])
     let r = WebRenderer()
+    clearTabListMenus(edge)
     renderAutoHideCollapsedIconsInto(r, container, records, callbacks)
+    liftTabListMenu(cast[js](container), edge == Left)
 else:
   proc requestCollapsedIconZoneRender*(containerId: cstring, edge: AutoHideEdge = Left) =
     discard

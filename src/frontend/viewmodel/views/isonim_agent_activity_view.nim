@@ -109,7 +109,7 @@ type
     onCheckoutBranch*: proc(branch: string)
       ## Called when the user picks a branch from the dropdown.
     onCreateBranch*: proc()
-      ## Called when the user clicks "Create new branch" in the branch dropdown.
+      ## Called when the user clicks "New branch" in the branch dropdown.
     onSettingsSelect*: proc()
       ## Callback for the settings button in the agent toolbar.
     onPermissionResponse*: proc(kind: string)
@@ -1695,7 +1695,7 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
                            callbacks: AgentActivityCallbacks): auto =
   ## Branch context selector with a search-and-pick dropdown.
   ## Search row at top, scrollable branch list in the middle,
-  ## "Create new branch" footer at the bottom.
+  ## "New branch" footer at the bottom.
   var wrapperRef: typeof(r.createElement("div"))
   var searchRef: typeof(r.createElement("div"))
   var searchIconRef: typeof(r.createElement("div"))
@@ -1731,7 +1731,7 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
                  callbacks.invokeCreateBranch()):
             tdiv(ref = createIconRef, class = "agent-branch-create-icon")
             span:
-              text "Create new branch"
+              text "New branch"
   if isOpen:
     when defined(js):
       setIconHtml(searchIconRef, BranchSearchIcon)
