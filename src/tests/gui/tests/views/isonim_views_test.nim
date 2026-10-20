@@ -2473,11 +2473,11 @@ suite "IsoNim Debug Controls Panel — structure":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "debug-controls"
+      check "isonim-debug-controls" in panel.attributes["class"]
       check panel.attributes["data-session-mode"] == "liveMcr"
       check panel.attributes["data-recording-head"] == "400"
 
@@ -2489,14 +2489,14 @@ suite "IsoNim Debug Controls Panel — structure":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepFwd = findByClass(panel, "step-forward")
-      let stepBwd = findByClass(panel, "step-backward")
-      let stepIn = findByClass(panel, "step-in")
-      let stepOut = findByClass(panel, "step-out")
-      let continueBtn = findByClass(panel, "continue-btn")
-      let revContinue = findByClass(panel, "reverse-continue")
+      let stepFwd = findById(panel, "next-image")
+      let stepBwd = findById(panel, "reverse-next-image")
+      let stepIn = findById(panel, "step-in-image")
+      let stepOut = findById(panel, "step-out-image")
+      let continueBtn = findById(panel, "continue-image")
+      let revContinue = findById(panel, "reverse-continue-image")
 
       check stepFwd != nil
       check stepBwd != nil
@@ -2520,11 +2520,10 @@ suite "IsoNim Debug Controls Panel — structure":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
-
-      let status = findByClass(panel, "debug-status-text")
-      check status != nil
-      check status.textContent == "Idle"
+      # The shipped toolbar shows no status line (the status bar does); the
+      # VM's text is what every surface reads.
+      discard renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
+      check vm.statusText.val == "Idle"
 
       dispose()
 
@@ -2541,10 +2540,10 @@ suite "IsoNim Debug Controls Panel — button states":
       let r = MockRenderer()
 
       # Debugger starts idle
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepFwd = findByClass(panel, "step-forward")
-      let continueBtn = findByClass(panel, "continue-btn")
+      let stepFwd = findById(panel, "next-image")
+      let continueBtn = findById(panel, "continue-image")
 
       # canStepForward should be true when idle
       check "disabled" notin stepFwd.attributes
@@ -2565,9 +2564,9 @@ suite "IsoNim Debug Controls Panel — button states":
       # ``supportsStepBack`` capability (which can lose a race with session-VM
       # creation) or for rr ticks (which DB traces never populate).  This test
       # asserted the opposite until ``c5be0b990`` deliberately changed it.
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       check stepBwd.attributes.getOrDefault("disabled", "") == ""
 
       dispose()
@@ -2587,9 +2586,9 @@ suite "IsoNim Debug Controls Panel — button states":
       session.debugSessionMode = liveMcr
       store.session.val = session
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       check stepBwd.attributes.getOrDefault("disabled", "") == "true"
 
       dispose()
@@ -2605,9 +2604,9 @@ suite "IsoNim Debug Controls Panel — button states":
       dbg.rrTicks = 100'u64
       store.debugger.val = dbg
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       check "disabled" notin stepBwd.attributes
 
       dispose()
@@ -2623,10 +2622,10 @@ suite "IsoNim Debug Controls Panel — button states":
       let r = MockRenderer()
 
       # debugger at rrTicks=0, minRRTicks=0 but supportsStepBack is true
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
-      let revContinue = findByClass(panel, "reverse-continue")
+      let stepBwd = findById(panel, "reverse-next-image")
+      let revContinue = findById(panel, "reverse-continue-image")
       check "disabled" notin stepBwd.attributes
       check "disabled" notin revContinue.attributes
 
@@ -2638,15 +2637,15 @@ suite "IsoNim Debug Controls Panel — button states":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # Put debugger in stepping state
       var dbg = store.debugger.val
       dbg.status = dsStepping
       store.debugger.val = dbg
 
-      let stepFwd = findByClass(panel, "step-forward")
-      let continueBtn = findByClass(panel, "continue-btn")
+      let stepFwd = findById(panel, "next-image")
+      let continueBtn = findById(panel, "continue-image")
 
       check stepFwd.attributes.getOrDefault("disabled", "") == "true"
       check continueBtn.attributes.getOrDefault("disabled", "") == "true"
@@ -2665,9 +2664,9 @@ suite "IsoNim Debug Controls Panel — actions":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepFwd = findByClass(panel, "step-forward")
+      let stepFwd = findById(panel, "next-image")
       let beforeCount = mock.receivedCommands.len
 
       stepFwd.fireEvent("click")
@@ -2683,9 +2682,9 @@ suite "IsoNim Debug Controls Panel — actions":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       let beforeCount = mock.receivedCommands.len
 
       stepBwd.fireEvent("click")
@@ -2708,9 +2707,9 @@ suite "IsoNim Debug Controls Panel — actions":
       session.debugSessionMode = liveMcr
       store.session.val = session
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       let beforeCount = mock.receivedCommands.len
 
       stepBwd.fireEvent("click")
@@ -2728,9 +2727,9 @@ suite "IsoNim Debug Controls Panel — actions":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let continueBtn = findByClass(panel, "continue-btn")
+      let continueBtn = findById(panel, "continue-image")
       let beforeCount = mock.receivedCommands.len
 
       continueBtn.fireEvent("click")
@@ -2752,23 +2751,21 @@ suite "IsoNim Debug Controls Panel — status text":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
-      let status = findByClass(panel, "debug-status-text")
-
-      check status.textContent == "Idle"
+      discard renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
+      check vm.statusText.val == "Idle"
 
       # Change debugger status to stepping
       var dbg = store.debugger.val
       dbg.status = dsStepping
       store.debugger.val = dbg
 
-      check status.textContent == "Stepping..."
+      check vm.statusText.val == "Stepping..."
 
       # Change to finished
       dbg.status = dsFinished
       store.debugger.val = dbg
 
-      check status.textContent == "Finished"
+      check vm.statusText.val == "Finished"
 
       dispose()
 
@@ -2789,25 +2786,29 @@ suite "IsoNim Debug Controls Panel — status text":
 # test below that matters has a mutation arm, and each arm reddens its own
 # assertion.
 #
-# `shortcutFor` is the injected lookup `ui/debug.nim` fills from
+# `shortcutFor` is the injected lookup `ui/debug_toolbar.nim` fills from
 # `data.config.shortcutMap`; the tests stand in for that host with a table
 # they control, which is what makes "rebind" expressible here at all.
 
-proc tooltipTextOf(panel: MockNode; buttonClass: string): string =
+proc tooltipTextOf(panel: MockNode; buttonId: string): string =
   ## The text a user would read in one button's tooltip.
   ##
   ## Reads the `.custom-tooltip` child rather than the button, because the
   ## button's own `textContent` also contains its glyph.
-  let button = findByClass(panel, buttonClass)
+  let button = findById(panel, buttonId)
   findByClass(button, "custom-tooltip").textContent
 
+const ToolbarControlCount = 16
+  ## Every control of the shipped toolbar: history back / forward and their
+  ## two lists, the eight steps, run to entry, reset, run tests, stop.
+
 const mockToolbarButtons: array[6, tuple[cls: string; id: string; label: string]] = [
-  (cls: "step-backward",     id: "reverse-next",     label: "Reverse next"),
-  (cls: "step-forward",      id: "next",             label: "Next"),
-  (cls: "step-in",           id: "step-in",          label: "Step in"),
-  (cls: "step-out",          id: "step-out",         label: "Step out"),
-  (cls: "continue-btn",      id: "continue",         label: "Continue"),
-  (cls: "reverse-continue",  id: "reverse-continue", label: "Reverse continue"),
+  (cls: "reverse-next-image",     id: "reverse-next",     label: "Reverse next"),
+  (cls: "next-image",             id: "next",             label: "Next"),
+  (cls: "step-in-image",          id: "step-in",          label: "Step in"),
+  (cls: "step-out-image",         id: "step-out",         label: "Step out"),
+  (cls: "continue-image",         id: "continue",         label: "Continue"),
+  (cls: "reverse-continue-image", id: "reverse-continue", label: "Reverse continue"),
 ]
 
 suite "IsoNim Debug Controls — tooltips read the binding":
@@ -2819,12 +2820,12 @@ suite "IsoNim Debug Controls — tooltips read the binding":
       vm.shortcutFor = proc(actionId: string): string = "CTRL+ALT+9"
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # NON-VACUITY. "every control has a chord" is satisfied by a toolbar
       # with no controls, so the population is sized before it is judged.
       let tooltips = findAllByClass(panel, "custom-tooltip")
-      check tooltips.len == 6
+      check tooltips.len == ToolbarControlCount
       check tooltips.len > 0
       check mockToolbarButtons.len == 6
 
@@ -2846,7 +2847,7 @@ suite "IsoNim Debug Controls — tooltips read the binding":
       vm.shortcutFor = proc(actionId: string): string = "CHORD-FOR-" & actionId
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       var checkedControls = 0
       for entry in mockToolbarButtons:
@@ -2868,12 +2869,12 @@ suite "IsoNim Debug Controls — tooltips read the binding":
         if bindings.hasKey(actionId): bindings[actionId] else: ""
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # BEFORE. Asserted so the mutation below has a measured starting point
       # and cannot pass by having been true all along.
-      check tooltipTextOf(panel, "step-forward") == "Next (F10)"
-      check tooltipTextOf(panel, "step-in") == "Step in (F11)"
+      check tooltipTextOf(panel, "next-image") == "Next (F10)"
+      check tooltipTextOf(panel, "step-in-image") == "Step in (F11)"
 
       # THE MUTATION ARM: rebind, exactly as a user editing the config would.
       bindings["next"] = "CTRL+ALT+7"
@@ -2882,10 +2883,10 @@ suite "IsoNim Debug Controls — tooltips read the binding":
 
       # AFTER, on the SAME panel — no re-render, no remount. A hardcoded
       # label cannot do this, and neither can a lookup read only at mount.
-      check tooltipTextOf(panel, "step-forward") == "Next (CTRL+ALT+7)"
+      check tooltipTextOf(panel, "next-image") == "Next (CTRL+ALT+7)"
       # And the control that was NOT rebound did not move — this is the arm's
       # own control, catching a repaint that simply rewrote everything.
-      check tooltipTextOf(panel, "step-in") == "Step in (F11)"
+      check tooltipTextOf(panel, "step-in-image") == "Step in (F11)"
 
       dispose()
 
@@ -2896,7 +2897,7 @@ suite "IsoNim Debug Controls — tooltips read the binding":
       vm.shortcutFor = proc(actionId: string): string = ""
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # `initShortcutMap` is first-writer-wins, so an action whose chord was
       # already claimed silently gets NO chord. Rendering that as "Next ()"
@@ -2916,15 +2917,15 @@ suite "IsoNim Debug Controls — tooltips read the binding":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)
-      # `shortcutFor` is nil until `ui/debug.nim` wires it, and the toolbar
+      # `shortcutFor` is nil until `ui/debug_toolbar.nim` wires it, and the toolbar
       # can mount before that happens.
       check vm.shortcutFor.isNil
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      check tooltipTextOf(panel, "step-forward") == "Next"
-      check findAllByClass(panel, "custom-tooltip").len == 6
+      check tooltipTextOf(panel, "next-image") == "Next"
+      check findAllByClass(panel, "custom-tooltip").len == ToolbarControlCount
 
       dispose()
 
