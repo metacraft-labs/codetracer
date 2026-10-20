@@ -91,6 +91,17 @@ type
       ## answer.
       ## Counter incremented on every `onShowOrigin`. Used by
       ## `applyChainResponse` to ignore stale responses.
+    latestRequestOpensSidePanel*: bool
+      ## Whether the answer to the latest `ct/originChain` sent opens the
+      ## side panel. True for every request but the origin badge's: the
+      ## context menu, the command palette and the legacy menus show the
+      ## chain in the side panel (spec §3.1), while the badge expands its
+      ## row in place (§3.2.1). The host that applies transport answers
+      ## (`ui_js.nim`, `applyChainAnswer`) reads it before opening the panel.
+    nextSendOpensSidePanel: bool
+      ## What `noteChainRequestSent` records for the request being sent
+      ## now. `onShowOrigin` sets it around its own send; a request a host
+      ## menu sends without the VM finds it at its default, true.
     lastResolvedSummaries*: Signal[Table[string, OriginSummary]]
       ## Token → resolved-summary cache populated by responses to
       ## `ct/originSummary`. The State Pane subscribes and replaces
@@ -107,8 +118,9 @@ type
       ## Optional bridge installed by the host so `onSeekToHop` can
       ## reuse the existing `ct/history-jump` / `ct/goto-ticks` wiring.
     onPinChainProc*: proc(chain: OriginChain)
-      ## Optional bridge installed by `state.nim` to forward pinned
-      ## chains into `ScratchpadVM`.
+      ## Bridge to `ScratchpadVM.addChain`, installed by
+      ## `origin_chain_bridges.wireOriginChainBridges` (which `ui/state.nim`
+      ## calls). Nil only in a host that has not wired the VM.
     onSwitchProcessProc*: proc(recordingId: string)
       ## Optional bridge installed by `state.nim` to forward
       ## breadcrumb-chip clicks into `SessionViewModel.onSwitchProcess`
@@ -154,28 +166,32 @@ proc applySummaryResponse*(vm: OriginChainVM; tokens: openArray[string];
                            summaries: openArray[OriginSummary])
 
 proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
-                   stepId: int64 = -1) =
+                   stepId: int64 = -1; openSidePanel: bool = true) =
   ## Dispatch a `ct/originChain` request (spec §5.3) for `expression`
   ## at `(location, stepId)`. The request is tracked via
   ## `latestRequestId` so `onCancelLoad` can ignore the late response.
-  ## The breadcrumb stack is updated immediately so the user sees the
-  ## navigation reflected even before the response arrives.
   ##
-  ## Per spec §3.2.2 + M4 deliverable §9, ``onShowOrigin`` also opens
-  ## the dedicated Origin Chain side panel. The State-Pane right-click
-  ## "Show value origin" menu item routes here; the in-row badge
-  ## click toggles the inline expansion and goes through the same
-  ## entry-point.
+  ## With `openSidePanel` (the default) this is "Show value origin" —
+  ## the State-Pane right-click menu, the command palette, the
+  ## `origin(expr)` watch: per spec §3.1 / §3.2.2 + M4 deliverable §9 it
+  ## opens the dedicated Origin Chain side panel and pushes a breadcrumb,
+  ## so the user sees the navigation even before the response arrives.
+  ##
+  ## Without it this is the origin badge's fetch (§3.2.1, "expands the row
+  ## in place"): the chain is fetched for the in-row block, which reads it
+  ## through `originChainLookup`, and neither the side panel nor its
+  ## breadcrumb trail is touched.
   if vm.store.isNil or vm.store.backend.isNil:
     return
   let nextId = vm.latestRequestId.val + 1
   vm.latestRequestId.val = nextId
   vm.loading.val = true
-  vm.sidePanelOpen.val = true
-
-  var stack = vm.breadcrumbStack.val
-  stack.add(BreadcrumbEntry(variableName: expression, stepId: stepId))
-  vm.breadcrumbStack.val = stack
+  vm.latestRequestOpensSidePanel = openSidePanel
+  if openSidePanel:
+    vm.sidePanelOpen.val = true
+    var stack = vm.breadcrumbStack.val
+    stack.add(BreadcrumbEntry(variableName: expression, stepId: stepId))
+    vm.breadcrumbStack.val = stack
 
   # THE QUERY IS ABOUT `stepId`: the step the engine walks back from. -1 is
   # the current stop, which is what the State pane's rows are about; a caller
@@ -192,12 +208,21 @@ proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
   # request or a cancel came first (`applyChainResponse`'s id check), so a
   # late answer never replaces the chain the user asked for since.
   let vmRef = vm
-  async_compat.onComplete(vm.store.backend.send("ct/originChain", args),
-    onSuccess = proc(response: JsonNode) =
-      let body = responseBody(response)
-      if responseSucceeded(response) and body.hasKey("hops"):
-        vmRef.applyChainResponse(parseOriginChain(body), nextId),
-    onError = proc(message: string) = discard)
+  # The transport names the request from inside `send`
+  # (`dap.dispatchCtRequest` runs the `trackCtRequests` hook before it
+  # writes the frame, synchronously), so `noteChainRequestSent` sees this
+  # value; restoring the default afterwards keeps a later request from a
+  # host menu, which never passes through here, opening the panel.
+  vm.nextSendOpensSidePanel = openSidePanel
+  try:
+    async_compat.onComplete(vm.store.backend.send("ct/originChain", args),
+      onSuccess = proc(response: JsonNode) =
+        let body = responseBody(response)
+        if responseSucceeded(response) and body.hasKey("hops"):
+          vmRef.applyChainResponse(parseOriginChain(body), nextId),
+      onError = proc(message: string) = discard)
+  finally:
+    vm.nextSendOpensSidePanel = true
 
 proc openSidePanel*(vm: OriginChainVM) =
   ## Force-open the side panel (used by the command palette / keyboard
@@ -213,8 +238,10 @@ proc closeSidePanel*(vm: OriginChainVM) =
 proc noteChainRequestSent*(vm: OriginChainVM; transportId: string) =
   ## A `ct/originChain` is being sent NOW, by whatever issued it (the VM or a
   ## host's own menu), under the transport's identity: it is the request
-  ## whose answer `applyChainAnswer` accepts.
+  ## whose answer `applyChainAnswer` accepts, and whether that answer opens
+  ## the side panel is recorded with it (`latestRequestOpensSidePanel`).
   vm.latestTransportRequest = transportId
+  vm.latestRequestOpensSidePanel = vm.nextSendOpensSidePanel
   vm.loading.val = true
 
 proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
@@ -509,6 +536,8 @@ proc createOriginChainVM*(store: ReplayDataStore): OriginChainVM =
       lastResolvedSummaries: createSignal(
         initTable[string, OriginSummary]()),
       sidePanelOpen: createSignal(false),
+      latestRequestOpensSidePanel: true,
+      nextSendOpensSidePanel: true,
       disposeProc: dispose,
     )
     vm

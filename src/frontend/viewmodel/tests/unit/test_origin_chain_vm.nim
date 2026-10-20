@@ -44,6 +44,7 @@ import ../../store/[replay_data_store, types]
 import ../../viewmodels/[
   origin_chain_types,
   origin_chain_vm,
+  origin_chain_bridges,
   state_vm,
   scratchpad_vm,
   command_palette_vm,
@@ -231,10 +232,10 @@ suite "M4 — OriginChainVM.onSeekToHop reuses goto-ticks/history-jump":
 suite "M4 — OriginChainVM.onPinChain mirrors into Scratchpad VM":
 
   test "test_origin_chain_vm_pin_chain_persists_in_scratchpad":
-    let (originVM, _, store, _) = makeOriginVM()
+    let (originVM, stateVM, store, _) = makeOriginVM()
     let scratchVM = createScratchpadVM(store)
-    originVM.onPinChainProc = proc(chain: OriginChain) =
-      scratchVM.addChain(chain)
+    wireOriginChainBridges(stateVM, originVM,
+      proc(): ScratchpadVM = scratchVM)
 
     let chain = OriginChain(queryVariable: "total", queryStepId: 3)
     originVM.onPinChain(chain)
@@ -862,13 +863,12 @@ suite "M4 — State Pane renders inline origin badge per row":
       stateVM.updateOriginSummaries(@[
         ("pending", placeholderSummary("tok-XYZ")),
       ])
-      # Install the host bridge ``state.nim`` would install: forward
-      # placeholder-pill clicks into ``OriginChainVM.onShowOrigin`` so
+      # Install the bridges ``state.nim`` installs (``wireOriginChainBridges``):
+      # they forward placeholder-pill clicks into ``OriginChainVM.onShowOrigin`` so
       # the placeholder is resolved via the same ``ct/originChain`` /
       # ``ct/originSummary`` pipeline.
-      stateVM.onShowOriginProc = proc(expression: string;
-                                      location: Location) =
-        originVM.onShowOrigin(expression, location)
+      wireOriginChainBridges(stateVM, originVM,
+        proc(): ScratchpadVM = nil)
 
       let panel = renderStatePanel(r, stateVM)
       let badge = findBadgeForRow(panel, "pending")
@@ -908,13 +908,12 @@ suite "M4 — State Pane renders inline origin badge per row":
         ("total", OriginSummary(terminatorKind: tkwLiteral,
                                 terminatorExpr: "10", hopCount: 1)),
       ])
-      # Install the host bridge ``state.nim`` would install so the
+      # Install the bridges ``state.nim`` installs (``wireOriginChainBridges``) so the
       # action's call to ``stateVM.onShowOrigin`` flows through to
       # ``OriginChainVM.onShowOrigin`` — that's where the side-panel
       # signal flips and the breadcrumb is pushed.
-      stateVM.onShowOriginProc = proc(expression: string;
-                                      location: Location) =
-        originVM.onShowOrigin(expression, location)
+      wireOriginChainBridges(stateVM, originVM,
+        proc(): ScratchpadVM = nil)
 
       let panel = renderStatePanel(r, stateVM)
       # Locate the row by its ``data-variable-name`` attribute.
@@ -1242,3 +1241,227 @@ suite "M21 — StateVM origin-metadata mode indicator":
     check stateVM.originMetadataModeLabel == "off"
     stateVM.updateOriginMetadataMode("unavailable")
     check stateVM.originMetadataModeLabel == "unavailable"
+
+# ---------------------------------------------------------------------------
+# M86 (#856) — the PRODUCTION bridges: the origin badge fetches the chain it
+# expands, and "Pin to scratchpad" reaches the Scratchpad.
+#
+# Every bridge below is installed by `origin_chain_bridges
+# .wireOriginChainBridges`, the proc `ui/state.nim` calls in the renderer.
+# None is assigned by hand: the suites above that assigned `onPinChainProc`
+# or `onShowOriginProc` themselves passed while no production
+# code installed either the pin bridge or a chain fetch for an eager badge
+# (Value-Origin-Tracking.md §3.2.1 "Clicking the badge (when loaded) expands
+# the row in place to show the full hop chain"; §3.3 "Pin to scratchpad";
+# §3.5 the pinned chain card).
+#
+# The mock backend stands in for the replay server because these cases are
+# about which request the VM sends and what it does with the answer; the
+# answer's wire shape is pinned against a real db-backend in
+# `src/db-backend/tests/origin_viewmodel_test.rs`.
+# ---------------------------------------------------------------------------
+
+proc twoHopChainPayload(variable: string): JsonNode =
+  ## A `ct/originChain` body in the backend's wire shape (the round-trip
+  ## case above parses the same shape): `variable = b`, `b = a`, literal 10.
+  %*{
+    "queryVariable": variable,
+    "queryStepId": 3,
+    "hops": [
+      {"kind": "trivialCopy", "targetExpr": variable, "sourceExpr": "b",
+       "sourceVariable": "b",
+       "location": {"path": "fixture.py", "line": 3, "rrTicks": 3},
+       "sourceText": variable & " = b", "stepId": 3,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 1.0},
+      {"kind": "trivialCopy", "targetExpr": "b", "sourceExpr": "a",
+       "sourceVariable": "a",
+       "location": {"path": "fixture.py", "line": 2, "rrTicks": 2},
+       "sourceText": "b = a", "stepId": 2,
+       "operandSnapshots": [], "truncatedOperands": false,
+       "confidence": 1.0},
+    ],
+    "terminator": {"kind": "literal", "expression": "10",
+                   "function": "main"},
+    "truncated": false,
+    "metrics": {"stepsScanned": 4, "elapsedMs": 1, "classifierHits": 2},
+    "confidence": 1.0,
+  }
+
+proc originChainRequests(mock: MockBackendService): seq[JsonNode] =
+  for rc in mock.receivedCommands:
+    if rc.command == "ct/originChain":
+      result.add(rc.args)
+
+type WiredOrigin = tuple[origin: OriginChainVM, state: StateVM,
+                         scratch: ScratchpadVM, store: ReplayDataStore,
+                         mock: MockBackendService]
+
+proc makeWiredOrigin(): WiredOrigin =
+  ## The State pane, its OriginChainVM and the Scratchpad, joined by the
+  ## renderer's own wiring.
+  let (originVM, stateVM, store, mock) = makeOriginVM()
+  let scratchVM = createScratchpadVM(store)
+  wireOriginChainBridges(stateVM, originVM,
+    proc(): ScratchpadVM = scratchVM)
+  (originVM, stateVM, scratchVM, store, mock)
+
+proc showEagerRow(w: WiredOrigin; name: string) =
+  ## One local whose origin summary arrived eagerly with `ct/load-locals`:
+  ## the badge is loaded, the chain behind it is not.
+  w.store.updateLocals(@[makeVariable(name, "10", "int")])
+  w.state.updateOriginSummaries(@[
+    (name, OriginSummary(terminatorKind: tkwLiteral,
+                         terminatorExpr: "10", hopCount: 2)),
+  ])
+  drain()
+  w.mock.clearReceivedCommands()
+
+suite "M86 — the origin badge and Pin to scratchpad, through the production bridges":
+
+  test "an eager badge click fetches the chain and the expanded row renders its hops":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel(MockRenderer(), w.state)
+      let badge = findBadgeForRow(panel, "c")
+      check badge != nil
+      # Nothing has fetched a chain yet: no context menu, no side panel.
+      check w.origin.activeChain.val.isNone
+
+      badge.fireEvent("click")
+      drain()
+
+      let sent = originChainRequests(w.mock)
+      check sent.len == 1
+      check sent.len == 1 and sent[0]["variableName"].getStr == "c"
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 1
+      check blocks.len == 1 and
+        blocks[0].styles.getOrDefault("display", "") == "block"
+      if blocks.len == 1:
+        check findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 2
+        let terminatorRow =
+          findByClass(blocks[0], "ct-origin-inline-chain-terminator")
+        check terminatorRow != nil
+        check terminatorRow != nil and terminatorRow.textContent.contains("10")
+      dispose()
+
+  test "the badge expands IN PLACE: it does not open the side panel":
+    # §3.2.1 "expands the row in place"; the side panel is the context
+    # menu's target (§3.1) and the expanded chain's "Show in side panel"
+    # affordance's (§3.2.2), not the badge's.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel(MockRenderer(), w.state)
+      findBadgeForRow(panel, "c").fireEvent("click")
+      drain()
+      check originChainRequests(w.mock).len == 1
+      check not w.origin.sidePanelOpen.val
+      check not w.origin.latestRequestOpensSidePanel
+      check w.origin.breadcrumbStack.val.len == 0
+      dispose()
+
+  test "collapsing, and re-expanding a row whose chain is held, send nothing":
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel(MockRenderer(), w.state)
+      let badge = findBadgeForRow(panel, "c")
+      badge.fireEvent("click")   # expand: fetch
+      drain()
+      badge.fireEvent("click")   # collapse
+      drain()
+      badge.fireEvent("click")   # expand again: the chain is held
+      drain()
+      check originChainRequests(w.mock).len == 1
+      let blocks = findAllByClass(panel, "ct-origin-inline-chain")
+      check blocks.len == 1 and
+        findAllByClass(blocks[0], "ct-origin-inline-chain-hop").len == 2
+      dispose()
+
+  test "Pin to scratchpad, through the production bridge, reaches ScratchpadVM.chainEntries":
+    let w = makeWiredOrigin()
+    let chain = parseOriginChain(twoHopChainPayload("total"))
+    w.origin.onPinChain(chain)
+    check w.origin.pinnedChains.val.len == 1
+    check w.scratch.chainEntries.val.len == 1
+    check w.scratch.chainEntries.val.len == 1 and
+      w.scratch.chainEntries.val[0].chain.queryVariable == "total"
+    check w.scratch.rowCount.val == 1
+
+  test "a pin lands in the Scratchpad VM current when it happens":
+    # The renderer builds the OriginChainVM before the Scratchpad pane's VM
+    # and later replaces that VM with the session's, so the target is
+    # resolved per pin, and a pin before any Scratchpad exists is kept on
+    # the OriginChainVM without failing.
+    let (originVM, stateVM, store, _) = makeOriginVM()
+    var current: ScratchpadVM = nil
+    wireOriginChainBridges(stateVM, originVM,
+      proc(): ScratchpadVM = current)
+    let chain = parseOriginChain(twoHopChainPayload("total"))
+    originVM.onPinChain(chain)
+    check originVM.pinnedChains.val.len == 1
+    let first = createScratchpadVM(store)
+    current = first
+    originVM.onPinChain(chain)
+    let second = createScratchpadVM(store)
+    current = second
+    originVM.onPinChain(chain)
+    check first.chainEntries.val.len == 1
+    check second.chainEntries.val.len == 1
+    check originVM.pinnedChains.val.len == 3
+
+  test "on the transport, only the badge's answer leaves the side panel shut":
+    # The renderer applies `ct/originChain` answers from the DAP channel
+    # (`ui_js.nim`: `applyChainAnswer`, then `openSidePanel` only when
+    # `latestRequestOpensSidePanel`). The DAP transport names every tracked
+    # request from INSIDE `send`, before it writes the frame
+    # (`dap.dispatchCtRequest` → the `trackCtRequests` hook → `ui_js`'s
+    # `noteChainRequestSent`). The backend below does exactly that in front
+    # of the mock, so the VM sees the hook at the moment the real transport
+    # calls it; a legacy menu, which sends on the mediator without the VM,
+    # is the hook called with no VM send around it.
+    let mock = newMockBackendService(autoRespond = true)
+    var originRef: OriginChainVM = nil
+    var sentIds = 0
+    let inner = mock.toBackendService()
+    let tracked = BackendService(
+      sendProc: proc(command: string;
+                     args: JsonNode): BackendFuture[JsonNode] =
+        if command == "ct/originChain" and not originRef.isNil:
+          inc sentIds
+          originRef.noteChainRequestSent("req-" & $sentIds)
+        inner.sendProc(command, args),
+      onEventProc: inner.onEventProc,
+      disconnectProc: inner.disconnectProc,
+    )
+    let store = createReplayDataStore(tracked)
+    let stateVM = createStateVM(store)
+    let originVM = createOriginChainVM(store)
+    originRef = originVM
+    wireOriginChainBridges(stateVM, originVM,
+      proc(): ScratchpadVM = nil)
+    drain()
+    let loc = Location(file: "fixture.py", line: 3)
+
+    stateVM.onLoadOriginChainProc("c", loc)            # the badge
+    check sentIds == 1
+    check not originVM.latestRequestOpensSidePanel
+    check originVM.applyChainAnswer(
+      parseOriginChain(twoHopChainPayload("c")), "req-1")
+    check not originVM.latestRequestOpensSidePanel
+    check not originVM.sidePanelOpen.val
+
+    originVM.noteChainRequestSent("menu-1")            # a legacy menu
+    check originVM.latestRequestOpensSidePanel
+
+    stateVM.onLoadOriginChainProc("c", loc)            # the badge again
+    check not originVM.latestRequestOpensSidePanel
+    stateVM.onShowOrigin("c", loc)                     # the context menu
+    check originVM.latestRequestOpensSidePanel
+    check originVM.sidePanelOpen.val

@@ -283,13 +283,24 @@ proc badgeDisplay(vm: StateVM; item: VariableViewState): string =
   if vm.rowHasBadge(item): "inline-flex" else: "none"
 
 template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evType: typedesc): untyped =
-  ## Per-row click handler. For eager summaries this just toggles the
-  ## in-row expansion (spec §3.2.1); for placeholder summaries it ALSO
-  ## enqueues the placeholder token for the next batched
-  ## ``ct/originSummary`` fill (spec §3.2.3) via the host-provided
-  ## bridge. The bridge is installed by ``state.nim`` once the
-  ## ``OriginChainVM`` is available — without it the click just toggles
-  ## expansion, which is the desired fallback when running headless.
+  ## Per-row click handler. It toggles the in-row expansion (spec
+  ## §3.2.1), and when that EXPANDS an eager-summary row whose chain the
+  ## host does not hold yet (``originChainLookup`` answers none), it
+  ## fetches the chain through ``onLoadOriginChainProc`` — in place,
+  ## without opening the side panel. The ``ct/load-locals`` summary that
+  ## drew the badge carries the terminator, not the hops, so without this
+  ## fetch the row expanded to nothing until the context menu had asked
+  ## for the same chain (codetracer#856). Collapsing, or expanding a row
+  ## whose chain is held, sends nothing.
+  ##
+  ## For placeholder summaries the click goes to ``onShowOriginProc``
+  ## instead, which resolves the placeholder (spec §3.2.3).
+  ##
+  ## Both bridges are installed by
+  ## ``origin_chain_bridges.wireOriginChainBridges`` once the
+  ## ``OriginChainVM`` is available — without them the click just
+  ## toggles expansion, which is the desired fallback when running
+  ## headless.
   (proc(ev: evType) =
     if not ev.isNil:
       ev.preventDefault()
@@ -304,7 +315,12 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
       # click both expands the row AND resolves the placeholder.
       if not vm.onShowOriginProc.isNil and not vm.store.isNil:
         let loc = vm.store.debugger.val.location
-        vm.onShowOriginProc(row.name, loc))
+        vm.onShowOriginProc(row.name, loc)
+    elif summary.isSome and vm.isOriginExpanded(id) and
+        not vm.onLoadOriginChainProc.isNil and not vm.store.isNil and
+        (vm.originChainLookup.isNil or vm.originChainLookup(row.name).isNone):
+      let loc = vm.store.debugger.val.location
+      vm.onLoadOriginChainProc(row.name, loc))
 
 # ---------------------------------------------------------------------------
 # Value Origin Tracking (M4 deliverable §3.1) — right-click context-menu

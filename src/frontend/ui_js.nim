@@ -2477,9 +2477,12 @@ when not defined(ctInExtension):
               if body.kind == JObject and body.hasKey("hops"):
                 # Spec §3.2.2 — "Show value origin" opens the dedicated side
                 # panel, whichever menu asked; a chain only arrives because a
-                # user asked for one.
+                # user asked for one. The origin badge is the one asker that
+                # does not: it expands its row in place (§3.2.1), and the VM
+                # recorded that when the request was sent.
                 if ocvm.applyChainAnswer(parseOriginChain(body),
-                                         $ctRequestIdOf(raw)):
+                                         $ctRequestIdOf(raw)) and
+                    ocvm.latestRequestOpensSidePanel:
                   ocvm.openSidePanel()
               else:
                 ocvm.onCancelLoad()

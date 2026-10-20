@@ -927,7 +927,11 @@ test_lane_files() {
 		# `locals_answer_identity_test.nim` drives the web renderer's
 		# `ct/load-locals` senders through the real response fan-out: one
 		# request per stop, in the stopped-in file's language.
+		# `origin_chain_wiring_test.nim` holds `ui/state.nim` to installing the
+		# origin badge's chain fetch and the "Pin to scratchpad" bridge into the
+		# Scratchpad pane's ViewModel (codetracer#856).
 		echo src/frontend/tests/locals_answer_identity_test.nim
+		echo src/frontend/tests/origin_chain_wiring_test.nim
 		;;
 
 	renderer-chromium)
