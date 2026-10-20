@@ -205,6 +205,11 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Calltrace selection is collaborative session intent.",
     requiresStableId = true,
     stableIdNote = "Currently stores a calltrace row index; needs a stable call node id/key.")
+  entries.addEntry("CalltraceVM", "selectedCallKey", vscRendererLocal,
+    "The call this front end keeps its selection on as sections load " &
+    "(`selectCall`). Only the row it resolves to is shared, written to " &
+    "`selectedEntry` through the session; a peer's own selection makes " &
+    "this front end stop following its call (`projectCalltraceViewState`).")
   entries.addEntry("CalltraceVM", "expandedNodes", vscSharedSessionViewState,
     "Calltrace expansion set is collaborative session intent.",
     requiresStableId = true,

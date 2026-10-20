@@ -88,7 +88,12 @@ proc rowHandlers(vm: CalltraceVM; item: proc(): CallLine): RowHandlers =
       # navigates to the source location (calltraceJump). Without the
       # navigation, Playwright `activate()` selects the row but the
       # editor never opens the target file.
-      vm.selectEntry(some(line.index))
+      # Select the row's CALL, so the mark stays on it when a collapse or
+      # a filter change moves it to another row (#811).
+      if line.callKey.len > 0:
+        vm.selectCall(line.callKey)
+      else:
+        vm.selectEntry(some(line.index))
       vm.doubleClickEntry(line.index),
     onDblClick: proc() =
       vm.doubleClickEntry(getLine().index),

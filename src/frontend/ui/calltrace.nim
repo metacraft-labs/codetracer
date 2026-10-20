@@ -24,7 +24,7 @@ from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
   setViewport, Viewport, scrolledTo, setRawIgnorePatterns,
-  setBackendSearchResults, selectEntry
+  setBackendSearchResults, selectEntry, selectCall
 from isonim/web/dom_api import nil
 from isonim/core/batch as isoBatch import batch
 from isonim/core/signals import val
@@ -651,10 +651,13 @@ method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltrace
   if element != nil:
     element.style.display = "none"
 
+  # The mark itself is the CalltraceVM's: it follows the call's key and
+  # retires when the section does not hold the call (#811), whatever route
+  # the section arrived by.
   if self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
     self.activeCallIndex = results.startCallLineIndex + self.loadedCallKeys[self.lastSelectedCallKey]
     if calltraceVMInstance != nil:
-      calltraceVMInstance.selectEntry(some(self.activeCallIndex.int64))
+      calltraceVMInstance.selectCall($self.lastSelectedCallKey)
 
   if self.forceCollapse:
     let scrollTo = max(results.scrollPosition - 2, 0)
@@ -1089,12 +1092,17 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     self.activeCallIndex = self.startCallLineIndex + self.loadedCallKeys[response.location.key]
 
     if calltraceVMInstance != nil:
-      calltraceVMInstance.selectEntry(some(self.activeCallIndex.int64))
+      calltraceVMInstance.selectCall($response.location.key)
 
     if self.loadedCallKeys[response.location.key] >= self.panelHeight() - 1 + buffer:
       self.calltraceScroll(((self.activeCallIndex - buffer) - (self.panelHeight() / 2).floor) * CALL_HEIGHT_PX)
   elif not self.usesMaterializedTracesTrace or not self.loadedCallKeys.hasKey(response.location.key):
     self.lastSelectedCallKey = response.location.key
+    # Follow the new current call now: the row marked before the move is
+    # not where the debugger is, and the section that holds the call marks
+    # it when it loads, by whichever route it arrives.
+    if calltraceVMInstance != nil:
+      calltraceVMInstance.selectCall($response.location.key)
     self.forceCollapse = true
     # When the IsoNim view is the active renderer, the CalltraceVM's
     # auto-load effect (in `createCalltraceVM`) is the single source of

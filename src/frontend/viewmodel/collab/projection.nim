@@ -74,7 +74,18 @@ proc projectCalltraceViewState*(state: SharedSessionViewState;
                                 vm: CalltraceVM) =
   if vm.isNil:
     return
-  vm.selectedEntry.val = parseInt64Option(state.calltrace.selectedEntry.value)
+  let selection = parseInt64Option(state.calltrace.selectedEntry.value)
+  # A selection that changed to a row other than the one this front end's
+  # followed call resolves to was made elsewhere (a peer, or a joined
+  # snapshot), and it is a bare row: stop following the local call, or the
+  # next local section load would put the local row back and take the
+  # shared selection away from whoever made it. The local follow's own
+  # writes arrive here equal to the call's row and keep the call.
+  let followed = vm.selectedCallKey.val
+  if followed.len > 0 and selection != vm.selectedEntry.val and
+      selection != indexOfCall(vm.store.calltrace.lines.val, followed):
+    vm.selectedCallKey.val = ""
+  vm.selectedEntry.val = selection
   vm.searchQuery.val = state.calltrace.searchQuery.value
 
   var nodes = initHashSet[int64]()

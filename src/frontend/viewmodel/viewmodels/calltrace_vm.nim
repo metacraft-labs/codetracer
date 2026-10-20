@@ -63,6 +63,7 @@ type
     ##   viewportHeight     — number of visible rows in the panel
     ##   viewportDepth      — column depth of the panel (for indentation)
     ##   selectedEntry      — index of the selected calltrace line, or none
+    ##   selectedCallKey    — key of the CALL the selection follows, or ""
     ##   expandedNodes      — set of line indices whose children are visible
     ##   searchQuery        — current search/filter text
     ##   rawIgnorePatterns  — filter patterns for calltrace (e.g. "path~lib/system")
@@ -89,6 +90,18 @@ type
     viewportHeight*: Signal[int]
     viewportDepth*: Signal[int]
     selectedEntry*: Signal[Option[int64]]
+    selectedCallKey*: Signal[string]
+      ## The call the selection (the current-call mark) follows, by
+      ## `CallLine.callKey`; "" when it follows none and `selectedEntry` is
+      ## a bare index. While a key is held, `selectedEntry` is DERIVED from
+      ## it: the index of the loaded line with that key, or `none` when no
+      ## loaded line has it. A row position is not a call's identity: a
+      ## collapse, an expansion or a filter change gives the index to
+      ## another call, and a mark left on it claims the debugger is where
+      ## it is not (Click-Navigation.md §3.3, #811). Set by `selectCall`,
+      ## and by `toggleExpandCallChildren` for an index selection. Local to
+      ## this front end: a selection another participant makes arrives as a
+      ## bare row and drops it (`projectCalltraceViewState`).
     expandedNodes*: Signal[HashSet[int64]]
     searchQuery*: Signal[string]
     rawIgnorePatterns*: Signal[string]
@@ -311,9 +324,9 @@ proc requestWindow(vm: CalltraceVM) =
     rawIgnorePatterns = vm.rawIgnorePatterns.val,
   )
 
-proc selectEntry*(vm: CalltraceVM; lineIndex: Option[int64]) =
-  ## Set the currently selected calltrace entry.
-  ## Pass `none(int64)` to clear the selection.
+proc writeSelectedEntry(vm: CalltraceVM; lineIndex: Option[int64]) =
+  ## Write `selectedEntry` (through the collaborative session when there is
+  ## one), leaving `selectedCallKey` alone.
   if not vm.collabCore.isNil:
     let entryId = if lineIndex.isSome: $lineIndex.get else: ""
     discard vm.collabCore.dispatchLocalViewOp(
@@ -323,6 +336,51 @@ proc selectEntry*(vm: CalltraceVM; lineIndex: Option[int64]) =
     )
     return
   vm.selectedEntry.val = lineIndex
+
+func indexOfCall*(lines: openArray[CallLine]; key: string): Option[int64] =
+  ## The index of the line among `lines` whose call key is `key`, or `none`
+  ## when none is (or `key` is empty).
+  if key.len == 0:
+    return none(int64)
+  for l in lines:
+    if l.callKey == key:
+      return some(l.index)
+  none(int64)
+
+proc followSelectedCall(vm: CalltraceVM) =
+  ## Re-derive `selectedEntry` from the held call key against the loaded
+  ## lines. Run on every section change and on every `selectCall`; a no-op
+  ## while no key is held, so a bare index selection is never rewritten.
+  let key = vm.selectedCallKey.val
+  if key.len == 0:
+    return
+  let resolved = indexOfCall(vm.store.calltrace.lines.val, key)
+  if resolved != vm.selectedEntry.val:
+    vm.writeSelectedEntry(resolved)
+
+proc selectEntry*(vm: CalltraceVM; lineIndex: Option[int64]) =
+  ## Set the currently selected calltrace entry by INDEX, and nothing else:
+  ## no backend command, no debugger state, no call to follow (it drops a
+  ## call `selectCall` was following). The terminal keeps its call-stack
+  ## frame cursor in this signal (`call_stack_binding
+  ## .publishInspectionCursor`), so an index written here must stay the
+  ## index it was. Pass `none(int64)` to clear the selection.
+  vm.selectedCallKey.val = ""
+  vm.writeSelectedEntry(lineIndex)
+
+proc selectCall*(vm: CalltraceVM; callKey: string) =
+  ## Select the call whose key is `callKey` and keep the selection on that
+  ## call as sections load: `selectedEntry` is its row while a loaded line
+  ## has the key and `none` while none does (Click-Navigation.md §3.3: "A
+  ## row that is no longer present retires the mark rather than leaving
+  ## the previous one standing"). The desktop marks the debugger's current
+  ## call with this (`CalltraceComponent.onCompleteMove`). An empty key
+  ## clears the selection.
+  if callKey.len == 0:
+    vm.selectEntry(none(int64))
+    return
+  vm.selectedCallKey.val = callKey
+  vm.followSelectedCall()
 
 proc toggleExpand*(vm: CalltraceVM; lineIndex: int64) =
   ## Toggle whether a calltrace node is expanded or collapsed.
@@ -369,6 +427,16 @@ proc toggleExpandCallChildren*(vm: CalltraceVM; lineIndex: int64) =
     if not line.hasChildren:
       return
     let command = if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"
+    # "Expanding or collapsing a row is not activating it" (Click-
+    # Navigation.md §3.3), and an expansion change keeps a row's identity,
+    # not its index (Scrollbar-Scrubbers.md §3 item 6). The reload below
+    # shifts every row after `line`, so a selection held as a bare index
+    # would land on whichever call takes it (#811): follow the selected
+    # row's CALL from here on instead.
+    if vm.selectedCallKey.val.len == 0 and vm.selectedEntry.val.isSome:
+      let selOffset = vm.selectedEntry.val.get - startIdx
+      if selOffset >= 0 and selOffset < lines.len.int64:
+        vm.selectedCallKey.val = lines[selOffset.int].callKey
     # nonExpandedKind is serialized as a u8 ordinal:
     #   Callstack=0, Children=1, Siblings=2, Calls=3,
     #   CallstackInternal=4, CallstackInternalChild=5
@@ -534,6 +602,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
           viewportDepth.val =
             if v.cols > 0: v.cols else: DEFAULT_VIEWPORT_DEPTH))
     let selectedEntry = createSignal(none(int64))
+    let selectedCallKey = createSignal("")
     let expandedNodes = createSignal(initHashSet[int64]())
     let searchQuery = createSignal("")
     let rawIgnorePatterns = createSignal("")
@@ -637,6 +706,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       viewportHeight: viewportHeight,
       viewportDepth: viewportDepth,
       selectedEntry: selectedEntry,
+      selectedCallKey: selectedCallKey,
       expandedNodes: expandedNodes,
       searchQuery: searchQuery,
       rawIgnorePatterns: rawIgnorePatterns,
@@ -651,6 +721,15 @@ proc createCalltraceVM*(store: ReplayDataStore;
       degradedState: degradedState,
       disposeProc: wrappedDispose,
     )
+
+    # Selection follow effect: whenever a section loads (a collapse, an
+    # expansion, a scroll, a filter change, a move), put the selection back
+    # on the call it follows, or retire it when the section does not hold
+    # that call (`followSelectedCall`).
+    createEffect proc() =
+      discard store.calltrace.lines.val
+      discard selectedCallKey.val
+      untrack(proc() = vm.followSelectedCall())
 
     # Auto-load effect: whenever the viewport, the filter or the debugger's
     # position changes, ask for the window the viewport shows
