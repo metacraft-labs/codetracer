@@ -3345,11 +3345,25 @@ proc onMenuAction(sender: js, response: jsobject(action=ClientAction)) =
     f(nil)
 
 
+proc filesystemLoadErrorOf(response: JsObject): cstring {.importjs:
+  "(function(r){ return r != null && typeof r.error === 'string' ? r.error : ''; })(#)".}
+  ## The ``error`` of a ``filesystem-loaded`` / ``filesystem-category-loaded``
+  ## payload, or ``""`` when the payload carries a tree.  The index process
+  ## sends one or the other (``index/traces.sendFilesystem``).
+
 proc onFilesystemLoaded(
   sender: js,
   response: jsobject(
     folders=CodetracerFile)) =
-  data.services.editor.filesystem = response.folders
+  # The root load's answer: a tree, or why there is none.  Either one ends
+  # the pane's "Loading..." (GitHub #785).
+  let loadError = filesystemLoadErrorOf(response.toJs)
+  if loadError.len > 0:
+    data.services.editor.filesystem = nil
+    data.services.editor.filesystemLoadError = loadError
+  else:
+    data.services.editor.filesystem = response.folders
+    data.services.editor.filesystemLoadError = cstring""
   filesystem.refreshIsoNimFilesystemPanel()
   # Keep the Ctrl+P file index in sync with the freshly-loaded tree;
   # DB-trace backends that never emit the `filenames` event rely on this
@@ -3363,7 +3377,13 @@ proc onFilesystemCategoryLoaded(
     category=cstring,
     folders=CodetracerFile)) =
   # Add a new category to the filesystem tree
-  if data.services.editor.filesystem.isNil:
+  let loadError = filesystemLoadErrorOf(response.toJs)
+  if loadError.len > 0:
+    # A category that failed to load leaves an existing tree as it is; with
+    # no tree yet it is the pane's answer, as in `onFilesystemLoaded`.
+    if data.services.editor.filesystem.isNil:
+      data.services.editor.filesystemLoadError = loadError
+  elif data.services.editor.filesystem.isNil:
     # If no filesystem exists yet, just use this as the root
     data.services.editor.filesystem = response.folders
   else:

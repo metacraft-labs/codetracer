@@ -375,6 +375,11 @@ type
     untitledIndex*: int
     changeLine*: bool
     filesystem*: CodetracerFile
+    filesystemLoadError*: cstring
+      ## Why the last root load of the file tree failed, as the index process
+      ## reported it in ``filesystem-loaded``; empty or nil when ``filesystem``
+      ## holds the answer.  The Files pane shows it instead of "Loading..."
+      ## (GitHub #785).
     currentLine*: int
     tags*:                  JsAssoc[cstring, seq[Tag]]
     completeMoveResponses*: JsAssoc[cstring, MoveState]

@@ -9,6 +9,14 @@
 ## - toggleExpanded / expandPath / collapsePath / isExpanded
 ##   (twisty / jstree-open-state mirror).
 ## - setDiffEntries (legacy ``data.startOptions.diff.files`` read).
+## - A root load that fails or comes back empty (#785): the pane must end on
+##   a tree, an empty state or an error, never on a permanent "Loading...".
+##   The view is rendered through ``MockRenderer`` (isonim/testing/mock_dom),
+##   the in-memory DOM the headless view tests use, because the assertion is
+##   about which overlay the user sees, and only the view decides that.
+## - The roots an imported trace's file tree is built from (#785).  The rule
+##   is pure; the payload is described by a predicate instead of a directory
+##   on disk, so each case states exactly which payload folders hold files.
 ##
 ## DR-R8 removed ``setDeepReview`` / ``deepReviewFiles`` /
 ## ``FilesystemDeepReviewFile`` and the "FilesystemVM deep review" suite that
@@ -26,7 +34,7 @@
 ## Compile and run:
 ##   nim c -r src/tests/gui/tests/filesystem/filesystem_vm_test.nim
 
-import std/[sets, unittest]
+import std/[sets, strutils, tables, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -35,6 +43,8 @@ import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/filesystem_vm
+import views/isonim_filesystem_view
+import isonim/testing/mock_dom
 import ../../../../common/trace_source_paths
 
 # ---------------------------------------------------------------------------
@@ -690,3 +700,203 @@ suite "FilesystemVM diff entries":
       check not vm.hasDiff.val
 
       dispose()
+
+# ---------------------------------------------------------------------------
+# A root load that fails or comes back empty (#785)
+# ---------------------------------------------------------------------------
+
+proc findOverlay(node: MockNode; cls: string): MockNode =
+  ## First element under ``node`` whose class list contains ``cls``.
+  if node.isNil:
+    return nil
+  if node.kind == mnkElement and node.attributes.hasKey("class"):
+    for part in node.attributes["class"].split(' '):
+      if part == cls:
+        return node
+  for child in node.children:
+    let found = findOverlay(child, cls)
+    if not found.isNil:
+      return found
+  nil
+
+proc isShown(node: MockNode): bool =
+  not node.isNil and "hidden" notin node.attributes["class"].split(' ')
+
+proc emptySourceFoldersRoot(): FilesystemEntryNode =
+  ## What ``legacyFileToVm`` makes of a ``filesystem-loaded`` whose
+  ## ``loadFilesystem`` found nothing under any root: the synthetic
+  ## "source folders" container with no children (and so, by the
+  ## bridge's "has children" rule, not even a folder).
+  FilesystemEntryNode(
+    id: "0",
+    text: "source folders",
+    path: "",
+    icon: "",
+    isFolder: false,
+    isExpanded: false,
+    diffClass: fdcNone,
+    children: @[],
+  )
+
+suite "FilesystemVM a root load that fails or comes back empty (#785)":
+  ## GitHub #785: a Noir trace left the FILES pane on "Loading..." for good.
+  ## ``createFilesystemVM`` starts at ``lsLoading`` and nothing ever set
+  ## ``lsError``, so a root load that failed had no state to end in.  A
+  ## load must leave the pane showing a tree, an empty state or an error
+  ## (codetracer-pm ``spec/GUI/Core-Panes/Filesystem-Pane.md`` §"Loading").
+
+  test "a failed root load leaves the loading state and says why":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      check vm.loadingState.val == lsLoading
+
+      vm.failLoad("cannot read /proj: EACCES")
+
+      check vm.loadingState.val == lsError
+      check vm.loadError.val == "cannot read /proj: EACCES"
+      check vm.isEmpty.val
+
+      dispose()
+
+  test "the panel replaces Loading... with the failure reason":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel(MockRenderer(), vm)
+      check isShown(findOverlay(panel, "filesystem-loading-overlay"))
+
+      vm.failLoad("cannot read /proj: EACCES")
+
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+      check not isShown(findOverlay(panel, "filesystem-empty-overlay"))
+      let errorOverlay = findOverlay(panel, "filesystem-error-overlay")
+      check isShown(errorOverlay)
+      check "cannot read /proj: EACCES" in errorOverlay.textContent
+      check findOverlay(panel, "filesystem").attributes["aria-busy"] == "false"
+
+      dispose()
+
+  test "a later successful load clears the failure":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel(MockRenderer(), vm)
+      vm.failLoad("cannot read /proj: EACCES")
+
+      vm.setRoot(makeSourceFoldersRoot(@[makeEntry("main.nr", path = "src/main.nr")]))
+
+      check vm.loadingState.val == lsIdle
+      check vm.loadError.val == ""
+      check not isShown(findOverlay(panel, "filesystem-error-overlay"))
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+
+      dispose()
+
+  test "a session reset after a failure waits for the next load again":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      vm.failLoad("cannot read /proj: EACCES")
+
+      vm.clearRoot()
+
+      check vm.loadingState.val == lsLoading
+      check vm.loadError.val == ""
+
+      dispose()
+
+  test "an empty root load ends on the empty state, not on a bare container row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel(MockRenderer(), vm)
+
+      vm.setRoot(emptySourceFoldersRoot())
+
+      check vm.loadingState.val == lsIdle
+      check vm.isEmpty.val
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+      check isShown(findOverlay(panel, "filesystem-empty-overlay"))
+      check findOverlay(panel, "filesystem-tree").children.len == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# The roots of an imported trace's file tree (#785)
+# ---------------------------------------------------------------------------
+
+proc payloadWith(roots: openArray[string]): proc(root: string): bool =
+  ## A trace payload in which exactly ``roots`` hold files.
+  let present = @roots
+  result = proc(root: string): bool = root in present
+
+suite "the roots of an imported trace's file tree (#785)":
+  ## The reporter's shape, measured with ``ct record`` on
+  ## ``test-programs/noir_example`` at codetracer ``cdeb13b12``: nargo
+  ## records RELATIVE paths (``src/main.nr``, ``std/lib.nr``), so the
+  ## recording's ``source_folders`` column is the git root the program
+  ## lives in; the payload holds ``files/src/main.nr`` and an empty
+  ## ``files/std`` (the std sources are not copied), and no ``paths.json``
+  ## sidecar is written.  The tree was rooted at the live git root and the
+  ## index process walked the whole repository.
+
+  const gitRoot = "/home/dev/repo"
+  const noirWorkdir = "/home/dev/repo/test-programs/noir_example"
+
+  test "a Noir trace without paths.json is rooted in its payload, not the recorded git root":
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: false,
+        payloadTopLevel: @["src", "std"],
+        liveFallback: @[noirWorkdir]),
+      payloadWith(["src"]))
+    check roots == @["src"]
+
+  test "a paths.json root that is empty in the payload does not send the tree to the live disk":
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: true,
+        tracePaths: @["src/main.nr", "std/lib.nr"],
+        payloadTopLevel: @["src", "std"],
+        liveFallback: @[noirWorkdir]),
+      payloadWith(["src"]))
+    check roots == @["src"]
+
+  test "a trace with no payload still falls back to its recorded folders":
+    # Unchanged: with nothing in the payload, the live folders are all
+    # there is, and the loader reads them with the live-filesystem limits.
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: false,
+        liveFallback: @[noirWorkdir]),
+      payloadWith([]))
+    check roots == @[gitRoot]
+
+  test "a workdir mirrored in the payload is the root":
+    # Unchanged: the root-stripped absolute layout (`files/home/dev/repo/...`).
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        payloadTopLevel: @["home"]),
+      payloadWith([noirWorkdir]))
+    check roots == @[noirWorkdir]
+
+  test "paths.json roots that are all in the payload are the roots":
+    # Unchanged: the shape every recorder that writes paths.json produces.
+    let roots = importedTraceTreeRoots(
+      ImportedTraceTreeInputs(
+        recordedSourceFolders: @[gitRoot],
+        workdir: noirWorkdir,
+        tracePathsRead: true,
+        tracePaths: @["src/main.nr", "lib/util.nr"],
+        payloadTopLevel: @["src", "lib"]),
+      payloadWith(["src", "lib"]))
+    check roots == @["src", "lib"]
