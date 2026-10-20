@@ -287,7 +287,7 @@ proc wireTopBar(rt: TuiRuntime) =
   rt.saveIcons = proc(mode: IconsMode): string = saveIconsPreference(mode)
 
 proc wireLayoutPreferences(rt: TuiRuntime;
-                           focusFlag, liveFlag: SettingOverride) =
+                           focusFlag, liveFlag, markersFlag: SettingOverride) =
   ## PLAT-51 deliverables 9 and 11: the remembered `focus-highlight` and
   ## `live-resize` (`host/layout_preferences`, beside the remembered layout)
   ## and then this session's flags, which beat them; `:set` remembers a new
@@ -300,9 +300,12 @@ proc wireLayoutPreferences(rt: TuiRuntime;
     rt.app.notification = stored.message
   settings.applyOverride(lsFocusHighlight, focusFlag)
   settings.applyOverride(lsLiveResize, liveFlag)
+  settings.applyOverride(lsOverflowMarkers, markersFlag)
   discard rt.applyLayoutSetting(lsFocusHighlight, settings.focusHighlight,
                                 remember = false)
   discard rt.applyLayoutSetting(lsLiveResize, settings.liveResize,
+                                remember = false)
+  discard rt.applyLayoutSetting(lsOverflowMarkers, settings.overflowMarkers,
                                 remember = false)
   rt.savePreference = proc(name: string; on: bool): string =
     let (known, which) = parseSettingName(name)
@@ -661,7 +664,8 @@ proc interactive(command: TuiCommand): int =
   # The binding is enabled before the first frame, seeded from the arrangement
   # this session would have painted anyway, so frame 0 is unchanged by it.
   discard rt.enableLayoutBinding()
-  wireLayoutPreferences(rt, command.focusHighlight, command.liveResize)
+  wireLayoutPreferences(rt, command.focusHighlight, command.liveResize,
+                        command.overflowMarkers)
   rt.layoutCommitted = proc(rt: TuiRuntime) =
     # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
     # know about, on the status line, and is not fatal: the arrangement is
@@ -991,6 +995,14 @@ proc interactive(command: TuiCommand): int =
   var frameOwed = false
   var commitsSeen = rt.layoutCommits
   var viewRows = rt.sourcePaneRows()
+  # PLAT-70: the editor's horizontal bar takes a row from the source window
+  # while the document is wider than the pane (`runtime.sourcePaneRows`);
+  # the first frame is what measured the pane's width.
+  var barSeen = rt.editorBarShown()
+  if barSeen and viewRows > 0:
+    session.setViewportHeight(viewRows)
+    session.refresh(rt)
+    paint(driver, rt)
   while running:
     # §6.2's `--replay-keys`: "replay input events from file and exit". The
     # journal REPLACES the keyboard rather than being merged with it, so a
@@ -1123,6 +1135,16 @@ proc interactive(command: TuiCommand): int =
           else:
             paint(driver, rt)
             frameOwed = false
+        # PLAT-70: the editor's horizontal bar came or went (a wider file, an
+        # edit, a narrower pane): the source window follows the rows it left.
+        if rt.editorBarShown() != barSeen:
+          barSeen = not barSeen
+          let rows = rt.sourcePaneRows()
+          if rows > 0 and rows != viewRows:
+            viewRows = rows
+            session.setViewportHeight(rows)
+            session.refresh(rt)
+            paint(driver, rt)
 
   # THE ARRANGEMENT IS SAVED AGAIN ON THE WAY OUT, AND ONLY IF IT IS THE
   # USER'S. PLAT-45 added the write-through on every committed change (a drag
@@ -1241,7 +1263,7 @@ proc editInteractive(command: TuiCommand): int =
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
   let keybindings = wireKeybindings(rt)
-  wireLayoutPreferences(rt, soUnset, soUnset)
+  wireLayoutPreferences(rt, soUnset, soUnset, soUnset)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)

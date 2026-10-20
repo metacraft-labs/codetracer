@@ -71,6 +71,7 @@ import ./editor/change_set
 import ./editor/document_version
 import ./editor/reconcile
 import ./editor/transaction
+import ./viewmodels/horizontal_scroll
 
 import ./keymap/editing_keymap
 import ./keymap/base_rows
@@ -83,7 +84,7 @@ import ./keymap/keymap_selection
 from ./keymap/vim_import import VimImport, ImportReportEntry, ImportReason,
   importVimConfig, coverageFraction, describeReport
 
-export editor_state, selection, wrap
+export editor_state, selection, wrap, horizontal_scroll
 export editing_keymap, base_rows, base_keymaps, cua_keymap, emacs_keymap,
   vim_keymap, kakoune_keymap
 export keymap_selection
@@ -166,6 +167,25 @@ type
       ## model. A `ref` so the one imported keymap is shared by every buffer
       ## of a session rather than copied into each, and because it never
       ## changes after the import: a new `:source` installs a new one.
+    widths*: LineWidths
+      ## Horizontal-Overflow.md §4.1: every line's width in view columns
+      ## (`ViewColumnPolicy`) and the widest — the editor's EXACT content
+      ## width, maintained per line by `drainJournal` as change sets arrive,
+      ## never re-measured over the document on a frame (`contentCols`).
+
+  LineWidths* = object
+    ## The width of every line in view columns (`ViewColumnPolicy`), the
+    ## widest, and how many lines are that wide — so a change re-measures only
+    ## the lines it touched, and a shrinking widest line is found again from
+    ## the stored numbers, not from the text.
+    widths*: seq[int]
+    widest*: int
+    atWidest*: int
+    valid*: bool
+      ## Measured; until then the first `contentCols` measures every line.
+    version*: DocumentVersion
+      ## The timeline version the widths describe.
+    docLen*: int
 
   ImportedKeymap* = ref object
     ## An imported configuration, reduced to what resolution needs: the
@@ -265,6 +285,93 @@ proc initEditingDocument*(path, text: string;
     delivery: delivery)
   result.state.mode = initialModeFor(model)
 
+const ViewColumnPolicy* = ColumnPolicy(tabSize: 1, ambiguous: awNarrow)
+  ## THE COLUMNS OF THE HORIZONTAL VIEW (Horizontal-Overflow.md §4): the
+  ## columns the native front-ends DRAW a line in. A tab is ONE column —
+  ## neither the terminal's grid (`styled_row.cellWidthOf`) nor GPUI's rows
+  ## (`leaves.dropColumns`, by rune) expand it — and a wide glyph two. The
+  ## editing settings' `policy` (tabs to the next multiple of 4) decides goal
+  ## columns; measuring the view with it would make a tabbed line's bar
+  ## promise columns the pane never draws, and put the caret-follow's caret
+  ## where the caret is not.
+
+func lineViewWidth*(line: string): int =
+  ## A line's width in view columns (`ViewColumnPolicy`): `selection.columnAt`
+  ## at its end. A line of printable ASCII is its length, without segmenting
+  ## it.
+  for c in line:
+    if ord(c) >= 0x80 or ord(c) < 0x20:
+      return columnAt(line, line.len, ViewColumnPolicy)
+  line.len
+
+proc recountWidest(w: var LineWidths) =
+  w.widest = 0
+  w.atWidest = 0
+  for x in w.widths:
+    if x > w.widest:
+      w.widest = x
+      w.atWidest = 1
+    elif x == w.widest:
+      inc w.atWidest
+
+proc measureLines(text: string; first, count: int): seq[int] =
+  ## The widths of `count` lines of `text` from the line starting at byte
+  ## `first`.
+  var at = first
+  for i in 0 ..< count:
+    var stop = text.find('\n', at)
+    if stop < 0: stop = text.len
+    result.add lineViewWidth(text[at ..< stop])
+    at = stop + 1
+
+proc measureAll(d: var EditingDocument) =
+  let text = d.state.doc
+  var lines = 1
+  for c in text:
+    if c == '\n': inc lines
+  d.widths = LineWidths(widths: measureLines(text, 0, lines),
+                        valid: true, version: d.timeline.version,
+                        docLen: text.len)
+  d.widths.recountWidest()
+
+proc remeasure(d: var EditingDocument; before, after: string; cs: ChangeSet) =
+  ## The lines one change set touched, measured again: from the line its
+  ## first change starts on to the line its last change ends on, in the old
+  ## text, replaced by the same span of the new one.
+  let ranges = cs.changedRangeSeq()
+  if ranges.len == 0:
+    return
+  let aFrom = ranges[0].fromA
+  var firstLine = 0
+  var lineStart = 0
+  for i in 0 ..< aFrom:
+    if before[i] == '\n':
+      inc firstLine
+      lineStart = i + 1
+  var oldLast = firstLine
+  for i in aFrom ..< ranges[^1].toA:
+    if before[i] == '\n': inc oldLast
+  var newLast = firstLine
+  for i in aFrom ..< ranges[^1].toB:
+    if after[i] == '\n': inc newLast
+  let fresh = measureLines(after, lineStart, newLast - firstLine + 1)
+  var w = d.widths
+  if oldLast >= w.widths.len:
+    d.widths.valid = false
+    return
+  for i in firstLine .. oldLast:
+    if w.widths[i] == w.widest: dec w.atWidest
+  w.widths = w.widths[0 ..< firstLine] & fresh & w.widths[oldLast + 1 .. ^1]
+  for x in fresh:
+    if x > w.widest:
+      w.widest = x
+      w.atWidest = 1
+    elif x == w.widest:
+      inc w.atWidest
+  if w.atWidest <= 0:
+    w.recountWidest()
+  d.widths = w
+
 proc drainJournal*(d: var EditingDocument) =
   ## Move the change sets the last step applied from the model's journal onto
   ## the timeline, one version each. The ONLY writer of `timeline` besides the
@@ -272,10 +379,19 @@ proc drainJournal*(d: var EditingDocument) =
   ## EVERY writer of `d.state` calls it — `applyKey`, `applyNamed`,
   ## `applyChangeSet` here, and the collaboration projection's two — so a
   ## document leaves each call with an empty journal.
+  ##
+  ## Each change set also re-measures the lines it touched (`widths`), once
+  ## they have been measured at all.
   for cs in d.state.journal:
+    let before = d.timeline.text
     discard d.timeline.applyChanges(cs)
+    if d.widths.valid:
+      d.remeasure(before, d.timeline.text, cs)
   d.state.journal.setLen(0)
   d.timeline.keepRecent(TimelineDepth)
+  if d.widths.valid:
+    d.widths.version = d.timeline.version
+    d.widths.docLen = d.state.doc.len
 
 func version*(d: EditingDocument): DocumentVersion =
   ## The version an asynchronous producer names when it is handed this
@@ -588,6 +704,17 @@ proc caretLine*(d: EditingDocument): int =
   ## one place, which is here.
   d.caretPos.line + 1
 
+proc caretLineText(d: EditingDocument): tuple[text: string; byteCol: int] =
+  ## The caret's line only — its start is `column` bytes back from the head,
+  ## its end the next newline — rather than every line of the document; and
+  ## the caret's byte offset in it.
+  let pos = d.caretPos
+  let head = clamp(d.state.primaryHead, 0, d.state.doc.len)
+  let lineStart = head - pos.column
+  var lineEnd = d.state.doc.find('\n', lineStart)
+  if lineEnd < 0: lineEnd = d.state.doc.len
+  (d.state.doc[lineStart ..< lineEnd], pos.column)
+
 proc caretColumn*(d: EditingDocument): int =
   ## **0-based GRAPHEME-CLUSTER column within the caret's line.**
   ##
@@ -599,31 +726,46 @@ proc caretColumn*(d: EditingDocument): int =
   ## every display row is built from — rather than a second walk, because a
   ## second walk is §30a's whole subject.
   ##
-  ## **THE CELL COLUMN IS A DIFFERENT NUMBER AND IT IS NOT PUBLISHED HERE.** A
-  ## tab is one cluster and `policy.tabSize` cells, and a wide CJK cluster is
-  ## one cluster and two cells, so a painter placing a cursor wants cells
-  ## while a caller asking "which cluster is the caret on" wants this. A
-  ## `caretDisplayColumn` was written and DELETED before it landed, because
-  ## nothing reached it: `views/edit_pane` places the caret at
-  ## `area.col + gutter + caretColumn`, which is the cells reading of a
-  ## clusters number and agrees on ASCII. That disagreement is a real one and
-  ## it is recorded HERE rather than as an export with no consumer (PLAT-31's
-  ## ratchet rule: *"a public helper nobody calls is not a backlog item
-  ## waiting for a caller; it is coverage-shaped dead code"*). The day a
-  ## medium places a cursor on a tab, the function arrives with its caller.
-  let pos = d.caretPos
-  # The caret's line only — its start is `column` bytes back from the head,
-  # its end the next newline — rather than every line of the document.
-  let head = clamp(d.state.primaryHead, 0, d.state.doc.len)
-  let lineStart = head - pos.column
-  var lineEnd = d.state.doc.find('\n', lineStart)
-  if lineEnd < 0: lineEnd = d.state.doc.len
-  let metrics = lineMetrics(d.state.doc[lineStart ..< lineEnd],
-                            d.settings.policy)
+  ## **THE VIEW COLUMN IS A DIFFERENT NUMBER** — `caretViewColumn`. A wide
+  ## CJK cluster is one cluster and two columns; the horizontal view
+  ## (Horizontal-Overflow.md §4.5) scrolls in view columns
+  ## (`ViewColumnPolicy`), so its caret-follow reads that one.
+  let (text, byteCol) = d.caretLineText
+  let metrics = lineMetrics(text, d.settings.policy)
   for i, c in metrics.clusters:
-    if c.startByte >= pos.column:
+    if c.startByte >= byteCol:
       return i
   metrics.clusters.len
+
+proc caretViewColumn*(d: EditingDocument): int =
+  ## The caret's 0-based column in the horizontal view (`ViewColumnPolicy`):
+  ## the column the view follows and the bar's mark.
+  let (text, byteCol) = d.caretLineText
+  columnAt(text, byteCol, ViewColumnPolicy)
+
+proc contentCols*(d: var EditingDocument): int =
+  ## Horizontal-Overflow.md §4.1: the editor's content width — its widest
+  ## line in view columns, exact, from the per-line widths `drainJournal`
+  ## maintains (measured once, the first time it is asked).
+  if not d.widths.valid or d.widths.version != d.timeline.version or
+     d.widths.docLen != d.state.doc.len:
+    d.measureAll()
+  d.widths.widest
+
+proc followView*(d: var EditingDocument; v: var HorizontalView;
+                 f: var CaretFollow; viewportCols: int): bool =
+  ## THE EDITOR'S HORIZONTAL VIEW before a frame, one rule for every
+  ## front-end: the content width and the view's width brought up to date,
+  ## then §4.5's caret-follow when the caret moved since it was last
+  ## followed (`horizontal_scroll.followCaret`). Answers whether the view
+  ## moved.
+  let before = v.leftCol
+  v.setContent(d.contentCols)
+  v.setViewport(viewportCols)
+  let (text, byteCol) = d.caretLineText
+  discard v.followCaret(f, d.caretLine, columnAt(text, byteCol, ViewColumnPolicy),
+                        lineViewWidth(text))
+  v.leftCol != before
 
 func offsetAt*(d: EditingDocument; line, column: int): int =
   ## The byte offset of the 0-based (line, cluster column), clamped into the

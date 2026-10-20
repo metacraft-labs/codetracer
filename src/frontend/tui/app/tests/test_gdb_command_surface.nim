@@ -274,7 +274,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 266
+  ExpectedStyleLiterals = 267
+    ## 2026-10-16 (PLAT-70 Part A): 266 → 267, measured. The `‹` / `›`
+    ## overflow markers' style (`views/scrubber_track.OverflowMarkerStyle`,
+    ## the muted chrome role).
     ## 2026-10-15 (PLAT-57): 256 → 266, measured. Find in Files' field,
     ## toggles, summary, file headers, line numbers, text and match
     ## (`views/search_results_pane.nim`, a new styled file).

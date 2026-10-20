@@ -261,6 +261,12 @@ const
     op("build.run-program", GlobalTable, "Build and Run"),
     op("project.export", GlobalTable, "Export Project"),
     op("view.low-level-code", GlobalTable, "Show Low Level Code"),
+    # --- The text panes' horizontal view (Horizontal-Overflow.md §4.4) -------
+    op("view.scroll-left", GlobalTable, "View: Scroll Left"),
+    op("view.scroll-right", GlobalTable, "View: Scroll Right"),
+    op("view.scroll-left-half", GlobalTable, "View: Scroll Left Half a View"),
+    op("view.scroll-right-half", GlobalTable, "View: Scroll Right Half a View"),
+    op("view.scroll-to-line-start", GlobalTable, "View: Scroll to Line Start"),
     op("tests.run", GlobalTable, "Run Tests"),
     op("flow.set-multiline", GlobalTable, "Flow: Multiline"),
     op("flow.set-parallel", GlobalTable, "Flow: Parallel"),

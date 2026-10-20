@@ -141,6 +141,14 @@ type
       ## carried-and-not-yet-produced note PLAT-16 attached to it still holds
       ## — no gesture in this front-end closes a fold today, and
       ## `test_mode_transition_oracle.nim` sets one directly.
+    hview*: HorizontalView
+      ## PLAT-70 (Horizontal-Overflow.md §4): how far right this pane's view
+      ## of the buffer is scrolled — per renderer, for `viewportTop`'s
+      ## reason. Moved by the caret (`editing_core.followView`), the wheel
+      ## and the bar.
+    follow*: CaretFollow
+      ## The caret the view last followed (§4.5: only the caret moves the
+      ## view).
     serial*: int
       ## Which opening of the file this buffer is, within its session — see
       ## `HighlightRequest.bufferSerial`.
@@ -763,3 +771,5 @@ proc editPaneModelFor*(s: EditSession; buf: EditBuffer): EditPaneModel =
   result.spans = buf.highlights.spansForWindow(buf.doc, buf.viewportTop, rows)
   result.spansFrom = buf.viewportTop
   result.spansProvided = true
+  result.hview = buf.hview
+  result.caretViewColumn = buf.doc.caretViewColumn

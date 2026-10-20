@@ -264,6 +264,12 @@ export terminal_output_vm
 import viewmodels/scrollbar_scrubber
 export scrollbar_scrubber
 
+# PLAT-70: a text pane's horizontal view and its overflow-only bar — the
+# scrubber model on the column axis (Horizontal-Overflow.md §4). Pure; imports
+# only `scrollbar_scrubber`.
+import viewmodels/horizontal_scroll
+export horizontal_scroll
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #

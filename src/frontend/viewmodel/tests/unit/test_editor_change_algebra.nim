@@ -117,7 +117,27 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1819
+const ExpectedAssertions = 1855
+  ## *1849 -> 1855 on 2026-10-20: the session mirror over a socket
+  ## (`sync/hosted_primary.nim`, `sync/socket_transport.nim`, `a928063082` / `86c11d2afb`)
+  ## x three assertions. Neither calls `rebase(`.*
+  ## *1846 -> 1849 on 2026-10-20: `viewmodels/diff_target.nim` (`0101549581`, a review
+  ## commit's file rows) x three assertions. It calls no `rebase(`.*
+  ## *1828 -> 1846 on 2026-10-20: six production modules the latest
+  ## refactors added without moving the count — the session mirror
+  ## (`sync/mirror_session`, `sync_host`, `synced_signals`, `transport`,
+  ## `9e06354dd3`), the viewport contract (`viewport.nim`, `403d8d7db0`) and
+  ## the toolbar's history cursor (`viewmodels/history_cursor.nim`,
+  ## `b7f4511527`) — x three assertions. None calls `rebase(` or spells
+  ## `mapOver`.*
+  ## *1822 -> 1828 on 2026-10-19: two production modules the per-stop loader
+  ## added (`d883db0e2b`) — `sdk/stop_loader.nim` and
+  ## `store/locals_answer.nim` — x three assertions, which that change did not
+  ## count. Neither calls `rebase(` or spells `mapOver`.*
+  ## *1819 -> 1822 on 2026-10-16 (PLAT-70 Part A): one new production module
+  ## under `viewmodels/` — `horizontal_scroll.nim` (a text pane's horizontal
+  ## view and its overflow-only bar) — x three assertions. It calls no
+  ## `rebase(` and spells no `mapOver`.*
   ## *1813 -> 1819 on 2026-10-16 (PLAT-57): two new production modules under
   ## `host/` — `find_in_files.nim` (the one search runner) and
   ## `text_match.nim` (its matcher) — x three assertions. Neither calls

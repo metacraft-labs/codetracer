@@ -41,7 +41,7 @@ import ../../app/theme/roles
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 39
+const ExpectedAssertions = 40
 
 var countedAssertions = 0
 
@@ -258,13 +258,19 @@ suite "PLAT-68 Phase B on a real terminal: selection and the clipboard":
     var sess = open()
     let at = sess.clickLine11(3)
     sess.send(ShiftEnd)
-    sess.waitUntil("a selection", proc(s: Snapshot): bool =
-      s[at.row][at.code + 2].bgHex == selectionHex)
+    # The line is wider than the pane: the caret's move to its end brings
+    # the end into view (PLAT-70, Horizontal-Overflow.md §4.5), so the row
+    # shows the line's TAIL, every shown character of it selected — the
+    # selection runs on off the view's left edge, to column 3.
+    let tail = Line11[^12 .. ^1]
+    sess.waitUntil("a selection to the line's end, in view", proc(s: Snapshot): bool =
+      s.text(at.row).contains(tail) and s[at.row][at.code].bgHex == selectionHex)
     let s = sess.snap()
-    # From column 3 to the end of the text, on the selection ground.
-    ck s[at.row][at.code + 2].bgHex == selectionHex
-    ck s[at.row][at.code + Line11Shown.runeLen - 1].bgHex == selectionHex
-    ck s[at.row][at.code].bgHex != selectionHex
+    let tailAt = s.text(at.row).cellFind(tail)
+    ck tailAt > at.code
+    ck s[at.row][at.code].bgHex == selectionHex
+    ck s[at.row][tailAt + tail.len - 1].bgHex == selectionHex
+    ck not s.text(at.row).contains(Line11Shown)
     sess.send(CtrlC)
     sess.waitUntil("copied", proc(s: Snapshot): bool =
       "copied" in s.text(StatusRow))
@@ -273,7 +279,7 @@ suite "PLAT-68 Phase B on a real terminal: selection and the clipboard":
     # Typing into the read-only document is refused: the line is unchanged.
     sess.send("x")
     sleep(300)
-    ck sess.snap().text(at.row).contains(Line11Shown)
+    ck sess.snap().text(at.row).contains(tail)
     sess.quit()
 
   test "a pointer drag selects across lines":

@@ -63,7 +63,9 @@ import ./navigation_table
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 318
+const ExpectedAssertions = 326
+  ## PLAT-70 Part A: +8 — five output-pane view bindings (`z h`, `z l`, `z H`,
+  ## `z L`, `0`), their three new key bytes decoded.
   ## The shared jump history: +6 — `Alt+Left` / `Alt+Right` bound (two chord
   ## checks), two xterm sequences decoded, and their two reachability checks.
   ## PLAT-68 Phase B: +2 — the `.cttui-keys` case is the one-time importer
@@ -100,7 +102,7 @@ const
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 95
+  ExpectedBindingCount = 100
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -135,6 +137,7 @@ const
     ("f", "f"), ("r", "r"), ("c", "c"), ("o", "o"), ("O", "O"), ("j", "j"),
     ("k", "k"), ("l", "l"), ("h", "h"), ("m", "m"), ("x", "x"), ("q", "q"),
     ("g", "g"), ("G", "G"), ("t", "t"), ("T", "T"), ("i", "i"),
+    ("H", "H"), ("L", "L"), ("0", "0"),
     ("[", "["), ("]", "]"), ("{", "{"), ("}", "}"), (".", "."),
     ("/", "/"), ("?", "?"), (":", ":"), (" ", "Space"),
     ("\r", "Enter"), ("\n", "Enter"), ("\x7f", "Backspace"),
@@ -421,7 +424,9 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
             if note notin duplicates:
               duplicates.add note
           elif a.chords.len < bnd.chords.len and
-               bnd.chords[0 ..< a.chords.len] == a.chords:
+               bnd.chords[0 ..< a.chords.len] == a.chords and
+               canBothHold(parseWhen(a.whenText).expr,
+                           parseWhen(bnd.whenText).expr):
             # `a` SHADOWS `bnd`: a user who types `a`'s sequence can never
             # reach `bnd`, because the shorter one fires first.
             shadowed.add $mode & ": " & a.chords.join(" ") & " (" & $a.action &
@@ -479,7 +484,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 73
+    ck decoded == 76
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0
@@ -496,12 +501,14 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
     checkpoint("chords checked: " & $chordsChecked)
     # Every binding contributes one chord, plus one extra for each of the SEVEN
     # two-chord bindings §4.2 has: `Ctrl+w` h/j/k/l, `rf`, `rc` and `g` `g` —
-    # and the TWO §3.3.1 adds, `g t` and `g T`: nine.
+    # and the TWO §3.3.1 adds, `g t` and `g T`: nine — and the FOUR the output
+    # panes' view adds (Horizontal-Overflow.md §4.4), `z h` / `z l` / `z H` /
+    # `z L`: thirteen.
     var twoChord = 0
     for bnd in km.bindings:
       if bnd.chords.len == 2:
         inc twoChord
-    ck twoChord == 9
+    ck twoChord == 13
     ck chordsChecked == ExpectedBindingCount + twoChord
 
     # …and the decoder REFUSES what is not a key, so "every chord decodes" is

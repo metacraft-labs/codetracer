@@ -438,6 +438,8 @@ proc runFileJob(rt: TuiRuntime; job: FileJob)
 proc writeBuffers(rt: TuiRuntime; verb: string; all = false)
 proc sessionFacts*(rt: TuiRuntime): SessionFacts
 proc debugBuffer*(rt: TuiRuntime): EditBuffer
+proc editorBuffer(rt: TuiRuntime): EditBuffer
+  ## Forward-declared for PLAT-70's horizontal views; defined below.
 proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer)
 proc scopePath*(rt: TuiRuntime): ScopePath
 proc navMode(rt: TuiRuntime): NavigationMode
@@ -793,6 +795,8 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
   of lsLiveResize:
     if not rt.app.layoutBinding.isNil:
       rt.app.layoutBinding.liveResize = on
+  of lsOverflowMarkers:
+    rt.app.overflowMarkersOff = not on
   result = describe(which, on)
   if remember:
     let saved =
@@ -1394,6 +1398,21 @@ proc endTerminalScrub(rt: TuiRuntime) =
   rt.app.terminalOutput.previewing = false
   rt.app.terminalOutput.scrubSent = -1
 
+proc pointerCellX(event: MouseEvent; fallback = -1.0): float =
+  ## PLAT-70: the pointer's column in fractional cells when the terminal
+  ## reports pixels (SGR-pixel, DECSET 1016), else `fallback`.
+  if event.pixel: event.px / mouseMetrics().cellW else: fallback
+
+proc heldBarHit(view: HorizontalView; left, cols: int;
+                event: MouseEvent): ScrubberHit =
+  ## PLAT-70: where a held horizontal thumb's pointer is on a bar drawn from
+  ## column `left` for `cols` cells — clamped onto the track, so a pointer
+  ## past either end drags the thumb to that end.
+  horizontalBarHit(view.barModel, left, cols,
+                   clamp(event.col, left, left + max(0, cols - 1)),
+                   clamp(event.pointerCellX(float(event.col) + 0.5),
+                         float(left), float(left + cols) - 0.01))
+
 proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
                               event: MouseEvent;
                               outcome: var RuntimeOutcome): bool =
@@ -1402,11 +1421,26 @@ proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
   ## the pane, so a right press is not taken.
   if event.button != mbLeft or not rt.app.terminalOutput.loaded:
     return false
-  let hit = rt.app.terminalOutput.terminalOutputHitAt(area, event.row,
-                                                      event.col)
+  let hit = rt.app.terminalOutput.terminalOutputHitAt(
+    area, event.row, event.col, event.pointerCellX)
   case hit.kind
   of thNone, thScreen:
     return false
+  of thCorner:
+    # PLAT-70 (HO-7): the cell between the two tracks belongs to neither.
+    discard
+  of thHBarTrack, thHBarThumb:
+    # PLAT-70 (§4.2): the line view's horizontal bar — the view only.
+    let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
+    var v = geo.view
+    discard v.barScrollTo(ScrubberHit(kind: (if hit.kind == thHBarThumb:
+                                               shThumb else: shTrack),
+                                      fraction: hit.fraction),
+                          dragging = hit.kind == thHBarThumb)
+    rt.app.terminalOutput.hview = v
+    if hit.kind == thHBarThumb:
+      rt.app.hbarDrag = (active: true, pane: paneTerminalOutput)
+    outcome.repaint = true
   of thViewLines:
     outcome.requestClick(PaneClickRequest(kind: pcTerminalView,
                                           text: $tvLines))
@@ -1507,14 +1541,19 @@ proc routeFrameViewerMouse(rt: TuiRuntime; event: MouseEvent;
   true
 
 proc terminalOutputOwnsToken*(rt: TuiRuntime; token: string): bool =
-  ## The pane's own keys while it is focused: Left / Right step a write back /
-  ## forward (the screen's "step-by-write keys ... scoped to the pane", which
-  ## the line view keeps too), `v` toggles lines / screen.
+  ## The pane's own keys while it is focused: in the SCREEN view Left / Right
+  ## step a write back / forward (Terminal-Output-Pane.md §3's "step-by-write
+  ## keys ... scoped to the pane", the desktop's screen keys); `v` toggles
+  ## lines / screen. In the LINE view the arrows are the view's
+  ## (Horizontal-Overflow.md §4.4: the pane has no caret, so `Left` / `Right`
+  ## scroll it sideways — `view.scroll-left` / `-right`, through the router).
   let (had, focused) = rt.focus.focusedPane()
   if not had or focused != paneTerminalOutput or
      not rt.app.terminalOutput.loaded:
     return false
-  rt.keyOf(token) in ["Left", "Right", "v"]
+  let key = rt.keyOf(token)
+  key == "v" or
+    (key in ["Left", "Right"] and rt.app.terminalOutput.screenShown)
 
 proc routeTokenToTerminalOutput(rt: TuiRuntime; token: string;
                                 outcome: var RuntimeOutcome) =
@@ -1597,6 +1636,241 @@ proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
   if not geometry.openDock.isEmptyArea and geometry.openDockPane == kind:
     return geometry.openDock
   CellArea()
+
+# ---------------------------------------------------------------------------
+# PLAT-70: the text panes' horizontal views (Horizontal-Overflow.md §4) — the
+# editor (both modes), the Terminal Output line view and Build Output. The
+# model is `codetracer_embed.horizontal_scroll` (and the editor's
+# `editing_core.followView`); this section only finds where each pane is
+# painted, feeds it its width, and routes the wheel, the bar and the keys.
+# ---------------------------------------------------------------------------
+
+proc paintedAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
+  ## The rectangle pane `kind`'s painter is handed this frame (its strip row
+  ## first): the maximized pane's under `z`, else `paneAreaOf`'s (a tiled
+  ## pane, or a docked one shown open or revealed).
+  if rt.maximize.active:
+    let body = bodyArea(rt.width, rt.height)
+    let projection = projectLayout(
+      rt.maximize.layoutFor(selectProfile(rt.width, rt.height)), body)
+    for region in projection.regions:
+      if region.pane == kind:
+        let frame = paneFrame(region.area, body)
+        return CellArea(col: region.area.col, row: region.area.row,
+                        width: frame.box.width, height: frame.box.height)
+    return CellArea()
+  rt.paneAreaOf(kind)
+
+proc editorPaneModel(rt: TuiRuntime; model: var ShellModel; follow: bool) =
+  ## The editor's part of a frame's model: PLAT-68's Debug-mode document (its
+  ## selection over the recording's source while read-only; the Edit pane
+  ## once writable) and PLAT-70's horizontal view — the content width and the
+  ## pane's code width brought up to date and, when `follow`, the caret
+  ## followed (§4.5) — before the frame is painted from it.
+  if rt.app.modes.product == pmDebug and not rt.app.editSession.isNil:
+    let at = rt.app.editSession.indexOfPath(rt.app.source.path)
+    if at >= 0:
+      let buf = rt.app.editSession.buffers[at]
+      if buf.doc.isReadOnly:
+        model.source.selected = selectedCells(buf)
+      else:
+        model.editorWritable = true
+        model.edit = editPaneModelFor(rt.app.editSession, buf)
+  let buf = rt.editorBuffer()
+  if buf.isNil:
+    return
+  let editShown = model.product == pmEdit or model.editorWritable
+  if not editShown and model.source.path != buf.path:
+    return
+  let area = rt.paintedAreaOf(paneEditor)
+  let gutter = if editShown: paneGutterWidth(model.edit)
+               else: min(area.width, model.source.paneGutterWidth())
+  let cols = if area.width > 0: max(0, area.width - gutter)
+             else: buf.hview.viewportCols
+  if follow:
+    # The first frame that knows the pane's width follows the caret where
+    # it already is; after that only a caret move does (§4.5).
+    if buf.hview.viewportCols == 0 and cols > 0:
+      buf.follow.armed = false
+    discard buf.doc.followView(buf.hview, buf.follow, cols)
+  let markers = not rt.app.overflowMarkersOff
+  if editShown:
+    model.edit.hview = buf.hview
+    model.edit.caretViewColumn = buf.doc.caretViewColumn
+    model.edit.overflowMarkers = markers
+  else:
+    model.source.hview = buf.hview
+    model.source.caretViewColumn = buf.doc.caretViewColumn
+    model.source.overflowMarkers = markers
+
+proc syncOutputViews(rt: TuiRuntime) =
+  ## The output panes' widths, before a frame: Build Output's content (the
+  ## widest line measured so far of this build) and both panes' text widths
+  ## where they are painted. A pane not on the screen keeps its last width.
+  rt.app.buildView.measureContent(rt.app.build)
+  let b = rt.paintedAreaOf(paneBuildOutput)
+  if b.width > 0:
+    rt.app.buildView.hview.setViewport(b.width)
+  let t = rt.paintedAreaOf(paneTerminalOutput)
+  if t.width > 0:
+    let geo = terminalPaneGeometry(rt.app.terminalOutput, t)
+    rt.app.terminalOutput.hview.setViewport(geo.textWidth)
+
+proc horizontalViewPane(rt: TuiRuntime; pane: PaneKind): bool =
+  ## Whether `pane` is a text pane with a horizontal view now (§4.1): the
+  ## editor with a document, the Terminal Output's LINE view (the screen
+  ## view has no bar, OQ-H3), Build Output.
+  case pane
+  of paneEditor: not rt.editorBuffer().isNil
+  of paneTerminalOutput: rt.app.terminalOutput.loaded and
+                         not rt.app.terminalOutput.screenShown
+  of paneBuildOutput: true
+  else: false
+
+proc scrollPaneView(rt: TuiRuntime; pane: PaneKind;
+                    step: proc(v: var HorizontalView): bool): bool =
+  ## Apply one view step to `pane`'s horizontal view; answers whether it
+  ## moved. The caret, the selection and the debugger are not touched
+  ## (HO-4): only the view is handed over.
+  case pane
+  of paneEditor:
+    let buf = rt.editorBuffer()
+    if buf.isNil: return false
+    step(buf.hview)
+  of paneTerminalOutput: step(rt.app.terminalOutput.hview)
+  of paneBuildOutput: step(rt.app.buildView.hview)
+  else: false
+
+proc routeHorizontalWheel(rt: TuiRuntime; event: MouseEvent;
+                          outcome: var RuntimeOutcome): bool =
+  ## §4.3: a horizontal wheel notch (SGR 66 / 67, or a delivered Shift +
+  ## wheel) over a text pane moves its view `WheelColumns` columns — the pane
+  ## under the pointer, focused or not, as the vertical wheel does. Never
+  ## the rows (HO-6).
+  if event.kind != mekPress or event.button notin {mbWheelLeft, mbWheelRight}:
+    return false
+  let at = rt.layoutGeometry().paneAt(event.row, event.col)
+  var pane = if at.found: at.region.pane else: paneEditor
+  if rt.maximize.active:
+    for kind in [paneEditor, paneTerminalOutput, paneBuildOutput]:
+      if rt.paintedAreaOf(kind).contains(event.row, event.col):
+        pane = kind
+  elif not at.found:
+    return false
+  if not rt.horizontalViewPane(pane):
+    return false
+  let cols = if event.button == mbWheelRight: WheelColumns else: -WheelColumns
+  if rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
+                         v.scrollBy(cols)):
+    outcome.repaint = true
+  true
+
+proc hbarOf(rt: TuiRuntime; pane: PaneKind):
+    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
+  ## Where `pane`'s horizontal bar is painted this frame — read back from the
+  ## same models and the same geometry functions the painters use.
+  let area = rt.paintedAreaOf(pane)
+  if area.width <= 0:
+    return
+  case pane
+  of paneEditor:
+    var model = rt.app.shellModel(rt.width, rt.height)
+    rt.editorPaneModel(model, follow = false)
+    let under = area
+    if model.product == pmEdit or model.editorWritable:
+      return editBarOf(model.edit, under)
+    return sourceBarOf(model.source, under)
+  of paneBuildOutput:
+    var model = buildPaneModelFor(rt.app.build)
+    model.hview = rt.app.buildView.hview
+    let content = CellArea(col: area.col, row: area.row + 1,
+                           width: area.width, height: max(0, area.height - 1))
+    return buildBarOf(model, content)
+  else:
+    discard
+
+proc pressHorizontalBar(rt: TuiRuntime; event: MouseEvent;
+                        outcome: var RuntimeOutcome): bool =
+  ## §4.2: a left press on the editor's or Build Output's horizontal bar —
+  ## on the track the clicked column is centred, on the thumb a drag
+  ## starts. The view moves; nothing else does (HO-4). (The Terminal
+  ## Output's bar is hit-tested with its scrubbers,
+  ## `routeTerminalOutputClick`.)
+  if event.kind != mekPress or event.button != mbLeft:
+    return false
+  for pane in [paneEditor, paneBuildOutput]:
+    if not rt.horizontalViewPane(pane):
+      continue
+    let bar = rt.hbarOf(pane)
+    if not bar.shown or event.row != bar.row:
+      continue
+    let area = rt.paintedAreaOf(pane)
+    if not area.contains(event.row, event.col):
+      continue
+    let hit = horizontalBarHit(bar.view.barModel, bar.left, bar.cols,
+                               event.col, event.pointerCellX)
+    if hit.kind == shNone:
+      return true
+    if hit.kind == shThumb:
+      rt.app.hbarDrag = (active: true, pane: pane)
+    discard rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
+      v.setViewport(bar.cols)
+      v.barScrollTo(hit, dragging = hit.kind == shThumb))
+    outcome.repaint = true
+    return true
+  false
+
+proc routeHorizontalBarDrag(rt: TuiRuntime; event: MouseEvent;
+                            outcome: var RuntimeOutcome): bool =
+  ## A press held on a horizontal bar's thumb owns the pointer until it is
+  ## released: the view follows it (§4.2), and the release ends the drag.
+  if not rt.app.hbarDrag.active:
+    return false
+  let pane = rt.app.hbarDrag.pane
+  if event.kind == mekPress:
+    rt.app.hbarDrag.active = false
+    return false
+  if event.kind == mekRelease:
+    rt.app.hbarDrag.active = false
+  if pane == paneTerminalOutput:
+    let area = rt.paintedAreaOf(pane)
+    let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
+    let hit = heldBarHit(geo.view, geo.textCol, geo.textWidth, event)
+    var v = geo.view
+    discard v.barScrollTo(hit, dragging = true)
+    rt.app.terminalOutput.hview = v
+  else:
+    let bar = rt.hbarOf(pane)
+    if bar.shown:
+      let hit = heldBarHit(bar.view, bar.left, bar.cols, event)
+      discard rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
+        v.setViewport(bar.cols)
+        v.barScrollTo(hit, dragging = true))
+  outcome.repaint = true
+  true
+
+proc runViewOperation(rt: TuiRuntime; operation: string;
+                      outcome: var RuntimeOutcome): bool =
+  ## §4.4's `view.*` operations on the focused output pane: by `WheelColumns`
+  ## (`view.scroll-left` / `-right`), by half the view, back to column 0.
+  let (had, focused) = rt.focus.focusedPane()
+  let pane = if had: focused else: paneEditor
+  if pane notin {paneTerminalOutput, paneBuildOutput} or
+     not rt.horizontalViewPane(pane):
+    rt.note("`" & operation & "` scrolls the Terminal Output or Build " &
+            "Output pane")
+    outcome.repaint = true
+    return true
+  discard rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
+    case operation
+    of "view.scroll-left": v.scrollBy(-WheelColumns)
+    of "view.scroll-right": v.scrollBy(WheelColumns)
+    of "view.scroll-left-half": v.scrollHalf(right = false)
+    of "view.scroll-right-half": v.scrollHalf(right = true)
+    of "view.scroll-to-line-start": v.scrollToLineStart()
+    else: false)
+  outcome.repaint = true
+  true
 
 proc scrubEventLog(rt: TuiRuntime; area: CellArea; row: int;
                    dragging: bool): bool =
@@ -1809,6 +2083,14 @@ proc lineValues(target: SourceClickTarget): seq[NamedValue] =
   for v in target.values:
     result.add (v.name, v.value)
 
+proc sourceWithView(rt: TuiRuntime): SourcePaneModel =
+  ## The source pane's model with its document's horizontal view (PLAT-70),
+  ## so a press is read back at the column it was painted at.
+  result = rt.app.source
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == result.path:
+    result.hview = buf.hview
+
 proc placeCaret(rt: TuiRuntime; path: string; line, column: int) =
   ## The read-only editor's caret onto `line:column` (1-based) of `path`:
   ## the caret of the file's document (`debugBuffer`), so the keys move it
@@ -1841,7 +2123,7 @@ proc routeTextDrag(rt: TuiRuntime; event: MouseEvent;
     return true
   let row = clamp(event.row, area.row, area.row + area.height - 1)
   let col = clamp(event.col, area.col, area.col + area.width - 1)
-  let target = rt.app.source.sourceClickTargetAt(area, row, col)
+  let target = rt.sourceWithView().sourceClickTargetAt(area, row, col)
   if target.line >= 1:
     buf.doc.extendSelectionTo(target.line - 1, max(1, target.column) - 1)
     rt.syncCaretFrom(buf)
@@ -1856,7 +2138,7 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
   ## menu — `ui/editor`'s and `ui/flow`'s mouse handlers.
   if rt.app.modes.product == pmEdit or rt.app.source.isEmpty:
     return false
-  let src = rt.app.source
+  let src = rt.sourceWithView()
   let target = src.sourceClickTargetAt(under, event.row, event.col)
   if target.line < 1:
     return false
@@ -2334,6 +2616,9 @@ proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
     if event.kind == mekPress:
       if event.button in {mbWheelUp, mbWheelDown}:
         rt.app.content.scroll(if event.button == mbWheelDown: 3 else: -3)
+      elif event.button in {mbWheelLeft, mbWheelRight}:
+        # PLAT-70: a sideways swipe is not a press; the overlay stays.
+        discard
       else:
         rt.app.content = ContentOverlay()
       outcome.repaint = true
@@ -2461,6 +2746,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
         return
       of cthNone:
         discard
+  # PLAT-70: a horizontal wheel over a text pane moves its view sideways
+  # (Horizontal-Overflow.md §4.3), and a press on the editor's or Build
+  # Output's horizontal bar is the bar's, never a click on the text.
+  if acted.status == lasNoGesture and rt.routeHorizontalWheel(event, outcome):
+    return
+  if acted.status == lasNoGesture and not inGesture and
+     rt.pressHorizontalBar(event, outcome):
+    return
   if acted.status == lasNoGesture and event.kind == mekPress and
      event.button in {mbWheelUp, mbWheelDown}:
     let idx = geometry.regionIndexAt(event.row, event.col)
@@ -3192,6 +3485,13 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
   let setting = parseSettingCommandTarget(action)
   if setting.ok:
     rt.note(rt.applyLayoutSetting(setting.setting, setting.on))
+    outcome.repaint = true
+    return
+  # PLAT-70: **View: Toggle Overflow Markers** flips the markers.
+  let toggle = parseSettingToggleTarget(action)
+  if toggle.ok and toggle.setting == lsOverflowMarkers:
+    rt.note(rt.applyLayoutSetting(lsOverflowMarkers,
+                                  rt.app.overflowMarkersOff))
     outcome.repaint = true
     return
   # PLAT-49 part B: the omnibar's event-log column commands
@@ -4063,6 +4363,11 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
   of "list.focus-next": rt.performAction(kaScrollLineDown, outcome); return
   of "list.focus-page-up": rt.performAction(kaHalfPageUp, outcome); return
   of "list.focus-page-down": rt.performAction(kaHalfPageDown, outcome); return
+  of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
+     "view.scroll-right-half", "view.scroll-to-line-start":
+    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view.
+    discard rt.runViewOperation(res.operation, outcome)
+    return
   of "help.check-key-delivery":
     rt.keyCheck = startCheck()
     rt.note("keys check: press keys to see how they arrive; Esc ends the check")
@@ -4228,7 +4533,19 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     # Shift-modified report finds the TUI standing down exactly as the
     # browser build's handlers do on Shift — no menu, no drag, no focus, no
     # repaint. (`--no-mouse` stays the whole-session escape.)
+    #
+    # THE ONE EXCEPTION IS THE WHEEL (Horizontal-Overflow.md §4.3): a
+    # delivered Shift + vertical wheel scrolls sideways, as it does on the
+    # desktop and GPUI — best effort, because many terminals keep that
+    # gesture for their own scrollback and never report it.
     if isMouse and event.shift:
+      if event.kind == mekPress and event.button in {mbWheelUp, mbWheelDown}:
+        var sideways = event
+        sideways.shift = false
+        sideways.button = if event.button == mbWheelUp: mbWheelLeft
+                          else: mbWheelRight
+        if rt.routeHorizontalWheel(sideways, result):
+          return
       rt.lastToken = token
       return
     if isMouse:
@@ -4251,6 +4568,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       if rt.routeListScrubDrag(event, result):
         return
       if rt.routeVariablesResize(event, result):
+        return
+      # PLAT-70: and on a text pane's horizontal bar thumb.
+      if rt.routeHorizontalBarDrag(event, result):
         return
       if rt.routeTextDrag(event, result):
         return
@@ -4451,6 +4771,8 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   ## LAYOUT through `motions.layoutFor` — so `z` really replaces the tree with a
   ## single-pane one rather than merely noting that it was pressed.
   rt.scheduleHighlights()
+  # PLAT-70: the output panes' widths before the model is taken from them.
+  rt.syncOutputViews()
   var model = rt.app.shellModel(rt.width, rt.height)
   model.status.mode = statusMode(rt.modal.mode)
   # PLAT-68: the indicator's text is the router's (a pending prefix, a
@@ -4458,16 +4780,9 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   rt.syncOverlayLayers()
   model.status.label = rt.router.statusLabel(rt.scopePath, rt.navMode)
   # PLAT-68: the Debug-mode editor's document — painted as the Edit pane
-  # once writable, and its selection over the recording's source while not.
-  if rt.app.modes.product == pmDebug and not rt.app.editSession.isNil:
-    let at = rt.app.editSession.indexOfPath(rt.app.source.path)
-    if at >= 0:
-      let buf = rt.app.editSession.buffers[at]
-      if buf.doc.isReadOnly:
-        model.source.selected = selectedCells(buf)
-      else:
-        model.editorWritable = true
-        model.edit = editPaneModelFor(rt.app.editSession, buf)
+  # once writable, and its selection over the recording's source while not;
+  # PLAT-70: its horizontal view, the caret followed.
+  rt.editorPaneModel(model, follow = true)
   if rt.maximize.active:
     # `z`. `motions.layoutFor` builds a one-pane `LayoutNode` of the SAME type
     # the profiles build, so `projectLayout`'s totality checks apply to the
@@ -4509,6 +4824,17 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
       return max(0, frame.box.height - 1)
   0
 
+proc editorBarShown*(rt: TuiRuntime): bool =
+  ## PLAT-70: whether the editor's document is wider than its pane, so its
+  ## horizontal bar takes the last row. The buffer is looked up, never
+  ## opened: opening one asks `sourcePaneRows` for its height.
+  if rt.app.editSession.isNil:
+    return false
+  let at = if rt.app.modes.product == pmEdit: rt.app.editSession.active
+           else: rt.app.editSession.indexOfPath(rt.app.source.path)
+  at >= 0 and at < rt.app.editSession.buffers.len and
+    rt.app.editSession.buffers[at].hview.overflows
+
 proc sourcePaneRows*(rt: TuiRuntime): int =
   ## How many rows the `editor` rectangle has on the CURRENT screen, minus its
   ## own title row.
@@ -4529,9 +4855,14 @@ proc sourcePaneRows*(rt: TuiRuntime): int =
   let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
                else: model.layout
   let projection = projectLayout(layout, bodyArea(rt.width, rt.height))
+  # PLAT-70: the horizontal bar takes the pane's last row while the
+  # document is wider than the pane (Horizontal-Overflow.md §4.7) — a window
+  # one row taller would put the execution line under it.
+  let bar = rt.editorBarShown()
   for region in projection.regions:
     if region.pane == paneEditor:
-      return max(0, region.area.height - 1)
+      let rows = max(0, region.area.height - 1)
+      return if bar and rows >= 2: rows - 1 else: rows
   0
 
 proc promptCursor*(rt: TuiRuntime): (bool, int, int) =

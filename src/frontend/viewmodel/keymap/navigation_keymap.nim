@@ -49,7 +49,8 @@ const
     BaseRow(chords: "2", operation: "layout.focus-pane(editor)", table: G, navModes: N),
     BaseRow(chords: "3", operation: "layout.focus-pane(variables)", table: G, navModes: N),
     BaseRow(chords: "4", operation: "layout.focus-pane(event-log)", table: G, navModes: N),
-    BaseRow(chords: "z", operation: "layout.maximize-pane", table: G, navModes: N),
+    BaseRow(chords: "z", operation: "layout.maximize-pane", table: G, navModes: N,
+            whenText: "!(" & OutputPanesWhen & ")"),
     # Omniscient Stepping
     BaseRow(chords: "n", operation: "debugger.step-over", table: G, navModes: N),
     BaseRow(chords: "F10", operation: "debugger.step-over", table: G, navModes: N),
@@ -91,6 +92,19 @@ const
     BaseRow(chords: ".", operation: "editor.center-on-pointer", table: G, navModes: N),
     BaseRow(chords: "F9", operation: "editor.toggle-breakpoint", table: G, navModes: N),
     BaseRow(chords: "Space", operation: "editor.toggle-breakpoint", table: G, navModes: N),
+    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view — Vim's
+    # `zh` / `zl`, `zH` / `zL` and `0`. Over these two panes `z` is their
+    # prefix, so `z` maximizes every OTHER pane (its `when` above).
+    BaseRow(chords: "z h", operation: "view.scroll-left", table: G, navModes: N,
+            whenText: OutputPanesWhen),
+    BaseRow(chords: "z l", operation: "view.scroll-right", table: G, navModes: N,
+            whenText: OutputPanesWhen),
+    BaseRow(chords: "z Shift+H", operation: "view.scroll-left-half", table: G,
+            navModes: N, whenText: OutputPanesWhen),
+    BaseRow(chords: "z Shift+L", operation: "view.scroll-right-half", table: G,
+            navModes: N, whenText: OutputPanesWhen),
+    BaseRow(chords: "0", operation: "view.scroll-to-line-start", table: G,
+            navModes: N, whenText: OutputPanesWhen),
     # Variables Tree
     BaseRow(chords: "Enter", operation: "list.expand", table: G, navModes: N,
             whenText: "!editorTextFocus"),

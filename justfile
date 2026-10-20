@@ -5117,6 +5117,17 @@ plat48-gpui-window:
 plat48-gpui-window-record:
   python3 ci/test/plat48_gpui_window.py record
 
+# PLAT-70 Part A: the GPUI window's editor and Terminal Output scrolled
+# sideways by a real horizontal wheel, Shift + wheel and a bar press, on a
+# headless sway (`ci/test/plat70a_gpui_window.py` says what each frame is).
+plat70a-gpui-window:
+  bash ci/test/plat70a-gpui-window.sh
+
+# Measure those frames into `src/tests/visual/plat70a-gpui-window.json`, which
+# `src/frontend/gpui/tests/test_plat70a_gpui_window.nim` asserts.
+plat70a-gpui-window-record:
+  python3 ci/test/plat70a_gpui_window.py record
+
 # The GPUI window captures, RE-TAKEN AND ASSERTED from a checkout: build
 # isonim-gpui's windowed shim and virtual pointer (in its own dev shell), this
 # checkout's windowed front-end against it, record `calc` / `call_pages` when

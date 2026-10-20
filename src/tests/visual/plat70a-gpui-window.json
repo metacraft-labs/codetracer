@@ -1,0 +1,87 @@
+{
+ "_comment": [
+  "PLAT-70 Part A \u2014 the GPUI window's text panes scrolled sideways by a",
+  "REAL horizontal wheel, Shift + wheel and a bar press. Produced by",
+  "`ci/test/plat70a-gpui-window.sh` then `python3 ci/test/",
+  "plat70a_gpui_window.py record`; asserted by",
+  "src/frontend/gpui/tests/test_plat70a_gpui_window.nim."
+ ],
+ "frame": [
+  1920,
+  1080
+ ],
+ "steps": {
+  "base": true,
+  "hwheel": true,
+  "shift-wheel": true,
+  "track": true,
+  "terminal": true,
+  "term-hwheel": true
+ },
+ "editorBody": [
+  389,
+  66,
+  476,
+  982
+ ],
+ "terminalBody": [
+  869,
+  575,
+  1047,
+  473
+ ],
+ "thumbs": {
+  "base": {
+   "y": 1038,
+   "first": 392,
+   "last": 453
+  },
+  "hwheel": {
+   "y": 1038,
+   "first": 421,
+   "last": 485
+  },
+  "shift-wheel": {
+   "y": 1038,
+   "first": 452,
+   "last": 516
+  },
+  "track": {
+   "y": 1038,
+   "first": 785,
+   "last": 849
+  },
+  "terminal": {
+   "y": 1026,
+   "first": 881,
+   "last": 1293
+  },
+  "term-hwheel": {
+   "y": 1026,
+   "first": 953,
+   "last": 1365
+  }
+ },
+ "reportedByWindow": {
+  "hwheel": {
+   "line": "gesture editor-hscroll leftCols=18 of 235",
+   "left": 18,
+   "max": 235
+  },
+  "shift-wheel": {
+   "line": "gesture editor-hscroll leftCols=36 of 235",
+   "left": 36,
+   "max": 235
+  },
+  "track": {
+   "line": "gesture editor-hbar leftCols=226 of 235",
+   "left": 226,
+   "max": 235
+  },
+  "term-hwheel": {
+   "line": "gesture terminal-hscroll leftCol=18 of 149",
+   "left": 18,
+   "max": 149
+  }
+ }
+}

@@ -206,8 +206,13 @@ ARMS = [
              "                             dtColorsUiBorderSecondary, attrs = {raBold},")],
      [(PTYB, "*::the selected tab's ground*")],
      "the focused strip's selected tab back on the strip's own ground"),
-    ("B6", [(CHROME, "       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]",
-             "       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]")],
+    # RE-AIMED 2026-10-19: since the window's redesign its strips draw the
+    # selected tab's ground inline (`main.nim`) rather than through
+    # `chrome.tabStyle`, so the arm's old line no longer reached the window
+    # and it survived on `agents`. Aimed at the line that draws it; the claim
+    # and the mutation are unchanged.
+    ("B6", [(GPUI_MAIN, "          r.setStyle(tab, \"background-color\", chromeOf(crTabStripBackground))",
+             "          r.setStyle(tab, \"background-color\", chromeOf(crFocusOutline))")],
      [(GPUIK, "*::its ground differs*")],
      "GPUI: the focused strip's selected tab back on the focus colour"),
     ("B7", [(CUA, "    BaseRow(chords: \"Home\", operation: \"editor.move-line-start-smart\", whenText: \"editorTextFocus\"),",

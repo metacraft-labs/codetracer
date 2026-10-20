@@ -260,6 +260,12 @@ const
             table: ListTable),
     BaseRow(chords: "Ctrl+F", operation: "list.filter", whenText: "listFocus", table: ListTable),
     BaseRow(chords: "Ctrl+C", operation: "list.copy", whenText: "listFocus", table: ListTable),
+    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes have no caret
+    # and are not trees, so the arrows move their view sideways.
+    BaseRow(chords: "Left", operation: "view.scroll-left", whenText: OutputPanesWhen,
+            table: G),
+    BaseRow(chords: "Right", operation: "view.scroll-right", whenText: OutputPanesWhen,
+            table: G),
 
     # --- §3.6 Single-line inputs --------------------------------------------
     BaseRow(chords: "Left", operation: "input.move-left", whenText: InputWhen, table: InputTable),

@@ -182,8 +182,13 @@ OPTIONS:
                       quarter, its first tab, or the layout's right edge —
                       not released)
                       hwheel:<pane>:<columns> (PLAT35-F3: a horizontal
-                      wheel over a pane's centre, the delta in editor
-                      columns; the editor scrolls, clamped to its content)
+                      wheel over a pane's centre, the delta in columns;
+                      the editor / the terminal output scroll, clamped)
+                      swheel:<pane>:<rows> (PLAT-70: the vertical wheel
+                      with Shift held — a horizontal scroll)
+                      hbar:<pane>:track:<permille>, hbar:<pane>:drag:<from>:
+                      <to>, hbar:terminalOutput:corner (PLAT-70: a text
+                      pane's horizontal bar)
                     and (PLAT-50) a press on a pane's row, delivered to
                     the row as the window delivers a real press:
                       click:<part>:<key>[:left|right|middle[:ctrl|alt|
@@ -458,6 +463,9 @@ type
       ## remembered preference (`gpui-preferences`).
     liveResize: SettingOverride
       ## PLAT-51: `--live-resize=on|off`, likewise.
+    overflowMarkers: SettingOverride
+      ## PLAT-70: `--overflow-markers=on|off` (Horizontal-Overflow.md §4.6;
+      ## off by default in this window, OQ-H1), likewise.
     subtleDividers: bool
       ## PLAT-50. `--dividers=subtle`: a 1px ui/border/secondary line in the
       ## vertical gaps between panes; `strip` (the default) leaves the gaps
@@ -537,7 +545,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
         if head notin ["key", "press", "move", "release", "menu", "control",
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
-                       "tab-add", "hwheel", "click", "ctx", "label-menu",
+                       "tab-add", "hwheel", "swheel", "hbar", "click",
+                       "ctx", "label-menu",
                        # PLAT-52: the Terminal Output pane's events.
                        "term",
                        # PLAT-51: a list pane's scrollbar scrubber, and
@@ -616,6 +625,7 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       case flag.setting
       of lsFocusHighlight: result.focusHighlight = flag.value
       of lsLiveResize: result.liveResize = flag.value
+      of lsOverflowMarkers: result.overflowMarkers = flag.value
     elif arg.startsWith("--dividers="):
       case arg["--dividers=".len .. ^1]
       of "strip": result.subtleDividers = false
@@ -806,10 +816,16 @@ var
     ## The editor pane's inner width, from the window's own geometry
     ## (`window_geometry.editorBodyWidthOf`). Zero until a window has been
     ## laid out, which is exactly the state in which no scrollbar is drawn.
-  gEditorScrollCols = 0
-    ## How far right the editor's code is scrolled, in columns. Clamped by
-    ## `leaves.editorHScrollOf` and never here, so the clamp a suite grades
-    ## is the clamp the window uses.
+  gEditorView: HorizontalView
+    ## PLAT-70 (Horizontal-Overflow.md §4): the editor's horizontal view —
+    ## how far right its code is scrolled, the document's exact content
+    ## width, the pane's code columns. Moved by the caret
+    ## (`editing_core.followView`, before every draw), the wheel and the bar;
+    ## clamped by the shared model and never here.
+  gEditorFollow: CaretFollow
+    ## The caret the view last followed (§4.5: only the caret moves it).
+  gEditorBarDrag = false
+    ## A press held on the editor bar's thumb: the view follows the pointer.
   pendingOutcome: LeafRenderOutcome
     ## The leaf tree, built BEFORE `gpui_launch` so `--report-plan` and the
     ## window path derive from one render rather than two.
@@ -976,6 +992,10 @@ proc drawSearchPane(r: GpuiRenderer)
   ## PLAT-52: the Terminal Output pane, drawn natively (defined with its
   ## clicks, before `windowPointer`).
 
+proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
+                    sticky: seq[tuple[line: int; text: string; top: int]] = @[])
+  ## PLAT-70: forward-declared; defined with the window's editor helpers.
+
 proc redrawEditor() =
   ## PLAT-44. Redraw the editor pane from the arm's CURRENT document.
   ##
@@ -993,8 +1013,7 @@ proc redrawEditor() =
   while childCount(editPane) > keep:
     r.removeChild(editPane, nthChild(editPane, childCount(editPane) - 1))
   gEditorSurface = openArm.surfaceOf(editViewportRows)
-  discard renderEditor(r, editPane, sourcePaneView(GpuiMedium).root,
-                       gEditorSurface, gEditorViewportPx, gEditorScrollCols)
+  drawEditorBody(r, editPane)
   noteEditorTab(r, editorTabLabel(openArm.root / openArm.path, openArm.isDirty))
   applyTextFaces(r, editPane)
 
@@ -1153,7 +1172,7 @@ var
     ## The top bar's run-tests, running (`native_host.startRecordTestJob`).
   gFolderArms = initTable[int, GpuiEditArm]()
     ## A folder tab's editing core (`app/edit_arm`), by the tab's serial.
-  gLayoutSettings = defaultLayoutSettings()
+  gLayoutSettings = productDefaults(lpGpui)
     ## PLAT-51: the focus highlight and live resize for this window — the
     ## remembered preference, then the flags (`--focus-highlight`,
     ## `--live-resize`), then the omnibox's commands.
@@ -1840,7 +1859,7 @@ proc adoptNewLeaves(r: GpuiRenderer) =
     gLeafSet.leaves.add leaf
     traceGesture("leaf adopted " & leaf.paneId)
 
-proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool)
+proc redrawReplayEditor(r: GpuiRenderer)
   ## Forward-declared for `drawArrangement`'s first frame.
 
 proc drawArrangement(r: GpuiRenderer): bool =
@@ -1868,7 +1887,7 @@ proc drawArrangement(r: GpuiRenderer): bool =
   # headers, sub-row offset and overview ruler are drawn from here.
   if not gEditorGeometryDrawn and not gSourceService.isNil and openArm.isNil:
     gEditorGeometryDrawn = true
-    redrawReplayEditor(r, resetScroll = false)
+    redrawReplayEditor(r)
   # The leaves are MOVED into the new arrangement, never rebuilt.
   for _, pane in gPanes:
     let parent = r.parentNode(pane)
@@ -1999,6 +2018,48 @@ proc scrollCalltrace(r: GpuiRenderer; rows: int) =
                $page.total)
   redrawCalltrace(r)
 
+proc debugDocumentFor(path: string; executionLine: int): bool
+  ## Forward-declared for `followEditorView`; defined below.
+
+proc followEditorView() =
+  ## PLAT-70: THE EDITOR'S HORIZONTAL VIEW before a draw — the content
+  ## width of the document the pane shows (the edit arm's, or the shown
+  ## file's Debug-mode document, opened here if it is not yet), the pane's
+  ## code columns, and §4.5's caret-follow when the caret moved
+  ## (`editing_core.followView`, one rule for every front-end). With no
+  ## document the drawn rows are the content.
+  let cols = editorViewCols(gEditorViewportPx)
+  if (openArm.isNil or gEditorSurface.productMode != pmEdit) and
+     gEditorSurface.path.len > 0 and gEditorSurface.report.len == 0:
+    discard debugDocumentFor(gEditorSurface.path,
+                             gEditorSurface.executionLine)
+  if not openArm.isNil and gEditorSurface.productMode == pmEdit:
+    discard openArm.doc.followView(gEditorView, gEditorFollow, cols)
+  elif gDebugDocs.hasKey(gEditorSurface.path):
+    discard gDebugDocs[gEditorSurface.path].followView(gEditorView,
+                                                      gEditorFollow, cols)
+  else:
+    gEditorView.setContent(editorCodeColumns(gEditorSurface.rows))
+    gEditorView.setViewport(cols)
+
+proc editorCaretMark(): int =
+  ## The bar's mark: the caret's display column, -1 with no document.
+  if not openArm.isNil and gEditorSurface.productMode == pmEdit:
+    openArm.doc.caretViewColumn
+  elif gDebugDocs.hasKey(gEditorSurface.path):
+    gDebugDocs[gEditorSurface.path].caretViewColumn
+  else: -1
+
+proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
+                    sticky: seq[tuple[line: int; text: string; top: int]] = @[]) =
+  ## The editor's rows and bar from `gEditorSurface`, at the window's width
+  ## and the followed horizontal view — every draw of the editor's body.
+  followEditorView()
+  discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
+                       gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
+                       gEditorView.contentCols, editorCaretMark(),
+                       gLayoutSettings.overflowMarkers, sticky)
+
 proc redrawEditorRows(r: GpuiRenderer) =
   ## `PLAT35-F3`. Draw the editor pane's body again from the surface it was
   ## last drawn from, at the window's CURRENT width and horizontal scroll.
@@ -2014,8 +2075,7 @@ proc redrawEditorRows(r: GpuiRenderer) =
              else: 0
   while childCount(pane) > keep:
     r.removeChild(pane, nthChild(pane, childCount(pane) - 1))
-  discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
-                       gEditorSurface, gEditorViewportPx, gEditorScrollCols)
+  drawEditorBody(r, pane)
   applyTextFaces(r, pane)
 
 proc recordedLines(path: string): tuple[lines: seq[string], detail: string] =
@@ -2094,21 +2154,64 @@ proc syncEditorViewport(r: GpuiRenderer) =
   redrawEditorRows(r)
 
 proc scrollEditorColumns(r: GpuiRenderer; cols: int) =
-  ## `PLAT35-F3`. Scroll the editor's code `cols` columns right (negative:
-  ## left), and draw it again. **The clamp is not here** — `editorHScrollOf`
-  ## owns it, and asking it is how this learns whether the move changed
-  ## anything at all.
+  ## `PLAT35-F3` / PLAT-70. Scroll the editor's code `cols` columns right
+  ## (negative: left), and draw it again. **The clamp is not here** — the
+  ## shared model owns it (`horizontal_scroll.scrollBy`), and asking it is
+  ## how this learns whether the move changed anything at all. The caret
+  ## does not move (§4.5: only the caret moves the view, not the other way).
   if cols == 0 or gEditorSurface.rows.len == 0:
     return
-  let scroll = editorHScrollOf(gEditorSurface.rows,
-                               editorNumberWidth(gEditorSurface.rows),
-                               gEditorViewportPx, gEditorScrollCols + cols)
-  if scroll.leftCols == gEditorScrollCols:
+  followEditorView()
+  if not gEditorView.scrollBy(cols):
     return
-  gEditorScrollCols = scroll.leftCols
-  traceGesture("editor-hscroll leftCols=" & $gEditorScrollCols & " of " &
-               $scroll.maxLeftCols)
+  traceGesture("editor-hscroll leftCols=" & $gEditorView.leftCol & " of " &
+               $gEditorView.maxLeftCol)
   redrawEditorRows(r)
+
+proc editorBarRect(): PxRect =
+  ## PLAT-70: where `leaves.renderEditorScrollbar` draws the editor's bar
+  ## (absolutely, at the pane's bottom, inset by the editor's side padding
+  ## `EditorPadSidePx`, as wide as the pane's inner width), in window
+  ## pixels; zero while the content fits.
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  followEditorView()
+  if i < 0 or not gEditorView.overflows:
+    return PxRect()
+  let body = gGeom.nodes[i].body
+  PxRect(x: body.x + EditorPadSidePx, y: body.y + body.h - EditorScrollbarPx,
+         w: gEditorViewportPx, h: EditorScrollbarPx)
+
+proc scrubEditorBar(r: GpuiRenderer; x: int; click: bool) =
+  ## PLAT-70 (Horizontal-Overflow.md §4.2): a press on the editor's bar
+  ## centres the column at its fraction; a held thumb follows the pointer.
+  ## The view only — the caret, the selection and the debugger stay (HO-4).
+  let bar = editorBarRect()
+  if bar.w <= 0:
+    return
+  let f = trackFractionAt(clamp(x - bar.x, 0, bar.w - 1), bar.w)
+  let moved = if click: gEditorView.clickTrack(f)
+              else: gEditorView.dragThumb(
+                      f - gEditorView.barModel.thumbLength / 2.0)
+  traceGesture("editor-hbar leftCols=" & $gEditorView.leftCol & " of " &
+               $gEditorView.maxLeftCol)
+  if moved:
+    redrawEditorRows(r)
+
+proc pressEditorBar(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on the editor's horizontal bar: the bar's, never a press
+  ## on the row under it.
+  let bar = editorBarRect()
+  if bar.w <= 0 or not bar.contains(x, y):
+    return false
+  let span = gEditorView.barModel.thumbSpan(bar.w, EditorScrollbarMinThumbPx)
+  let local = x - bar.x
+  let onThumb = local >= span.start and local < span.start + span.length
+  # A press on the bar is not a press on the text: no selection drag
+  # continues from an earlier one.
+  gTextDrag = false
+  gEditorBarDrag = onThumb
+  scrubEditorBar(r, x, click = not onThumb)
+  true
 
 proc refreshReplayWindow(r: GpuiRenderer)
   ## Forward-declared for `clickCalltrace`; defined beside the controls.
@@ -2209,7 +2312,7 @@ proc drawTerminalPane(r: GpuiRenderer) =
   # again until that holds still.
   let body = terminalBody()
   if body.w > 0 and not vm.screenShown:
-    let rows = terminalLayout(body, vm).rows
+    let rows = terminalLayout(body, vm, gTerminal).rows
     var reported = -1
     for _ in 0 ..< 3:
       let top = vm.visibleTop(gTerminal, rows)
@@ -2217,6 +2320,12 @@ proc drawTerminalPane(r: GpuiRenderer) =
         break
       reported = top
       vm.showTerminalLines(Viewport(rows: rows, firstRow: top))
+  # PLAT-70: the widest line measured so far over the windows held, and the
+  # view at this width (Horizontal-Overflow.md §4.1) — the pane's own state.
+  gTerminal.measureContent(vm)
+  gTerminal.markers = gLayoutSettings.overflowMarkers
+  if body.w > 0:
+    gTerminal.hview = terminalLayout(body, vm, gTerminal).view
   if drawTerminalOutput(r, pane, vm, gTerminal, body):
     applyTextFaces(r, pane)
 
@@ -2249,7 +2358,7 @@ proc scrubTerminalLines(r: GpuiRenderer; y: int; click: bool) =
   ## WHOLE output; a held thumb follows the pointer. The view, never the
   ## debugger.
   let vm = terminalVM()
-  let lay = terminalLayout(terminalBody(), vm)
+  let lay = terminalLayout(terminalBody(), vm, gTerminal)
   if vm.isNil or lay.track.h <= 0:
     return
   let sm = vm.scrubberFor(gTerminal, lay.rows)
@@ -2265,7 +2374,7 @@ proc scrubTerminalScreen(r: GpuiRenderer; x: int) =
   ## pointer as it is dragged — one jump per write crossed, through the
   ## window's own `ct/event-jump` (`terminalJump`), which waits for the move.
   let vm = terminalVM()
-  let lay = terminalLayout(terminalBody(), vm)
+  let lay = terminalLayout(terminalBody(), vm, gTerminal)
   if vm.isNil or lay.screenTrack.w <= 0:
     return
   let w = writeAtFraction(vm.screen.writeCount,
@@ -2280,6 +2389,37 @@ proc scrubTerminalScreen(r: GpuiRenderer; x: int) =
     # The drag is still held: keep showing the write under the pointer.
     vm.scrubPreview.val = w
   drawTerminalPane(r)
+
+proc scrubTerminalHBar(r: GpuiRenderer; x: int; click: bool) =
+  ## PLAT-70 (Horizontal-Overflow.md §4.2): the line view's horizontal bar —
+  ## a press on the track centres the column at its fraction, a held thumb
+  ## follows the pointer. The view only (HO-4).
+  let vm = terminalVM()
+  let lay = terminalLayout(terminalBody(), vm, gTerminal)
+  if vm.isNil or lay.hbar.w <= 0:
+    return
+  let f = trackFractionAt(clamp(x - lay.hbar.x, 0, lay.hbar.w - 1),
+                          lay.hbar.w)
+  var v = lay.view
+  discard (if click: v.clickTrack(f)
+           else: v.dragThumb(f - v.barModel.thumbLength / 2.0))
+  gTerminal.hview = v
+  traceGesture("terminal-hscroll leftCol=" & $v.leftCol & " of " &
+               $v.maxLeftCol)
+  drawTerminalPane(r)
+
+proc scrollTerminalColumns(r: GpuiRenderer; cols: int): bool =
+  ## PLAT-70: the line view's view moved `cols` columns (the wheel, the
+  ## `view.*` keys). Answers whether it moved.
+  let vm = terminalVM()
+  if vm.isNil or vm.screenShown:
+    return false
+  if not gTerminal.hview.scrollBy(cols):
+    return false
+  traceGesture("terminal-hscroll leftCol=" & $gTerminal.hview.leftCol &
+               " of " & $gTerminal.hview.maxLeftCol)
+  drawTerminalPane(r)
+  true
 
 proc pressTerminalOutput(r: GpuiRenderer; x, y: int): bool =
   ## A left press on the pane: the toggle, a fragment, a scrubber.
@@ -2307,12 +2447,21 @@ proc pressTerminalOutput(r: GpuiRenderer; x, y: int): bool =
     gTerminal.drag = gtdScreen
     gTerminal.scrubSent = -1
     scrubTerminalScreen(r, x)
+  of ghHBarTrack:
+    scrubTerminalHBar(r, x, click = true)
+  of ghHBarThumb:
+    gTerminal.drag = gtdHBarThumb
+    scrubTerminalHBar(r, x, click = false)
+  of ghCorner:
+    # HO-7: the corner square takes no gesture.
+    discard
   true
 
 proc moveTerminal(r: GpuiRenderer; x, y: int) =
   case gTerminal.drag
   of gtdLineThumb: scrubTerminalLines(r, y, click = false)
   of gtdScreen: scrubTerminalScreen(r, x)
+  of gtdHBarThumb: scrubTerminalHBar(r, x, click = false)
   of gtdNone: discard
 
 proc releaseTerminal(r: GpuiRenderer; x, y: int) =
@@ -2330,13 +2479,18 @@ proc releaseTerminal(r: GpuiRenderer; x, y: int) =
     drawTerminalPane(r)
 
 proc terminalKey(r: GpuiRenderer; key: string): bool =
-  ## The pane's keys while it has the pointer's focus: Left / Right step a
-  ## write back / forward, `v` toggles lines / screen.
+  ## The pane's keys while it has the pointer's focus: in the SCREEN view
+  ## Left / Right step a write back / forward (Terminal-Output-Pane §3's
+  ## step-by-write keys); `v` toggles lines / screen. In the LINE view the
+  ## arrows are the view's (PLAT-70, Horizontal-Overflow.md §4.4:
+  ## `view.scroll-left` / `-right`, through the router).
   let vm = terminalVM()
   if vm.isNil or not gTerminal.focused:
     return false
   case key.toLowerAscii
   of "left", "arrowleft", "right", "arrowright":
+    if not vm.screenShown:
+      return false
     let delta = if key.toLowerAscii in ["left", "arrowleft"]: -1 else: 1
     let target = vm.stepTarget(delta)
     if target >= 0:
@@ -2569,6 +2723,20 @@ proc dragTextTo(r: GpuiRenderer; x, y: int)
 proc redrawPaneOf(r: GpuiRenderer; pane: PaneKind)
   ## Forward-declared; defined with the panes' redraws.
 
+func wheelDeltas*(dy, dx: float; shift: bool): tuple[dy, dx: float] =
+  ## PLAT-70 (Horizontal-Overflow.md §4.3): Shift + the vertical wheel is a
+  ## horizontal one — `dy` read as `dx` — when the device sent no `dx`.
+  if shift and dx == 0.0: (0.0, dy) else: (dy, dx)
+
+const GpuiWheelLinePx = 16.0 * 1.618034
+  ## The pixels GPUI turns ONE line of wheel motion into — "the column
+  ## equivalent of a line" is measured against it (Horizontal-Overflow.md
+  ## §4.3). The shim reports a wheel as `ScrollDelta.pixel_delta(window
+  ## .line_height())`, and the window's line height is GPUI's default text
+  ## style's: 1 rem (16 px) at a line height of φ. Not a pane's row pitch:
+  ## the editor's rows are `EditorLinePx` (22 px) high since the window's
+  ## redesign, and dividing by that turned a Wayland notch (three lines,
+  ## 77.7 px) into 21 columns instead of 3 × `WheelColumns`.
 proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
                    dy = 0.0; dx = 0.0) =
   ## One pointer event of the window, wherever it came from: the root's
@@ -2620,6 +2788,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # would.
     if pressListScrubber(r, x, y):
       return
+    # PLAT-70: the editor's horizontal bar, before the row under it.
+    if pressEditorBar(r, x, y):
+      return
     if clickCalltrace(r, x, y):
       return
     # PLAT-52: the Terminal Output pane's presses.
@@ -2630,6 +2801,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
   of gekPointerMove:
+    if gEditorBarDrag:
+      scrubEditorBar(r, x, click = false)
+      return
     if gTextDrag:
       dragTextTo(r, x, y)
       return
@@ -2650,6 +2824,10 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
   of gekPointerUp:
+    if gEditorBarDrag:
+      scrubEditorBar(r, x, click = false)
+      gEditorBarDrag = false
+      return
     if gTextDrag:
       dragTextTo(r, x, y)
       gTextDrag = false
@@ -2694,6 +2872,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         drawSearchPane(r)
       return
     let onPane = gGeom.activePaneAt(x, y)
+    # PLAT-70 (Horizontal-Overflow.md §4.3): a horizontal wheel — the
+    # shim's `dx`, or Shift + the vertical wheel (`pointerHandler`) — moves
+    # a text pane's view sideways, a line's worth of pixels a notch of
+    # `WheelColumns` columns, and never its rows.
+    if dx != 0.0 and onPane == $paneTerminalOutput:
+      discard scrollTerminalColumns(r,
+        wheelColumnsOf(-dx, GpuiWheelLinePx))
+      return
     if onPane == $paneCalltrace:
       # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
       # (scroll down) moves the content up, a negative `dy`.
@@ -2702,7 +2888,7 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       # PLAT-52: the wheel scrolls the line view, as the call trace's does.
       let vm = terminalVM()
       if not vm.isNil and not vm.screenShown:
-        let lay = terminalLayout(terminalBody(), vm)
+        let lay = terminalLayout(terminalBody(), vm, gTerminal)
         let rows = int(round(-dy / float(TerminalRowPx)))
         let maxTop = max(0, vm.lineCount - lay.rows)
         gTerminal.scrollTop = max(0, min(maxTop,
@@ -2727,7 +2913,7 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       # `dx` is the shim's own (`input.rs` spells a wheel `"x,y,dx,dy"`); it
       # was parsed into `GpuiPointer` and dropped on the floor here until
       # this line, which is why no horizontal gesture reached any pane.
-      scrollEditorColumns(r, int(round(-dx / EditorColumnPx)))
+      scrollEditorColumns(r, wheelColumnsOf(-dx, GpuiWheelLinePx))
     return
   else:
     return
@@ -2752,7 +2938,8 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
     let p = pointerOf(ev)
     if not p.valid:
       return
-    windowPointer(r0, ev.kind, int(p.x), int(p.y), p.dy, p.dx)
+    let (dy, dx) = wheelDeltas(p.dy, p.dx, gmShift in ev.modifiers)
+    windowPointer(r0, ev.kind, int(p.x), int(p.y), dy, dx)
 
 proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string])
   ## PLAT-68: forward-declared; defined with the router below.
@@ -3817,11 +4004,11 @@ proc stickyLinesOf(surface: EditorSurface):
   for (line, top) in stickyScopeLines(file, surface.viewportTop, offset):
     result.add (line, file[line - 1], top)
 
-proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
+proc redrawReplayEditor(r: GpuiRenderer) =
   ## The replay editor drawn again from the source window as it now holds,
-  ## at the pane's current width: after a move (`refreshReplayWindow`, which
-  ## resets the horizontal scroll) and after the window resized (PLAT-69,
-  ## which keeps it).
+  ## at the pane's current width: after a move (`refreshReplayWindow`) and
+  ## after the window resized (PLAT-69). The horizontal view is the caret's
+  ## to move (PLAT-70, `drawEditorBody`), so neither resets it.
   let editor = gPanes.getOrDefault($paneEditor)
   if editor.isNil or gSourceService.isNil or gSession.isNil:
     return
@@ -3843,8 +4030,6 @@ proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
   # The flow's values are on the surface already (`editor_surface.
   # flowValuesByLine`, the rule the terminal draws too).
   gEditorSurface = withDebugDocument(surface)
-  if resetScroll:
-    gEditorScrollCols = 0
   r.setStyle(editor, "padding-top", $max(0, editorTopInsetPx()) & "px")
   editorLoopZones = loopZonesOf(gEditorSurface)
   block:
@@ -3861,9 +4046,7 @@ proc redrawReplayEditor(r: GpuiRenderer; resetScroll: bool) =
                             elif gSourceService.fileLines.hasKey(gEditorSurface.path):
                               gSourceService.fileLines[gEditorSurface.path].len
                             else: -1))
-  discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
-                       gEditorSurface, gEditorViewportPx, gEditorScrollCols,
-                       sticky)
+  drawEditorBody(r, editor, sticky)
   # A negative inset starts the rows above the editor's top: the first row
   # is pulled up by it, the pane's clip cutting off what is above.
   let inset = editorTopInsetPx()
@@ -3898,10 +4081,10 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   # the value-origin chains open in the Variables pane, re-read here.
   refreshEventLogMark()
   refreshStateOrigins()
-  # `PLAT35-F3`. The horizontal scroll is RESET by a move, as Monaco's is:
-  # the debugger put a new line under the cursor and leaving the view 40
-  # columns right of it would hide the line the move was about.
-  redrawReplayEditor(r, resetScroll = true)
+  # PLAT-70: the horizontal view is the CARET's to move (§4.5): a stop that
+  # moved the caret is followed by `drawEditorBody`; one that did not leaves
+  # the view where the reader put it.
+  redrawReplayEditor(r)
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin != paneEditor:
       let pane = gPanes.getOrDefault($leaf.builtin)
@@ -4513,13 +4696,21 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
     return
   # PLAT-51: the omnibox's layout-setting commands — the focus highlight and
   # live resize, for this window and remembered (`gpui-preferences`).
-  let setting = parseSettingCommandTarget(action)
+  var setting = parseSettingCommandTarget(action)
+  # PLAT-70: **View: Toggle Overflow Markers** flips the markers.
+  let toggle = parseSettingToggleTarget(action)
+  if toggle.ok:
+    setting = (true, toggle.setting,
+               not gLayoutSettings.valueOf(toggle.setting))
   if setting.ok:
     gLayoutSettings.assign(setting.setting, setting.on)
     let saved = saveLayoutPreference(lpGpui, setting.setting, setting.on)
     traceGesture("setting " & describe(setting.setting, setting.on) &
                  (if saved.len > 0: " (" & saved & ")" else: ""))
     discard drawArrangement(r)
+    if setting.setting == lsOverflowMarkers:
+      redrawEditorRows(r)
+      drawTerminalPane(r)
     return
   # PLAT-49 part B (finding 14): the omnibar's event-log column commands,
   # over the session's `EventLogVM.columns`, then the event log drawn again.
@@ -4945,7 +5136,7 @@ proc handleTopHover(r: GpuiRenderer; x, y: int) =
     let over = i >= 0 and gGeom.nodes[i].body.contains(x, y)
     if over != editorScrollbarShown:
       editorScrollbarShown = over
-      if openArm.isNil: redrawReplayEditor(r, resetScroll = false)
+      if openArm.isNil: redrawReplayEditor(r)
       else: redrawEditor()
   var control = -1
   var tool = -1
@@ -5150,8 +5341,7 @@ proc showViewedFile(r: GpuiRenderer; atLine = 1) =
   gEditorSurface = withDebugDocument(surface)
   while childCount(editor) > 0:
     r.removeChild(editor, nthChild(editor, childCount(editor) - 1))
-  discard renderEditor(r, editor, sourcePaneView(GpuiMedium).root,
-                       gEditorSurface)
+  drawEditorBody(r, editor)
   applyTextFaces(r, editor)
   noteEditorTab(r, editorTabLabel(gViewedFile, false))
   wireClicks(r)
@@ -5207,7 +5397,7 @@ proc editorColumnAt(x: int): int =
   let left = editorCodeLeftPx()
   if left < 0 or x < left:
     return 0
-  int(floor(float(x - left) / EditorColumnPx)) + 1 + gEditorScrollCols
+  int(floor(float(x - left) / EditorColumnPx)) + 1 + gEditorView.leftCol
 
 proc editorXOfColumn(column: int): int =
   ## The inverse: the window x at the middle of `column` (for `--window-ops`,
@@ -5215,7 +5405,7 @@ proc editorXOfColumn(column: int): int =
   let left = editorCodeLeftPx()
   if left < 0:
     return 0
-  left + int(round((float(column - 1 - gEditorScrollCols) + 0.5) *
+  left + int(round((float(column - 1 - gEditorView.leftCol) + 0.5) *
                    EditorColumnPx))
 
 proc editorRowOf(line: int): EditorRow =
@@ -6042,6 +6232,26 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     if text.len == 0: traceGesture("nothing is selected here to copy")
     else: copyToClipboard(text, what)
     return
+  of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
+     "view.scroll-right-half", "view.scroll-to-line-start":
+    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view — the
+    # Terminal Output's line view in this window (Build Output is PLAT-56).
+    let vm = terminalVM()
+    if vm.isNil or vm.screenShown:
+      traceGesture("`" & op & "` scrolls the Terminal Output's line view")
+      return
+    var v = gTerminal.hview
+    discard (case res.operation
+             of "view.scroll-left": v.scrollBy(-WheelColumns)
+             of "view.scroll-right": v.scrollBy(WheelColumns)
+             of "view.scroll-left-half": v.scrollHalf(right = false)
+             of "view.scroll-right-half": v.scrollHalf(right = true)
+             else: v.scrollToLineStart())
+    gTerminal.hview = v
+    traceGesture("terminal-hscroll leftCol=" & $v.leftCol & " of " &
+                 $v.maxLeftCol)
+    drawTerminalPane(r)
+    return
   of "find.open", "find.open-backward":
     # GPUI's find is the omnibar's (`:grep` over the files).
     openOmnibar(r, CommandPrefix & "grep ")
@@ -6467,7 +6677,7 @@ proc refitEditorRows(r: GpuiRenderer) =
       showViewedFile(r, max(1, gEditorSurface.viewportTop))
     else:
       gSourceService.serveWindow()
-      redrawReplayEditor(r, resetScroll = false)
+      redrawReplayEditor(r)
     let editor = gPanes.getOrDefault($paneEditor)
     if not editor.isNil:
       applyTextFaces(r, editor)
@@ -6846,17 +7056,26 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       #   term:scrub:<from>:<to>[:hold]     the screen scrubber, dragged
       #   term:key:<key>                    a key while the pane has focus
       #   term:wheel:<rows>                 the wheel over the pane
+      #   term:blank                        press the line view below its
+      #                                     last line (focuses the pane,
+      #                                     moves nothing)
       let vm = terminalVM()
       let body = terminalBody()
       if vm.isNil or body.w <= 0:
         return "the terminal output pane is not drawn"
-      let lay = terminalLayout(body, vm)
+      let lay = terminalLayout(body, vm, gTerminal)
       proc trackY(permille: int): int =
         lay.track.y + min(lay.track.h - 1, lay.track.h * permille div 1000)
       proc scrubX(permille: int): int =
         lay.screenTrack.x + min(lay.screenTrack.w - 1,
                                 lay.screenTrack.w * permille div 1000)
       case parts[1]
+      of "blank":
+        let shown = vm.lineCount - vm.visibleTop(gTerminal, lay.rows)
+        if shown >= lay.rows:
+          return "the line view has no blank row"
+        pressAt(lay.content.x + 20,
+                lay.content.y + shown * TerminalRowPx + TerminalRowPx div 2)
       of "view":
         let b = if parts[2] == "screen": lay.screenButton else: lay.linesButton
         if b.w <= 0:
@@ -6998,6 +7217,65 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
+    of "hbar":
+      # PLAT-70: a text pane's horizontal bar, aimed from the geometry the
+      # window drew it at (`editorBarRect`, `terminalLayout`'s `hbar` and
+      # `corner`):
+      #   hbar:<editor|terminalOutput>:track:<permille>   press the track
+      #   hbar:<editor|terminalOutput>:drag:<from>:<to>   hold the thumb,
+      #                                                   move in ten steps,
+      #                                                   release
+      #   hbar:terminalOutput:corner                      press the corner
+      var bar, corner: PxRect
+      var thumbStart, thumbLen = 0
+      case parts[1]
+      of $paneEditor:
+        bar = editorBarRect()
+        let span = gEditorView.barModel.thumbSpan(bar.w,
+                                                  EditorScrollbarMinThumbPx)
+        (thumbStart, thumbLen) = (span.start, span.length)
+      of $paneTerminalOutput:
+        let vm = terminalVM()
+        if vm.isNil:
+          return "the terminal output pane is not drawn"
+        let lay = terminalLayout(terminalBody(), vm, gTerminal)
+        bar = lay.hbar
+        corner = lay.corner
+        let span = lay.view.barModel.thumbSpan(bar.w, TerminalMinThumbPx)
+        (thumbStart, thumbLen) = (span.start, span.length)
+      else:
+        return "no horizontal bar on '" & parts[1] & "'"
+      if bar.w <= 0:
+        return "the " & parts[1] & " pane's content fits: no bar is drawn"
+      let y = bar.y + bar.h div 2
+      proc bx(permille: int): int = bar.x + min(bar.w - 1, bar.w * permille div 1000)
+      case parts[2]
+      of "track": pressAt(bx(at(3)), y)
+      of "corner":
+        if corner.w <= 0: return "no corner on '" & parts[1] & "'"
+        pressAt(corner.x + corner.w div 2, corner.y + corner.h div 2)
+      of "drag":
+        windowPointer(r, gekPointerDown, bar.x + thumbStart + thumbLen div 2, y)
+        let a = at(3)
+        let b = at(4)
+        for k in 0 .. 10:
+          windowPointer(r, gekPointerMove, bx(a + (b - a) * k div 10), y)
+        windowPointer(r, gekPointerUp, bx(b), y)
+      else:
+        return "unknown hbar event '" & parts[2] & "'"
+    of "swheel":
+      # PLAT-70: `swheel:<pane>:<lines>` — the VERTICAL wheel with Shift held
+      # over a named pane (lines of GPUI's wheel, `GpuiWheelLinePx`, positive
+      # toward the user),
+      # through the same Shift rule the root's listener applies
+      # (`wheelDeltas`).
+      let i = gGeom.tabsNodeOfPane(parts[1])
+      if i < 0:
+        return "no pane box holds '" & parts[1] & "'"
+      let (cx, cy) = centreOf(gGeom.nodes[i].body)
+      let (dy, dx) = wheelDeltas(-float(at(2)) * GpuiWheelLinePx,
+                                 0.0, shift = true)
+      windowPointer(r, gekWheel, cx, cy, dy, dx)
     of "hwheel":
       # `PLAT35-F3`. `hwheel:<pane>:<columns>` — a horizontal wheel over a
       # named pane, aimed at the pane's own centre from the geometry the
@@ -7009,8 +7287,10 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       if i < 0:
         return "no pane box holds '" & parts[1] & "'"
       let (cx, cy) = centreOf(gGeom.nodes[i].body)
+      # PLAT-70: a line's worth of pixels is a notch of `WheelColumns`
+      # columns (§4.3), so `<columns>` is sent as that share of a line.
       windowPointer(r, gekWheel, cx, cy, 0.0,
-                    -float(at(2)) * EditorColumnPx)
+                    -float(at(2)) / float(WheelColumns) * GpuiWheelLinePx)
     of "menu":
       # PLAT-49: the desktop's menu — press the root button (when the menu
       # is not open), then the first-level item `parts[1]` in its popover,
@@ -7786,6 +8066,7 @@ proc runOpen(cmd: GpuiCommand): int =
     gLayoutSettings = stored.settings
     gLayoutSettings.applyOverride(lsFocusHighlight, cmd.focusHighlight)
     gLayoutSettings.applyOverride(lsLiveResize, cmd.liveResize)
+    gLayoutSettings.applyOverride(lsOverflowMarkers, cmd.overflowMarkers)
   let windowId = WindowId(0)
   let opened = shell.openWindowForSession(windowId, slot.id)
   if opened.kind == wsRefused:
@@ -7972,7 +8253,14 @@ proc runOpen(cmd: GpuiCommand): int =
     if st >= 0: statePaneSizePx = (g.nodes[st].body.w, g.nodes[st].body.h)
     let e = g.tabsNodeOfPane($paneEditor)
     if e >= 0: editorPaneHeightPx = g.nodes[e].body.h
-  let drawn = renderLeaves(r, leafSet, gEditorSurface, gEditorViewportPx)
+  # PLAT-70: the shown file's document, so the editor's horizontal view is
+  # its EXACT content width from the first frame (Horizontal-Overflow §4.1).
+  gSourceService = sourceService
+  discard debugDocumentFor(gEditorSurface.path, gEditorSurface.executionLine)
+  followEditorView()
+  let drawn = renderLeaves(r, leafSet, gEditorSurface, gEditorViewportPx,
+                           gEditorView.leftCol, gEditorView.contentCols,
+                           editorCaretMark())
   # PLAT-47 part B: what the window's gestures and the call trace's paging
   # act on. A rearrangement is remembered on the terms `--layout-ops` is:
   # never over a quarantined file, and not for a session opened from a named
@@ -7982,7 +8270,6 @@ proc runOpen(cmd: GpuiCommand): int =
   gRemember = not quarantined and cmd.layoutFile.len == 0
   gSession = session
   wireSearch(session)
-  gSourceService = sourceService
   # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
   # with what this window performs enabled, its chords none (the window has
   # no keymap of its own for the debugger yet); the omnibar searches the

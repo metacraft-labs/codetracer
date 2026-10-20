@@ -126,6 +126,7 @@ U_WINDOW = ("moving from a short file to a longer one asks for the longer "
 P_ADD = "clicking `add` in the call trace shows helpers.py's source"
 P_SEQ = "add, then scale, then add again: each click shows its call's file"
 G_ADD = "clicking `add` in the call trace shows helpers.py's source"
+P_WIDE = "add, then scale, wide enough that neither file overflows the editor"
 E_SAME = "resolve_bundled_source_resolves_a_parent_component_to_the_same_file"
 P_MISSING = "a stop in a file the recording lacks says so, naming the path"
 G_MISSING = P_MISSING
@@ -188,9 +189,16 @@ ARMS = [
         PTY, P_ADD,
         "the shipped terminal, clicking `add` on multi_root, built with the "
         "provider looking the `..` path up as given"),
+    # RE-AIMED 2026-10-16, PLAT-70 Part A: at the suite's 200 columns
+    # extra.py overflows the editor and helpers.py does not, so between `add`
+    # and `scale` the editor's horizontal bar comes, the source window is
+    # re-sized and asked for again, and that hides a window that kept the
+    # previous file's line count. The suite's wide case, where neither file
+    # overflows, is where the claim is observed. (GPUI's plan never killed
+    # this arm, on `agents` either.)
     Arm("PT2", SOURCEVM, NOWINDOW,
         NOWINDOW.replace("vm.totalLineCount.val = 0", "discard"),
-        PTY, P_SEQ,
+        PTY, P_WIDE,
         "the shipped terminal, `add` then `scale`: extra.py's sixth line "
         "stays `⋯ loading`"),
     Arm("GP1", PROVIDER,

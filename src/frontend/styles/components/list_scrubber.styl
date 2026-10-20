@@ -5,15 +5,22 @@
 // track over the container's right edge: a click JUMPS there, the thumb
 // drags the view, a tick marks where the debugger is.
 
+// Only the VERTICAL bar is the scrubber's: the horizontal one stays, so a
+// list wider than its pane (the Call Trace's long argument lists) can still
+// be scrolled sideways (Nikolay, 2026-10-16).  It was `scrollbar-width: none`
+// + `display: none`, which removed both.  `scrollbar-width` must stay unset:
+// once it is, Chromium ignores the `::-webkit-scrollbar` rules entirely.  The
+// remaining bar takes the app-wide scrollbar look (shared_widgets.styl).
 .ct-scrubbed
-  scrollbar-width: none
-
   &::-webkit-scrollbar
-    display: none
+    width: 0
 
 .ct-list-scrubber
   position: absolute
   right: 0
+  // The app-wide scrollbar's thickness (PANEL_SCROLLBAR_SIZE, 8px —
+  // shared_widgets.styl): a scrubber is the pane's scrollbar and reads as one.
+  width: PANEL_SCROLLBAR_SIZE
   // Above the pane's own overlays (the event log's DataTables footer sits
   // over the bottom of its scroll body): the track takes the press there.
   z-index: 30
@@ -21,16 +28,18 @@
   background: transparent
 
 .ct-list-scrubber-thumb
+  // Drawn exactly as the app-wide scrollbar thumb (shared_widgets.styl):
+  // the track's full width, square, flush with the panel's right edge, and
+  // the same tokens — `tertiary`, stepping LIGHTER to `tertiary-hover` under
+  // the pointer and while dragged.
   position: absolute
-  left: 2px
-  right: 2px
-  border-radius: 3px
-  // The window's scrollbar thumb (Monaco's `scrollbarSlider.background`,
-  // the GPUI and terminal scrubbers' thumb).
-  background: rgba(121, 121, 121, 0.4)
+  left: 0
+  right: 0
+  background: colors-ui-surface-primary-tertiary
 
-  &:hover
-    background: rgba(100, 100, 100, 0.7)
+  &:hover,
+  .ct-list-scrubber:active &
+    background: colors-ui-surface-primary-tertiary-hover
 
 .ct-list-scrubber-mark
   position: absolute
@@ -38,3 +47,36 @@
   right: 0
   // The execution pointer's colour, as the terminal's and GPUI's marks.
   background: colors-editor-action-secondary
+
+// PLAT-70 (Horizontal-Overflow.md §4.7): a text pane's overflow-only
+// HORIZONTAL bar — the vertical track's drawing on the other axis, along the
+// scroll container's bottom (`views/list_scrubber_dom.attachHorizontalScrubber`),
+// only while the content is wider than the pane. The square where it meets
+// the vertical track belongs to neither.
+// The container's own horizontal bar is hidden (its vertical one is the list
+// scrubber's to hide, `.ct-scrubbed`); `scrollbar-width` stays unset for the
+// reason given above.
+.ct-hscrubbed
+  &::-webkit-scrollbar
+    height: 0
+
+.ct-hscrubber
+  position: absolute
+  // The app-wide scrollbar's thickness, as the vertical track's
+  // (`list_scrubber_dom.TrackPx` lays the two out against each other).
+  height: PANEL_SCROLLBAR_SIZE
+  z-index: 30
+  cursor: pointer
+  background: transparent
+
+.ct-hscrubber-thumb
+  // Drawn as the vertical thumb is: the track's full height, square, the
+  // app-wide scrollbar's tokens.
+  position: absolute
+  top: 0
+  bottom: 0
+  background: colors-ui-surface-primary-tertiary
+
+  &:hover,
+  .ct-hscrubber:active &
+    background: colors-ui-surface-primary-tertiary-hover

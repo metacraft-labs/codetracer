@@ -156,6 +156,12 @@ const
     BaseRow(chords: "Ctrl+X Ctrl+F", operation: "session.open-file", table: G),
     BaseRow(chords: "Ctrl+X Ctrl+Q", operation: "editor.toggle-read-only", table: G),
     BaseRow(chords: "Ctrl+X Ctrl+C", operation: "app.quit", table: G),
+    # PLAT-70 (Horizontal-Overflow.md §4.4): GNU `scroll-left` (`C-x <`) moves
+    # the TEXT left, so the view right; `scroll-right` the other way.
+    BaseRow(chords: "Ctrl+X <", operation: "view.scroll-right-half",
+            whenText: OutputPanesWhen, table: G),
+    BaseRow(chords: "Ctrl+X >", operation: "view.scroll-left-half",
+            whenText: OutputPanesWhen, table: G),
     BaseRow(chords: "Ctrl+G", operation: "layout.cancel-drag", whenText: "dragActive", table: G),
 
     # --- §3.8 Debugging: GUD's prefix and the desktop's F-keys ------------------

@@ -67,7 +67,7 @@ const
                  "3.9", "4"]
   EmacsSections = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8",
                    "3.9", "3.10", "3.11", "3.12"]
-  ExpectedCuaTuples = 311
+  ExpectedCuaTuples = 313
     ## The binding tuples CUA-Keymap.md §3.1 – §3.9 and §4 publish (their
     ## legacy fallbacks are §3.10's), counted from the document on 2026-10-12
     ## (293, then +10 for §3.8's program-menu rows: `Alt`, `` Alt+` ``, `F10`
@@ -76,12 +76,14 @@ const
     ## +2 for §3.7's `F4` / `Shift+F4`, the search results, PLAT-57;
     ## +3 for §3.7's `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field —
     ## the `Alt+C` pane-focus row and §3.8's mnemonics split by the field's
-    ## `when`, their tuples unchanged in number).
-  ExpectedEmacsTuples = 185
+    ## `when`, their tuples unchanged in number; +2 for §3.6's `Left` /
+    ## `Right` on the output panes, `view.scroll-left` / `-right`, PLAT-70).
+  ExpectedEmacsTuples = 187
     ## Emacs-Keymap.md §3.1 – §3.12's (+1: `` Alt+` ``, `tmm-menubar`; +1:
     ## §3.8's `Enter` in the read-only Debug editor, the tracepoint editor;
     ## +2: §3.6's `Alt+G N` / `Alt+G P`, `next-error` / `previous-error`;
-    ## +3: §3.6's `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field).
+    ## +3: §3.6's `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field; +2:
+    ## §3.7's `Ctrl+X <` / `Ctrl+X >` on the output panes, PLAT-70).
 
 type
   Tuple = object

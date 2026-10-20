@@ -35,6 +35,9 @@ const
   EditorOperationPrefix* = "editor."
     ## The editor table's namespace (Input-Routing §3.1). Its operations are
     ## the editing vocabulary's (Editing-Operations §2.2), spelled without it.
+  OutputPanesWhen* = "paneKind == terminalOutput || paneKind == buildOutput"
+    ## PLAT-70 (Horizontal-Overflow.md §4.4): the text panes with no caret —
+    ## the scope of every base's `view.*` rows.
 
 type
   BaseRow* = object

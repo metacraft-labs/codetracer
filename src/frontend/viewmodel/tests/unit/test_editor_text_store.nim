@@ -66,7 +66,9 @@ func classOfDoc(id: string): int =
   ## that filters by class and the manifest that records it cannot disagree.
   parseInt($id[1])
 
-const ExpectedAssertions = 10475
+const ExpectedAssertions = 10729
+  ## 10475 -> 10729: `source_vm.nim` (`CorpusMid`) grew by the viewport
+  ## contract (`403d8d7db0`), which did not move the count.
   ## 10353 -> 10475: `source_vm.nim` (`CorpusMid`) grew by `trimToWindow`
   ## forgetting the previous file's length with its text (a new file's window
   ## is no longer clamped to the old file's length).

@@ -446,3 +446,7 @@ when defined(js):
         else:
           setStyles(pre, "padding-top", "")
           setStyles(pre, "padding-bottom", "")
+      # PLAT-70 (Horizontal-Overflow.md §4): the line view's overflow-only
+      # horizontal bar, under the lines, the corner left to neither track.
+      discard attachHorizontalScrubber(pre, p, paneId = "terminalOutput",
+                                       verticalTrack = true)

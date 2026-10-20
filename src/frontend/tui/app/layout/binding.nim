@@ -1855,7 +1855,9 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
     let (px, py) = pixelOf(event)
     discard b.hoverAtPx(geom, px, py)
     b.dropDrag()
-  of mbMiddle, mbRight, mbOther:
+  of mbMiddle, mbRight, mbOther, mbWheelLeft, mbWheelRight:
+    # A horizontal wheel is the pane's (Horizontal-Overflow.md §4.3), handed
+    # on through `lasNoGesture` as the vertical wheel over a body is.
     action(lasNoGesture, "this button carries no layout gesture")
 
 # ---------------------------------------------------------------------------

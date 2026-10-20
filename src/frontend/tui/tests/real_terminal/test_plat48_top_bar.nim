@@ -44,7 +44,10 @@ import ../../../viewmodel/viewmodels/transport_icons
 # case checks every row the docked-open pane changed, and a docked band is
 # taller than the overlay the click used to open. PLAT-50: -1 — with no
 # divider row between stacked panes the docked band changes one row fewer.)
-const ExpectedAssertions = 116
+const ExpectedAssertions = 117
+  ## PLAT-70 Part A: 116 -> 117, measured. `calc`'s widest line overflows the
+  ## editor, so its horizontal bar is drawn in the editor's last row; the
+  ## docked band moves that row up, one more changed row for the sweep.
   ## PLAT-51: 109 -> 116, measured. Revealing the docked BUILD pane changes
   ## seven more rows than it did: the list panes' scrollbar scrubbers above it
   ## are redrawn for their shorter tracks, and the "no fill glyph" sweep

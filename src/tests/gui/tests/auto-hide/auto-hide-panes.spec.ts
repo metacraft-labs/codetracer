@@ -946,10 +946,11 @@ test.describe("Independent sidebar presentation", () => {
     for (const [edge, minimal] of [["left", left], ["right", right]] as const) {
       const strip = page.locator(`#auto-hide-strip-${edge}`);
       await expect(strip).toHaveClass(minimal ? /collapsed-mode/ : /^(?!.*collapsed-mode)/);
-      await expect(strip.locator(".auto-hide-mode-button")).toHaveCount(minimal ? 0 : 1);
+      // The sidebar toggle is in the status bar in both modes, never on the strip.
+      await expect(strip.locator(".auto-hide-mode-button")).toHaveCount(0);
       const host = page.locator(edge === "left" ? leftHost : rightHost);
-      if (minimal) await expect(host).toBeVisible();
-      else await expect(host).toBeHidden();
+      await expect(host).toBeVisible();
+      await expect(host.locator(".auto-hide-restore-button")).toHaveClass(minimal ? /sidebar-close/ : /sidebar-open/);
     }
   }
 
@@ -964,14 +965,14 @@ test.describe("Independent sidebar presentation", () => {
     await ctPage.getByRole("button", { name: "Use minimal left sidebar", exact: true }).click();
     await modes(ctPage, true, false);
     await expect(dockedContainer(ctPage, "right")).toHaveClass(/docked-open/);
-    await expect(ctPage.locator(`${leftHost} button`).last()).toHaveAccessibleName("Use normal left sidebar");
-    await expect(ctPage.locator(`${leftHost} button`).first()).toHaveAccessibleName("FILES");
+    await expect(ctPage.locator(`${leftHost} button`).first()).toHaveAccessibleName("Use normal left sidebar");
+    await expect(ctPage.locator(`${leftHost} button`).last()).toHaveAccessibleName("FILES");
 
     await ctPage.getByRole("button", { name: "Use minimal right sidebar", exact: true }).click();
     await modes(ctPage, true, true);
     await expect(dockedContainer(ctPage, "right")).not.toHaveClass(/docked-open/);
-    await expect(ctPage.locator(`${rightHost} button`).first()).toHaveAccessibleName("Use normal right sidebar");
-    await expect(ctPage.locator(`${rightHost} button`).last()).toHaveAccessibleName("EVENTS");
+    await expect(ctPage.locator(`${rightHost} button`).last()).toHaveAccessibleName("Use normal right sidebar");
+    await expect(ctPage.locator(`${rightHost} button`).first()).toHaveAccessibleName("EVENTS");
     const leftBox = await ctPage.locator(leftHost).boundingBox();
     const rightBox = await ctPage.locator(rightHost).boundingBox();
     expect(leftBox!.x).toBeLessThan(10);
