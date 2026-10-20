@@ -123,6 +123,9 @@ proc legacyStopToVm(stop: Stop;
     line: stop.line,
     functionName: safeStr(stop.functionName),
     localsText: localsToText(stop.locals),
+    # A sweep answers without the locals (Q4): the VM reads the rows' locals
+    # by window. A hit that carried them is already read.
+    localsLoaded: stop.locals.len > 0,
     eventId: stop.event,
     tracepointId: stop.tracepointId,
   )

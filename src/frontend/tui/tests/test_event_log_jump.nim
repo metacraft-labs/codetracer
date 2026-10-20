@@ -97,7 +97,7 @@ import ./fixtures/fixture_provider
 # 162 since PLAT-41: the recording's extent now reaches `TimelineVM.bounds`,
 # so the marker case asserts where `seekAtFraction` lands (three checks)
 # where it asserted that nothing moved (two).
-const ExpectedAssertions = 153
+const ExpectedAssertions = 155
   ## PLAT-51: 162 -> 153. The Timeline bar the jump painted is removed:
   ## its six checks per destination became two, and the tracepoint marks
   ## block lost its painted-bar checks.
@@ -729,9 +729,15 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       # `ct/run-tracepoints` sends NO DAP RESPONSE — see
       # `headless_session.runTracepoints`'s header, and the hang that
       # established it. This call synchronises on the event.
-      let hits = h.session.runTracepoints(@[TracepointSweepSpec(
+      var hits = h.session.runTracepoints(@[TracepointSweepSpec(
         tracepointId: 0, path: request.path, line: request.line,
         expression: request.expression)])
+      # THE SWEEP ANSWERS TICKS AND LOCATIONS (Viewport-Driven-Loading Q4):
+      # the hits' values are read by window, for the hits a pane shows —
+      # here all of them, in one `ct/update-table`.
+      ck hits.len > 0 and not hits[0].valuesLoaded and hits[0].values.len == 0
+      h.session.loadTracepointHitValues(hits, 0, hits.len)
+      ck hits[^1].valuesLoaded
       var hitTicks: seq[uint64] = @[]
       var values: seq[string] = @[]
       for hit in hits:

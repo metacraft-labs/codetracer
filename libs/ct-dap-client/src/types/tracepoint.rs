@@ -85,7 +85,13 @@ pub struct TraceSession {
 #[serde(rename_all = "camelCase")]
 pub struct RunTracepointsArg {
     pub session: TraceSession,
+    /// Stop the sweep after this many hits; 0 or negative for every hit.
     pub stop_after: i64,
+    /// Ask for each hit's locals on the `ct/tracepoint-results` event. The
+    /// engine leaves them out unless asked (Viewport-Driven-Loading Q4): a
+    /// pane reads the window of hits it shows through `ct/update-table`.
+    #[serde(default)]
+    pub with_locals: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -162,6 +168,7 @@ mod tests {
                 id: 1,
             },
             stop_after: -1,
+            with_locals: true,
         };
         let json = serde_json::to_string(&args).expect("serialise");
         assert!(!json.contains("\"lang\""), "{json}");

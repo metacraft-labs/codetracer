@@ -673,23 +673,22 @@ proc runTracepointSweep(s: TuiSession; rt: TuiRuntime;
   ## panes refreshed (the point list and the gutter carry it). Answers how
   ## many hits.
   inc s.tracepointsRun
-  let hits = s.session.runTracepoints(@[TracepointSweepSpec(
+  var hits = s.session.runTracepoints(@[TracepointSweepSpec(
     tracepointId: s.tracepointsRun - 1, path: request.path,
     line: request.line, expression: request.expression)])
-  var text = ""
-  for h in hits:
-    var parts: seq[string] = @[]
-    for (name, value) in h.values:
-      parts.add name & " = " & value
-    text.add "tick " & $h.rrTicks & "  " &
-             (if h.errorMessage.len > 0: h.errorMessage
-              else: parts.join(", ")) & "\n"
+  # The values of the hits the overlay shows are read as it scrolls (Q4).
+  let text = s.session.tracepointHitsText(hits, 0)
+  let sess = s.session
+  var held = hits
   rt.app.content = ContentOverlay(
+    refill: proc(top: int): string = sess.tracepointHitsText(held, top),
     open: true,
     title: "tracepoint `" & request.expression & "` at " &
            request.path.extractFilename & ":" & $request.line & " — " &
            $hits.len & " hit(s)",
     text: (if text.len > 0: text else: "the line never ran"))
+  if hits.len == 0:
+    rt.app.content.refill = nil
   s.refresh(rt)
   hits.len
 

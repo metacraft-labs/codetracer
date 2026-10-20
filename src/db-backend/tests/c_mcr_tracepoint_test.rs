@@ -133,6 +133,7 @@ fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
             id: 1,
         },
         stop_after: -1,
+        with_locals: true,
     };
     let results = runner.client().run_tracepoints(args).expect("ct/run-tracepoints");
     let mut expected = vec![ExpectedTrace {

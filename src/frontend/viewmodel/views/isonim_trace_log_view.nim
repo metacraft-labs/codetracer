@@ -43,6 +43,7 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import std/[jsffi, math]
 
 import ../store/types
 import ../viewmodels/trace_log_vm
@@ -269,6 +270,18 @@ when defined(js):
 
     panel
 
+  proc scrollTopOf(el: JsObject): float {.importjs: "#.scrollTop".}
+  proc clientHeightOf(el: JsObject): float {.importjs: "#.clientHeight".}
+  proc traceRowHeight(panel: JsObject): float {.importjs:
+    "(function(p){const r=p.querySelector('.trace-log-table-body > *');const h=r?r.getBoundingClientRect().height:0;return h>0?h:22;})(#)".}
+  proc onRowsScrollOrResize(panel: JsObject; cb: proc(scroller: JsObject)) {.importjs: """
+    (function(p, cb) {
+      p.addEventListener('scroll', function(ev) { cb(ev.target); },
+                         {capture: true, passive: true});
+      if (typeof ResizeObserver === 'function')
+        new ResizeObserver(function() { cb(p); }).observe(p);
+    })(#, #)""".}
+
   proc mountIsoNimTraceLogPanel*(container: isonim_dom.Element;
                                  vm: TraceLogVM) =
     ## Mount the IsoNim Trace Log panel as a child of ``container``.
@@ -278,3 +291,14 @@ when defined(js):
     let panel = renderTraceLogPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))
+    # THE ROWS IT SHOWS (Viewport-Driven-Loading Q4): whichever element
+    # scrolls the rows, its size and scroll in rows. A hidden pane reports
+    # none and reads nothing until it is shown.
+    let report = proc(scroller: JsObject) =
+      let h = traceRowHeight(cast[JsObject](panel))
+      let height = clientHeightOf(scroller)
+      vm.setViewport(Viewport(
+        rows: (if height <= 0.0: 0 else: int(ceil(height / h))),
+        firstRow: int(floor(scrollTopOf(scroller) / h))))
+    onRowsScrollOrResize(cast[JsObject](panel), report)
+    report(cast[JsObject](panel))

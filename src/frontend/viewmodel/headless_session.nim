@@ -28,7 +28,7 @@ when defined(js):
 # `strutils` went out with the parsing that moved to
 # `store/replay_data_store.eventLogRowFromJson`: the inline wire decode this
 # module used to carry was its last user here.
-import std/[json, options, asyncdispatch, osproc, os, streams, strutils]
+import std/[json, options, asyncdispatch, osproc, os, streams, strutils, tables]
 
 import isonim/core/[signals, computation, async_compat]
 
@@ -1298,14 +1298,8 @@ proc runTracepoints*(s: HeadlessDebugSession;
       line: stop.getOrDefault("line").getBiggestInt(0).int,
       values: @[],
       errorMessage: stop.getOrDefault("errorMessage").getStr(""))
-    let locals = stop.getOrDefault("locals")
-    if not locals.isNil and locals.kind == JArray:
-      for pair in locals:
-        # `StringAndValueTuple` serialises as `{"Field0": name, "Field1": value}`
-        # — a tuple struct, so the names are positional and not descriptive.
-        let name = pair.getOrDefault("Field0").getStr("")
-        let value = pair.getOrDefault("Field1")
-        hit.values.add (name, presentedValueText(value, TracepointBudget))
+    # The sweep answers ticks and locations (Q4); a hit's locals are read by
+    # window, for the hits a pane shows (`loadTracepointHitValues`).
     hits.add hit
   # THE ONE PLACE THE SWEEP BECOMES DATA. The `Value` rendering above is
   # PLAT-2's presenter and cannot move into the store — the store is below
@@ -1315,6 +1309,81 @@ proc runTracepoints*(s: HeadlessDebugSession;
   s.session.store.applyTracepointResults(specs, hits)
   drain()
   result = s.session.store.pointList.tracepointHits.val
+
+const TracepointValueWindow* = 64
+  ## How many hits' values a text listing of a sweep reads at a time: a
+  ## screenful of the overlay that lists them, with room to scroll.
+
+proc hitValuesOf(local: JsonNode): seq[(string, string)] =
+  ## One hit's locals, as `StringAndValueTuple`s serialise them —
+  ## `{"Field0": name, "Field1": value}`, a tuple struct whose names are
+  ## positional — presented at the tracepoint budget.
+  if local.isNil or local.kind != JArray:
+    return
+  for pair in local:
+    result.add (pair.getOrDefault("Field0").getStr(""),
+                presentedValueText(pair.getOrDefault("Field1"),
+                                   TracepointBudget))
+
+proc loadTracepointHitValues*(s: HeadlessDebugSession;
+                              hits: var seq[TracepointSweepHit];
+                              first, count: int) =
+  ## Read the locals of `hits[first ..< first + count]` that are not read yet
+  ## (Viewport-Driven-Loading, Decided Q4): for each tracepoint among them,
+  ## ONE `ct/update-table` on its event slot for the window of its hits they
+  ## span. The engine answers the window's locals on the `tracepoint-locals`
+  ## event, indexed by the hit's place among that tracepoint's hits.
+  let lo = max(0, first)
+  let hi = min(hits.len, first + count)
+  if lo >= hi:
+    return
+  # Each hit's place among its own tracepoint's hits.
+  var ordinal = newSeq[int](hits.len)
+  var seen = initTable[int, int]()
+  for i, h in hits:
+    ordinal[i] = seen.getOrDefault(h.tracepointId, 0)
+    seen[h.tracepointId] = ordinal[i] + 1
+  var spans = initTable[int, (int, int)]()   # tracepoint -> (first, last)
+  for i in lo ..< hi:
+    if hits[i].valuesLoaded:
+      continue
+    let id = hits[i].tracepointId
+    let (a, b) = spans.getOrDefault(id, (high(int), -1))
+    spans[id] = (min(a, ordinal[i]), max(b, ordinal[i]))
+  for id, span in spans:
+    let (start, last) = span
+    discard s.backend.sendDapRequest("ct/update-table", %*{
+      "tableArgs": {"columns": [], "draw": 0, "length": last - start + 1,
+                    "order": [], "search": {"value": "", "regex": false},
+                    "start": start},
+      "selectedKinds": {},
+      "isTrace": true,
+      "eventSlot": id})
+    var locals = newJArray()
+    for event in s.backend.drainEvents():
+      if event.getOrDefault("event").getStr("") == "tracepoint-locals":
+        locals = event{"body", "locals"}
+    for i in lo ..< hi:
+      if hits[i].tracepointId == id and not hits[i].valuesLoaded and
+         ordinal[i] < locals.len:
+        hits[i].values = hitValuesOf(locals[ordinal[i]])
+        hits[i].valuesLoaded = true
+
+proc tracepointHitsText*(s: HeadlessDebugSession;
+                         hits: var seq[TracepointSweepHit];
+                         top: int): string =
+  ## A sweep's hits as a text listing, one line per hit, with the values of
+  ## the hits around line `top` read (`loadTracepointHitValues`); a hit whose
+  ## values are not read yet shows its tick alone until it is scrolled to.
+  s.loadTracepointHitValues(hits, top - TracepointValueWindow div 4,
+                            TracepointValueWindow)
+  for h in hits:
+    var parts: seq[string] = @[]
+    for (name, value) in h.values:
+      parts.add name & " = " & value
+    result.add "tick " & $h.rrTicks & "  " &
+               (if h.errorMessage.len > 0: h.errorMessage
+                else: parts.join(", ")) & "\n"
 
 # ---------------------------------------------------------------------------
 # Trace recording

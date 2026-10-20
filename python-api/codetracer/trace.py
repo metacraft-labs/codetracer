@@ -40,6 +40,10 @@ from codetracer.exceptions import (
 )
 
 
+
+_REQUIRED = object()
+"""Marks a parameter a caller must pass explicitly (``run_tracepoints``)."""
+
 def open_trace(
     path: Union[str, Path],
     *,
@@ -890,16 +894,18 @@ class Trace:
                 response.get("message", "remove_tracepoint() failed")
             )
 
-    def run_tracepoints(self, stop_after: int = -1) -> list:
+    def run_tracepoints(self, limit=_REQUIRED, *, stop_after=None) -> list:
         """Execute all active tracepoints across the trace.
 
-        Replays the entire recorded execution (or up to *stop_after*
-        hits), evaluating every active tracepoint at each matching line.
-        Returns a list of result dicts, one per hit.
+        Replays the recorded execution, evaluating every active tracepoint
+        at each matching line, until *limit* hits were collected.
 
         Parameters:
-            stop_after: Maximum number of hits to collect.  ``-1`` means
-                no limit (process the entire trace).
+            limit: Maximum number of hits to collect. REQUIRED, so that a
+                script that wants every hit of a long recording says so:
+                pass ``limit=None`` for every hit.
+            stop_after: The older spelling of *limit* (``-1`` for every
+                hit); accepted when *limit* is not given.
 
         Returns:
             A list of dicts, each with keys:
@@ -913,11 +919,24 @@ class Trace:
               each ``{"name": str, "value": str}``.
 
         Raises:
+            TypeError: If neither *limit* nor *stop_after* is given.
+            ValueError: If *limit* is not a non-negative int or None.
             TraceError: If the daemon reports an error.
         """
+        if limit is _REQUIRED:
+            if stop_after is None:
+                raise TypeError(
+                    "run_tracepoints() needs an explicit limit: "
+                    "run_tracepoints(limit=N), or limit=None for every hit"
+                )
+            limit = None if stop_after < 0 else stop_after
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative int or None")
         response = self._connection.send_request("ct/py-run-tracepoints", {
             "tracePath": self._path,
-            "stopAfter": stop_after,
+            "limit": -1 if limit is None else limit,
         })
         if not response.get("success"):
             raise TraceError(

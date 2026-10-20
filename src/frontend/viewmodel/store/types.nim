@@ -381,7 +381,12 @@ type
     path*: string
     line*: int
     values*: seq[(string, string)]
-      ## The locals the expression named, as ``(name, rendered)``.
+      ## The locals the expression named, as ``(name, rendered)`` — once
+      ## ``valuesLoaded``.
+    valuesLoaded*: bool
+      ## ``values`` was read. A sweep answers each hit's tick and location;
+      ## the locals of the hits a pane shows are read by window
+      ## (Viewport-Driven-Loading, Decided Q4).
     errorMessage*: string
 
   TermColorKind* = enum
@@ -999,6 +1004,10 @@ type
     line*: int
     functionName*: string
     localsText*: string
+    localsLoaded*: bool
+      ## ``localsText`` was read. A sweep answers each hit's tick and
+      ## location; the pane reads the locals of the rows it shows by window
+      ## (Viewport-Driven-Loading, Decided Q4).
     eventId*: int
     tracepointId*: int
 

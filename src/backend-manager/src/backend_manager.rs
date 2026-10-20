@@ -1,9 +1,9 @@
-use std::{
-    collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
-};
 #[cfg(windows)]
 #[allow(unused_imports)]
 use std::os::windows::process::CommandExt;
+use std::{
+    collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
+};
 
 /// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
 /// a visible console window when spawned as child processes.
@@ -11,6 +11,12 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use serde_json::{Value, json};
+#[cfg(unix)]
+use tokio::fs::remove_file;
+#[cfg(windows)]
+use tokio::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::{
     fs::create_dir_all,
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
@@ -21,12 +27,6 @@ use tokio::{
     },
     time::sleep,
 };
-#[cfg(unix)]
-use tokio::fs::remove_file;
-#[cfg(unix)]
-use tokio::net::{UnixListener, UnixStream};
-#[cfg(windows)]
-use tokio::net::{TcpListener, TcpStream};
 
 #[cfg(unix)]
 use crate::errors::SocketPathError;
@@ -302,7 +302,11 @@ impl BackendManager {
         // Write the port number so the frontend can discover it.
         tokio::fs::write(&port_file, port.to_string()).await?;
 
-        info!("TCP listening on: 127.0.0.1:{} (port file: {})", port, port_file.display());
+        info!(
+            "TCP listening on: 127.0.0.1:{} (port file: {})",
+            port,
+            port_file.display()
+        );
 
         let mut socket_read;
         let mut socket_write;
@@ -628,7 +632,11 @@ impl BackendManager {
 
         // Write the port number to the port file so clients can discover it.
         tokio::fs::write(&socket_path, port.to_string()).await?;
-        info!("Daemon listening on: 127.0.0.1:{} (port file: {})", port, socket_path.display());
+        info!(
+            "Daemon listening on: 127.0.0.1:{} (port file: {})",
+            port,
+            socket_path.display()
+        );
 
         // --- Accept loop: spawns per-client read and write tasks. ---
         let mgr_accept = mgr.clone();
@@ -1334,9 +1342,8 @@ impl BackendManager {
                                             .get("first")
                                             .and_then(Value::as_str)
                                             .unwrap_or("");
-                                        let value = python_bridge::extract_value_str(
-                                            local.get("second"),
-                                        );
+                                        let value =
+                                            python_bridge::extract_value_str(local.get("second"));
                                         json!({"name": name, "value": value})
                                     })
                                     .collect()
@@ -1359,10 +1366,7 @@ impl BackendManager {
                     })
                     .collect();
 
-                let errors = body
-                    .get("errors")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
+                let errors = body.get("errors").cloned().unwrap_or_else(|| json!({}));
 
                 let py_response = serde_json::json!({
                     "type": "response",
@@ -1635,7 +1639,10 @@ impl BackendManager {
                         // at request-dispatch time (same convention as Evaluate),
                         // so the formatter can pick the matching local from
                         // the backend's history update.
-                        python_bridge::format_resolve_variable_step_response(msg, &pending.expression)
+                        python_bridge::format_resolve_variable_step_response(
+                            msg,
+                            &pending.expression,
+                        )
                     }
                     PendingPyRequestKind::AddBreakpoint { .. }
                     | PendingPyRequestKind::FireAndForget => {
@@ -4096,10 +4103,7 @@ impl BackendManager {
             }
         };
 
-        let source_path = match args
-            .and_then(|a| a.get("path"))
-            .and_then(Value::as_str)
-        {
+        let source_path = match args.and_then(|a| a.get("path")).and_then(Value::as_str) {
             Some(p) => p.to_string(),
             None => {
                 self.send_py_command_error(
@@ -4111,10 +4115,7 @@ impl BackendManager {
             }
         };
 
-        let line = match args
-            .and_then(|a| a.get("line"))
-            .and_then(Value::as_i64)
-        {
+        let line = match args.and_then(|a| a.get("line")).and_then(Value::as_i64) {
             Some(l) => l,
             None => {
                 self.send_py_command_error(
@@ -4286,7 +4287,7 @@ impl BackendManager {
     ///   "seq": 3,
     ///   "arguments": {
     ///     "tracePath": "/path/to/trace",
-    ///     "stopAfter": -1
+    ///     "limit": 100
     ///   }
     /// }
     /// ```
@@ -4333,9 +4334,12 @@ impl BackendManager {
             }
         };
 
+        // THE SCRIPT'S LIMIT (Viewport-Driven-Loading, Decided Q4): `limit`
+        // hits, or every hit for `null` / a negative one. `stopAfter` is the
+        // older spelling of the same bound.
         let stop_after = args
-            .and_then(|a| a.get("stopAfter"))
-            .and_then(Value::as_i64)
+            .and_then(|a| a.get("limit").or_else(|| a.get("stopAfter")))
+            .map(|v| v.as_i64().unwrap_or(-1))
             .unwrap_or(-1);
 
         let trace_path = PathBuf::from(&trace_path_str);
@@ -4422,7 +4426,10 @@ impl BackendManager {
                     "lastCount": 0,
                     "results": {}
                 },
-                "stopAfter": stop_after
+                "stopAfter": stop_after,
+                // The script reads every hit's values: they ride the
+                // results event, bounded by the script's own limit (Q4).
+                "withLocals": true
             }
         });
 
@@ -5701,7 +5708,10 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     COMMAND,
-                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                    &format!(
+                        "failed spawning ct_memdiff_helper at {}: {e}",
+                        helper.display()
+                    ),
                 );
                 return Ok(());
             }
@@ -5724,9 +5734,15 @@ impl BackendManager {
             }
         };
 
-        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let success = parsed
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let response = if success {
-            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            let body = parsed
+                .get("body")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
             json!({
                 "type": "response",
                 "request_seq": seq,
@@ -5756,7 +5772,7 @@ impl BackendManager {
         } else {
             self.send_manager_message(response);
         }
-        let _ = send_response;  // silence the unused-closure warning when refactored
+        let _ = send_response; // silence the unused-closure warning when refactored
         Ok(())
     }
 
@@ -5902,7 +5918,10 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     COMMAND,
-                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                    &format!(
+                        "failed spawning ct_memdiff_helper at {}: {e}",
+                        helper.display()
+                    ),
                 );
                 return Ok(());
             }
@@ -5924,9 +5943,15 @@ impl BackendManager {
             }
         };
 
-        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let success = parsed
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let response = if success {
-            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            let body = parsed
+                .get("body")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
             json!({
                 "type": "response",
                 "request_seq": seq,
@@ -6062,9 +6087,7 @@ impl BackendManager {
 
             // Clear accumulated breakpoint/watchpoint state from previous
             // script runs so the new script starts with a clean slate.
-            ds.py_bridge
-                .breakpoint_state_mut(&trace_path)
-                .clear_all();
+            ds.py_bridge.breakpoint_state_mut(&trace_path).clear_all();
 
             if let Some(info) = ds.session_manager.get_session(&trace_path) {
                 let backend_id = info.backend_id;
@@ -6176,14 +6199,13 @@ impl BackendManager {
             .unwrap_or_else(|_| "replay-server".to_string());
 
         // Build the arguments: the backend command + "dap-server" subcommand.
-        let backend_args_owned: Vec<String> = if backend_cmd.contains("backend-manager")
-            || backend_cmd.contains("session-manager")
-        {
-            // For mock-dap-backend, the subcommand is `mock-dap-backend`.
-            vec!["mock-dap-backend".to_string()]
-        } else {
-            vec!["dap-server".to_string()]
-        };
+        let backend_args_owned: Vec<String> =
+            if backend_cmd.contains("backend-manager") || backend_cmd.contains("session-manager") {
+                // For mock-dap-backend, the subcommand is `mock-dap-backend`.
+                vec!["mock-dap-backend".to_string()]
+            } else {
+                vec!["dap-server".to_string()]
+            };
         let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
 
         // Spawn the backend process (raw, without installing channels).
@@ -6266,7 +6288,10 @@ impl BackendManager {
                     });
 
                 if let Some(ref exe) = rr_support_cmd {
-                    info!("RR trace detected, using ct-native-replay: {}", exe.display());
+                    info!(
+                        "RR trace detected, using ct-native-replay: {}",
+                        exe.display()
+                    );
                     opts.ct_rr_worker_exe = rr_support_cmd;
                 } else {
                     warn!(

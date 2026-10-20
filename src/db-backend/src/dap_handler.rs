@@ -5372,6 +5372,11 @@ impl Handler {
                             results.push(stop);
 
                             visit_index += 1;
+                            if args.stop_after > 0 && results.len() as i64 >= args.stop_after {
+                                // The caller's limit: no further hit is asked for.
+                                *visit_entry = visit_index;
+                                return Ok(());
+                            }
                         }
 
                         *visit_entry = visit_index;
@@ -5562,6 +5567,19 @@ impl Handler {
 
         // Emit the aggregate results event so the daemon's Python bridge
         // can build a single `ct/py-run-tracepoints` response.
+        // The hits' locals stay in the event store (`ct/update-table` serves
+        // them by window); the event carries them only when asked (Q4).
+        let results = if args.with_locals {
+            results
+        } else {
+            results
+                .into_iter()
+                .map(|mut stop| {
+                    stop.locals.clear();
+                    stop
+                })
+                .collect()
+        };
         let aggregate = TracepointResultsAggregate {
             session_id: args.session.id,
             results,
@@ -5807,7 +5825,14 @@ impl Handler {
             let trace_event = self.dap_client.tracepoint_locals_event(trace_values)?;
             sender.send(trace_event)?;
         }
-        let table_body = task::CtUpdatedTableResponseBody { table_update };
+        let trace_locals = trace_values_option
+            .as_ref()
+            .map(|values| serde_json::to_value(&values.locals))
+            .transpose()?;
+        let table_body = task::CtUpdatedTableResponseBody {
+            table_update,
+            trace_locals,
+        };
         let raw_event = self.dap_client.updated_table_event(&table_body)?;
         sender.send(raw_event)?;
         // Include table data in the response body for customRequest().
@@ -7956,6 +7981,53 @@ mod tests {
         Ok(())
     }
 
+    /// The sweep's answer (`ct/tracepoint-results`) carries each hit's tick
+    /// and location; its locals only when asked (Viewport-Driven-Loading Q4).
+    /// The event store keeps them either way, for `ct/update-table`'s window.
+    /// `stopAfter` ends the sweep after that many hits.
+    #[test]
+    fn a_sweep_answers_hits_and_carries_locals_only_when_asked() -> Result<(), Box<dyn Error>> {
+        fn sweep(with_locals: bool, stop_after: i64) -> Result<(Vec<serde_json::Value>, usize), Box<dyn Error>> {
+            let db: Db = setup_db_loop(100);
+            let (sender, receiver) = mpsc::channel();
+            let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+            handler.event_load(dap::Request::default(), sender.clone())?;
+            let mut args = make_tracepoints_args(2, 0);
+            args.with_locals = with_locals;
+            args.stop_after = stop_after;
+            handler.run_tracepoints(dap::Request::default(), args, sender)?;
+            let mut results = vec![];
+            for message in receiver.try_iter() {
+                if let DapMessage::Event(event) = message
+                    && event.event == "ct/tracepoint-results"
+                {
+                    results = event.body["results"].as_array().cloned().unwrap_or_default();
+                }
+            }
+            Ok((results, handler.event_db.single_tables[1].events.len()))
+        }
+
+        let (hits, stored) = sweep(false, 0)?;
+        assert_eq!(hits.len(), 100);
+        assert_eq!(stored, 100);
+        assert!(
+            hits.iter()
+                .all(|h| h["locals"].as_array().is_some_and(|l| l.is_empty()))
+        );
+        assert!(hits.iter().all(|h| h["rrTicks"].as_i64().is_some() && h["line"] == 2));
+
+        let (hits, _) = sweep(true, 0)?;
+        assert!(
+            hits.iter()
+                .all(|h| h["locals"].as_array().is_some_and(|l| !l.is_empty()))
+        );
+
+        let (hits, stored) = sweep(true, 5)?;
+        assert_eq!(hits.len(), 5);
+        assert_eq!(stored, 5);
+        Ok(())
+    }
+
     // Test a given number of steps with individual tracepoint on each (10,000 steps; ~7s)
     #[test]
     fn test_big_number_tracepoints() -> Result<(), Box<dyn Error>> {
@@ -8732,6 +8804,7 @@ mod tests {
                 id: 0,
             },
             stop_after: 0,
+            with_locals: true,
         }
     }
 
@@ -8765,6 +8838,7 @@ mod tests {
                 id: 0,
             },
             stop_after: 0,
+            with_locals: true,
         }
     }
 
@@ -8802,6 +8876,7 @@ mod tests {
                 id: 0,
             },
             stop_after: 0,
+            with_locals: true,
         }
     }
 }

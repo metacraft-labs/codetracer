@@ -286,6 +286,13 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct CtUpdatedTableResponseBody {
     pub table_update: TableUpdate,
+    /// A tracepoint table's window: each row's locals, indexed by the row's
+    /// place among the tracepoint's hits (`tableArgs.start` onward; earlier
+    /// places are empty). The same values the `tracepoint-locals` event
+    /// carries, in the answer so a client that asked for a window reads its
+    /// locals off its own request (Viewport-Driven-Loading, Decided Q4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_locals: Option<serde_json::Value>,
 }
 
 /// documentation
@@ -1950,7 +1957,16 @@ pub struct TraceSession {
 #[serde(deny_unknown_fields)]
 pub struct RunTracepointsArg {
     pub session: TraceSession,
+    /// Stop the sweep after this many hits; 0 or negative for every hit.
     pub stop_after: i64,
+    /// Whether the `ct/tracepoint-results` event carries each hit's locals.
+    /// Off by default (Viewport-Driven-Loading, Decided Q4): the sweep's
+    /// answer is each hit's tick and location, which is what a timeline
+    /// draws, and a pane asks for the window of hits it shows, locals
+    /// included, through `ct/update-table` on the tracepoint's event slot.
+    /// The Python API asks for them with its explicit limit.
+    #[serde(default)]
+    pub with_locals: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3527,6 +3543,7 @@ mod tests {
                 id: 1,
             },
             stop_after: -1,
+            with_locals: false,
         };
         let json = serde_json::to_string(&args).expect("serialise");
         assert!(

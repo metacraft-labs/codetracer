@@ -767,6 +767,10 @@ type
       ## The text is a unified diff, its lines in the diff colours.
     top: int
       ## The first line shown (the wheel and Up / Down scroll it).
+    refill: proc(top: int): string {.closure.}
+      ## For a text whose lines are read as they are shown (a tracepoint
+      ## sweep's hits, whose values are read by window): the text again with
+      ## the lines around `top` read. Nil for a fixed text.
 
   ProbeArrival = object
     ## **ONE KEY, AS THE RUST-SIDE ELEMENT STORE RECORDED IT.** Read inside
@@ -3558,6 +3562,8 @@ proc drawTopBar(r: GpuiRenderer) =
     r.setStyle(title, "color", chromeOf(crPaneTitleForeground))
     r.appendChild(title, r.createTextNode(gContent.title))
     r.appendChild(box, title)
+    if not gContent.refill.isNil:
+      gContent.text = gContent.refill(gContent.top)
     let lines = gContent.text.replace("\\n", "\n").splitLines()
     let room = max(1, (h - 2 * ChromePaddingPx) div MenuItemPx - 1)
     for i in min(gContent.top, max(0, lines.high)) ..< lines.len:
@@ -4572,19 +4578,18 @@ proc runGpuiTracepoint(r: GpuiRenderer; path: string; line: int;
   except CatchableError as e:
     traceGesture("tracepoint failed: " & e.msg)
     return
-  var text = ""
-  for h in hits:
-    var parts: seq[string] = @[]
-    for (name, value) in h.values:
-      parts.add name & " = " & value
-    text.add "tick " & $h.rrTicks & "  " &
-             (if h.errorMessage.len > 0: h.errorMessage
-              else: parts.join(", ")) & "\n"
+  # The values of the hits the overlay shows are read as it scrolls (Q4).
+  let text = gSession.tracepointHitsText(hits, 0)
   refreshReplayWindow(r)
   showContent(r, "tracepoint `" & expression & "` at " &
                    path.extractFilename & ":" & $line & " — " & $hits.len &
                    " hit(s)",
               (if text.len > 0: text else: "the line never ran"))
+  if hits.len > 0:
+    let session = gSession
+    var held = hits
+    gContent.refill = proc(top: int): string =
+      session.tracepointHitsText(held, top)
 
 proc runWatchCommand(r: GpuiRenderer; query: string): bool
   ## PLAT-51: forward-declared; defined beside the value history.

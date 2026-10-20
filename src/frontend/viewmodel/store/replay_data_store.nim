@@ -1990,7 +1990,7 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   store.applyVerifiedBreakpoints(path, verified, disabled)
 
 proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
-                             stopAfter = -1): JsonNode =
+                             stopAfter = -1; withLocals = false): JsonNode =
   ## The ``ct/run-tracepoints`` arguments for ``specs``: THE ONE PLACE THE
   ## WIRE SHAPE OF A ``Tracepoint`` IS SPELLED on this side, so that a
   ## reader of the Rust ``task::Tracepoint`` has exactly one Nim builder to
@@ -2003,6 +2003,10 @@ proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
   ## the Rust struct required the key, while the engine never read it; it was
   ## measured dead on ``calc`` (12 and 21 answered identically) and deleted on
   ## both sides rather than moved to a name.
+  ##
+  ## ``withLocals`` (Viewport-Driven-Loading, Decided Q4): the answer carries
+  ## each hit's tick and location; its locals only when asked. A pane reads
+  ## the locals of the hits it shows by window (`ct/update-table`).
   var tracepoints = newJArray()
   for spec in specs:
     tracepoints.add %*{
@@ -2027,6 +2031,7 @@ proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
       "id": 0,
     },
     "stopAfter": stopAfter,
+    "withLocals": withLocals,
   }
 
 proc applyTracepointResults*(store: ReplayDataStore;

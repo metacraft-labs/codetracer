@@ -215,6 +215,9 @@ suite "ReplayDataStore requests":
     ]
     let request = tracepointSweepRequest(specs)
     check request["stopAfter"].getInt == -1
+    # Q4: the answer carries hits' ticks and locations; locals by window.
+    check request["withLocals"].getBool == false
+    check tracepointSweepRequest(specs, withLocals = true)["withLocals"].getBool
     check request["session"]["id"].getInt == 0
     let tracepoints = request["session"]["tracepoints"]
     check tracepoints.len == 2
