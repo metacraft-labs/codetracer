@@ -95,7 +95,14 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 708
+const ExpectedAssertions = 731
+  ## 2026-10-20 (no-window refusal): 708 -> 731, measured — `CHECKS: 731`
+  ## over BOTH the HEAD record and the re-recorded one, `CHECKS: 708` for the
+  ## HEAD suite. Two routes: ONE more non-test file under `src/frontend/gpui/`
+  ## (`window_preflight.nim`), `1 + 8 = 9` in the registry scan (+9); and the
+  ## exit-code case now also reads each windowed run's `refusal` (+6), each
+  ## featureless run's refusal line beside its rc (+6) and the featureless
+  ## edit-mode run's rc and refusal (+2).
   ## 2026-10-17 (desktop-parity redesign): 680 -> 708, by the second and
   ## third routes above. THREE more non-test files under `src/frontend/gpui/`
   ## (`design_fonts.nim`, `design_font_metrics.nim`, `devicon_marks.nim`),
@@ -901,18 +908,42 @@ suite "PLAT-37: the event loop ends and the lane terminates":
       ck cap > 0
       ck elapsed < 2 * cap
 
-  test "every windowed run exited rc 0":
+  test "every windowed run exited rc 0, and every featureless run REFUSED by name":
+    # `refusal` is read as a PRESENT string, never defaulted: a record from
+    # before the field existed would otherwise read "" — "no refusal" — and
+    # the windowed half below would hold for free (§4).
+    template refusalOf(entry: JsonNode): string =
+      (if entry.isNil or entry{"refusal"}.isNil or
+          entry{"refusal"}.kind != JString: "<absent>"
+       else: entry{"refusal"}.getStr)
     for id in scenarios:
       let entry = runEntry("windowed", id)
       ck not entry.isNil
       ck (not entry.isNil) and entry{"binaryRc"}.getInt(-1) == 0
-    # AND SO DID THE FEATURELESS ARM. This is the half that makes `DIFF-6` a
-    # difference in PIXELS rather than a difference in whether the binary
-    # worked: a featureless run that crashed would produce no frame for a
-    # reason that has nothing to do with the renderer.
+      ck refusalOf(entry) == ""
+    # THE FEATURELESS ARM REFUSES, AND THAT IS STRONGER THAN THE rc 0 THIS
+    # CASE USED TO ASSERT. It is still the half that makes `DIFF-6` a
+    # difference in PIXELS rather than in whether the binary worked — but the
+    # old reading of "worked" was a silent rc 0 from a launch that opened
+    # nothing, which is the defect
+    # `codetracer-pm/issues/2026-10-01-gpui-launch-is-silent-when-no-window-can-open.md`
+    # records. Now the binary asks the shim first and refuses BY KIND with
+    # exit 3 (`window_preflight.ExitNoWindow`), so this asserts both the code
+    # and WHICH refusal: a crash that happened to exit 3, or the no-display
+    # refusal (this arm runs inside sway, which has a display), would be a
+    # featureless run that produced no frame for a reason that has nothing to
+    # do with the renderer. The plan is still written — `--plan-out` runs
+    # before the window path — which the falsifier below asserts separately.
     for id in scenarios:
       let entry = runEntry("featureless", id)
-      ck (not entry.isNil) and entry{"binaryRc"}.getInt(-1) == 0
+      ck (not entry.isNil) and entry{"binaryRc"}.getInt(-1) == 3
+      ck refusalOf(entry).startsWith(
+        "codetracer-gpui: this build of the GPUI shim has no window backend")
+    # And the second product mode, through the same window path.
+    let edit = modeEntry("featureless", "edit-mode")
+    ck (not edit.isNil) and edit{"binaryRc"}.getInt(-1) == 3
+    ck refusalOf(edit).startsWith(
+      "codetracer-gpui: this build of the GPUI shim has no window backend")
 
 # ===========================================================================
 # PLAT35-VG1, RETIRED

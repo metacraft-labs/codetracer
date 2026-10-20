@@ -138,7 +138,9 @@ FRAME_H=900
 # screen. That is a budget defect and it is fixed as one.
 #
 # **IT IS NOT FIXED BY GIVING THE TWO ARMS DIFFERENT BUDGETS.** The featureless
-# arm's binary exits in about 8 s and then the capture polls an empty screen
+# arm's binary exits in about 8 s (since the no-window refusal, with rc 3 and
+# a `codetracer-gpui: … no window backend` line, which the row records as
+# `refusal`; it used to be a silent rc 0) and then the capture polls an empty screen
 # for the rest of the window, which is pure wall clock spent proving a
 # negative. Shortening it there would be the cheapest thing in this file and it
 # would also destroy `DIFF-6`: an arm that was given less time to produce a
@@ -401,6 +403,26 @@ capture_one() {
 			        pass
 			    return -1
 
+			# THE REFUSAL, IF THE BINARY MADE ONE. A launch that cannot open a
+			# window refuses by kind on stderr with exit 3
+			# (`src/frontend/gpui/window_preflight.nim`), so the featureless arm
+			# ends that way rather than with a silent rc 0. Recorded as the line
+			# itself, read from the run log (stdout and stderr together), so the
+			# gate can assert WHICH refusal was made and not only that the rc is
+			# non-zero: a crash that happened to exit 3 must not read as one.
+			# "" means no refusal line, which is a state, not a missing field.
+			def refusal_of(path):
+			    try:
+			        with open(path, errors="replace") as fh:
+			            for line in fh:
+			                if re.match(r"codetracer-gpui: (this build of the GPUI "
+			                            r"shim has no window backend|no graphical "
+			                            r"session)", line):
+			                    return line.rstrip("\n")
+			    except OSError:
+			        pass
+			    return ""
+
 			caplog = ppm + ".log"
 			print(json.dumps({
 			    "blankAtTick": tick_of(r"phase1 tick (\d+): output is blank", caplog),
@@ -413,6 +435,7 @@ capture_one() {
 			    "ops": ops,
 			    "outcome": outcome,
 			    "binaryRc": int(rc),
+			    "refusal": refusal_of(log),
 			    "captureRc": int(cap_rc),
 			    "elapsedMs": int(elapsed),
 			    "quitAfterMs": int(quit_ms),

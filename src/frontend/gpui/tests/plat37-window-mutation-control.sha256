@@ -16,6 +16,35 @@
 # along with the bytes.
 #
 # ===========================================================================
+# RE-RECORD, 2026-10-20 (the no-window refusal), on `a92806308` (agents)
+# with that change uncommitted. ALL 12 ARMS GRADED, M11 INCLUDED.
+# ===========================================================================
+#   WHAT MOVED  test_gpui_window_frame.nim (the exit-code case asserts the
+#               featureless arm's rc 3 and refusal line; ExpectedAssertions
+#               708 -> 731), plat37_vision.nim (the `refusal` field), and
+#               plat37-measurements.json, RE-RECORDED by
+#               `bash ci/test/plat37-window-frame.sh` + `just plat37-measure`
+#               on nixos-ci-bare-002 (Linux 6.18.55, sway 1.11).
+#   GRADED      M1..M12, 12 of 12 KILLED (11 on the first pass; M9 was
+#               MIS-ATTRIBUTED because its `because` names a suite line that
+#               the edit moved, 1052 -> 1083, and was re-derived with
+#               --derive --only M9, then graded KILLED).
+#   ALSO MOVED  chrome.nim's row, which this change does not touch: the
+#               control was ALREADY STALE at `a92806308` (1a5beb575 edited
+#               chrome.nim on 2026-10-17 without re-recording), so the harness
+#               refused there with rc 3. The arms over it (M8, M10) are in the
+#               12 graded above.
+#   CARRIED     the `sway-gles2` configuration row: this host exposes no
+#               /dev/dri, so wlroots cannot create a GLES2 renderer ("no DRM
+#               FD available") and the re-recorded row had no frame. That one
+#               row is carried verbatim from the record at `a92806308` and
+#               named in the record's `provenance.carriedRows`; it probes the
+#               windowed binary with WAYLAND_DISPLAY set, a path this change
+#               does not alter. No arm is aimed at that row. A host with a DRM
+#               node has to re-take it. The digest below is of the record WITH
+#               the carried row, and M1..M12 were re-graded against it.
+#
+# ===========================================================================
 # PLATFORM-SCOPED RE-RECORD, 2026-10-02 (PLAT-35, RE-GRADED ON `6fa0bdd89`).
 # ONE ARM IS OWED A GRADE.
 # ===========================================================================
@@ -92,10 +121,10 @@
 # both sides; measured red-then-green in a second worktree of this commit at a
 # different path. The line also moved — 985 -> 1020 — because the constant's
 # own note above grew.
-cad6f3e340ba65160902bc10f05db2e9c279ad8469df667a0189d0ac417cd2cc  src/tests/visual/plat37-measurements.json
+3955929e285052dccad6f50269e42a51bb798a4d7e87e9864f217d8aa33b90b4  src/tests/visual/plat37-measurements.json
 6691efa7f680d879a9ffc9f4ceb4b95f0c07c5550f982c206658b9ffeb4e60df  src/tests/visual/plat37-thresholds.json
-0ee802f4e4c6fc5c3432d32cc07c80a3b20fd1a362a8222ac826ebcaf56d92bb  src/frontend/gpui/chrome.nim
+0587764dba7f18066eeb0ff826504824bdad1db9b8e8ae07c3054fa3c7d90be8  src/frontend/gpui/chrome.nim
 cb6c5462e917d2e9e33645f68bbcb97e97bbfc7535260fa0a0f1ca8718e7329c  src/frontend/gpui/replay_ops.nim
 b80875c273eb71880e4ba1894c3eca0751f4e300216e5b18c113e3b66bfd732a  src/tests/visual/scenarios.json
-eae5ce275ce0f8d32a08ff37064e7794f9a6bcad368a4fd28a6be9ca742fd590  src/frontend/gpui/tests/plat37_vision.nim
-5d81ad6b8b3cb017589d3e645cf48fd94627807415de66f78552c1993fb685dd  src/frontend/gpui/tests/test_gpui_window_frame.nim
+1fc40f6167811d579c8c35e05c7bde74d4748b3836bc6a57f3e0ab2d27209edb  src/frontend/gpui/tests/plat37_vision.nim
+f8d4aad34ebd3006ff390fdd703e37ec25afdad39cf80099947b8f2d6bafdf4e  src/frontend/gpui/tests/test_gpui_window_frame.nim

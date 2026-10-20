@@ -152,7 +152,9 @@ inside it), `repro exec . -- just build-gpui`, and launch with
 `repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH
 src/build-debug/bin/ct replay --ui=gpui <trace>'` from a graphical session. With
 no display, use `--report-plan` (same command) to check the build; `--headless`
-is TUI-only and `ct` refuses it with `--ui=gpui`.
+is TUI-only and `ct` refuses it with `--ui=gpui`. A window launch that cannot
+open a window (the featureless shim, or no `DISPLAY` / `WAYLAND_DISPLAY`) exits 3
+and names the cause on stderr. Read that line rather than retrying the launch.
 
 ## Building the db-backend
 

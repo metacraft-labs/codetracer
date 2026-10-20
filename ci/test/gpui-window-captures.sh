@@ -126,6 +126,37 @@ NIM
 		"${work}/record_${fx}.nim" || fail "could not record the ${fx} fixture"
 done
 
+# ---- 3b. the no-display refusal, with the binary that CAN open a window -----
+#
+# `codetracer-gpui` linked to the WINDOWED shim, with no `DISPLAY` and no
+# `WAYLAND_DISPLAY`, used to wait forever in silence: GPUI picks its headless
+# platform, which opens no window and so never closes one
+# (`codetracer-pm/issues/2026-10-01-gpui-launch-is-silent-when-no-window-can-open.md`).
+# It must now refuse by kind with exit 3 (`codetracer-pm/spec/CLI/ct/
+# ui-selection.md` §8a). This is the only lane that builds a windowed binary
+# outside a compositor, so the case lives here; the featureless kind is
+# `src/frontend/gpui/tests/test_gpui_window_refusal.nim`'s, in `gpui-shell`.
+# `timeout` keeps the old failure mode a red step rather than a hung job, and
+# the rc is captured directly, never through a pipe.
+echo "=== the windowed binary refuses a launch with no graphical session"
+refusal_err="$(mktemp "${root}/build/gpui-window-refusal.XXXXXX")"
+# Step 3 recorded `calc`, so the glob matches; its first match is the trace.
+refusal_trace=(test-logs/tui-fixtures/calc-*)
+LD_LIBRARY_PATH="${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}:${LD_LIBRARY_PATH:-}" \
+	timeout 120 env -u DISPLAY -u WAYLAND_DISPLAY -u ZED_HEADLESS \
+	build/bin/codetracer-gpui-window --quit-after-ms=5000 \
+	"${refusal_trace[0]}" \
+	>/dev/null 2>"${refusal_err}"
+refusal_rc=$?
+cat "${refusal_err}"
+grep -q '^codetracer-gpui: no graphical session' "${refusal_err}" &&
+	[ "${refusal_rc}" -eq 3 ] || {
+	rm -f "${refusal_err}"
+	fail "the windowed binary with no display exited ${refusal_rc} without the
+      'no graphical session' refusal (expected exit 3 and that line on stderr)"
+}
+rm -f "${refusal_err}"
+
 # ---- 4. capture, measure, assert --------------------------------------------
 export ISONIM_GPUI_DIR="${ISONIM_GPUI}" CODETRACER_WINDOW_BIN_PINS_SHIM=1
 export CODETRACER_REPO_ROOT="${root}"
