@@ -13,7 +13,6 @@ proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#
 const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
-  SVG_NAMESPACE            = cstring"http://www.w3.org/2000/svg"
 
 const CODE_FONT_FAMILY* = cstring"SpaceMono, monospace"
   ## The face for every code surface in the app: the editors, the trace and
@@ -56,14 +55,6 @@ proc monacoLineDecorationsWidth*(fontSize: int): int =
   ## reach — this one cannot be imported by a headless suite, because
   ## `utils.nim` reaches `kdom`.
   editor_gutter_lanes.lineDecorationsWidthPx(fontSize)
-
-proc renderLineElement*(x1, y1, x2, y2: float): dom.Element =
-  result = dom.createElementNS(dom.document, SVG_NAMESPACE, cstring"line")
-  result.setAttribute(cstring"x1", cstring($x1))
-  result.setAttribute(cstring"y1", cstring($y1))
-  result.setAttribute(cstring"x2", cstring($x2))
-  result.setAttribute(cstring"y2", cstring($y2))
-  result.setAttribute(cstring"stroke-width", cstring"0.5")
 
 proc lineCountForGutter*(content: cstring): int =
   ## Count logical lines for gutter sizing from Monaco-facing cstring content.
@@ -566,8 +557,6 @@ proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): Ca
     forceCollapse: false,
     depthStart: 0,
     coordinates: @[],
-    startPositionX: -1,
-    startPositionY: -1,
     width: "300",
     callValuePosition: JsAssoc[cstring, float]{},
     inExtension: inExtension,

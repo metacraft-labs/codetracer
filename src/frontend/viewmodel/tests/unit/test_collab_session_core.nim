@@ -148,3 +148,43 @@ suite "collaborative ViewModel M2 session core":
     check not session.collabCore.dispatchLog[^1].publishedToPeer
     check mock.receivedCommands.len == 0
     session.dispose()
+
+  test "test_collab_peer_selection_is_not_taken_back_by_a_followed_call":
+    # A front end whose selection follows a call (`selectCall`: the
+    # current-call mark, a row click) re-derives the row from that call on
+    # every section load. When a peer then selects another row, the local
+    # call must be dropped: otherwise the next local section load (a
+    # scroll, a collapse) republishes the local row and silently takes the
+    # shared selection back from the peer.
+    let (session, _) = makeSession()
+    let vm = session.calltraceVM
+    proc keyed(index: int64; key: string): CallLine =
+      CallLine(index: index, callKey: key, name: "call" & key)
+    let section = @[keyed(0, "0"), keyed(1, "1"), keyed(2, "2")]
+    session.store.updateCalltraceSection(section, 0, 3)
+    drain()
+
+    vm.selectCall("1")
+    check vm.selectedEntry.val == some(1'i64)
+    check vm.selectedCallKey.val == "1"
+
+    let core = session.collabCore
+    var op = core.nextLocalViewOp(vokSetCalltraceSelection,
+      "calltrace.selectedEntry", %*{"entryId": "2"})
+    # Another replica of the session (the same principal, so it holds the
+    # capability to select), whose op arrives as a remote one.
+    op.actorId = "peer-actor"
+    op.replicaId = "peer-replica"
+    op.opId = "peer-actor:1"
+    check core.applyRemoteViewOp(op).status != asRejected
+    check vm.selectedEntry.val == some(2'i64)
+    check vm.selectedCallKey.val == ""
+
+    let publishedBefore = core.localOperationLog.len
+    # A later section (here one more row loaded below) re-runs the follow.
+    session.store.updateCalltraceSection(section & @[keyed(3, "3")], 0, 4)
+    drain()
+    check vm.selectedEntry.val == some(2'i64)
+    check core.document.state.calltrace.selectedEntry.value == "2"
+    check core.localOperationLog.len == publishedBefore
+    session.dispose()

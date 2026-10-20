@@ -88,7 +88,12 @@ proc rowHandlers(vm: CalltraceVM; item: proc(): CallLine): RowHandlers =
       # navigates to the source location (calltraceJump). Without the
       # navigation, Playwright `activate()` selects the row but the
       # editor never opens the target file.
-      vm.selectEntry(some(line.index))
+      # Select the row's CALL, so the mark stays on it when a collapse or
+      # a filter change moves it to another row (#811).
+      if line.callKey.len > 0:
+        vm.selectCall(line.callKey)
+      else:
+        vm.selectEntry(some(line.index))
       vm.doubleClickEntry(line.index),
     onDblClick: proc() =
       vm.doubleClickEntry(getLine().index),
@@ -257,6 +262,65 @@ proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
   panel
 
 # ---------------------------------------------------------------------------
+# Guide-line geometry
+# ---------------------------------------------------------------------------
+#
+# The guides are an SVG layer laid over the rows (`renderTraceSvg` below). A
+# guide connects two rows only if it is drawn where the browser put them, and
+# the browser lays the rows out from em-based CSS: their advance follows the
+# root font size (zoom) and is not a whole number of pixels (about 25.28 px
+# against a 25 px row box at 16 px on the desktop). So nothing here is a pixel
+# constant except the depth indent, which the row renderer itself writes in
+# pixels. The rest is measured from the rendered rows and passed in.
+
+const CallDepthIndentPx* = 8.0
+  ## Width of one level of nesting: `renderCallLineRowWeb` writes a spacer of
+  ## `depth * CallDepthIndentPx` px before each row's toggle, so a toggle's
+  ## centre moves right by exactly this much per level.
+
+type
+  CallGuideAnchor* = object
+    ## Where a row's toggle sits, measured from a rendered row. Both values
+    ## are in CSS px and scale with the root font size.
+    originX*: float
+      ## Toggle centre x of a depth-0 row, relative to `.calltrace-lines`.
+    centerY*: float
+      ## Toggle centre y relative to its row's top edge.
+
+  CallGuideSegment* = tuple[x1, y1, x2, y2: float]
+
+func defaultCallGuideAnchor*(pitch: float): CallGuideAnchor =
+  ## Used until a row has been measured: the toggle of the default stylesheet
+  ## at the 16 px root font size, vertically centred in the row.
+  CallGuideAnchor(originX: 13.0, centerY: pitch / 2.0)
+
+func callGuideSegments*(depths: openArray[int]; pitch: float;
+                        anchor: CallGuideAnchor): seq[CallGuideSegment] =
+  ## The guide segments for rows `0 ..< depths.len`, row `i` at depth
+  ## `depths[i]`, the rows `pitch` px apart (the measured row ADVANCE, top to
+  ## top — not the row box).
+  ##
+  ## Row `i` gets a vertical segment over its own extent `[i*pitch,
+  ## (i+1)*pitch]` at its toggle's x, cut to the toggle centre for the first
+  ## and the last row, and a horizontal connector on its bottom edge (the next
+  ## row's top) from its toggle's x to the next row's. Fewer than two rows draw
+  ## nothing: there is nothing to connect.
+  if depths.len < 2 or pitch <= 0.0:
+    return
+  proc xOf(depth: int): float =
+    anchor.originX + float(max(depth, 0)) * CallDepthIndentPx
+  for i in 0 ..< depths.len:
+    let x = xOf(depths[i])
+    let topY = float(i) * pitch
+    let bottomY = topY + pitch
+    let startY = if i == 0: topY + anchor.centerY else: topY
+    let endY = if i == depths.high: topY + anchor.centerY else: bottomY
+    if endY > startY:
+      result.add (x, startY, x, endY)
+    if i < depths.high:
+      result.add (x, bottomY, xOf(depths[i + 1]), bottomY)
+
+# ---------------------------------------------------------------------------
 # WebRenderer renderer — Karax-compatible structure for Playwright tests
 # ---------------------------------------------------------------------------
 #
@@ -320,15 +384,80 @@ when defined(js):
       }
     """.}
 
-  proc measureCallRowHeight(linesContainer: isonim_dom.Element): float =
-    ## Return the rendered CSS-pixel height of the first calltrace row found
-    ## inside `linesContainer`.  Returns 0.0 if no rows have been rendered yet.
-    ## The result reflects the current font-size (em/rem) so it stays correct
-    ## after zooming or theme changes.
+  proc calltraceRowElements(el: isonim_dom.Element): seq[isonim_dom.Element]
+    {.importjs: "Array.from(#.querySelectorAll('.calltrace-call-line'))".}
+  proc calltraceElementTop(el: isonim_dom.Element): float
+    {.importjs: "#.getBoundingClientRect().top".}
+  proc calltraceElementLeft(el: isonim_dom.Element): float
+    {.importjs: "#.getBoundingClientRect().left".}
+  proc calltraceElementWidth(el: isonim_dom.Element): float
+    {.importjs: "#.getBoundingClientRect().width".}
+  proc calltraceFirstElementChild(el: isonim_dom.Element): isonim_dom.Element
+    {.importjs: "(#.firstElementChild || null)".}
+  proc calltraceObserveResize(el: isonim_dom.Element; onResize: proc())
+    {.importjs: "((el, cb) => { if (typeof ResizeObserver !== 'undefined') { new ResizeObserver(() => cb()).observe(el); } })(#, #)".}
+
+  proc measureCallRowPitch(linesContainer: isonim_dom.Element): float =
+    ## The rows' ADVANCE in CSS px — the distance from one row's top to the
+    ## next — which is what positions every row, and not the row box: on the
+    ## desktop the advance is ~25.28 px against a 25 px box (codetracer-pm
+    ## issue 2026-10-18), and a layout built on the box drifts by the
+    ## difference every row. Averaged over all rendered rows, so a sub-pixel
+    ## advance is recovered exactly rather than rounded per row. With one row
+    ## the box is all there is; with none, 0.0.
+    ##
+    ## Read from the live layout, so it follows the root font size (zoom) and
+    ## the theme.
+    let rows = linesContainer.calltraceRowElements()
+    case rows.len
+    of 0: 0.0
+    of 1: rows[0].calltraceElementHeight()
+    else:
+      (rows[^1].calltraceElementTop() - rows[0].calltraceElementTop()) /
+        float(rows.len - 1)
+
+  proc measureCallGuideAnchor(linesContainer, svgContainer: isonim_dom.Element):
+      Option[CallGuideAnchor] =
+    ## Where the first rendered row's toggle sits relative to the guide layer
+    ## (`svgContainer`, whose user units are its CSS px), with that row's depth
+    ## spacer subtracted so the result is a depth-0 row's. `none` until a row
+    ## with a toggle exists.
     let row = linesContainer.calltraceQuerySelector(cstring".calltrace-call-line")
     if isonim_dom.isNodeNil(isonim_dom.Node(row)):
-      return 0.0
-    result = row.calltraceElementHeight()
+      return none(CallGuideAnchor)
+    let toggle = row.calltraceQuerySelector(cstring".toggle-call")
+    if isonim_dom.isNodeNil(isonim_dom.Node(toggle)):
+      return none(CallGuideAnchor)
+    let spacer = row.calltraceFirstElementChild()
+    let spacerWidth =
+      if isonim_dom.isNodeNil(isonim_dom.Node(spacer)): 0.0
+      else: spacer.calltraceElementWidth()
+    some(CallGuideAnchor(
+      originX: toggle.calltraceElementLeft() +
+               toggle.calltraceElementWidth() / 2.0 -
+               svgContainer.calltraceElementLeft() - spacerWidth,
+      centerY: toggle.calltraceElementTop() +
+               toggle.calltraceElementHeight() / 2.0 -
+               row.calltraceElementTop()))
+
+  proc remeasureCallRows(vm: CalltraceVM;
+                         linesContainer, svgContainer: isonim_dom.Element;
+                         anchor: Signal[Option[CallGuideAnchor]]) =
+    ## Re-read the row advance and the toggle anchor from the layout and
+    ## publish them: the advance to `vm.rowHeightPx` (the virtual-scroll
+    ## height, the window's `translateY`, and the guides), the anchor to the
+    ## guides. A value that has not moved is not re-published, so a
+    ## re-measure of an unchanged layout redraws nothing.
+    let pitch = measureCallRowPitch(linesContainer)
+    if pitch > 0.0:
+      vm.setRowHeightPx(pitch)
+    let measured = measureCallGuideAnchor(linesContainer, svgContainer)
+    if measured.isSome:
+      let prev = anchor.val
+      if prev.isNone or
+          abs(prev.get.originX - measured.get.originX) > RowHeightEpsilonPx or
+          abs(prev.get.centerY - measured.get.centerY) > RowHeightEpsilonPx:
+        anchor.val = measured
 
   proc calltraceSetTimeout(fn: proc(); delay: int) {.importjs: "setTimeout(#, #)", discardable.}
 
@@ -441,7 +570,7 @@ when defined(js):
            `data-source-digest` = item().location.sourceDigest,
            `data-code-generation` = $item().codeGeneration,
            `data-rr-ticks` = $item().rrTicks):
-        span(min_width = $(item().depth * 8) & "px"):
+        span(min_width = $(float(item().depth) * CallDepthIndentPx) & "px"):
           discard
         tdiv(class = "calltrace-child call-depth"):
           tdiv(id = "local-call-" & $item().index,
@@ -572,19 +701,19 @@ when defined(js):
     ## variant exists, but the handler needs access to `scrollTop` from
     ## the element, so this is attached imperatively.
     ##
-    ## The row height is measured from the DOM on every scroll event so that
+    ## The row advance is measured from the DOM on every scroll event so that
     ## the row-index calculation is always consistent with the actual
-    ## em/rem-derived row height, regardless of zoom level or theme changes.
-    ## If no rows have been rendered yet (height = 0), the cached VM value
+    ## em/rem-derived advance, regardless of zoom level or theme changes.
+    ## If no rows have been rendered yet (advance = 0), the cached VM value
     ## is used as a fallback to avoid a divide-by-zero.
     isonim_dom.addEventListener(isonim_dom.Node(scrollContainer),
       cstring"scroll",
       proc(ev: isonim_dom.Event) =
-        let h = measureCallRowHeight(linesContainer)
+        let h = measureCallRowPitch(linesContainer)
         let rowH = if h > 0.0: h else: vm.rowHeightPx.val
-        # Keep the VM's cached row height in sync; setRowHeightPx only
-        # updates the signal when the delta exceeds 0.5 px so this is
-        # a no-op on every scroll tick where the height is stable.
+        # Keep the VM's cached advance in sync; setRowHeightPx only updates
+        # the signal when the value moves, so this is a no-op on every
+        # scroll tick where the layout is stable.
         if h > 0.0:
           vm.setRowHeightPx(h)
         if rowH > 0.0:
@@ -592,47 +721,36 @@ when defined(js):
             int(scrollContainer.scrollTop() / rowH))))
 
   proc renderTraceSvg(r: WebRenderer; svgContainer: isonim_dom.Element;
-                      vm: CalltraceVM) =
-    ## Lightweight version of Karax ``redrawTraceLine`` for Storybook/visual
-    ## parity.  It draws the same absolute SVG layer and approximate 8px-depth
-    ## connector grid used by the legacy materialized calltrace.
+                      vm: CalltraceVM;
+                      anchor: Signal[Option[CallGuideAnchor]]) =
+    ## Draw the guide lines (`callGuideSegments`) for the rows the store
+    ## holds, into the absolutely positioned SVG layer that sits at the top
+    ## of `.calltrace-lines` and so moves with the rendered window.
+    ##
+    ## The effect depends on the rows, on the measured row advance
+    ## (`vm.rowHeightPx`) and on the measured toggle anchor, so it redraws
+    ## when any of them changes — a zoom changes the last two, through
+    ## `remeasureCallRows`. It is the only drawer of this layer.
     createRenderEffect proc() =
       let lines = vm.store.calltrace.lines.val
+      let pitch = vm.rowHeightPx.val
+      let a = anchor.val.get(defaultCallGuideAnchor(pitch))
       r.clearChildren(svgContainer)
-      let rowHeight = 25.0
-      # Row padding offset: .calltrace-row already had padding-left: 0.3125em
-      # (5px at 16px font-size), which the original x1=10.0 was calibrated for.
-      # .calltrace-call-line now overrides that with padding-left: 0.5em (8px),
-      # a net increase of 0.1875em = 3px.  Add only the delta so the connector
-      # lines stay centred on the toggle icons.
-      const rowPaddingPx = 3.0
-      # Compute the maximum depth to size the SVG exactly as wide as needed.
-      # Using a hardcoded wide value inflates the scroll container horizontally.
+      # Size the SVG exactly as wide as the deepest row's guide needs: a
+      # hard-coded wide value inflates the scroll container horizontally.
+      var depths = newSeq[int](lines.len)
       var maxDepth = 0
-      for line in lines:
-        if line.depth > maxDepth:
-          maxDepth = line.depth
-      let width = rowPaddingPx + 10.0 + float(maxDepth * 8) + 16.0
-      let height = max(float(lines.len) * rowHeight, 1.0)
+      for i, line in lines:
+        depths[i] = line.depth
+        maxDepth = max(maxDepth, line.depth)
+      let width = a.originX + float(maxDepth) * CallDepthIndentPx + 16.0
+      let height = max(float(lines.len) * pitch, 1.0)
       isonim_dom.setAttribute(svgContainer, cstring"width", cstring($width))
       isonim_dom.setAttribute(svgContainer, cstring"height", cstring($height))
       isonim_dom.setAttribute(svgContainer, cstring"viewBox",
                               cstring("0 0 " & $width & " " & $height))
-      if lines.len < 2:
-        return
-      for i in 0 ..< lines.len:
-        let depth = max(lines[i].depth, 0)
-        let x1 = rowPaddingPx + 10.0 + float(depth * 8)
-        let topY = float(i) * rowHeight
-        let centerY = topY + 12.5
-        let bottomY = topY + rowHeight
-        let startY = if i == 0: centerY else: topY
-        let endY = if i == lines.high: centerY else: bottomY
-        if endY > startY:
-          appendTraceLine(svgContainer, x1, startY, x1, endY)
-        if i < lines.high:
-          let nextX = rowPaddingPx + 10.0 + float(max(lines[i + 1].depth, 0) * 8)
-          appendTraceLine(svgContainer, x1, bottomY, nextX, bottomY)
+      for s in callGuideSegments(depths, pitch, a):
+        appendTraceLine(svgContainer, s.x1, s.y1, s.x2, s.y2)
 
   proc renderCalltracePanel*(r: WebRenderer;
                              vm: CalltraceVM): isonim_dom.Element =
@@ -691,9 +809,10 @@ when defined(js):
           discard
 
     # Render the full window the store currently holds.  The `.calltrace-lines`
-    # container is positioned with `translateY(startLineIndex * 24px)` so the
-    # rendered window sits at the correct offset inside the virtual scroll area
-    # (`.local-calltrace` at `totalCallsCount * 24px` tall).  This mirrors the
+    # container is positioned with `translateY(startLineIndex * rowHeightPx)` so
+    # the rendered window sits at the correct offset inside the virtual scroll
+    # area (`.local-calltrace` at `totalCallsCount * rowHeightPx` tall), where
+    # `rowHeightPx` is the measured row advance (`remeasureCallRows`).  This mirrors the
     # legacy Karax translateY-based virtual scrolling.
     #
     # All lines in the current store window are kept in the DOM so Playwright's
@@ -720,19 +839,26 @@ when defined(js):
       proc(item: proc(): CallLine, index: int): isonim_dom.Element =
         renderCallLineRowWeb(r, vm, item))
 
-    # Measure actual row height after each data update so the virtual-scroll
-    # math (container height and translateY) stays accurate when the font size
-    # changes due to zoom or theme changes.  The effect subscribes to
-    # `calltrace.lines` so it fires whenever new rows arrive.  We defer the
-    # DOM read by one tick (setTimeout 0) to let `indexEach` finish adding
-    # the new row elements before we query their bounding rect.
+    # Measure the rows' advance and toggle anchor from the layout, which is
+    # what the virtual-scroll math (container height and translateY) and the
+    # guide lines are drawn from. Two prompts:
+    #
+    # - new rows: the effect subscribes to `calltrace.lines` and defers the
+    #   DOM read by one tick (setTimeout 0) so `indexEach` has finished adding
+    #   the row elements before their rects are queried;
+    # - a layout change with no new data — a zoom (`zoomInEditors` /
+    #   `zoomOutEditors` only change the root font size), a theme, a font:
+    #   the rows' container changes size, and the ResizeObserver reports it
+    #   after layout and before paint, so the guides are redrawn in the same
+    #   frame the rows move in.
+    let guideAnchor = createSignal(none(CallGuideAnchor))
     createEffect proc() =
       discard vm.store.calltrace.lines.val  # reactive dependency
       calltraceSetTimeout(proc() =
-        let h = measureCallRowHeight(linesContainer)
-        if h > 0.0:
-          vm.setRowHeightPx(h)
+        remeasureCallRows(vm, linesContainer, svgContainer, guideAnchor)
       , 0)
+    calltraceObserveResize(linesContainer, proc() =
+      remeasureCallRows(vm, linesContainer, svgContainer, guideAnchor))
 
     # The discreet indicator the user asked for, in the tab rather than
     # across the pane. Toggles a class; adds no element and changes no text,
@@ -745,7 +871,7 @@ when defined(js):
       setCalltraceTabBusy(vm.isLoading.val)
 
     renderSearchResultsList(r, resultsContainer, vm)
-    renderTraceSvg(r, svgContainer, vm)
+    renderTraceSvg(r, svgContainer, vm, guideAnchor)
     wireSearchForm(formEl, inputEl, vm)
     wireScrollContainer(scrollContainer, linesContainer, vm)
     # PLAT-51: THE SCROLLBAR IS A SCRUBBER over the WHOLE trace
@@ -780,7 +906,7 @@ when defined(js):
           lastCurrent = -1
         lastCurrent,
       rowHeight = proc(): float =
-        let h = measureCallRowHeight(lines)
+        let h = measureCallRowPitch(lines)
         if h > 0.0: h else: vm.rowHeightPx.val,
       paneId = "calltrace")
 

@@ -547,6 +547,13 @@ test_lane_extra_flags() {
 		# the renderer is.
 		echo "-d:chronicles_enabled=off -d:ctRenderer"
 		;;
+	renderer-chromium)
+		# The same, for the same reason: `calltrace_guides_chromium_test.nim`
+		# mounts the renderer's call-trace view. Without `-d:ctRenderer` the
+		# shared modules take their main-process arm, which `require`s node's
+		# `os` and `path`, and the page dies on `require is not defined`.
+		echo "-d:chronicles_enabled=off -d:ctRenderer"
+		;;
 	main-process)
 		# The Electron MAIN process's defines — `!nim_node_index_server` in
 		# `Tuprules.tup` (`server_index.js`): `-d:ctIndex` selects the
@@ -932,6 +939,10 @@ test_lane_files() {
 		# measuring what the browser's own elements do on their own (the
 		# evidence behind `mappings.webMapping`'s grades).
 		echo src/frontend/tests/view_vocabulary_chromium_test.nim
+		# The call trace's guide lines against the rows they connect, read
+		# off a real layout before and after a zoom (#849). Geometry needs a
+		# browser that lays out; jsdom answers 0 for every rect.
+		echo src/frontend/tests/calltrace_guides_chromium_test.nim
 		;;
 
 	main-process)

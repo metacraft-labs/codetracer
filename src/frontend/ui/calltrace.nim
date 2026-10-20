@@ -24,7 +24,7 @@ from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
   setViewport, Viewport, scrolledTo, setRawIgnorePatterns,
-  setBackendSearchResults, selectEntry
+  setBackendSearchResults, selectEntry, selectCall
 from isonim/web/dom_api import nil
 from isonim/core/batch as isoBatch import batch
 from isonim/core/signals import val
@@ -61,8 +61,6 @@ const
   CALL_HEIGHT_PX        = 24
   CALL_BUFFER           = 20
   START_BUFFER          = 10
-  CALLTRACE_MARKER_SELECTOR = cstring".collapse-call-img, .expand-call-img, .dot-call-img, .end-of-program-img, .active-call-location"
-  CALLTRACE_TOGGLE_SELECTOR = cstring".toggle-call"
   EXPAND_CALLS_KIND     = CtExpandCalls
   COLLAPSE_CALLS_KIND   = CtCollapseCalls
 
@@ -253,21 +251,6 @@ proc setExpandedValueOffsetDom(
       result.appendChild(calltraceNewElement(
         cstring"div",
         cstring"empty-offset empty-offset-right-border"))
-
-proc updateTooltipOrigin(self: CalltraceComponent, callLine: kdom.Node) =
-  if self.startPositionX != -1:
-    return
-
-  let rowRect = getBoundingClientRect(callLine.toJs)
-  self.startPositionX = rowRect.left + self.scrollLeftOffset
-
-proc syncSvgContainerBounds(svgContainer: Element, width, height: float) =
-  let safeWidth = max(width, 1.0)
-  let safeHeight = max(height, 1.0)
-
-  svgContainer.setAttribute(cstring"width", cstring($safeWidth))
-  svgContainer.setAttribute(cstring"height", cstring($safeHeight))
-  svgContainer.setAttribute(cstring"viewBox", cstring(fmt"0 0 {safeWidth} {safeHeight}"))
 
 proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
   let current = if self.searchText.isNil: cstring"" else: self.searchText
@@ -651,10 +634,13 @@ method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltrace
   if element != nil:
     element.style.display = "none"
 
+  # The mark itself is the CalltraceVM's: it follows the call's key and
+  # retires when the section does not hold the call (#811), whatever route
+  # the section arrived by.
   if self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
     self.activeCallIndex = results.startCallLineIndex + self.loadedCallKeys[self.lastSelectedCallKey]
     if calltraceVMInstance != nil:
-      calltraceVMInstance.selectEntry(some(self.activeCallIndex.int64))
+      calltraceVMInstance.selectCall($self.lastSelectedCallKey)
 
   if self.forceCollapse:
     let scrollTo = max(results.scrollPosition - 2, 0)
@@ -793,13 +779,6 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
     self.resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
       for entry in entries:
         let timeout = setTimeout((proc =
-          let scrollPosition = jq(fmt"#calltraceScroll-{self.id}")
-          self.startPositionX = -1
-          self.scrollLeftOffset =
-            if not scrollPosition.isNil:
-              cast[float](scrollPosition.toJs.scrollLeft)
-            else:
-              0
           try:
             let index = self.scrollLineIndex()
             self.startCallLineIndex = index
@@ -817,70 +796,6 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
         )
       )
     self.resizeObserver.observe(cast[Node](activeCalltrace))
-
-proc redrawTraceLine(self: CalltraceComponent) =
-  let scrollElement = jq(cstring(fmt"#calltraceScroll-{self.id}"))
-  let svgContainer = document.getElementById(fmt"svg-content-{self.id}")
-
-  if scrollElement.isNil or svgContainer.isNil:
-    return
-
-  let localCalltraceNode = findNodeInElement(cast[kdom.Node](scrollElement), ".local-calltrace")
-  if localCalltraceNode.isNil:
-    return
-  let localCalltraceElement = cast[Element](localCalltraceNode)
-
-  let calltraceLinesNode = findNodeInElement(cast[kdom.Node](localCalltraceElement), ".calltrace-lines")
-  if calltraceLinesNode.isNil:
-    return
-  let calltraceLinesElement = cast[Element](calltraceLinesNode)
-
-  let scrollLeft = cast[float](scrollElement.toJs.scrollLeft)
-  self.scrollLeftOffset = scrollLeft
-  let calltraceLinesRect = calltraceLinesElement.getBoundingClientRect()
-  let svgWidth = max(cast[float](scrollElement.toJs.scrollWidth), calltraceLinesRect.width + scrollLeft)
-  let svgHeight = max(cast[float](calltraceLinesElement.scrollHeight), calltraceLinesRect.height)
-  var coordinates: seq[tuple[x, top, center, bottom: float]] = @[]
-
-  self.startPositionX = -1
-  self.startPositionY = -1
-  replaceChildren(svgContainer.toJs)
-  svgContainer.syncSvgContainerBounds(svgWidth, svgHeight)
-
-  for callLine in findAllNodesInElement(cast[kdom.Node](calltraceLinesElement), ".calltrace-call-line"):
-    self.updateTooltipOrigin(callLine)
-
-    let rowRect = getBoundingClientRect(callLine.toJs)
-    var marker = findNodeInElement(callLine, CALLTRACE_MARKER_SELECTOR)
-    if marker.isNil:
-      marker = findNodeInElement(callLine, CALLTRACE_TOGGLE_SELECTOR)
-    if marker.isNil:
-      continue
-
-    let markerRect = getBoundingClientRect(marker)
-    let rowTop = rowRect.top - calltraceLinesRect.top
-    let rowBottom = rowRect.bottom - calltraceLinesRect.top
-    let centerY = min(max(markerRect.top + (markerRect.height / 2.0) - calltraceLinesRect.top, rowTop), rowBottom)
-    let centerX = markerRect.left + (markerRect.width / 2.0) - calltraceLinesRect.left + scrollLeft
-
-    coordinates.add((centerX, rowTop, centerY, rowBottom))
-
-  if coordinates.len > 1:
-    for i in 0..<coordinates.len:
-      let (x1, top1, center1, bottom1) = coordinates[i]
-      let startY = if i == 0: center1 else: top1
-      let endY = if i == coordinates.high: center1 else: bottom1
-
-      if endY > startY:
-        cast[Node](svgContainer).appendChild(cast[Node](renderLineElement(x1, startY, x1, endY)))
-
-      if i < coordinates.high:
-        let (x2, _, _, _) = coordinates[i + 1]
-        cast[Node](svgContainer).appendChild(cast[Node](renderLineElement(x1, bottom1, x2, bottom1)))
-
-proc refreshTraceOverlay*(self: CalltraceComponent) =
-  if self.usesMaterializedTracesTrace:
-    self.redrawTraceLine()
 
 proc redrawCallLines(self: CalltraceComponent) =
   ## Historical selection/scroll paths still call this proc, but the
@@ -1089,12 +1004,17 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     self.activeCallIndex = self.startCallLineIndex + self.loadedCallKeys[response.location.key]
 
     if calltraceVMInstance != nil:
-      calltraceVMInstance.selectEntry(some(self.activeCallIndex.int64))
+      calltraceVMInstance.selectCall($response.location.key)
 
     if self.loadedCallKeys[response.location.key] >= self.panelHeight() - 1 + buffer:
       self.calltraceScroll(((self.activeCallIndex - buffer) - (self.panelHeight() / 2).floor) * CALL_HEIGHT_PX)
   elif not self.usesMaterializedTracesTrace or not self.loadedCallKeys.hasKey(response.location.key):
     self.lastSelectedCallKey = response.location.key
+    # Follow the new current call now: the row marked before the move is
+    # not where the debugger is, and the section that holds the call marks
+    # it when it loads, by whichever route it arrives.
+    if calltraceVMInstance != nil:
+      calltraceVMInstance.selectCall($response.location.key)
     self.forceCollapse = true
     # When the IsoNim view is the active renderer, the CalltraceVM's
     # auto-load effect (in `createCalltraceVM`) is the single source of
