@@ -1748,13 +1748,41 @@ package codeTracer:
           afterValue = codetracerActions & frontendActions & styleActions)
         target("macos-app", macosApp)
 
-        let stagingApp = fs.preserveTree(
-          sourceRoot = "non-nix-build/CodeTracer.app",
-          outputRoot = "non-nix-build/dmg-staging/CodeTracer.app",
-          actionId = "stage-app-for-dmg",
-          after = @[macosApp]
-        )
+        # A process action, not `fs.preserveTree`. preserveTree mirrors a
+        # SOURCE tree and lists that tree when this recipe is evaluated, but
+        # CodeTracer.app is generated in this very build by `macos-app`
+        # above. So it mirrored the PREVIOUS build's .app: on a fresh checkout
+        # it staged nothing, and once the asset step dropped a file it failed
+        # with `preserveTree source file disappeared before execution`
+        # (`…/debug/continue_dark.svg`). It also wrote through what an older
+        # staging had left: `dmg-staging/…/MacOS/node_modules` was a symlink
+        # into /nix/store, and the copy followed it and died with `Permission
+        # denied` on a tree only root could delete. Reprobuild refuses, when
+        # the recipe is evaluated, a preserveTree whose source an `after`
+        # action generates.
+        #
+        # So the staging is done afresh on every run, the way `macos-app`
+        # builds the .app itself: `rm -rf` clears the previous staging
+        # without following its links (a stale store symlink is unlinked,
+        # its target untouched), and `cp -a` copies the finished bundle with
+        # its symlinks and modes intact -- the relinked third-party links and
+        # the exec bits on `MacOS/bin` that `macos-app` set up.
+        let stagingApp = ctShell(
+          "stage-app-for-dmg",
+          "set -eu\n" &
+          "STAGING=non-nix-build/dmg-staging\n" &
+          "rm -rf \"$STAGING\"\n" &
+          "mkdir -p \"$STAGING\"\n" &
+          "cp -a non-nix-build/CodeTracer.app \"$STAGING/CodeTracer.app\"",
+          extraInputsValue = @["non-nix-build/CodeTracer.app"],
+          extraOutputsValue = @["non-nix-build/dmg-staging"],
+          afterValue = @[macosApp])
 
+        # No `rm -f CodeTracer.dmg` here, unlike `non-nix-build/build_dmg.sh`:
+        # create-dmg's final `hdiutil convert` refuses an existing image
+        # (`hdiutil: convert failed - File exists`), and the `create_dmg` typed
+        # tool declares the .dmg as an output the engine removes before the
+        # edge runs.
         let macosDmg = create_dmg(
           volname = "CodeTracer",
           background = "non-nix-build/dmg_background.png",
