@@ -31,6 +31,9 @@
 ##   models are created with.  It never sees a mode, which is VCS-Panel.md's
 ##   "the diff rendering code does NOT check which mode is active" made
 ##   structural.
+## - ``viewmodel/viewmodels/diff_target.nim`` — pure: which git command a
+##   target (and the active review's commit) asks for, when the diff comes
+##   from git.
 ## - ``viewmodel/viewmodels/vcs_vm.nim`` — the hunk editor's selection model
 ##   and its patch builder, shared with the docked panel's state rather than
 ##   duplicated here.
@@ -56,6 +59,7 @@ import review_flow_adapter
 import review_flow_selection
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/diff_document
+import ../viewmodel/viewmodels/diff_target
 import ../viewmodel/viewmodels/context_expansion
 import ../viewmodel/viewmodels/review_flow_overlay
 import diff_expansion
@@ -399,6 +403,21 @@ proc loadFromReview(self: UnifiedDiffComponent): bool =
   self.reviewBacked = true
   true
 
+proc gitPlan(self: UnifiedDiffComponent): DiffGitPlan =
+  ## The git command this tab's target resolves to, in the context of the
+  ## active review (if any).
+  ##
+  ## The review's ``commitSha`` / ``baseCommitSha`` are passed only while a
+  ## review is active: VCS-Panel.md, "Which two revisions a file row
+  ## compares", scopes a review's ``file:<path>`` fallback to the commit under
+  ## review, and outside a review the same target means the working tree.
+  var reviewCommit = ""
+  var reviewBase = ""
+  if self.data.deepReviewActive and not self.data.deepReviewData.isNil:
+    reviewCommit = safeStr(self.data.deepReviewData.commitSha)
+    reviewBase = safeStr(self.data.deepReviewData.baseCommitSha)
+  diffGitPlan(self.rawTarget(), reviewCommit, reviewBase)
+
 proc loadFromGit(self: UnifiedDiffComponent) =
   ## Fill the tab by asking git for the target's diff.
   ##
@@ -410,46 +429,36 @@ proc loadFromGit(self: UnifiedDiffComponent) =
   ## per-commit diff came back empty — silently, since git treats "no path
   ## matched" as an empty diff rather than an error.  Only the two targets with
   ## no pathspec (Working Tree, whole-commit) ever worked.
+  ##
+  ## Which command each target asks for is decided by the pure
+  ## ``diff_target.diffGitPlan``, together with the active review's commit
+  ## context (``gitPlan`` above); this proc only runs it and parses the result.
   let cwd = gitRepositoryRoot(self.data)
+  let plan = self.gitPlan()
   var args: seq[cstring] = @[]
-  var sessionTitle = cstring"Working Tree Changes"
-  let target = self.rawTarget()
-
-  if target.len == 0 or target == "Working Tree":
-    args = @[cstring"diff", cstring"HEAD"]
-    sessionTitle = cstring"Working Tree Changes"
-  elif target.startsWith("file:"):
-    let filepath = target[5 .. ^1]
-    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(filepath)]
-    sessionTitle = cstring("Diff: " & filepath)
-  elif target.startsWith("commit:"):
-    let commitPart = target[7 .. ^1]
-    let colonIdx = commitPart.find(':')
-    if colonIdx >= 0:
-      let hash = commitPart[0 ..< colonIdx]
-      let filepath = commitPart[colonIdx + 1 .. ^1]
-      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id",
-               cstring"--root", cstring(hash), cstring"--", cstring(filepath)]
-      sessionTitle = cstring("Diff: " & filepath & " (" &
-                             hash[0 ..< min(12, hash.len)] & ")")
-    else:
-      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id",
-               cstring"--root", cstring(commitPart)]
-      sessionTitle = cstring("Commit Diff: " &
-                             commitPart[0 ..< min(12, commitPart.len)])
-  else:
-    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(target)]
-    sessionTitle = cstring("Diff: " & target)
+  for arg in plan.args:
+    args.add(cstring(arg))
 
   let raw = gitExec(args, cwd)
+  # Record the revisions actually compared: a review-scoped `file:` fallback
+  # diffs the review's commit (against its base, when it names one), not
+  # `HEAD` — VCS-Panel.md, "Which two revisions a file row compares".
+  let comparedCommit =
+    if plan.reviewScoped: self.data.deepReviewData.commitSha
+    else: cstring"HEAD"
+  let comparedBase =
+    if plan.reviewScoped: self.data.deepReviewData.baseCommitSha
+    else: cstring""
   self.diffData = DeepReviewData(
-    commitSha: cstring"HEAD",
-    baseCommitSha: cstring"",
+    commitSha: comparedCommit,
+    baseCommitSha: comparedBase,
     collectionTimeMs: 0,
     recordingCount: 0,
-    sessionTitle: sessionTitle,
+    sessionTitle: cstring(plan.sessionTitle),
     files: parseGitDiffHunks($raw))
   self.reviewBacked = false
+  self.gitNewRevision = cstring(plan.newRevision)
+  self.gitReviewScoped = plan.reviewScoped
 
 proc expansionRevision(self: UnifiedDiffComponent): string =
   ## The revision whose text the *new* side of this tab's diff shows.
@@ -461,12 +470,15 @@ proc expansionRevision(self: UnifiedDiffComponent): string =
   ## `gitFileText` reads as "the file itself".  A `commit:<hash>[:<path>]`
   ## target is the case §4.2 names: the lines are neither in the diff nor in
   ## the working tree, and only `git show <hash>:<path>` has them.
-  let target = self.rawTarget()
-  if target.startsWith("commit:"):
-    let commitPart = target[7 .. ^1]
-    let colonIdx = commitPart.find(':')
-    return if colonIdx >= 0: commitPart[0 ..< colonIdx] else: commitPart
-  ""
+  ##
+  ## So is a `file:` target during a review of a commit: VCS-Panel.md, "Which
+  ## two revisions a file row compares", diffs that commit, so its new side is
+  ## the commit and not the working tree.
+  ##
+  ## Recorded by ``loadFromGit`` from the plan it ran rather than resolved
+  ## again here, so the revision the diff was taken against and the one
+  ## expansion reads cannot disagree, not even after the review has ended.
+  safeStr(self.gitNewRevision)
 
 proc sourceLinesFor(self: UnifiedDiffComponent; file: DeepReviewFileData;
                     path: string): seq[string] =
@@ -610,6 +622,10 @@ proc ensureLoaded(self: UnifiedDiffComponent) =
   if self.initialized:
     return
   self.initialized = true
+  # Only `loadFromGit` sets these; a reload served from elsewhere must not
+  # inherit them from an earlier git load.
+  self.gitNewRevision = cstring""
+  self.gitReviewScoped = false
   if not self.loadFromReview():
     if not self.loadFromAgentRegistry():
       self.loadFromGit()
@@ -1705,7 +1721,11 @@ proc syncIntoVM*(self: UnifiedDiffComponent) =
   # (`VCSVM.mutatingHunkOpsEnabled`); the diff itself renders identically
   # either way, which is the rule VCS-Panel.md states under "Unified Diff View
   # (Shared)".
-  vm.setDeepReviewMode(self.reviewBacked)
+  #
+  # A git fallback scoped to the review's commit is read-only as well: its
+  # hunks are that commit's change, not the working tree's, so staging or
+  # discarding them would apply the wrong patch to the repository.
+  vm.setDeepReviewMode(self.reviewBacked or self.gitReviewScoped)
   vm.setUnifiedDiff(true, self.diffRows())
 
 proc handleHunkClick(self: UnifiedDiffComponent; modelLine: int;

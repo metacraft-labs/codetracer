@@ -954,6 +954,15 @@ type
       ## Parsed hunks for the target.  Filled from the review dataset when the
       ## session is a review and from ``git diff`` otherwise — VCS-Panel.md,
       ## "Data Sources and Instantiation Modes".
+    gitNewRevision*: cstring
+      ## For a git-loaded tab, the revision its diff's new side shows
+      ## (``DiffGitPlan.newRevision``; ``""`` is the working tree), recorded
+      ## when the diff is loaded so context expansion keeps reading that
+      ## revision even after the review that scoped it has ended.
+    gitReviewScoped*: bool
+      ## True when a git-loaded tab diffs the active review's commit
+      ## (``DiffGitPlan.reviewScoped``) rather than the working tree.  Such a
+      ## diff is read-only, like a review-backed one.
     reviewBacked*: bool
       ## True when ``diffData`` came from ``deepReviewData`` rather than from
       ## live git.  Drives *only* whether the mutating hunk operations are

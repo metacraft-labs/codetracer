@@ -377,6 +377,17 @@ const
     # models and every region a reader expanded collapses again; and a cleared
     # panel must produce no document at all.
     "src/tests/gui/tests/vcs/vcs_context_expansion_test.nim",
+    # Which git command a unified-diff tab's target asks for
+    # (`viewmodels/diff_target.diffGitPlan`), extracted from the JS-only
+    # `ui/unified_diff.nim` so it can be asserted at all.  Its central case is
+    # VCS-Panel.md, "Which two revisions a file row compares": a DeepReview of
+    # a commit falls back to git for a file with no diff record, and that
+    # fallback must diff the reviewed commit, never `git diff HEAD -- <path>`
+    # (codetracer-pm issue 2026-09-29-changed-files-rows-diff-against-head-
+    # for-a-selected-historical-commit).  Nothing on screen says which two
+    # revisions a diff tab compared, so a regression here would show a
+    # plausible-looking wrong diff and stay green everywhere else.
+    "src/tests/gui/tests/vcs/diff_target_test.nim",
     # AA-1 — the DeepReview roll-up is deleted from the Agent Activity panel,
     # and its layout identity is not.
     #
