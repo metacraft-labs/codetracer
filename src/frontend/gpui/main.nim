@@ -64,6 +64,17 @@
 ##      verification tier PLAT-19 established and what the integration tests
 ##      read. It is the INTROSPECTION tier. It is not evidence that anything
 ##      was painted, and PLAT-37's instrument contract says so in a table.
+##
+##      **A RUN THAT CANNOT OPEN A WINDOW NOW SAYS SO.** With the featureless
+##      shim `gpui_launch` returned at once and this binary exited 0 having
+##      shown nothing; with the windowed shim and no `DISPLAY` /
+##      `WAYLAND_DISPLAY` GPUI picked its headless platform and `gpui_launch`
+##      never returned. Both were silent. `launchWindow` now asks first
+##      (`window_preflight.nim`: the shim's `gpui_has_window_backend` and the
+##      display environment) and refuses by kind on stderr with exit 3,
+##      `ExitNoWindow` — the terminal front-end's `ExitNoTerminal` number
+##      (`codetracer-pm/spec/CLI/ct/ui-selection.md` §8a). The plan, the
+##      window-plan and the pixel paths ask nothing and work everywhere.
 
 when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
@@ -93,6 +104,7 @@ from ../../common/ct_home import ctConfigDir
 from ../../ct/trace/ctfs_sources import readCtfsMetaDat
 from ../viewmodel/platform/displayed_product import sessionDocumentTitle
 import ./window_clicks
+import ./window_preflight               # refuse by kind when no window can open
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
 import ../viewmodel/viewmodels/history_cursor   # history back / forward: the desktop's cursor rule
@@ -380,6 +392,17 @@ OPTIONS:
                     that had only ever tested quotes.
   --version         Print the version and exit
   --help            Print this and exit
+
+WHEN NO WINDOW CAN OPEN:
+  a run that would open a window (none of `--report-plan`,
+  `--report-window-plan`, `--pixels-out`) first checks that one can, and
+  otherwise prints the reason and exits 3 instead of exiting 0 with nothing
+  shown or waiting forever:
+    the shim has no window backend — isonim-gpui's shim was built without
+      `--features gpui-backend` (a bare `just rust-build`);
+    no graphical session — on Linux, neither WAYLAND_DISPLAY nor DISPLAY is
+      set (or ZED_HEADLESS is), so GPUI would run with no display.
+  `--report-plan` checks the build without a window, on any host.
 
 NOT YET, AND REFUSED RATHER THAN IGNORED:
   the debugger panes are PLAT-21 and the editing surface is PLAT-22, so a
@@ -7702,6 +7725,18 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   discard registerDesignFonts()
   if cmd.pixelsOut.len > 0:
     return capturePixels(cmd)
+  # FROM HERE ON THIS RUN EXISTS TO SHOW A WINDOW, so first make sure one can
+  # appear. A featureless shim's `gpui_launch` returns at once having opened
+  # nothing, and with no graphical session GPUI picks its headless platform
+  # and `gpui_launch` never returns; both used to be silent (rc 0, or a hang).
+  # Asked HERE rather than before the recording is opened, so the outputs a
+  # windowed run writes ahead of the window — `--plan-out`, `--dock-out` —
+  # are still written: the PLAT-37 lane's featureless DIFF-6 arm reads its
+  # plan from exactly such a run. See `window_preflight.nim`.
+  let preflight = currentWindowPreflight(gpui_has_window_backend() == 1'u8)
+  if preflight.refusal != wpWindowCanOpen:
+    stderr.writeLine("codetracer-gpui: " & preflight.message)
+    return ExitNoWindow
   if cmd.quitAfterMs > 0'u32:
     gpui_quit_after_ms(cmd.quitAfterMs)
   armHoverTick()   # nothing hovered yet: the VCS refresh, when there is one

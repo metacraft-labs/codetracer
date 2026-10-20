@@ -270,8 +270,9 @@ The GPUI front-end also needs `isonim-gpui`'s Rust shim. Build it in the same
 ```
 
 Plain `cargo build` (the `just rust-build` default) builds a shim without a window
-backend, which is what the GPUI test lanes use; with it `codetracer-gpui` renders
-nothing and exits immediately.
+backend, which is what the GPUI test lanes use. With it, `codetracer-gpui` cannot
+open a window: it says so and exits 3 (see "When no window can open" below).
+`--report-plan` still works with either shim.
 
 ### Get a recording
 
@@ -320,8 +321,19 @@ exits, which is a quick way to check that a build works:
 repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH build/bin/codetracer-gpui --report-plan /tmp/ct-calc'
 ```
 
-With no display at all, a windowed launch currently prints nothing and waits;
-stop it with `Ctrl+c`.
+#### When no window can open
+
+A launch that would open a window first checks that one can. If not, it prints
+the reason on stderr and exits with status 3 (the terminal front-end uses the same
+code when its output is not a terminal):
+
+| situation | message |
+|---|---|
+| the shim was built without a window backend | ``codetracer-gpui: this build of the GPUI shim has no window backend; rebuild isonim-gpui's shim with `--features gpui-backend`; …`` |
+| Linux, neither `WAYLAND_DISPLAY` nor `DISPLAY` set (an SSH session, a bare tty) | `codetracer-gpui: no graphical session (DISPLAY / WAYLAND_DISPLAY unset); …` |
+
+`--report-plan`, `--report-window-plan` and `--pixels-out` open no window and do
+not check.
 
 ### Useful options (TUI)
 
