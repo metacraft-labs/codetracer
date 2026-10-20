@@ -331,7 +331,10 @@ proc ensureStateVM*(session: SessionViewModel;
   ## demands. The active-recording's StateVM (rotated by
   ## `onSwitchProcess`) is the one the collab projection bridge
   ## targets via the legacy single-VM path — out of scope for M29's
-  ## ship-core deliverable, in scope for the collab follow-on.
+  ## ship-core deliverable, in scope for the collab follow-on. The one
+  ## exception is the recording the first `setProcessTree` selects: it is
+  ## given the session's existing `stateVM`, collaboration core and all,
+  ## because that is the VM the host already shows (see `setProcessTree`).
   if session.stateVMs.hasKey(recordingId):
     return session.stateVMs[recordingId]
   let vm = createStateVM(session.store, nil, session.runtimeRole)
@@ -345,6 +348,28 @@ proc setProcessTree*(session: SessionViewModel;
   ## `onSwitchProcess` finds the VM ready (no race with the first
   ## panel render). When the active recording is empty (first reply)
   ## the first entry is selected automatically.
+  ##
+  ## THE FIRST REPLY NAMES THE STATEVM THE SESSION ALREADY HAS. The engine
+  ## sends `ct/listProcesses` on every launch, a single-trace one included
+  ## (`dap_server.rs::dispatch_session_load_event`), so in an ordinary session
+  ## this runs once, after `initializePanelViewModels` built `stateVM` and the
+  ## host bound its views, its watch input and the collaboration projection to
+  ## it. That VM is the recording being viewed, and it is registered as the
+  ## entry about to be selected rather than replaced by a fresh one. Replacing
+  ## it left two StateVMs: the one the user edits, and the one the stop loader
+  ## reads the watch list from (`stop_loader.watchList`), which held none — so
+  ## a move asked for no watches and emptied the Watches tab, and only a watch
+  ## edit on a VM still subscribed asked with the list again (#855).
+  if session.activeProcessRecordingId.val.len == 0 and entries.len > 0 and
+     not session.stateVM.isNil and
+     not session.stateVMs.hasKey(entries[0].recordingId):
+    var registered = false
+    for vm in session.stateVMs.values:
+      if vm == session.stateVM:
+        registered = true
+        break
+    if not registered:
+      session.stateVMs[entries[0].recordingId] = session.stateVM
   var seqEntries = newSeq[ProcessTreeEntry](entries.len)
   for i, e in entries:
     seqEntries[i] = e
