@@ -50,6 +50,7 @@ import isonim/core/async_compat   # `drainPlatformCallbacks`: applies the answer
 import headless_session
 import sdk/stop_loader   # the SDK's per-stop loads, which `loadStopPanes` runs
 import store/types as store_types   # `FilesystemEntryNode`
+from store/replay_data_store import applySymbolsResponse   # the omnibar's symbols
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
@@ -474,19 +475,14 @@ proc openLocalTrace*(traceFolder: string;
 # "empty because nothing asked" from "empty because the engine declined".
 
 const
-  RecordingEventWindow* = 4096
-    ## How much of the event log is read at open: enough to learn the
-    ## recording's extent (`ct/event-load`'s `maxRRTicks`) and to fill the
-    ## event-log pane's first pages.
-    ##
-    ## CTUI-8 established that `TimelineVM.bounds` (named `markers` until
-    ## 2026-09-24) is filled by nothing on a
-    ## replay session and that the recording's extent comes from
-    ## `ct/event-load`'s `maxRRTicks` instead. So the timeline's bounds are a
-    ## property of that one answer, and this is the window both native
-    ## front-ends read it from.
   RecordingCalltraceLevels* = 400
+    ## The call STACK's depth cap — the frames `stackTrace` is asked for when
+    ## the current call is selected (`selectCurrentCall`) and by the stop
+    ## loader's call-stack fallback. A bound on one stack, not a page of a
+    ## windowed list.
   RecordingCalltraceDepth* = 200
+    ## The call-trace depth a native host pages its own call trace at, until
+    ## its pane reports a viewport (Viewport-Driven-Loading V3).
 
 type
   PaneLoad* = object
@@ -621,20 +617,33 @@ proc expandAllFolders*(vm: FilesystemVM) =
   vm.setExpandedPaths(paths)
 
 proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
-  ## The per-RECORDING producers, asked once at open: the event log's first
-  ## window and the call trace. Both decode into the store, which is the one
-  ## place the rows live; this returns whether each arrived.
+  ## The per-RECORDING facts, asked once at open: the event log's size and
+  ## the recording's extent, whether there is a call trace, and the
+  ## recording's functions (the omnibar's symbols). The ROWS are not loaded
+  ## here: each pane asks for the window it shows when it is drawn
+  ## (Viewport-Driven-Loading V2). This returns what arrived.
+  ##
+  ## ONE ROW IS ENOUGH TO LEARN THE EXTENT: every event row carries the
+  ## recording's `maxRRTicks` (CTUI-8: the timeline's bounds come from it),
+  ## and `ct/event-load` answers the whole log's `total` with any window. A
+  ## one-row call-trace section likewise answers `totalCallsCount`. These
+  ## replaced reading 4096 events and a 400 x 200 call trace at open.
+  let store = s.session.store
   try:
-    discard s.requestAndLoadEventLog(start = 0, count = RecordingEventWindow)
-    result.events = s.session.store.eventLog.rows.val.len > 0
+    discard s.requestAndLoadEventLog(start = 0, count = 1)
+    result.events = store.eventLog.rows.val.len > 0
   except CatchableError:
     result.events = false
   try:
-    s.requestAndLoadCalltrace(height = RecordingCalltraceLevels,
-                              depth = RecordingCalltraceDepth)
-    result.calltrace = s.getCalltraceLines().len > 0
+    s.requestAndLoadCalltrace(height = 1, depth = RecordingCalltraceDepth)
+    result.calltrace = store.calltrace.totalCallsCount.val > 0'u64
   except CatchableError:
     result.calltrace = false
+  try:
+    store.applySymbolsResponse(s.sendRawDapRequest("ct/load-symbols"))
+    discard s.drainEvents()
+  except CatchableError:
+    discard
   # PLAT-41: the recording's own source tree, read off the trace folder — a
   # host concern, which is why it is here and not in the ViewModel layer.
   let files = s.session.fileTreeVM

@@ -16,7 +16,7 @@
 ##
 ## Runs on the C and JS backends.
 
-import std/[json, tables, unittest]
+import std/[json, options, tables, unittest]
 
 import isonim/core/[signals, computation, owner, clock, async_compat]
 
@@ -24,7 +24,10 @@ import backend/[backend_service, mock_backend]
 import store/[replay_data_store, request_tracker, types]
 import viewport
 import viewmodels/[calltrace_vm, event_log_vm, state_vm, step_list_vm,
-                  search_results_vm, source_vm, editor_vm]
+                  search_results_vm, source_vm, editor_vm, omnibar_sources,
+                  origin_chain_vm, origin_chain_types, vcs_vm]
+import session_vm
+import sdk/stop_loader
 
 proc drain() = drainPlatformCallbacks()
 
@@ -323,6 +326,141 @@ suite "value history follows the stop":
       store.updateDebuggerPosition(20'u64, "main.nim", 7)
       check asked == @["total"]
       dispose()
+
+suite "the call-trace search asks for the pane's window of results":
+
+  test "a measured pane limits the search to its window":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = storeWithMock()
+      let vm = createCalltraceVM(store)
+      vm.setViewport(Viewport(rows: 30))
+      vm.setSearchQuery("calc")
+      let asked = mock.sent("ct/search-calltrace")
+      check asked.len == 1
+      check asked[0]["value"].getStr == "calc"
+      check asked[0]["limit"].getInt == 30 + LeadRows
+      dispose()
+
+  test "an unmeasured consumer asks for every match":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = storeWithMock()
+      let vm = createCalltraceVM(store)
+      vm.setSearchQuery("calc")
+      let asked = mock.sent("ct/search-calltrace")
+      check asked.len == 1
+      check not asked[0].hasKey("limit")
+      dispose()
+
+suite "the current position's event index is asked once per tick":
+
+  test "the same tick is not asked again; a new tick is":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    store.requestEventIndexAt(10'u64)
+    store.requestEventIndexAt(10'u64)
+    drain()
+    store.requestEventIndexAt(10'u64)
+    store.requestEventIndexAt(11'u64)
+    check mock.sent("ct/event-load").len == 2
+
+suite "the request-span tail":
+
+  test "a completed recording is not polled after its snapshot":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    store.requestRequestSpansSince()
+    drain()
+    store.requestRequestSpansSince()
+    store.requestRequestSpansSince()
+    check mock.sent("ct/load-request-spans-since").len == 1
+
+  test "a live session keeps polling":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    var session = store.session.val
+    session.debugSessionMode = liveMcr
+    store.session.val = session
+    store.requestRequestSpansSince()
+    drain()
+    store.requestRequestSpansSince()
+    drain()
+    check mock.sent("ct/load-request-spans-since").len == 2
+
+suite "the locals budget follows the state pane":
+
+  test "unmeasured: the GUI's constant; measured: the pane's rows":
+    check localsCountBudgetFor(Viewport()) == LocalsCountBudget
+    check localsCountBudgetFor(Viewport(rows: 30)) == LocalsCountBudget
+    check localsCountBudgetFor(Viewport(rows: 10, firstRow: 50)) ==
+      (10 + LeadRows + TrailRows) * LocalsMinCountLimit
+
+  test "the stop loader asks with the state pane's budget":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = createSessionVM(mock.toBackendService())
+    session.store.claimLocalsLoading()
+    session.initializePanelViewModels()
+    session.stateVM.setViewport(Viewport(rows: 10))
+    session.store.updateDebuggerPosition(5'u64, "main.nim", 2)
+    let loader = createStopLoader(session)
+    loader.loadStop()
+    let asked = mock.sent("ct/load-locals")
+    check asked.len == 1
+    check asked[0]["countBudget"].getInt ==
+      (10 + LeadRows + TrailRows) * LocalsMinCountLimit
+
+suite "the omnibar's symbols are the recording's functions":
+
+  test "the engine's list, each going to its first call":
+    let (store, _) = storeWithMock()
+    store.applySymbolsResponse(%*{"symbols": [
+      {"name": "calc", "path": "/src/calc.rs", "line": 3, "firstCallTicks": 40},
+      {"name": "main", "path": "/src/main.rs", "line": 1, "firstCallTicks": 1}]})
+    let found = symbolsOf(store)
+    check found.len == 2
+    check found[0].label == "calc"
+    check found[0].target == "40"
+    check found[0].detail == "calc.rs:3"
+
+suite "origin chains":
+
+  test "only the answer to the latest request, not cancelled, is applied":
+    let (store, _) = storeWithMock()
+    let vm = createOriginChainVM(store)
+    let chainA = OriginChain(hops: @[OriginHop(targetExpr: "a")])
+    let chainB = OriginChain(hops: @[OriginHop(targetExpr: "b")])
+    vm.noteChainRequestSent("0:1")
+    vm.noteChainRequestSent("0:2")
+    # The older request's answer arrives late: not applied.
+    check not vm.applyChainAnswer(chainA, "0:1")
+    check vm.activeChain.val.isNone
+    check vm.applyChainAnswer(chainB, "0:2")
+    check vm.activeChain.val.get.hops[0].targetExpr == "b"
+    # After a cancel, the cancelled request's answer is not applied.
+    vm.noteChainRequestSent("0:3")
+    vm.onCancelLoad()
+    check not vm.applyChainAnswer(chainA, "0:3")
+    check vm.activeChain.val.get.hops[0].targetExpr == "b"
+
+  test "the summary fill goes on to the next batch":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createOriginChainVM(store)
+    vm.enqueuePlaceholderFill("t1")
+    vm.flushPlaceholderFill()
+    # Queued while the first batch is in flight.
+    vm.enqueuePlaceholderFill("t2")
+    drain()
+    # The first answer was applied and the fill moved on to the second batch.
+    check mock.sent("ct/originSummary").len == 2
+    drain()
+    check not vm.inFlightSummary.val
+
+suite "the VCS history reads what its list shows":
+
+  test "the rows up to the last visible one, plus the lead":
+    check historyCommitCount(Viewport()) == VcsHistoryUnmeasured
+    check historyCommitCount(Viewport(rows: 20, firstRow: 40)) ==
+      40 + 20 + LeadRows
 
 suite "request bookkeeping":
 

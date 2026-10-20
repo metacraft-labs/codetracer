@@ -27,6 +27,8 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../platform/vcs as platform_vcs
+import ../viewport
+export viewport
 
 const
   VCSWorkingTreeTitle* = "Working Tree"
@@ -182,6 +184,9 @@ type
     status*: string ## diff status letter of the row ("M", "A", "D", "R", …)
 
   VCSVM* = ref object of ViewModel
+    historyViewport*: Signal[Viewport]
+      ## What the history list was given (`setHistoryViewport`): it decides
+      ## how many commits the native refresh reads.
     deepReviewMode*: Signal[bool]
     headerTitle*: Signal[string]
     headerIcon*: Signal[string]
@@ -577,8 +582,29 @@ proc applyWorkingTreeStatus*(vm: VCSVM; status: platform_vcs.VcsStatus) =
   vm.setBranchState(branch, [branch], false)
   vm.setWorkingTreeFiles(workingTreeRowsOf(status))
 
+const
+  VcsHistoryUnmeasured* = 50
+    ## The commits a history list reads before its pane has reported a size —
+    ## the view binding's fallback (Viewport-Driven-Loading V2). Once it has,
+    ## the count follows the pane (`historyCommitCount`).
+
+proc setHistoryViewport*(vm: VCSVM; v: Viewport) =
+  ## The size and scroll position the history list was given
+  ## (Viewport-Driven-Loading V1). Reaching the end of what was read asks the
+  ## next refresh for more (`historyCommitCount`) — the native Load More.
+  vm.historyViewport.val = v
+
+func historyCommitCount*(v: Viewport): int =
+  ## How many commits the history reads for a list showing `v`: every row up
+  ## to the last visible one, plus `LeadRows` below it. The log is read from
+  ## the newest commit, so the count grows as the reader scrolls down.
+  if not v.measured: VcsHistoryUnmeasured
+  else: max(0, v.firstRow) + v.rows + LeadRows
+
 proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
-                        directory: string; commitCount = 50) =
+                        directory: string; commitCount = -1) =
+  ## `commitCount` -1 (the default) reads what the history list's viewport
+  ## calls for (`historyCommitCount`); a caller may name a count instead.
   ## Fill the panel for `directory` through the VCS facade — what a native
   ## front-end (the terminal, GPUI) calls, with the platform's own `git`. The
   ## desktop fills the same ViewModel from `ui/vcs.nim`, which runs the same
@@ -601,7 +627,10 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
     vm.setGitRepoState(false, $status.error)
     return
   vm.applyWorkingTreeStatus(status.value)
-  let log = awaitSync(facade.log(directory, commitCount, ""))
+  let wanted =
+    if commitCount > 0: commitCount
+    else: historyCommitCount(vm.historyViewport.val)
+  let log = awaitSync(facade.log(directory, wanted, ""))
   var rows: seq[VCSCommitRow] = @[]
   if log.ok:
     for c in log.value:
@@ -905,6 +934,7 @@ proc createVCSVM*(): VCSVM =
       selectedHunks.val.len
 
     VCSVM(
+      historyViewport: createSignal(Viewport()),
       deepReviewMode: createSignal(false),
       headerTitle: createSignal(""),
       headerIcon: createSignal("\239\132\166"),

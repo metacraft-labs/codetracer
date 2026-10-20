@@ -1061,7 +1061,7 @@ proc createStoryFrameViewerClient(): VisualReplayClient =
         width: 320,
         height: 180,
       )),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       storyFuture(storyDrawCalls()),
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =

@@ -429,7 +429,12 @@ proc setSearchQuery*(vm: CalltraceVM; query: string) =
 
   # Also send the query to the backend for full-trace search.
   if query.len > 0:
+    # At most the pane's window of results (Viewport-Driven-Loading V2);
+    # every match from a consumer that has not measured one.
     let args = %*{"value": query}
+    let w = listWindow(vm.viewport.val)
+    if w.count > 0:
+      args["limit"] = %w.count
     discard vm.store.backend.send("ct/search-calltrace", args)
 
 proc setBackendSearchResults*(vm: CalltraceVM;

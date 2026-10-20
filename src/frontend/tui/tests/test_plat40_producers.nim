@@ -235,29 +235,28 @@ suite "PLAT-40 1 — the producers, on the shipped path, over the recording's ow
 
   s.close()
 
-  test "the RECORDING-WIDE event window arrives, not only the view model's first page":
-    # The event log is fed twice at open: `EventLogVM`'s own effect loads its
-    # first page (`DEFAULT_PAGE_SIZE` rows), and `loadRecordingPanes` asks for
-    # `RecordingEventWindow`. On `calc` (6 events) the two are indistinguishable;
-    # the terminal's timeline bounds and mutation marks are computed over the
-    # whole window, so it is asserted where the difference exists —
-    # `noir_space_ship`, which has more events than one page holds.
+  test "open learns the log's size and the extent, without loading the log":
+    # `loadRecordingPanes` reads ONE event: every row carries the recording's
+    # `maxRRTicks` (the timeline's bounds) and `ct/event-load` answers the
+    # whole log's `total` with any window. The rows themselves are each
+    # pane's to ask for, for the window it shows (Viewport-Driven-Loading V2).
+    # Asserted on `noir_space_ship`, which has many more events than one.
     let noir = resolveFixture("noir_space_ship")
     doAssert noir.outcome != foMissingPrereq,
       missingPrereqMessage(noir.spec, noir.detail)
     let ns = openLocalTrace(noir.tracePath)
     defer: ns.close()
-    let before = ns.session.store.eventLog.rows.val.len
     let got = ns.loadRecordingPanes()
-    let rows = ns.session.store.eventLog.rows.val
-    checkpoint("rows at open " & $before & ", after the producer " & $rows.len)
+    let ev = ns.session.store.eventLog
+    checkpoint("rows held " & $ev.rows.val.len & ", total " &
+               $ev.recordsTotal.val)
     ck got.events
-    ck rows.len > event_log_vm.DEFAULT_PAGE_SIZE
-    # A contiguous window from the first event: no page left out.
-    var contiguous = true
-    for i, r in rows:
-      if r.eventIndex != i: contiguous = false
-    ck contiguous
+    ck ev.rows.val.len == 1
+    ck ev.totalReported.val
+    ck ev.recordsTotal.val > 1
+    ck ns.session.store.timeline.val.maxRRTicks > 0'u64
+    # The recording's functions arrived for the omnibar.
+    ck ns.session.store.symbols.val.len > 0
 
 # ===========================================================================
 suite "PLAT-40 2 — one decoder: what a call-trace row IS":

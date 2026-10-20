@@ -2113,6 +2113,12 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             task::location_from_jump_arguments(&req.command, &req.arguments)?,
             sender.clone(),
         )?,
+        "ct/load-symbols" => handler.load_symbols(req.clone(), sender.clone())?,
+        "ct/load-value-elements" => handler.load_value_elements(
+            req.clone(),
+            req.load_args::<task::LoadValueElementsArguments>()?,
+            sender.clone(),
+        )?,
         "ct/search-calltrace" => {
             handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?, sender.clone())?
         }

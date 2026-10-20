@@ -8,8 +8,8 @@
 ##
 ##   * FILES: every file of the recording's source tree, as the Files pane
 ##     lists it (`FilesystemVM.rootEntry`, the desktop's replay Files pane);
-##   * SYMBOLS: every distinct function of the call-trace section the store
-##     holds (`store.calltrace.lines`), located at its call's file and line;
+##   * SYMBOLS: every function the recording called (`store.symbols`, the
+##     engine's `ct/load-symbols`), located where it is defined;
 ##   * COMMANDS: every enabled action item of the menu, labelled by its menu
 ##     path, with the chord the active keymap binds — choosing one runs the
 ##     menu item, so the omnibar and the menu are two ways into one command
@@ -44,24 +44,19 @@ proc filesOf*(fs: FilesystemVM): seq[OmnibarEntry] =
   walk(fs.rootEntry.val, result, seen)
 
 proc symbolsOf*(store: ReplayDataStore): seq[OmnibarEntry] =
+  ## Every function the recording called — the engine's list, not the
+  ## call-trace section the store happens to hold, so a function outside the
+  ## pane's window is found too.
   if store.isNil:
     return
-  var seen = initHashSet[string]()
-  for line in store.calltrace.lines.val:
-    let name = if line.displayName.len > 0: line.displayName else: line.name
-    if name.len == 0 or name in seen:
-      continue
-    seen.incl name
+  for sym in store.symbols.val:
     let where =
-      if line.location.file.len > 0:
-        line.location.file & ":" & $line.location.line
+      if sym.path.len > 0: sym.path.split('/')[^1] & ":" & $sym.line
       else: ""
-    # CHOOSING A SYMBOL GOES TO ITS CALL: the target is the call's tick, so
-    # every front-end navigates the same way (in time, to the first call the
-    # held section shows), whatever each can do with a file location.
-    result.add OmnibarEntry(kind: omSymbol, label: name,
-                            detail: where.split('/')[^1],
-                            target: $line.rrTicks)
+    # CHOOSING A SYMBOL GOES TO ITS FIRST CALL: the target is that call's
+    # tick, so every front-end navigates the same way, in time.
+    result.add OmnibarEntry(kind: omSymbol, label: sym.name, detail: where,
+                            target: $sym.firstCallTicks)
 
 proc commandsOf*(menu: MenuVM): seq[OmnibarEntry] =
   if menu.isNil:

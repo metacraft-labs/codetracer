@@ -39,6 +39,13 @@ type
     store*: ReplayDataStore
     reactiveOwner: OwnerBase
     frameRequestSerial: int
+    drawCallsFrame: int
+      ## The frame whose draw calls `drawCalls` holds; -1 for none. A frame
+      ## whose list is held is not asked for again.
+    frameInFlight: bool
+    pendingFrame: Option[int]
+      ## The frame asked for while another frame's load was in flight:
+      ## fetched when that load lands, the latest request winning.
     lastStoreGeid: Option[uint64]
     fetchRing: FrameFetchRing
 
@@ -168,7 +175,14 @@ proc isCurrentFrameRequest(vm: FrameViewerVM; serial: int): bool =
   serial == vm.frameRequestSerial
 
 proc loadDrawCalls*(vm: FrameViewerVM) =
-  let fut = vm.client.getDrawCalls()
+  ## The draw calls of the frame shown — asked for only when the frame
+  ## changed (Viewport-Driven-Loading audit finding 20: it used to fetch the
+  ## whole list after every frame load).
+  let frame = vm.currentFrame.val
+  if frame == vm.drawCallsFrame:
+    return
+  vm.drawCallsFrame = frame
+  let fut = vm.client.getDrawCalls(frame)
   async_compat.onComplete(fut,
     onSuccess = proc(calls: seq[VisualReplayDrawCall]) =
       vm.drawCalls.val = calls
@@ -176,6 +190,7 @@ proc loadDrawCalls*(vm: FrameViewerVM) =
           vm.selectedDrawCall.val.get >= calls.len:
         vm.selectedDrawCall.val = none(int),
     onError = proc(message: string) =
+      vm.drawCallsFrame = -1
       vm.error.val = message
       vm.drawCalls.val = @[]
       vm.selectedDrawCall.val = none(int))
@@ -199,22 +214,45 @@ proc loadFrameForGeid*(vm: FrameViewerVM; geid: uint64) =
         vm.failFrame(message))
 
 proc loadFrameByIndex*(vm: FrameViewerVM; frame: int) =
+  ## Show frame `frame`. ONE FRAME REQUEST AT A TIME (UI-Data-Loading-
+  ## Guidelines Pattern 6): playback ticks and scrub events arrive faster than
+  ## frames load, so while one is in flight a newer target replaces the
+  ## pending one instead of being sent, and the latest is fetched when the
+  ## in-flight load lands.
   let nextFrame = max(frame, 0)
+  if vm.frameInFlight:
+    vm.pendingFrame = some(nextFrame)
+    vm.currentFrame.val = nextFrame
+    return
+  vm.frameInFlight = true
   let serial = vm.beginFrameLoad()
   let startMs = nowMs()
   vm.currentFrame.val = nextFrame
   vm.currentGeid.val = none(uint64)
   let fut = vm.client.getFrameByFrame(nextFrame)
+  proc landed(vm: FrameViewerVM): bool =
+    ## Release the in-flight slot; `true` when a newer frame was asked for
+    ## meanwhile and has now been requested instead.
+    vm.frameInFlight = false
+    if vm.pendingFrame.isSome:
+      let next = vm.pendingFrame.get
+      vm.pendingFrame = none(int)
+      if next != nextFrame:
+        vm.loadFrameByIndex(next)
+        return true
+    false
   async_compat.onComplete(fut,
     onSuccess = proc(frameData: VisualReplayFrame) =
       vm.recordFetchLatency(startMs)
-      if not vm.isCurrentFrameRequest(serial):
+      if vm.landed() or not vm.isCurrentFrameRequest(serial):
         return
       vm.setFrame(frameData)
       vm.loading.val = false
       vm.loadDrawCalls(),
     onError = proc(message: string) =
       vm.recordFetchLatency(startMs)
+      if vm.landed():
+        return
       if vm.isCurrentFrameRequest(serial):
         vm.failFrame(message))
 
@@ -342,6 +380,7 @@ proc createFrameViewerVM*(client: VisualReplayClient;
   withViewModel proc(dispose: proc()): FrameViewerVM =
     let vm = FrameViewerVM(
       client: client,
+      drawCallsFrame: -1,
       reactiveOwner: getOwner(),
       visualReplayAvailable: createSignal(false),
       playerUrl: createSignal(client.playerUrl),

@@ -246,6 +246,12 @@ type
       ## each host reimplementing the split (which is how the headless
       ## surface came to ask for no watches at all while the GUI asked for
       ## them and threw the answers away).
+    moreElements*: bool
+      ## The locals budget cut this collection short: `children` holds its
+      ## first elements and the rest are fetched on demand
+      ## (`StateVM.loadMore`, `ct/load-value-elements`).
+    elementsTotal*: int
+      ## With `moreElements`: the collection's full length; 0 otherwise.
 
   EventLogRow* = object
     ## One row in the event-log panel.
@@ -548,6 +554,15 @@ type
   # The Find in Files pane renders file/line/snippet rows produced by the
   # one search runner (``host/find_in_files``), on every front-end.
   # -------------------------------------------------------------------
+
+  RecordedSymbol* = object
+    ## One function the recording called (`ct/load-symbols`): what the
+    ## omnibar's symbol search finds, and the tick of its first call, where
+    ## choosing it goes.
+    name*: string
+    path*: string
+    line*: int
+    firstCallTicks*: int64
 
   SearchResultLine* = object
     ## One row of the Find in Files pane: the line ``line`` (1-based) of

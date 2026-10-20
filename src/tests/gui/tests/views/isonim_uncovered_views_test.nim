@@ -173,7 +173,7 @@ proc makeClient(drawCalls: seq[VisualReplayDrawCall] = @[]):
       newCompletedFuture(VisualReplayFrame(
         imageSrc: "draw-" & $draw, geid: some(uint64(100 + draw)),
         frame: some(0), width: 64, height: 64)),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       newCompletedFuture(drawCalls),
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =

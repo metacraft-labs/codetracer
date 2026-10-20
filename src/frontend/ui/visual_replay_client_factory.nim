@@ -125,7 +125,7 @@ proc createInactiveVisualReplayClient*(playerUrl: string): VisualReplayClient =
         frame: none(int),
         width: 0,
         height: 0)),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       completedVisualFuture(newSeq[VisualReplayDrawCall]()),
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
@@ -186,8 +186,8 @@ proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
         getFrame(frameByFrameUrl(baseUrl, frame)),
       getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
         getFrame(frameByDrawUrl(baseUrl, draw)),
-      getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
-        let fut = getJson(drawCallsUrl(baseUrl))
+      getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+        let fut = getJson(drawCallsUrl(baseUrl, frame))
         result = newPromise proc(resolve: proc(value: seq[VisualReplayDrawCall])) =
           async_compat.onComplete(fut,
             onSuccess = proc(node: JsonNode) =

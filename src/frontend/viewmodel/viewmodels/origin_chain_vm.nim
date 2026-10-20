@@ -32,7 +32,7 @@
 
 import std/[json, options, sets, sequtils, hashes, tables]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
@@ -84,6 +84,11 @@ type
     inFlightSummary*: Signal[bool]
       ## True while a batched `ct/originSummary` request is in flight.
     latestRequestId*: Signal[int]
+    latestTransportRequest*: string
+      ## The transport's identity of the latest `ct/originChain` sent, by the
+      ## VM or by a host's own menu (`noteChainRequestSent`); "" when none is
+      ## outstanding or it was cancelled. `applyChainAnswer` accepts only its
+      ## answer.
       ## Counter incremented on every `onShowOrigin`. Used by
       ## `applyChainResponse` to ignore stale responses.
     lastResolvedSummaries*: Signal[Table[string, OriginSummary]]
@@ -143,6 +148,11 @@ proc derivePreferences(vm: OriginChainVM; key: string;
 # Actions
 # ---------------------------------------------------------------------------
 
+proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
+                         requestId: int = -1)
+proc applySummaryResponse*(vm: OriginChainVM; tokens: openArray[string];
+                           summaries: openArray[OriginSummary])
+
 proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
                    stepId: int64 = -1) =
   ## Dispatch a `ct/originChain` request (spec §5.3) for `expression`
@@ -167,13 +177,27 @@ proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
   stack.add(BreadcrumbEntry(variableName: expression, stepId: stepId))
   vm.breadcrumbStack.val = stack
 
+  # THE QUERY IS ABOUT `stepId`: the step the engine walks back from. -1 is
+  # the current stop, which is what the State pane's rows are about; a caller
+  # asking about another moment (a history entry, a hop) passes that step.
+  # `location` is where the value is SHOWN — the source position the State
+  # pane's row belongs to — and does not change the question.
   let prefs = vm.preferences.val
   let args = originChainArgs(
     expression = expression,
     stepId = stepId,
     maxHops = prefs.defaultMaxHops,
   )
-  discard vm.store.backend.send("ct/originChain", args)
+  # The answer to THIS request is applied when it arrives — unless a newer
+  # request or a cancel came first (`applyChainResponse`'s id check), so a
+  # late answer never replaces the chain the user asked for since.
+  let vmRef = vm
+  async_compat.onComplete(vm.store.backend.send("ct/originChain", args),
+    onSuccess = proc(response: JsonNode) =
+      let body = responseBody(response)
+      if responseSucceeded(response) and body.hasKey("hops"):
+        vmRef.applyChainResponse(parseOriginChain(body), nextId),
+    onError = proc(message: string) = discard)
 
 proc openSidePanel*(vm: OriginChainVM) =
   ## Force-open the side panel (used by the command palette / keyboard
@@ -185,6 +209,30 @@ proc closeSidePanel*(vm: OriginChainVM) =
   ## same chain can be re-opened without re-fetching). Wired to the
   ## panel's Esc key handler per spec §13.0.
   vm.sidePanelOpen.val = false
+
+proc noteChainRequestSent*(vm: OriginChainVM; transportId: string) =
+  ## A `ct/originChain` is being sent NOW, by whatever issued it (the VM or a
+  ## host's own menu), under the transport's identity: it is the request
+  ## whose answer `applyChainAnswer` accepts.
+  vm.latestTransportRequest = transportId
+  vm.loading.val = true
+
+proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
+                       transportId: string): bool =
+  ## Apply a chain that arrived on the transport, named by the request it
+  ## answers. Only the answer to the latest request sent, and not cancelled
+  ## since, is applied; `true` when it was. An answer that carries no
+  ## identity (a transport that names none) is applied while a request is
+  ## outstanding.
+  if transportId.len > 0:
+    if transportId != vm.latestTransportRequest:
+      return false
+  elif not vm.loading.val:
+    return false
+  vm.activeChain.val = some(chain)
+  vm.loading.val = false
+  vm.latestTransportRequest = ""
+  true
 
 proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
                          requestId: int = -1) =
@@ -199,9 +247,11 @@ proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
 
 proc onCancelLoad*(vm: OriginChainVM) =
   ## Drop the spinner flag and bump the request counter so any future
-  ## arriving response is treated as stale.
+  ## arriving response is treated as stale — the VM's own and one named by
+  ## the transport alike.
   vm.loading.val = false
   vm.latestRequestId.val = vm.latestRequestId.val + 1
+  vm.latestTransportRequest = ""
 
 proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
   ## Invoke the host-provided seek bridge (spec §3.3 "Click a hop").
@@ -332,7 +382,22 @@ proc flushPlaceholderFill*(vm: OriginChainVM) =
     return
   vm.inFlightSummary.val = true
   let args = originSummaryArgs(queue)
-  discard vm.store.backend.send("ct/originSummary", args)
+  # THE ANSWER IS APPLIED HERE, and the next batch follows: the fill used to
+  # set `inFlightSummary` and wait for a caller of `applySummaryResponse`
+  # that no host had, so it stopped after the first batch.
+  let vmRef = vm
+  let sent = queue
+  async_compat.onComplete(vm.store.backend.send("ct/originSummary", args),
+    onSuccess = proc(response: JsonNode) =
+      if responseSucceeded(response):
+        vmRef.applySummaryResponse(sent,
+          parseOriginSummariesResponse(responseBody(response)))
+      else:
+        vmRef.inFlightSummary.val = false
+      # Whatever was queued while this batch was in flight goes next.
+      vmRef.flushPlaceholderFill(),
+    onError = proc(message: string) =
+      vmRef.inFlightSummary.val = false)
 
 proc applySummaryResponse*(vm: OriginChainVM; tokens: openArray[string];
                            summaries: openArray[OriginSummary]) =

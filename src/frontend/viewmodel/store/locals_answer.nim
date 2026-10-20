@@ -73,6 +73,11 @@ proc variableFromPValue*(name: string; pv: PValue): Variable =
                     presented: pv)
   if pv.isNil:
     return
+  # A BUDGET CUT, not `pv.partial` (which says the RECORDING is short): the
+  # engine held back elements past `elementsTotal`'s first ones.
+  let held = (if pv.kind == pvkMap: pv.entries.len else: pv.members.len)
+  result.moreElements = pv.elementsTotal > held
+  result.elementsTotal = (if result.moreElements: pv.elementsTotal else: 0)
   if pv.kind == pvkMap:
     if pv.entries.len == 0:
       return

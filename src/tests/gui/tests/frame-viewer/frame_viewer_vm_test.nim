@@ -63,7 +63,7 @@ proc makeFakeClient(): FakeVisualReplayClient =
         width: 320,
         height: 200,
       )),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       inc fake.drawCallRequests
       newCompletedFuture(@[
         VisualReplayDrawCall(index: 0, geid: 100'u64,
@@ -164,8 +164,8 @@ suite "VisualReplayClient URL construction":
       "http://localhost:9000/frame?frame=3"
     check frameByDrawUrl("http://localhost:9000/", 7) ==
       "http://localhost:9000/frame?draw=7"
-    check drawCallsUrl("http://localhost:9000/") ==
-      "http://localhost:9000/draw-calls"
+    check drawCallsUrl("http://localhost:9000/", 4) ==
+      "http://localhost:9000/draw-calls?frame=4"
     check pixelHistoryUrl("http://localhost:9000/", 12, 34, 2) ==
       "http://localhost:9000/pixel-history?x=12&y=34&frame=2"
     check shaderDebugUrl("http://localhost:9000/") ==
@@ -598,4 +598,42 @@ suite "ShaderDebugVM":
     check vm.currentStepIndex.val == 1
     check vm.currentStep().get.instruction == "OpCompositeConstruct %base"
 
+    vm.dispose()
+
+suite "FrameViewerVM loads only what the pane shows":
+
+  test "draw calls are asked for once per frame, by frame":
+    let fake = makeFakeClient()
+    let vm = createFrameViewerVM(fake.client)
+    vm.loadFrameByIndex(1)
+    drain()
+    drain()
+    check fake.drawCallRequests == 1
+    # The same frame again: its draw calls are held.
+    vm.loadFrameByIndex(1)
+    drain()
+    drain()
+    check fake.drawCallRequests == 1
+    vm.loadFrameByIndex(2)
+    drain()
+    drain()
+    check fake.drawCallRequests == 2
+    vm.dispose()
+
+  test "frame loads coalesce: one in flight, the latest target next":
+    let fake = makeFakeClient()
+    let vm = createFrameViewerVM(fake.client)
+    # A burst of playback ticks / scrub events before any answer lands.
+    vm.loadFrameByIndex(1)
+    vm.loadFrameByIndex(2)
+    vm.loadFrameByIndex(3)
+    check fake.frameRequests == @[1]
+    check vm.currentFrame.val == 3
+    drain()
+    drain()
+    # Frame 1 landed; the latest target (3) was asked for, frame 2 never.
+    check fake.frameRequests == @[1, 3]
+    drain()
+    drain()
+    check vm.currentFrame.val == 3
     vm.dispose()

@@ -5285,9 +5285,10 @@ proc orderEventLog(r: GpuiRenderer; order: EventLogOrder) =
   if vm.isNil:
     return
   vm.sortBy(order)
+  # The window the pane shows, re-cut in the new order — not the whole log.
+  let held = max(1, gSession.session.store.eventLog.rows.val.len)
   try:
-    discard gSession.requestAndLoadEventLog(start = 0,
-                                            count = RecordingEventWindow,
+    discard gSession.requestAndLoadEventLog(start = 0, count = held,
                                             order = order)
   except CatchableError as e:
     traceGesture("event order failed: " & e.msg)

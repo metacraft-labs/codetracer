@@ -279,7 +279,8 @@ from ui/process_tree import
   consumeListProcessesEvent, mountProcessTree
 import viewmodel/viewmodels/state_vm
 import viewmodel/viewmodels/origin_chain_types
-from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, openSidePanel, onCancelLoad
+from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, applyChainAnswer,
+  noteChainRequestSent, openSidePanel, onCancelLoad
 from isonim/core/signals import val, `val=`
 from isonim/core/computation import val
 from viewmodel/viewmodels/trace_open import
@@ -2403,26 +2404,21 @@ when not defined(ctInExtension):
       # response — including the session-composed cross-process one, whose
       # wire shape is deliberately identical — so one subscription feeds
       # the VM for both the single- and multi-recording paths.
+      # EVERY `ct/originChain` IS NAMED BY THE TRANSPORT as it is sent —
+      # the VM's own (`OriginChainVM.onShowOrigin`) and the legacy menus'
+      # (`ui/value.nim`, `ui/key_router.nim`, `ui/flow.nim`), which emit it
+      # on the mediator and never touch the VM — so only the answer to the
+      # LATEST request, not cancelled since, is applied
+      # (`OriginChainVM.applyChainAnswer`). The companion
+      # `ct/updated-origin-chain` event carries no identity and the same body
+      # as the response, so the chain is taken from the response alone.
       initPanelVM("subscribeUpdatedOriginChain"):
-        dap.on[JsObject](dapRef, CtUpdatedOriginChain,
-          proc(kind: CtEventKind, raw: JsObject) =
+        trackCtRequests(CtOriginChain,
+          onSent = proc(requestId: cstring) =
             let ocvm = state.activeOriginChainVM()
-            if ocvm.isNil or raw.isNil:
-              return
-            try:
-              ocvm.applyChainResponse(
-                parseOriginChain(parseJsonFromJsObject(raw)))
-              # Spec §3.2.2 — "Show value origin" opens the dedicated
-              # side panel. There are two menus that can start the
-              # request (the IsoNim State Pane row menu, which goes
-              # through `OriginChainVM.onShowOrigin`, and the legacy
-              # value-row menu in `ui/value.nim`, which emits
-              # `CtOriginChain` on the mediator and never touches the
-              # VM). Opening here covers both, and a chain only ever
-              # arrives because a user asked for one.
-              ocvm.openSidePanel()
-            except CatchableError as e:
-              cerror "ct/updated-origin-chain: failed to decode chain: " & e.msg)
+            if not ocvm.isNil:
+              ocvm.noteChainRequestSent($requestId),
+          onAnswered = proc(requestId: cstring) = discard)
         # The `ct/originChain` response carries the identical chain body
         # and is the request's direct correlate, so it is consumed too:
         # the companion event is emitted only on success, and a failed
@@ -2436,8 +2432,12 @@ when not defined(ctInExtension):
             try:
               let body = parseJsonFromJsObject(raw)
               if body.kind == JObject and body.hasKey("hops"):
-                ocvm.applyChainResponse(parseOriginChain(body))
-                ocvm.openSidePanel()
+                # Spec §3.2.2 — "Show value origin" opens the dedicated side
+                # panel, whichever menu asked; a chain only arrives because a
+                # user asked for one.
+                if ocvm.applyChainAnswer(parseOriginChain(body),
+                                         $ctRequestIdOf(raw)):
+                  ocvm.openSidePanel()
               else:
                 ocvm.onCancelLoad()
                 cerror "ct/originChain: query returned no chain: " & $body

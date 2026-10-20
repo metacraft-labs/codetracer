@@ -30,12 +30,16 @@
 
 import std/[json, options, sets, tables, strutils]
 
-import isonim/core/[signals, computation, owner, batch]
+import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types as store_types]
+from ../store/stop_timeline import stopIdentityOf
+from ../store/locals_answer import variableFromValue
+import ../viewport
+export viewport
 import origin_chain_types
 import value_changes
 # NOTE: deliberately does NOT import `common/types`. That module *includes*
@@ -114,6 +118,12 @@ type
       ## Empty string means "no selection".
     watchExpressions*: Signal[seq[string]]
     expandedHistories*: Signal[HashSet[string]]
+    viewport*: Signal[Viewport]
+    loadingMore*: Signal[HashSet[string]]
+      ## The row paths whose next elements are being fetched (`loadMore`) —
+      ## what a view shows as busy on that row's "Load More".
+      ## What the state pane was given (`setViewport`): it sizes the value
+      ## budget the stop loader asks for (`localsCountBudgetFor`).
     valueHistory*: Signal[Table[string, seq[ValueHistoryRow]]]
       ## Value history per variable path. Keyed by the dot-separated
       ## variable path (``VariableViewState.path``) — the same key
@@ -454,6 +464,109 @@ proc editWatch*(vm: StateVM; old, expression: string) =
     exprs[at] = expression
   vm.watchExpressions.val = exprs
 
+proc setViewport*(vm: StateVM; v: Viewport) =
+  ## The size the state pane was given (Viewport-Driven-Loading V1); the
+  ## stop loader's value budget follows it.
+  vm.viewport.val = v
+
+const
+  LoadMoreCount* = LocalsMinCountLimit
+    ## Elements one "Load More" adds — the locals request's per-collection
+    ## floor, so a collection grows by the same step it was first cut to.
+
+proc variableAt(locals: seq[Variable]; path: string;
+                indices: var seq[int]): Option[Variable] =
+  ## The row named by `path` (child names joined with `.`, the local's name
+  ## first — `VariableViewState.path`), and the element indices that reach it
+  ## from the local, for `ct/load-value-elements`'s `path`.
+  let parts = path.split('.')
+  if parts.len == 0:
+    return none(Variable)
+  var current: Variable
+  var found = false
+  for v in locals:
+    if v.name == parts[0]:
+      current = v
+      found = true
+      break
+  if not found:
+    return none(Variable)
+  for part in parts[1 .. ^1]:
+    var at = -1
+    for i, c in current.children:
+      if c.name == part:
+        at = i
+        break
+    if at < 0:
+      return none(Variable)
+    indices.add at
+    current = current.children[at]
+  some(current)
+
+proc appendElements(v: var Variable; path: openArray[int];
+                    added: seq[Variable]; more: bool) =
+  ## Append `added` to the children of the row `path` reaches under `v`.
+  if path.len == 0:
+    v.children.add added
+    v.moreElements = more
+    if not more:
+      v.elementsTotal = 0
+    return
+  appendElements(v.children[path[0]], path[1 .. ^1], added, more)
+
+proc loadMore*(vm: StateVM; path: string) =
+  ## "Load More" (UI-Data-Loading-Guidelines Pattern 3): the next
+  ## `LoadMoreCount` elements of the collection at row `path`, which the
+  ## locals budget cut short (`Variable.moreElements`), appended to its
+  ## children. Asked once at a time per row; an answer about a stop the
+  ## debugger has since left is dropped. A row with nothing more does nothing.
+  let store = vm.store
+  if store.isNil or path.len == 0 or path in vm.loadingMore.val:
+    return
+  var indices: seq[int] = @[]
+  let row = variableAt(store.locals.locals.val, path, indices)
+  if row.isNone or not row.get.moreElements:
+    return
+  let expression = path.split('.')[0]
+  let start = row.get.children.len
+  let at = stopIdentityOf(store.debugger.val)
+  var busy = vm.loadingMore.val
+  busy.incl path
+  vm.loadingMore.val = busy
+  let theVm = vm
+  proc done() =
+    var b = theVm.loadingMore.val
+    b.excl path
+    theVm.loadingMore.val = b
+  onComplete(store.backend.send("ct/load-value-elements", %*{
+      "expression": expression, "path": indices, "startIndex": start,
+      "count": LoadMoreCount, "rrTicks": store.debugger.val.rrTicks}),
+    onSuccess = proc(resp: JsonNode) =
+      done()
+      if not responseSucceeded(resp) or
+         stopIdentityOf(store.debugger.val) != at:
+        return
+      let body = responseBody(resp)
+      let first = body{"startIndex"}.getInt(-1)
+      var current: seq[int] = @[]
+      let now = variableAt(store.locals.locals.val, path, current)
+      # The slice continues what the row holds NOW; anything else (a reload
+      # in between) is not appended.
+      if now.isNone or first != now.get.children.len:
+        return
+      var added: seq[Variable] = @[]
+      for i, e in body{"elements"}.getElems:
+        added.add variableFromValue("[" & $(first + i) & "]", e)
+      var locals = store.locals.locals.val
+      for li in 0 ..< locals.len:
+        if locals[li].name == expression:
+          appendElements(locals[li], current, added,
+                         body{"more"}.getBool(false))
+          break
+      store.locals.locals.val = locals,
+    onError = proc(message: string) =
+      done())
+
 proc toggleHistory*(vm: StateVM; expression: string) =
   # Build a fresh HashSet to avoid same-reference equality on the JS target.
   # See updateHistory for full explanation.
@@ -606,6 +719,8 @@ proc createStateVM*(store: ReplayDataStore;
     let watchExpressions = createSignal(newSeq[string]())
     let expandedHistories = createSignal(initHashSet[string]())
     let valueHistory = createSignal(initTable[string, seq[ValueHistoryRow]]())
+    let viewport = createSignal(Viewport())
+    let loadingMore = createSignal(initHashSet[string]())
     let expandedOrigins = createSignal(initHashSet[VariableId]())
     let breadcrumbStack = createSignal(newSeq[BreadcrumbEntry]())
     let originSummaries = createSignal(initTable[string, OriginSummary]())
@@ -661,6 +776,8 @@ proc createStateVM*(store: ReplayDataStore;
       expandedPaths: expandedPaths,
       expandedHistories: expandedHistories,
       valueHistory: valueHistory,
+      viewport: viewport,
+      loadingMore: loadingMore,
       selectedPath: selectedPath,
       watchExpressions: watchExpressions,
       currentVariables: currentVariables,

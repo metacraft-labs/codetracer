@@ -58,6 +58,7 @@ use crate::task::{
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{Type, Value, to_ct_value};
+use crate::value_budget;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
@@ -189,6 +190,16 @@ pub struct Handler {
     /// only called once.  This avoids the >30s timeout that occurs when
     /// every `ct/py-events` request re-reads all events from disk.
     cached_events: Option<Vec<ProgramEvent>>,
+    /// `cached_events` ordered by tick, each with the largest recorded index
+    /// at or before it — what answers "the last event at or before this tick"
+    /// (`ct/event-load`'s `indexAtTick`) by binary search instead of a scan of
+    /// the whole log on every move. Built on first use, dropped with the
+    /// cache it indexes.
+    event_tick_index: Option<Vec<(i64, usize)>>,
+    /// The last `ct/load-locals` answer before the budget cut it, and the tick
+    /// it is about: `ct/load-value-elements` slices from it, so "Load More"
+    /// re-reads nothing from the trace.
+    full_locals: Option<(i64, Vec<Variable>)>,
 
     /// Cached list of terminal-output (Write) events, populated lazily by
     /// `load_terminal()`.
@@ -584,6 +595,8 @@ impl Handler {
             raw_diff_index: None,
             initialized: false,
             cached_events: None,
+            event_tick_index: None,
+            full_locals: None,
             cached_terminal_events: None,
             macro_sourcemaps: MacroSourceMapCollection::default(),
             sourcemap_cache: SourcemapCache::new(),
@@ -1152,6 +1165,9 @@ impl Handler {
         // if self.trace_kind == TraceKind::Recreator {
         // let locals: Vec<Variable> = vec![];
         // warn!("load_locals not implemented for rr yet");
+        let rr_ticks = args.rr_ticks;
+        let count_budget = args.count_budget;
+        let min_count_limit = args.min_count_limit;
         let locals_with_records = self.replay.load_locals(args)?;
         // Per spec §3.2.3, locals on the active frame use *Eager*
         // origin summaries on the materialized backend. The cache
@@ -1199,6 +1215,13 @@ impl Handler {
                 address: l.address,
                 origin_summary,
             });
+        }
+        // THE BUDGET, APPLIED (`value_budget`): the full answer is kept for
+        // `ct/load-value-elements`, the client gets each collection's share.
+        self.full_locals = Some((rr_ticks, locals.clone()));
+        {
+            let mut values: Vec<&mut Value> = locals.iter_mut().map(|l| &mut l.value).collect();
+            value_budget::apply_count_budget(&mut values, count_budget, min_count_limit);
         }
         self.respond_dap(req, task::CtLoadLocalsResponseBody { locals }, sender)?;
         Ok(())
@@ -2679,6 +2702,7 @@ impl Handler {
             self.event_db.replace_record_events(&events_data.events);
 
             self.cached_events = Some(events_data.events);
+            self.event_tick_index = None;
         }
         Ok(())
     }
@@ -2780,12 +2804,13 @@ impl Handler {
         // the recording, not of the position.
         let index_at_tick: i64 = match req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64) {
             Some(at) => {
-                let mut best: Option<usize> = None;
-                for (i, event) in all_events.iter().enumerate() {
-                    if event.direct_location_rr_ticks <= at {
-                        best = Some(i);
-                    }
+                if self.event_tick_index.is_none() {
+                    self.event_tick_index = Some(event_tick_index_of(all_events));
                 }
+                let best = self
+                    .event_tick_index
+                    .as_ref()
+                    .and_then(|index| last_event_at_or_before(index, at));
                 match best {
                     Some(event_index) => positions
                         .iter()
@@ -3003,6 +3028,7 @@ impl Handler {
     /// re-derive against the freshly-installed events.
     pub fn set_cached_events_for_tests(&mut self, events: Vec<ProgramEvent>) {
         self.cached_events = Some(events);
+        self.event_tick_index = None;
         self.cached_marker_rows = None;
         self.marker_decode_calls.store(0, std::sync::atomic::Ordering::Relaxed);
     }
@@ -3107,6 +3133,68 @@ impl Handler {
         Ok(())
     }
 
+    /// `ct/load-value-elements`: the next slice of a collection the locals
+    /// budget cut short ("Load More", UI-Data-Loading-Guidelines Pattern 3),
+    /// out of the untruncated answer kept for the stop.
+    pub fn load_value_elements(
+        &mut self,
+        req: dap::Request,
+        args: task::LoadValueElementsArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let Some((ticks, locals)) = self.full_locals.as_ref() else {
+            return Err("ct/load-value-elements: no ct/load-locals answer to continue".into());
+        };
+        if *ticks != args.rr_ticks {
+            return Err(format!(
+                "ct/load-value-elements: asked about tick {} but the locals are about tick {}",
+                args.rr_ticks, ticks
+            )
+            .into());
+        }
+        let Some(local) = locals.iter().find(|l| l.expression == args.expression) else {
+            return Err(format!("ct/load-value-elements: no local named {:?}", args.expression).into());
+        };
+        let slice = value_budget::elements_slice(&local.value, &args.path, args.start_index, args.count)
+            .map_err(|e| format!("ct/load-value-elements: {e:?}"))?;
+        self.respond_dap(
+            req,
+            task::LoadValueElementsResponseBody {
+                elements: slice.elements,
+                start_index: slice.start_index,
+                total: slice.total,
+                more: slice.more,
+            },
+            sender,
+        )?;
+        Ok(())
+    }
+
+    /// `ct/load-symbols`: every function the recording called, once, with
+    /// the tick of its first call — the omnibar's symbol index. It used to be
+    /// derived from whatever call-trace section the client happened to hold,
+    /// so a function outside that window could not be found.
+    pub fn load_symbols(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        let mut first_call: HashMap<usize, i64> = HashMap::new();
+        for db_call in self.reader.calls_iter() {
+            first_call.entry(db_call.function_id.0).or_insert(db_call.step_id.0);
+        }
+        let mut symbols: Vec<task::SymbolEntry> = Vec::new();
+        for (id, function) in self.reader.functions_iter() {
+            if let Some(&ticks) = first_call.get(&id.0) {
+                symbols.push(task::SymbolEntry {
+                    name: function.name.clone(),
+                    path: self.reader.path(function.path_id).unwrap_or("").to_string(),
+                    line: function.line.0,
+                    first_call_ticks: ticks,
+                });
+            }
+        }
+        symbols.sort_by(|a, b| a.name.cmp(&b.name).then(a.first_call_ticks.cmp(&b.first_call_ticks)));
+        self.respond_dap(req, task::LoadSymbolsResponseBody { symbols }, sender)?;
+        Ok(())
+    }
+
     pub fn calltrace_search(
         &mut self,
         req: dap::Request,
@@ -3123,10 +3211,16 @@ impl Handler {
             }
         }
 
+        // Count every match, but build a `Call` only for the ones answered:
+        // the search's `limit` is the requesting pane's window.
+        let mut total = 0usize;
         for db_call in self.reader.calls_iter() {
             if list.contains(&db_call.function_id.0) {
-                // expanded children count not relevant here
-                calls.push(self.reader.to_call(db_call, &mut self.expr_loader));
+                total += 1;
+                if arg.limit == 0 || calls.len() < arg.limit {
+                    // expanded children count not relevant here
+                    calls.push(self.reader.to_call(db_call, &mut self.expr_loader));
+                }
             }
         }
 
@@ -3145,7 +3239,7 @@ impl Handler {
         // confirms the handler returns ``success=true`` with the
         // correct calls.  Wrapping in an object brings this response
         // into the same shape every other ``ct/*`` custom command uses.
-        self.respond_dap(req, CallSearchResponseBody { calls }, sender)?;
+        self.respond_dap(req, CallSearchResponseBody { calls, total }, sender)?;
         Ok(())
     }
 
@@ -7000,6 +7094,33 @@ impl Handler {
 
         Ok(())
     }
+}
+
+/// The events ordered by tick, each paired with the largest recorded index
+/// among the events at or before its tick: `last_event_at_or_before` answers
+/// from it by binary search. Recorded order is not guaranteed to be tick
+/// order, so the running maximum is what keeps the answer "the LAST event (in
+/// recorded order) at or before the tick".
+pub fn event_tick_index_of(events: &[ProgramEvent]) -> Vec<(i64, usize)> {
+    let mut by_tick: Vec<(i64, usize)> = events
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.direct_location_rr_ticks, i))
+        .collect();
+    by_tick.sort();
+    let mut latest = 0usize;
+    for (k, entry) in by_tick.iter_mut().enumerate() {
+        latest = if k == 0 { entry.1 } else { latest.max(entry.1) };
+        entry.1 = latest;
+    }
+    by_tick
+}
+
+/// The last event (in recorded order) at or before `at`, from
+/// `event_tick_index_of`'s index; `None` when every event is after it.
+pub fn last_event_at_or_before(index: &[(i64, usize)], at: i64) -> Option<usize> {
+    let upto = index.partition_point(|&(tick, _)| tick <= at);
+    if upto == 0 { None } else { Some(index[upto - 1].1) }
 }
 
 // ---------------------------------------------------------------------------

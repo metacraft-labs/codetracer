@@ -133,3 +133,35 @@ fn an_empty_search_is_no_search() {
     assert_eq!(body["total"], 100);
     assert_eq!(contents(&body).len(), 3);
 }
+
+#[test]
+fn the_current_position_is_the_last_recorded_event_at_or_before_the_tick() {
+    use db_backend::dap_handler::{event_tick_index_of, last_event_at_or_before};
+    // Recorded order is not tick order: event 2 was recorded after event 1
+    // but happened earlier.
+    let events = vec![
+        event(0, "a", "m.rs"),
+        ProgramEvent {
+            direct_location_rr_ticks: 30,
+            ..event(1, "b", "m.rs")
+        },
+        ProgramEvent {
+            direct_location_rr_ticks: 20,
+            ..event(2, "c", "m.rs")
+        },
+    ];
+    let index = event_tick_index_of(&events);
+    assert_eq!(last_event_at_or_before(&index, -1), None);
+    assert_eq!(last_event_at_or_before(&index, 0), Some(0));
+    assert_eq!(last_event_at_or_before(&index, 25), Some(2));
+    assert_eq!(last_event_at_or_before(&index, 30), Some(2));
+    assert_eq!(last_event_at_or_before(&index, 1000), Some(2));
+}
+
+#[test]
+fn the_index_at_tick_answer_matches_the_scan_it_replaced() {
+    let mut handler = handler_with_events(hundred_events());
+    let body = load(&mut handler, serde_json::json!({ "indexOnly": true, "atRRTicks": 42 }));
+    assert_eq!(body["indexAtTick"], 42);
+    assert_eq!(body["total"], 100);
+}

@@ -122,13 +122,18 @@ proc createStopLoader*(session: SessionViewModel;
 proc watchList(l: StopLoader): seq[string] =
   if l.session.stateVM.isNil: @[] else: l.session.stateVM.watchExpressions.val
 
+proc localsBudget(l: StopLoader): int =
+  ## The value budget the state pane's viewport calls for.
+  if l.session.stateVM.isNil: LocalsCountBudget
+  else: localsCountBudgetFor(l.session.stateVM.viewport.val)
+
 proc stopKey(l: StopLoader; pane: StopPane): string =
   ## What makes two loads of `pane` the same request.
   let store = l.session.store
   result = stopIdentityOf(store.debugger.val)
   case pane
   of spLocals:
-    result.add "\x02" & l.watchList().join("\x1f")
+    result.add "\x02" & l.watchList().join("\x1f") & "\x02" & $l.localsBudget()
   of spCallStackFallback:
     # The fallback is a fact about the stop AND about whether the recording
     # gave a call trace: a section that arrives (or is cleared) at the same
@@ -158,7 +163,8 @@ proc settle(l: StopLoader; pane: StopPane; key: string;
 proc loadLocals(l: StopLoader; key: string) =
   let store = l.session.store
   let ticks = store.debugger.val.rrTicks
-  let args = store.localsLoadArgs(ticks, l.watchList())
+  let args = store.localsLoadArgs(ticks, l.watchList(),
+                                  countBudget = l.localsBudget())
   let requestedAt = store.stopStamp()
   let loader = l
   store.locals.loadingState.val = lsLoading
@@ -299,6 +305,7 @@ proc follow*(l: StopLoader) =
       # and, for the call-stack fallback, the call trace's presence.
       discard stopIdentityOf(loader.session.store.debugger.val)
       discard loader.watchList()
+      discard loader.localsBudget()
       if spCallStackFallback in loader.openPanes.val:
         discard loader.session.store.calltrace.lines.val.len > 0
       # A host may mark the session as a diff after it attached.

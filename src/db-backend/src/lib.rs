@@ -239,6 +239,7 @@ pub mod tracepoint_interpreter;
 pub mod transport;
 pub mod transport_endpoint;
 pub mod value;
+pub mod value_budget;
 
 #[cfg(feature = "browser-transport")]
 #[wasm_bindgen(start)]

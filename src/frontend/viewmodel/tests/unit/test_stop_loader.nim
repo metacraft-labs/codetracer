@@ -30,7 +30,7 @@
 ##   nim js -d:nodejs -r --path:src/frontend/viewmodel \
 ##     src/frontend/viewmodel/tests/unit/test_stop_loader.nim
 
-import std/[json, options, strutils, unittest]
+import std/[json, options, sets, strutils, unittest]
 
 import isonim/core/[signals, async_compat]
 
@@ -307,3 +307,90 @@ suite "BackendService response envelopes":
     check responseBody(%*{"a": 1}) == %*{"a": 1}
     check responseBody(%*{"success": true}) == newJObject()
     check responseBody(newJNull()) == newJObject()
+
+proc cutLocal(name: string; held, total: int): JsonNode =
+  ## A `ct/load-locals` answer whose one local is a sequence the budget cut
+  ## to its first `held` of `total` elements (`elementsTotal`).
+  var elements = newJArray()
+  for i in 0 ..< held:
+    elements.add %*{"kind": 7, "i": $i, "typ": {"langType": "int"}}
+  %*{"success": true, "body": {"locals": [{"expression": name, "value": {
+    "kind": 0, "elements": elements, "elementsTotal": total,
+    "typ": {"kind": 0, "langType": "seq[int]"}}}]}}
+
+proc elementsAnswer(start, n: int; more: bool): JsonNode =
+  var elements = newJArray()
+  for i in start ..< start + n:
+    elements.add %*{"kind": 7, "i": $i, "typ": {"langType": "int"}}
+  %*{"success": true, "body": {"elements": elements, "startIndex": start,
+                                "total": 120, "more": more}}
+
+suite "V1 / Load More: the State pane's next elements":
+
+  test "a cut collection says so, and Load More appends the next slice":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(10, 2)
+    mock.expect("ct/load-locals", cutLocal("xs", 50, 120))
+    let loader = createStopLoader(session)
+    loader.loadStop()
+    drainPlatformCallbacks()
+    let xs = session.store.locals.locals.val[0]
+    check xs.moreElements
+    check xs.elementsTotal == 120
+    check xs.children.len == 50
+
+    mock.clearReceivedCommands()
+    mock.expect("ct/load-value-elements", elementsAnswer(50, 50, true))
+    session.stateVM.loadMore("xs")
+    check "xs" in session.stateVM.loadingMore.val
+    session.stateVM.loadMore("xs")             # in flight: not asked twice
+    check mock.sent("ct/load-value-elements") == 1
+    let args = mock.findCommand("ct/load-value-elements").get.args
+    check args["expression"].getStr == "xs"
+    check args["startIndex"].getInt == 50
+    check args["count"].getInt == LoadMoreCount
+    check args["rrTicks"].getInt == 10
+    drainPlatformCallbacks()
+    let grown = session.store.locals.locals.val[0]
+    check grown.children.len == 100
+    check grown.children[50].name == "[50]"
+    check grown.moreElements
+    check "xs" notin session.stateVM.loadingMore.val
+
+    mock.expect("ct/load-value-elements", elementsAnswer(100, 20, false))
+    session.stateVM.loadMore("xs")
+    drainPlatformCallbacks()
+    let whole = session.store.locals.locals.val[0]
+    check whole.children.len == 120
+    check not whole.moreElements
+
+  test "a row with nothing more asks nothing":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(11, 2)
+    mock.expect("ct/load-locals", localsAnswer("x"))
+    let loader = createStopLoader(session)
+    loader.loadStop()
+    drainPlatformCallbacks()
+    mock.clearReceivedCommands()
+    session.stateVM.loadMore("x")
+    session.stateVM.loadMore("nope")
+    check mock.sent("ct/load-value-elements") == 0
+
+  test "an answer about a stop the debugger has left is dropped":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(12, 2)
+    mock.expect("ct/load-locals", cutLocal("xs", 50, 120))
+    let loader = createStopLoader(session)
+    loader.loadStop()
+    drainPlatformCallbacks()
+    mock.expect("ct/load-value-elements", elementsAnswer(50, 50, true))
+    session.stateVM.loadMore("xs")
+    session.store.moveTo(13, 3)                # moved before the answer
+    drainPlatformCallbacks()
+    check session.stateVM.loadingMore.val.len == 0
+    if session.store.locals.locals.val.len > 0 and
+       session.store.locals.locals.val[0].name == "xs":
+      check session.store.locals.locals.val[0].children.len <= 50

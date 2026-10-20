@@ -1482,6 +1482,60 @@ pub struct SourceCallJumpTarget {
 #[serde(deny_unknown_fields)]
 pub struct CallSearchArg {
     pub value: String,
+    /// At most this many calls are answered (the requesting pane's window);
+    /// every matching call when absent or 0.
+    #[serde(default)]
+    pub limit: usize,
+}
+
+/// One function of the recording, as the omnibar finds it
+/// (`ct/load-symbols`): its name, where it is defined, and the tick of its
+/// first call — where choosing it goes.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolEntry {
+    pub name: String,
+    pub path: String,
+    pub line: i64,
+    pub first_call_ticks: i64,
+}
+
+/// Arguments of `ct/load-value-elements`: elements `startIndex ..<
+/// startIndex + count` of the collection reached from the local (or watch)
+/// `expression` by `path` (element indices, outermost first), at the stop the
+/// last `ct/load-locals` answered for. `count` 0 means the rest.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadValueElementsArguments {
+    pub expression: String,
+    #[serde(default)]
+    pub path: Vec<usize>,
+    pub start_index: usize,
+    #[serde(default)]
+    pub count: usize,
+    /// The tick the client's locals are about; a request about another stop
+    /// is refused rather than answered from the wrong one.
+    pub rr_ticks: i64,
+}
+
+/// Response body for `ct/load-value-elements`.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadValueElementsResponseBody {
+    pub elements: Vec<crate::value::Value>,
+    pub start_index: usize,
+    pub total: usize,
+    /// More elements follow this slice.
+    pub more: bool,
+}
+
+/// Response body for `ct/load-symbols`: every function the recording called,
+/// once. The population is the program's functions, bounded by the program
+/// rather than by the length of the recording.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadSymbolsResponseBody {
+    pub symbols: Vec<SymbolEntry>,
 }
 
 /// Response body for `ct/search-calltrace`.
@@ -1505,6 +1559,9 @@ pub struct CallSearchArg {
 #[serde(rename_all = "camelCase")]
 pub struct CallSearchResponseBody {
     pub calls: Vec<Call>,
+    /// How many calls matched, of which `calls` is the first `limit`.
+    #[serde(default)]
+    pub total: usize,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

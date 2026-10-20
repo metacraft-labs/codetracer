@@ -96,7 +96,7 @@ type
     getFrameByGeidProc*: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame]
     getFrameByFrameProc*: proc(frame: int): VisualReplayFuture[VisualReplayFrame]
     getFrameByDrawProc*: proc(draw: int): VisualReplayFuture[VisualReplayFrame]
-    getDrawCallsProc*: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]]
+    getDrawCallsProc*: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]]
     getPixelHistoryProc*: proc(x, y, frame: int):
       VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]]
     getShaderDebugProc*: proc(request: VisualReplayShaderDebugRequest):
@@ -119,8 +119,10 @@ proc frameByFrameUrl*(playerUrl: string; frame: int): string =
 proc frameByDrawUrl*(playerUrl: string; draw: int): string =
   normalizedPlayerUrl(playerUrl) & "/frame?draw=" & $draw
 
-proc drawCallsUrl*(playerUrl: string): string =
-  normalizedPlayerUrl(playerUrl) & "/draw-calls"
+proc drawCallsUrl*(playerUrl: string; frame: int): string =
+  ## The draw calls of ONE frame (MCR-Visual-Replay.md, `GET
+  ## /draw-calls?frame=<F>`) — never the whole recording's.
+  normalizedPlayerUrl(playerUrl) & "/draw-calls?frame=" & $frame
 
 proc pixelHistoryUrl*(playerUrl: string; x, y, frame: int): string =
   normalizedPlayerUrl(playerUrl) & "/pixel-history?x=" & $x &
@@ -372,11 +374,11 @@ proc getFrameByDraw*(client: VisualReplayClient;
     "VisualReplayClient.getFrameByDrawProc is not set"
   client.getFrameByDrawProc(draw)
 
-proc getDrawCalls*(client: VisualReplayClient):
+proc getDrawCalls*(client: VisualReplayClient; frame: int):
     VisualReplayFuture[seq[VisualReplayDrawCall]] =
   assert client.getDrawCallsProc != nil,
     "VisualReplayClient.getDrawCallsProc is not set"
-  client.getDrawCallsProc()
+  client.getDrawCallsProc(frame)
 
 proc getPixelHistory*(client: VisualReplayClient; x, y, frame: int):
     VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
@@ -466,8 +468,8 @@ proc createJsonVisualReplayClient*(
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
     ,
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
-      let fut = getJson(drawCallsUrl(baseUrl))
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+      let fut = getJson(drawCallsUrl(baseUrl, frame))
       when defined(js):
         result = newPromise proc(resolve: proc(value: seq[VisualReplayDrawCall])) =
           async_compat.onComplete(fut,

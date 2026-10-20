@@ -297,6 +297,9 @@ type
       ## producer the last delta came from.  Diagnostics only; the merge
       ## rules do not depend on it.
     loadingState*: Signal[LoadingState]
+    snapshotAnswered*: bool
+      ## The first poll (the snapshot) has been answered. A completed
+      ## recording is not polled again (`requestRequestSpansSince`).
 
   DegradedStateStore* = object
     ## The degraded-state catalogue's four axes, as signals
@@ -381,6 +384,12 @@ type
       ## because this module is in the Embed SDK's package graph and does not
       ## import `common_lang` (see `LoadLocalsDefaultLang`).
     viewportScheduler*: ViewportScheduler
+    symbols*: Signal[seq[RecordedSymbol]]
+      ## Every function the recording called, once (`ct/load-symbols`) — the
+      ## omnibar's symbol index, independent of the call-trace window held.
+    eventIndexAskedFor*: string
+      ## The tick `requestEventIndexAt` last asked about; the same tick is not
+      ## asked again. Cleared with the event log.
       ## The timer every windowed ViewModel over this store debounces its
       ## viewport reports with (Viewport-Driven-Loading V2). Immediate by
       ## default; a host that reports on every resize and scroll event (the
@@ -715,6 +724,7 @@ proc clearRequestSpans*(store: ReplayDataStore) =
   ## "Clear" button is pressed.
   store.requestSpans.requests.val = @[]
   store.requestSpans.cursor.val = 0'i64
+  store.requestSpans.snapshotAnswered = false
   store.requestSpans.source.val = ""
   store.requestSpans.loadingState.val = lsIdle
 
@@ -780,6 +790,40 @@ proc resetForNewSession*(store: ReplayDataStore) =
   # results are recording-specific, and the next sweep replaces them whole.
   store.clearEventLog()
 
+proc applySymbolsResponse*(store: ReplayDataStore; payload: JsonNode) =
+  ## Write a `ct/load-symbols` answer (the body, or the whole response) into
+  ## `symbols`. An answer without a `symbols` list leaves them alone.
+  if payload.isNil or payload.kind != JObject:
+    return
+  let body =
+    if payload.hasKey("symbols"): payload
+    else: payload.getOrDefault("body")
+  if body.isNil or body.kind != JObject or
+      body.getOrDefault("symbols").kind != JArray:
+    return
+  var symbols: seq[RecordedSymbol]
+  for node in body["symbols"]:
+    symbols.add RecordedSymbol(
+      name: node{"name"}.getStr(""),
+      path: node{"path"}.getStr(""),
+      line: node{"line"}.getInt(0),
+      firstCallTicks: node{"firstCallTicks"}.getBiggestInt(0).int64)
+  store.symbols.val = symbols
+
+proc requestSymbols*(store: ReplayDataStore) =
+  ## Ask the engine for the recording's functions, once per recording.
+  let key = "load-symbols"
+  if store.requestTracker.isDuplicate(key, "") or store.symbols.val.len > 0:
+    return
+  store.requestTracker.markPending(key, "")
+  let s = store
+  async_compat.onComplete(store.backend.send("ct/load-symbols", newJObject()),
+    onSuccess = proc(response: JsonNode) =
+      s.requestTracker.markComplete(key, "")
+      s.applySymbolsResponse(response),
+    onError = proc(msg: string) =
+      s.requestTracker.markComplete(key, ""))
+
 proc requestRequestSpansSince*(store: ReplayDataStore) =
   ## Poll for spans committed since the stored cursor.
   ##
@@ -795,6 +839,13 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   let cursor = store.requestSpans.cursor.val
   if store.requestTracker.isDuplicate(key, $cursor):
     return
+  # A COMPLETED RECORDING DOES NOT GROW: once its snapshot has been answered
+  # there is nothing to tail, and the panel's poll timer asks nothing more.
+  # Only a live session (or a replay of one that is still recording) keeps
+  # polling (UI-Data-Loading-Guidelines anti-pattern 3).
+  if store.requestSpans.snapshotAnswered and
+      not store.session.val.debugSessionMode.historicalModeTarget():
+    return
 
   store.requestTracker.markPending(key, $cursor)
   store.requestSpans.loadingState.val = lsLoading
@@ -806,6 +857,7 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
     onSuccess = proc(response: JsonNode) =
       s.requestTracker.markComplete(key, $cursor)
       s.applyRequestSpanDelta(response)
+      s.requestSpans.snapshotAnswered = true
       if s.requestSpans.loadingState.val == lsLoading:
         s.requestSpans.loadingState.val = lsIdle,
     onError = proc(msg: string) =
@@ -819,11 +871,21 @@ proc requestEventIndexAt*(store: ReplayDataStore; rrTicks: uint64) =
   ## (`ct/event-load` with `indexOnly`: no window, no `ct/updated-events`, so a
   ## host whose table reloads on that event is not made to redraw by a move).
   ## The answer lands in `eventLog.currentIndex` (the list scrubber's mark).
+  # ONE QUESTION PER TICK (Pattern 5): a move re-asks only when the tick
+  # changed, and not while the same question is still in flight.
+  let key = "event-index-at"
+  let argsStr = $rrTicks
+  if store.requestTracker.isDuplicate(key, argsStr) or
+      store.eventIndexAskedFor == argsStr:
+    return
+  store.requestTracker.markPending(key, argsStr)
+  store.eventIndexAskedFor = argsStr
   let fut = store.backend.send("ct/event-load", %*{
     "indexOnly": true, "atRRTicks": int64(rrTicks)})
   let s = store
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
+      s.requestTracker.markComplete(key, argsStr)
       var body = response
       if not body.isNil and body.kind == JObject and body.hasKey("body") and
           body["body"].kind == JObject:
@@ -832,7 +894,10 @@ proc requestEventIndexAt*(store: ReplayDataStore; rrTicks: uint64) =
         return
       if body.hasKey("indexAtTick") and body["indexAtTick"].kind == JInt:
         s.eventLog.currentIndex.val = body["indexAtTick"].getInt,
-    onError = proc(msg: string) = discard)
+    onError = proc(msg: string) =
+      s.requestTracker.markComplete(key, argsStr)
+      # A failed question may be asked again.
+      s.eventIndexAskedFor = "")
 
 proc installBackendEventHandlers(store: ReplayDataStore) =
   ## Consume backend responses/events that are not mirrored through the
@@ -889,6 +954,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       storeId: assignedId,
       stops: initStopTimeline(),
       viewportScheduler: immediateScheduler(),
+      symbols: createSignal(newSeq[RecordedSymbol]()),
       # -- top-level state --
       session: createSignal(SessionState(
         connectionStatus: csDisconnected,
@@ -1005,12 +1071,22 @@ proc localsLanguage*(store: ReplayDataStore): string =
 
 const
   LocalsCountBudget* = 3000
-    ## `ct/load-locals`' value budgets — the Electron GUI's numbers
-    ## (`ui/state.nim` `loadLocals`), sent by every front-end. They bound a
-    ## value TREE, not a screen; whether `countBudget` should follow the state
-    ## pane's viewport is Viewport-Driven-Loading.md Q2.
+    ## `ct/load-locals`' value budget while the state pane has not been
+    ## measured — the Electron GUI's number (`ui/state.nim` `loadLocals`).
+    ## Once it has, the budget follows the pane (`localsCountBudgetFor`).
   LocalsMinCountLimit* = 50
   LocalsDepthLimit* = 7
+
+func localsCountBudgetFor*(v: Viewport): int =
+  ## The value budget for a state pane showing `v` (Viewport-Driven-Loading
+  ## Q2): every row the pane shows or pre-fetches may be a collection that
+  ## shows its first `LocalsMinCountLimit` items, so the budget is those rows
+  ## times that. A 30-row pane gets (30 + 30) x 50 = 3000, the GUI's
+  ## constant; an unmeasured pane gets that constant.
+  # The pane's rows plus both buffers, independent of where it is scrolled:
+  # the budget bounds the values held for the stop, not a window of them.
+  if not v.measured: LocalsCountBudget
+  else: (v.rows + LeadRows + TrailRows) * LocalsMinCountLimit
 
 proc localsLoadArgs*(store: ReplayDataStore; rrTicks: uint64;
                      watchExpressions: seq[string];
@@ -1827,6 +1903,7 @@ proc clearEventLog*(store: ReplayDataStore) =
   store.eventLog.recordsTotal.val = 0
   store.eventLog.totalReported.val = false
   store.eventLog.currentIndex.val = -1
+  store.eventIndexAskedFor = ""
   store.eventLog.recordsFiltered.val = 0
   store.eventLog.maxRRTicks.val = 0'u64
   store.eventLog.loadedStart.val = 0
@@ -2354,14 +2431,23 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   ## raising ``ValueError``.
   let key = "step"
   let dirStr = $direction
-  if store.requestTracker.isDuplicate(key, dirStr):
+  let current = store.debugger.val
+  let threadId =
+    if current.threadId == 0'u32:
+      1
+    else:
+      current.threadId.int
+  let command = stepDirectionToDapCommand(direction)
+  # THE KEY IS EVERY ARGUMENT (Pattern 5): the command, the direction and the
+  # thread. A step on another thread is another request.
+  let stepKey = command & "|" & dirStr & "|" & $threadId
+  if store.requestTracker.isDuplicate(key, stepKey):
     return
 
-  store.requestTracker.markPending(key, dirStr)
+  store.requestTracker.markPending(key, stepKey)
 
   # Update debugger status to stepping.
   # Construct a NEW object to avoid JS reference semantics bug.
-  let current = store.debugger.val
   store.debugger.val = DebuggerState(
     rrTicks: current.rrTicks,
     location: current.location,
@@ -2369,21 +2455,15 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
     threadId: current.threadId,
   )
 
-  let command = stepDirectionToDapCommand(direction)
-  let threadId =
-    if current.threadId == 0'u32:
-      1
-    else:
-      current.threadId.int
   let args = %*{"direction": dirStr, "threadId": threadId}
   let fut = store.backend.send(command, args)
 
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key, dirStr),
+      s.requestTracker.markComplete(key, stepKey),
     onError = proc() =
-      s.requestTracker.markComplete(key, dirStr)
+      s.requestTracker.markComplete(key, stepKey)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,
@@ -2419,31 +2499,34 @@ proc requestLiveToolbarAction*(store: ReplayDataStore; actionId: string) =
   ## Route a toolbar action to the fake/real live MCR command path instead of
   ## the completed-replay DAP step commands.
   let key = "mcr-live-step"
-  if store.requestTracker.isDuplicate(key, actionId):
-    return
-
-  store.requestTracker.markPending(key, actionId)
   let current = store.debugger.val
-  let runningStatus =
-    if actionId == "continue": dsRunning
-    else: dsStepping
-  store.setDebuggerSnapshot(current.rrTicks, runningStatus)
-
   let threadId =
     if current.threadId == 0'u32:
       1
     else:
       current.threadId.int
+  # THE KEY IS EVERY ARGUMENT (Pattern 5): the live command, the action and
+  # the thread.
+  let actionKey = LiveMcrStepCommand & "|" & actionId & "|" & $threadId
+  if store.requestTracker.isDuplicate(key, actionKey):
+    return
+
+  store.requestTracker.markPending(key, actionKey)
+  let runningStatus =
+    if actionId == "continue": dsRunning
+    else: dsStepping
+  store.setDebuggerSnapshot(current.rrTicks, runningStatus)
+
   let args = %*{"action": actionId, "threadId": threadId}
   let fut = store.backend.send(LiveMcrStepCommand, args)
 
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key, actionId)
+      s.requestTracker.markComplete(key, actionKey)
       s.setDebuggerSnapshot(s.debugger.val.rrTicks, dsIdle),
     onError = proc() =
-      s.requestTracker.markComplete(key, actionId)
+      s.requestTracker.markComplete(key, actionKey)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,
