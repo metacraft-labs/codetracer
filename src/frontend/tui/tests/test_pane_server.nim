@@ -314,6 +314,41 @@ suite "HSF-E1: the pane server, over a real recording":
       %*{"session": sid, "created": ["/tmp/new.py"], "deleted": [], "renamed": []})
     check changed{"error"}.isNil
 
+    # ---- CodeTracer's file pane: its rows open files in the editor ---------
+    let (_, treeOpen) = srv.request("pane/open",
+      %*{"session": sid, "pane": "fileTree", "width": 50, "height": 8})
+    let treeRows = treeOpen.notes("pane/content")
+    check treeRows.len == 1
+    var fileSpot: JsonNode = nil
+    if treeRows.len == 1:
+      for r in treeRows[0]{"params", "rows"}.getElems:
+        for h in r{"hotspots"}.getElems:
+          if h{"operation"}.getStr == "file-tree.open" and
+             h{"args", "path"}.getStr.endsWith("main.py"):
+            fileSpot = h
+    # A file's row offers to open it, by its path; a folder's to open or
+    # close it.
+    check not fileSpot.isNil
+    check treeRows.len == 1 and treeRows[0]{"params", "rows"}.getElems.anyIt(
+      it{"hotspots"}.getElems.anyIt(it{"operation"}.getStr == "file-tree.toggle-folder"))
+    if not fileSpot.isNil:
+      let path = fileSpot{"args", "path"}.getStr
+      let (opened, openNotes) = srv.request("operation/run",
+        %*{"session": sid, "operation": "file-tree.open", "pane": "fileTree",
+           "args": fileSpot{"args"}})
+      check opened{"result", "ok"}.getBool
+      # The editor owns the source: it is told which file to show — even the
+      # stop's own file, which the terminal would not count as opened.
+      let shows = openNotes.notes("source/show")
+      check shows.len == 1
+      check shows.len == 1 and shows[0]{"params", "file"}.getStr == path
+      # The editor's own tree selecting it: the file tree's selection follows.
+      discard srv.request("files/selected", %*{"session": sid, "path": path})
+      let tree = srv.activeRuntime().app.fileTree
+      check tree.selected >= 0 and tree.selected < tree.entries.len and
+            tree.entries[tree.selected].path == path
+    discard srv.request("pane/close", %*{"session": sid, "pane": "fileTree"})
+
     # ---- the DAP endpoint drives the same session -------------------------
     var dseq = 0
     proc dap(command: string; args: JsonNode = newJObject()): JsonNode =

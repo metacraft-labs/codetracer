@@ -112,6 +112,12 @@ type
     imageSent: string
       ## Which frame's image the editor holds, so it is sent once per frame.
     pngCache: tuple[frame: int; png: string; width, height: int]
+    viewedSent: string
+      ## The viewed file (`TuiApp.viewedFile`) last sent as `source/show`.
+    showRequest: string
+      ## A file a pane's row asked to open (`file-tree.open`), to be shown in
+      ## the editor's source window even when it is the stop's own file —
+      ## which the terminal already shows, and so does not count as viewed.
 
   DapEndpoint = object
     listener: Socket
@@ -518,6 +524,18 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
   if not deco.isNil and $deco != s.decorationsSent:
     s.decorationsSent = $deco
     result.add deco
+  # A file a pane opened is shown in the editor's source window (§E7): the
+  # editor owns the source, so the server only names the file. One the
+  # editor cannot open from disk it reads with `source/read`.
+  let viewed = s.app.viewedFile
+  var show = s.showRequest
+  s.showRequest = ""
+  if viewed != s.viewedSent:
+    s.viewedSent = viewed
+    if show.len == 0:
+      show = viewed
+  if show.len > 0:
+    result.add notification("source/show", %*{"session": s.id, "file": show})
 
 proc resyncViewports(s: ServerSession) =
   ## The editor's windows changed size: each pane's viewport is its window's,
@@ -599,7 +617,10 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
     if op == name: isPaneOp = true
   s.applyCursor()
   if isPaneOp:
-    discard s.rt.runPaneOperation(name, paneArgsOf(params{"args"}), outcome)
+    let args = paneArgsOf(params{"args"})
+    discard s.rt.runPaneOperation(name, args, outcome)
+    if name == "file-tree.open":
+      s.showRequest = args.path
   elif isCatalogued(name):
     let problem = argumentProblem(name, argument)
     if problem.len > 0:
@@ -809,6 +830,21 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
         truncated = listing.truncated)
       s.app.fileTree.openPath = open
       extra.add srv.publish(s)
+    result = newJNull()
+  of "files/selected":
+    # The file selected in the editor's own tree, when it fills the file tree
+    # role (§E8): the file tree's selection follows, as a selection in
+    # CodeTracer's file pane would.
+    let s = srv.sessionById(params)
+    let path = params{"path"}.getStr("")
+    var tree = s.app.fileTree
+    tree.selected = -1
+    for i, e in tree.entries:
+      if e.path == path:
+        tree.selected = i
+    if tree.selected < 0:
+      tree.selected = tree.files.find(path)
+    s.app.fileTree = tree
     result = newJNull()
   of "source/cursor":
     # The editor's cursor in its source window (§E7, the source editor
