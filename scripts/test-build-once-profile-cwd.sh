@@ -38,7 +38,7 @@ RC
 
 # A PATH with the basic tools build-once.sh needs before the profile, and
 # without tup or nim, so the profile branch is taken.
-for tool in bash dirname cat; do
+for tool in bash dirname cat uname rm; do
 	ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
 done
 

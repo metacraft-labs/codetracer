@@ -42,6 +42,10 @@ test-dev-shell-writes-nothing-elsewhere:
 test-build-once-profile-cwd:
   bash scripts/test-build-once-profile-cwd.sh
 
+# Failed builds must not leave stale or partial renderer bundles runnable.
+test-build-once-failed-bundle:
+  bash scripts/test-build-once-failed-bundle.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `runquota.follows = "reprobuild/runquota-src"`
 # derives that input from reprobuild; a half-refreshed lock can still retain

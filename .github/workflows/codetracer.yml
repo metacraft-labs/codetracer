@@ -1934,6 +1934,9 @@ jobs:
       - name: build-once prepares this checkout, whatever directory it runs from
         run: nix develop .#devShells.x86_64-linux.default --command just test-build-once-profile-cwd
 
+      - name: Failed build-once invalidates stale and partial renderer bundles
+        run: bash scripts/test-build-once-failed-bundle.sh
+
       # The front door's Functions served by the pinned wrangler, on
       # localhost — no network, no deploy (ci/test/web-front-door-local.sh).
       - name: The web front door's logic, served locally

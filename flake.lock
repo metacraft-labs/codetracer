@@ -7593,11 +7593,11 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1792556986,
-        "narHash": "sha256-Ogb3KnJl3LqAJfJ2TAsc5Ymdd9PhHCT8RngrgfqjDTI=",
+        "lastModified": 1792563229,
+        "narHash": "sha256-jqyheoYEH51HhZvrh9N69/KdijKs65tvJWsL0VLw5uY=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "bd88e5a301d0efea07b9c416f07b11a536836270",
+        "rev": "0d35bb1dddd4dfff74adb671c58e9efb9aab1038",
         "type": "github"
       },
       "original": {

@@ -4,6 +4,52 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+case "$(uname -s)" in
+Darwin) ct_reprobuild_host="darwin" ;;
+Linux)
+	# Reprobuild is the default build driver on macOS, but on Linux it is
+	# still experimental: keep `just build-once` on the legacy tup path by
+	# default while we gain more experience with reprobuild here. Developers
+	# can opt in per-invocation with CODETRACER_REPROBUILD_LINUX=1. Windows
+	# keeps the reprobuild branch because it has no tup fallback in this
+	# script.
+	if [ -n "${CODETRACER_REPROBUILD_LINUX:-}" ]; then
+		ct_reprobuild_host="linux"
+	else
+		ct_reprobuild_host=""
+	fi
+	;;
+MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
+*) ct_reprobuild_host="" ;;
+esac
+
+if [ -z "$ct_reprobuild_host" ]; then
+	ct_tup_config="${CODETRACER_CONFIG:-debug}"
+	ct_tup_variant="build-${ct_tup_config}"
+	# Invalidate both webpack's output and the published renderer before starting.
+	# Failed compiles must leave an absent renderer, not yesterday's runnable
+	# bundle. Also remove partially written outputs while keeping the tool's status.
+	ct_invalidate_renderer() {
+		rm -f -- "$CT_ROOT/src/public/dist/frontend_bundle.js" \
+			"$CT_ROOT/src/public/dist/frontend_bundle.js.map" \
+			"$CT_ROOT/src/$ct_tup_variant/public/dist/frontend_bundle.js" \
+			"$CT_ROOT/src/$ct_tup_variant/public/dist/frontend_bundle.js.map"
+	}
+	ct_renderer_exit() {
+		local status="$?"
+		if [ "$status" -ne 0 ]; then
+			if ct_invalidate_renderer; then
+				echo "build-once: build failed; renderer bundle invalidated" >&2
+			else
+				echo "build-once: ERROR: failed to invalidate renderer after build failure" >&2
+			fi
+		fi
+		exit "$status"
+	}
+	trap ct_renderer_exit EXIT
+	ct_invalidate_renderer
+fi
+
 # Bootstrap the dev-shell PATH when key build tools (tup, nim, node) are not
 # already available.  The .direnv/flake-profile-*.rc file is the nix-direnv
 # cached evaluation of the codetracer flake — sourcing it is instant (no
@@ -129,24 +175,6 @@ EOF
 # every tool the codetracer `uses:` clause references on its Windows
 # branch. On all three, the codetracer recipe lives in `reprobuild.nim`
 # and is built end-to-end via the local `repro` binary.
-case "$(uname -s)" in
-Darwin) ct_reprobuild_host="darwin" ;;
-Linux)
-	# Reprobuild is the default build driver on macOS, but on Linux it is
-	# still experimental: keep `just build-once` on the legacy tup path by
-	# default while we gain more experience with reprobuild here. Developers
-	# can opt in per-invocation with CODETRACER_REPROBUILD_LINUX=1. Windows
-	# keeps the reprobuild branch because it has no tup fallback in this
-	# script.
-	if [ -n "${CODETRACER_REPROBUILD_LINUX:-}" ]; then
-		ct_reprobuild_host="linux"
-	else
-		ct_reprobuild_host=""
-	fi
-	;;
-MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
-*) ct_reprobuild_host="" ;;
-esac
 
 if [ -n "$ct_reprobuild_host" ]; then
 	# Build configuration (debug/release), selected by CODETRACER_CONFIG
@@ -517,8 +545,6 @@ fi
 # builds the `build-release` variant (src/build-release/tup.config, CONFIG_DEBUG=0
 # → release Nim flags); the default is `build-debug`. The two variants live in
 # separate output dirs so they don't collide.
-ct_tup_config="${CODETRACER_CONFIG:-debug}"
-ct_tup_variant="build-${ct_tup_config}"
 ct_publish_build_env "" "$ct_tup_config" "$ct_tup_variant" "src/$ct_tup_variant"
 
 # Mirror the reprobuild branch's env-var setup so cargo build scripts work
