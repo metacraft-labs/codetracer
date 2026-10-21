@@ -260,18 +260,42 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
     await ctPage.locator(".monaco-editor .margin-view-overlays .gutter[data-line='31'] .gutter-breakpoint-enabled")
       .first().click({ button: "right" });
     await ctPage.waitForTimeout(800);
+    // AND NO MENU: the marker's right-click is the enable / disable toggle and
+    // nothing else (`Editor-Pane.md`, the gutter's gesture 8). Monaco's own
+    // `onContextMenu` used to answer the same press with the editor's menu,
+    // built BEFORE the toggle ran, so it offered "Disable breakpoint" for the
+    // breakpoint the press had just disabled — and that stale menu was still
+    // open when the next right-click read it (codetracer-pm issue
+    // 2026-10-04-desktop-editor-menu-offers-disable-for-a-just-disabled-
+    // breakpoint).
+    clicks.gutterRightClickMenu = await ctPage.locator("#context-menu-container").isVisible();
     clicks.gutterDisabled = await ctPage.locator(
       ".monaco-editor .margin-view-overlays .gutter[data-line='31'] .gutter-breakpoint-disabled").count() > 0;
     // The editor's menu on a line WITH a breakpoint — the one just disabled,
-    // so its entry reads "Enable breakpoint". MEASURED: the FIRST menu
-    // opened after the gutter's right-click still offers "Disable
-    // breakpoint" although the breakpoint table holds it disabled (codetracer-
-    // specs issue 2026-10-04-desktop-editor-menu-offers-disable-for-a-just-
-    // disabled-breakpoint); the second reads the state. Both are recorded;
-    // the second is the reference.
-    menus.editorTextOnBreakpointFirst = await rightClickMenu(
-      ctPage.locator(".monaco-editor .view-line", { hasText: "return left + right" }).first());
-    menus.editorTextOnBreakpoint = await rightClickMenu(ctPage.locator(".monaco-editor .view-line", { hasText: "return left + right" }).first());
+    // so its entry reads "Enable breakpoint", on the FIRST press as on the
+    // second. Both are recorded and both are asserted below.
+    //
+    // Each press is made on line 31 brought to the editor's CENTRE first. By
+    // now the debugger has moved and the editor has scrolled line 31 under
+    // Monaco's sticky-scroll header (`.overlayWidgets`), which then takes the
+    // press: Playwright reports it intercepting pointer events and the press
+    // never reaches the line. The press is made near the line's start, as the
+    // breakpoint-free `editorText` press above is, and for its reason.
+    const centreLine31 = async () => {
+      await ctPage.evaluate(() => {
+        const editors = (globalThis as any).data?.ui?.editors ?? {};
+        for (const key of Object.keys(editors)) {
+          editors[key]?.monacoEditor?.revealLineInCenter?.(31);
+        }
+      });
+      await ctPage.waitForTimeout(300);
+    };
+    const line31OnBreakpoint = () =>
+      ctPage.locator(".monaco-editor .view-line", { hasText: "return left + right" }).first();
+    await centreLine31();
+    menus.editorTextOnBreakpointFirst = await rightClickMenu(line31OnBreakpoint(), { x: 60, y: 8 });
+    await centreLine31();
+    menus.editorTextOnBreakpoint = await rightClickMenu(line31OnBreakpoint(), { x: 60, y: 8 });
   }
   // A disabled breakpoint does not stop the jumps below.
   const start = await where();
@@ -366,6 +390,8 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   const sort = clicks.eventLogSort as { ascending: unknown; descending: unknown };
   expect(sort.ascending).not.toEqual(sort.descending);
   expect(menus.callTraceWithChildren).toEqual(["Collapse Call Children"]);
+  expect(clicks.gutterRightClickMenu).toBe(false);
+  expect(menus.editorTextOnBreakpointFirst).toContain("Enable breakpoint");
   expect(menus.editorTextOnBreakpoint).toContain("Enable breakpoint");
   // An argument takes no left press of its own on the desktop: no tooltip,
   // and the debugger stays (only the call's name is the row's target).

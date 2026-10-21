@@ -538,6 +538,33 @@ proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js
       self.data.services.debugger.enable(path, lineNumber)
     self.refreshEditorLine(lineNumber)
 
+proc isGutterToggleTarget(target: js): bool =
+  ## Whether a right click on `target` is the gutter's enable / disable toggle
+  ## (`Editor-Pane.md`, "On the gutter", gesture 8, the glyph column's right
+  ## click): an element with a class starting with `gutter-breakpoint`, which
+  ## is the breakpoint's marker (`gutter-breakpoint-enabled` / `-disabled` /
+  ## `-error`, drawn by `trace.editorLineNumber`). An exact
+  ## `gutter-breakpoint` matched no element the gutter draws (PLAT-50).
+  ##
+  ## NOT THE LINE NUMBER. `gutter-line` is the element holding the line's
+  ## number, and a right click on the line numbers opens the editor's menu for
+  ## that line (the same section, after its table). It used to toggle here as
+  ## well, so one press both toggled and opened a menu built before the
+  ## toggle: the defect this predicate exists to stop. The menu carries the
+  ## breakpoint entries, so nothing the toggle offered is lost there.
+  ##
+  ## ONE TEST FOR BOTH LISTENERS. The container's `contextmenu` listener
+  ## toggles on exactly these targets, and Monaco's `onContextMenu` must stand
+  ## down on exactly the same ones (see there). Two copies of the class test
+  ## could drift apart, and a target one of them matched and the other did
+  ## not would bring the stale menu back, or a press with no answer at all.
+  if target.isNil or target.classList.isNil:
+    return false
+  for element in cast[seq[cstring]](target.classList):
+    if cstrutils.startsWith(element, cstring"gutter-breakpoint"):
+      return true
+  false
+
 method clear*(self: EditorViewComponent) =
   self.flow.clear()
 
@@ -3458,8 +3485,8 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     # over ours.
     #
     # AND THE GUTTER WAS NOT THE EXCEPTION IT LOOKED LIKE.  The listener below
-    # (`:2674`) does call `preventDefault`, but only for a target whose class
-    # list contains `gutter-line` or `gutter-breakpoint` — so on the rest of the
+    # does call `preventDefault`, but only for a breakpoint marker
+    # (`isGutterToggleTarget`; it then took `gutter-line` too) — so on the rest of the
     # margin (Monaco's own `.line-numbers`, `.margin`) nothing suppressed
     # anything and the gutter showed two menus as well.  Measured against an
     # assembled bundle before this change: right-clicking `div.gutter` gave
@@ -3481,6 +3508,31 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     # nothing and prevent nothing, and the browser's default action for an
     # unprevented `contextmenu` is its own menu.
     if cast[bool](ev.event.toJs.shiftKey):
+      return
+    # THE GUTTER'S TOGGLE OPENS NO MENU (`Editor-Pane.md`, "On the gutter",
+    # gesture 8: a right click in the glyph column toggles the breakpoint's
+    # enabled state, and "No menu appears").
+    #
+    # This listener sits on Monaco's own DOM node, a descendant of the editor
+    # container, so for one press it runs BEFORE the container's `contextmenu`
+    # listener below — the one that does the toggle. Building a menu here
+    # therefore read the breakpoint's state from before the toggle: a right
+    # click on an enabled marker showed "Disable breakpoint" for the
+    # breakpoint the same press then disabled, and that stale menu stayed
+    # open, so the next right click on the text read it instead of a fresh
+    # one (codetracer-pm issue 2026-10-04-desktop-editor-menu-offers-disable-
+    # for-a-just-disabled-breakpoint). On those targets this handler builds
+    # nothing, shows nothing and prevents nothing; the container listener
+    # calls `preventDefault` itself, so no browser menu appears either.
+    #
+    # Placed after the Shift test, which this change leaves as it was. On these
+    # targets Shift never reached the browser's menu: the container listener
+    # prevents the default whatever the modifiers, before and after this test.
+    #
+    # `ev.event` is Monaco's `StandardMouseEvent`, whose `target` is the DOM
+    # element under the press — the same element the container listener's
+    # `ev.target` names.
+    if isGutterToggleTarget(ev.event.target):
       return
     ev.event.preventDefault()
     let contextMenu = createContextMenuItems(self, ev)
@@ -3560,16 +3612,13 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   )
 
   document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
-    for element in cast[seq[cstring]](ev.toJs.target.classList):
-      # PLAT-50: the breakpoint's MARKER is `gutter-breakpoint-enabled` /
-      # `-disabled` (`trace.editorLineNumber`); an exact `gutter-breakpoint`
-      # matched no element the gutter draws.
-      if element == cstring"gutter-line" or
-         cstrutils.startsWith(element, cstring"gutter-breakpoint"):
-        ev.preventDefault()
-        ev.stopPropagation()
-        self.lineActionContextMenu(tabInfo, ev.target.toJs)
-        return
+    # The gutter's right-click toggle. Monaco's `onContextMenu` above has
+    # already seen this press and, for these same targets, stood down without
+    # a menu (`isGutterToggleTarget`), so the toggle here is the whole answer.
+    if isGutterToggleTarget(ev.target.toJs):
+      ev.preventDefault()
+      ev.stopPropagation()
+      self.lineActionContextMenu(tabInfo, ev.target.toJs)
   )
 
   discard self.loadInitialFlowIfReady()
