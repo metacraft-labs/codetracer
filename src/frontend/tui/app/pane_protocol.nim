@@ -93,7 +93,8 @@ proc argsJson(a: PaneOpArgs; operation: string): JsonNode =
     result["line"] = %a.line
     result["text"] = %a.text
   of "variables.toggle-expand", "variables.value-history",
-     "variables.value-origin", "variables.load-more":
+     "variables.value-origin", "variables.load-more",
+     "file-tree.open", "file-tree.toggle-folder":
     result["path"] = %a.path
   of "history.seek-to-tick":
     result["tick"] = %a.tick

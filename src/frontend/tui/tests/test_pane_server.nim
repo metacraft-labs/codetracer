@@ -15,7 +15,7 @@
 ## No mocks: the recording, the engine, the session and the painters are the
 ## product's. The stdio transport itself is `test_pane_server_stdio.nim`'s.
 
-import std/[json, options, sequtils, strutils, tables, unittest]
+import std/[json, options, os, sequtils, strutils, tables, unittest]
 
 import headless_app/layout_model
 
@@ -277,6 +277,88 @@ suite "HSF-E1: the pane server, over a real recording":
     check deco.len == 1
     check deco.len == 1 and deco[0]{"params", "rows"}.getElems.anyIt(
       it{"line"}.getInt == execLine and it{"execution"}.getBool)
+
+    # ---- an operation "at the cursor" acts at the editor's cursor ----------
+    # The editor reports where its cursor is (`source/cursor`); toggling a
+    # breakpoint then places it there, not at the stop's line.
+    let cursorLine = execLine + 2
+    discard srv.request("source/cursor",
+      %*{"session": sid, "file": file, "line": cursorLine, "column": 1})
+    let (toggled, toggleNotes) = srv.request("operation/run",
+      %*{"session": sid, "operation": "editor.toggle-breakpoint"})
+    check toggled{"result", "ok"}.getBool
+    var marked = toggleNotes.notes("source/decorations")
+    if marked.len == 0:
+      # The decorations follow the next publish when the toggle did not
+      # change the visible range's text.
+      marked = srv.request("source/viewport",
+        %*{"session": sid, "file": file, "firstLine": max(1, execLine - 5),
+           "lastLine": execLine + 6})[1].notes("source/decorations")
+    check marked.len >= 1 and marked[^1]{"params", "rows"}.getElems.anyIt(
+      it{"line"}.getInt == cursorLine and it{"mark"}.getStr == "breakpoint")
+    check marked.len >= 1 and not marked[^1]{"params", "rows"}.getElems.anyIt(
+      it{"line"}.getInt == execLine and it{"mark"}.getStr == "breakpoint")
+
+    # ---- the recording's source set, for an editor's own file tree -------
+    let (listed, _) = srv.request("session/files", %*{"session": sid})
+    let files = listed{"result"}.getElems
+    check files.anyIt(it{"path"}.getStr == file)
+    let (read, _) = srv.request("source/read", %*{"session": sid, "file": file})
+    check read{"result", "text"}.getStr == readFile(file) or
+          read{"result", "text"}.getStr.len > 0
+    check read{"result", "text"}.getStr.splitLines.len >= execLine
+    let (missing, _) = srv.request("source/read",
+      %*{"session": sid, "file": "/no/such/recorded/file.py"})
+    check not missing{"error"}.isNil
+    # The editor's tree selection: CodeTracer's file tree selects the file,
+    # and its pane draws that row on the selection surface.
+    discard srv.request("files/selected", %*{"session": sid, "path": file})
+    let (_, treeNotes) = srv.request("pane/open",
+      %*{"session": sid, "pane": "fileTree", "width": 40, "height": 12})
+    let selectedRows = treeNotes.notes("pane/content")
+    let base = file.extractFilename
+    check selectedRows.len >= 1 and selectedRows[^1]{"params", "rows"}.getElems.anyIt(
+      base in it{"text"}.getStr and it{"spans"}.getElems.anyIt(
+        it{"surface"}.getStr == "ct.surface-selection"))
+    discard srv.request("pane/close", %*{"session": sid, "pane": "fileTree"})
+    let (changed, _) = srv.request("files/changed",
+      %*{"session": sid, "created": ["/tmp/new.py"], "deleted": [], "renamed": []})
+    check changed{"error"}.isNil
+
+    # ---- CodeTracer's file pane: its rows open files in the editor ---------
+    let (_, treeOpen) = srv.request("pane/open",
+      %*{"session": sid, "pane": "fileTree", "width": 50, "height": 8})
+    let treeRows = treeOpen.notes("pane/content")
+    check treeRows.len == 1
+    var fileSpot: JsonNode = nil
+    if treeRows.len == 1:
+      for r in treeRows[0]{"params", "rows"}.getElems:
+        for h in r{"hotspots"}.getElems:
+          if h{"operation"}.getStr == "file-tree.open" and
+             h{"args", "path"}.getStr.endsWith("main.py"):
+            fileSpot = h
+    # A file's row offers to open it, by its path; a folder's to open or
+    # close it.
+    check not fileSpot.isNil
+    check treeRows.len == 1 and treeRows[0]{"params", "rows"}.getElems.anyIt(
+      it{"hotspots"}.getElems.anyIt(it{"operation"}.getStr == "file-tree.toggle-folder"))
+    if not fileSpot.isNil:
+      let path = fileSpot{"args", "path"}.getStr
+      let (opened, openNotes) = srv.request("operation/run",
+        %*{"session": sid, "operation": "file-tree.open", "pane": "fileTree",
+           "args": fileSpot{"args"}})
+      check opened{"result", "ok"}.getBool
+      # The editor owns the source: it is told which file to show — even the
+      # stop's own file, which the terminal would not count as opened.
+      let shows = openNotes.notes("source/show")
+      check shows.len == 1
+      check shows.len == 1 and shows[0]{"params", "file"}.getStr == path
+      # The editor's own tree selecting it: the file tree's selection follows.
+      discard srv.request("files/selected", %*{"session": sid, "path": path})
+      let tree = srv.activeRuntime().app.fileTree
+      check tree.selected >= 0 and tree.selected < tree.entries.len and
+            tree.entries[tree.selected].path == path
+    discard srv.request("pane/close", %*{"session": sid, "pane": "fileTree"})
 
     # ---- the DAP endpoint drives the same session -------------------------
     var dseq = 0

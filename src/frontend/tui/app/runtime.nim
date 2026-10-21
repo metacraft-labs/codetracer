@@ -5488,7 +5488,9 @@ const
     ("variables.value-history", "Show this value's history"),
     ("variables.value-origin", "Show this value's origin"),
     ("variables.load-more", "Load more members"),
-    ("history.seek-to-tick", "Go to this moment")]
+    ("history.seek-to-tick", "Go to this moment"),
+    ("file-tree.open", "Open this file"),
+    ("file-tree.toggle-folder", "Expand or collapse this folder")]
     ## The operations a hosted pane's rows offer: what a click on the same
     ## cells of the terminal's pane does (`routeMouseReport`,
     ## `routePaneClick`), named so an editor can bind them.
@@ -5542,6 +5544,22 @@ proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
     return
   let area = hostedArea(height, width)
   case pane
+  of paneFileTree:
+    # K17 / K18: a row opens its file or opens or closes its folder, as a
+    # press on the terminal's row does (`routePaneClick`).
+    let tree = rt.app.fileTree
+    if tree.entries.len == 0:
+      return
+    var g = newStyledGrid(area.col + area.width, area.row + area.height)
+    let screen = paintFileTree(g, area, tree)
+    for r in 0 ..< height:
+      let i = screen.entryIndexAt(r + 1)
+      if i < 0 or i >= tree.entries.len:
+        continue
+      let e = tree.entries[i]
+      result[r].add PaneHotspot(startCol: 0, endCol: width,
+        operation: (if e.isFolder: "file-tree.toggle-folder" else: "file-tree.open"),
+        args: PaneOpArgs(path: e.path))
   of paneCalltrace:
     if rt.app.callTrace.isEmpty:
       return
@@ -5626,6 +5644,10 @@ proc runPaneOperation*(rt: TuiRuntime; operation: string; args: PaneOpArgs;
     discard rt.app.variables.expandMore(args.path)
   of "history.seek-to-tick":
     outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: args.tick))
+  of "file-tree.open":
+    outcome.requestClick(PaneClickRequest(kind: pcOpenFile, path: args.path))
+  of "file-tree.toggle-folder":
+    outcome.requestClick(PaneClickRequest(kind: pcToggleFolder, path: args.path))
   else:
     outcome.repaint = false
     return false
