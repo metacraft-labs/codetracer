@@ -58,6 +58,10 @@ test-build-once-failed-bundle:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Run inside the dev-env to exercise its provisioned Nix, including 2.28.
+test-dev-env-flake-metadata:
+  bash ci/test/dev-env-flake-metadata-test.sh
+
 # Assert that every `flake.lock` node whose repository is checked out beside
 # this one records the `lastModified` that its own `rev` actually carries. A
 # node whose timestamp names one commit and whose `rev` names another is
@@ -1025,6 +1029,7 @@ test:
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-flake-pin-alignment \
+    test-dev-env-flake-metadata \
     test-flake-lock-node-dates \
     test-npm-install-yarn-lock \
     test-python-version-alignment \

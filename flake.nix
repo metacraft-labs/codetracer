@@ -287,6 +287,12 @@
       # `nixos-modules` needs no line here: runquota-src's already follows
       # reprobuild's, which follows `nix-blockchain-development/nixos-modules`
       # above.
+      # Nix 2.28 treats an override-only nested input as the indirect
+      # registry reference `flake:runquota-src`. State the same source URL
+      # as reprobuild so the Nix shipped in our dev-env can re-enter it.
+      # This declares no revision: the lock and the derived root follows
+      # edge above still select reprobuild's single RunQuota source.
+      inputs.runquota-src.url = "github:metacraft-labs/runquota/dev";
       inputs.runquota-src.inputs.nixpkgs.follows = "nixpkgs";
       inputs.runquota-src.inputs.flake-parts.follows = "flake-parts";
       inputs.runquota-src.inputs.git-hooks.follows = "git-hooks-nix";
