@@ -2224,13 +2224,7 @@ test-recorder-siblings:
 #
 # Needs the wazero replayer built (`just build` in codetracer-wasm-recorder).
 verify-wasm-recordings:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  for fixture in wasm-memory-calldata wasm-nan-payloads wasm-parity-corpus; do
-    echo "=== $fixture ==="
-    ./src/db-backend/tests/fixtures/$fixture/verify.sh
-  done
-  echo "=== all WebAssembly boundary-recording checks passed ==="
+  bash ci/test/wasm-recordings.sh
 
 # M29 cross-process value-origin envelope, per
 # `GUI/Test-Scenarios/Cross-Process-Origin-E2E-Test-Design.md` §6 — the

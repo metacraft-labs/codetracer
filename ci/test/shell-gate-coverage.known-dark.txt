@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 47
+# RECORDED-DARK-CEILING: 46
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -72,8 +72,7 @@
 # `actions/checkout`, when it is not yet on the runner's disk.
 #
 # This file means the opposite: these ARE
-# gates, they SHOULD run, and today nothing runs them. (One entry — the
-# `ci/lib/` library at the bottom — is neither, and says so on its own line.)
+# gates, they SHOULD run, and today nothing runs them.
 #
 # ENTRIES ARE REPO-RELATIVE PATHS, NOT BASENAMES, since 2026-09-04: the guard's
 # scan was widened from `ci/test/ -maxdepth 1` to every `*.sh` under `ci/` and
@@ -727,12 +726,3 @@ ci/test/host-image-serves-in-a-container.sh
 # Issue: 2026-10-05-identity-live-device-grant-has-no-issuer-in-ci.
 ci/test/identity-live-device-grant.sh
 ci/test/identity-device-approve.mjs
-
-# A library: its only consumers are the WebAssembly boundary-recording fixture
-# checks (`src/db-backend/tests/fixtures/wasm-*/verify.sh`, run by `just
-# verify-wasm-recordings`), which need the wazero replayer built from the
-# `codetracer-wasm-recorder` sibling. No workflow clones or builds that
-# sibling. Green when a job does and runs `just verify-wasm-recordings`; the
-# both-directions rule then deletes this line.
-# Issue: 2026-10-05-wasm-recording-fixture-checks-have-no-wazero-in-ci.
-ci/lib/recording-dump.sh

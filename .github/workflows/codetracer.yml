@@ -1889,6 +1889,58 @@ jobs:
       # inside a contract suite.
       - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/nim.sh"
 
+  wasm-recordings:
+    name: WebAssembly boundary recording fixtures
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: '2'
+      GOMAXPROCS: '2'
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+          persist-credentials: false
+      - name: Setup dev env and lock-pinned recording dependencies
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+          siblings: |
+            codetracer-wasm-recorder
+            codetracer-wasm-instrumenter
+            codetracer-trace-format
+            codetracer-trace-format-nim
+      - name: Assert the fixture CI contract
+        run: bash ci/test/wasm-recordings-ci-test.sh
+      # Each producer owns its compiler and trace-writer dependencies.
+      - name: Build the wazero replayer
+        working-directory: ../codetracer-wasm-recorder
+        run: nix develop . --command just build
+      - name: Build the WebAssembly instrumenter
+        working-directory: ../codetracer-wasm-instrumenter
+        run: nix develop . --command just build
+      - name: Build the canonical recording decoder
+        working-directory: ../codetracer-trace-format-nim
+        run: nix develop . --command just build
+      - name: Build the browser recording daemon
+        run: nix develop .#ci --command cargo build --locked --manifest-path src/backend-manager/Cargo.toml
+      - name: Re-record and verify the boundary fixtures
+        run: nix develop .#ci --command just verify-wasm-recordings
+
   dev-shell-hygiene:
     runs-on: [self-hosted, linux, x64]
     # NEW, NO SAMPLE YET. Three gates that `shell-gate-coverage.sh` reported as
@@ -8592,6 +8644,9 @@ jobs:
         # silently becomes an empty token rather than an error.
         run: bash ci/test/sibling-provisioning-test.sh
 
+      - name: Assert the WebAssembly recording fixture lane stays required
+        run: bash ci/test/wasm-recordings-ci-test.sh
+
       - name: Assert every job in this workflow declares a timeout
         # A third static check over this same file, here for the same reason as
         # the two above: it needs no runner and no siblings, so it must not sit
@@ -8833,6 +8888,7 @@ jobs:
     # delay only by giving up the coverage this gate exists to protect.
     needs:
       - ci-contract-suites
+      - wasm-recordings
       - lint-bash
       - lint-nim
       - lint-nix
