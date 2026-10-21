@@ -20,6 +20,7 @@ from ../viewmodel/viewmodels/generated_code_operation import
 from dom import createElement
 from mode_layouts import isEditingMode
 from ../viewmodel/viewmodels/diff_document import editorLanguageForPath
+from ../viewmodel/viewmodels/run_control_ownership import rollbackRunSpinner
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
@@ -2726,12 +2727,10 @@ proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
 
   let refusal = editorTestRunHook(self.name, selector, attrLine)
   if refusal.len > 0:
-    # UNWIND WHAT THIS CLICK ARMED. When nothing was running, that is the whole
-    # of it — `settle` rather than `restoreTestButton` because the list must be
-    # emptied too, and emptying it is what `restoreTestButton` alone does not
-    # do. When a run WAS in flight, its slot and its place in the list are put
-    # back instead, so the refusal costs the user a sentence and not the
-    # progress they were already watching.
+    # Unwind only this click. Another editor can still own an accepted run,
+    # so a refusal must never call the global settle. Restore this editor
+    # and remove only the membership this click added; preserve any earlier
+    # slot and spinner instead.
     if hadRunningSlot:
       trace.gutterRunningTest[self.name] = previousSlot
       self.updateLineNumbersOnly()
@@ -2739,7 +2738,8 @@ proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
       trace.gutterRunningTest.del(self.name)
       self.updateLineNumbersOnly()
     else:
-      settleEditorTestRun()
+      self.restoreTestButton(cstring"Run test")
+      rollbackRunSpinner(spinningTestEditors, self, wasSpinning)
     self.api.errorMessage($refusal)
     return
 
@@ -2793,17 +2793,62 @@ proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = f
       return
 
     if not editorTestRunHook.isNil:
-      # A HOST TOOK IT, or said why it could not. Either way the button never
-      # starts animating over a message that went nowhere.
-      let refusal = editorTestRunHook(self.name, selector, line)
-      if refusal.len > 0:
-        self.api.errorMessage($refusal)
-        return
+      # ARM THE SPINNER BEFORE THE DISPATCH, for exactly the reason
+      # `runTestFromGutter` does — see the long note there. This arm carried
+      # the PRE-FIX ordering: it called the hook first and armed afterwards,
+      # so a dispatch refused SYNCHRONOUSLY INSIDE the hook settled while
+      # `spinningTestEditors` was still empty and `activeTestId` still unset,
+      # swept nothing, and then these lines armed an animation no second
+      # settle would ever arrive to clear. `loadAnimation`'s 400-frame cap was
+      # the only thing that ended it: two minutes of "Running..." under a
+      # `"<selector>" started` message, over a run that was declined before
+      # the click finished.
+      #
+      # The gutter was repaired; this widget is still painted whenever an
+      # editor has a `#[test]` or a Python test and no catalog entry for that
+      # line, and `editorTestRunHook` is installed globally, so the defect was
+      # live on the surviving arm.
+      #
+      # WHAT WAS THERE BEFORE IS REMEMBERED so the unwind puts back exactly
+      # what this click displaced: the commonest refusal is `already-running`,
+      # where a real run owns the spinner and a blanket settle would visibly
+      # "finish" it.
+      let wasSpinning = spinningTestEditors.find(self) >= 0
+      let previousTestId = self.activeTestId
       capture testId:
         self.activeTestId = testId
-        self.redrawActiveTestButton()
-      if spinningTestEditors.find(self) < 0:
+        # The accepted run already owns its animation when this is the same
+        # button. Re-arming it would create a second timer chain.
+        if not wasSpinning or previousTestId != testId:
+          self.redrawActiveTestButton()
+      if not wasSpinning:
         spinningTestEditors.add(self)
+
+      let refusal = editorTestRunHook(self.name, selector, line)
+      if refusal.len > 0:
+        # UNWIND WHAT THIS CLICK ARMED, and no more.
+        if wasSpinning:
+          if self.activeTestId != previousTestId:
+            # Undo only the newly clicked node. restoreTestButton would also
+            # clear the gutter owned by the accepted run in this editor.
+            let declinedButton = cast[Element](jq("#" & self.activeTestId))
+            if not declinedButton.isNil:
+              declinedButton.classList.remove(cstring"active-test-button")
+              declinedButton.textContent = cstring"Run test"
+          # Its existing timer resumes once this synchronous click returns.
+          self.activeTestId = previousTestId
+        else:
+          self.restoreTestButton(cstring"Run test")
+          rollbackRunSpinner(spinningTestEditors, self, wasSpinning)
+        self.api.errorMessage($refusal)
+        return
+
+      # ALREADY SETTLED, INSIDE THE CALL. The dispatch was refused or answered
+      # synchronously and the settle has already emptied the list. Nothing is
+      # running, so "started" is not claimed and no animation is left behind.
+      if spinningTestEditors.find(self) < 0:
+        return
+
       self.api.infoMessage(&"\"{selector}\" started")
       return
 
