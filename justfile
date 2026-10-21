@@ -3635,9 +3635,11 @@ test-css-token-resolution:
   exec > >(tee test-logs/test-css-token-resolution.log) 2>&1
   bash ci/test/css-token-resolution.sh
 
-# The guard above, shown failing. Eleven arms: five defects it must report,
-# four legal constructs it must not, and the two instrument checks that stop
-# an empty stylesheet or an unreadable Tupfile scoring as a pass. Hermetic
+# The guard above, shown failing. Ten arms: four defects it must report (an
+# unresolved token, a theme redefining a token, and a legacy palette leak —
+# alone, and beside the retired ceilings file), three legal constructs it must
+# not, the two instrument checks that stop an empty stylesheet or an
+# unreadable Tupfile scoring as a pass, and the real tree. Hermetic
 # and sub-second — synthetic fixtures in a scratch directory, nothing in the
 # worktree is touched — except the last arm, which runs the real pipeline
 # over the real tree and needs `stylus` (it skips without it).
