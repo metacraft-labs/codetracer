@@ -16,6 +16,7 @@ use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::ReplaySession;
+use crate::step_table::StepTable;
 use crate::task::{
     Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, DapTracepoint, Events,
     HistoryResultWithRecord, LoadHistoryArg, Location, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, ProgramEvent,
@@ -53,7 +54,7 @@ pub struct Db {
     pub workdir: PathBuf,
     pub functions: DistinctVec<FunctionId, FunctionRecord>,
     pub calls: DistinctVec<CallKey, DbCall>,
-    pub steps: DistinctVec<StepId, DbStep>,
+    pub steps: StepTable,
     pub variables: DistinctVec<StepId, Vec<FullValueRecord>>,
     pub instructions: DistinctVec<StepId, Vec<String>>,
     pub types: DistinctVec<TypeId, TypeRecord>,
@@ -111,7 +112,7 @@ impl Db {
             workdir: PathBuf::from(workdir),
             functions: DistinctVec::new(),
             calls: DistinctVec::new(),
-            steps: DistinctVec::new(),
+            steps: StepTable::new(),
             variables: DistinctVec::new(),
             instructions: DistinctVec::new(),
             types: DistinctVec::new(),
@@ -336,7 +337,9 @@ impl Db {
                         let mut last_line = function_record.line.0;
                         let steps_len = self.steps.len() as i64;
                         for i in step_id_int..steps_len {
-                            let step = self.steps[StepId(i)];
+                            let Some(step) = self.steps.get(StepId(i)).copied() else {
+                                continue;
+                            };
                             if step.call_key == CallKey(call_key_int) {
                                 if step.line.0 > last_line {
                                     last_line = step.line.0;
@@ -360,7 +363,9 @@ impl Db {
                     let mut last_line = function_record.line.0;
                     let steps_len = self.steps.len() as i64;
                     for i in step_id_int..steps_len {
-                        let step = self.steps[StepId(i)];
+                        let Some(step) = self.steps.get(StepId(i)).copied() else {
+                            continue;
+                        };
                         if step.call_key == CallKey(call_key_int) {
                             if step.line.0 > last_line {
                                 last_line = step.line.0;
@@ -955,7 +960,10 @@ impl Db {
             // Guard against negative step_id wrapping: only iterate when
             // the next id is non-negative and within bounds.
             while current_step_id.0 >= 0 && (current_step_id.0 as usize) < self.steps.len() {
-                let step = self.steps[current_step_id];
+                let Some(step) = self.steps.get(current_step_id).copied() else {
+                    current_step_id = current_step_id + 1;
+                    continue;
+                };
                 if step.path_id != original_path_id || step.line != original_line {
                     break;
                 } else {
@@ -978,7 +986,7 @@ impl Db {
 
 impl Db {
     pub fn new_for_test() -> Db {
-        let steps: DistinctVec<StepId, DbStep> = DistinctVec::new();
+        let steps = StepTable::new();
         let mut step_map_0: HashMap<usize, Vec<DbStep>> = HashMap::new();
         // GDH-M7: the map holds EVERY version interned under a path string.
         let mut path_map: HashMap<String, Vec<PathId>> = HashMap::new();
@@ -1031,61 +1039,24 @@ pub struct StepIterator<'a> {
     pub forward: bool,
 }
 
-impl StepIterator<'_> {
-    fn on_step_id_limit(&self) -> bool {
-        // Guard against negative step IDs (e.g. StepId(-1) / NO_STEP_ID) and
-        // empty step vectors.  A negative i64 cast to usize wraps to a huge
-        // value, so we must check the sign first.
-        if self.db.steps.is_empty() || self.step_id.0 < 0 {
-            return true;
-        }
-        let idx = self.step_id.0 as usize;
-        if self.forward {
-            // moving forward: we're at (or past) the last step
-            idx >= self.db.steps.len() - 1
-        } else {
-            // moving backwards: we're at the first step
-            idx == 0
-        }
-    }
-
-    fn single_step_line(&self) -> StepId {
-        // Caller (`Iterator::next`) must call `on_step_id_limit` first, so
-        // these conditions should always hold.  We still avoid a hard panic
-        // and clamp to the boundary instead, logging the unexpected situation.
-        if self.forward {
-            if self.step_id.0 < 0 || (self.step_id.0 as usize) >= self.db.steps.len().saturating_sub(1) {
-                warn!(
-                    "single_step_line: forward step from {:?} is at or beyond limit (steps len {})",
-                    self.step_id,
-                    self.db.steps.len()
-                );
-                return self.step_id;
-            }
-            self.step_id + 1
-        } else {
-            if self.step_id.0 <= 0 {
-                warn!(
-                    "single_step_line: backward step from {:?} is at or beyond limit",
-                    self.step_id
-                );
-                return self.step_id;
-            }
-            self.step_id - 1
-        }
-    }
-}
-
 impl Iterator for StepIterator<'_> {
     type Item = DbStep;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.on_step_id_limit() {
-            self.step_id = self.single_step_line();
-            Some(self.db.steps[self.step_id])
-        } else {
-            None
+        if self.step_id.0 < 0 {
+            return None;
         }
+        let steps = &self.db.steps.items;
+        let index = if self.forward {
+            steps.partition_point(|step| step.step_id <= self.step_id)
+        } else {
+            steps
+                .partition_point(|step| step.step_id < self.step_id)
+                .checked_sub(1)?
+        };
+        let step = *steps.get(index)?;
+        self.step_id = step.step_id;
+        Some(step)
     }
 }
 
@@ -1684,10 +1655,11 @@ impl MaterializedReplaySession {
         // `step_matches_any_tracepoint` is O(1) keyed by `path_id`.
         let mut tracepoint_list: Vec<HashMap<(usize, Option<i64>), DapTracepoint>> = Default::default();
         tracepoint_list.resize_with(reader.path_count(), HashMap::new);
+        let initial_step_id = reader.first_step_id().unwrap_or(StepId(0));
         MaterializedReplaySession {
             reader,
             local_types: Vec::new(),
-            step_id: StepId(0),
+            step_id: initial_step_id,
             call_key: CallKey(0),
             breakpoint_list,
             breakpoint_next_id: 0,
@@ -1936,11 +1908,9 @@ impl MaterializedReplaySession {
     #[allow(clippy::expect_used)] // step_id != NO_INDEX guard ensures the id is valid
     fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
         let step_id_int = event_record.step_id.0;
-        let (path, line) = if step_id_int != NO_INDEX {
-            let step_record = self
-                .reader
-                .step(event_record.step_id)
-                .expect("to_program_event: invalid step_id");
+        // I/O can be recorded at a reload annotation. Keep the event at its
+        // execution tick without inventing a source location for that tick.
+        let (path, line) = if let Some(step_record) = self.reader.step(event_record.step_id) {
             (
                 self.reader
                     .workdir()
@@ -1961,14 +1931,7 @@ impl MaterializedReplaySession {
             call_key: CallKey(0),
             global_call_key: CallKey(0),
         };
-        let last_step_id = if self.reader.step_count() > 0 {
-            self.reader
-                .step(StepId((self.reader.step_count() - 1) as i64))
-                .unwrap_or(&default_step)
-                .step_id
-        } else {
-            default_step.step_id
-        };
+        let last_step_id = self.reader.last_step_id().unwrap_or(default_step.step_id);
 
         ProgramEvent {
             kind: event_record.kind,
@@ -1991,22 +1954,9 @@ impl MaterializedReplaySession {
     }
 
     fn single_step_line(&self, step_index: usize, forward: bool) -> usize {
-        // taking note of db.lines limits: returning a valid step id always
-        if self.reader.step_count() == 0 {
-            return step_index;
-        }
-        if forward {
-            if step_index < self.reader.step_count() - 1 {
-                step_index + 1
-            } else {
-                step_index
-            }
-        } else if step_index > 0 {
-            step_index - 1
-        } else {
-            // auto-returning the same 0 if stepping backwards from 0
-            step_index
-        }
+        self.reader
+            .adjacent_step_id(StepId(step_index as i64), forward)
+            .map_or(step_index, |id| id.0 as usize)
     }
 
     fn step_in(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
@@ -2168,22 +2118,15 @@ impl MaterializedReplaySession {
             return Ok(true);
         }
 
-        // If the continue step doesn't find a valid breakpoint.
-        let step_count = self.reader.step_count();
-        if forward {
-            self.step_id_jump(
-                self.reader
-                    .step(StepId((step_count - 1) as i64))
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            );
+        // An execution boundary can itself be an annotation. Park on the
+        // first/last recorded SOURCE step rather than a numeric slot boundary.
+        let boundary = if forward {
+            self.reader.last_step_id()
         } else {
-            self.step_id_jump(
-                self.reader
-                    .step(StepId(0))
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            )
+            self.reader.first_step_id()
+        };
+        if let Some(id) = boundary {
+            self.step_id_jump(id);
         }
         // false: hasn't hit a breakpoint
         Ok(false)
@@ -2659,8 +2602,15 @@ impl MaterializedReplaySession {
     }
 
     fn first_executable_step_for_call(&self, call: &DbCall) -> StepId {
+        let source_entry = self
+            .reader
+            .step(call.step_id)
+            .map(|step| step.step_id)
+            .or_else(|| self.reader.adjacent_step_id(call.step_id, true))
+            .or_else(|| self.reader.first_step_id())
+            .unwrap_or(StepId(0));
         let Some(function) = self.reader.function(call.function_id) else {
-            return call.step_id;
+            return source_entry;
         };
         let function_path = self.reader.path(function.path_id).unwrap_or("");
         let function_line = function.line.0;
@@ -2705,13 +2655,13 @@ impl MaterializedReplaySession {
         }
 
         if function_line <= 0 {
-            return call.step_id;
+            return source_entry;
         }
 
         find_first(&|step: &DbStep| {
             step.call_key == call.key && step.path_id == function.path_id && step.line.0 >= function_line
         })
-        .unwrap_or(call.step_id)
+        .unwrap_or(source_entry)
     }
 }
 
@@ -2720,8 +2670,8 @@ impl ReplaySession for MaterializedReplaySession {
         info!("load_location: db replay");
         // Event-only traces (e.g. Stylus) have no steps — return a default location
         // so the DAP server can still initialize and serve event data.
-        if self.reader.step_count() == 0 {
-            info!("  no steps in trace, returning default location");
+        if self.reader.first_step_id().is_none() {
+            info!("  no source steps in trace, returning default location");
             return Ok(Location::default());
         }
         let call_key = self.reader.call_key_for_step(self.step_id).unwrap_or(CallKey(0));
@@ -2752,10 +2702,11 @@ impl ReplaySession for MaterializedReplaySession {
             let entry_step = self
                 .first_user_call()
                 .map(|call| self.first_executable_step_for_call(call))
+                .or_else(|| self.reader.first_step_id())
                 .unwrap_or(StepId(0));
             self.step_id_jump(entry_step);
-        } else if self.reader.step_count() > 0 {
-            self.step_id_jump(StepId(0));
+        } else if let Some(first) = self.reader.first_step_id() {
+            self.step_id_jump(first);
         }
         Ok(())
     }
@@ -3032,7 +2983,9 @@ impl ReplaySession for MaterializedReplaySession {
         let mut last_kept: Option<String> = None;
         for step_idx in first_step..step_count {
             let sid = StepId(step_idx as i64);
-            let step = *self.reader.step(sid).expect("load_history: step out of range");
+            let Some(step) = self.reader.step(sid).copied() else {
+                continue;
+            };
             if step.call_key != current_call_key {
                 let inside = self
                     .reader
@@ -3089,6 +3042,9 @@ impl ReplaySession for MaterializedReplaySession {
     }
 
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        if self.reader.step(step_id).is_none() {
+            return Err(format!("execution index {} is not a source step", step_id.0).into());
+        }
         self.step_id = step_id;
         Ok(true)
     }
@@ -4562,7 +4518,8 @@ impl MaterializedReplaySession {
         while step_id >= 0 {
             let sid = StepId(step_id);
             let Some(step) = self.reader.step(sid).copied() else {
-                break;
+                step_id -= 1;
+                continue;
             };
             if step.call_key == caller_frame {
                 let path_str = self.reader.path(step.path_id)?.to_string();

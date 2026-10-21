@@ -589,11 +589,12 @@ impl Handler {
         let trace = CoreTrace::default();
         let mut expr_loader = ExprLoader::new(trace.clone());
         let step_lines_loader = StepLinesLoader::new(&*reader, &mut expr_loader);
-        // let sender = sender::Sender::new();
+        // A materialized trace can begin with reload annotations.
+        let initial_step_id = reader.first_step_id().unwrap_or(StepId(0));
         let mut handler = Handler {
             trace_kind,
             reader,
-            step_id: StepId(0),
+            step_id: initial_step_id,
             last_location: Location {
                 key: format!("{}", NO_KEY.0),
                 ..Location::default()
@@ -607,7 +608,7 @@ impl Handler {
             calltrace,
             step_lines_loader,
             dap_client: DapClient::default(),
-            previous_step_id: StepId(0),
+            previous_step_id: initial_step_id,
             breakpoints: HashMap::new(),
             tracepoints: HashMap::new(),
             replay,
@@ -666,7 +667,12 @@ impl Handler {
 
     fn load_location(&self, step_id: StepId) -> Location {
         let step_id_int = step_id.0;
-        let step_record = self.reader.step(step_id).expect("load_location: invalid step_id");
+        let Some(step_record) = self.reader.step(step_id) else {
+            return Location {
+                rr_ticks: RRTicks(step_id_int),
+                ..Location::default()
+            };
+        };
         let path = format!(
             "{}",
             self.reader
@@ -1102,7 +1108,7 @@ impl Handler {
         } else {
             self.replay.run_to_entry()?;
         }
-        self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
+        self.step_id = self.replay.current_step_id();
         self.complete_move(true, sender)?;
         Ok(())
     }
@@ -1162,7 +1168,7 @@ impl Handler {
         };
         info!("launch: opening the session at its start geid {geid} ({START_GEID_ENV})");
         self.replay.run_to_entry()?;
-        self.step_id = StepId(0);
+        self.step_id = self.replay.current_step_id();
         let refusal = match self.replay.seek_to_geid(geid) {
             Ok(true) => None,
             Ok(false) => Some("the replay did not reach it".to_string()),
@@ -1443,7 +1449,11 @@ impl Handler {
             {
                 let step_id = StepId(location.rr_ticks.0);
                 if (step_id.0 as usize) < self.reader.step_count() {
-                    let call_key = self.reader.step(step_id).expect("step not found").call_key;
+                    let call_key = self
+                        .reader
+                        .step(step_id)
+                        .ok_or("flow location is not a source step")?
+                        .call_key;
                     let enriched = self
                         .reader
                         .load_location(step_id, call_key, &mut self.flow_preloader.expr_loader);
@@ -1597,35 +1607,15 @@ impl Handler {
     }
 
     fn on_step_id_limit(&self, step_index: usize, forward: bool) -> bool {
-        if self.reader.step_count() == 0 {
-            return true;
-        }
-        if forward {
-            // moving forward
-            step_index >= self.reader.step_count() - 1 // we're on the last one
-        } else {
-            // moving backwards
-            step_index == 0
-        }
+        self.reader
+            .adjacent_step_id(StepId(step_index as i64), forward)
+            .is_none()
     }
 
     fn single_step_line(&self, step_index: usize, forward: bool) -> usize {
-        // taking note of db.lines limits: returning a valid step id always
-        if self.reader.step_count() == 0 {
-            return step_index;
-        }
-        if forward {
-            if step_index < self.reader.step_count() - 1 {
-                step_index + 1
-            } else {
-                step_index
-            }
-        } else if step_index > 0 {
-            step_index - 1
-        } else {
-            // auto-returning the same 0 if stepping backwards from 0
-            step_index
-        }
+        self.reader
+            .adjacent_step_id(StepId(step_index as i64), forward)
+            .map_or(step_index, |id| id.0 as usize)
     }
 
     pub fn next(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
@@ -1766,21 +1756,25 @@ impl Handler {
 
         if self.trace_kind == TraceKind::Materialized {
             if original_step_id == self.step_id {
-                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                let location = if Some(self.step_id) == self.reader.first_step_id() {
+                    "beginning"
+                } else {
+                    "end"
+                };
                 self.send_notification(
                     NotificationKind::Warning,
                     &format!("Limit of record at the {location} already reached!"),
                     false,
                     sender.clone(),
                 )?;
-            } else if self.step_id == StepId(0) {
+            } else if Some(self.step_id) == self.reader.first_step_id() {
                 self.send_notification(
                     NotificationKind::Info,
                     "Beginning of record reached",
                     false,
                     sender.clone(),
                 )?;
-            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
+            } else if Some(self.step_id) == self.reader.last_step_id() {
                 self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
             }
         }
@@ -2053,7 +2047,6 @@ impl Handler {
         };
 
         let start_step_id = self.step_id;
-        let step_count = self.reader.step_count();
         let mut last_step_id = start_step_id;
         let mut count: usize = 0;
         loop {
@@ -2069,17 +2062,7 @@ impl Handler {
             // and avoids redundant ``self.replay.step(...)`` driver
             // calls that would advance ``self.step_id`` on every
             // iteration.
-            let last_index = if last_step_id.0 < 0 {
-                0usize
-            } else {
-                last_step_id.0 as usize
-            };
-            let next_index = if step_count == 0 || last_index >= step_count - 1 {
-                last_index
-            } else {
-                last_index + 1
-            };
-            let candidate = StepId(next_index as i64);
+            let candidate = self.reader.adjacent_step_id(last_step_id, true).unwrap_or(last_step_id);
             if candidate == last_step_id {
                 break;
             }
@@ -2295,21 +2278,25 @@ impl Handler {
 
         if self.trace_kind == TraceKind::Materialized {
             if original_step_id == self.step_id {
-                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                let location = if Some(self.step_id) == self.reader.first_step_id() {
+                    "beginning"
+                } else {
+                    "end"
+                };
                 self.send_notification(
                     NotificationKind::Warning,
                     &format!("Limit of record at the {location} already reached!"),
                     false,
                     sender.clone(),
                 )?;
-            } else if self.step_id == StepId(0) {
+            } else if Some(self.step_id) == self.reader.first_step_id() {
                 self.send_notification(
                     NotificationKind::Info,
                     "Beginning of record reached",
                     false,
                     sender.clone(),
                 )?;
-            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
+            } else if Some(self.step_id) == self.reader.last_step_id() {
                 self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
             }
         }
@@ -2378,21 +2365,25 @@ impl Handler {
 
         if self.trace_kind == TraceKind::Materialized {
             if original_step_id == self.step_id {
-                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                let location = if Some(self.step_id) == self.reader.first_step_id() {
+                    "beginning"
+                } else {
+                    "end"
+                };
                 self.send_notification(
                     NotificationKind::Warning,
                     &format!("Limit of record at the {location} already reached!"),
                     false,
                     sender.clone(),
                 )?;
-            } else if self.step_id == StepId(0) {
+            } else if Some(self.step_id) == self.reader.first_step_id() {
                 self.send_notification(
                     NotificationKind::Info,
                     "Beginning of record reached",
                     false,
                     sender.clone(),
                 )?;
-            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
+            } else if Some(self.step_id) == self.reader.last_step_id() {
                 self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
             }
         }
@@ -5364,7 +5355,7 @@ impl Handler {
         if !self.breakpoints.is_empty() {
             return;
         }
-        if let Some(first_step) = self.reader.step(StepId(0)) {
+        if let Some(first_step) = self.reader.first_step_id().and_then(|id| self.reader.step(id)) {
             let path = self.reader.path(first_step.path_id).unwrap_or("").to_string();
             // M1: the sentinel cache entry mirrors the legacy line-only
             // slot — column `None` matches every step on the line.
@@ -5459,7 +5450,7 @@ impl Handler {
                 // measured on an MCR recording served by `ct-mcr debugserver`
                 // (zero tracepoint results, the run-to-entry's
                 // `DeleteBreakpoints` sending `z0` for each tracepoint site).
-                self.replay.jump_to(StepId(0))?;
+                self.replay.jump_to(self.reader.first_step_id().unwrap_or(StepId(0)))?;
 
                 for (path, line_map) in tracepoint_locations.iter() {
                     if line_map.is_empty() {
@@ -6068,7 +6059,9 @@ impl Handler {
                 let interesting_steps = self.load_steps_for_call(call_key);
                 for (line, step_id) in interesting_steps.iter() {
                     if step_id.0 != NO_STEP_ID {
-                        let current_step = *self.reader.step(*step_id).expect("load_asm_function: invalid step_id");
+                        let Some(current_step) = self.reader.step(*step_id).copied() else {
+                            continue;
+                        };
                         if let Some(asm_instructions) = self.reader.instructions_at(*step_id) {
                             if asm_instructions.is_empty() {
                                 instructions.push(Instruction::empty(
@@ -6711,11 +6704,9 @@ impl Handler {
 
     fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
         let step_id_int = event_record.step_id.0;
-        let (path, line) = if step_id_int != NO_INDEX {
-            let step_record = self
-                .reader
-                .step(event_record.step_id)
-                .expect("to_program_event: invalid step_id");
+        // I/O can be recorded at a reload annotation. Keep the event at its
+        // execution tick without inventing a source location for that tick.
+        let (path, line) = if let Some(step_record) = self.reader.step(event_record.step_id) {
             (
                 self.reader
                     .workdir()
@@ -6744,14 +6735,7 @@ impl Handler {
             high_level_path: path,
             high_level_line: line,
             base64_encoded: false,
-            max_rr_ticks: if self.reader.step_count() > 0 {
-                self.reader
-                    .step(StepId((self.reader.step_count() - 1) as i64))
-                    .map(|s| s.step_id.0)
-                    .unwrap_or(0)
-            } else {
-                0
-            },
+            max_rr_ticks: self.reader.last_step_id().map_or(0, |id| id.0),
             source_generation: 0,
             source_digest: String::new(),
         }

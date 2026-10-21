@@ -198,12 +198,11 @@ impl TraceReader for InMemoryTraceReader {
     }
 
     fn steps_from(&self, start_id: StepId) -> &[DbStep] {
-        let start = start_id.0 as usize;
-        if start < self.db.steps.items.len() {
-            &self.db.steps.items[start..]
-        } else {
-            &[]
+        if start_id.0 < 0 {
+            return &[];
         }
+        let items = &self.db.steps.items;
+        &items[items.partition_point(|step| step.step_id < start_id)..]
     }
 
     fn path_entries_iter(&self) -> Box<dyn Iterator<Item = (&str, PathId)> + '_> {

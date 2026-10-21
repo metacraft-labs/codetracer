@@ -200,6 +200,40 @@ fn probes() -> Vec<Probe> {
                 .join("|")
         }),
         ("step_count", |r| r.step_count().to_string()),
+        ("first_step_id", |r| {
+            let expected = r.steps_from(StepId(0)).first().map(|step| step.step_id);
+            let actual = r.first_step_id();
+            assert_eq!(actual, expected, "first_step_id must identify the first source row");
+            format!("{actual:?}")
+        }),
+        ("last_step_id", |r| {
+            let expected = r.steps_from(StepId(0)).last().map(|step| step.step_id);
+            let actual = r.last_step_id();
+            assert_eq!(actual, expected, "last_step_id must identify the last source row");
+            format!("{actual:?}")
+        }),
+        ("adjacent_step_id", |r| {
+            // Ground each answer in the actual source rows, independently of
+            // the helper's execution-slot walk. Probe both directions from
+            // recorded positions, each trace boundary and invalid positions.
+            let rows: Vec<StepId> = r.steps_from(StepId(0)).iter().map(|step| step.step_id).collect();
+            let mut starts = probe_steps(r);
+            starts.extend([StepId(i64::MIN), StepId(-1), StepId(i64::MAX)]);
+            let mut out = Vec::new();
+            for start in starts {
+                for forward in [true, false] {
+                    let expected = if forward {
+                        rows.iter().copied().filter(|id| *id > start).min()
+                    } else {
+                        rows.iter().copied().filter(|id| *id < start).max()
+                    };
+                    let actual = r.adjacent_step_id(start, forward);
+                    assert_eq!(actual, expected, "adjacent_step_id({start:?}, {forward})");
+                    out.push(format!("{start:?}/{forward}:{actual:?}"));
+                }
+            }
+            out.join("|")
+        }),
         ("variables_at", |r| {
             probe_steps(r)
                 .into_iter()

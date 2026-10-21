@@ -768,51 +768,22 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     // fixture bytes, 124 stops below); the two claims here add the other half,
     // by grounding the reader's STEP INDEX SPACE against `ct-print`.
     //
-    // A MARKER CONSUMES A STEP INDEX. The container's step indices are
-    // therefore NOT contiguous: GDH-M6's corrected invariant puts this
-    // recording's versions at [0,76] / [78,177] / [179,311] with 77 and 178 as
-    // holes, and `ct-print` reports exactly that — 310 steps over 312 slots.
-    //
-    // THE READER UNDER TEST DOES NOT REPRODUCE THE HOLES. `step_count()` is
-    // 312 and `step()` answers `Some` at every index in it, returning at each
-    // marker slot a DUPLICATE of the step before it. So the version ranges the
-    // consumer sees are the contiguous [0,77] / [78,178] / [179,311]. This is
-    // pre-existing — GDH-M7 touches neither `step` nor `step_count` — and no
-    // container before this campaign's had a hole for it to get wrong. It is
-    // PINNED rather than asserted away: the deviation is allowed to be exactly
-    // the marker indices and nothing else, and each phantom must be a copy of
-    // its predecessor, so a third phantom, a moved one, or one that invents a
-    // position of its own turns this gate red.
-    //
-    // It errs toward the OLD version (index 77 reads as v1, which is the side
-    // the marker separates from), so it does not misattribute across the
-    // boundary — but a phantom step is still a position the debugger reports
-    // that the recording does not contain, and it is filed as such.
+    // Reload markers occupy execution indices, but carry no source location.
+    // Compare the COMPLETE step set with the independent decoder so neither a
+    // phantom marker nor an accidentally dropped real step can pass.
     let reader_indices: BTreeSet<u64> = (0..reader.step_count())
         .filter(|i| reader.step(StepId(*i as i64)).is_some())
         .map(|i| i as u64)
         .collect();
     let marker_indices: BTreeSet<u64> = dump.markers.iter().map(|(i, _, _, _)| *i).collect();
-    let phantom: BTreeSet<u64> = reader_indices.difference(&dump.step_indices).copied().collect();
     ck.eq(
-        phantom.clone(),
-        marker_indices.clone(),
-        "the ONLY indices where the reader claims a step and the independent reader reports none \
-         are the reload-marker indices — a marker consumes a step index, and the reader answers a \
-         phantom at each one (pre-existing; GDH-M7 touches neither `step` nor `step_count`)",
+        reader_indices.clone(),
+        dump.step_indices.clone(),
+        "the reader exposes exactly the real steps reported by the independent decoder",
     );
     ck.ck(
-        !phantom.is_empty()
-            && phantom.iter().all(
-                |i| match (reader.step(StepId(*i as i64)), reader.step(StepId(*i as i64 - 1))) {
-                    (Some(here), Some(before)) => here.path_id == before.path_id && here.line == before.line,
-                    _ => false,
-                },
-            ),
-        format!(
-            "each phantom is a DUPLICATE of the step before it, not a position of its own \
-             ({phantom:?}) — so the deviation is the known one and a new shape would show up here"
-        ),
+        !marker_indices.is_empty() && reader_indices.is_disjoint(&marker_indices),
+        format!("source-reload annotations are never exposed as steps ({marker_indices:?})"),
     );
 
     // ---- no step's version can be answered by failing to look -------------
@@ -828,13 +799,12 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     let mut unresolvable: Vec<String> = Vec::new();
     let mut steps_examined = 0usize;
     for idx in 0..reader.step_count() {
-        // An index below the reader's own step count that it cannot answer is
-        // not a step to skip: it is a position the debugger can be asked for
-        // and cannot resolve, so it is filed with the other failures to look.
+        // Only holes independently identified as reload annotations may be
+        // absent. Every real step still has to resolve its registered version.
         let Some(step) = reader.step(StepId(idx as i64)) else {
-            unresolvable.push(format!(
-                "step {idx}: the reader has no step at an index below its own step count"
-            ));
+            if !marker_indices.contains(&(idx as u64)) {
+                unresolvable.push(format!("step {idx}: real step is absent from the reader"));
+            }
             continue;
         };
         steps_examined += 1;
@@ -856,8 +826,8 @@ fn gdh7_no_step_is_attributed_to_the_wrong_version_through_dap() {
     }
     ck.eq(
         steps_examined,
-        reader.step_count(),
-        "the registry check examined EVERY step index below the reader's step count",
+        dump.step_indices.len(),
+        "the registry check examined EVERY independently decoded real step",
     );
     ck.ck(
         unresolvable.is_empty(),

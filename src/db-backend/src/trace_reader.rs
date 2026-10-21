@@ -85,8 +85,40 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// Look up a single step by id.
     fn step(&self, id: StepId) -> Option<&DbStep>;
 
-    /// Total number of recorded steps.
+    /// Exclusive end of the stable execution-ID space. Reload annotations
+    /// occupy IDs but are not steps: `step(id)` returns `None` at those slots.
     fn step_count(&self) -> usize;
+
+    /// First source step, skipping any leading reload annotations.
+    fn first_step_id(&self) -> Option<StepId> {
+        (0..self.step_count())
+            .map(|i| StepId(i as i64))
+            .find(|id| self.step(*id).is_some())
+    }
+
+    /// Last source step, skipping any trailing reload annotations.
+    fn last_step_id(&self) -> Option<StepId> {
+        (0..self.step_count())
+            .rev()
+            .map(|i| StepId(i as i64))
+            .find(|id| self.step(*id).is_some())
+    }
+
+    /// Next actual source step in the requested direction, across annotations.
+    fn adjacent_step_id(&self, start: StepId, forward: bool) -> Option<StepId> {
+        if forward {
+            let lo = start.0.saturating_add(1).max(0) as usize;
+            (lo..self.step_count())
+                .map(|i| StepId(i as i64))
+                .find(|id| self.step(*id).is_some())
+        } else {
+            let end = (start.0.max(0) as usize).min(self.step_count());
+            (0..end)
+                .rev()
+                .map(|i| StepId(i as i64))
+                .find(|id| self.step(*id).is_some())
+        }
+    }
 
     /// Local variable values captured at a particular step.
     fn variables_at(&self, step_id: StepId) -> Option<&[FullValueRecord]>;
@@ -427,20 +459,17 @@ pub trait TraceReader: std::fmt::Debug + Send {
             return;
         }
         if forward {
-            let tail = self.steps_from(start_id);
-            for step in tail.iter().skip(1) {
+            for step in self.steps_from(start_id).iter().filter(|step| step.step_id > start_id) {
                 if !visit(step) {
                     return;
                 }
             }
         } else {
-            let all_steps = self.steps_from(StepId(0));
-            let end = start_id.0 as usize;
-            if end <= all_steps.len() {
-                for step in all_steps[..end].iter().rev() {
-                    if !visit(step) {
-                        return;
-                    }
+            let steps = self.steps_from(StepId(0));
+            let end = steps.partition_point(|step| step.step_id < start_id);
+            for step in steps[..end].iter().rev() {
+                if !visit(step) {
+                    return;
                 }
             }
         }
@@ -876,7 +905,7 @@ pub trait TraceReader: std::fmt::Debug + Send {
                         None => {
                             let steps_len = self.step_count() as i64;
                             for i in step_id_int..steps_len {
-                                let step = self.step(StepId(i)).expect("load_location: invalid step in range");
+                                let Some(step) = self.step(StepId(i)) else { continue };
                                 if step.call_key == CallKey(call_key_int) {
                                     if step.line.0 > last_line {
                                         last_line = step.line.0;

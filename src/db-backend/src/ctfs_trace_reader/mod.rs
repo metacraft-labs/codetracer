@@ -338,6 +338,7 @@ impl CTFSTraceReader {
             let full = self.lazy_full_steps();
             db.steps.clear();
             db.steps.items.extend_from_slice(&full.steps);
+            db.steps.set_extent(self.step_count());
             db.step_map.clear();
             db.step_map.items.extend_from_slice(&full.step_map);
             // Re-create the per-step parallel scaffolding the eager loop pushed
@@ -347,7 +348,7 @@ impl CTFSTraceReader {
             db.compound.clear();
             db.cells.clear();
             db.variable_cells.clear();
-            for _ in 0..full.steps.len() {
+            for _ in 0..self.step_count() {
                 db.instructions.push(vec![]);
                 db.compound.push(HashMap::new());
                 db.cells.push(HashMap::new());
@@ -2474,6 +2475,13 @@ impl CTFSTraceReader {
         } else {
             Vec::new()
         };
+        let eager_records = if lazy_steps.is_none() {
+            step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs)
+                .map_err(|e| format!("steps.dat record classification: {e}"))?
+        } else {
+            None
+        };
+        db.steps.set_extent(step_count as usize);
         let mut step_idx: u64 = 0;
         while lazy_steps.is_none() && step_idx < step_count {
             let want = std::cmp::min(BULK_STEP_LOCATIONS_CHUNK, step_count - step_idx);
@@ -2567,6 +2575,18 @@ impl CTFSTraceReader {
                 } else {
                     None
                 };
+                // Values, calls and events keep execution IDs, including
+                // annotation slots. Only the SOURCE-step table is sparse.
+                db.instructions.push(vec![]);
+                db.compound.push(HashMap::new());
+                db.cells.push(HashMap::new());
+                db.variable_cells.push(HashMap::new());
+                if eager_records
+                    .as_ref()
+                    .is_some_and(|records| records.is_source_reload(step_id))
+                {
+                    continue;
+                }
                 let db_step = DbStep {
                     step_id,
                     path_id,
@@ -2575,14 +2595,7 @@ impl CTFSTraceReader {
                     call_key,
                     global_call_key,
                 };
-
                 db.steps.push(db_step);
-
-                // Per-step parallel vectors that postprocess() also creates.
-                db.instructions.push(vec![]);
-                db.compound.push(HashMap::new());
-                db.cells.push(HashMap::new());
-                db.variable_cells.push(HashMap::new());
 
                 // step_map: (path_id) → { line → [DbStep, ...] }
                 // Ensure enough entries in step_map for this path_id.
@@ -3425,8 +3438,10 @@ impl TraceReader for CTFSTraceReader {
         } else {
             &self.db.steps.items
         };
-        let start = start_id.0 as usize;
-        if start < items.len() { &items[start..] } else { &[] }
+        if start_id.0 < 0 {
+            return &[];
+        }
+        &items[items.partition_point(|step| step.step_id < start_id)..]
     }
 
     /// M0/3 — the BOUNDED walk that replaces `steps_from` for navigation.
@@ -3454,12 +3469,10 @@ impl TraceReader for CTFSTraceReader {
             let count = lazy.len();
             if forward {
                 for index in (start + 1)..count {
-                    // A step the stream cannot reconstruct ends the walk. It
-                    // is not an empty result: the caller keeps whatever it has
-                    // reached, exactly as the slice walk did when it ran off
-                    // the end.
+                    // Reload annotations are holes in the execution-ID space,
+                    // not the end of the source-step sequence.
                     let Some(step) = lazy.get(StepId(index as i64)) else {
-                        return;
+                        continue;
                     };
                     if !visit(step) {
                         return;
@@ -3468,7 +3481,7 @@ impl TraceReader for CTFSTraceReader {
             } else {
                 for index in (0..std::cmp::min(start, count)).rev() {
                     let Some(step) = lazy.get(StepId(index as i64)) else {
-                        return;
+                        continue;
                     };
                     if !visit(step) {
                         return;
@@ -3480,13 +3493,13 @@ impl TraceReader for CTFSTraceReader {
 
         let items: &[DbStep] = &self.db.steps.items;
         if forward {
-            for step in items.iter().skip(start + 1) {
+            for step in items.iter().filter(|step| step.step_id > start_id) {
                 if !visit(step) {
                     return;
                 }
             }
         } else {
-            let end = std::cmp::min(start, items.len());
+            let end = items.partition_point(|step| step.step_id < start_id);
             for step in items[..end].iter().rev() {
                 if !visit(step) {
                     return;

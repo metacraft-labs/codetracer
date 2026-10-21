@@ -402,8 +402,7 @@ impl Calltrace {
     #[allow(clippy::expect_used)]
     pub fn load_callstack(&self, step_id: StepId, reader: &dyn TraceReader) -> Vec<DbCall> {
         let mut callstack = vec![];
-        if step_id.0 < reader.step_count().try_into().unwrap_or(i64::MAX) {
-            let current_step = reader.step(step_id).expect("load_callstack: invalid step_id");
+        if let Some(current_step) = reader.step(step_id) {
             let mut call_key = current_step.call_key;
 
             // ``call_key`` can legitimately be ``NO_KEY`` (-1) for
@@ -499,7 +498,7 @@ impl Calltrace {
                 // for now, we accept end of program error events only for the last step
                 // if this assumption changes, we need to update this as well, or to
                 // pass the step id with the end_of_program object!
-                StepId((reader.step_count() - 1) as i64),
+                reader.last_step_id().unwrap_or(StepId(0)),
             )
         } else {
             let call = reader.to_call(&self.calls[metadata.content.call_key], expr_loader);

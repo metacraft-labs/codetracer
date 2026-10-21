@@ -47,6 +47,7 @@ mod dap_types;
 mod db;
 mod diff;
 mod distinct_vec;
+mod step_table;
 // M17 — the lib already exports these via `lib.rs`; the bin needs its
 // own copies because dap_handler.rs is `mod dap_handler` here rather
 // than a re-export from the lib. The lib's `#![allow(clippy::expect_used)]`

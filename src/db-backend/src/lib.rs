@@ -84,6 +84,7 @@ pub mod db;
 pub mod deepreview;
 pub mod diff;
 pub mod distinct_vec;
+pub mod step_table;
 // M-DWARF-1: DWARF parsing infrastructure. Compiles on both native and
 // wasm32 targets — addr2line/gimli/object are no_std-friendly and contain
 // no C dependencies. M-DWARF-2/3/4 will wire this into the recorder,
