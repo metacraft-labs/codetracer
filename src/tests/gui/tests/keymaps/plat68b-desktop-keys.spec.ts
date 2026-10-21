@@ -97,9 +97,49 @@ async function clearTrace(page: any) {
 }
 
 async function caretInEditor(page: any) {
-  const line = page.locator(".monaco-editor .view-lines > .view-line").first();
-  await line.waitFor({ state: "visible", timeout: 120_000 });
-  await line.click();
+  // A REAL click, because what these tests exercise is real input — but on a
+  // point the editor actually shows.  A `.view-line` is as wide as the
+  // file's longest line (6575 px for `calc/main.py` in a 455 px editor), so
+  // its centre, where `locator.click()` aims by default, lies far outside the
+  // editor's visible content box; Playwright then reported whatever covered
+  // that point (the State pane's watch field, its Globals tab, the gutter)
+  // as intercepting the click, and every test died here.  The point used is
+  // just inside the left edge of a line's intersection with its editor's
+  // `.monaco-scrollable-element` (the content area, right of the gutter),
+  // vertically centred, given relative to the line as `click` takes it.
+  //
+  // Waits for such a line rather than taking the first `.view-line` as it
+  // is: right after launch the editor may not have laid out yet, and Monaco
+  // keeps line nodes in DOM order, not screen order.
+  const target = await page.waitForFunction(() => {
+    const lines = Array.from(
+      document.querySelectorAll(".monaco-editor .view-lines > .view-line"),
+    ) as HTMLElement[];
+    for (let index = 0; index < lines.length; index++) {
+      const lineBox = lines[index].getBoundingClientRect();
+      const content = lines[index].closest(".monaco-editor")
+        ?.querySelector(".monaco-scrollable-element")
+        ?.getBoundingClientRect();
+      if (!content) continue;
+      const left = Math.max(lineBox.left, content.left);
+      const right = Math.min(lineBox.right, content.right);
+      const top = Math.max(lineBox.top, content.top);
+      const bottom = Math.min(lineBox.bottom, content.bottom);
+      // Whole line height inside the content box, and room to click.
+      if (right - left < 2 || bottom - top < lineBox.height - 0.5) continue;
+      return {
+        index,
+        x: left + Math.min(8, (right - left) / 2) - lineBox.left,
+        y: (top + bottom) / 2 - lineBox.top,
+      };
+    }
+    return null;
+  }, undefined, { timeout: 120_000 });
+  const { index, x, y } = await target.jsonValue();
+  await page
+    .locator(".monaco-editor .view-lines > .view-line")
+    .nth(index)
+    .click({ position: { x, y } });
   await page.waitForFunction(() => {
     const a = document.activeElement as HTMLElement | null;
     return !!a && !!a.closest("[data-scope-kind='editor']");
