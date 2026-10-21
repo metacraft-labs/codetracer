@@ -982,6 +982,12 @@ test_lane_files() {
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
 		#
+		# `settle_once_test.nim` drives `index/settle_once.nim` — the rule that
+		# `traces.onRunTest` and `onRunTestSuite` answer a test run EXACTLY ONCE —
+		# with real async handlers that reject, throw, or settle and then fail,
+		# on the JS backend where a rejection arrives as a foreign exception.
+		echo src/frontend/tests/settle_once_test.nim
+		#
 		# `index_serves_deployment_cache_classes_test.nim` asks the running
 		# server for two files and compares the `Cache-Control` it sends with
 		# `web_deployment.headerFor(cacheClassFor(url))` — the same pair that

@@ -899,3 +899,41 @@ suite "an ISA stated by --lang overrides the assessment, and keeps two routes al
     check overridden.targetIsa == tiSolanaSbf     # ...and the user overrides it
     check assessRecordingTarget(dir, LangRust, isaOverride = tiUnknown) == fromMarker
     removeDir(dir)
+
+suite "ct record-test on a Noir test":
+  ## `ct record-test` routes a `.nr` test through `db-backend-record` with
+  ## `--noir-test-name`, which becomes `RecorderOptions.noirTestName`; nargo is
+  ## then run IN the package with `trace --test-name <test>`. The pure halves
+  ## are asserted here; `record_test_noir_e2e_test.nim` records for real.
+
+  test "a test name reaches nargo as --test-name, after the trace arguments":
+    let s = assessedSelector("/work/crate/src/main.nr", LangNoir)
+    check s.targetIsa == tiAcir
+    let plain = recorderInvocation(s, "/work/crate", TraceFolder)
+    let test = recorderInvocation(s, "/work/crate", TraceFolder,
+                                  RecorderOptions(noirTestName: "tests::test_main"))
+    check plain.args == @["trace", "--out-dir", TraceFolder]
+    check test.args == @["trace", "--out-dir", TraceFolder,
+                         "--test-name", "tests::test_main"]
+    # Still run INSIDE the package, exactly as `ct record <crate>` is.
+    check test.workdir == plain.workdir
+
+  test "the package root is the nearest directory holding Nargo.toml":
+    let root = getTempDir() / "ct-dispatch-test-noir-root"
+    removeDir(root)
+    createDir(root / "src" / "nested")
+    writeFile(root / NoirPackageManifest, "[package]\nname = \"n\"\ntype = \"bin\"\n")
+    writeFile(root / "src" / "nested" / "deep.nr", "")
+    check noirPackageRoot(root / "src" / "nested" / "deep.nr") == root
+    check noirPackageRoot(root / "src") == root
+    check noirPackageRoot(root) == root
+    removeDir(root)
+
+  test "a file in no Noir package has no root":
+    let lonely = getTempDir() / "ct-dispatch-test-noir-none"
+    removeDir(lonely)
+    createDir(lonely)
+    writeFile(lonely / "x.nr", "")
+    # The temp directory's ancestors carry no Nargo.toml on any sane host.
+    check noirPackageRoot(lonely / "x.nr") == ""
+    removeDir(lonely)

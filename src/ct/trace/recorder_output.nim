@@ -56,12 +56,12 @@ proc recordTestFailureSentence*(exitCode: int; signal, stdoutText,
                                 stderrText, spawnError: string): string =
   ## Why a `ct record-test` run made no recording, in the recorder's OWN words.
   ##
-  ## `ct record-test` states its reason and exits 1 — for a Noir test,
-  ## "Assuming recording language LangNoir: currently `ct record-test` not
-  ## supported for this db-based language", on STDOUT — and the Electron main
-  ## process used to keep only "Exit with code 1", because
-  ## `electron_lib.readProcessOutput` discards output on a non-zero exit. A
-  ## user was told the run failed and never why.
+  ## `ct record-test` states its reason and exits 1 — for a language it has
+  ## no test route for, "Assuming recording language <lang>: currently
+  ## `ct record-test` not supported for this db-based language", on STDOUT —
+  ## and the Electron main process used to keep only "Exit with code 1",
+  ## because `electron_lib.readProcessOutput` discards output on a non-zero
+  ## exit. A user was told the run failed and never why.
   ##
   ## Stderr is preferred when it has anything, since that is where a crash
   ## or a loader lands; otherwise stdout, where `recordTest` prints its own

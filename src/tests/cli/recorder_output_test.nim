@@ -42,7 +42,9 @@ suite "recordingIdFromOutput":
 
 suite "recordTestFailureSentence":
   test "the recorder's own sentence on stdout reaches the failure text":
-    ## The measured case: Noir on the desktop.
+    ## The measured case: Noir on the desktop, before `ct record-test` had a
+    ## Noir route; the sentence is the one every language without a route
+    ## still prints.
     let sentence = recordTestFailureSentence(1, "",
       "Assuming recording language LangNoir: currently `ct record-test` " &
       "not supported for this db-based language\n", "", "")

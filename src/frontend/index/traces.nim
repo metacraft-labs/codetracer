@@ -12,6 +12,7 @@ import
   # ../../common/common_types/codetracer_features/notifications,
   ./js_helpers,
   ./launch_config,
+  ./settle_once,
   ../lang
 
 var
@@ -1708,24 +1709,25 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   # a rejected `await` before the hoisted settle below (`findTraceWithCodetracer`
   # was the one) escaped this `async` proc, rejected its future, reached no
   # handler and settled nothing — the renderer's raising-dispatch defect, on
-  # this side of the IPC. The whole body is therefore inside one `try`, and
-  # the `except` settles with a sentence. `settle` is idempotent, so the
-  # recording load AFTER the hoisted send can fail without a second message
-  # contradicting the first.
-  var settled = false
+  # this side of the IPC. The rule is `settle_once.settleGuarded`, which a
+  # JS-backend test asserts (`src/frontend/tests/settle_once_test.nim`): the
+  # handler below runs under it, a rejection or raise before anything was
+  # sent is answered with a sentence, and the recording load AFTER the hoisted
+  # send can fail without a second message contradicting the first.
+  let once = newSettleOnce()
   proc settle(recordingId: cstring; errorMessage: cstring) =
-    if settled:
-      return
-    settled = true
-    sendTestRunSettled(recordingId, errorMessage)
+    if once.claim():
+      sendTestRunSettled(recordingId, errorMessage)
 
-  try:
+  proc handle(once: SettleOnce): Future[void] {.async.} =
     let pid = nodeProcess.pid.to(int)
     # `readProcessOutcome`, not `readProcessOutput`: the latter turns a
     # non-zero exit into "Exit with code <n>" and DISCARDS what the recorder
-    # printed, which is where `ct record-test` states its reason (for a Noir
-    # test: "currently `ct record-test` not supported for this db-based
-    # language"). Never rejects, so its outcome is one value to branch on.
+    # printed, which is where `ct record-test` states its reason (for a
+    # language it has no test route for: "currently `ct record-test` not
+    # supported for this db-based language"; for a Noir test nargo cannot
+    # find: "`<name>` does not match with any test function"). Never rejects,
+    # so its outcome is one value to branch on.
     let outcome = await readProcessOutcome(
       codetracerExe,
       @[cstring"record-test"].concat(
@@ -1816,20 +1818,18 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
       # started. That is the reported defect in its most-travelled form.
       mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: errorText}
       settle(cstring"", errorText)
-  except:
-    # Bare, because what reaches here on the JS backend is usually a raw JS
-    # rejection (an Error from Node or Electron), not a `CatchableError`.
-    let detail = getCurrentExceptionMsg()
+
+  let settleFailure = proc(detail: string) =
     errorPrint "index: run-test: ", detail
-    if settled:
-      # The run had already been settled — this is the recording LOAD that
-      # follows it failing. The renderer has been told how the run ended; the
-      # load failure is logged rather than reported as a second, contradictory
-      # end of the same run.
-      return
-    settle(cstring"", cstring(
-      "CodeTracer could not finish handling ct record-test's answer: " &
-      (if detail.len > 0: detail else: "an unexpected error")))
+    sendTestRunSettled(cstring"", cstring(
+      "CodeTracer could not finish handling ct record-test's answer: " & detail))
+  let loadFailedAfterSettle = proc(detail: string) =
+    # The run had already been settled — this is the recording LOAD that
+    # follows it failing. The renderer has been told how the run ended; the
+    # load failure is logged rather than reported as a second, contradictory
+    # end of the same run.
+    errorPrint "index: run-test: loading the recording failed: ", detail
+  await settleGuarded(once, handle, settleFailure, loadFailedAfterSettle)
 
 # ---------------------------------------------------------------------------
 # THE WHOLE-SUITE RUN — the desktop Test Results pane's header ▶
@@ -1884,17 +1884,16 @@ proc onRunTestSuite*(sender: JsObject,
                      response: jsobject(workspaceRoot=cstring)) {.async.} =
   # SETTLED EXACTLY ONCE, ON EVERY PATH — `onRunTest`'s rule, and for its
   # reason: an exception escaping this `async` proc would settle nothing and
-  # leave the pane on "running…" for ever.
-  var settled = false
+  # leave the pane on "running…" for ever. Asserted through
+  # `settle_once.settleGuarded` (`src/frontend/tests/settle_once_test.nim`).
+  let once = newSettleOnce()
   proc settle(events: cstring; exitCode: int; stderrText: cstring;
               errorMessage: cstring) =
-    if settled:
-      return
-    settled = true
-    sendTestSuiteSettled(events, exitCode, stderrText, errorMessage)
+    if once.claim():
+      sendTestSuiteSettled(events, exitCode, stderrText, errorMessage)
 
   var eventsPath = cstring""
-  try:
+  proc handle(once: SettleOnce): Future[void] {.async.} =
     let root = if response.workspaceRoot.isNil: "" else: $response.workspaceRoot
     if root.len == 0:
       # The renderer refuses before sending this (`DesktopNoProjectText`);
@@ -1939,12 +1938,13 @@ proc onRunTestSuite*(sender: JsObject,
     infoPrint "index: run-test-suite: exit ", $outcome.exitCode,
               " events bytes ", $events.len
     settle(events, outcome.exitCode, outcome.stderr, signalSentence)
-  except:
-    let detail = getCurrentExceptionMsg()
+
+  let settleFailure = proc(detail: string) =
     errorPrint "index: run-test-suite: ", detail
-    settle(cstring"", -1, cstring"", cstring(
-      "CodeTracer could not run ct test run: " &
-      (if detail.len > 0: detail else: "an unexpected error")))
+    sendTestSuiteSettled(cstring"", -1, cstring"", cstring(
+      "CodeTracer could not run ct test run: " & detail))
+  try:
+    await settleGuarded(once, handle, settleFailure)
   finally:
     if eventsPath.len > 0:
       removeFileQuietly(eventsPath)

@@ -67,7 +67,7 @@
     # THIS INPUT WAS A FLAKE.  Dropping ``flake = true`` is what let the pin
     # move to a branch that produces a trace this product can open.
     noir = {
-      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=1786e598ec42062cf5458690bd37465767a004d6";
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=73160a51bc317ef40e03c5e73b5a052721c144b3";
       flake = false;
     };
 

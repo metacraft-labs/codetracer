@@ -687,6 +687,39 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       for line in guidance:
         echo "  " & line
       quit(1)
+  elif assessedSelector(fullPath, lang).targetIsa == tiAcir:
+    # NOIR: `nargo trace --test-name <test>` in the package, through the SAME
+    # route `ct record <package>` takes — `db-backend-record`, whose
+    # `recorderInvocation` builds the nargo argv (`--noir-test-name` becomes
+    # `RecorderOptions.noirTestName`) and whose `importTrace` registers the
+    # recording. Nothing about how a Noir trace is made or imported is copied
+    # here; only the test name is new.
+    #
+    # `testName` is whatever the caller holds: the catalog's fully-qualified
+    # selector (`tests::test_main`, the Test Results pane's rows) or the bare
+    # function name (the editor's text scan). nargo resolves both the way
+    # `nargo debug --test-name` does — substring, then the exact last `::`
+    # segment when several match — so neither is rewritten here.
+    let packageDir = noirPackageRoot(fullPath)
+    if packageDir.len == 0:
+      echo "error: " & fullPath & " is not inside a Noir package: no " &
+        NoirPackageManifest & " was found in its directory or any above it, " &
+        "so there is no crate for nargo to trace the test in."
+      quit(1)
+    if getEnv("CODETRACER_WRAPPER_PID", "").len == 0:
+      putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
+    let trace = recordInternal(
+      dbBackendRecordExe,
+      @["--noir-test-name", testName, "--trace-kind", "db", packageDir],
+      withDiff,
+      storeTraceFolderForPid,
+      upload=false)
+    if trace.isNil:
+      echo "error: nargo traced the test " & testName & ", but no recording " &
+        "was registered for it."
+      quit(1)
+    echo fmt"recordingId:{trace.recordingId}"
+    quit(0)
   elif lang == LangPythonDb:
     # Python test recording using pytest
     let (pythonInterpreter, resolverError) = resolvePythonInterpreter()

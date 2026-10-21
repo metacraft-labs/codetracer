@@ -109,6 +109,12 @@ type
     server*: bool
       ## ``ct record --server``: the recorded program is a long-lived server
       ## rather than a run that ends on its own.  See ``serverSupport``.
+    noirTestName*: string
+      ## ``ct record-test`` on a Noir test: the test function nargo traces
+      ## instead of `main` (`nargo trace --test-name`). Either nargo's
+      ## fully-qualified name (`tests::test_main`) or the bare function name;
+      ## nargo matches both the way `nargo debug --test-name` does (substring,
+      ## then exact last `::` segment).
 
   RecorderInvocation* = object
     exe*: string                  ## the process to spawn
@@ -868,9 +874,11 @@ proc recorderInvocation*(sel: RecorderSelector, program: string,
       # is expressed as the working directory rather than an argument.
       let backendArgs = if opts.backend == "plonky2": @["--trace-plonky2"]
                         else: @[]
+      let testArgs = if opts.noirTestName.len > 0: @["--test-name", opts.noirTestName]
+                     else: @[]
       RecorderInvocation(
         exe: noirExe(),
-        args: @["trace", "--out-dir", traceFolder] & backendArgs,
+        args: @["trace", "--out-dir", traceFolder] & backendArgs & testArgs,
         workdir: if dirExists(program): program else: program.parentDir)
     of tiWasm:
       var args = @["run"]
@@ -907,3 +915,24 @@ proc serverGuidance*(sel: RecorderSelector, traceFolder: string): seq[string] =
   result.add("watch requests arrive live with, in another terminal:")
   result.add("  ct replay -t " & traceFolder)
   result.add("stop the recording with Ctrl-C; the container stays readable")
+
+const NoirPackageManifest* = "Nargo.toml"
+
+proc noirPackageRoot*(path: string): string =
+  ## The Noir package `path` belongs to: the nearest directory, starting at
+  ## `path` itself when it is a directory and at its parent otherwise, that
+  ## holds a `Nargo.toml`. "" when there is none up to the filesystem root.
+  ##
+  ## nargo traces the package it is run INSIDE (EXCEPTION 3 in
+  ## `recorderInvocation`), so `ct record-test` on `src/tests/foo.nr` has to
+  ## find the crate root before it can hand nargo a test name — the same walk
+  ## nargo's own `get_package_manifest` makes from its working directory.
+  var dir = if dirExists(path): path else: path.parentDir
+  while dir.len > 0:
+    if fileExists(dir / NoirPackageManifest):
+      return dir
+    let parent = dir.parentDir
+    if parent == dir or parent.len == 0:
+      break
+    dir = parent
+  ""

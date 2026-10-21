@@ -270,7 +270,7 @@ proc recordDb(
     # M-REC-3: UUIDv7 recording-id string; empty == NO_RECORDING_ID.
     recordingId: string, pythonActivationPath: string = "",
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
-    server: bool = false): Trace =
+    server: bool = false, noirTestName: string = ""): Trace =
   ## `sel` selects the recorder; `lang` is the summary the recording is
   ## registered under (`Trace.lang`, a per-file fact summarised per recording
   ## — see `src/common/common_types/debugger_features/trace.nim`).
@@ -305,7 +305,8 @@ proc recordDb(
       pythonActivationPath: pythonActivationPath,
       pythonTestFramework: pythonTestFramework,
       pythonTestArgs: pythonTestArgs,
-      server: server))
+      server: server,
+      noirTestName: noirTestName))
 
   if invocation.exe.len == 0:
     # Unreachable via ``requireRecorder`` above; kept as a hard stop so a
@@ -361,7 +362,7 @@ proc record(
     traceKind: string = "db", rrSupportPath: string = "",
     pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false,
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[],
-    server: bool = false): Trace =
+    server: bool = false, noirTestName: string = ""): Trace =
   var traceID: string
   if traceIDRecord == NO_RECORDING_ID:
     traceID = trace_index.newID(test)
@@ -477,7 +478,8 @@ proc record(
         # for noir for now "executable" is the noir folder
         recordSymbols(executable, outputFolder, lang)
       return recordDb(sel, lang, executable, args, backend, outputFolder,
-                      stylusTrace, traceId, server = server)
+                      stylusTrace, traceId, server = server,
+                      noirTestName = noirTestName)
     elif sel.language == slPython and sel.approach == raInstrumentedRuntime and
          tool.supported:
       var activationPathResolved = pythonActivationPath
@@ -591,6 +593,7 @@ proc main*(): Trace =
   #   [-t/--stylus-trace <trace-path>]
   #   [-a/--address <address>] [--socket <socket-path>]
   #   [--trace-kind db/rr/ttd] [--rr-support-path <rr-support-path>]
+  #   [--noir-test-name <name>]
   #   <program> [<args>]
   let args = os.commandLineParams()
   if args.len == 0:
@@ -621,6 +624,9 @@ proc main*(): Trace =
   var server = false
   var pythonTestFramework = ""
   var pythonTestArgs: seq[string] = @[]
+  var noirTestName = ""
+    ## `--noir-test-name <name>`: trace that Noir test function instead of
+    ## `main` (`ct record-test` on a `.nr` file; see `recordTest`).
 
   echo args
 
@@ -710,6 +716,12 @@ proc main*(): Trace =
         displayHelp()
         return
       rrSupportPath = args[i + 1]
+      i += 2
+    elif arg == "--noir-test-name":
+      if args.len() < i + 2:
+        displayHelp()
+        return
+      noirTestName = args[i + 1]
       i += 2
     elif arg == "--pytest":
       # Collect all remaining args as pytest arguments
@@ -826,7 +838,8 @@ proc main*(): Trace =
       pythonInterpreter=pythonInterpreter,
       pythonTestFramework=pythonTestFramework,
       pythonTestArgs=pythonTestArgs,
-      server=server)
+      server=server,
+      noirTestName=noirTestName)
     traceId = trace.recordingId
     outputFolder = trace.outputFolder
 
