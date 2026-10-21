@@ -283,6 +283,19 @@ func topCentringIfOutside*(currentTop, line, viewportHeight,
     clampTop(line - (viewportHeight - 1) div 2, viewportHeight,
              totalLineCount)
 
+func topCentring*(currentTop, line, viewportHeight, totalLineCount: int): int =
+  ## The top that puts `line` in the MIDDLE of the viewport, whether or not it
+  ## is visible now — `topCentringIfOutside` without its "if outside".
+  ##
+  ## M73 (#840): CodeTracer-TUI.md §4.2's `.`, *"Reset source scroll so the
+  ## current execution pointer is centered"*. A reset is unconditional: after
+  ## the user scrolled the pointer to the pane's last row, `.` must still
+  ## centre it, which the stop rule (leave a visible line where it is) would
+  ## refuse to do.
+  if viewportHeight <= 0 or line <= 0:
+    return clampTop(currentTop, viewportHeight, totalLineCount)
+  clampTop(line - (viewportHeight - 1) div 2, viewportHeight, totalLineCount)
+
 # ---------------------------------------------------------------------------
 # Reading the window
 # ---------------------------------------------------------------------------
@@ -375,6 +388,12 @@ proc scrollBy*(vm: SourceVM; delta: int) =
 proc followCursor*(vm: SourceVM) =
   ## Scroll the least amount that brings `EditorVM.cursorLine` — the editor
   ## CARET — into view.
+  ##
+  ## M73 (#840): the terminal's and GPUI's read-only editors call this after
+  ## the user moves the caret (having written it with `EditorVM.setCursor`),
+  ## so a caret moved below the last row brings the drawn window with it.
+  ## Until then it had no caller outside the tests, and the caret could leave
+  ## the screen.
   vm.viewportTop.val = topFollowingCursor(
     vm.viewportTop.val, vm.editor.cursorLine.val,
     vm.viewportHeight.val, vm.totalLineCount.val)
@@ -387,6 +406,16 @@ proc followExecutionPointer*(vm: SourceVM) =
   ## This is the one a stepping front-end calls after every stop. See
   ## `executionLine` for why it is not the same call as `followCursor`.
   vm.viewportTop.val = topCentringIfOutside(
+    vm.viewportTop.val, vm.executionLine.val,
+    vm.viewportHeight.val, vm.totalLineCount.val)
+
+proc centreOnExecutionPointer*(vm: SourceVM) =
+  ## Put the execution line in the middle of the viewport, visible or not —
+  ## the user's `.` (CodeTracer-TUI.md §4.2), as against the stop's
+  ## `followExecutionPointer`, which leaves a visible pointer where it is.
+  ## M73 (#840): until then a front-end that let the user scroll had no way
+  ## back that was not a step.
+  vm.viewportTop.val = topCentring(
     vm.viewportTop.val, vm.executionLine.val,
     vm.viewportHeight.val, vm.totalLineCount.val)
 

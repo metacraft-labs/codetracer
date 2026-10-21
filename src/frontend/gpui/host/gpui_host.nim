@@ -162,8 +162,12 @@ type
       ## horizontal scrollbar band — what Monaco calls the viewport when it
       ## decides whether a stop is "outside" it. 0: every row counts.
     followed: string
-      ## The stop (`<path>:<line>`) the window last followed, so a scroll
-      ## the user made afterwards is never taken back.
+      ## The stop (`<path>:<line>@<tick>`) the window last followed, so a
+      ## scroll the user made afterwards is never taken back.
+    followOwed*: bool
+      ## M73 (#840): the editor's height changed — the next `serveWindow`
+      ## follows the pointer even at the same stop, as it always did then, so
+      ## a shrunken pane does not leave the pointer below its last row.
     fullRows*: int
       ## How many whole rows the editor shows (its body over the row pitch,
       ## the partial last row not counted) — where Monaco stops scrolling at
@@ -201,6 +205,51 @@ const ServeRounds = 4
 
 proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest])
 
+proc serveRounds(s: GpuiSourceService; follow: bool) =
+  ## Up to `ServeRounds` rounds of asking for what the window lacks and
+  ## serving it — after following the execution pointer each round when
+  ## `follow` (a stop), or with the window held where it is (a user's scroll,
+  ## M73: `requestMissing`, the second half of `followAndRequest` alone).
+  for _ in 0 ..< ServeRounds:
+    let requests = if follow: s.vm.followAndRequest()
+                   else: s.vm.requestMissing()
+    if requests.len == 0:
+      break
+    s.serveRequests(requests)
+
+proc settleAtFileEnd(s: GpuiSourceService; follow: bool) =
+  ## MONACO'S END OF FILE: it scrolls no further than the file's last line —
+  ## the empty one after a final newline included — resting on the editor's
+  ## bottom edge. The shared window clamps its top by its own line count and
+  ## height; a window at that clamp is at the file's end, and the editor
+  ## draws its rows bottom-aligned to Monaco's count (`main.editorTopInsetPx`).
+  s.bottomAligned = false
+  let path = s.vm.revision.val.path
+  s.monacoLineCount = (if s.fileLines.hasKey(path): s.fileLines[path].len
+                       else: s.vm.totalLineCount.val) +
+                      (if s.trailingNewline.getOrDefault(path, false): 1 else: 0)
+  let ownTotal = s.vm.totalLineCount.val
+  let height = s.vm.viewportHeight.val
+  if s.fullRows > 0 and ownTotal > height and s.vm.viewportTop.val > 1 and
+     s.vm.viewportTop.val >= ownTotal - height:
+    # ONE ROW SHORT OF THE CLAMP — a window that grew (the top clamped to the
+    # taller end) and shrank back keeps its top — is drawn at the end too:
+    # its held rows then reach the file's last line, which the bottom-aligned
+    # rows need, rather than stopping one short of it over a blank strip.
+    #
+    # M73: but NOT after a user's scroll. There "one row short" is where a
+    # one-line scroll up from the end lands (`k`, `Ctrl+Up`, a fine wheel
+    # delta), and moving it back to the end undid that scroll, so the window
+    # could never leave the file's end one line at a time. That window is an
+    # ordinary scrolled one, drawn top-aligned.
+    let atEnd = ownTotal - height + 1
+    if s.vm.viewportTop.val < atEnd:
+      if not follow:
+        return
+      s.vm.viewportTop.val = atEnd
+      s.serveRounds(follow)
+    s.bottomAligned = true
+
 proc serveWindow*(s: GpuiSourceService) =
   ## Follow the execution pointer and serve every line the window then lacks.
   ##
@@ -218,6 +267,13 @@ proc serveWindow*(s: GpuiSourceService) =
   ## loading (measured on `calc` after `stepIn=21,stepOut=1`: 15 of 54 rows).
   ## The terminal converges by itself because it serves on every frame; a
   ## window that draws once must converge before it draws.
+  ##
+  ## M73 (#840): ONLY A NEW STOP FOLLOWS (or a height change,
+  ## `followOwed`). This is also called after a breakpoint toggle and other
+  ## refreshes at the same stop, and now that the user can scroll the window
+  ## (`scrollWindowBy` & co.), following there snapped a window the user had
+  ## scrolled away from the pointer back to it. The stop is named by its tick
+  ## as well as its line: a loop's next iteration on the same line is a stop.
   if s.isNil or s.vm.isNil:
     return
   # MONACO'S "OUTSIDE THE VIEWPORT" (`revealLineInCenterIfOutsideViewport`,
@@ -228,44 +284,60 @@ proc serveWindow*(s: GpuiSourceService) =
   # the line, so `followExecutionPointer` sees it outside and centres it with
   # its own clamping — rather than a second centring computed here.
   let line = s.vm.executionLine.val
-  let stop = $s.vm.revision.val.path & ":" & $line
+  let stop = $s.vm.revision.val.path & ":" & $line & "@" &
+             $s.store.debugger.val.rrTicks
+  let follow = stop != s.followed or s.followOwed
   if s.visibleRows > 0 and stop != s.followed and line > 0:
     let top = s.vm.viewportTop.val
     if line >= top + s.visibleRows and line < top + s.vm.viewportHeight.val:
       s.vm.viewportTop.val = line + 1
   s.followed = stop
-  for _ in 0 ..< ServeRounds:
-    let requests = s.vm.followAndRequest()
-    if requests.len == 0:
-      break
-    s.serveRequests(requests)
-  # MONACO'S END OF FILE: it scrolls no further than the file's last line —
-  # the empty one after a final newline included — resting on the editor's
-  # bottom edge. The shared window clamps its top by its own line count and
-  # height; a window at that clamp is at the file's end, and the editor
-  # draws its rows bottom-aligned to Monaco's count (`main.editorTopInsetPx`).
-  s.bottomAligned = false
-  let path = s.vm.revision.val.path
-  s.monacoLineCount = (if s.fileLines.hasKey(path): s.fileLines[path].len
-                       else: s.vm.totalLineCount.val) +
-                      (if s.trailingNewline.getOrDefault(path, false): 1 else: 0)
-  let ownTotal = s.vm.totalLineCount.val
-  let height = s.vm.viewportHeight.val
-  if s.fullRows > 0 and ownTotal > height and s.vm.viewportTop.val > 1 and
-     s.vm.viewportTop.val >= ownTotal - height:
-    s.bottomAligned = true
-    # ONE ROW SHORT OF THE CLAMP — a window that grew (the top clamped to the
-    # taller end) and shrank back keeps its top — is drawn at the end too:
-    # its held rows then reach the file's last line, which the bottom-aligned
-    # rows need, rather than stopping one short of it over a blank strip.
-    let atEnd = ownTotal - height + 1
-    if s.vm.viewportTop.val < atEnd:
-      s.vm.viewportTop.val = atEnd
-      for _ in 0 ..< ServeRounds:
-        let requests = s.vm.followAndRequest()
-        if requests.len == 0:
-          break
-        s.serveRequests(requests)
+  s.followOwed = false
+  s.serveRounds(follow)
+  s.settleAtFileEnd(follow)
+
+proc settleUserScroll(s: GpuiSourceService) =
+  ## After the user moved the window: serve what it lacks without following
+  ## the pointer, and settle Monaco's end of file.
+  s.serveRounds(follow = false)
+  s.settleAtFileEnd(follow = false)
+
+proc scrollWindowBy*(s: GpuiSourceService; lines: int) =
+  ## M73 (#840): the wheel over the editor and §4.2's scroll keys — the
+  ## window `lines` lines down (negative: up), `SourceVM.scrollBy`. The
+  ## execution pointer and the caret stay where they are.
+  if s.isNil or s.vm.isNil or lines == 0:
+    return
+  s.vm.scrollBy(lines)
+  s.settleUserScroll()
+
+proc scrollWindowTo*(s: GpuiSourceService; top: int) =
+  ## M73: line `top` first — the editor's vertical scrubber pressed or held
+  ## (Scrollbar-Scrubbers.md §3.2, §3.3), `SourceVM.scrollTo`. The pointer
+  ## and the caret stay where they are (§3.5).
+  if s.isNil or s.vm.isNil:
+    return
+  s.vm.scrollTo(top)
+  s.settleUserScroll()
+
+proc centreWindowOnPointer*(s: GpuiSourceService) =
+  ## M73: `.` — "Reset source scroll so the current execution pointer is
+  ## centered" (CodeTracer-TUI.md §4.2), `SourceVM.centreOnExecutionPointer`.
+  if s.isNil or s.vm.isNil:
+    return
+  s.vm.centreOnExecutionPointer()
+  s.settleUserScroll()
+
+proc followCaretInWindow*(s: GpuiSourceService; line, column: int) =
+  ## M73: the read-only caret moved to `line`:`column` (1-based): it is
+  ## written into `EditorVM` (the editor caret `followCursor` reads) and the
+  ## window follows it by the least amount, so it cannot leave the screen
+  ## (Editor-Pane.md § The caret in a read-only editor).
+  if s.isNil or s.vm.isNil or s.vm.editor.isNil:
+    return
+  s.vm.editor.setCursor(line, column)
+  s.vm.followCursor()
+  s.settleUserScroll()
 
 proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest]) =
   for request in requests:

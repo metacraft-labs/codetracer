@@ -338,6 +338,28 @@ proc sourcePaneModelFor*(vm: SourceVM;
     notTakenLines = notTakenLines,
     lineValues = lineAnnotationsOf(lineValues))
 
+proc withSourceWindow*(model: SourcePaneModel; vm: SourceVM): SourcePaneModel =
+  ## `model` with `vm`'s CURRENT window: the held lines, their first line and
+  ## entry context, the file's length and the first visible line — and
+  ## everything else (the marks, the inline values, the flow overlay, the
+  ## provenance) as the stop's `sourcePaneModelFor` left it.
+  ##
+  ## M73 (#840): what a USER's scroll changes. Those other fields are facts
+  ## about the STOP — a line's inline value is the same whichever window
+  ## shows it — so a scroll re-reads only the window rather than rebuilding
+  ## the stop's whole model, and the pane cannot show values from one stop
+  ## beside another's window. Only for the file `model` already shows: any
+  ## other is the stop's business (`sourcePaneModelFor`).
+  result = model
+  if vm.path.val != model.path:
+    return
+  result.firstHeldLine = vm.heldFirstLine.val
+  result.heldLines = vm.heldLines.val
+  result.entryContext = (if vm.heldLineContexts.val.len > 0:
+                           vm.heldLineContexts.val[0] else: "")
+  result.totalLineCount = vm.totalLineCount.val
+  result.viewportTop = vm.visibleFirstLine.val
+
 # `followAndRequest` IS NO LONGER DECLARED HERE. PLAT-22 moved it to
 # `view_vocabulary/editor_surface.nim` and this module re-exports it (see the
 # import above), so the call sites in `host/tui_session.nim` and in this

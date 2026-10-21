@@ -198,6 +198,10 @@ OPTIONS:
                       the editor / the terminal output scroll, clamped)
                       swheel:<pane>:<rows> (PLAT-70: the vertical wheel
                       with Shift held — a horizontal scroll)
+                      wheel:<pane>:<lines> (M73: the vertical wheel over a
+                      pane's centre, positive toward the user)
+                      vbar:editor:track:<permille>, vbar:editor:drag:<from>:
+                      <to> (M73: the editor's vertical scrubber)
                       hbar:<pane>:track:<permille>, hbar:<pane>:drag:<from>:
                       <to>, hbar:terminalOutput:corner (PLAT-70: a text
                       pane's horizontal bar)
@@ -569,6 +573,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
                        "tab-add", "hwheel", "swheel", "hbar", "click",
+                       # M73 (#840): the plain vertical wheel.
+                       "wheel", "vbar",
                        "ctx", "label-menu",
                        # PLAT-52: the Terminal Output pane's events.
                        "term",
@@ -849,6 +855,9 @@ var
     ## The caret the view last followed (§4.5: only the caret moves it).
   gEditorBarDrag = false
     ## A press held on the editor bar's thumb: the view follows the pointer.
+  gEditorVBarDrag = false
+    ## M73 (#840): a press held on the editor's VERTICAL scrubber's thumb: the
+    ## source window follows the pointer.
   pendingOutcome: LeafRenderOutcome
     ## The leaf tree, built BEFORE `gpui_launch` so `--report-plan` and the
     ## window path derive from one render rather than two.
@@ -2201,8 +2210,31 @@ proc editorBarRect(): PxRect =
   if i < 0 or not gEditorView.overflows:
     return PxRect()
   let body = gGeom.nodes[i].body
+  # M73: one vertical scrubber's width shorter while that one is drawn too,
+  # as `leaves.renderEditor` draws it (the corner is neither's, §6).
+  let v = editorVScrollOf(gEditorSurface, body.h, true)
   PxRect(x: body.x + EditorPadSidePx, y: body.y + body.h - EditorScrollbarPx,
-         w: gEditorViewportPx, h: EditorScrollbarPx)
+         w: gEditorViewportPx - (if v.present: EditorVScrollbarPx else: 0),
+         h: EditorScrollbarPx)
+
+proc editorVBarRect(): tuple[rect: PxRect; v: EditorVScroll] =
+  ## M73 (#840): where `leaves.renderEditorVScrollbar` draws the editor's
+  ## vertical scrubber, in window pixels, and the decision it was drawn from
+  ## (`leaves.editorVScrollOf`, over the surface the editor was drawn from);
+  ## a zero rectangle while the file fits.
+  let i = gGeom.tabsNodeOfPane($paneEditor)
+  if i < 0:
+    return
+  followEditorView()
+  let body = gGeom.nodes[i].body
+  let v = editorVScrollOf(gEditorSurface, body.h, gEditorView.overflows)
+  if not v.present or gEditorViewportPx <= EditorVScrollbarPx:
+    return
+  (rect: PxRect(x: body.x + EditorPadSidePx + gEditorViewportPx -
+                   EditorVScrollbarPx,
+                y: body.y + v.trackTopPx, w: EditorVScrollbarPx,
+                h: v.trackPx),
+   v: v)
 
 proc scrubEditorBar(r: GpuiRenderer; x: int; click: bool) =
   ## PLAT-70 (Horizontal-Overflow.md §4.2): a press on the editor's bar
@@ -2238,6 +2270,13 @@ proc pressEditorBar(r: GpuiRenderer; x, y: int): bool =
 
 proc refreshReplayWindow(r: GpuiRenderer)
   ## Forward-declared for `clickCalltrace`; defined beside the controls.
+
+proc scrollEditorLines(r: GpuiRenderer; lines: int)
+  ## M73 (#840): FORWARD-DECLARED for the wheel's arm in `windowPointer`;
+  ## defined beside `showViewedFile`, whose window it moves too.
+proc pressEditorVBar(r: GpuiRenderer; x, y: int): bool
+proc scrubEditorVBar(r: GpuiRenderer; y: int; click: bool)
+  ## M73: FORWARD-DECLARED for `windowPointer`; defined with the scroll above.
 
 proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
   ## PLAT-49 part B: a press on the call trace's body. On a row: go to that
@@ -2814,6 +2853,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-70: the editor's horizontal bar, before the row under it.
     if pressEditorBar(r, x, y):
       return
+    # M73 (#840): and its vertical scrubber.
+    if pressEditorVBar(r, x, y):
+      return
     if clickCalltrace(r, x, y):
       return
     # PLAT-52: the Terminal Output pane's presses.
@@ -2826,6 +2868,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   of gekPointerMove:
     if gEditorBarDrag:
       scrubEditorBar(r, x, click = false)
+      return
+    if gEditorVBarDrag:
+      scrubEditorVBar(r, y, click = false)
       return
     if gTextDrag:
       dragTextTo(r, x, y)
@@ -2850,6 +2895,10 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gEditorBarDrag:
       scrubEditorBar(r, x, click = false)
       gEditorBarDrag = false
+      return
+    if gEditorVBarDrag:
+      scrubEditorVBar(r, y, click = false)
+      gEditorVBarDrag = false
       return
     if gTextDrag:
       dragTextTo(r, x, y)
@@ -2928,7 +2977,7 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       traceGesture("state scroll top=" & $stateScroll.top & " left=" &
                    $stateScroll.left)
       redrawPaneOf(r, paneState)
-    elif onPane == $paneEditor and dx != 0.0:
+    elif onPane == $paneEditor and (dx != 0.0 or dy != 0.0):
       # `PLAT35-F3`. **THE EDITOR SCROLLS SIDEWAYS, and this is the half that
       # makes the clipped text reachable rather than merely announced.** The
       # sign convention is the call trace's one line up — the delta is the
@@ -2936,7 +2985,19 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       # `dx` is the shim's own (`input.rs` spells a wheel `"x,y,dx,dy"`); it
       # was parsed into `GpuiPointer` and dropped on the floor here until
       # this line, which is why no horizontal gesture reached any pane.
-      scrollEditorColumns(r, wheelColumnsOf(-dx, GpuiWheelLinePx))
+      if dx != 0.0:
+        scrollEditorColumns(r, wheelColumnsOf(-dx, GpuiWheelLinePx))
+      # M73 (#840): AND DOWN — the vertical wheel over the editor moves the
+      # source window (CodeTracer-TUI.md §4.4, the terminal's rule; Monaco
+      # scrolls itself on the desktop). Until M73 a `dy` here was dropped,
+      # and only a stop moved the window. A line of wheel motion is
+      # `GpuiWheelLinePx` (a Wayland notch is three), and at least one line
+      # a report, so a fine-grained touchpad delta still moves it.
+      if dy != 0.0:
+        let lines = int(round(-dy / GpuiWheelLinePx))
+        scrollEditorLines(r, (if lines != 0: lines
+                              elif dy < 0.0: 1
+                              else: -1))
     return
   else:
     return
@@ -5327,13 +5388,14 @@ proc editorPath(): string =
   elif gSession.isNil: ""
   else: gSession.getCurrentFile()
 
-proc showViewedFile(r: GpuiRenderer; atLine = 1) =
+proc showViewedFile(r: GpuiRenderer; atLine = 1; topLine = 0) =
   ## PLAT-50 (K17): the editor draws `gViewedFile` — read whole from the
   ## recording through the source service's provider, its breakpoints in the
   ## gutter, the execution pointer only when the debugger is in it — until
   ## the debugger moves (`refreshReplayWindow` clears it), as the desktop's
   ## editor follows the debugger back to the location's file. PLAT-57: from
   ## the window of rows that shows `atLine` (a Find in Files result's line).
+  ## M73 (#840): or from `topLine` exactly, when the user scrolled it.
   let editor = gPanes.getOrDefault($paneEditor)
   if editor.isNil or gSourceService.isNil or gViewedFile.len == 0:
     return
@@ -5343,7 +5405,8 @@ proc showViewedFile(r: GpuiRenderer; atLine = 1) =
     gViewedFile = ""
     return
   let shown = min(lines.len, editorRowsOf(gGeom))
-  let top = clamp(atLine - shown div 3, 1, max(1, lines.len - shown + 1))
+  let top = clamp((if topLine > 0: topLine else: atLine - shown div 3), 1,
+                  max(1, lines.len - shown + 1))
   var surface = EditorSurface(medium: GpuiMedium, path: gViewedFile,
                               revisionLabel: "@0",
                               provenance: epVerified, viewportTop: top,
@@ -5369,6 +5432,129 @@ proc showViewedFile(r: GpuiRenderer; atLine = 1) =
   noteEditorTab(r, editorTabLabel(gViewedFile, false))
   wireClicks(r)
   traceGesture("opened " & gViewedFile)
+
+# ---------------------------------------------------------------------------
+# M73 (#840): THE DEBUG-MODE EDITOR'S WINDOW, MOVED BY THE USER
+#
+# GPUI draws the same `SourceVM` window the terminal does, and had the same
+# defect: only a stop moved it (`serveWindow`). The vertical wheel over the
+# editor was dropped, the read-only caret followed only sideways
+# (`followEditorView`), and §4.2's scroll keys reached no arm. These move the
+# window through `gpui_host`'s `scrollWindowBy` / `centreWindowOnPointer` /
+# `followCaretInWindow` — the shared `SourceVM` calls, then the lines served
+# without following the pointer — and draw the editor again from it.
+# ---------------------------------------------------------------------------
+
+proc debugSourceShown(): bool =
+  ## Whether the editor draws the recording's source READ-ONLY now: Debug
+  ## mode, a file on it, its document not made writable (`Ctrl+E` hands the
+  ## pane to the document's own window, `withDebugDocument`), a source
+  ## service to move.
+  if gSourceService.isNil or gSession.isNil or
+     gEditorSurface.productMode == pmEdit or gEditorSurface.path.len == 0:
+    return false
+  let path = gEditorSurface.path
+  not (gDebugDocs.hasKey(path) and not gDebugDocs[path].isReadOnly)
+
+proc redrawSourceWindow(r: GpuiRenderer) =
+  ## The editor drawn again from the window as the user left it — the
+  ## resize path's three calls (`redrawReplayEditor`, the text faces, the
+  ## clicks wired to the new rows).
+  redrawReplayEditor(r)
+  let editor = gPanes.getOrDefault($paneEditor)
+  if not editor.isNil:
+    applyTextFaces(r, editor)
+  wireClicks(r)
+  traceGesture("editor-vscroll top=" & $gEditorSurface.viewportTop &
+               " execution=" & $gEditorSurface.executionLine)
+
+proc scrollEditorLines(r: GpuiRenderer; lines: int) =
+  ## The window `lines` lines down (negative: up): the wheel over the editor
+  ## and `j` / `k` / `Ctrl+d` / `Ctrl+u` (CodeTracer-TUI.md §4.2, "without
+  ## moving execution pointer"). A file shown whole (`gViewedFile`) moves its
+  ## own top.
+  if lines == 0 or not debugSourceShown():
+    return
+  if gViewedFile.len > 0:
+    showViewedFile(r, topLine = max(1, gEditorSurface.viewportTop + lines))
+    traceGesture("editor-vscroll top=" & $gEditorSurface.viewportTop)
+    return
+  gSourceService.scrollWindowBy(lines)
+  redrawSourceWindow(r)
+
+proc centreEditorOnPointer(r: GpuiRenderer) =
+  ## `.`: "Reset source scroll so the current execution pointer is
+  ## centered" (§4.2). A file shown whole carries no pointer unless the
+  ## debugger is in it, and then the stop's own window shows it.
+  if not debugSourceShown():
+    return
+  if gViewedFile.len > 0:
+    traceGesture("the execution pointer is not in " & gViewedFile)
+    return
+  gSourceService.centreWindowOnPointer()
+  redrawSourceWindow(r)
+
+proc followCaretInEditor(r: GpuiRenderer; line, column: int): bool =
+  ## The read-only caret moved to `line`:`column`: the window follows it by
+  ## the least amount (Editor-Pane.md § The caret in a read-only editor).
+  ## Answers whether the window moved — and so whether the editor was drawn
+  ## again from it.
+  if not debugSourceShown():
+    return false
+  if gViewedFile.len > 0:
+    let rows = max(1, min(gEditorSurface.totalLineCount, editorRowsOf(gGeom)))
+    let top = topFollowingCursor(gEditorSurface.viewportTop, line, rows,
+                                 gEditorSurface.totalLineCount)
+    if top == gEditorSurface.viewportTop:
+      return false
+    showViewedFile(r, topLine = top)
+    return true
+  let before = gSourceService.vm.visibleFirstLine.val
+  gSourceService.followCaretInWindow(line, column)
+  if gSourceService.vm.visibleFirstLine.val == before:
+    return false
+  redrawSourceWindow(r)
+  true
+
+proc scrollEditorTo(r: GpuiRenderer; top: int) =
+  ## The window with line `top` first — what the vertical scrubber asks for
+  ## (Scrollbar-Scrubbers.md §3.2, §3.3). The view only (§3.5).
+  if not debugSourceShown():
+    return
+  if gViewedFile.len > 0:
+    showViewedFile(r, topLine = max(1, top))
+    traceGesture("editor-vscroll top=" & $gEditorSurface.viewportTop)
+    return
+  gSourceService.scrollWindowTo(top)
+  redrawSourceWindow(r)
+
+proc scrubEditorVBar(r: GpuiRenderer; y: int; click: bool) =
+  ## M73 (#840): a press on the vertical track centres the line at its
+  ## fraction of the FILE (§3.2); a held thumb follows the pointer, centred on
+  ## it (§3.3) — through the shared scrubber model the track was drawn from,
+  ## so the press is read against what the user saw.
+  let (bar, v) = editorVBarRect()
+  if bar.h <= 0:
+    return
+  let f = trackFractionAt(clamp(y - bar.y, 0, bar.h - 1), bar.h)
+  let first = if click: v.model.clickAt(f)
+              else: v.model.dragTo(f - v.model.thumbLength / 2.0)
+  scrollEditorTo(r, first + 1)
+
+proc pressEditorVBar(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on the vertical scrubber: the bar's, never a press on the
+  ## row under it. On the thumb a drag starts; on the track the view jumps.
+  if not debugSourceShown():
+    return false
+  let (bar, v) = editorVBarRect()
+  if bar.h <= 0 or not bar.contains(x, y):
+    return false
+  let local = y - bar.y
+  let onThumb = local >= v.thumbTopPx and local < v.thumbTopPx + v.thumbPx
+  gTextDrag = false
+  gEditorVBarDrag = onThumb
+  scrubEditorVBar(r, y, click = not onThumb)
+  true
 
 proc lineMarkOf(path: string; line: int): EditorMark =
   ## The breakpoint on `path:line`, as the gutter draws it.
@@ -6113,6 +6299,7 @@ proc runDebugEditorOperation(r: GpuiRenderer; res: EditingResolution;
     let pasted = clipboardText()
     if pasted.len > 0:
       gDebugDocs[path].offerClipboard(pasted)
+  let caretBefore = (gDebugDocs[path].caretLine, gDebugDocs[path].caretColumn)
   let applied = gDebugDocs[path].applyResolved(res, nowMs)
   if res.operation in ["clipboard-copy", "clipboard-cut"]:
     let copied = gDebugDocs[path].clipboardText
@@ -6121,7 +6308,16 @@ proc runDebugEditorOperation(r: GpuiRenderer; res: EditingResolution;
   if applied.outcome == eoIgnored and res.kind == erOperation and
      gDebugDocs[path].isReadOnly:
     traceGesture("the editor is read-only — Ctrl+E makes it writable")
-  drawDebugDocument(r)
+  # M73 (#840): A CARET THAT MOVED brings the drawn window with it — the
+  # vertical half of `followEditorView`'s caret-follow, which until M73 was
+  # sideways only, so a caret walked below the last row left the screen. A
+  # key that did not move it (a copy, a refused edit) leaves a window the
+  # user scrolled where it is.
+  let d = gDebugDocs[path]
+  if not (d.isReadOnly and path == gEditorSurface.path and
+          (d.caretLine, d.caretColumn) != caretBefore and
+          followCaretInEditor(r, d.caretLine, d.caretColumn + 1)):
+    drawDebugDocument(r)
   traceGesture("caret " & $gDebugDocs[path].caretLine & ":" &
                $(gDebugDocs[path].caretColumn + 1))
 
@@ -6255,6 +6451,26 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     if text.len == 0: traceGesture("nothing is selected here to copy")
     else: copyToClipboard(text, what)
     return
+  of "editor.scroll-line-down", "editor.scroll-line-up",
+     "editor.scroll-half-page-down", "editor.scroll-half-page-up",
+     "editor.scroll-page-down", "editor.scroll-page-up",
+     "editor.center-on-pointer":
+    # M73 (#840): §4.2 Source Navigation on the focused read-only editor —
+    # `j` / `k` (CUA's `Ctrl+Down` / `Ctrl+Up`) a line, `Ctrl+d` / `Ctrl+u`
+    # half the editor (CUA's `Alt+PageDown` / `Alt+PageUp` a page), `.` the
+    # pointer centred — the window only, the pointer and the caret stay.
+    # Until M73 these were inert here ("not available in this window").
+    if editorFocused() and debugSourceShown():
+      let rows = max(1, editorRowsOf(gGeom))
+      case res.operation
+      of "editor.center-on-pointer": centreEditorOnPointer(r)
+      of "editor.scroll-line-down": scrollEditorLines(r, 1)
+      of "editor.scroll-line-up": scrollEditorLines(r, -1)
+      of "editor.scroll-half-page-down": scrollEditorLines(r, max(1, rows div 2))
+      of "editor.scroll-half-page-up": scrollEditorLines(r, -max(1, rows div 2))
+      of "editor.scroll-page-down": scrollEditorLines(r, rows)
+      else: scrollEditorLines(r, -rows)
+      return
   of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
      "view.scroll-right-half", "view.scroll-to-line-start":
     # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view — the
@@ -6699,6 +6915,9 @@ proc refitEditorRows(r: GpuiRenderer) =
       # from the line it showed first.
       showViewedFile(r, max(1, gEditorSurface.viewportTop))
     else:
+      # M73: a new height follows the pointer as every serve did before the
+      # user could scroll (`GpuiSourceService.followOwed`).
+      gSourceService.followOwed = true
       gSourceService.serveWindow()
       redrawReplayEditor(r)
     let editor = gPanes.getOrDefault($paneEditor)
@@ -7240,6 +7459,33 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
     of "release": windowPointer(r, gekPointerUp, at(1), at(2))
+    of "vbar":
+      # M73 (#840): the editor's vertical scrubber, aimed from the geometry
+      # the window drew it at (`editorVBarRect`):
+      #   vbar:editor:track:<permille>       press the track
+      #   vbar:editor:drag:<from>:<to>       hold the thumb, move it from
+      #                                      `from` to `to` permille of the
+      #                                      track in ten steps, release
+      if parts.len < 3 or parts[1] != $paneEditor:
+        return "no vertical scrubber on '" & (if parts.len > 1: parts[1]
+                                               else: "") & "'"
+      let (bar, v) = editorVBarRect()
+      if bar.h <= 0:
+        return "the editor's file fits: no vertical scrubber is drawn"
+      let x = bar.x + bar.w div 2
+      proc vy(permille: int): int =
+        bar.y + min(bar.h - 1, bar.h * clamp(permille, 0, 1000) div 1000)
+      case parts[2]
+      of "track": windowPointer(r, gekPointerDown, x, vy(at(3)))
+      of "drag":
+        windowPointer(r, gekPointerDown, x, bar.y + v.thumbTopPx + v.thumbPx div 2)
+        let a = at(3)
+        let b = at(4)
+        for k in 0 .. 10:
+          windowPointer(r, gekPointerMove, x, vy(a + (b - a) * k div 10))
+        windowPointer(r, gekPointerUp, x, vy(b))
+      else:
+        return "unknown vbar event '" & parts[2] & "'"
     of "hbar":
       # PLAT-70: a text pane's horizontal bar, aimed from the geometry the
       # window drew it at (`editorBarRect`, `terminalLayout`'s `hbar` and
@@ -7286,6 +7532,17 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         windowPointer(r, gekPointerUp, bx(b), y)
       else:
         return "unknown hbar event '" & parts[2] & "'"
+    of "wheel":
+      # M73 (#840): `wheel:<pane>:<lines>` — the plain VERTICAL wheel over a
+      # named pane's centre (lines of GPUI's wheel, `GpuiWheelLinePx`,
+      # positive toward the user: the content moves up), through
+      # `windowPointer` as a real one reaches it. Until M73 no op sent one,
+      # and no suite could see the editor drop it.
+      let i = gGeom.tabsNodeOfPane(parts[1])
+      if i < 0:
+        return "no pane box holds '" & parts[1] & "'"
+      let (cx, cy) = centreOf(gGeom.nodes[i].body)
+      windowPointer(r, gekWheel, cx, cy, -float(at(2)) * GpuiWheelLinePx, 0.0)
     of "swheel":
       # PLAT-70: `swheel:<pane>:<lines>` — the VERTICAL wheel with Shift held
       # over a named pane (lines of GPUI's wheel, `GpuiWheelLinePx`, positive

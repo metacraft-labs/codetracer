@@ -444,6 +444,39 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     h.vm.followExecutionPointer()
     check h.vm.visibleFirstLine.val == 262 - 9
 
+  test "M73: the user's `.` centres the pointer even while it is visible; a user scroll keeps it":
+    # CodeTracer-TUI.md §4.2's `.`: "Reset source scroll so the current
+    # execution pointer is centered". A RESET, so unlike the stop's
+    # `followExecutionPointer` it moves a window in which the pointer is
+    # already visible (Pxor-Bugs M73, codetracer#840).
+    let h = newHarness()
+    defer: h.teardown()
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
+    discard h.fillWindow()
+    h.store.updateDebuggerPosition(rrTicks = 1, file = RecordedPath, line = 250)
+    h.vm.followExecutionPointer()
+    check h.vm.visibleFirstLine.val == 241
+    # The user scrolls until the pointer sits on the window's last row: it is
+    # still visible, so the stop's rule leaves the window there…
+    h.vm.scrollBy(-10)
+    check h.vm.visibleFirstLine.val == 231
+    check h.vm.visibleLastLine.val == 250
+    h.vm.followExecutionPointer()
+    check h.vm.visibleFirstLine.val == 231
+    # …and `.` centres it.
+    h.vm.centreOnExecutionPointer()
+    check h.vm.visibleFirstLine.val == 241
+    check h.store.debugger.val.location.line == 250
+    discard h.fillWindow()
+    h.checkLineIsHeld(250)
+    # The caret written into `EditorVM` and followed — the read-only caret's
+    # route (M73) — scrolls the least amount, and leaves the pointer alone.
+    h.editor.setCursor(275, 1)
+    h.vm.followCursor()
+    check h.vm.visibleFirstLine.val == 275 - 19
+    check h.vm.executionLine.val == 250
+
   test "a line outside the window is a REQUEST, never an empty string":
     let h = newHarness()
     defer: h.teardown()
@@ -574,6 +607,14 @@ suite "CTUI-4 — the window arithmetic, as free functions":
     check clampTop(5, 20, 10) == 1
     # An unknown length must not collapse a scroll the caller just made.
     check clampTop(200, 20, 0) == 200
+
+  test "M73: topCentring centres whether or not the line is visible":
+    check topCentring(241, 250, 20, 400) == 241
+    check topCentring(231, 250, 20, 400) == 241
+    check topCentring(100, 250, 20, 400) == 241
+    check topCentring(100, 5, 20, 400) == 1
+    check topCentring(100, 399, 20, 400) == 381
+    check topCentring(100, 0, 20, 400) == 100
 
   test "topFollowingCursor makes the smallest move that works":
     check topFollowingCursor(100, 105, 20, 400) == 100

@@ -238,6 +238,40 @@ type
     order*: EventLogOrder
       ## `pcEventOrder`'s order.
 
+  SourceScrollKind* = enum
+    ## M73 (#840): what the user asked the Debug-mode source pane's WINDOW to
+    ## do. The pane draws `SourceVM`'s window, which the HOST owns
+    ## (`host/tui_session`), so this layer says what was asked and the host
+    ## moves the window and serves the lines it then lacks — the same split as
+    ## `awaitsMove`. Until M73 nothing the user did reached that window: only
+    ## a stop's `followExecutionPointer` moved it.
+    sskNone
+    sskBy
+      ## Scroll by `delta` lines, down positive: the wheel over the editor
+      ## (CodeTracer-TUI.md §4.4), `j` / `k` and `Ctrl+d` / `Ctrl+u` while it
+      ## is focused (§4.2 Source Navigation). The execution pointer and the
+      ## caret stay where they are.
+    sskTo
+      ## Put line `top` at the top: the vertical bar's track or thumb
+      ## (Scrollbar-Scrubbers.md §3.2, §3.3).
+    sskCentreOnPointer
+      ## `.`: "Reset source scroll so the current execution pointer is
+      ## centered" (§4.2).
+    sskFollowCaret
+      ## The read-only caret moved to `line`:`column`: the smallest scroll
+      ## that keeps it on screen (Editor-Pane.md § The caret in a read-only
+      ## editor).
+
+  SourceScroll* = object
+    ## M73 (#840): one request for the source window. See `SourceScrollKind`.
+    kind*: SourceScrollKind
+    delta*: int
+    top*: int
+      ## 1-based.
+    line*: int
+    column*: int
+      ## 1-based, both.
+
   RuntimeOutcome* = object
     ## Everything one token decided, as a value the host acts on.
     ##
@@ -281,6 +315,10 @@ type
       ## section of the trace the pane now shows, if it does not hold it
       ## (`tui_session.pageCallTrace`), and nothing else — no pump, no
       ## rebuild of the other panes.
+    sourceScroll*: SourceScroll
+      ## M73 (#840): the source window moved by the user — the host applies
+      ## it to `SourceVM` and serves the lines it then lacks
+      ## (`tui_session.scrollSource`). `sskNone` for every other token.
     action*: KeyAction
       ## What fired, for the status line and for a test that wants to assert
       ## the binding rather than its effect.
@@ -441,6 +479,10 @@ proc debugBuffer*(rt: TuiRuntime): EditBuffer
 proc editorBuffer(rt: TuiRuntime): EditBuffer
   ## Forward-declared for PLAT-70's horizontal views; defined below.
 proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer)
+proc scrubSource(rt: TuiRuntime; row: int; dragging: bool;
+                 outcome: var RuntimeOutcome): bool
+  ## M73: FORWARD-DECLARED for `routeListScrubDrag`; defined with the rest of
+  ## the source window's input, after `sourceWithView`.
 proc scopePath*(rt: TuiRuntime): ScopePath
 proc navMode(rt: TuiRuntime): NavigationMode
 proc unmountGoneOwners(rt: TuiRuntime)
@@ -1683,10 +1725,14 @@ proc editorPaneModel(rt: TuiRuntime; model: var ShellModel; follow: bool) =
   if not editShown and model.source.path != buf.path:
     return
   let area = rt.paintedAreaOf(paneEditor)
-  let gutter = if editShown: paneGutterWidth(model.edit)
-               else: min(area.width, model.source.paneGutterWidth())
-  let cols = if area.width > 0: max(0, area.width - gutter)
-             else: buf.hview.viewportCols
+  # M73: the read-only pane's code columns are the painter's own
+  # (`sourceCodeWidth`), one fewer while its vertical bar is shown — so the
+  # view is measured against the cells the code is really drawn in.
+  var probe = model.source
+  probe.hview = buf.hview
+  let cols = if area.width <= 0: buf.hview.viewportCols
+             elif editShown: max(0, area.width - paneGutterWidth(model.edit))
+             else: probe.sourceCodeWidth(area)
   if follow:
     # The first frame that knows the pane's width follows the caret where
     # it already is; after that only a caret move does (§4.5).
@@ -1993,6 +2039,9 @@ proc routeListScrubDrag(rt: TuiRuntime; event: MouseEvent;
       discard rt.scrubCallTrace(area, event.row, dragging = true, outcome)
     of paneSearch:
       discard rt.scrubSearch(event.row, dragging = true)
+    of paneEditor:
+      # M73 (#840): the source pane's vertical bar, held.
+      discard rt.scrubSource(event.row, dragging = true, outcome)
     else: discard
   outcome.repaint = true
   true
@@ -2101,6 +2150,102 @@ proc placeCaret(rt: TuiRuntime; path: string; line, column: int) =
     rt.syncCaretFrom(buf)
   else:
     rt.app.caret = (path, line, column)
+
+# ---------------------------------------------------------------------------
+# M73 (#840): THE DEBUG-MODE SOURCE PANE'S WINDOW, MOVED BY THE USER
+#
+# The pane draws `SourceVM`'s window (`source_binding`: `viewportTop =
+# vm.visibleFirstLine`), and until M73 only a stop moved it
+# (`editor_surface.followAndRequest`). The wheel was routed to four other
+# panes, the scroll keys answered for two, the caret scrolled a document
+# window this pane does not draw, and there was no vertical bar. Each input
+# below says what it asks for (`SourceScroll`); the host moves `SourceVM` and
+# serves the lines the window then lacks (`tui_session.scrollSource`), as it
+# serves a stop's. The execution pointer is never moved by any of it.
+# ---------------------------------------------------------------------------
+
+const SourceWheelRows* = 3
+  ## Lines one wheel notch scrolls the source — the call trace's, the event
+  ## log's and the terminal output's (`CallTraceWheelRows`,
+  ## `TerminalWheelRows`): the common terminal default.
+
+proc sourceWindowShown(rt: TuiRuntime): bool =
+  ## Whether the editor pane draws the recording's source READ-ONLY now:
+  ## Debug mode, a file on it, and its document not made writable — `Ctrl+E`
+  ## hands the pane to the edit pane (`editorPaneModel`), which draws its
+  ## document's own window and is not this milestone's (the issue's "Edit
+  ## mode is not part of this report").
+  if rt.app.modes.product != pmDebug or rt.app.source.isEmpty:
+    return false
+  if not rt.app.editSession.isNil:
+    let at = rt.app.editSession.indexOfPath(rt.app.source.path)
+    if at >= 0 and not rt.app.editSession.buffers[at].doc.isReadOnly:
+      return false
+  true
+
+proc requestSourceScroll(rt: TuiRuntime; scroll: SourceScroll;
+                         outcome: var RuntimeOutcome) =
+  outcome.sourceScroll = scroll
+  outcome.repaint = true
+
+proc scrubSource(rt: TuiRuntime; row: int; dragging: bool;
+                 outcome: var RuntimeOutcome): bool =
+  ## The vertical bar pressed at `row` (§3.2: the line at that fraction of
+  ## the FILE centred) or its thumb held there (§3.3: the window follows) —
+  ## through the shared scrubber model, which the painter drew the bar from
+  ## (`source_pane.sourceTrackOf`), so the press is read back against the
+  ## cells the user saw. The view moves; the debugger does not (§3.5).
+  let area = rt.paintedAreaOf(paneEditor)
+  if area.width <= 0:
+    return false
+  let track = rt.sourceWithView().sourceTrackOf(area)
+  if not track.shown:
+    return false
+  let at = clamp(row, track.top, track.top + track.rows - 1)
+  let hit = track.model.verticalScrubberHit(track.top, track.rows, at)
+  if hit.kind == shNone:
+    return false
+  rt.requestSourceScroll(SourceScroll(
+    kind: sskTo, top: track.model.scrubTo(hit, dragging) + 1), outcome)
+  true
+
+proc pressSourceTrack(rt: TuiRuntime; event: MouseEvent;
+                      outcome: var RuntimeOutcome): bool =
+  ## A left press on the source pane's vertical bar: a jump on the track, a
+  ## drag started on the thumb (`routeListScrubDrag` follows it). Never a
+  ## click on the text.
+  if event.kind != mekPress or event.button != mbLeft or
+     not rt.sourceWindowShown:
+    return false
+  let area = rt.paintedAreaOf(paneEditor)
+  if not area.contains(event.row, event.col):
+    return false
+  let track = rt.sourceWithView().sourceTrackOf(area)
+  if not track.shown or event.col != track.col or event.row < track.top or
+     event.row >= track.top + track.rows:
+    return false
+  let hit = track.model.verticalScrubberHit(track.top, track.rows, event.row)
+  if hit.kind == shThumb:
+    rt.app.listScrub = (active: true, pane: paneEditor)
+  discard rt.scrubSource(event.row, dragging = hit.kind == shThumb, outcome)
+  true
+
+proc followCaretInSource(rt: TuiRuntime; buf: EditBuffer;
+                         before: (int, int); outcome: var RuntimeOutcome) =
+  ## The read-only caret moved (a key, a find): the drawn window follows it
+  ## by the least amount (`SourceVM.followCursor`), so it cannot leave the
+  ## screen. `buf.followCaret` scrolls the DOCUMENT's own window, which the
+  ## Debug-mode pane does not draw; that was the gap. A key that did not move
+  ## the caret (a copy, a refused edit) does not scroll: after a wheel the
+  ## user's window is theirs until the caret moves (Monaco's rule too).
+  if buf.isNil or not buf.doc.isReadOnly or buf.path != rt.app.source.path or
+     not rt.sourceWindowShown:
+    return
+  if (buf.caretLine, buf.caretColumn) == before:
+    return
+  rt.requestSourceScroll(SourceScroll(kind: sskFollowCaret,
+                                      line: buf.caretLine,
+                                      column: buf.caretColumn + 1), outcome)
 
 proc routeTextDrag(rt: TuiRuntime; event: MouseEvent;
                    outcome: var RuntimeOutcome): bool =
@@ -2754,6 +2899,10 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   if acted.status == lasNoGesture and not inGesture and
      rt.pressHorizontalBar(event, outcome):
     return
+  # M73 (#840): a press on the source pane's vertical bar is the bar's.
+  if acted.status == lasNoGesture and not inGesture and
+     rt.pressSourceTrack(event, outcome):
+    return
   if acted.status == lasNoGesture and event.kind == mekPress and
      event.button in {mbWheelUp, mbWheelDown}:
     let idx = geometry.regionIndexAt(event.row, event.col)
@@ -2785,6 +2934,18 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
       rt.scrollTerminalOutput(
         (if event.button == mbWheelDown: TerminalWheelRows
          else: -TerminalWheelRows), outcome)
+      return
+    # M73 (#840): THE WHEEL OVER THE EDITOR scrolls the recording's source —
+    # CodeTracer-TUI.md §4.4, "the pane beneath the pointer ... without
+    # requiring pane focus" (nor taking it). The rectangle is the one the
+    # editor is PAINTED into (`paintedAreaOf`), so a maximized editor takes
+    # it too. The pointer and the caret stay where they are.
+    if rt.sourceWindowShown and
+       rt.paintedAreaOf(paneEditor).contains(event.row, event.col):
+      rt.requestSourceScroll(SourceScroll(
+        kind: sskBy,
+        delta: (if event.button == mbWheelDown: SourceWheelRows
+                else: -SourceWheelRows)), outcome)
       return
   # PLAT-50: every other press the layout did not act on is the pane's —
   # the desktop's click behaviour there (`routePaneClick`).
@@ -3009,6 +3170,19 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
                                              area).contentRows)
       let (_, delta) = scrollDelta(action, rows)
       rt.scrollTerminalOutput(delta, outcome)
+      return true
+    # M73 (#840): THE FOCUSED EDITOR'S SOURCE SCROLLS — §4.2 Source
+    # Navigation: `j` / `k` (and `Down` / `Up`, CUA's `Ctrl+Down` /
+    # `Ctrl+Up`) a line, `Ctrl+d` / `Ctrl+u` half the pane, "without moving
+    # execution pointer"; `.` "Reset source scroll so the current execution
+    # pointer is centered". Before M73 these keys reached the dispatcher here,
+    # which has no source window to move.
+    if had and focused == paneEditor and rt.sourceWindowShown:
+      if action == kaCenterOnPointer:
+        rt.requestSourceScroll(SourceScroll(kind: sskCentreOnPointer), outcome)
+      else:
+        let (_, delta) = scrollDelta(action, max(1, rt.sourcePaneRows()))
+        rt.requestSourceScroll(SourceScroll(kind: sskBy, delta: delta), outcome)
       return true
     if not had or focused != paneCalltrace or rt.app.callTrace.isEmpty:
       return false
@@ -4105,6 +4279,7 @@ proc runEditorOperation(rt: TuiRuntime; buf: EditBuffer;
       outcome.repaint = true
       return
     rt.offerClipboardTo(buf)
+  let caretBefore = (buf.caretLine, buf.caretColumn)
   let applied = rt.app.editSession.applyResolvedIn(buf, res, nowMs)
   if applied.outcome == eoChanged:
     rt.app.editSession.recordEdit(buf.path)
@@ -4116,6 +4291,8 @@ proc runEditorOperation(rt: TuiRuntime; buf: EditBuffer;
   buf.followCaret(max(1, rt.sourcePaneRows()))
   if rt.app.modes.product == pmDebug:
     rt.syncCaretFrom(buf)
+    # M73 (#840): and the window the Debug pane DRAWS follows the caret too.
+    rt.followCaretInSource(buf, caretBefore, outcome)
   if "save" in applied.operations or "save-all" in applied.operations:
     rt.writeBuffers(res.spelling, all = "save-all" in applied.operations)
   elif "save-as" in applied.operations:
@@ -4213,9 +4390,12 @@ proc runFind(rt: TuiRuntime; forward: bool; outcome: var RuntimeOutcome) =
   if at < 0:
     rt.note("find: no match for `" & query & "`")
     return
+  let caretBefore = (buf.caretLine, buf.caretColumn)
   buf.doc.selectSpan(at, at + query.len)
   buf.followCaret(max(1, rt.sourcePaneRows()))
   rt.syncCaretFrom(buf)
+  # M73 (#840): a match off the drawn window brings the window to it.
+  rt.followCaretInSource(buf, caretBefore, outcome)
   rt.note("find: `" & query & "` at line " & $buf.caretLine)
 
 proc runPromptKey(rt: TuiRuntime; key: string;

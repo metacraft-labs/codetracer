@@ -982,6 +982,24 @@ const
   EditorScrollbarMarkPx* = 3
   EditorScrollbarMarkColour* = DesignTokenHex[dtColorsEditorActionSecondary][dmDark]
     ## The execution pointer's colour, as every scrubber's mark is drawn.
+  EditorVScrollbarPx* = 14
+    ## M73 (#840): THE VERTICAL SCRUBBER'S WIDTH — Monaco's
+    ## `verticalScrollbarSize` default, beside the `horizontalScrollbarSize:
+    ## 12` above in the same options bag (`editorOptions.js`). It lies over
+    ## the editor's right edge, where the overview ruler's border is drawn, as
+    ## Monaco's vertical slider lies over its overview ruler.
+  EditorVScrollbarAttribute* = "data-ct-editor-vscrollbar"
+    ## M73: the VERTICAL track — a node of its own rather than a second
+    ## `EditorScrollbarAttribute` value, because every reader of that one
+    ## counts it as THE editor's (horizontal) bar.
+  EditorVScrollbarThumbAttribute* = "data-ct-editor-vscrollbar-thumb"
+  EditorVScrollbarMarkAttribute* = "data-ct-editor-vscrollbar-mark"
+    ## Its value is the execution line the mark stands for (§3.5).
+  EditorVScrollMetricAttribute* = "data-ct-editor-vscroll"
+    ## The vertical extent, stamped on the track as `EditorScrollMetricAttribute`
+    ## stamps the horizontal one: `total`, `first`, `visible` (lines),
+    ## `trackTop`, `trackPx`, `corner` (the horizontal bar's height it leaves
+    ## free, 0 without one) and `paneH` (px).
   EditorScrollMetricAttribute* = "data-ct-editor-scroll"
     ## **WHAT THE EDITOR'S HORIZONTAL EXTENT ACTUALLY IS**, stamped on the
     ## editor's own node on EVERY frame — including the frames with no
@@ -1019,6 +1037,31 @@ type
     view*: HorizontalView
       ## PLAT-70: the horizontal view the bar is drawn over (zero while the
       ## content fits) — what a press on the bar is handed back to.
+    trackPx*: int
+      ## M73: the bar's own length — `viewportPx`, less the vertical
+      ## scrubber's width while that one is drawn too, so the corner cell is
+      ## neither bar's (Scrollbar-Scrubbers.md §6). The thumb is measured on it.
+
+  EditorVScroll* = object
+    ## M73 (#840): the editor's VERTICAL scrubber — Scrollbar-Scrubbers.md §3
+    ## over the WHOLE file's lines, as the terminal's source pane draws it
+    ## (`views/source_pane.sourcePaneLayout`). A value, as `EditorHScroll` is,
+    ## so the drawing and the window's hit-test (`main.editorVBarRect`) read
+    ## one decision.
+    present*: bool
+      ## Only while the file has more lines than the editor shows (Monaco's
+      ## `vertical: 'auto'`).
+    model*: ScrubberModel
+    trackTopPx*: int
+    trackPx*: int
+      ## The track's top inside the editor and its height.
+    cornerPx*: int
+      ## The horizontal bar's height the track stops short of (0 without it).
+    paneHeightPx*: int
+    thumbTopPx*: int
+    thumbPx*: int
+    markTopPx*: int
+      ## The execution line's mark, -1 when the pointer is not in this file.
 
 func columnsPx*(cols: int): int =
   ## `cols` columns of the editor's face, in whole pixels.
@@ -1087,7 +1130,7 @@ func editorViewCols*(viewportPx: int): int =
 
 func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
                       viewportPx: int; leftCols = 0;
-                      contentCols = -1): EditorHScroll =
+                      contentCols = -1; reservePx = 0): EditorHScroll =
   ## **THE WHOLE DECISION, IN ONE PLACE.** Given the rows as drawn, the
   ## gutter's width, the pane's inner width and — when the window holds the
   ## document — its exact content width (PLAT-70, Horizontal-Overflow.md
@@ -1105,6 +1148,7 @@ func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
   ## `leftCols` is clamped by the model: to `0 .. maxLeftCols`, and the one
   ## column past it that only the caret's follow reaches.
   result.viewportPx = max(0, viewportPx)
+  result.trackPx = max(0, result.viewportPx - max(0, reservePx))
   result.gutterCols = editorGutterColumns(numberWidth)
   result.codeCols = if contentCols >= 0: contentCols
                     else: editorCodeColumns(rows)
@@ -1121,11 +1165,56 @@ func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
   result.present = true
   result.maxLeftCols = view.maxLeftCol
   result.leftCols = view.leftCol
-  let span = view.barModel.thumbSpan(result.viewportPx,
+  let span = view.barModel.thumbSpan(result.trackPx,
                                      EditorScrollbarMinThumbPx)
   result.thumbPx = span.length
   result.thumbLeftPx = span.start
   result.view = view
+
+const EditorTopPadPx = 4
+  ## The editor's top inset at rest (`window_geometry.EditorPadTopPx`).
+  ## Declared here (M73) because the vertical scrubber's track starts at it.
+
+func editorVScrollOf*(surface: EditorSurface; paneHeightPx: int;
+                      horizontalShown: bool): EditorVScroll =
+  ## M73 (#840): the vertical scrubber of the editor drawing `surface` in a
+  ## body `paneHeightPx` high — whether it is drawn, the track (from the
+  ## editor's top inset down to the pane's bottom, less the horizontal bar's
+  ## height while that one is drawn: the corner is neither's, §6), and the
+  ## thumb and the mark the SHARED scrubber model puts on it
+  ## (`scrollbar_scrubber`: `visible / total` long, at least Monaco's 20 px,
+  ## `(first - 1) / total` along). The window it reads is `SourceVM`'s, as
+  ## the surface carries it (`viewportTop`, the rows drawn, `totalLineCount`).
+  let total = surface.totalLineCount
+  let visible = min(surface.rows.len, max(0, total))
+  result.paneHeightPx = max(0, paneHeightPx)
+  result.markTopPx = -1
+  if surface.report.len > 0 or total <= 0 or visible <= 0 or
+     total <= visible or paneHeightPx <= 0:
+    return
+  result.cornerPx = if horizontalShown: EditorScrollbarPx else: 0
+  result.trackTopPx = EditorTopPadPx
+  result.trackPx = paneHeightPx - EditorTopPadPx - result.cornerPx
+  if result.trackPx < EditorScrollbarMinThumbPx:
+    return
+  result.present = true
+  result.model = scrubberModel(
+    total, max(0, surface.viewportTop - 1), visible,
+    (if surface.executionLine > 0: surface.executionLine - 1 else: -1))
+  let span = result.model.thumbSpan(result.trackPx, EditorScrollbarMinThumbPx)
+  result.thumbTopPx = span.start
+  result.thumbPx = span.length
+  let f = result.model.currentFraction
+  if f >= 0.0:
+    result.markTopPx = min(result.trackPx - EditorScrollbarMarkPx,
+                           int(f * float(result.trackPx)))
+
+func vscrollMetricText*(v: EditorVScroll): string =
+  ## `EditorVScrollMetricAttribute`'s value.
+  "total=" & $v.model.total & ";first=" & $(v.model.firstVisible + 1) &
+  ";visible=" & $v.model.visible & ";trackTop=" & $v.trackTopPx &
+  ";trackPx=" & $v.trackPx & ";corner=" & $v.cornerPx &
+  ";paneH=" & $v.paneHeightPx
 
 func scrollMetricText*(scroll: EditorHScroll): string =
   ## `EditorScrollMetricAttribute`'s value.
@@ -1167,9 +1256,6 @@ var editorScrollbarShown* = false
   ## Whether the editor's scrollbar is shown — the window sets it while the
   ## pointer is over the editor.
 
-const EditorTopPadPx = 4
-  ## The editor's top inset at rest (`window_geometry.EditorPadTopPx`).
-
 proc renderEditorScrollbar(r: GpuiRenderer; scroll: EditorHScroll;
                            caretMark = -1): GpuiElement =
   ## The track, and the thumb inside it at its offset.
@@ -1209,7 +1295,7 @@ proc renderEditorScrollbar(r: GpuiRenderer; scroll: EditorHScroll;
   r.setStyle(result, "position", "absolute")
   r.setStyle(result, "left", $EditorPadSidePx & "px")
   r.setStyle(result, "bottom", "0px")
-  r.setStyle(result, "width", $scroll.viewportPx & "px")
+  r.setStyle(result, "width", $scroll.trackPx & "px")
   r.setStyle(result, "height", $EditorScrollbarPx & "px")
   r.setStyle(result, "flex-shrink", "0")
   r.setStyle(result, "padding-left", $scroll.thumbLeftPx & "px")
@@ -1232,8 +1318,8 @@ proc renderEditorScrollbar(r: GpuiRenderer; scroll: EditorHScroll;
       let mark = r.createElement("div")
       r.setAttribute(mark, EditorScrollbarMarkAttribute, $caretMark)
       r.setStyle(mark, "position", "absolute")
-      r.setStyle(mark, "left", $min(scroll.viewportPx - EditorScrollbarMarkPx,
-                                    int(f * float(scroll.viewportPx))) & "px")
+      r.setStyle(mark, "left", $min(scroll.trackPx - EditorScrollbarMarkPx,
+                                    int(f * float(scroll.trackPx))) & "px")
       r.setStyle(mark, "top", "0px")
       r.setStyle(mark, "width", $EditorScrollbarMarkPx & "px")
       r.setStyle(mark, "height", $EditorScrollbarPx & "px")
@@ -1241,6 +1327,51 @@ proc renderEditorScrollbar(r: GpuiRenderer; scroll: EditorHScroll;
       if not editorScrollbarShown:
         r.setStyle(mark, "opacity", "0")
       r.appendChild(result, mark)
+
+proc renderEditorVScrollbar(r: GpuiRenderer; v: EditorVScroll;
+                            viewportPx: int): GpuiElement =
+  ## M73 (#840): the vertical scrubber — the horizontal bar's drawing on the
+  ## other axis (`renderEditorScrollbar`): an unfilled track ABSOLUTELY over
+  ## the editor's right edge (Monaco's vertical slider over its overview
+  ## ruler), the thumb inside it at its offset, the execution line marked in
+  ## the pointer's colour (§3.5), all fading with the horizontal bar
+  ## (`editorScrollbarShown`). Children are placed with `top` rather than a
+  ## padding, as the horizontal bar's mark is.
+  result = r.createElement("div")
+  r.setAttribute(result, EditorVScrollbarAttribute, "vertical")
+  r.setAttribute(result, EditorVScrollMetricAttribute, vscrollMetricText(v))
+  r.setAttribute(result, "data-ct-scrollbar-visible", $editorScrollbarShown)
+  r.setStyle(result, "position", "absolute")
+  r.setStyle(result, "left",
+             $(EditorPadSidePx + max(0, viewportPx - EditorVScrollbarPx)) & "px")
+  r.setStyle(result, "top", $v.trackTopPx & "px")
+  r.setStyle(result, "width", $EditorVScrollbarPx & "px")
+  r.setStyle(result, "height", $v.trackPx & "px")
+  let thumb = r.createElement("div")
+  r.setAttribute(thumb, EditorVScrollbarThumbAttribute, "true")
+  r.setStyle(thumb, "position", "absolute")
+  r.setStyle(thumb, "left", "0px")
+  r.setStyle(thumb, "top", $v.thumbTopPx & "px")
+  r.setStyle(thumb, "width", $EditorVScrollbarPx & "px")
+  r.setStyle(thumb, "height", $v.thumbPx & "px")
+  r.setStyle(thumb, "background-color", EditorScrollbarThumbColour)
+  r.setStyle(thumb, "rounded", "3px")
+  if not editorScrollbarShown:
+    r.setStyle(thumb, "opacity", "0")
+  r.appendChild(result, thumb)
+  if v.markTopPx >= 0:
+    let mark = r.createElement("div")
+    r.setAttribute(mark, EditorVScrollbarMarkAttribute,
+                   $(v.model.current + 1))
+    r.setStyle(mark, "position", "absolute")
+    r.setStyle(mark, "left", "0px")
+    r.setStyle(mark, "top", $v.markTopPx & "px")
+    r.setStyle(mark, "width", $EditorVScrollbarPx & "px")
+    r.setStyle(mark, "height", $EditorScrollbarMarkPx & "px")
+    r.setStyle(mark, "background-color", EditorScrollbarMarkColour)
+    if not editorScrollbarShown:
+      r.setStyle(mark, "opacity", "0")
+    r.appendChild(result, mark)
 
 proc markRuns(runs: seq[TokenRun]; view: HorizontalView;
               width: int): seq[TokenRun] =
@@ -2008,8 +2139,17 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
   # both the rows' scroll offset and the scrollbar come out of that one
   # value — so a clamped offset and the thumb that reports it cannot
   # disagree (§30).
+  # M73: the vertical scrubber is decided against the horizontal bar's
+  # presence (which does not depend on it), and then the horizontal bar is
+  # measured on the track the vertical one leaves it — one decision each, so
+  # the corner is neither's (Scrollbar-Scrubbers.md §6).
+  let hasH = editorHScrollOf(surface.rows, widest, viewportPx, scrollLeftCols,
+                             contentCols).present
+  let vscroll = editorVScrollOf(surface, editorPaneHeightPx, hasH)
   let scroll = editorHScrollOf(surface.rows, widest, viewportPx,
-                               scrollLeftCols, contentCols)
+                               scrollLeftCols, contentCols,
+                               reservePx = (if vscroll.present:
+                                              EditorVScrollbarPx else: 0))
   r.setAttribute(parent, EditorScrollMetricAttribute, scrollMetricText(scroll))
   let runs = editorRunsOf(surface)
   let folds = foldableRows(surface.rows)
@@ -2143,6 +2283,11 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
         r.setStyle(band, "background-color",
                    "#000000" & toHex(int(round(alpha * 255)), 2).toLowerAscii)
         r.appendChild(parent, band)
+  # M73: the vertical scrubber LAST, over the sticky headers and the
+  # shadow, as Monaco's slider is over its sticky widget.
+  if vscroll.present and viewportPx > EditorVScrollbarPx:
+    r.setStyle(parent, "position", "relative")
+    r.appendChild(parent, renderEditorVScrollbar(r, vscroll, viewportPx))
   surface.rows.len > 0
 
 const
