@@ -61,10 +61,23 @@ skip() { printf '  SKIP — %s\n' "$1" >&2; }
 # ---------------------------------------------------------------------------
 probe_detect() {
 	local ct_root="$1"
+	# detect-siblings.sh also derives _PRESENT from `command -v ct-native-replay`,
+	# and a dev shell whose workspace HAS a built native backend puts that
+	# binary's directory on PATH. Left in, it reaches the synthetic workspaces
+	# below, which have no sibling: case A-negative then sees PRESENT=1 from the
+	# real workspace and fails. So the probe runs with every PATH entry that
+	# holds a ct-native-replay removed; each case brings its own.
+	local probe_path="" dir
+	local IFS=:
+	for dir in $PATH; do
+		[ -n "$dir" ] && [ -x "$dir/ct-native-replay" ] && continue
+		probe_path="${probe_path:+$probe_path:}$dir"
+	done
+	unset IFS
 	# shellcheck disable=SC2016  # $1/$2 inside the single-quoted script below
 	# are that inner shell's positional args (passed after the `_` argv[0]
 	# placeholder); they must NOT expand here.
-	env -u CODETRACER_RR_BACKEND_PATH \
+	PATH="$probe_path" env -u CODETRACER_RR_BACKEND_PATH \
 		-u CODETRACER_RR_BACKEND_PRESENT \
 		-u CODETRACER_REPO_ROOT_PATH \
 		-u CT_CODETRACER_NATIVE_BACKEND_SIBLING \
@@ -221,7 +234,10 @@ for f in "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT/repro.nim"; do
 	rel="${f#"$REPO_ROOT"/}"
 	# Comments may still mention the old name (e.g. "formerly ..."); only
 	# non-comment lines constitute a live lookup.
-	if hits="$(grep -n 'codetracer-rr-backend' "$f" | grep -vE ':[[:space:]]*(#|##|--)' || true)"; [ -z "$hits" ]; then
+	if
+		hits="$(grep -n 'codetracer-rr-backend' "$f" | grep -vE ':[[:space:]]*(#|##|--)' || true)"
+		[ -z "$hits" ]
+	then
 		pass "case C: $rel has no live codetracer-rr-backend lookup"
 	else
 		fail "case C: $rel still looks up the retired name:"$'\n'"$hits"
