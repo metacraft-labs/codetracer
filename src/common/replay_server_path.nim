@@ -50,7 +50,11 @@
 ## `src/build-debug/` is tracked in git holding only `tup.config`, so "the
 ## directory exists" is true on every checkout and answers the wrong question.
 
-import std/[os, strutils]
+import std/[monotimes, os, osproc, streams, strutils, times]
+when defined(windows):
+  import std/winlean
+else:
+  import std/posix
 
 const
   ReplayServerBinEnv* = "REPLAY_SERVER_BIN"
@@ -149,10 +153,124 @@ proc codetracerCheckoutRoot*(): string =
       return ""
     dir = parent
 
+proc gitOutput(root: string; args: seq[string]): tuple[output: string, code: int] =
+  let p = startProcess("git", workingDir = root, args = args,
+    options = {poUsePath, poStdErrToStdOut})
+  defer: p.close()
+  result.output = p.outputStream.readAll()
+  result.code = p.waitForExit()
+
+proc isGitHash(value: string): bool =
+  if value.len notin [40, 64]: return false
+  for ch in value:
+    if ch notin {'0'..'9', 'a'..'f'}: return false
+  true
+
+proc replaySourceFingerprint*(root: string): string =
+  ## Match build.rs's ordered hashes of actual backend/library input bytes.
+  ## Hashing contents rather than HEAD accepts a commit with unchanged inputs,
+  ## and rejects a stale binary even when both builds name the same dirty HEAD.
+  try:
+    let listing = gitOutput(root,
+      @["ls-files", "-z", "--", "src/db-backend", "src/libs", "libs"])
+    if listing.code != 0: return ""
+    let files = listing.output.split('\0')
+    var args = @["hash-object", "--"]
+    for file in files:
+      if file.len > 0 and fileExists(root / file): args.add(file)
+    if args.len == 2: return ""
+    var hashes: seq[string]
+    var first = 2
+    while first < args.len:
+      let last = min(first + 63, args.high)
+      let hashed = gitOutput(root, @["hash-object", "--"] & args[first .. last])
+      if hashed.code != 0: return ""
+      hashes.add(hashed.output.strip().splitLines())
+      first = last + 1
+    if hashes.len != args.len - 2: return ""
+    for hash in hashes:
+      if not isGitHash(hash): return ""
+    var input = ""
+    for i in 2 ..< args.len:
+      input.add(args[i] & '\0' & hashes[i - 2] & '\n')
+    let p = startProcess("git", workingDir = root,
+      args = ["hash-object", "--stdin"], options = {poUsePath})
+    defer: p.close()
+    p.inputStream.write(input)
+    p.inputStream.close()
+    result = p.outputStream.readAll().strip()
+    if p.waitForExit() != 0 or not isGitHash(result): result = ""
+  except OSError, IOError:
+    result = ""
+
+proc replayServerRevisionProblem*(bin, root: string; timeoutMs = 3000): string =
+  ## Bounded, side-effect-free handshake before a real-stack test starts DAP.
+  ## Never fall through to another engine after rejecting an explicit choice.
+  try:
+    let p = startProcess(bin, args = ["--build-revision"], options = {poStdErrToStdOut})
+    defer: p.close()
+    # Read the raw pipe without a userspace buffer, with a deadline and size
+    # limit. readAll after waitForExit is not bounded: a descendant may still
+    # hold stdout open after its parent exited successfully.
+    let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+    var answer = ""
+    var timedOut = false
+    when not defined(windows):
+      let fd = cint(p.outputHandle)
+      let flags = fcntl(fd, F_GETFL)
+      if flags < 0 or fcntl(fd, F_SETFL, flags or O_NONBLOCK) < 0:
+        p.kill()
+        discard p.waitForExit()
+        return "cannot configure revision handshake pipe: " & bin
+    while true:
+      var buffer: array[512, char]
+      var count = 0
+      when defined(windows):
+        var available, received: int32
+        if peekNamedPipe(Handle(p.outputHandle), nil, 0, nil, addr available, nil) and available > 0:
+          discard winlean.readFile(Handle(p.outputHandle), addr buffer[0],
+            min(available, 512'i32), addr received, nil)
+          count = int(received)
+      else:
+        count = int(posix.read(fd, addr buffer[0], buffer.len))
+      if count > 0:
+        for i in 0 ..< count: answer.add(buffer[i])
+        if answer.len > 512: break
+      elif not p.running:
+        break
+      if getMonoTime() >= deadline:
+        timedOut = true
+        break
+      sleep(5)
+    if p.running:
+      p.kill()
+    let code = p.waitForExit()
+    if timedOut:
+      return "revision handshake timed out: " & bin
+    if answer.len > 512:
+      return "revision handshake response too large: " & bin
+    answer = answer.strip()
+    let fields = answer.splitWhitespace()
+    if code != 0 or fields.len != 3 or fields[0] != "codetracer-replay-build-v1" or
+        not isGitHash(fields[1]):
+      return "revision handshake unsupported: " & bin & " (" & answer & ")"
+    let expected = replaySourceFingerprint(root)
+    if expected.len == 0 or fields[1] == "unknown" or fields[2] != expected:
+      return "stale replay-server: " & bin & " built at " & fields[1] &
+        " (source " & fields[2] & "; checkout source " & expected & ")"
+  except OSError, IOError:
+    return "cannot probe replay-server " & bin & ": " & getCurrentExceptionMsg()
+
 proc locateReplayServer*(): string =
   ## `findReplayServerIn` for this checkout: the call every front-end and
   ## suite makes. "" when `replay-server` has not been built.
-  findReplayServerIn(codetracerCheckoutRoot())
+  result = findReplayServerIn(codetracerCheckoutRoot())
+  if result.len > 0 and getEnv("CODETRACER_REQUIRE_REPLAY_REVISION") == "1":
+    let problem = replayServerRevisionProblem(result, codetracerCheckoutRoot())
+    if problem.len > 0:
+      stderr.writeLine("prerequisite missing: " & problem &
+        "; rebuild with `just build-once` or `cd src/db-backend && cargo build`")
+      result = ""
 
 proc missingReplayServerMessage*(root = codetracerCheckoutRoot()): string =
   ## The standard diagnostic for a `replay-server` that could not be found,

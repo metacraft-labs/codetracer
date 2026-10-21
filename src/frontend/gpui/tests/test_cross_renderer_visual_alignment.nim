@@ -93,6 +93,7 @@
 ## Every helper that calls `check` is a `template`. The ones that are `proc`s
 ## return values and call `check` nowhere.
 
+import replay_prerequisite
 import std/[algorithm, json, options, os, sequtils, sets, strutils, tables,
             times, unittest]
 

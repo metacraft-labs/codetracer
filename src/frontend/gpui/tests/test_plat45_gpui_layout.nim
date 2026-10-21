@@ -30,6 +30,7 @@
 ## No mocks: the shipped binary, the real shim, the real `replay-server`, a real
 ## recording and real files.
 
+import replay_prerequisite
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tempfiles,
             unittest]
 

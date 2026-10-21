@@ -61,6 +61,7 @@
 ## `ck` counts; `expectCount` fails when a case does not reach the number
 ## written at the end of it. Every number was written LAST, from a run.
 
+import replay_prerequisite
 import std/[algorithm, monotimes, os, osproc, strutils, times, unittest]
 
 import isonim_gpui/renderer

@@ -31,6 +31,7 @@
 ## real recording and a real desktop capture. A missing prerequisite fails by
 ## name.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import headless_app/layout_model

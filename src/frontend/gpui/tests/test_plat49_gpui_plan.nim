@@ -37,6 +37,7 @@
 ## No mocks: the shipped binary, the real shim, the real `replay-server`, a
 ## real recording. A missing prerequisite fails by name.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tables, tempfiles,
             unittest]
 

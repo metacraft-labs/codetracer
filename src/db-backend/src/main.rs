@@ -357,6 +357,15 @@ fn main() {}
 
 #[cfg(feature = "io-transport")]
 fn main() -> Result<(), Box<dyn Error>> {
+    // A prerequisite probe must not initialize logging, user state or DAP.
+    if std::env::args().skip(1).eq(["--build-revision"]) {
+        println!(
+            "codetracer-replay-build-v1 {} {}",
+            env!("CT_REPLAY_REVISION"),
+            env!("CT_REPLAY_FINGERPRINT")
+        );
+        return Ok(());
+    }
     panic::set_hook(Box::new(panic_handler));
 
     // env_logger setup based and adapted from

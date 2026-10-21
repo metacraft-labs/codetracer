@@ -48,6 +48,7 @@
 ##
 ## No mocks: the shipped binary, real recordings, a real `replay-server`.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 from std/unicode import runeLen
 

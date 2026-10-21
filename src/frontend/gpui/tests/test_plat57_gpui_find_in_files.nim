@@ -26,6 +26,7 @@
 ## No mocks: the real binary, a real recording made by the Python recorder, a
 ## real `replay-server`, the real shared runner.
 
+import replay_prerequisite
 import std/[algorithm, json, os, osproc, sequtils, streams, strtabs, strutils,
             tempfiles, unittest]
 

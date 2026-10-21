@@ -55,6 +55,7 @@ struct PrivateEmulatorBuild {
 }
 
 fn main() {
+    emit_replay_provenance();
     println!("cargo:rerun-if-changed=build.rs");
 
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
@@ -84,6 +85,89 @@ fn main() {
     } else {
         build_native(&private_build, &target_arch);
     }
+}
+
+/// Identify the actual working-tree inputs, including edits before a commit.
+/// Archives may build without Git; their unknown provenance is explicitly
+/// refused by checkout-based real-stack test lanes rather than guessed.
+fn emit_replay_provenance() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    let git = |args: &[&str]| Command::new("git").current_dir(&root).args(args).output();
+    for name in ["index", "HEAD"] {
+        if let Ok(path) = git(&["rev-parse", "--git-path", name])
+            && path.status.success()
+        {
+            println!(
+                "cargo:rerun-if-changed={}",
+                root.join(String::from_utf8_lossy(&path.stdout).trim()).display()
+            );
+        }
+    }
+    let provenance = (|| -> Option<(String, String)> {
+        let revision = git(&["rev-parse", "HEAD"]).ok()?;
+        if !revision.status.success() {
+            return None;
+        }
+        let files = git(&["ls-files", "-z", "--", "src/db-backend", "src/libs", "libs"]).ok()?;
+        if !files.status.success() {
+            return None;
+        }
+        let paths: Vec<&str> = std::str::from_utf8(&files.stdout)
+            .ok()?
+            .split('\0')
+            .filter(|p| !p.is_empty() && root.join(p).is_file())
+            .collect();
+        if paths.is_empty() {
+            return None;
+        }
+        for path in &paths {
+            println!("cargo:rerun-if-changed={}", root.join(path).display());
+        }
+        // Keep each argv below Windows' command-line length limit.
+        let mut hashes = Vec::new();
+        for chunk in paths.chunks(64) {
+            let output = Command::new("git")
+                .current_dir(&root)
+                .args(["hash-object", "--"])
+                .args(chunk)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            hashes.extend_from_slice(&output.stdout);
+        }
+        // Include path names: equal-content renames can alter Rust module
+        // wiring even though a bare sequence of content hashes is unchanged.
+        let mut input = Vec::new();
+        for (path, hash) in paths.iter().zip(hashes.split(|b| *b == b'\n')) {
+            input.extend_from_slice(path.as_bytes());
+            input.push(0);
+            input.extend_from_slice(hash);
+            input.push(b'\n');
+        }
+        let mut child = Command::new("git")
+            .current_dir(&root)
+            .args(["hash-object", "--stdin"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .ok()?;
+        child.stdin.take()?.write_all(&input).ok()?;
+        let fingerprint = child.wait_with_output().ok()?;
+        if !fingerprint.status.success() {
+            return None;
+        }
+        Some((
+            String::from_utf8(revision.stdout).ok()?.trim().to_owned(),
+            String::from_utf8(fingerprint.stdout).ok()?.trim().to_owned(),
+        ))
+    })()
+    .unwrap_or_else(|| ("unknown".into(), "unknown".into()));
+    println!("cargo:rustc-env=CT_REPLAY_REVISION={}", provenance.0);
+    println!("cargo:rustc-env=CT_REPLAY_FINGERPRINT={}", provenance.1);
 }
 
 /// Locate the sibling `codetracer-native-recorder` checkout that supplies the

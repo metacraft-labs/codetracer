@@ -25,6 +25,7 @@
 ## No mocks: the shipped binary, a real recording, a real engine; the session
 ## tabs' layout is the pure `gpuiTopBarLayout` over `SessionTabView` values.
 
+import replay_prerequisite
 import std/[json, options, os, osproc, sets, streams, strtabs, strutils,
             tables, tempfiles, unittest]
 

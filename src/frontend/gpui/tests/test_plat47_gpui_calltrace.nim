@@ -19,6 +19,7 @@
 ##
 ## No mocks: a real recording, a real replay-server, the real ViewModel.
 
+import replay_prerequisite
 import std/[os, strutils, unittest]
 
 import gpui/host/gpui_host

@@ -28,6 +28,7 @@
 ## No mocks: the shipped binary, real recordings, a real engine, a real `ct
 ## record`.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
             times, unittest]
 

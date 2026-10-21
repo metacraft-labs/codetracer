@@ -31,6 +31,7 @@
 ##
 ## No mocks: the binary, the engine and the recordings are the product's.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import gpui/app/leaves

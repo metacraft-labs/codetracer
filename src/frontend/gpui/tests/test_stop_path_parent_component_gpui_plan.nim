@@ -19,6 +19,7 @@
 ## No mocks: the shipped binary, the real `multi_root` recording made by the
 ## Python recorder, a real `replay-server`.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import gpui/chrome

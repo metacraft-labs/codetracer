@@ -70,6 +70,7 @@
 ## asserts it saw `launch`, so a pass cannot come from failing EARLIER than the
 ## shape the issue describes (a spawn failure, a refused folder).
 
+import replay_prerequisite
 import std/[os, osproc, strtabs, strutils, tempfiles, times, unittest]
 
 import gpui/host/gpui_host

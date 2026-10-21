@@ -22,6 +22,7 @@
 ## No mocks: the binary, the engine and the recording are the product's; the
 ## user keymap is a real file the binary reads.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import gpui/chrome                # `contrastRatio`

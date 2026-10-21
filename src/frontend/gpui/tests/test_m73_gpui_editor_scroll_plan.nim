@@ -41,6 +41,7 @@
 ##
 ## No mocks: the binary, the engine and the recording are the product's.
 
+import replay_prerequisite
 import std/[json, math, os, osproc, streams, strtabs, strutils, tempfiles,
             unittest]
 

@@ -29,6 +29,7 @@
 ## untracked files for the overflowing case. No mocks: the binary, the
 ## engine, the recordings and git are the product's.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 
 import gpui/list_scrubber
