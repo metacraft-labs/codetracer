@@ -73,6 +73,29 @@ suite "truncation is not a save unless somebody truncated it":
         check classifyWrite(BufferProvenance(
           contentLength: length, editsSinceLoad: edits)) == tvWrite
 
+  test "AN EMPTY NEW UNTITLED BUFFER IS WRITTEN (#792)":
+    # Reported: *"New file → shows "#untitled0". Try save empty → ERROR"*.
+    # `renderer.openNewTab` builds the model with `""`, so it is empty and at
+    # version 1 — the same two numbers as THE WIPE above. What differs is that
+    # an untitled buffer has NO STORED COPY for emptiness to destroy: its save
+    # goes to a save-as chooser and creates the file where the user says
+    # (`Welcome-Screen.md`, "New file, and what it creates"). The refusal's own
+    # premise, "Your stored copy is unchanged", is false here.
+    for edits in [-1, 0, UneditedModelVersion]:
+      check classifyWrite(BufferProvenance(
+        contentLength: 0, editsSinceLoad: edits, untitled: true)) == tvWrite
+
+  test "A STORED FILE'S REBUILT EMPTY EDITOR IS STILL REFUSED":
+    # The exemption is for having no stored copy, not for being empty. The
+    # same never-edited empty buffer over a file that exists must keep being
+    # refused, and a provenance that does not say `untitled` is a stored file.
+    check classifyWrite(BufferProvenance(
+      contentLength: 0, editsSinceLoad: UneditedModelVersion,
+      untitled: false)) == tvRefuseUnproven
+    check classifyWrite(BufferProvenance(
+      contentLength: 0, editsSinceLoad: -1, untitled: false)) ==
+      tvRefuseUnproven
+
   test "the refusal names the file and says the stored copy is untouched":
     # A refusal the user cannot understand is a bug report. It has to say which
     # file, that nothing was lost, and how to empty the file if that was
