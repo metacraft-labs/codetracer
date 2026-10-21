@@ -847,7 +847,8 @@ build-app-image:
   ./appimage-scripts/build_appimage.sh
 
 
-# Run all Rust tests (db-backend unit + integration, backend-manager).
+# Run all Rust tests (db-backend unit + integration, backend-manager,
+# and the shared leaf crates those two both depend on).
 test-rust:
   #!/usr/bin/env bash
   set -e
@@ -881,9 +882,15 @@ test-rust:
   ct_export_scratch_codetracer_home rust-tests
   trap 'report_skips; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
-  pushd libs/ct-home
-  cargo test
-  popd
+  ( cd libs/ct-home && cargo test )
+  # `libs/ct-data-breakpoints` holds the admission rules for DAP data
+  # breakpoints (watchpoints) and is a plain path dependency of BOTH
+  # src/db-backend and src/backend-manager -- neither of which builds a
+  # dependency's test targets. Without this line its tests are dark, and
+  # its `conformance_cases()` table is exactly what the mock/real parity
+  # tests in those two crates are anchored to. A dark anchor is not an
+  # anchor. (ci/test/rust-test-crate-coverage.sh is the gate that says so.)
+  ( cd libs/ct-data-breakpoints && cargo nextest run --release )
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server
@@ -1708,11 +1715,12 @@ test-frontend-js:
   shortcut_dialog_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-dialog-test.XXXXXX.js")"
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
   component_registry_binding_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-component-registry-binding-test.XXXXXX.js")"
+  component_ids_across_sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-component-ids-across-sessions-test.XXXXXX.js")"
   stop_command_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-stop-command-test.XXXXXX.js")"
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
   dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$monaco_operations_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$component_ids_across_sessions_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1788,6 +1796,17 @@ test-frontend-js:
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$component_registry_binding_test" js src/frontend/tests/component_registry_binding_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$component_registry_binding_test"
+  echo ""
+  # Issue #835: every tab of a window shares one document, so an editor or
+  # unified-diff pane needs an id no OTHER tab uses -- its host is the
+  # document-global `editorComponent-<id>` / `unifiedDiffComponent-<id>`.
+  # Covers `utils.generateId` and `utils.claimWindowUniqueLayoutIds`, and that
+  # the singleton chrome keeps its per-tab id 0. `utils.nim` compiles for node;
+  # same `window` alias as above.
+  echo "Running component ids across sessions tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$component_ids_across_sessions_test" js src/frontend/tests/component_ids_across_sessions_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$component_ids_across_sessions_test"
   echo ""
   # *Stop* leaves Debug mode for Edit mode. `renderer.nim`'s `stopAction` was
   # `discard` from the initial open-source commit while `SHIFT+F5` dispatched

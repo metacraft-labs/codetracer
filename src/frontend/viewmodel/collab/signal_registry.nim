@@ -802,6 +802,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Which detail tab the selected request is being read through — the same " &
     "kind of shared pane intent as StateVM.activeTab, and already a stable " &
     "tab name rather than an index.")
+  entries.addEntry("RequestPanelVM", "navigationMessage", vscRendererLocal,
+    "Feedback from this participant's last request activation is local interaction state.")
   entries.addDerived("RequestPanelVM", ["filteredRequests"])
 
   entries.addMany("ReplVM", ["history", "replEnabled", "materialized",

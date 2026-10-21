@@ -4,7 +4,7 @@
 ## (isonim-gpui's `window` and `window_environment`): the window `gpui_launch`
 ## opens, never the window registry (`createWindow` / `show` / `destroy`, which
 ## no renderer reads — see `test_gpui_window_frame.nim`'s registry scan). It
-## answers four questions for `main.nim`, and does nothing else:
+## answers five questions for `main.nim`, and does nothing else:
 ##
 ##   * WHO IS DRAWING THE FRAME, and so whether the top bar is the title bar —
 ##     `WindowChrome`: the decoration mode the compositor granted, which
@@ -14,6 +14,9 @@
 ##     the app id (`prepareWindowLaunch`).
 ##   * WHEN TO DRAW AGAIN — the content size changed, or the chrome did
 ##     (`subscribeWindow`).
+##   * WHEN TO READ AGAIN — the user came back to the window from another
+##     program (`subscribeWindow`'s `activated`): the desktop's window
+##     `focus` event, which the VCS pane re-reads its repository on.
 ##   * WHAT THE WINDOW IS CALLED — its title (`setWindowTitle`).
 ##
 ## THE CHROME HAS A STAND-IN. `--report-window-plan` draws the window with no
@@ -163,19 +166,39 @@ proc prepareWindowLaunch*(launch: WindowLaunch) =
   window.setInitialWindowState(launch.maximized)
   window.setAppId(windowAppId())
 
-proc subscribeWindow*(resized: proc(width, height: int);
-                      chromeChanged: proc()): bool =
-  ## From inside the root builder: be told when the launched window's content
-  ## size changes (before the frame at the new size is built) and when its
-  ## chrome does — the decoration mode granted after mapping, maximize and
-  ## restore, the desktop's button layout changed while the window is open.
-  ## False when no window is being launched (the plan and capture paths).
-  let win = launchedWindow()
+proc subscribeWindowOn*(win: GpuiWindow;
+                        resized: proc(width, height: int);
+                        chromeChanged: proc();
+                        activated: proc()): bool =
+  ## `subscribeWindow` for a named window: what `main.nim`'s root builder
+  ## registers on the launched one, and what a suite registers on a window
+  ## it created to drive the same subscriptions through the shim's bridging
+  ## entry points (`gpui_notify_window_state`). False for window id 0.
+  ##
+  ## `activated` runs when the window is ACTIVATED — inactive, then active:
+  ## the user came back to it from another program (`onWindowActivated`, the
+  ## renderer's inactive-to-active edge). It is the window's equivalent of
+  ## the desktop's window `focus` event, which its VCS panel re-reads the
+  ## repository on (VCS-Panel.md's focus-gain refresh); `nil` subscribes
+  ## nothing.
   if win.id == 0:
     return false
   window.onResize(win, proc(w, h: float) = resized(int(w + 0.5), int(h + 0.5)))
   window.onWindowState(win, chromeChanged)
+  if not activated.isNil:
+    window.onWindowActivated(win, activated)
   true
+
+proc subscribeWindow*(resized: proc(width, height: int);
+                      chromeChanged: proc();
+                      activated: proc()): bool =
+  ## From inside the root builder: be told when the launched window's content
+  ## size changes (before the frame at the new size is built), when its
+  ## chrome does — the decoration mode granted after mapping, maximize and
+  ## restore, the desktop's button layout changed while the window is open —
+  ## and when it is activated (see `subscribeWindowOn`).
+  ## False when no window is being launched (the plan and capture paths).
+  subscribeWindowOn(launchedWindow(), resized, chromeChanged, activated)
 
 proc launchedContentSize*(): tuple[ok: bool; width, height: int] =
   ## The launched window's content size now, as the renderer reports it.

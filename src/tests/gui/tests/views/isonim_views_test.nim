@@ -8880,6 +8880,31 @@ suite "IsoNim Request Panel — clearRequests":
 
 suite "IsoNim Request Panel — interactions":
 
+  test "double-click refuses an unavailable handler and explains why":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel(r, vm)
+      vm.setRequests(@[parseRequestRecord(%*{
+        "id": 1, "httpMethod": "GET", "url": "/excluded",
+        "startGeid": 10,
+        "seekUnavailableReason": "Handler source steps were not recorded."
+      })])
+      mock.clearReceivedCommands()
+      findByClass(panel, "request-table-body").children[0].fireEvent("dblclick")
+      check mock.findCommand("ct/seek-to-geid").isNone
+      let explanation = findByClassOrNil(panel, "request-navigation-status")
+      require explanation != nil
+      check explanation.textContent == "Handler source steps were not recorded."
+      check explanation.attributes["role"] == "status"
+      # A later valid gesture clears feedback about the previous request.
+      vm.addRequest("GET", "/available", 200, 0, 0, 20)
+      findByClass(panel, "request-table-body").children[1].fireEvent("dblclick")
+      check explanation.textContent == ""
+      check mock.findCommand("ct/seek-to-geid").isSome
+      dispose()
+
   test "double-clicking a row dispatches ct/seek-to-geid with startGeid":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()

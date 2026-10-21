@@ -559,8 +559,11 @@ proc createUIComponents*(data: Data) =
   discard data.makeRequestPanelComponent(0)
   discard data.makeCommandPaletteComponent()
 
-  # create components defined in layout
+  # create components defined in layout — after giving any editor or diff pane
+  # whose saved id another tab already uses an id of its own (#835; see
+  # `utils.claimWindowUniqueLayoutIds`).
   if not data.ui.resolvedConfig.isNil:
+    data.claimWindowUniqueLayoutIds(data.ui.resolvedConfig.root)
     createUILayoutComponents(data.ui.resolvedConfig.root)
 
 proc requestInitialPanelData*(data: Data) =
@@ -1142,9 +1145,20 @@ proc focusComponent*(data: Data, component: Component) =
   discard component.onFocus()
 
 proc focusEditorView*(data: Data) =
-  let map = data.ui.componentMapping
-  focusComponent(data, map[Content.EditorView][0])
-  cast[JsObject](data.ui.editors[data.services.editor.active].monacoEditor).focus()
+  ## Focus the active editor tab.
+  ##
+  ## It used to focus `componentMapping[Content.EditorView][0]` and the active
+  ## tab's Monaco instance — two different editors whenever editor 0 was not
+  ## the active one, and a nil component when there was no editor 0 at all:
+  ## after it was closed, or in any tab but the first, whose editor ids are
+  ## unique across the window (#835, `utils.WindowUniqueIdContents`).
+  let active = data.services.editor.active
+  if active.isNil or not data.ui.editors.hasKey(active):
+    return
+  let editor = data.ui.editors[active]
+  focusComponent(data, editor)
+  if not editor.monacoEditor.isNil:
+    cast[JsObject](editor.monacoEditor).focus()
 
 proc focusEventLog*(data: Data) =
   let map = data.ui.componentMapping

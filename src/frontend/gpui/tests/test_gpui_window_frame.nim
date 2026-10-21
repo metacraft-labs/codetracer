@@ -95,7 +95,14 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 731
+const ExpectedAssertions = 732
+  ## 2026-10-21 (window activation): 731 -> 732, measured — `CHECKS: 732`
+  ## against isonim-gpui `d4325e9` plus its uncommitted `onWindowActivated`.
+  ## The third route: `window.nim` exports one more proc, and it joined
+  ## `LaunchedWindowNames` (it is registered on `launchWindow()`, as
+  ## `onWindowState` is), whose exports the derived-sets case checks one by
+  ## one (+1). The registry subjects stay 8, so the scan's per-file body is
+  ## unchanged.
   ## 2026-10-20 (no-window refusal): 708 -> 731, measured — `CHECKS: 731`
   ## over BOTH the HEAD record and the re-recorded one, `CHECKS: 708` for the
   ## HEAD suite. Two routes: ONE more non-test file under `src/frontend/gpui/`
@@ -1299,7 +1306,7 @@ const LaunchedWindowNames = [
   "tiledEdges", "supportedControls", "isMaximized", "isActive",
   "buttonLayout", "setTitle", "setAppId", "setMinWindowSize",
   "setInitialWindowState", "minimize", "toggleMaximize", "toggleFullscreen",
-  "requestClose", "addFontFile"]
+  "requestClose", "addFontFile", "onWindowActivated"]
   ## PLAT-69: `window.nim`'s operations on THE WINDOW `gpui_launch` OPENS
   ## (isonim-gpui GWIN: `launchWindow()` names it, and the rest read or act
   ## on it, or are the launch options read before `gpui_launch`). They are the
@@ -1309,7 +1316,10 @@ const LaunchedWindowNames = [
   ## IT: registered on `launchWindow()`, which `gpui_launch` notifies.
   ## `addFontFile` (2026-10-17) is a launch option too: the design system's
   ## font files, handed to the text system `gpui_launch` creates
-  ## (`design_fonts.registerDesignFonts`).
+  ## (`design_fonts.registerDesignFonts`). `onWindowActivated` (2026-10-21)
+  ## is `onWindowState`'s twin for the inactive-to-active edge, registered on
+  ## `launchWindow()` the same way (`window_chrome.subscribeWindow`), so the
+  ## VCS pane re-reads its repository when the user returns to the window.
   ##
   ## Declared and checked as `AmbiguousWindowNames` is: each must still be
   ## exported, and a proc added upstream lands in the FORBIDDEN set until

@@ -3,6 +3,12 @@
 # `specs:` is $CT_SPECS_DIR, `nim-termctl:` is
 # $NIM_TERMCTL_SRC. Refreshed with --record-control-hashes,
 # gated by the needle scan (§39a).
+# RE-RECORD, 2026-10-21, on `951f9f5ce` (agents) with the VCS pane's
+# focus-gain refresh uncommitted (CT_SPECS_DIR=../codetracer-pm, whose
+# CUA-Keymap.md matches the recorded digest). MOVED: src/frontend/tui/main.nim,
+# src/frontend/tui/host/terminal_driver.nim, src/frontend/gpui/main.nim, and
+# nothing else. GRADED: baseline green (13 suites), 41 of 41 arms KILLED, and
+# the declared survivor N1 survived. Measured on nixos-ci-bare-002.
 81f87d59e91be6f955683c856920521ec27991d225c46115f20661d483986064  src/common/key_names.nim
 e4e1aa250db4ae5618efed59727aa4886e38349f67e6bf808ac9bea66569646a  src/frontend/viewmodel/keymap/editing_keymap.nim
 87d56b404425487fd8d6f0ac598dad1a1385ac7f5ec02fd9d2f4f41d4449ab71  src/frontend/viewmodel/keymap/keymap_selection.nim
@@ -16,10 +22,10 @@ a46221e9805ad8c30ce885c064a3aec08bc29dbb53929bb9d855d7e347c55bba  src/frontend/v
 0525c9d8f4344138fcc8bf6a3d65b4c1f2f23260681cea82c2d887aa94ad1edc  src/frontend/viewmodel/editing_core.nim
 ac1765ef010c344e12e6f44cc271de52488c61e774b3372fa65d8e7fd7329b21  src/frontend/tui/app/theme/roles.nim
 0587764dba7f18066eeb0ff826504824bdad1db9b8e8ae07c3054fa3c7d90be8  src/frontend/gpui/chrome.nim
-aaa2b35bf8e8702fee09f9bc920c27ce0c704c89516df3e13684a52e7e87ff01  src/frontend/tui/main.nim
-15d75ed8f7f2faf18535a09ce3267321cc4d07cb15baa038f99f88d59f71fba2  src/frontend/tui/host/terminal_driver.nim
+2950b5dc87c8070005bff8b6452bbd9ae9d27d51ed5e6fd3b1eb034af3892a1e  src/frontend/tui/main.nim
+1ce72f94c60951775db5ea07c83f9caef1bd1137583427760cb2320db999109b  src/frontend/tui/host/terminal_driver.nim
 d22b436a31d0fa8139ed2c80bc91362c43f11e4da4b5097cdd00b2e008b336e5  src/frontend/tui/app/input/motions.nim
-7e13a05ec2378e1a3256fd739c9f8ce9792e0958dcc91edd48286d3bb8b92585  src/frontend/gpui/main.nim
+f2d6e4db241c0429347d7f6299ca7a43d7fa4fcb043e3768d0c06db05dcaff31  src/frontend/gpui/main.nim
 dd1855c0f91ad81ceec06ea40b8cc74ef692970801d4230a068dbe296a3fe527  src/frontend/ui/monaco_operations.nim
 9b466a2a6f53333f2f1fe2543cc3fec00509317ef8ef410b1ac222e6b58ecae1  isonim-tui:isonim_tui/event_dispatch.nim
 3d189e863baf61829b2415058b6e36d1e38cc42c84dd1deee9debd02fe5cf6d0  src/frontend/tui/app/runtime.nim

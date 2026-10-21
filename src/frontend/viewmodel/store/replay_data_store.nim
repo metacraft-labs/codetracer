@@ -668,6 +668,7 @@ proc parseRequestRecord*(node: JsonNode): RequestRecord =
     # ``null`` and an absent key to "", which is this layer's "no external
     # container" sentinel (avoids Option noise across the JS/native split).
     externalTracePath: node{"externalTracePath"}.getStr(""),
+    seekUnavailableReason: node{"seekUnavailableReason"}.getStr(""),
   )
 
 proc mergeRequestSpans*(existing: seq[RequestRecord];

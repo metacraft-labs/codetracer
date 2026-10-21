@@ -106,6 +106,9 @@ pub struct RequestRecord {
     /// disk. `None` for an inline span (the normal case — the execution is in
     /// *this* container) and for an external binding whose target is missing.
     pub external_trace_path: Option<String>,
+    /// An explicit recorder refusal: scheduler boundaries are not handler steps.
+    /// Empty for recorders that provide a source entry or omit the capability.
+    pub seek_unavailable_reason: String,
 }
 
 /// Status-class buckets the panel filters on, matching `statusBucket` in
@@ -339,6 +342,11 @@ pub fn to_request_record(span: &SpanRecord, base_dir: &Path) -> RequestRecord {
         duration_ms: parse_numeric_metadata(span, KEY_HTTP_DURATION_MS),
         response_size: parse_numeric_metadata(span, KEY_HTTP_RESPONSE_SIZE),
         start_geid: span.start_step,
+        seek_unavailable_reason: if span.metadata_value("beam.handler_step_available") == Some("false") {
+            "Handler source steps were not recorded.".to_string()
+        } else {
+            String::new()
+        },
         is_open: span.is_open,
         status: status_name(span.status).to_string(),
         external_trace_path: resolve_external_container(span, base_dir).map(|p| p.to_string_lossy().into_owned()),
@@ -1123,6 +1131,24 @@ mod tests {
         assert_eq!(records[0].start_geid, 10);
         assert_eq!(records[0].status, "ok");
         assert!(!records[0].is_open);
+    }
+
+    #[test]
+    fn unavailable_beam_handler_is_projected_as_a_seek_refusal() {
+        let mut request = span(1, "GET", "/excluded", 200, 1);
+        request
+            .metadata
+            .push(("beam.handler_step_available".into(), "false".into()));
+        let row = serde_json::to_value(to_request_record(&request, Path::new("."))).unwrap();
+        assert_eq!(row["seekUnavailableReason"], "Handler source steps were not recorded.");
+        request.metadata.retain(|(key, _)| key != "beam.handler_step_available");
+        let row = serde_json::to_value(to_request_record(&request, Path::new("."))).unwrap();
+        assert_eq!(row["seekUnavailableReason"], "");
+        request
+            .metadata
+            .push(("beam.handler_step_available".into(), "true".into()));
+        let row = serde_json::to_value(to_request_record(&request, Path::new("."))).unwrap();
+        assert_eq!(row["seekUnavailableReason"], "");
     }
 
     #[test]

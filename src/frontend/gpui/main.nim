@@ -5532,7 +5532,8 @@ const RecordPollMs = 200
   ## PLAT-51: how often a welcome tab's running `ct record` is polled.
 var gVcsDirectory = ""
   ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
-  ## by `vcsTick`; "" when the window has no VCS pane.
+  ## by `vcsTick` and on every return to the window by `vcsWindowActivated`;
+  ## "" when the window has no VCS pane.
 
 var gArmedTick = (due: -2'i64, vcs: false)
   ## What the shim's tick is armed for: the hover machine's due moment, or
@@ -5693,13 +5694,17 @@ proc hoverTick() {.cdecl.} =
   applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
   armHoverTick()
 
-proc vcsTick() {.cdecl.} =
-  ## THE VCS PANE REFRESHES AS THE DESKTOP'S DOES: every
-  ## `VCSRefreshIntervalMs` the loop calls this (`gpui_set_tick`, on the
-  ## loop's own thread), the repository is read again, and the pane is drawn
-  ## again when what it shows changed — so a file edited, added or committed
-  ## in another program appears here as it does on the desktop and in the
-  ## terminal, instead of the pane keeping the state it was opened with.
+proc refreshVcsPane() =
+  ## THE VCS PANE REFRESHES AS THE DESKTOP'S DOES, on the desktop's two
+  ## triggers (VCS-Panel.md's auto-refresh, `ui/vcs.nim`
+  ## `startFileWatching`): the repository is read again, and the pane is
+  ## drawn again when what it shows changed — so a file edited, added or
+  ## committed in another program appears here as it does on the desktop and
+  ## in the terminal, instead of the pane keeping the state it was opened
+  ## with. ONE BODY FOR BOTH TRIGGERS (`vcsTick`, `vcsWindowActivated`), so
+  ## the interval and the return to the window cannot come to disagree about
+  ## what a re-read is or when it earns a frame. The trace line is the one
+  ## `ci/test/plat47_gpui_window.py` counts, whichever trigger ran.
   if gVcsDirectory.len == 0:
     return
   for leaf in gLeafSet.leaves:
@@ -5712,6 +5717,23 @@ proc vcsTick() {.cdecl.} =
         applyTextFaces(r, pane)
         traceGesture("vcs refreshed")
       break
+
+proc vcsTick() {.cdecl.} =
+  ## The first trigger: every `VCSRefreshIntervalMs` the loop calls this
+  ## (`gpui_set_tick`, on the loop's own thread).
+  refreshVcsPane()
+
+proc vcsWindowActivated() =
+  ## The second trigger: the user came back to the window from another
+  ## program (`window_chrome.subscribeWindow`'s `activated`, the renderer's
+  ## inactive-to-active edge, delivered on the loop's thread from inside the
+  ## frame that sampled it). The desktop re-reads on its window `focus`
+  ## event, so a commit made elsewhere is on screen the moment the user
+  ## returns rather than up to `VCSRefreshIntervalMs` later. The interval
+  ## keeps its own pace: the tick is not re-armed here, because
+  ## `armHoverTick` shares it with the hover, search and recording polls and
+  ## re-arming would postpone whichever of them is pending.
+  refreshVcsPane()
 
 # ---------------------------------------------------------------------------
 # PLAT-50: the desktop's click behaviours on the window's panes
@@ -7497,7 +7519,9 @@ proc paintWindowChrome(root: GpuiElement) {.cdecl.} =
       windowResized(rr, w, h),
     proc() =
       var rr: GpuiRenderer
-      chromeChanged(rr, liveWindowChrome()))
+      chromeChanged(rr, liveWindowChrome()),
+    # The VCS pane's focus-gain refresh (`vcsWindowActivated`).
+    vcsWindowActivated)
   gChrome =
     if subscribed: liveWindowChrome()
     elif gChromeSpec.len > 0:

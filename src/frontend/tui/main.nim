@@ -1059,6 +1059,16 @@ proc interactive(command: TuiCommand): int =
       session.setViewportHeight(viewRows)
       session.refresh(rt)
       paint(driver, rt)
+    of dekFocus:
+      # THE VCS PANE'S SECOND TRIGGER (VCS-Panel.md's auto-refresh, the
+      # desktop's window `focus` listener in `ui/vcs.nim`): the terminal
+      # window regained focus (`CSI I`, DECSET 1004), so the repository is
+      # read again NOW rather than up to `VcsRefreshMs` later, and the frame
+      # is painted only when the pane's value moved. Never a key and never
+      # journalled — `terminal_driver.tokenEvent` already took it out of the
+      # token stream, so a replay of `--record-keys` is unchanged by it.
+      if vcs.refreshOnFocus(rt, ev.focused):
+        paint(driver, rt)
     of dekToken:
       if rt.takeClipboardReply(driver, ev.token):
         continue
@@ -1314,6 +1324,11 @@ proc editInteractive(command: TuiCommand): int =
       size = ev.size
       rt.resize(size.cols, size.rows)
       paint(driver, rt)
+    of dekFocus:
+      # The terminal window regained focus: the project's VCS pane re-reads
+      # now, exactly as in the replay loop above (`VcsSource.refreshOnFocus`).
+      if vcs.refreshOnFocus(rt, ev.focused):
+        paint(driver, rt)
     of dekToken:
       if rt.takeClipboardReply(driver, ev.token):
         continue

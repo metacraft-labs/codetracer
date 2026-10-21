@@ -116,8 +116,22 @@ type
     unconstrainedOpcodes*: Memo[int]
     headline*: Memo[string]
 
+const NoCircuitCompiledYet = "No circuit has been compiled for this project yet."
+  ## What the pane says before anything has reported on a circuit: a fresh
+  ## VM's report, and the report `resetToInitial` puts back.
+
 proc setReport*(vm: ConstraintsVM; report: ConstraintReport) =
   vm.report.val = report
+
+proc resetToInitial*(vm: ConstraintsVM) =
+  ## Put the pane back to what a freshly created VM shows.
+  ##
+  ## For a window tab that has never been shown (`shared_pane_state`): this VM
+  ## is one per window, so without it a new tab would show the report of the
+  ## tab that was active before it. Tests pin it to `createConstraintsVM`'s
+  ## initial values.
+  vm.report.val = absentReport(NoCircuitCompiledYet)
+  vm.projectName.val = ""
 
 proc setAbsence*(vm: ConstraintsVM; reason: string) =
   vm.report.val = absentReport(reason)
@@ -224,8 +238,7 @@ proc headlineFor*(report: ConstraintReport): string =
 
 proc createConstraintsVM*(): ConstraintsVM =
   withViewModel proc(dispose: proc()): ConstraintsVM =
-    let report = createSignal(absentReport(
-      "No circuit has been compiled for this project yet."))
+    let report = createSignal(absentReport(NoCircuitCompiledYet))
     let projectName = createSignal("")
 
     let hasReport = createMemo[bool] proc(): bool =

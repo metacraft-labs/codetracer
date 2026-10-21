@@ -1122,8 +1122,12 @@ test_lane_files() {
 		# WITHOUT `-d:ctInExtension`, for that first reason.
 		# ACP notification handling runs the index module with -d:server so
 		# the Electron window can be supplied without a display.
+		# `component_ids_across_sessions_test.nim` (#835) imports `utils.nim`,
+		# whose `generateId` reads every tab's `componentMapping` through the same
+		# JS-only `Data`; it holds editor and diff ids unique across the window.
 		printf '%s\n' \
 			src/frontend/tests/acp_notification_test.nim \
+			src/frontend/tests/component_ids_across_sessions_test.nim \
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/dap_refusal_surfaces_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
