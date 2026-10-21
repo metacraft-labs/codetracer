@@ -998,9 +998,8 @@ const PRINT_C_STEP: &str = "9";
 /// A recorded trace plus a live daemon, for driving the `ct trace
 /// origin` *client* (as opposed to the MCP server).
 struct CliOriginHarness {
-    _daemon: TestDaemon,
+    daemon: TestDaemon,
     binary: PathBuf,
-    root: PathBuf,
     trace_path: String,
 }
 
@@ -1008,11 +1007,10 @@ impl CliOriginHarness {
     /// Run `ct trace origin <trace> --variable c --step 9 --format <format>`
     /// against this harness's daemon and return its stdout.
     ///
-    /// `CODETRACER_TMP_PATH` is what the CLI client resolves its daemon
-    /// socket from (`paths::Paths::default`), and it is the same
-    /// `<root>/daemon.sock` that `start_daemon` created — so the client
-    /// joins the harness daemon instead of auto-starting a stray one
-    /// against the user's real socket.
+    /// The client is given the harness daemon's `CODETRACER_DAEMON_SOCKET`,
+    /// which it resolves exactly as the daemon does
+    /// (`DaemonConfig::daemon_paths`), so it joins that daemon instead of
+    /// auto-starting a stray one against the user's real socket.
     fn run_origin(&self, format: &str) -> String {
         let output = Command::new(&self.binary)
             .args([
@@ -1026,7 +1024,7 @@ impl CliOriginHarness {
                 "--format",
                 format,
             ])
-            .env("CODETRACER_TMP_PATH", &self.root)
+            .env("CODETRACER_DAEMON_SOCKET", &self.daemon.socket)
             .stdin(Stdio::null())
             .output()
             .unwrap_or_else(|e| panic!("cannot run `ct trace origin --format {format}`: {e}"));
@@ -1060,9 +1058,8 @@ fn cli_origin_harness(scenario: &str) -> Option<CliOriginHarness> {
     let daemon = start_daemon(&binary, &root)?;
 
     Some(CliOriginHarness {
-        _daemon: daemon,
+        daemon,
         binary,
-        root,
         trace_path: trace_dir.to_string_lossy().to_string(),
     })
 }

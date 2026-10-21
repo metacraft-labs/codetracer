@@ -57,7 +57,7 @@ import {
  * would let the whole chain keep rendering after the recorder that
  * produced it had been replaced.
  */
-const recordingRoot = threeTraceRecordingRoot();
+// Materialize in the sourcePath fixture below, after Playwright collection.
 
 /** The demo's sources, which stay in the repository. */
 const sourceRoot = threeTraceSourceRoot();
@@ -88,7 +88,12 @@ function balanceBindingLine(): number {
   return index + 1;
 }
 
-test.use({ sourcePath: recordingRoot, launchMode: "trace-folder" });
+test.use({
+  sourcePath: async ({}, use) => {
+    await use(threeTraceRecordingRoot());
+  },
+  launchMode: "trace-folder",
+});
 test.setTimeout(240_000);
 
 test.beforeAll(() => {

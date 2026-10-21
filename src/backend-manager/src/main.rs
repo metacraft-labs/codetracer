@@ -45,7 +45,7 @@ use tokio::{
 };
 
 use crate::backend_manager::BackendManager;
-use crate::config::DaemonConfig;
+use crate::config::{DaemonConfig, DaemonPaths};
 use crate::dap_parser::DapParser;
 use crate::paths::CODETRACER_PATHS;
 
@@ -3346,11 +3346,14 @@ async fn wait_for_stop(
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    // Resolve well-known daemon paths once.
-    let (daemon_socket_path, daemon_pid_path) = {
-        let paths = CODETRACER_PATHS.lock()?;
-        (paths.daemon_socket_path(), paths.daemon_pid_path())
-    };
+    // Resolve the daemon's paths once, for the daemon and every client verb
+    // alike (`DaemonConfig::daemon_paths`): an override such as
+    // `CODETRACER_DAEMON_SOCKET` must move both sides or neither.
+    let daemon_config = DaemonConfig::load();
+    let DaemonPaths {
+        socket: daemon_socket_path,
+        pid: daemon_pid_path,
+    } = daemon_config.daemon_paths(&*CODETRACER_PATHS.lock()?);
 
     // ------------------------------------------------------------------
     // MockBackend subcommand (used by integration tests)
@@ -3529,18 +3532,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(Commands::Daemon { action }) = cli.command {
         match action {
             DaemonAction::Start => {
-                // Load configuration from env vars / config file / defaults.
-                let config = DaemonConfig::load();
-
-                // Apply config overrides: if CODETRACER_DAEMON_SOCKET is set,
-                // use it (and derive the PID path from the same directory).
-                let (daemon_socket_path, daemon_pid_path) = if let Some(ref sp) = config.socket_path
-                {
-                    let pid = sp.with_extension("pid");
-                    (sp.clone(), pid)
-                } else {
-                    (daemon_socket_path, daemon_pid_path)
-                };
+                // Configuration from env vars / config file / defaults, the
+                // same value the paths above were resolved from.
+                let config = daemon_config;
 
                 // Detach from the controlling terminal (if any) so that the
                 // daemon survives the parent process exiting.

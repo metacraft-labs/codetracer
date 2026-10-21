@@ -1892,7 +1892,7 @@ pub fn find_suitable_python() -> Option<(String, String)> {
     }
 }
 
-/// What a `--version` probe of `cmd` actually found.
+/// What a version probe of `cmd` (see [`version_probe_args`]) actually found.
 ///
 /// # Why this is three states and not a bool
 ///
@@ -1913,27 +1913,57 @@ pub fn find_suitable_python() -> Option<(String, String)> {
 pub enum CommandProbe {
     /// `cmd` is not on PATH (or is not executable). A legitimate skip.
     Absent,
-    /// `cmd` is on PATH and `--version` succeeded.
+    /// `cmd` is on PATH and its version probe succeeded.
     Usable,
-    /// `cmd` is on PATH and `--version` FAILED, with its own diagnosis.
+    /// `cmd` is on PATH and its version probe FAILED, with its own diagnosis.
     /// Never a skip — see [`is_command_available`].
     Broken(String),
+}
+
+/// The arguments that ask `cmd` for its version through the interface the
+/// tool actually supports.
+///
+/// Almost every tool answers `--version`. Go does not: its CLI has no global
+/// `--version` flag, so `go --version` exits 2 ("flag provided but not
+/// defined"), and the supported spelling is the `version` subcommand
+/// (<https://pkg.go.dev/cmd/go#hdr-Print_Go_version>). Probing Go with
+/// `--version` made every installed, working Go a [`CommandProbe::Broken`],
+/// so the Go integration targets refused before recording anything.
+///
+/// The choice is keyed on the executable's basename, so an explicit path
+/// (`/nix/store/…/bin/go`, `C:\Go\bin\go.exe`) selects the same argv as a
+/// bare `go` on PATH. Contract: codetracer-specs
+/// `spec/Testing/Native-Go-Prerequisite-Version-Probe.md`.
+pub fn version_probe_args(cmd: &str) -> &'static [&'static str] {
+    // `Path::file_name` splits on `/` everywhere and also on `\` on Windows,
+    // which is where a `go.exe` path would be written with backslashes.
+    let basename = Path::new(cmd).file_name().and_then(|n| n.to_str()).unwrap_or(cmd);
+    if basename == "go" || basename.eq_ignore_ascii_case("go.exe") {
+        &["version"]
+    } else {
+        &["--version"]
+    }
 }
 
 /// Probe `cmd` for all three outcomes. Prefer this over
 /// [`is_command_available`] in new code: a caller holding a
 /// [`CommandProbe::Broken`] can print the tool's own complaint, which is the
 /// difference between a useful failure and "not available".
+///
+/// The argv comes from [`version_probe_args`], and every diagnosis names the
+/// argv that was actually invoked.
 pub fn probe_command(cmd: &str) -> CommandProbe {
-    match Command::new(cmd).arg("--version").output() {
+    let args = version_probe_args(cmd);
+    let invoked = format!("{cmd} {}", args.join(" "));
+    match Command::new(cmd).args(args).output() {
         Ok(o) if o.status.success() => CommandProbe::Usable,
         Ok(o) => CommandProbe::Broken(format!(
-            "`{cmd} --version` exited {} — stderr: {}",
+            "`{invoked}` exited {} — stderr: {}",
             o.status,
             String::from_utf8_lossy(&o.stderr).trim()
         )),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => CommandProbe::Absent,
-        Err(e) => CommandProbe::Broken(format!("`{cmd} --version` could not be run: {e}")),
+        Err(e) => CommandProbe::Broken(format!("`{invoked}` could not be run: {e}")),
     }
 }
 

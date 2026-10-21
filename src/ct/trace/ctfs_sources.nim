@@ -177,6 +177,12 @@ proc openCtfs(path: string): CtfsReader =
         mapBlock: mapBlock)
     offset += 24
 
+proc hasEntry(reader: CtfsReader, name: string): bool =
+  ## Whether the container has a member called ``name``.  For a member whose
+  ## absence is a normal case rather than damage, so the caller can tell
+  ## "not there" from every way of failing to read it.
+  reader.entries.anyIt(it.name == name)
+
 proc findEntry(reader: CtfsReader, name: string): CtfsEntry =
   for entry in reader.entries:
     if entry.name == name:
@@ -340,6 +346,14 @@ proc safePayloadPath*(realPath: string): string =
   rel
 
 proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string] =
+  ## Unpack the portable sources an MCR ``filemap.bin`` maps.  Only MCR
+  ## writes that member; every other recorder names its sources in
+  ## ``paths.dat`` alone, so an absent filemap means "no filemap" and returns
+  ## nothing (``codetracer-pm`` ``spec/Testing/UI-CTFS-Schema6-Source-Materialization.md``).
+  ## A filemap that is present is parsed strictly, and a malformed one still
+  ## raises.
+  if not reader.hasEntry("filemap.bin"):
+    return @[]
   let filemap = reader.readCtfsFile("filemap.bin")
   if filemap.len == 0:
     return @[]

@@ -755,10 +755,10 @@ storybook-build: build-storybook-components storybook-deps
 storybook-check-styles: storybook-deps
   cd storybook && npm run check-styles
 
+[positional-arguments]
 ensure-storybook-static *args:
   #!/usr/bin/env bash
   set -euo pipefail
-  set -- {{args}}
 
   needs_storybook=0
   if [ "$#" -eq 0 ]; then
@@ -951,7 +951,22 @@ test-rust:
     filter="$filter and ($(bash ../../ci/lib/not-provided-filter.sh "$not_provided"))"
   fi
   cargo nextest run --release --test '*' -E "$filter"
+  # The replay-server path, reported by cargo for the same reason as the
+  # session-manager's above: libs/jsbound's e2e test drives it.
+  replay_server="$(cargo build --release --bin replay-server --message-format=json-render-diagnostics \
+    | jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' | tail -n 1)"
   popd
+  if [ ! -x "$replay_server" ]; then
+    echo "error: cargo build of replay-server reported no executable" >&2
+    exit 1
+  fi
+  # `libs/jsbound`: the JS boundary log's encoder, strict decoder and the
+  # `ct-jsbound` assembler, with the byte vectors shared with
+  # codetracer-js-recorder. Its e2e test opens an assembled boundary
+  # recording with `ct trace info`, i.e. the session-manager and
+  # replay-server built above; it fails rather than skips without them.
+  ( cd libs/jsbound && JSBOUND_E2E_SESSION_MANAGER="$session_manager" \
+      CODETRACER_REPLAY_SERVER_CMD="$replay_server" cargo nextest run --release )
   pushd src/backend-manager
   cargo nextest run --release
   # mcp_dive_in_fetch_gateway_test needs a running codetracer-ci as its
@@ -1048,6 +1063,7 @@ test:
     "$@"
 
 # Run all GUI tests headlessly against an already-built CodeTracer binary.
+[positional-arguments]
 test-gui-prebuilt *args:
   #!/usr/bin/env bash
   set -e
@@ -1061,7 +1077,7 @@ test-gui-prebuilt *args:
       # would have started nothing and then exported a $DISPLAY pointing at
       # an X server that does not exist.  `test-e2e` exempts Darwin from its
       # $DISPLAY precondition for the same reason; this keeps the two in step.
-      just test-e2e {{args}}
+      just test-e2e "$@"
       ;;
     *)
       # Linux: start a persistent Xvfb so Playwright/Electron tests have a display.
@@ -1075,7 +1091,7 @@ test-gui-prebuilt *args:
       sleep 1
       export DISPLAY=":${DISPLAY_NUM}"
 
-      just test-e2e {{args}}
+      just test-e2e "$@"
       ;;
   esac
 
@@ -1089,8 +1105,9 @@ test-gui-prebuilt *args:
 # changes that haven't been compiled silently produce stale-binary test
 # failures (see task #317 + the May 19→20 staleness incident that produced
 # the "ct-mcr binary not found" Cluster B failure).
+[positional-arguments]
 test-gui *args: build-once build-siblings
-  just test-gui-prebuilt {{args}}
+  just test-gui-prebuilt "$@"
 
 # Assert the Event Log is static across a jump, and that a jump moves only the
 # dimming boundary. Reported as "the event log completely disappears after some
@@ -1103,8 +1120,9 @@ test-gui *args: build-once build-siblings
 # distinct reasons (a rebuilt row set vs. a mis-placed dimming boundary), and
 # the row-identity assertion is the one that catches ANY future silent rebuild
 # of the pane, not just the vanish that prompted it.
+[positional-arguments]
 test-event-log-static *args:
-  just test-gui-prebuilt tests/event-log/event_log_is_static_across_jumps.spec.ts {{args}}
+  just test-gui-prebuilt tests/event-log/event_log_is_static_across_jumps.spec.ts "$@"
 
 # H6 (Home-Demo-Screencast) — CODETRACER LAUNCHES THE FLAME UNDER HCR.
 #
@@ -1126,8 +1144,9 @@ test-event-log-static *args:
 # Needs the flame demo's prerequisites (`just gdext-hcr` and a session-capable
 # `hcr_patch_driver` in `artifacts/h5-driver/`); it FAILS by name rather than
 # skipping if one is missing. Runs on Linux and Windows.
+[positional-arguments]
 test-hcr-launch-under-hcr *args:
-  just test-gui-prebuilt tests/hcr-live-edit/flame_launch_under_hcr.spec.ts {{args}}
+  just test-gui-prebuilt tests/hcr-live-edit/flame_launch_under_hcr.spec.ts "$@"
 
 # The same gate's SIX ARMS, followed by the discrimination matrix.
 #
@@ -1142,6 +1161,7 @@ test-hcr-launch-arms *args:
 # On Linux, requires a running display server ($DISPLAY must be set).
 # On Windows, always works (no $DISPLAY needed).
 # `build-once` is a prereq for the same reason as `test-gui` (task #317).
+[positional-arguments]
 test-gui-visible *args: build-once build-siblings
   #!/usr/bin/env bash
   set -e
@@ -1156,7 +1176,7 @@ test-gui-visible *args: build-once build-siblings
       fi
       ;;
   esac
-  just test-e2e {{args}}
+  just test-e2e "$@"
 
 # The BROWSER-ONLY stylesheet guards — every surface whose PAINTING has been
 # reported broken by a user, in seconds.
@@ -1901,23 +1921,9 @@ test-frontend-js:
   echo "Running main-process lane..."
   just test-main-process
 
-# Run the Playwright suite. Args are forwarded to `npx playwright test`.
-#
-# QUOTING: `{{args}}` interpolates the arguments *unquoted*, so a
-# multi-word value is re-split by the shell here. This does NOT fail
-# loudly — Playwright treats the stray words as additional FILE filters,
-# collects every spec they match, and then dies inside some unrelated
-# spec's module-level setup (a missing recorder, an unbuilt sibling).
-# The error names a file you never asked for, so it looks like a broken
-# tree rather than a mis-parsed filter.
-#
-#   WRONG:  just test-e2e tests/foo.spec.ts -g "welcome open folder"
-#           -> `-g welcome` plus file filters `open`, `folder`
-#   RIGHT:  just test-e2e tests/foo.spec.ts -g handoff
-#           (a single-token regex; `.` matches a space if you need one)
-#
-# For anything that must contain a space, call Playwright directly:
-#   cd src/tests/gui && npx playwright test <file> -g "two words"
+# Run the Playwright suite. Preserve argument boundaries, including grep values
+# with spaces or quotes, through the Storybook guard and Playwright itself.
+[positional-arguments]
 test-e2e *args:
   #!/usr/bin/env bash
   set -e
@@ -1933,11 +1939,11 @@ test-e2e *args:
       fi
       ;;
   esac
-  just ensure-storybook-static {{args}}
+  just ensure-storybook-static "$@"
   bash "${CODETRACER_REPO_ROOT_PATH}/ci/lib/npm-install.sh" "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui"
   cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
-      {{args}}
+      "$@"
 
 dev-tools-test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/src/tests/gui && \
@@ -5103,6 +5109,7 @@ test-gpui-shell:
 # The screen is therefore sized from the matrix rather than from the host, with
 # headroom. A viewport added to `scenarios.json` that does not fit here will
 # fail the same way, by name, in the same place.
+[positional-arguments]
 plat35-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -5113,7 +5120,7 @@ plat35-capture-electron *args:
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
-      just test-e2e tests/visual/visual-alignment-capture.spec.ts {{args}}
+      just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
       ;;
     *)
       DISPLAY_NUM=99
@@ -5125,7 +5132,7 @@ plat35-capture-electron *args:
       trap "kill $XVFB_PID 2>/dev/null || true" EXIT
       sleep 1
       export DISPLAY=":${DISPLAY_NUM}"
-      just test-e2e tests/visual/visual-alignment-capture.spec.ts {{args}}
+      just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
       ;;
   esac
 
@@ -5138,8 +5145,9 @@ plat35-capture-electron *args:
 # (`tests/layout/plat45-desktop-remembers-own.spec.ts`). Both run THIS
 # checkout's desktop JavaScript (`scripts/plat45-desktop-prefix.sh`). Its own
 # Xvfb, as `plat35-capture-electron` does, when no display is set.
+[positional-arguments]
 plat45-capture-electron *args:
-  bash scripts/plat45-capture-electron.sh {{args}}
+  bash scripts/plat45-capture-electron.sh "$@"
 
 # PLAT-45: the GPUI window's FIRST SCREEN, on a headless sway, with no
 # remembered layout — the frame `plat45-window-record` reads the arrangement
@@ -5236,13 +5244,14 @@ plat69-window-chrome *scenarios:
 # written to src/tests/visual/answers/plat46-token-parity.electron.json for
 # `tests/real_terminal/test_plat46_desktop_parity.nim`. Same Xvfb arrangement
 # as `plat35-capture-electron` (its own server, `-dpi 96`), for its reasons.
+[positional-arguments]
 plat46-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
-      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts {{args}}
+      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts "$@"
       ;;
     *)
       DISPLAY_NUM=99
@@ -5254,7 +5263,7 @@ plat46-capture-electron *args:
       trap "kill $XVFB_PID 2>/dev/null || true" EXIT
       sleep 1
       export DISPLAY=":${DISPLAY_NUM}"
-      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts {{args}}
+      just test-e2e tests/visual/plat46-token-parity-capture.spec.ts "$@"
       ;;
   esac
 
@@ -5264,35 +5273,40 @@ plat46-capture-electron *args:
 # written to src/tests/visual/answers/plat47-desktop-parity.electron.json for
 # the terminal's and GPUI's parity suites. Runs this checkout's desktop
 # JavaScript in a prefix of its own (scripts/plat45-desktop-prefix.sh).
+[positional-arguments]
 plat47-capture-electron *args:
-  bash scripts/plat47-capture-electron.sh {{args}}
+  bash scripts/plat47-capture-electron.sh "$@"
 
 # PLAT-48: the desktop's menu drawn from the shared Menu ViewModel (the
 # verification gate: a ViewModel-only highlight change moves the DOM's), its
 # shortcuts, Step Over from the menu, and the footer's labels — written to
 # `src/tests/visual/answers/plat48-menu.electron.json`.
+[positional-arguments]
 plat48-capture-electron *args:
-  bash scripts/plat48-capture-electron.sh {{args}}
+  bash scripts/plat48-capture-electron.sh "$@"
 
 # The desktop's chrome as the terminal's and GPUI's are measured against it:
 # the one root menu button and its cascade, each transport control's tooltip
 # and the omnibar's placeholder — written to
 # `src/tests/visual/answers/plat49-chrome.electron.json`.
+[positional-arguments]
 plat49-capture-electron *args:
-  bash scripts/plat49-capture-electron.sh {{args}}
+  bash scripts/plat49-capture-electron.sh "$@"
 
 # The desktop's caption bar, strips, menu surface, right-click menus and click
 # behaviours, as the terminal's and GPUI's are measured against them —
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.
+[positional-arguments]
 plat50-capture-electron *args:
-  bash scripts/plat50-capture-electron.sh {{args}}
+  bash scripts/plat50-capture-electron.sh "$@"
 
 # The desktop's Terminal Output pane as the terminal's and GPUI's are measured
 # against it: its lines and their computed styles, a click on a fragment, its
 # screen view with the real-time scrubber and its marks — written to
 # `src/tests/visual/answers/plat52-terminal.electron.json`.
+[positional-arguments]
 plat52-capture-electron *args:
-  bash scripts/plat52-capture-electron.sh {{args}}
+  bash scripts/plat52-capture-electron.sh "$@"
 
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
@@ -5578,13 +5592,14 @@ plat40-production-callers:
 plat40-capture-window:
   bash ci/test/plat40-panes-window.sh
 
+[positional-arguments]
 plat40-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
-      just test-e2e tests/visual/plat40-panes-capture.spec.ts {{args}}
+      just test-e2e tests/visual/plat40-panes-capture.spec.ts "$@"
       ;;
     *)
       # A screen LARGER than the 1920x1080 window, as PLAT-35's capture uses:
@@ -5599,7 +5614,7 @@ plat40-capture-electron *args:
       trap "kill $XVFB_PID 2>/dev/null || true" EXIT
       sleep 1
       export DISPLAY=":${DISPLAY_NUM}"
-      just test-e2e tests/visual/plat40-panes-capture.spec.ts {{args}}
+      just test-e2e tests/visual/plat40-panes-capture.spec.ts "$@"
       ;;
   esac
 
@@ -5616,13 +5631,14 @@ plat40-record:
 plat41-capture-window:
   bash ci/test/plat41-panes-window.sh
 
+[positional-arguments]
 plat41-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
-      just test-e2e tests/visual/plat41-parity-capture.spec.ts {{args}}
+      just test-e2e tests/visual/plat41-parity-capture.spec.ts "$@"
       ;;
     *)
       DISPLAY_NUM=99
@@ -5634,7 +5650,7 @@ plat41-capture-electron *args:
       trap "kill $XVFB_PID 2>/dev/null || true" EXIT
       sleep 1
       export DISPLAY=":${DISPLAY_NUM}"
-      just test-e2e tests/visual/plat41-parity-capture.spec.ts {{args}}
+      just test-e2e tests/visual/plat41-parity-capture.spec.ts "$@"
       ;;
   esac
 
@@ -6487,8 +6503,9 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
 # the terminal and GPUI are measured against (no Timeline, the list panes'
 # scrollbar scrubbers, the changed-value style) — writes
 # `src/tests/visual/answers/plat51-desktop.electron.json`.
+[positional-arguments]
 plat51-capture-electron *args:
-  bash scripts/plat51-capture-electron.sh {{args}}
+  bash scripts/plat51-capture-electron.sh "$@"
 
 # PLAT-68 Phase B: the real Electron app's keys through the one router (F-keys
 # once, letters and Enter in the read-only editor, Alt+E, Ctrl+B,

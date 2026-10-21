@@ -12,6 +12,8 @@ readonly SCRIPT_DIR
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 readonly REPO_ROOT
 readonly GATE="$REPO_ROOT/scripts/test-cross-process.sh"
+python3 "$SCRIPT_DIR/js-recorder-path-test.py"
+
 readonly EVENT_LOG_SPEC="$REPO_ROOT/src/tests/gui/tests/value-origin/event-log-correlation-markers-three-trace.spec.ts"
 
 fail() {
@@ -31,8 +33,11 @@ require_source_line "$EVENT_LOG_SPEC" \
 	'from "../../lib/fixtures";' \
 	"event-log spec must import the CodeTracer fixture"
 require_source_line "$EVENT_LOG_SPEC" \
-	'test.use({ sourcePath: fixtureDir, launchMode: "trace-folder" });' \
+	'  launchMode: "trace-folder",' \
 	"event-log spec must launch the materialized fixture through Electron"
+require_source_line "$EVENT_LOG_SPEC" \
+	'    await use(threeTraceRecordingRoot());' \
+	"event-log spec must materialize recordings during fixture setup"
 require_source_line "$EVENT_LOG_SPEC" \
 	'await readyOnEntry(ctPage);' \
 	"event-log spec must wait for the launched CodeTracer renderer"

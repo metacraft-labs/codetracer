@@ -1,0 +1,317 @@
+{
+  "format": "jsbound shared vectors (JS-Boundary-Recording.md §5)",
+  "vectors": [
+    {
+      "bytes": "minimal.bin",
+      "class": "valid",
+      "description": "Header, Env and End: the shortest complete log",
+      "expected": "minimal.json",
+      "name": "minimal"
+    },
+    {
+      "bytes": "task.bin",
+      "class": "valid",
+      "description": "one Task record at seq 1",
+      "expected": "task.json",
+      "name": "task"
+    },
+    {
+      "bytes": "task_reg.bin",
+      "class": "valid",
+      "description": "one TaskReg record at seq 1",
+      "expected": "task_reg.json",
+      "name": "task_reg"
+    },
+    {
+      "bytes": "clock.bin",
+      "class": "valid",
+      "description": "one Clock record at seq 1",
+      "expected": "clock.json",
+      "name": "clock"
+    },
+    {
+      "bytes": "random.bin",
+      "class": "valid",
+      "description": "one Random record at seq 1",
+      "expected": "random.json",
+      "name": "random"
+    },
+    {
+      "bytes": "net_request.bin",
+      "class": "valid",
+      "description": "one NetRequest record at seq 1",
+      "expected": "net_request.json",
+      "name": "net_request"
+    },
+    {
+      "bytes": "net_response_inline.bin",
+      "class": "valid",
+      "description": "one NetResponse record at seq 1",
+      "expected": "net_response_inline.json",
+      "name": "net_response_inline"
+    },
+    {
+      "bytes": "net_response_ref.bin",
+      "class": "valid",
+      "description": "one NetResponse record at seq 1",
+      "expected": "net_response_ref.json",
+      "name": "net_response_ref"
+    },
+    {
+      "bytes": "ws_message.bin",
+      "class": "valid",
+      "description": "one WsMessage record at seq 1",
+      "expected": "ws_message.json",
+      "name": "ws_message"
+    },
+    {
+      "bytes": "storage_read.bin",
+      "class": "valid",
+      "description": "one StorageRead record at seq 1",
+      "expected": "storage_read.json",
+      "name": "storage_read"
+    },
+    {
+      "bytes": "layout_read.bin",
+      "class": "valid",
+      "description": "one LayoutRead record at seq 1",
+      "expected": "layout_read.json",
+      "name": "layout_read"
+    },
+    {
+      "bytes": "input.bin",
+      "class": "valid",
+      "description": "one Input record at seq 1",
+      "expected": "input.json",
+      "name": "input"
+    },
+    {
+      "bytes": "dom_effect.bin",
+      "class": "valid",
+      "description": "one DomEffect record at seq 1",
+      "expected": "dom_effect.json",
+      "name": "dom_effect"
+    },
+    {
+      "bytes": "checkpoint.bin",
+      "class": "valid",
+      "description": "one Checkpoint record at seq 1",
+      "expected": "checkpoint.json",
+      "name": "checkpoint"
+    },
+    {
+      "bytes": "refusal.bin",
+      "class": "valid",
+      "description": "one Refusal record at seq 1",
+      "expected": "refusal.json",
+      "name": "refusal"
+    },
+    {
+      "bytes": "navigation.bin",
+      "class": "valid",
+      "description": "one Navigation record at seq 1",
+      "expected": "navigation.json",
+      "name": "navigation"
+    },
+    {
+      "bytes": "error.bin",
+      "class": "valid",
+      "description": "one Error record at seq 1",
+      "expected": "error.json",
+      "name": "error"
+    },
+    {
+      "bytes": "scrubbed.bin",
+      "class": "valid",
+      "description": "one Scrubbed record at seq 1",
+      "expected": "scrubbed.json",
+      "name": "scrubbed"
+    },
+    {
+      "bytes": "mark.bin",
+      "class": "valid",
+      "description": "one Mark record at seq 1",
+      "expected": "mark.json",
+      "name": "mark"
+    },
+    {
+      "bytes": "gap.bin",
+      "class": "valid",
+      "description": "a Gap covering seq 2..4 between seq 1 and seq 5",
+      "expected": "gap.json",
+      "name": "gap"
+    },
+    {
+      "bytes": "end_idle.bin",
+      "class": "valid",
+      "description": "End appended by the assembler on idle finalisation (reason 3)",
+      "expected": "end_idle.json",
+      "name": "end_idle"
+    },
+    {
+      "bytes": "net_response_inline_max.bin",
+      "class": "valid",
+      "description": "an inline body of exactly 1024 bytes, the most jsbound.log inlines",
+      "expected": "net_response_inline_max.json",
+      "name": "net_response_inline_max"
+    },
+    {
+      "bytes": "session.bin",
+      "class": "valid",
+      "description": "every record kind in one stream, with a Gap after the Checkpoint",
+      "expected": "session.json",
+      "name": "session"
+    },
+    {
+      "bytes": "truncated_unterminated.bin",
+      "class": "truncation",
+      "description": "the session vector without its End frame",
+      "expected": "truncated_unterminated.json",
+      "name": "truncated_unterminated"
+    },
+    {
+      "bytes": "truncated_mid_record.bin",
+      "class": "truncation",
+      "description": "the session vector cut 7 bytes into its eleventh frame",
+      "expected": "truncated_mid_record.json",
+      "name": "truncated_mid_record"
+    },
+    {
+      "base": "minimal",
+      "bytes": "bad_magic.bin",
+      "class": "refusal",
+      "description": "the first magic byte is 'X' instead of 'C'",
+      "expected": "bad_magic.json",
+      "name": "bad_magic"
+    },
+    {
+      "base": "minimal",
+      "bytes": "ctbl_version_2.bin",
+      "class": "refusal",
+      "description": "the CTBL version byte is 2",
+      "expected": "ctbl_version_2.json",
+      "name": "ctbl_version_2"
+    },
+    {
+      "base": "minimal",
+      "bytes": "vocab_2.bin",
+      "class": "refusal",
+      "description": "the Header's vocab is 2",
+      "expected": "vocab_2.json",
+      "name": "vocab_2"
+    },
+    {
+      "base": "clock",
+      "bytes": "unknown_tag.bin",
+      "class": "refusal",
+      "description": "the third frame's tag is 0x54, unassigned in the jsbound range",
+      "expected": "unknown_tag.json",
+      "name": "unknown_tag"
+    },
+    {
+      "base": "clock",
+      "bytes": "empty_frame.bin",
+      "class": "refusal",
+      "description": "the third frame declares length 0",
+      "expected": "empty_frame.json",
+      "name": "empty_frame"
+    },
+    {
+      "base": "clock",
+      "bytes": "frame_too_large.bin",
+      "class": "refusal",
+      "description": "the third frame declares 64 MiB + 1 bytes",
+      "expected": "frame_too_large.json",
+      "name": "frame_too_large"
+    },
+    {
+      "base": "clock",
+      "bytes": "field_overrun.bin",
+      "class": "refusal",
+      "description": "the third frame declares one byte fewer than its fields need",
+      "expected": "field_overrun.json",
+      "name": "field_overrun"
+    },
+    {
+      "base": "clock",
+      "bytes": "trailing_field_bytes.bin",
+      "class": "refusal",
+      "description": "the third frame declares one byte more than its fields",
+      "expected": "trailing_field_bytes.json",
+      "name": "trailing_field_bytes"
+    },
+    {
+      "base": "minimal",
+      "bytes": "invalid_utf8.bin",
+      "class": "refusal",
+      "description": "the first byte of the Header's recorder_id is 0xff",
+      "expected": "invalid_utf8.json",
+      "name": "invalid_utf8"
+    },
+    {
+      "base": "net_response_inline",
+      "bytes": "unknown_blob_kind.bin",
+      "class": "refusal",
+      "description": "the NetResponse body's blobref kind is 2",
+      "expected": "unknown_blob_kind.json",
+      "name": "unknown_blob_kind"
+    },
+    {
+      "base": "net_response_inline_max",
+      "bytes": "inline_blob_too_large.bin",
+      "class": "refusal",
+      "description": "the inline body is one byte longer: 1025 bytes",
+      "expected": "inline_blob_too_large.json",
+      "name": "inline_blob_too_large"
+    },
+    {
+      "base": "minimal",
+      "bytes": "header_not_first.bin",
+      "class": "refusal",
+      "description": "the Header and Env frames are swapped",
+      "expected": "header_not_first.json",
+      "name": "header_not_first"
+    },
+    {
+      "base": "clock",
+      "bytes": "env_not_second.bin",
+      "class": "refusal",
+      "description": "the Env and Clock frames are swapped",
+      "expected": "env_not_second.json",
+      "name": "env_not_second"
+    },
+    {
+      "base": "clock",
+      "bytes": "seq_skip_without_gap.bin",
+      "class": "refusal",
+      "description": "the Clock's seq is 2 where the first seq must be 1, with no Gap",
+      "expected": "seq_skip_without_gap.json",
+      "name": "seq_skip_without_gap"
+    },
+    {
+      "base": "gap",
+      "bytes": "gap_mismatch.bin",
+      "class": "refusal",
+      "description": "the Gap's first_seq is 3, leaving seq 2 uncovered",
+      "expected": "gap_mismatch.json",
+      "name": "gap_mismatch"
+    },
+    {
+      "base": "clock",
+      "bytes": "end_seq_mismatch.bin",
+      "class": "refusal",
+      "description": "End.last_seq is 2, but the last seq is 1",
+      "expected": "end_seq_mismatch.json",
+      "name": "end_seq_mismatch"
+    },
+    {
+      "base": "minimal",
+      "bytes": "bytes_after_end.bin",
+      "class": "refusal",
+      "description": "one 0x00 byte after the End frame",
+      "expected": "bytes_after_end.json",
+      "name": "bytes_after_end"
+    }
+  ],
+  "vocab": 1
+}

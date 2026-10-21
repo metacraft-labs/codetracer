@@ -54,4 +54,8 @@ suite "ct host and test-oracle output":
     let dir = scratchDir("legacy-bin")
     writeFile(dir / "trace.bin", "\x00\x01")
     writeFile(dir / "trace_metadata.json", """{"program":"main.py"}""")
-    check findLegacyMaterializedTraceFolder(dir) == dir
+    # The proc returns the folder resolved (`expandFilename`), symlinks
+    # included, so it is compared with `dir` resolved the same way. On macOS
+    # the temp dir is under `/tmp`, a symlink to `/private/tmp`, and the
+    # unresolved `dir` names the same folder by a different string.
+    check findLegacyMaterializedTraceFolder(dir) == expandFilename(dir)

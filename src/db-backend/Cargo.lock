@@ -1211,6 +1211,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsbound"
+version = "0.1.0"
+dependencies = [
+ "codetracer_ctfs",
+ "codetracer_trace_writer",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1625,6 +1636,7 @@ dependencies = [
  "gimli",
  "indexmap 1.9.3",
  "js-sys",
+ "jsbound",
  "libc",
  "log",
  "mapping-catalog",

@@ -76,7 +76,9 @@ fn replay_server() -> PathBuf {
 struct Opened {
     /// The first `ct/complete-move`'s `location`.
     location: Value,
-    /// The `stackTrace` frames at that stop.
+    /// The `stackTrace` frames at that stop.  Only the native case, which
+    /// compiles on x86_64 Linux alone, reads them.
+    #[cfg_attr(not(all(target_os = "linux", target_arch = "x86_64")), allow(dead_code))]
     frames: Vec<Value>,
     /// The texts of every `ct/notification` of kind error (2).
     errors: Vec<String>,
@@ -223,6 +225,8 @@ fn materialized_launch_with_a_start_geid_opens_at_the_entry_quietly() {
 }
 
 /// The span probe's printed spans: (end-marker geid, value, end-call line).
+/// Used by the native case only, so compiled where it is.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn printed_spans(stdout: &str) -> Vec<(u64, i64, i64)> {
     stdout
         .lines()

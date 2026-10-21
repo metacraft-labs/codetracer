@@ -54,6 +54,9 @@ codetracer_trace_types = { path = "../../../codetracer-trace-format/codetracer_t
 codetracer_trace_reader = { path = "../../../codetracer-trace-format/codetracer_trace_reader" }
 codetracer_trace_writer = { path = "../../../codetracer-trace-format/codetracer_trace_writer" }
 codetracer_ctfs = { path = "../../../codetracer-trace-format/codetracer_ctfs" }
+# Recognises a JS boundary recording (CTFS-Binary-Format.md §4.8) so `setup`
+# opens it as a trace with no steps; see `dap_server.rs` `setup`.
+jsbound = { path = "../../libs/jsbound" }
 codetracer_trace_writer_nim = { path = "../../../codetracer-trace-format/codetracer_trace_writer_nim", optional = true }
 # Value Origin Tracking classifier (M1). The db-backend is the only
 # consumer at replay time — recorders do NOT depend on this crate

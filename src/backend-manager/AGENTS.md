@@ -108,8 +108,17 @@ and communicating via stdin/stdout with newline-delimited JSON-RPC 2.0.
   recording for an authenticated caller only with it (or as a signed-in
   member of the recording's tenant). Both tokens must be RFC 6750
   b64tokens.
-- `CODETRACER_DAEMON_SOCK` - Override the daemon socket path (used in tests).
-- `TMPDIR` - Affects where the daemon socket and PID files are created.
+- `CODETRACER_DAEMON_SOCKET` - Override the daemon socket path (the PID file
+  becomes `<socket>.pid`; `socket_path` in the daemon config file does the
+  same). The daemon and every client (the `trace` verbs, `daemon
+  stop`/`status`/`connect`, the MCP server) resolve it through one function,
+  `DaemonConfig::daemon_paths`, so it moves both sides or neither.
+- `CODETRACER_DAEMON_SOCK` - The MCP server only: connect to the daemon at
+  this socket and never auto-start one (used in tests). The daemon also sets
+  it for `exec_script`'s Python process.
+- `CODETRACER_TMP_PATH`, else `$CODETRACER_HOME/tmp`, else the per-OS default
+  (`TMPDIR`-based on Linux) - where the daemon socket and PID file go without
+  an override.
 
 ### Trace Paths
 

@@ -377,7 +377,6 @@ impl Drop for Daemon {
             .args(["daemon", "stop"])
             .env("TMPDIR", &self.scratch)
             .env("CODETRACER_HOME", self.scratch.join("home"))
-            .env("CODETRACER_DAEMON_SOCK", &self.socket)
             .env("CODETRACER_DAEMON_SOCKET", &self.socket)
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -441,6 +441,43 @@ fn setup(
     info!("run setup() for {:?}", trace_folder);
     let trace_path = trace_folder.join(trace_file);
 
+    // A JS boundary recording (codetracer-pm CTFS-Binary-Format.md §4.8) is a
+    // container of `meta.dat` and the `jsbound.*` members, with no trace
+    // streams. This reader does not replay boundary logs (a replay worker
+    // materialises a separate JavaScript trace from one,
+    // JS-Boundary-Recording.md §12), so it opens one as a trace with no
+    // steps, as the format's unknown-member rule promises, instead of taking
+    // a non-MCR container without `steps.dat` for a native recording and
+    // failing inside the replay worker. The kind is recognised the way the
+    // spec declares it: `jsbound.log` present and a
+    // `codetracer-js-boundary/` recorder id.
+    for candidate in [trace_folder, trace_path.as_path()] {
+        if jsbound::container::is_boundary_recording_file(candidate) {
+            info!(
+                "JS boundary recording: {} has no steps (open its materialised trace to step through it)",
+                candidate.display()
+            );
+            let workdir = candidate.parent().map(Path::to_path_buf).unwrap_or_default();
+            let reader: Arc<dyn TraceReader> = Arc::new(CTFSTraceReader::from_events(Vec::new(), &workdir)?);
+            let mut handler = Handler::construct_with_reader(
+                TraceKind::Materialized,
+                RecreatorArgs {
+                    name: thread_name.to_string(),
+                    ..RecreatorArgs::default()
+                },
+                reader,
+                false,
+            );
+            handler.raw_diff_index = raw_diff_index;
+            handler.set_trace_folder(trace_folder);
+            if for_launch {
+                handler.run_to_launch_position(restore_location, sender)?;
+            }
+            handler.initialized = true;
+            return Ok(handler);
+        }
+    }
+
     // Materialized traces are CTFS-only. Native MCR traces are also CTFS
     // containers, but they carry recorder streams such as `t00000000000`
     // instead of DB trace files and must fall through to the replay-worker

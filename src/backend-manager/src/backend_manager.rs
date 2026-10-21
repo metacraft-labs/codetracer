@@ -6723,19 +6723,26 @@ impl BackendManager {
         // --- Determine the daemon socket path ---
         //
         // The Python subprocess connects back to the daemon using this socket.
-        // In daemon mode we use the socket path from the daemon state config;
-        // otherwise fall back to the well-known default.
-        let socket_path = self
-            .daemon_state
-            .as_ref()
-            .and_then(|ds| ds.config.socket_path.as_ref())
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| {
-                CODETRACER_PATHS
-                    .lock()
-                    .map(|p| p.daemon_socket_path().to_string_lossy().to_string())
-                    .unwrap_or_else(|_| "/tmp/codetracer/daemon.sock".to_string())
-            });
+        // It is the path this daemon bound, resolved by the same function
+        // (`DaemonConfig::daemon_paths`) from the daemon state's config; a
+        // manager without daemon state has no override, so the defaults.
+        // `Paths` is never mutated, so a poisoned lock still holds a valid
+        // value.
+        let socket_path = {
+            let no_override = DaemonConfig::default();
+            let config = self
+                .daemon_state
+                .as_ref()
+                .map_or(&no_override, |ds| &ds.config);
+            let defaults = CODETRACER_PATHS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            config
+                .daemon_paths(&defaults)
+                .socket
+                .to_string_lossy()
+                .to_string()
+        };
 
         // --- Determine the Python API path ---
         //
