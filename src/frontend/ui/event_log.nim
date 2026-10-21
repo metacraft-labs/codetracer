@@ -631,6 +631,18 @@ proc mergeLiveDebuggerRows(self: EventLogComponent; data: var TableData): int =
       data.data.add(liveRow)
       result += 1
 
+proc eventLogComponentFor(tab: int): EventLogComponent =
+  ## The Event Log component of tab `tab` (its `componentMapping[EventLog][0]`),
+  ## falling back to the module's `eventLogComponentRef` where the tab has none
+  ## (the extension's component is not in a session's mapping).
+  if tab >= 0 and tab < data.sessions.len:
+    let session = data.sessions[tab]
+    if not session.isNil and not session.ui.isNil:
+      let mapping = session.ui.componentMapping[Content.EventLog]
+      if not mapping.isNil and mapping.hasKey(0) and not mapping[0].isNil:
+        return EventLogComponent(mapping[0])
+  eventLogComponentRef
+
 proc tryMountIsoNimEventLogPanel*() =
   ## Mount the IsoNim event log view into the GoldenLayout-managed
   ## event log component container. The container is created by
@@ -650,7 +662,7 @@ proc tryMountIsoNimEventLogPanel*() =
   ##
   ## Safe to call multiple times — mounts only once.
   cdebug "tryMountIsoNimEventLogPanel: called, isoNimEventLogMounted=" & $isoNimEventLogMounted & " vmIsNil=" & $eventLogVMInstance.isNil & " compRefIsNil=" & $eventLogComponentRef.isNil
-  if isoNimEventLogMounted or eventLogVMInstance.isNil:
+  if eventLogVMInstance.isNil:
     cdebug "tryMountIsoNimEventLogPanel: skipping (already mounted or VM nil)"
     return
   if eventLogComponentRef.isNil:
@@ -661,12 +673,12 @@ proc tryMountIsoNimEventLogPanel*() =
   # the component is registered. IsoNim mounts directly into it —
   # no Karax renderer is involved.
   let key = cstring"eventLogComponent-0"
+  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+  let tab = data.activeSessionIndex
   var eventLogRetryCount = 0
   proc doMount() =
-    if isoNimEventLogMounted:
-      return
     eventLogRetryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
+    let container = findIsoNimPaneHost(key, tab)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if eventLogRetryCount > 200:
         cerror "tryMountIsoNimEventLogPanel: not ready after 200 retries, giving up"
@@ -674,13 +686,26 @@ proc tryMountIsoNimEventLogPanel*() =
       discard setTimeout(proc() = doMount(), 10)
       return
 
+    # Per HOST, not per id: tab 0's mount set the latch for a host this
+    # tab does not share. See `isoNimPanelNeedsMountInHost`.
+    if not isoNimPanelNeedsMountInHost(
+        latchSaysMounted = isoNimEventLogMounted,
+        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
+      return
+
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
     isoNimEventLogMounted = true
+    markIsoNimPanelContainerMounted(container)
 
-    let comp = eventLogComponentRef
+    # THIS TAB'S component, not the module's first one. Every tab has its own
+    # `EventLogComponent` (id 0, its own `index`, so its own table ids) and
+    # the DataTables this mount sets up must be that component's — with
+    # `eventLogComponentRef`, tab 1's tables were created under tab 0's ids
+    # and DataTables bound tab 0's table.
+    let comp = eventLogComponentFor(tab)
     let denseId = "eventLog-" & $comp.id & "-dense-table-" & $comp.index
     let detailedId = "eventLog-" & $comp.id & "-detailed-table-" & $comp.index
     let searchId = "eventLog-" & $comp.id & "-search"

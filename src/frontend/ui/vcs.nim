@@ -978,12 +978,15 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
     let vm = ensureVCSVM(component)
     if vm.isNil:
       return
-    var container = document.getElementById(
-      cstring(fmt"vcsComponent-{componentId}"))
-    if container.isNil:
-      container = document.getElementById(cstring(fmt"vCSComponent-{componentId}"))
-    if container.isNil:
+    # This tab's host, not the first in the document — see
+    # `findIsoNimPaneHost`. Both spellings of the label are still accepted.
+    let tab = data.activeSessionIndex
+    var host = findIsoNimPaneHost(cstring(fmt"vcsComponent-{componentId}"), tab)
+    if host.isNil:
+      host = findIsoNimPaneHost(cstring(fmt"vCSComponent-{componentId}"), tab)
+    if host.isNil:
       return
+    let container = cast[kdom.Element](host)
     if not isoNimPanelNeedsMount(
         idLatchSaysMounted = isoNimVCSMountedIds.hasKey(componentId) and
                              isoNimVCSMountedIds[componentId],

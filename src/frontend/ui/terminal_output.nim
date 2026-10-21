@@ -112,23 +112,30 @@ proc tryMountIsoNimTerminalOutputPanel*() =
   ## handles GoldenLayout's asynchronous container creation: the
   ## container appears slightly after the layout state changes so we
   ## back off and retry until it lands (capped at 200 attempts, ~2 s).
-  if isoNimTerminalOutputMounted or terminalOutputVMInstance.isNil:
+  if terminalOutputVMInstance.isNil:
     return
   if terminalOutputComponentRef.isNil:
     return
 
   let key = cstring("terminalComponent-" & $terminalOutputComponentRef.id)
+  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+  let tab = data.activeSessionIndex
   var retryCount = 0
   proc doMount() =
-    if isoNimTerminalOutputMounted:
-      return
     retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
+    let container = findIsoNimPaneHost(key, tab)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if retryCount > 200:
         cerror "tryMountIsoNimTerminalOutputPanel: not ready after 200 retries, giving up"
         return
       discard setTimeout(proc() = doMount(), 10)
+      return
+
+    # Per HOST, not per id: tab 0's mount set the latch for a host this
+    # tab does not share. See `isoNimPanelNeedsMountInHost`.
+    if not isoNimPanelNeedsMountInHost(
+        latchSaysMounted = isoNimTerminalOutputMounted,
+        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
       return
 
     # Replace any prior content (Karax may have planted a stub element
@@ -138,6 +145,7 @@ proc tryMountIsoNimTerminalOutputPanel*() =
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
     isoNimTerminalOutputMounted = true
+    markIsoNimPanelContainerMounted(container)
     try:
       mountIsoNimTerminalOutput(container, terminalOutputVMInstance)
     except:

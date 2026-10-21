@@ -788,18 +788,15 @@ when defined(js):
       return
     if not agentActivityComponentRefs.hasKey(componentId):
       return
-    if isoNimAgentActivityMountedIds.hasKey(componentId):
-      return
 
     let component = agentActivityComponentRefs[componentId]
     let key = cstring("agentActivityComponent-" & $componentId)
+    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+    let tab = data.activeSessionIndex
     var retryCount = 0
     proc doMount() =
-      if isoNimAgentActivityMountedIds.hasKey(componentId):
-        return
       retryCount += 1
-      let container = isonim_dom_api.getElementById(
-        isonim_dom_api.document, key)
+      let container = findIsoNimPaneHost(key, tab)
       if isonim_dom_api.isNodeNil(isonim_dom_api.Node(container)):
         if retryCount > 200:
           cerror "tryMountIsoNimAgentActivityPanel: not ready after 200 retries, giving up"
@@ -807,11 +804,19 @@ when defined(js):
         discard setTimeout(proc() = doMount(), 10)
         return
 
+      # Per HOST, not per id: tab 0's mount set the latch for a host this
+      # tab does not share. See `isoNimPanelNeedsMountInHost`.
+      if not isoNimPanelNeedsMountInHost(
+          latchSaysMounted = isoNimAgentActivityMountedIds.hasKey(componentId),
+          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
+        return
+
       let containerNode = isonim_dom_api.Node(container)
       while not isonim_dom_api.isNodeNil(containerNode.firstChild):
         discard isonim_dom_api.removeChild(containerNode, containerNode.firstChild)
 
       isoNimAgentActivityMountedIds[componentId] = true
+      markIsoNimPanelContainerMounted(container)
       try:
         component.syncLegacyAgentActivityIntoVM()
         mountIsoNimAgentActivityPanel(

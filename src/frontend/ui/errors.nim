@@ -245,23 +245,30 @@ proc tryMountIsoNimErrorsPanel*() =
   ## DOM container appears (capped at 200 attempts, ~2 s) since
   ## GoldenLayout creates the host slightly after the layout state
   ## changes.
-  if isoNimErrorsMounted or errorsVMInstance.isNil:
+  if errorsVMInstance.isNil:
     return
   if errorsComponentRef.isNil:
     return
 
   let key = cstring("errorsComponent-" & $errorsComponentRef.id)
+  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+  let tab = data.activeSessionIndex
   var retryCount = 0
   proc doMount() =
-    if isoNimErrorsMounted:
-      return
     retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
+    let container = findIsoNimPaneHost(key, tab)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if retryCount > 200:
         cerror "tryMountIsoNimErrorsPanel: not ready after 200 retries, giving up"
         return
       discard setTimeout(proc() = doMount(), 10)
+      return
+
+    # Per HOST, not per id: tab 0's mount set the latch for a host this
+    # tab does not share. See `isoNimPanelNeedsMountInHost`.
+    if not isoNimPanelNeedsMountInHost(
+        latchSaysMounted = isoNimErrorsMounted,
+        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
       return
 
     # Replace any prior content (the layout bridge may have planted a
@@ -271,6 +278,7 @@ proc tryMountIsoNimErrorsPanel*() =
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
     isoNimErrorsMounted = true
+    markIsoNimPanelContainerMounted(container)
     try:
       mountIsoNimErrors(container, errorsVMInstance)
     except:

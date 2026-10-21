@@ -37,22 +37,19 @@ from ../viewmodel/views/isonim_calltrace_view import
 var calltraceVMInstance: CalltraceVM
 var calltraceVMStore: ReplayDataStore
 
-# WAS `var isoNimCalltraceMounted: bool = false`. See `isoNimPanelMountIsLive`
+# WAS `var isoNimCalltraceMounted: bool = false`, and then a module-level pair
+# `mountedCalltraceVM` / `mountedCalltraceHost`. See `isoNimPanelMountIsLive`
 # in `ui/isonim_panel_mount.nim`: a boolean that records "I mounted once"
-# cannot answer "is it mounted now", and `layout.swapLayout` destroys the DOM
-# without running any reset.
-var mountedCalltraceVM: CalltraceVM
-  ## The ViewModel whose DOM the live Call Trace holds, or `nil`.
-var mountedCalltraceHost: dom_api.Element
-  ## The element that DOM was mounted into, asked `document.contains`.
+# cannot answer "is it mounted now", and one remembered host cannot answer for
+# the `calltraceComponent-0` every tab of the window has. What was mounted now
+# lives on each host (the mount mark plus `recordIsoNimPanelHostSource`).
 
-proc calltracePanelIsLive(): bool =
-  ## Is the Call Trace mounted RIGHT NOW, into an element still in the
-  ## document, with the ViewModel that is current?
+proc calltracePanelIsLive(host: dom_api.Element): bool =
+  ## Does `host` — this tab's `calltraceComponent-0` — hold a Call Trace view
+  ## built on the ViewModel that is current?
   isoNimPanelMountIsLive(
-    mountedVMIsCurrent = not mountedCalltraceVM.isNil and
-                         mountedCalltraceVM == calltraceVMInstance,
-    hostIsInDocument = isoNimPanelHostIsInDocument(mountedCalltraceHost))
+    mountedVMIsCurrent = isoNimPanelHostHolds(host, calltraceVMInstance),
+    hostIsInDocument = isoNimPanelContainerIsMounted(host))
 
 let returnValueName: cstring = "<return value>"
 
@@ -339,27 +336,28 @@ proc tryMountIsoNimCalltrace*() =
   ## is the primary renderer — no Karax renderer is involved.
   ##
   ## After mounting:
-  ## - `calltracePanelIsLive()` answers true until the host leaves the
-  ##   document or the ViewModel is replaced
+  ## - `calltracePanelIsLive(host)` answers true for that host until it is
+  ##   rebuilt or the ViewModel is replaced; another tab's host is asked
+  ##   separately
   ## - onUpdatedCalltrace / onCompleteMove still feed data into the
   ##   store, and IsoNim's reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
-  cdebug "[PIPELINE] tryMountIsoNimCalltrace: called, panelIsLive=" &
-    $calltracePanelIsLive() & " vmIsNil=" & $calltraceVMInstance.isNil
-  if calltracePanelIsLive() or calltraceVMInstance.isNil:
-    cdebug "[PIPELINE] tryMountIsoNimCalltrace: skipping (already mounted or VM nil)"
+  cdebug "[PIPELINE] tryMountIsoNimCalltrace: called, vmIsNil=" &
+    $calltraceVMInstance.isNil
+  if calltraceVMInstance.isNil:
+    cdebug "[PIPELINE] tryMountIsoNimCalltrace: skipping (VM nil)"
     return
 
   # Wait for the DOM container to exist. GoldenLayout creates it when
   # the component is registered. IsoNim mounts directly into it.
   let key = cstring"calltraceComponent-0"
+  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+  let tab = data.activeSessionIndex
   var calltraceRetryCount = 0
   proc doMount() =
-    if calltracePanelIsLive():
-      return
     calltraceRetryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
+    let container = findIsoNimPaneHost(key, tab)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if calltraceRetryCount mod 10 == 0:
         # Legitimate, hence DEBUG: polling for a container
@@ -375,7 +373,7 @@ proc tryMountIsoNimCalltrace*() =
         # session". `ui/layout.nim`'s `Content.Calltrace` factory arm calls
         # `tryMountIsoNimCalltrace()` after the container has been built, and
         # that call declares its own `var calltraceRetryCount = 0`, so the cap
-        # is per-attempt; `calltracePanelIsLive()` reports mounted, not failed.
+        # is per-attempt; `calltracePanelIsLive(host)` reports mounted, not failed.
         #
         # Calltrace is the sharpest case, and `layout.nim` says why: its
         # `register` method has ALWAYS made this call, but on the desktop
@@ -390,15 +388,17 @@ proc tryMountIsoNimCalltrace*() =
       discard setTimeout(proc() = doMount(), 10)
       return
 
+    if calltracePanelIsLive(container):
+      return
+
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
     cdebug "[PIPELINE] tryMountIsoNimCalltrace: container found, mounting now"
-    mountedCalltraceVM = calltraceVMInstance
-    mountedCalltraceHost = container
     mountIsoNimCalltrace(container, calltraceVMInstance)
     markIsoNimPanelContainerMounted(container)
+    recordIsoNimPanelHostSource(container, calltraceVMInstance)
     cdebug "[PIPELINE] tryMountIsoNimCalltrace: mount COMPLETE in #calltraceComponent-0"
 
   doMount()
@@ -413,7 +413,7 @@ proc initCalltraceVMFromSession*(vm: CalltraceVM) =
   let store = vm.store
   if calltraceVMInstance != nil:
     clog "CalltraceVM: replacing existing instance with shared-store version"
-    # No flag to reset. `calltracePanelIsLive` compares `mountedCalltraceVM`
+    # No flag to reset. `calltracePanelIsLive` compares the host's recorded VM
     # against `calltraceVMInstance`, so the assignment below IS the
     # invalidation and the remount happens for the same reason it used to.
   calltraceVMStore = store
@@ -469,7 +469,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   # One progress line, not two: the previous pair logged `storeId`, the
   # line count and `totalCalls` twice, the first being a strict subset of
   # the second.
-  cdebug fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={calltracePanelIsLive()}"
+  cdebug fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}"
   if calltraceVMStore.isNil:
     # Stays at ERROR: this silently DROPS a backend calltrace response.
     # The store is created by `initCalltraceVMFromSession` (or the stub

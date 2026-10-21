@@ -203,11 +203,13 @@ test.describe("Multi-trace loading into sessions", () => {
     expect(editor0File).toContain("main.py");
 
     // Verify event log has entries (trace is fully loaded with data).
+    // Scoped to session 0's container: every tab has its own
+    // `eventLogComponent-0`, all in one document.
     await retry(
       async () => {
         const rowCount = await ctPage.evaluate(() => {
           const rows = document.querySelectorAll(
-            "div[id^='eventLogComponent'] .eventLog-dense-table tbody tr",
+            "#session-container-0 div[id^='eventLogComponent'] .eventLog-dense-table tbody tr",
           );
           return rows.length;
         });
@@ -392,28 +394,37 @@ test.describe("Multi-trace loading into sessions", () => {
     // Phase 7: Click event log entry in session 1 — verify navigation
     // ==================================================================
 
-    // Wait for event log rows to appear in session 1.
+    // Wait for event log rows to appear in session 1 — in SESSION 1's
+    // container, and real rows only (DataTables' "No data available"
+    // placeholder is a `tbody tr` too). This selector used to be
+    // document-wide, so it counted session 0's rows and passed over a
+    // session 1 Event Log that had never mounted (codetracer-pm issue
+    // 2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first).
+    //
+    // Not asserted: session 1's Event Log now MOUNTS, but its rows do not
+    // arrive, because the replay panes' ViewModels and middleware are one per
+    // window (`ui_js.nim` `configureMiddleware`, `middlewareConfigured`), bound
+    // to session 0. Same known limitation as the editor checks above; the
+    // line below records which side of it a run is on.
+    const session1EventRows =
+      "#session-container-1 div[id^='eventLogComponent'] .eventLog-dense-table tbody tr:not(:has(td.dataTables_empty))";
     const hasEventLogRows = await retry(
       async () => {
-        const rowCount = await ctPage.evaluate(() => {
-          const rows = document.querySelectorAll(
-            "div[id^='eventLogComponent'] .eventLog-dense-table tbody tr",
-          );
-          return rows.length;
-        });
+        const rowCount = await ctPage.evaluate((selector) => {
+          return document.querySelectorAll(selector).length;
+        }, session1EventRows);
         return rowCount > 0;
       },
       { maxAttempts: 30, delayMs: 1000 },
     ).then(() => true).catch(() => false);
+    console.log(`# session 1: own event log rows present: ${hasEventLogRows}`);
 
     if (hasEventLogRows) {
       // Click the first visible event log row.  The rows may exist in the
       // DOM but be hidden (e.g. if the event log pane is behind another
       // pane after session switch), so we use a short timeout and catch.
       try {
-        const firstRow = ctPage
-          .locator("div[id^='eventLogComponent'] .eventLog-dense-table tbody tr")
-          .first();
+        const firstRow = ctPage.locator(session1EventRows).first();
         await firstRow.click({ timeout: 10_000 });
         await ctPage.waitForTimeout(1000);
 

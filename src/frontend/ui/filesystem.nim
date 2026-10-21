@@ -514,24 +514,13 @@ when defined(js):
   proc findFilesystemMountContainer(
       keyedId, legacyId: cstring;
       sessionIndex: int): dom_api.Element =
-    let activeSessionContainer = document.getElementById(
-      cstring("session-container-" & $sessionIndex))
-    if not activeSessionContainer.isNil:
-      let keyed = cast[Element](findNodeInElement(
-        Node(activeSessionContainer),
-        cstring("#" & $keyedId)))
-      if not keyed.isNil:
-        return cast[dom_api.Element](keyed)
-
-      let legacy = cast[Element](findNodeInElement(
-        Node(activeSessionContainer),
-        cstring("#" & $legacyId)))
-      if not legacy.isNil:
-        return cast[dom_api.Element](legacy)
-
-    result = dom_api.getElementById(dom_api.document, keyedId)
+    ## This tab's Files host: the keyed id, then the legacy unkeyed one. Both
+    ## through `findIsoNimPaneHost`, which never hands back ANOTHER tab's
+    ## host — this used to fall back to a document-wide `getElementById` when
+    ## the tab's own host was not built yet, and that returned tab 0's.
+    result = findIsoNimPaneHost(keyedId, sessionIndex)
     if dom_api.isNodeNil(dom_api.Node(result)):
-      result = dom_api.getElementById(dom_api.document, legacyId)
+      result = findIsoNimPaneHost(legacyId, sessionIndex)
 
   proc tryMountIsoNimFilesystemPanel*() =
     ## Mount the IsoNim Filesystem panel view into the GoldenLayout-

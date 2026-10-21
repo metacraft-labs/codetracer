@@ -152,21 +152,26 @@ when defined(js):
     ## retry loop in ``state.nim``).
     if noSourceVMInstance.isNil:
       return
-    if isoNimNoSourceMountedIds.hasKey(self.id):
-      return
     let key = cstring("no-source-" & $self.id)
     let componentId = self.id
+    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+    let tab = data.activeSessionIndex
     var retryCount = 0
 
     proc doMount() =
-      if isoNimNoSourceMountedIds.hasKey(componentId):
-        return
       retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
+      let container = findIsoNimPaneHost(key, tab)
       if dom_api.isNodeNil(dom_api.Node(container)):
         if retryCount > 200:
           return
         discard setTimeout(proc() = doMount(), 10)
+        return
+
+      # Per HOST, not per id: tab 0's mount set the latch for a host this
+      # tab does not share. See `isoNimPanelNeedsMountInHost`.
+      if not isoNimPanelNeedsMountInHost(
+          latchSaysMounted = isoNimNoSourceMountedIds.hasKey(componentId),
+          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
         return
 
       # Tear down anything Karax may have left behind in the container
@@ -178,6 +183,7 @@ when defined(js):
         discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
       isoNimNoSourceMountedIds[componentId] = true
+      markIsoNimPanelContainerMounted(container)
       mountIsoNimNoSource(container, noSourceVMInstance)
       syncNoSourceVM(self)
 

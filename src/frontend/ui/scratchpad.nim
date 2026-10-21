@@ -347,21 +347,26 @@ when defined(js):
     if scratchpadComponentRef.isNil:
       return
     let componentId = scratchpadComponentRef.id
-    if isoNimScratchpadMountedIds.hasKey(componentId):
-      return
 
     let key = cstring("scratchpadComponent-" & $componentId)
+    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+    let tab = data.activeSessionIndex
     var retryCount = 0
     proc doMount() =
-      if isoNimScratchpadMountedIds.hasKey(componentId):
-        return
       retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
+      let container = findIsoNimPaneHost(key, tab)
       if dom_api.isNodeNil(dom_api.Node(container)):
         if retryCount > 200:
           cerror "tryMountIsoNimScratchpadPanel: not ready after 200 retries, giving up"
           return
         discard setTimeout(proc() = doMount(), 10)
+        return
+
+      # Per HOST, not per id: tab 0's mount set the latch for a host this
+      # tab does not share. See `isoNimPanelNeedsMountInHost`.
+      if not isoNimPanelNeedsMountInHost(
+          latchSaysMounted = isoNimScratchpadMountedIds.hasKey(componentId),
+          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
         return
 
       # Replace any prior content (Karax may have planted a stub
@@ -371,6 +376,7 @@ when defined(js):
         discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
       isoNimScratchpadMountedIds[componentId] = true
+      markIsoNimPanelContainerMounted(container)
       try:
         mountIsoNimScratchpadPanel(container, scratchpadVMInstance)
       except:

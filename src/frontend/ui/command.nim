@@ -529,11 +529,12 @@ when defined(js):
       return
     let componentId = commandPaletteComponentRef.id
     let key = cstring("commandPaletteComponent-" & $componentId)
+    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+    let tab = data.activeSessionIndex
     var retryCount = 0
     proc doMount() =
       retryCount += 1
-      let container = isonim_dom_api.getElementById(
-        isonim_dom_api.document, key)
+      let container = findIsoNimPaneHost(key, tab)
       if isonim_dom_api.isNodeNil(isonim_dom_api.Node(container)):
         if retryCount > 200:
           cerror "tryMountIsoNimCommandPalettePanel: not ready after 200 retries, giving up"

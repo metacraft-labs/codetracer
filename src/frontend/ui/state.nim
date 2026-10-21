@@ -38,15 +38,13 @@ var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
 var stateHistoryBridge: proc(expression: string)
 
-# WAS `var isoNimStateMounted: bool = false`. See `isoNimPanelMountIsLive` in
+# WAS `var isoNimStateMounted: bool = false`, and then a module-level pair
+# `mountedStateVM` / `mountedStateHost`. See `isoNimPanelMountIsLive` in
 # `ui/isonim_panel_mount.nim` for why a boolean could not answer the question
-# it was being asked. These two record WHAT was mounted and WHERE, so the
-# answer can be re-derived from the document instead of remembered.
-var mountedStateVM: StateVM
-  ## The ViewModel whose DOM the live State panel holds, or `nil`.
-var mountedStateHost: dom_api.Element
-  ## The element that DOM was mounted into. Asked `document.contains` rather
-  ## than trusted: `layout.swapLayout` destroys it without telling this module.
+# it was being asked — and the pair could describe only ONE host, while every
+# tab of the window has its own `stateComponent-0`. What was mounted now lives
+# on each host (the mount mark plus `recordIsoNimPanelHostSource`), so the
+# answer is re-derived from the host in front of the mount, per tab.
 
 when defined(js):
   proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
@@ -144,20 +142,19 @@ type
   StateMountData = ref object
     key: cstring
     retryCount: int
+    tab: int
+      ## The tab the mount was requested for — see `findIsoNimPaneHost`.
 
-proc statePanelIsLive(): bool =
-  ## Is the State panel mounted RIGHT NOW, into an element still in the
-  ## document, with the ViewModel that is current?
+proc statePanelIsLive(host: dom_api.Element): bool =
+  ## Does `host` — this tab's `stateComponent-0` — hold a State view built
+  ## on the ViewModel that is current?
   isoNimPanelMountIsLive(
-    mountedVMIsCurrent = not mountedStateVM.isNil and
-                         mountedStateVM == stateVMInstance,
-    hostIsInDocument = isoNimPanelHostIsInDocument(mountedStateHost))
+    mountedVMIsCurrent = isoNimPanelHostHolds(host, stateVMInstance),
+    hostIsInDocument = isoNimPanelContainerIsMounted(host))
 
 proc doMountStatePanel(data: StateMountData) {.cdecl.} =
-  if statePanelIsLive():
-    return
   data.retryCount += 1
-  let container = dom_api.getElementById(dom_api.document, data.key)
+  let container = findIsoNimPaneHost(data.key, data.tab)
   if dom_api.isNodeNil(dom_api.Node(container)):
     if data.retryCount mod 10 == 0:
       # Legitimate, hence DEBUG.  `tryMountIsoNimStatePanel` is
@@ -175,7 +172,7 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
       # `mountComponentContainer` has built `#stateComponent-0`, which is the
       # one moment the container is known to exist. That call re-enters with a
       # FRESH `StateMountData(retryCount: 0)`, so the cap below is per-ATTEMPT
-      # and not per-session, and `statePanelIsLive()` is a mounted guard rather
+      # and not per-session, and `statePanelIsLive(host)` is a mounted guard rather
       # than a failed one — reaching the cap latches nothing.
       #
       # So what has happened here is that an EARLIER, redundant poll lost a
@@ -200,15 +197,17 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
     setTimeoutWithArg(doMountStatePanel, 10, data)
     return
 
+  if statePanelIsLive(container):
+    return
+
   let containerNode = dom_api.Node(container)
   while not dom_api.isNodeNil(containerNode.firstChild):
     discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
   cdebug "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
-  mountedStateVM = stateVMInstance
-  mountedStateHost = container
   mountIsoNimStatePanel(container, stateVMInstance)
   markIsoNimPanelContainerMounted(container)
+  recordIsoNimPanelHostSource(container, stateVMInstance)
   cdebug "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
 
   let panelContainer = container
@@ -233,21 +232,23 @@ proc tryMountIsoNimStatePanel*() =
   ## renderer — no Karax renderer is involved.
   ##
   ## After mounting:
-  ## - `statePanelIsLive()` answers true until the host leaves the document
-  ##   or the ViewModel is replaced
+  ## - `statePanelIsLive(host)` answers true for that host until it is
+  ##   rebuilt or the ViewModel is replaced; another tab's host is asked
+  ##   separately
   ## - `registerLocals` still feeds data into the store, and IsoNim's
   ##   reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: called, panelIsLive=" &
-    $statePanelIsLive() & " vmIsNil=" & $stateVMInstance.isNil
-  if statePanelIsLive() or stateVMInstance.isNil:
-    cdebug "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
+  cdebug "[PIPELINE] tryMountIsoNimStatePanel: called, vmIsNil=" &
+    $stateVMInstance.isNil
+  if stateVMInstance.isNil:
+    cdebug "[PIPELINE] tryMountIsoNimStatePanel: skipping (VM nil)"
     return
 
   let mountData = StateMountData(
     key: cstring"stateComponent-0",
-    retryCount: 0
+    retryCount: 0,
+    tab: data.activeSessionIndex
   )
   doMountStatePanel(mountData)
 
@@ -411,8 +412,8 @@ proc initStateVMFromSession*(vm: StateVM) =
   let store = vm.store
   if stateVMInstance != nil:
     clog "StateVM: replacing existing instance with shared-store version"
-    # No flag to reset. `statePanelIsLive` compares `mountedStateVM` against
-    # `stateVMInstance`, so the assignment below IS the invalidation: the next
+    # No flag to reset. `statePanelIsLive` compares the ViewModel recorded on
+    # the host (`recordIsoNimPanelHostSource`) against `stateVMInstance`, so the assignment below IS the invalidation: the next
     # `tryMountIsoNimStatePanel` sees a live host holding the old VM's DOM and
     # remounts. This was the one and only site that cleared `isoNimStateMounted`
     # and it is the reason the flag could not simply be deleted.

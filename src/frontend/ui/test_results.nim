@@ -75,10 +75,12 @@ when defined(js):
     # `layout.nim` suppresses `itemDestroyed`, so `unregister` never runs and
     # the id latch outlives the mount it describes. See `ui/isonim_panel_mount.nim`.
     let key = cstring("testResultsComponent-" & $componentId)
+    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+    let tab = data.activeSessionIndex
     var retryCount = 0
     proc doMount() =
       retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
+      let container = findIsoNimPaneHost(key, tab)
       if dom_api.isNodeNil(dom_api.Node(container)):
         if retryCount > 200:
           cerror "tryMountIsoNimTestResultsPanel: not ready after 200 retries"

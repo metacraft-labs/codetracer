@@ -124,8 +124,8 @@ suite "the single-instance panes ask the document, not their memory":
                                      hostIsInDocument = true)
 
   test "a pane that has never mounted is never live":
-    # The boot case. `mountedXHost` is nil, so `isoNimPanelHostIsInDocument`
-    # answers false, and both halves agree.
+    # The boot case. The host carries no mark and no recorded ViewModel, so
+    # both halves agree.
     check not isoNimPanelMountIsLive(mountedVMIsCurrent = false,
                                      hostIsInDocument = false)
 
@@ -141,3 +141,86 @@ suite "the single-instance panes ask the document, not their memory":
           check vmCurrent
           check inDocument
     check liveCount == 1
+
+suite "a pane mounts into its own tab's host, not the first in the document":
+  ## Issue (codetracer-pm) `2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first.md`.
+  ##
+  ## Every tab's DOM lives in one document — tab <n> in
+  ## `.session-container#session-container-<n>`, hidden or shown by
+  ## `ui/session_switch.nim` — and the singleton panes keep component id 0 in
+  ## every tab. So `stateComponent-0` is the id of one host PER TAB, and
+  ## `getElementById` answered every tab with tab 0's. The later tab's own
+  ## host was never mounted: its State, Call Trace, Event Log, Terminal, VCS,
+  ## Test Results and Constraints stayed blank.
+  ##
+  ## `isoNimPaneHostChoice` is the rule `findIsoNimPaneHost` applies to the
+  ## hosts carrying the id, in document order, each described by the tab whose
+  ## container holds it (`NotInAnyTab` for a host outside every container: the
+  ## auto-hide standalone host, a VS Code webview, a page with no tabs).
+  ##
+  ## THE CONTROL-DATA RUN:
+  ##
+  ##     nim c -r -d:ctIsoNimPaneHostDocumentWide \
+  ##       --path:src src/tests/gui/tests/layout/isonim_panel_mount_test.nim
+  ##
+  ## restores the pre-fix answer — the first host in the document, whatever tab
+  ## holds it — and the first two tests below fail under it.
+
+  test "THE REPORTED DEFECT: the second tab gets its own host, not tab 0's":
+    # Document order is tab 0's host, then tab 1's. Tab 1 is active.
+    check isoNimPaneHostChoice([0, 1], activeTab = 1) == 1
+
+  test "a host held only by ANOTHER tab is not this tab's: wait, do not borrow it":
+    # Tab 1's container is being built and its host does not exist yet. The
+    # caller must retry until it does. Taking tab 0's host here is exactly the
+    # defect: that host is already mounted, so the mount declines and tab 1
+    # never gets one.
+    check isoNimPaneHostChoice([0], activeTab = 1) == -1
+    check isoNimPaneHostChoice([0, 2], activeTab = 1) == -1
+
+  test "the first tab still finds its own host":
+    check isoNimPaneHostChoice([0, 1], activeTab = 0) == 0
+    check isoNimPaneHostChoice([1, 0], activeTab = 0) == 1
+
+  test "a host outside every tab is still found: standalone, extension, no tabs":
+    # The auto-hide standalone host is appended to `document.body`, a VS Code
+    # webview and a page that never created a session container have no tab
+    # containers at all. Those panes are window-wide by construction.
+    check isoNimPaneHostChoice([NotInAnyTab], activeTab = 0) == 0
+    check isoNimPaneHostChoice([NotInAnyTab], activeTab = 3) == 0
+    # The active tab's own host wins over an outside one with the same id.
+    check isoNimPaneHostChoice([NotInAnyTab, 2], activeTab = 2) == 1
+    # And an outside host wins over another tab's.
+    check isoNimPaneHostChoice([0, NotInAnyTab], activeTab = 1) == 1
+
+  test "no host anywhere is no host":
+    check isoNimPaneHostChoice([], activeTab = 0) == -1
+
+suite "a latch kept by a module describes one host, not every tab's":
+  ## The panes that keep a module-level latch — a `bool` (Event Log,
+  ## Terminal, Build, …) or a table keyed by the bare component id
+  ## (Constraints, Scratchpad, Agent Activity, …) — set it when tab 0 mounts.
+  ## Tab 1's host has the same id, so the latch said "mounted" for a host that
+  ## never was. `isoNimPanelNeedsMountInHost` asks the host as well: the latch
+  ## still forces a remount when a module clears it (a ViewModel swap, an
+  ## unregister), and the mark on the element says whether THIS host carries
+  ## the view.
+  ##
+  ## Under `-d:ctIsoNimPanelIdLatch` the answer is the latch alone, and the
+  ## first test fails.
+
+  test "THE REPORTED DEFECT: tab 0 mounted, tab 1's host is still empty":
+    check isoNimPanelNeedsMountInHost(latchSaysMounted = true,
+                                      hostCarriesMark = false)
+
+  test "a host that carries the view is not mounted twice":
+    check not isoNimPanelNeedsMountInHost(latchSaysMounted = true,
+                                          hostCarriesMark = true)
+
+  test "a cleared latch still forces the remount its module asked for":
+    # `initXVMFromSession` / `unregister` / the auto-hide refresh clear the
+    # latch precisely to have the live host rebuilt on the current ViewModel.
+    check isoNimPanelNeedsMountInHost(latchSaysMounted = false,
+                                      hostCarriesMark = true)
+    check isoNimPanelNeedsMountInHost(latchSaysMounted = false,
+                                      hostCarriesMark = false)

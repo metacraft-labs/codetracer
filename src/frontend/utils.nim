@@ -270,6 +270,17 @@ proc claimWindowUniqueLayoutIds*(data: Data, root: JsObject) =
     state["id"] = fresh
     claimed.add((content, fresh))
 
+var eventLogTableSerial = 0
+  ## Window-wide serial for `EventLogComponent.index`, the suffix of the
+  ## pane's DataTables ids (`eventLog-<id>-dense-table-<index>`, see
+  ## `ui/event_log.denseId`). The Event Log keeps id 0 in every tab, and all
+  ## tabs share one document, so with `index` left at 0 every tab's tables
+  ## had tab 0's ids and `jQuery("#…").DataTable()` bound tab 0's table
+  ## (codetracer-pm issue
+  ## `2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first.md`).
+  ## A serial rather than the tab index: tabs are renumbered when one closes,
+  ## and a new tab could then reuse a live tab's number.
+
 proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): EventLogComponent =
   var dropDownsInit: array[EventDropDownBox,bool]
   dropDownsInit.fill(false);
@@ -302,7 +313,9 @@ proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): Eve
     started: false,
     liveDebugRows: @[],
     usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
+    index: eventLogTableSerial,
   )
+  eventLogTableSerial += 1
   when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
     data.registerComponent(result, Content.EventLog)
 

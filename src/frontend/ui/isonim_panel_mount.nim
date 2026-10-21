@@ -92,10 +92,15 @@ func isoNimPanelMountIsLive*(mountedVMIsCurrent: bool;
   ##
   ## Both halves are load-bearing and neither subsumes the other:
   ##
-  ##   * `hostIsInDocument` — `document.contains(host)`, asked of the element
-  ##     the module actually mounted into. Covers the layout swap, the session
-  ##     switch and the panel close with one question and no reset list.
-  ##   * `mountedVMIsCurrent` — the host can be perfectly alive and holding
+  ##   * `hostIsInDocument` — the host IN FRONT OF THE MOUNT (this tab's,
+  ##     found by `findIsoNimPaneHost`) carries the mount mark. It used to be
+  ##     `document.contains(host)` of the one host the module remembered;
+  ##     that answered "live" in every tab once tab 0 had mounted
+  ##     (issue `2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first.md`).
+  ##     A rebuilt host carries no mark, so the layout swap is still covered.
+  ##   * `mountedVMIsCurrent` — the ViewModel recorded ON that host
+  ##     (`recordIsoNimPanelHostSource`) is the current one. The host can be
+  ##     perfectly alive and holding
   ##     the DOM of a ViewModel that has since been replaced. This is the
   ##     case the old flag's single reset site existed for, and dropping it
   ##     would leave the stub backend's rows on screen after the real one
@@ -110,7 +115,89 @@ func isoNimPanelMountIsLive*(mountedVMIsCurrent: bool;
   else:
     mountedVMIsCurrent and hostIsInDocument
 
+
+# ---------------------------------------------------------------------------
+# Which host is THIS tab's
+# ---------------------------------------------------------------------------
+#
+# The defect this exists for: codetracer-pm issue
+# `2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first.md`.
+#
+# Every tab of a desktop window keeps its DOM in ONE document: tab <n> lives in
+# `#ROOT > .session-container#session-container-<n>`, and `ui/session_switch.nim`
+# only hides and shows those containers. The singleton panes keep component id
+# 0 in every tab — by design, `data.buildComponent(0)` and friends look them up
+# by it — so `stateComponent-0`, `vCSComponent-0`, `constraintsComponent-0`, …
+# name one host PER TAB. `getElementById` returns the first in document order,
+# tab 0's, hidden or not. Every `tryMountIsoNim*Panel` then asked tab 0's host
+# whether it was mounted (it was), declined, and the later tab's own host was
+# never looked at: a second replay tab had a working editor and nothing else
+# (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior, rules 1 and 2).
+#
+# The rule below, and `findIsoNimPaneHost` that applies it, are the one place
+# that answers "which element is this pane's host in this tab". The #835 fix
+# made EDITOR ids window-unique instead; that is right for panes a tab opens
+# any number of, and wrong for the singleton chrome, whose id 0 per tab is
+# load-bearing.
+
+const NotInAnyTab* = -1
+  ## The tab of a host that sits in no `session-container-<n>`: the auto-hide
+  ## standalone host (`document.body`), a VS Code webview, a page that never
+  ## created a tab container.
+
+func isoNimPaneHostChoice*(hostTabs: openArray[int]; activeTab: int): int =
+  ## Of the hosts carrying a pane's id, in document order, each described by
+  ## the tab whose container holds it, which is the active tab's? Returns its
+  ## position in `hostTabs`, or -1 when there is none YET.
+  ##
+  ## 1. The active tab's own host.
+  ## 2. Otherwise a host outside every tab — those panes are window-wide by
+  ##    construction (the footer's Build / Problems / Search / Requests, the
+  ##    extension's single page).
+  ## 3. Otherwise none. A host held only by ANOTHER tab is not this tab's to
+  ##    mount, even when it is the only match: the caller's container has not
+  ##    been built yet, and it retries until it is. Borrowing the other tab's
+  ##    host is exactly the defect — that host is already mounted, so the mount
+  ##    declines and this tab never gets one.
+  when defined(ctIsoNimPaneHostDocumentWide):
+    # THE PRE-FIX ANSWER — `getElementById`'s: the first match in the
+    # document, whatever tab holds it. Reachable only by defining this symbol,
+    # which only the control-data run in `isonim_panel_mount_test.nim` does.
+    if hostTabs.len > 0: 0 else: -1
+  else:
+    for i, tab in hostTabs:
+      if tab == activeTab:
+        return i
+    for i, tab in hostTabs:
+      if tab == NotInAnyTab:
+        return i
+    -1
+
+func isoNimPanelNeedsMountInHost*(latchSaysMounted: bool;
+                                  hostCarriesMark: bool): bool =
+  ## For the panes that keep a MODULE-level latch — a `bool` (Event Log,
+  ## Terminal, Build, …) or a table keyed by the bare component id
+  ## (Constraints, Scratchpad, Agent Activity, …): must this host be mounted?
+  ##
+  ## The latch alone answered for every tab at once. Tab 0's mount set it, and
+  ## tab 1's host — same id, different element — was then "mounted" without
+  ## ever having been. So the host is asked too: the view is in place only
+  ## when the latch says so AND this element carries the mark
+  ## (`markIsoNimPanelContainerMounted`). The latch keeps its other job: the
+  ## modules CLEAR it to have a live host rebuilt (a ViewModel swap in
+  ## `initXVMFromSession`, `unregister`, the auto-hide overlay refresh), and a
+  ## cleared latch still mounts.
+  ##
+  ## The panes whose latch never decided — Files, VCS, Test Results — keep
+  ## `isoNimPanelNeedsMount`, which asks the mark alone.
+  when defined(ctIsoNimPanelIdLatch):
+    # THE PRE-FIX ANSWER: the latch alone. Control-data only, as above.
+    not latchSaysMounted
+  else:
+    not (latchSaysMounted and hostCarriesMark)
+
 when defined(js):
+  import std/jsffi
   from isonim/web/dom_api as isonim_dom_api import nil
 
   proc isoNimPanelContainerIsMounted*(container: isonim_dom_api.Element): bool =
@@ -122,15 +209,75 @@ when defined(js):
     ## Record the mount ON THE ELEMENT, so it cannot outlive it.
     isonim_dom_api.setAttribute(container, IsoNimPanelMountedAttr, cstring"1")
 
-  proc jsDocumentContains(host: isonim_dom_api.Element): bool
-      {.importjs: "document.contains(#)".}
+  # -------------------------------------------------------------------------
+  # The host lookup every `tryMountIsoNim*Panel` goes through
+  # -------------------------------------------------------------------------
 
-  proc isoNimPanelHostIsInDocument*(host: isonim_dom_api.Element): bool =
-    ## `document.contains(host)` — the whole of the liveness question.
+  proc jsHostsWithId(id: cstring): seq[isonim_dom_api.Element] {.importjs:
+    "Array.from(document.querySelectorAll('[id=\"' + " &
+    "String(#).replace(/[\"\\\\]/g, function(c){return '\\\\' + c;}) + '\"]'))".}
+    ## Every element carrying `id`, in document order. `getElementById` would
+    ## stop at the first, and the first is the whole defect. The id is quoted
+    ## into an attribute selector with `"` and `\` escaped by hand rather than
+    ## through `CSS.escape`, which jsdom (the `renderer-dom` lane) lacks.
+
+  proc jsTabOfHost(host: isonim_dom_api.Element): int {.importjs:
+    "(function(e){var c=e.closest('.session-container');" &
+    "if(!c)return -1;var m=/^session-container-(\\d+)/.exec(c.id);" &
+    "return (m&&m[0].length===c.id.length)?Number(m[1]):-1;})(#)".}
+    # (No `$` anchor: `$` is a placeholder character in `importjs`. The
+    # length check is the anchor.)
+    ## The `<n>` of the `session-container-<n>` holding `host`, or
+    ## `NotInAnyTab`.
+
+  proc findIsoNimPaneHost*(hostId: cstring;
+                           activeTab: int): isonim_dom_api.Element =
+    ## THE host of the pane `hostId` (`stateComponent-0`, `vCSComponent-0`, …)
+    ## for tab `activeTab`, or `nil` when that tab has none yet — in which case
+    ## the caller keeps retrying, as it already does while GoldenLayout builds
+    ## the container. The choice is `isoNimPaneHostChoice`; read it for why a
+    ## host that only ANOTHER tab holds is never returned.
     ##
-    ## A `nil` host means the pane has never mounted, which is not live
-    ## either, so the null check is part of the answer rather than a guard
-    ## around it.
-    if isonim_dom_api.isNodeNil(isonim_dom_api.Node(host)):
+    ## `activeTab` is `data.activeSessionIndex` AS THE MOUNT WAS REQUESTED,
+    ## captured before the retry loop starts: a retry that lands after the user
+    ## switched tabs still mounts the tab it was asked for. `session_switch`
+    ## makes a tab active before it builds that tab's components and layout
+    ## (`createNewSession`, `switchSession`), so a mount requested while a tab
+    ## is being built names that tab.
+    ##
+    ## Window-wide surfaces outside every tab — the footer's standalone
+    ## auto-hide host, the VS Code webview, a page with no session containers
+    ## — are found exactly as `getElementById` found them. Lookups that are
+    ## not a pane's own host (menus, overlays, the status bar) do not come
+    ## through here and stay document-wide.
+    let hosts = jsHostsWithId(hostId)
+    var tabs = newSeq[int](hosts.len)
+    for i in 0 ..< hosts.len:
+      tabs[i] = jsTabOfHost(hosts[i])
+    let pick = isoNimPaneHostChoice(tabs, activeTab)
+    if pick < 0: nil else: hosts[pick]
+
+  # -------------------------------------------------------------------------
+  # Which ViewModel a host's view was built on
+  # -------------------------------------------------------------------------
+
+  proc jsRecordHostSource(host: isonim_dom_api.Element; source: JsRoot)
+      {.importjs: "#.__ctIsoNimMountSource = #".}
+  proc jsHostHoldsSource(host: isonim_dom_api.Element; source: JsRoot): bool
+      {.importjs: "((#.__ctIsoNimMountSource || null) === #)".}
+
+  proc recordIsoNimPanelHostSource*[T: ref](host: isonim_dom_api.Element;
+                                            source: T) =
+    ## Record ON THE ELEMENT which ViewModel the view mounted into it reads.
+    ## For the single-instance replay panes (State, Call Trace), whose one
+    ## module-level "mounted host / mounted VM" pair could describe only one
+    ## tab's host. Like the mark, it dies with the element.
+    jsRecordHostSource(host, cast[JsRoot](source))
+
+  proc isoNimPanelHostHolds*[T: ref](host: isonim_dom_api.Element;
+                                     source: T): bool =
+    ## Was the view in `host` mounted on `source`? `false` for a host that was
+    ## never mounted, or was mounted on a ViewModel since replaced.
+    if source.isNil:
       return false
-    jsDocumentContains(host)
+    jsHostHoldsSource(host, cast[JsRoot](source))

@@ -112,16 +112,14 @@ when defined(js):
     if verificationComponentRef.isNil:
       return
     let componentId = verificationComponentRef.id
-    if isoNimVerificationMountedIds.hasKey(componentId):
-      return
 
     let key = cstring("verificationComponent-" & $componentId)
+    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+    let tab = data.activeSessionIndex
     var retryCount = 0
     proc doMount() =
-      if isoNimVerificationMountedIds.hasKey(componentId):
-        return
       retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
+      let container = findIsoNimPaneHost(key, tab)
       if dom_api.isNodeNil(dom_api.Node(container)):
         if retryCount > 200:
           cerror "tryMountIsoNimVerificationPanel: not ready after 200 " &
@@ -130,11 +128,19 @@ when defined(js):
         discard setTimeout(proc() = doMount(), 10)
         return
 
+      # Per HOST, not per id: tab 0's mount set the latch for a host this
+      # tab does not share. See `isoNimPanelNeedsMountInHost`.
+      if not isoNimPanelNeedsMountInHost(
+          latchSaysMounted = isoNimVerificationMountedIds.hasKey(componentId),
+          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
+        return
+
       let containerNode = dom_api.Node(container)
       while not dom_api.isNodeNil(containerNode.firstChild):
         discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
       isoNimVerificationMountedIds[componentId] = true
+      markIsoNimPanelContainerMounted(container)
       try:
         # Two roots, one container, in reading order: the run, then what its
         # counterexample says. They are separate mounts rather than one nested

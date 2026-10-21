@@ -439,19 +439,26 @@ proc toggleCoverageOverlay(self: AgentWorkspaceComponent) =
 
 proc tryMountIsoNimAgentWorkspacePanel*(componentId: int) =
   when defined(js):
-    if isoNimAgentWorkspaceMountedIds.hasKey(componentId) and
-       isoNimAgentWorkspaceMountedIds[componentId]:
-      return
     if not agentWorkspaceComponentRefs.hasKey(componentId):
       return
     let component = agentWorkspaceComponentRefs[componentId]
     let vm = ensureAgentWorkspaceVM(component)
     if vm.isNil:
       return
-    let container = document.getElementById(
-      cstring(fmt"agentWorkspaceComponent-{componentId}"))
-    if container.isNil:
+    # This tab's host, not the first in the document — see
+    # `findIsoNimPaneHost`; and a latch that describes THAT host — see
+    # `isoNimPanelNeedsMountInHost`.
+    let host = findIsoNimPaneHost(
+      cstring(fmt"agentWorkspaceComponent-{componentId}"),
+      data.activeSessionIndex)
+    if host.isNil:
       return
+    if not isoNimPanelNeedsMountInHost(
+        latchSaysMounted = isoNimAgentWorkspaceMountedIds.hasKey(componentId) and
+                           isoNimAgentWorkspaceMountedIds[componentId],
+        hostCarriesMark = isoNimPanelContainerIsMounted(host)):
+      return
+    let container = cast[kdom.Element](host)
     let callbacks = AgentWorkspaceCallbacks(
       onToggleView: proc() =
         component.toggleWorkspaceView(),
@@ -464,6 +471,7 @@ proc tryMountIsoNimAgentWorkspacePanel*(componentId: int) =
     )
     mountIsoNimAgentWorkspacePanel(
       cast[isonim_dom_api.Element](container), vm, componentId, callbacks)
+    markIsoNimPanelContainerMounted(host)
     isoNimAgentWorkspaceMountedIds[componentId] = true
   else:
     discard

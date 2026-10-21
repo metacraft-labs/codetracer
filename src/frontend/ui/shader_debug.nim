@@ -53,18 +53,18 @@ proc tryMountIsoNimShaderDebugPanel*(component: ShaderDebugComponent = nil) =
     shaderDebugComponentRef = component
   if shaderDebugVMInstance.isNil:
     initShaderDebugVM()
-  if isoNimShaderDebugMounted or shaderDebugVMInstance.isNil:
+  if shaderDebugVMInstance.isNil:
     return
   if shaderDebugComponentRef.isNil:
     return
 
   let key = cstring("shaderDebugComponent-" & $shaderDebugComponentRef.id)
+  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+  let tab = data.activeSessionIndex
   var retryCount = 0
   proc doMount() =
-    if isoNimShaderDebugMounted:
-      return
     retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
+    let container = findIsoNimPaneHost(key, tab)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if retryCount > 200:
         cerror "tryMountIsoNimShaderDebugPanel: not ready after 200 retries, giving up"
@@ -72,11 +72,19 @@ proc tryMountIsoNimShaderDebugPanel*(component: ShaderDebugComponent = nil) =
       discard setTimeout(proc() = doMount(), 10)
       return
 
+    # Per HOST, not per id: tab 0's mount set the latch for a host this
+    # tab does not share. See `isoNimPanelNeedsMountInHost`.
+    if not isoNimPanelNeedsMountInHost(
+        latchSaysMounted = isoNimShaderDebugMounted,
+        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
+      return
+
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
     isoNimShaderDebugMounted = true
+    markIsoNimPanelContainerMounted(container)
     try:
       mountIsoNimShaderDebug(container, shaderDebugVMInstance)
     except:
@@ -90,7 +98,7 @@ proc refreshMountedShaderDebugPanel() =
       shaderDebugVMInstance.isNil:
     return
   let key = cstring("shaderDebugComponent-" & $shaderDebugComponentRef.id)
-  let container = dom_api.getElementById(dom_api.document, key)
+  let container = findIsoNimPaneHost(key, data.activeSessionIndex)
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
 
