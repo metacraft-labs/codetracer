@@ -182,6 +182,58 @@ proc bootFake(log: BridgeLog; durable = true; granted = true;
   doAssert awaitOutcome(web.activateProject("p1")).ok
   (web, memory)
 
+when not defined(js):
+  import std/asyncdispatch
+
+  proc later[T](settled: PlatformFuture[PlatformOutcome[T]]
+               ): PlatformFuture[PlatformOutcome[T]] =
+    ## The same answer, delivered on a later dispatcher turn instead of
+    ## inline.
+    let value = settled.read()
+    let pending = newFuture[PlatformOutcome[T]]("deferred volume answer")
+    callSoon(proc() = pending.complete(value))
+    pending
+
+  proc deferredVolume(inner: StoreVolume): StoreVolume =
+    ## `memory_volume` answering the way OPFS does: every operation is still
+    ## pending when it returns. `memory_volume` itself answers inline, so a
+    ## chain whose later steps capture the wrong value is invisible through it
+    ## — every step has run before the next one is built. That is how
+    ## codetracer#809's short archive passed this suite: `collectTree` walks
+    ## the tree with `foldOutcome`, which (until it was fixed) ran the LAST
+    ## entry in place of every entry after the first once the volume answered
+    ## later. Not a mock of the store: the store, the archive and the facade
+    ## are the shipped ones, and only the timing of the volume's answers
+    ## changes.
+    ##
+    ## Native backends only. On JS a pending `PlatformFuture` is a real
+    ## promise that settles on V8's microtask queue, which
+    ## `drainPlatformCallbacks` cannot run from inside a synchronous test case.
+    StoreVolume(
+      description: inner.description,
+      durable: inner.durable,
+      readBytes: proc(path: string): PlatformFuture[PlatformOutcome[seq[byte]]] =
+        later(inner.readBytes(path)),
+      writeBytes: proc(path: string; content: seq[byte]
+                      ): PlatformFuture[PlatformOutcome[Nothing]] =
+        later(inner.writeBytes(path, content)),
+      stat: proc(path: string): PlatformFuture[PlatformOutcome[VolumeEntry]] =
+        later(inner.stat(path)),
+      list: proc(path: string
+                ): PlatformFuture[PlatformOutcome[seq[VolumeEntry]]] =
+        later(inner.list(path)),
+      createDir: proc(path: string): PlatformFuture[PlatformOutcome[Nothing]] =
+        later(inner.createDir(path)),
+      remove: proc(path: string; recursive: bool
+                  ): PlatformFuture[PlatformOutcome[Nothing]] =
+        later(inner.remove(path, recursive)),
+      move: proc(source, destination: string
+                ): PlatformFuture[PlatformOutcome[Nothing]] =
+        later(inner.move(source, destination)),
+      atomicMove: inner.atomicMove,
+      usage: proc(): PlatformFuture[PlatformOutcome[VolumeUsage]] =
+        later(inner.usage()))
+
 # ---------------------------------------------------------------------------
 suite "the web instantiation satisfies every facade — NS2, §3.1":
 # ---------------------------------------------------------------------------
@@ -564,6 +616,165 @@ suite "archive export, end to end through the facade — §6.2":
 
     check textOf(memory.rawRead(buildOutputRoot("p1") & "/circuit.acir")) ==
       "compiled"
+
+  test "a template file whose seed write fails still leaves in the archive":
+    ## codetracer#809, problem 2: an exported `hello_noir.tar` held
+    ## `main.nr` and `utils.nr` but not `tests.nr` or `Prover.toml`. Its
+    ## measured cause is the case below that uses `deferredVolume`; this is
+    ## the second route to the same short archive. The export walks the
+    ## store's working tree, and the restore-then-seed loop the web arm runs
+    ## on load put each absent template file there with a write whose outcome
+    ## it discarded — so one failed seed write was a file silently missing
+    ## from every later archive. §6.2's Archive form is "the working tree as
+    ## the user's normal tools accept it": all five files, or a failure the
+    ## user is told about, never a short archive.
+    let log = BridgeLog()
+    let booted = bootFake(log)
+    let web = booted.web
+    let tmpl = noirHelloWorld()
+    check tmpl.templateFileCount == 5
+    booted.memory.failMovesInto = workingTreeRoot("p1") & "/src/tests.nr"
+
+    # The path `web_project_persistence.prepareProject` runs on load.
+    let restored = awaitOutcome(web.restoreOrSeedProject("p1", tmpl))
+    check restored.ok
+    check restored.value.project.files == tmpl.files
+
+    # Reported, not discarded: the one failed write, by path, and a sentence
+    # for the user that names it.
+    check restored.value.failures.len == 1
+    check restored.value.failures[0].path == "src/tests.nr"
+    check restored.value.failures[0].kind == sfkUnsaved
+    let notice = seedFailureNotice(restored.value.failures)
+    check "src/tests.nr" in notice
+    check "export includes them" in notice
+    check seedFailureNotice(@[]) == ""
+
+    # The other four did land, so a reload restores them.
+    let landed = booted.memory.fileNames
+    check workingTreeRoot("p1") & "/src/tests.nr" notin landed
+    for file in tmpl.files:
+      if file.path != "src/tests.nr":
+        check workingTreeRoot("p1") & "/" & file.path in landed
+
+    check awaitOutcome(web.exportProjectArchive("p1", tmpl.name)).ok
+    check log.downloads.len == 1
+    var archived: seq[string] = @[]
+    for entry in readArchive(log.downloads[0].bytes):
+      archived.add entry.path
+    archived.sort()
+    var expected: seq[string] = @[]
+    for file in tmpl.files:
+      expected.add tmpl.name & "/" & file.path
+    expected.sort()
+    check archived == expected
+    for entry in readArchive(log.downloads[0].bytes):
+      if entry.path == tmpl.name & "/src/tests.nr":
+        check textOf(entry.content) == tmpl.fileContent("src/tests.nr")
+
+  test "a held seed gives way to the stored copy once a save lands":
+    ## The held bytes are the template's. When the user later saves that file
+    ## and the write succeeds, the working tree has THEIR bytes, and the
+    ## archive must carry those, once — not the template's, and not both.
+    let log = BridgeLog()
+    let booted = bootFake(log)
+    let web = booted.web
+    let tmpl = noirHelloWorld()
+    booted.memory.failMovesInto = workingTreeRoot("p1") & "/src/tests.nr"
+    check awaitOutcome(web.restoreOrSeedProject("p1", tmpl)).value.failures.len == 1
+
+    booted.memory.failMovesInto = ""
+    check awaitOutcome(web.store.writeProjectText(
+      "p1", "src/tests.nr", "// edited")).ok
+
+    check awaitOutcome(web.exportProjectArchive("p1", tmpl.name)).ok
+    var testsEntries: seq[string] = @[]
+    for entry in readArchive(log.downloads[0].bytes):
+      if entry.path == tmpl.name & "/src/tests.nr":
+        testsEntries.add textOf(entry.content)
+    check testsEntries == @["// edited"]
+
+  test "a stored file is restored, and one that cannot be read is not overwritten":
+    ## The store wins over the bundled copy, and only `pkNotFound` means the
+    ## store does not hold a file. Any other read failure is reported and
+    ## nothing is written over it: the stored copy may be the user's edit.
+    let log = BridgeLog()
+    let booted = bootFake(log)
+    let web = booted.web
+    let tmpl = noirHelloWorld()
+    booted.memory.rawWrite(workingTreeRoot("p1") & "/src/main.nr",
+                           bytesOf("// the user's main"))
+    # A directory where a file is expected reads as `pkInvalidArgument`.
+    booted.memory.rawWrite(workingTreeRoot("p1") & "/Prover.toml/x",
+                           bytesOf(""))
+    let writesBefore = booted.memory.moveCount
+
+    let restored = awaitOutcome(web.restoreOrSeedProject("p1", tmpl))
+    check restored.ok
+    check restored.value.project.fileContent("src/main.nr") ==
+      "// the user's main"
+    check restored.value.failures.len == 1
+    check restored.value.failures[0].path == "Prover.toml"
+    check restored.value.failures[0].kind == sfkUnreadable
+    check "could not be read" in seedFailureNotice(restored.value.failures)
+    # Three seeds — Nargo.toml, src/tests.nr, src/utils.nr — and nothing else.
+    check booted.memory.moveCount - writesBefore == 3
+    check textOf(booted.memory.rawRead(
+      workingTreeRoot("p1") & "/src/main.nr")) == "// the user's main"
+
+  when not defined(js):
+    test "a store that answers later still restores, seeds and exports every file":
+      ## codetracer#809, problem 2, as the browser has it: OPFS answers every
+      ## operation later, never inline. The reported archive held `Nargo.toml`,
+      ## `src/main.nr` and `src/utils.nr` — the first and the last entry of
+      ## each directory — and lacked `Prover.toml` and `src/tests.nr`, the
+      ## entries in between. See `deferredVolume` for why only a volume that
+      ## answers later can show it.
+      let log = BridgeLog()
+      let memory = newMemoryVolume()
+      let bridge = newFakeBridge(deferredVolume(memory.asVolume), log)
+      let opened = awaitOutcome(openWebStore(bridge))
+      doAssert opened.ok, "the deferred store did not open: " & $opened.error
+      opened.value.acknowledgeDurability()
+      let web = newWebPlatform(bridge, opened.value)
+      doAssert awaitOutcome(web.store.createProject("p1", "demo", t0)).ok
+      doAssert awaitOutcome(web.activateProject("p1")).ok
+      let tmpl = noirHelloWorld()
+
+      # First visit: every template file is seeded, not just the first and
+      # the last.
+      let seeded = awaitOutcome(web.restoreOrSeedProject("p1", tmpl))
+      check seeded.ok
+      check seeded.value.failures.len == 0
+      for file in tmpl.files:
+        check textOf(memory.rawRead(workingTreeRoot("p1") & "/" & file.path)) ==
+          file.content
+
+      # Second visit: a file in the middle of the template comes back as the
+      # user left it, not as the template has it.
+      check awaitOutcome(web.store.writeProjectText(
+        "p1", "src/tests.nr", "// the user's tests")).ok
+      let restored = awaitOutcome(web.restoreOrSeedProject("p1", tmpl))
+      check restored.ok
+      check restored.value.failures.len == 0
+      check restored.value.project.fileContent("src/tests.nr") ==
+        "// the user's tests"
+      for file in tmpl.files:
+        if file.path != "src/tests.nr":
+          check restored.value.project.fileContent(file.path) == file.content
+
+      # The archive: every file, once each.
+      check awaitOutcome(web.exportProjectArchive("p1", tmpl.name)).ok
+      check log.downloads.len == 1
+      var archived: seq[string] = @[]
+      for entry in readArchive(log.downloads[0].bytes):
+        archived.add entry.path
+      archived.sort()
+      var expected: seq[string] = @[]
+      for file in tmpl.files:
+        expected.add tmpl.name & "/" & file.path
+      expected.sort()
+      check archived == expected
 
 # ---------------------------------------------------------------------------
 suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":

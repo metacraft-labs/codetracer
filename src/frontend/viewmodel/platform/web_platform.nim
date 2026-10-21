@@ -48,6 +48,8 @@
 ## profiles stay the specification's and the instantiation's narrowing stays
 ## visible — which is what `withCapabilities` exists for.
 
+import std/tables
+
 import ./outcome
 import ./capabilities
 import ./fs
@@ -64,6 +66,7 @@ import ./store_volume
 import ./project_store
 import ./archive
 import ./paths
+import ./noir_template
 
 export platform, project_store, archive, wasm_registry
 
@@ -135,6 +138,11 @@ type
     store*: StoreSession
     bridge*: BrowserBridge
     activeProjectId*: string
+    heldSeeds: Table[string, seq[TreeFile]]
+      ## Per project, the template files `restoreOrSeedProject` could not
+      ## write into the store, with the bundled bytes this tab is showing.
+      ## `exportProjectArchive` adds each one the working tree does not
+      ## (yet) hold, so a failed seed is never a file missing from an archive.
 
 const webInstantiationCapabilities*: CapabilitySet =
   webCapabilities - {capFilesystemTemp}
@@ -632,6 +640,128 @@ proc activateProject*(web: WebPlatform; projectId: string
       mapOutcome(web.store.discardStaleWork(projectId),
         proc(ignored: Nothing): ProjectOpen = opened))
 
+# ---------------------------------------------------------------------------
+# Restoring a template project, and seeding what the store does not hold
+# ---------------------------------------------------------------------------
+#
+# codetracer#809, problem 2: an exported `hello_noir.tar` was missing
+# `src/tests.nr` and `Prover.toml`. The measured cause was the export's walk:
+# `collectTree` reached each directory's middle entries only when the volume
+# answered inline, and OPFS never does (see `outcome.foldOutcome`). The load
+# path had a second route to the same symptom, which this section closes: it
+# put each absent template file into the store with a write whose outcome it
+# DISCARDED, so one failed seed write would also have been a file silently
+# missing from every later archive. §6.2 makes the Archive form "the working
+# tree as the user's normal tools accept it", and `Prover.toml` and
+# `src/tests.nr` are as much project files as `main.nr`.
+#
+# So the seed now lives here, headless and testable, and a failed write is
+# neither dropped nor fatal: it is RETURNED, so the web arm can tell the user,
+# and the bundled bytes are HELD by this platform, so the export still carries
+# the file the editor is showing.
+
+type
+  SeedFailureKind* = enum
+    sfkUnsaved
+      ## The store did not hold the file and writing the bundled copy failed.
+      ## The tab holds that copy, and an export includes it; a reload seeds it
+      ## again.
+    sfkUnreadable
+      ## The store holds the file but reading it failed. Nothing is written:
+      ## overwriting a file that may be the user's edited copy because one read
+      ## failed would turn a transient error into lost work.
+
+  SeedFailure* = object
+    path*: string
+      ## Project-relative, as the template names it.
+    kind*: SeedFailureKind
+    error*: PlatformError
+
+  RestoredProject* = object
+    project*: ProjectTemplate
+      ## The template with every file the store holds replaced by its stored
+      ## bytes — the store wins, because a stored file is the user's.
+    failures*: seq[SeedFailure]
+      ## Every file that could not be restored or seeded, in template order.
+      ## Empty when the store and the project agree.
+
+proc restoreOrSeedProject*(web: WebPlatform; projectId: string;
+                           tmpl: ProjectTemplate
+                          ): PlatformFuture[PlatformOutcome[RestoredProject]] =
+  ## Restore every template file the store already holds and write in every
+  ## one it does not — per file, so a template that gains a file between two
+  ## visits seeds only the new one instead of overwriting the user's work.
+  ##
+  ## Never fails as a whole: a file that could not be restored or seeded is
+  ## reported in `failures`, and the rest of the project still opens. Only
+  ## `pkNotFound` counts as "the store does not hold it"; any other read
+  ## failure is reported as `sfkUnreadable` and nothing is written over it.
+  var restored = RestoredProject(project: tmpl)
+  var held: seq[TreeFile] = @[]
+  let store = web.store
+  var indices: seq[int] = @[]
+  for index in 0 ..< tmpl.files.len:
+    indices.add index
+
+  proc restoreOne(index: int): PlatformFuture[PlatformOutcome[Nothing]] =
+    let file = tmpl.files[index]
+
+    proc seedAbsent(readError: PlatformError
+                   ): PlatformFuture[PlatformOutcome[Nothing]] =
+      if readError.kind != pkNotFound:
+        restored.failures.add SeedFailure(
+          path: file.path, kind: sfkUnreadable, error: readError)
+        return resolvedOk()
+      proc holdUnsaved(writeError: PlatformError
+                      ): PlatformFuture[PlatformOutcome[Nothing]] =
+        restored.failures.add SeedFailure(
+          path: file.path, kind: sfkUnsaved, error: writeError)
+        var bytes = newSeq[byte](file.content.len)
+        for i in 0 ..< file.content.len: bytes[i] = file.content[i].byte
+        held.add TreeFile(path: file.path, content: bytes)
+        resolvedOk()
+      recoverOutcome(store.writeProjectText(projectId, file.path, file.content),
+                     holdUnsaved)
+
+    recoverOutcome(
+      mapOutcome(store.readProjectText(projectId, file.path),
+        proc(stored: string): Nothing =
+          restored.project.files[index].content = stored
+          nothing),
+      seedAbsent)
+
+  mapOutcome(foldOutcome(indices, restoreOne),
+    proc(ignored: Nothing): RestoredProject =
+      # Replaced rather than appended: this is the state of THIS load, and a
+      # file a previous call held but this one stored must not be held twice.
+      web.heldSeeds[projectId] = held
+      restored)
+
+proc seedFailureNotice*(failures: seq[SeedFailure]): string =
+  ## The sentence the web arm raises when `restoreOrSeedProject` reports
+  ## failures, or `""` when there are none. Composed here rather than in the
+  ## js-only arm so what the user is told is asserted beside what happened.
+  var unsaved, unreadable: seq[string]
+  for failure in failures:
+    let named = failure.path & " (" & failure.error.message & ")"
+    case failure.kind
+    of sfkUnsaved: unsaved.add named
+    of sfkUnreadable: unreadable.add named
+  proc listed(items: seq[string]): string =
+    for i, item in items:
+      if i > 0: result.add ", "
+      result.add item
+  if unsaved.len > 0:
+    result.add "These project files could not be saved in this browser's " &
+      "storage: " & listed(unsaved) & ". This tab still has them and an " &
+      "export includes them, but until each is saved successfully a " &
+      "reload starts it again from the template."
+  if unreadable.len > 0:
+    if result.len > 0: result.add " "
+    result.add "These project files are in this browser's storage but could " &
+      "not be read: " & listed(unreadable) & ". This tab shows the template's " &
+      "copy and has not overwritten the stored one."
+
 proc exportProjectArchive*(web: WebPlatform; projectId, suggestedName: string
                           ): PlatformFuture[PlatformOutcome[Nothing]] =
   ## §6.2's launch form of "your work leaves with you", end to end: walk the
@@ -639,8 +769,21 @@ proc exportProjectArchive*(web: WebPlatform; projectId, suggestedName: string
   ## the project has now been exported so `exportWarning` stops escalating.
   let store = web.store
   let bridge = web.bridge
+  let held = web.heldSeeds.getOrDefault(projectId)
   thenOutcome(store.collectTree(projectId),
-    proc(files: seq[TreeFile]): PlatformFuture[PlatformOutcome[Nothing]] =
+    proc(stored: seq[TreeFile]): PlatformFuture[PlatformOutcome[Nothing]] =
+      # The working tree, plus every template file whose seed write failed and
+      # which the tree still does not hold. A stored copy wins: once the user
+      # saves such a file successfully, the tree has their bytes.
+      var files = stored
+      for heldFile in held:
+        var inTree = false
+        for file in stored:
+          if file.path == heldFile.path:
+            inTree = true
+            break
+        if not inTree:
+          files.add heldFile
       var entries: seq[ArchiveEntry] = @[]
       for file in files:
         entries.add ArchiveEntry(

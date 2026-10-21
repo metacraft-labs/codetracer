@@ -300,10 +300,35 @@ proc recheckPersistence(web: WebPlatform) {.async.} =
   if not onPersistenceUpgrade.isNil:
     onPersistenceUpgrade(sentence)
 
+var seedNotice: string
+  ## What `restoreOrSeedProject` could not restore or seed on this load, as the
+  ## sentence `takeSeedFailureNotice` hands the renderer, or `""`.
+
+proc takeSeedFailureNotice*(): string =
+  ## The seed-failure sentence, once. Raised by `ui_js` beside the durability
+  ## notice and NOT suppressed per browser session the way that one is: it
+  ## describes this load's storage, not a standing condition, and a user who
+  ## was told yesterday has not been told about today's failure.
+  result = seedNotice
+  seedNotice = ""
+
+var onExportFailure: proc(message: string)
+
+proc setExportFailureHandler*(handler: proc(message: string)) =
+  ## Installed by `ui_js`, which owns the notification system — injected for
+  ## the same reason as `setPersistenceUpgradeHandler`.
+  onExportFailure = handler
+
 proc installExport(web: WebPlatform; projectId, displayName: string) =
   exportAction = proc() =
     proc run() {.async.} =
-      discard await web.exportProjectArchive(projectId, displayName)
+      # An export that fails must say so. Discarding this outcome left the
+      # user pressing the chord and receiving nothing, with no way to tell a
+      # refused export from one still in flight.
+      let exported = await web.exportProjectArchive(projectId, displayName)
+      if not exported.ok and not onExportFailure.isNil:
+        onExportFailure("The project could not be exported: " &
+                        exported.error.message)
     discard run()
 
 proc installWriter(web: WebPlatform; projectId: string) =
@@ -398,14 +423,18 @@ proc prepareProject*(booted: WebBoot; tmpl: ProjectTemplate): Future[void]
   #
   # Per file rather than per project, so a template that GAINS a file between
   # two visits seeds just the new one instead of overwriting the user's work.
-  var effective = tmpl
-  for index in 0 ..< tmpl.files.len:
-    let stored = await web.store.readProjectText(projectId,
-                                                 tmpl.files[index].path)
-    if stored.ok:
-      effective.files[index].content = stored.value
-    else:
-      discard await web.store.writeProjectText(projectId,
-                                               tmpl.files[index].path,
-                                               tmpl.files[index].content)
-  setCurrentProject(effective)
+  #
+  # A FAILED SEED IS TOLD, NOT DROPPED. This loop used to discard each seed
+  # write's outcome, so a failed one was a file the editor showed and every
+  # export left out, with nothing on screen to say why — the symptom
+  # codetracer#809 reported, by a second route besides the one it was traced to.
+  # `restoreOrSeedProject` returns every failure and holds the unsaved bytes
+  # for the export; the sentence is raised beside the durability notice.
+  let restored = await web.restoreOrSeedProject(projectId, tmpl)
+  if restored.ok:
+    setCurrentProject(restored.value.project)
+    seedNotice = seedFailureNotice(restored.value.failures)
+  else:
+    setCurrentProject(tmpl)
+    seedNotice = "This project could not be restored from browser storage (" &
+      restored.error.message & "), so this tab shows the template."
