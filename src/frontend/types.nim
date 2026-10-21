@@ -193,6 +193,10 @@ type
     line*: int
     column*: int
     newWindow*: bool
+    keepWindow*: bool
+      ## Record the test and STAY: do not load the recording into this window
+      ## (`index/traces.onRunTest`). The Test Results row's `⟳`; false for
+      ## every caller that existed before it, which keeps their behaviour.
 
   ValueWithExpression* = ref object
     expression*: cstring

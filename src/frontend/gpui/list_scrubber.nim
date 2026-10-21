@@ -1,7 +1,9 @@
 ## gpui/list_scrubber.nim — PLAT-51: a list pane's scrollbar SCRUBBER in the
 ## GPUI window (Scrollbar-Scrubbers.md §4, "GPUI": a native scrollbar element
 ## of the pane, a filled-rect thumb, a tick for the current position), for the
-## Event Log and the Call Trace. The model is the shared
+## Event Log and the Call Trace — and (M71, codetracer#838) the ordinary
+## scrollbar of the Files and VCS panes, whose rows are in hand (§2: the same
+## track, the same §3 press and drag). The model is the shared
 ## `viewmodels/scrollbar_scrubber.nim`; this module only places its fractions
 ## on pixels and turns a pointer's y back into a fraction ("no front-end
 ## computes a row from a pointer itself").
@@ -69,6 +71,12 @@ proc listTrackRect*(body: PxRect; pane = ""): PxRect =
     let top = 8 + CallChromeAbovePx
     return PxRect(x: body.x + body.w - NarrowTrackPx, y: body.y + top,
                   w: NarrowTrackPx, h: max(0, body.h - top))
+  of "fileTree":
+    # M71 (#838): the Files pane's rows reach its sides under the desktop's
+    # 8 px `.lm_content` top (`window_geometry.paneInsetOf`): the narrow
+    # list track along its right edge, beside every row.
+    return PxRect(x: body.x + body.w - NarrowTrackPx, y: body.y + 8,
+                  w: NarrowTrackPx, h: max(0, body.h - 8))
   else: discard
   PxRect(x: body.x + body.w - ChromePaddingPx - ListTrackPx,
          y: body.y + ChromePaddingPx, w: ListTrackPx,
@@ -84,6 +92,20 @@ proc box(r: GpuiRenderer; rect, body: PxRect; colour: string): GpuiElement =
   if colour.len > 0:
     r.setStyle(result, "background", colour)
 
+proc clearListScrubber*(r: GpuiRenderer; pane: GpuiElement) =
+  ## Remove the track and mark drawn in `pane` before — a redraw replaces
+  ## them rather than stacking a second, and (M71) a pane whose rows now fit
+  ## keeps none.
+  if pane.isNil:
+    return
+  var i = childCount(pane) - 1
+  while i >= 0:
+    let c = nthChild(pane, i)
+    if getAttribute(c, ListTrackAttribute).len > 0 or
+       getAttribute(c, ListMarkAttribute).len > 0:
+      r.removeChild(pane, c)
+    dec i
+
 proc drawListScrubber*(r: GpuiRenderer; pane: GpuiElement; body: PxRect;
                        sm: ScrubberModel; paneId: string) =
   ## The track, the thumb over the WHOLE population and the current-position
@@ -92,18 +114,12 @@ proc drawListScrubber*(r: GpuiRenderer; pane: GpuiElement; body: PxRect;
     return
   # A redraw of the scrubber alone (the other pane's leaf was redrawn)
   # replaces the one drawn before rather than stacking a second.
-  var i = childCount(pane) - 1
-  while i >= 0:
-    let c = nthChild(pane, i)
-    if getAttribute(c, ListTrackAttribute).len > 0 or
-       getAttribute(c, ListMarkAttribute).len > 0:
-      r.removeChild(pane, c)
-    dec i
+  r.clearListScrubber(pane)
   if body.w <= ListTrackPx or listTrackRect(body, paneId).h <= 0:
     return
   r.setStyle(pane, "position", "relative")
   let track = listTrackRect(body, paneId)
-  let narrow = paneId in ["eventLog", "calltrace"]
+  let narrow = paneId in ["eventLog", "calltrace", "fileTree"]
   let span = sm.thumbSpan(track.h, ListMinThumbPx)
   let t = box(r, track, body, "")
   r.setAttribute(t, ListTrackAttribute, paneId)
@@ -111,6 +127,9 @@ proc drawListScrubber*(r: GpuiRenderer; pane: GpuiElement; body: PxRect;
   r.setAttribute(t, "data-ct-thumb-px", $span.length)
   r.setAttribute(t, "data-ct-scrub-total", $sm.total)
   r.setAttribute(t, "data-ct-scrub-first", $sm.firstVisible)
+  # M71: how many rows the view shows, so a reader can say "the LAST rows"
+  # (first + visible == total) of a pane whose body it does not measure.
+  r.setAttribute(t, "data-ct-scrub-visible", $sm.visible)
   r.setAttribute(t, "data-ct-scrub-known", $sm.totalKnown)
   r.setStyle(t, "display", "flex")
   r.setStyle(t, "flex-direction", "column")

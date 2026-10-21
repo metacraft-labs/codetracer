@@ -702,6 +702,37 @@ proc summarize*(runResult: TestRunResult): TestRunSummary =
       of tsSkipped:
         inc result.skipped
 
+proc runEvents*(runResult: TestRunResult): seq[TestEvent] =
+  ## Every ``TestEvent`` the run's providers produced, in a DETERMINISTIC
+  ## order: units sorted by test id (then provider id), and each unit's own
+  ## events in the order its provider emitted them.
+  ##
+  ## ``outcomes`` is in completion order, which a worker pool makes different
+  ## on every run; a consumer that folds these events — the desktop Test
+  ## Results pane does — must not see two identical runs as two different
+  ## streams, and a reader comparing two runs must be able to ``diff`` them.
+  ## A unit's internal order is left alone because it is meaningful
+  ## (``test-started`` before ``test-finished``, a ``failure`` before the
+  ## ``test-finished`` that closes it). ``sort`` is a stable merge sort, so
+  ## units with equal keys keep their relative order too.
+  var ordered = runResult.outcomes
+  ordered.sort(proc(a, b: RunUnitOutcome): int =
+    result = cmp(a.testId, b.testId)
+    if result == 0:
+      result = cmp(a.providerId, b.providerId))
+  for outcome in ordered:
+    for event in outcome.events:
+      result.add event
+
+proc runEventsJsonLines*(runResult: TestRunResult): string =
+  ## ``runEvents`` as JSON Lines — one ``contracts.eventToJsonLine`` per line,
+  ## each terminated by ``\n`` — which is what ``ct-test test run --events
+  ## <path>`` writes. The serialiser is the contracts one and nothing else, so
+  ## the reader's ``testEventFromJson`` is its exact inverse.
+  for event in runEvents(runResult):
+    result.add eventToJsonLine(event)
+    result.add '\n'
+
 proc unrunnableByProvider*(runResult: TestRunResult):
     seq[tuple[providerId: string; units: int]] =
   ## Which providers refused how many units, sorted by provider id.

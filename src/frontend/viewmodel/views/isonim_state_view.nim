@@ -348,6 +348,18 @@ proc rowLocation(vm: StateVM): store_types.Location =
     return store_types.Location()
   vm.store.debugger.val.location
 
+proc switchProcessAction(stateVM: StateVM; recordingId: string): proc() =
+  ## The action of one "Switch process" menu entry: pivot to `recordingId`.
+  ##
+  ## A FACTORY, because the entries are built in a `for` loop over the switch
+  ## targets and Nim closures capture by reference: a `let` in the loop body
+  ## is ONE variable for the whole loop, so an inline action made every entry
+  ## switch to the LAST target (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures).
+  result = proc() =
+    if not stateVM.onSwitchProcessProc.isNil:
+      stateVM.onSwitchProcessProc(recordingId)
+
 proc buildVariableRowContextMenu*(vm: StateVM;
                                   item: VariableViewState):
     seq[OriginContextMenuEntry] =
@@ -391,9 +403,7 @@ proc buildVariableRowContextMenu*(vm: StateVM;
       result.add OriginContextMenuEntry(
         label: "Switch process: " & switchLabel,
         hint: "",
-        action: proc() =
-          if not stateVM.onSwitchProcessProc.isNil:
-            stateVM.onSwitchProcessProc(switchTo),
+        action: switchProcessAction(stateVM, switchTo),
       )
 
 proc onShowVariableRowContextMenu*(vm: StateVM;

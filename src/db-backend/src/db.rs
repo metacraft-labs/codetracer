@@ -5765,8 +5765,10 @@ mod jump_destination_tests {
             StepId(7)
         );
 
-        // `isonim_calltrace_view`'s search result — `{rrTicks}` and nothing
-        // else.  The minimum a jump payload may be, and it must still pass.
+        // `{rrTicks}` and nothing else — what `isonim_calltrace_view`'s search
+        // result sent until codetracer#860 (it now sends `doubleClickEntry`'s
+        // full payload, through the same `calltraceJumpArgs`).  The minimum a
+        // jump payload may be, and it must still pass.
         assert_eq!(
             destination_of_guarded_dispatch("ct/calltrace-jump", &json!({ "rrTicks": 14 }), 1),
             StepId(14),

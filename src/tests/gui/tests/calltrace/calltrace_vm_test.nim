@@ -13,6 +13,14 @@
 ## - hasMoreAbove/hasMoreBelow derive correctly from scroll position and total count
 ## - searchQuery updates and highlightedMatches recomputes
 ## - isLoading reflects store loading state
+## - a search result's jump reveals and marks the clicked call (codetracer#860)
+##
+## Why a mock backend (`MockBackendService`): these are unit tests of the
+## ViewModel's own logic — which commands it sends and how it reacts to the
+## store. The mock only records the commands and plays no engine logic; the
+## cases write the store exactly as the real decoders do. The real engine is
+## covered end to end by the Playwright specs (e.g.
+## `noir-space-ship/calltrace-search-jump.spec.ts`).
 ##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_calltrace_vm.nim
@@ -881,5 +889,215 @@ suite "CalltraceVM auto-load effect":
       # Window start: 50 - TrailRows = 40; height: rows + LeadRows + TrailRows.
       check lastCmd.args["startCallLineIndex"].getBiggestInt == 50 - TrailRows
       check lastCmd.args["height"].getInt == 20 + LeadRows + TrailRows
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Search-result reveal (codetracer#860, Click-Navigation.md §2.1)
+# ---------------------------------------------------------------------------
+#
+# Activating a search result must land in that call's frame AND mark that
+# call's row as the one the session is in (§2.1), even when the row lies
+# outside the section the pane holds. The engine says where the call the
+# session is in sits in the whole trace with every section answer
+# (`currentCallLineIndex`, mirrored into `store.calltrace.currentLineIndex`);
+# these cases play the engine's part with exactly the two writes both
+# decoders make — `updateCalltraceSection` and `currentLineIndex` — so they
+# exercise the ViewModel's reveal and nothing in front of it. The mock backend
+# only records what the ViewModel asks for (justified in this file's header:
+# no real engine is needed to say which section was requested).
+
+proc revealSection(first, count: int64;
+                   target = -1'i64; targetKey = ""; targetTicks = 0'u64;
+                   decoy = -1'i64): seq[CallLine] =
+  ## Rows `first ..< first+count`. Row `target` is the searched call
+  ## (`calculate_damage`, key `targetKey`, starting at `targetTicks`). Row
+  ## `decoy` is a DIFFERENT call that starts at the SAME tick — the caller
+  ## a call chain collapses onto it (§2.2) — so a mark placed by tick could
+  ## not tell the two apart, and only the call's key does.
+  for i in first ..< first + count:
+    var l = makeCallLine(i, "f" & $i, depth = 1, rrTicks = uint64(i * 10))
+    l.callKey = "k" & $i
+    if i == target:
+      l.name = "calculate_damage"
+      l.depth = 3
+      l.callKey = targetKey
+      l.rrTicks = targetTicks
+    elif i == decoy:
+      l.name = "status_report"
+      l.depth = 2
+      l.rrTicks = targetTicks
+    result.add l
+
+proc sectionRequestsSince(mock: MockBackendService; first: int): seq[JsonNode] =
+  ## The `ct/load-calltrace-section` arguments the ViewModel sent from
+  ## `first` on. Data only: a `check` in a plain proc cannot fail the test
+  ## (Verification-Harness-Traps §29).
+  for i in first ..< mock.receivedCommands.len:
+    if mock.receivedCommands[i].command == "ct/load-calltrace-section":
+      result.add mock.receivedCommands[i].args
+
+suite "CalltraceVM search-result reveal (codetracer#860)":
+
+  test "a result outside the held section is requested, scrolled to and marked by its key":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      store.updateDebuggerPosition(10'u64, "main.nr", 13)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      # The pane holds rows 0..39; the session is in row 1.
+      store.updateCalltraceSection(revealSection(0, 40), 0'i64, 200'u64)
+      store.calltrace.currentLineIndex.val = 1
+      vm.setBackendSearchResults(@[CalltraceSearchResult(
+        name: "calculate_damage", key: "k-target", rrTicks: 1390'u64,
+        location: Location(file: "shield.nr", line: 22, callstackDepth: 3))])
+      drain()
+      let firstRowBefore = vm.viewport.val.firstRow
+
+      let before = mock.receivedCommands.len
+      vm.jumpToSearchResult(0)
+      drain()
+      check mock.findCommand("ct/calltrace-jump").isSome
+
+      # The engine moves the session into the call, and the pane's re-asked
+      # section (the same rows) answers with where that call sits: line 139,
+      # outside the rows held.
+      store.updateDebuggerPosition(1390'u64, "shield.nr", 22)
+      drain()
+      store.updateCalltraceSection(revealSection(0, 40), 0'i64, 200'u64)
+      store.calltrace.currentLineIndex.val = 139
+      drain()
+
+      # The ViewModel asks for the section that contains line 139, and its
+      # viewport shows that line.
+      let asked = mock.sectionRequestsSince(before)
+      check asked.len > 0
+      var start, height = 0'i64
+      if asked.len > 0:
+        start = asked[^1]["startCallLineIndex"].getBiggestInt
+        height = asked[^1]["height"].getBiggestInt
+      check start <= 139 and 139 < start + height
+      let v = vm.viewport.val
+      check v.firstRow != firstRowBefore
+      check v.firstRow <= 139 and 139 < v.firstRow + v.rows
+
+      # The engine answers that section. Row 138 is a different call that
+      # starts at the same tick; the mark goes to the clicked call, row 139.
+      store.updateCalltraceSection(
+        revealSection(start, height, target = 139, targetKey = "k-target",
+                      targetTicks = 1390'u64, decoy = 138),
+        start, 200'u64)
+      store.calltrace.currentLineIndex.val = 139
+      drain()
+      check vm.selectedEntry.val == some(139'i64)
+      # The mark follows the call (`selectCall`), not a row position, so a
+      # later reload that shifts the row keeps it on this call.
+      check vm.selectedCallKey.val == "k-target"
+      # A collapse above it moves the call up two rows: the mark goes with it.
+      check start <= 137
+      store.updateCalltraceSection(
+        revealSection(start, height, target = 137, targetKey = "k-target",
+                      targetTicks = 1390'u64),
+        start, 200'u64)
+      drain()
+      check vm.selectedEntry.val == some(137'i64)
+
+      dispose()
+
+  test "a result whose row is already held is marked by its key, without a reveal scroll":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      store.updateDebuggerPosition(10'u64, "main.nr", 13)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      store.updateCalltraceSection(
+        revealSection(0, 40, target = 6, targetKey = "k-near",
+                      targetTicks = 60'u64, decoy = 5),
+        0'i64, 200'u64)
+      store.calltrace.currentLineIndex.val = 1
+      vm.setBackendSearchResults(@[CalltraceSearchResult(
+        name: "calculate_damage", key: "k-near", rrTicks: 60'u64,
+        location: Location(file: "shield.nr", line: 22, callstackDepth: 3))])
+      drain()
+
+      vm.jumpToSearchResult(0)
+      drain()
+      store.updateDebuggerPosition(60'u64, "shield.nr", 22)
+      drain()
+      store.calltrace.currentLineIndex.val = 6
+      drain()
+      check vm.selectedEntry.val == some(6'i64)
+      check vm.selectedCallKey.val == "k-near"
+      check vm.viewport.val.firstRow == 0
+      discard mock
+
+      dispose()
+
+  test "activating the same result again before its section answers still reveals it":
+    # Measured in the desktop GUI: a click whose mousedown landed, then a
+    # second activation of the same row once the session had already arrived
+    # but before the re-asked section answered. The store still held the
+    # line from before the move (row 1, held), so a reveal restarted at that
+    # moment took a held row that is not the call for "folded" and gave up.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      store.updateDebuggerPosition(10'u64, "main.nr", 13)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      store.updateCalltraceSection(revealSection(0, 40), 0'i64, 200'u64)
+      store.calltrace.currentLineIndex.val = 1
+      vm.setBackendSearchResults(@[CalltraceSearchResult(
+        name: "calculate_damage", key: "k-target", rrTicks: 1390'u64,
+        location: Location(file: "shield.nr", line: 22, callstackDepth: 3))])
+      drain()
+
+      let before = mock.receivedCommands.len
+      vm.jumpToSearchResult(0)
+      drain()
+      store.updateDebuggerPosition(1390'u64, "shield.nr", 22)
+      drain()
+      vm.jumpToSearchResult(0)     # again: the session is there, the line is not
+      drain()
+      store.updateCalltraceSection(revealSection(0, 40), 0'i64, 200'u64)
+      store.calltrace.currentLineIndex.val = 139
+      drain()
+
+      let asked = mock.sectionRequestsSince(before)
+      var start, height = 0'i64
+      if asked.len > 0:
+        start = asked[^1]["startCallLineIndex"].getBiggestInt
+        height = asked[^1]["height"].getBiggestInt
+      check start <= 139 and 139 < start + height
+      store.updateCalltraceSection(
+        revealSection(start, height, target = 139, targetKey = "k-target",
+                      targetTicks = 1390'u64, decoy = 138),
+        start, 200'u64)
+      drain()
+      check vm.selectedEntry.val == some(139'i64)
+      check vm.selectedCallKey.val == "k-target"
+
+      dispose()
+
+  test "a move that is not a search-result activation does not scroll the pane":
+    # Scrollbar-Scrubbers.md §3.5: the scrubber, not the debugger, moves the
+    # view. Only the call trace's own search-result activation reveals.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      store.updateDebuggerPosition(10'u64, "main.nr", 13)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      store.updateCalltraceSection(revealSection(0, 40), 0'i64, 200'u64)
+      store.calltrace.currentLineIndex.val = 1
+      drain()
+
+      store.updateDebuggerPosition(1390'u64, "shield.nr", 22)
+      drain()
+      store.calltrace.currentLineIndex.val = 139
+      drain()
+      check vm.viewport.val.firstRow == 0
 
       dispose()

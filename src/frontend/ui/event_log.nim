@@ -430,7 +430,7 @@ proc orderDataTable(table: js; column: int; direction: cstring)
   {.importjs: "#.order([[#, #]]).draw()".}
   ## Order by one column and redraw (an ajax table asks the engine again).
 
-proc renderColumnHeader(tableId: cstring; columns: seq[JsObject];
+proc renderColumnHeader*(tableId: cstring; columns: seq[JsObject];
                         dataTable: js = nil) =
   ## **THE TABLE SAYS WHAT ITS COLUMNS ARE** (`PLAT35-PD2`, closed by
   ## PLAT-40). A strip of header cells above the rows, one per column, each
@@ -491,12 +491,13 @@ proc renderColumnHeader(tableId: cstring; columns: seq[JsObject];
     label.textContent = title
     cell.appendChild(label)
     if not dataTable.isNil:
-      let at = index
-      cell.addEventListener(cstring"click", proc(ev: Event) =
-        let again = at == orderedAt
-        let direction = if again and ascending: cstring"desc" else: cstring"asc"
-        dataTable.orderDataTable(at, direction)
-        renderColumnHeader(tableId, columns, dataTable))
+      closureScope: # The header listener must retain this column after rendering ends.
+        let at = index
+        cell.addEventListener(cstring"click", proc(ev: Event) =
+          let again = at == orderedAt
+          let direction = if again and ascending: cstring"desc" else: cstring"asc"
+          dataTable.orderDataTable(at, direction)
+          renderColumnHeader(tableId, columns, dataTable))
     strip.appendChild(cell)
   host.insertBefore(strip, host.firstChild)
 

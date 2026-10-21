@@ -19,12 +19,38 @@
 ##   * the current-position mark is on the row of the debugger's event / call;
 ##   * none of it moves the debugger — and a row click still does.
 ##
+## M71 (codetracer#838) adds the panes whose whole content is IN HAND — the
+## State pane (an open value history included), the Files tree and the VCS
+## pane. Scrollbar-Scrubbers.md §2 gives them "an ordinary scrollbar", with
+## the §3 click rule "so that every scrollbar behaves alike", drawn as §4's
+## terminal track (the rightmost column, eighth-block thumb); CodeTracer-TUI.md
+## §4.4 has the wheel scroll "the pane beneath the pointer ... without
+## requiring pane focus". For each of the three:
+##
+##   * painted by its own `paint*` proc over a model that overflows the area,
+##     the pane's last column is a track whose thumb moves with `scrollTop`;
+##     over one that fits, there is no track and the last column is content;
+##   * a wheel over it (it NOT focused) scrolls it, in a real session;
+##   * a press on its track's end / start shows the last / first row, a press
+##     in the middle centres the row at that fraction, and a held thumb drags.
+##
+## The State pane's population is the real `call_pages` recording's, with the
+## value history of `total` (one entry per loop round) open under its row —
+## the reporter's case. The Files and VCS cases need more rows than the
+## recording's tree or any repository at hand gives, so: the VCS pane is the
+## product's own `VcsSource` over a scratch git repository with two hundred
+## untracked files (real git, no fake facade); the Files pane is handed a
+## `FileTreeModel` VALUE of two hundred entries — the same plain value
+## `fileTreeModelOf` builds from a recording's tree. Nothing the painter or the
+## router reads is stubbed: the pane paints a value and the runtime routes to
+## it, and neither reads a ViewModel.
+##
 ## Everything through the product's own entry points (`handleToken` with the
 ## bytes a terminal sends, `applyOutcome` as the shipped loop runs it,
 ## `shellScreenOf` for the frame). No mocks: the state directory is a scratch
 ## one (`CODETRACER_TUI_LAYOUT_DIR`), the engine and the recording are real.
 
-import std/[os, strutils, unicode, unittest]
+import std/[os, osproc, strutils, tables, tempfiles, unicode, unittest]
 
 import headless_session
 import viewmodels/scrollbar_scrubber
@@ -37,13 +63,19 @@ import ../app/theme/roles
 import ../app/views/shell
 import ../app/views/styled_row
 import ../app/views/scrubber_track
+import ../app/views/variables
+import ../app/views/file_tree
+import ../app/views/vcs_pane
+import ../app/views/tree_node
 import ../app/layout/profile
 import ../host/tui_session
+import ../host/vcs_source
 import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 50
+const ExpectedAssertions = 122
+  ## +72: M71 (#838), the State, Files and VCS panes' scrollbars and wheel.
 
 var countedAssertions = 0
 
@@ -313,4 +345,364 @@ suite "PLAT-51: the Call Trace's scrollbar is a scrubber over the whole trace":
     ck s.session.getCurrentRRTicks() == tick
     ck rt.app.callTrace.currentTraceIndex == current
 
-echo "CHECKS ", countedAssertions
+# ---------------------------------------------------------------------------
+# M71 (codetracer#838): the State, Files and VCS panes — whole content in
+# hand — keep an ordinary scrollbar (Scrollbar-Scrubbers.md §2), drawn as the
+# terminal's track (§4) and pressed by the §3 rule, and the wheel scrolls
+# each without focusing it (CodeTracer-TUI.md §4.4).
+# ---------------------------------------------------------------------------
+
+const
+  WheelUp = 64
+  WheelDown = 65
+  InHandRows = 200
+    ## Files entries / untracked VCS files: several times what any pane at
+    ## `Rows` shows, so the thumb is short and a press mid-track is on the
+    ## track, not the thumb.
+
+proc isTrackStyle(st: CellStyle): bool =
+  ## A scrollbar cell: the track, the thumb (either eighth-block form — the
+  ## reversed one is the track colour on the thumb's ground) or the mark.
+  st.role in {srScrubberTrack, srScrubberThumb, srScrubberMark} or
+    st.surface == srScrubberThumbGround
+
+proc isThumbStyle(st: CellStyle): bool =
+  st.role == srScrubberThumb or st.surface == srScrubberThumbGround
+
+proc trackCells(g: StyledGrid; col, top, rows: int): int =
+  ## How many of column `col`'s rows `top ..< top + rows` are scrollbar cells.
+  for r in top ..< top + rows:
+    if g.styleAt(r, col).isTrackStyle: inc result
+
+proc thumbRows(g: StyledGrid; col, top, rows: int): seq[int] =
+  ## The rows of column `col` the thumb covers (any part of), top to bottom.
+  for r in top ..< top + rows:
+    if g.styleAt(r, col).isThumbStyle: result.add r
+
+proc cellOf(line, needle: string): int =
+  let at = line.find(needle)
+  if at < 0: -1 else: line[0 ..< at].runeLen
+
+proc rowIn(rt: TuiRuntime; kind: PaneKind; needle: string): int =
+  ## The first body row of pane `kind` whose text holds `needle`, or -1.
+  let a = rt.areaOf(kind)
+  let rows = rt.shellScreenOf().rows
+  for r in a.row + 1 ..< a.row + a.height:
+    if r < rows.len and rows[r].runeSubStr(a.col, a.width).contains(needle):
+      return r
+  -1
+
+proc openTotalHistory(rt: TuiRuntime; s: TuiSession): seq[HistoryEntry] =
+  ## Step into `call_pages`' `main` until its local `total` is listed, then
+  ## open `total`'s value history under its row with the row's history
+  ## control — the reporter's case (one entry per loop round).
+  var row = -1
+  for _ in 0 ..< 80:
+    row = rt.rowIn(paneState, "total")
+    if row > 0:
+      break
+    s.send(rt, "s")
+  checkpoint("`total` on screen row " & $row)
+  if row <= 0:
+    return @[]
+  let a = rt.areaOf(paneState)
+  let line = rt.shellScreenOf().rows[row].runeSubStr(a.col, a.width)
+  let ctl = line.cellOf(HistoryControlGlyph)
+  if ctl < 0:
+    return @[]
+  s.click(rt, row, a.col + ctl)
+  for _, entries in rt.app.openHistories:
+    result = entries
+
+proc wideEntries(): seq[FileTreeEntry] =
+  ## `InHandRows` files of a recording's tree, the first named wider than
+  ## any pane, so whatever the pane's last column holds on its row is either
+  ## that name or the track.
+  for i in 0 ..< InHandRows:
+    let name = (if i == 0: repeat("x", 300) else: "module_" & $i & ".py")
+    result.add FileTreeEntry(text: name, depth: 0, isFolder: false,
+                             path: "src/" & name)
+
+proc wideVcs(): VcsPaneModel =
+  ## A VCS pane value of `2 + InHandRows + 2` rows: the branch, the working
+  ## tree's caption, its files (the first wider than any pane), the commits'
+  ## caption and one commit.
+  result = VcsPaneModel(loaded: true, isRepo: true, branch: "m71",
+                        workingTreeTitle: "Working tree", cleanText: "clean",
+                        expandedCommit: -1)
+  for i in 0 ..< InHandRows:
+    result.files.add VcsFileLine(
+      status: "?", path: (if i == 0: repeat("x", 300) else: "f" & $i & ".txt"))
+  result.commits.add VcsCommitLine(hash: "496ddf7", subject: "the last row")
+
+proc vcsRows(m: VcsPaneModel): int =
+  ## The pane's rows, counted from what it lists (the layout above).
+  (if m.branch.len > 0: 1 else: 0) + 1 + max(1, m.files.len) +
+    (if m.commits.len > 0: 1 + m.commits.len else: 0)
+
+proc makeVcsRepo(): string =
+  ## A real git repository: one commit (`README`), then `InHandRows`
+  ## untracked files — so the working tree lists that many rows.
+  result = createTempDir("m71-vcs-", "") / "repo"
+  createDir(result)
+  writeFile(result / "README", "m71\n")
+  let q = quoteShell(result)
+  let (output, code) = execCmdEx(
+    "git -C " & q & " -c init.defaultBranch=m71 init -q && " &
+    "git -C " & q & " -c user.name=m71 -c user.email=m71@invalid " &
+    "-c commit.gpgsign=false add README && " &
+    "git -C " & q & " -c user.name=m71 -c user.email=m71@invalid " &
+    "-c commit.gpgsign=false commit -q -m m71")
+  if code != 0:
+    checkpoint(output)
+  for i in 0 ..< InHandRows:
+    writeFile(result / ("untracked_" & align($i, 2, '0') & ".txt"), $i & "\n")
+
+proc showVcsTab(s: TuiSession; rt: TuiRuntime): bool =
+  ## Press the VCS tab of the Files / VCS stack, so the VCS pane is shown.
+  for region in rt.shellScreenOf().geometry.projection.regions:
+    for k, title in region.tabs:
+      if title.toUpperAscii.contains("VCS"):
+        let spans = tabSpans(region.tabs, region.activeTab)
+        s.click(rt, region.area.row,
+                region.area.col + spans[k].startCol + spans[k].width div 2)
+        return true
+  false
+
+proc focusedPaneOf(rt: TuiRuntime): (bool, PaneKind) =
+  rt.focus.focusedPane()
+
+proc checkTrackPresses(s: TuiSession; rt: TuiRuntime; pane: PaneKind;
+                       total: int; topOf: proc(): int) =
+  ## §3 on pane `pane`'s track — its last column, one cell, beside the body
+  ## rows: a press at the END shows the last row, at the START the first, in
+  ## the MIDDLE centres the row at that fraction; the held thumb drags.
+  let a = rt.areaOf(pane)
+  let col = a.col + a.width - 1
+  let top = a.row + 1
+  let body = a.height - 1
+  checkpoint($pane & ": " & $total & " rows over a body of " & $body)
+  ck total > body
+  # The shell's frame draws the track down that column, every body row.
+  var drawn = 0
+  for r in top ..< top + body:
+    if rt.styleAt(r, col).isTrackStyle: inc drawn
+  ck drawn == body
+  s.click(rt, top + body - 1, col)
+  ck topOf() == total - body
+  s.click(rt, top, col)
+  ck topOf() == 0
+  let mid = body div 2
+  let sm = scrubberModel(total, 0, body)
+  ck sm.verticalScrubberHit(top, body, top + mid).kind == shTrack
+  let want = sm.clickAt(trackFractionAt(mid, body))
+  s.click(rt, top + mid, col)
+  checkpoint($pane & ": middle press top " & $topOf() & " want " & $want)
+  ck want > 0
+  ck topOf() == want
+  # The thumb, at the top again, held and dragged to the bottom.
+  s.click(rt, top, col)
+  s.send(rt, sgr(0, top, col))
+  ck rt.app.listScrub.active and rt.app.listScrub.pane == pane
+  for r in top .. top + body - 1:
+    s.send(rt, sgr(0, r, col, motion = true))
+  s.send(rt, sgr(0, top + body - 1, col, release = true))
+  ck not rt.app.listScrub.active
+  ck topOf() == total - body
+
+suite "M71 (#838): the State, Files and VCS panes draw a scrollbar when they overflow":
+
+  test "State: an open value history overflows the pane, and the thumb follows scrollTop":
+    require pages.outcome == foRecorded
+    let (rt, s) = open(pages.tracePath)
+    defer: s.close()
+    let hist = rt.openTotalHistory(s)
+    checkpoint("history of `total`: " & $hist.len & " entries")
+    ck hist.len > 100
+    let opened = rt.app.variables
+    var closed = opened
+    closed.histories = initTable[string, seq[HistoryEntry]]()
+    let closedRows = closed.paneRows().len
+    let openRows = opened.paneRows().len
+    # The history's entries are rows of the pane's population.
+    ck openRows == closedRows + hist.len
+    # An area the pane fits in with the history closed: no track, and the
+    # last column is the rows' own.
+    const W = 72
+    let h = closedRows + 2
+    let area = CellArea(col: 0, row: 0, width: W, height: h)
+    var fits = newStyledGrid(W, h)
+    discard paintVariables(fits, area, closed)
+    ck fits.trackCells(W - 1, 1, h - 1) == 0
+    # Exactly full — a body row for every row, none spare — is not an
+    # overflow either.
+    var full = newStyledGrid(W, closedRows + 1)
+    discard paintVariables(full, CellArea(col: 0, row: 0, width: W,
+                                          height: closedRows + 1), closed)
+    ck full.trackCells(W - 1, 1, closedRows) == 0
+    # The same area with the history open: the last column is a track down
+    # every body row, the thumb at its top.
+    var over = newStyledGrid(W, h)
+    discard paintVariables(over, area, opened)
+    ck over.trackCells(W - 1, 1, h - 1) == h - 1
+    let atTop = over.thumbRows(W - 1, 1, h - 1)
+    checkpoint("thumb rows at the top: " & $atTop)
+    ck atTop.len > 0 and atTop[0] == 1
+    # Scrolled to the end, the thumb ends on the last body row.
+    var scrolled = opened
+    scrolled.scrollTop = openRows
+    var atEnd = newStyledGrid(W, h)
+    discard paintVariables(atEnd, area, scrolled)
+    let low = atEnd.thumbRows(W - 1, 1, h - 1)
+    checkpoint("thumb rows at the end: " & $low)
+    ck low.len > 0 and low[^1] == h - 1 and low[0] > atTop[0]
+
+  test "Files: an overflowing tree paints a track whose thumb follows scrollTop; one that fits keeps its last column":
+    const W = 40
+    let model = initFileTreeModel(wideEntries())
+    # Fits: every entry has a body row; the first's name runs to the last
+    # column, which is its text, not a track.
+    let tall = InHandRows + 3
+    var fits = newStyledGrid(W, tall)
+    discard paintFileTree(fits, CellArea(col: 0, row: 0, width: W,
+                                         height: tall), model)
+    ck fits.trackCells(W - 1, 1, tall - 1) == 0
+    ck fits.runeAt(1, W - 1) == "x"
+    # Exactly full: still no track.
+    var full = newStyledGrid(W, InHandRows + 1)
+    discard paintFileTree(full, CellArea(col: 0, row: 0, width: W,
+                                         height: InHandRows + 1), model)
+    ck full.trackCells(W - 1, 1, InHandRows) == 0
+    # Overflows: the last column is the track, the name stops a cell short.
+    const h = 12
+    let area = CellArea(col: 0, row: 0, width: W, height: h)
+    var over = newStyledGrid(W, h)
+    discard paintFileTree(over, area, model)
+    ck over.trackCells(W - 1, 1, h - 1) == h - 1
+    ck over.runeAt(1, W - 2) == "x"
+    let atTop = over.thumbRows(W - 1, 1, h - 1)
+    ck atTop.len > 0 and atTop[0] == 1
+    var scrolled = model
+    scrolled.scrollTop = InHandRows
+    var atEnd = newStyledGrid(W, h)
+    discard paintFileTree(atEnd, area, scrolled)
+    let low = atEnd.thumbRows(W - 1, 1, h - 1)
+    checkpoint("files thumb " & $atTop & " -> " & $low)
+    ck low.len > 0 and low[^1] == h - 1 and low[0] > atTop[0]
+    # The last entry is on the last body row.
+    ck atEnd.rowText(h - 1).contains("module_" & $(InHandRows - 1) & ".py")
+    # Edit mode's flat list (`files`) scrolls the same way.
+    var paths: seq[string] = @[]
+    for e in wideEntries(): paths.add e.path
+    var flat = newStyledGrid(W, h)
+    discard paintFileTree(flat, area, initFileTreeModel(files = paths))
+    ck flat.trackCells(W - 1, 1, h - 1) == h - 1
+
+  test "VCS: an overflowing pane paints a track whose thumb follows scrollTop; one that fits keeps its last column":
+    const W = 40
+    let model = wideVcs()
+    let total = model.vcsRows
+    # Fits (the VCS pane has no heading: every row of its area is a body
+    # row): no track; the first file's path runs to the last column.
+    let tall = total + 2
+    var fits = newStyledGrid(W, tall)
+    discard paintVcsPane(fits, CellArea(col: 0, row: 0, width: W,
+                                        height: tall), model)
+    ck fits.trackCells(W - 1, 0, tall) == 0
+    ck fits.runeAt(2, W - 1) == "x"
+    # Exactly full: still no track.
+    var full = newStyledGrid(W, total)
+    discard paintVcsPane(full, CellArea(col: 0, row: 0, width: W,
+                                        height: total), model)
+    ck full.trackCells(W - 1, 0, total) == 0
+    const h = 12
+    let area = CellArea(col: 0, row: 0, width: W, height: h)
+    var over = newStyledGrid(W, h)
+    discard paintVcsPane(over, area, model)
+    ck over.trackCells(W - 1, 0, h) == h
+    ck over.runeAt(2, W - 2) == "x"
+    let atTop = over.thumbRows(W - 1, 0, h)
+    ck atTop.len > 0 and atTop[0] == 0
+    var scrolled = model
+    scrolled.scrollTop = total
+    var atEnd = newStyledGrid(W, h)
+    discard paintVcsPane(atEnd, area, scrolled)
+    let low = atEnd.thumbRows(W - 1, 0, h)
+    checkpoint("vcs thumb " & $atTop & " -> " & $low)
+    ck low.len > 0 and low[^1] == h - 1 and low[0] > atTop[0]
+    # The last row — the commit — is on the area's last row.
+    ck atEnd.rowText(h - 1).contains("the last row")
+
+suite "M71 (#838): the wheel and the track move the State, Files and VCS panes":
+
+  test "a wheel over each pane scrolls it without focusing it first":
+    require pages.outcome == foRecorded
+    putEnv("CODETRACER_TUI_LAYOUT_DIR", getTempDir() / "m71-scrub-state")
+    let (rt, s) = open(pages.tracePath)
+    defer: s.close()
+    ck rt.openTotalHistory(s).len > 100
+    # Focus elsewhere: a press in the editor's text.
+    let ed = rt.areaOf(paneEditor)
+    s.click(rt, ed.row + 2, ed.col + ed.width div 2)
+    let (hadFocus, focused) = rt.focusedPaneOf()
+    checkpoint("focused " & $focused)
+    ck hadFocus and focused != paneState
+    # State: the wheel down, then up.
+    let st = rt.areaOf(paneState)
+    ck rt.app.variables.scrollTop == 0
+    s.send(rt, sgr(WheelDown, st.row + 2, st.col + 4))
+    ck rt.app.variables.scrollTop == CallTraceWheelRows
+    s.send(rt, sgr(WheelUp, st.row + 2, st.col + 4))
+    ck rt.app.variables.scrollTop == 0
+    # Files.
+    rt.app.fileTree = initFileTreeModel(wideEntries())
+    let fa = rt.areaOf(paneFileTree)
+    ck fa.height > 1
+    s.send(rt, sgr(WheelDown, fa.row + 2, fa.col + 4))
+    ck rt.app.fileTree.scrollTop == CallTraceWheelRows
+    s.send(rt, sgr(WheelUp, fa.row + 2, fa.col + 4))
+    ck rt.app.fileTree.scrollTop == 0
+    # VCS: the product's source over a real repository, its tab shown.
+    let repo = makeVcsRepo()
+    defer: removeDir(repo.parentDir)
+    let vcs = newVcsSource(repo)
+    defer: vcs.close()
+    vcs.refresh(rt)
+    ck rt.app.vcs.files.len == InHandRows
+    ck s.showVcsTab(rt)
+    let va = rt.areaOf(paneVcs)
+    ck va.height > 1
+    s.send(rt, sgr(WheelDown, va.row + 2, va.col + 4))
+    ck rt.app.vcs.scrollTop == CallTraceWheelRows
+    # The pane's periodic re-read keeps the reader's place.
+    vcs.refresh(rt)
+    ck rt.app.vcs.scrollTop == CallTraceWheelRows
+    s.send(rt, sgr(WheelUp, va.row + 2, va.col + 4))
+    ck rt.app.vcs.scrollTop == 0
+
+  test "a press on each pane's track jumps the view; its held thumb drags; the debugger stays":
+    require pages.outcome == foRecorded
+    let (rt, s) = open(pages.tracePath)
+    defer: s.close()
+    ck rt.openTotalHistory(s).len > 100
+    let tick = s.session.getCurrentRRTicks()
+    s.checkTrackPresses(rt, paneState, rt.app.variables.paneRows().len,
+                        proc(): int = rt.app.variables.scrollTop)
+    ck s.session.getCurrentRRTicks() == tick
+    rt.app.fileTree = initFileTreeModel(wideEntries())
+    s.checkTrackPresses(rt, paneFileTree, InHandRows,
+                        proc(): int = rt.app.fileTree.scrollTop)
+    let repo = makeVcsRepo()
+    defer: removeDir(repo.parentDir)
+    let vcs = newVcsSource(repo)
+    defer: vcs.close()
+    vcs.refresh(rt)
+    ck s.showVcsTab(rt)
+    s.checkTrackPresses(rt, paneVcs, rt.app.vcs.vcsRows,
+                        proc(): int = rt.app.vcs.scrollTop)
+    ck s.session.getCurrentRRTicks() == tick
+
+suite "PLAT-51 / M71 scrubbers: assertion count":
+  test "every assertion ran":
+    echo "CHECKS: " & $countedAssertions
+    check countedAssertions == ExpectedAssertions

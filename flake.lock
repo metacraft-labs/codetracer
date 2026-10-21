@@ -639,11 +639,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1792535405,
-        "narHash": "sha256-50M7rqEyM9M5tWelq+CkTGhGucUl0sZvnAGw16IP2tE=",
+        "lastModified": 1792550894,
+        "narHash": "sha256-HL1K80HmEJPrepQG0WSwmHzkmOhBm0NPP7doW5zTNVI=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "201619ed41a382f17a28e547c7029b1820780932",
+        "rev": "9518ecbee452a13183c86465b5b02ba72fd00fa6",
         "type": "github"
       },
       "original": {
@@ -661,9 +661,11 @@
         "pre-commit-hooks": "pre-commit-hooks_2"
       },
       "locked": {
+        "lastModified": 1792552743,
+        "narHash": "sha256-BCT5qse3Ty6kAJHjfPxYOc0c+Gxh8n6IJ/WeruOHtLE=",
         "owner": "metacraft-labs",
         "repo": "codetracer-python-recorder",
-        "rev": "c02632817c90199f3071f974efb1e0224f4e9903",
+        "rev": "1c228e87042008daf2893684333b39aabf78972a",
         "type": "github"
       },
       "original": {
@@ -690,9 +692,11 @@
         "pre-commit-hooks": "pre-commit-hooks_3"
       },
       "locked": {
+        "lastModified": 1792548781,
+        "narHash": "sha256-kDxujy4CO3YbrP/lJWplBeuBhz7EtnLnq43+sMvtsUk=",
         "owner": "metacraft-labs",
         "repo": "codetracer-ruby-recorder",
-        "rev": "8a25b1260ae541cc42408737b641f44b96d43627",
+        "rev": "8151c6a2d0dcb296a0c4edc451c10561f3c9b4f2",
         "type": "github"
       },
       "original": {
@@ -807,11 +811,11 @@
     "codetracer-trace-format": {
       "flake": false,
       "locked": {
-        "lastModified": 1792358159,
-        "narHash": "sha256-HkBDw/ifYxp7ipHEo0cq1OgrrtR75ECNin8QLC+8FNU=",
+        "lastModified": 1792566715,
+        "narHash": "sha256-m8z9SV49enLYvLrdv/jRKptklauED5OSyIYoFvY5FQ4=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format",
-        "rev": "afa4dde4156c168bec73711c8002418345fa249b",
+        "rev": "b1fdaece32cb7aa7c6dfd211f8f61b8432938f26",
         "type": "github"
       },
       "original": {
@@ -4060,11 +4064,11 @@
     "io-mon": {
       "flake": false,
       "locked": {
-        "lastModified": 1792470986,
-        "narHash": "sha256-717Of0gxW8wcU6KJBpmtr4pzR+PJiy0GCMkQxHGlXnY=",
+        "lastModified": 1792542810,
+        "narHash": "sha256-nD8LqZKiPx5QgKFkdQonFzg6Ee2SS29Sz6CEYXSBol4=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "d5fa1abecfb40aed5d470a8032b803d6bef641e8",
+        "rev": "8a9a71c9cf75898a83c854898860b9e589e2a264",
         "type": "github"
       },
       "original": {
@@ -4077,17 +4081,17 @@
     "io-mon-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1792337935,
-        "narHash": "sha256-pWwTsQZxlkJZFv+7S2aSXpsoLo+26IUYB7cZMBgIEAw=",
+        "lastModified": 1792542810,
+        "narHash": "sha256-nD8LqZKiPx5QgKFkdQonFzg6Ee2SS29Sz6CEYXSBol4=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "091fa26ce03d9dd1ca8cfa6a1d9d46624dc50491",
+        "rev": "8a9a71c9cf75898a83c854898860b9e589e2a264",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "091fa26ce03d9dd1ca8cfa6a1d9d46624dc50491",
+        "rev": "8a9a71c9cf75898a83c854898860b9e589e2a264",
         "type": "github"
       }
     },
@@ -4631,17 +4635,17 @@
     "nim-shm-queue-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1790569352,
-        "narHash": "sha256-vsqb2Ibe+4VqVug6oGJVZqX4d+z4oOY0oWZMHKc2pLk=",
+        "lastModified": 1792410294,
+        "narHash": "sha256-HYS07QHtkHQ4Pm7yBuQm27dhQ3mOYquwp2GWIEuupqo=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "a3564c13e0b7d0c6a092c19c998cd3faee5ce20a",
+        "rev": "91451f2250beb89d1d221f0a77be0841c19b182e",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-shm-queue",
-        "rev": "a3564c13e0b7d0c6a092c19c998cd3faee5ce20a",
+        "rev": "91451f2250beb89d1d221f0a77be0841c19b182e",
         "type": "github"
       }
     },
@@ -4665,17 +4669,17 @@
     "nim-stackable-hooks-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1792121399,
-        "narHash": "sha256-itD4iFoT/HMbY0qbxM7NJmxzBJJIzaWY64NHmd7wC8I=",
+        "lastModified": 1792526570,
+        "narHash": "sha256-OClpXo2nKlpbLk1uYt06/gNMlC77lwq+o9ipgLk0BbQ=",
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "ff7eb18af166f9355c5e62bf1434ba5f9fd2c99e",
+        "rev": "6082ee94203a5937d3dffe99e5098f644c4799b2",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "ff7eb18af166f9355c5e62bf1434ba5f9fd2c99e",
+        "rev": "6082ee94203a5937d3dffe99e5098f644c4799b2",
         "type": "github"
       }
     },
@@ -7589,11 +7593,11 @@
         "stackable-hooks-macos-tools": "stackable-hooks-macos-tools"
       },
       "locked": {
-        "lastModified": 1792534195,
-        "narHash": "sha256-/GUYF91lE8HGkbYMLj80zV0v5/o3Huc/FLuZZlydwYI=",
+        "lastModified": 1792563229,
+        "narHash": "sha256-jqyheoYEH51HhZvrh9N69/KdijKs65tvJWsL0VLw5uY=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "e92680464851956d9396dbb0e324d36f4b9404f8",
+        "rev": "0d35bb1dddd4dfff74adb671c58e9efb9aab1038",
         "type": "github"
       },
       "original": {
@@ -7775,11 +7779,11 @@
         "runquota-package-catalog": "runquota-package-catalog"
       },
       "locked": {
-        "lastModified": 1792335111,
-        "narHash": "sha256-A0+DQquMegirVLTJxokjn2Yxs9LWNef9RLUORFwXCUU=",
+        "lastModified": 1792456882,
+        "narHash": "sha256-Xc9pRPsDtK81R8glrnggQ1+8XpTVeDZ56lK3DC+Gams=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "416274abe4cda8ec9aef7dca9165cfb8c25a1846",
+        "rev": "4962e37106e318c88626040fbdce4aa0832ff82a",
         "type": "github"
       },
       "original": {

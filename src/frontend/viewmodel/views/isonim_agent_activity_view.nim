@@ -24,6 +24,7 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/agent_activity_vm
+import ../keymap/scope_path   # the prompt's scope element
 
 var expandedToolRowIds = initHashSet[string]()
 
@@ -745,6 +746,51 @@ proc makeToolRowClickHandler(rowId: string): proc() =
         else:
           expandedToolRowIds.incl(sid)
 
+# Per-item handler factories (codetracer#860 sweep).
+#
+# Every list below -- message images, inline image segments, tool-call groups,
+# changed files, pasted images, context paths -- is built in a `for` loop,
+# and Nim closures capture by reference: a `let` declared in a
+# loop body, or the loop variable itself, is ONE variable for the whole loop
+# (https://nim-lang.org/docs/manual.html#procedures-closures). An inline
+# `proc() = ...` over such a `let` therefore acts on the LAST item whichever
+# item was clicked. Each factory takes the per-item value as its own
+# parameter, so every closure it returns owns that value; the `ui` DSL
+# evaluates an `onX = expr` attribute once, when the item is built.
+
+proc imageLightboxHandler(src: string): proc() =
+  ## Opens the lightbox on THIS image.
+  result = proc() =
+    when defined(js):
+      showImageLightbox(cstring(src))
+    else:
+      discard src
+
+proc toolHistoryToggleHandler(historyId: string): proc() =
+  ## Expands or collapses THIS tool-call group's history.
+  result = proc() =
+    when defined(js):
+      let histEl = jsQuerySelector(cstring("#" & historyId))
+      if not histEl.isNil:
+        classListToggle(histEl, "agent-tc-history-expanded")
+    else:
+      discard historyId
+
+proc openFileDiffHandler(callbacks: AgentActivityCallbacks;
+                         target: string): proc() =
+  ## Opens the diff of THIS changed file.
+  result = proc() =
+    if callbacks.onOpenFileDiff != nil:
+      callbacks.onOpenFileDiff(target)
+
+proc removePastedImageHandler(vm: AgentActivityVM; idx: int): proc() =
+  ## Removes THIS pasted image.
+  result = proc() = vm.removePastedImage(idx)
+
+proc removeContextPathHandler(vm: AgentActivityVM; idx: int): proc() =
+  ## Removes THIS context path.
+  result = proc() = vm.removeContextPath(idx)
+
 proc renderMessage[R](r: R; componentId: int;
                       message: AgentActivityMessageEntry;
                       callbacks: AgentActivityCallbacks): auto =
@@ -776,9 +822,7 @@ proc renderMessage[R](r: R; componentId: int;
             for imgData in message.images:
               let capturedSrc = imgData
               tdiv(class = "agent-msg-thumb",
-                   onclick = proc() =
-                     when defined(js):
-                       showImageLightbox(cstring(capturedSrc))):
+                   onclick = imageLightboxHandler(capturedSrc)):
                 img(class = "agent-msg-thumb-img", alt = "attachment", src = capturedSrc)
         tdiv(class = AgentActivityMessageContentClass, id = contentId):
           for segLent in parseInlineCode(message.content):
@@ -987,9 +1031,7 @@ proc renderMessage[R](r: R; componentId: int;
                   elif seg.kind == mskImage:
                     let capturedImgSrc = seg.content
                     tdiv(class = "agent-msg-thumb",
-                         onclick = proc() =
-                           when defined(js):
-                             showImageLightbox(cstring(capturedImgSrc))):
+                         onclick = imageLightboxHandler(capturedImgSrc)):
                       img(class = "agent-msg-thumb-img", alt = seg.lang, src = capturedImgSrc)
                   else:
                     tdiv(class = "agent-code-block"):
@@ -1018,11 +1060,7 @@ proc renderMessage[R](r: R; componentId: int;
                           span(class = "agent-tc-name"): text tc.toolName
                           span(class = dotClass)
                     tdiv(class = "agent-tc-toggle",
-                         onclick = proc() =
-                           when defined(js):
-                             let histEl = jsQuerySelector(cstring("#" & grpHistId))
-                             if not histEl.isNil:
-                               classListToggle(histEl, "agent-tc-history-expanded")):
+                         onclick = toolHistoryToggleHandler(grpHistId)):
                       span(class = "agent-tc-toggle-icon")
                       text $grpTools.len & " tools used"
                   let currentTc = grpTools[^1]
@@ -1113,9 +1151,7 @@ proc renderMessage[R](r: R; componentId: int;
               elif mseg.kind == mskImage:
                 let capturedMsegSrc = mseg.content
                 tdiv(class = "agent-msg-thumb",
-                     onclick = proc() =
-                       when defined(js):
-                         showImageLightbox(cstring(capturedMsegSrc))):
+                     onclick = imageLightboxHandler(capturedMsegSrc)):
                   img(class = "agent-msg-thumb-img", alt = mseg.lang, src = capturedMsegSrc)
               else:
                 tdiv(class = "agent-code-block"):
@@ -1127,9 +1163,7 @@ proc renderMessage[R](r: R; componentId: int;
             for imgData in message.images:
               let capturedSrc = imgData
               tdiv(class = "agent-msg-thumb",
-                   onclick = proc() =
-                     when defined(js):
-                       showImageLightbox(cstring(capturedSrc))):
+                   onclick = imageLightboxHandler(capturedSrc)):
                 img(class = "agent-msg-thumb-img", alt = "agent image", src = capturedSrc)
         # "Agent is working" indicator: visible outside the collapsible block while
         # the agent is still producing output after the thinking phase ended.
@@ -1155,9 +1189,7 @@ proc renderMessage[R](r: R; componentId: int;
               let (added, removed) = computeDiffStats(diff.original, diff.modified)
               let singleTarget = "file:" & msgId & ":" & $diff.id
               tdiv(class = "agent-diff-file-row",
-                   onclick = proc() =
-                     if callbacks.onOpenFileDiff != nil:
-                       callbacks.onOpenFileDiff(singleTarget)):
+                   onclick = openFileDiffHandler(callbacks, singleTarget)):
                 span(class = "agent-diff-file-path"): text diff.path
                 span(class = "agent-diff-stat-added"): text "+" & $added
                 span(class = "agent-diff-stat-removed"): text "-" & $removed
@@ -1953,6 +1985,15 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         tdiv(ref = buttons, class = "agent-buttons-container")
       tdiv(ref = settingsPanelHost, class = "agent-settings-host")
 
+  # The prompt is the scope path's `input:agent-prompt` (Base-Keymaps-And-
+  # Layer-Stack.md §5.2: views render the attributes the desktop reads its
+  # path from, §6.2), as Find in Files' field is `input:search-query`.  This
+  # pane is a LIST pane, so without its own element the focus was the pane:
+  # `Enter` resolved to `list.activate`, which the key router ran and stopped
+  # before the keydown handler below could submit.  Both renderers take the
+  # same two attributes, so MockRenderer suites see what Electron gets.
+  r.setAttribute(input, ScopeKindAttribute, $ekInput)
+  r.setAttribute(input, ScopeIdAttribute, AgentPromptInput)
   r.attachInputEvents(input, vm, callbacks)
   r.setupInputHighlight(input, highlight)
 
@@ -1972,7 +2013,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
           tdiv(class = "agent-paste-thumb agent-paste-thumb--loading"):
             tdiv(class = "agent-paste-shimmer")
             tdiv(class = "agent-paste-remove",
-                 onclick = proc() = vm.removePastedImage(idx)):
+                 onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.appendRenderedChild(imagesStrip, thumb)
       else:
@@ -1981,11 +2022,9 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         let thumb = ui(r):
           tdiv(class = "agent-paste-thumb"):
             img(ref = imgEl, class = "agent-paste-img", alt = "attachment",
-                onclick = proc() =
-                  when defined(js):
-                    showImageLightbox(cstring(capturedSrc)))
+                onclick = imageLightboxHandler(capturedSrc))
             tdiv(class = "agent-paste-remove",
-                 onclick = proc() = vm.removePastedImage(idx)):
+                 onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.setAttribute(imgEl, "src", imgData)
         r.appendRenderedChild(imagesStrip, thumb)
@@ -1997,7 +2036,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
           span(class = "agent-context-path-chip__label"):
             text capturedPath
           tdiv(class = "agent-paste-remove",
-               onclick = proc() = vm.removeContextPath(pathIdx)):
+               onclick = removeContextPathHandler(vm, pathIdx)):
             text "×"
       r.appendRenderedChild(imagesStrip, chip)
 

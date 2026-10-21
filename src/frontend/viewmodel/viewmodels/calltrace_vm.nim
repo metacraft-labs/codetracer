@@ -55,6 +55,62 @@ const
   CALLTRACE_BUFFER* = LeadRows
 
 type
+  CalltraceSearchResult* = object
+    ## One match of the backend's full-trace call search
+    ## (`ct/search-calltrace`), as the search-results list draws and jumps to
+    ## it.
+    ##
+    ## A result row names ONE frame, so it carries that frame's identity and
+    ## not only its tick: `Click-Navigation.md` §2.2 — the tick a frame starts
+    ## at is shared by every frame a call chain collapses onto it, so a jump
+    ## written as "seek to the tick" cannot say which of them was clicked.
+    ## `location`, `rrTicks` and `codeGeneration` are the same three inputs a
+    ## calltrace row's jump is built from (`calltraceJumpArgs`), so a search
+    ## result and the row it matches send the same `ct/calltrace-jump`.
+    name*: string
+      ## The call's high-level function name.
+    key*: string
+      ## The call's key, as the row label's `#<key>` shows it.
+    rrTicks*: uint64
+      ## The tick the call starts at.
+    location*: Location
+      ## Where the call is: the high-level path and line (the low-level ones
+      ## when the recorder left the high-level fields empty, as
+      ## `replay_data_store.callLineOf` does for a row), its source revision
+      ## and its `callstackDepth`.
+    codeGeneration*: int
+      ## Executable-code generation for HCR-aware occurrences (see
+      ## `CallLine.codeGeneration`); 0 for legacy traces.
+
+  RevealScroll* = object
+    ## A request, from the search-result reveal, that the view scroll its
+    ## rows so `firstRow` is the first one shown. `serial` grows with every
+    ## request, so a view can tell a new request from the one it already
+    ## carried out — even one naming the same row.
+    serial*: int
+    firstRow*: int
+
+  PendingReveal = object
+    ## A search result whose row the pane is bringing into view and marking
+    ## (`jumpToSearchResult`, Click-Navigation.md §2.1). Kept until the row
+    ## is marked, or the session moves somewhere else.
+    key: string
+      ## The clicked call's key: the frame identity the mark goes to (§2.2).
+    rrTicks: uint64
+      ## The tick the call starts at, where the jump lands.
+    clickTicks: uint64
+      ## The debugger's tick when the result was clicked.
+    clickIndex: int64
+      ## `store.calltrace.currentLineIndex` when the result was clicked: until
+      ## an answer names another line, what the store holds is from before
+      ## the move and says nothing about where the clicked call is.
+    arrivedAtClick: bool
+      ## The session was already at the call's tick when it was clicked, so
+      ## no move will follow and the line the store holds is current.
+    revealedTo: int64
+      ## The line the pane was last scrolled to for this result, -1 for none:
+      ## a section is asked for once per line, not on every answer.
+
   CalltraceVM* = ref object of ViewModel
     ## Reactive state for the Calltrace panel.
     ##
@@ -108,9 +164,20 @@ type
 
     # -- Backend search results --
     # Populated by the legacy calltrace component when it receives
-    # CtCalltraceSearchResponse. Each entry is (name, rrTicks, key)
-    # matching what the Karax search results view shows.
-    backendSearchResults*: Signal[seq[tuple[name: string, rrTicks: int, key: string]]]
+    # CtCalltraceSearchResponse (`ui/calltrace.registerSearchRes`). Each
+    # entry carries the matched call's frame identity so a click on it can
+    # jump to that frame (`jumpToSearchResult`).
+    backendSearchResults*: Signal[seq[CalltraceSearchResult]]
+
+    # -- Search-result reveal (codetracer#860) --
+    revealScroll*: Signal[RevealScroll]
+      ## The scroll a search-result activation asks the view for, so the
+      ## clicked call's row is on screen (`jumpToSearchResult`). The ONLY
+      ## thing that scrolls the pane on the ViewModel's initiative: a move made
+      ## anywhere else leaves the pane where the reader put it
+      ## (Scrollbar-Scrubbers.md §3.5).
+    pendingReveal: Option[PendingReveal]
+      ## The search result being revealed, if any — see `PendingReveal`.
 
     # -- Measured layout --
     # The rows' measured ADVANCE (top to top) in CSS pixels, measured from
@@ -457,6 +524,36 @@ proc toggleExpandCallChildren*(vm: CalltraceVM; lineIndex: int64) =
     vm.store.requestTracker.forget("load-calltrace")
     vm.requestWindow()
 
+proc calltraceJumpArgs*(location: Location; rrTicks: uint64;
+                        codeGeneration: int): JsonNode =
+  ## The `ct/calltrace-jump` payload for the call at `location`, starting at
+  ## `rrTicks`.
+  ##
+  ## THE ONE PLACE this payload is written. A calltrace row's jump
+  ## (`doubleClickEntry`) and a search result's (`jumpToSearchResult`) both
+  ## go through it, so they cannot drift apart again: the search result's
+  ## used to be `{rrTicks}` alone, which names a moment rather than a frame
+  ## (`Click-Navigation.md` §2.2 — the frame's `callstackDepth` is what tells
+  ## the frames that share a tick apart).
+  ##
+  ## The backend deserialises it as its `Location` struct
+  ## (`src/db-backend/src/task.rs`), so the keys are that struct's camelCase
+  ## field names — `path`, not `file` — with the high-level pair mirroring
+  ## the primary path and line. `codeGeneration` is not a `Location` field;
+  ## the backend's `Location` is deliberately not `deny_unknown_fields`, so
+  ## the extra key reaches the handler without being refused.
+  %*{
+    "path": location.file,
+    "line": location.line,
+    "highLevelPath": location.file,
+    "highLevelLine": location.line,
+    "rrTicks": rrTicks,
+    "callstackDepth": location.callstackDepth,
+    "sourceGeneration": location.sourceGeneration,
+    "sourceDigest": location.sourceDigest,
+    "codeGeneration": codeGeneration,
+  }
+
 proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
   ## Navigate to the source location of the calltrace entry at `lineIndex`.
   ## Looks up the line in the store's calltrace data and sends a
@@ -466,20 +563,8 @@ proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
   let offset = lineIndex - startIdx
   if offset >= 0 and offset < lines.len.int64:
     let line = lines[offset.int]
-    # The backend expects a Location struct with camelCase field names:
-    #   path (not file), line, rrTicks, highLevelPath, highLevelLine, etc.
-    let args = %*{
-      "path": line.location.file,
-      "line": line.location.line,
-      "highLevelPath": line.location.file,
-      "highLevelLine": line.location.line,
-      "rrTicks": line.rrTicks,
-      "callstackDepth": line.location.callstackDepth,
-      "sourceGeneration": line.location.sourceGeneration,
-      "sourceDigest": line.location.sourceDigest,
-      "codeGeneration": line.codeGeneration,
-    }
-    vm.store.requestHistoricalNavigation("ct/calltrace-jump", args)
+    vm.store.requestHistoricalNavigation("ct/calltrace-jump",
+      calltraceJumpArgs(line.location, line.rrTicks, line.codeGeneration))
 
 proc setSearchQuery*(vm: CalltraceVM; query: string) =
   ## Update the search query. Sends the query to the backend via
@@ -509,10 +594,122 @@ proc setSearchQuery*(vm: CalltraceVM; query: string) =
     discard vm.store.backend.send("ct/search-calltrace", args)
 
 proc setBackendSearchResults*(vm: CalltraceVM;
-    results: seq[tuple[name: string, rrTicks: int, key: string]]) =
+    results: seq[CalltraceSearchResult]) =
   ## Update the backend search results. Called by the legacy calltrace
   ## component when it receives CtCalltraceSearchResponse.
   vm.backendSearchResults.val = results
+
+proc revealRow(vm: CalltraceVM; row: int64) =
+  ## Scroll the pane so `row` is in the middle of the rows it shows: the
+  ## viewport moves (the auto-load effect then asks for the section around
+  ## it, Viewport-Driven-Loading V2) and the view is asked to scroll to match
+  ## (`revealScroll`).
+  let v = vm.viewport.val
+  let first = int(max(0'i64, row - int64(max(1, v.rows) div 2)))
+  vm.setViewport(v.scrolledTo(first))
+  vm.revealScroll.val = RevealScroll(serial: vm.revealScroll.val.serial + 1,
+                                     firstRow: first)
+
+proc advanceReveal(vm: CalltraceVM; lines: seq[CallLine]; start: int64;
+                   current: int64; ticks: uint64) =
+  ## One step of a search result's reveal, on every change to the section
+  ## held, to where the engine says the current call is, or to the
+  ## debugger's position.
+  ##
+  ## THE MARK GOES TO THE CLICKED CALL BY ITS KEY, and only once the session
+  ## has arrived at it: the key is the frame's identity, where a tick is
+  ## shared by every frame a call chain collapses onto it
+  ## (Click-Navigation.md §2.2), and a mark placed before the move would mark
+  ## a row the session is not in (§2.1).
+  ##
+  ## WHEN THE ROW IS NOT HELD, the engine's `currentCallLineIndex` — sent with
+  ## every section, the pane's re-ask after the move included — says which
+  ## line it is, and the pane scrolls there; the auto-load effect then asks
+  ## for that section, and its answer holds the row. A line that IS held but
+  ## is not the clicked call's row is a caller the call is folded inside:
+  ## revealing it would take an expansion the reader did not ask for, so the
+  ## reveal ends there.
+  if vm.pendingReveal.isNone:
+    return
+  var p = vm.pendingReveal.get
+  if ticks != p.rrTicks:
+    if ticks != p.clickTicks:
+      # The session moved somewhere else before arriving: nothing to reveal.
+      vm.pendingReveal = none(PendingReveal)
+    return
+  for l in lines:
+    if l.callKey == p.key:
+      vm.pendingReveal = none(PendingReveal)
+      # `selectCall`, not `selectEntry`: the mark then follows this call
+      # through later reloads (a collapse above it shifts its row, #811)
+      # instead of staying on a row position.
+      vm.selectCall(p.key)
+      let v = vm.viewport.val
+      if v.rows > 0 and (l.index < v.firstRow or
+                         l.index >= v.firstRow + v.rows):
+        vm.revealRow(l.index)
+      return
+  # Not held. Only an answer given after the move says where the call is.
+  if current < 0 or (current == p.clickIndex and not p.arrivedAtClick):
+    return
+  if current >= start and current < start + lines.len.int64:
+    vm.pendingReveal = none(PendingReveal)
+    return
+  if current == p.revealedTo:
+    return  # already scrolled there; waiting for that section
+  p.revealedTo = current
+  vm.pendingReveal = some(p)
+  vm.revealRow(current)
+
+proc jumpToSearchResult*(vm: CalltraceVM; index: int) =
+  ## Navigate to the frame of the search result at `index` in
+  ## `backendSearchResults` — what activating a `.search-result` row does.
+  ##
+  ## Sends the same `ct/calltrace-jump` a calltrace row sends for that call
+  ## (`calltraceJumpArgs`), so the jump carries the frame's identity
+  ## (`Click-Navigation.md` §2.1/§2.2). Taking the INDEX, and reading the
+  ## result when the click happens, keeps the view's per-row handler down
+  ## to one plain integer — see `isonim_calltrace_view.searchResultJumpHandler`
+  ## for why a per-row value has to be passed in rather than captured. The
+  ## list is rebuilt whenever the results change, so a row's index always
+  ## names the result it draws; an index outside the list (a click racing a
+  ## new search) sends nothing.
+  ##
+  ## It then BRINGS THAT CALL'S ROW INTO THE PANE AND MARKS IT, wherever it
+  ## lies — §2.1's second half, which a pane that only re-asked the rows it
+  ## already showed could not do for a match outside them (`advanceReveal`).
+  ## This is the call trace's own activation; a move made anywhere else does
+  ## not scroll the pane (Scrollbar-Scrubbers.md §3.5).
+  let results = vm.backendSearchResults.val
+  if index < 0 or index >= results.len:
+    return
+  let res = results[index]
+  let dbg = vm.store.debugger.val
+  if vm.pendingReveal.isSome and vm.pendingReveal.get.key == res.key:
+    # THE SAME RESULT AGAIN, while its reveal is still under way (a double
+    # click, or a second activation before the first arrived): the jump is
+    # the same jump, and the reveal already in progress is kept. Restarting
+    # it here would take the session as "already there" and trust the line
+    # the store holds — which, until the first jump's section answer lands,
+    # is still the line from BEFORE the move (measured: the reveal then gave
+    # up on a held row that was not the call).
+    vm.store.requestHistoricalNavigation("ct/calltrace-jump",
+      calltraceJumpArgs(res.location, res.rrTicks, res.codeGeneration))
+    return
+  vm.pendingReveal = some(PendingReveal(
+    key: res.key,
+    rrTicks: res.rrTicks,
+    clickTicks: dbg.rrTicks,
+    clickIndex: vm.store.calltrace.currentLineIndex.val,
+    arrivedAtClick: dbg.rrTicks == res.rrTicks,
+    revealedTo: -1))
+  vm.store.requestHistoricalNavigation("ct/calltrace-jump",
+    calltraceJumpArgs(res.location, res.rrTicks, res.codeGeneration))
+  if dbg.rrTicks == res.rrTicks:
+    # Already there: no move follows to set the reveal going.
+    vm.advanceReveal(vm.store.calltrace.lines.val,
+                     vm.store.calltrace.startLineIndex.val,
+                     vm.store.calltrace.currentLineIndex.val, dbg.rrTicks)
 
 proc setRawIgnorePatterns*(vm: CalltraceVM; patterns: string) =
   ## Update the calltrace filter patterns (e.g. "path~lib/system;path~chronicles").
@@ -757,7 +954,8 @@ proc createCalltraceVM*(store: ReplayDataStore;
     let isLoading = createMemo[bool] proc(): bool =
       store.calltrace.loadingState.val == lsLoading
 
-    let backendSearchResults = createSignal(newSeq[tuple[name: string, rrTicks: int, key: string]]())
+    let backendSearchResults = createSignal(newSeq[CalltraceSearchResult]())
+    let revealScroll = createSignal(RevealScroll())
 
     # Default 24.0 matches the legacy CALL_HEIGHT_PX constant; updated by the
     # view once rows have rendered so the virtual-scroll math uses the actual
@@ -784,6 +982,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       searchQuery: searchQuery,
       rawIgnorePatterns: rawIgnorePatterns,
       backendSearchResults: backendSearchResults,
+      revealScroll: revealScroll,
       rowHeightPx: rowHeightPx,
       fallbackStack: fallbackStack,
       visibleLines: visibleLines,
@@ -826,5 +1025,16 @@ proc createCalltraceVM*(store: ReplayDataStore;
       if not mayIssueBackendCommands(runtimeRole):
         return
       untrack(proc() = vm.requestWindow())
+
+    # Search-result reveal (codetracer#860): each change to the section held,
+    # to where the engine says the current call is, or to the debugger's
+    # position takes a pending reveal one step further (`advanceReveal`).
+    # Inert unless `jumpToSearchResult` started one.
+    createEffect proc() =
+      let lines = store.calltrace.lines.val
+      let start = store.calltrace.startLineIndex.val
+      let current = store.calltrace.currentLineIndex.val
+      let ticks = store.debugger.val.rrTicks
+      untrack(proc() = vm.advanceReveal(lines, start, current, ticks))
 
     vm

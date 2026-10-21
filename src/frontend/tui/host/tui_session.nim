@@ -851,8 +851,12 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
 
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)
+  # M71 (#838): the pane's reading position is the reader's too — a click on
+  # a history entry moves the debugger, and the reader stays where they were
+  # in the history (the painter clamps it to the new stop's rows).
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
-                                       tickLabel = "tick " & $tick)
+                                       tickLabel = "tick " & $tick,
+                                       scrollTop = rt.app.variables.scrollTop)
   # PLAT-51: the pane's open histories and origins, its watches and the
   # name column's width — the user's, carried across stops.
   rt.app.variables.histories = rt.app.openHistories
@@ -1191,9 +1195,12 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     if not vm.isNil:
       vm.toggleExpanded(c.path)
       let open = rt.app.fileTree.openPath
+      let top = rt.app.fileTree.scrollTop
       s.files = fileTreeModelOf(vm)
       rt.app.fileTree = s.files
       rt.app.fileTree.openPath = open
+      # M71 (#838): a folder opened or closed keeps the reader's place.
+      rt.app.fileTree.scrollTop = top
   of pcToggleBreakpoint:
     # K10: the desktop's gutter click (`lineActionClick` → `toggleBreakpoint`).
     if not s.toggleBreakpoint(c.path, c.line):

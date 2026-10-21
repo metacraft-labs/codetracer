@@ -36,8 +36,9 @@
 ##   * ``CODETRACER_MOVE_RECORDER_PATH`` — REQUIRED.  Path to the
 ##     column-aware ``codetracer-move-recorder`` binary.  Unset =>
 ##     SKIPPED.
-##   * ``REPLAY_SERVER_BIN`` — path to a built replay-server; defaults
-##     to the standard cargo-debug or `just build-once` output paths.
+##   * ``REPLAY_SERVER_BIN`` — path to a built replay-server.
+##     When unset, the search order of ``src/common/replay_server_path.nim``
+##     applies: the Repro build output first, cargo's trees last.
 ##   * ``CODETRACER_MOVE_COLUMN_AWARE_FIXTURE`` — override the
 ##     fixture project dir; defaults to
 ##     ``../codetracer-move-recorder/test-programs/move/column_aware``.
@@ -64,6 +65,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import ../../../../common/replay_server_path   # the one search order
 import recorder_gate
 
 # ---------------------------------------------------------------------------
@@ -98,17 +100,12 @@ proc repoRoot(): string =
     "could not locate codetracer repo root from " & currentSourcePath())
 
 proc findReplayServer(): string =
-  ## Resolve a replay-server binary (env override or standard build paths).
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  for c in [repoRoot() / "src" / "build-debug" / "bin" / "replay-server",
-            repoRoot() / "src" / "db-backend" / "target" / "debug" / "replay-server",
-            repoRoot() / "src" / "db-backend" / "target" / "release" / "replay-server"]:
-    if fileExists(c): return c
-  raise newException(IOError,
-    "missing replay-server; set REPLAY_SERVER_BIN or build via " &
-    "`cd src/db-backend && cargo build`")
+  ## The engine `src/common/replay_server_path` resolves -- the one search
+  ## order the native front-ends use too -- or an `IOError` naming every path
+  ## searched, because this suite cannot run without one.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 proc findColumnAwareMoveRecorder(): string =
   ## REQUIRES ``CODETRACER_MOVE_RECORDER_PATH`` (absolute path to a

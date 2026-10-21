@@ -1434,6 +1434,33 @@ proc clipboardItems(self: EditorViewComponent;
       result.add ContextMenuItem(name: "Paste", hint: "",
         handler: proc(e: Event) = monacoClipboardPaste(self.monacoEditor.toJs))
 
+proc generatedTargetHandler(path: cstring; line: int; targetId: string;
+    openTarget: proc(path: cstring; line: int; targetId: string)): proc(e: Event) =
+  # Factory parameters belong to this target, even after the menu loop ends.
+  result = proc(e: Event) = openTarget(path, line, targetId)
+
+proc generatedCodeMenuItems*(commands: seq[TargetCommand]; path: cstring; line: int;
+    openTarget: proc(path: cstring; line: int; targetId: string)): seq[ContextMenuItem] =
+  ## Build the target entries with the same cursor position used by the editor.
+  for command in commands:
+    if command.availability == gaDisabled:
+      result.add ContextMenuItem(
+        name: commandLabel(command.target),
+        hint: "",
+        handler: proc(e: Event) = discard,
+        disabled: true,
+        disabledReason: command.reason)
+    elif command.availability == gaEnabled:
+      result.add ContextMenuItem(
+        name: commandLabel(command.target),
+        hint: "shows what the line under the cursor compiled to",
+        # THE CURSOR IS THE ARGUMENT. GCL-D10: the operation takes a
+        # position, not a project — a listing opened over a whole project
+        # has no anchor to place the reader at, and its entry names are
+        # the compiler's rather than the developer's.
+        handler: generatedTargetHandler(path, line, command.target.id, openTarget))
+
+
 # Fill contextMenu with ContextMenuItem variables and return it to be used in the context menu
 proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuItem] =
   # Editor context menu items
@@ -1555,27 +1582,9 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # because there is nothing to explain. A target that exists and cannot be
     # produced is the disabled case, and it carries the build proposal's own
     # sentence (GCL-D17).
-    for command in generatedCodeCommandsAt(path):
-      let targetId = command.target.id
-      let capturedPath = path
-      let capturedLine = line
-      if command.availability == gaDisabled:
-        contextMenu &= ContextMenuItem(
-          name: commandLabel(command.target),
-          hint: "",
-          handler: proc(e: Event) = discard,
-          disabled: true,
-          disabledReason: command.reason)
-      elif command.availability == gaEnabled:
-        contextMenu &= ContextMenuItem(
-          name: commandLabel(command.target),
-          hint: "shows what the line under the cursor compiled to",
-          handler: proc(e: Event) =
-            # THE CURSOR IS THE ARGUMENT. GCL-D10: the operation takes a
-            # position, not a project — a listing opened over a whole project
-            # has no anchor to place the reader at, and its entry names are
-            # the compiler's rather than the developer's.
-            showGeneratedCode(self.data, capturedPath, capturedLine, targetId))
+    contextMenu.add generatedCodeMenuItems(generatedCodeCommandsAt(path), path, line,
+      proc(targetPath: cstring; targetLine: int; targetId: string) =
+        showGeneratedCode(self.data, targetPath, targetLine, targetId))
 
     try:
       targetToken = self.getTokenFromPosition(ev.target.position)

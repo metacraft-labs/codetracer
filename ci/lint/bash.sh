@@ -246,6 +246,7 @@ lint_step "shellcheck: stale-artefact guards" \
 	scripts/build-desktop-component.sh \
 	scripts/developer-setup.sh \
 	scripts/run-cross-repo-tests.sh \
+	scripts/build-siblings.sh \
 	browser-replay/setup-certs.sh \
 	browser-replay/deploy-wasm.sh \
 	browser-replay/build-dist.sh \

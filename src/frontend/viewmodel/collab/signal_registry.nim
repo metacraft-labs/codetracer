@@ -224,6 +224,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("CalltraceVM", "backendSearchResults",
     vscBackendAuthoritative,
     "Search result payloads come from backend queries.")
+  entries.addEntry("CalltraceVM", "revealScroll", vscRendererLocal,
+    "codetracer#860: the scroll this pane's own search-result activation " &
+    "asks its view for; one reader's pane position, not session intent.")
   entries.addDerived("CalltraceVM",
     ["visibleLines", "hasMoreAbove", "hasMoreBelow", "highlightedMatches",
      "isLoading", "degradedState"])

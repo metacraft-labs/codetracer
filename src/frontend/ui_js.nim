@@ -110,6 +110,11 @@ when defined(ctInExtension):
 when not defined(ctWeb):
   import ui/agentic_worktree_test_hooks
 
+# The Electron desktop's edit-mode topbar (#812). The web studio composes its
+# own in `ui/web_noir_build`, and the extension has no topbar.
+when not defined(ctWeb) and not defined(ctInExtension):
+  import ui/desktop_edit_toolbar
+
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
@@ -1477,6 +1482,13 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
     data.ui.editModeHiddenPanels.setLen(0)
     data.ui.layoutBeforeAuxiliaryClose = nil
 
+# The Electron desktop's edit-mode composer. The web arm installs its own
+# beside `installEditModeToolbar`, far below, which is the only place that has
+# the `invoke` it needs; the extension has no topbar and installs none.
+when not defined(ctWeb) and not defined(ctInExtension):
+  debug_toolbar.installEditToolbarComposer(proc() =
+    installDesktopEditModeToolbar())
+
 proc switchToEdit*(data: Data) =
   # THE FLAG BEFORE THE LAYOUT. `restoreSavedLayout` below rebuilds
   # GoldenLayout, and the editors it opens read `data.ui.readOnly` as they are
@@ -1553,10 +1565,10 @@ proc switchToEdit*(data: Data) =
   data.finishReadOnlyTransition(false, readOnlyChanged,
                                 rearrangePanels = not switched)
   redrawAfterModeSwitch()
-  # THE TOPBAR'S SURFACE FOLLOWS THE MODE. Every one of these three call sites
-  # has just assigned `data.ui.mode`; the toolbar ViewModel's `topbarSurface`
-  # memo does the rest. A no-op when the mode did not change.
-  debug_toolbar.syncToolbarMode()
+  # THE TOPBAR FOLLOWS THE MODE. Every one of these three call sites has just
+  # assigned `data.ui.mode`; `syncTopbarToMode` recomposes the edit-mode model
+  # for it and the toolbar ViewModel's `topbarSurface` memo does the rest.
+  debug_toolbar.syncTopbarToMode()
 
 proc switchToDebug*(data: Data) =
   # THE FLAG BEFORE THE LAYOUT, for the reason `beginReadOnlyTransition` gives:
@@ -1602,10 +1614,10 @@ proc switchToDebug*(data: Data) =
   data.finishReadOnlyTransition(true, readOnlyChanged,
                                 rearrangePanels = not switched)
   redrawAfterModeSwitch()
-  # THE TOPBAR'S SURFACE FOLLOWS THE MODE. Every one of these three call sites
-  # has just assigned `data.ui.mode`; the toolbar ViewModel's `topbarSurface`
-  # memo does the rest. A no-op when the mode did not change.
-  debug_toolbar.syncToolbarMode()
+  # THE TOPBAR FOLLOWS THE MODE. Every one of these three call sites has just
+  # assigned `data.ui.mode`; `syncTopbarToMode` recomposes the edit-mode model
+  # for it and the toolbar ViewModel's `topbarSurface` memo does the rest.
+  debug_toolbar.syncTopbarToMode()
 
 proc toggleMode*(data: Data) =
   if data.ui.mode == DebugMode:
@@ -1642,10 +1654,10 @@ proc toggleReadOnly*(data: Data) =
   let goingReadOnly = not data.ui.readOnly
   data.setEditorsReadOnlyState(goingReadOnly)
   redrawAfterModeSwitch()
-  # THE TOPBAR'S SURFACE FOLLOWS THE MODE. Every one of these three call sites
-  # has just assigned `data.ui.mode`; the toolbar ViewModel's `topbarSurface`
-  # memo does the rest. A no-op when the mode did not change.
-  debug_toolbar.syncToolbarMode()
+  # THE TOPBAR FOLLOWS THE MODE. Every one of these three call sites has just
+  # assigned `data.ui.mode`; `syncTopbarToMode` recomposes the edit-mode model
+  # for it and the toolbar ViewModel's `topbarSurface` memo does the rest.
+  debug_toolbar.syncTopbarToMode()
 
 data.functions.toggleMode = toggleMode
 # NOTHING CALLS THIS ONE ANY MORE, and that is worth saying here rather than
@@ -3372,6 +3384,9 @@ proc onFilesystemLoaded(
     data.services.editor.filesystem = response.folders
     data.services.editor.filesystemLoadError = cstring""
   filesystem.refreshIsoNimFilesystemPanel()
+  # The edit-mode topbar reads the same tree for its project listing: a
+  # replay session's sources arrive here, after the session has started.
+  debug_toolbar.refreshEditToolbar()
   # Keep the Ctrl+P file index in sync with the freshly-loaded tree;
   # DB-trace backends that never emit the `filenames` event rely on this
   # to populate command-palette file search.
@@ -3632,6 +3647,12 @@ proc onNoTrace(
   # meant for toggling an already-running debug session into edit mode.
   data.ui.mode = EditMode
   data.setEditorsReadOnlyState(false)
+  # AN EDIT SESSION HAS STARTED, so the topbar is composed for it now: the
+  # mode was assigned directly above rather than through `switchToEdit`, and
+  # `configureMiddleware` bound the toolbar ViewModel before it, while the
+  # mode still read Debug. Without this the topbar kept the stepping controls
+  # on every `ct edit` launch (#812). The listing is the tree assigned above.
+  debug_toolbar.syncTopbarToMode()
 
   # The welcome/new-tab handoff can reuse already-mounted panel instances.
   # Resync the panels against the freshly loaded edit-mode services so the
@@ -3942,14 +3963,6 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
     discard jsDelete(data.ui.editors[untitledName])
     data.ui.editors[newPath].path = newPath
 
-var refreshEditToolbarHook: proc()
-  ## Recompose the edit-mode topbar. A hook rather than a direct call because
-  ## `ui/web_noir_build` is imported in a `when defined(js)` block far below
-  ## this handler, and hoisting that import to reach one proc would pull the
-  ## whole wasm-toolchain module into the desktop renderer's graph. Installed
-  ## beside `installEditModeToolbar`, which is the only place that has the
-  ## `invoke` it needs anyway.
-
 proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   if data.services.editor.open.hasKey(response.name):
     data.services.editor.open[response.name].changed = false
@@ -4010,8 +4023,7 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     # mounted; `installEditModeToolbar`'s own comment claimed it was "called on
     # every install and after every save" and it had one call site, in a
     # one-shot startup block.
-    if not refreshEditToolbarHook.isNil:
-      refreshEditToolbarHook()
+    debug_toolbar.refreshEditToolbar()
 
   data.redraw()
 
@@ -4259,6 +4271,32 @@ proc onTestRunSettled(
     recordingId = $response.recordingId,
     recordedAtText = $response.recordedAt,
     errorMessage = $response.errorMessage)
+
+proc onTestSuiteSettled(
+    sender: js,
+    response: jsobject(events=cstring, exitCode=int, stderr=cstring,
+                       errorMessage=cstring)) =
+  ## `index/traces.onRunTestSuite` answered — on EVERY one of its exits.
+  ##
+  ## The whole-suite run's settle (`GUI/Core-Panes/Test-Results-Pane.md`
+  ## §4.3, §5): what `ct-test --events` wrote, the exit status, the runner's
+  ## stderr, and the main process's own sentence when the run could not be
+  ## started. Everything about what that MEANS is decided by the host's
+  ## `settleDesktopSuiteRun`, which a headless suite asserts; this only
+  ## unpacks the IPC payload, defensively, because a field the main process
+  ## did not send arrives as `undefined`.
+  if desktopTestRunHost.isNil:
+    return
+  let events = if response.events.isNil: "" else: $response.events
+  let stderrText = if response.stderr.isNil: "" else: $response.stderr
+  let errorMessage =
+    if response.errorMessage.isNil: "" else: $response.errorMessage
+  let exitCode =
+    if response.toJs[cstring"exitCode"].isUndefined: -1
+    else: response.exitCode
+  desktopTestRunHost.settleDesktopSuiteRun(
+    eventsText = events, exitCode = exitCode,
+    stderrText = stderrText, errorMessage = errorMessage)
 
 macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
   let ipc = ident("ipc")
@@ -4575,6 +4613,9 @@ proc configureIPC(data: Data) =
     # WHAT SETTLES A DESKTOP TEST RUN. See `onTestRunSettled` and
     # `GUI/Core-Panes/Test-Results-Pane.md` §5.
     "test-run-settled"
+    # AND WHAT SETTLES A DESKTOP SUITE RUN (the pane's header ▶). See
+    # `onTestSuiteSettled`.
+    "test-suite-settled"
     "welcome-screen"
     # #568: the recent-traces / recent-folders push for startup paths whose own
     # startup message does not carry them (`index/recent_items.nim`).
@@ -6634,13 +6675,13 @@ when defined(ctWeb) and not defined(ctInExtension):
           # no behaviour at all.
           else: discard)
         # AND THE WAY BACK. `installEditModeToolbar` holds the `invoke` above
-        # so it can recompose without it; this hook is how `onSavedFile` — far
-        # above this block, and without `web_noir_build` in scope — reaches
-        # that recomposition. Set here because this is the only site that has
-        # both, and set AFTER the install so the hook can never run before
-        # there is a toolbar to refresh.
-        refreshEditToolbarHook = proc() =
-          web_noir_build.refreshEditModeToolbar()
+        # so it can recompose without it; this composer is how `onSavedFile`
+        # and the mode switches — far above this block, and without
+        # `web_noir_build` in scope — reach that recomposition. Set here
+        # because this is the only site that has both, and set AFTER the
+        # install so it can never run before there is a toolbar to refresh.
+        debug_toolbar.installEditToolbarComposer(proc() =
+          web_noir_build.refreshEditModeToolbar())
         # RUN IS A MODE TRANSITION — "full surface, returnable".
         #
         # Installed here, beside the Build wiring, and for the same reason its
@@ -7344,9 +7385,10 @@ if inElectron:
     # so `beginRun`, `endRun` and `editor.settleEditorTestRun` had exactly one
     # caller between them and all three were inside `startWebRenderer`.
     #
-    # `GUI/Core-Panes/Test-Results-Pane.md` §4 defines what goes here; §4.3
-    # states, as a stated gap rather than as silence, why the pane's ▶ is still
-    # left disabled on this arm.
+    # `GUI/Core-Panes/Test-Results-Pane.md` §4 defines what goes here. §4.3
+    # used to state, as a gap, why the pane's ▶ and row controls were left
+    # disabled on this arm; they are installed below, now that `ct test run`
+    # reaches the `ct-test` runner shipped beside `ct`.
     #
     # INSTALLED AFTER `configure`, for the reason `startWebRenderer` gives
     # about its own order: `configure` builds the panel services a mounted
@@ -7383,3 +7425,47 @@ if inElectron:
       editor.editorTestRunHook =
         proc(path: cstring; selector: cstring; line: int): cstring =
           cstring(desktopTestRunHost.startDesktopTestRun($selector, $path, line))
+
+      # THE PANE'S HEADER ▶ — the whole suite, through `ct test run`
+      # (`Test-Results-Pane.md` §4.3). Left nil here until `ct-test` shipped
+      # beside `ct`; it is installed BY THE HOST (`installDesktopSuiteRun`) so
+      # the claim "the desktop host installs the ▶" is one the headless suite
+      # `test_desktop_suite_run_gives_verdicts.nim` can assert.
+      #
+      # The project is the EDIT session's folder — the same
+      # `data.startOptions.folder` that `CODETRACER::ns9-panes` asks the
+      # catalog for, so the suite that runs is the catalog the pane lists. Read
+      # at click time: a replay session, or an edit session with no folder,
+      # answers "" and the host refuses with `DesktopNoProjectText` instead of
+      # spawning anything.
+      desktopTestRunHost.installDesktopSuiteRun(
+        workspaceRoot = proc(): string =
+          let folder = data.startOptions.folder
+          if not data.startOptions.edit or folder.isNil or
+             folder.toJs.isUndefined:
+            ""
+          else:
+            $folder,
+        suiteDispatch = proc(workspaceRoot: string): string =
+          data.runTestSuite(workspaceRoot)
+          "")
+
+      # AND THE PER-ROW `⟳` / `⏵`, mirroring the web arm's three actions
+      # (`startWebRenderer`): `⟳` records and stays — `keepWindow` tells
+      # `index/traces.onRunTest` not to load the recording into this window;
+      # `⏵` over an existing recording enters it by id through
+      # `CODETRACER::load-recent-trace` and runs nothing; record-and-open is
+      # the editor's own dispatch above (the host's `dispatch`).
+      desktopTestRunHost.installDesktopRowActions(
+        keepWindowDispatch = proc(selector, file: string; line: int): string =
+          data.runTests(RunTestOptions(
+            testName: cstring(selector),
+            path: cstring(file),
+            line: line,
+            column: 1,
+            newWindow: false,
+            keepWindow: true))
+          "",
+        openRecording = proc(recordingId: string): string =
+          data.openRecordingById(recordingId)
+          "")

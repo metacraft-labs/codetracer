@@ -232,6 +232,17 @@ proc renderMockEntry(r: MockRenderer; vm: FilesystemVM;
         r.appendChild(lastChildContainer, childNode)
   row
 
+proc diffOpenHandler(vm: FilesystemVM; path: string): proc() =
+  ## The click handler of one diff-list row: open `path`.
+  ##
+  ## A FACTORY, because the diff rows are built in a `for` loop and Nim
+  ## closures capture by reference: a `let` in the loop body is ONE variable
+  ## for the whole loop, so an inline `proc() = vm.openFile(p)` made every
+  ## row open the LAST changed file (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures). `path` is
+  ## this call's own parameter, so each row's closure owns its value.
+  result = proc() = vm.openFile(path)
+
 proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
   ## Render the Filesystem panel for the Mock renderer.
   ##
@@ -319,15 +330,16 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     else:
       r.setAttribute(diffContainer, "class", "diff-files-list")
       for diff in diffs:
-        # Copy the row data into local non-lent vars so the inner closure can
-        # capture them safely. Without the copy the iterator's
-        # ``lent FilesystemDiffEntry`` cannot be captured.
+        # Copy the row data into local non-lent vars: the DSL's attribute
+        # closures cannot capture the iterator's ``lent FilesystemDiffEntry``.
+        # The click goes through `diffOpenHandler`, NOT a closure over
+        # `pathLocal` (one variable for the whole loop) -- see that proc.
         let rowClsLocal = diffEntryClass(diff)
         let rowLabelLocal = diffEntryLabel(diff)
         let pathLocal = diff.path
         let row = ui(r):
           tdiv(class = rowClsLocal,
-               onclick = proc() = vm.openFile(pathLocal)):
+               onclick = diffOpenHandler(vm, pathLocal)):
             text rowLabelLocal
         r.appendChild(diffContainer, row)
 
@@ -439,6 +451,16 @@ when defined(js):
       isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(children))
     row
 
+  proc diffClickListener(vm: FilesystemVM;
+                         path: string): proc(ev: isonim_dom.Event) =
+    ## `diffOpenHandler` in the shape a DOM listener takes, per row for the
+    ## same reason; it also keeps the click from reaching the tree beneath.
+    let open = diffOpenHandler(vm, path)
+    result = proc(ev: isonim_dom.Event) =
+      ev.preventDefault()
+      ev.stopPropagation()
+      open()
+
   proc renderFilesystemPanel*(r: WebRenderer;
                               vm: FilesystemVM): isonim_dom.Element =
     ## Render the Filesystem panel for the real DOM.  Same dispatch
@@ -544,12 +566,10 @@ when defined(js):
         for diff in diffs:
           let row = createWebTextElement("div", diffEntryLabel(diff),
                                          diffEntryClass(diff))
-          let path = diff.path
+          # A per-row factory, not an inline closure over a loop-body `let`
+          # (one variable for the whole loop): see `diffOpenHandler`.
           isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                      proc(ev: isonim_dom.Event) =
-            ev.preventDefault()
-            ev.stopPropagation()
-            vm.openFile(path))
+                                      diffClickListener(vm, diff.path))
           isonim_dom.appendChild(isonim_dom.Node(diffContainer),
                                  isonim_dom.Node(row))
 

@@ -119,6 +119,17 @@ proc lineClass(line: BuildOutputLine): string =
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
 
+proc lineJumpHandler(vm: BuildVM; line: BuildOutputLine): proc() =
+  ## The click handler of one output row: open the location `line` names.
+  ##
+  ## A FACTORY, because the rows are built in a `for` loop and Nim closures
+  ## capture by reference: a `let` in the loop body (or the loop variable) is
+  ## ONE variable for the whole loop, so an inline `proc() = vm.jumpToLine(x)`
+  ## made every row open the LAST row's location (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures). `line` is
+  ## this call's own parameter, so each row's closure owns its value.
+  result = proc() = vm.jumpToLine(line)
+
 proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
   ## Render the build panel for the Mock renderer.
   ##
@@ -167,11 +178,13 @@ proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
     let lines = vm.output.val
     r.clearChildren(outputContainer)
     for line in lines:
-      # Capture loop-local value so DSL closures don't share state.
+      # Copied out of the iterator: the DSL's attribute closures cannot
+      # capture a `lent` value. The click goes through `lineJumpHandler`,
+      # NOT a closure over this copy -- see that proc for why.
       let lineCopy = line
       let lineNode = ui(r):
         tdiv(class = lineClass(lineCopy),
-             onclick = proc() = vm.jumpToLine(lineCopy)):
+             onclick = lineJumpHandler(vm, lineCopy)):
           text lineCopy.htmlText
       r.appendChild(outputContainer, lineNode)
 
@@ -188,6 +201,13 @@ when defined(js):
   proc scrollToBottom(node: isonim_dom.Element) {.importjs: "(function(node) { if (node) { node.scrollTop = node.scrollHeight; } })(#)".}
   proc outputContainerOf(panel: JsObject): JsObject {.importjs:
     "(#.querySelector('.build-output-container') || null)".}
+
+  proc lineClickListener(vm: BuildVM;
+                         line: BuildOutputLine): proc(ev: isonim_dom.Event) =
+    ## `lineJumpHandler` in the shape a DOM listener takes: per row, for the
+    ## same reason.
+    let jump = lineJumpHandler(vm, line)
+    result = proc(ev: isonim_dom.Event) = jump()
 
   proc renderBuildPanel*(r: WebRenderer; vm: BuildVM): isonim_dom.Element =
     ## Render the panel for the real DOM.  Uses ``innerHTML`` for each
@@ -248,9 +268,10 @@ when defined(js):
         # its `cursor: pointer` have been on these rows since the Karax
         # migration dropped the handler; this is the handler.
         if lineCopy.locationPath.len > 0 and lineCopy.locationLine > 0:
+          # A per-row factory, not an inline closure over `lineCopy` (one
+          # variable for the whole loop): see `lineJumpHandler`.
           isonim_dom.addEventListener(isonim_dom.Node(lineNode), cstring"click",
-            proc(ev: isonim_dom.Event) =
-              vm.jumpToLine(lineCopy))
+            lineClickListener(vm, lineCopy))
         isonim_dom.appendChild(isonim_dom.Node(outputContainer),
                                isonim_dom.Node(lineNode))
       if autoScrollOn:

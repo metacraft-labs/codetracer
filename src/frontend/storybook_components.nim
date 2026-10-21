@@ -942,12 +942,16 @@ proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc
     if fixture != "empty": vm.applyCalltrace()
     if fixture == "search-status-report":
       vm.setSearchQuery("status_report")
-      vm.setBackendSearchResults(@[
-        (name: "status_report", rrTicks: 43, key: "5"),
-        (name: "status_report", rrTicks: 111, key: "10"),
-        (name: "status_report", rrTicks: 179, key: "15"),
-        (name: "status_report", rrTicks: 247, key: "20"),
-      ])
+      # Each match carries its frame's location, as `registerSearchRes`
+      # gives a real one, so a click in the story jumps the way the app does.
+      var matches: seq[CalltraceSearchResult] = @[]
+      for (rrTicks, key) in [(43'u64, "5"), (111'u64, "10"), (179'u64, "15"),
+                             (247'u64, "20")]:
+        matches.add CalltraceSearchResult(
+          name: "status_report", key: key, rrTicks: rrTicks,
+          location: Location(file: "src/main.nr", line: 17, column: 3,
+                             callstackDepth: 1))
+      vm.setBackendSearchResults(matches)
     mountIsoNimCalltrace(container, vm)
     return proc() = vm.dispose())
 

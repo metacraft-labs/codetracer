@@ -2,12 +2,13 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a]
-#   just gpui-window-captures                 # all six
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a] [m71]
+#   just gpui-window-captures                 # all seven
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
 # `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
-# `test_plat68_cua_window.nim`, `test_plat70a_gpui_window.nim`) assert
+# `test_plat68_cua_window.nim`, `test_plat70a_gpui_window.nim`,
+# `test_m71_gpui_window.nim`) assert
 # COMMITTED records measured off a real window on a headless sway. A record
 # nobody re-takes stops describing the product the first time the window
 # changes — which is how PLAT-45's and PLAT-47's records came to predate the
@@ -23,7 +24,8 @@
 #      tools (sway, grim, wtype);
 #   2. `build/bin/codetracer-gpui-window`, this checkout's GPUI front-end
 #      pinned to that shim (`-d:gpuiShimPath`);
-#   3. the recordings the drivers open (`calc`, and `call_pages` for PLAT-47),
+#   3. the recordings the drivers open (`calc`, `call_pages` for PLAT-47,
+#      `wide_lines` for PLAT-70a and `multi_root` for M71),
 #      recorded by the terminal lanes' own fixture provider when absent, and
 #      the terminal front-end where a capture drives it (PLAT-45's three
 #      media, PLAT-48's terminal-saved layout);
@@ -60,11 +62,11 @@ fail() {
 }
 
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a m71)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a)" ;;
+	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a | m71) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a, m71)" ;;
 	esac
 done
 
@@ -108,15 +110,25 @@ fixtures=(calc)
 for w in "${which[@]}"; do
 	[ "${w}" = "plat47" ] && fixtures+=(call_pages)
 	[ "${w}" = "plat70a" ] && fixtures+=(wide_lines)
+	[ "${w}" = "m71" ] && fixtures+=(multi_root)
 done
 work="$(mktemp -d "${root}/build/gpui-window-captures.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
 for fx in "${fixtures[@]}"; do
 	ls -d "test-logs/tui-fixtures/${fx}-"* >/dev/null 2>&1 && continue
 	echo "=== recording the ${fx} fixture"
+	# `multi_root` is not one of the provider's declared fixtures: every suite
+	# that opens it spells its spec, as `test_m71_gpui_plan.nim` does.
+	spec="\"${fx}\""
+	[ "${fx}" = "multi_root" ] && spec='FixtureSpec(name: "multi_root",
+  program: "test-programs/multi_root/app/main.py",
+  recorder: "codetracer-python-recorder",
+  probe: FixtureProbe(kind: pkPythonRecorder),
+  buildHint: "Install codetracer_python_recorder into the interpreter ct will use.",
+  blockedOn: "")'
 	cat >"${work}/record_${fx}.nim" <<NIM
 import fixtures/fixture_provider
-let r = resolveFixture("${fx}")
+let r = resolveFixture(${spec})
 if r.outcome != foRecorded:
   quit("could not record the ${fx} fixture: " & r.detail, 1)
 echo r.tracePath
@@ -224,6 +236,15 @@ for w in "${which[@]}"; do
 		in_compositor_shell "bash ci/test/plat70a-gpui-window.sh" &&
 			python3 ci/test/plat70a_gpui_window.py record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat70a_gpui_window.nim ||
+			failed+=("${w}")
+		;;
+	m71)
+		# M71 (codetracer#838): the State, Files and VCS panes of
+		# `multi_root`, in a layout where all three overflow, scrolled by the
+		# virtual pointer's wheel and the State bar pressed.
+		in_compositor_shell "bash ci/test/m71-gpui-window.sh" &&
+			python3 ci/test/m71_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_m71_gpui_window.nim ||
 			failed+=("${w}")
 		;;
 	plat45)

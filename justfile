@@ -42,10 +42,14 @@ test-dev-shell-writes-nothing-elsewhere:
 test-build-once-profile-cwd:
   bash scripts/test-build-once-profile-cwd.sh
 
+# Failed builds must not leave stale or partial renderer bundles runnable.
+test-build-once-failed-bundle:
+  bash scripts/test-build-once-failed-bundle.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
-# its pinned `reprobuild` locks. `inputs.runquota-src.follows = "runquota"`
-# means reprobuild is COMPILED against whatever that input resolves to, so
-# drift in either direction breaks `nix develop` with an `undeclared
+# its pinned `reprobuild` locks. `runquota.follows = "reprobuild/runquota-src"`
+# derives that input from reprobuild; a half-refreshed lock can still retain
+# old dependency nodes and break `nix develop` with an `undeclared
 # identifier` inside reprobuild's own sources, minutes in and attributed to
 # the wrong repo. Reads two flake.lock files; no toolchain, under a second.
 # Skips LOUDLY (never silently passes) when the sibling reprobuild checkout it
@@ -3635,9 +3639,11 @@ test-css-token-resolution:
   exec > >(tee test-logs/test-css-token-resolution.log) 2>&1
   bash ci/test/css-token-resolution.sh
 
-# The guard above, shown failing. Eleven arms: five defects it must report,
-# four legal constructs it must not, and the two instrument checks that stop
-# an empty stylesheet or an unreadable Tupfile scoring as a pass. Hermetic
+# The guard above, shown failing. Ten arms: four defects it must report (an
+# unresolved token, a theme redefining a token, and a legacy palette leak —
+# alone, and beside the retired ceilings file), three legal constructs it must
+# not, the two instrument checks that stop an empty stylesheet or an
+# unreadable Tupfile scoring as a pass, and the real tree. Hermetic
 # and sub-second — synthetic fixtures in a scratch directory, nothing in the
 # worktree is touched — except the last arm, which runs the real pipeline
 # over the real tree and needs `stylus` (it skips without it).
@@ -4896,12 +4902,13 @@ build-tui: tui-prereqs
 # CTUI-1 put `test_fixture_corpus.nim` in this lane, and it is the one suite
 # here that is NOT self-contained: it opens real recorded traces through a real
 # `replay-server`, and records them from `test-programs/` on a cold cache. So
-# this lane needs `src/build-debug/bin/replay-server` (or $REPLAY_SERVER_BIN)
-# and, until `test-logs/tui-fixtures/` is warm, `src/build-debug/bin/ct` plus
-# the recorders the fixtures name. Missing ones are reported as counted
-# `MISSING-PREREQ SKIP:` lines and an all-skipped run FAILS — see that file's
-# header. The first run on a workspace therefore costs a few recordings; every
-# run after it hits the content-addressed cache.
+# this lane needs a built `replay-server` (anywhere
+# src/common/replay_server_path.nim searches, or $REPLAY_SERVER_BIN) and,
+# until `test-logs/tui-fixtures/` is warm, `ct` (beside that engine, or
+# `src/build-debug/bin/ct`) plus the recorders the fixtures name. Missing ones
+# are reported as counted `MISSING-PREREQ SKIP:` lines and an all-skipped run
+# FAILS — see that file's header. The first run on a workspace therefore costs
+# a few recordings; every run after it hits the content-addressed cache.
 test-tui: tui-prereqs
   #!/usr/bin/env bash
   set -euo pipefail
@@ -5160,6 +5167,17 @@ plat70a-gpui-window:
 # `src/frontend/gpui/tests/test_plat70a_gpui_window.nim` asserts.
 plat70a-gpui-window-record:
   python3 ci/test/plat70a_gpui_window.py record
+
+# M71 (codetracer#838): the GPUI window's State, Files and VCS panes, each
+# overflowing, scrolled by a real wheel and the State bar pressed, on a
+# headless sway (`ci/test/m71_gpui_window.py` says what each frame is).
+m71-gpui-window:
+  bash ci/test/m71-gpui-window.sh
+
+# Measure those frames into `src/tests/visual/m71-gpui-window.json`, which
+# `src/frontend/gpui/tests/test_m71_gpui_window.nim` asserts.
+m71-gpui-window-record:
+  python3 ci/test/m71_gpui_window.py record
 
 # The GPUI window captures, RE-TAKEN AND ASSERTED from a checkout: build
 # isonim-gpui's windowed shim and virtual pointer (in its own dev shell), this
@@ -5735,12 +5753,32 @@ test-vm-recorder-gated: vm-test-prereqs
   # per-repo PASS/SKIP/FAIL and exits non-zero on a build failure.
   bash scripts/build-siblings.sh --only codetracer-js-recorder
 
-  # replay-server is a same-repo cargo artefact the tests fail loudly without.
-  if [ ! -x src/db-backend/target/debug/replay-server ] \
-     && [ ! -x src/db-backend/target/release/replay-server ] \
-     && [ ! -x src/build-debug/bin/replay-server ]; then
+  # replay-server is a same-repo artefact the tests fail loudly without. Build
+  # one only when NONE of the places the suites search holds it: the search
+  # order is src/common/replay_server_path.nim's (the authority; restated here
+  # because a recipe cannot import Nim). Checking cargo's trees alone made a
+  # `repro`-built checkout, whose engine is in src/build-<config>-repro/bin,
+  # run a redundant `cargo build` on every invocation.
+  _ct_rs_config="${CODETRACER_CONFIG:-debug}"
+  _ct_rs_found=""
+  for _ct_rs in \
+      "${REPLAY_SERVER_BIN:-}" \
+      ${CT_BUILD_OUT_ROOT:+"${CT_BUILD_OUT_ROOT}/bin/replay-server"} \
+      ${CODETRACER_BUILD_DIR:+"${CODETRACER_BUILD_DIR}/bin/replay-server"} \
+      "src/build-${_ct_rs_config}-repro/bin/replay-server" \
+      "src/build-${_ct_rs_config}/bin/replay-server" \
+      src/db-backend/target/debug/replay-server \
+      src/db-backend/target/release/replay-server; do
+    if [ -n "${_ct_rs}" ] && [ -f "${_ct_rs}" ]; then
+      _ct_rs_found="${_ct_rs}"
+      break
+    fi
+  done
+  if [ -z "${_ct_rs_found}" ]; then
     echo "Building replay-server (db-backend) ..."
     (cd src/db-backend && cargo build --bin replay-server)
+  else
+    echo "Using replay-server: ${_ct_rs_found}"
   fi
 
   # Discover the sibling recorders / tools the tests look up by env var.
