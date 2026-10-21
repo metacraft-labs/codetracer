@@ -286,6 +286,15 @@ lint_step "shellcheck: TUI grammar-archive builder" \
 lint_step "shellcheck: flake lock node dates guard" \
 	shellcheck scripts/test-flake-lock-node-dates.sh
 
+# scripts/test-sibling-cargo-locks.sh is the trace-format pin / Cargo.lock
+# coherence guard `just test` runs. Not under ci/, so the glob at the top does
+# not reach it. Its contract suite (ci/test/sibling-cargo-locks-test.sh) IS
+# under the glob and is shellchecked there, but it does not RUN here: it drives
+# real cargo, which the lint shell does not provide, so it runs in the
+# `test-sibling-cargo-locks` recipe instead.
+lint_step "shellcheck: sibling cargo locks guard" \
+	shellcheck scripts/test-sibling-cargo-locks.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.

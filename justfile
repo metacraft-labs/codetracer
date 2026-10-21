@@ -70,6 +70,24 @@ test-flake-pin-alignment:
 test-flake-lock-node-dates:
   bash scripts/test-flake-lock-node-dates.sh
 
+# Assert that `repro.lock` and `flake.lock` pin the same
+# `codetracer-trace-format` revision, and that every committed Cargo.lock which
+# reaches that sibling by path (src/db-backend, src/backend-manager, found by
+# parsing the manifests) is EXACTLY the lock cargo writes for the trace-format
+# tree at that pin AND for the sibling checkout on disk. A path dependency
+# writes the sibling crate's own edges into the lock, so a trace-format commit
+# that adds a dependency breaks `cargo build --locked` (src/Tuprules.tup) and
+# the cargo-check pre-commit hook here unless the pins and the locks move
+# together. Needs python3 and cargo, offline; a few seconds. Skips LOUDLY
+# (never silently passes) when the sibling checkout or the pinned revision is
+# absent; CT_SIBLING_CARGO_LOCKS_STRICT=1 makes that a failure. Its contract
+# suite runs first: it needs cargo, which the lint shell (ci/lint/bash.sh, home
+# of the other guards' suites) does not provide.
+# See the header of scripts/test-sibling-cargo-locks.sh.
+test-sibling-cargo-locks:
+  bash ci/test/sibling-cargo-locks-test.sh
+  bash scripts/test-sibling-cargo-locks.sh
+
 # Assert the GUI harness's `npm install` leaves `src/tests/gui/yarn.lock` alone.
 # npm >= 7 keeps an existing yarn.lock "up to date" by rewriting it from the
 # tree it installed, and on Linux that tree has no `fsevents` (playwright's
@@ -985,7 +1003,7 @@ test:
     echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"
     set --
   fi
-  # THE SEVEN LANE NAMES ARE LITERAL ARGUMENTS ON THIS INVOCATION, and that is
+  # THE LANE NAMES ARE LITERAL ARGUMENTS ON THIS INVOCATION, and that is
   # load-bearing beyond style.  They used to be built up in a bash array, which
   # made them invisible to `ci/test/shell-gate-coverage.sh`: its walk reaches a
   # recipe only through a name it can SEE, and an array element is not one.
@@ -995,6 +1013,11 @@ test:
   # still RUNNING the whole time — the walk had gone blind, not the coverage —
   # but a reachability guard that cannot see a live edge is exactly the defect
   # this recipe's own aggregate exists to prevent.  Keep them literal here.
+  #
+  # `test-sibling-cargo-locks` runs AFTER `test-rust` on purpose. It resolves
+  # both Cargo.locks offline, from the local registry index, and on a fresh CI
+  # runner nothing has filled that index until `test-rust` builds the crates;
+  # placed earlier it would SKIP there and verify nothing.
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-flake-pin-alignment \
@@ -1004,6 +1027,7 @@ test:
     test-sibling-backend-path \
     test-agent-api-contract \
     test-rust \
+    test-sibling-cargo-locks \
     test-nimsuggest \
     "$@"
 
