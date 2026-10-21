@@ -258,4 +258,36 @@ test.describe("the desktop Test Results pane runs the suite through ct test run"
     // …and nothing was recorded to get there.
     expect(recordedContainers()).toBe(containersBefore);
   });
+
+  test("a row's ⏵ with no recording yet records the test and enters the recording", async ({ ctPage }) => {
+    // RECORD-AND-OPEN: `openButtonMode` answers `obmRecordAndOpen` for a row with
+    // no recording (that arm is checked before Shift is consulted), and
+    // `triggerOpen` then calls the host's `recordAndOpenRecording` — on the
+    // desktop, the editor's own opening dispatch: `ct record-test`, then the
+    // recording loaded into this window.
+    await showTestsPane(ctPage);
+    await expect(ctPage.locator(".test-results-row")).toHaveCount(2, { timeout: 60_000 });
+    const row = rowFor(ctPage, "test_fails");
+    await expect(row).toHaveAttribute("data-ct-recording-id", "");
+    const open = row.locator(".test-results-open-btn");
+    await expect(open).toHaveAttribute("data-ct-open-mode", "record-and-open");
+    await expect(open).not.toHaveClass(/disabled/, { timeout: 30_000 });
+    const containersBefore = recordedContainers();
+    // Nothing is loaded yet, so a `recording:` outcome below can only be the
+    // one this click produced.
+    expect(await loadedRecordingId(ctPage)).toBe("");
+
+    await open.click();
+
+    // The same evidence case 2 uses: the run settled with the recording entered
+    // into the window, or with the recorder's stated reason — and it must be the
+    // former. A FAILING test still records (tracing records the execution up to
+    // the failure), which is why this row is `test_fails`.
+    const ended = await waitForRunOutcome(ctPage);
+    test.info().annotations.push({ type: "record-and-open outcome", description: ended });
+    console.log(`record-and-open outcome: ${ended}`);
+    expect(ended).toMatch(/^recording:/);
+    // And it was RECORDED to get there, unlike ⏵ over an existing recording.
+    expect(recordedContainers()).toBe(containersBefore + 1);
+  });
 });

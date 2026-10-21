@@ -20,6 +20,10 @@
 ## 4. A name that matches no test fails, with nargo's own sentence.
 ## 5. A `.nr` file in no Noir package fails before nargo is run, saying why.
 ##
+## And a guard on the harness itself: every run goes through
+## `runWithDeadline`, and a run past its deadline is killed together with the
+## processes it spawned, and reported as timed out.
+##
 ## PREREQUISITE, AND IT FAILS BY NAME: a `nargo` that knows `trace
 ## --test-name` — `CODETRACER_NOIR_EXE_PATH` when set, else the dev shell's
 ## `nargo` (the flake's pinned noir). A noir sibling's build is never picked
@@ -35,9 +39,12 @@
 ## Compile and run:
 ##   nim c -r src/tests/cli/record_test_noir_e2e_test.nim
 
-import std/[os, osproc, streams, strtabs, strutils, unittest]
+import std/[os, osproc, posix, strtabs, strutils, times, unittest]
 
 const RecordTimeoutSeconds = 600
+  ## A cold recording is slow, so this is generous -- but it is ENFORCED:
+  ## `runWithDeadline` kills the run when it passes, and the case fails
+  ## saying so, rather than wedging the lane on a hung recorder.
 
 proc repoRoot(): string =
   currentSourcePath.parentDir.parentDir.parentDir.parentDir
@@ -98,21 +105,71 @@ let lonely = scratch / "lonely"
 createDir(lonely)
 writeFile(lonely / "alone.nr", "#[test]\nfn t() {}\n")
 
+const TimedOutCode* = -2
+  ## `runWithDeadline`'s exit code for a run it had to kill.
+
+var runCounter = 0
+  ## Gives each run its own output file within this process's `scratch`.
+
+proc inheritedEnv(): StringTableRef =
+  ## This process's environment, as a table a run can add to. A run needs at
+  ## least its `PATH`: with an empty table `sh` falls back to a built-in
+  ## search path, which on NixOS holds no `sleep` or other coreutils.
+  result = newStringTable(modeCaseSensitive)
+  for k, v in envPairs():
+    result[k] = v
+
+proc runWithDeadline*(exe: string; args: seq[string]; env: StringTableRef;
+                      timeoutSeconds: int): tuple[output: string, code: int] =
+  ## Run `exe`, merged stdout+stderr, and give up after `timeoutSeconds`.
+  ##
+  ## THE DEADLINE IS REAL. Reading a pipe to EOF before `waitForExit(timeout)`
+  ## blocks for as long as the child holds its stdout open, so the timeout
+  ## could never fire. Here the child writes to a file (via `sh -c 'exec ..'`,
+  ## so the shell is replaced and the pid is the child's own) and this loop
+  ## polls `peekExitCode` against the deadline. `poDaemon` starts the child in
+  ## its OWN PROCESS GROUP (`posix_spawnattr_setpgroup(.., 0)` in `std/osproc`),
+  ## so an expired run is killed with everything it spawned -- `ct
+  ## record-test` runs `db-backend-record`, which runs `nargo` -- rather than
+  ## leaving a recorder orphaned behind the test.
+  inc runCounter
+  let outFile = scratch / ("run-" & $runCounter & ".log")
+  createDir(scratch)
+  let p = startProcess(findExe("sh"),
+    args = @["-c", "exec \"$0\" \"$@\" > \"$CT_E2E_OUT\" 2>&1", exe] & args,
+    env = (block:
+      let e = newStringTable(modeCaseSensitive)
+      for k, v in env: e[k] = v
+      e["CT_E2E_OUT"] = outFile
+      e),
+    options = {poDaemon, poParentStreams})
+  let deadline = epochTime() + timeoutSeconds.float
+  var code = p.peekExitCode()
+  while code == -1:
+    if epochTime() >= deadline:
+      discard posix.kill(-Pid(p.processID), SIGKILL)
+      discard p.waitForExit()
+      p.close()
+      let partial = (if fileExists(outFile): readFile(outFile) else: "")
+      removeFile(outFile)
+      return ("TIMED OUT after " & $timeoutSeconds & " s: `" & exe & " " &
+              args.join(" ") & "` was killed with its process group. " &
+              "Output so far:\n" & partial, TimedOutCode)
+    sleep(200)
+    code = p.peekExitCode()
+  p.close()
+  let output = (if fileExists(outFile): readFile(outFile) else: "")
+  removeFile(outFile)
+  (output, code)
+
 proc recordTest(selector, file: string; line: int): tuple[output: string, code: int] =
   ## `ct record-test` exactly as the desktop's main process runs it, in a
   ## scratch `CODETRACER_HOME`, with the `nargo` `nargoBinary` names.
-  let env = newStringTable(modeCaseSensitive)
-  for k, v in envPairs():
-    env[k] = v
+  let env = inheritedEnv()
   env["CODETRACER_HOME"] = scratch / "home"
   env["CODETRACER_NOIR_EXE_PATH"] = nargoBinary()
-  let p = startProcess(ctBinary(),
-    args = @["record-test", selector, file, $line, "1"],
-    env = env, options = {poStdErrToStdOut})
-  let output = p.outputStream.readAll()
-  let code = p.waitForExit(RecordTimeoutSeconds * 1000)
-  p.close()
-  (output, code)
+  runWithDeadline(ctBinary(), @["record-test", selector, file, $line, "1"],
+                  env, RecordTimeoutSeconds)
 
 proc recordingId(output: string): string =
   for line in output.splitLines():
@@ -125,6 +182,27 @@ proc ctContainers(): int =
     for path in walkDirRec(scratch / "home"):
       if path.endsWith(".ct"):
         inc result
+
+suite "the run deadline is enforced":
+
+  test "a run past its deadline is killed with what it spawned, and says so":
+    ## The guard on `runWithDeadline` itself: without it a hung recorder would
+    ## wedge this suite for ever, which is the defect a pipe read to EOF
+    ## before `waitForExit(timeout)` had. The command is a shell that starts a
+    ## child and waits on it, so "killed with its process group" is checked
+    ## and not just "the shell died".
+    let marker = "31.4159"
+    let started = epochTime()
+    let (output, code) = runWithDeadline(findExe("sh"),
+      @["-c", "sleep " & marker & " & wait"], inheritedEnv(), 1)
+    let elapsed = epochTime() - started
+    checkpoint(output)
+    check code == TimedOutCode
+    check output.startsWith("TIMED OUT after 1 s")
+    check elapsed < 10.0
+    sleep(300)
+    check execProcess("pgrep", args = ["-f", "sleep " & marker],
+                      options = {poUsePath}).strip() == ""
 
 suite "ct record-test records a Noir test":
 
