@@ -55,6 +55,7 @@ import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 from viewmodels/calltrace_vm import selectEntry, currentCallInSectionOf   # PLAT-49 part B
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
+import ../../../common/replay_server_path   # the one replay-server search order
 import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
 from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
@@ -93,28 +94,23 @@ proc repoRoot(): string =
 proc findReplayServer*(): string =
   ## Where `replay-server` is, or "" when it has not been built.
   ##
-  ## The search order is the one `src/frontend/viewmodel/tests/unit/
-  ## test_column_evm_vm.nim` and the rest of the headless suites already use —
-  ## `REPLAY_SERVER_BIN`, then the debug build tree, then cargo's own output
-  ## directories — because a front-end that looked somewhere else would find a
-  ## different binary than the tests do, which is a difference nobody would
-  ## notice until it mattered.
+  ## The search order is `src/common/replay_server_path`'s, and deliberately
+  ## not a list of this module's own: `REPLAY_SERVER_BIN`, the output root the
+  ## build published (`CT_BUILD_OUT_ROOT`, `CODETRACER_BUILD_DIR`), the Repro
+  ## and tup trees, and cargo's own directories last. Every headless suite
+  ## resolves through the same module, because a front-end that looked
+  ## somewhere else would find a different binary than the tests do — and
+  ## that is exactly what happened while this list was private: it did not
+  ## know the Repro output root, so a `repro`-built checkout ran a stale cargo
+  ## engine and the window hung on a DAP read with no output at all
+  ## (codetracer-pm
+  ## `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
   ##
   ## Returns "" rather than raising: a caller that only wants `--version` must
   ## not need a backend, and CTUI-1's fixture provider needs to be able to
   ## report the absence as a named, counted prerequisite rather than catch an
   ## exception.
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let root = repoRoot()
-  for candidate in [
-      root / "src" / "build-debug" / "bin" / "replay-server",
-      root / "src" / "db-backend" / "target" / "debug" / "replay-server",
-      root / "src" / "db-backend" / "target" / "release" / "replay-server"]:
-    if fileExists(candidate):
-      return candidate
-  ""
+  locateReplayServer()
 
 proc traceFolderProblem*(path: string): string
   ## Forward-declared; defined below.
