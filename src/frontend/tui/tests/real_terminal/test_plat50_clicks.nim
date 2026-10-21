@@ -525,7 +525,18 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
     sess.press(ro2, co2 + 2)
     let (rg, _) = sess.waitFor("⇠ tick ")
     ck rg > rx
-    ck sess.snap().text(rg).contains(" <- ")
+    # The hop's arrow, on the hop's own row after its `⇠ tick` and inside the
+    # Variables pane (up to the divider after it). No trailing space: with the
+    # history open the pane overflows, its last column is the scrollbar (M71,
+    # Scrollbar-Scrubbers.md §4), and on this 41-cell pane the arrow ends in
+    # the last text cell.
+    let hopRow = sess.snap().text(rg)
+    let hopAt = hopRow.find("⇠ tick ")
+    let hopSeg =
+      if hopAt < 0: ""
+      else: hopRow[hopAt + "⇠ tick ".len .. ^1].split("▏")[0]
+    checkpoint("origin hop: " & hopSeg)
+    ck hopSeg.contains(" <-")
     # And `:origin` — the walk, which froze the terminal before: it answers.
     sess.send(":origin EXPRESSIONS\r")
     discard sess.waitFor("EXPRESSIONS computed from", timeoutMs = 30000)
