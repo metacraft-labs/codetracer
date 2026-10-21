@@ -304,8 +304,11 @@ build/bin/codetracer-tui /tmp/ct-calc                 # the same, directly
 
 Running a built binary does not need the development environment. `ct` finds
 `build/bin/codetracer-tui` in the checkout it was built from (`CODETRACER_TUI_BIN`
-overrides it), and the front-end finds `src/build-debug/bin/replay-server` the same
-way; set `REPLAY_SERVER_BIN=<path>` to use a different engine build.
+overrides it), and the front-end finds the engine the same way: the build's
+published output root (`CT_BUILD_OUT_ROOT`, `CODETRACER_BUILD_DIR`), then
+`src/build-debug-repro/bin/`, then tup's `src/build-debug/bin/`, then cargo's
+`src/db-backend/target/{debug,release}/`. Set `REPLAY_SERVER_BIN=<path>` to use a
+different engine build.
 
 The native window needs a graphical session and its runtime libraries, which the
 development environment provides:

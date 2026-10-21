@@ -129,9 +129,11 @@ The user-facing reference is README.md, "Running the terminal (TUI) and native
    ```
 
    Equivalent through the launcher: `src/build-debug/bin/ct replay --ui=tui <trace>`.
-   A dev build finds `src/build-debug/bin/replay-server` of its own checkout; set
-   `REPLAY_SERVER_BIN=<path>` when the engine lives elsewhere (for example a
-   `src/build-debug-repro/bin/` build, or another worktree's).
+   A dev build finds the `replay-server` of its own checkout, in the order
+   `src/common/replay_server_path.nim` defines (the build's published output
+   root, then `src/build-debug-repro/bin/`, then `src/build-debug/bin/`, then
+   cargo's `target/` trees); set `REPLAY_SERVER_BIN=<path>` when the engine
+   lives elsewhere (for example another worktree's build).
 7. **State.** When launching for the user, do NOT set `CODETRACER_TUI_LAYOUT_DIR`:
    they expect their own remembered layout in `$XDG_STATE_HOME/codetracer/`
    (`~/.local/state/codetracer/tui-layout.json`). When YOU drive the TUI for

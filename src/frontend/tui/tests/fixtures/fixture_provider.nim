@@ -28,7 +28,8 @@
 ## each caller's discretion:
 ##
 ##   * **`replay-server` is never a skip.** `findReplayServer` raises, with a
-##     message naming the build command, exactly as
+##     message naming the build command and every path searched
+##     (`src/common/replay_server_path.missingReplayServerMessage`), exactly as
 ##     `src/tests/gui/tests/noir-space-ship/noir_space_ship_test.nim` does.
 ##     Every fixture needs it, so its absence is a broken environment, not a
 ##     partial one.
@@ -63,6 +64,8 @@
 ## process-spawning host — is reachable from the suites that use this.
 
 import std/[algorithm, md5, os, osproc, strutils]
+
+import ../../../../common/replay_server_path   # the one search order
 
 const FixtureCacheSchema = 2
   ## Bumped whenever the *shape* of a cached fixture directory changes, so a
@@ -241,23 +244,17 @@ proc repoRoot*(): string =
     "could not locate the codetracer checkout from " & currentSourcePath())
 
 proc findReplayServer*(): string =
-  ## Locate `replay-server`, exactly as the existing headless suite does.
+  ## Locate `replay-server`, exactly as the TUI host and every headless suite
+  ## do: through `src/common/replay_server_path`, whose order is the only one.
   ##
-  ## `REPLAY_SERVER_BIN`, then `src/build-debug/bin/replay-server`, then a
-  ## DIAGNOSTIC FAILURE naming the build command — never a skip. CTUI-1 states
-  ## this as a contract, and the reason is that `replay-server` is not a
-  ## per-fixture prerequisite: it is what "open a trace" MEANS. A run without
-  ## it has not tested a fixture corpus, it has tested nothing, and a skip
-  ## would let that read as green.
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let candidate = repoRoot() / "src" / "build-debug" / "bin" / "replay-server"
-  if fileExists(candidate):
-    return candidate
-  raise newException(IOError,
-    "Could not find replay-server binary. Set REPLAY_SERVER_BIN or " &
-    "build it with 'cargo build' in src/db-backend/. Tried: " & candidate)
+  ## Found, or a DIAGNOSTIC FAILURE naming every path searched — never a skip.
+  ## CTUI-1 states this as a contract, and the reason is that `replay-server`
+  ## is not a per-fixture prerequisite: it is what "open a trace" MEANS. A run
+  ## without it has not tested a fixture corpus, it has tested nothing, and a
+  ## skip would let that read as green.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 proc findCtBinary*(): string =
   ## Locate `ct`, the binary that drives every recorder.
@@ -267,9 +264,17 @@ proc findCtBinary*(): string =
   ## cache the corpus is fully testable without it, so its absence must not
   ## fail a run that never needed to record anything. `resolveFixture` turns a
   ## "" here into a MISSING-PREREQ skip only when it actually has to record.
+  ##
+  ## `CT_BIN`, then beside the `replay-server` `src/common/replay_server_path`
+  ## resolves — the build that produced the engine produced `ct` next to it,
+  ## so this follows the Repro output root the same way the engine search
+  ## does, and agrees with `host/native_host.findCtBinary` — then the tup tree.
   let envBin = getEnv("CT_BIN", "")
   if envBin.len > 0 and fileExists(envBin):
     return envBin
+  let rs = locateReplayServer()
+  if rs.len > 0 and fileExists(rs.parentDir / "ct".addFileExt(ExeExt)):
+    return rs.parentDir / "ct".addFileExt(ExeExt)
   let candidate = repoRoot() / "src" / "build-debug" / "bin" / "ct"
   if fileExists(candidate):
     return candidate

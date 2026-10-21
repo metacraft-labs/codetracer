@@ -493,13 +493,48 @@ def take_lock():
     return fh
 
 
+def resolve_replay_server() -> Path | None:
+    """The `replay-server` the suite will spawn, or None when none is built.
+
+    `src/common/replay_server_path.nim` is the AUTHORITY for this order; it is
+    restated here only because Python cannot import Nim. Keep the two in step:
+    `$REPLAY_SERVER_BIN` (when it names a file), `$CT_BUILD_OUT_ROOT/bin`, then
+    `$CODETRACER_BUILD_DIR/bin` (both relative to the checkout or absolute),
+    then `src/build-<config>-repro/bin` and tup's `src/build-<config>/bin`
+    (`<config>` = `$CODETRACER_CONFIG`, default `debug`), then cargo's
+    `target/debug` and `target/release`. Each is tested for the FILE: the
+    tracked `src/build-debug/` exists everywhere, holding only `tup.config`.
+    """
+    exe = "replay-server.exe" if os.name == "nt" else "replay-server"
+    candidates: list[Path] = []
+    override = os.environ.get("REPLAY_SERVER_BIN", "")
+    if override:
+        candidates.append(Path(override))
+    for var in ("CT_BUILD_OUT_ROOT", "CODETRACER_BUILD_DIR"):
+        tree = os.environ.get(var, "")
+        if tree:
+            candidates.append((REPO / tree) / "bin" / exe)  # absolute wins
+    config = os.environ.get("CODETRACER_CONFIG", "") or "debug"
+    candidates += [
+        REPO / "src" / f"build-{config}-repro" / "bin" / exe,
+        REPO / "src" / f"build-{config}" / "bin" / exe,
+        REPO / "src" / "db-backend" / "target" / "debug" / exe,
+        REPO / "src" / "db-backend" / "target" / "release" / exe,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def check_replay_server_runnable() -> bool:
     """Refuse to grade when the suite's `replay-server` cannot be executed.
 
     **PLAT-22 residue 13, closed by PLAT-23.** Every case in
     `test_gpui_editing_surface.nim` spawns a real `replay-server`, and the
-    binary `native_host.findReplayServer` picks first —
-    `src/build-debug/bin/replay-server` — resolves `libmcr_emulator.so` through
+    binary `native_host.findReplayServer` picks (`resolve_replay_server`
+    below; the tup tree `src/build-debug/bin/replay-server` when PLAT-23
+    measured it) resolves `libmcr_emulator.so` through
     neither an rpath nor `CT_LD_LIBRARY_PATH`. Without the emulator's build
     directory on `LD_LIBRARY_PATH` the suite is RED on an UNMUTATED tree, and
     the harness scored **5 of 15** with eight `MIS-ATTRIBUTED` and two
@@ -526,11 +561,12 @@ def check_replay_server_runnable() -> bool:
     which is why the residue is a harness residue; this check gives the harness
     the same property.
     """
-    binary = REPO / "src" / "build-debug" / "bin" / "replay-server"
-    if not binary.exists():
-        print("REFUSED: %s does not exist, so every case that spawns a "
-              "replay-server would fail on an UNMUTATED tree and every arm "
-              "would score MIS-ATTRIBUTED. Nothing was mutated." % binary)
+    binary = resolve_replay_server()
+    if binary is None:
+        print("REFUSED: no replay-server is built (the search order of "
+              "src/common/replay_server_path.nim found nothing), so every case "
+              "that spawns one would fail on an UNMUTATED tree and every arm "
+              "would score MIS-ATTRIBUTED. Nothing was mutated.")
         return False
     p = subprocess.run(["ldd", str(binary)], capture_output=True, text=True)
     missing = [ln.strip() for ln in p.stdout.splitlines() if "not found" in ln]
