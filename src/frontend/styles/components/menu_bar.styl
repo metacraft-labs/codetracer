@@ -237,11 +237,13 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
     width: 50px
     height: 50px
     font-size: 20px
-    color: OPPOSITE_COLOR
+    // OPPOSITE_COLOR is the light palette's window ground, so these glyphs
+    // vanished there: the icon token in the light theme (`by-mode`, defaults.styl).
+    color: by-mode(OPPOSITE_COLOR, colors-ui-icon-primary-default)
 
   #navigation-menu
     font-size: inherit
-    color: white // TODO is this correct
+    color: by-mode(white, colors-ui-text-primary-body) // TODO is this correct
     z-index: 10
     -webkit-app-region: no-drag
     order: 1

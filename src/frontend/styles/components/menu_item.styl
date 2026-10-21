@@ -129,6 +129,9 @@
     .ct-menu-item-trailing
       opacity: 0.3
 
+    // A disabled item's box: fainter white strokes in the dark theme, the
+    // disabled border and icon tokens in the light one (`by-mode`,
+    // defaults.styl; checkmark.styl).
     .ct-checkmark
-      --ct-checkmark-border: rgba(255, 255, 255, 0.14)
-      --ct-checkmark-icon: rgba(255, 255, 255, 0.3)
+      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.14), colors-ui-border-disabled)
+      --ct-checkmark-icon: by-mode(rgba(255, 255, 255, 0.3), colors-ui-icon-primary-disabled)

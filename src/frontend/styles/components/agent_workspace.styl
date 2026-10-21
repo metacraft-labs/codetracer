@@ -171,7 +171,8 @@ if COLOR_MODE is defined and COLOR_MODE == "Light"
   margin-top 2px
   margin-left 6px
   font-size 10px
-  color rgba(0, 180, 0, 0.8)
+  // The success text token in the light theme (`by-mode`, defaults.styl).
+  color by-mode(rgba(0, 180, 0, 0.8), colors-ui-text-success-primary)
   background-color rgba(0, 180, 0, 0.1)
   padding 1px 4px
   border-radius 3px
@@ -202,8 +203,11 @@ if COLOR_MODE is defined and COLOR_MODE == "Light"
 
 .deepreview-line-executed
   background-color rgba(0, 180, 0, 0.08)
-  border-left 3px solid rgba(0, 200, 0, 0.5)
+  // The coverage stripes: half-alpha green and red over the dark editor,
+  // 1.5:1 and 2.6:1 over the light one. The success / error icon tokens in
+  // the light theme (`by-mode`, defaults.styl).
+  border-left 3px solid by-mode(rgba(0, 200, 0, 0.5), colors-ui-icon-success-primary)
 
 .deepreview-line-unreachable
   background-color rgba(220, 0, 0, 0.08)
-  border-left 3px solid rgba(220, 0, 0, 0.5)
+  border-left 3px solid by-mode(rgba(220, 0, 0, 0.5), colors-ui-icon-error-primary)

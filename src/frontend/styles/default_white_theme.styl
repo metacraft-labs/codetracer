@@ -153,10 +153,14 @@ INLINE_NAME_COLOR = #00f
 INLINE_RIGHT_VAR_COLOR_BG = #38b088
 INLINE_RIGHT_VAR_COLOR_FG = #fff
 INLINE_RIGHT_NAME_COLOR = #fff
-JUMP_COLOR = #fff
+// `.jump`, a link in the old DOM editor: white, the dark theme's ink, until
+// it took the information text token.
+JUMP_COLOR = colors-ui-text-information-primary
 TRACE_SIMPLE_COLOR = #000
 TRACE_VAR_COLOR = #000
-TRACE_ENUM_COLOR = #0f0
+// `.trace-enum`: pure green (1.3:1 on the light ground) until it took the
+// success text token.
+TRACE_ENUM_COLOR = colors-ui-text-success-primary
 TRACE_EXPAND_COLOR = #00f
 TRACE_EVEN_COLOR_BG = #222
 TRACE_ODD_COLOR_BG = #111
@@ -248,12 +252,14 @@ ERROR_COLOR_FG = #fff
 ERROR_COLOR_BG = #a00
 NORMAL_COLOR_FG = #fff
 NORMAL_COLOR_BG = #0a0
-WARN_COLOR_FG = #fff
+// `.message-warn`'s text on the cyan WARN_COLOR_BG: white was 1.3:1 there.
+WARN_COLOR_FG = colors-ui-text-primary-body
 WARN_COLOR_BG = #0ff
 FUZZY_RESULT_COLOR_BG = #888
 LOADING_TEXT_COLOR_FG = #00f
 SEARCHED_TOKEN_COLOR = #ECF53D
-BREAK_COLOR = #fff
+// `.break` text: white, the dark theme's ink, until it took body text.
+BREAK_COLOR = colors-ui-text-primary-body
 INSTANTIATIONS_MENU_COLOR_BG = #3761D3
 INSTANTIATIONS_MENU_COLOR_FG = #D3E9E9
 INCODE_COLOR_BG = #77DA1D
@@ -303,7 +309,9 @@ FLOW_PARALLEL_NAME_COLOR=white
 FLOW_PARALLEL_BEFORE_VALUE_BORDER_COLOR=#aaa
 FLOW_PARALLEL_BEFORE_VALUE_COLOR=black
 FLOW_PARALLEL_NAME_BORDER_COLOR=#777
-FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR=#aaa
+// Read only as `.flow-parallel-values`'s right border (flow.styl): the
+// primary border token, as #aaa was 2.2:1 on the light ground.
+FLOW_PARALLEL_BEFORE_VALUE_BACKGROUND_COLOR=colors-ui-border-primary
 FLOW_PARALLEL_BEFORE_ONLY_VALUE_BORDER_COLOR=#ccc
 FLOW_PARALLEL_BEFORE_ONLY_VALUE_BACKGROUND_COLOR=#e0e1e1
 FLOW_PARALLEL_BEFORE_ONLY_VALUE_COLOR=#3D993D
@@ -332,13 +340,17 @@ FLOW_MULTILINE_LOOP_VALUE_BACKGROUND_COLOR=#C2C4CD
 FLOW_MULTILINE_LOOP_VALUE_COLOR=#3D993D
 FLOW_MULTILINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR=#4fa05a
 FLOW_MULTILINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR=#C2C4CD
-FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR=#3D993D
+// A before-only value on its #C2C4CD box: #3D993D was 2.1:1 there; the
+// editor's function green reads.
+FLOW_MULTILINE_BEFORE_ONLY_VALUE_COLOR=colors-editor-syntax-function
 FLOW_MULTILINE_VALUE_BOX_SHADOW_COLOR=#9A9DA7
 
 FLOW_INLINE_BACKGROUND_COLOR=BACKGROUND_COLOR
 FLOW_INLINE_ACTIVE_LOOP_ITERATION_BACKGROUND_COLOR=#4fa05a
 FLOW_INLINE_BEFORE_ONLY_VALUE_BACKGROUND_COLOR=#C2C4CD
-FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR=#3D993D
+// The inline value box paints `editor/surface/primary` (flow.styl), mid-grey
+// in this mode, on which #3D993D was 1.3:1: code text for a coloured surface.
+FLOW_INLINE_BEFORE_ONLY_VALUE_COLOR=colors-editor-syntax-on-color
 
 FLOW_CONDITION_TAKEN = #B9F8B9
 FLOW_CONDITION_NOT_TAKEN = #F8B9B9

@@ -56,7 +56,9 @@
   color: #f85149
 
 .problems-count-warning
-  color: #d29922
+  // GitHub-dark's amber, 2.3:1 on the light ground: the warning text token
+  // there (`by-mode`, defaults.styl).
+  color: by-mode(#d29922, colors-ui-text-warning-primary)
 
 // -- Filter / control buttons --
 
@@ -152,21 +154,23 @@
 .problems-icon-error
   color: #f85149
 
+// The severity glyphs and the dimmed path text were written for the dark
+// ground; the light theme takes the icon and caption tokens (`by-mode`, defaults.styl).
 .problems-icon-warning
-  color: #d29922
+  color: by-mode(#d29922, colors-ui-icon-warning-primary)
 
 .problems-icon-info
-  color: #58a6ff
+  color: by-mode(#58a6ff, colors-ui-icon-information-primary)
 
 .problems-path
-  color: #8b949e
+  color: by-mode(#8b949e, colors-ui-text-primary-caption)
   flex-shrink: 1
   overflow: hidden
   text-overflow: ellipsis
   font-size: 12px
 
 .problems-location
-  color: #8b949e
+  color: by-mode(#8b949e, colors-ui-text-primary-caption)
   flex-shrink: 0
   font-size: 12px
 
@@ -189,16 +193,19 @@
   padding: 4px PANEL_INSET
   font-weight: 600
   font-size: 12px
-  color: #8b949e
+  // Caption text, and a hairline that is about `border/tertiary` over the
+  // dark panel: those tokens in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(#8b949e, colors-ui-text-primary-caption)
   background: rgba(255, 255, 255, 0.03)
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05)
+  border-bottom: 1px solid by-mode(rgba(255, 255, 255, 0.05), colors-ui-border-tertiary)
 
 // Severity-tinted left border for quick scanning
 .problems-severity-error
   border-left: 3px solid #f85149
 
+// In the light theme the severity icon tokens, as the glyphs above.
 .problems-severity-warning
-  border-left: 3px solid #d29922
+  border-left: 3px solid by-mode(#d29922, colors-ui-icon-warning-primary)
 
 .problems-severity-info
-  border-left: 3px solid #58a6ff
+  border-left: 3px solid by-mode(#58a6ff, colors-ui-icon-information-primary)

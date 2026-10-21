@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""css-light-theme-grounds.py — the light theme paints its grounds light.
+"""css-light-theme-grounds.py — the light theme paints its grounds light, and
+the text and outlines on them dark enough to read.
 
 WHY THIS EXISTS
 ---------------
@@ -66,13 +67,58 @@ light sheet is now read whole:
      dark, not grounds; a colour hard-coded for every theme paints the same
      in both sheets and is caught), and the rule is shaped like ink: it
      paints through a mask or a glyph image, or one of its sides is a line's
-     or a dot's (``ink_shaped``), so a text or icon token spread over a pane
-     is still a dark ground —
+     or a dot's (``ink_shaped``; a custom property counts when every rule
+     that reads it into a background is so shaped, ``read_as_ink``), so a
+     text or icon token spread over a pane is still a dark ground —
      or the rule's selector is in ``MODE_INDEPENDENT``, matched EXACTLY
      against one member of the rule's selector list, never by substring, so
      a new rule cannot hide under an old entry.  The list is self-checking:
      an entry whose selector no longer appears in the light sheet, or no
      longer paints dark there, fails too, so it cannot outlive its rule.
+
+Then EVERY foreground (added for the light theme's pale text and white
+checkbox outlines, codetracer-pm issue 2026-10-21).  Making every ground
+light left the ink written for the dark ground where it was: caption text
+``#b0b0b0`` (2:1 on the light tab bar), pale cyan ``#a5f3fc`` (1.2:1), and
+checkbox strokes in translucent white (1.0:1).  Text and outlines drawn on a
+light ground are part of that surface, so:
+
+  5. every ``color``, ``caret-color``, ``text-decoration(-color)``,
+     ``outline(-color)``, ``column-rule(-color)`` and ``border*`` colour
+     (shorthand, side, logical side, ``-color`` longhand; placeholder text is
+     ``color`` on a ``::placeholder`` selector) of the LIGHT stylesheet, and
+     every custom property such a declaration reads, is graded against the
+     GROUND it sits on, and one below ``MIN_FOREGROUND_CONTRAST`` (3:1, WCAG
+     2.x's large-text and non-text floor; its comment says why not 4.5:1)
+     fails.  The ground is found from the selector alone
+     (``foreground_ground``): the element's own background (its selector,
+     then that selector without the last pseudo-class or pseudo-element),
+     else each ancestor the selector names, innermost first, else the
+     window ground; translucent layers composite outward, ``var()`` resolves
+     through the element's and its ancestors' custom properties and then
+     ``:root``.  A border, an outline or a column rule is an EDGE and reads
+     against what surrounds the element, so its own fill is skipped.  Where
+     the markup puts an element on a surface its selector does not name, the
+     commented, self-checking ``SITS_ON`` map says which, and the colour is
+     graded against that surface instead (it is not exempted);
+  6. unless the colour follows the mode: it is opaque and is a design
+     token's Light value that the dark sheet does not paint at the same place
+     (``follows_mode``, as in check 4) and that token may paint the
+     property's role (``fit_for_role``: text is never painted in a surface,
+     border or divider token, the role check 4 asks of a rule's shape), or
+     it is a token of the property's role — ``colors-ui-border-*`` for an
+     edge, ``colors-ui-text-*`` / ``colors-ui-icon-*`` for text — that has
+     the same value in both modes (``role_tokens``: ``border/information``
+     is #93c5fd in each, and whether that suits a light ground is the design
+     system's question); in both cases the tokens for ink on a coloured
+     surface (``*-on-color*``, ``*-on-action*``, ``border/contrast``) count
+     only on a ground the design system made for them (the Light value of an
+     action, alert or on-colour surface token), never on the window ground
+     or any other surface —
+     or it is drawn on a MODE_INDEPENDENT surface, dark in both modes, whose
+     foregrounds the light theme does not change and this check does not
+     grade, or its rule is in the self-checking ``UNRENDERED`` list (markup
+     nothing renders, cross-checked against the footer guard's own list).
 
 Translucent colours are graded by what they PAINT: composited over the light
 sheet's own window ground (``body``'s background) with ordinary source-over
@@ -82,12 +128,17 @@ leaves: ``rgba(0,0,0,.5)`` lands mid-grey and passes, ``rgba(0,0,0,.9)``
 lands near-black and fails.  This is the window ground, not each element's
 real backdrop (which is not knowable statically), and it is the ground a
 dark-on-light defect shows up against.
+A translucent FOREGROUND is composited the same way over the ground check 5
+finds for it, and the contrast is taken between the two results.
 
 Values this cannot grade are skipped, and the reasons are deliberate:
 ``url()`` images; ``transparent``, ``none``, ``inherit``, ``currentColor``;
 and unresolved identifiers, which ``ci/test/css-token-resolution.sh`` owns.
 An element's own ``opacity`` is not folded into its colour: it dims the
-element's text with it, so it is not a property of the ground alone.
+element's text with it, so it is not a property of the ground alone.  A
+foreground's ground is what its selector says about the DOM and no more
+(plus ``SITS_ON``): an ancestor the selector does not name is not knowable
+statically, and the window ground stands for it, as it does for check 3.
 
 The web IDE ships no light sheet of its own: its deployment carries the
 dark ``_electron`` sheet (``web_deployment.nim`` ``rendererThemeStylesPath``)
@@ -155,6 +206,77 @@ MODE_INDEPENDENT = {
         "the loupe's pixel readout, over the video stage (components/video_player.styl)",
     ".agent-ha-container .agent-paste-thumb .agent-paste-remove:hover":
         "the remove chip over a pasted image's thumbnail (components/agent_activity.styl)",
+}
+
+# The properties that draw a FOREGROUND: text, its caret and decoration, and
+# the edges an element is outlined with (a border shorthand or any side or
+# logical side of it, its colour longhands, an outline, a column rule).
+# `border-radius`, `-width`, `-style` and `-collapse` name no colour and do not
+# match.  Placeholder text is `color` on a `::placeholder` selector.
+FOREGROUND_PROP_RE = re.compile(
+    r"color|caret-color|text-decoration(-color)?|outline(-color)?|column-rule(-color)?"
+    r"|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-color)?")
+
+# The least contrast a foreground may have with its ground.  3:1 is WCAG 2.x's
+# floor for large text (SC 1.4.3) and for the graphical objects and component
+# boundaries a border or an outline draws (SC 1.4.11):
+# https://www.w3.org/TR/WCAG21/#contrast-minimum and
+# https://www.w3.org/TR/WCAG21/#non-text-contrast.  Not the 4.5:1 for body
+# text, which the editor's own text is held to above: the compiled sheet does
+# not say how large any text is, and the design system's own Light text
+# tokens sit under 4.5:1 on its own window ground (`text/primary/caption`
+# #7a756a is 4.25:1 on #f8f6f2, `text/success/primary` 3.05:1), so 4.5:1
+# here would grade the design system rather than whether a rule follows the
+# mode.  The defect this guards against — ink written for the dark ground —
+# sits far below 3:1 on a light one (#b0b0b0 2.0:1, #a5f3fc 1.2:1, a white
+# hairline 1.0:1).
+MIN_FOREGROUND_CONTRAST = 3.0
+
+# Where the DOM puts a foreground on a surface its selector does not name.
+# A compiled selector says which ancestors it requires, and nothing else, so
+# the overlay text of a video stage (`.video-player-component
+# .video-player-empty`) cannot be seen to sit on that stage
+# (`.video-player-component .video-player-stage`, dark in both modes, see
+# MODE_INDEPENDENT).  Each entry names the surface the element is a child of
+# in the markup, and the foreground is then graded against THAT surface's
+# paint: it is not exempted, it must still read there.  Keys and values are
+# compiled selectors, matched exactly.  Self-checking: an entry whose key no
+# longer appears in the light sheet, or that no longer turns any colour from
+# failing on the window ground to passing on its surface, fails.
+SITS_ON = {
+    # viewmodel/views/isonim_video_player_view.nim: the empty and loading
+    # notices and the startup chip are children of the stage.
+    ".video-player-component .video-player-empty":
+        ".video-player-component .video-player-stage",
+    ".video-player-component .video-player-loading":
+        ".video-player-component .video-player-stage",
+    ".video-player-component .video-player-startup":
+        ".video-player-component .video-player-stage",
+    # The spinner and its label are children of the startup chip.
+    ".video-player-component .video-player-startup-spinner":
+        ".video-player-component .video-player-startup",
+    ".video-player-component .video-player-startup-label":
+        ".video-player-component .video-player-startup",
+    # The loupe is a child of the stage; its canvas's ring is drawn on it.
+    ".video-player-component .video-player-loupe-canvas":
+        ".video-player-component .video-player-stage",
+    # The RGBA line is a readout chip itself (`video-player-loupe-readout
+    # video-player-loupe-rgba` on one element), so it has the readout's
+    # ground.
+    ".video-player-component .video-player-loupe-rgba":
+        ".video-player-component .video-player-loupe-readout",
+}
+
+# Foreground rules whose markup nothing in the frontend renders, so a pale
+# colour in them never meets a pixel.  Each is the compiled selector of an
+# entry in the footer guard's `UNREACHABLE_SELECTORS`
+# (src/tests/gui/page-objects/status-footer-contrast.ts), which asserts
+# against the frontend sources that the class is still unrendered and holds
+# the evidence; status_bar.styl says why the colour is left alone rather than
+# adjusted.  Self-checking: an entry must still be listed there, still appear
+# in the light sheet, and still carry a colour this check would fail.
+UNRENDERED = {
+    "#status #status-base .whitespace-set": "whitespace-set",
 }
 
 # `background-image` too: a gradient written there paints exactly as one in
@@ -416,9 +538,13 @@ def ink_shaped(selector, decls):
 
     A design token's Light value passes ``follows_mode`` whatever its role,
     so a text token painting a whole pane would pass there; this is what
-    stops it.  A custom property is never ink-shaped (``:root`` has no
-    shape), so a dark Light value read through ``var()`` fails: give it a
-    ground token, or move the colour into the rule that draws the ink."""
+    stops it.  A custom property has no shape of its own, so a dark Light
+    value read through ``var()`` passes only when every rule that reads it
+    into a background is ink-shaped (``read_as_ink``); otherwise give it a
+    ground token, or move the colour into the rule that draws the ink.
+    `inline-size` / `block-size` count as `width` / `height`, and a side
+    written as `var(--x)` counts when every definition of `--x` is that
+    small (``side_is_ink``)."""
     for s, p, v, _ in decls:
         if s != selector:
             continue
@@ -428,11 +554,37 @@ def ink_shaped(selector, decls):
         if p == "background-image" and v.strip().lower() != "none" and not colours_in(v) \
                 and not re.search(r"gradient\(", v, re.I):
             return True
-        if p in ("width", "height"):
-            m = INK_SIDE_RE.fullmatch(v.strip())
-            if m and float(m.group(1)) <= INK_MAX_SIDE[m.group(2)]:
-                return True
+        if p in ("width", "height", "inline-size", "block-size") and \
+                side_is_ink(v, decls):
+            return True
     return False
+
+
+def side_is_ink(value, decls):
+    """Whether a `width` / `height` (or its logical twin) `value` is at most
+    ``INK_MAX_SIDE``: a length, or a `var(--x)` every definition of which in
+    the sheet is such a length.  Every definition, because the compiled
+    sheet does not say which one reaches the element (the checkmark's
+    `--ct-checkmark-minus-height` is 0.125em wherever it is set)."""
+    m = INK_SIDE_RE.fullmatch(value.strip())
+    if m:
+        return float(m.group(1)) <= INK_MAX_SIDE[m.group(2)]
+    m = re.fullmatch(r"var\(\s*(--[-a-zA-Z0-9_]+)\s*\)", value.strip())
+    if not m:
+        return False
+    defs = [v for _, p, v, _ in decls if p == m.group(1)]
+    return bool(defs) and all(INK_SIDE_RE.fullmatch(v.strip()) and
+                              side_is_ink(v, decls) for v in defs)
+
+
+def read_as_ink(prop, decls):
+    """Whether custom property `prop` is read into a background only by
+    rules shaped like ink (``ink_shaped``): then it is an ink colour carried
+    in a variable (the checkmark's `--ct-checkmark-icon`, which draws both
+    the tick's strokes and the indeterminate dash), not a ground."""
+    readers = {s for s, p, v, _ in decls
+               if p in BACKGROUND_PROPS and prop in VAR_READ_RE.findall(v)}
+    return bool(readers) and all(ink_shaped(s, decls) for s in readers)
 
 
 def check_every_ground(light_decls, dark_decls, tokens, failures):
@@ -449,7 +601,8 @@ def check_every_ground(light_decls, dark_decls, tokens, failures):
             allowed.append(d)
             continue
         candidates = follows_mode(d, dark_decls, tokens)
-        if candidates and ink_shaped(d["selector"], light_decls):
+        if candidates and (ink_shaped(d["selector"], light_decls) or
+                           (d["prop"].startswith("--") and read_as_ink(d["prop"], light_decls))):
             inked.append((d, candidates))
         else:
             offending.append((d, candidates))
@@ -483,6 +636,384 @@ def check_every_ground(light_decls, dark_decls, tokens, failures):
     if not offending:
         print(f"  ok   light: no other background paints darker than luminance "
               f"{DARK_LUMINANCE} on the window ground {page_ground}")
+
+
+def split_compounds(selector):
+    """`selector` cut at its top-level combinators, as a list of
+    (combinator, compound): the first combinator is ``""``, a descendant one
+    is ``" "``.  Brackets and parentheses are respected, so
+    ``[data-x="a b"]`` and ``:not(.a .b)`` stay whole."""
+    out, buf, depth, comb, i = [], "", 0, "", 0
+    while i < len(selector):
+        c = selector[i]
+        if c in "[(":
+            depth += 1
+        elif c in "])":
+            depth -= 1
+        if depth == 0 and c in " >+~":
+            # Collapse a run of whitespace and at most one explicit combinator.
+            j, seen = i, " "
+            while j < len(selector) and selector[j] in " >+~":
+                if selector[j] != " ":
+                    seen = selector[j]
+                j += 1
+            if buf:
+                out.append((comb, buf))
+                buf = ""
+            comb, i = seen, j
+            continue
+        buf += c
+        i += 1
+    if buf:
+        out.append((comb, buf))
+    return out
+
+
+def strip_pseudo(compound):
+    """`compound` without its pseudo-classes and pseudo-elements: the element
+    a `:hover`, a `::placeholder` or an `::after` belongs to."""
+    out, depth, i = "", 0, 0
+    while i < len(compound):
+        c = compound[i]
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+        if c == ":" and depth == 0:
+            # Skip `:name`, `::name` and a balanced `(...)` argument.
+            i += 1
+            while i < len(compound) and compound[i] == ":":
+                i += 1
+            while i < len(compound) and (compound[i].isalnum() or compound[i] in "-_"):
+                i += 1
+            if i < len(compound) and compound[i] == "(":
+                d = 0
+                while i < len(compound):
+                    d += {"(": 1, ")": -1}.get(compound[i], 0)
+                    i += 1
+                    if d == 0:
+                        break
+            continue
+        out += c
+        i += 1
+    return out
+
+
+def ground_layers(selector):
+    """The selectors whose background can lie under what `selector` paints,
+    nearest first, as (selector, same_element) pairs.
+
+    The element itself comes first (its own selector, then that selector with
+    the last compound's pseudo-classes cut, so a `:hover` or a
+    `::placeholder` sits on its element's ground), then each ancestor the
+    selector names, innermost first.  A compound reached through `+` or `~` is
+    a sibling, not an ancestor, so it is skipped.  The compiled sheet does not
+    know the DOM beyond what a selector says, so an ancestor the selector does
+    not name cannot be found; the window ground stands for it."""
+    parts = split_compounds(selector)
+    out, seen = [], set()
+
+    def add(sel, same):
+        if sel and sel not in seen:
+            seen.add(sel)
+            out.append((sel, same))
+
+    for n in range(len(parts), 0, -1):
+        same = n == len(parts)
+        if not same and parts[n][0] in "+~":
+            continue
+        prefix = parts[:n]
+        text = "".join((c if k else "") + p for k, (c, p) in enumerate(prefix)).strip()
+        add(text, same)
+        last = strip_pseudo(prefix[-1][1])
+        if last:
+            text = "".join((c if k else "") + p for k, (c, p) in enumerate(prefix[:-1] + [(prefix[-1][0], last)])).strip()
+            add(text, same)
+    return out
+
+
+def resolve_vars(value, context, root, depth=0):
+    """`value` with each `var(--x, fallback)` replaced by the value `--x`
+    takes for the element: its definition on the nearest of the `context`
+    selectors (the element and its ancestors, nearest first, as
+    ``ground_layers`` lists them), else on `:root`, else the fallback.
+    Definitions are themselves resolved, to a bounded depth (a cycle is
+    invalid CSS and resolves to nothing)."""
+    if depth > 8:
+        return ""
+    out, i = [], 0
+    for m in VAR_READ_RE.finditer(value):
+        if m.start() < i:
+            continue
+        open_at = value.index("(", m.start())
+        d, j = 1, open_at + 1
+        while j < len(value) and d:
+            d += {"(": 1, ")": -1}.get(value[j], 0)
+            j += 1
+        inner = value[open_at + 1:j - 1]
+        fallback = inner.split(",", 1)[1].strip() if "," in inner else ""
+        name = m.group(1)
+        defined = next((v for sel in context for s, p, v, _ in reversed(sel) if p == name), None)
+        if defined is None:
+            defined = root.get(name)
+        out.append(value[i:m.start()])
+        out.append(resolve_vars(defined if defined is not None else fallback,
+                                context, root, depth + 1))
+        i = j
+    return "".join(out) + value[i:]
+
+
+def foreground_ground(selector, decls_by_sel, root, page_ground, sits_on, edge):
+    """The opaque colour the foreground of `selector` sits on, the selector
+    that painted it (``"body"`` for the window ground), the `sits_on`
+    entries the walk went through, and the MODE_INDEPENDENT surface among
+    the layers that painted it (None when there is none).
+
+    Walk ``ground_layers`` outward and take each layer's winning `background`
+    / `background-color` colour (a gradient by its first stop; `transparent`,
+    `none` and images paint nothing knowable and are passed over) until one is
+    opaque; translucent layers are composited, outermost first, over it or
+    over the window ground.  An `edge` (a border, an outline, a column rule)
+    is drawn at the element's boundary and has to read against what
+    surrounds the element, so the element's own fill is skipped for it.  A
+    layer listed in `sits_on` continues the walk at the surface named there
+    (see ``SITS_ON``)."""
+    layers, painted_by, via, media = [], "body", [], None
+    queue = list(ground_layers(selector))
+    visited = set()
+    while queue:
+        sel, same = queue.pop(0)
+        if sel in visited:
+            continue
+        visited.add(sel)
+        own = [] if edge and same else decls_by_sel.get(sel, [])
+        bg = [(v, imp) for s, p, v, imp in own if p in ("background", "background-color")]
+        colour = None
+        if bg:
+            important = [v for v, imp in bg if imp]
+            value = important[-1] if important else bg[-1][0]
+            context = [decls_by_sel.get(s, []) for s, _ in ground_layers(sel)]
+            found = colours_in(resolve_vars(value, context, root))
+            if found:
+                colour = found[0][1:]
+        if colour:
+            layers.append(colour)
+            painted_by = sel if len(layers) == 1 else painted_by
+            if sel in MODE_INDEPENDENT and media is None:
+                media = sel
+            if colour[3] >= 1.0:
+                break
+        if sel in sits_on:
+            via.append(sel)
+            queue = [(sits_on[sel], False)] + [(s, False) for s, _ in ground_layers(sits_on[sel])]
+    ground = page_ground
+    for r, g, b, alpha in reversed(layers):
+        ground = composite(r, g, b, alpha, ground)
+    return ground, painted_by, via, media
+
+
+def role_tokens(colour_hex, prop, tokens, on_surface):
+    """The design tokens of the property's ROLE that paint `colour_hex` in
+    BOTH modes: `colors-ui-border-*` for an edge, `colors-ui-text-*` and
+    `colors-ui-icon-*` for text.  The design system chose that colour for the
+    role in its Light mode too (`border/information` is #93c5fd in each), so
+    a rule that paints it in both sheets follows the mode; whether the colour
+    suits the role is the design system's question, not this check's.
+
+    The compiled sheet does not record which variable a value came from, so
+    a hard-coded colour that equals such a token passes as well: it IS the
+    design system's Light colour for that role.  The tokens meant for ink on
+    a coloured surface (`*-on-color*`, `*-on-action*`, `border/contrast`)
+    count only `on_surface`: when the rule's ground is one the design system
+    made for them, the Light value of a `surface/action/*`,
+    `surface/alert/*` or `surface/on-color/*` token (other than the window
+    ground's own colour).  On any other ground they are pale by design:
+    #fca5a5 error text on a pale pink hover, 1.26:1.  A custom property
+    takes the tokens of either role, since its readers may draw an edge or
+    text."""
+    edge, custom = is_edge(prop), prop.startswith("--")
+    out = []
+    for var, (dark, light) in tokens.items():
+        if dark != light or light != colour_hex:
+            continue
+        is_border = var.startswith("colors-ui-border-")
+        is_text = var.startswith(("colors-ui-text-", "colors-ui-icon-"))
+        # A custom property may be read as either (`--ct-checkmark-border-error`
+        # is a border), so either role's tokens count for it.
+        if not (is_border if edge else (is_border or is_text) if custom else is_text):
+            continue
+        if re.search(r"-on-(color|action)|-contrast", var) and not on_surface:
+            continue
+        out.append(var)
+    return sorted(out)
+
+
+def is_edge(prop):
+    return bool(re.match(r"(border|outline|column-rule)", prop))
+
+
+# Token families that name a GROUND (a surface, a separator, the editor's own
+# ground or selection), never ink.  Text painted in one of these follows the
+# mode only in the sense that a ground does: `colors-ui-surface-input-default`
+# as text is the window ground's colour on the window ground.
+GROUND_TOKEN_PREFIXES = ("colors-ui-surface-", "colors-ui-border-", "colors-ui-divider-",
+                         "colors-editor-surface-", "colors-editor-action-",
+                         "editor-theme-ground", "editor-theme-selection",
+                         "editor-theme-executionline")
+
+
+def fit_for_role(names, prop, on_surface):
+    """The tokens among `names` (those ``follows_mode`` found for a
+    foreground's colour) that may paint it in its ROLE.  ``follows_mode``
+    cannot see the role, as check 4 cannot, and check 4 answers that with the
+    rule's shape; a foreground's role is its property instead:
+
+    - TEXT (`color`, `caret-color`, `text-decoration`) is not painted in a
+      ground token: a surface, border or divider token's Light value as text
+      is pale by design.  An EDGE keeps every name, because a border drawn
+      in a surface colour is a CSS idiom for a ground (a tooltip's arrow
+      triangle, a scrollbar thumb's inset, a knock-out ring around a dot);
+      so does a custom property, whose readers may be either.
+    - The tokens for ink on a coloured surface (`*-on-color*`,
+      `*-on-action*`, `border/contrast`) count only `on_surface`, as in
+      ``role_tokens``: on the bare window ground they are pale by design.
+
+    Without this, a pale colour passed whenever ANY token had it as its
+    Light value: `.recent-trace`'s `text/warning/on-color` (#fdba74, 1.56:1
+    on the window ground) and a dropdown's text in `surface/input/default`
+    (1.03:1) both did."""
+    text = not is_edge(prop) and not prop.startswith("--")
+    out = []
+    for var in names:
+        if text and var.startswith(GROUND_TOKEN_PREFIXES):
+            continue
+        if re.search(r"-on-(color|action)|-contrast", var) and not on_surface:
+            continue
+        out.append(var)
+    return out
+
+
+def pale_foregrounds(light_decls, dark_decls, tokens, page_ground):
+    """Check 5 of the header.  Returns (offending, followed, on_media,
+    unused_sits_on, unrendered): the pale colours that fail, those that pass
+    because they follow the mode, those that pass on a SITS_ON or
+    MODE_INDEPENDENT surface, the SITS_ON entries that no longer change any
+    verdict, and the pale colours of ``UNRENDERED`` rules."""
+    decls_by_sel = {}
+    for d in light_decls:
+        decls_by_sel.setdefault(d[0], []).append(d)
+    root = {p: v for s, p, v, _ in light_decls if s == ":root" and p.startswith("--")}
+    read_vars = {v for _, p, val, _ in light_decls if FOREGROUND_PROP_RE.fullmatch(p)
+                 for v in VAR_READ_RE.findall(val)}
+    on_root = set(root)
+    seen, offending, followed, on_media = {}, [], [], []
+    sits_on_used, unrendered = set(), []
+    # The grounds the design system made for on-colour ink: the Light values
+    # of its action, alert and on-colour surfaces, less the window ground's
+    # own colour (`surface/on-color/secondary` is #f8f6f2 in Light).
+    coloured_surfaces = {light for var, (_, light) in tokens.items()
+                         if var.startswith(("colors-ui-surface-action-",
+                                            "colors-ui-surface-alert-",
+                                            "colors-ui-surface-on-color-"))} - {page_ground}
+    for selector, prop, value, _ in light_decls:
+        if not FOREGROUND_PROP_RE.fullmatch(prop) and prop not in read_vars:
+            continue
+        occurrence = seen.get((selector, prop), 0)
+        seen[(selector, prop)] = occurrence + 1
+        # A custom property is graded where it is defined, as text would be
+        # (it has no edge of its own); the readers are graded as well.
+        edge = is_edge(prop)
+        ground, painted_by, listed, media = foreground_ground(
+            selector, decls_by_sel, root, page_ground, SITS_ON, edge)
+        plain_ground = foreground_ground(selector, decls_by_sel, root, page_ground,
+                                         {}, edge)[0] if listed else None
+        for index, (spelling, r, g, b, alpha) in enumerate(
+                colours_in(drop_fallbacks(value, on_root))):
+            painted = composite(r, g, b, alpha, ground)
+            ratio = contrast(painted, ground)
+            plain_fails = plain_ground is not None and contrast(
+                composite(r, g, b, alpha, plain_ground), plain_ground) < MIN_FOREGROUND_CONTRAST
+            if ratio >= MIN_FOREGROUND_CONTRAST or media:
+                # Readable on its real surface, or drawn on a surface that is
+                # dark in both modes (MODE_INDEPENDENT), whose foregrounds the
+                # light theme does not change and this check does not grade.
+                if plain_fails:
+                    sits_on_used.update(listed)
+                if plain_fails or (media and ratio < MIN_FOREGROUND_CONTRAST):
+                    on_media.append((selector, prop, spelling, painted_by, ratio, media))
+                continue
+            hit = dict(selector=selector, prop=prop, value=value, occurrence=occurrence,
+                       index=index, spelling=spelling, rgba=(r, g, b, alpha),
+                       ground=ground, painted_by=painted_by, ratio=ratio)
+            opaque_hex = "#" + "".join(f"{c:02x}" for c in (r, g, b))
+            names = []
+            if alpha >= 1.0:
+                on_surface = ground in coloured_surfaces
+                names = fit_for_role(follows_mode(hit, dark_decls, tokens), prop,
+                                     on_surface) or \
+                    role_tokens(opaque_hex, prop, tokens, on_surface)
+            if names:
+                followed.append((hit, names))
+            elif selector in UNRENDERED:
+                unrendered.append(hit)
+            else:
+                offending.append(hit)
+    unused = [s for s in SITS_ON if s not in sits_on_used]
+    return offending, followed, on_media, unused, unrendered
+
+
+def check_every_foreground(light_decls, dark_decls, tokens, failures, repo_root):
+    """Check 5 of the header over the LIGHT sheet's declarations."""
+    page_ground = norm_hex(winning(light_decls, "body", "background-color"))
+    if not page_ground:
+        return  # check_every_ground has already failed on this
+    offending, followed, on_media, unused, unrendered = pale_foregrounds(
+        light_decls, dark_decls, tokens, page_ground)
+    footer_guard = (repo_root / "src/tests/gui/page-objects/status-footer-contrast.ts"
+                    ).read_text(encoding="utf-8")
+    for selector, identifier in UNRENDERED.items():
+        if f'identifier: "{identifier}"' not in footer_guard:
+            failures.append(f"UNRENDERED lists `{selector}`, but `{identifier}` is no longer "
+                            f"in UNREACHABLE_SELECTORS: grade it, or drop the entry")
+        elif not any(h["selector"] == selector for h in unrendered):
+            failures.append(f"UNRENDERED lists `{selector}`, which no longer appears in the "
+                            f"light stylesheet or no longer paints a pale colour: drop the entry")
+    for h in unrendered:
+        print(f"  ok   light {h['selector']} {{ {h['prop']}: {h['spelling']} }} is "
+              f"{h['ratio']:.2f}:1 on {h['ground']}, but nothing renders it (UNRENDERED)")
+    for h in offending:
+        where = "the window ground" if h["painted_by"] == "body" else \
+            f"the ground `{h['painted_by']}` paints"
+        shown = h["spelling"]
+        if h["rgba"][3] < 1.0:
+            shown += f" (paints {composite(*h['rgba'], h['ground'])})"
+        failures.append(
+            f"light stylesheet paints `{h['selector']} {{ {h['prop']}: {h['value']} }}` pale: "
+            f"{shown} on {h['ground']}, {where}, is {h['ratio']:.2f}:1 < "
+            f"{MIN_FOREGROUND_CONTRAST}:1 — a colour written for the dark ground; give it "
+            f"the design token of its role in the light mode")
+    for selector in unused:
+        if not any(s == selector for s, _, _, _ in light_decls):
+            failures.append(f"SITS_ON lists `{selector}`, which no longer appears in the "
+                            f"light stylesheet: drop the entry")
+        else:
+            failures.append(f"SITS_ON lists `{selector}` ({SITS_ON[selector]}), but no "
+                            f"foreground under it needs that surface to read: drop the entry")
+    for h, names in followed:
+        shown = " / ".join(names[:3]) + (" / ..." if len(names) > 3 else "")
+        print(f"  ok   light {h['selector']} {{ {h['prop']}: {h['spelling']} }} is "
+              f"{h['ratio']:.2f}:1 on {h['ground']}, but it is the Light value of {shown} "
+              f"(follows the mode)")
+    for selector, prop, spelling, painted_by, ratio, media in on_media:
+        where = f"`{painted_by}`" + (f", over the media surface `{media}`"
+                                     if media and media != painted_by else "")
+        verdict = "reads" if ratio >= MIN_FOREGROUND_CONTRAST else \
+            "is dark in both modes and not graded:"
+        print(f"  ok   light {selector} {{ {prop}: {spelling} }} {verdict} {ratio:.2f}:1 on "
+              f"{where}")
+    if not offending:
+        print(f"  ok   light: no other foreground reads below {MIN_FOREGROUND_CONTRAST}:1 "
+              f"on its ground")
 
 
 def main():
@@ -546,16 +1077,19 @@ def main():
                 f"{ratio:.2f}:1, below {MIN_TEXT_CONTRAST}:1")
 
     check_every_ground(sheets["light"], sheets["dark"], tokens, failures)
+    check_every_foreground(sheets["light"], sheets["dark"], tokens, failures, args.repo_root)
 
     if failures:
-        print(f"FAIL: {len(failures)} light-theme ground(s) wrong:", file=sys.stderr)
+        print(f"FAIL: {len(failures)} light-theme ground(s) or foreground(s) wrong:",
+              file=sys.stderr)
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
         return 1
     print(f"OK: {len(GROUNDS)} grounds paint their design-token value in each mode, "
-          f"the light editor's text is readable, and no light background is dark "
+          f"the light editor's text is readable, no light background is dark "
           f"but ink from the Light tokens and the {len(MODE_INDEPENDENT)} "
-          f"mode-independent media surfaces")
+          f"mode-independent media surfaces, and no light foreground is paler than "
+          f"{MIN_FOREGROUND_CONTRAST}:1 on its ground but colours that follow the mode")
     return 0
 
 

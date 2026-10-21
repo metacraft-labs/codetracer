@@ -215,7 +215,10 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     color: colors-ui-icon-error-primary
 
     &:hover
-      color: colors-ui-icon-error-on-color
+      // `icon/error/on-color` is for a strong error fill; on this pale tint
+      // it is #fca5a5 in the light theme, 1.3:1, so there the error icon's
+      // hover token (`by-mode`, defaults.styl).
+      color: by-mode(colors-ui-icon-error-on-color, colors-ui-icon-error-primary-hover)
       background-color: rgba(248, 81, 73, 0.15)
 
   .build-duration
@@ -971,7 +974,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       .status-flow-types-list
         position: absolute
         top: -85px
-        color: white
+        // On the panel ground: body text in the light theme, where white is
+        // 1.3:1 (`by-mode`, defaults.styl).
+        color: by-mode(white, colors-ui-text-primary-body)
         text-align: left
         background-color: colors-ui-surface-base-panel
         border-radius: 5px
@@ -981,7 +986,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
         &-active
           position: absolute
           top: -85px
-          color: white
+          color: by-mode(white, colors-ui-text-primary-body)
           text-align: left
           background-color: colors-ui-surface-base-panel
           border-radius: 5px
@@ -1156,7 +1161,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   color: white !important
 
 .toggle-search-results
-  color: OPPOSITE_COLOR
+  // OPPOSITE_COLOR is the light palette's window ground, so the toggle's
+  // glyph vanished there. The icon token in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(OPPOSITE_COLOR, colors-ui-icon-primary-default)
 
 .debug-notification
   min-width: fit-content
@@ -1211,7 +1218,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   width 100%
 
 .short-event
-  color: #0aa
+  color: by-mode(#0aa, colors-ui-text-information-primary)
 
 .future-event
   opacity: 0.4

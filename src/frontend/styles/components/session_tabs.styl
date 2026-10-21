@@ -51,7 +51,11 @@
   padding 0 0.625em
   height 1.625em
   cursor pointer
-  color #b0b0b0
+  // Caption text, dimmed further by the opacity below. The dark theme keeps
+  // its #b0b0b0 (no token has that Dark value; `by-mode`, defaults.styl); the
+  // light one takes `text/primary/caption`, since #b0b0b0 is 2:1 on the light
+  // tab bar.
+  color by-mode(#b0b0b0, colors-ui-text-primary-caption)
   opacity 0.7
   // The design system's control radius (`border/radius/control`, 6px) — the
   // same corners as the command prompt beside these tabs (command-palette.styl,
@@ -146,7 +150,9 @@
   border-radius 50% !important
   background-color colors-ui-surface-primary-tertiary
   background-image none !important
-  color #b0b0b0
+  // The "+" mark, drawn in currentColor on the tertiary disc: in the light
+  // theme the label token, as caption text would be 2:1 on that disc.
+  color by-mode(#b0b0b0, colors-ui-text-primary-label)
   transition BUTTON_TRANSITION
 
   &::before
@@ -191,7 +197,8 @@
   height 1.625em
   margin-right 0.125em
   cursor pointer
-  color #b0b0b0
+  // Caption text in the light theme, as the tabs (`.session-tab`).
+  color by-mode(#b0b0b0, colors-ui-text-primary-caption)
   font-size 1.25em
   line-height 1
   user-select none
@@ -239,7 +246,8 @@
   padding 0 0.625em
   display flex
   align-items center
-  color #b0b0b0
+  // Caption text in the light theme, as the tabs (`.session-tab`).
+  color by-mode(#b0b0b0, colors-ui-text-primary-caption)
   cursor pointer
   white-space nowrap
   overflow hidden

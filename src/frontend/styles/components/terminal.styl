@@ -1,5 +1,7 @@
 .future
-  color: white
+  // Lines after the current point, dimmed by the opacity below: white on the
+  // dark terminal, body text on the light one (`by-mode`, defaults.styl).
+  color: by-mode(white, colors-ui-text-primary-body)
   opacity: 0.5
 
 .line-before, .line-before-or-on
@@ -32,7 +34,8 @@
 
 .terminal-output, .terminal-input
   background-color: transparent
-  color: #ABABAB
+  // Caption text in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(#ABABAB, colors-ui-text-primary-caption)
   word-wrap: break-all
   white-space: pre-line
   cursor: pointer

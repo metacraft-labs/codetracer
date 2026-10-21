@@ -35,6 +35,13 @@
     background-color var(--bg-hover, #2a2b34)
 
 // --- State-dependent colour coding ---
+//
+// The state text and the milestone icons were written for the dark caption
+// bar: pale cyan, amber and translucent green, 1.2-2.1:1 on the light one.
+// The dark theme keeps them (no token has those Dark values; `by-mode`,
+// defaults.styl); the light theme takes the text token of each state's role:
+// information for running, warning for waiting, success for done, caption
+// for paused.
 
 .caption-progress-idle
   .caption-progress-state
@@ -42,21 +49,21 @@
 
 .caption-progress-initializing
   .caption-progress-state
-    color #A5F3FC
+    color by-mode(#A5F3FC, colors-ui-text-information-primary)
 
   .caption-progress-bar-fill
     animation caption-progress-pulse 1.5s ease-in-out infinite
 
 .caption-progress-working
   .caption-progress-state
-    color #A5F3FC
+    color by-mode(#A5F3FC, colors-ui-text-information-primary)
 
   .caption-progress-bar-fill
     background-color #0E7490
 
 .caption-progress-waiting
   .caption-progress-state
-    color #e09f3e
+    color by-mode(#e09f3e, colors-ui-text-warning-primary)
 
   .caption-progress-bar-fill
     background-color #e09f3e
@@ -64,14 +71,14 @@
 
 .caption-progress-paused
   .caption-progress-state
-    color #8e8f92
+    color by-mode(#8e8f92, colors-ui-text-primary-caption)
 
   .caption-progress-bar-fill
     background-color #6e6e6e
 
 .caption-progress-completed
   .caption-progress-state
-    color rgba(0, 200, 0, 0.8)
+    color by-mode(rgba(0, 200, 0, 0.8), colors-ui-text-success-primary)
 
   .caption-progress-bar-fill
     background-color rgba(0, 200, 0, 0.6)
@@ -176,12 +183,13 @@
 .caption-progress-milestone-priority
   font-size 10px
   font-weight bold
-  color #e09f3e
+  color by-mode(#e09f3e, colors-ui-text-warning-primary)
   background-color rgba(224, 159, 62, 0.1)
   padding 1px 4px
   border-radius 2px
 
 // --- Milestone status colours ---
+// In the light theme, the state colours' tokens, as above.
 
 .milestone-pending
   .caption-progress-milestone-icon
@@ -189,11 +197,11 @@
 
 .milestone-in-progress
   .caption-progress-milestone-icon
-    color #A5F3FC
+    color by-mode(#A5F3FC, colors-ui-text-information-primary)
 
 .milestone-completed
   .caption-progress-milestone-icon
-    color rgba(0, 200, 0, 0.8)
+    color by-mode(rgba(0, 200, 0, 0.8), colors-ui-text-success-primary)
 
 .milestone-failed
   .caption-progress-milestone-icon

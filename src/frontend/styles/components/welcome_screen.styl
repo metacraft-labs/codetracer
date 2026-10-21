@@ -429,7 +429,10 @@ welcome-heading-type()
       // (`.vcs-commit-header:hover`, vcs.styl): `surface/primary/secondary-hover`.
       // The same for the Recent folders rows below, so the two lists match.
       .recent-trace
-        color: colors-ui-text-warning-on-color
+        // `text/warning/on-color` is for a coloured surface; on the light
+        // window ground it is #fdba74, 1.6:1. The light theme takes the
+        // warning text token (`by-mode`, defaults.styl).
+        color: by-mode(colors-ui-text-warning-on-color, colors-ui-text-warning-primary)
         background-color: transparent
         height: 1.75em
         margin-top: 0.125em
@@ -576,7 +579,8 @@ welcome-heading-type()
 
       // Same rows as Recent traces: no fill at rest, the VCS row hover.
       .recent-folder
-        color: colors-ui-text-warning-on-color
+        // As `.recent-trace` above.
+        color: by-mode(colors-ui-text-warning-on-color, colors-ui-text-warning-primary)
         background-color: transparent
         height: 1.75em
         margin-top: 0.125em
@@ -993,7 +997,8 @@ welcome-heading-type()
   width: -moz-available
   width: -webkit-fill-available
   width: stretch
-  color: colors-ui-text-warning-on-color
+  // As `.recent-trace` above.
+  color: by-mode(colors-ui-text-warning-on-color, colors-ui-text-warning-primary)
   font-family: "SpaceMono"
 
   #tx-success

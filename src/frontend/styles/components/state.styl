@@ -209,7 +209,8 @@
     font-size: inherit
 
 .value-non-expanded
-  color: orange
+  // The warning text token in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(orange, colors-ui-text-warning-primary)
 
 .value-error
   color: colors-ui-text-error-primary
@@ -348,8 +349,10 @@
     min-width: 4em
     text-align: right
 
+  // `text/warning/primary`, whose Dark value is this amber; its Light value
+  // reads on the light ground.
   .history-value
-    color: #FDBA74
+    color: colors-ui-text-warning-primary
     text-align: left
 
 

@@ -114,7 +114,9 @@
   color: green !important
 
 .diff-file-changed
-  color: orange !important
+  // The warning text token in the light theme, where orange is 1.8:1
+  // (`by-mode`, defaults.styl).
+  color: by-mode(orange, colors-ui-text-warning-primary) !important
 
 .diff-file-deleted
   color: red !important

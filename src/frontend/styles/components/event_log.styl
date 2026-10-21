@@ -198,9 +198,12 @@
 
     .ct-checkmark
       --ct-checkmark-size: 1rem
-      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
-      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
-      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+      // A slightly fainter box than the default in the dark theme; in the
+      // light one the default box's tokens (checkmark.styl), as fainter
+      // white would not show there (`by-mode`, defaults.styl).
+      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
+      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
+      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
     .ct-checkmark-label
       min-width: 0
@@ -245,9 +248,10 @@ table.dataTable tbody tr:not(.active):hover
 
     .ct-checkmark
       --ct-checkmark-size: 1rem
-      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
-      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
-      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+      // As the filter list's box above.
+      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
+      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
+      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
 // Right column — kind checkboxes in a wrapping flex row
 .dropdown-kind-items
@@ -266,9 +270,10 @@ table.dataTable tbody tr:not(.active):hover
 
     .ct-checkmark
       --ct-checkmark-size: 1rem
-      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
-      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
-      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+      // As the filter list's box above.
+      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
+      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
+      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
 // The filter menu's header row: the "Trace events" / "Recorded events" tabs on
 // the left and the On/Off switch on the right.
@@ -500,7 +505,10 @@ table.dataTable tbody tr:not(.active):hover
     color: EVENT_LOG_BUTTON_UNSELECTED_COLOR
 
   .eventLog-normal-color-button, .eventLog-selected-kind, .eventLog-selected-category
-    color: colors-ui-surface-primary-secondary
+    // A surface token as text: the panel's own colour in the light theme
+    // (#e6e2db, 1.2:1), so there it takes the label text token (`by-mode`,
+    // defaults.styl).
+    color: by-mode(colors-ui-surface-primary-secondary, colors-ui-text-primary-label)
 
   .eventLog-button
     i
