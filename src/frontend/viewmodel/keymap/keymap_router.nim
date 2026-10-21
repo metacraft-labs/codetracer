@@ -200,20 +200,26 @@ proc switchBase*(router: var KeymapRouter; base: BaseKeymap;
 # Resolution
 # ---------------------------------------------------------------------------
 
-proc factsFor(router: KeymapRouter; facts: SessionFacts): SessionFacts =
+proc factsFor(router: KeymapRouter; facts: SessionFacts;
+              chordPending: bool): SessionFacts =
   ## The two facts that are the router's own, filled in so no front-end
-  ## spells them.
+  ## spells them. `chordPending` is passed in rather than read off
+  ## `router.pending` so `chordFor` can ask about a prefix it is typing
+  ## without a router of its own (`ChordLookup`).
   result = facts
   result.modalBase = router.base.isModal
-  result.chordPending = router.pending.chords.len > 0
+  result.chordPending = chordPending
+
+proc factsFor(router: KeymapRouter; facts: SessionFacts): SessionFacts =
+  router.factsFor(facts, router.pending.chords.len > 0)
 
 proc contextFor*(router: KeymapRouter; facts: SessionFacts;
                  path: ScopePath): ContextKeys =
   contextKeysOf(router.factsFor(facts), path, router.delivery)
 
 proc scopeFor(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
-              navMode: NavigationMode): EditingScope =
-  let f = router.factsFor(facts)
+              navMode: NavigationMode; chordPending: bool): EditingScope =
+  let f = router.factsFor(facts, chordPending)
   let ctx = contextKeysOf(f, path, router.delivery)
   var onEditor = false
   for e in path:
@@ -237,11 +243,12 @@ func tablesInOrder(router: KeymapRouter;
   if path.len == 0 or path[0].kind != ekWindow:
     result.add (GlobalTable, false)
 
-proc layersFor*(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
-                navMode: NavigationMode): seq[ResolutionLayer] =
-  ## The layers `route` resolves through, in order — exposed so the shortcut
-  ## reference and the differential read the SAME list.
-  let scope = router.scopeFor(facts, path, navMode)
+proc layersFor(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
+               navMode: NavigationMode;
+               scope: EditingScope): seq[ResolutionLayer] =
+  ## The layers for `path` as seen from `scope` — `scopeFor` with whether a
+  ## prefix is pending — so `route` (the router's own prefix) and
+  ## `ChordLookup` (a prefix it is typing on a probe) assemble them one way.
   result = @[]
   for source in [lsUser, lsBase]:
     for (table, atFocus) in router.tablesInOrder(path):
@@ -262,6 +269,14 @@ proc layersFor*(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
                                    source: source, trie: trie,
                                    atFocus: atFocus)
 
+proc layersFor*(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
+                navMode: NavigationMode): seq[ResolutionLayer] =
+  ## The layers `route` resolves through, in order — exposed so the shortcut
+  ## reference and the differential read the SAME list.
+  router.layersFor(facts, path, navMode,
+                   router.scopeFor(facts, path, navMode,
+                                   router.pending.chords.len > 0))
+
 proc chordFor*(router: KeymapRouter; operation: string; facts: SessionFacts;
                path: ScopePath; navMode: NavigationMode;
                argument = ""): string
@@ -270,9 +285,10 @@ proc resolveKey(router: var KeymapRouter; facts: SessionFacts; path: ScopePath;
                 navMode: NavigationMode; key: string;
                 nowMs: int64): EditingResolution =
   ## The resolution itself — the layers, the pending prefix — with no §8.1
-  ## annotation (`chordFor` verifies its chords through this).
-  let scope = router.scopeFor(facts, path, navMode)
-  result = resolveLayers(router.layersFor(facts, path, navMode),
+  ## annotation.
+  let scope = router.scopeFor(facts, path, navMode,
+                              router.pending.chords.len > 0)
+  result = resolveLayers(router.layersFor(facts, path, navMode, scope),
                          router.pending, pendingTimeoutOf(router.base),
                          scope.textEntry, key, nowMs)
   router.pending = result.pending
@@ -350,32 +366,100 @@ func statusLabel*(router: KeymapRouter; path: ScopePath;
   if router.base.isModal: ($navMode).toUpperAscii
   else: ($router.base).toUpperAscii
 
-proc chordFor*(router: KeymapRouter; operation: string; facts: SessionFacts;
-               path: ScopePath; navMode: NavigationMode;
-               argument = ""): string =
+type
+  ChordLayers = object
+    built: bool
+    layers: seq[ResolutionLayer]
+    textEntry: bool
+
+  ChordLookup* = object
+    ## **THE LAYERS `chordFor` RESOLVES THROUGH, BUILT ONCE** for one
+    ## (facts, scope path, navigation mode). Asking which chord runs an
+    ## operation types each candidate row's sequence on an empty prefix and
+    ## checks where it lands; that needs only two layer lists — the one seen
+    ## with no prefix pending and the one seen with a prefix pending
+    ## (`factsFor` reads only WHETHER one is pending, as `chordPending`) —
+    ## whatever the operation, the row or the prefix. A menu asks for every
+    ## item's chord on every redraw (the desktop's program menu, the TUI and
+    ## GPUI menus), so building those tries once per lookup instead of once
+    ## per chord of every candidate row, and never copying the router, is
+    ## what keeps a redraw from blocking the window for seconds (#784).
+    ##
+    ## A lookup answers for the router it was made from, as that router was:
+    ## a new user keymap, a pushed or popped layer, another base or other
+    ## facts need a new lookup.
+    facts: SessionFacts
+    path: ScopePath
+    navMode: NavigationMode
+    timeoutMs: int64
+    states: array[2, ChordLayers]
+      ## Indexed by `ord` of whether a prefix is pending (an `array[bool, …]`
+      ## indexed by a `bool` reads `undefined` on the JS backend); the
+      ## prefixed list is built the first time a multi-chord row needs it.
+
+proc initChordLookup*(router: KeymapRouter; facts: SessionFacts;
+                      path: ScopePath; navMode: NavigationMode): ChordLookup =
+  ChordLookup(facts: facts, path: path, navMode: navMode,
+              timeoutMs: pendingTimeoutOf(router.base))
+
+proc ensureLayers(lookup: var ChordLookup; router: KeymapRouter;
+                  prefixed: bool) =
+  if not lookup.states[ord(prefixed)].built:
+    let scope = router.scopeFor(lookup.facts, lookup.path, lookup.navMode,
+                                prefixed)
+    lookup.states[ord(prefixed)] = ChordLayers(
+      built: true, textEntry: scope.textEntry,
+      layers: router.layersFor(lookup.facts, lookup.path, lookup.navMode,
+                               scope))
+
+proc typesTo(lookup: var ChordLookup; router: KeymapRouter;
+             b: EditingBinding): bool =
+  ## Whether `b`'s sequence, typed here on an empty prefix, resolves to `b`'s
+  ## own operation and argument — `route`'s resolution, one chord at a time,
+  ## each through the layers its prefix state sees.
+  var pending = PendingChords()
+  var res: EditingResolution
+  for c in b.chords:
+    let prefixed = pending.chords.len > 0
+    lookup.ensureLayers(router, prefixed)
+    res = resolveLayers(lookup.states[ord(prefixed)].layers, pending,
+                        lookup.timeoutMs,
+                        lookup.states[ord(prefixed)].textEntry, c, 0)
+    pending = res.pending
+  res.kind == erOperation and res.operation == b.operation and
+    res.argument == b.argument
+
+proc chordFor*(lookup: var ChordLookup; router: KeymapRouter;
+               operation: string; argument = ""): string =
   ## **THE CHORD TO DISPLAY FOR `operation` WHERE `path` IS** (KL-8, IR-3):
   ## the first row naming it — user rows first, later rows first — whose
   ## sequence, typed here, RESOLVES to it. A shadowed row is never shown,
   ## because typing it would run something else. "" when nothing typed here
   ## reaches the operation.
-  var candidates: seq[tuple[b: EditingBinding, user: bool]] = @[]
   for i in countdown(router.user.bindings.len - 1, 0):
-    candidates.add (router.user.bindings[i], true)
-  for b in router.effective.bindings: candidates.add (b, false)
-  for (b, user) in candidates:
-    if b.operation != operation or b.argument != argument: continue
-    var probe = router
-    probe.pending = PendingChords()
-    var res: EditingResolution
-    for c in b.chords:
-      res = probe.resolveKey(facts, path, navMode, c, 0)
-    if res.kind == erOperation and res.operation == operation and
-       res.argument == argument:
-      # The spelling the menu shows: the data's own for a base row (CUA's
-      # `Ctrl+K Ctrl+W`, §4.2's `r f`), the display form of a user's row —
-      # who may have written `ctrl+alt+n`.
-      return if user: displaySequence(b.chords) else: b.spelling
+    # A template, not a `let`: on the JS backend a `let` deep-copies the row.
+    template b: untyped = router.user.bindings[i]
+    if b.operation == operation and b.argument == argument and
+       lookup.typesTo(router, b):
+      # The display form of a user's row — who may have written
+      # `ctrl+alt+n`.
+      return displaySequence(b.chords)
+  for i in 0 ..< router.effective.bindings.len:
+    template b: untyped = router.effective.bindings[i]
+    if b.operation == operation and b.argument == argument and
+       lookup.typesTo(router, b):
+      # The data's own spelling for a base row (CUA's `Ctrl+K Ctrl+W`,
+      # §4.2's `r f`).
+      return b.spelling
   ""
+
+proc chordFor*(router: KeymapRouter; operation: string; facts: SessionFacts;
+               path: ScopePath; navMode: NavigationMode;
+               argument = ""): string =
+  ## `chordFor` for one operation, through a lookup of its own. A caller that
+  ## asks for many operations at once (a menu) keeps one `ChordLookup`.
+  var lookup = initChordLookup(router, facts, path, navMode)
+  lookup.chordFor(router, operation, argument)
 
 proc inertNote*(router: KeymapRouter; res: EditingResolution;
                 facts: SessionFacts; path: ScopePath;

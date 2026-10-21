@@ -83,6 +83,24 @@ proc browserPlatform(): PlatformKind =
      (navigator.platform || navigator.userAgent)) || '');"""].}
   if mac: pkMac elif win: pkWindows else: pkLinux
 
+type
+  ChordMemo = object
+    ## The chords `chordForAction` answered, valid while everything the
+    ## answer depends on is unchanged: the router's rows (by generation), its
+    ## base and pushed layers, the ViewModels' facts and the scope path. The
+    ## program menu is rebuilt on every redraw — every move, every tab switch
+    ## — and asks for each item's chord; resolving them afresh each time blocked
+    ## the window for seconds per move on a Noir trace (#784).
+    valid: bool
+    generation: int
+    base: BaseKeymap
+    imported: bool
+    stack: LayerStack
+    facts: SessionFacts
+    path: ScopePath
+    lookup: ChordLookup
+    chords: Table[string, string]
+
 var
   deskRouter: KeymapRouter = initKeymapRouter(bkCua, KeyDelivery(
     # The web studio is its own front-end (`frontEnd == web` rows: its Run
@@ -93,6 +111,11 @@ var
   hostOperations = initTable[string, proc()]()
     ## Operations a build performs itself (`registerHostOperation`): the web
     ## studio's Run and Export.
+  keymapGeneration = 0
+    ## Bumped whenever `deskRouter`'s rows change (`applyKeybindingsText`), so
+    ## `chordForAction`'s memo knows its answers are stale.
+  chordMemo: ChordMemo
+    ## `chordForAction`'s answers for the state they were computed in.
   keybindingsNotes*: seq[string] = @[]
     ## What the last `keybindings.json` load said (errors, shadows, the
     ## import's summary) — shown by the shortcuts dialog.
@@ -550,6 +573,7 @@ proc applyKeybindingsText*(text: string; notes: seq[string] = @[]) =
   ## the base. What did not load is kept for the shortcuts dialog and said
   ## on the console.
   deskRouter.applyUserKeymap(parseUserKeymap(text))
+  inc keymapGeneration
   keybindingsNotes = notes
   if deskRouter.errors.len > 0:
     keybindingsNotes.add deskRouter.loadSummary
@@ -564,9 +588,23 @@ proc chordForAction*(action: ClientAction): cstring =
   let op = operationOfClientAction($action)
   if op.len == 0:
     return cstring""
-  let (name, arg) = splitOperation(op)
-  cstring(deskRouter.chordFor(name, desktopFacts(), desktopScopePath(),
-                              nmNormal, arg))
+  let facts = desktopFacts()
+  let path = desktopScopePath()
+  if not (chordMemo.valid and chordMemo.generation == keymapGeneration and
+          chordMemo.base == deskRouter.base and
+          chordMemo.imported == deskRouter.hasImported and
+          chordMemo.stack == deskRouter.stack and chordMemo.facts == facts and
+          chordMemo.path == path):
+    chordMemo = ChordMemo(
+      valid: true, generation: keymapGeneration, base: deskRouter.base,
+      imported: deskRouter.hasImported, stack: deskRouter.stack,
+      facts: facts, path: path,
+      lookup: initChordLookup(deskRouter, facts, path, nmNormal),
+      chords: initTable[string, string]())
+  if not chordMemo.chords.hasKey(op):
+    let (name, arg) = splitOperation(op)
+    chordMemo.chords[op] = chordMemo.lookup.chordFor(deskRouter, name, arg)
+  cstring(chordMemo.chords[op])
 
 chord_display.chordOfAction = chordForAction
 

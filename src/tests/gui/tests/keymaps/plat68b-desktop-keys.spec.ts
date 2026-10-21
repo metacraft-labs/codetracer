@@ -20,7 +20,7 @@
  *   * the user's `keybindings.json`, read by the main process and sent to the
  *     renderer: a user row adds a chord, a `-` row removes the base's, and the
  *     chord the menu shows is the router's; a change to the file on disk takes
- *     effect without a restart.
+ *     effect without a restart, in the keys and in the chords the menu shows.
  *
  * WHAT IS READ: `window.__ctKeyTrace` — every operation the router ran, in
  * order (the desktop's counterpart of the terminal's status line and GPUI's
@@ -304,6 +304,42 @@ test.describe("PLAT-68: the user's keybindings.json on the desktop", () => {
     // The toolbar's Next tooltip names the chord that runs it now.
     await ctPage.locator("#next-image").hover();
     await expect(ctPage.locator("body")).toContainText("Ctrl+Alt+N", { timeout: 20_000 });
+  });
+
+  // The program menu's chords are remembered between redraws (the menu asks
+  // for every item's chord on every move, #784), so a reloaded file must
+  // replace what the menu shows, not only what the keys do. Read through the
+  // open Debug folder rather than a key press, so the check does not depend
+  // on where the keyboard focus is.
+  test("a change to the file on disk changes the chord the menu shows", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".calltrace-view .call-text", { timeout: 120_000 });
+    // The open Debug folder's text, or "" when the menu was re-rendering
+    // under the click (a reload rebuilds it), so `expect.poll` asks again
+    // instead of failing on a transient miss.
+    const debugFolder = async (): Promise<string> => {
+      try {
+        await ctPage.evaluate(() => (globalThis as any).__ctMenuVM.open());
+        const folder = ctPage.locator("#menu-elements").getByText("Debug", { exact: true }).first();
+        await folder.waitFor({ state: "visible", timeout: 5_000 });
+        await folder.click({ force: true, timeout: 5_000 });
+        await ctPage.waitForFunction(
+          () => document.body.innerText.includes("Reverse Step Over"),
+          undefined, { timeout: 5_000 });
+        return await ctPage.evaluate(() => document.body.innerText);
+      } catch {
+        return "";
+      } finally {
+        await ctPage.evaluate(() => (globalThis as any).__ctMenuVM.close());
+        await expect.poll(async () => await ctPage.evaluate(() =>
+          JSON.parse((globalThis as any).__ctMenuVM.state()).isOpen),
+                          { timeout: 10_000 }).toBe(false);
+      }
+    };
+    // The describe's file: Step Over is the user's Ctrl+Alt+N, F10 removed.
+    await expect.poll(debugFolder, { timeout: 30_000 }).toContain("\nStep Over\nCtrl+Alt+N\n");
+    writeKeybindings(`[ { "key": "ctrl+alt+j", "command": "debugger.step-over" } ]`);
+    await expect.poll(debugFolder, { timeout: 30_000 }).toContain("\nStep Over\nCtrl+Alt+J\n");
+    expect(await debugFolder()).not.toContain("\nStep Over\nCtrl+Alt+N\n");
   });
 
   test("a change to the file on disk takes effect without a restart", async ({ ctPage }) => {
