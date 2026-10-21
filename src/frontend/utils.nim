@@ -1583,6 +1583,56 @@ proc focusLine(editor: EditorViewComponent, line: int, col: int = NO_COLUMN) =
   editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: col))
   editor.monacoEditor.focus()
 
+proc sleepMs*(ms: int): Future[void] {.importjs: "new Promise(resolve => setTimeout(resolve, #))".}
+
+proc waitForLayoutGround*(data: Data): Future[bool] {.async.} =
+  ## Wait until GoldenLayout has a ground item with something in it, and SAY
+  ## WHETHER IT DID.
+  ##
+  ## ## Why it lives here and not in `ui_js.nim`
+  ##
+  ## It was private to `ui_js.nim`, so only the edit-mode and DeepReview paths
+  ## there could wait for the layout; `openNewEditorView` below could not, and
+  ## it is the path a replay's FIRST editor tab takes. That tab is opened by
+  ## the first `ct/complete-move`, and nothing orders that move after the
+  ## layout: `tryInitLayout` waits for `document.readyState == "complete"`
+  ## (`ui_js.onReady`), while the backend's first move only waits for the
+  ## replay to start. On a loaded host the move won. Measured on aarch64-darwin
+  ## at `326657ab9`, five launches out of five: `TIME complete move 20484`,
+  ## then `tabs: cannot place EditorView (…/main.py): no GoldenLayout ground
+  ## item`, then `initLayout` 4 ms later — and the replay had no editor at all,
+  ## because `openLayoutTab` logs and returns and nothing asks again.
+  ##
+  ## ## Why this returns a value now
+  ##
+  ## It used to return `void` after at most 50 × 20 ms, and a caller could not
+  ## tell "the layout is ready" from "one second elapsed". `onNoTrace`'s
+  ## `openTab` ran either way, and against a layout that had not arrived it
+  ## reached `utils.openNewLayoutContainer`'s `data.ui.layout.groundItem` —
+  ## measured on the first load of a freshly deployed `ide.codetracer.com/noir`
+  ## as an uncaught `TypeError: Cannot read properties of null (reading
+  ## 'groundItem')`, with the editor pane simply absent from a screen whose
+  ## other four panes were correct. Three later loads of the same URL were
+  ## clean, which is the signature of a budget rather than a bug in the layout.
+  ##
+  ## ## Why the budget is five seconds and not one
+  ##
+  ## One second is a guess about how long GoldenLayout takes to mount a tree,
+  ## and on a warm cache it is a generous one. A COLD one is a different
+  ## machine: the first visitor after a deploy fetches a 13 MB third-party
+  ## bundle and a 14 MB renderer before any of this runs, and the browser is
+  ## still parsing them. Five seconds is still a bound — this cannot hang —
+  ## but it is a bound on a slow first load rather than on a fast repeat one.
+  ##
+  ## Timing out is now a REPORTED failure rather than a silent fall-through;
+  ## see the call site.
+  for _ in 0 ..< 250:
+    if not data.ui.layout.isNil and not data.ui.layout.groundItem.isNil and
+        data.ui.layout.groundItem.contentItems.len > 0:
+      return true
+    await sleepMs(20)
+  return false
+
 proc openNewEditorView*(
     data: Data,
     name: cstring,
@@ -1626,6 +1676,13 @@ proc openNewEditorView*(
       return
     cdebug "editor: openNewEditorView location: " & $location
     var tabInfo = await data.services.editor.tabLoad(location, editorView, lang)
+    # THE PANE NEEDS A LAYOUT TO GO IN. The source can arrive before
+    # GoldenLayout has mounted (see `waitForLayoutGround`), and placing the tab
+    # then fails once, for good. Waiting here is bounded and costs nothing when
+    # the layout is already up; a timeout still falls through to the placement
+    # below, which reports the failure by name.
+    if not await data.waitForLayoutGround():
+      cwarn "editor: GoldenLayout was not ready within 5s for " & $editorName
     tabInfo.lang = if lang != LangAsm: toLangFromFilename(location.path) else: lang
     # try:
     #   cdebug "editor: tabInfo received " & $(tabInfo[])

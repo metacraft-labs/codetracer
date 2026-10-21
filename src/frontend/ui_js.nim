@@ -2192,41 +2192,6 @@ proc onReady(event: dom.Event) =
           jq(".low-level").toJs.scrollTop = cast[int](jqall(".assembly-offset")[index].toJs.offsetTop) - 300, 500)
 
 
-proc sleepMs(ms: int): Future[void] {.importjs: "new Promise(resolve => setTimeout(resolve, #))".}
-
-proc waitForLayoutGround(data: Data): Future[bool] {.async.} =
-  ## Wait until GoldenLayout has a ground item with something in it, and SAY
-  ## WHETHER IT DID.
-  ##
-  ## ## Why this returns a value now
-  ##
-  ## It used to return `void` after at most 50 × 20 ms, and a caller could not
-  ## tell "the layout is ready" from "one second elapsed". `onNoTrace`'s
-  ## `openTab` ran either way, and against a layout that had not arrived it
-  ## reached `utils.openNewLayoutContainer`'s `data.ui.layout.groundItem` —
-  ## measured on the first load of a freshly deployed `ide.codetracer.com/noir`
-  ## as an uncaught `TypeError: Cannot read properties of null (reading
-  ## 'groundItem')`, with the editor pane simply absent from a screen whose
-  ## other four panes were correct. Three later loads of the same URL were
-  ## clean, which is the signature of a budget rather than a bug in the layout.
-  ##
-  ## ## Why the budget is five seconds and not one
-  ##
-  ## One second is a guess about how long GoldenLayout takes to mount a tree,
-  ## and on a warm cache it is a generous one. A COLD one is a different
-  ## machine: the first visitor after a deploy fetches a 13 MB third-party
-  ## bundle and a 14 MB renderer before any of this runs, and the browser is
-  ## still parsing them. Five seconds is still a bound — this cannot hang —
-  ## but it is a bound on a slow first load rather than on a fast repeat one.
-  ##
-  ## Timing out is now a REPORTED failure rather than a silent fall-through;
-  ## see the call site.
-  for _ in 0 ..< 250:
-    if not data.ui.layout.isNil and not data.ui.layout.groundItem.isNil and
-        data.ui.layout.groundItem.contentItems.len > 0:
-      return true
-    await sleepMs(20)
-  return false
 
 proc onInit*(
     sender: js,
