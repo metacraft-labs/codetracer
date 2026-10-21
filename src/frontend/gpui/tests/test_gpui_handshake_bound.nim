@@ -22,6 +22,10 @@
 ##     `ExitEngineStalled` (4) inside the budget `CODETRACER_GPUI_HANDSHAKE_MS`
 ##     sets, and stderr names the folder and the stall — under a watchdog, so
 ##     the pre-fix behaviour FAILS here rather than hanging the lane;
+##   * a stall AFTER the open (the engine reached its first stop, then went
+##     quiet on a pane request) is the same exit 4, worded as such and
+##     WITHOUT the open's "re-record it" advice, which cannot help a recording
+##     the engine has read;
 ##   * with no override the shipped default budget applies (it is a clock, not
 ##     an opt-in);
 ##   * the engine is reaped: the stalled child does not outlive the front-end;
@@ -108,6 +112,10 @@ const
 # FAKE_ENGINE_MODE=stall  -- answer initialize / configurationDone / launch
 #                            with success, send `initialized`, then go silent.
 # FAKE_ENGINE_MODE=refuse -- the same, then a `ct/launch-failed` event.
+# FAKE_ENGINE_MODE=settle -- the same as stall, but reach the first stop
+#                            (`stopped` + `ct/complete-move`) and THEN go
+#                            silent: every later request is read and never
+#                            answered.
 #
 # stdout is the DAP channel and the front-end merges stderr into it, so this
 # script writes NOTHING to stderr. It records each command it acknowledged
@@ -143,10 +151,15 @@ def read():
             length = int(line.split(b":")[1])
     return json.loads(sys.stdin.buffer.read(length))
 
+HANDSHAKE = ("initialize", "configurationDone", "launch")
+
 note("pid %d" % os.getpid())
 while True:
     msg = read()
     cmd = msg.get("command")
+    if mode == "settle" and cmd not in HANDSHAKE:
+        note("ignored " + str(cmd))
+        continue
     send({"type": "response", "request_seq": msg["seq"], "success": True,
           "command": cmd, "body": {}})
     note("ack " + str(cmd))
@@ -155,6 +168,12 @@ while True:
     if cmd == "launch" and mode == "refuse":
         send({"type": "event", "event": "ct/launch-failed",
               "body": {"message": os.environ["FAKE_ENGINE_TEXT"]}})
+    if cmd == "launch" and mode == "settle":
+        send({"type": "event", "event": "stopped",
+              "body": {"reason": "entry", "threadId": 1}})
+        send({"type": "event", "event": "ct/complete-move",
+              "body": {"location": {"path": os.environ["FAKE_ENGINE_SOURCE"],
+                                    "line": 1}}})
 """
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
@@ -202,7 +221,8 @@ proc baseEnv(): StringTableRef =
   result = newStringTable()
   for k, v in envPairs():
     if k notin [HandshakeEnv, "REPLAY_SERVER_BIN", "FAKE_ENGINE_MODE",
-                "FAKE_ENGINE_LOG", "FAKE_ENGINE_TEXT"]:
+                "FAKE_ENGINE_LOG", "FAKE_ENGINE_TEXT",
+                "FAKE_ENGINE_SOURCE"]:
       result[k] = v
 
 let scratch = createTempDir("gpui-handshake-", "")
@@ -217,6 +237,7 @@ proc fakeEnv(mode: string; log: string; budgetMs: int): StringTableRef =
   result["FAKE_ENGINE_MODE"] = mode
   result["FAKE_ENGINE_LOG"] = log
   result["FAKE_ENGINE_TEXT"] = RefusalText
+  result["FAKE_ENGINE_SOURCE"] = shapedFolder / "main.py"
   if budgetMs > 0:
     result[HandshakeEnv] = $budgetMs
 
@@ -276,6 +297,8 @@ suite "codetracer-gpui bounds the replay engine's handshake":
     ck shapedFolder in r.stderr
     ck "the replay engine stopped answering" in r.stderr
     ck ($BudgetMs & " ms") in r.stderr
+    ck "after the recording opened" notin r.stderr
+    ck "re-record" in r.stderr
     ck r.stdout.strip().len == 0
     # The stalled engine does not outlive the front-end.
     let pid = enginePid(lines)
@@ -302,6 +325,41 @@ suite "codetracer-gpui bounds the replay engine's handshake":
     ck not r.killed
     ck r.rc == ExitEngineStalled
     ck ($DefaultBudgetMs & " ms") in r.stderr
+
+  test "a stall AFTER the open is exit 4 too, without the re-record advice":
+    # The engine reached its first stop, so it read the recording; it then
+    # went quiet on the first pane request `--report-plan` sent. That is the
+    # same exit code, and a different sentence: telling this user to
+    # re-record a recording that opened sends them to redo work that cannot
+    # help.
+    let log = scratch / "settle.log"
+    let r = runBinary(@["--report-plan", shapedFolder],
+                      fakeEnv("settle", log, BudgetMs))
+    let lines = engineLog(log)
+    checkpoint("rc " & $r.rc & " in " & $r.seconds & " s; killed: " &
+               $r.killed & "; stderr: " & r.stderr & "; engine: " &
+               lines.join(" | "))
+    ck "ack launch" in lines
+    # The run went past the open and was refused an answer, so the stall
+    # really is the post-open one.
+    # And it was refused exactly ONE answer: the first unanswered request ends
+    # the run. Before the loader stopped swallowing a stall, each of its
+    # requests waited out a budget of its own (measured 40 s on this 10 s
+    # budget), which is the defect this case pins.
+    var ignored = 0
+    for l in lines:
+      if l.startsWith("ignored "): inc ignored
+    ck ignored == 1
+    ck not r.killed
+    ck r.rc == ExitEngineStalled
+    ck r.seconds >= BudgetMs / 1000 - 0.5
+    ck r.seconds < BudgetMs / 1000 + 20
+    ck "stopped answering after the recording opened" in r.stderr
+    ck ($BudgetMs & " ms") in r.stderr
+    ck "re-record" notin r.stderr
+    let pid = enginePid(lines)
+    ck pid > 0
+    ck waitGone(pid)
 
   test "an engine that says why is reported verbatim, exit 5, not a stall":
     let log = scratch / "refuse.log"

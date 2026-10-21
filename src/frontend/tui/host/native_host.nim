@@ -623,7 +623,8 @@ proc expandAllFolders*(vm: FilesystemVM) =
   walk(vm.rootEntry.val)
   vm.setExpandedPaths(paths)
 
-proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
+proc loadRecordingPanes*(s: HeadlessDebugSession;
+                         raiseOnStall = false): PaneLoad =
   ## The per-RECORDING facts, asked once at open: the event log's size and
   ## the recording's extent, whether there is a call trace, and the
   ## recording's functions (the omnibar's symbols). The ROWS are not loaded
@@ -635,20 +636,39 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
   ## and `ct/event-load` answers the whole log's `total` with any window. A
   ## one-row call-trace section likewise answers `totalCallsCount`. These
   ## replaced reading 4096 events and a 400 x 200 call trace at open.
+  ##
+  ## `raiseOnStall`: A STALL IS NOT A DECLINE. A request the engine answers
+  ## with a refusal is recorded as not loaded, as this section's header says.
+  ## With `raiseOnStall`, an engine that answers NOTHING for a whole read
+  ## budget (`DapStalledError`) is raised instead, because swallowing it makes
+  ## the next request wait out the budget again — one budget per request
+  ## before a run that will never get an answer says so — and reports a
+  ## silent engine as a recording with empty panes. The GPUI front-end passes
+  ## it, and reports the stall by name (`gpui/main.nim`). The terminal's call
+  ## sites (`tui_session.learnExtent`) keep the default, because they run
+  ## after and outside the `try` that reports a stall at their open: raised
+  ## there, a stall would escape as an unhandled exception. On those paths a
+  ## silent engine still costs one budget per request here.
   let store = s.session.store
   try:
     discard s.requestAndLoadEventLog(start = 0, count = 1)
     result.events = store.eventLog.rows.val.len > 0
+  except DapStalledError:
+    if raiseOnStall: raise
   except CatchableError:
     result.events = false
   try:
     s.requestAndLoadCalltrace(height = 1, depth = RecordingCalltraceDepth)
     result.calltrace = store.calltrace.totalCallsCount.val > 0'u64
+  except DapStalledError:
+    if raiseOnStall: raise
   except CatchableError:
     result.calltrace = false
   try:
     store.applySymbolsResponse(s.sendRawDapRequest("ct/load-symbols"))
     discard s.drainEvents()
+  except DapStalledError:
+    if raiseOnStall: raise
   except CatchableError:
     discard
   # PLAT-41: the recording's own source tree, read off the trace folder — a

@@ -147,6 +147,21 @@ const
     ## (`DapLaunchRefusedError`). Equal to the terminal front-end's
     ## `cli.ExitUnreadableRecording`, for the same reason.
 
+type
+  GpuiOpenStalledError* = object of DapStalledError
+    ## The engine went quiet DURING THE OPEN — before `openGpuiTrace`
+    ## returned a session — as opposed to after it, while the run was loading
+    ## panes, replaying `--replay-ops` or building a `--report-plan`.
+    ##
+    ## A SUBTYPE, so every `except DapStalledError` still catches it, and
+    ## because the two moments call for opposite advice. A stall in the open
+    ## means the engine could not get the recording to its first stop, which
+    ## is what a recording it cannot read looks like when it says nothing, so
+    ## re-recording is worth suggesting. A stall after the open is an engine
+    ## that HAS read the recording and then stopped answering a request:
+    ## telling that user to re-record a recording that opened sends them to
+    ## redo work that will not help.
+
 proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
   ## Spawn `replay-server` on `traceFolder` and complete the DAP handshake.
   ##
@@ -203,10 +218,19 @@ proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
   if traceFolder.strip().len == 0:
     raise newException(TuiHostError,
       "codetracer-gpui: name a recording folder")
-  openLocalTrace(traceFolder,
-                 bound = DapReadBound(
-                   timeoutMs: handshakeBudgetMs(GpuiHandshakeEnvVar),
-                   interruptFd: -1))
+  try:
+    openLocalTrace(traceFolder,
+                   bound = DapReadBound(
+                     timeoutMs: handshakeBudgetMs(GpuiHandshakeEnvVar),
+                     interruptFd: -1))
+  except GpuiOpenStalledError:
+    raise
+  except DapStalledError as e:
+    # Re-raised as the open's own kind, carrying the original as `parent`, so
+    # the caller can tell this stall from one later in the run (see
+    # `GpuiOpenStalledError`). The child is already reaped:
+    # `newHeadlessDebugSession` closes it on every failing path.
+    raise newException(GpuiOpenStalledError, e.msg, e)
 
 proc liftOpenBound*(session: HeadlessDebugSession) =
   ## Take the clock `openGpuiTrace` installed off `session`'s engine channel,
