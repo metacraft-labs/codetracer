@@ -41,9 +41,14 @@ import {
 
 // Produced from this tree rather than read from a committed copy — see
 // `scripts/materialize-recording.sh`.
-const recordingRoot = threeTraceRecordingRoot();
+// Materialize in the sourcePath fixture below, after Playwright collection.
 
-test.use({ sourcePath: recordingRoot, launchMode: "trace-folder" });
+test.use({
+  sourcePath: async ({}, use) => {
+    await use(threeTraceRecordingRoot());
+  },
+  launchMode: "trace-folder",
+});
 test.setTimeout(240_000);
 
 test.beforeAll(() => {

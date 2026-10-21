@@ -30,9 +30,11 @@ source "$CODETRACER_ROOT/ci/lib/newest-build.sh"
 WORKSPACE_ROOT="$(cd "$CODETRACER_ROOT/.." && pwd -P)"
 cd "$FIXTURE_DIR"
 
-JS_RECORDER="${CODETRACER_JS_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-js-recorder}"
+# shellcheck source=scripts/js-recorder-path.sh
+source "$CODETRACER_ROOT/scripts/js-recorder-path.sh"
+JS_RECORDER_CLI="$(js_recorder_cli "$WORKSPACE_ROOT")"
 WASM_INSTRUMENTER="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
-export CODETRACER_JS_RECORDER_PATH="$JS_RECORDER"
+export CODETRACER_JS_RECORDER_PATH="$JS_RECORDER_CLI"
 export CODETRACER_WASM_INSTRUMENTER_PATH="$WASM_INSTRUMENTER"
 
 BACKEND_PORT="${DEMO_BACKEND_PORT:-8080}"
@@ -56,7 +58,7 @@ OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
 echo "[regenerate] cross-process origin demo"
 echo "[regenerate] fixture:    $FIXTURE_DIR"
 echo "[regenerate] output:     $OUT_DIR"
-echo "[regenerate] js-recorder: $JS_RECORDER"
+echo "[regenerate] js-recorder: $JS_RECORDER_CLI"
 echo "[regenerate] instrumenter: $WASM_INSTRUMENTER"
 echo
 
@@ -78,7 +80,6 @@ if ! grep -qx 'wasm32-unknown-unknown' <<<"$(rustc --print target-list 2>/dev/nu
 	missing+=("- rustc cannot target wasm32-unknown-unknown (rustup target add wasm32-unknown-unknown)")
 fi
 
-JS_RECORDER_CLI="$JS_RECORDER/packages/cli/dist/index.js"
 if [ ! -f "$JS_RECORDER_CLI" ]; then
 	missing+=("- codetracer-js-recorder is not built ($JS_RECORDER_CLI; run 'just build' in that repo)")
 fi

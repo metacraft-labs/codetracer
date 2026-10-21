@@ -426,7 +426,7 @@ Useful overrides:
 | `DEMO_BACKEND_TIMEOUT_MS` | backend idle timeout before it gives up (default `120000`) |
 | `CT_INSTRUMENT_BIN` | explicit path to `ct-instrument` |
 | `CODETRACER_RECORD_WEB_BIN` | explicit path to `session-manager` |
-| `CODETRACER_JS_RECORDER_PATH` | explicit path to the `codetracer-js-recorder` checkout |
+| `CODETRACER_JS_RECORDER_PATH` | explicit path to the recorder CLI file, `<repo>/packages/cli/dist/index.js` |
 | `CODETRACER_WASM_INSTRUMENTER_PATH` | explicit path to the `codetracer-wasm-instrumenter` checkout |
 
 ### What re-recording changes

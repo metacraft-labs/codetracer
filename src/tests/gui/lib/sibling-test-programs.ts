@@ -77,11 +77,14 @@ export function findRecorderRepo(recorderName: string): string | null {
   // walking up past target/release/.
   const envValue = process.env[entry.envVar] ?? "";
   if (envValue.length > 0 && fs.existsSync(envValue)) {
-    if (fs.statSync(envValue).isDirectory()) {
+    if (recorderName !== "js" && fs.statSync(envValue).isDirectory()) {
       return envValue;
     }
     // Binary path like <repo>/target/release/<binary> — go up to <repo>
-    const repoDir = path.resolve(envValue, "..", "..", "..");
+    // JavaScript's override names packages/cli/dist/index.js, one level
+    // deeper than the native target/release/<binary> layout.
+    const repoDir = path.resolve(envValue, ...(recorderName === "js"
+      ? ["..", "..", "..", ".."] : ["..", "..", ".."]));
     if (fs.existsSync(path.join(repoDir, "test-programs"))) {
       return repoDir;
     }

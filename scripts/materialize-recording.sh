@@ -232,7 +232,13 @@ resolve_record_web() {
 
 INSTRUMENTER_ROOT="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
 readonly INSTRUMENTER_ROOT
-JS_RECORDER_ROOT="${CODETRACER_JS_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-js-recorder}"
+# shellcheck source=scripts/js-recorder-path.sh
+source "$SCRIPT_DIR/js-recorder-path.sh"
+JS_RECORDER_CLI="$(js_recorder_cli "$WORKSPACE_ROOT")"
+JS_RECORDER_ROOT=""
+if [ "$NEEDS_JS_RECORDER" -eq 1 ]; then
+	JS_RECORDER_ROOT="$(js_recorder_root "$WORKSPACE_ROOT")"
+fi
 readonly JS_RECORDER_ROOT
 
 CT_INSTRUMENT_BIN="$(resolve_ct_instrument || true)"
@@ -247,8 +253,8 @@ RECORD_WEB_BIN="$(resolve_record_web || true)"
 	missing+=("- the instrumenter's recorder-runtime/ is not present at $INSTRUMENTER_ROOT")
 
 if [ "$NEEDS_JS_RECORDER" -eq 1 ]; then
-	[ -f "$JS_RECORDER_ROOT/packages/cli/dist/index.js" ] ||
-		missing+=("- codetracer-js-recorder is not built ($JS_RECORDER_ROOT/packages/cli/dist/index.js; run 'just build' there)")
+	[ -f "$JS_RECORDER_CLI" ] ||
+		missing+=("- codetracer-js-recorder is not built ($JS_RECORDER_CLI; run 'just build' there)")
 fi
 
 command -v cargo >/dev/null 2>&1 || missing+=("- cargo not on PATH (the Rust toolchain builds the WASM tier)")
@@ -276,7 +282,7 @@ fi
 export CT_INSTRUMENT_BIN
 export CODETRACER_RECORD_WEB_BIN="$RECORD_WEB_BIN"
 export CODETRACER_WASM_INSTRUMENTER_PATH="$INSTRUMENTER_ROOT"
-export CODETRACER_JS_RECORDER_PATH="$JS_RECORDER_ROOT"
+export CODETRACER_JS_RECORDER_PATH="$JS_RECORDER_CLI"
 
 # ---------------------------------------------------------------------------
 # The key.
@@ -284,6 +290,7 @@ export CODETRACER_JS_RECORDER_PATH="$JS_RECORDER_ROOT"
 key_inputs() {
 	printf 'fixture\t%s\n' "$FIXTURE"
 	printf 'sources\t%s\n' "$(digest_fixture_sources)"
+	printf 'js-recorder-resolver\t%s\n' "$(digest_path "$SCRIPT_DIR/js-recorder-path.sh")"
 	printf 'materializer\t%s\n' "$(digest_path "${BASH_SOURCE[0]}")"
 	printf 'ct-instrument\t%s\n' "$(digest_path "$CT_INSTRUMENT_BIN")"
 	printf 'record-web\t%s\n' "$(digest_path "$RECORD_WEB_BIN")"
