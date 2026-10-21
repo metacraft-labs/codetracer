@@ -37,6 +37,14 @@ const
     ## The protocol's version, sent in the `initialize` answer. A plugin
     ## refuses a server whose version it does not know (§ Protocol summary).
   PositionEncoding* = "utf-8"
+  FrameViewerPane* = "frameViewer"
+    ## The recording's graphics (CodeTracer-TUI-Graphics.md §4): a pane the
+    ## server draws that is not a layout pane — it is offered when a
+    ## recording carries graphics, as the terminal's frame viewer is.
+  FrameViewerOperations* = [
+    ("frame-viewer.next-frame", "Next frame"),
+    ("frame-viewer.previous-frame", "Previous frame"),
+    ("frame-viewer.go-to-frame", "Go to this frame")]
 
   QuietSurfaces = {srNone, srSurfacePanel, srSurfaceEditor, srSurfaceCanvas}
     ## The pane's own ground: the editor window has one already, so a span is
@@ -89,6 +97,8 @@ proc argsJson(a: PaneOpArgs; operation: string): JsonNode =
     result["path"] = %a.path
   of "history.seek-to-tick":
     result["tick"] = %a.tick
+  of "frame-viewer.go-to-frame":
+    result["index"] = %a.index
   else: discard
 
 proc paneArgsOf*(j: JsonNode): PaneOpArgs =
@@ -165,5 +175,8 @@ proc operationsJson*(): JsonNode =
   for o in Catalogue:
     result.add %*{"name": o.name, "label": o.label, "argument": $o.arg}
   for (name, label) in PaneOperations:
+    result.add %*{"name": name, "label": label, "argument": "pane-target",
+                  "pane": true}
+  for (name, label) in FrameViewerOperations:
     result.add %*{"name": name, "label": label, "argument": "pane-target",
                   "pane": true}

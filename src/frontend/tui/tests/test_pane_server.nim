@@ -81,6 +81,8 @@ suite "HSF-E1: the pane server, over a real recording":
     check init{"result", "protocolVersion"}.getInt == 1
     check init{"result", "positionEncoding"}.getStr == "utf-8"
     check init{"result", "capabilities", "dap", "port"}.getInt > 0
+    # An editor that did not declare the image medium is sent text only.
+    check init{"result", "capabilities", "media"} == %["text"]
 
     # ---- operations/list: the catalogue and the panes' own ----------------
     let (ops, _) = srv.request("operations/list")
@@ -96,6 +98,12 @@ suite "HSF-E1: the pane server, over a real recording":
     let sid = opened{"result", "session"}.getInt
     check sid > 0
     check opened{"result", "mode"}.getStr == "debug"
+    # `calc` draws nothing: no graphics, and no frame viewer to open.
+    check opened{"result", "graphics", "available"}.getBool == false
+    let (noFrames, _) = srv.request("pane/open",
+      %*{"session": opened{"result", "session"}.getInt, "pane": "frameViewer",
+         "width": 40, "height": 10})
+    check noFrames{"error", "code"}.getInt == -32803
     check not findPane(opened{"result", "layout"}, "calltrace").isNil
     let firstPos = afterOpen.notes("session/position")
     check firstPos.len == 1
