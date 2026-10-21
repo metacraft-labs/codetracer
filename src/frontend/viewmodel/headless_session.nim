@@ -161,9 +161,14 @@ proc newHeadlessDebugSession*(
   ## ``handshake`` is CTUI-14's ``DapReadBound``, and it applies to steps 2-5
   ## and then STAYS ON the backend for the rest of the session.  The default is
   ## the zero value — unbounded, exactly what every caller had before — and
-  ## `src/frontend/tui/host/native_host.openLocalTrace` is the caller that
-  ## passes one, because it is the caller holding a terminal it would otherwise
-  ## never give back.  ``stdio_backend.nim``'s header has the reproduction.
+  ## both native front-ends pass one through
+  ## `src/frontend/tui/host/native_host.openLocalTrace`: the terminal because
+  ## it holds a terminal it would otherwise never give back, and the GPUI
+  ## window (`gpui/host/gpui_host.openGpuiTrace`) because without it a silent
+  ## engine left the process blocked for ever with nothing on stdout or
+  ## stderr.  The GPUI window then takes the clock off again
+  ## (`gpui_host.liftOpenBound`) when it starts taking input; the terminal
+  ## keeps it.  ``stdio_backend.nim``'s header has the reproduction.
 
   # 1. Spawn
   let backend = startReplayServer(replayServerBin, bound = handshake)

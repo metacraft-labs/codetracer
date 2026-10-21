@@ -120,6 +120,33 @@ proc gpuiFrontEndVersion*(): string =
   ## future about-box cannot part.
   GpuiFrontEndVersion
 
+const
+  GpuiHandshakeEnvVar* = "CODETRACER_GPUI_HANDSHAKE_MS"
+    ## Overrides `native_host.DefaultHandshakeMs` for THIS front-end, in
+    ## milliseconds, parsed by `native_host.handshakeBudgetMs` — so a value
+    ## that does not parse or is not positive keeps the default rather than
+    ## switching the clock off.
+    ##
+    ## ITS OWN VARIABLE rather than the terminal's
+    ## `CODETRACER_TUI_HANDSHAKE_MS`, because a test that shortens one
+    ## front-end's clock must not shorten the other's: a shell that exported
+    ## the TUI's knob for a lifecycle suite would otherwise give every GPUI
+    ## window it started a budget meant for a fake engine. Like the TUI's, it
+    ## is a knob and not a command-line flag;
+    ## `tests/test_gpui_handshake_bound.nim` is the reason it exists.
+
+  GpuiExitEngineStalled* = 4
+    ## The folder has a recording's shape, the engine accepted `launch`, and
+    ## then sent nothing for a whole budget. Equal to the terminal
+    ## front-end's `cli.ExitEngineStalled` on purpose, so a script driving
+    ## `ct replay --ui=<either>` reads one code for one fact
+    ## (`codetracer-pm/spec/CLI/ct/ui-selection.md` §8b).
+
+  GpuiExitUnreadableRecording* = 5
+    ## The engine ANSWERED that it cannot read this recording
+    ## (`DapLaunchRefusedError`). Equal to the terminal front-end's
+    ## `cli.ExitUnreadableRecording`, for the same reason.
+
 proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
   ## Spawn `replay-server` on `traceFolder` and complete the DAP handshake.
   ##
@@ -129,14 +156,75 @@ proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
   ## exactly one site, which is what makes the residue above a one-line move
   ## rather than a sweep.
   ##
-  ## No `DapReadBound` is threaded: CTUI-14's read bound exists because a
-  ## stalled adapter can wedge a TERMINAL a user cannot get back, and a window
-  ## that has not opened yet is not in that state. A GPUI equivalent is
-  ## PLAT-21's, when there is a pane whose data can stall.
+  ## ## The read bound, and why the earlier reasoning against it was wrong
+  ##
+  ## Every read of the handshake is bounded by `handshakeBudgetMs
+  ## (GpuiHandshakeEnvVar)` — `native_host.DefaultHandshakeMs` (30 s) unless
+  ## `CODETRACER_GPUI_HANDSHAKE_MS` says otherwise — and an engine that sends
+  ## nothing for that long raises `DapStalledError`, which `main` reports by
+  ## name with `GpuiExitEngineStalled`.
+  ##
+  ## This function used to pass NO bound, on the reasoning that CTUI-14's
+  ## bound exists because a stalled adapter wedges a TERMINAL a user cannot
+  ## get back, "and a window that has not opened yet is not in that state".
+  ## That was measured false (codetracer-pm `issues/2026-10-02-codetracer-
+  ## gpui-hangs-for-ever-on-a-replay-server-that-never-reports-a-stop.md`):
+  ## `replay-server` answered `launch` with `success: true`, never sent
+  ## `stopped`, and `codetracer-gpui --report-plan <trace>` was killed by
+  ## `timeout` at 100 s with 0 bytes on stdout and 0 on stderr — both ends
+  ## blocked in `read`, diagnosable only with `sample(1)`. A window that has
+  ## not opened is WORSE off than a wedged terminal, not better: nothing on
+  ## screen says where it is, and there is no window yet to take a keystroke,
+  ## so the clock is the only thing that ends the wait by name. `interruptFd`
+  ## is therefore `-1`.
+  ##
+  ## ## The bound covers the OPEN, not the window
+  ##
+  ## The returned session still carries the bound, so everything the caller
+  ## does before the window takes input — loading the first panes,
+  ## `--replay-ops`, the whole of `--report-plan` — is bounded too: none of
+  ## it has a user watching, and an unattended run must end. The caller lifts
+  ## it with `liftOpenBound` when the session becomes INTERACTIVE, and this is
+  ## where this front-end deliberately differs from the terminal, which keeps
+  ## its clock for the whole session (`tui_session.disarmHandshakeInterrupt`).
+  ##
+  ## The reason is operations that are silent BY DESIGN for longer than any
+  ## budget that is short enough to be useful at open: `ct/run-tracepoints`
+  ## sends nothing at all until the sweep over the whole recording is done
+  ## (`Handler::run_tracepoints`), and a `continue` across a long native
+  ## recording answers only when it stops. Under a 30 s per-message clock a
+  ## user's sweep over a large recording would be reported as a failure, and
+  ## the sweep's answer — which still arrives — would sit in the event queue
+  ## to be read as the answer to the NEXT sweep. A window the user started an
+  ## operation in is a window they are watching; a slow answer there is the
+  ## right outcome and a wrong one is not.
+  ##
+  ## The contract is codetracer-pm `spec/CLI/ct/ui-selection.md` §8b.
   if traceFolder.strip().len == 0:
     raise newException(TuiHostError,
       "codetracer-gpui: name a recording folder")
-  openLocalTrace(traceFolder)
+  openLocalTrace(traceFolder,
+                 bound = DapReadBound(
+                   timeoutMs: handshakeBudgetMs(GpuiHandshakeEnvVar),
+                   interruptFd: -1))
+
+proc liftOpenBound*(session: HeadlessDebugSession) =
+  ## Take the clock `openGpuiTrace` installed off `session`'s engine channel,
+  ## because the session is about to answer a user rather than a script.
+  ##
+  ## Call it once the open is complete and the window is about to take input
+  ## (`runOpen` before `launchWindow`, `openRecordingInTab` once the new tab's
+  ## panes are loaded) — never on a path with nobody at it: a run that ends
+  ## without a window, or a window `--quit-after-ms` will close, stays
+  ## bounded. See `openGpuiTrace`'s "The bound covers the OPEN, not
+  ## the window" for why the window is unbounded.
+  ##
+  ## Operations that carry their OWN budget are unaffected: `awaitJump`
+  ## installs `LineJumpQuietMs` whenever the channel's clock is off or longer,
+  ## and restores what it found.
+  if session.isNil or session.backend.isNil:
+    return
+  session.backend.bound = DapReadBound(interruptFd: -1)
 
 const GpuiSourceOverscan* = 6
   ## Lines held above and below the viewport. The terminal's number, and the

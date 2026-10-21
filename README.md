@@ -338,6 +338,27 @@ code when its output is not a terminal):
 `--report-plan`, `--report-window-plan` and `--pixels-out` open no window and do
 not check.
 
+#### When the recording does not open
+
+Every run opens the recording first, `--report-plan` included. If the replay
+engine cannot open it, `codetracer-gpui` prints the reason on stderr and exits
+with the same codes as the terminal front-end:
+
+| exit | situation |
+|---|---|
+| 5 | the engine said it cannot read this recording (for example, a trace container version this build does not implement). Its own message is printed, and re-recording the program is the remedy. |
+| 4 | the engine accepted the recording and then sent nothing for 30 seconds: `codetracer-gpui: <folder>: the replay engine stopped answering (…)`. |
+
+The 30 seconds apply to each message from the engine, not to the whole open,
+so a large recording that is still making progress is never cut off. They
+cover everything `codetracer-gpui` does before its window takes input (all of
+`--report-plan`, and `--replay-ops`); once the window is open, an operation
+such as a tracepoint sweep over a large recording may take as long as the
+engine needs.
+`CODETRACER_GPUI_HANDSHAKE_MS=<milliseconds>` changes the budget for the GPUI
+front-end (`CODETRACER_TUI_HANDSHAKE_MS` for the terminal); a value that is not
+a positive number keeps the default.
+
 ### Useful options (TUI)
 
 | option | effect |

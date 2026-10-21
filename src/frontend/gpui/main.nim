@@ -408,6 +408,18 @@ WHEN NO WINDOW CAN OPEN:
       set (or ZED_HEADLESS is), so GPUI would run with no display.
   `--report-plan` checks the build without a window, on any host.
 
+WHEN THE RECORDING DOES NOT OPEN:
+  every run, `--report-plan` included, opens the recording first, and a
+  recording the replay engine cannot open ends the run with the reason on
+  stderr:
+    exit 5 — the engine said it cannot read this recording (for example a
+      container version this build does not implement); its own sentence is
+      printed, and re-recording is the remedy;
+    exit 4 — the engine accepted the recording and then sent nothing for
+      30 s (one message's budget, not the whole open), so it stopped
+      answering. Once the window takes input there is no such clock: an
+      operation there may take as long as the engine needs.
+
 NOT YET, AND REFUSED RATHER THAN IGNORED:
   the debugger panes are PLAT-21 and the editing surface is PLAT-22, so a
   leaf here names its pane and its state. `--headless` belongs to the
@@ -4542,6 +4554,9 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
   # PLAT-52 / Q3: the Terminal Output's lines are asked for as the pane is
   # drawn (`drawTerminalPane`), the window it shows.
   opened.openTerminalOutput()
+  # Opened, and from here on it answers the user in this window: the open's
+  # clock comes off, as it does for the first session before `launchWindow`.
+  liftOpenBound(opened)
   let idx = gShell.windows.indexOf(gWindow)
   let layout = if idx >= 0: gShell.windows.windows[idx].layout
                else: sharedDefaultValue()
@@ -9017,6 +9032,15 @@ proc runOpen(cmd: GpuiCommand): int =
   # contract, and `--replay-ops` is what stands in for it meanwhile.
   # `--input-probe` is the instrument that shows the delivery half works.
   let dock = shell.projectionFor(windowId)
+  # THE OPEN IS OVER AND THE WINDOW IS ABOUT TO TAKE INPUT, so the engine's
+  # clock comes off here and not earlier: everything above, `--replay-ops`
+  # and every early `return` without a window included, ran unattended and
+  # stays bounded (`gpui_host.openGpuiTrace`, "The bound covers the OPEN, not
+  # the window"). A window with `--quit-after-ms` is a scripted capture with
+  # nobody at it, so it keeps the clock: a read that blocked there would also
+  # block the very event loop whose timer is meant to end the run.
+  if cmd.quitAfterMs == 0'u32:
+    liftOpenBound(session)
   # PLAT-69 (C4): `<program> — CodeTracer`, the desktop's title.
   result = launchWindow(cmd, windowTitleFor(session), drawn,
                         if dock.status == dpsRefused: nil else: dock.state)
@@ -9051,7 +9075,22 @@ proc main() =
       # `cli.ExitUnreadableRecording`, which both front-ends owe a script
       # driving either of them.
       stderr.writeLine("codetracer-gpui: " & e.msg)
-      quit(5)
+      quit(GpuiExitUnreadableRecording)
+    except DapStalledError as e:
+      # THE ENGINE WENT QUIET. `openGpuiTrace` bounds every read of the open
+      # (`CODETRACER_GPUI_HANDSHAKE_MS`, 30 s by default) until the window
+      # takes input; before it did, an engine that acknowledged `launch` and never sent `stopped` left
+      # this process blocked in `read` for ever with nothing on either stream.
+      # A distinct code and the terminal front-end's wording
+      # (`cli.ExitEngineStalled`): a stall is neither a bad command line nor an
+      # engine that stated a reason, and a script must be able to tell.
+      stderr.writeLine("codetracer-gpui: " & cmd.traceFolder &
+                       ": the replay engine stopped answering (" & e.msg & ")")
+      stderr.writeLine("  the folder has a recording's shape but the engine" &
+                       " could not read it; re-record it, or run" &
+                       " `replay-server dap-server --stdio` against it to see" &
+                       " what it says.")
+      quit(GpuiExitEngineStalled)
     except CatchableError as e:
       stderr.writeLine("codetracer-gpui: " & e.msg.splitLines()[0])
       quit(1)

@@ -373,6 +373,11 @@ const
     ## refusing to open a trace that was merely slow.
     ##
     ## PER MESSAGE, not per session. See `DapReadBound.timeoutMs`.
+    ##
+    ## The GPUI window uses the same default while it opens a recording
+    ## (`gpui_host.openGpuiTrace`): it has no window to take a keystroke yet,
+    ## so for it the clock is the ONLY way out, and the argument above for a
+    ## generous budget applies with more force, not less.
   HandshakeEnvVar* = "CODETRACER_TUI_HANDSHAKE_MS"
     ## Overrides `DefaultHandshakeMs`, in milliseconds.
     ##
@@ -382,15 +387,21 @@ const
     ## reason it exists. `app/cli.parseTuiCommand` therefore never sees it and
     ## `TuiHelpText` never mentions it.
 
-proc handshakeBudgetMs*(): int =
-  ## The per-message budget this process will use, from the environment or
-  ## from `DefaultHandshakeMs`.
+proc handshakeBudgetMs*(envVar = HandshakeEnvVar): int =
+  ## The per-message budget this process will use, from the environment
+  ## variable `envVar` or from `DefaultHandshakeMs`.
   ##
   ## A value that does not parse, or that is not positive, falls back to the
   ## default rather than disabling the bound: "the clock is off" is exactly the
   ## state this milestone exists to remove, and it must not be reachable by
   ## mistyping an environment variable.
-  let raw = getEnv(HandshakeEnvVar, "")
+  ##
+  ## `envVar` is a parameter because each native front-end has its own knob —
+  ## the terminal reads `HandshakeEnvVar`, the GPUI window
+  ## `gpui_host.GpuiHandshakeEnvVar` — and both must parse it by THIS rule: a
+  ## second copy of the fallback is a second place where a typo could switch
+  ## the clock off.
+  let raw = getEnv(envVar, "")
   if raw.len == 0:
     return DefaultHandshakeMs
   try:
