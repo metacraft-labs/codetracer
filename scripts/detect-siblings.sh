@@ -275,23 +275,11 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-python-r
 		export CODETRACER_PYTHON_INTERPRETER="$_CT_WORKSPACE_ROOT/codetracer/.python-recorder-venv/bin/python"
 	fi
 
-	# THE SAME GAP THE RUBY BLOCK BELOW HAD, in its Python spelling.
-	#
-	# Everything above keys off DIRECTORIES that exist in a fresh clone: the
-	# source tree, and a venv that `nix develop` materialises whether or not
-	# the recorder was ever installed into it. This block therefore used to
-	# report "detected" unconditionally.
-	#
-	# `codetracer-python-recorder` is a maturin/pyo3 project -- a COMPILED
-	# extension, not a pure-Python package -- so a resolved interpreter proves
-	# nothing about whether `import codetracer_python_recorder` will work. On
-	# the machine this was written on, it did not: the venv existed, the
-	# interpreter ran, and the import raised ModuleNotFoundError while this
-	# script printed "detected".
-	#
-	# Probe site-packages for the installed distribution rather than starting
-	# the interpreter: this file is sourced on every dev-shell entry, and a
-	# `python -c import` on that path is a cost paid by every shell.
+	# Shell entry must remain a filesystem-only observation. Local package
+	# files neither establish importability nor rule out a recorder inherited
+	# from the declared base environment (include-system-site-packages=true).
+	# Do not run the interpreter or construct/install a package to refine this
+	# advisory result; principal and recording qualification happen elsewhere.
 	if [ -n "${CODETRACER_PYTHON_INTERPRETER:-}" ]; then
 		_ct_py_installed=""
 		for _ct_py_sp in "$(dirname "$(dirname "$CODETRACER_PYTHON_INTERPRETER")")"/lib/python*/site-packages; do
@@ -302,13 +290,12 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-python-r
 			fi
 		done
 		if [ -n "$_ct_py_installed" ]; then
-			_ct_detect_summary "codetracer-python-recorder (installed)"
+			_ct_detect_summary "codetracer-python-recorder (local package files found; import unverified)"
 		else
-			echo "  WARNING: codetracer-python-recorder is NOT installed in the venv." >&2
+			echo "  WARNING: codetracer-python-recorder has no local package files in the venv." >&2
 			echo "    interpreter: $CODETRACER_PYTHON_INTERPRETER" >&2
-			echo "    'import codetracer_python_recorder' will fail; the sources alone are not enough" >&2
-			echo "    (this is a maturin/pyo3 extension and has to be built)." >&2
-			_ct_detect_summary "codetracer-python-recorder (sources present, NOT installed)"
+			echo "    The recorder may be inherited from the base environment; import availability is unverified." >&2
+			_ct_detect_summary "codetracer-python-recorder (no local package files; availability unverified)"
 		fi
 		unset _ct_py_installed _ct_py_sp
 	else

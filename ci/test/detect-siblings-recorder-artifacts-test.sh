@@ -26,10 +26,17 @@
 # was absent, `import codetracer_python_recorder` raised ModuleNotFoundError,
 # and the script printed "detected" for both.
 #
-# So the invariant asserted here is: THE PROBE MUST TRACK THE ARTEFACT THE
-# LOADER NEEDS. Every case therefore comes in pairs -- artefact absent must
-# WARN, artefact present must not -- because a probe that only ever says one
+# So the invariant asserted here is: THE PROBE MUST DESCRIBE THE ARTEFACT EVIDENCE IT
+# ACTUALLY OBSERVES. Local Python files do not qualify an import, and their
+# absence cannot exclude inheritance from the base interpreter. Cases come
+# in pairs -- artefact absent must WARN, artefact present must not -- because
+# a probe that only ever says one
 # thing is the defect, whichever thing it says.
+#
+# Python fixtures model only local filesystem evidence, not importability.
+# The interpreter stub is an execution tripwire: shell entry must not run it,
+# import the native extension, build, or install anything. Inherited availability
+# remains unverified even when pyvenv.cfg allows system site-packages.
 #
 # Fixtures are built under mktemp with the real directory layout and sourced in
 # a subshell. Pure bash; no nix, no network, no ruby, no python, no real
@@ -101,7 +108,8 @@ build_ws() {
 	mkdir -p "$ws/codetracer-python-recorder/codetracer-pure-python-recorder"
 	local venv="$root/.python-recorder-venv"
 	mkdir -p "$venv/bin" "$venv/lib/python3.13/site-packages"
-	printf '#!/bin/sh\nexit 0\n' >"$venv/bin/python"
+	# shellcheck disable=SC2016 # The generated interpreter expands these at execution.
+	printf '#!/bin/sh\ntouch "$(dirname "$0")/executed"\nexit 97\n' >"$venv/bin/python"
 	chmod +x "$venv/bin/python"
 	if [ -n "$with_py_pkg" ]; then
 		mkdir -p "$venv/lib/python3.13/site-packages/codetracer_python_recorder"
@@ -116,6 +124,7 @@ build_ws() {
 # that prints it buries its own explanation.
 out=""
 ruby_on_path=""
+python_interpreter=""
 run_detect() {
 	local ws="$1" raw
 	# shellcheck disable=SC2016  # $1/$2/$PATH belong to the INNER shell; they
@@ -126,8 +135,16 @@ run_detect() {
 		bash -c '
 			source "$1" "$2/codetracer" 2>&1
 			echo "PATH_IS=$PATH"
+			echo "PYTHON_IS=${CODETRACER_PYTHON_INTERPRETER:-}"
 		' _ "$DETECT" "$ws")"
-	out="$(printf '%s\n' "$raw" | grep -v '^PATH_IS=')"
+	python_interpreter="$(printf '%s\n' "$raw" | sed -n 's/^PYTHON_IS=//p')"
+	if [ -e "$ws/codetracer/.python-recorder-venv/bin/executed" ]; then
+		fail "the detector never executes the managed interpreter ($ws)"
+	fi
+	if [ "$python_interpreter" != "$ws/codetracer/.python-recorder-venv/bin/python" ]; then
+		fail "the detector preserves the managed interpreter export ($ws)" "$python_interpreter"
+	fi
+	out="$(printf '%s\n' "$raw" | grep -Ev '^(PATH_IS|PYTHON_IS)=')"
 	if grep -q "$ws/codetracer-ruby-recorder/gems" \
 		<<<"$(grep '^PATH_IS=' <<<"$raw")"; then
 		ruby_on_path="yes"
@@ -241,35 +258,57 @@ fi
 ws="$tmp_root/py-uninstalled"
 build_ws "$ws" "codetracer_ruby_recorder.$host_dlext" ""
 run_detect "$ws"
-if grep -q "codetracer-python-recorder is NOT installed" <<<"$out"; then
-	ok "a venv without the recorder installed WARNS"
+if grep -q "codetracer-python-recorder has no local package files" <<<"$out"; then
+	ok "a venv without local recorder files WARNS"
 else
-	fail "a venv without the recorder installed WARNS" \
+	fail "a venv without local recorder files WARNS" \
 		"The source tree and the venv both exist in a fresh clone; neither means" \
 		"'import codetracer_python_recorder' will work." \
 		"$out"
 fi
 
-if grep -q "sources present, NOT installed" <<<"$out"; then
-	ok "the python summary distinguishes sources from an installed recorder"
+if grep -q "no local package files; availability unverified" <<<"$out"; then
+	ok "the python summary distinguishes local absence from availability"
 else
-	fail "the python summary distinguishes sources from an installed recorder" "$out"
+	fail "the python summary distinguishes local absence from availability" "$out"
 fi
 
 # --- Case 7: installed -> no warning ---------------------------------------
 ws="$tmp_root/py-installed"
 build_ws "$ws" "codetracer_ruby_recorder.$host_dlext" "1"
 run_detect "$ws"
-if grep -q "codetracer-python-recorder (installed)" <<<"$out"; then
-	ok "an installed recorder is reported as installed"
+if grep -q "codetracer-python-recorder (local package files found; import unverified)" <<<"$out"; then
+	ok "local package files are reported without claiming importability"
 else
-	fail "an installed recorder is reported as installed" "$out"
+	fail "local package files are reported without claiming importability" "$out"
 fi
 
-if grep -q "NOT installed" <<<"$out"; then
-	fail "an installed recorder produces no warning" "$out"
+if grep -Eq "WARNING: codetracer-python-recorder|no local package files" <<<"$out"; then
+	fail "local recorder files produce no warning" "$out"
 else
-	ok "an installed recorder produces no warning"
+	ok "local recorder files produce no warning"
+fi
+
+# --- Case 8: system packages may supply a recorder absent locally ---------
+ws="$tmp_root/py-inherited"
+build_ws "$ws" "codetracer_ruby_recorder.$host_dlext" ""
+printf 'include-system-site-packages = true\n' >"$ws/codetracer/.python-recorder-venv/pyvenv.cfg"
+run_detect "$ws"
+if grep -q 'no local package files; availability unverified' <<<"$out" &&
+	grep -q 'may be inherited from the base environment' <<<"$out"; then
+	ok "an inheritance-enabled venv reports the limits of the local probe"
+else
+	fail "an inheritance-enabled venv reports the limits of the local probe" "$out"
+fi
+if grep -Eq "will fail|NOT installed|\(installed\)" <<<"$out"; then
+	fail "a local-only probe does not assert import failure or availability" "$out"
+else
+	ok "a local-only probe does not assert import failure or availability"
+fi
+if [ -e "$ws/codetracer/.python-recorder-venv/bin/executed" ]; then
+	fail "the detector never executes the managed interpreter"
+else
+	ok "the detector never executes the managed interpreter"
 fi
 
 printf '\n'
