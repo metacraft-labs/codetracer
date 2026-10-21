@@ -344,44 +344,45 @@ proc dapSetBreakpoints*(self: DebuggerService) =
   ## stopping.  Empty ``logMessage`` preserves the breakpoint
   ## behaviour M1/M9 shipped with.
   for path, breakpointList in self.breakpointTable:
-    var args = DapSetBreakpointsArguments(
-      source: DapSource(
-        name: extractFilename($path),
-        path: path,
-        sourceReference: nil
-      )
-    )
-    for line, b in breakpointList:
-      if b.enabled:
-        args.breakpoints.add(
-          DapSourceBreakpoint(
-            line: line,
-            column: b.column,
-            condition: b.condition,
-            logMessage: b.logMessage
-          )
+    closureScope:
+      var args = DapSetBreakpointsArguments(
+        source: DapSource(
+          name: extractFilename($path),
+          path: path,
+          sourceReference: nil
         )
-        args.lines.add(line)
-    # THE ANSWER IS READ (PLAT-40). This was fire-and-forget, so the engine's
-    # verdict on each breakpoint — which line it bound, whether it bound at
-    # all — reached nothing, and the ViewModel's point list never held the
-    # breakpoints a user set here. The verified lines now go to the store's
-    # one decoder, `applyVerifiedBreakpoints`, through `onBreakpointsVerified`.
-    let answeredPath = path
-    let data = self.data
-    discard data.dapApi.asyncSendCtRequest(DapSetBreakpoints, args.toJs).then(
-      proc(body: JsObject) =
-        if data.onBreakpointsVerified.isNil or body.isNil or
-           jsUndefined == body or body.breakpoints.isNil or
-           jsUndefined == body.breakpoints:
-          return
-        var verified: seq[int] = @[]
-        let answered = body.breakpoints
-        for i in 0 ..< answered.length.to(int):
-          let bp = answered[i]
-          if bp.verified.to(bool):
-            verified.add bp.line.to(int)
-        data.onBreakpointsVerified(answeredPath, verified))
+      )
+      for line, b in breakpointList:
+        if b.enabled:
+          args.breakpoints.add(
+            DapSourceBreakpoint(
+              line: line,
+              column: b.column,
+              condition: b.condition,
+              logMessage: b.logMessage
+            )
+          )
+          args.lines.add(line)
+      # THE ANSWER IS READ (PLAT-40). This was fire-and-forget, so the engine's
+      # verdict on each breakpoint — which line it bound, whether it bound at
+      # all — reached nothing, and the ViewModel's point list never held the
+      # breakpoints a user set here. The verified lines now go to the store's
+      # one decoder, `applyVerifiedBreakpoints`, through `onBreakpointsVerified`.
+      let answeredPath = path
+      let data = self.data
+      discard data.dapApi.asyncSendCtRequest(DapSetBreakpoints, args.toJs).then(
+        proc(body: JsObject) =
+          if data.onBreakpointsVerified.isNil or body.isNil or
+             jsUndefined == body or body.breakpoints.isNil or
+             jsUndefined == body.breakpoints:
+            return
+          var verified: seq[int] = @[]
+          let answered = body.breakpoints
+          for i in 0 ..< answered.length.to(int):
+            let bp = answered[i]
+            if bp.verified.to(bool):
+              verified.add bp.line.to(int)
+          data.onBreakpointsVerified(answeredPath, verified))
 
 proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = false) =
   if not self.hasBreakpoint(path, line):

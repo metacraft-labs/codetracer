@@ -142,9 +142,9 @@ proc eventuallyUpdateTabHistory(editorService: EditorService, tab: EditorViewTab
   editorService.hasSaveHistoryTimeout = true
 
 type
-  ContextMenuOption = object
-    label: cstring
-    action: proc(container: GoldenContainer, state: GoldenItemState)
+  ContextMenuOption* = object
+    label*: cstring
+    action*: proc(container: GoldenContainer, state: GoldenItemState)
 
 # ---------------------------------------------------------------------------
 # M21: "Send to Window" context menu on GL tabs
@@ -198,7 +198,7 @@ let editorSpecificContextMenuOptions: seq[ContextMenuOption] = @[
     action: proc(container: GoldenContainer, state: GoldenItemState) = clipboardCopy(state.label))
 ]
 
-proc createContextMenuFromOptions(
+proc createContextMenuFromOptions*(
   container: GoldenContainer,
   state: GoldenItemState,
   contextMenuOptions: seq[ContextMenuOption]
@@ -208,9 +208,11 @@ proc createContextMenuFromOptions(
     options: JsAssoc[int, cstring] = JsAssoc[int, cstring]{}
     actions: JsAssoc[int, proc()] = JsAssoc[int, proc()]{}
 
-  for i, option in contextMenuOptions:
-    options[i] = option.label
-    actions[i] = proc() {.closure.} = option.action(container, state)
+  for i in 0 ..< contextMenuOptions.len:
+    closureScope:
+      let capturedOption = contextMenuOptions[i]
+      options[i] = capturedOption.label
+      actions[i] = proc() {.closure.} = capturedOption.action(container, state)
 
   return ContextMenu(
     options: options,

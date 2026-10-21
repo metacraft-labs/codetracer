@@ -932,6 +932,8 @@ test_lane_files() {
 		# Scratchpad pane's ViewModel (codetracer#856).
 		echo src/frontend/tests/locals_answer_identity_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		echo src/frontend/tests/loop_built_handlers_test.nim
+		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
 		;;
 
 	renderer-chromium)

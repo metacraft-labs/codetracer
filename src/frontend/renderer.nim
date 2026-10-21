@@ -103,18 +103,19 @@ proc renderContextMenu*(self: ContextMenu): dom.Node =
     self.dom.toJs.classList.remove("visible"))
 
   for key, option in self.options:
-    let action = self.actions[key]
-    let optionDom = kdom.document.createElement("div")
-    optionDom.class = cstring"context-menu-option ct-menu-item"
-    optionDom.addEventListener(cstring"click", proc(e: Event) =
-      action()
-      self.dom.toJs.classList.remove("visible"))
+    closureScope:
+      let action = self.actions[key]
+      let optionDom = kdom.document.createElement("div")
+      optionDom.class = cstring"context-menu-option ct-menu-item"
+      optionDom.addEventListener(cstring"click", proc(e: Event) =
+        action()
+        self.dom.toJs.classList.remove("visible"))
 
-    let textDom = kdom.document.createElement("div")
-    textDom.class = cstring"context-menu-option-text"
-    textDom.appendChild(kdom.document.createTextNode(option))
-    optionDom.appendChild(textDom)
-    root.appendChild(optionDom)
+      let textDom = kdom.document.createElement("div")
+      textDom.class = cstring"context-menu-option-text"
+      textDom.appendChild(kdom.document.createTextNode(option))
+      optionDom.appendChild(textDom)
+      root.appendChild(optionDom)
 
   return cast[dom.Node](root)
 
@@ -1928,11 +1929,7 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
         "Re-recording aborted: could not resolve the conflict for " & $path)
     ipc.send "CODETRACER::no-reload-file", js{path: path}
 
-  for action in [cstring"discard", cstring"save", cstring"merge", cstring"keep"]:
-    let button = overlay.toJs.querySelector(cstring("[data-action='" & $action & "']"))
-    if not button.isNil:
-      button.addEventListener(cstring"click", proc(e: Event) =
-        handleAction(action))
+  wireFileConflictActions(overlay, handleAction)
 
   kdom.document.body.appendChild(overlay)
 
