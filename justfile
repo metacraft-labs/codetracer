@@ -5164,6 +5164,17 @@ plat70a-gpui-window:
 plat70a-gpui-window-record:
   python3 ci/test/plat70a_gpui_window.py record
 
+# M71 (codetracer#838): the GPUI window's State, Files and VCS panes, each
+# overflowing, scrolled by a real wheel and the State bar pressed, on a
+# headless sway (`ci/test/m71_gpui_window.py` says what each frame is).
+m71-gpui-window:
+  bash ci/test/m71-gpui-window.sh
+
+# Measure those frames into `src/tests/visual/m71-gpui-window.json`, which
+# `src/frontend/gpui/tests/test_m71_gpui_window.nim` asserts.
+m71-gpui-window-record:
+  python3 ci/test/m71_gpui_window.py record
+
 # The GPUI window captures, RE-TAKEN AND ASSERTED from a checkout: build
 # isonim-gpui's windowed shim and virtual pointer (in its own dev shell), this
 # checkout's windowed front-end against it, record `calc` / `call_pages` when
