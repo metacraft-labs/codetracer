@@ -9,6 +9,12 @@ import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  DEBUG_TOOLBAR_IDS,
+  EDIT_TOOLBAR_IDS,
+  editToolbarSelector,
+  topbarSurfaceSelector,
+} from "../../page-objects/debug-toolbar-ids";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,6 +56,95 @@ childProcess.execFileSync(
   ],
   { cwd: gitEditFixture, stdio: "ignore" },
 );
+
+// A folder `projectKinds` recognises as exactly ONE project kind: `Nargo.toml`
+// at the root is Noir, whose Build (`nargo compile`) and Run proposals are both
+// canonical. An unrecognised folder hides the command group (§8's recognition
+// split), so without a marker the edit bar would carry no buttons and "Build
+// and Run are refused with a reason" could not be asserted at all.
+const noirEditFixture = fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-edit-toolbar-"));
+fs.mkdirSync(path.join(noirEditFixture, "src"), { recursive: true });
+fs.writeFileSync(
+  path.join(noirEditFixture, "Nargo.toml"),
+  '[package]\nname = "edit_toolbar"\ntype = "bin"\nauthors = [""]\n\n[dependencies]\n',
+);
+fs.writeFileSync(
+  path.join(noirEditFixture, "src", "main.nr"),
+  "fn main(x: Field) {\n    assert(x != 0);\n}\n",
+);
+
+/** `LayoutMode` ordinals, as `data.ui.mode` carries them. */
+const DEBUG_MODE = 0;
+const EDIT_MODE = 1;
+
+async function layoutMode(ctPage: any): Promise<number> {
+  return await ctPage.evaluate(() => Number((window as any).data?.ui?.mode));
+}
+
+async function activeSessionIndex(ctPage: any): Promise<number> {
+  return await ctPage.evaluate(() => Number((window as any).data?.activeSessionIndex));
+}
+
+/**
+ * Flip the session's mode with the product's own chord (`Ctrl+F5`,
+ * `session.toggle-product-mode`) and wait until `data.ui.mode` says it
+ * happened, so a toolbar assertion that follows cannot run against the mode
+ * the session is leaving.
+ */
+async function toggleProductMode(ctPage: any, expected: number) {
+  await ctPage.keyboard.press("Control+F5");
+  await expect.poll(async () => layoutMode(ctPage), {
+    timeout: 30_000,
+    message: `Ctrl+F5 did not switch data.ui.mode to ${expected}`,
+  }).toBe(expected);
+}
+
+/**
+ * The topbar in EDIT mode (#812): the edit-commands surface, and NOT ONE of
+ * the debugger's stepping controls. `Edit-Mode-Toolbar.md` §7.3 / EMT-A1:
+ * `tbaDebuggerControls` is absent in `EditMode`.
+ *
+ * With `withCommands`, also the two command buttons, each DISABLED and saying
+ * why: the desktop has no route that builds or runs from the toolbar yet, and
+ * §8 / EMT-D14 forbid an enabled button that does nothing as much as a
+ * disabled one with no reason.
+ */
+async function expectEditModeTopbar(ctPage: any, withCommands: boolean) {
+  await expect(
+    ctPage.locator(`#isonim-debug-controls ${topbarSurfaceSelector("editCommands")}`),
+    "Edit mode's topbar is not the edit-commands surface",
+  ).toHaveCount(1, { timeout: 30_000 });
+  await expect(ctPage.locator(topbarSurfaceSelector("debuggerControls"))).toHaveCount(0);
+  for (const [name, id] of Object.entries(DEBUG_TOOLBAR_IDS)) {
+    await expect(
+      ctPage.locator(`#${id}`),
+      `the debugger's '${name}' control (#${id}) is on screen in Edit mode`,
+    ).toHaveCount(0);
+  }
+  if (!withCommands) return;
+  for (const button of ["build", "run"] as const) {
+    const locator = ctPage.locator(editToolbarSelector(button));
+    await expect(locator, `#${EDIT_TOOLBAR_IDS[button]} is missing`).toBeVisible();
+    await expect(locator, `#${EDIT_TOOLBAR_IDS[button]} is enabled`).toBeDisabled();
+    const reason = ((await locator.getAttribute("title")) ?? "").trim();
+    expect(
+      reason.length,
+      `#${EDIT_TOOLBAR_IDS[button]} is disabled with no reason (EMT-A28)`,
+    ).toBeGreaterThan(0);
+  }
+}
+
+/** The topbar in DEBUG mode: the stepping controls, and no command buttons. */
+async function expectDebugModeTopbar(ctPage: any) {
+  await expect(
+    ctPage.locator(`#isonim-debug-controls ${topbarSurfaceSelector("debuggerControls")}`),
+    "Debug mode's topbar is not the debugger-controls surface",
+  ).toHaveCount(1, { timeout: 30_000 });
+  await expect(ctPage.locator(`#${DEBUG_TOOLBAR_IDS.next}`)).toHaveCount(1);
+  await expect(ctPage.locator(topbarSurfaceSelector("editCommands"))).toHaveCount(0);
+  await expect(ctPage.locator(`#${EDIT_TOOLBAR_IDS.build}`)).toHaveCount(0);
+  await expect(ctPage.locator(`#${EDIT_TOOLBAR_IDS.run}`)).toHaveCount(0);
+}
 
 async function visibleEditorText(ctPage: any): Promise<string> {
   return await ctPage.evaluate(() => {
@@ -129,8 +224,116 @@ test.describe("Edit Mode", () => {
 
     const layoutContent = ctPage.locator(".lm_content").first();
     await expect(layoutContent).toBeVisible({ timeout: 10000 });
+
+    // #812: and the TOPBAR says so. `test-programs/` is not one project, so
+    // the command group may be hidden here; the stepping controls must be
+    // gone regardless.
+    expect(await layoutMode(ctPage)).toBe(EDIT_MODE);
+    await expectEditModeTopbar(ctPage, false);
   });
 
+});
+
+test.describe("Edit Mode toolbar on the desktop (#812)", () => {
+  test.use({ launchMode: "edit", editFolderPath: noirEditFixture, deploymentMode: "electron" });
+
+  test("edit mode shows the edit toolbar with Build and Run refused, and no stepping controls", async ({
+    ctPage,
+  }) => {
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 60_000 });
+    expect(await layoutMode(ctPage)).toBe(EDIT_MODE);
+    await expectEditModeTopbar(ctPage, true);
+  });
+
+  test("the topbar follows an Edit -> Debug -> Edit round trip", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 60_000 });
+    expect(await layoutMode(ctPage)).toBe(EDIT_MODE);
+    await expectEditModeTopbar(ctPage, true);
+
+    await toggleProductMode(ctPage, DEBUG_MODE);
+    await expectDebugModeTopbar(ctPage);
+
+    // The SECOND entry is the one `Mode-Transitions.md` §3 warns nobody
+    // exercises: the bar must be re-derived for it, not left from the first.
+    await toggleProductMode(ctPage, EDIT_MODE);
+    await expectEditModeTopbar(ctPage, true);
+
+    await toggleProductMode(ctPage, DEBUG_MODE);
+    await expectDebugModeTopbar(ctPage);
+    await toggleProductMode(ctPage, EDIT_MODE);
+    await expectEditModeTopbar(ctPage, true);
+  });
+});
+
+test.describe("Edit Mode toolbar from a replay session (#812)", () => {
+  test.use({ launchMode: "trace", sourcePath: "py_console_logs/main.py", deploymentMode: "electron" });
+
+  test("a trace session's Debug -> Edit -> Debug -> Edit round trip shows the right bar each time", async ({
+    ctPage,
+  }) => {
+    test.setTimeout(240_000);
+    // A replay session starts in Debug mode; the toolbar is what is under
+    // test, so readiness is the session's mode, not any one pane.
+    await expect.poll(async () => layoutMode(ctPage), { timeout: 120_000 }).toBe(DEBUG_MODE);
+    await expectDebugModeTopbar(ctPage);
+
+    // A recording's source folder need not be a recognised project, so only
+    // the surface and the absence of the stepping controls are asserted here.
+    await toggleProductMode(ctPage, EDIT_MODE);
+    await expectEditModeTopbar(ctPage, false);
+
+    await toggleProductMode(ctPage, DEBUG_MODE);
+    await expectDebugModeTopbar(ctPage);
+
+    await toggleProductMode(ctPage, EDIT_MODE);
+    await expectEditModeTopbar(ctPage, false);
+  });
+});
+
+test.describe("Edit Mode toolbar across session tabs (#812)", () => {
+  test.use({ launchMode: "trace", sourcePath: "py_console_logs/main.py", deploymentMode: "electron" });
+
+  test("switching between a replay tab and an edit tab shows each tab's own bar", async ({ ctPage }) => {
+    test.setTimeout(240_000);
+    // Tab 0 is a replay session, in Debug mode.
+    await expect.poll(async () => layoutMode(ctPage), { timeout: 120_000 }).toBe(DEBUG_MODE);
+    await expectDebugModeTopbar(ctPage);
+
+    // Tab 1 is an edit session over the Noir fixture, opened from the new
+    // tab's welcome screen. The folder dialog is answered by sending the
+    // message the dialog's handler sends, as the new-tab handoff test does.
+    await ctPage.locator(".session-tab-add").click();
+    await expect(ctPage.locator(".welcome-screen")).toBeVisible({ timeout: 10_000 });
+    await ctPage.evaluate((folderPath: string) => {
+      const d = (window as any).data;
+      const originalSend = d.ipc.send.bind(d.ipc);
+      d.ipc.send = (channel: string, payload?: unknown) => {
+        if (channel === "CODETRACER::open-folder-dialog") {
+          originalSend("CODETRACER::init-edit-mode", { folder: folderPath });
+          return;
+        }
+        originalSend(channel, payload);
+      };
+    }, noirEditFixture);
+    await ctPage.locator(".start-option.open-folder").click();
+    await expect(ctPage.locator(".welcome-screen")).toBeHidden({ timeout: 45_000 });
+    await expect.poll(async () => activeSessionIndex(ctPage), { timeout: 30_000 }).toBe(1);
+    await expect.poll(async () => layoutMode(ctPage), { timeout: 30_000 }).toBe(EDIT_MODE);
+    await expectEditModeTopbar(ctPage, true);
+
+    // Back to the replay tab: its session is in Debug mode, so the bar must
+    // be the stepping controls again, not the edit tab's bar left behind.
+    await ctPage.locator(".session-tab").nth(0).click();
+    await expect.poll(async () => activeSessionIndex(ctPage), { timeout: 30_000 }).toBe(0);
+    expect(await layoutMode(ctPage)).toBe(DEBUG_MODE);
+    await expectDebugModeTopbar(ctPage);
+
+    // And to the edit tab once more: the edit bar, composed for that tab.
+    await ctPage.locator(".session-tab").nth(1).click();
+    await expect.poll(async () => activeSessionIndex(ctPage), { timeout: 30_000 }).toBe(1);
+    expect(await layoutMode(ctPage)).toBe(EDIT_MODE);
+    await expectEditModeTopbar(ctPage, true);
+  });
 });
 
 test.describe("Edit Mode CLI", () => {

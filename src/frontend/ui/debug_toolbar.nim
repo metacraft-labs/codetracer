@@ -208,6 +208,50 @@ proc setEditModeToolbar*(model: EditToolbarModel; invoke: proc(id: string)) =
   if not toolbarVM.isNil:
     toolbarVM.setEditToolbar(model, invoke)
 
+var editToolbarComposer: proc()
+  ## Recompose the edit-mode topbar from the session as it is now. Each
+  ## platform composes its own model — the web studio in `ui/web_noir_build`,
+  ## the Electron desktop in `ui/desktop_edit_toolbar` — so the platform
+  ## installs its composer here with `installEditToolbarComposer`, and every
+  ## site that changes an input reaches it through `refreshEditToolbar`
+  ## without importing either module. Nil on a platform that composes no
+  ## model, which then keeps the debugger controls.
+
+proc installEditToolbarComposer*(compose: proc()) =
+  ## Install (or replace) the platform's edit-mode composer.
+  editToolbarComposer = compose
+
+proc refreshEditToolbar*() =
+  ## Run the installed composer, if there is one. A failure to compose is
+  ## reported and contained: every caller is in the middle of something that
+  ## matters more — a session starting, a mode or tab switch, a save — and a
+  ## toolbar model that cannot be built must not abort it.
+  if editToolbarComposer.isNil:
+    return
+  #
+  # A bare `except`: what a composer throws in a renderer is as likely a
+  # native JavaScript `TypeError` (a field missing from an IPC payload) as a
+  # Nim exception.
+  try:
+    editToolbarComposer()
+  except:
+    cerror "edit toolbar: could not recompose: " & getCurrentExceptionMsg()
+
+proc syncTopbarToMode*() =
+  ## THE TOPBAR FOLLOWS THE MODE, RE-DERIVED: the toolbar is re-derived from
+  ## the mode, never patched. `EditToolbarModel` is a value composed for one
+  ## mode — Build and Run are in its slot set only when it was composed in an
+  ## editing mode — so a model composed in Debug mode and merely re-shown in
+  ## Edit mode is an edit bar with no buttons. Recompose FIRST, then move the
+  ## surface, so no step in between shows a bar built for the mode being left.
+  ##
+  ## Called wherever `data.ui.mode` may now read differently: a mode switch,
+  ## an edit session starting, and a session-tab switch, since the mode is
+  ## per session and the topbar is shared by all of them. `syncToolbarMode`
+  ## alone is a no-op when the mode did not change.
+  refreshEditToolbar()
+  syncToolbarMode()
+
 # ---------------------------------------------------------------------------
 # Routes into the toolbar from chords and mouse buttons
 # ---------------------------------------------------------------------------

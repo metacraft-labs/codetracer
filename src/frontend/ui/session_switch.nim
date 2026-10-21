@@ -438,6 +438,12 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    Empty welcome sessions also own the singleton shared components, so
   #    redraw them even though they do not create a GoldenLayout instance.
   refreshSessionTabBar()
+  # THE TOPBAR FOLLOWS THE TARGET SESSION'S MODE. `data.ui.mode` is per
+  # session and the topbar is one bar shared by every tab, so without this a
+  # Debug tab reached from an Edit tab kept the edit bar, and an Edit tab
+  # reached from a Debug tab kept the stepping controls (#812). Recomposed
+  # rather than re-shown, because the edit bar's listing is the target's too.
+  debug_toolbar.syncTopbarToMode()
   debug_toolbar.ensureDebugToolbar()
   if not data.activeSession.ui.layout.isNil or data.activeSession.startOptions.welcomeScreen:
     if data.activeSession.startOptions.welcomeScreen:
