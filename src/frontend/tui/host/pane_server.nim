@@ -654,6 +654,25 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
         let (ok, pane) = paneOfWire(name)
         if ok:
           discard tree.setWeight(pane, weight.getFloat(0.0))
+    # Weights addressed by the node's path from the root (child indices):
+    # the editor's realization may not have one window per tree node (an
+    # Emacs side holds its slots in one line), so it reports the weight of
+    # every node it sized — containers and stacks included, which a weight
+    # keyed by pane cannot reach. Applied before `closed`, whose collapsing
+    # renumbers the paths.
+    for w in params{"weights"}.getElems:
+      let weight = w{"weight"}.getFloat(-1.0)
+      if weight < 0.0:
+        continue
+      var node = tree
+      for step in w{"path"}.getElems:
+        let k = step.getInt(-1)
+        if node.isNil or k < 0 or k >= node.children.len:
+          node = nil
+          break
+        node = node.children[k]
+      if not node.isNil and node != tree:
+        node.weight = weight
     for name in params{"closed"}.getElems:
       let (ok, pane) = paneOfWire(name.getStr(""))
       if ok:

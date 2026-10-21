@@ -235,6 +235,18 @@ suite "HSF-E1: the pane server, over a real recording":
     # Recorded on the region the pane occupies — the call trace is a tab of a
     # stack, so the stack's weight is what sizes it.
     check regionOf(edited{"result", "layout"}, "calltrace"){"weight"}.getFloat == 3.0
+    # A weight addressed by its node's path reaches a container, which a
+    # weight keyed by pane cannot: the root's last child here. A path that
+    # names no node, and the root itself, are ignored.
+    let rootKids = edited{"result", "layout", "children"}.len
+    check rootKids >= 2
+    let (byPath, _) = srv.request("layout/edited",
+      %*{"session": sid, "mode": "debug",
+         "weights": [{"path": [rootKids - 1], "weight": 42.0},
+                     {"path": [99], "weight": 1.0},
+                     {"path": [], "weight": 7.0}]})
+    check byPath{"result", "layout", "children"}[rootKids - 1]{"weight"}.getFloat == 42.0
+    check byPath{"result", "layout"}{"weight"}.getFloat(0.0) != 7.0
     let (_, toEdit) = srv.request("operation/run",
       %*{"session": sid, "operation": "session.toggle-product-mode"})
     let editLayout = toEdit.notes("layout/changed")
@@ -249,6 +261,8 @@ suite "HSF-E1: the pane server, over a real recording":
     # The arrangement the user left the mode in comes back with it.
     check debugLayout.len == 1 and regionOf(debugLayout[0]{"params", "layout"},
                                             "calltrace"){"weight"}.getFloat == 3.0
+    check debugLayout.len == 1 and debugLayout[0]{"params", "layout",
+      "children"}[rootKids - 1]{"weight"}.getFloat == 42.0
 
     # ---- source decorations for the visible lines -------------------------
     let pos = srv.request("session/list")[0]
