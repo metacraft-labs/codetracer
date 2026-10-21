@@ -152,15 +152,123 @@ proc makeEditorViewDetailed*(
   ## `openNewEditorView`, which exists to ASK a host for the source and would
   ## send a `tab-load` for a path no filesystem has.
 
+const WindowUniqueIdContents* = {Content.EditorView, Content.UnifiedDiff}
+  ## The panes whose ids must be unique across EVERY tab of the window, not
+  ## only within the tab that opens them (issue #835).
+  ##
+  ## Each tab is a `ReplaySession` with its own `ui.componentMapping`, but all
+  ## tabs share one document: a hidden tab keeps its `session-container-<n>`
+  ## mounted so switching back is instant (`ui/session_switch.nim`). These two
+  ## panes are found by a document-global id derived from the component id —
+  ## `editorComponent-<id>` (`ui/layout.nim`'s editor registration, then
+  ## `ui/editor.renderTopLevelEditorDirect`'s `getElementById` and the
+  ## `jq("#editorComponent-<id>")` Monaco is created on) and
+  ## `unifiedDiffComponent-<id>` (`ui/unified_diff.nim`) — and the editor's
+  ## id also keys module-global state (`ui/editor.isoNimEditorMountedIds`).
+  ## `getElementById` returns the FIRST match in document order, which is the
+  ## earlier tab's. So a second tab's editor 0 mounted into the replay tab's
+  ## `editorComponent-0`: Monaco refused a second editor on that host
+  ## ("Element already has context attribute: editor, code-editor, tab") and
+  ## the new tab's own host stayed blank.
+  ##
+  ## Only these two, deliberately. They are the panes a tab opens any number
+  ## of at runtime, so their ids come from `generateId`. The singleton chrome
+  ## (Build, BuildErrors, Menu, WelcomeScreen, CommandPalette, Shell, …) is
+  ## looked up by id 0 in every tab — `buildComponent(0)`, `shellComponent(0)`,
+  ## `componentMapping[Content.Build][0]` in `ui/layout.nim` — and mounts into
+  ## fixed, non-id hosts, so making those window-unique would break each of
+  ## those lookups in every tab after the first.
+
+proc componentIdUsedInWindow(data: Data, content: Content, id: int): bool =
+  ## Whether `id` is taken for `content` — in the active tab always, and in
+  ## any other tab of the window as well for `WindowUniqueIdContents`.
+  if data.ui.componentMapping[content].hasKey(id):
+    return true
+  if content notin WindowUniqueIdContents:
+    return false
+  for session in data.sessions:
+    if session.isNil or session.ui.isNil:
+      continue
+    let mapping = session.ui.componentMapping[content]
+    # A session whose maps were never initialised has no components to clash
+    # with; `closeSession` guards the same way.
+    if not mapping.isNil and mapping.hasKey(id):
+      return true
+  false
+
 proc generateId*(data: Data, content: Content): int =
-  if data.ui.componentMapping[content].len > 0:
-    var id = 0
-    while true:
-      if not data.ui.componentMapping[content].hasKey(id):
-        return id
-      id += 1
-  else:
-    return 0
+  ## The lowest id that is free for `content`: within the active tab for most
+  ## panes, and across the whole window for `WindowUniqueIdContents`.
+  result = 0
+  while data.componentIdUsedInWindow(content, result):
+    result += 1
+
+proc claimWindowUniqueLayoutIds*(data: Data, root: JsObject) =
+  ## Re-number, IN PLACE, every `WindowUniqueIdContents` pane in a GoldenLayout
+  ## config tree whose id another tab of the window already uses — before the
+  ## tree is turned into components and loaded.
+  ##
+  ## `generateId` covers the panes a tab opens at runtime. This covers the
+  ## ones that arrive with a layout: a restored edit layout carries one
+  ## `editorComponent` node per tab that was open, with the ids it was saved
+  ## with, and a "+" tab inherits the layout of the tab it was opened from
+  ## (`session_switch.createNewSession`). Those ids collide exactly the way a
+  ## generated one used to.
+  ##
+  ## Only a clash with ANOTHER tab is re-numbered. An id this tab already owns
+  ## is kept, because `renderer.createUIComponents` can run twice for the same
+  ## tab and must find its own components again rather than mint copies. The
+  ## mutation is what makes it stick: `componentState.id` is what
+  ## `createUIComponents` builds the component from, and what GoldenLayout
+  ## hands back to the `editorComponent` registration that builds the host id.
+  if root.isNil or root.isUndefined:
+    return
+
+  # Every node first, so a fresh id is never one a LATER node already holds.
+  var states: seq[JsObject] = @[]
+  proc collect(node: JsObject) =
+    if node.isNil or node.isUndefined:
+      return
+    if node["type"].to(cstring) == cstring"component":
+      let state = node["componentState"]
+      if state.isNil or state.isUndefined or state["content"].isUndefined or
+          state["id"].isUndefined:
+        return
+      let raw = state["content"].to(int)
+      if raw >= ord(low(Content)) and raw <= ord(high(Content)) and
+          Content(raw) in WindowUniqueIdContents:
+        states.add(state)
+    elif not node["content"].isNil and not node["content"].isUndefined:
+      for _, child in node["content"]:
+        collect(child)
+  collect(root)
+
+  proc usedByAnotherTab(content: Content, id: int): bool =
+    for index, session in data.sessions:
+      if index == data.activeSessionIndex or session.isNil or session.ui.isNil:
+        continue
+      let mapping = session.ui.componentMapping[content]
+      if not mapping.isNil and mapping.hasKey(id):
+        return true
+    false
+
+  var held: seq[(Content, int)] = @[]
+  for state in states:
+    held.add((Content(state["content"].to(int)), state["id"].to(int)))
+
+  var claimed: seq[(Content, int)] = @[]
+  for state in states:
+    let content = Content(state["content"].to(int))
+    let id = state["id"].to(int)
+    if not usedByAnotherTab(content, id) and (content, id) notin claimed:
+      claimed.add((content, id))
+      continue
+    var fresh = 0
+    while data.componentIdUsedInWindow(content, fresh) or
+        (content, fresh) in claimed or (content, fresh) in held:
+      fresh += 1
+    state["id"] = fresh
+    claimed.add((content, fresh))
 
 proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): EventLogComponent =
   var dropDownsInit: array[EventDropDownBox,bool]
@@ -1583,6 +1691,56 @@ proc focusLine(editor: EditorViewComponent, line: int, col: int = NO_COLUMN) =
   editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: col))
   editor.monacoEditor.focus()
 
+proc sleepMs*(ms: int): Future[void] {.importjs: "new Promise(resolve => setTimeout(resolve, #))".}
+
+proc waitForLayoutGround*(data: Data): Future[bool] {.async.} =
+  ## Wait until GoldenLayout has a ground item with something in it, and SAY
+  ## WHETHER IT DID.
+  ##
+  ## ## Why it lives here and not in `ui_js.nim`
+  ##
+  ## It was private to `ui_js.nim`, so only the edit-mode and DeepReview paths
+  ## there could wait for the layout; `openNewEditorView` below could not, and
+  ## it is the path a replay's FIRST editor tab takes. That tab is opened by
+  ## the first `ct/complete-move`, and nothing orders that move after the
+  ## layout: `tryInitLayout` waits for `document.readyState == "complete"`
+  ## (`ui_js.onReady`), while the backend's first move only waits for the
+  ## replay to start. On a loaded host the move won. Measured on aarch64-darwin
+  ## at `326657ab9`, five launches out of five: `TIME complete move 20484`,
+  ## then `tabs: cannot place EditorView (…/main.py): no GoldenLayout ground
+  ## item`, then `initLayout` 4 ms later — and the replay had no editor at all,
+  ## because `openLayoutTab` logs and returns and nothing asks again.
+  ##
+  ## ## Why this returns a value now
+  ##
+  ## It used to return `void` after at most 50 × 20 ms, and a caller could not
+  ## tell "the layout is ready" from "one second elapsed". `onNoTrace`'s
+  ## `openTab` ran either way, and against a layout that had not arrived it
+  ## reached `utils.openNewLayoutContainer`'s `data.ui.layout.groundItem` —
+  ## measured on the first load of a freshly deployed `ide.codetracer.com/noir`
+  ## as an uncaught `TypeError: Cannot read properties of null (reading
+  ## 'groundItem')`, with the editor pane simply absent from a screen whose
+  ## other four panes were correct. Three later loads of the same URL were
+  ## clean, which is the signature of a budget rather than a bug in the layout.
+  ##
+  ## ## Why the budget is five seconds and not one
+  ##
+  ## One second is a guess about how long GoldenLayout takes to mount a tree,
+  ## and on a warm cache it is a generous one. A COLD one is a different
+  ## machine: the first visitor after a deploy fetches a 13 MB third-party
+  ## bundle and a 14 MB renderer before any of this runs, and the browser is
+  ## still parsing them. Five seconds is still a bound — this cannot hang —
+  ## but it is a bound on a slow first load rather than on a fast repeat one.
+  ##
+  ## Timing out is now a REPORTED failure rather than a silent fall-through;
+  ## see the call site.
+  for _ in 0 ..< 250:
+    if not data.ui.layout.isNil and not data.ui.layout.groundItem.isNil and
+        data.ui.layout.groundItem.contentItems.len > 0:
+      return true
+    await sleepMs(20)
+  return false
+
 proc openNewEditorView*(
     data: Data,
     name: cstring,
@@ -1626,6 +1784,13 @@ proc openNewEditorView*(
       return
     cdebug "editor: openNewEditorView location: " & $location
     var tabInfo = await data.services.editor.tabLoad(location, editorView, lang)
+    # THE PANE NEEDS A LAYOUT TO GO IN. The source can arrive before
+    # GoldenLayout has mounted (see `waitForLayoutGround`), and placing the tab
+    # then fails once, for good. Waiting here is bounded and costs nothing when
+    # the layout is already up; a timeout still falls through to the placement
+    # below, which reports the failure by name.
+    if not await data.waitForLayoutGround():
+      cwarn "editor: GoldenLayout was not ready within 5s for " & $editorName
     tabInfo.lang = if lang != LangAsm: toLangFromFilename(location.path) else: lang
     # try:
     #   cdebug "editor: tabInfo received " & $(tabInfo[])

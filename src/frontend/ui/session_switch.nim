@@ -19,8 +19,13 @@ import
   debug_toolbar,
   welcome_screen,
   search_results,
+  filesystem,
+  test_results,
+  constraints,
   ../utils,
   ../lib/[logging, jslib]
+
+import ../viewmodel/viewmodels/shared_pane_state
 
 import kdom except Location
 
@@ -114,6 +119,66 @@ proc callInitLayoutSafe(config: GoldenLayoutResolvedConfig,
       `result` = false;
     }
   """.}
+
+# ---------------------------------------------------------------------------
+# Panes whose ViewModels every tab shares
+# ---------------------------------------------------------------------------
+#
+# THE FILES, TEST RESULTS AND CONSTRAINTS PANES HAVE ONE VIEWMODEL PER WINDOW,
+# not one per tab: `filesystem.filesystemVMInstance`,
+# `test_results.testResultsVMInstance` and `constraints.constraintsVMInstance`
+# are module globals. Whatever the active tab writes into them, every other
+# tab reads too. `viewmodel/viewmodels/shared_pane_state.nim` explains the
+# approach; this is where it is wired to the tab switch.
+#
+# Measured (#835) on the desktop: replay open, "+", New File. The edit tab's
+# `onNoTrace` re-synced Files from its own empty project and its
+# `CODETRACER::ns9-panes` answer set both NS9 panes to "No project folder is
+# open." Switching back, the replay tab's Files tree had lost
+# `py_console_logs/main.py`, its Test Results read "No project folder is
+# open." and its Constraints the same — none of which is about the recording
+# that tab holds (rule 6 of `GUI/Multi-Window-Tab-Management.md` §Tab
+# Behavior). And a tab that had never been shown inherited the previous tab's
+# project in all three (rule 1), which a replay opened in it would have kept.
+#
+# Files is re-synced from the entered tab's own `FilesystemComponent` rather
+# than restored from the copy, because that component's `service` is the
+# tab's own `EditorService` — the source of truth for its tree — and because
+# the sync also points `filesystem.filesystemComponentRef` back at it, so a
+# later `filesystem-loaded` refresh lands in the right tab.
+
+proc saveSharedPanes(session: ReplaySession) =
+  ## Keep what `session` shows in the shared panes, as it is left.
+  if session.isNil:
+    return
+  session.sharedPaneSnapshot = cast[JsObject](captureSharedPanes(
+    testResultsVMInstance, constraintsVMInstance, filesystemVMInstance))
+
+proc restoreSharedPanes(session: ReplaySession) =
+  ## Put back what `session` showed in the shared panes, or, for a tab
+  ## entered for the first time, what a freshly started window shows. Called
+  ## with `session` already active, so the Files re-sync reads its services.
+  if session.isNil:
+    return
+  if session.sharedPaneSnapshot.isNil:
+    # Its UI components do not exist yet (`switchSession` creates them after
+    # this), so there is no Files tree of its own to re-sync either.
+    resetSharedPanes(
+      testResultsVMInstance, constraintsVMInstance, filesystemVMInstance)
+    return
+  if not session.ui.isNil:
+    let mapping = session.ui.componentMapping[Content.Filesystem]
+    if not mapping.isNil:
+      for _, component in mapping:
+        if component.isNil:
+          continue
+        filesystem.syncLegacyFilesystemIntoVM(FilesystemComponent(component))
+        break
+  # After the re-sync, which MERGES the tree's opened folders into the
+  # expansion set: the copy then replaces that set with the tab's own.
+  shared_pane_state.restoreSharedPanes(
+    cast[SharedPaneSnapshot](session.sharedPaneSnapshot),
+    testResultsVMInstance, constraintsVMInstance, filesystemVMInstance)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -399,8 +464,11 @@ proc switchSession*(data: Data, targetIndex: int) =
     currentContainer.classList.add(cstring"hidden")
 
   # 2. Switch active session index — all Data forwarding templates now
-  #    resolve to the target session's fields.
+  #    resolve to the target session's fields. The shared panes go with it:
+  #    the tab being left keeps what it showed, the target gets its own back.
+  saveSharedPanes(data.activeSession)
   data.activeSessionIndex = targetIndex
+  restoreSharedPanes(data.activeSession)
 
   # 3. Show (or create) the target session's container.
   var targetContainer = getSessionContainer(targetIndex)

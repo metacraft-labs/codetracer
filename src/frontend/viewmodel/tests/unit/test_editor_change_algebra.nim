@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1858
+const ExpectedAssertions = 1861
+  ## *1858 -> 1861 on 2026-10-21: `viewmodels/shared_pane_state.nim` (each
+  ## window tab's Files, Test Results and Constraints state, codetracer#835)
+  ## x three assertions. It calls no `rebase(` and spells no `mapOver`.*
   ## *1855 -> 1858 on 2026-10-21: `viewmodels/origin_chain_bridges.nim` (the
   ## origin badge, side panel and Scratchpad bridges, codetracer#856) x three
   ## assertions. It calls no `rebase(` and spells no `mapOver`.*

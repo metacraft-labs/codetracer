@@ -174,6 +174,70 @@ async function isTooltipShown(page: Page, id: string): Promise<boolean> {
 
 
 /**
+ * Rest on a control and report whether its tooltip is already shown, read at
+ * an instant the page itself confirms is still inside the tooltip's delay.
+ *
+ * "Absent before the delay" is a claim about a moment, and the moment is
+ * measured in the page, not in the test process. A read that sleeps
+ * `CROSSING_MS` and then asks can still land after the delay has run out: any
+ * main-thread task longer than the delay that falls between the hover and the
+ * read (a synchronous git refresh, for instance) defers the read and not the
+ * CSS transition, so the read then sees a correctly delayed tooltip and the
+ * check fails for a reason that has nothing to do with the delay. Such a read
+ * says nothing about the claim, so it is discarded and the rest is taken again.
+ *
+ * The page stamps the `mouseover` the rest produces and the read reports how
+ * long after it it ran, together with the delay the control's own computed
+ * style declares — read off the page, so this file still does not turn the
+ * number into a requirement. A tooltip with no delay at all declares 0, so no
+ * read can qualify and the helper throws rather than passing.
+ */
+async function tooltipShownBeforeItsDelay(page: Page, id: string): Promise<boolean> {
+  const attempts = 5;
+  const late: string[] = [];
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await restOffToolbar(page);
+    await sleep(400);
+    await page.evaluate((elementId: string) => {
+      const w = window as unknown as { __tooltipHoverAt?: number };
+      w.__tooltipHoverAt = undefined;
+      document.getElementById(elementId)?.addEventListener(
+        "mouseover",
+        () => {
+          w.__tooltipHoverAt = performance.now();
+        },
+        { once: true },
+      );
+    }, id);
+    await restOn(page, id);
+    await sleep(CROSSING_MS);
+    const read = await page.evaluate((elementId: string) => {
+      const now = performance.now();
+      const hoverAt = (window as unknown as { __tooltipHoverAt?: number }).__tooltipHoverAt;
+      const tip = document.querySelector(`#${elementId} .custom-tooltip`);
+      if (!tip) return { shown: false, elapsedMs: -1, delayMs: -1 };
+      const style = window.getComputedStyle(tip);
+      const delayMs = Math.max(
+        ...style.transitionDelay.split(",").map((d) => {
+          const t = d.trim();
+          return t.endsWith("ms") ? parseFloat(t) : parseFloat(t) * 1000;
+        }),
+      );
+      return {
+        shown: style.visibility === "visible" && Number(style.opacity) > 0.5,
+        elapsedMs: hoverAt === undefined ? -1 : now - hoverAt,
+        delayMs,
+      };
+    }, id);
+    if (read.elapsedMs >= 0 && read.elapsedMs < read.delayMs) return read.shown;
+    late.push(`read ${read.elapsedMs.toFixed(0)} ms after the hover, delay ${read.delayMs} ms`);
+  }
+  throw new Error(
+    `#${id}: no read landed inside the tooltip's delay in ${attempts} rests (${late.join("; ")})`,
+  );
+}
+
+/**
  * Turn a chord as the TOOLTIP SPELLS IT into the key string Playwright presses.
  *
  * Deliberately a dumb transliteration with no table of known chords in it: the
@@ -305,10 +369,8 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
       await sleep(400); // let any previous tooltip finish hiding
       expect(await isTooltipShown(page, id)).toBe(false);
 
-      await restOn(page, id);
-      await sleep(CROSSING_MS);
       // BEFORE the delay — this is an assertion, not a warm-up.
-      expect(await isTooltipShown(page, id)).toBe(false);
+      expect(await tooltipShownBeforeItsDelay(page, id)).toBe(false);
 
       await sleep(REST_MS);
       // AFTER.
