@@ -49,7 +49,7 @@ const EditorTabText = " calc/main.py "
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 38
+const ExpectedAssertions = 41
 
 var countedAssertions = 0
 
@@ -587,6 +587,54 @@ suite "PLAT-51 part B on a real terminal: a new tab's Welcome Screen":
     let (mr, _) = sess.waitFor("main.py", timeoutMs = 30000)
     ck mr > 0
     ck sess.snap().text(0).contains("plat51proj")
+    ck sess.snap().findRow("Welcome to CodeTracer")[0] < 0
+    sess.quit()
+
+suite "M74 (#841) on a real terminal: the File menu reaches the welcome flow":
+
+  test "Alt+F, New Trace Tab shows a welcome tab; its Open local trace opens the fixture":
+    # codetracer#841: File › New Trace Tab was greyed out. Here it is chosen
+    # with the bytes a terminal sends — `Alt+F` (`ESC f`, CUA-Keymap.md §3.8's
+    # File mnemonic under the default CUA base), `Down` to the item, `Enter`
+    # — and the welcome tab it opens is used end to end: its "Open local
+    # trace" form opens the recording, through the shipped host, in the tab.
+    let calc = resolveFixture("calc")
+    require calc.outcome == foRecorded
+    let dir = freshDir("file-menu")
+    var sess = open(@[], dir)
+    let name = calc.tracePath.strip(chars = {'/'}).extractFilename
+    # A session tab is drawn as its title and its close control (`" calc-… ×
+    # "`), and only once there are several sessions: one recording shows its
+    # name in the header alone.
+    let tab = name & " ×"
+    checkpoint("top bar before: " & sess.snap().text(0))
+    ck sess.snap().text(0).count(tab) == 0
+    sess.send("\x1bf")
+    discard sess.waitFor(" New Trace Tab ")
+    # The folder opens on its first item (Open Trace…); New Trace Tab is the
+    # fourth.
+    for _ in 0 ..< 3:
+      sess.send("\x1b[B")
+    sess.send("\r")
+    discard sess.waitFor("Welcome to CodeTracer")
+    let (lr, lc) = sess.waitFor(" Open local trace ")
+    sess.click(lr, lc + 2)
+    discard sess.waitFor("Recording to open")
+    sess.send(calc.tracePath)
+    sess.send("\r")
+    # The recording opens in the welcome tab's place, as a session of its
+    # own: the strip shows two sessions of that recording, and no Welcome
+    # Screen.
+    let deadline = getMonoTime() + initDuration(seconds = 60)
+    var top = ""
+    while getMonoTime() < deadline:
+      top = sess.snap().text(0)
+      if top.count(tab) >= 2 and
+         sess.snap().findRow("Welcome to CodeTracer")[0] < 0:
+        break
+      sleep(100)
+    checkpoint("top bar after: " & top)
+    ck top.count(tab) == 2
     ck sess.snap().findRow("Welcome to CodeTracer")[0] < 0
     sess.quit()
 

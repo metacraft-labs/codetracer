@@ -22,6 +22,8 @@
 ##     options in the DESKTOP's order (the real Electron app's,
 ##     `answers/plat51-desktop.electron.json`) and the recent panels; "Record
 ##     new trace" runs a real `ct record` and the recording opens in the tab.
+##   * M74 (codetracer#841), THE FILE MENU: its items reach the welcome flow,
+##     and a disabled item's reason is drawn beside it (EMT-D14).
 ##
 ## No mocks: the shipped binary, real recordings, a real engine, a real `ct
 ## record`.
@@ -38,10 +40,16 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 33
+  ExpectedAssertions = 63
     ## 32 -> 33 (2026-10-17): the focus case asserts that NOTHING is outlined
     ## before the first press (the desktop's behaviour since the redesign),
     ## then that a press outlines the pressed pane — one check more.
+    ## 33 -> 39 (2026-10-20): the File menu case (codetracer#841) — the
+    ## welcome tab and form each of three File items opens, six checks.
+    ## 39 -> 63 (2026-10-21): a disabled File item's reason drawn beside it
+    ## (EMT-D14) — highlighted by keyboard and by pointer, an enabled item
+    ## with none, chosen by Enter and by a click, and wrapped in two windows
+    ## too narrow for it on one line — twenty-four checks.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   DesktopAnswers = "src/tests/visual/answers/plat51-desktop.electron.json"
@@ -55,10 +63,10 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
 let calc = repo / CalcFixture
 
 proc windowPlan(ops: string; geometry: var JsonNode; state = "";
-                pre: seq[string] = @[]): JsonNode =
+                pre: seq[string] = @[]; width = W): JsonNode =
   ## The window's root after `ops`, as the shipped binary reports it, and
   ## the geometry it drew last. `state` is the product's state root (a fresh
-  ## one when empty, removed afterwards).
+  ## one when empty, removed afterwards); `width` the window's, in pixels.
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
@@ -80,7 +88,7 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
     env["CT_BIN"] = ct
   let geomFile = root / "geometry.json"
   env["CODETRACER_GPUI_GEOMETRY_OUT"] = geomFile
-  var args = pre & @["--report-window-plan", "--width=" & $W,
+  var args = pre & @["--report-window-plan", "--width=" & $width,
                      "--height=" & $H]
   if ops.len > 0:
     args.add "--window-ops=" & ops
@@ -102,9 +110,10 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
     raise newException(IOError, "the window plan run failed (" & ops & ")")
   parseJson(output)
 
-proc windowPlan(ops: string; state = ""; pre: seq[string] = @[]): JsonNode =
+proc windowPlan(ops: string; state = ""; pre: seq[string] = @[];
+                width = W): JsonNode =
   var g: JsonNode
-  windowPlan(ops, g, state, pre)
+  windowPlan(ops, g, state, pre, width)
 
 proc attr(n: JsonNode; name: string): string =
   if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
@@ -331,6 +340,157 @@ suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
       if kind == pcDir and path.extractFilename.startsWith("greeter-"):
         inc found
     ck found == 1
+
+suite "M74 (#841) GPUI: the File menu reaches the welcome flow":
+  # codetracer#841: the window's menu enabled a static list without a single
+  # File item. Here File is opened with `Alt+F` (CUA-Keymap.md §3.8, the
+  # window's default CUA base) and an item chosen with `Down` / `Enter`,
+  # through the window's own key handlers (`--window-ops`).
+
+  proc welcomeForm(plan: JsonNode): string =
+    for n in plan.nodesWith("data-ct-welcome-form"):
+      return n.attr("data-ct-welcome-form")
+    ""
+
+  test "New Trace Tab opens the Welcome Screen; Open Trace… and Record New Trace… open its forms":
+    # File's items in order: Open Trace…, Open Trace in New Tab…, Record New
+    # Trace…, New Trace Tab. The folder opens on the first.
+    let tab = windowPlan("key:f:alt,key:down,key:down,key:down,key:enter")
+    ck tab.nodesWith("data-ct-welcome").len == 1
+    ck tab.welcomeForm == ""
+    let open = windowPlan("key:f:alt,key:enter")
+    ck open.nodesWith("data-ct-welcome").len == 1
+    ck open.welcomeForm == "open-local-trace"
+    let record = windowPlan("key:f:alt,key:down,key:down,key:enter")
+    ck record.nodesWith("data-ct-welcome").len == 1
+    ck record.welcomeForm == "record-new-trace"
+
+suite "M74 (#841) GPUI: a disabled File item says why, beside it":
+  # EMT-D14 (Edit-Mode-Toolbar.md §8): every disabled state carries a
+  # non-empty reason, and the parity rule wants it SHOWN, not only logged
+  # (the terminal puts "<item>: <reason>" on its status line). A desktop
+  # menu shows a disabled item's explanation as a tooltip, so the window
+  # draws its hover label — the element a control's tooltip uses — beside
+  # the highlighted row. Close Current File is disabled here because a GPUI
+  # edit tab holds one file (`GpuiFileListReason` in main.nim).
+
+  const
+    CloseFileReason =
+      "the window's editor holds one file per tab; there is no list of " &
+      "open files to step through"
+    ToCloseFile = "key:f:alt,key:down,key:down,key:down,key:down"
+      ## File opens on Open Trace…; Close Current File is the fifth item.
+
+  proc pxRect(a: JsonNode): PxRect =
+    PxRect(x: a[0].getInt, y: a[1].getInt, w: a[2].getInt, h: a[3].getInt)
+
+  proc fileRow(g: JsonNode; label: string): tuple[pop, row: PxRect] =
+    ## The popover holding row `label` and the row, as the window drew them.
+    for p in g["topBar"]["popovers"]:
+      for row in p["rows"]:
+        if row["label"].getStr == label:
+          return (p["rect"].pxRect, row["rect"].pxRect)
+
+  proc px(n: JsonNode; style: string): int =
+    let v = n{"styles"}{style}.getStr
+    if v.endsWith("px"): parseInt(v[0 ..< v.len - 2]) else: -1
+
+  proc rectOf(n: JsonNode): PxRect =
+    PxRect(x: n.px("left"), y: n.px("top"), w: n.px("w"), h: n.px("h"))
+
+  proc hoverLabels(plan: JsonNode): seq[JsonNode] =
+    plan.nodesWith("data-ct-hover-label")
+
+  proc besideRow(label: JsonNode; pop, row: PxRect; width = W): bool =
+    ## Level with the row, clear of its popover, and inside a window `width`
+    ## pixels wide.
+    let r = label.rectOf
+    checkpoint("label " & $r & " row " & $row & " popover " & $pop)
+    r.w > 0 and r.y < row.y + row.h and r.y + r.h > row.y and
+      (r.x >= pop.x + pop.w or r.x + r.w <= pop.x) and
+      r.x >= 0 and r.y >= 0 and r.x + r.w <= width and r.y + r.h <= H
+
+  proc labelLines(label: JsonNode): seq[string] =
+    ## A wrapped label's lines, in drawing order.
+    for n in label.nodesWith("data-ct-hover-label-line"):
+      result.add n.textOf
+
+  proc mid(r: PxRect): string = $(r.x + r.w div 2) & ":" & $(r.y + r.h div 2)
+
+  test "highlighted by keyboard or pointer, the reason is drawn beside the row; an enabled item has none":
+    var g: JsonNode
+    let opened = windowPlan("key:f:alt", g)
+    # Open Trace…, highlighted on opening, is performed here: no label.
+    ck opened.hoverLabels.len == 0
+    let (pop, close) = g.fileRow("Close Current File")
+    let (_, newTab) = g.fileRow("New Trace Tab")
+    ck close.w > 0 and newTab.w > 0
+    # THE KEYBOARD: Down onto Close Current File.
+    let keyed = windowPlan(ToCloseFile)
+    let kl = keyed.hoverLabels
+    ck kl.len == 1
+    if kl.len == 1:
+      ck kl[0].attr("data-ct-hover-label") == CloseFileReason
+      ck kl[0].textOf == CloseFileReason
+      ck kl[0].besideRow(pop, close)
+      # Painted last, over the popovers and the panes.
+      var last = -1
+      for i, c in keyed{"children"}.getElems:
+        if c == kl[0]: last = i
+      ck last == keyed{"children"}.len - 1
+    # Up again, onto New Trace Tab (enabled): the label goes.
+    ck windowPlan(ToCloseFile & ",key:up").hoverLabels.len == 0
+    # THE POINTER: the same row hovered, then an enabled one.
+    let hovered = windowPlan("key:f:alt,move:" & close.mid)
+    let hl = hovered.hoverLabels
+    ck hl.len == 1
+    if hl.len == 1:
+      ck hl[0].textOf == CloseFileReason
+      ck hl[0].besideRow(pop, close)
+    ck windowPlan("key:f:alt,move:" & close.mid & ",move:" &
+                  newTab.mid).hoverLabels.len == 0
+
+  test "choosing it, by Enter or by a click, keeps the menu open and shows the reason":
+    var g0: JsonNode
+    discard windowPlan("key:f:alt", g0)
+    let (pop, close) = g0.fileRow("Close Current File")
+    var ge: JsonNode
+    let entered = windowPlan(ToCloseFile & ",key:enter", ge)
+    ck ge["topBar"]["menuOpen"].getBool
+    let el = entered.hoverLabels
+    ck el.len == 1 and el[0].textOf == CloseFileReason
+    # A press with no motion before it (a touch, a tablet): the press alone
+    # must bring the refused row's reason up.
+    var gc: JsonNode
+    let clicked = windowPlan("key:f:alt,press:" & close.mid & ",release:" &
+                             close.mid, gc)
+    ck gc["topBar"]["menuOpen"].getBool
+    let cl = clicked.hoverLabels
+    ck cl.len == 1 and cl[0].textOf == CloseFileReason
+    if cl.len == 1:
+      ck cl[0].besideRow(pop, close)
+
+  test "in a window too narrow for one line, the reason wraps: beside the menu where there is room, never past the window":
+    # The reason is wider than the room right of the File menu in a laptop-
+    # sized window: it wraps there, beside the row, rather than being slid
+    # over the very menu it explains. In a window narrower than the reason
+    # can sit beside at all, it wraps to the window instead of running out
+    # of it.
+    for (width, beside) in [(1280, true), (640, false)]:
+      checkpoint("window width " & $width)
+      var g: JsonNode
+      discard windowPlan("key:f:alt", g, width = width)
+      let (pop, close) = g.fileRow("Close Current File")
+      let ls = windowPlan(ToCloseFile, width = width).hoverLabels
+      ck ls.len == 1
+      if ls.len == 1:
+        let lines = ls[0].labelLines
+        let r = ls[0].rectOf
+        checkpoint("label " & $r & " lines " & $lines)
+        ck lines.len > 1 and lines.join(" ") == CloseFileReason
+        ck r.x >= 0 and r.x + r.w <= width and r.h == lines.len * 24
+        if beside:
+          ck ls[0].besideRow(pop, close, width)
 
 suite "PLAT-51 part B GPUI: assertion count":
   test "every assertion ran":

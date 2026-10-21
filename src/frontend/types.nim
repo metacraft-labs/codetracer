@@ -375,6 +375,11 @@ type
     untitledIndex*: int
     changeLine*: bool
     filesystem*: CodetracerFile
+    filesystemLoadError*: cstring
+      ## Why the last root load of the file tree failed, as the index process
+      ## reported it in ``filesystem-loaded``; empty or nil when ``filesystem``
+      ## holds the answer.  The Files pane shows it instead of "Loading..."
+      ## (GitHub #785).
     currentLine*: int
     tags*:                  JsAssoc[cstring, seq[Tag]]
     completeMoveResponses*: JsAssoc[cstring, MoveState]
@@ -1127,9 +1132,6 @@ type
     forceCollapse*: bool
     depthStart*: int
     coordinates*: seq[(float, float, float)]
-    startPositionX*: float
-    startPositionY*: float
-    scrollLeftOffset*: float
     callValuePosition*: JsAssoc[cstring, float]
     width*: cstring
     resizeObserver*: ResizeObserver
@@ -1189,6 +1191,12 @@ type
     thinkingEndedAt*: float
     images*: seq[string]
       ## Base64 data URLs of images the user attached to this message.
+    failed*: bool
+      ## #862: the agent refused or aborted this turn (`session/prompt`
+      ## answered with an error) — `AgentFailed` in
+      ## `DeepReview/Agentic-Coding-Integration.md` §3.2.
+    errorMessage*: cstring
+      ## The agent's reason when `failed`, as the main process described it.
 
   AgentTerminal* = object
     id*: cstring

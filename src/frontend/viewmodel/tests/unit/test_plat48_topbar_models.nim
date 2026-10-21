@@ -21,7 +21,7 @@ import ../../../../common/terminal_graphics/[raster, path_raster]
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 139
+const ExpectedAssertions = 147
 
 var countedAssertions = 0
 
@@ -90,6 +90,44 @@ suite "the Menu ViewModel":
     vm.openFolder(6)
     let b = vm.activate()          # Continue
     ck b.ran and b.action == "forwardContinue"
+
+  test "setAvailability: every disabled item carries a reason, and follows a state change":
+    # codetracer#841 / EMT-D14: what is enabled follows the front-end's state
+    # (`setAvailability` is called again when it may have changed), and a
+    # disabled item says why.
+    let vm = menuWith()
+    var hosted = false
+    let table = proc(action: string): MenuAvailability =
+      if action == "aNewTraceTab" and not hosted:
+        unavailable("no host to open a tab in")
+      elif action == "aOpenTrace":
+        unavailable("")
+      else:
+        availableNow()
+    vm.setAvailability(table)
+    let tab = vm.itemAt(vm.pathOfAction("aNewTraceTab"))
+    ck not tab.enabled and tab.reason == "no host to open a tab in"
+    ck refusalOf(tab) == "New Trace Tab: no host to open a tab in"
+    # An empty reason is never shown as one.
+    let open = vm.itemAt(vm.pathOfAction("aOpenTrace"))
+    ck not open.enabled and open.reason == MenuUnavailableReason
+    let exit = vm.itemAt(vm.pathOfAction("aExit"))
+    ck exit.enabled and exit.reason == "" and refusalOf(exit) == ""
+    # Nothing changed: the revision stays, so a renderer skips the repaint.
+    let before = vm.revision
+    vm.setAvailability(table)
+    ck vm.revision == before
+    # The state changed: the same table answers differently, and the item is
+    # enabled with its reason cleared.
+    hosted = true
+    vm.setAvailability(table)
+    ck vm.revision != before
+    let now = vm.itemAt(vm.pathOfAction("aNewTraceTab"))
+    ck now.enabled and now.reason == ""
+    # `setEnabled`'s yes / no predicate still gives a refused item a reason.
+    vm.setEnabled(proc(action: string): bool = action != "aExit")
+    ck refusalOf(vm.itemAt(vm.pathOfAction("aExit"))) ==
+       "Exit CodeTracer: " & MenuUnavailableReason
 
   test "type-to-select finds by prefix, and the same letter cycles":
     let vm = menuWith()

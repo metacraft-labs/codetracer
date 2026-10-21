@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 #
 # css-light-theme-grounds.sh — the desktop's light theme paints its panels and
-# its editor's ground from the design system's LIGHT palette.
+# its editor's ground from the design system's LIGHT palette, and paints no
+# dark ground anywhere except the media stages that are dark in both modes.
+#
+# Two layers, both in the .py: the six main grounds must paint their token's
+# value in each mode, and then EVERY background of the light sheet (each
+# colour in background, background-color and background-image: hex, rgb(a),
+# gradient stops, var() fallbacks, and the custom properties backgrounds read)
+# must be lighter than WCAG relative luminance 0.05, unless it is ink drawn in
+# a design token's Light value (a mask, a glyph, a line or a dot) or its exact
+# selector is on the .py's commented MODE_INDEPENDENT list. The second layer
+# exists because 37 hard-coded dark backgrounds survived the fix of the first
+# (GitHub issue #858): they did not read a token, so neither the token change
+# nor the six-ground check could reach them.
 #
 # It compiles the two Electron stylesheets the Tupfile ships
 # (`default_dark_theme_electron.styl`, `default_white_theme_electron.styl`)
@@ -13,6 +25,10 @@
 # same reason: the defect it guards against is a property of the COMPILED
 # stylesheet (both themes compiled clean while the light one carried the dark
 # surfaces), so the output is what it reads.
+#
+# Only these two sheets: the web IDE loads the same `{name}_theme_electron.css`
+# (renderer.nim `loadTheme`), and the Tupfile's other light output,
+# `default_white_theme.css`, is the palette file alone and compiles empty.
 
 set -euo pipefail
 

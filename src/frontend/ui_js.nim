@@ -283,7 +283,7 @@ from ui/process_tree import
 import viewmodel/viewmodels/state_vm
 import viewmodel/viewmodels/origin_chain_types
 from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, applyChainAnswer,
-  noteChainRequestSent, openSidePanel, onCancelLoad
+  noteChainRequestSent, openSidePanel, rejectChainAnswer
 from isonim/core/signals import val, `val=`
 from isonim/core/computation import val
 from viewmodel/viewmodels/trace_open import
@@ -2477,12 +2477,19 @@ when not defined(ctInExtension):
               if body.kind == JObject and body.hasKey("hops"):
                 # Spec §3.2.2 — "Show value origin" opens the dedicated side
                 # panel, whichever menu asked; a chain only arrives because a
-                # user asked for one.
+                # user asked for one. The origin badge is the one asker that
+                # does not: it expands its row in place (§3.2.1), so the VM
+                # never makes its request the side panel's
+                # (`noteChainRequestSent`) and `applyChainAnswer` declines its
+                # answer, which reaches the row through the request's own
+                # future instead.
                 if ocvm.applyChainAnswer(parseOriginChain(body),
                                          $ctRequestIdOf(raw)):
                   ocvm.openSidePanel()
               else:
-                ocvm.onCancelLoad()
+                # Only the side panel's own request ends its wait: a row's
+                # failed fetch leaves a pending "Show value origin" alone.
+                discard ocvm.rejectChainAnswer($ctRequestIdOf(raw))
                 cerror "ct/originChain: query returned no chain: " & $body
             except CatchableError as e:
               cerror "ct/originChain: failed to decode response: " & e.msg)
@@ -3345,11 +3352,25 @@ proc onMenuAction(sender: js, response: jsobject(action=ClientAction)) =
     f(nil)
 
 
+proc filesystemLoadErrorOf(response: JsObject): cstring {.importjs:
+  "(function(r){ return r != null && typeof r.error === 'string' ? r.error : ''; })(#)".}
+  ## The ``error`` of a ``filesystem-loaded`` / ``filesystem-category-loaded``
+  ## payload, or ``""`` when the payload carries a tree.  The index process
+  ## sends one or the other (``index/traces.sendFilesystem``).
+
 proc onFilesystemLoaded(
   sender: js,
   response: jsobject(
     folders=CodetracerFile)) =
-  data.services.editor.filesystem = response.folders
+  # The root load's answer: a tree, or why there is none.  Either one ends
+  # the pane's "Loading..." (GitHub #785).
+  let loadError = filesystemLoadErrorOf(response.toJs)
+  if loadError.len > 0:
+    data.services.editor.filesystem = nil
+    data.services.editor.filesystemLoadError = loadError
+  else:
+    data.services.editor.filesystem = response.folders
+    data.services.editor.filesystemLoadError = cstring""
   filesystem.refreshIsoNimFilesystemPanel()
   # Keep the Ctrl+P file index in sync with the freshly-loaded tree;
   # DB-trace backends that never emit the `filenames` event rely on this
@@ -3363,7 +3384,13 @@ proc onFilesystemCategoryLoaded(
     category=cstring,
     folders=CodetracerFile)) =
   # Add a new category to the filesystem tree
-  if data.services.editor.filesystem.isNil:
+  let loadError = filesystemLoadErrorOf(response.toJs)
+  if loadError.len > 0:
+    # A category that failed to load leaves an existing tree as it is; with
+    # no tree yet it is the pane's answer, as in `onFilesystemLoaded`.
+    if data.services.editor.filesystem.isNil:
+      data.services.editor.filesystemLoadError = loadError
+  elif data.services.editor.filesystem.isNil:
     # If no filesystem exists yet, just use this as the root
     data.services.editor.filesystem = response.folders
   else:
@@ -4731,13 +4758,6 @@ proc updateDataTables(data: Data) =
       let trace = TraceComponent(component)
       trace.refreshTraceComponentLayout()
 
-proc refreshCalltraceOverlays(data: Data) =
-  for _, component in data.ui.componentMapping[Content.Calltrace]:
-    if not component.isNil:
-      let calltrace = CalltraceComponent(component)
-      if calltrace.usesMaterializedTracesTrace:
-        calltrace.refreshTraceOverlay()
-
 proc updateLayout(data: Data) =
   dom.document.documentElement.style.fontSize = &"{data.ui.fontSize}px"
   data.updateGoldenLayoutHeaderHeight(2)
@@ -4753,7 +4773,6 @@ proc zoomInEditors*(data: Data) =
     redrawAll()
     discard setTimeout(proc =
       data.updateDataTables()
-      data.refreshCalltraceOverlays()
     , 0)
     clog "editor: zoom in!"
 
@@ -4767,7 +4786,6 @@ proc zoomOutEditors*(data: Data) =
     redrawAll()
     discard setTimeout(proc =
       data.updateDataTables()
-      data.refreshCalltraceOverlays()
     , 0)
     clog "editor: zoom out!"
 

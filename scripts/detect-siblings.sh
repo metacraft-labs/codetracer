@@ -163,7 +163,12 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-b
 		if grep -qE "liblldb.*not found|libstdc\+\+.*not found" <<<"$(ldd "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" 2>/dev/null)"; then
 			_ct_lldb_dir=""
 			if command -v nix >/dev/null 2>&1; then
-				_ct_lldb_dir="$(nix build --no-link --print-out-paths nixpkgs#lldb 2>/dev/null)/lib"
+				# `--inputs-from` resolves `nixpkgs` from codetracer's flake.lock.
+				# A bare `nixpkgs#lldb` is the machine's flake REGISTRY, which can
+				# be a newer nixpkgs than the glibc this binary was linked against:
+				# on 2026-10-21 that gave an LLDB needing GLIBC_2.42 to a binary
+				# whose interpreter is glibc 2.40, and it could not start.
+				_ct_lldb_dir="$(nix build --no-link --print-out-paths --inputs-from "$_CT_ROOT_DIR" nixpkgs#lldb 2>/dev/null)/lib"
 			fi
 			_ct_stdcpp_dir=""
 			if command -v g++ >/dev/null 2>&1; then

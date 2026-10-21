@@ -184,11 +184,13 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   align-items: center
   flex-shrink: 0
 
+// A <select>: the input surface and body text in the light theme
+// (`by-mode`, defaults.styl, keeps the dark theme's colours exactly).
 .deepreview-trace-select
   font-family: "SpaceGrotesk"
   font-size: 12px
-  color: #cccccc
-  background-color: #3c3c3c
+  color: by-mode(#cccccc, colors-ui-text-primary-body)
+  background-color: by-mode(#3c3c3c, colors-ui-surface-input-default)
   border: 1px solid var(--border-color, #3a3b44)
   border-radius: 3px
   padding: 2px 8px
@@ -198,7 +200,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   appearance: auto
 
   &:hover
-    background-color: #4a4a4a
+    background-color: by-mode(#4a4a4a, colors-ui-surface-input-secondary)
 
   &:focus
     border-color: #007acc

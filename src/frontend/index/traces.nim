@@ -191,13 +191,57 @@ proc sendFilenames(main: js, paths: seq[cstring], traceFolder: cstring, selfCont
   let filenames = await loadFilenames(paths, traceFolder, selfContained)
   main.webContents.send "CODETRACER::filenames-loaded", js{filenames: filenames}
 
-proc sendFilesystem(main: js, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool) {.async.} =
-  let folders = await loadFilesystem(paths, traceFilesPath, selfContained)
-  main.webContents.send "CODETRACER::filesystem-loaded", js{ folders: folders }
+# THE ROOT LOAD ANSWERS ON EVERY EXIT.  The Files pane shows "Loading..."
+# until ``filesystem-loaded`` arrives, and nothing else ends that state, so a
+# load that rejected without sending left the pane on "Loading..." for good
+# (GitHub #785; ``files.onLoadPathContent`` keeps the same rule for sub-folder
+# loads, #574).  A failure is sent on the SAME channel, with ``error`` set and
+# no ``folders``: the reconnect bootstrap cache (``bootstrap_cache.nim``) keeps
+# the latest payload per channel, so one channel replays the latest outcome,
+# where two would replay a stale failure after a newer tree.
+
+proc filesystemLoadFailure(paths: seq[cstring]; reason: string): cstring =
+  ## The reason the renderer shows, naming the roots it could not load.
+  var roots: seq[string] = @[]
+  for path in paths:
+    roots.add $path
+  let what =
+    if roots.len == 0: "the file tree"
+    else: roots.join(", ")
+  cstring(what & ": " &
+    (if reason.len > 0: reason else: "the index process gave no reason"))
+
+proc sendFilesystemFailure(main: js, paths: seq[cstring], reason: string) =
+  let message = filesystemLoadFailure(paths, reason)
+  errorPrint "loading the file tree failed: ", $message
+  main.webContents.send "CODETRACER::filesystem-loaded", js{ error: message }
+
+proc sendFilesystem*(main: js, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool) {.async.} =
+  var folders: CodetracerFile = nil
+  var failure = ""
+  try:
+    folders = await loadFilesystem(paths, traceFilesPath, selfContained)
+  except:
+    failure = getCurrentExceptionMsg()
+  if folders.isNil:
+    sendFilesystemFailure(main, paths, failure)
+  else:
+    main.webContents.send "CODETRACER::filesystem-loaded", js{ folders: folders }
 
 proc sendFilesystemWithCategory(main: js, categoryName: cstring, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool) {.async.} =
-  let folders = await loadFilesystemWithCategory(categoryName, paths, traceFilesPath, selfContained)
-  main.webContents.send "CODETRACER::filesystem-category-loaded", js{ category: categoryName, folders: folders }
+  var folders: CodetracerFile = nil
+  var failure = ""
+  try:
+    folders = await loadFilesystemWithCategory(categoryName, paths, traceFilesPath, selfContained)
+  except:
+    failure = getCurrentExceptionMsg()
+  if folders.isNil:
+    let message = filesystemLoadFailure(paths, failure)
+    errorPrint "loading the ", $categoryName, " file tree failed: ", $message
+    main.webContents.send "CODETRACER::filesystem-category-loaded",
+      js{ category: categoryName, error: message }
+  else:
+    main.webContents.send "CODETRACER::filesystem-category-loaded", js{ category: categoryName, folders: folders }
 
 proc isAbsoluteFilesystemPath(path: string): bool =
   if path.len > 0 and (path[0] == '/' or path[0] == '\\'):
@@ -325,16 +369,6 @@ proc materializedTraceRootHasEntries(trace: Trace; root: string): bool =
     discard
   false
 
-proc resolveAgainstWorkdir(trace: Trace; folders: seq[cstring]): seq[cstring] =
-  for folder in folders:
-    let path = $folder
-    if path.len == 0:
-      continue
-    if path.isAbsoluteFilesystemPath or trace.workdir.len == 0:
-      result.addUniquePath(folder)
-    else:
-      result.addUniquePath(nodePath.join(trace.workdir, folder))
-
 proc fallbackLiveSourceFolders*(trace: Trace): seq[cstring] =
   if trace.program.len > 0:
     if ($trace.program).isAbsoluteFilesystemPath:
@@ -348,60 +382,61 @@ proc fallbackLiveSourceFolders*(trace: Trace): seq[cstring] =
   if result.len == 0 and trace.workdir.len > 0 and pathExists(trace.workdir):
     result.addUniquePath(trace.workdir)
 
+proc payloadTopLevelNames(trace: Trace): seq[string] =
+  ## The names directly under the trace's ``files/`` payload; empty when
+  ## the trace has no payload.
+  let filesRoot = nodePath.join(trace.outputFolder, cstring"files")
+  if not pathExists(filesRoot):
+    return @[]
+  try:
+    for entry in fs.readdirSync(filesRoot):
+      result.add $entry
+  except:
+    warnPrint "failed to list the trace payload ", $filesRoot, ": ",
+      getCurrentExceptionMsg()
+
 proc sourceFoldersFromTracePaths*(trace: Trace): Future[seq[cstring]] {.async.} =
-  ## Materialized/self-contained traces store source files under
+  ## The roots of the Files pane for ``trace``.
+  ##
+  ## A live recording's roots are its recorded source folders.  An
+  ## imported (self-contained) trace stores its sources under
   ## ``trace/files`` using relative paths from ``paths.json`` (the
   ## runtime-materialized mirror of the CTFS internal ``paths.json``
-  ## file; pre-M-REC-1.5 the sidecar was named ``trace_paths.json``).
-  ## In that case the trace index's workspace source folder is not a
-  ## valid root inside the self-contained file store, so prefer the
-  ## relative trace-path folders.
-  var sourceFolders: seq[cstring] = trace.sourceFolders
+  ## file; pre-M-REC-1.5 the sidecar was named ``trace_paths.json``), so
+  ## its roots are chosen by the pure rule
+  ## ``trace_source_paths.importedTraceTreeRoots``.
   if not trace.imported:
+    var sourceFolders: seq[cstring] = trace.sourceFolders
     if sourceFolders.len == 0:
       sourceFolders = fallbackLiveSourceFolders(trace)
     return sourceFolders
 
-  if trace.workdir.len > 0 and materializedTraceRootHasEntries(trace, $trace.workdir):
-    let workdirInsideKnownSource =
-      sourceFolders.len == 0 or
-      sourceFolders.anyIt(isPathInside(trace.workdir, it))
-    if workdirInsideKnownSource:
-      return @[trace.workdir]
-
-  if sourceFolders.len > 0 and
-      sourceFolders.allIt(materializedTraceRootHasEntries(trace, $it)):
-    return sourceFolders
+  var input = ImportedTraceTreeInputs(
+    workdir: if trace.workdir.isNil: "" else: $trace.workdir,
+    payloadTopLevel: payloadTopLevelNames(trace))
+  for folder in trace.sourceFolders:
+    input.recordedSourceFolders.add $folder
+  for folder in fallbackLiveSourceFolders(trace):
+    input.liveFallback.add $folder
 
   let (rawTracePaths, err) = await fsReadFileWithErr(
     nodePath.join(trace.outputFolder, cstring"paths.json"))
-  if not err.isNil:
-    if sourceFolders.len == 0:
-      sourceFolders = fallbackLiveSourceFolders(trace)
-    return sourceFolders
+  if err.isNil:
+    input.tracePathsRead = true
+    try:
+      let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
+      for rawPath in tracePaths: input.tracePaths.add $rawPath
+    except:
+      warnPrint "failed to derive filesystem folders from paths.json: ",
+        getCurrentExceptionMsg()
 
+  let roots = importedTraceTreeRoots(
+    input,
+    proc(root: string): bool = materializedTraceRootHasEntries(trace, root))
   var folders: seq[cstring] = @[]
-  try:
-    let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
-    var plain: seq[string] = @[]
-    for rawPath in tracePaths: plain.add $rawPath
-    # THE SHARED RULE (`trace_source_paths.sourceFolderRootsOf`), which the
-    # native front-ends' replay file tree uses too.
-    for root in sourceFolderRootsOf(plain):
-      folders.addUniquePath(cstring(root))
-  except:
-    warnPrint "failed to derive filesystem folders from paths.json: ",
-      getCurrentExceptionMsg()
-
-  if folders.len > 0:
-    if folders.allIt(materializedTraceRootHasEntries(trace, $it)):
-      sourceFolders = folders
-    else:
-      sourceFolders = resolveAgainstWorkdir(trace, folders)
-
-  if sourceFolders.len == 0:
-    sourceFolders = fallbackLiveSourceFolders(trace)
-  return sourceFolders
+  for root in roots:
+    folders.addUniquePath(cstring(root))
+  return folders
 
 proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
   try:
@@ -490,10 +525,21 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
 
   let traceFilesPath = cstring($trace.outputFolder / "files")
   discard sendFilenames(main, trace.sourceFolders, trace.outputFolder, trace.imported)
-  let filesystemSourceFolders = await sourceFoldersFromTracePaths(trace)
+  # Choosing the roots reads the trace folder, so it can fail too; the
+  # pane must still get its answer (see `sendFilesystem`).
+  var filesystemSourceFolders: seq[cstring] = @[]
+  var rootsFailure = ""
+  try:
+    filesystemSourceFolders = await sourceFoldersFromTracePaths(trace)
+  except:
+    rootsFailure = getCurrentExceptionMsg()
+    if rootsFailure.len == 0:
+      rootsFailure = "choosing the source folders failed"
 
+  if rootsFailure.len > 0:
+    sendFilesystemFailure(main, trace.sourceFolders, rootsFailure)
   # Check if we have a workspace folder and if trace files are outside it
-  if not data.workspaceFolder.isNil and data.workspaceFolder.len > 0:
+  elif not data.workspaceFolder.isNil and data.workspaceFolder.len > 0:
     # Check if all trace source folders are inside the workspace
     var allInside = true
     var outsideFolders: seq[cstring] = @[]

@@ -697,8 +697,24 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
       except:
         discard
 
-  let promptResp = await acpClient.prompt(promptRequest(sessionId, text))
-  let stopReason = stopReasonFrom(promptResp)
+  # The agent may answer `session/prompt` with a JSON-RPC error instead of a
+  # result: #862, where Codex refused the turn because the configured model is
+  # not available to the account.  An unhandled rejection here used to end
+  # this proc before the renderer heard anything, so the pane kept "Thinking"
+  # for ever and the session stayed `activePrompt`.  Settling the request turns
+  # the refusal into a value, and the turn then ends through the same path as
+  # a successful one (the touched-file diffs below still apply: the agent may
+  # have edited files before it failed), with the agent's reason attached.
+  let promptOutcome = await settle(acpClient.prompt(promptRequest(sessionId, text)))
+  let promptFailed = not promptOutcome[cstring"ok"].to(bool)
+  let stopReason =
+    if promptFailed: cstring"" else: stopReasonFrom(promptOutcome[cstring"value"])
+  var failureMessage = cstring""
+  if promptFailed:
+    failureMessage = describeAcpError(promptOutcome[cstring"error"])
+    if failureMessage.len == 0:
+      failureMessage = cstring"The agent rejected the prompt without giving a reason."
+    errorPrint cstring(fmt"[acp_ipc] prompt failed clientSessionId={clientSessionId} sessionId={sessionId}: {failureMessage}")
 
   # Compute authoritative diffs for every file the agent touched during this
   # session.  Merge paths from tool_call_update events and writeTextFile calls,
@@ -833,14 +849,24 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
         errorPrint cstring(fmt"[acp_ipc] end-of-session diff failed for {filePath}: {getCurrentExceptionMsg()}")
   promptOriginalCache = initTable[cstring, cstring]()
 
-  mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+  # The final message of the turn.  A failed turn carries `error` (the agent's
+  # reason, for the pane to show) in place of `stopReason`: it did not stop
+  # for any of ACP's stop reasons, and the renderer treats either key as the
+  # end of the turn (`agent_activity.onAcpReceiveResponse`).
+  let finalResponse = js{
     "sessionId": sessionId,
     "clientSessionId": clientSessionId,
     "id": messageId,
-    "stopReason": stopReason,
     "updates": state.collectedUpdates
-  })
+  }
+  if promptFailed:
+    finalResponse[cstring"error"] = failureMessage
+  else:
+    finalResponse[cstring"stopReason"] = stopReason
+  mainWindow.webContents.send("CODETRACER::acp-receive-response", finalResponse)
 
+  # Reached on success and on failure alike, so a refused turn no longer
+  # leaves the session `activePrompt` with a stale `currentMessageId`.
   state.currentMessageId = cstring""
   state.aggregatedContent = cstring""
   state.collectedUpdates = @[]

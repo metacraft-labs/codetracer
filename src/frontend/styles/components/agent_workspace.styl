@@ -4,6 +4,36 @@
 // sidebar (left) and Monaco editor with coverage overlay (right).
 // Reuses the DeepReview line decoration classes for coverage highlighting.
 
+// --- The custom properties these panes read, in the light theme ---
+//
+// This file, `caption_bar_progress.styl` and the DeepReview header in
+// `vcs.styl` paint through `var(--bg-hover, #2a2b34)`, `var(--text-primary,
+// #c9c9c9)` and their siblings, and nothing defines those properties: under
+// the dark theme every one falls back to the hex beside it, which is what
+// those panes have always looked like, and that stays as it is. Under the
+// light theme the same fallbacks were dark grounds with pale text. Defined on
+// `:root` they reach every element, so no fallback paints in the light sheet;
+// each takes the design token of its role. The other light-sheet readers of
+// these names (the borders of `file_conflict_dialog.styl` and
+// `hcr_live_edit_panel.styl`, the text of `async_flow.styl`) read them with no
+// fallback at all, and take the same tokens from here.
+if COLOR_MODE is defined and COLOR_MODE == "Light"
+  :root
+    // A pane's ground: the file list, the milestones popup.
+    --bg-primary: colors-ui-surface-base-panel
+    // A bar set off from that ground: the header and summary bars, the
+    // progress track.
+    --bg-secondary: colors-ui-surface-base-card
+    // The list hover (LIST_HOVER_BG, button.styl).
+    --bg-hover: colors-ui-surface-primary-secondary-hover
+    // A selected row, as `.event-selected`.
+    --bg-selected: colors-editor-surface-select
+    --text-primary: colors-ui-text-primary-body
+    --text-secondary: colors-ui-text-primary-caption
+    --border-color: colors-ui-border-primary
+    // The panes' links and toggles (cyan #a5f3fc in the dark).
+    --accent-color: colors-ui-text-information-primary
+
 .agent-workspace-container
   display flex
   flex-direction column

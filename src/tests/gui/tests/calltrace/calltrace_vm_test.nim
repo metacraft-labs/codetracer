@@ -232,6 +232,178 @@ suite "CalltraceVM selection":
 
       dispose()
 
+  # The current-call mark is a claim about which CALL the debugger is in,
+  # so it follows the call's key, never the row position the call happened
+  # to have (#811; Click-Navigation.md §3.3: "A row that is no longer
+  # present retires the mark rather than leaving the previous one
+  # standing"). The sections below are the ones the reporter's program
+  # produces: `<toplevel>` -> `main` -> `assert_in_range`, then
+  # `<end of program>`, before and after `main` is collapsed.
+
+  proc keyedLine(index: int64; name, key: string; depth: int;
+                 hasChildren = false; isExpanded = false): CallLine =
+    result = makeCallLine(index, name, depth = depth)
+    result.callKey = key
+    result.hasChildren = hasChildren
+    result.isExpanded = isExpanded
+
+  proc expandedSection(): seq[CallLine] =
+    @[
+      keyedLine(0, "<toplevel>", "0", 0, hasChildren = true, isExpanded = true),
+      keyedLine(1, "main", "1", 1, hasChildren = true, isExpanded = true),
+      keyedLine(2, "assert_in_range", "2", 2),
+      keyedLine(3, "<end of program>", "3", 1),
+    ]
+
+  proc collapsedSection(): seq[CallLine] =
+    # `main` collapsed: its child is hidden and every row after it moves
+    # up, so `<end of program>` takes `assert_in_range`'s old index 2.
+    @[
+      keyedLine(0, "<toplevel>", "0", 0, hasChildren = true, isExpanded = true),
+      keyedLine(1, "main", "1", 1, hasChildren = true, isExpanded = false),
+      keyedLine(2, "<end of program>", "3", 1),
+    ]
+
+  proc markedRows(vm: CalltraceVM): seq[string] =
+    ## The names of the visible rows the View draws the mark on: it marks
+    ## the row whose `index` equals `selectedEntry` (`rowClassWeb`,
+    ## `selectedToggleIconClass`, `selectedChildBoxClass`).
+    let sel = vm.selectedEntry.val
+    for line in vm.visibleLines.val:
+      if sel.isSome and sel.get == line.index:
+        result.add line.name
+
+  test "collapsing an ancestor of the selected call retires the mark (#811)":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      store.updateCalltraceSection(expandedSection(), 0, 4)
+
+      # The `assert_in_range` row is selected (a click, `rowHandlers
+      # .onSelect`, or the debugger stopping in it) and carries the mark.
+      vm.selectEntry(some(2'i64))
+      check vm.markedRows() == @["assert_in_range"]
+
+      # Collapse `main` through the toggle the View wires to its icon. The
+      # VM asks the backend to collapse and re-asks for the section ...
+      mock.clearReceivedCommands()
+      vm.toggleExpandCallChildren(1)
+      check mock.receivedCommands.len >= 2
+      check mock.receivedCommands[0].command == "ct/collapse-calls"
+      check mock.receivedCommands[^1].command == "ct/load-calltrace-section"
+      # ... and the reloaded section no longer holds the call.
+      store.updateCalltraceSection(collapsedSection(), 0, 3)
+
+      # No visible row may carry the mark, and `<end of program>` (the row
+      # that took index 2) least of all.
+      check vm.markedRows().len == 0
+      check vm.selectedEntry.val.isNone
+
+      dispose()
+
+  test "re-expanding restores the mark on the call at its new index (#811)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      store.updateCalltraceSection(expandedSection(), 0, 4)
+      vm.selectEntry(some(2'i64))
+
+      vm.toggleExpandCallChildren(1)
+      store.updateCalltraceSection(collapsedSection(), 0, 3)
+      check vm.selectedEntry.val.isNone
+
+      vm.toggleExpandCallChildren(1)
+
+      # Expanded again, with a sibling call loaded before it this time, so
+      # the call is back but one row further down than it was.
+      store.updateCalltraceSection(@[
+        keyedLine(0, "<toplevel>", "0", 0, hasChildren = true, isExpanded = true),
+        keyedLine(1, "main", "1", 1, hasChildren = true, isExpanded = true),
+        keyedLine(2, "check_input", "4", 2),
+        keyedLine(3, "assert_in_range", "2", 2),
+        keyedLine(4, "<end of program>", "3", 1),
+      ], 0, 5)
+      check vm.selectedEntry.val == some(3'i64)
+      check vm.markedRows() == @["assert_in_range"]
+
+      dispose()
+
+  test "selectCall marks the call once a section holding it is loaded":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      store.updateCalltraceSection(collapsedSection(), 0, 3)
+
+      # A move into a call the loaded section does not show: nothing is
+      # marked, not the row that happens to sit where the call once was.
+      vm.selectCall("2")
+      check vm.selectedEntry.val.isNone
+      check vm.selectedCallKey.val == "2"
+
+      store.updateCalltraceSection(expandedSection(), 0, 4)
+      check vm.selectedEntry.val == some(2'i64)
+      check vm.markedRows() == @["assert_in_range"]
+
+      dispose()
+
+  test "clearing the selection forgets the call":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      store.updateCalltraceSection(expandedSection(), 0, 4)
+      vm.selectCall("2")
+      check vm.selectedEntry.val == some(2'i64)
+
+      vm.selectEntry(none(int64))
+      check vm.selectedCallKey.val == ""
+      # A later section that holds the call does not bring the mark back.
+      store.updateCalltraceSection(expandedSection(), 0, 4)
+      check vm.selectedEntry.val.isNone
+
+      dispose()
+
+  test "a collapse keeps a row selected by index on its call, not its index":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      store.updateCalltraceSection(expandedSection(), 0, 4)
+
+      # `<end of program>` is selected by index; collapsing `main` moves
+      # it up one row, and the mark moves with it (Scrollbar-Scrubbers.md
+      # §3 item 6: expansion changes keep the row's identity, not its
+      # index).
+      vm.selectEntry(some(3'i64))
+      vm.toggleExpandCallChildren(1)
+      check vm.selectedCallKey.val == "3"
+      store.updateCalltraceSection(collapsedSection(), 0, 3)
+      check vm.selectedEntry.val == some(2'i64)
+      check vm.markedRows() == @["<end of program>"]
+
+      dispose()
+
+  test "selectEntry alone writes the index and follows no call":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      store.updateCalltraceSection(expandedSection(), 0, 4)
+      vm.selectCall("2")
+
+      # The terminal keeps its call-stack FRAME cursor in this signal
+      # (`call_stack_binding.publishInspectionCursor`), so an index write
+      # drops the held call and a section reload leaves the index alone.
+      vm.selectEntry(some(3'i64))
+      check vm.selectedCallKey.val == ""
+      store.updateCalltraceSection(collapsedSection(), 0, 3)
+      check vm.selectedEntry.val == some(3'i64)
+
+      dispose()
+
 # ---------------------------------------------------------------------------
 # Expand / collapse
 # ---------------------------------------------------------------------------

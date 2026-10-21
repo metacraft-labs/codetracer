@@ -112,9 +112,10 @@ import ./build as build_pane
 from ./errors import
   syncErrorsAppendProblem, syncErrorsClear, highlightFirstBuildError
 from ../viewmodel/store/types import BuildProblemLine
-# THE EDIT-MODE TOPBAR. `editModeToolbar` composes the model, `debug` mounts
-# it, and `currentWasmRegistry` is what lets the browser tier resolve
-# `nargo compile` at subcommand granularity instead of refusing every command.
+# THE EDIT-MODE TOPBAR. `editModeToolbar` composes the model,
+# `debug_toolbar.setEditModeToolbar` mounts it, and `currentWasmRegistry` is
+# what lets the browser tier resolve `nargo compile` at subcommand granularity
+# instead of refusing every command.
 from ../viewmodel/viewmodels/edit_mode_toolbar import
   editModeToolbar, EditToolbarModel, ToolbarMode
 from ../viewmodel/platform/web_platform import currentWasmRegistry
@@ -1208,7 +1209,7 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
     wasm = currentWasmRegistry())
 
   editToolbarInvoke = invoke
-  debug.setEditModeToolbar(model, invoke)
+  setEditModeToolbar(model, invoke)
   report("edit-toolbar", "buttons=" & $model.buttons.len &
     " kinds=" & $model.kinds.len & " group=" & $model.commandGroupVisible)
 

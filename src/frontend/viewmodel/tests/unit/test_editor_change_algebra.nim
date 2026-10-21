@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1855
+const ExpectedAssertions = 1858
+  ## *1855 -> 1858 on 2026-10-21: `viewmodels/origin_chain_bridges.nim` (the
+  ## origin badge, side panel and Scratchpad bridges, codetracer#856) x three
+  ## assertions. It calls no `rebase(` and spells no `mapOver`.*
   ## *1849 -> 1855 on 2026-10-20: the session mirror over a socket
   ## (`sync/hosted_primary.nim`, `sync/socket_transport.nim`, `a928063082` / `86c11d2afb`)
   ## x three assertions. Neither calls `rebase(`.*

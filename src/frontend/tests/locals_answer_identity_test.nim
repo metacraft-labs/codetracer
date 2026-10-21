@@ -80,7 +80,7 @@
 ## extension transport carries no request `seq`. Without `-d:nodejs`
 ## `std/unittest` cannot set the exit status, so this suite sets it.
 
-import std/[unittest, jsffi, strutils, asyncjs]
+import std/[unittest, jsffi, strutils, asyncjs, json]
 
 import ../types
 import ../dap
@@ -89,6 +89,7 @@ import ../communication
 import ../middleware
 import ../../common/ct_event
 import ../ui/state
+from ../ui/process_tree import consumeListProcessesEvent
 import ../lang
 from ../viewmodel/viewmodels/state_vm import addWatch, removeWatch
 import ../viewmodel/store/replay_data_store
@@ -204,6 +205,25 @@ proc watchesOf(packet: JsObject): seq[string] =
   for i in 0 ..< raw["length"].to(int):
     result.add $raw[i].to(cstring)
 
+proc jsPush(arr: JsObject; item: JsObject) {.importjs: "#.push(#)".}
+
+proc answerFromRequest(packet: JsObject; marker: int): JsObject =
+  ## `localsAnswer`, plus the watch rows the REQUEST asked for: one copy of
+  ## the fixture's `initial_shield` value per expression in the request's
+  ## `watchExpressions`, renamed to that expression and marked
+  ## `value.isWatch` — the shape `db-backend/src/watch_expression.rs` gives a
+  ## watch answer. A request that named no watches gets no watch rows, as
+  ## from the engine, so a request that dropped the watch list (#855) cannot
+  ## be hidden by an answer that carries one anyway.
+  result = localsAnswer(seqOf(packet), marker)
+  let rows = result["body"]["locals"]
+  for expression in watchesOf(packet):
+    let row = jsonParse(readFixture())["locals"][1]
+    row["value"]["i"] = cstring($marker)
+    row["expression"] = cstring(expression)
+    row["value"]["isWatch"] = true
+    rows.jsPush(row)
+
 # The language `calc.rs` is in, as the wire names it — resolved the way the
 # renderer resolves it, so the suite does not restate the table.
 let rustWire = langWireName(toLangFromFilename(cstring"/src/calc.rs"))
@@ -233,6 +253,14 @@ session.session.initializePanelViewModels()
 initStateVMFromSession(session.session.stateVM)
 wireLocalsAnswers(viewsApi)
 session.attach(localFolderTrace("/trace"))
+# The engine answers every launch with an unsolicited `ct/listProcesses`, a
+# single-trace launch too (`dap_server.rs::dispatch_session_load_event`, over
+# `wrap_single_trace_as_session`); `ui_js`'s `subscribeListProcesses` hands it
+# to `consumeListProcessesEvent`. Delivered here, as at session load, because
+# it decides which StateVM the session reads the watch list from (#855).
+session.session.consumeListProcessesEvent(%*{"processes": [{
+  "recordingId": "calc", "role": "", "displayName": "calc.ct",
+  "defaultThreadPrefix": "", "threadCount": 1, "threadIds": [1]}]})
 
 proc deliver(frame: JsObject) =
   ## What `ui_js.onDapReceiveResponse` does with a response frame.
@@ -340,6 +368,47 @@ proc sessionChecks() {.async.} =
     deliver(localsAnswer(seqOf(after[^1]), 48))
     await settle()
     ck shown() == @["initial_shield=48"]
+
+  # ---- #855: a watch's result survives a move
+  block:
+    # Reported: add a watch, step, and the Watches tab is empty until
+    # another watch is added. On the desktop the move reaches the store from
+    # the State component (`onCompleteMove`), the session's stop loader asks,
+    # and the store writes `store.locals.watches` from that answer — so the
+    # answer to the MOVE must still carry the watch. Each answer here carries
+    # exactly the watches its own request named (`answerFromRequest`).
+    proc watchRows(): seq[string] =
+      for row in store.locals.watches.val:
+        result.add row.name & "=" & row.value
+    let base = localsRequests().len
+    activeStateVM().addWatch("initial_shield")
+    let added = newSince(base)
+    ck added.len == 1
+    deliver(answerFromRequest(added[^1], 81))
+    await settle()
+    ck watchRows() == @["initial_shield=81"]
+    moveTo(810, 81)
+    let moved = newSince(base + 1)
+    ck moved.len == 1
+    ck moved.len == 1 and watchesOf(moved[0]) == @["initial_shield"]
+    deliver(answerFromRequest(moved[^1], 82))
+    await settle()
+    ck shown() == @["initial_shield=82"]
+    ck watchRows() == @["initial_shield=82"]
+    # And a second move.
+    moveTo(820, 82)
+    let movedAgain = newSince(base + 2)
+    ck movedAgain.len == 1
+    deliver(answerFromRequest(movedAgain[^1], 83))
+    await settle()
+    ck watchRows() == @["initial_shield=83"]
+    # Leave the session as the blocks below expect it: no watches.
+    activeStateVM().removeWatch("initial_shield")
+    let removed = newSince(base + 3)
+    ck removed.len == 1 and watchesOf(removed[0]).len == 0
+    deliver(answerFromRequest(removed[^1], 84))
+    await settle()
+    ck watchRows().len == 0
 
   # ---- an answer to a request this session never sent is not applied
   block:

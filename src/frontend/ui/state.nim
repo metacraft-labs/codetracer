@@ -22,6 +22,8 @@ from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/viewmodels/state_vm
 import ../viewmodel/viewmodels/origin_chain_vm
 import ../viewmodel/viewmodels/origin_chain_types
+import ../viewmodel/viewmodels/origin_chain_bridges as origin_chain_bridges
+from ../viewmodel/viewmodels/scratchpad_vm import ScratchpadVM
 import isonim/core/[signals, computation]
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_state_view import
@@ -356,39 +358,26 @@ proc releaseOriginSidePanelEffect*() =
   when defined(js):
     originSidePanelEffectInstalled = false
 
+var scratchpadForPins: proc(): ScratchpadVM
+  ## Where "Pin to scratchpad" puts a chain: the Scratchpad pane's
+  ## ViewModel, resolved when the pin happens. `ui/scratchpad.nim` imports
+  ## this module, so this module cannot import it back; it installs the
+  ## resolver instead (`installScratchpadForPins`). Resolving at pin time
+  ## rather than at wiring time is what lets the OriginChainVM be built
+  ## before the Scratchpad pane's VM is, and follow that VM when it is
+  ## replaced by the session's.
+
+proc installScratchpadForPins*(resolve: proc(): ScratchpadVM) =
+  scratchpadForPins = resolve
+
 proc wireOriginChainBridges(stateVM: StateVM; originVM: OriginChainVM) =
-  ## Wire the StateVM → OriginChainVM bridges so the State Pane's
-  ## inline origin badge click handler dispatches the same
-  ## ``ct/originChain`` request the side-panel uses (M4 deliverable
-  ## §3.2.1 + §3.2.3). The chain-lookup bridge lets the per-row
-  ## expansion block (M4 deliverable §3.2.2 "expanded chain") render
-  ## as soon as the active chain matches the row's variable name.
-  # Construct the bridge closure by capturing the OriginChainVM via
-  # the surrounding scope.  The ``Location`` type the StateVM's
-  # ``onShowOriginProc`` field uses is
-  # ``viewmodel/store/types.Location``; we reach it through the
-  # StateVM's own field type so the JS backend resolves the symbol
-  # unambiguously.
-  type StateLocation = typeof(stateVM.store.debugger.val.location)
-  proc forwardShowOrigin(expression: string; location: StateLocation) =
-    originVM.onShowOrigin(expression, location)
-  stateVM.onShowOriginProc = forwardShowOrigin
-  stateVM.originChainLookup = proc(name: string): origin_chain_types.Option[OriginChain] =
-    # NB: ``origin_chain_types`` re-exports ``std/options``, which is
-    # how we reach ``Option``/``some``/``none`` here without pulling
-    # ``std/options`` directly (importing it in this file would
-    # introduce a ``data`` ambiguity with the legacy global from
-    # ``frontend/types.nim``).
-    let active = originVM.activeChain.val
-    if active.isSome and active.get.queryVariable == name:
-      active
-    else:
-      origin_chain_types.none(OriginChain)
-  # Sync the OriginChainVM preferences signal into the StateVM mirror
-  # so badge text / icon / function-suffix follow the user's chosen
-  # style.  The OriginChainVM owns the canonical preferences; the
-  # StateVM mirror is read by the row renderer.
-  stateVM.originPreferences.val = originVM.preferences.val
+  ## The production wiring of the origin badge, the side panel and the
+  ## Scratchpad. It lives in the ViewModel layer
+  ## (`origin_chain_bridges.wireOriginChainBridges`) so the headless
+  ## suites drive the same bridges this renderer installs.
+  origin_chain_bridges.wireOriginChainBridges(stateVM, originVM,
+    proc(): ScratchpadVM =
+      if scratchpadForPins.isNil: nil else: scratchpadForPins())
 
 proc activeStateVM*(): StateVM =
   ## M42 §14.8 — expose the module-local `StateVM` so the bootstrap

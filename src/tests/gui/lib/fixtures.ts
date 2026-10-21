@@ -374,6 +374,21 @@ interface CodetracerOptions {
    * and the Monaco theme both — exactly as a user's config would select it.
    */
   configTheme: string;
+  /**
+   * Extra environment variables for the launched CodeTracer process (and so
+   * for every child it spawns).
+   *
+   * This is per test, through `test.use`, rather than through `process.env`:
+   * with `--workers=1` every spec file shares one worker process, so a spec
+   * that edited `process.env` would change the launches of the spec files
+   * that run after it. The harness's own isolation variables
+   * (`CODETRACER_HOME`, `XDG_CONFIG_HOME`, …) are applied after these and
+   * cannot be overridden from here.
+   *
+   * #862: `agent-activity/acp_prompt_failure.spec.ts` uses it to put a stub
+   * `codex-acp` first on the app's `PATH`.
+   */
+  launchEnv: Record<string, string>;
 }
 
 /**
@@ -734,6 +749,9 @@ async function getEditorWindow(app: ElectronApplication): Promise<Page> {
 /** PLAT-45: the running test's `codetracerPrefixOverride`, or "". */
 let activePrefixOverride = "";
 
+/** #862: the running test's `launchEnv` (see that option), or {}. */
+let activeLaunchEnv: Record<string, string> = {};
+
 /**
  * The `ct` a launch runs. With a `codetracerPrefixOverride` it is the
  * PREFIX'S OWN `bin/ct`, not the build's: `ct` derives the Electron main
@@ -762,6 +780,9 @@ function makeCleanEnv(
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
   }
+  // The test's own `launchEnv` goes on first, so every isolation variable set
+  // below still wins over it.
+  Object.assign(env, activeLaunchEnv);
   // M-REC-6: legacy CODETRACER_TRACE_ID is retired; CODETRACER_RECORDING_ID
   // is the new name.  We delete both so neither leaks into the launched
   // process from the test runner's environment.
@@ -1919,6 +1940,7 @@ export const test = base.extend<
   // desktop JavaScript) instead of the build's own; a spec's `test.use` wins.
   codetracerPrefixOverride: [process.env.CODETRACER_TEST_PREFIX ?? "", { option: true }],
   configTheme: ["", { option: true }],
+  launchEnv: [{}, { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -2012,12 +2034,14 @@ export const test = base.extend<
         preserveUserLayout,
         codetracerPrefixOverride,
         configTheme,
+        launchEnv,
       },
       use,
       testInfo,
     ) => {
       let result: LaunchResult;
       activePrefixOverride = codetracerPrefixOverride;
+      activeLaunchEnv = launchEnv;
 
       // Ensure each test starts with the bundled default layout in the
       // worker-local config directory.  Earlier tests in the same worker may

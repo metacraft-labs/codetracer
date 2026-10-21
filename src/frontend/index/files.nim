@@ -104,6 +104,16 @@ proc loadFile(
       # instead of just returning the absolute path.
       nodePath.join(traceFilesPath, stripPathRoot(path))
 
+  # Whether this node is read from the trace payload.  It stops being so
+  # when the payload lacks ``path`` and the loader falls back to the live
+  # disk below.  From then on the live-filesystem rules apply to the node
+  # and everything under it: the depth limit, the skipped directories
+  # (``.git``, ``node_modules``, build output) and no payload overlay.
+  # Without them a fallback onto a repository root walked every file in
+  # the repository before the tree was sent (GitHub #785: 35 764 rows for
+  # a Noir program inside the codetracer checkout).
+  var readsPayload = selfContained
+
   try:
     data = await cast[Future[js]](fsAsync.lstat(realPath))
   except:
@@ -111,6 +121,7 @@ proc loadFile(
       try:
         data = await cast[Future[js]](fsAsync.lstat(path))
         realPath = path
+        readsPayload = false
       except:
         errorPrint "lstat error: ", getCurrentExceptionMsg()
         return res
@@ -133,13 +144,13 @@ proc loadFile(
     name = strippedPath
 
   if cast[bool](data.isDirectory()):
-    if not selfContained and shouldSkipIndexedDirectory(realPath):
+    if not readsPayload and shouldSkipIndexedDirectory(realPath):
       return res
 
     try:
       # returning just the filenames, not full paths!
       let files = await cast[Future[seq[cstring]]](fsAsync.readdir(realPath))
-      let depthLimit = editFilesystemDepthLimit(selfContained)
+      let depthLimit = editFilesystemDepthLimit(readsPayload)
       res = CodetracerFile(
         text: name,
         children: @[],
@@ -164,7 +175,7 @@ proc loadFile(
             fileIndex,
             newParentIndices,
             traceFilesPath,
-            selfContained,
+            readsPayload,
             if readPathOverride.len > 0:
               nodePath.join(readPathOverride, file)
             else:
@@ -172,7 +183,7 @@ proc loadFile(
           if not child.isNil:
             res.children.add(child)
 
-      if selfContained and readPathOverride.len == 0 and
+      if readsPayload and readPathOverride.len == 0 and
           traceFilesPath.len > 0 and isAbsoluteTraceSourcePath($path):
         # Portable self-contained traces can store source files relative to
         # the recorded workdir (`files/src/main.nr`) while project metadata

@@ -179,6 +179,8 @@ should_skip() {
 #        helper) so each step gets its own result row.
 #   $5 — optional repro repo (defaults to $1).  Use this when a sibling has no
 #        usable repro shell but can be built from another pinned dev shell.
+#   $6 — optional smoke argument.  When given, the built artifact is run with
+#        it in an empty environment and must exit 0 before the row is PASS.
 # ---------------------------------------------------------------------------
 build_sibling() {
 	local repo="$1"
@@ -186,6 +188,7 @@ build_sibling() {
 	local cmd="$3"
 	local key="${4:-$1}"
 	local env_repo="${5:-$repo}"
+	local smoke_arg="${6:-}"
 
 	if should_skip "$key"; then return 0; fi
 
@@ -241,6 +244,19 @@ build_sibling() {
 			# their build directories, so the bug hid behind that; depending on
 			# every sibling's .gitignore for correctness is not a dependency
 			# worth having.
+		fi
+		# Nor is a current artifact one that runs (see the smoke check after
+		# the build): a fresh-looking binary that cannot start is rebuilt, not
+		# skipped.
+		if [ -z "$stale_reason" ] && [ -n "$smoke_arg" ] &&
+			! env -i PATH=/usr/bin:/bin "$artifact_path" "$smoke_arg" >/dev/null 2>&1; then
+			stale_reason="\`$artifact $smoke_arg\` does not run"
+			# Remove it, or the rebuild may leave it in place: cargo, for one,
+			# sees its own build products current and does not re-copy over a
+			# file someone replaced, but does restore one that is missing.
+			# Not under --check, which promises to build (and so to change)
+			# nothing.
+			if [ "$CHECK_ONLY" -eq 0 ]; then rm -f "$artifact_path"; fi
 		fi
 		if [ -z "$stale_reason" ]; then
 			RESULT_STATE[$key]="SKIP"
@@ -299,6 +315,20 @@ build_sibling() {
 		RESULT_STATE[$key]="FAIL"
 		RESULT_DETAIL[$key]="build succeeded but $artifact still missing — $see"
 		return 0
+	fi
+
+	# An artifact that exists is not one that runs. Where the entry names a
+	# smoke argument, run the artifact with it in an EMPTY environment (no dev
+	# shell, no LD_LIBRARY_PATH): what it loads must come from its own
+	# interpreter and runpath, as it will when ct spawns it. A ct-native-replay
+	# linked against two nixpkgs once reported PASS here and died before main.
+	if [ -n "$smoke_arg" ]; then
+		local smoke_out
+		if ! smoke_out="$(env -i PATH=/usr/bin:/bin "$artifact_path" "$smoke_arg" 2>&1)"; then
+			RESULT_STATE[$key]="FAIL"
+			RESULT_DETAIL[$key]="built $artifact, but \`$artifact $smoke_arg\` does not run: $(printf '%s' "$smoke_out" | head -1)"
+			return 0
+		fi
 	fi
 
 	RESULT_STATE[$key]="PASS"
@@ -364,20 +394,36 @@ build_sibling \
 	"nimble buildCtPrint" \
 	codetracer-trace-format-nim/ct-print
 
-# Native backend (ct-native-replay). Its own repro/flake can reject freshly
-# initialized submodules in repo-managed checkouts, so build it the same way
-# the local justfile does: borrow codetracer's dev shell and compile in-place.
+# Native backend (ct-native-replay). Built by codetracer's own
+# `just ensure-ct-native-replay`, the one recipe that knows how: it compiles
+# inside the backend's Nix dev shell, so the binary's glibc, LLDB and
+# libstdc++ come from one pinned nixpkgs, and that shell's hook exports the
+# `CT_NATIVE_REPLAY_RPATH` its build.rs bakes in. The recipe header has the
+# per-platform detail and its fallbacks.
+#
+# This used to be a second, hand-written build: `cargo build` in codetracer's
+# dev shell, with LLVM/LLDB fetched by `nix build nixpkgs#lldb` (and
+# `#lldb.dev`, `#llvm.dev`). A bare `nixpkgs#` resolves the machine's FLAKE
+# REGISTRY, not any lock, so it linked whatever LLDB that machine had against
+# codetracer's pinned glibc. Measured 2026-10-21 on a Linux host: LLDB
+# 21.1.8 from a glibc-2.42 nixpkgs, interpreter glibc 2.40, and the reported
+# `PASS … built target/debug/ct-native-replay` could not start:
+#   ct-native-replay: …/glibc-2.40-224/lib/libc.so.6: version `GLIBC_2.42'
+#   not found (required by …/lldb-21.1.8/lib/liblldb.so.21.1)
+# so every GUI spec that records a native trace failed in `ct record`.
+# ci/test/build-siblings-native-backend-runs-test.sh holds the binary to
+# starting with an empty environment.
 if ! should_skip codetracer-native-backend; then
 	ensure_submodules codetracer-native-backend libs/rr libs/delve
 fi
-# shellcheck disable=SC2016
-native_backend_cmd='if [ -z "${LLVM_CONFIG:-}" ]; then llvm_dev="$(nix build --no-link --print-out-paths nixpkgs#llvm.dev)"; export LLVM_CONFIG="$llvm_dev/bin/llvm-config"; fi; if [ -z "${LLDB_LIB_PATH:-}" ]; then lldb_out="$(nix build --no-link --print-out-paths nixpkgs#lldb)"; export LLDB_LIB_PATH="$lldb_out/lib"; fi; if [ -z "${LLDB_ADDITIONAL_INCLUDE_DIRS:-}" ]; then lldb_dev="$(nix build --no-link --print-out-paths nixpkgs#lldb.dev)"; export LLDB_ADDITIONAL_INCLUDE_DIRS="$lldb_dev/include"; fi; export LIBRARY_PATH="$LLDB_LIB_PATH${LIBRARY_PATH:+:$LIBRARY_PATH}"; export LD_LIBRARY_PATH="$LLDB_LIB_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; cargo build --bin ct-native-replay'
+native_backend_cmd="CT_CODETRACER_NATIVE_BACKEND_SIBLING=\"\$PWD\" just --justfile '$CT_ROOT/justfile' --working-directory '$CT_ROOT' ensure-ct-native-replay"
 build_sibling \
 	codetracer-native-backend \
 	target/debug/ct-native-replay \
 	"$native_backend_cmd" \
 	codetracer-native-backend \
-	codetracer
+	codetracer \
+	--help
 
 # MCR / native recorder (ct_cli aka ct-mcr).
 build_sibling \

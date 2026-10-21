@@ -38,6 +38,20 @@ const AgentActivityTerminalShellPrefix* = "shellComponent-"
 const AgentActivityPlaceholderText* = "Ask anything…"
 const AgentActivityFollowUpPlaceholderText* = "Ask for a change, or type a follow-up…"
 
+const AgentActivityTurnFailedClass* = "agent-turn-failed"
+  ## #862 — an agent turn that ended in an error (`AgentFailed`,
+  ## `DeepReview/Agentic-Coding-Integration.md` §3.2).  Set on the turn's
+  ## wrapper, next to `agent-thought-wrapper`.
+const AgentActivityTurnFailedIconClass* = "agent-turn-failed-icon"
+  ## §3.3: "Red X replaces icon" — drawn in the turn's header where a running
+  ## turn shows its spinner.
+const AgentActivityTurnErrorClass* = "agent-turn-error"
+  ## The agent's reason for the failure.  Rendered outside the collapsible
+  ## thought block, because a finished turn starts collapsed and a reason
+  ## nobody sees is the defect #862 reported.
+const AgentActivityTurnNoReasonText* =
+  "The agent ended the turn with an error but gave no reason."
+
 const AgentActivityTestRunClass* = "agent-test-run"
   ## AA-2 — a `ct test` execution, rendered as a summary of the run *in place
   ## of* the raw runner output (DeepReview-GUI.md §2.1.2).
@@ -823,8 +837,12 @@ proc renderMessage[R](r: R; componentId: int;
             finalTextContent = lastParagraph
     # Header label: "Thinking" while waiting, "Thinking Xs" once output starts
     let stillThinking = message.thinkingEndedAt == 0.0 and message.isLoading
+    # #862: a failed turn says so in its header (with §3.3's red X below),
+    # rather than "Thought for Ns", which reads as a turn that finished.
     let durationLabel =
-      if message.duration > 0.0:
+      if message.failed:
+        "Failed"
+      elif message.duration > 0.0:
         thoughtDuration(message.duration)
       elif message.thinkingEndedAt > 0.0:
         thinkingLabel(message.createdAt, message.thinkingEndedAt)
@@ -835,8 +853,16 @@ proc renderMessage[R](r: R; componentId: int;
     let isCollapsed = not message.isLoading
     let chevronClass = if isCollapsed: "agent-chevron agent-chevron-collapsed" else: "agent-chevron"
     let contentClass = if isCollapsed: AgentActivityMessageContentClass & " agent-thought-collapsed" else: AgentActivityMessageContentClass
+    let wrapperClass =
+      if message.failed:
+        "agent-msg-wrapper agent-thought-wrapper " & AgentActivityTurnFailedClass
+      else:
+        "agent-msg-wrapper agent-thought-wrapper"
+    let failureText =
+      if message.errorMessage.len > 0: message.errorMessage
+      else: AgentActivityTurnNoReasonText
     ui(r):
-      tdiv(class = "agent-msg-wrapper agent-thought-wrapper"):
+      tdiv(class = wrapperClass):
         tdiv(class = "agent-thought-header",
              onclick = proc() =
                when defined(js):
@@ -858,8 +884,18 @@ proc renderMessage[R](r: R; componentId: int;
             # Spinner shown in header only during the pure thinking phase
             if stillThinking and not message.canceled:
               span(class = "ai-status")
+            # §3.3: "Red X replaces icon" — where a running turn shows its
+            # spinner, a failed one shows the X.
+            if message.failed:
+              span(class = AgentActivityTurnFailedIconClass, title = "Failed"):
+                text "\u2715"
           span(class = "agent-thought-timestamp"):
             text wallClockTime(message.createdAt)
+        # Outside the collapsible block below, so the reason is visible while
+        # the finished turn is collapsed.
+        if message.failed:
+          tdiv(class = AgentActivityTurnErrorClass):
+            text failureText
         tdiv(class = contentClass, id = contentId):
           if segGroups.len > 0:
             # Render segments in chronological order.

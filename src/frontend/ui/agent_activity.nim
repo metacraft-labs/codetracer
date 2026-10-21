@@ -398,6 +398,8 @@ proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
     createdAt: message.createdAt,
     duration: message.duration,
     images: message.images,
+    failed: message.failed,
+    errorMessage: safeStr(message.errorMessage),
   )
 
 proc currentMessagesToVm(self: AgentActivityComponent):
@@ -878,9 +880,15 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   let hasImage = jsHasKey(response, cstring"image")
   let imageSrc = if hasImage: cast[cstring](response[cstring"image"]) else: cstring""
 
-  let isFinal = jsHasKey(response, cstring"stopReason")
+  # #862: the main process ends a turn the agent refused with `error` (the
+  # agent's reason) instead of `stopReason`.  It is just as final: the turn is
+  # over, so the spinner must stop and the prompt must accept the next one.
+  let failed = jsHasKey(response, cstring"error")
+  let failureMessage =
+    if failed: cast[cstring](response[cstring"error"]) else: cstring""
+  let isFinal = failed or jsHasKey(response, cstring"stopReason")
   let stopReason =
-    if isFinal:
+    if jsHasKey(response, cstring"stopReason"):
       cast[cstring](response[cstring"stopReason"])
     else:
       cstring""
@@ -955,6 +963,17 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
       self.activeAgentMessageId = cstring""
     except:
       discard
+    if failed:
+      # Mark the turn's own message failed (AgentFailed), creating it when the
+      # agent refused before streaming anything — the usual case, since the
+      # placeholder that stood in for it was dropped above.
+      self.addAgentMessage(messageId)
+      for msg in self.sessionMessageIds[self.sessionId]:
+        if msg.id == messageId:
+          msg.failed = true
+          msg.errorMessage = failureMessage
+          break
+      console.log cstring(fmt"[agent-activity] turn failed sessionId={sessionId} messageId={messageId} error={failureMessage}")
     self.isLoading = false
     self.sessionMessageIds[self.sessionId][^1].isLoading = false
     self.promptInFlight = false

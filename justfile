@@ -109,6 +109,15 @@ test-python-version-alignment:
 test-sibling-backend-path:
   bash ci/test/sibling-backend-path-test.sh
 
+# Assert that the ct-native-replay `build-siblings` reports as built actually
+# starts (`--help` with an empty environment). It once linked the machine's
+# unpinned registry LLDB against codetracer's pinned glibc, reported PASS, and
+# died before main, failing every native-trace GUI spec in `ct record`. Runs
+# the real build of the sibling (minutes cold; cargo reuses a warm cache);
+# fails, rather than skips, without the sibling.
+test-build-siblings-native-backend:
+  bash ci/test/build-siblings-native-backend-runs-test.sh
+
 # Assert that the built output tree carries the assets `ct` reads on startup
 # (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
 # build exits 0 when a runtime asset is simply never published -- there is no
