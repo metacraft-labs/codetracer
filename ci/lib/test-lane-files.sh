@@ -1114,7 +1114,10 @@ test_lane_files() {
 		# has no `pendingResponses` table — and `types.nim`'s `Data` is
 		# `std/jsffi`-based. It is also the ONLY suite in this lane compiled
 		# WITHOUT `-d:ctInExtension`, for that first reason.
+		# ACP notification handling runs the index module with -d:server so
+		# the Electron window can be supplied without a display.
 		printf '%s\n' \
+			src/frontend/tests/acp_notification_test.nim \
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/dap_refusal_surfaces_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \

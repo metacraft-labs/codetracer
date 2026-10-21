@@ -58,6 +58,10 @@ test-build-once-failed-bundle:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Run inside the dev-env to exercise its provisioned Nix, including 2.28.
+test-dev-env-flake-metadata:
+  bash ci/test/dev-env-flake-metadata-test.sh
+
 # Assert that every `flake.lock` node whose repository is checked out beside
 # this one records the `lastModified` that its own `rev` actually carries. A
 # node whose timestamp names one commit and whose `rev` names another is
@@ -1025,6 +1029,7 @@ test:
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-flake-pin-alignment \
+    test-dev-env-flake-metadata \
     test-flake-lock-node-dates \
     test-npm-install-yarn-lock \
     test-python-version-alignment \
@@ -1674,6 +1679,17 @@ ls-trace-folder-for-id trace_id:
 # ====
 # e2e helpers
 
+test-acp-notifications:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  source ci/lib/codetracer-home.sh
+  ct_export_scratch_codetracer_home acp-notifications
+  notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
+  trap 'rm -f "$notification_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  nim js -d:nodejs -d:server -d:chronicles_enabled=off \
+    --out:"$notification_test" src/frontend/tests/acp_notification_test.nim
+  node "$notification_test"
+
 test-frontend-js:
   #!/usr/bin/env bash
   set -e
@@ -1811,6 +1827,8 @@ test-frontend-js:
     --out:"$dap_refusal_test" js src/frontend/tests/dap_refusal_surfaces_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$dap_refusal_test"
   echo ""
+  echo "Running ACP notification tests..."
+  just test-acp-notifications
   echo "Running IPC registry rebind tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$ipc_registry_test" js src/frontend/tests/ipc_registry_test.nim
