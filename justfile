@@ -43,9 +43,9 @@ test-build-once-profile-cwd:
   bash scripts/test-build-once-profile-cwd.sh
 
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
-# its pinned `reprobuild` locks. `inputs.runquota-src.follows = "runquota"`
-# means reprobuild is COMPILED against whatever that input resolves to, so
-# drift in either direction breaks `nix develop` with an `undeclared
+# its pinned `reprobuild` locks. `runquota.follows = "reprobuild/runquota-src"`
+# derives that input from reprobuild; a half-refreshed lock can still retain
+# old dependency nodes and break `nix develop` with an `undeclared
 # identifier` inside reprobuild's own sources, minutes in and attributed to
 # the wrong repo. Reads two flake.lock files; no toolchain, under a second.
 # Skips LOUDLY (never silently passes) when the sibling reprobuild checkout it
