@@ -519,6 +519,8 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
               placeholder = "Find by URL...")
         tdiv(ref = methodPickerHost)
         tdiv(ref = statusPickerHost)
+      tdiv(class = "request-navigation-status", role = "status"):
+        text vm.navigationMessage.val
       # Column headers
       tdiv(class = "request-table-header"):
         tdiv(class = "request-col-id"):
@@ -773,6 +775,8 @@ when defined(js):
                 placeholder = "Find by URL...")
           tdiv(ref = methodPickerHost)
           tdiv(ref = statusPickerHost)
+        tdiv(class = "request-navigation-status", role = "status"):
+          text vm.navigationMessage.val
         # Column headers
         tdiv(class = "request-table-header"):
           tdiv(class = "request-col-id"):

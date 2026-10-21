@@ -140,3 +140,24 @@ suite "the request panel reads the window it shows":
     check e.sentOf("ct/load-request-spans").len == 0
     check e.sentOf("ct/load-request-spans-since").len == 1
     check not vm.windowed
+
+suite "request activation requires a recorded handler step":
+  test "an explicit unavailable handler refuses both seek and external open":
+    let (e, _, vm) = setup()
+    var row = record(1, "GET")
+    row["seekUnavailableReason"] = %"Handler source steps were not recorded."
+    row["externalTracePath"] = %"/other/container.ct"
+    vm.setRequests(@[parseRequestRecord(row)])
+    var opened = false
+    vm.openExternalTrace = proc(path: string; geid: int64) = opened = true
+    vm.jumpToHandler(0)
+    drain()
+    check not opened
+    check e.sentOf("ct/seek-to-geid").len == 0
+
+  test "a row without an unavailability marker still seeks":
+    let (e, _, vm) = setup()
+    vm.setRequests(@[parseRequestRecord(record(1, "GET"))])
+    vm.jumpToHandler(0)
+    drain()
+    check e.sentOf("ct/seek-to-geid").len == 1

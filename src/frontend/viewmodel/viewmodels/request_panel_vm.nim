@@ -118,6 +118,8 @@ type
     filterStatus*: Signal[string]
     searchText*: Signal[string]
     selectedIndex*: Signal[int]
+    navigationMessage*: Signal[string]
+      ## Local feedback explaining why the last handler activation was refused.
 
     # -- The window (Viewport-Driven-Loading V2) --
     viewport*: Signal[Viewport]
@@ -362,6 +364,11 @@ proc jumpToHandler*(vm: RequestPanelVM; index: int) =
   if index < 0 or index >= filtered.len:
     return
   let req = filtered[index]
+  vm.navigationMessage.val = req.seekUnavailableReason
+  # Scheduler bookkeeping may bound an uninstrumented handler. Never present
+  # that coordinate as source entry, including for an external container.
+  if req.seekUnavailableReason.len > 0:
+    return
 
   if req.externalTracePath.len > 0 and not vm.openExternalTrace.isNil:
     vm.openExternalTrace(req.externalTracePath, req.startGeid)
@@ -395,6 +402,7 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
     let filterStatus = createSignal("")
     let searchText = createSignal("")
     let selectedIndex = createSignal(NO_SELECTED_INDEX)
+    let navigationMessage = createSignal("")
     let detailTab = createSignal("headers")
 
     let viewport = createSignal(Viewport())
@@ -445,6 +453,7 @@ proc createRequestPanelVM*(store: ReplayDataStore): RequestPanelVM =
       filterStatus: filterStatus,
       searchText: searchText,
       selectedIndex: selectedIndex,
+      navigationMessage: navigationMessage,
       viewport: viewport,
       viewportGate: viewportGate,
       windowStart: windowStart,

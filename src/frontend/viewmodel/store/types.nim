@@ -835,6 +835,9 @@ type
     isOpen*: bool
     status*: string
     externalTracePath*: string
+    seekUnavailableReason*: string
+      ## Nonempty when the recorder explicitly reports no handler source step.
+      ## Empty for older recordings and requests with a usable handler entry.
 
   # -------------------------------------------------------------------
   # Welcome screen — recent traces, recent folders, start options,
