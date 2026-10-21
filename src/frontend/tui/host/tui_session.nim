@@ -1265,20 +1265,16 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.refreshOrigins(rt)
   of pcWatch:
     # PLAT-51: a watch added, removed or edited (the desktop's watch field
-    # and row controls); the engine evaluates watches inside the next
-    # locals load, so the pane re-reads the stop.
-    # BOTH StateVMs: the session's (whose list `ct/load-locals` sends, so
-    # the engine evaluates the watch) and the pane's own (`s.state`, which
-    # the Variables pane is read from).
-    for vm in [session.session.stateVM, s.state]:
-      if vm.isNil:
-        continue
+    # and row controls), on the session's StateVM: the Variables pane reads
+    # it, and the stop loader sends its list with `ct/load-locals`, so the
+    # engine evaluates the watch in the next locals load and the pane
+    # re-reads the stop.
+    let vm = s.state
+    if not vm.isNil:
       case c.behaviour
       of "remove": vm.removeWatch(c.path)
       of "edit": vm.editWatch(c.path, c.text)
       else: vm.addWatch(c.text)
-      if vm == s.state and s.state == session.session.stateVM:
-        break
     s.refresh(rt)
   of pcSearchResult:
     # PLAT-57 (K35): the result opens at its line; the debugger stays.
