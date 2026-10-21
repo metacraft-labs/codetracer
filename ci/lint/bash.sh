@@ -602,6 +602,13 @@ lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling bu
 lint_step "contract suite: lane not-provided lists name real tests and the lane that runs each" \
 	bash ci/test/lane-not-provided-test.sh
 
+# The same lists name two crates' tests, and nextest refuses a filterset that
+# names a binary its crate does not have; the lane that runs an entry selects
+# it from the same line. not-provided-filter.sh is the one place a list becomes
+# a filterset, both ways. Pure bash fixtures, no cargo.
+lint_step "contract suite: not-provided-filter.sh restricts a list to one crate and selects a lane's entries" \
+	bash ci/test/not-provided-filter-test.sh
+
 # The other half of the same defect: an honest detector reporting "not built" is
 # still a red job if no job builds it. Registered here because the check reads
 # the workflow statically -- it needs neither a runner nor a recorder -- and

@@ -5,6 +5,11 @@ on:
     branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
+      # backend-manager's rr tests run here (the backend-manager-rr selector),
+      # chosen from the non-gui lane's not-provided list by not-provided-filter.sh.
+      - 'src/backend-manager/**'
+      - 'ci/test/non-gui-not-provided.linux.txt'
+      - 'ci/lib/not-provided-filter.sh'
       - 'scripts/resolve-sibling-rev.sh'
       - 'scripts/run-cross-repo-tests.sh'
       - 'ci/test/build-recorder-siblings.sh'
@@ -13,6 +18,11 @@ on:
     branches: [main, dev, stable]
     paths:
       - 'src/db-backend/**'
+      # backend-manager's rr tests run here (the backend-manager-rr selector),
+      # chosen from the non-gui lane's not-provided list by not-provided-filter.sh.
+      - 'src/backend-manager/**'
+      - 'ci/test/non-gui-not-provided.linux.txt'
+      - 'ci/lib/not-provided-filter.sh'
       - 'scripts/resolve-sibling-rev.sh'
       - 'scripts/run-cross-repo-tests.sh'
       - 'ci/test/build-recorder-siblings.sh'
@@ -45,6 +55,18 @@ permissions:
 
 jobs:
   rr-backend-tests:
+    # The tests that need rr and ct-native-replay: the db-backend rr flow and
+    # origin suites, the native backend's own C/C++/D/Pascal flow tests, and
+    # backend-manager's rr tests (real_recording_integration's
+    # `check_rr_prerequisites()` callers). `test-non-gui` excludes all of them
+    # by name (ci/test/non-gui-not-provided.linux.txt names this job as where
+    # they run); the backend-manager ones are selected here from that same
+    # list (the cross-repo driver's `backend-manager-rr` selector, through
+    # `ci/lib/not-provided-filter.sh --lane rr-backend-tests`), so the two
+    # jobs cannot disagree about which tests those are. (The driver's file
+    # name is not spelled in this comment: ci/test/sibling-provisioning-test.sh
+    # reads any line naming it as a call site.)
+    #
     # ROUTED to the GPU hosts (H4), reversing the hold that was placed here for
     # the same wrong reason as codetracer.yml's `test-ui-tests-rr`: rr does not
     # run "unpinned" on a hybrid part. Its default bind mode is
@@ -235,6 +257,11 @@ jobs:
       - name: Run cross-repo integration tests
         # Graceful skipping OFF: this lane provisions the tools its tests need,
         # so a missing one is a failure here, not a skip that passes.
+        #
+        # `all` includes backend-manager-rr, which also needs the native-backend
+        # checkout itself (CODETRACER_RR_BACKEND_PATH, resolved by the script
+        # from the sibling this job cloned) and a replay-server, which the
+        # script builds where the tests look for it.
         env:
           CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |

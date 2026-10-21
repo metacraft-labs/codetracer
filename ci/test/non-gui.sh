@@ -21,8 +21,10 @@ nixos)
 	# Graceful skipping is OFF: a test whose prerequisite is missing fails
 	# instead of passing having asserted nothing. The tests needing tools this
 	# lane does not install are named in ci/test/non-gui-not-provided.linux.txt;
-	# `just test-rust` excludes them by name and prints each as NOT RUN with the
-	# lane that runs it.
+	# `just test-rust` excludes them by name -- from the db-backend AND the
+	# backend-manager nextest runs, each given its own crate's entries -- and
+	# prints each as NOT RUN with the lane that runs it. Those lanes select the
+	# same entries from the same file (ci/lib/not-provided-filter.sh --lane).
 	exec nix develop .#devShells.x86_64-linux.default --command \
 		env CODETRACER_RR_BACKEND_PATH= CODETRACER_RR_BACKEND_PRESENT=0 \
 		CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false \

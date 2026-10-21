@@ -946,9 +946,13 @@ test-rust:
   # A lane that runs with graceful skipping off names, in one file, the tests
   # whose tools it does not provide (ci/test/non-gui-not-provided.linux.txt);
   # each is excluded by name and listed here as NOT RUN with where it runs.
+  # The list names both crates' tests and nextest refuses a `binary()` that
+  # matches none of the crate's binaries, so each crate's run is handed only
+  # its own entries: the filter is told which tests directory it is for.
+  not_provided=""
   if [ -n "${CODETRACER_TEST_LANE_NOT_PROVIDED:-}" ]; then
     not_provided="$(cd ../.. && realpath "$CODETRACER_TEST_LANE_NOT_PROVIDED")"
-    filter="$filter and ($(bash ../../ci/lib/not-provided-filter.sh "$not_provided"))"
+    filter="$filter and ($(bash ../../ci/lib/not-provided-filter.sh "$not_provided" "$PWD/tests"))"
   fi
   cargo nextest run --release --test '*' -E "$filter"
   # The replay-server path, reported by cargo for the same reason as the
@@ -968,14 +972,25 @@ test-rust:
   ( cd libs/jsbound && JSBOUND_E2E_SESSION_MANAGER="$session_manager" \
       CODETRACER_REPLAY_SERVER_CMD="$replay_server" cargo nextest run --release )
   pushd src/backend-manager
-  cargo nextest run --release
+  # The same list, for backend-manager's tests: real_recording_integration's
+  # rr tests and the tests that record with ct-mcr fail without tools the
+  # non-gui lane does not install, and are excluded here by name. Both
+  # backend-manager runs below apply it. The lanes the list names select the
+  # same entries with `not-provided-filter.sh --lane <job>`
+  # (scripts/run-cross-repo-tests.sh backend-manager-rr, `just
+  # test-mcr-dap-flow`), so every test excluded here runs there.
+  bm_filter='all()'
+  if [ -n "$not_provided" ]; then
+    bm_filter="$(bash ../../ci/lib/not-provided-filter.sh "$not_provided" "$PWD/tests")"
+  fi
+  cargo nextest run --release -E "$bm_filter"
   # mcp_dive_in_fetch_gateway_test needs a running codetracer-ci as its
   # gateway; it is excluded here, by name, and runs through
   # `just t_mcp_dive_in_fetch_sends_token_only_to_gateway` in the sibling
   # codetracer-observability-e2e checkout, which brings one up.
   echo "NOT RUN in this lane: mcp_dive_in_fetch_gateway_test (needs a running codetracer-ci;"
   echo "  codetracer-observability-e2e: just t_mcp_dive_in_fetch_sends_token_only_to_gateway)"
-  cargo nextest run --release --run-ignored ignored-only -E 'not binary(mcp_dive_in_fetch_gateway_test)' || \
+  cargo nextest run --release --run-ignored ignored-only -E "not binary(mcp_dive_in_fetch_gateway_test) and ($bm_filter)" || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in backend-manager; treating as no-op)"; \
     else \
@@ -6456,6 +6471,20 @@ ensure-ct-native-replay:
 #     debug``; we export the explicit path so the right binary is used.
 # Tests whose language compiler is absent honest-SKIP (``SKIPPED:`` line)
 # rather than failing.
+#
+# Then the backend-manager tests that record with ct-mcr
+# (real_recording_integration's goto_geid test, meta_dat_real_mcr_recording's
+# recording test): the entries ci/test/non-gui-not-provided.linux.txt names
+# for mcr-dap-flow, selected from that list with
+# ``ci/lib/not-provided-filter.sh --lane mcr-dap-flow`` -- the same lines the
+# non-gui lane excludes them by, so the two cannot drift apart. They find
+# ct-mcr through CODETRACER_CT_MCR_CMD, ct-native-replay through
+# CT_NATIVE_REPLAY_PATH, and replay-server through ``find_db_backend()``,
+# which looks first in the test binary's target directory and then in
+# ``src/db-backend/target/debug``; the db-backend ``cargo test`` above builds
+# exactly that debug replay-server, and the run below is debug too. A
+# missing prerequisite FAILS them (their "Prerequisite policy"), and the run
+# is refused when it ran fewer tests than the filterset selected.
 test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
     #!/usr/bin/env bash
     set -euo pipefail
@@ -6497,7 +6526,44 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
     fi
     export PATH="${extra_path}${PATH}"
 
-    cd src/db-backend && cargo test --no-fail-fast --test '*_mcr_streaming_flow_test' --test mcr_streaming_unified_reader_test
+    repo_root="$PWD"
+    db_status=0
+    ( cd src/db-backend && cargo test --no-fail-fast --test '*_mcr_streaming_flow_test' --test mcr_streaming_unified_reader_test ) || db_status=$?
+
+    # backend-manager's ct-mcr tests (recipe header). Run even when the
+    # db-backend tests failed, so one red run reports both; the recipe fails
+    # if either did.
+    bm_filter="$(bash ci/lib/not-provided-filter.sh --lane mcr-dap-flow \
+      ci/test/non-gui-not-provided.linux.txt "$repo_root/src/backend-manager/tests")"
+    # find_db_backend() takes the first replay-server it finds, so make sure
+    # the one it reaches first is current rather than whatever an earlier
+    # build left (the cargo test above built it; this is a no-op then).
+    ( cd src/db-backend && cargo build --bin replay-server )
+    # Every status below is checked by hand: this runs on the left of `||`,
+    # where bash ignores `set -e`.
+    bm_status=0
+    (
+      cd src/backend-manager || exit 1
+      listing="$(cargo nextest list -E "$bm_filter" --message-format json)" || exit 1
+      # What a plain run executes: filter-match "matches" (#[ignore] is a mismatch).
+      selected="$(jq '[.["rust-suites"][].testcases[] | select(.["filter-match"].status == "matches")] | length' <<<"$listing")" || exit 1
+      if [ "$selected" -eq 0 ]; then
+        echo "error: the mcr-dap-flow filterset selects no backend-manager test: $bm_filter" >&2
+        exit 1
+      fi
+      log="$(mktemp "${TMPDIR:-/tmp}/ct-mcr-bm-tests.XXXXXX")" || exit 1
+      run_status=0
+      env -u REAL_RECORDING_INTEGRATION_ALLOW_MISSING REQUIRE_REAL_RECORDINGS=1 \
+        cargo nextest run --no-fail-fast -E "$bm_filter" 2>&1 | tee "$log" || run_status=$?
+      ran="$(sed -nE 's/^ *Summary \[[^]]*\] +([0-9]+) tests? run:.*/\1/p' "$log" | tail -n 1)"
+      rm -f "$log"
+      [ "$run_status" -eq 0 ] || exit "$run_status"
+      if [ "${ran:-0}" -ne "$selected" ]; then
+        echo "error: $selected backend-manager test(s) selected but ${ran:-no} run" >&2
+        exit 1
+      fi
+    ) || bm_status=$?
+    [ "$db_status" -eq 0 ] && [ "$bm_status" -eq 0 ]
 
 # PLAT-51: the real Electron app's share of the milestone and the reference
 # the terminal and GPUI are measured against (no Timeline, the list panes'

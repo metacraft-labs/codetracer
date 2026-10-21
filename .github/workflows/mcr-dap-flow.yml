@@ -1,8 +1,11 @@
 name: MCR DAP Flow
 
 # Cross-repo CI for the MCR-backend DAP flow tests
-# (src/db-backend/tests/*_mcr_streaming_flow_test.rs).  Drives
-# ct-native-replay + ct-mcr against pinned sibling SHAs of
+# (src/db-backend/tests/*_mcr_streaming_flow_test.rs) and for the
+# backend-manager tests that record with ct-mcr (the entries
+# ci/test/non-gui-not-provided.linux.txt names for this job, which
+# `test-non-gui` excludes by name and this job selects from the same
+# list).  Drives ct-native-replay + ct-mcr against pinned sibling SHAs of
 # codetracer-native-recorder and codetracer-native-backend using real
 # clones, real recorder/replay builds, real db-backend and real DAP.
 #
@@ -20,7 +23,10 @@ on:
     branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
+      - 'src/backend-manager/**'
       - 'libs/ct-dap-client/**'
+      - 'ci/test/non-gui-not-provided.linux.txt'
+      - 'ci/lib/not-provided-filter.sh'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
       - '.github/workflows/mcr-dap-flow.yml'
@@ -31,7 +37,10 @@ on:
     branches: [dev, stable]
     paths:
       - 'src/db-backend/**'
+      - 'src/backend-manager/**'
       - 'libs/ct-dap-client/**'
+      - 'ci/test/non-gui-not-provided.linux.txt'
+      - 'ci/lib/not-provided-filter.sh'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
       - '.github/workflows/mcr-dap-flow.yml'
@@ -174,6 +183,12 @@ jobs:
         # Graceful skipping OFF: codetracer's dev shell carries every compiler
         # these tests use (gnatmake, ldc2, gfortran, go, fpc, gcc/clang, nim,
         # rustc), so a missing one is a failure here, not a skip that passes.
+        #
+        # The recipe then runs the backend-manager tests the non-gui list
+        # assigns to this job (selected with `not-provided-filter.sh --lane
+        # mcr-dap-flow`). Like the db-backend MCR tests, they record with
+        # `ct-mcr record`, which refuses a host without CPUID faulting, and
+        # they fail rather than skip on a missing prerequisite.
         env:
           CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |

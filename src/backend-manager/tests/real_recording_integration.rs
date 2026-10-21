@@ -231,6 +231,36 @@ async fn connect_to_daemon_socket(
     }
 }
 
+/// The environment every session-manager process this file starts gets
+/// (daemon, MCP server, CLI), and through them every replay-server and
+/// ct-native-replay they spawn.
+///
+/// * `CODETRACER_IN_UI_TEST=1` -- ct-native-replay enforces a free-tier quota
+///   of 5 replays a day (`DEFAULT_FREE_TIER_DAILY_LIMIT`) and refuses the
+///   sixth with "Free tier: 5 replays per day", which reaches a test as a
+///   failed `ct/open-trace`. This is the bypass ct-native-replay provides for
+///   headless tests (`codetracer-native-backend` src/licensing/cli.rs), and
+///   the one db-backend's harness sets (`ensure_replay_license_bypass` in
+///   src/db-backend/tests/test_harness/mod.rs). Without it the rr tests here
+///   pass or fail by how many replays ran before them that day.
+///
+/// `CODETRACER_HOME` is deliberately NOT set here. The CLI tests find the
+/// pre-started daemon through `TMPDIR` (`Paths::default()` falls back to it
+/// only when no `CODETRACER_HOME` is set), so a per-test home would send the
+/// CLI to a daemon of its own instead of the one the test started. Scratch
+/// state is the harness's job, as for every bare `cargo test` here: `just
+/// test-rust` and scripts/run-cross-repo-tests.sh export a scratch
+/// `CODETRACER_HOME` (ci/lib/codetracer-home.sh), and a developer running
+/// nextest by hand exports one (AGENTS.md, "Tests never touch your real
+/// CodeTracer state").
+///
+/// Applied BEFORE a caller's `extra_env`, so a test that needs a different
+/// value still gets it. `every_session_manager_spawn_gets_the_replay_test_env`
+/// fails if a spawn site stops applying it.
+fn replay_test_env() -> [(&'static str, &'static str); 1] {
+    [("CODETRACER_IN_UI_TEST", "1")]
+}
+
 /// Returns the path to the compiled `session-manager` (formerly `backend-manager`) binary.
 fn binary_path() -> PathBuf {
     let mut path = std::env::current_exe().expect("cannot determine test binary path");
@@ -639,6 +669,9 @@ async fn start_daemon_with_real_backend(
             socket_path.to_string_lossy().as_ref(),
         )
         .env("CODETRACER_REPLAY_SERVER_CMD", &db_backend_str)
+        // The replay quota bypass (see `replay_test_env`), applied
+        // before `extra_env` so a caller can still override it.
+        .envs(replay_test_env())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -10402,6 +10435,8 @@ async fn start_mcp_server_with_real_backend_in(
             "CODETRACER_DAEMON_SOCK",
             socket_path.to_string_lossy().to_string(),
         )
+        // Same environment as the daemon it talks to (`replay_test_env`).
+        .envs(replay_test_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -11716,6 +11751,7 @@ async fn start_hermetic_mcp_server(
         .env("TMPDIR", test_dir)
         .env("CODETRACER_DAEMON_SOCKET", &socket_path)
         .env("CODETRACER_REPLAY_SERVER_CMD", db_backend_path)
+        .envs(replay_test_env())
         .envs(extra_env.iter().copied())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -11734,6 +11770,7 @@ async fn start_hermetic_mcp_server(
         .current_dir(mcp_cwd)
         .env("TMPDIR", test_dir)
         .env("CODETRACER_DAEMON_SOCK", &socket_path)
+        .envs(replay_test_env())
         .envs(extra_env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -15721,6 +15758,9 @@ async fn run_cli_command(
     let mut cmd = Command::new(&bin);
     cmd.args(args)
         .env("TMPDIR", test_dir)
+        // The CLI can start its own daemon and replay; same environment as
+        // the pre-started daemon (`replay_test_env`).
+        .envs(replay_test_env())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -17295,4 +17335,76 @@ async fn test_real_py_add_watchpoint_reports_the_backends_own_verdict() {
     );
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// Every process this file starts from the session-manager binary -- the
+/// daemon, the MCP server and the CLI, each of which can start a replay --
+/// gets [`replay_test_env`], so no test here depends on ct-native-replay's
+/// free-tier replay quota.
+///
+/// Before this, only the goto_geid test passed `CODETRACER_IN_UI_TEST`; the
+/// rr tests did not, and run together they exhausted the quota (5 replays a
+/// day) after the first few and failed on "Free tier: 5 replays per day" in
+/// `ct/open-trace` -- 43 of 47 in one run of the rr-backend-tests selection.
+///
+/// The check is structural: every `Command::new(...)` of `binary_path()` (or
+/// of a `bin` bound to it) must sit in a function that applies the helper,
+/// so a new spawn site cannot quietly leave it out. Needles are assembled
+/// with `concat!` so this test's own source does not match them.
+#[test]
+fn every_session_manager_spawn_gets_the_replay_test_env() {
+    let env = replay_test_env();
+    assert!(
+        env.contains(&("CODETRACER_IN_UI_TEST", "1")),
+        "replay_test_env must set CODETRACER_IN_UI_TEST=1 (ct-native-replay's \
+         supported bypass of the free-tier replay quota for headless tests): {env:?}"
+    );
+
+    let source = include_str!("real_recording_integration.rs");
+    let lines: Vec<&str> = source.lines().collect();
+    let spawn_needles = [
+        concat!("Command::new(", "binary_path())"),
+        concat!("Command::new(", "&bin)"),
+    ];
+    let applied = concat!("replay_", "test_env(");
+    let mut spawns = 0usize;
+    let mut offenders: Vec<String> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim_start().starts_with("//") || !spawn_needles.iter().any(|n| line.contains(n)) {
+            continue;
+        }
+        spawns += 1;
+        // The enclosing function: the nearest top-level `fn` line above, and
+        // its body up to the closing `}` in column 0.
+        let start = (0..i)
+            .rev()
+            .find(|&j| {
+                let l = lines[j];
+                l.starts_with("fn ") || l.starts_with("async fn ")
+            })
+            .unwrap_or(0);
+        let end = (i..lines.len())
+            .find(|&j| lines[j] == "}")
+            .unwrap_or(lines.len());
+        let body = lines[start..end].join("\n");
+        if !body.contains(applied) {
+            offenders.push(format!(
+                "line {}: `{}` spawns session-manager without replay_test_env()",
+                i + 1,
+                lines[start].trim()
+            ));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "session-manager spawn site(s) without the replay test env:\n{}",
+        offenders.join("\n")
+    );
+    // Guard the guard: five spawn sites when this was written (daemon, MCP
+    // server, the hermetic daemon and MCP server, the CLI).
+    assert!(
+        spawns >= 5,
+        "found only {spawns} session-manager spawn site(s); the needles no longer \
+         match the file, so this test would pass vacuously"
+    );
 }

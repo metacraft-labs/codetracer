@@ -5988,8 +5988,23 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-python-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Clone ruby-recorder (macOS)
-        if: matrix.platform == 'macos'
+      # The Ruby recorder, on BOTH legs. It used to be cloned and built on macOS
+      # only, on the reading that the nixos leg got it from "Provision
+      # dependency siblings from repro.lock". It does not: that action clones
+      # only the lock's BUILD inputs (ci/repro-lock-build-input-siblings.sh:
+      # isonim and the Nim libraries), and codetracer-ruby-recorder is a
+      # test-lane member of the develop set, not a build input. And a clone
+      # alone would not have been enough, because the extension is compiled.
+      #
+      # backend-manager's real_recording_integration records its custom-format
+      # traces with the native Ruby recorder (`find_ruby_recorder()`: the
+      # `codetracer-ruby-recorder` launcher, used only when the extension under
+      # ext/native_tracer/target/release is built) and FAILS without one --
+      # "no CTFS-capable Ruby recorder found", about thirty test_real_custom_*
+      # tests plus test_real_py_add_watchpoint_reports_the_backends_own_verdict
+      # on the nixos leg. The lane ships ruby and is the lane meant to run
+      # them, so it provisions the recorder rather than excluding them.
+      - name: Clone ruby-recorder
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
@@ -5997,8 +6012,10 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Build ruby-recorder native extension (macOS)
-        if: matrix.platform == 'macos'
+      - name: Build ruby-recorder native extension
+        # Both legs (see the clone step above for why the nixos leg needs it
+        # too); the sibling's own flake supplies the toolchain on each.
+        #
         # The clone above is NOT enough, and for a long time nothing here said
         # so. `grep -E 'rake compile|extconf|build-extension'` over `.github/`
         # returned ZERO hits: the extension was built only by
@@ -6025,7 +6042,14 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}/../codetracer-ruby-recorder"
-          nix develop --no-write-lock-file --command just build-extension
+          # Built INTO the gem's own target/ directory. The Linux runners export
+          # their own CARGO_TARGET_DIR (see cross-repo-tests.yml's ct-native-replay
+          # step), and both the loader (`load_extension!`) and backend-manager's
+          # `find_ruby_recorder()` look only under ext/native_tracer/target/release,
+          # so a build that followed the runner's variable would land where neither
+          # looks and fail the assertion below.
+          CARGO_TARGET_DIR="$PWD/gems/codetracer-ruby-recorder/ext/native_tracer/target" \
+            nix develop --no-write-lock-file --command just build-extension
 
           # Assert the artefact, do not assume the exit code. `just
           # build-extension` succeeding is not the same claim as "the file the
@@ -6038,7 +6062,9 @@ jobs:
           # it then links to the name `require` wants. On macOS DLEXT is
           # `bundle`; asserting `.so` here -- the spelling
           # scripts/build-siblings.sh used to hard-code -- would fail on every
-          # green build.
+          # green build. On Linux it is `so`, and cargo names the cdylib
+          # `libcodetracer_ruby_recorder.so`; the list below accepts each leg's
+          # spellings.
           ext_dir="gems/codetracer-ruby-recorder/ext/native_tracer/target/release"
           found=""
           for cand in \
