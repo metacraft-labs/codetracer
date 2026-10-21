@@ -78,7 +78,8 @@ import ./heatmap
 import ./inline_annotations
 import ./styled_row
 import ./scrubber_track
-from codetracer_embed import HorizontalView, setViewport, overflows, barModel
+from codetracer_embed import HorizontalView, setViewport, overflows, barModel,
+  ScrubberModel, scrubberModel
 
 export gutter, heatmap, inline_annotations, styled_row, highlighter, profile
 
@@ -191,6 +192,36 @@ type
       ## Lines that carried an inline annotation.
     barRow*: int
       ## PLAT-70: the horizontal bar's row, -1 when the content fits.
+    trackCol*: int
+      ## M73 (#840): the vertical bar's column, -1 when the file fits.
+    trackTop*: int
+    trackRows*: int
+      ## Its first row and its height: the body rows, never the corner cell
+      ## the horizontal bar's row would give it (Scrollbar-Scrubbers.md §6).
+
+  SourceTrack* = object
+    ## M73 (#840): where the pane's VERTICAL bar is painted, and the model it
+    ## is drawn over — what `paintSourcePane` draws and what a press on it is
+    ## hit-tested against, from one computation.
+    shown*: bool
+    col*: int
+    top*: int
+    rows*: int
+    model*: ScrubberModel
+      ## Scrollbar-Scrubbers.md §3 over the FILE: every line of it is the
+      ## population, the window the first visible one, the mark the
+      ## execution line (§3.5's "now", in the pointer's colour).
+
+  SourcePaneLayout* = object
+    ## The cells the pane divides `area` into. ONE function computes all of
+    ## it (`sourcePaneLayout`) because the two bars depend on each other: the
+    ## vertical one takes a column from the code, which can make a line
+    ## overflow and bring the horizontal one, which takes a row from the body.
+    gutterWidth*: int
+    codeWidth*: int
+    bodyRows*: int
+    bar*: tuple[shown: bool; row, left, cols: int; view: HorizontalView]
+    track*: SourceTrack
 
 const
   SourcePaneTitle* = "SOURCE"
@@ -425,17 +456,75 @@ proc restyleClamped(g: var StyledGrid; row, col, width, lo, hi: int;
   if stop > start:
     g.restyle(row, start, stop - start, transform)
 
+const
+  MinSourceTrackWidth* = 8
+    ## M73 (#840): the narrowest pane that gives a column to the vertical bar
+    ## — the call trace's `MinTrackedWidth`, for the same reason: below it the
+    ## column is worth more as text.
+
+proc sourcePaneLayout*(model: SourcePaneModel; area: CellArea): SourcePaneLayout =
+  ## Where `paintSourcePane` puts the gutter, the code, PLAT-70's horizontal
+  ## bar and M73's vertical bar in `area` — the one computation the painter,
+  ## the click read-back and the runtime's hit-tests all use.
+  ##
+  ## THE VERTICAL BAR IS OVERFLOW-ONLY, as the horizontal one is
+  ## (Horizontal-Overflow.md §4.7) and as Monaco's `vertical: 'auto'`
+  ## scrollbar is: it takes the pane's rightmost column (Scrollbar-Scrubbers.md
+  ## §4, "inside the pane's own rectangle") only while the file has more lines
+  ## than the body has rows. A file that fits paints exactly the pane it did
+  ## before M73. The order matters: the column is decided first, against the
+  ## rows the horizontal bar leaves at the full code width; the horizontal bar
+  ## is then decided at the narrower width, and where both are shown their
+  ## corner cell is left to neither (§6).
+  let gutW = min(area.width, model.paneGutterWidth())
+  let fullW = max(0, area.width - gutW)
+  var view = model.hview
+  view.setViewport(fullW)
+  let barAtFull = view.overflows and area.height >= 3
+  let rowsAtFull = area.height - 1 - (if barAtFull: 1 else: 0)
+  # §14's absent file draws no row of text, so it has nothing to scroll.
+  let absent = model.provenance == gpAbsent and model.heldLines.len == 0
+  let tracked = not absent and area.width >= MinSourceTrackWidth and
+                fullW >= 2 and rowsAtFull >= 1 and
+                model.totalLineCount > rowsAtFull
+  let codeW = if tracked: fullW - 1 else: fullW
+  view = model.hview
+  view.setViewport(codeW)
+  let barShown = view.overflows and area.height >= 3
+  let bodyRows =
+    if absent: 0
+    else: max(0, area.height - 1 - (if barShown: 1 else: 0))
+  result.gutterWidth = gutW
+  result.codeWidth = codeW
+  result.bodyRows = bodyRows
+  result.bar = (shown: barShown, row: area.row + area.height - 1,
+                left: area.col + gutW, cols: codeW, view: view)
+  if tracked and bodyRows > 0:
+    result.track = SourceTrack(
+      shown: true, col: area.col + area.width - 1, top: area.row + 1,
+      rows: bodyRows,
+      model: scrubberModel(model.totalLineCount, max(0, model.viewportTop - 1),
+                           bodyRows,
+                           (if model.executionLine > 0: model.executionLine - 1
+                            else: -1)))
+
 proc sourceBarOf*(model: SourcePaneModel; area: CellArea):
     tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
   ## PLAT-70: where `paintSourcePane` draws the horizontal bar in `area`, and
   ## the view it is drawn over — what a press on it is hit-tested against.
-  let gutW = min(area.width, model.paneGutterWidth())
-  let codeW = max(0, area.width - gutW)
-  var view = model.hview
-  view.setViewport(codeW)
-  (shown: view.overflows and area.height >= 3,
-   row: area.row + area.height - 1, left: area.col + gutW, cols: codeW,
-   view: view)
+  ## M73: one column narrower while the vertical bar is shown
+  ## (`sourcePaneLayout`).
+  model.sourcePaneLayout(area).bar
+
+proc sourceTrackOf*(model: SourcePaneModel; area: CellArea): SourceTrack =
+  ## M73 (#840): where `paintSourcePane` draws the vertical bar in `area`.
+  model.sourcePaneLayout(area).track
+
+proc sourceCodeWidth*(model: SourcePaneModel; area: CellArea): int =
+  ## The code columns of the pane painted into `area` — the width the
+  ## horizontal view is measured against (PLAT-70), less the vertical bar's
+  ## column while it is shown (M73).
+  model.sourcePaneLayout(area).codeWidth
 
 proc paintSourcePane*(g: var StyledGrid; area: CellArea;
                       model: SourcePaneModel;
@@ -447,12 +536,16 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
   ## which is what the cold-parse benchmark measures.
   result = SourcePaneScreen(rows: @[], area: area, gutterWidth: 0,
                             codeWidth: 0, materializedLines: 0,
-                            loadingLines: 0, annotatedLines: 0, barRow: -1)
+                            loadingLines: 0, annotatedLines: 0, barRow: -1,
+                            trackCol: -1, trackTop: -1, trackRows: 0)
   if area.width <= 0 or area.height <= 0:
     return
 
-  let gutW = min(area.width, model.paneGutterWidth())
-  let codeW = max(0, area.width - gutW)
+  # M73: the gutter, the code and both bars from ONE computation, so the
+  # painter, the click read-back and the runtime's hit-tests cannot disagree.
+  let layout = model.sourcePaneLayout(area)
+  let gutW = layout.gutterWidth
+  let codeW = layout.codeWidth
   let numberWidth = gutterNumberWidth(largestGutterNumber(model))
   result.gutterWidth = gutW
   result.codeWidth = codeW
@@ -476,14 +569,12 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
 
   # PLAT-70: THE HORIZONTAL VIEW, at this pane's code width; the bar takes
   # the last row only while the content overflows (Horizontal-Overflow §4.7).
-  let bar = model.sourceBarOf(area)
+  let bar = layout.bar
   let view = bar.view
   let left = view.leftCol
   # Absent (§14's `savAbsent`): no line of this file will arrive, so no row is
   # drawn as `⋯ loading` — the degraded message below names the missing file.
-  let bodyRows =
-    if model.provenance == gpAbsent and model.heldLines.len == 0: 0
-    else: area.height - 1 - (if bar.shown: 1 else: 0)
+  let bodyRows = layout.bodyRows
   for i in 0 ..< bodyRows:
     let row = area.row + 1 + i
     let line = model.viewportTop + i
@@ -598,7 +689,12 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       # its 56-column pane with the full-width band, and
       # `test_plat47_desktop_parity.nim` reads the band back off a real PTY
       # to the pane's last column.
-      g.restyle(row, codeCol, area.col + area.width - codeCol,
+      #
+      # M73: TO THE CODE'S LAST COLUMN, which is the pane's last column
+      # unless the vertical bar holds it — the band never paints over the
+      # track (Scrollbar-Scrubbers.md §4: the track is the pane's rightmost
+      # column, and the desktop's band ends at Monaco's scrollbar too).
+      g.restyle(row, codeCol, codeW,
                 proc(s: CellStyle): CellStyle =
                   s.withBackground(ExecutionLineBackground))
     # PLAT-68: THE SELECTION, on the design system's selection ground, under
@@ -621,6 +717,19 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
                   out2.reverse = true
                   out2)
 
+  if layout.track.shown:
+    # M73 (#840): THE VERTICAL BAR — Scrollbar-Scrubbers.md §4's terminal
+    # track down the pane's rightmost column over the body rows, the thumb in
+    # eighths for the window over the WHOLE file, the execution line marked in
+    # the pointer's colour. Painted after the rows so nothing a row draws (the
+    # band, an inline value) can cover it; its corner with the horizontal bar
+    # is left to neither (§6).
+    let t = layout.track
+    paintVerticalScrubber(g, t.col, t.top, t.rows, t.model)
+    result.trackCol = t.col
+    result.trackTop = t.top
+    result.trackRows = t.rows
+
   if bar.shown and bodyRows > 0:
     # §4.7: the last row, one cell high, over the code columns.
     result.barRow = bar.row
@@ -640,8 +749,10 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
         rest = rest[piece.len .. ^1]
         inc row
     else:
+      # Left of the vertical bar while it is shown (M73).
+      let room = area.width - (if layout.track.shown: 1 else: 0)
       g.paint(area.row + 1, area.col,
-              truncateToCells(model.degradedMessage, area.width), DegradedStyle)
+              truncateToCells(model.degradedMessage, room), DegradedStyle)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
@@ -672,12 +783,16 @@ proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
      row >= area.row + area.height or col < area.col or
      col >= area.col + area.width:
     return
-  let gutW = min(area.width, model.paneGutterWidth())
-  let codeW = max(0, area.width - gutW)
-  let bar = model.sourceBarOf(area)
+  let layout = model.sourcePaneLayout(area)
+  let gutW = layout.gutterWidth
+  let codeW = layout.codeWidth
+  let bar = layout.bar
   let view = bar.view
   # PLAT-70: the horizontal bar's row is the bar's, never a line.
   if bar.shown and row == bar.row:
+    return
+  # M73: and the vertical bar's column is the bar's, never a column of text.
+  if layout.track.shown and col == layout.track.col:
     return
   let line = model.viewportTop + (row - area.row - 1)
   if line < 1 or (model.totalLineCount > 0 and line > model.totalLineCount):

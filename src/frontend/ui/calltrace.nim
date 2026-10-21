@@ -24,10 +24,10 @@ from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
   setViewport, Viewport, scrolledTo, setRawIgnorePatterns,
-  setBackendSearchResults, selectEntry, selectCall
+  setBackendSearchResults, selectEntry, selectCall, CalltraceSearchResult
 from isonim/web/dom_api import nil
 from isonim/core/batch as isoBatch import batch
-from isonim/core/signals import val
+from isonim/core/signals import val, `val=`
 from ../viewmodel/views/isonim_calltrace_view import
   mountIsoNimCalltrace
 
@@ -252,6 +252,42 @@ proc setExpandedValueOffsetDom(
         cstring"div",
         cstring"empty-offset empty-offset-right-border"))
 
+proc wireOfCall(call: Call): CallLineWire =
+  ## The `CallLineWire` fields a `Call` carries by itself: its names, its
+  ## low- and high-level location, its tick, source revision, frame depth and
+  ## key. The fields that belong to a calltrace LINE rather than to the call
+  ## (`depth`, `count`, `hiddenChildren`) are left for the caller.
+  ##
+  ## Shared by the calltrace section decoder (`syncCalltraceData`) and the
+  ## search-result decoder (`registerSearchRes`), so a search result is
+  ## located exactly as the row for the same call is — through `callLineOf`
+  ## — and the two send the same `ct/calltrace-jump`.
+  let loc = call.location
+  CallLineWire(
+    rawName: $call.rawName,
+    highLevelFunctionName: $loc.highLevelFunctionName,
+    path: $loc.path, line: loc.line,
+    highLevelPath: $loc.highLevelPath, highLevelLine: loc.highLevelLine,
+    rrTicks: cast[uint64](loc.rrTicks),
+    sourceGeneration: loc.sourceGeneration,
+    sourceDigest: $loc.sourceDigest,
+    callstackDepth: loc.callstackDepth,
+    loadedChildren: call.children.len,
+    callKey: $call.key)
+
+proc searchResultOf(call: Call): CalltraceSearchResult =
+  ## One backend search match as the CalltraceVM's results list holds it:
+  ## named and located as the calltrace row for the same call would be
+  ## (`callLineOf`), so a click on it carries that frame's identity
+  ## (`Click-Navigation.md` §2.2), not just the tick it starts at.
+  let row = callLineOf(wireOfCall(call), 0'i64)
+  CalltraceSearchResult(
+    name: row.name,
+    key: row.callKey,
+    rrTicks: row.rrTicks,
+    location: row.location,
+    codeGeneration: row.codeGeneration)
+
 proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
   let current = if self.searchText.isNil: cstring"" else: self.searchText
 
@@ -268,13 +304,10 @@ proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
   # Sync search results into the CalltraceVM so the IsoNim view
   # can render them in the `.call-search-results` container.
   if calltraceVMInstance != nil:
-    var vmResults: seq[tuple[name: string, rrTicks: int, key: string]] = @[]
+    var vmResults: seq[CalltraceSearchResult] = @[]
     for call in searchResults:
-      vmResults.add((
-        name: $call.location.highLevelFunctionName,
-        rrTicks: call.location.rrTicks,
-        key: $call.key,
-      ))
+      if not call.isNil:
+        vmResults.add searchResultOf(call)
     calltraceVMInstance.setBackendSearchResults(vmResults)
 
   self.redraw()
@@ -420,6 +453,15 @@ proc initCalltraceVM() =
   clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimCalltrace()
 
+proc currentCallLineIndexOf(results: CtUpdatedCalltraceResponseBody): int64 =
+  ## The answer's `currentCallLineIndex`, or -1 when the engine sent none.
+  ## Read off the object itself rather than through the typed field: the
+  ## engine sends `null` for "unknown" (an `Option<usize>`), and a `null` in
+  ## a Nim `int` field compares as 0 in JavaScript, which would name the
+  ## trace's first row.
+  let raw = results.toJs[cstring"currentCallLineIndex"]
+  if jsTypeOf(raw) == cstring"number": int64(raw.to(int)) else: -1
+
 proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
   ## so the CalltraceVM's visibleLines memo sees the same data.
@@ -448,25 +490,14 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   for i, callLine in results.callLines:
     if not hasRenderableCall(callLine):
       continue
-    let call = callLine.content.call
-    let loc = call.location
     # THE STORE DECIDES WHAT THE ROW SAYS (`callLineOf`), exactly as it does
     # for the terminal and the native window, which decode the same response
     # from its JSON. This side only copies the typed fields across.
-    vmLines.add callLineOf(CallLineWire(
-      rawName: $call.rawName,
-      highLevelFunctionName: $loc.highLevelFunctionName,
-      path: $loc.path, line: loc.line,
-      highLevelPath: $loc.highLevelPath, highLevelLine: loc.highLevelLine,
-      rrTicks: cast[uint64](loc.rrTicks),
-      depth: callLine.depth,
-      sourceGeneration: loc.sourceGeneration,
-      sourceDigest: $loc.sourceDigest,
-      callstackDepth: loc.callstackDepth,
-      count: callLine.content.count,
-      hiddenChildren: callLine.content.hiddenChildren,
-      loadedChildren: call.children.len,
-      callKey: $call.key), backendStartIndex + i.int64)
+    var wire = wireOfCall(callLine.content.call)
+    wire.depth = callLine.depth
+    wire.count = callLine.content.count
+    wire.hiddenChildren = callLine.content.hiddenChildren
+    vmLines.add callLineOf(wire, backendStartIndex + i.int64)
   # Mirror the backend's startCallLineIndex into the store so that the
   # visibleLines memo can correctly slice based on the global index.
   # Without this, after a calltrace-jump (search-result click) the
@@ -576,6 +607,12 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
     totalCount = cast[uint64](results.totalCallsCount),
     args = vmArgs,
   )
+  # Where the call the debugger is in sits in the whole trace, as the
+  # terminal and GPUI decoder already mirror it (`replay_data_store
+  # .applyCalltraceSection`). The search-result reveal reads it to bring a
+  # clicked result's row into the pane when it lies outside this section
+  # (`CalltraceVM.jumpToSearchResult`, codetracer#860).
+  calltraceVMStore.calltrace.currentLineIndex.val = currentCallLineIndexOf(results)
   cdebug fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store ({vmArgs.len} arg entries), startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
 
 proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int;

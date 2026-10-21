@@ -681,9 +681,14 @@ arm A "the save host is never registered" \
 #     bundle. The save still happens and the bytes are still on disk; the tab
 #     simply never asks for them. This is the half of the chain that a
 #     write-only test would miss entirely.
+#
+#     The restore lives in `web_platform.restoreOrSeedProject`, whose one
+#     assignment of a stored file's bytes over the template's is the line
+#     this arm diverts to a field nothing reads — so the tab keeps showing
+#     the bundled bytes although the read succeeded.
 arm B "the restore never reads what the store already holds" \
-	'if \(stored_[0-9]+\.ok\) \{' \
-	'if (false) {' \
+	'(restored[0-9]+\.project\.files\[[^\]]*\])\.content = nimCopy\(null, (stored_p[0-9]+), ' \
+	'\1.mutantDiscarded = nimCopy(null, \2, ' \
 	"the edit survives a reload" "${edit_is_lost}"
 
 # C — the write-through never happens: the edit reaches memory, so the tab

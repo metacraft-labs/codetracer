@@ -135,6 +135,17 @@ type
       ## `SourceVM` with each window, so a window that opens inside a
       ## docstring is coloured as the desktop colours it.
     valueGate*: InlineValueGate
+    followedStop*: tuple[tick: uint64; path: string; line: int]
+      ## M73 (#840): the stop whose execution line the source window last
+      ## FOLLOWED (`serveSourceWindow`). A refresh at the same stop — a
+      ## breakpoint set, a search run, a resize settled — serves the window
+      ## where the user scrolled it instead of snapping it back to the
+      ## pointer: following the pointer is what a STOP does (Monaco reveals
+      ## the line on `ct/complete-move`, not on every repaint).
+    followOwed*: bool
+      ## The pane's height changed (`setViewportHeight`): the next refresh
+      ## follows the pointer even at the same stop, as every refresh did
+      ## before M73, so a shrunken pane does not leave it below the last row.
     tracepointsRun*: int
       ## PLAT-50: how many tracepoints `:tracepoint` swept (each its own id).
       ## PLAT-29. The inline values are drawn only when the locals they come
@@ -216,6 +227,7 @@ proc setViewportHeight*(s: TuiSession; height: int) =
   ## resize.
   s.source.setOverscan(SourceOverscan)
   s.source.setViewport(s.source.viewport.withRows(max(1, height)))
+  s.followOwed = true
 
 proc pumpMove*(s: TuiSession) =
   ## Consume the `stopped` + `ct/complete-move` pair a navigation command
@@ -228,10 +240,10 @@ proc pumpMove*(s: TuiSession) =
   ## show anyway.
   discard s.session.settleMove()
 
-proc serveSourceWindow(s: TuiSession) =
-  ## Follow the execution pointer and serve every line the window then lacks,
-  ## through the real provider.
-  for request in s.source.followAndRequest():
+proc serveSourceRequests(s: TuiSession; requests: seq[SourceLineRequest]) =
+  ## Serve `requests` — what `SourceVM` said its window lacks — through the
+  ## real provider.
+  for request in requests:
     var captured = SourceFetch(status: sfsProviderUnavailable,
                                detail: "the provider callback never ran")
     # SEEDED WITH A STATUS THAT CANNOT BE MISTAKEN FOR SUCCESS, and drained:
@@ -250,6 +262,66 @@ proc serveSourceWindow(s: TuiSession) =
       else: @[]
     discard s.session.session.store.applySourceFetch(s.source, captured,
                                                       contexts)
+
+proc serveSourceWindow(s: TuiSession; tick: uint64) =
+  ## At a NEW stop (or after the pane's height changed), follow the execution
+  ## pointer (`followAndRequest`: not at all while it is visible, centred when
+  ## it is not); at the stop the window already followed, keep the window
+  ## where it is. Then serve every line it lacks.
+  ##
+  ## M73 (#840): until M73 every refresh followed, which was harmless while
+  ## nothing else could move the window. Now the user can, and a refresh that
+  ## is not a move (a breakpoint toggled on a line the user scrolled to)
+  ## snapped the window back to the pointer.
+  let stop = (tick: tick, path: s.source.path.val,
+              line: s.source.executionLine.val)
+  if s.followOwed or stop != s.followedStop:
+    s.followedStop = stop
+    s.followOwed = false
+    s.serveSourceRequests(s.source.followAndRequest())
+  else:
+    s.serveSourceRequests(s.source.requestMissing())
+
+proc scrollSource*(s: TuiSession; rt: TuiRuntime; scroll: SourceScroll) =
+  ## M73 (#840): what the user asked the source pane's window to do
+  ## (`runtime.SourceScroll`), done to `SourceVM` — `scrollBy` / `scrollTo`,
+  ## `centreOnExecutionPointer`, and the caret written into `EditorVM` and
+  ## followed by `followCursor` — then the lines the window lacks served the
+  ## way a stop's are (`requestMissing`, as `followAndRequest` ends), and the
+  ## pane's model given the new window (`withSourceWindow`). The execution
+  ## pointer is never touched.
+  ##
+  ## A FILE SHOWN WHOLE (PLAT-50's `viewedFile`: one opened from the Files
+  ## pane or a Find in Files result) is not `SourceVM`'s: its model holds every
+  ## line, so the same rules move its `viewportTop` directly.
+  if scroll.kind == sskNone:
+    return
+  let rows = max(1, s.source.viewportHeight.val)
+  if rt.app.viewedFile.len > 0:
+    let m = rt.app.source
+    rt.app.source.viewportTop =
+      case scroll.kind
+      of sskNone: m.viewportTop
+      of sskBy: clampTop(m.viewportTop + scroll.delta, rows, m.totalLineCount)
+      of sskTo: clampTop(scroll.top, rows, m.totalLineCount)
+      of sskCentreOnPointer:
+        topCentring(m.viewportTop, m.executionLine, rows, m.totalLineCount)
+      of sskFollowCaret:
+        topFollowingCursor(m.viewportTop, scroll.line, rows, m.totalLineCount)
+    return
+  case scroll.kind
+  of sskNone: discard
+  of sskBy: s.source.scrollBy(scroll.delta)
+  of sskTo: s.source.scrollTo(scroll.top)
+  of sskCentreOnPointer: s.source.centreOnExecutionPointer()
+  of sskFollowCaret:
+    let editor = s.session.session.editorVM
+    if editor.isNil:
+      return
+    editor.setCursor(scroll.line, scroll.column)
+    s.source.followCursor()
+  s.serveSourceRequests(s.source.requestMissing())
+  rt.app.source = rt.app.source.withSourceWindow(s.source)
 
 proc stackBody(s: TuiSession): JsonNode =
   let response = s.session.sendRawDapRequest("stackTrace", %*{
@@ -399,10 +471,12 @@ proc callTraceModelOf(s: TuiSession; rt: TuiRuntime): CallTraceModel =
                               firstIndex = store.calltrace.startLineIndex.val,
                               total = int(store.calltrace.totalCallsCount.val),
                               scrollTop = rt.app.callTrace.scrollTop,
-                              follow = not rt.app.callTraceScrolled)
-  # PLAT-51: where the debugger is in the WHOLE trace (the engine's), for the
-  # scrubber's mark.
-  result.currentIndex = int(store.calltrace.currentLineIndex.val)
+                              follow = not rt.app.callTraceScrolled,
+                              # PLAT-51: where the debugger is in the WHOLE
+                              # trace (the engine's): the scrubber's mark, and
+                              # the check on a section's unprovable answer.
+                              currentIndex =
+                                int(store.calltrace.currentLineIndex.val))
 
 proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
   ## PLAT-47: **the call trace, a section at a time.** Build the pane's model
@@ -710,7 +784,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## the order.
   let tick = s.session.getCurrentRRTicks()
 
-  serveSourceWindow(s)
+  serveSourceWindow(s, tick)
   # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
   # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same
   # `EditorVM.showFlowOverlay` toggle.
@@ -777,8 +851,12 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
 
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)
+  # M71 (#838): the pane's reading position is the reader's too — a click on
+  # a history entry moves the debugger, and the reader stays where they were
+  # in the history (the painter clamps it to the new stop's rows).
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
-                                       tickLabel = "tick " & $tick)
+                                       tickLabel = "tick " & $tick,
+                                       scrollTop = rt.app.variables.scrollTop)
   # PLAT-51: the pane's open histories and origins, its watches and the
   # name column's width — the user's, carried across stops.
   rt.app.variables.histories = rt.app.openHistories
@@ -1117,9 +1195,12 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     if not vm.isNil:
       vm.toggleExpanded(c.path)
       let open = rt.app.fileTree.openPath
+      let top = rt.app.fileTree.scrollTop
       s.files = fileTreeModelOf(vm)
       rt.app.fileTree = s.files
       rt.app.fileTree.openPath = open
+      # M71 (#838): a folder opened or closed keeps the reader's place.
+      rt.app.fileTree.scrollTop = top
   of pcToggleBreakpoint:
     # K10: the desktop's gutter click (`lineActionClick` → `toggleBreakpoint`).
     if not s.toggleBreakpoint(c.path, c.line):
@@ -1184,6 +1265,11 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
   ## viewed file and the panes rebuilt from the session. A change to what the
   ## session holds without a move (a breakpoint) is refreshed and NOT pumped —
   ## a pump there would wait on a `stopped` event no engine sends.
+  # M73 (#840): the user moved the source window (the wheel over the editor,
+  # its scroll keys, its vertical bar, or a caret that left the screen).
+  # Never a move, so nothing else here is owed for it.
+  if outcome.sourceScroll.kind != sskNone:
+    s.scrollSource(rt, outcome.sourceScroll)
   if outcome.paneClick.kind != pcNone:
     s.applyPaneClick(rt, outcome.paneClick)
   elif outcome.jumpsToCall:

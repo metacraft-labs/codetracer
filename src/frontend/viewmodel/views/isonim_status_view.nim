@@ -156,6 +156,25 @@ proc invokeAction(
   if not callbacks.onNotificationAction.isNil:
     callbacks.onNotificationAction(notificationIndex, actionIndex)
 
+proc dismissHandler(callbacks: StatusShellCallbacks;
+                    notificationIndex: int): proc() =
+  ## The click handler of one notification's dismiss button.
+  ##
+  ## A FACTORY, as is `actionHandler` below: the notifications and their
+  ## action buttons are built in `for` loops, and Nim closures capture by
+  ## reference -- a `let` in a loop body is ONE variable for the whole loop.
+  ## The inline closures these replace made every dismiss button dismiss the
+  ## LAST notification, and every action button fire the last notification's
+  ## last action (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures).
+  result = proc() = callbacks.invokeDismiss(notificationIndex)
+
+proc actionHandler(callbacks: StatusShellCallbacks;
+                   notificationIndex, actionIndex: int): proc() =
+  ## The click handler of one notification action button; per button for
+  ## the reason `dismissHandler` gives.
+  result = proc() = callbacks.invokeAction(notificationIndex, actionIndex)
+
 proc invokeCopyLocation(callbacks: StatusShellCallbacks) =
   if not callbacks.onCopyLocation.isNil:
     callbacks.onCopyLocation()
@@ -281,8 +300,7 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeDismiss(notificationIndex)):
+                    onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
               let currentActionIndex = actionIndex
@@ -290,8 +308,8 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-action-button action-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                    onclick = actionHandler(callbacks, notificationIndex,
+                                           currentActionIndex)):
                   text action.label
 
       if model.hasOperationNotification:
@@ -308,8 +326,7 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeDismiss(notificationIndex)):
+                    onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
               let currentActionIndex = actionIndex
@@ -317,8 +334,8 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-action-button action-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                    onclick = actionHandler(callbacks, notificationIndex,
+                                           currentActionIndex)):
                   text action.label
 
       tdiv(id = StatusBaseId):
@@ -447,8 +464,7 @@ template renderStatusShellImpl(
                   tdiv(
                       class = "notification-button dismiss-notification-button " &
                         notification.kindClass,
-                      onclick = proc() =
-                        callbacks.invokeDismiss(notificationIndex)):
+                      onclick = dismissHandler(callbacks, notificationIndex)):
                     discard
               for actionIndex, action in notification.actions:
                 let currentActionIndex = actionIndex
@@ -456,8 +472,8 @@ template renderStatusShellImpl(
                   tdiv(
                       class = "notification-action-button action-notification-button " &
                         notification.kindClass,
-                      onclick = proc() =
-                        callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                      onclick = actionHandler(callbacks, notificationIndex,
+                                             currentActionIndex)):
                     text action.label
 
       if model.showBugReport:

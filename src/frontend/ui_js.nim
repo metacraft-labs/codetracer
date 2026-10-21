@@ -7066,6 +7066,23 @@ when defined(ctWeb) and not defined(ctInExtension):
       newNotification(durabilityNotificationKind(notice.level), notice.text,
                       actions = actions))
 
+  proc raiseSeedFailureNotice() =
+    ## A template file whose seed write failed is in the editor and in an
+    ## export but not in browser storage (see `prepareProject`). Raised as a
+    ## warning beside the durability notice, with the same Export action,
+    ## because exporting is what keeps such a file.
+    let text = web_project_persistence.takeSeedFailureNotice()
+    if text.len == 0:
+      return
+    var actions: seq[NotificationAction] = @[]
+    if web_project_persistence.canExportProject():
+      actions.add(newNotificationButtonAction(
+        cstring"Export project",
+        proc = web_project_persistence.exportOpenProject()))
+    data.viewsApi.showNotification(
+      newNotification(NotificationKind.NotificationWarning, text,
+                      actions = actions))
+
   const durabilityNoticeMountAttempts = 40
     ## 40 turns of ~25ms — one second — before the sentence goes to the console
     ## instead. Generous next to a mount measured in tens of milliseconds, and
@@ -7089,12 +7106,16 @@ when defined(ctWeb) and not defined(ctInExtension):
     if not data.ui.isNil and not data.ui.status.isNil and
        not data.viewsApi.isNil:
       raiseDurabilityNotice()
+      raiseSeedFailureNotice()
       return
     if attemptsLeft <= 0:
       # The one channel left. Better than dropping it, and it is what
       # `ci/test/noir-edit-persists.sh` would report as the absence it is.
       cwarn "durability: no status bar to announce into: " &
         web_project_store.durabilityNoticeText()
+      let seedNotice = web_project_persistence.takeSeedFailureNotice()
+      if seedNotice.len > 0:
+        cwarn "project storage: no status bar to announce into: " & seedNotice
       return
     discard windowSetTimeout(
       proc() = awaitStatusBarThenRaise(attemptsLeft - 1), 25)
@@ -7151,6 +7172,11 @@ when defined(ctWeb) and not defined(ctInExtension):
       if not data.viewsApi.isNil:
         data.viewsApi.showNotification(
           newNotification(NotificationKind.NotificationSuccess, message)))
+
+    web_project_persistence.setExportFailureHandler(proc(message: string) =
+      if not data.viewsApi.isNil:
+        data.viewsApi.showNotification(
+          newNotification(NotificationKind.NotificationError, message)))
 
     await web_project_persistence.prepareProject(
       booted, templateFor(booted.entry.languageEntry, booted.entry.form))

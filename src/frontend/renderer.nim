@@ -2020,8 +2020,13 @@ proc dispatchSaveEffect(data: Data, effect: ReRecordEffect,
         edits = model.getVersionId().to(int)
     except:
       edits = -1
-    let verdict = classifyWrite(
-      BufferProvenance(contentLength: value.len, editsSinceLoad: edits))
+    #
+    # AN UNTITLED BUFFER HAS NO STORED COPY to protect: a New File buffer is
+    # built empty at version 1, which is exactly the wipe's provenance, and
+    # saving it empty must still reach the save-as chooser (issue #792).
+    let verdict = classifyWrite(BufferProvenance(
+      contentLength: value.len, editsSinceLoad: edits,
+      untitled: effect.kind == rreSaveUntitled))
     if verdict == tvRefuseUnproven:
       # NOT COUNTED AS DISPATCHED. The caller uses the count to decide whether
       # anything can ever answer it, and nothing will answer a message that was

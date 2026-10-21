@@ -25,7 +25,7 @@
 import std/[options, strutils]
 
 # PLAT-49 part B: the row's parts are the Call Trace ViewModel's `CallRow`.
-from codetracer_embed import CallLine, currentCallOf,
+from codetracer_embed import CallLine, currentCallInSectionOf,
   CallRow, CallRowToggle, CallSegmentKind,
   CallSegment, callRowSegments, crtLeaf, crtExpanded, crtCollapsed,
   CallRowIndentCells,
@@ -102,29 +102,45 @@ proc initCallTraceModel*(rows: seq[CallTraceRow] = @[];
                          firstIndex = 0'i64;
                          total = -1;
                          scrollTop = 0;
-                         follow = true): CallTraceModel =
+                         follow = true;
+                         currentIndex = -1): CallTraceModel =
   ## The model for the loaded section `rows` (the trace's calls from
-  ## `firstIndex`) at `tick`, with the call STACK at that stop (innermost
-  ## first) when the host has it. `total` is the whole trace's call count;
-  ## -1 means the section is the whole trace.
+  ## `firstIndex`, in order, each with its depth) at `tick`, with the call
+  ## STACK at that stop (innermost first) when the host has it. `total` is
+  ## the whole trace's call count; -1 means the section is the whole trace.
+  ## `currentIndex` is the engine's `currentCallLineIndex` (a trace index),
+  ## or -1.
   ##
-  ## The current call is the call the debugger is IN: the last row entered at
-  ## or before `tick` whose name is the innermost frame's and whose depth is
-  ## the stack's (`stack.len - 1`, the trace's root being depth 0). A call
-  ## that has already returned is entered before `tick` too, so "the last row
-  ## entered" alone would mark `mul` while the debugger is back in `main`.
-  ## With no stack, that is the fallback.
+  ## The current call is the call the debugger is IN, by the ViewModel's
+  ## rule (`calltrace_vm.currentCallOf`): the last row entered at or before
+  ## `tick` whose name is the innermost frame's and whose depth is the
+  ## stack's (`stack.len - 1`, the trace's root being depth 0), and which
+  ## has not returned. A row has returned when a later row entered by `tick`
+  ## is at its depth or shallower. So a call hidden by a collapsed parent
+  ## leaves NO row current; it never moves the mark to an earlier call of
+  ## the same name that returned (codetracer#845). With no stack, the
+  ## current row is the last row entered.
+  ##
+  ## A section that ends before the trace does, with no row after the answer
+  ## entered after `tick`, cannot show that the answer has not returned
+  ## (the row that shows it may be past the section's end). The answer is
+  ## then kept only when the engine's `currentIndex` names the same call
+  ## (`calltrace_vm.currentCallInSectionOf`).
   result = CallTraceModel(rows: rows, current: -1, firstIndex: firstIndex,
                           total: max(total, firstIndex.int + rows.len),
                           scrollTop: max(0, scrollTop), follow: follow,
-                          currentIndex: -1)
+                          currentIndex: currentIndex)
   # The ViewModel's rule (`calltrace_vm.currentCallOf`, PLAT-49 part B) —
   # GPUI selects the same call from it.
   var lines: seq[CallLine] = @[]
   for i, r in rows:
     lines.add CallLine(index: i.int64, name: r.name, depth: r.depth,
                        rrTicks: r.rrTicks)
-  let at = currentCallOf(lines, tick, stack)
+  let engineAt = if currentIndex >= 0: currentIndex.int64 - firstIndex
+                 else: -1'i64
+  let at = currentCallInSectionOf(lines, tick, stack,
+    reachesTraceEnd = firstIndex.int + rows.len >= result.total,
+    engineIndex = engineAt)
   if at.isSome:
     result.current = at.get.int
 
@@ -141,8 +157,13 @@ proc tracked*(area: CellArea): bool =
 proc currentTraceIndex*(m: CallTraceModel): int =
   ## The trace index of the call the debugger is in, or -1.
   ## The loaded section's answer wins when it has one: it is the ViewModel's
-  ## exact rule (`currentCallOf`, by tick and stack); the engine's
-  ## `currentCallLineIndex` places the mark when the call is outside it.
+  ## exact rule (`currentCallOf`, by tick and stack), which never names a
+  ## call that has returned, and which the section answers only when it can
+  ## show that (`initCallTraceModel`). The engine's `currentCallLineIndex`
+  ## places the mark otherwise: when the call is outside the section, when
+  ## the section cannot show its answer has not returned, and when a
+  ## collapsed parent hides the call (the engine then names that parent, the
+  ## last listed call keyed at or before the current one).
   if m.current >= 0: m.firstIndex.int + m.current
   elif m.currentIndex >= 0: m.currentIndex
   else: -1

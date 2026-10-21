@@ -56,10 +56,10 @@ test.describe("CallTrace collapse retires the current-call mark", () => {
       { maxAttempts: 30, delayMs: 1000 },
     );
 
-    // Collapse `main`, the parent of the current call. The mark coming back
-    // when `main` is expanded again is covered headlessly, in
-    // calltrace_vm_test.nim, "re-expanding restores the mark on the call at
-    // its new index (#811)".
+    // Collapse `main`, the parent of the current call. The view-model half of
+    // the round trip, the mark following the call to a new index, is covered
+    // headlessly in calltrace_vm_test.nim, "re-expanding restores the mark on
+    // the call at its new index (#811)".
     callTrace.invalidateEntries();
     const parent = await callTrace.findEntry("main", true);
     expect(parent).not.toBeNull();
@@ -80,5 +80,24 @@ test.describe("CallTrace collapse retires the current-call mark", () => {
     // Give a stale mark every chance to be (re)drawn before asserting.
     await ctPage.waitForTimeout(1000);
     expect(await markedRows(ctPage)).toEqual([]);
+
+    // Expand `main` again. Retiring the mark must not lose it: the current
+    // call is still `assert_in_range`, so once its row is back the mark is on
+    // that row and on no other.
+    callTrace.invalidateEntries();
+    const parentAgain = await callTrace.findEntry("main", true);
+    expect(parentAgain).not.toBeNull();
+    await parentAgain!.expandChildren();
+    expect(await parentAgain!.hasExpandedChildren()).toBe(true);
+    await retry(
+      async () => {
+        const marked = await markedRows(ctPage);
+        return marked.length === 1 && marked[0].startsWith("assert_in_range");
+      },
+      { maxAttempts: 30, delayMs: 500 },
+    );
+    expect(await markedRows(ctPage)).toEqual([
+      expect.stringMatching(/^assert_in_range #\d+$/),
+    ]);
   });
 });

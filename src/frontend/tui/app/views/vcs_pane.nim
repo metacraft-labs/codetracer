@@ -23,8 +23,12 @@
 
 import std/strutils
 
+# M71 (#838): the pane's ordinary scrollbar is the shared scrubber model.
+from codetracer_embed import ScrubberModel, scrubberModel
+
 import ../layout/profile
 import ./styled_row
+import ./scrubber_track
 
 export styled_row, profile
 
@@ -58,6 +62,9 @@ type
       ## it, `VCSVM.commitFilesMap`), -1 for none — the desktop's accordion.
     commitFiles*: seq[VcsFileLine]
       ## The files `expandedCommit` changed.
+    scrollTop*: int
+      ## M71 (#838): the first row the pane shows — the reader's position,
+      ## which the host carries across refreshes (`vcs_source.publish`).
 
   VcsRowKind* = enum
     vrNone, vrFile, vrCommit, vrCommitFile
@@ -76,6 +83,15 @@ type
       ## How many working-tree rows reached the screen.
     targets*: seq[VcsRowTarget]
       ## PLAT-50: every row a click acts on, as painted.
+    area*: CellArea
+      ## M71 (#838): the rectangle painted (every row of it a list row).
+    totalRows*: int
+      ## M71: every row the pane lists, on screen or not.
+    top*: int
+      ## M71: the index of the first row shown (`scrollTop`, clamped).
+    trackCol*: int
+      ## M71: the scrollbar's column (down the whole area), -1 while the
+      ## rows fit.
 
 const
   BranchMarker* = "on "
@@ -113,21 +129,22 @@ proc paintLine(g: var StyledGrid; row, col, width: int;
     g.paint(row, col + used, rule, fillStyle)
     result.add StyledSpan(text: rule, style: fillStyle)
 
-proc paintVcsPane*(g: var StyledGrid; area: CellArea;
-                   model: VcsPaneModel): VcsPaneScreen =
-  ## The pane into `area` and nowhere else.
-  result = VcsPaneScreen(rows: @[], fileRows: 0)
-  if area.width <= 0 or area.height <= 0:
-    return
-  # PLAT-49: NO TITLE BAR — the tab strip above the pane names it. The
-  # first row is CONTENT: the branch the working tree is on (the desktop's
-  # VCS panel heads its list with it), with no `VCS ───` rule.
-  var row = area.row
-  let last = area.row + area.height - 1
-  template line(spans: seq[StyledSpan]) =
-    if row <= last:
-      result.rows.add g.paintLine(row, area.col, area.width, spans)
-      inc row
+type
+  VcsLine = object
+    ## One row of the pane before it is painted (M71: the pane lists them
+    ## all, then draws the window `scrollTop` names).
+    spans: seq[StyledSpan]
+    target: VcsRowTarget
+      ## What a click on it acts on; `vrNone` for a caption or a message.
+    isFile: bool
+      ## A working-tree row (`fileRows` counts the ones on screen).
+
+proc vcsLines(model: VcsPaneModel): seq[VcsLine] =
+  ## Every row the pane lists, in order — the branch, the working tree and
+  ## its files, the commits and the files of the one opened.
+  template line(s: seq[StyledSpan]; t = VcsRowTarget(kind: vrNone);
+                file = false) =
+    result.add VcsLine(spans: s, target: t, isFile: file)
   if model.isRepo and model.branch.len > 0:
     line @[StyledSpan(text: BranchMarker & model.branch,
                       style: VcsBranchStyle)]
@@ -141,36 +158,72 @@ proc paintVcsPane*(g: var StyledGrid; area: CellArea;
   if model.files.len == 0:
     line @[StyledSpan(text: " " & model.cleanText, style: VcsMessageStyle)]
   for i, f in model.files:
-    if row > last:
-      break
-    result.targets.add VcsRowTarget(row: row, kind: vrFile, index: i,
-                                    status: f.status, path: f.path)
     line @[StyledSpan(text: " ", style: DefaultCellStyle),
            StyledSpan(text: f.status, style: statusStyle(f.status)),
-           StyledSpan(text: " " & f.path, style: VcsPathStyle)]
-    inc result.fileRows
+           StyledSpan(text: " " & f.path, style: VcsPathStyle)],
+         VcsRowTarget(kind: vrFile, index: i, status: f.status, path: f.path),
+         file = true
   if model.commits.len > 0:
     line @[StyledSpan(text: CommitsTitle & " (" & $model.commits.len & ")",
                       style: VcsSectionStyle)]
     for ci, c in model.commits:
-      if row > last:
-        break
-      result.targets.add VcsRowTarget(row: row, kind: vrCommit, index: ci,
-                                      hash: c.hash)
-      line @[StyledSpan(text: " " & c.hash, style: VcsHashStyle),
-             StyledSpan(text: " " & c.subject, style: VcsPathStyle)]
+      line(@[StyledSpan(text: " " & c.hash, style: VcsHashStyle),
+             StyledSpan(text: " " & c.subject, style: VcsPathStyle)],
+           VcsRowTarget(kind: vrCommit, index: ci, hash: c.hash))
       # PLAT-50 (K53): an opened commit lists the files it changed under it,
       # indented, as the desktop's accordion does.
       if ci == model.expandedCommit:
         for fi, f in model.commitFiles:
-          if row > last:
-            break
-          result.targets.add VcsRowTarget(row: row, kind: vrCommitFile,
-                                          index: fi, status: f.status,
-                                          path: f.path, hash: c.hash)
-          line @[StyledSpan(text: "   ", style: DefaultCellStyle),
+          line(@[StyledSpan(text: "   ", style: DefaultCellStyle),
                  StyledSpan(text: f.status, style: statusStyle(f.status)),
-                 StyledSpan(text: " " & f.path, style: VcsPathStyle)]
+                 StyledSpan(text: " " & f.path, style: VcsPathStyle)],
+               VcsRowTarget(kind: vrCommitFile, index: fi, status: f.status,
+                            path: f.path, hash: c.hash))
+
+proc scrubberOf*(screen: VcsPaneScreen): ScrubberModel =
+  ## M71: the pane's ordinary scrollbar over what `paintVcsPane` drew — the
+  ## population is every row it lists, the view the area from `top`.
+  scrubberModel(screen.totalRows, screen.top, screen.area.height)
+
+proc paintVcsPane*(g: var StyledGrid; area: CellArea;
+                   model: VcsPaneModel): VcsPaneScreen =
+  ## The pane into `area` and nowhere else.
+  ##
+  ## PLAT-49: NO TITLE BAR — the tab strip above the pane names it. The
+  ## first row is CONTENT: the branch the working tree is on (the desktop's
+  ## VCS panel heads its list with it), with no `VCS ───` rule. So every
+  ## row of `area` is a row of the list.
+  result = VcsPaneScreen(rows: @[], fileRows: 0, area: area, trackCol: -1)
+  if area.width <= 0 or area.height <= 0:
+    return
+  let lines = vcsLines(model)
+  result.totalRows = lines.len
+  let top = clamp(model.scrollTop, 0, max(0, lines.len - area.height))
+  result.top = top
+  # M71 (#838): WHILE THE ROWS OVERFLOW, THE RIGHTMOST COLUMN IS THE PANE'S
+  # SCROLLBAR (Scrollbar-Scrubbers.md §2 names the VCS pane: its whole
+  # content is in hand, so it keeps an ordinary scrollbar; §4: the pane's
+  # rightmost column, inside its own rectangle), and the rows are drawn in
+  # the cells left of it. Rows that fit keep the whole width.
+  let overflow = lines.len > area.height and area.width > ScrubberTrackCells
+  let width = if overflow: area.width - ScrubberTrackCells else: area.width
+  for i in 0 ..< area.height:
+    let at = top + i
+    if at >= lines.len:
+      break
+    let row = area.row + i
+    let l = lines[at]
+    if l.target.kind != vrNone:
+      var t = l.target
+      t.row = row
+      result.targets.add t
+    if l.isFile:
+      inc result.fileRows
+    result.rows.add g.paintLine(row, area.col, width, l.spans)
+  if overflow:
+    result.trackCol = area.col + width
+    g.paintVerticalScrubber(result.trackCol, area.row, area.height,
+                            result.scrubberOf)
 
 proc vcsTargetAt*(screen: VcsPaneScreen; row: int): VcsRowTarget =
   ## PLAT-50: the row a press on screen row `row` is on.

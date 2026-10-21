@@ -13,7 +13,7 @@
 
 import std/[options, tables, math, strutils, sets]
 
-import isonim/core/[signals, computation]
+import isonim/core/[signals, computation, owner, batch]
 import isonim/dsl/ui
 import isonim/testing/mock_dom
 
@@ -575,20 +575,53 @@ when defined(js):
       document.body.appendChild(ov);
     })(#)
   """.}
-  proc setupClickOutsideHandler(wrapper: isonim_dom.Element; onClose: proc()) {.importjs: """
+  type Disposer = proc() {.closure.}
+    ## Undoes a registration; what `onCleanup` takes.
+
+  # Closes a dropdown when the user clicks anywhere outside `wrapper`.
+  #
+  # Returns the disposer, which the caller hands to `onCleanup` from the
+  # render effect that drew the open dropdown.  A dropdown that closes some
+  # other way (its trigger, one of its items, the panel closing, the effect
+  # re-rendering it) therefore takes its document-level listener with it.
+  # Without that, every opening left one listener behind, bound to a
+  # wrapper that might since have been discarded — and a discarded wrapper
+  # `contains` nothing, so a stale listener fired on clicks INSIDE the
+  # live dropdown too.  Idempotent; safe to call before the deferred
+  # registration has happened.
+  proc setupClickOutsideHandler(wrapper: isonim_dom.Element;
+                                onClose: proc()): Disposer {.importjs: """
     (function(wrapper, onClose) {
-      setTimeout(function() {
-        function handler(e) {
+      // Registration is deferred past the click that opened the dropdown,
+      // or that very click would reach the handler and close it again.
+      var handler = null;
+      var disposed = false;
+      var timer = setTimeout(function() {
+        timer = null;
+        if (disposed) return;
+        handler = function(e) {
           if (!wrapper.contains(e.target)) {
+            dispose();
             onClose();
-            document.removeEventListener('click', handler, true);
           }
-        }
+        };
         document.addEventListener('click', handler, true);
       }, 0);
+      function dispose() {
+        disposed = true;
+        if (timer !== null) { clearTimeout(timer); timer = null; }
+        if (handler !== null) {
+          document.removeEventListener('click', handler, true);
+          handler = null;
+        }
+      }
+      return dispose;
     })(#, #)
   """.}
-  proc setupClickOutsideHandler(wrapper: MockNode; onClose: proc()) = discard
+  proc setupClickOutsideHandler(wrapper: MockNode; onClose: proc()): Disposer =
+    ## There is no document to listen on under `MockRenderer`; the returned
+    ## disposer keeps the call sites identical for both renderers.
+    result = proc() = discard
   proc setupBranchSearch(searchInput: isonim_dom.Element;
                           listContainer: isonim_dom.Element) {.importjs: """
     (function(inp, list) {
@@ -712,6 +745,51 @@ proc makeToolRowClickHandler(rowId: string): proc() =
         else:
           expandedToolRowIds.incl(sid)
 
+# Per-item handler factories (codetracer#860 sweep).
+#
+# Every list below -- message images, inline image segments, tool-call groups,
+# changed files, pasted images, context paths -- is built in a `for` loop,
+# and Nim closures capture by reference: a `let` declared in a
+# loop body, or the loop variable itself, is ONE variable for the whole loop
+# (https://nim-lang.org/docs/manual.html#procedures-closures). An inline
+# `proc() = ...` over such a `let` therefore acts on the LAST item whichever
+# item was clicked. Each factory takes the per-item value as its own
+# parameter, so every closure it returns owns that value; the `ui` DSL
+# evaluates an `onX = expr` attribute once, when the item is built.
+
+proc imageLightboxHandler(src: string): proc() =
+  ## Opens the lightbox on THIS image.
+  result = proc() =
+    when defined(js):
+      showImageLightbox(cstring(src))
+    else:
+      discard src
+
+proc toolHistoryToggleHandler(historyId: string): proc() =
+  ## Expands or collapses THIS tool-call group's history.
+  result = proc() =
+    when defined(js):
+      let histEl = jsQuerySelector(cstring("#" & historyId))
+      if not histEl.isNil:
+        classListToggle(histEl, "agent-tc-history-expanded")
+    else:
+      discard historyId
+
+proc openFileDiffHandler(callbacks: AgentActivityCallbacks;
+                         target: string): proc() =
+  ## Opens the diff of THIS changed file.
+  result = proc() =
+    if callbacks.onOpenFileDiff != nil:
+      callbacks.onOpenFileDiff(target)
+
+proc removePastedImageHandler(vm: AgentActivityVM; idx: int): proc() =
+  ## Removes THIS pasted image.
+  result = proc() = vm.removePastedImage(idx)
+
+proc removeContextPathHandler(vm: AgentActivityVM; idx: int): proc() =
+  ## Removes THIS context path.
+  result = proc() = vm.removeContextPath(idx)
+
 proc renderMessage[R](r: R; componentId: int;
                       message: AgentActivityMessageEntry;
                       callbacks: AgentActivityCallbacks): auto =
@@ -743,9 +821,7 @@ proc renderMessage[R](r: R; componentId: int;
             for imgData in message.images:
               let capturedSrc = imgData
               tdiv(class = "agent-msg-thumb",
-                   onclick = proc() =
-                     when defined(js):
-                       showImageLightbox(cstring(capturedSrc))):
+                   onclick = imageLightboxHandler(capturedSrc)):
                 img(class = "agent-msg-thumb-img", alt = "attachment", src = capturedSrc)
         tdiv(class = AgentActivityMessageContentClass, id = contentId):
           for segLent in parseInlineCode(message.content):
@@ -954,9 +1030,7 @@ proc renderMessage[R](r: R; componentId: int;
                   elif seg.kind == mskImage:
                     let capturedImgSrc = seg.content
                     tdiv(class = "agent-msg-thumb",
-                         onclick = proc() =
-                           when defined(js):
-                             showImageLightbox(cstring(capturedImgSrc))):
+                         onclick = imageLightboxHandler(capturedImgSrc)):
                       img(class = "agent-msg-thumb-img", alt = seg.lang, src = capturedImgSrc)
                   else:
                     tdiv(class = "agent-code-block"):
@@ -985,11 +1059,7 @@ proc renderMessage[R](r: R; componentId: int;
                           span(class = "agent-tc-name"): text tc.toolName
                           span(class = dotClass)
                     tdiv(class = "agent-tc-toggle",
-                         onclick = proc() =
-                           when defined(js):
-                             let histEl = jsQuerySelector(cstring("#" & grpHistId))
-                             if not histEl.isNil:
-                               classListToggle(histEl, "agent-tc-history-expanded")):
+                         onclick = toolHistoryToggleHandler(grpHistId)):
                       span(class = "agent-tc-toggle-icon")
                       text $grpTools.len & " tools used"
                   let currentTc = grpTools[^1]
@@ -1080,9 +1150,7 @@ proc renderMessage[R](r: R; componentId: int;
               elif mseg.kind == mskImage:
                 let capturedMsegSrc = mseg.content
                 tdiv(class = "agent-msg-thumb",
-                     onclick = proc() =
-                       when defined(js):
-                         showImageLightbox(cstring(capturedMsegSrc))):
+                     onclick = imageLightboxHandler(capturedMsegSrc)):
                   img(class = "agent-msg-thumb-img", alt = mseg.lang, src = capturedMsegSrc)
               else:
                 tdiv(class = "agent-code-block"):
@@ -1094,9 +1162,7 @@ proc renderMessage[R](r: R; componentId: int;
             for imgData in message.images:
               let capturedSrc = imgData
               tdiv(class = "agent-msg-thumb",
-                   onclick = proc() =
-                     when defined(js):
-                       showImageLightbox(cstring(capturedSrc))):
+                   onclick = imageLightboxHandler(capturedSrc)):
                 img(class = "agent-msg-thumb-img", alt = "agent image", src = capturedSrc)
         # "Agent is working" indicator: visible outside the collapsible block while
         # the agent is still producing output after the thinking phase ended.
@@ -1122,9 +1188,7 @@ proc renderMessage[R](r: R; componentId: int;
               let (added, removed) = computeDiffStats(diff.original, diff.modified)
               let singleTarget = "file:" & msgId & ":" & $diff.id
               tdiv(class = "agent-diff-file-row",
-                   onclick = proc() =
-                     if callbacks.onOpenFileDiff != nil:
-                       callbacks.onOpenFileDiff(singleTarget)):
+                   onclick = openFileDiffHandler(callbacks, singleTarget)):
                 span(class = "agent-diff-file-path"): text diff.path
                 span(class = "agent-diff-stat-added"): text "+" & $added
                 span(class = "agent-diff-stat-removed"): text "-" & $removed
@@ -1478,8 +1542,10 @@ proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
       # Register a document-level click handler that closes the dropdown when
       # the user clicks outside the wrapper. setTimeout(0) defers registration
       # past the current click event so the opening click doesn't fire it.
-      setupClickOutsideHandler(wrapperRef,
-        proc() = vm.addContextDropdownOpen.val = false)
+      # The buttons effect that drew this menu owns the listener: its next run
+      # (the menu closing, or any re-render of the buttons) disposes it.
+      onCleanup(setupClickOutsideHandler(wrapperRef,
+        proc() = vm.addContextDropdownOpen.val = false))
   panel
 
 const AvailableAgentModels = ["Codex GPT5"]
@@ -1529,8 +1595,9 @@ proc renderModelButton[R](r: R; vm: AgentActivityVM;
     for model in AvailableAgentModels:
       r.appendRenderedChild(listRef, renderModelOption(r, vm, model))
     when defined(js):
-      setupClickOutsideHandler(wrapperRef,
-        proc() = vm.modelDropdownOpen.val = false)
+      # Owned by the buttons effect, like the "+" menu's listener above.
+      onCleanup(setupClickOutsideHandler(wrapperRef,
+        proc() = vm.modelDropdownOpen.val = false))
   panel
 
 const SettingsRuntimeOptions = ["devcontainer", "Local shell", "Micro-VM (Firecracker)", "GPT·o-series", "Docker image"]
@@ -1539,13 +1606,81 @@ const SettingsMemoryOptions = ["2 GB", "4 GB", "8 GB", "16 GB"]
 const SettingsDeliveryModeOptions = ["New branch", "Existing branch", "Current branch"]
 const SettingsPermissionsOptions = ["Ask before commands", "Allow all", "Deny all"]
 
+# ---------------------------------------------------------------------------
+# The settings panel
+#
+# `div.agent-settings-panel` is a scroll container, and a browser keeps a
+# scroll position only for as long as the same element stays mounted (#861).
+# So the panel is built ONCE per opening (see the `settingsOpen` effect in
+# `renderAgentActivityPanelImpl`), and nothing in the code below reads a
+# settings signal outside a render effect scoped to the few nodes that show
+# it:
+#
+# - a trigger's text, the toggle's class and the agent chip are dynamic `ui`
+#   attributes/text, each of which the `ui` macro wraps in its own effect;
+# - a dropdown's open list is drawn by one effect per dropdown, which adds
+#   and removes only the list (`renderSettingsDropdown`).
+#
+# A plain `vm.settingsX.val` read in these helpers' bodies would subscribe
+# whichever effect is running them, and in the panel's case that was the
+# effect that rebuilds the whole panel
+# (`codetracer-specs/Refactoring-Plans/Shared-DOM-Front-Ends.md`, "What the
+# DOM front-ends do instead", item 5).
+# ---------------------------------------------------------------------------
+
+proc settingsToggleClass(on: bool): string =
+  if on: "agent-settings-toggle agent-settings-toggle--on"
+  else: "agent-settings-toggle"
+
+proc settingsAgentChipText(selectedModel: string): string =
+  (if selectedModel.len > 0: selectedModel else: "Claude·Sonnet") & " ×1"
+
+proc shownDeliveryBranch(vm: AgentActivityVM): string =
+  ## The target branch the panel shows: the user's choice, or the checked-out
+  ## branch until they make one.
+  if vm.settingsDeliveryBranch.val.len > 0: vm.settingsDeliveryBranch.val
+  else: vm.currentBranch.val
+
+proc settingsBranchOptions(vm: AgentActivityVM): seq[string] =
+  ## The repository's branches, plus the shown target if it is not among them
+  ## (a branch typed in elsewhere, or one the list has not caught up with).
+  result = vm.branches.val
+  let shown = shownDeliveryBranch(vm)
+  if shown.len > 0 and shown notin result:
+    result.add(shown)
+
+proc staticOptions(options: openArray[string]): proc(): seq[string] =
+  let snapshot = @options
+  result = proc(): seq[string] = snapshot
+
+proc renderSettingsDropdownItem[R](r: R; vm: AgentActivityVM; value: string;
+                                   isActive: bool;
+                                   onSelect: proc(v: string)): auto =
+  ## One row of an open dropdown list.  A proc of its own so that each row's
+  ## handler captures its own `value` (the JS backend shares a loop-local
+  ## `let` between the closures created in a loop; see
+  ## `makeToolRowClickHandler`).
+  let cls = if isActive: "agent-settings-dropdown-item agent-settings-dropdown-item--active"
+            else: "agent-settings-dropdown-item"
+  ui(r):
+    tdiv(class = cls,
+         onclick = proc() =
+           vm.settingsActiveDropdown.val = ""
+           onSelect(value)):
+      text value
+      if isActive:
+        span(class = "agent-settings-check-icon")
+
 proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
-                               currentValue: string;
-                               options: openArray[string];
+                               currentValue: proc(): string;
+                               options: proc(): seq[string];
                                onSelect: proc(v: string)): auto =
+  ## A settings select: a trigger showing `currentValue()` and, while
+  ## `vm.settingsActiveDropdown` names `dropdownId`, the list of `options()`.
+  ##
+  ## Both accessors are read only inside effects scoped to this dropdown, so
+  ## a change updates this dropdown alone and the panel around it stays put.
   var wrapperRef: typeof(r.createElement("div"))
-  var listRef: typeof(r.createElement("div"))
-  let isOpen = vm.settingsActiveDropdown.val == dropdownId
   let panel = ui(r):
     tdiv(ref = wrapperRef, class = "agent-settings-select-wrapper"):
       tdiv(class = "agent-settings-select-trigger",
@@ -1554,51 +1689,43 @@ proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
                vm.settingsActiveDropdown.val = ""
              else:
                vm.settingsActiveDropdown.val = dropdownId):
-        span(class = "agent-settings-select-text"): text currentValue
+        span(class = "agent-settings-select-text"): text currentValue()
         span(class = "agent-settings-select-chevron")
-      if isOpen:
-        tdiv(ref = listRef, class = "agent-settings-dropdown-list")
-  if isOpen:
-    for opt in options:
-      let optVal = opt
-      let isActive = optVal == currentValue
-      let cls = if isActive: "agent-settings-dropdown-item agent-settings-dropdown-item--active"
-                else: "agent-settings-dropdown-item"
-      let item = ui(r):
-        tdiv(class = cls,
-             onclick = proc() =
-               vm.settingsActiveDropdown.val = ""
-               onSelect(optVal)):
-          text optVal
-          if isActive:
-            span(class = "agent-settings-check-icon")
-      r.appendRenderedChild(listRef, item)
+
+  # Narrowed to this dropdown, so opening a different one does not re-run
+  # the list effect below (and churn its click-outside listener) unless this
+  # dropdown's own state actually changes.
+  let isOpen = createMemo(proc(): bool =
+    vm.settingsActiveDropdown.val == dropdownId)
+
+  # The open list, appended after the trigger.  Everything it shows is read
+  # here, so a value that changes while it is open (e.g. "Reset to defaults")
+  # redraws the list, and only the list.  The cleanups run before every
+  # re-run and when the panel closes: the list leaves the wrapper and the
+  # document-level listener goes with it.
+  createRenderEffect proc() =
+    if not isOpen.val:
+      return
+    let current = currentValue()
+    var listRef: typeof(r.createElement("div"))
+    let list = ui(r):
+      tdiv(ref = listRef, class = "agent-settings-dropdown-list")
+    for opt in options():
+      r.appendRenderedChild(listRef,
+        renderSettingsDropdownItem(r, vm, opt, opt == current, onSelect))
+    r.appendRenderedChild(wrapperRef, list)
+    onCleanup(proc() = r.removeChild(wrapperRef, list))
     when defined(js):
-      setupClickOutsideHandler(wrapperRef, proc() =
+      onCleanup(setupClickOutsideHandler(wrapperRef, proc() =
         if vm.settingsActiveDropdown.val == dropdownId:
-          vm.settingsActiveDropdown.val = "")
+          vm.settingsActiveDropdown.val = ""))
   panel
 
 proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
                             callbacks: AgentActivityCallbacks): auto =
-  let runtime = vm.settingsRuntime.val
-  let cpu = vm.settingsCpu.val
-  let memory = vm.settingsMemory.val
-  let networkOn = vm.settingsNetworkAccess.val
-  let deliveryMode = vm.settingsDeliveryMode.val
-  let deliveryBranch = if vm.settingsDeliveryBranch.val.len > 0: vm.settingsDeliveryBranch.val
-                       else: vm.currentBranch.val
-  let permissions = vm.settingsPermissions.val
-  let agentName = if vm.selectedModel.val.len > 0: vm.selectedModel.val else: "Claude·Sonnet"
-  let toggleClass = if networkOn: "agent-settings-toggle agent-settings-toggle--on"
-                    else: "agent-settings-toggle"
-
-  var branchOptions: seq[string] = @[]
-  for b in vm.branches.val:
-    branchOptions.add(b)
-  if deliveryBranch.len > 0 and deliveryBranch notin branchOptions:
-    branchOptions.add(deliveryBranch)
-
+  ## The settings panel, built once per opening.  Must be called untracked
+  ## (it creates effects and memos, and must not subscribe its caller to
+  ## anything); see the section comment above.
   # Ref vars for containers into which we append dynamic children
   var sEnvRef: typeof(r.createElement("div"))
   var sDelRef: typeof(r.createElement("div"))
@@ -1613,7 +1740,7 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
         tdiv(ref = twocolRef, class = "agent-settings-two-col")
         tdiv(class = "agent-settings-toggle-row"):
           span(class = "agent-settings-label"): text "Network access"
-          tdiv(class = toggleClass,
+          tdiv(class = settingsToggleClass(vm.settingsNetworkAccess.val),
                onclick = proc() =
                  vm.settingsNetworkAccess.val = not vm.settingsNetworkAccess.val):
             tdiv(class = "agent-settings-toggle-thumb")
@@ -1624,7 +1751,8 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
       tdiv(class = "agent-settings-section"):
         span(class = "agent-settings-section-header"): text "AGENTS"
         tdiv(class = "agent-settings-agents-row"):
-          tdiv(class = "agent-settings-agent-chip"): text agentName & " ×1"
+          tdiv(class = "agent-settings-agent-chip"):
+            text settingsAgentChipText(vm.selectedModel.val)
           tdiv(class = "agent-settings-add-chip"): text "+ add"
       tdiv(ref = sPermRef, class = "agent-settings-section agent-settings-section--last"):
         span(class = "agent-settings-section-header"): text "PERMISSIONS"
@@ -1649,31 +1777,39 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
       span(class = "agent-settings-label"): text "Memory"
   discard twoCols
   r.appendRenderedChild(cpuColRef,
-    renderSettingsDropdown(r, vm, "cpu", cpu, SettingsCpuOptions,
+    renderSettingsDropdown(r, vm, "cpu",
+      proc(): string = vm.settingsCpu.val, staticOptions(SettingsCpuOptions),
       proc(v: string) = vm.settingsCpu.val = v))
   r.appendRenderedChild(memColRef,
-    renderSettingsDropdown(r, vm, "memory", memory, SettingsMemoryOptions,
+    renderSettingsDropdown(r, vm, "memory",
+      proc(): string = vm.settingsMemory.val, staticOptions(SettingsMemoryOptions),
       proc(v: string) = vm.settingsMemory.val = v))
   r.appendRenderedChild(twocolRef, cpuColRef)
   r.appendRenderedChild(twocolRef, memColRef)
 
   # Runtime dropdown appended after the "Runtime" label in env section
   r.appendRenderedChild(sEnvRef,
-    renderSettingsDropdown(r, vm, "runtime", runtime, SettingsRuntimeOptions,
+    renderSettingsDropdown(r, vm, "runtime",
+      proc(): string = vm.settingsRuntime.val, staticOptions(SettingsRuntimeOptions),
       proc(v: string) = vm.settingsRuntime.val = v))
 
   # Delivery section dropdowns
   r.appendRenderedChild(sDelRef,
-    renderSettingsDropdown(r, vm, "deliveryMode", deliveryMode, SettingsDeliveryModeOptions,
+    renderSettingsDropdown(r, vm, "deliveryMode",
+      proc(): string = vm.settingsDeliveryMode.val,
+      staticOptions(SettingsDeliveryModeOptions),
       proc(v: string) = vm.settingsDeliveryMode.val = v))
-  let capturedBranches = branchOptions
   r.appendRenderedChild(sDelRef,
-    renderSettingsDropdown(r, vm, "deliveryBranch", deliveryBranch, capturedBranches,
+    renderSettingsDropdown(r, vm, "deliveryBranch",
+      proc(): string = shownDeliveryBranch(vm),
+      proc(): seq[string] = settingsBranchOptions(vm),
       proc(v: string) = vm.settingsDeliveryBranch.val = v))
 
   # Permissions dropdown
   r.appendRenderedChild(sPermRef,
-    renderSettingsDropdown(r, vm, "permissions", permissions, SettingsPermissionsOptions,
+    renderSettingsDropdown(r, vm, "permissions",
+      proc(): string = vm.settingsPermissions.val,
+      staticOptions(SettingsPermissionsOptions),
       proc(v: string) = vm.settingsPermissions.val = v))
 
   fullPanel
@@ -1776,8 +1912,9 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
       r.appendRenderedChild(listRef, renderBranchOption(r, vm, callbacks, branch))
     when defined(js):
       setupBranchSearch(searchRef, listRef)
-      setupClickOutsideHandler(wrapperRef,
-        proc() = vm.branchDropdownOpen.val = false)
+      # Owned by the buttons effect, like the "+" menu's listener above.
+      onCleanup(setupClickOutsideHandler(wrapperRef,
+        proc() = vm.branchDropdownOpen.val = false))
   panel
 
 proc renderIdleState[R](r: R; vm: AgentActivityVM;
@@ -1866,7 +2003,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
           tdiv(class = "agent-paste-thumb agent-paste-thumb--loading"):
             tdiv(class = "agent-paste-shimmer")
             tdiv(class = "agent-paste-remove",
-                 onclick = proc() = vm.removePastedImage(idx)):
+                 onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.appendRenderedChild(imagesStrip, thumb)
       else:
@@ -1875,11 +2012,9 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         let thumb = ui(r):
           tdiv(class = "agent-paste-thumb"):
             img(ref = imgEl, class = "agent-paste-img", alt = "attachment",
-                onclick = proc() =
-                  when defined(js):
-                    showImageLightbox(cstring(capturedSrc)))
+                onclick = imageLightboxHandler(capturedSrc))
             tdiv(class = "agent-paste-remove",
-                 onclick = proc() = vm.removePastedImage(idx)):
+                 onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.setAttribute(imgEl, "src", imgData)
         r.appendRenderedChild(imagesStrip, thumb)
@@ -1891,7 +2026,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
           span(class = "agent-context-path-chip__label"):
             text capturedPath
           tdiv(class = "agent-paste-remove",
-               onclick = proc() = vm.removeContextPath(pathIdx)):
+               onclick = removeContextPathHandler(vm, pathIdx)):
             text "×"
       r.appendRenderedChild(imagesStrip, chip)
 
@@ -1969,10 +2104,20 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     else:
       r.appendRenderedChild(buttons, renderStopButton(r, callbacks))
 
+  # The settings panel: built when it opens, removed when it closes, and
+  # otherwise left alone (#861).  `settingsOpen` is the ONLY signal this
+  # effect tracks.  The panel is built untracked, so the reads its contents
+  # make subscribe their own small effects instead of this one; a tracked read
+  # here would discard the panel (and its scroll position) on every dropdown
+  # and setting change.  The panel's effects are still owned by this effect,
+  # so closing the panel disposes them, with their click-outside listeners.
   createRenderEffect proc() =
+    let open = vm.settingsOpen.val
     r.clearChildren(settingsPanelHost)
-    if vm.settingsOpen.val:
-      r.appendRenderedChild(settingsPanelHost, renderSettingsPanel(r, vm, callbacks))
+    if open:
+      untrack proc() =
+        r.appendRenderedChild(settingsPanelHost,
+                              renderSettingsPanel(r, vm, callbacks))
 
   panel
 

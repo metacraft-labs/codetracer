@@ -346,13 +346,24 @@ proc foldOutcome*[A](items: seq[A];
   ## over OPFS would interleave `createWritable` calls on sibling paths whose
   ## ordering the atomic-replace argument depends on. There is no throughput
   ## case here worth that.
-  var accumulated = resolvedOk()
-  var capturedStep = step
-  for item in items:
-    let current = item
-    accumulated = thenOutcome(accumulated,
+  ##
+  ## Each link is built by `stepAfter`, never by a closure written in the loop
+  ## body. A Nim closure captures a loop-body local by reference, in ONE
+  ## environment shared by every iteration (see the manual's "Creating
+  ## closures in loops": https://nim-lang.org/docs/manual.html#closures-creating-closures-in-loops),
+  ## on the C and the JS backend alike. Written inline, every link built while
+  ## its predecessor was still pending ran with the LAST item: over OPFS, which
+  ## answers later, a three-entry directory was walked as entries 1, 3, 3.
+  ## That is codetracer#809's archive, which lacked `Prover.toml` and
+  ## `src/tests.nr`. A proc call gives each link an environment of its own.
+  proc stepAfter(previous: PlatformFuture[PlatformOutcome[Nothing]];
+                 item: A): PlatformFuture[PlatformOutcome[Nothing]] =
+    thenOutcome(previous,
       proc(ignored: Nothing): PlatformFuture[PlatformOutcome[Nothing]] =
-        capturedStep(current))
+        step(item))
+  var accumulated = resolvedOk()
+  for item in items:
+    accumulated = stepAfter(accumulated, item)
   accumulated
 
 proc awaitSync*[T](future: PlatformFuture[PlatformOutcome[T]]

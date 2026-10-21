@@ -47,9 +47,20 @@
 ## `apps/app_source_pane.nim` paints, which is what makes the cross-tier
 ## comparison a statement about the RENDERER.
 ##
+## ## M73 (#840): THE SHIPPED EDITOR UNDER THE WHEEL
+##
+## One case here is not about the snapshot app: it spawns the shipped
+## `codetracer-tui` on the real `calc` recording (a real `replay-server`
+## behind it), sends the wheel's SGR-1006 bytes over the editor with
+## `sendMouseScroll`, and reads back off the terminal's cells that the lines
+## the editor shows moved — three a notch — and that the vertical bar's thumb
+## in the pane's last column moved with them (Scrollbar-Scrubbers.md §4).
+## Before M73 the wheel was not routed to the editor and the pane had no
+## vertical bar (Pxor-Bugs M73).
+##
 ## ## Templates, not procs, for anything that calls `check`
 
-import std/[strutils, times, unicode, unittest]
+import std/[os, strutils, times, unicode, unittest]
 
 import isonim_tui
 import term_assert
@@ -59,11 +70,14 @@ import ../../testing/dual_snap
 import ../../testing/test_app_runtime
 import ../apps/app_source_pane as paneApp
 import ./derived_colours
+# M73 (#840): the shipped binary on a real recording.
+import ../fixtures/fixture_provider
+import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 72
+const ExpectedAssertions = 81
 
 const
   Cols = 90
@@ -339,6 +353,171 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
       ck canon.dialect == "tier1-isonim-tui"
       ck canonFromDir(res.tier2Dir).dialect == "tier2-libvterm"
     ck checkedCases == 2
+
+  test "M73 (#840): the wheel over the shipped editor moves its lines, and the vertical bar's thumb moves with them":
+    # THE SHIPPED BINARY on a real recording, not the snapshot app: the
+    # defect was that nothing a user did reached the window `SourceVM` holds
+    # (Pxor-Bugs M73), so only the real runtime, host and engine can show it.
+    # `calc`'s `main.py` is 116 lines, several times the editor's height
+    # here. The wheel is TermAssert's `sendMouseScroll` — the SGR-1006 bytes
+    # a terminal writes — aimed at the editor's body while another pane may
+    # hold the focus (CodeTracer-TUI.md §4.4).
+    let fixture = resolveFixture("calc")
+    require fixture.outcome == foRecorded
+    let state = getTempDir() / ("m73-pty-" & $getCurrentProcessId())
+    removeDir(state)
+    createDir(state)
+    const M73Cols = 160
+    const M73Rows = 48
+    var sess = newTuiTest(tuiBinary(), @["--theme=dark", fixture.tracePath])
+      .width(M73Cols).height(M73Rows)
+      .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX",
+                 "STY", "NERD_FONT", "NERDFONT", "COLORFGBG")
+      .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
+      .envSet("COLORTERM", "truecolor")
+      .envSet("XDG_STATE_HOME", state)
+      .envSet("CODETRACER_HOME", state / "ct-home")
+      .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
+      .spawn()
+    try:
+      settleOnDebugger(sess, M73Cols, M73Rows)
+      let source = readFile(lifecycle_support.repoRoot() / "test-programs/calc/main.py")
+        .splitLines()
+
+      proc glyphAt(s: var TuiTestSession; r, c: int): string =
+        let cell = s.cellAt(r, c)
+        if int(cell.rune) == 0: " " else: $cell.rune
+
+      proc rowText(s: var TuiTestSession; r: int): string =
+        for c in 0 ..< M73Cols:
+          result.add s.glyphAt(r, c)
+
+      type Shown = object
+        rowOf: seq[(int, int)]
+          ## (screen row, source line) for every row whose text is one of
+          ## the file's distinctive lines — read off the cells, so the
+          ## lines are what the terminal SHOWS.
+        textCol: int
+          ## The screen column the code starts in.
+
+      proc distinctive(n: int): bool =
+        ## A line long enough, and whose first 24 characters — what a row is
+        ## searched for — occur in no other line, to place a row by its text.
+        let t = source[n - 1].strip
+        if t.len < 24: return false
+        var count = 0
+        for l in source:
+          if l.contains(t[0 ..< 24]): inc count
+        count == 1
+
+      proc shown(s: var TuiTestSession): Shown =
+        discard s.drainOutput(80)
+        result.textCol = -1
+        for r in 1 ..< M73Rows - 1:
+          let text = s.rowText(r)
+          for n in 1 .. source.len:
+            if distinctive(n):
+              let t = source[n - 1].strip
+              let at = text.find(t[0 ..< 24])
+              if at >= 0:
+                result.rowOf.add (r, n)
+                if result.textCol < 0:
+                  # The cell where the line's text (with its indentation)
+                  # starts.
+                  let indent = source[n - 1].len - source[n - 1].strip(
+                    trailing = false).len
+                  result.textCol = text[0 ..< at].runeLen - indent
+                break
+
+      proc trackCol(s: var TuiTestSession; sh: Shown): int =
+        ## The vertical bar's column: the first column right of the code
+        ## whose every placed row holds a track or thumb glyph.
+        result = -1
+        if sh.rowOf.len == 0 or sh.textCol < 0: return
+        const TrackGlyphs = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇"]
+        for c in sh.textCol + 1 ..< M73Cols:
+          var all = true
+          for (r, _) in sh.rowOf:
+            if s.glyphAt(r, c) notin TrackGlyphs:
+              all = false
+              break
+          if all:
+            return c
+
+      proc thumbStart(s: var TuiTestSession; col, top, bottom: int): int =
+        ## The first row of the LONGEST run of non-track cells down `col`
+        ## between `top` and `bottom` — the thumb (the execution line's mark
+        ## is a single cell, so it is never the longest run of a thumb taller
+        ## than one cell).
+        var best = (start: -1, len: 0)
+        var run = (start: -1, len: 0)
+        for r in top .. bottom:
+          if s.glyphAt(r, col) != "│":
+            if run.start < 0: run = (start: r, len: 0)
+            inc run.len
+            if run.len > best.len: best = run
+          else:
+            run = (start: -1, len: 0)
+        best.start
+
+      let before = sess.shown()
+      checkpoint("placed rows before: " & $before.rowOf)
+      ck before.rowOf.len >= 3
+      # The anchor: the first placed row that is still on the screen once the
+      # lines have moved 18 rows up (six notches of three), so where its line
+      # lands is read back rather than inferred.
+      var anchor = (-1, -1)
+      for (r, n) in before.rowOf:
+        if r - 18 >= before.rowOf[0][0]:
+          anchor = (r, n)
+          break
+      checkpoint("anchor (row, line): " & $anchor)
+      ck anchor[0] >= 0
+      let col = sess.trackCol(before)
+      checkpoint("vertical bar column: " & $col)
+      ck col > before.textCol
+      let firstRow = before.rowOf[0][0]
+      let lastRow = before.rowOf[^1][0]
+      let thumb0 = if col > 0: sess.thumbStart(col, firstRow, lastRow) else: -1
+
+      # Six notches DOWN over the code, mid-pane.
+      let wheelRow = (firstRow + lastRow) div 2
+      let wheelCol = before.textCol + 10
+      for _ in 0 ..< 6:
+        sess.sendMouseScroll(wheelRow, wheelCol, sdDown)
+        discard sess.drainOutput(120)
+      sleep(300)
+      let after = sess.shown()
+      checkpoint("placed rows after six notches down: " & $after.rowOf)
+      # The line that was on `anchor`'s row is now 18 rows higher (three
+      # lines a notch): the editor moved, and by exactly the wheel's lines.
+      var moved = -1
+      for (r, n) in after.rowOf:
+        if n == anchor[1]:
+          moved = anchor[0] - r
+      checkpoint("anchor line " & $anchor[1] & " moved up " & $moved &
+                 " row(s)")
+      ck moved == 18
+      ck after.rowOf.len >= 1 and after.rowOf != before.rowOf
+      # The thumb moved down with the lines.
+      let thumb1 = if col > 0: sess.thumbStart(col, firstRow, lastRow) else: -1
+      checkpoint("thumb first row " & $thumb0 & " -> " & $thumb1)
+      ck thumb0 >= 0
+      ck thumb1 > thumb0
+
+      # Six notches UP: back where it was, thumb and lines.
+      for _ in 0 ..< 6:
+        sess.sendMouseScroll(wheelRow, wheelCol, sdUp)
+        discard sess.drainOutput(120)
+      sleep(300)
+      let back = sess.shown()
+      ck back.rowOf == before.rowOf
+      ck col > 0 and sess.thumbStart(col, firstRow, lastRow) == thumb0
+    finally:
+      sess.send("\x11")  # Ctrl+Q, the CUA base's quit
+      discard sess.waitExit(initDuration(seconds = 10))
+      sess.terminate()
+      sess.close()
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

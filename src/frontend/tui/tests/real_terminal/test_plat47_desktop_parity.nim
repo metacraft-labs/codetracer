@@ -217,10 +217,17 @@ suite "PLAT-47: the terminal shows what the desktop shows":
     # the band's colour — past the end of `#!/usr/bin/env python3`, as the
     # desktop's band is read 30px inside its editor's right edge — and the
     # gutter is not (the desktop draws no band under the line numbers).
+    #
+    # M73 (#840): the right edge is the CODE's — the column before the
+    # pane's vertical bar while the file is taller than the pane, as the
+    # desktop's band ends at Monaco's scrollbar (Scrollbar-Scrubbers.md §4:
+    # the track is the pane's rightmost column).
+    const VerticalBarGlyphs = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇"]
     let codeCol = colOf(sess, lineOne, Cols, "#!/usr")
     var edge = codeCol
     while edge + 1 < Cols and
-          glyph(sess, lineOne, edge + 1) notin VerticalDividerGlyphs:
+          glyph(sess, lineOne, edge + 1) notin VerticalDividerGlyphs and
+          glyph(sess, lineOne, edge + 1) notin VerticalBarGlyphs:
       inc edge
     var banded = 0
     for c in codeCol .. edge:
