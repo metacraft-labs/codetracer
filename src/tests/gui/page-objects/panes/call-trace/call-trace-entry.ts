@@ -137,10 +137,18 @@ export class CallTraceEntry {
     return this.hasClass("event-selected");
   }
 
+  /**
+   * Whether the row has children to expand or collapse. The view draws
+   * `.collapse-call-img` on an expanded parent, `.expand-call-img` on a
+   * collapsed one and `.dot-call-img` on a leaf (`toggleIconClass` in
+   * `isonim_calltrace_view.nim`). Counting the leaf's dot and not the
+   * collapsed parent's icon made `expandChildren()` return without
+   * clicking on exactly the rows it exists to open.
+   */
   async hasToggle(): Promise<boolean> {
     return (
       (await this.toggleLocator()
-        .locator(".collapse-call-img, .dot-call-img")
+        .locator(".collapse-call-img, .expand-call-img")
         .count()) > 0
     );
   }

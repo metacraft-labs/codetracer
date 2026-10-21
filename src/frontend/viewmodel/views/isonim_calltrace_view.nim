@@ -18,7 +18,7 @@
 ##     `.component-container.calltrace-view.isonim-calltrace`
 ##     `.calltrace-call-line.calltrace-row[.event-selected]`
 ##     `.call-child-box#local-call-{index}`
-##     `.toggle-call > .{dot|collapse}-call-img`
+##     `.toggle-call > .{dot|expand|collapse}-call-img`
 ##     `.call-text#local-call-text-{index}` (click = select / double-click = jump)
 ##     `.calltrace-search > form > input.calltrace-search-input`
 ##     `.call-search-results > .search-result`
