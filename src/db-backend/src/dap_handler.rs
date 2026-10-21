@@ -11,7 +11,7 @@ use std::sync::mpsc::Sender;
 
 use codetracer_trace_types::{CallKey, EventLogKind, Line, NO_KEY, PathId, StepId, TypeKind, VariableId};
 
-use crate::calltrace::Calltrace;
+use crate::calltrace::{Calltrace, CalltraceShape};
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::dap::{self, DapClient, DapMessage};
@@ -1280,6 +1280,10 @@ impl Handler {
         _req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
     ) -> Result<(), Box<dyn Error>> {
+        // Shape the tree for this stop BEFORE applying the collapse, so the
+        // read that follows it does not re-shape and drop it
+        // (`Calltrace::reshape_if_stop_changed`).
+        self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             self.calltrace.change_expand_state(CallKey(num_key), false);
         } else {
@@ -1295,6 +1299,8 @@ impl Handler {
         _req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
     ) -> Result<(), Box<dyn Error>> {
+        // As in `collapse_calls`: shape for this stop first, then expand.
+        self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         let kind = collapse_calls_args.non_expanded_kind;
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             if kind == CalltraceNonExpandedKind::CallstackInternal {
@@ -1329,24 +1335,23 @@ impl Handler {
         if self.reader.first_step_id().is_none() {
             return Ok(Vec::new());
         }
-        let Some(call_key) = self.reader.call_key_for_step(self.step_id) else {
+        if self.reader.call_key_for_step(self.step_id).is_none() {
             return Err(format!(
                 "load_local_calltrace: execution index {} is not a source step (the trace has {} execution IDs)",
                 self.step_id.0,
                 self.reader.step_count()
             )
             .into());
-        };
-        self.calltrace.optimize_collapse = args.optimize_collapse;
-        if call_key != self.calltrace.start_call_key {
-            // When not auto-collapsing (e.g. Python API bridge), pass the
-            // requested depth so calls are expanded up to that level.
-            // The GUI uses auto_collapsing=true and handles expand/collapse
-            // interactively, so it does not need this.
-            let max_depth = if args.auto_collapsing { None } else { Some(args.depth) };
-            self.calltrace
-                .jump_to_with_depth(self.step_id, args.auto_collapsing, max_depth, &*self.reader);
         }
+        self.calltrace.optimize_collapse = args.optimize_collapse;
+        // Remember how this client shapes the listing — smart collapse
+        // (desktop, `auto_collapsing = true`) or every call expanded up to
+        // `depth` (terminal, GPUI, Python API bridge) — so a collapse or an
+        // expansion that reaches a new stop before any read there can shape
+        // the tree first. Then shape it for this stop if no request has yet.
+        self.calltrace
+            .set_shape(CalltraceShape::of_load(args.auto_collapsing, args.depth));
+        self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         self.calltrace.load_lines(
             args.start_call_line_index,
             args.height,
@@ -8834,6 +8839,209 @@ mod tests {
             error.to_string().contains("is not a source step"),
             "unexpected error: {error}"
         );
+    }
+
+    /// A collapse or an expansion at a position that is not a step leaves
+    /// the tree alone, as the section read there refuses: it re-shapes the
+    /// tree for its stop first (`Calltrace::reshape_if_stop_changed`), and
+    /// the desktop's smart collapse has no call to shape around there. It
+    /// must not panic the task thread.
+    #[test]
+    fn collapse_at_a_position_that_is_not_a_step_leaves_the_tree_alone() -> Result<(), Box<dyn Error>> {
+        let mut handler: Handler = Handler::new(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            Box::new(setup_db_with_calls()),
+        );
+        // A read at a real stop, with the desktop's shape, so the next
+        // request has a shape to re-shape with.
+        let args = local_calltrace_args(&mut handler, true);
+        let before = listed_calls(&handler.load_local_calltrace(args)?);
+        assert!(!before.is_empty(), "control: the read at a real stop lists calls");
+
+        handler.step_id = StepId(handler.reader.step_count() as i64 + 10);
+        collapse(&mut handler, CallKey(0))?;
+        handler.expand_calls(
+            dap::Request::default(),
+            CollapseCallsArgs {
+                call_key: "0".to_string(),
+                non_expanded_kind: CalltraceNonExpandedKind::Children,
+                count: 0,
+            },
+        )?;
+        Ok(())
+    }
+
+    /// The first step recorded inside the call to `function_name` in
+    /// `setup_db_with_calls`'s trace, with that call's key.
+    fn first_step_in_call_to(handler: &Handler, function_name: &str) -> (StepId, CallKey) {
+        for step in 0..handler.reader.step_count() as i64 {
+            let Some(key) = handler.reader.call_key_for_step(StepId(step)) else {
+                continue;
+            };
+            let Some(call) = handler.reader.call(key) else {
+                continue;
+            };
+            let name = handler
+                .reader
+                .function(call.function_id)
+                .map(|f| f.name.clone())
+                .unwrap_or_default();
+            if name == function_name {
+                return (StepId(step), key);
+            }
+        }
+        panic!("the fixture records no step inside `{function_name}`");
+    }
+
+    fn local_calltrace_args(handler: &mut Handler, auto_collapsing: bool) -> CalltraceLoadArgs {
+        CalltraceLoadArgs {
+            location: handler
+                .reader
+                .load_location(handler.step_id, CallKey(-1), &mut handler.expr_loader),
+            start_call_line_index: GlobalCallLineIndex(0),
+            depth: 10,
+            height: 10,
+            raw_ignore_patterns: "".to_string(),
+            auto_collapsing,
+            optimize_collapse: true,
+            render_call_line_index: 0,
+        }
+    }
+
+    /// Move the session to `step` as a real move does: the replay and
+    /// `self.step_id` follow it, then `complete_move` reports the stop.
+    fn move_to(handler: &mut Handler, step: StepId) -> Result<(), Box<dyn Error>> {
+        let (sender, _receiver) = mpsc::channel();
+        seek_to(handler, step.0)?;
+        handler.complete_move(false, sender)?;
+        Ok(())
+    }
+
+    /// `ct/collapse-calls` for `key`, as the front ends send it.
+    fn collapse(handler: &mut Handler, key: CallKey) -> Result<(), Box<dyn Error>> {
+        handler.collapse_calls(
+            dap::Request::default(),
+            CollapseCallsArgs {
+                call_key: key.0.to_string(),
+                non_expanded_kind: CalltraceNonExpandedKind::Children,
+                count: 0,
+            },
+        )
+    }
+
+    /// The keys of the `Call` lines a section lists, each with whether that
+    /// call hides its children.
+    fn listed_calls(lines: &[CallLine]) -> Vec<(String, bool)> {
+        lines
+            .iter()
+            .filter(|line| line.content.kind == CallLineContentKind::Call)
+            .map(|line| (line.content.call.key.clone(), line.content.hidden_children))
+            .collect()
+    }
+
+    /// A collapse made after a move survives the section read that follows
+    /// it (codetracer-pm issue 2026-10-21 "on the native front ends, a
+    /// call-trace collapse made after a move is undone by the next section
+    /// read").
+    ///
+    /// The terminal and GPUI do not re-read a section they already hold after
+    /// a move, so the first calltrace request at the new stop can be the
+    /// collapse itself, with the read right behind it. The tree has to be
+    /// re-shaped for the new stop BEFORE that collapse is applied: re-shaping
+    /// on the read expands every call again and drops it. Both shapes are
+    /// covered — the native front ends' (`auto_collapsing = false`) and the
+    /// desktop's smart collapse (`auto_collapsing = true`).
+    #[test]
+    fn test_collapse_after_a_move_survives_the_next_section_read() -> Result<(), Box<dyn Error>> {
+        for auto_collapsing in [false, true] {
+            let mut handler = Handler::new(
+                TraceKind::Materialized,
+                RecreatorArgs::default(),
+                Box::new(setup_db_with_calls()),
+            );
+            let (in_a, a_key) = first_step_in_call_to(&handler, "a");
+            let (in_b, b_key) = first_step_in_call_to(&handler, "b");
+            let start_key = handler
+                .reader
+                .call(b_key)
+                .map(|c| c.parent_key)
+                .expect("b has a parent");
+            assert_ne!(a_key, b_key);
+
+            // The pane is read once at a stop in `a` ...
+            move_to(&mut handler, in_a)?;
+            let args = local_calltrace_args(&mut handler, auto_collapsing);
+            let before = listed_calls(&handler.load_local_calltrace(args)?);
+            eprintln!("auto_collapsing={auto_collapsing} at a: {before:?}");
+            assert!(
+                before.contains(&(start_key.0.to_string(), false)),
+                "control: `start` lists its children before the collapse: {before:?}"
+            );
+
+            // ... then the debugger moves into `b`, and the first calltrace
+            // request at the new stop is the collapse of b's parent.
+            move_to(&mut handler, in_b)?;
+            collapse(&mut handler, start_key)?;
+            let args = local_calltrace_args(&mut handler, auto_collapsing);
+            let after = listed_calls(&handler.load_local_calltrace(args)?);
+            eprintln!("auto_collapsing={auto_collapsing} after the collapse at b: {after:?}");
+
+            assert!(
+                after.contains(&(start_key.0.to_string(), true)),
+                "auto_collapsing={auto_collapsing}: the collapsed `start` must hide its children: {after:?}"
+            );
+            for hidden in [a_key, b_key] {
+                assert!(
+                    !after.iter().any(|(key, _)| *key == hidden.0.to_string()),
+                    "auto_collapsing={auto_collapsing}: call {hidden:?} must be hidden under the \
+                     collapsed `start`: {after:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The other half of the contract: a move to a different call still
+    /// re-shapes the tree (Call-Trace-Pane.md § Smart Collapsing: "when the
+    /// user jumps to a different location"), so a collapse made at an earlier
+    /// stop does not outlive the move. With `auto_collapsing = false` the
+    /// re-shape expands every call up to the requested depth.
+    #[test]
+    fn test_a_move_to_another_call_reshapes_the_tree() -> Result<(), Box<dyn Error>> {
+        let mut handler = Handler::new(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            Box::new(setup_db_with_calls()),
+        );
+        let (in_a, _) = first_step_in_call_to(&handler, "a");
+        let (in_b, b_key) = first_step_in_call_to(&handler, "b");
+        let start_key = handler
+            .reader
+            .call(b_key)
+            .map(|c| c.parent_key)
+            .expect("b has a parent");
+
+        move_to(&mut handler, in_a)?;
+        let args = local_calltrace_args(&mut handler, false);
+        let _ = handler.load_local_calltrace(args)?;
+        collapse(&mut handler, start_key)?;
+        let args = local_calltrace_args(&mut handler, false);
+        let collapsed = listed_calls(&handler.load_local_calltrace(args)?);
+        assert!(
+            collapsed.contains(&(start_key.0.to_string(), true)),
+            "control: the collapse takes effect at its own stop: {collapsed:?}"
+        );
+
+        move_to(&mut handler, in_b)?;
+        let args = local_calltrace_args(&mut handler, false);
+        let reshaped = listed_calls(&handler.load_local_calltrace(args)?);
+        assert!(
+            reshaped.contains(&(start_key.0.to_string(), false))
+                && reshaped.iter().any(|(key, _)| *key == b_key.0.to_string()),
+            "a move into `b` re-expands its parent: {reshaped:?}"
+        );
+        Ok(())
     }
 
     /// `ct/load-locals` answers for the step the debugger is on — for

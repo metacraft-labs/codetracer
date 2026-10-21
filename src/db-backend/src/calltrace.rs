@@ -24,6 +24,40 @@ pub struct Calltrace {
     pub global_call_lines: DistinctVec<GlobalCallLineIndex, CallLineMetadata>,
     pub start_call_key: CallKey,
     pub optimize_collapse: bool,
+    /// How the client last asked the listing to be shaped, remembered from
+    /// its last section read so the tree can be re-shaped for a new stop
+    /// before ANY calltrace request is served there — including a collapse
+    /// or an expansion that arrives before the first read at that stop. See
+    /// [`Calltrace::reshape_if_stop_changed`]. `None` until a section has
+    /// been read: before that nothing has been shaped and no client has seen
+    /// a row to act on.
+    shape: Option<CalltraceShape>,
+}
+
+/// The shape a client asks the calltrace listing to take when the stop moves
+/// to a different call: what `jump_to_with_depth` needs besides the stop.
+///
+/// It comes from the client's `ct/load-calltrace-section` arguments. The
+/// desktop sends `auto_collapsing = true` (the smart collapse of
+/// Call-Trace-Pane.md § Smart Collapsing); the terminal, GPUI and the Python
+/// API bridge send `auto_collapsing = false` with a depth, which expands
+/// every call up to that depth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CalltraceShape {
+    pub auto_collapsing: bool,
+    pub max_depth: Option<usize>,
+}
+
+impl CalltraceShape {
+    /// The shape a section read with these arguments asks for. The depth
+    /// only matters without auto-collapsing: the smart collapse decides
+    /// visibility from the call stack instead.
+    pub fn of_load(auto_collapsing: bool, depth: usize) -> Self {
+        CalltraceShape {
+            auto_collapsing,
+            max_depth: if auto_collapsing { None } else { Some(depth) },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,7 +123,58 @@ impl Calltrace {
             // with calls
             start_call_key: CallKey(-1),
             optimize_collapse: false,
+            shape: None,
         }
+    }
+
+    /// Remember how the client wants the listing shaped (from its latest
+    /// section read). Changing it does not re-shape the current stop's tree:
+    /// it is applied at the next stop in a different call, as before.
+    pub fn set_shape(&mut self, shape: CalltraceShape) {
+        self.shape = Some(shape);
+    }
+
+    /// Re-shape the tree for the stop at `step_id` if that stop is in a
+    /// different call than the one the tree was last shaped for
+    /// (`start_call_key`), using the remembered [`CalltraceShape`]. Returns
+    /// whether it re-shaped.
+    ///
+    /// **Every calltrace request calls this before it acts** — a section
+    /// read, a collapse, an expansion. That is what makes the re-shape happen
+    /// "when the user jumps to a different location" (Call-Trace-Pane.md §
+    /// Smart Collapsing) as far as any client can observe, without paying
+    /// for it on moves no calltrace request follows (a DAP client with no
+    /// calltrace pane never pays at all, since `shape` stays `None`).
+    ///
+    /// Re-shaping only on the first READ at a new stop was the defect: the
+    /// terminal and GPUI do not re-read a section they already hold after a
+    /// move, so their first calltrace request at the new stop can be a
+    /// collapse, with the read right behind it — and that read re-expanded
+    /// every call (`expand_all_up_to_depth`), dropping the collapse. Now the
+    /// collapse request re-shapes first and is applied on top, and the read
+    /// that follows sees `start_call_key` already at this stop and keeps it.
+    ///
+    /// Keyed on the CALL, not on every move: a move within the same call
+    /// keeps the user's collapses and expansions, as it always has. Whether
+    /// collapses made at an earlier stop should survive a move to another
+    /// call is not specified; they do not, as before.
+    pub fn reshape_if_stop_changed(&mut self, step_id: StepId, reader: &dyn TraceReader) -> bool {
+        let Some(shape) = self.shape else {
+            return false;
+        };
+        // A position that is not a source step has no call to shape the tree
+        // around: leave the tree as it is. A section read there is refused
+        // (`load_local_calltrace`), and a collapse or an expansion must not
+        // shape for it either — the smart collapse would index the call list
+        // with no call and panic the task thread.
+        let Some(call_key) = reader.call_key_for_step(step_id) else {
+            return false;
+        };
+        if call_key == self.start_call_key {
+            return false;
+        }
+        self.jump_to_with_depth(step_id, shape.auto_collapsing, shape.max_depth, reader);
+        true
     }
 
     pub fn jump_to(&mut self, step_id: StepId, auto_collapsing: bool, reader: &dyn TraceReader) {

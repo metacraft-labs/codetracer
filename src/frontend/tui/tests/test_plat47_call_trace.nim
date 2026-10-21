@@ -210,13 +210,14 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
 
     # ---- step into the later call, as a click on its row does ------------
     ck session.session.jumpToCall(target) == ""
-    # The section at the NEW stop. The engine re-expands its listing when a
-    # section is read at a stop in a different call than the last read, so a
-    # collapse sent before any read at this stop would be undone by the read
-    # that follows it. Reading here first is what makes the collapse below
-    # stick; the order is not what this case is about.
-    session.session.requestAndLoadCalltrace(startIndex = 0, height = 200,
-                                            depth = RecordingCalltraceDepth)
+    # The terminal's own path after a click moved the debugger: `refresh`,
+    # which reads no section when the rows the pane shows are already held —
+    # so the collapse below is the FIRST calltrace request at the new stop.
+    # The engine must shape its listing for this stop before applying that
+    # collapse, or the read the toggle makes after it re-expands every call
+    # and the collapse is lost (codetracer-pm issue 2026-10-21, "a call-trace
+    # collapse made after a move is undone by the next section read"). The
+    # `parentCollapsed` instrument below fails if it is.
     session.refresh(rt)
     session.session.selectCurrentCall()
     ck rt.app.callStack.frames.len > 0
