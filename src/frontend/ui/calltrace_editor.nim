@@ -181,15 +181,17 @@ method unregister*(self: CalltraceEditorComponent) =
   ## Release the module-global slot and the mounted marker before the base
   ## implementation drops the event-bus subscriptions.
   ##
-  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY, AND SILENTLY. Both
-  ## globals are write-once: `register` assigns `calltraceEditorComponentRef` only
-  ## `if isNil`, and the mount returns early at its
-  ## `isoNimCalltraceEditorMountedIds.hasKey` guard. Neither was ever cleared. After a
-  ## teardown `calltraceEditorComponentRef` still points at a component whose DOM
-  ## container is gone, and the marker for its id survives into the next
-  ## component handed the same id — GoldenLayout reuses them, and ids restart
-  ## from 0 after a layout reset — whose mount then returns at the guard and
-  ## draws nothing.
+  ## WITHOUT THIS THE PANE COMES BACK BLANK, AND SILENTLY. Both globals are
+  ## write-once: `register` assigns `calltraceEditorComponentRef` only
+  ## `if isNil`, and the mount consults `isoNimCalltraceEditorMountedIds`.
+  ## Neither is cleared anywhere else. After a teardown
+  ## `calltraceEditorComponentRef` still points at a component whose DOM
+  ## container is gone. The id latch alone no longer blanks a FRESH host —
+  ## `isoNimPanelNeedsMountInHost` also asks whether the host in front of the
+  ## mount carries the mark, and a new element does not — but a host that
+  ## survived the teardown still carries it, and GoldenLayout reuses ids (they
+  ## restart from 0 after a layout reset), so clearing the latch here is what
+  ## has that host rebuilt for the next component handed the same id.
   ##
   ## It is an ordinary transition, not an exotic one:
   ## `ui/session_switch.nim:337` unregisters EVERY component of a closing

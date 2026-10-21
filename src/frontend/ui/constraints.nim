@@ -127,17 +127,15 @@ method unregister*(self: ConstraintsComponent) =
   ## Release the module-global slot and the mounted marker before the base
   ## implementation drops the event-bus subscriptions.
   ##
-  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY. Both globals above
-  ## are write-once — `register` assigns the ref only `if isNil`, and
-  ## `tryMountIsoNimConstraintsPanel` returns early at its
-  ## `isoNimConstraintsMountedIds.hasKey` guard. Neither is ever cleared, so
-  ## after a teardown:
-  ##
-  ##   * `constraintsComponentRef` still points at a component whose DOM
-  ##     container no longer exists, and
-  ##   * the mounted marker for its id survives into the next component that
-  ##     is given the same id, whose mount then returns at the guard and draws
-  ##     nothing.
+  ## WITHOUT THIS THE PANE COMES BACK BLANK. Both globals above are
+  ## write-once — `register` assigns the ref only `if isNil`, and the mount
+  ## consults `isoNimConstraintsMountedIds`. Neither is cleared anywhere else,
+  ## so after a teardown `constraintsComponentRef` still points at a component
+  ## whose DOM container no longer exists. The id latch alone no longer blanks
+  ## a FRESH host — `isoNimPanelNeedsMountInHost` also asks whether the host in
+  ## front of the mount carries the mark, and a new element does not — but a
+  ## host that survived the teardown still carries it, and clearing the latch
+  ## here is what has that host rebuilt for the next component given the id.
   ##
   ## `ui/session_switch.nim` unregisters EVERY component of the closing
   ## session, and `ui/layout.nim` unregisters a closed panel, so this is an

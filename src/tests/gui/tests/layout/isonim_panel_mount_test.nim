@@ -105,14 +105,14 @@ suite "the single-instance panes ask the document, not their memory":
     #
     # THIS IS THE ASSERTION THAT FAILS UNDER `-d:ctIsoNimPanelIdLatch`.
     check not isoNimPanelMountIsLive(mountedVMIsCurrent = true,
-                                     hostIsInDocument = false)
+                                     hostCarriesMark = false)
 
   test "a live host holding the current ViewModel is not remounted":
     # The other half, and the reason this is not simply "always mount". Every
     # mount's first act is to delete the host's children, so remounting over a
     # live view tears down a rendered tree on every registration.
     check isoNimPanelMountIsLive(mountedVMIsCurrent = true,
-                                 hostIsInDocument = true)
+                                 hostCarriesMark = true)
 
   test "a live host holding a REPLACED ViewModel is remounted":
     # The case the deleted flag's single reset site existed for: the stub
@@ -121,13 +121,13 @@ suite "the single-instance panes ask the document, not their memory":
     # rows after the real backend arrived, and deleting the flag would have
     # been a regression rather than a fix.
     check not isoNimPanelMountIsLive(mountedVMIsCurrent = false,
-                                     hostIsInDocument = true)
+                                     hostCarriesMark = true)
 
   test "a pane that has never mounted is never live":
     # The boot case. The host carries no mark and no recorded ViewModel, so
     # both halves agree.
     check not isoNimPanelMountIsLive(mountedVMIsCurrent = false,
-                                     hostIsInDocument = false)
+                                     hostCarriesMark = false)
 
   test "both halves decide, and neither subsumes the other":
     # Stated as the matrix because a predicate that ignored one input would

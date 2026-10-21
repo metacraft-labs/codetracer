@@ -49,7 +49,7 @@ proc calltracePanelIsLive(host: dom_api.Element): bool =
   ## built on the ViewModel that is current?
   isoNimPanelMountIsLive(
     mountedVMIsCurrent = isoNimPanelHostHolds(host, calltraceVMInstance),
-    hostIsInDocument = isoNimPanelContainerIsMounted(host))
+    hostCarriesMark = isoNimPanelContainerIsMounted(host))
 
 let returnValueName: cstring = "<return value>"
 

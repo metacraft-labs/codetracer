@@ -72,7 +72,7 @@ func isoNimPanelNeedsMount*(idLatchSaysMounted: bool;
     not containerCarriesMark
 
 func isoNimPanelMountIsLive*(mountedVMIsCurrent: bool;
-                             hostIsInDocument: bool): bool =
+                             hostCarriesMark: bool): bool =
   ## Is the mount a SINGLE-INSTANCE pane remembers still the one on screen?
   ##
   ## The three replay panes — State, Call Trace, Timeline — never had the
@@ -92,9 +92,10 @@ func isoNimPanelMountIsLive*(mountedVMIsCurrent: bool;
   ##
   ## Both halves are load-bearing and neither subsumes the other:
   ##
-  ##   * `hostIsInDocument` — the host IN FRONT OF THE MOUNT (this tab's,
+  ##   * `hostCarriesMark` — the host IN FRONT OF THE MOUNT (this tab's,
   ##     found by `findIsoNimPaneHost`) carries the mount mark. It used to be
-  ##     `document.contains(host)` of the one host the module remembered;
+  ##     `hostIsInDocument`, `document.contains(host)` of the one host the
+  ##     module remembered;
   ##     that answered "live" in every tab once tab 0 had mounted
   ##     (issue `2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first.md`).
   ##     A rebuilt host carries no mark, so the layout swap is still covered.
@@ -113,7 +114,7 @@ func isoNimPanelMountIsLive*(mountedVMIsCurrent: bool;
     # with the DOM question left unasked.
     mountedVMIsCurrent
   else:
-    mountedVMIsCurrent and hostIsInDocument
+    mountedVMIsCurrent and hostCarriesMark
 
 
 # ---------------------------------------------------------------------------

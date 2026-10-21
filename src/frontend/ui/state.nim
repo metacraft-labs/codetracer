@@ -150,7 +150,7 @@ proc statePanelIsLive(host: dom_api.Element): bool =
   ## on the ViewModel that is current?
   isoNimPanelMountIsLive(
     mountedVMIsCurrent = isoNimPanelHostHolds(host, stateVMInstance),
-    hostIsInDocument = isoNimPanelContainerIsMounted(host))
+    hostCarriesMark = isoNimPanelContainerIsMounted(host))
 
 proc doMountStatePanel(data: StateMountData) {.cdecl.} =
   data.retryCount += 1
