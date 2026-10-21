@@ -318,6 +318,66 @@ const
     ## their tooltip and key on hover (`runtime.routeTopBarMouse`), and is
     ## otherwise dropped without a repaint.
 
+# ---------------------------------------------------------------------------
+# Focus reporting (DECSET 1004)
+# ---------------------------------------------------------------------------
+#
+# THE TERMINAL'S EQUIVALENT OF THE DESKTOP'S WINDOW `focus` EVENT. The
+# desktop's VCS panel re-reads the repository every `refreshIntervalMs` AND
+# whenever its window regains focus (`ui/vcs.nim` `startFileWatching`,
+# VCS-Panel.md's auto-refresh), so returning to CodeTracer after committing in
+# another program shows the commit at once. A terminal program learns the same
+# thing only by asking: with DECSET 1004 set, xterm and every terminal that
+# follows it (VTE, kitty, WezTerm, iTerm2, foot, Alacritty, Windows Terminal,
+# and tmux with `focus-events on`) writes `CSI I` when the terminal window
+# gains focus and `CSI O` when it loses it.
+# https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-FocusIn_FocusOut
+#
+# Requested WHENEVER THE TERMINAL IS OURS, not with the mouse: focus says
+# nothing about a pointer, and `--no-mouse` (the user keeping the terminal's
+# own selection) must not also cost them the refresh on return. A terminal
+# that does not implement mode 1004 ignores the request, as it does every
+# private mode it does not know, and simply never sends the reports.
+
+const
+  FocusInToken* = "\e[I"
+    ## `CSI I`: the terminal window gained focus.
+  FocusOutToken* = "\e[O"
+    ## `CSI O`: the terminal window lost focus.
+
+type
+  FocusReport* = enum
+    ## What one framed input token says about the terminal's focus.
+    frNone = "none"
+      ## Not a focus report: a key, a mouse report, a reply.
+    frGained = "gained"
+    frLost = "lost"
+
+func focusReportOf*(token: string): FocusReport =
+  ## Whether `token` — ONE COMPLETE TOKEN as `InputFramer.feed` delivers it —
+  ## is a focus report.
+  ##
+  ## AN EXACT MATCH ON THE WHOLE TOKEN, and that is what keeps a report from
+  ## ever being a key and a key from ever being a report. The framer delivers
+  ## `ESC [ I` as one CSI token (`I` is a CSI final byte), and the keys that
+  ## look like it are different tokens: `Esc` then `I` is either `ESC I` in
+  ## one burst (Alt+Shift+I, framed as two bytes) or a lone `ESC` and then a
+  ## separate `I`. A CSI with parameters (`CSI 1 ; 5 I`) is not a focus report
+  ## either — xterm sends none — and stays whatever the key decoder makes of
+  ## it.
+  ##
+  ## ONE KEY SEQUENCE DOES FRAME AS A REPORT: `Alt+[` (`ESC [` in one burst)
+  ## followed, at any later moment, by `Shift+I` or `Shift+O`. The framer holds
+  ## an unfinished `ESC [` until a final byte arrives (only a LONE `ESC` times
+  ## out, `EscDelayMs`), so the two keys become `ESC [ I`. Before focus
+  ## reporting that token named no key (`keyName` answers "") and the `I` was
+  ## dropped; now it is one focus event, which costs a repository re-read and
+  ## nothing else. Nothing is bound to `Alt+[`, and the swallowed key is the
+  ## framer's existing behaviour, not this decoder's.
+  if token == FocusInToken: frGained
+  elif token == FocusOutToken: frLost
+  else: frNone
+
 template frameNodeIds(body: untyped) =
   ## A frame's nodes take ids from 1 (`resetNodeIds`, so ids stay bounded
   ## across a long session) — and the counter is put BACK afterwards, so a
@@ -420,7 +480,7 @@ proc plainFrame*(caps: TerminalCapabilities; rows: seq[StyledRow];
 
 type
   DriverEventKind* = enum
-    ## What the loop woke up for. Four answers rather than one, because
+    ## What the loop woke up for. Five answers rather than one, because
     ## "nothing happened", "the window changed" and "the terminal went away" have
     ## completely different consequences and folding any two of them into a
     ## timeout is how a closed terminal becomes an idle spin.
@@ -428,13 +488,22 @@ type
     dekResize = "resize"
     dekIdle = "idle"
     dekEof = "eof"
+    dekFocus = "focus"
+      ## The terminal window gained or lost focus (DECSET 1004's `CSI I` /
+      ## `CSI O`, see `focusReportOf`). AN EVENT OF ITS OWN AND NOT A TOKEN,
+      ## so a focus report can never reach the keymap, the key journal or an
+      ## open prompt: the loop decides what focus means (the VCS pane's
+      ## re-read on return), and nothing downstream has to know the bytes.
 
   DriverEvent* = object
     kind*: DriverEventKind
     token*: string
       ## One complete input token on `dekToken`: a byte, or a whole escape
       ## sequence. Exactly what `app/input/keymap.keyName` and
-      ## `app/input/mouse.decodeMouse` are written to take.
+      ## `app/input/mouse.decodeMouse` are written to take. On `dekFocus`, the
+      ## report's own bytes, for a trace.
+    focused*: bool
+      ## On `dekFocus`: `true` when the window GAINED focus.
     size*: TerminalSize
       ## The NEW geometry on `dekResize`, read back from `ioctl(TIOCGWINSZ)`.
 
@@ -493,6 +562,12 @@ type
       ## PLAT-68: the extended key reporting `caps.keyProtocol` negotiated,
       ## enabled on the alternate screen; `nim-termctl` undoes it on every
       ## exit path (`stop`, a signal, `atexit`).
+    focusReporting: FocusReporting
+      ## DECSET 1004, asked for by `start` whenever the terminal is ours (see
+      ## "Focus reporting" above). `nim-termctl`'s, like the mouse and key
+      ## modes, so the async-signal-safe restore a SIGTERM or SIGHUP runs
+      ## sends `CSI ? 1004 l` too: a shell left with focus reporting on
+      ## prints `^[[I` / `^[[O` every time the user switches windows.
 
 proc newTerminalDriver*(caps: TerminalCapabilities;
                         inFd: cint = STDIN_FILENO;
@@ -563,7 +638,7 @@ proc size*(d: TerminalDriver): TerminalSize =
 
 proc start*(d: TerminalDriver) =
   ## Claim the terminal: SIGWINCH, raw mode, the alternate screen, the cursor,
-  ## and mouse reporting if it was negotiated.
+  ## mouse reporting if it was negotiated, and focus reporting.
   ##
   ## ORDER IS THE SAME AS `isonim_tui`'s own `PosixDriver.start`, and for its
   ## reasons: SIGWINCH first so a resize that arrives during startup is not
@@ -602,6 +677,12 @@ proc start*(d: TerminalDriver) =
     # controls shows each one's tooltip and key; a report over anything else
     # is dropped without a frame.
     writeAll(d.outFd, MotionTrackingOnBytes)
+  # FOCUS REPORTING, UNCONDITIONALLY ONCE THE SCREEN IS OURS — outside the
+  # mouse branch on purpose (see "Focus reporting" above): the VCS pane's
+  # re-read on return (VCS-Panel.md's auto-refresh, the desktop's window
+  # `focus` listener) does not depend on a pointer, and `--no-mouse` must
+  # not switch it off.
+  d.focusReporting = enableFocusReporting(d.outFd)
   d.started = true
   # PLAT-68: EXTENDED KEY REPORTING IS NOT ASKED FOR HERE. Until the start-up
   # round has run, `caps.keyProtocol` is the environment's guess; the round
@@ -630,7 +711,8 @@ proc stop*(d: TerminalDriver) =
   ##
   ## The same order `nim-termctl`'s signal handler uses, so a clean exit and a
   ## SIGTERM leave the terminal in the same state: key reporting undone, mouse
-  ## off, alternate screen left, cursor shown, termios restored last.
+  ## off, focus reporting off, alternate screen left, cursor shown, termios
+  ## restored last.
   if d.keyReporting.active:
     # Before the alternate screen is left: the Kitty pop must reach the
     # screen its push was made on.
@@ -642,6 +724,11 @@ proc stop*(d: TerminalDriver) =
     writeAll(d.outFd, MotionTrackingOffBytes)
     disableMouseCapture(d.mouseCapture)
     d.mouseOwned = false
+  # DECSET 1004 is not per-screen, so its place relative to leaving the
+  # alternate screen is not load-bearing; it sits with the other input
+  # modes, before the screen is given back, so every mode this driver asked
+  # for is undone before the user's shell can see a byte.
+  disableFocusReporting(d.focusReporting)
   if d.altOwned:
     leaveAltScreen(d.altScreen)
     d.altOwned = false
@@ -750,8 +837,22 @@ proc absorbInterruptByte*(d: TerminalDriver): bool =
   d.buffered.add token
   keyName(token, d.eraseByte) in InterruptKeys
 
+func tokenEvent*(token: string): DriverEvent =
+  ## One complete framed token as the event the loop receives: `dekFocus` for
+  ## a focus report (`focusReportOf`), `dekToken` for everything else.
+  ##
+  ## THE ONE PLACE A REPORT IS TOLD FROM A KEY, and every token `nextEvent`
+  ## delivers goes through it — the ones read now and the ones
+  ## `absorbInterruptByte` queued while the trace was opening, so a window
+  ## switch made during a slow open is still a focus event and not a stray
+  ## key handed to the keymap afterwards.
+  case focusReportOf(token)
+  of frGained: DriverEvent(kind: dekFocus, token: token, focused: true)
+  of frLost: DriverEvent(kind: dekFocus, token: token, focused: false)
+  of frNone: DriverEvent(kind: dekToken, token: token)
+
 proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
-  ## Block until a token, a resize, a timeout or end-of-input.
+  ## Block until a token, a focus report, a resize, a timeout or end-of-input.
   ##
   ## ONE BYTE PER CALL through the framer, which is what keeps a multi-byte
   ## escape sequence from being split across two of the caller's iterations: a
@@ -765,7 +866,7 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   if d.buffered.len > 0:
     let token = d.buffered[0]
     d.buffered.delete(0)
-    return DriverEvent(kind: dekToken, token: token)
+    return tokenEvent(token)
   # A LONE `ESC` IS THE KEY ONCE `EscDelayMs` PASSES WITH NOTHING AFTER IT.
   # The read below waits no longer than the time left, so the key arrives
   # `EscDelayMs` after it was pressed rather than on the next keystroke.
@@ -804,7 +905,7 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       break
     (complete, token) = d.framer.feed(char(more))
   if complete:
-    return DriverEvent(kind: dekToken, token: token)
+    return tokenEvent(token)
   if d.framer.holdsLoneEsc:
     d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
   DriverEvent(kind: dekIdle)

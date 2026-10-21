@@ -4115,11 +4115,11 @@
     "isonim-gpui": {
       "flake": false,
       "locked": {
-        "lastModified": 1792509010,
-        "narHash": "sha256-l5wvESxvoS0nrKlHbnpKD2nkBS6gANq11hGnSTafR2c=",
+        "lastModified": 1792578381,
+        "narHash": "sha256-fGgZf9ZuW+gLBwbUBVL5CrmheS33h7Pm7kYB0yOL7fE=",
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "d4325e90545a141b076194ea9a9942c73a3c8fe1",
+        "rev": "9f5bd4e0c79c0d074f81cc77cf77024a01ef0d39",
         "type": "github"
       },
       "original": {

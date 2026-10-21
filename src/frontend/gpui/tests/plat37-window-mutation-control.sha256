@@ -16,6 +16,33 @@
 # along with the bytes.
 #
 # ===========================================================================
+# RE-RECORD, 2026-10-21 (the VCS pane's focus-gain refresh), on `a02367eb0`
+# (agents) with that change uncommitted, isonim-gpui at the bytes committed
+# as `9f5bd4e`. ALL 12 ARMS GRADED, M11 INCLUDED. Carried to `951f9f5ce`
+# without a re-grade: `a02367eb0..951f9f5ce` changes no file under
+# src/frontend/gpui/ and none of the seven rows below.
+# ===========================================================================
+#   WHAT MOVED  test_gpui_window_frame.nim only: `onWindowActivated` joins
+#               `LaunchedWindowNames` (window.nim exports it, and it is
+#               registered on `launchWindow()` as `onWindowState` is), and
+#               `ExpectedAssertions` goes 731 -> 732. Every other row is
+#               unchanged; plat37-measurements.json was NOT re-taken, because
+#               neither the record nor the code that measures it moved.
+#   GRADED      M1..M12, 12 of 12 KILLED (11 on the first pass; M9 was
+#               MIS-ATTRIBUTED again for the same reason as below: its
+#               `because` names a suite line that the edit moved,
+#               1083 -> 1090. It was re-derived with --derive --only M9 and
+#               then graded KILLED). M11 was graded against a FRESH live
+#               capture: `bash ci/test/plat37-window-frame.sh` on
+#               nixos-ci-bare-002 (Linux 6.18.55, sway 1.11), with
+#               isonim-gpui's `just plat37-shims` rebuilt at `9f5bd4e`.
+#               Windowed 6 of 6 captured, featureless 6 of 6 timed out.
+#   CONTROL     the full run refused with rc 3 before the re-record
+#               (CONTROL DIGEST MOVED on test_gpui_window_frame.nim). The
+#               control had matched at the base: the change made it stale,
+#               not upstream.
+#
+# ===========================================================================
 # RE-RECORD, 2026-10-20 (the no-window refusal), on `a92806308` (agents)
 # with that change uncommitted. ALL 12 ARMS GRADED, M11 INCLUDED.
 # ===========================================================================
@@ -127,4 +154,4 @@ cb49f90c2b780d59d5bd9b8d6f8950b18087f13987cfafcd80ad58cfa4dc5b94  src/tests/visu
 cb6c5462e917d2e9e33645f68bbcb97e97bbfc7535260fa0a0f1ca8718e7329c  src/frontend/gpui/replay_ops.nim
 b80875c273eb71880e4ba1894c3eca0751f4e300216e5b18c113e3b66bfd732a  src/tests/visual/scenarios.json
 1fc40f6167811d579c8c35e05c7bde74d4748b3836bc6a57f3e0ab2d27209edb  src/frontend/gpui/tests/plat37_vision.nim
-f8d4aad34ebd3006ff390fdd703e37ec25afdad39cf80099947b8f2d6bafdf4e  src/frontend/gpui/tests/test_gpui_window_frame.nim
+9c51aefa1e811c7eb10106ea591240a4b581afeef603a9f14c66c0ebd4262287  src/frontend/gpui/tests/test_gpui_window_frame.nim

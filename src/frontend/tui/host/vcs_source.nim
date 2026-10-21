@@ -12,9 +12,11 @@
 ## working directory for a replay — the desktop sets `startOptions.folder` to
 ## `process.cwd()` when it opens a recording.
 ##
-## Refreshed at open and then every `VcsRefreshMs`, the desktop's own
-## `refreshIntervalMs`, so an edit made in another terminal shows up here as it
-## does there.
+## Refreshed at open, then every `VcsRefreshMs` (the desktop's own
+## `refreshIntervalMs`) and whenever the terminal window regains focus (the
+## desktop's window `focus` listener; `terminal_driver`'s DECSET 1004 and
+## `dekFocus`, `refreshOnFocus` below), so an edit made in another terminal
+## shows up here as it does there — at once when the user switches back.
 
 import std/[monotimes, os, times]
 
@@ -93,15 +95,41 @@ proc refresh*(s: VcsSource; rt: TuiRuntime) =
   s.lastRefresh = getMonoTime()
   s.publish(rt)
 
+proc refreshChanged(s: VcsSource; rt: TuiRuntime): bool =
+  ## `refresh`, answering whether the pane's value changed — the one body
+  ## both triggers share, so the interval and the focus regain cannot come
+  ## to disagree about what a re-read is or when it earns a frame.
+  if s.isNil:
+    return false
+  let before = rt.app.vcs
+  s.refresh(rt)
+  rt.app.vcs != before
+
 proc tick*(s: VcsSource; rt: TuiRuntime): bool =
   ## Refresh when `VcsRefreshMs` has passed; whether the pane's value changed.
   if s.isNil:
     return false
   if (getMonoTime() - s.lastRefresh).inMilliseconds < VcsRefreshMs:
     return false
-  let before = rt.app.vcs
-  s.refresh(rt)
-  rt.app.vcs != before
+  s.refreshChanged(rt)
+
+proc refreshOnFocus*(s: VcsSource; rt: TuiRuntime; focused: bool): bool =
+  ## The terminal window's focus changed (`terminal_driver.dekFocus`):
+  ## re-read NOW when it was GAINED, whatever the interval says; whether the
+  ## pane's value changed, so the loop paints only then.
+  ##
+  ## The desktop's second trigger (VCS-Panel.md's auto-refresh: "refreshes
+  ## periodically and when the window regains focus"; `ui/vcs.nim`
+  ## `startFileWatching`, `window.addEventListener('focus', …)`). Returning
+  ## to the terminal after committing in another program shows the commit
+  ## at once instead of up to `VcsRefreshMs` later. A LOST focus re-reads
+  ## nothing: nobody is looking, and the desktop's `blur` does nothing
+  ## either. The re-read also restarts the interval (`refresh` stamps
+  ## `lastRefresh`), so the tick does not read the same state again a moment
+  ## later.
+  if not focused:
+    return false
+  s.refreshChanged(rt)
 
 proc close*(s: VcsSource) =
   if not s.isNil and not s.dispose.isNil:
