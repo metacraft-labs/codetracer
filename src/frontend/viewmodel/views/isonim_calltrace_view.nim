@@ -224,6 +224,55 @@ proc renderCallLineRowMock(r: MockRenderer; vm: CalltraceVM;
 
   row
 
+# ---------------------------------------------------------------------------
+# Search results — shared by both renderers
+# ---------------------------------------------------------------------------
+
+proc searchResultJumpHandler(vm: CalltraceVM; index: int): proc() =
+  ## The `mousedown` handler of the search-result row at `index`.
+  ##
+  ## A FACTORY, NOT AN INLINE `proc() =` IN THE LOOP, and that is the fix for
+  ## codetracer#860. Nim closures capture variables by reference, and a `let`
+  ## declared in a `for` body — or the loop variable itself — is ONE variable
+  ## for the whole loop (the manual's "Closures" section:
+  ## https://nim-lang.org/docs/manual.html#procedures-closures). The rows used
+  ## to be built with handlers reading such a `let`, so every row read the
+  ## final iteration's value and jumped to the last match, while each row's
+  ## label — computed eagerly — was right. `index` here is this call's own
+  ## parameter, so every row's closure owns its value. The `ui` DSL evaluates
+  ## an `onX = expr` attribute once, when the row is built, which is what
+  ## makes a factory call per-row.
+  result = proc() = vm.jumpToSearchResult(index)
+
+proc searchResultLabel(res: CalltraceSearchResult): string =
+  ## A result row's text: `#<call key> - stepId(<tick>): <function>`, the
+  ## legacy Karax search-results label.
+  "#" & res.key & " - stepId(" & $res.rrTicks & "): " & res.name
+
+proc renderSearchResultsList[R, N](r: R; container: N; vm: CalltraceVM) =
+  ## Reactively populate the search-results container with one
+  ## `.search-result` row per `vm.backendSearchResults` entry; the
+  ## hide/show class flip is reactive too. On `mousedown` a row jumps to its
+  ## own result's frame (`CalltraceVM.jumpToSearchResult`).
+  ##
+  ## Generic over the renderer so the headless Mock panel mounts the very
+  ## list the desktop's Web panel ships — the regression test for #860
+  ## (`isonim_views_test.nim`, "IsoNim Calltrace Panel — search results")
+  ## clicks these rows, not a copy of them.
+  createRenderEffect proc() =
+    let results = vm.backendSearchResults.val
+    r.clearChildren(container)
+    if results.len == 0:
+      r.setAttribute(container, "class", "call-search-results hidden")
+      return
+    r.setAttribute(container, "class", "call-search-results")
+    for i in 0 ..< results.len:
+      let resultEl = ui(r):
+        tdiv(class = "search-result",
+             onmousedown = searchResultJumpHandler(vm, i)):
+          text searchResultLabel(results[i])
+      r.appendChild(container, resultEl)
+
 proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
   ## Render the complete Calltrace panel for Mock-based tests.
   ##
@@ -235,7 +284,9 @@ proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
   ##     div.more-below              (display reactive on hasMoreBelow)
   ##     div.calltrace-search-row
   ##       input.calltrace-search-input
-  var linesContainer: MockNode
+  ##       div.call-search-results     (one .search-result per backend
+  ##                                    match; `renderSearchResultsList`)
+  var linesContainer, resultsContainer: MockNode
 
   let panel = ui(r):
     tdiv(class = "calltrace-component"):
@@ -253,11 +304,15 @@ proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
       tdiv(class = "calltrace-search-row"):
         input(class = "calltrace-search-input",
               placeholder = "Search calltrace...")
+        tdiv(class = "call-search-results hidden", ref = resultsContainer):
+          discard
 
   indexEach[CallLine, MockRenderer, MockNode](r, linesContainer,
     proc(): seq[CallLine] = vm.visibleLines.val,
     proc(item: proc(): CallLine, index: int): MockNode =
       renderCallLineRowMock(r, vm, item))
+
+  renderSearchResultsList(r, resultsContainer, vm)
 
   panel
 
@@ -349,6 +404,7 @@ when defined(js):
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc eventKeyCode(ev: isonim_dom.Event): int {.importjs: "(#.keyCode || 0)".}
   proc scrollTop(node: isonim_dom.Element): float {.importjs: "(#.scrollTop || 0)".}
+  proc setScrollTop(node: isonim_dom.Element; value: float) {.importjs: "#.scrollTop = #".}
 
   # DOM helpers for measuring the actual rendered row height.
   # `querySelector` returns null when no match is found; the importjs guard
@@ -547,6 +603,18 @@ when defined(js):
       handler: proc(ev: kdom.Event) =
         addCallArgToScratchpad(argName, argText)))
 
+  proc callArgMenuListener(argName, argText: string): proc(ev: isonim_dom.Event) =
+    ## The `contextmenu` listener of one call argument: the menu for THIS
+    ## argument.
+    ##
+    ## A FACTORY, because the arguments are built in a `for` loop and Nim
+    ## closures capture by reference: a `let` in the loop body is ONE
+    ## variable for the whole loop, so an inline closure gave every argument
+    ## the LAST argument's menu ("Add to scratchpad" added the wrong value;
+    ## codetracer#860 sweep, https://nim-lang.org/docs/manual.html#procedures-closures).
+    result = proc(ev: isonim_dom.Event) =
+      showMenu(ev, callArgContextItems(argName, argText))
+
   proc renderCallLineRowWeb(r: WebRenderer; vm: CalltraceVM;
                             item: proc(): CallLine): isonim_dom.Element =
     ## Render a single calltrace row using the Karax-compatible markup.
@@ -569,7 +637,11 @@ when defined(js):
            `data-source-generation` = $item().location.sourceGeneration,
            `data-source-digest` = item().location.sourceDigest,
            `data-code-generation` = $item().codeGeneration,
-           `data-rr-ticks` = $item().rrTicks):
+           `data-rr-ticks` = $item().rrTicks,
+           # The call's key: its frame identity (Click-Navigation.md §2.2),
+           # which a tick is not. It is the `#<key>` a search result's label
+           # shows, so a row can be matched to the result that names it.
+           `data-call-key` = item().callKey):
         span(min_width = $(float(item().depth) * CallDepthIndentPx) & "px"):
           discard
         tdiv(class = "calltrace-child call-depth"):
@@ -634,9 +706,10 @@ when defined(js):
               tdiv(class = "call-arg-text",
                    id = "call-arg-text-" & $line.index & "-" & argName):
                 text argText
+        # A per-arg factory, not an inline closure over `argName`/`argText`
+        # (one variable each for the whole loop): see `callArgMenuListener`.
         isonim_dom.addEventListener(isonim_dom.Node(argEl), cstring"contextmenu",
-          proc(ev: isonim_dom.Event) =
-            showMenu(ev, callArgContextItems(argName, argText)))
+          callArgMenuListener(argName, argText))
         r.appendChild(argsContainer, argEl)
         if i < callArgs.len - 1:
           let sep = ui(r):
@@ -649,31 +722,6 @@ when defined(js):
       r.appendChild(argsContainer, closeParen)
 
     row
-
-  proc renderSearchResultsList(r: WebRenderer; container: isonim_dom.Element;
-                               vm: CalltraceVM) =
-    ## Reactively populate the search-results container. The hide/show
-    ## class flip is also reactive. On `mousedown`, the result emits a
-    ## calltrace-jump command so the editor navigates to the entry.
-    createRenderEffect proc() =
-      let results = vm.backendSearchResults.val
-      r.clearChildren(container)
-      if results.len == 0:
-        r.setAttribute(container, "class", "call-search-results hidden")
-        return
-      r.setAttribute(container, "class", "call-search-results")
-      for res in results:
-        let capturedRrTicks = res.rrTicks
-        let key = res.key
-        let name = res.name
-        let resultEl = ui(r):
-          tdiv(class = "search-result",
-               onmousedown = proc() =
-                 vm.store.requestHistoricalNavigation(
-                   "ct/calltrace-jump",
-                   %*{"rrTicks": capturedRrTicks})):
-            text "#" & key & " - stepId(" & $capturedRrTicks & "): " & name
-        r.appendChild(container, resultEl)
 
   proc wireSearchForm(form, input: isonim_dom.Element; vm: CalltraceVM) =
     ## Wire up search form submission and Enter-key handling on the
@@ -874,6 +922,20 @@ when defined(js):
     renderTraceSvg(r, svgContainer, vm, guideAnchor)
     wireSearchForm(formEl, inputEl, vm)
     wireScrollContainer(scrollContainer, linesContainer, vm)
+    # codetracer#860: a search result's reveal (`CalltraceVM.revealScroll`)
+    # scrolls the container to the row the ViewModel revealed. The scroll
+    # listener above then reports the same first row back, so the viewport and
+    # the DOM agree. Nothing else scrolls the pane on the ViewModel's
+    # initiative (Scrollbar-Scrubbers.md §3.5).
+    var revealSerial = 0
+    createEffect proc() =
+      let req = vm.revealScroll.val
+      if req.serial == 0 or req.serial == revealSerial:
+        return
+      revealSerial = req.serial
+      let measured = measureCallRowPitch(linesContainer)
+      let rowH = if measured > 0.0: measured else: vm.rowHeightPx.val
+      setScrollTop(scrollContainer, float(req.firstRow) * rowH)
     # PLAT-51: THE SCROLLBAR IS A SCRUBBER over the WHOLE trace
     # (Scrollbar-Scrubbers.md): a click on its track jumps the view there, the
     # thumb drags it, a tick marks the debugger's call. It scrolls the

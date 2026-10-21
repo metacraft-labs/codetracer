@@ -102,6 +102,16 @@ proc invokeSelect(callbacks: ProcessTreeCallbacks; recordingId: string) =
   if not callbacks.onSelectProcess.isNil:
     callbacks.onSelectProcess(recordingId)
 
+proc selectHandler(callbacks: ProcessTreeCallbacks; recordingId: string): proc() =
+  ## The click handler of one process row: select `recordingId`.
+  ##
+  ## A FACTORY, because the rows are built in a `for` loop and Nim closures
+  ## capture by reference: a `let` in the loop body is ONE variable for the
+  ## whole loop, so the inline closure this replaces made every row select
+  ## the LAST process (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures).
+  result = proc() = callbacks.invokeSelect(recordingId)
+
 # ---------------------------------------------------------------------------
 # Shared markup
 # ---------------------------------------------------------------------------
@@ -120,7 +130,8 @@ template renderProcessTreeImpl(
         text "Processes"
       for entryIndex in 0 ..< model.entries.len:
         let entry = model.entries[entryIndex]
-        # Capture the id by value: the closure outlives this loop turn.
+        # The handler takes the id as a factory argument: a closure over a
+        # loop-body `let` would share one variable across every row.
         let selectedRecordingId = entry.recordingId
         tdiv(
             class = entryClass(entry.active),
@@ -129,8 +140,7 @@ template renderProcessTreeImpl(
             `data-process-role` = entry.role,
             `data-recording-id` = entry.recordingId,
             `aria-selected` = (if entry.active: "true" else: "false"),
-            onclick = proc() =
-              callbacks.invokeSelect(selectedRecordingId)):
+            onclick = selectHandler(callbacks, selectedRecordingId)):
           span(class = "ct-process-tree-role"):
             text entry.role
           span(class = "ct-process-tree-name"):

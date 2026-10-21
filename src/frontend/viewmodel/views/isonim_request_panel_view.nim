@@ -337,6 +337,15 @@ when defined(js):
     ## Remove the document mouseup handler installed by ``setDocMouseUp``.
     {.emit: "document.onmouseup = null;".}
 
+proc pickerSelectHandler(onSelect: proc(value: string); value: string): proc() =
+  ## The click handler of one picker option: select `value`.
+  ##
+  ## A FACTORY, like `makeTabClickHandler` above and for the same reason: the
+  ## options are built in a `for` loop, and an inline `proc() = onSelect(v)`
+  ## over a loop-body `let` made every option select the LAST one
+  ## (codetracer#860 sweep).
+  result = proc() = onSelect(value)
+
 proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
                             currentValue: string;
                             options: openArray[(string, string)];
@@ -377,7 +386,7 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
       let itemClass = if v == currentValue: "ct-menu-item ct-menu-item--active"
                       else: "ct-menu-item"
       let item = ui(r):
-        tdiv(class = itemClass, onclick = proc() = onSelect(v)):
+        tdiv(class = itemClass, onclick = pickerSelectHandler(onSelect, v)):
           span(class = "ct-menu-item-label"):
             text ol
       r.appendRenderedChild(dropdown, item)

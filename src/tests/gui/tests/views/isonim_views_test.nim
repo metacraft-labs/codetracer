@@ -2195,6 +2195,143 @@ suite "IsoNim Calltrace Panel — call lines":
       dispose()
 
 # ---------------------------------------------------------------------------
+# Calltrace search results (codetracer#860)
+# ---------------------------------------------------------------------------
+#
+# A `.search-result` row names ONE frame, so activating it must land in that
+# frame (Click-Navigation.md §2.1) and the jump must carry the frame's
+# identity, not only its tick (§2.2). The rows are built in a `for` loop, and
+# each row's handler used to read a loop-body `let` — one variable for the
+# whole loop under Nim's by-reference closure capture — so every row jumped
+# to the LAST match. Three results with distinct ticks, paths, lines and
+# depths tell each row's jump apart; a shared capture answers 99 for all.
+
+proc calltraceJumpsSince(mock: MockBackendService; first: int): seq[JsonNode] =
+  ## The `ct/calltrace-jump` payloads the mock received from index `first`
+  ## on, in order. Returns data rather than checking it: a `check` inside a
+  ## plain proc cannot fail the calling test (Verification-Harness-Traps §29).
+  for i in first ..< mock.receivedCommands.len:
+    if mock.receivedCommands[i].command == "ct/calltrace-jump":
+      result.add mock.receivedCommands[i].args
+
+suite "IsoNim Calltrace Panel — search results":
+
+  test "a search result jumps to its own match, not the last one":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCalltracePanel(r, vm)
+      vm.setBackendSearchResults(@[
+        CalltraceSearchResult(name: "calculate_damage", key: "2",
+          rrTicks: 27'u64, codeGeneration: 0,
+          location: Location(file: "src/ship.rb", line: 11,
+                             sourceGeneration: 0, callstackDepth: 3)),
+        CalltraceSearchResult(name: "calculate_damage", key: "7",
+          rrTicks: 63'u64, codeGeneration: 2,
+          location: Location(file: "src/shield.rb", line: 40,
+                             sourceGeneration: 2, sourceDigest: "sha256:gen2",
+                             callstackDepth: 5)),
+        CalltraceSearchResult(name: "calculate_damage", key: "12",
+          rrTicks: 99'u64, codeGeneration: 0,
+          location: Location(file: "src/asteroid.rb", line: 77,
+                             sourceGeneration: 0, callstackDepth: 7)),
+      ])
+
+      let container = findByClass(panel, "call-search-results")
+      check container.attributes["class"] == "call-search-results"
+      let rows = findAllByClass(container, "search-result")
+      check rows.len == 3
+      if rows.len == 3:
+        # The labels were always right; only the destinations were shared.
+        check "#2 - stepId(27): calculate_damage" in rows[0].textContent
+        check "#7 - stepId(63): calculate_damage" in rows[1].textContent
+        check "#12 - stepId(99): calculate_damage" in rows[2].textContent
+
+        # The FIRST row: the case the reporter saw land on the last match.
+        let beforeFirst = mock.receivedCommands.len
+        rows[0].fireEvent("mousedown")
+        drain()
+        let firstJumps = mock.calltraceJumpsSince(beforeFirst)
+        check firstJumps.len == 1
+        if firstJumps.len == 1:
+          let jump = firstJumps[0]
+          check jump["rrTicks"].getBiggestInt == 27
+          # §2.2: the frame's identity travels with the tick.
+          check jump["path"].getStr == "src/ship.rb"
+          check jump["line"].getInt == 11
+          check jump["highLevelPath"].getStr == "src/ship.rb"
+          check jump["highLevelLine"].getInt == 11
+          check jump["callstackDepth"].getInt == 3
+
+        # The MIDDLE row, carrying a source revision, so a shared capture of
+        # either neighbour cannot pass for it.
+        let beforeMiddle = mock.receivedCommands.len
+        rows[1].fireEvent("mousedown")
+        drain()
+        let middleJumps = mock.calltraceJumpsSince(beforeMiddle)
+        check middleJumps.len == 1
+        if middleJumps.len == 1:
+          let jump = middleJumps[0]
+          check jump["rrTicks"].getBiggestInt == 63
+          check jump["path"].getStr == "src/shield.rb"
+          check jump["line"].getInt == 40
+          check jump["callstackDepth"].getInt == 5
+          check jump["sourceGeneration"].getInt == 2
+          check jump["sourceDigest"].getStr == "sha256:gen2"
+          check jump["codeGeneration"].getInt == 2
+
+      dispose()
+
+  test "a search result jumps with the payload its calltrace row sends":
+    # The one-payload rule (`calltraceJumpArgs`): a search result and the
+    # calltrace row for the same call must send the same `ct/calltrace-jump`,
+    # or a click on one lands somewhere a click on the other does not.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      drain()
+
+      var line = makeTestCallLine(0, "calculate_damage", depth = 2,
+                                  file = "src/shield.rb", line = 40)
+      line.rrTicks = 63'u64
+      line.codeGeneration = 2
+      line.location.sourceGeneration = 2
+      line.location.sourceDigest = "sha256:gen2"
+      line.location.callstackDepth = 5
+      store.updateCalltraceSection(@[line], startIndex = 0'i64,
+                                   totalCount = 1'u64)
+      vm.setBackendSearchResults(@[CalltraceSearchResult(
+        name: line.name, key: "7", rrTicks: line.rrTicks,
+        location: line.location, codeGeneration: line.codeGeneration)])
+
+      let beforeRow = mock.receivedCommands.len
+      vm.doubleClickEntry(0)
+      drain()
+      let rowJumps = mock.calltraceJumpsSince(beforeRow)
+
+      let beforeResult = mock.receivedCommands.len
+      vm.jumpToSearchResult(0)
+      drain()
+      let resultJumps = mock.calltraceJumpsSince(beforeResult)
+
+      check rowJumps.len == 1
+      check resultJumps.len == 1
+      if rowJumps.len == 1 and resultJumps.len == 1:
+        check resultJumps[0] == rowJumps[0]
+
+      # An index outside the list — a click racing a new search — sends
+      # nothing rather than jumping somewhere else.
+      let beforeStale = mock.receivedCommands.len
+      vm.jumpToSearchResult(1)
+      vm.jumpToSearchResult(-1)
+      drain()
+      check mock.calltraceJumpsSince(beforeStale).len == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
 # Calltrace call argument rendering tests
 # ---------------------------------------------------------------------------
 #
@@ -11884,3 +12021,185 @@ suite "IsoNim App Shell — structure":
   # Real coverage is in
   # `src/tests/gui/tests/editor/editor_decorations_test.nim` (the retention
   # rule) and `src/tests/gui/tests/flow/flow_branch_colors.spec.ts` (end to end).
+
+# ---------------------------------------------------------------------------
+# Handlers built in a loop act on their own item (codetracer#860 sweep)
+# ---------------------------------------------------------------------------
+#
+# The call-trace search results all jumped to the last match because each
+# row's handler, built in a `for` loop, closed over a loop-body `let` — one
+# variable for the whole loop under Nim's by-reference closure capture. The
+# same shape turned up in the views below, and each case here clicks
+# an item that is NOT the last one: with a shared capture it acts on the last
+# item instead. (The pre-existing cases for these views each rendered ONE item,
+# or clicked the last one, which is why they never saw it.)
+
+suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
+
+  test "build output: a row opens its own location":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+      var jumps: seq[(string, int)] = @[]
+      vm.onJumpToLine = proc(path: string; line: int) = jumps.add((path, line))
+
+      let panel = renderBuildPanel(r, vm)
+      vm.appendLine(makeBuildLine("a.nim(3, 1) Error: x", severity = blsError,
+                                  path = "a.nim", line = 3))
+      vm.appendLine(makeBuildLine("b.nim(7, 1) Error: y", severity = blsError,
+                                  path = "b.nim", line = 7))
+
+      let rows = findAllByClass(panel, "build-clickable")
+      check rows.len == 2
+      if rows.len == 2:
+        rows[0].fireEvent("click")
+        check jumps == @[("a.nim", 3)]
+
+      dispose()
+
+  test "filesystem diff list: a row opens its own file":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+      var openedPaths: seq[string] = @[]
+      vm.onOpenFile = proc(path: string) = openedPaths.add(path)
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setDiffEntries(@[
+        FilesystemDiffEntry(path: "/trace/files/first.nim", zebra: false),
+        FilesystemDiffEntry(path: "/trace/files/second.nim", zebra: true),
+      ])
+
+      let rows = findAllByClass(panel, "diff-file-path")
+      check rows.len == 2
+      if rows.len == 2:
+        rows[0].fireEvent("click")
+        check openedPaths == @["/trace/files/first.nim"]
+
+      dispose()
+
+  test "request panel filter picker: an option selects its own value":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      # The first picker is the Method one; open it.
+      findByClass(panel, "ct-picker-trigger").fireEvent("click")
+      let options = findAllByClass(findByClass(panel, "ct-picker-dropdown"),
+                                   "ct-menu-item")
+      check options.len == MethodPickerOptions.len
+      if options.len == MethodPickerOptions.len:
+        options[1].fireEvent("click")
+        check vm.filterMethod.val == MethodPickerOptions[1][0]
+
+      dispose()
+
+  test "status notifications: dismiss and action buttons name their own":
+    let r = MockRenderer()
+    var dismissed: seq[int] = @[]
+    var actions: seq[(int, int)] = @[]
+    let model = StatusShellModel(
+      activeNotifications: @[
+        StatusNotificationRecord(index: 5, kindClass: "warning",
+          variantClass: "primary", text: "first", dismissible: true,
+          actions: @[StatusNotificationActionRecord(label: "Retry"),
+                     StatusNotificationActionRecord(label: "Ignore")]),
+        StatusNotificationRecord(index: 6, kindClass: "info",
+          variantClass: "primary", text: "second", dismissible: true,
+          actions: @[StatusNotificationActionRecord(label: "Open"),
+                     StatusNotificationActionRecord(label: "Close")]),
+      ],
+      base: StatusBaseModel())
+    let panel = renderStatusShell(r, model, StatusShellCallbacks(
+      onDismissNotification: proc(index: int) = dismissed.add(index),
+      onNotificationAction: proc(index: int; actionIndex: int) =
+        actions.add((index, actionIndex))))
+
+    let dismissButtons = findAllByClass(panel, "dismiss-notification-button")
+    let actionButtons = findAllByClass(panel, "notification-action-button")
+    check dismissButtons.len == 2
+    check actionButtons.len == 4
+    if dismissButtons.len == 2 and actionButtons.len == 4:
+      dismissButtons[0].fireEvent("click")
+      actionButtons[0].fireEvent("click")
+      actionButtons[2].fireEvent("click")
+      check dismissed == @[5]
+      check actions == @[(5, 0), (6, 0)]
+
+  test "agent activity: a changed-file row opens its own diff":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      var openedTargets: seq[string] = @[]
+      let panel = renderAgentActivityPanel(r, vm, componentId = 3,
+        callbacks = AgentActivityCallbacks(
+          onOpenFileDiff: proc(target: string) = openedTargets.add(target)))
+
+      vm.setMessages(@[
+        makeAgentActivityMessage("a1", "patch", diffs = @[
+          AgentActivityDiffEntry(id: 9, path: "/repo/a.nim",
+                                 original: "old", modified: "new"),
+          AgentActivityDiffEntry(id: 10, path: "/repo/b.nim",
+                                 original: "old", modified: "new"),
+        ])
+      ])
+
+      let rows = findAllByClass(panel, "agent-diff-file-row")
+      check rows.len == 2
+      if rows.len == 2:
+        rows[0].fireEvent("click")
+        check openedTargets == @["file:a1:9"]
+
+      dispose()
+
+  test "agent activity settings: an option selects its own value":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel(r, vm, componentId = 4)
+
+      vm.settingsOpen.val = true
+      vm.settingsActiveDropdown.val = "permissions"
+      let options = findAllByClass(
+        findByClass(panel, "agent-settings-dropdown-list"),
+        "agent-settings-dropdown-item")
+      # "Ask before commands", "Allow all", "Deny all": the middle one, so
+      # neither the default nor the last option can pass for it.
+      check options.len == 3
+      if options.len == 3:
+        options[1].fireEvent("click")
+        check vm.settingsPermissions.val == "Allow all"
+
+      dispose()
+
+  test "agent activity attachments: a remove button removes its own item":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel(r, vm, componentId = 5)
+
+      vm.pastedImages.val = @["data:image/png;base64,AAAA",
+                              "data:image/png;base64,BBBB"]
+      vm.contextPaths.val = @["/repo/first.nim", "/repo/second.nim"]
+
+      let thumbs = findAllByClass(panel, "agent-paste-thumb")
+      check thumbs.len == 2
+      if thumbs.len == 2:
+        findByClass(thumbs[0], "agent-paste-remove").fireEvent("click")
+        check vm.pastedImages.val == @["data:image/png;base64,BBBB"]
+
+      # The strip is rebuilt by the removal; look the chips up afresh.
+      let chips = findAllByClass(panel, "agent-context-path-chip")
+      check chips.len == 2
+      if chips.len == 2:
+        findByClass(chips[0], "agent-paste-remove").fireEvent("click")
+        check vm.contextPaths.val == @["/repo/second.nim"]
+
+      dispose()
