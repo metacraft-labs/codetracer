@@ -2343,6 +2343,11 @@
         };
 
         default = codetracer;
+      }
+      # Linux-only: it is a NixOS VM (Incus is a Linux daemon, and the VM
+      # needs /dev/kvm). See the file's header for what it is for.
+      // pkgs.lib.optionalAttrs stdenv.hostPlatform.isLinux {
+        codetracer-incus-vm = import ./incus-vm.nix { inherit pkgs; };
       };
     };
 }

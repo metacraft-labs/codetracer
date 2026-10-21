@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# NOT-A-CI-GATE: an operator's publication step, not a check. It WRITES `ct host`'s
-# image into an Incus daemon's image store (and confirms the write);
-# `ci/test/host-image-serves-in-a-container.sh` is the gate that runs it.
+# An operator's publication step, and CI's: it WRITES `ct host`'s image into an
+# Incus daemon's image store and confirms the write, which is the precondition
+# of `ci/test/host-image-serves-in-a-container.sh`.
+# `ci/test/host-image-serves-in-incus-vm.sh` runs the two in that order inside
+# a NixOS VM that is an Incus host, and that is how CI reaches this file.
 # Publish `ct host`'s OCI image into an Incus daemon's image store, and CONFIRM
 # it is resolvable before anything depends on it — WD2.
 #
@@ -40,14 +42,47 @@
 # resolver can name the image, and exits non-zero otherwise.
 #
 #   ci/publish-host-image.sh [--alias NAME] [--sessionctl PATH] [--keep-work]
+#                            [--oci-archive PATH] [--project NAME]
 #
 # Everything it needs is discovered: `nix`, `incus` and (for the confirmation)
 # a `sessionctl` on PATH or named with `--sessionctl`.
+#
+# `--oci-archive` hands in an already-built `packages.codetracer-host-image`
+# (the docker archive's store path) instead of building it here, and then `nix`
+# is not needed. That is for a host that can run Incus but not evaluate this
+# flake: `ci/test/host-image-serves-in-incus-vm.sh` builds the archive outside
+# its NixOS VM and publishes it from inside, where the host's store is mounted
+# and there is no flake to build from. It must be the same derivation's output
+# -- this script converts what it is given and checks nothing about its origin.
+#
+# ## The image goes into the SUBSTRATE'S project, not the client's
+#
+# The substrate keeps its sessions in an Incus project of its own --
+# `$ISONIM_SESSION_INCUS_PROJECT`, default `isonim-dev`
+# (isonim-platform `session/src/incus.nim`, `DefaultProject`) -- and every
+# `incus` call it makes carries `--project`. That project is created with
+# `features.images=true`, so it has an image store of its own, and
+# `sessionctl image-resolve` looks there and nowhere else. An import that
+# names no project lands in whichever project the `incus` CLI has selected,
+# which on a fresh daemon is `default`: the import succeeds and the
+# confirmation can never pass. Measured 2026-10-21 in the Incus VM of
+# `ci/test/host-image-serves-in-incus-vm.sh`: `sessionctl answered
+# {"ok":false,...,"message":"no image 'codetracer-host-ci' in this
+# substrate's image store"}`. The 2026-10-01 verification passed only
+# because the operator's CLI had the substrate's project selected.
+#
+# So `--project` defaults exactly as `sessionctl`'s does, the import names it,
+# `sessionctl` is run with it, and a project the daemon does not have is
+# refused before any work: creating it is the substrate's job
+# (`sessionctl image build`), and a project this script made up would be one
+# the substrate has never configured.
 set -euo pipefail
 
 alias_name=""
 sessionctl_bin="${SESSIONCTL:-sessionctl}"
 keep_work=0
+oci_tar=""
+project="${ISONIM_SESSION_INCUS_PROJECT:-isonim-dev}"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -67,6 +102,14 @@ while [ $# -gt 0 ]; do
 		keep_work=1
 		shift
 		;;
+	--oci-archive)
+		oci_tar="${2:-}"
+		shift 2
+		;;
+	--project)
+		project="${2:-}"
+		shift 2
+		;;
 	*)
 		echo "unknown argument: $1" >&2
 		exit 2
@@ -77,12 +120,25 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-for tool in nix incus tar; do
+# `nix` only when this script is the one building the archive.
+required_tools="incus tar"
+[ -n "${oci_tar}" ] || required_tools="nix ${required_tools}"
+for tool in ${required_tools}; do
 	command -v "${tool}" >/dev/null 2>&1 || {
 		echo "publish-host-image: ${tool} is not on PATH" >&2
 		exit 1
 	}
 done
+
+if [ -z "${project}" ]; then
+	echo "publish-host-image: --project needs a name" >&2
+	exit 2
+fi
+if ! incus project show "${project}" >/dev/null 2>&1; then
+	echo "publish-host-image: this Incus daemon has no project '${project}', so there is no substrate here to publish to" >&2
+	echo "  remedy: provision the substrate first (sessionctl image build), or name its project with --project" >&2
+	exit 1
+fi
 
 if [ -z "${alias_name}" ]; then
 	# The revision, so two builds of two commits are two images rather than one
@@ -130,11 +186,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> building packages.codetracer-host-image"
-# `?submodules=1` and both trace-format overrides are this flake's documented
-# invocation; without them the build resolves a different pair of FFI inputs,
-# and the two must move together or not at all.
-oci_tar="$(nix build --no-link --print-out-paths '.?submodules=1#codetracer-host-image')"
+if [ -n "${oci_tar}" ]; then
+	echo "==> using the given packages.codetracer-host-image"
+	[ -f "${oci_tar}" ] || {
+		echo "publish-host-image: --oci-archive ${oci_tar} is not a file" >&2
+		exit 1
+	}
+else
+	echo "==> building packages.codetracer-host-image"
+	# `?submodules=1` and both trace-format overrides are this flake's documented
+	# invocation; without them the build resolves a different pair of FFI inputs,
+	# and the two must move together or not at all.
+	oci_tar="$(nix build --no-link --print-out-paths '.?submodules=1#codetracer-host-image')"
+fi
 echo "    ${oci_tar}"
 
 echo "==> unpacking the docker archive"
@@ -333,11 +397,11 @@ unified="${work}/codetracer-host.tar.gz"
 )
 echo "    $(wc -c <"${unified}") bytes, $(wc -l <"${work}/filelist") entries"
 
-echo "==> importing as ${alias_name}"
+echo "==> importing as ${alias_name} into project ${project}"
 # `--reuse` so republishing the same alias replaces it rather than failing.
 # A publication that refused on its second run would push every operator
 # towards deleting by hand, which is the step that gets skipped.
-incus image import "${unified}" --alias "${alias_name}" --reuse
+incus image import "${unified}" --project "${project}" --alias "${alias_name}" --reuse
 
 echo "==> confirming with sessionctl image-resolve"
 # THE STEP THIS SCRIPT EXISTS FOR. An import that succeeded and a reference the
@@ -350,7 +414,7 @@ if ! command -v "${sessionctl_bin}" >/dev/null 2>&1 && [ ! -x "${sessionctl_bin}
 	exit 1
 fi
 
-resolved="$("${sessionctl_bin}" image-resolve --reference "${alias_name}" 2>/dev/null || true)"
+resolved="$(ISONIM_SESSION_INCUS_PROJECT="${project}" "${sessionctl_bin}" image-resolve --reference "${alias_name}" 2>/dev/null || true)"
 fingerprint="$(printf '%s' "${resolved}" | python3 -c 'import json,sys
 try:
     print(json.load(sys.stdin).get("fingerprint", ""))
@@ -365,5 +429,5 @@ if [ -z "${fingerprint}" ]; then
 fi
 
 echo "published ${alias_name} -> ${fingerprint}"
-printf '{"alias":"%s","fingerprint":"%s","layers":%s}\n' \
-	"${alias_name}" "${fingerprint}" "${layer_count}"
+printf '{"alias":"%s","project":"%s","fingerprint":"%s","layers":%s}\n' \
+	"${alias_name}" "${project}" "${fingerprint}" "${layer_count}"
