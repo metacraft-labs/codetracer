@@ -178,6 +178,15 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
       let style = if isOpen: FileTreeOpenStyle else: FileTreePlainStyle
       let text = truncateToCells(entryText(e), width)
       g.paint(area.row + 1 + i, area.col, text, style)
+      # The selected entry on the selection surface, as the flat list draws
+      # its own: a selection made elsewhere (an editor's tree reporting
+      # `files/selected`) is otherwise invisible in the recording's tree.
+      if idx == model.selected:
+        g.restyle(area.row + 1 + i, area.col, width,
+                  proc(s: CellStyle): CellStyle =
+                    var out2 = s
+                    out2.surface = FileTreeSelectedBackground
+                    out2)
       inc result.renderedRows
       result.rows.add @[StyledSpan(text: text, style: style)]
     return

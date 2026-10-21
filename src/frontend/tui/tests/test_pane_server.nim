@@ -15,7 +15,7 @@
 ## No mocks: the recording, the engine, the session and the painters are the
 ## product's. The stdio transport itself is `test_pane_server_stdio.nim`'s.
 
-import std/[json, options, sequtils, strutils, tables, unittest]
+import std/[json, options, os, sequtils, strutils, tables, unittest]
 
 import headless_app/layout_model
 
@@ -310,6 +310,17 @@ suite "HSF-E1: the pane server, over a real recording":
     let (missing, _) = srv.request("source/read",
       %*{"session": sid, "file": "/no/such/recorded/file.py"})
     check not missing{"error"}.isNil
+    # The editor's tree selection: CodeTracer's file tree selects the file,
+    # and its pane draws that row on the selection surface.
+    discard srv.request("files/selected", %*{"session": sid, "path": file})
+    let (_, treeNotes) = srv.request("pane/open",
+      %*{"session": sid, "pane": "fileTree", "width": 40, "height": 12})
+    let selectedRows = treeNotes.notes("pane/content")
+    let base = file.extractFilename
+    check selectedRows.len >= 1 and selectedRows[^1]{"params", "rows"}.getElems.anyIt(
+      base in it{"text"}.getStr and it{"spans"}.getElems.anyIt(
+        it{"surface"}.getStr == "ct.surface-selection"))
+    discard srv.request("pane/close", %*{"session": sid, "pane": "fileTree"})
     let (changed, _) = srv.request("files/changed",
       %*{"session": sid, "created": ["/tmp/new.py"], "deleted": [], "renamed": []})
     check changed{"error"}.isNil
