@@ -223,9 +223,9 @@ pub struct Handler {
     /// Cached list of terminal-output (Write) events, populated lazily by
     /// `load_terminal()`.
     ///
-    /// When `load_terminal()` is called before `ensure_events_loaded()`,
-    /// this cache is filled by scanning `reader.events()` for Write
-    /// records only -- much faster than loading all events into memory first.
+    /// Recreator sessions obtain events from the replay worker; their reader
+    /// does not contain the recorded event log. Materialized sessions can scan
+    /// `reader.events()` directly without loading other event types.
     /// When `cached_events` is already populated, Write events are extracted
     /// from it instead.
     cached_terminal_events: Option<Vec<ProgramEvent>>,
@@ -6569,8 +6569,8 @@ impl Handler {
 
     /// Loads terminal output (stdout/stderr Write events) from the trace.
     ///
-    /// Uses a dedicated fast path that only loads Write events from the
-    /// database, avoiding the overhead of `ensure_events_loaded()` which
+    /// Materialized traces use a dedicated fast path that only loads terminal
+    /// events from the database, avoiding `ensure_events_loaded()` which
     /// loads ALL events into memory. On large traces with thousands of
     /// non-terminal events this makes a significant difference and prevents
     /// timeouts when `terminal_output()` is called as the first operation.
@@ -6582,7 +6582,7 @@ impl Handler {
     /// pagination (forwarded by the daemon from the Python API).
     pub fn load_terminal(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         // Ensure terminal events are cached.
-        self.ensure_terminal_events_loaded();
+        self.ensure_terminal_events_loaded()?;
 
         // Safety: `ensure_terminal_events_loaded` guarantees the cache is Some.
         let write_events = match self.cached_terminal_events.as_ref() {
@@ -6642,7 +6642,7 @@ impl Handler {
         let count = arg_usize("count");
         let at_ticks = req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64);
         if self.cached_terminal_lines.is_none() {
-            self.ensure_terminal_events_loaded();
+            self.ensure_terminal_events_loaded()?;
             let events = self.cached_terminal_events.as_deref().unwrap_or(&[]);
             self.cached_terminal_lines = Some(CachedTerminalLines::of(events));
         }
@@ -6658,12 +6658,19 @@ impl Handler {
     ///
     /// When the full event cache (`cached_events`) has already been loaded
     /// (e.g. by a prior `ct/event-load` call), the Write events are
-    /// extracted from it.  Otherwise the database's event records are
-    /// scanned directly for terminal output (stdout and stderr), which is much
-    /// faster than loading every event type into memory first.
-    fn ensure_terminal_events_loaded(&mut self) {
+    /// extracted from it. Recreator sessions must ask their worker for the
+    /// recorded events: their reader is an empty projection, not the producer.
+    /// Other sessions retain the direct reader scan for stdout and stderr.
+    fn ensure_terminal_events_loaded(&mut self) -> Result<(), Box<dyn Error>> {
         if self.cached_terminal_events.is_some() {
-            return;
+            return Ok(());
+        }
+
+        if self.trace_kind == TraceKind::Recreator {
+            // Use the same events and recorded positions as ct/event-load,
+            // including registration in event_db for subsequent event jumps.
+            // Do not cache an empty terminal when the worker failed to load.
+            self.ensure_events_loaded()?;
         }
 
         let write_events: Vec<ProgramEvent> = if let Some(ref all_events) = self.cached_events {
@@ -6686,6 +6693,7 @@ impl Handler {
         };
 
         self.cached_terminal_events = Some(write_events);
+        Ok(())
     }
 
     fn send_notification(

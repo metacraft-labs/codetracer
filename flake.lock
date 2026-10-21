@@ -622,11 +622,11 @@
     "codetracer-native-backend": {
       "flake": false,
       "locked": {
-        "lastModified": 1792575871,
-        "narHash": "sha256-Zup+ZVAzxFfTU9k8XSqbvGdtAw4EA8JgJTczsula1fk=",
+        "lastModified": 1792609123,
+        "narHash": "sha256-bkOUJUeEbYUrjCNeJFuL+ZxXpeqBvDlw9h+ry1gaBqE=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-backend",
-        "rev": "57e587bf0ad722fffde7e0f75aef79af25af577a",
+        "rev": "7eff3b75678004e0f554613551d6d14721e95a62",
         "type": "github"
       },
       "original": {
@@ -639,11 +639,11 @@
     "codetracer-native-recorder": {
       "flake": false,
       "locked": {
-        "lastModified": 1792603314,
-        "narHash": "sha256-+dAKGq3nd8zdk/B5/xpuTf4A7VAsZYvLSyUdGC28clk=",
+        "lastModified": 1792604792,
+        "narHash": "sha256-4bULxP8WhcHlYhw0K3fqUI1KBz8Cm3bEJQkUoJno7uw=",
         "owner": "metacraft-labs",
         "repo": "codetracer-native-recorder",
-        "rev": "6f17be8d0e53ab153146c3ffded5730b65589652",
+        "rev": "df4e46e4ec53912d22cc17630786752e407d09d0",
         "type": "github"
       },
       "original": {
@@ -4102,11 +4102,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1792478502,
-        "narHash": "sha256-o9xLELCcHbHZwOkVm5fbD1KZR1QLlB1zNkEKQWA3vm4=",
+        "lastModified": 1792605093,
+        "narHash": "sha256-7DRSv8xe6XnMpT06pITpxO0IKZkFxPLuTJO9vqV7yVs=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "fc047a8e7cec4c9f5ba6fc8df5a10d8abbcbfa4c",
+        "rev": "edf09ccae7485922fb4f08d313a86e5211f91ada",
         "type": "github"
       },
       "original": {
@@ -4136,9 +4136,11 @@
     "isonim-tui": {
       "flake": false,
       "locked": {
+        "lastModified": 1792603616,
+        "narHash": "sha256-p+vCJiqCcwFQX+GntoKoleLxcGbfuwBEHQSUZ8rXBik=",
         "owner": "metacraft-labs",
         "repo": "isonim-tui",
-        "rev": "bb3445376248cb5453abf394ae17c167bb15da36",
+        "rev": "594398d5962a911f89f18d77cc1794404858283d",
         "type": "github"
       },
       "original": {
