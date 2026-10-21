@@ -1592,8 +1592,20 @@ mod tests {
     /// ordinary way: what the tests then see not running is held back by
     /// `execute_script`, not inert.  The `NIX_PYTHONPATH` control needs a
     /// Nixpkgs interpreter on `PATH`, as the development shell provides.
+    ///
+    /// The directory is returned resolved, because what the script process
+    /// reports about it (`os.getcwd()`, and every path Python derives from
+    /// the working directory) is resolved, and the temp root need not be: on
+    /// macOS `/tmp`, and with it the dev shell's `TMPDIR=/tmp/nix-shell.*`,
+    /// is a symlink to `/private/tmp`.  Against the unresolved path the
+    /// `cwd` check fails, and every `starts_with(&shared)` refusal holds
+    /// whatever the reported path names.
     fn make_planted_shared_dir(root: &Path) -> PathBuf {
-        let shared = root.join("shared");
+        std::fs::create_dir_all(root.join("shared")).expect("create shared dir");
+        let shared = root
+            .join("shared")
+            .canonicalize()
+            .expect("resolve shared dir");
         std::fs::create_dir_all(shared.join("codetracer")).expect("create planted package");
         std::fs::create_dir_all(shared.join("lib")).expect("create planted lib");
         std::fs::create_dir_all(shared.join("bin")).expect("create planted bin");
