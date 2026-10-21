@@ -116,6 +116,12 @@ proc applyAgentActivityEvidenceDataset*(datasetPath: string;
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
 proc tryMountIsoNimAgentActivityPanel*(componentId: int)
 proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent)
+proc clear(self: AgentActivityComponent)
+  ## Declared ahead because `updateAgentUi` calls it before its body. Without
+  ## this, `self.clear()` there bound to the base `method clear(Component)`
+  ## in `types.nim`, which does nothing, so the host's own clear (empty the
+  ## element, resize it, republish) never ran after a submit, and only the
+  ## view's VM -> element sync emptied and resized the box.
 
 proc scrollAgentCom() =
   let el = document.getElementsByClassName("agent-com")
