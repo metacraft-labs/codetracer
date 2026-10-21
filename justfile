@@ -951,7 +951,22 @@ test-rust:
     filter="$filter and ($(bash ../../ci/lib/not-provided-filter.sh "$not_provided"))"
   fi
   cargo nextest run --release --test '*' -E "$filter"
+  # The replay-server path, reported by cargo for the same reason as the
+  # session-manager's above: libs/jsbound's e2e test drives it.
+  replay_server="$(cargo build --release --bin replay-server --message-format=json-render-diagnostics \
+    | jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' | tail -n 1)"
   popd
+  if [ ! -x "$replay_server" ]; then
+    echo "error: cargo build of replay-server reported no executable" >&2
+    exit 1
+  fi
+  # `libs/jsbound`: the JS boundary log's encoder, strict decoder and the
+  # `ct-jsbound` assembler, with the byte vectors shared with
+  # codetracer-js-recorder. Its e2e test opens an assembled boundary
+  # recording with `ct trace info`, i.e. the session-manager and
+  # replay-server built above; it fails rather than skips without them.
+  ( cd libs/jsbound && JSBOUND_E2E_SESSION_MANAGER="$session_manager" \
+      CODETRACER_REPLAY_SERVER_CMD="$replay_server" cargo nextest run --release )
   pushd src/backend-manager
   cargo nextest run --release
   # mcp_dive_in_fetch_gateway_test needs a running codetracer-ci as its
