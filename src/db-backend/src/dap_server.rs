@@ -857,36 +857,16 @@ pub fn wrap_single_trace_as_session(handler: Handler, trace_path: PathBuf) -> Re
         .map_err(|e| -> Box<dyn Error> { format!("failed to wrap single trace as session: {e}").into() })
 }
 
-/// Build the per-slot list of inner thread ids by querying each
-/// trace's `ReplaySession::list_processes()`. Mirrors the projection
-/// the `Handler::threads` implementation already does — we replicate
-/// it here so the SessionHandler can build the aggregated thread list
-/// without mutating each handler's internal state.
-fn inner_threads_for_slot(
-    session: &SessionHandler,
-    slot: TraceSlot,
-) -> Result<Vec<(u32, String)>, crate::session_handler::SessionHandlerError> {
-    let loaded = session
-        .trace(slot)
-        .ok_or(crate::session_handler::SessionHandlerError::UnknownSlot { slot })?;
-    // We do not have `&mut Handler` here, but `list_processes` on the
-    // ReplaySession trait is `&mut self`. For M24 we use the
-    // pre-cached single-thread fallback the existing `threads`
-    // handler also falls back to; the production wiring of multi-thread
-    // enumeration per trace is a follow-on once
-    // `Handler::collect_thread_descriptors()` lands. The behaviour
-    // matches today's `Handler::threads`: when no per-trace process
-    // metadata is available, surface one synthetic `<thread 1>`.
-    let _ = loaded; // suppress unused-binding warning while still asserting the slot is valid
-    Ok(vec![(1, "<thread 1>".to_string())])
-}
-
 /// Build the DAP `threads` response from a SessionHandler. The
-/// aggregated thread list applies each trace's manifest prefix and
-/// surfaces composed thread ids — see `session_handler::compose_thread_id`.
-fn build_session_threads_response(session: &SessionHandler) -> Result<Vec<crate::dap_types::Thread>, Box<dyn Error>> {
+/// aggregated thread list is built from each trace's own thread
+/// descriptors (`Handler::collect_thread_descriptors`), applies each
+/// trace's manifest prefix and surfaces composed thread ids — see
+/// `session_handler::compose_thread_id`.
+fn build_session_threads_response(
+    session: &mut SessionHandler,
+) -> Result<Vec<crate::dap_types::Thread>, Box<dyn Error>> {
     let aggregated = session
-        .aggregated_thread_list(|slot| inner_threads_for_slot(session, slot))
+        .thread_list()
         .map_err(|e| -> Box<dyn Error> { format!("session threads aggregation failed: {e}").into() })?;
     Ok(aggregated
         .into_iter()
@@ -955,9 +935,9 @@ fn build_session_pair_index_lookup_response(
 /// `ct/listProcesses` *event* dispatched at session-load (see
 /// [`dispatch_session_load_event`]); both surfaces carry the same wire
 /// shape so the frontend has a single deserialiser.
-fn build_ct_list_processes_response(session: &SessionHandler) -> Result<Value, Box<dyn Error>> {
+fn build_ct_list_processes_response(session: &mut SessionHandler) -> Result<Value, Box<dyn Error>> {
     let processes = session
-        .list_processes(|slot| inner_threads_for_slot(session, slot))
+        .process_list()
         .map_err(|e| -> Box<dyn Error> { format!("session list_processes failed: {e}").into() })?;
     let processes_json: Vec<Value> = processes
         .into_iter()
@@ -1011,7 +991,11 @@ fn build_ct_list_processes_response(session: &SessionHandler) -> Result<Value, B
 /// Errors building the payload are logged but never surfaced to the
 /// caller — emission is best-effort; a missing event must not block
 /// session bring-up.
-pub fn dispatch_session_load_event(session: &SessionHandler, sender: &Sender<DapMessage>) {
+///
+/// Takes `&mut` because each trace reports its own processes through
+/// `Handler::collect_thread_descriptors`, which may query the trace's
+/// replay worker.
+pub fn dispatch_session_load_event(session: &mut SessionHandler, sender: &Sender<DapMessage>) {
     let body = match build_ct_list_processes_response(session) {
         Ok(b) => b,
         Err(e) => {
@@ -3172,6 +3156,29 @@ fn send_launch_failure_notification(sender: &Sender<DapMessage>, text: &str) {
     }
 }
 
+/// M29 §5.2 — announce a freshly loaded session to the client with a
+/// `ct/listProcesses` event, from the task thread that announces sessions.
+///
+/// Every task thread (`stable`, `flow`, `tracepoint`) loads the launched
+/// trace into a session of its own, but only the `stable` one serves the
+/// client's requests, so only its snapshot is the one the client acts on.
+/// The others must not announce theirs: building the snapshot asks each
+/// trace for its processes (`Handler::collect_thread_descriptors`), which
+/// would start a replay worker in the `flow` and `tracepoint` threads that
+/// they never otherwise use — a whole extra `rr replay` per thread — and the
+/// client would receive three copies of one snapshot. (Those workers used to
+/// collide on one socket with the first flow or history worker, too; worker
+/// indices are now reserved process-wide by
+/// `crate::paths::reserve_worker_index`, which removes the collision itself.)
+fn announce_session_load(announces_session: bool, session: &mut SessionHandler, sender: &Sender<DapMessage>) {
+    if announces_session {
+        dispatch_session_load_event(session, sender);
+    }
+}
+
+/// Serve the requests routed to one task thread (`name`) against the session
+/// it loads on `launch`. `announces_session` is true for the one thread whose
+/// session answers the client — see [`announce_session_load`].
 fn task_thread(
     name: &str,
     from_thread_receiver: Receiver<dap::Request>,
@@ -3179,6 +3186,7 @@ fn task_thread(
     ctx_with_cached_launch: &Ctx,
     cached_launch: bool,
     run_to_entry: bool,
+    announces_session: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Track the trace folder + file currently loaded into `session` so we can
     // skip a redundant `setup()` reload when the renderer issues a duplicate
@@ -3212,7 +3220,7 @@ fn task_thread(
         } else {
             None
         };
-        let s = if let Some(manifest_path) = session_manifest_path {
+        let mut s = if let Some(manifest_path) = session_manifest_path {
             setup_session(
                 &manifest_path,
                 ctx_with_cached_launch.launch_raw_diff_index.clone(),
@@ -3276,7 +3284,7 @@ fn task_thread(
         // frontend's process tree consumes this event without having
         // to race a follow-up request. Idempotent on re-load — every
         // launch dispatches a fresh snapshot.
-        dispatch_session_load_event(&s, &sender);
+        announce_session_load(announces_session, &mut s, &sender);
         s
     } else {
         // No cached launch yet → synthesise an empty single-trace
@@ -3389,7 +3397,7 @@ fn task_thread(
                         // M29 §5.2 — emit `ct/listProcesses` on
                         // session.toml re-load. Idempotent: each launch
                         // produces a fresh full snapshot.
-                        dispatch_session_load_event(&session, &sender);
+                        announce_session_load(announces_session, &mut session, &sender);
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
@@ -3420,7 +3428,7 @@ fn task_thread(
                         // trace launch. The synthetic single-trace
                         // session yields a one-entry process list with the
                         // recorded `.ct` file as `displayName`.
-                        dispatch_session_load_event(&session, &sender);
+                        announce_session_load(announces_session, &mut session, &sender);
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
@@ -3459,7 +3467,7 @@ fn task_thread(
                     // `displayName` falls back to the recording id (path
                     // is empty for live recordings until the recorder
                     // finishes).
-                    dispatch_session_load_event(&session, &sender);
+                    announce_session_load(announces_session, &mut session, &sender);
                     loaded_trace_folder = None;
                     loaded_trace_file = None;
                     loaded_raw_diff_index = None;
@@ -3593,6 +3601,7 @@ where
     info!("create stable thread");
     let cached_launch = false;
     let run_to_entry = true;
+    let announces_session = true;
     let builder = thread::Builder::new().name("stable".to_string());
     let _stable_thread_handle = builder.spawn(move || -> Result<(), String> {
         task_thread(
@@ -3602,6 +3611,7 @@ where
             &stable_ctx,
             cached_launch,
             run_to_entry,
+            announces_session,
         )
         .map_err(|e| {
             error!("task_thread error: {e:?}");
@@ -3621,6 +3631,7 @@ where
     info!("create flow thread");
     let cached_launch = false;
     let run_to_entry = false;
+    let announces_session = false;
     let builder = thread::Builder::new().name("flow".to_string());
     let _flow_thread_handle = builder.spawn(move || -> Result<(), String> {
         task_thread(
@@ -3630,6 +3641,7 @@ where
             &flow_ctx,
             cached_launch,
             run_to_entry,
+            announces_session,
         )
         .map_err(|e| {
             error!("task_thread error: {e:?}");
@@ -3646,6 +3658,7 @@ where
     info!("create tracepoint thread");
     let cached_launch = false;
     let run_to_entry = false;
+    let announces_session = false;
     let builder = thread::Builder::new().name("tracepoint".to_string());
     let _tracepoint_thread_handle = builder.spawn(move || -> Result<(), String> {
         task_thread(
@@ -3655,6 +3668,7 @@ where
             &tracepoint_ctx,
             cached_launch,
             run_to_entry,
+            announces_session,
         )
         .map_err(|e| {
             error!("task_thread error: {e:?}");

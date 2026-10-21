@@ -197,8 +197,6 @@ pub struct Handler {
     pub trace_kind: TraceKind,
     pub replay: Box<dyn ReplaySession>,
     pub ct_rr_args: RecreatorArgs,
-    pub load_flow_index: usize,
-    pub tracepoint_rr_worker_index: usize,
 
     pub initialized: bool,
 
@@ -557,7 +555,10 @@ impl Handler {
             // Emulator-kind handlers must go through
             // `construct_with_replay`, where the caller supplies the
             // pre-built `EmulatorReplaySession`.
-            Box::new(RecreatorReplaySession::new(&ct_rr_args.name, 0, ct_rr_args.clone()))
+            Box::new(RecreatorReplaySession::with_reserved_index(
+                &ct_rr_args.name,
+                ct_rr_args.clone(),
+            ))
         };
         Self::construct_with_replay(trace_kind, ct_rr_args, reader, replay, indirect_send)
     }
@@ -613,8 +614,6 @@ impl Handler {
             tracepoints: HashMap::new(),
             replay,
             ct_rr_args,
-            load_flow_index: 0,
-            tracepoint_rr_worker_index: 0,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
             initialized: false,
@@ -1391,12 +1390,13 @@ impl Handler {
         Ok(())
     }
 
-    pub fn load_flow(
-        &mut self,
-        req: dap::Request,
-        arg: CtLoadFlowArguments,
-        sender: Sender<DapMessage>,
-    ) -> Result<(), Box<dyn Error>> {
+    /// The replay session a `ct/load-flow` walks, separate from the
+    /// handler's own replay so the flow walk does not move the position the
+    /// user sees. A recreator trace gets a new `flow` worker whose index is
+    /// reserved process-wide (`RecreatorReplaySession::with_reserved_index`),
+    /// so it never shares a socket with this handler's own worker or another
+    /// flow's. `command` names the request in the emulator refusal.
+    pub fn new_flow_replay(&self, command: &str) -> Result<Box<dyn ReplaySession>, Box<dyn Error>> {
         // `TraceKind` has THREE variants, and this condition used to have
         // two arms: `== Materialized`, everything else into the rr branch.
         // That silently routed `TraceKind::Emulator` — the in-process MCR
@@ -1412,11 +1412,10 @@ impl Handler {
         // rather than `!= Materialized`. This matches them, and names the
         // remaining case instead of letting it fail as a worker-transport
         // error that says nothing about flow or about emulator traces.
-        let mut flow_replay: Box<dyn ReplaySession> = match self.trace_kind {
+        Ok(match self.trace_kind {
             TraceKind::Materialized => Box::new(MaterializedReplaySession::new(Arc::clone(&self.reader))),
-            TraceKind::Recreator => Box::new(RecreatorReplaySession::new(
+            TraceKind::Recreator => Box::new(RecreatorReplaySession::with_reserved_index(
                 "flow",
-                self.load_flow_index,
                 self.ct_rr_args.clone(),
             )),
             TraceKind::Emulator => {
@@ -1426,13 +1425,20 @@ impl Handler {
                      builds for recreator traces (`EmulatorReplaySession::jump_to_call` is \
                      still unimplemented). Refusing by name rather than failing later as a \
                      worker-transport error.",
-                    req.command,
+                    command,
                 )
                 .into());
             }
-        };
-        self.load_flow_index += 1;
+        })
+    }
 
+    pub fn load_flow(
+        &mut self,
+        req: dap::Request,
+        arg: CtLoadFlowArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut flow_replay = self.new_flow_replay(&req.command)?;
         // TODO: eventually cleanup or manage in a more optimal way flow replays: caching
         // if possible for example
 
@@ -3269,12 +3275,10 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::Recreator {
-            self.replay = Box::new(RecreatorReplaySession::new(
+            self.replay = Box::new(RecreatorReplaySession::with_reserved_index(
                 "tracepoint",
-                self.tracepoint_rr_worker_index,
                 self.ct_rr_args.clone(),
             ));
-            self.tracepoint_rr_worker_index += 1;
         };
         let (all_history, address) = self.replay.load_history(&load_history_arg)?;
         // THE WINDOW the pane asked for (`start` / `count`), cut before the
@@ -5690,12 +5694,10 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::Recreator {
-            self.replay = Box::new(RecreatorReplaySession::new(
+            self.replay = Box::new(RecreatorReplaySession::with_reserved_index(
                 "tracepoint",
-                self.tracepoint_rr_worker_index,
                 self.ct_rr_args.clone(),
             ));
-            self.tracepoint_rr_worker_index += 1;
         };
         info!("run_tracepoints trace_kind {:?}", self.trace_kind);
 
@@ -6855,77 +6857,70 @@ impl Handler {
 
         (recorded_path.to_string(), recorded_line, recorded_column)
     }
+
+    /// The DAP threads this trace contributes, as `(thread id, name)` pairs.
+    ///
+    /// This is the one projection of a trace's process list onto DAP
+    /// threads. [`Handler::threads`] answers a single-trace `threads`
+    /// request with it, and the session layer
+    /// ([`crate::session_handler::SessionHandler::thread_list`]) builds the
+    /// session-wide list from every trace's descriptors, so the two surfaces
+    /// cannot drift apart.
+    ///
+    /// For multi-process recordings (fork / exec) the recorded processes are
+    /// enumerated through [`ReplaySession::list_processes`] — for an rr trace
+    /// that is the worker's `GetProcessInfo` query, i.e. `rr ps` — and every
+    /// process becomes one DAP thread. DAP has no first-class "process"
+    /// concept, so DAP clients use the thread list as the process selector
+    /// for multi-process debugging.
+    ///
+    /// The process the replay worker is replaying is thread
+    /// [`REPLAYED_THREAD_ID`] (1): it is the thread `stopped` events name and
+    /// the one `stackTrace` answers for, so clients that hard-code thread 1
+    /// keep working. Every other recorded process is thread `pid` — stable
+    /// across requests, since pids are unique within a trace and rr preserves
+    /// them, and within the session's 24-bit inner id budget for every Linux
+    /// pid. [`thread_descriptors_from_processes`] has the full mapping,
+    /// including the fallback for a worker that does not mark the replayed
+    /// process and the remap of a non-replayed pid 1.
+    ///
+    /// Traces without process metadata (in-process backends, single-process
+    /// recordings, an empty `rr ps`, or a worker error) keep the historical
+    /// single thread `(1, "<thread 1>")`.
+    pub fn collect_thread_descriptors(&mut self) -> Vec<(u32, String)> {
+        thread_descriptors_from_processes(self.replay.list_processes())
+    }
+
     pub fn threads(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        // For multi-process recordings (fork / exec), enumerate the recorded
-        // processes via `ReplaySession::list_processes` and surface one DAP
-        // `Thread` per process. The DAP spec has no first-class "process"
-        // concept, so VS Code-style clients use the threads list as the
-        // process selector for multi-process debugging.
-        //
-        // The thread id mapping is `pid as i64`. PIDs are unique within a
-        // trace (rr preserves them across replay), so this is a stable
-        // identifier across repeated `threads` requests in a session.
-        //
-        // For traces without process metadata (in-process backends, single-
-        // process recordings, or worker errors) `list_processes` returns a
-        // synthetic single entry — we map it to the historical
-        // `Thread { id: 1, name: "<thread 1>" }` to preserve behaviour for
-        // existing single-process traces.
-        let threads = match self.replay.list_processes() {
-            Ok(processes) if !processes.is_empty() => processes
-                .into_iter()
-                .map(|info| {
-                    // pid==0 is the synthetic single-process fallback; keep
-                    // the legacy id and label so we don't break clients that
-                    // hard-coded "<thread 1>".
-                    if info.pid == 0 {
-                        dap_types::Thread {
-                            id: 1,
-                            name: "<thread 1>".to_string(),
-                        }
-                    } else {
-                        // Strip the leading binary path from the recorded
-                        // command for a more readable label. `rr ps` records
-                        // commands like `/full/path/m12_orchestrator` for the
-                        // root and `m12_child_cpp 10` for forked exec'd
-                        // children — we keep the latter form and shorten the
-                        // former to just the basename.
-                        let label = if let Some(first) = info.command.split_whitespace().next() {
-                            let basename = first.rsplit('/').next().unwrap_or(first);
-                            format!("{} (pid {})", basename, info.pid)
-                        } else {
-                            format!("pid {}", info.pid)
-                        };
-                        dap_types::Thread {
-                            id: info.pid as i64,
-                            name: label,
-                        }
-                    }
-                })
-                .collect(),
-            Ok(_) => vec![dap_types::Thread {
-                id: 1,
-                name: "<thread 1>".to_string(),
-            }],
-            Err(e) => {
-                warn!("threads: list_processes failed, falling back to single-thread: {e}");
-                vec![dap_types::Thread {
-                    id: 1,
-                    name: "<thread 1>".to_string(),
-                }]
-            }
-        };
+        let threads = self
+            .collect_thread_descriptors()
+            .into_iter()
+            .map(|(id, name)| dap_types::Thread {
+                id: i64::from(id),
+                name,
+            })
+            .collect();
         self.respond_dap(request, dap_types::ThreadsResponseBody { threads }, sender)?;
         Ok(())
     }
 
+    /// Answer DAP `stackTrace`.
+    ///
+    /// Only the replayed process has a stack: the frames are read from the
+    /// replay's current position, so they are answered for
+    /// [`REPLAYED_THREAD_ID`]. Any other thread — another recorded process of
+    /// a multi-process trace, which this replay is not executing — gets an
+    /// empty frame list. The request's `threadId` may be a session-composed
+    /// id (`session_handler::compose_thread_id`); its inner part names the
+    /// thread of this trace.
     pub fn stack_trace(
         &mut self,
         request: dap::Request,
         args: dap_types::StackTraceArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let stack_frames: Vec<dap_types::StackFrame> = if args.thread_id == 1 {
+        let (_, inner_thread_id) = crate::session_handler::decompose_thread_id(args.thread_id);
+        let stack_frames: Vec<dap_types::StackFrame> = if inner_thread_id == REPLAYED_THREAD_ID {
             // Both the Recreator (out-of-process RR worker) and the
             // Emulator (in-process MCR) backends surface the callstack via
             // the `ReplaySession` trait rather than through a
@@ -7529,6 +7524,148 @@ fn sanitize_view_name(name: &str) -> String {
     }
 }
 
+/// DAP thread id of the process the replay worker is replaying — the thread
+/// every `stopped` event names and the only thread `stackTrace` returns
+/// frames for. It is also the id of the single thread a trace without process
+/// metadata contributes, so clients that hard-code thread 1 keep working.
+pub const REPLAYED_THREAD_ID: u32 = 1;
+
+/// Name of the single DAP thread a trace without process metadata
+/// contributes; see [`REPLAYED_THREAD_ID`].
+pub const SINGLE_PROCESS_THREAD_NAME: &str = "<thread 1>";
+
+/// DAP thread id given to a recorded process whose pid is 1 when it is *not*
+/// the replayed process, because id 1 belongs to the replayed one. It is the
+/// largest inner thread id a session can carry
+/// ([`crate::session_handler::INNER_THREAD_MASK`]); no Linux pid reaches it,
+/// since `pid_max` is at most 2^22
+/// (<https://man7.org/linux/man-pages/man5/proc_sys_kernel.5.html>), so the
+/// remap cannot collide with another recorded pid.
+pub const NON_REPLAYED_PID_1_THREAD_ID: u32 = (1 << crate::session_handler::TRACE_SLOT_SHIFT) - 1;
+
+/// Project a trace's process list onto `(DAP thread id, name)` pairs — the
+/// pure half of [`Handler::collect_thread_descriptors`].
+///
+/// - The replayed process — the row the worker marks `replayed`, or, for a
+///   worker that marks none, the root process (the first row whose parent is
+///   not in the recording) — is thread [`REPLAYED_THREAD_ID`].
+/// - Every other recorded process is thread `pid`, except pid 1, which is
+///   remapped to [`NON_REPLAYED_PID_1_THREAD_ID`].
+/// - Names come from [`process_thread_label`].
+/// - A list holding only the synthetic `pid == 0` entry
+///   [`ReplaySession::list_processes`] returns without process metadata, an
+///   empty list, or a query error yields the single legacy thread
+///   `(1, "<thread 1>")`, so a trace never contributes zero threads.
+///
+/// If a worker marks more than one row, the first is used and the conflict
+/// is logged; the reply cannot be trusted to name more than one replayed
+/// process, and DAP has a single stopped thread.
+pub fn thread_descriptors_from_processes(
+    processes: Result<Vec<crate::task::ProcessInfo>, Box<dyn Error>>,
+) -> Vec<(u32, String)> {
+    let single_process = || vec![(REPLAYED_THREAD_ID, SINGLE_PROCESS_THREAD_NAME.to_string())];
+    let processes = match processes {
+        Ok(processes) if !processes.is_empty() && processes.iter().any(|info| info.pid != 0) => processes,
+        Ok(_) => return single_process(),
+        Err(e) => {
+            warn!("threads: list_processes failed, falling back to single-thread: {e}");
+            return single_process();
+        }
+    };
+    let replayed = replayed_process_index(&processes);
+    processes
+        .iter()
+        .enumerate()
+        .map(|(index, info)| {
+            let id = if index == replayed {
+                REPLAYED_THREAD_ID
+            } else if info.pid == REPLAYED_THREAD_ID {
+                NON_REPLAYED_PID_1_THREAD_ID
+            } else {
+                info.pid
+            };
+            (id, process_thread_label(info, &processes))
+        })
+        .collect()
+}
+
+/// Index of the replayed process in a non-empty process list; see
+/// [`thread_descriptors_from_processes`].
+fn replayed_process_index(processes: &[crate::task::ProcessInfo]) -> usize {
+    let mut marked = processes
+        .iter()
+        .enumerate()
+        .filter(|(_, info)| info.replayed)
+        .map(|(index, _)| index);
+    if let Some(first) = marked.next() {
+        let extra: Vec<u32> = marked.map(|index| processes[index].pid).collect();
+        if !extra.is_empty() {
+            warn!(
+                "threads: the worker marked more than one process as replayed; using pid {} and ignoring {extra:?}",
+                processes[first].pid
+            );
+        }
+        return first;
+    }
+    // A worker that predates the `replayed` field: rr, Delve and the MCR
+    // worker all follow the recording's root process unless targeted.
+    processes
+        .iter()
+        .position(|info| !processes.iter().any(|parent| parent.pid == info.ppid))
+        .unwrap_or(0)
+}
+
+/// Human-readable label for a recorded process's DAP thread.
+///
+/// - An exec'd or root process: the basename of its executable and its pid,
+///   e.g. `m12_orchestrator (pid 4071167)`. `rr ps` records the root as
+///   `/full/path/m12_orchestrator` and exec'd children as `m12_child_cpp 10`.
+/// - A child forked without `exec`, which `rr ps` records as
+///   `(forked without exec)`: the executable of the process it was forked
+///   from (followed up through forked ancestors), its pid and its parent's,
+///   e.g. `m2_parent (pid 4071216, forked from 4071167)`. When no ancestor
+///   with an executable is in the recording, the executable part reads
+///   `process`.
+pub fn process_thread_label(info: &crate::task::ProcessInfo, processes: &[crate::task::ProcessInfo]) -> String {
+    if is_forked_without_exec(info) {
+        let executable = forked_process_executable(info, processes).unwrap_or_else(|| "process".to_string());
+        return format!("{executable} (pid {}, forked from {})", info.pid, info.ppid);
+    }
+    match executable_basename(&info.command) {
+        Some(executable) => format!("{executable} (pid {})", info.pid),
+        None => format!("pid {}", info.pid),
+    }
+}
+
+/// rr's `ps` spelling of a child that forked without exec'ing.
+fn is_forked_without_exec(info: &crate::task::ProcessInfo) -> bool {
+    info.command.trim_start().starts_with("(forked")
+}
+
+/// The basename of a command line's executable, if it names one.
+fn executable_basename(command: &str) -> Option<String> {
+    let first = command.split_whitespace().next()?;
+    Some(first.rsplit('/').next().unwrap_or(first).to_string())
+}
+
+/// The executable a forked-without-exec process runs: that of its nearest
+/// ancestor that is not itself a bare fork. The walk is bounded by the list
+/// length so a malformed (cyclic) parent chain cannot loop.
+fn forked_process_executable(
+    info: &crate::task::ProcessInfo,
+    processes: &[crate::task::ProcessInfo],
+) -> Option<String> {
+    let mut current = info;
+    for _ in 0..processes.len() {
+        let parent = processes.iter().find(|candidate| candidate.pid == current.ppid)?;
+        if !is_forked_without_exec(parent) {
+            return executable_basename(&parent.command);
+        }
+        current = parent;
+    }
+    None
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
@@ -7555,6 +7692,48 @@ mod tests {
     use codetracer_trace_writer::trace_writer::TraceWriter;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
+
+    /// The `(name, index)` that names a recreator session's worker socket.
+    fn worker_identity_of(replay: &mut Box<dyn ReplaySession>) -> (String, usize) {
+        let session = replay
+            .as_any_mut()
+            .downcast_ref::<RecreatorReplaySession>()
+            .expect("a recreator handler's replay is a RecreatorReplaySession");
+        let (name, index) = session.worker_identity();
+        (name.to_string(), index)
+    }
+
+    /// The `flow` task thread's handler names its own replay `flow`, the name
+    /// every `ct/load-flow` worker carries. Before indices were reserved
+    /// process-wide, both took index 0 and two workers bound one socket; the
+    /// first flow of every rr trace then waited out the replay-query timeout.
+    /// Every worker identity a handler creates — its own replay and each flow
+    /// replay — must be distinct.
+    #[test]
+    fn flow_workers_never_reuse_the_handlers_own_worker_identity() {
+        let mut handler = Handler::new(
+            TraceKind::Recreator,
+            RecreatorArgs {
+                name: "flow".to_string(),
+                ..RecreatorArgs::default()
+            },
+            Box::new(Db::new(&PathBuf::from(""))),
+        );
+        let mut identities = vec![worker_identity_of(&mut handler.replay)];
+        for _ in 0..3 {
+            let mut flow_replay = handler.new_flow_replay("ct/load-flow").expect("flow replay");
+            identities.push(worker_identity_of(&mut flow_replay));
+        }
+        let mut distinct = identities.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            identities.len(),
+            "duplicate replay worker identities: {identities:?}"
+        );
+        assert!(identities.iter().all(|(name, _)| name == "flow"));
+    }
 
     /// The start geid a launch opens at: unset and blank mean none; an
     /// unsigned integer is the geid; anything else is refused with a message naming the

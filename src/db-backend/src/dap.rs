@@ -427,7 +427,9 @@ impl DapClient {
     pub fn stopped_event(&mut self, reason: &str) -> DapResult<DapMessage> {
         let body = StoppedEventBody {
             reason: reason.to_string(),
-            thread_id: Some(1),
+            // The replayed process is always DAP thread 1
+            // (`dap_handler::REPLAYED_THREAD_ID`); it is the one that stopped.
+            thread_id: Some(i64::from(crate::dap_handler::REPLAYED_THREAD_ID)),
             all_threads_stopped: Some(true),
             hit_breakpoint_ids: Some(vec![]),
             description: None,

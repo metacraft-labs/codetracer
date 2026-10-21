@@ -347,9 +347,10 @@ pub struct EmptyArg {}
 
 /// Information about a single process recorded in a multi-process trace.
 ///
-/// This mirrors `ct_native_replay::multiprocess::ProcessInfo` so that the
-/// JSON payload returned by the worker's `GetProcessInfo` query deserializes
-/// without any field renaming.
+/// This mirrors `ct_native_replay::multiprocess::ReplayedProcessInfo` (a
+/// recorded process plus its `replayed` flag) so that the JSON payload
+/// returned by the worker's `GetProcessInfo` query deserializes without any
+/// field renaming.
 ///
 /// Used by the DAP `threads` handler to enumerate threads (one per process)
 /// for multi-process recordings (fork/exec). For non-multiprocess traces the
@@ -365,8 +366,16 @@ pub struct ProcessInfo {
     /// Exit status: `Some(code)` for normal exit, `Some(-signal)` for
     /// signal-terminated processes, `None` if unknown / still running.
     pub exit_code: Option<i32>,
-    /// Command line of the process, including arguments.
+    /// Command line of the process, including arguments. rr reports a child
+    /// forked without `exec` as `(forked without exec)`.
     pub command: String,
+    /// True for the one process the replay worker is replaying, whose stops,
+    /// stack and variables the DAP session shows. Defaulted, so a reply from
+    /// a worker that predates the field still parses; with no row marked,
+    /// the db-backend treats the root process as the replayed one
+    /// (`dap_handler::thread_descriptors_from_processes`).
+    #[serde(default)]
+    pub replayed: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
