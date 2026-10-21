@@ -25,13 +25,18 @@
 #   it loads must come from its own interpreter and runpath.
 #
 # WHAT IT DOES
-#   1. Static: `build-siblings.sh` names no bare `nixpkgs#` package. That is
-#      cheap, and it catches the specific mistake coming back.
+#   1. Static: neither `build-siblings.sh` nor `detect-siblings.sh` (which
+#      re-points a broken binary's runpath at an LLDB it fetches) names a
+#      `nixpkgs#lldb` / `#llvm…` without `--inputs-from`, i.e. from the registry
+#      rather than codetracer's lock. Cheap, and it catches the specific
+#      mistake coming back.
 #   2. End to end, against the real sibling checkout: moves any existing
 #      binary aside (restored afterwards whatever happens), runs
 #      `build-siblings.sh --force --only codetracer-native-backend`, requires a
 #      PASS row for it, and runs the result with `env -i`.
-#   Step 2 needs the sibling at ../codetracer-native-backend and Nix. Without
+#   3. Plants a binary that cannot start and runs WITHOUT --force: it must be
+#      rebuilt, not skipped as already built.
+#   Steps 2-3 need the sibling at ../codetracer-native-backend and Nix. Without
 #   them it FAILS by name rather than skipping, because a skipped run of this
 #   test is how the defect stayed invisible.
 #
@@ -42,6 +47,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WS_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 SCRIPT="$REPO_ROOT/scripts/build-siblings.sh"
+DETECT="$REPO_ROOT/scripts/detect-siblings.sh"
 SIBLING="$WS_ROOT/codetracer-native-backend"
 BIN="$SIBLING/target/debug/ct-native-replay"
 
@@ -54,14 +60,19 @@ fail() {
 
 echo "== build-siblings: the native backend it builds can start"
 
-# 1. No bare registry nixpkgs reference. Comments are allowed to name the
-#    spelling (they explain why it is gone), so only non-comment lines count.
-if grep -nE '^[^#]*nixpkgs#' "$SCRIPT" >/dev/null; then
-	fail "build-siblings.sh resolves a package from the unpinned flake registry:"
-	grep -nE '^[^#]*nixpkgs#' "$SCRIPT" | sed 's/^/         /'
-else
-	pass "build-siblings.sh names no bare nixpkgs# package"
-fi
+# 1. No LLVM/LLDB from the registry nixpkgs. Comments may name the spelling
+#    (they explain why it is gone), so only non-comment lines count, and a
+#    line that pins with `--inputs-from` is fine.
+for f in "$SCRIPT" "$DETECT"; do
+	bad="$(grep -nE '^[^#]*nixpkgs#(lldb|llvm)' "$f" | grep -v -- '--inputs-from')"
+	if [ -n "$bad" ]; then
+		fail "$(basename "$f") resolves a package from the unpinned flake registry:"
+		# shellcheck disable=SC2001  # a per-line prefix, not a substitution
+		printf '%s\n' "$bad" | sed 's/^/         /'
+	else
+		pass "$(basename "$f") fetches no LLVM/LLDB from the unpinned registry"
+	fi
+done
 
 # 2. End to end.
 if [ ! -d "$SIBLING" ]; then
@@ -101,6 +112,37 @@ else
 		fi
 	else
 		fail "no executable at $BIN after the build"
+	fi
+
+	# 3. A binary that is current by the freshness rule but cannot start must
+	#    be rebuilt, not reported `SKIP … already built`. Plant one (an
+	#    executable that exits non-zero, newer than HEAD) and run WITHOUT
+	#    --force.
+	if [ -x "$BIN" ]; then
+		good="$(mktemp -d)/ct-native-replay"
+		cp -p "$BIN" "$good"
+		# A NEW file, not a write through the old one: cargo hard-links
+		# target/debug/ct-native-replay to its own build product under
+		# target/debug/deps/, so writing into it would corrupt cargo's cache
+		# too and no rebuild could restore it.
+		rm -f "$BIN"
+		printf '#!/bin/sh\necho "cannot start" >&2\nexit 127\n' >"$BIN"
+		chmod +x "$BIN"
+		out3="$(bash "$SCRIPT" --only codetracer-native-backend 2>&1)"
+		# shellcheck disable=SC2016  # the backticks are literal text in the message
+		if echo "$out3" | grep -q 'rebuilding — `target/debug/ct-native-replay --help` does not run'; then
+			pass "an existing binary that cannot start is rebuilt, not skipped"
+		else
+			fail "an existing binary that cannot start was not rebuilt:"
+			echo "$out3" | tail -8 | sed 's/^/         /'
+		fi
+		if env -i PATH=/usr/bin:/bin "$BIN" --help >/dev/null 2>&1; then
+			pass "after that rebuild ct-native-replay runs"
+		else
+			fail "after that rebuild ct-native-replay still does not run; restoring the previous build"
+			rm -f "$BIN"
+			cp -p "$good" "$BIN"
+		fi
 	fi
 fi
 
