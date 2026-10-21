@@ -11,7 +11,9 @@
 ##      element and its ancestors, each scope element carrying
 ##      `data-scope-kind` / `data-scope-id` (the document, every GoldenLayout
 ##      pane, the Monaco editor, the palette and its field — stamped where
-##      those are created);
+##      those are created) — and a focused native text field no view
+##      stamped as an input element of its own (`withNativeTextField`), so
+##      a field's keys are never a list pane's;
 ##   3. resolves it with the shared `KeymapRouter` — the active base, the
 ##      user's rows, the pushed layers (the palette while it is open);
 ##   4. runs the operation, ONCE: a `ClientAction` the desktop already
@@ -146,6 +148,26 @@ proc scopeChainOf(start: JsObject): seq[ScopeElement] =
   for i in countdown(reversed.high, 0):
     result.add reversed[i]
 
+proc focusedFieldFactsOf(active: JsObject): FocusedFieldFacts =
+  ## What `withNativeTextField` needs to know about the focused DOM element.
+  ## `type` is read as the PROPERTY, which the DOM normalises (lower case,
+  ## `text` for a missing or unknown attribute; `textarea` on a textarea), so
+  ## `<input>` with no type and `<input type="TEXT">` read alike.
+  if active.isNil or active.isUndefined:
+    return FocusedFieldFacts()
+  proc str(v: JsObject): string =
+    if v.isNil or v.isUndefined: "" else: $v.to(cstring)
+  let editable = active[cstring"isContentEditable"]
+  let getAttr = active[cstring"hasAttribute"]
+  FocusedFieldFacts(
+    tagName: str(active[cstring"tagName"]),
+    inputType: str(active[cstring"type"]),
+    contentEditable: not editable.isNil and not editable.isUndefined and
+                     editable.to(bool),
+    id: str(active[cstring"id"]),
+    carriesScope: not getAttr.isNil and not getAttr.isUndefined and
+                  active.hasAttribute(cstring(ScopeKindAttribute)).to(bool))
+
 proc desktopScopePath*(): ScopePath =
   ## **THE DESKTOP'S SCOPE PATH** (§6.2), read off the DOM focus chain. The
   ## document is the window element; a focus on `<body>` (nothing focused
@@ -157,10 +179,17 @@ proc desktopScopePath*(): ScopePath =
     let line = data.ui.commandPalette.inputValue
     return @[window, element(ekOverlay, "palette"),
              paletteFieldOf(if line.isNil: "" else: $line)]
-  let chain = scopeChainOf(activeElementJs())
+  let active = activeElementJs()
+  let chain = scopeChainOf(active)
   result = @[window]
   for e in chain:
     if e.kind != ekWindow: result.add e
+  # A text field no view stamped (the Agent Activity prompt before it was,
+  # a filter box, xterm's helper textarea) is still an input element
+  # (§4.2's `textInputFocus`), so its keys reach it: without this the pane
+  # was the focus, and a list pane's `Enter` / arrows / letters were run here
+  # and the key stopped (`scope_path.withNativeTextField`).
+  result = withNativeTextField(result, focusedFieldFactsOf(active))
 
 proc desktopFacts(): SessionFacts =
   ## The ViewModels' facts, from this renderer's state.
