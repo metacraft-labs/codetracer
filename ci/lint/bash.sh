@@ -84,7 +84,7 @@ export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # while `command -v python3` said yes throughout. Requirements are declared here
 # in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl
+	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
@@ -199,17 +199,15 @@ lint_step "shellcheck: build-alignment harness ('just test' runs it)" \
 # below is: an aggregate that has never been SEEN to report a second failure is
 # indistinguishable from one that still hides it.
 #
-# It is HERMETIC — it stubs `just` on PATH rather than needing the real one —
-# and that is a correctness requirement of running it here, not a convenience.
-# nix/shells/lint.nix carries no `just` on purpose, so the first version of this
-# registration refused to run and turned this job red. The stub costs nothing:
+# It stubs `just` on PATH to control each lane's exit status. The real `just`
+# is supplied by nix/shells/lint.nix for the argument-forwarding contract suite.
+# The stub isolates this aggregate test from actual builds and test lanes:
 # ci/lib/run-just-lanes.sh's whole interface to the outside is `just <lane>`,
 # one argument and one exit status. So: no nix, no build, no network, seconds.
 #
 # One section of the suite does need a real `just` (it asserts what `just`
 # itself does with a failing DEPENDENCY, which is why `test-bpf` could not stay
-# a dependency list). That section self-skips here and the suite's expected
-# assertion count drops to match, so a short tally is still a finding.
+# a dependency list). The lint shell supplies it, so that section also runs here.
 lint_step "contract suite: an aggregate runs every lane and names every failure" \
 	bash ci/test/run-just-lanes-test.sh
 
@@ -663,5 +661,9 @@ lint_step "shellcheck: Rust test-crate coverage gate" \
 	shellcheck ci/test/rust-test-crate-coverage.sh
 lint_step "contract suite: every Rust crate with tests is run (enumerated baseline)" \
 	bash ci/test/rust-test-crate-coverage.sh
+
+# Exercise the shell argument boundary without launching Electron.
+lint_step "contract suite: Playwright recipe arguments stay intact" \
+	bash ci/test/e2e-argument-forwarding-test.sh
 
 lint_summary

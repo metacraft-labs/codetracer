@@ -91,6 +91,9 @@ pkgs.mkShell {
     bash
     shellcheck
 
+    # Argument-forwarding contract tests execute the real just recipes.
+    just
+
     # Interpreters the contract suites run under.
     #
     # PYTHON CARRIES PyYAML, AND THE REASON IS THE ONE BLIND SPOT IN HOW THIS
