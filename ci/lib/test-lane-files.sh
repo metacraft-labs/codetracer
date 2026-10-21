@@ -932,6 +932,8 @@ test_lane_files() {
 		# Scratchpad pane's ViewModel (codetracer#856).
 		echo src/frontend/tests/locals_answer_identity_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		echo src/frontend/tests/loop_built_handlers_test.nim
+		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
 		;;
 
 	renderer-chromium)
@@ -1014,11 +1016,12 @@ test_lane_files() {
 		echo src/frontend/tests/index_serves_one_deployment_descriptor_test.nim
 		echo src/frontend/tests/index_reports_the_port_it_bound_test.nim
 		#
-		# `file_tree_root_load_test.nim` loads the Files pane's root over a
-		# real temporary directory (GitHub #785): a fallback onto a live
-		# repository gets the live-filesystem limits, a trace payload is
-		# still loaded whole, and a root load that rejects still answers
-		# `filesystem-loaded` with an `error`. Writes only under one `mkdtemp`
+		# `file_tree_root_load_test.nim` loads the Files pane over a real
+		# temporary directory (GitHub #785, Viewport-Driven-Loading § V5): a
+		# fallback onto a live repository gets the live-filesystem limits,
+		# every tree is listed one level per load (payload folders lazily,
+		# from where the root load read them), and a root load that rejects
+		# still answers `filesystem-loaded` with an `error`. Writes only under one `mkdtemp`
 		# directory, which it removes.
 		echo src/frontend/tests/file_tree_root_load_test.nim
 		;;
@@ -1117,7 +1120,10 @@ test_lane_files() {
 		# has no `pendingResponses` table — and `types.nim`'s `Data` is
 		# `std/jsffi`-based. It is also the ONLY suite in this lane compiled
 		# WITHOUT `-d:ctInExtension`, for that first reason.
+		# ACP notification handling runs the index module with -d:server so
+		# the Electron window can be supplied without a display.
 		printf '%s\n' \
+			src/frontend/tests/acp_notification_test.nim \
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/dap_refusal_surfaces_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \

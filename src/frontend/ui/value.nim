@@ -519,7 +519,7 @@ proc renderChartCanvasDom(self: ChartComponent, kind: cstring, hidden: bool): No
   canvas.setAttribute(cstring"id", cstring(fmt"chart-{kind}-canvas-{self.getId}"))
   result.appendChild(canvas)
 
-proc renderHistoryTableDom(self: ValueComponent, expression: cstring, chart: ChartComponent): Node =
+proc renderHistoryTableDom*(self: ValueComponent, expression: cstring, chart: ChartComponent): Node =
   let key =
     if self.baseAddress == NO_ADDRESS:
       expression
@@ -549,70 +549,71 @@ proc renderHistoryTableDom(self: ValueComponent, expression: cstring, chart: Cha
     else: originVM.preferences.val
 
   if self.state.valueHistory.hasKey(key):
-    for event in self.state.valueHistory[key].results:
-      let historyEvent = event
-      let locationNode = newElement(cstring"div", cstring"history-location")
-      locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-        ev.preventDefault()
-        self.historyContextAction(historyEvent, ev)
-      )
-      locationNode.appendText(cstring($historyEvent.location.rrTicks))
-      locationElement.appendChild(locationNode)
-
-      let valueNode = newElement(cstring"div", cstring"history-value")
-      valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
-        if cast[MouseEvent](ev).button == 0:
-          self.historyClick(historyEvent.location)
-      )
-      valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-        ev.preventDefault()
-        self.historyContextAction(historyEvent, ev)
-      )
-      valueNode.appendText(statePanelValue(historyEvent.value).root.text)
-
-      # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 1) —
-      # attach the icon-only origin badge per entry.  The per-entry
-      # summary is read from the raw JsObject because
-      # ``HistoryResult`` in ``common_types/language_features/
-      # value_history.nim`` does not yet carry a typed field; the
-      # Rust serde-derived wire JSON does carry it (see
-      # ``task::HistoryResult.origin_summary``).  Placeholder pills
-      # are auto-enqueued into the shared lazy-fill batch when they
-      # scroll into view (spec §3.2.3 V1
-      # ``originDisplay.batchFillVisible: on``).
-      let summaryOpt = extractOriginSummary(historyEvent.toJs)
-      if summaryOpt.isSome:
-        let summary = summaryOpt.get
-        let badge = renderBadgeDom(
-          parent = valueNode,
-          summary = summary,
-          prefs = prefs,
-          atSidePanel = false,
-          iconOnly = true,
-          onClick = proc(token: string) =
-            # Click on a placeholder pill resolves it through the
-            # same lazy-fill batch the scroll observer drives.  Click
-            # on a resolved badge issues a full
-            # ``ct/originChain`` request via the shared bridge so
-            # the side panel pops in with the chain.
-            if summary.isPlaceholder and token.len > 0:
-              enqueueOriginPlaceholderToken(token)
-              flushPlaceholdersNow()
-            elif not originVM.isNil:
-              # The ``OriginChainVM.onShowOrigin`` signature uses the
-              # store-types ``Location`` (file/line) — reach into the
-              # VM's own debugger position rather than try to convert
-              # the legacy ``types.Location`` (which uses ``path``,
-              # ``rrTicks``, …) on the fly.  The debugger position is
-              # the same one the row was rendered against so the chain
-              # query targets the right step.
-              let loc = originVM.store.debugger.val.location
-              originVM.onShowOrigin($expression, loc)
+    for eventIndex in 0 ..< self.state.valueHistory[key].results.len:
+      closureScope: # Each history row owns its listeners and origin-badge callbacks.
+        let historyEvent = self.state.valueHistory[key].results[eventIndex]
+        let locationNode = newElement(cstring"div", cstring"history-location")
+        locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
+          ev.preventDefault()
+          self.historyContextAction(historyEvent, ev)
         )
-        if summary.isPlaceholder:
-          observePlaceholderBadge(badge)
+        locationNode.appendText(cstring($historyEvent.location.rrTicks))
+        locationElement.appendChild(locationNode)
 
-      valueElement.appendChild(valueNode)
+        let valueNode = newElement(cstring"div", cstring"history-value")
+        valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
+          if cast[MouseEvent](ev).button == 0:
+            self.historyClick(historyEvent.location)
+        )
+        valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
+          ev.preventDefault()
+          self.historyContextAction(historyEvent, ev)
+        )
+        valueNode.appendText(statePanelValue(historyEvent.value).root.text)
+
+        # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 1) —
+        # attach the icon-only origin badge per entry.  The per-entry
+        # summary is read from the raw JsObject because
+        # ``HistoryResult`` in ``common_types/language_features/
+        # value_history.nim`` does not yet carry a typed field; the
+        # Rust serde-derived wire JSON does carry it (see
+        # ``task::HistoryResult.origin_summary``).  Placeholder pills
+        # are auto-enqueued into the shared lazy-fill batch when they
+        # scroll into view (spec §3.2.3 V1
+        # ``originDisplay.batchFillVisible: on``).
+        let summaryOpt = extractOriginSummary(historyEvent.toJs)
+        if summaryOpt.isSome:
+          let summary = summaryOpt.get
+          let badge = renderBadgeDom(
+            parent = valueNode,
+            summary = summary,
+            prefs = prefs,
+            atSidePanel = false,
+            iconOnly = true,
+            onClick = proc(token: string) =
+              # Click on a placeholder pill resolves it through the
+              # same lazy-fill batch the scroll observer drives.  Click
+              # on a resolved badge issues a full
+              # ``ct/originChain`` request via the shared bridge so
+              # the side panel pops in with the chain.
+              if summary.isPlaceholder and token.len > 0:
+                enqueueOriginPlaceholderToken(token)
+                flushPlaceholdersNow()
+              elif not originVM.isNil:
+                # The ``OriginChainVM.onShowOrigin`` signature uses the
+                # store-types ``Location`` (file/line) — reach into the
+                # VM's own debugger position rather than try to convert
+                # the legacy ``types.Location`` (which uses ``path``,
+                # ``rrTicks``, …) on the fly.  The debugger position is
+                # the same one the row was rendered against so the chain
+                # query targets the right step.
+                let loc = originVM.store.debugger.val.location
+                originVM.onShowOrigin($expression, loc)
+          )
+          if summary.isPlaceholder:
+            observePlaceholderBadge(badge)
+
+        valueElement.appendChild(valueNode)
 
   textElement.appendChild(locationElement)
   textElement.appendChild(valueElement)

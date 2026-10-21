@@ -1934,6 +1934,9 @@ jobs:
       - name: build-once prepares this checkout, whatever directory it runs from
         run: nix develop .#devShells.x86_64-linux.default --command just test-build-once-profile-cwd
 
+      - name: Failed build-once invalidates stale and partial renderer bundles
+        run: bash scripts/test-build-once-failed-bundle.sh
+
       # The front door's Functions served by the pinned wrangler, on
       # localhost — no network, no deploy (ci/test/web-front-door-local.sh).
       - name: The web front door's logic, served locally
@@ -8668,12 +8671,16 @@ jobs:
         # reported `SKIP … already built` on every run forever. Observed: a
         # codetracer-js-recorder emitting meta.dat v3 while ct accepted only
         # v4/v5, with every recording spec then dying inside importTraceFolder
-        # naming THE TRACE rather than the stale recorder. This suite runs the
-        # real script against throwaway git repos and pins that an artifact
-        # older than HEAD, or one built from a tree with tracked modifications,
-        # is rebuilt and SAYS WHY -- and that a genuinely fresh one is still
-        # skipped, which is the control that stops "always rebuild" passing.
-        # Stock bash and git, no network; its builders are stubs.
+        # naming THE TRACE rather than the stale recorder. The script now
+        # reuses an artifact only when its build stamp -- the sibling's and its
+        # trace-format dependencies' HEADs and tracked modifications, the build
+        # command, the artifact's sha256 -- matches. This suite runs the real
+        # script against throwaway git repos and pins that a moved dependency,
+        # an older checkout, a missing/corrupt stamp, a replaced artifact and
+        # a failed build all lead to a rebuild that SAYS WHY -- and that an
+        # unchanged one is still skipped, which is the control that stops
+        # "always rebuild" passing. Stock bash and git, no network; its
+        # builders are stubs.
         run: bash ci/test/sibling-artifact-freshness-test.sh
 
       - name: Self-test the private-registry credential preflight

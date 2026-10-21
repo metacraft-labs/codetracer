@@ -525,6 +525,8 @@ export RUSTUP_HOME
 # default ~/.cargo, which tup doesn't allow as an undeclared output.
 export CARGO_HOME
 export PATH
+# Let Cargo/Nim FFI caches follow the operator's scratch directory.
+export TMPDIR
 export LIB
 export LIBPATH
 export INCLUDE

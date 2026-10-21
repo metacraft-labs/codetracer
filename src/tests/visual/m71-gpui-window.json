@@ -1,0 +1,135 @@
+{
+ "_comment": [
+  "M71 (codetracer#838) \u2014 the GPUI window's State, Files and VCS panes",
+  "keep an ordinary scrollbar, moved by a REAL wheel and a REAL press.",
+  "Produced by `ci/test/m71-gpui-window.sh` then `python3 ci/test/",
+  "m71_gpui_window.py record`; asserted by",
+  "src/frontend/gpui/tests/test_m71_gpui_window.nim."
+ ],
+ "frame": [
+  1920,
+  1080
+ ],
+ "steps": {
+  "base": true,
+  "vcs-wheel": true,
+  "files-wheel": true,
+  "state-press": true
+ },
+ "bodies": {
+  "state": [
+   4,
+   66,
+   636,
+   208
+  ],
+  "fileTree": [
+   4,
+   310,
+   636,
+   160
+  ],
+  "vcs": [
+   4,
+   506,
+   636,
+   542
+  ]
+ },
+ "thumbs": {
+  "base": {
+   "vcs": {
+    "x": 616,
+    "first": 518,
+    "last": 679,
+    "fromRight": 24
+   },
+   "fileTree": {
+    "x": 632,
+    "first": 318,
+    "last": 431,
+    "fromRight": 8
+   },
+   "state": {
+    "x": 632,
+    "first": 144,
+    "last": 221,
+    "fromRight": 8
+   }
+  },
+  "vcs-wheel": {
+   "vcs": {
+    "x": 616,
+    "first": 595,
+    "last": 756,
+    "fromRight": 24
+   },
+   "fileTree": {
+    "x": 632,
+    "first": 318,
+    "last": 431,
+    "fromRight": 8
+   },
+   "state": {
+    "x": 632,
+    "first": 144,
+    "last": 221,
+    "fromRight": 8
+   }
+  },
+  "files-wheel": {
+   "vcs": {
+    "x": 616,
+    "first": 595,
+    "last": 756,
+    "fromRight": 24
+   },
+   "fileTree": {
+    "x": 632,
+    "first": 356,
+    "last": 469,
+    "fromRight": 8
+   },
+   "state": {
+    "x": 632,
+    "first": 144,
+    "last": 221,
+    "fromRight": 8
+   }
+  },
+  "state-press": {
+   "vcs": {
+    "x": 616,
+    "first": 595,
+    "last": 756,
+    "fromRight": 24
+   },
+   "fileTree": {
+    "x": 632,
+    "first": 356,
+    "last": 469,
+    "fromRight": 8
+   },
+   "state": {
+    "x": 632,
+    "first": 188,
+    "last": 265,
+    "fromRight": 8
+   }
+  }
+ },
+ "reportedByWindow": {
+  "vcs-wheel": {
+   "line": "gesture vcs top=10 total=67 rows=21",
+   "top": 10
+  },
+  "files-wheel": {
+   "line": "gesture fileTree top=2 total=8 rows=6",
+   "top": 2
+  },
+  "state-press": {
+   "line": "gesture state scroll top=70 left=0",
+   "top": 70
+  }
+ }
+}

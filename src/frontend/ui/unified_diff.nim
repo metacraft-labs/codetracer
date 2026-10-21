@@ -1609,6 +1609,32 @@ proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
       cstring(fmt"review-loop-slider-{self.id}-{zone.functionKey}-{zone.loopIndex}"),
       "review-loop-slider"))
 
+proc reviewLoopSlideHandler(functionKey: string; loopIndex: int;
+    onIteration: proc(functionKey: string; loopIndex, iteration: int)):
+    proc(iteration: int) =
+  # A widget invokes this after the zone loop has finished; its identity must
+  # live in a separate factory call rather than shared loop-body locals.
+  result = proc(iteration: int) = onIteration(functionKey, loopIndex, iteration)
+
+proc bindReviewLoopSliders*(componentId: int; zones: seq[ReviewLoopZone];
+    onIteration: proc(functionKey: string; loopIndex, iteration: int)): bool =
+  ## Bind each rendered slider; return whether a later layout pass is needed.
+  for zone in zones:
+    let container = document.getElementById(cstring(
+      fmt"review-loop-slider-{componentId}-{zone.functionKey}-{zone.loopIndex}"))
+    if container.isNil:
+      continue
+    let element = cast[Node](container.querySelector(
+      cstring("." & FlowLoopSliderClass)))
+    if element.isNil:
+      continue
+    # `total - 1`: the range is over ITERATION INDICES, and the debugger's
+    # `maxLoopIteration` is the same 0-based bound.
+    if not ensureFlowLoopSlider(element, zone.total - 1, zone.iteration,
+        reviewLoopSlideHandler(zone.functionKey, zone.loopIndex, onIteration)):
+      if zone.total > 1:
+        result = true
+
 proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
                          attempt: int) =
   ## Build the loop controls' sliders once their view zones have been laid out.
@@ -1636,26 +1662,9 @@ proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
     return
   if not self.editorInitialized or self.editor.isNil:
     return
-  var pending = false
-  for zone in self.reviewLoopZonesFor(doc):
-    let container = document.getElementById(cstring(
-      fmt"review-loop-slider-{self.id}-{zone.functionKey}-{zone.loopIndex}"))
-    if container.isNil:
-      continue
-    let element = cast[Node](container.querySelector(
-      cstring("." & FlowLoopSliderClass)))
-    if element.isNil:
-      continue
-    let functionKey = zone.functionKey
-    let loopIndex = zone.loopIndex
-    let component = self
-    # `total - 1`: the range is over ITERATION INDICES, and the debugger's
-    # `maxLoopIteration` is the same 0-based bound.
-    if not ensureFlowLoopSlider(element, zone.total - 1, zone.iteration,
-        proc(iteration: int) =
-          component.setLoopIterationTo(functionKey, loopIndex, iteration)):
-      if zone.total > 1:
-        pending = true
+  let pending = bindReviewLoopSliders(self.id, self.reviewLoopZonesFor(doc),
+    proc(functionKey: string; loopIndex, iteration: int) =
+      self.setLoopIterationTo(functionKey, loopIndex, iteration))
   if pending:
     discard windowSetTimeout(
       proc() = self.scheduleLoopSliders(doc, attempt + 1), 150)

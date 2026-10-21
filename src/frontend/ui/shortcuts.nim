@@ -83,15 +83,17 @@ proc openShortcutsDialog*() =
   # The preset buttons and the close button, wired by the attribute the builder
   # stamped rather than by position — so reordering the picker cannot silently
   # rewire it.
-  for node in host.querySelectorAll("[data-kb-preset]"):
-    let button = cast[Element](node)
-    let chosen = parsePresetId($button.getAttribute("data-kb-preset"))
-    button.addEventListener("click", proc(ev: Event) =
-      storePreset(chosen)
-      if not data.ipc.isNil:
-        data.ipc.send(cstring"CODETRACER::keybindings-import",
-                      js{preset: cstring($chosen), replace: true})
-      closeShortcutsDialog())
+  let presetButtons = host.querySelectorAll("[data-kb-preset]")
+  for index in 0 ..< presetButtons.len:
+    closureScope:
+      let button = cast[Element](presetButtons[index])
+      let chosen = parsePresetId($button.getAttribute("data-kb-preset"))
+      button.addEventListener("click", proc(ev: Event) =
+        storePreset(chosen)
+        if not data.ipc.isNil:
+          data.ipc.send(cstring"CODETRACER::keybindings-import",
+                        js{preset: cstring($chosen), replace: true})
+        closeShortcutsDialog())
   for node in host.querySelectorAll("[data-kb-close]"):
     cast[Element](node).addEventListener("click", proc(ev: Event) =
       closeShortcutsDialog())

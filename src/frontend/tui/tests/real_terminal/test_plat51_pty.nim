@@ -31,6 +31,7 @@ import nim_libvterm
 
 import ../fixtures/fixture_provider
 import ./lifecycle_support
+from ../../testing/dual_snap import waitForCompleteFrame
 import ../../app/theme/colour_math
 import styles/generated/design_tokens
 
@@ -154,6 +155,38 @@ proc tick(sess: var TuiTestSession): int =
   if digits.len == 0: -1 else: parseInt(digits)
 
 const TrackGlyphs = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇"]
+
+proc sameText(a, b: Snapshot): bool =
+  for r in 0 ..< Rows:
+    if a.text(r) != b.text(r): return false
+  true
+
+proc pollUntil(sess: var TuiTestSession; cond: proc(s: Snapshot): bool;
+               timeoutMs = 30000): Snapshot =
+  ## M71: the screen as soon as `cond` holds of it, read every 40 ms — or, at
+  ## the deadline, the last screen read, for the case's OWN assertions to
+  ## judge (a wait that raised would report a timeout where an assertion
+  ## names what is wrong).
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while true:
+    result = sess.snap()
+    if cond(result) or getMonoTime() >= deadline: return
+    sleep(40)
+
+proc quiescent(sess: var TuiTestSession; timeoutMs = 30000): Snapshot =
+  ## M71: the screen once the TUI has stopped painting — two reads in a row
+  ## agree (each drains the pty for 80 ms) — and the frame that left it so is
+  ## whole (`waitForCompleteFrame`'s cursor barrier). For a burst of input
+  ## that repaints several times, where one barrier could pass between two
+  ## frames.
+  var prev = sess.snap()
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while getMonoTime() < deadline:
+    let cur = sess.snap()
+    if cur.sameText(prev): break
+    prev = cur
+  waitForCompleteFrame(sess, Cols, Rows)
+  sess.snap()
 
 proc eventLogPane(s: Snapshot): tuple[strip, left, track: int] =
   ## The Event Log's strip row, its first column and its scrubber's column:
@@ -350,7 +383,9 @@ suite "M71 (#838) on a real terminal: the State pane's scrollbar":
       let deadline = getMonoTime() + initDuration(seconds = 10)
       while sess.tick() == before and getMonoTime() < deadline:
         sleep(40)
-      sleep(250)
+      # The tick is on the top row, the State pane below it: the frame that
+      # moved the tick is read once it is whole, not after a fixed wait.
+      waitForCompleteFrame(sess, Cols, Rows)
     checkpoint("`total` row " & $row & " history control col " & $ctl)
     if row <= 0:
       let s = sess.snap()
@@ -358,7 +393,9 @@ suite "M71 (#838) on a real terminal: the State pane's scrollbar":
     ck row > 0
     sess.press(row, ctl)
     discard sess.waitFor("↳ ")
-    sleep(400)
+    # The history's rows and the track beside them are one frame: read it
+    # whole.
+    waitForCompleteFrame(sess, Cols, Rows)
     var s = sess.snap()
     # The pane's last column: the cell before the divider to the right of
     # the control (or the screen's last column).
@@ -389,15 +426,21 @@ suite "M71 (#838) on a real terminal: the State pane's scrollbar":
     ck thumb.len > 0 and thumb[0] == top
     # The wheel over the pane, as a terminal reports it, scrolls the rows:
     # the thumb moves down.
+    proc thumbRows(s: Snapshot): seq[int] =
+      for r in top .. bottom:
+        if $s[r][right].rune != "│" and $s[r][right].rune in TrackGlyphs:
+          result.add r
+    let first = if thumb.len > 0: thumb[0] else: Rows
     for _ in 0 ..< 10:
       sess.mouse(65, row + 1, ctl - 6)
-      sleep(60)
-    sleep(400)
-    s = sess.snap()
-    var moved: seq[int] = @[]
-    for r in top .. bottom:
-      if $s[r][right].rune != "│" and $s[r][right].rune in TrackGlyphs:
-        moved.add r
+    # Polled for the thumb to leave its place (up to the deadline, then the
+    # assertion below judges the last screen), and read once the ten
+    # notches' repaints are over.
+    discard sess.pollUntil(proc(s: Snapshot): bool =
+      let m = s.thumbRows
+      m.len > 0 and m[0] > first)
+    s = sess.quiescent()
+    let moved = s.thumbRows
     checkpoint("thumb after the wheel " & $moved)
     ck moved.len > 0 and moved[0] > thumb[0]
 

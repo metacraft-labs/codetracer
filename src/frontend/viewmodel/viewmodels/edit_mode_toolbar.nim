@@ -974,6 +974,46 @@ proc editModeToolbar*(profile: PlatformProfile;
     result.actions.incl tbaRun
     result.actions.incl tbaActionOverflow
 
+proc refuseCommands*(model: EditToolbarModel; reason: string;
+                     cause = dcCapability;
+                     refused: set[TopbarAction] = {tbaBuild, tbaRun}):
+                    EditToolbarModel =
+  ## `model` with every ENABLED button in `refused` turned off for `reason` —
+  ## what a HOST says when it cannot carry out what the model would run.
+  ##
+  ## The profile answers whether a platform can run a program; it cannot
+  ## answer whether this front end has wired a route to do it. The Electron
+  ## desktop is that case (#812): `desktopProfile` has
+  ## `capProcessArbitraryPrograms`, so `nargo compile` is enabled, while its
+  ## build message has no handler. An enabled button that does nothing is
+  ## what EMT-D14 forbids, so the host refuses — disabled, NOT hidden: the
+  ## slots, the group and the command line stay, and only `enabled`, `reason`
+  ## and `cause` change.
+  ##
+  ## A button that is already off keeps its own reason. That is the
+  ## precedence `commandButton` gives `platformVerdict`: ambiguity and "no
+  ## command" are decided first, and a capability refusal speaks only for a
+  ## command that would otherwise have run.
+  ##
+  ## Applied to `buttons` as well as to the named fields, because `buttons` is
+  ## what the bar renders and the fields are what a pane control reads; the
+  ## two must not disagree about whether Build is on.
+  doAssert reason.len > 0,
+    "a refused button must say why (EMT-D14/EMT-A28)"
+  proc refuse(button: var ToolbarButton) =
+    if button.action in refused and button.enabled:
+      button.enabled = false
+      button.reason = reason
+      button.cause = cause
+      button.requiresConfirmation = false
+  result = model
+  refuse(result.build)
+  refuse(result.run)
+  refuse(result.runTests)
+  refuse(result.recordTests)
+  for button in result.buttons.mitems:
+    refuse(button)
+
 # ---------------------------------------------------------------------------
 # §7.3 — WHICH SURFACE THE TOPBAR HOST CARRIES
 # ---------------------------------------------------------------------------

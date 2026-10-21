@@ -1055,17 +1055,11 @@ test.describe("NoirSpaceShip", () => {
     const filesystem = (await layout.filesystemTabs())[0];
     await filesystem.clickTab();
 
-    // The filesystem tree shows only the recording's source folders.  For the
-    // noir_space_ship trace the tree is
-    //   source folders > noir_space_ship > src > main.nr
-    // (no codetracer/test-programs prefix), so the path traversal must mirror
-    // that shape.
-    const node = await filesystem.nodeByPath(
-      "source folders",
-      "noir_space_ship",
-      "src",
-      "main.nr",
-    );
+    // The tree is rooted in the sources the recording carries (`files/src/
+    // main.nr`), not in the folder it was recorded from (GitHub #785), so
+    // for the noir_space_ship trace it is
+    //   source folders > src > main.nr
+    const node = await filesystem.nodeByPath("source folders", "src", "main.nr");
 
     // The jstree context menu can be slow to appear. Retry the right-click.
     let options: string[] = [];

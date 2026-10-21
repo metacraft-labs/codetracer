@@ -24,6 +24,7 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/agent_activity_vm
+import ../keymap/scope_path   # the prompt's scope element
 
 var expandedToolRowIds = initHashSet[string]()
 
@@ -1984,6 +1985,15 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         tdiv(ref = buttons, class = "agent-buttons-container")
       tdiv(ref = settingsPanelHost, class = "agent-settings-host")
 
+  # The prompt is the scope path's `input:agent-prompt` (Base-Keymaps-And-
+  # Layer-Stack.md §5.2: views render the attributes the desktop reads its
+  # path from, §6.2), as Find in Files' field is `input:search-query`.  This
+  # pane is a LIST pane, so without its own element the focus was the pane:
+  # `Enter` resolved to `list.activate`, which the key router ran and stopped
+  # before the keydown handler below could submit.  Both renderers take the
+  # same two attributes, so MockRenderer suites see what Electron gets.
+  r.setAttribute(input, ScopeKindAttribute, $ekInput)
+  r.setAttribute(input, ScopeIdAttribute, AgentPromptInput)
   r.attachInputEvents(input, vm, callbacks)
   r.setupInputHighlight(input, highlight)
 

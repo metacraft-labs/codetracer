@@ -228,7 +228,7 @@ suite "M71 GPUI: the VCS pane keeps an ordinary scrollbar":
     ck fits.plan.firstAttr(VcsScrollAttribute) == "0"   # the pane is drawn
     ck fits.plan.scrubber("vcs").kind == JNull
 
-  test "the wheel scrolls it; a press at the track's end shows the last rows; the thumb drags":
+  test "VCS: the wheel scrolls it; a press at the track's end shows the last rows; the thumb drags":
     let big = vcsRepo(Extra)
     let wheel = run("click:tab:vcs:left,wheel:vcs:3", calc, workDir = big)
     ck wheel.rc == 0
@@ -273,7 +273,7 @@ suite "M71 GPUI: the Files pane keeps an ordinary scrollbar":
     ck shown > 0 and shown < all.len
     ck short.plan.fileRowIds == all[0 ..< shown]
 
-  test "the wheel scrolls it; a press at the track's end shows the last rows; the thumb drags":
+  test "Files: the wheel scrolls it; a press at the track's end shows the last rows; the thumb drags":
     let all = run("", multiRoot).plan.fileRowIds
     let wheel = run("wheel:fileTree:1", multiRoot, pre = shortFiles,
                     height = ShortH)

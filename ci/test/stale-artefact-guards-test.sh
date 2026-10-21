@@ -118,11 +118,12 @@ DEPLOY_WASM="${SUITE_ROOT}/browser-replay/deploy-wasm.sh"
 CROSS_REPO="${SUITE_ROOT}/scripts/run-cross-repo-tests.sh"
 DESKTOP_CAPS="${SUITE_ROOT}/resources/codetracer-desktop-capabilities"
 VERSION_NIM="${SUITE_ROOT}/src/ct/version.nim"
+BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=107
+EXPECTED_ASSERTIONS=114
 
 ASSERTIONS=0
 FAILURES=0
@@ -187,7 +188,7 @@ run_expect_failure() {
 for required in "${VISUAL_CAPTURE}" "${STORYBOOK_FRESHNESS}" "${STORYBOOK_DEPS}" \
 	"${RR_SETUP}" "${SETUP_CERTS}" "${WEBP}" "${CAPTURE_LIB}" \
 	"${DESKTOP_COMPONENT}" "${DEVELOPER_SETUP}" "${DEPLOY_WASM}" \
-	"${CROSS_REPO}" "${DESKTOP_CAPS}" "${VERSION_NIM}"; do
+	"${CROSS_REPO}" "${DESKTOP_CAPS}" "${VERSION_NIM}" "${BUILD_SIBLINGS}"; do
 	if [[ ! -f ${required} ]]; then
 		echo "stale-artefact-guards-test: missing '${required}'" >&2
 		exit 3
@@ -1607,6 +1608,103 @@ else
 	bad "build_wasm.sh stamps the engine it builds" \
 		"without the stamp every guard above can only report 'unstamped'"
 fi
+
+# ---------------------------------------------------------------------------
+section "build-siblings reuses a sibling artefact only when its build stamp matches"
+# ---------------------------------------------------------------------------
+#
+# `scripts/build-siblings.sh` decided "already built" with `[ -e ]` — and then,
+# for a while, with an mtime comparison against the sibling's HEAD — so the
+# launcher<->recorder lanes ran recorders compiled against a superseded
+# `codetracer-trace-format`: the recorders' own HEADs had not moved, the trace
+# format had, and ct refused every container they wrote ("meta.dat: unsupported
+# version 3"). The guard is now a build stamp, kept under the CODETRACER
+# checkout's `.tools/`, recording the sibling's and its trace-format
+# dependencies' HEADs and tracked modifications, the build command and the
+# artefact's sha256.
+#
+# The full case list (corrupt stamps, a failed build, `--check`, a non-git
+# sibling, ...) is ci/test/sibling-artifact-freshness-test.sh. This section is
+# the enrolment: the contracts that ARE the defect, seen going red here with
+# the other sites, and a check that the full suite still runs in CI.
+#
+# Only the build itself is stubbed: `repro exec` is a pass-through and the
+# builder writes the artefact. The HEADs, `git status`, the hashing and the
+# stamp files are real.
+
+BS_WS="${TEST_ROOT}/bs-ws"
+BS_BIN="${TEST_ROOT}/bs-bin"
+BS_SIB=codetracer-beam-recorder
+BS_ART="target/debug/codetracer-beam-recorder"
+BS_STAMP="${BS_WS}/codetracer/.tools/build-siblings-stamps/${BS_SIB}.stamp"
+mkdir -p "${BS_WS}/codetracer/scripts" "${BS_BIN}"
+cp "${BUILD_SIBLINGS}" "${BS_WS}/codetracer/scripts/"
+
+# The stub bodies are written verbatim; the expansions in them are the stubs'.
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\n[ "$1" = exec ] && { shift 2; [ "$1" = -- ] && shift; exec "$@"; }\nexit 0\n' \
+	>"${BS_BIN}/repro"
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\nmkdir -p "$(dirname "$BS_ARTEFACT")" && echo built >"$BS_ARTEFACT"\n' \
+	>"${BS_BIN}/just"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${BS_BIN}/nim"
+cp "${BS_BIN}/nim" "${BS_BIN}/nimble"
+cp "${BS_BIN}/nim" "${BS_BIN}/pkg-config"
+chmod +x "${BS_BIN}"/*
+
+bs_repo() { # <name>: a sibling checkout with two dated commits
+	local dir="${BS_WS}/$1"
+	mkdir -p "${dir}"
+	git -C "${dir}" init -q
+	git -C "${dir}" config user.email t@t.local
+	git -C "${dir}" config user.name t
+	printf 'one\n' >"${dir}/src.txt"
+	git -C "${dir}" add src.txt
+	GIT_COMMITTER_DATE="1577836800 +0000" git -C "${dir}" commit -qm one
+	printf 'two\n' >>"${dir}/src.txt"
+	GIT_COMMITTER_DATE="1577923200 +0000" git -C "${dir}" commit -qam two
+}
+bs_repo "${BS_SIB}"
+bs_repo codetracer-trace-format
+bs_repo codetracer-trace-format-nim
+
+run_build_siblings() {
+	(cd "${BS_WS}/codetracer" &&
+		PATH="${BS_BIN}:${PATH}" BS_ARTEFACT="${BS_WS}/${BS_SIB}/${BS_ART}" \
+			bash scripts/build-siblings.sh --only "${BS_SIB}" 2>&1)
+}
+
+run_build_siblings >/dev/null
+assert_file_exists "${BS_STAMP}" "a sibling built by build-siblings.sh is stamped"
+assert_contains "$(run_build_siblings)" "already built" \
+	"...and is reused while nothing it was built from has changed"
+
+# THE DEFECT. Only the dependency moves; the recorder's HEAD, tree and
+# timestamps are exactly as they were.
+printf 'meta.dat v4\n' >>"${BS_WS}/codetracer-trace-format/src.txt"
+git -C "${BS_WS}/codetracer-trace-format" commit -qam "meta.dat v4"
+assert_contains "$(run_build_siblings)" "rebuilding — dependency codetracer-trace-format moved" \
+	"a recorder whose trace-format dependency moved is rebuilt, and says why"
+
+# THE ANTI-MTIME CONTRACT. An older commit checked out after the build leaves
+# the artefact NEWER than HEAD, which is what an mtime gate reads as fresh.
+git -C "${BS_WS}/${BS_SIB}" checkout -q HEAD~1
+assert_contains "$(run_build_siblings)" "moved since the stamped build" \
+	"a sibling checked out to an older commit is rebuilt, not trusted by its mtime"
+
+# Every artefact that predates the stamps is in this state on first run.
+rm -f "${BS_STAMP}"
+assert_contains "$(run_build_siblings)" "rebuilding — no build stamp" \
+	"an artefact with no build stamp is rebuilt rather than assumed fresh"
+
+# AND THE SITES. The guard is the stamp comparison; the full suite is the
+# evidence it keeps working, and it is only evidence while CI runs it.
+# shellcheck disable=SC2016 # the needle is source text, not an expansion
+assert_contains "$(cat "${BUILD_SIBLINGS}")" 'stamp_stale_reason "$stamp"' \
+	"build-siblings.sh decides reuse by comparing the build stamp"
+assert_contains "$(cat "${SUITE_ROOT}/.github/workflows/codetracer.yml")" \
+	"bash ci/test/sibling-artifact-freshness-test.sh" \
+	"...and its full freshness suite is run by CI"
 
 # ---------------------------------------------------------------------------
 printf '\n'

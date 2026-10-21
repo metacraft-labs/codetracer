@@ -49,6 +49,20 @@ PART B (deliverables 8-11, and the future-output issue):
   | the Welcome Screen on a new tab | B10 (the + opens the omnibar), B11 (Record new trace refused), B12 (a recording made outside the state root), W4 (the window's + opens nothing) |
   | the future keeps its colour, dimmed | B8 (future output at full strength), B9 (not the desktop's 0.5 composite) |
 
+M71 (codetracer#838 — the State, Files and VCS panes keep an ordinary
+scrollbar, Scrollbar-Scrubbers.md §2-§4, and the wheel scrolls them,
+CodeTracer-TUI.md §4.4):
+
+  | claim | arms |
+  |---|---|
+  | the terminal's track is drawn only while the rows overflow | M1 (State), M2 (Files), M3 (VCS) — each draws one when the pane is exactly full; M13 (the shipped binary's State pane draws none over a long history) |
+  | the thumb follows `scrollTop` | M4 (State), M5 (Files), M6 (VCS) — each thumb pinned to the top |
+  | the wheel scrolls the pane beneath the pointer, unfocused | M7 (State), M8 (Files), M9 (VCS) — each pane dropped from `routeMouseReport`'s wheel routing |
+  | a track press is the scrollbar's, never the row's, and the debugger stays | M10 (the press also falls through to the row), M11 (the held thumb drags nothing) |
+  | the reader's place survives the VCS pane's re-read | M12 (`vcs_source.publish` drops `scrollTop`) |
+  | GPUI's Files and VCS panes keep the list scrollbar | MG1 (Files draws none), MG2 (VCS draws none), MG3 (VCS draws one while its rows fit), MG4 / MG5 (the wheel over Files / VCS scrolls nothing), MG6 (a track press moves no view) |
+  | GPUI's State bar takes the §3 press and drag | MG7 (a press moves nothing), MG8 (the held thumb drags nothing) |
+
 THREE VERDICTS (Verification-Harness-Traps §1): `killed` (the named case
 reported [FAILED], or the named gate failed), `SURVIVED`, `HARNESS-FAILURE`
 (the needle not unique, the suite did not compile, the mutated binary did not
@@ -131,6 +145,11 @@ WELCOMEVM = "src/frontend/viewmodel/viewmodels/welcome_screen_vm.nim"
 GCHROME = "src/frontend/gpui/chrome.nim"
 LPREFS = "src/frontend/viewmodel/host/layout_preferences.nim"
 TMOUSE = "src/frontend/tui/app/input/mouse.nim"
+# M71 (codetracer#838): the in-hand panes' painters and the VCS source.
+TVARS = "src/frontend/tui/app/views/variables.nim"
+TFILES = "src/frontend/tui/app/views/file_tree.nim"
+TVCS = "src/frontend/tui/app/views/vcs_pane.nim"
+TVCSSRC = "src/frontend/tui/host/vcs_source.nim"
 ISONIM_GPUI_DIR = Path(os.environ.get(
     "ISONIM_GPUI_DIR", str(ROOT.parent / "isonim-gpui")))
 if os.environ.get("ISONIM_GPUI_SRC"):
@@ -155,6 +174,9 @@ CAPRES = "src/frontend/tui/app/tests/test_capability_resolution.nim"
 PTYB = "src/frontend/tui/tests/real_terminal/test_plat51b_pty.nim"
 TOUTPTY = "src/frontend/tui/tests/real_terminal/test_plat52_terminal_output_pty.nim"
 GPLANB = "src/frontend/gpui/tests/test_plat51b_gpui_plan.nim"
+# M71 (codetracer#838): GPUI's Files, VCS and State scrollbars, read off the
+# shipped binary's window plan.
+GPLANM71 = "src/frontend/gpui/tests/test_m71_gpui_plan.nim"
 CAPTURE = "scripts/plat51-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat51-desktop-capture.spec.ts"
 DE_EVENTLOG = CAPTURE + "#scrubber.spans.the.whole.log"
@@ -166,10 +188,12 @@ SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, NAVIGATION, RUNTIME, TSESSION, TEVENT,
             TDRIVER,
             READER, GMAIN, GLEAVES, GLIST, DEVLOG, DCONFIG, DSTATE, ENGINE,
             GLHITS, LINTER, TBINDING, TSHELL, TROLES, TPALETTE, TCAPS, TPROBE,
-            TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE]
+            TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE,
+            TVARS, TFILES, TVCS, TVCSSRC]
 SUITES = [LAYU, MODELU, SCRUBT, PARITY, PRODUCERS, FRAMEV, PTY, GPLAN,
           DE_EVENTLOG, DE_SAVED, DE_CHANGED,
-          GLHIT, DROPREF, PARITYB, TOUT, CAPRES, PTYB, TOUTPTY, GPLANB]
+          GLHIT, DROPREF, PARITYB, TOUT, CAPRES, PTYB, TOUTPTY, GPLANB,
+          GPLANM71]
 
 
 def suite_file(path: str) -> str:
@@ -204,9 +228,10 @@ SUITE_KIND = {
     PTYB: ("c", "tui-real-terminal"),
     TOUTPTY: ("c", "tui-real-terminal"),
     GPLANB: ("c", "gpui-shell"),
+    GPLANM71: ("c", "gpui-shell"),
 }
 BINARY_SUITES = {PTY, PTYB, TOUTPTY}
-GPUI_BINARY_SUITES = {GPLAN, GPLANB}
+GPUI_BINARY_SUITES = {GPLAN, GPLANB, GPLANM71}
 ENGINE_SUBJECTS = {ENGINE}
 UNISOLATED_SUITES: set = set()
 UNFILTERED_CONTROL: set = {DE_EVENTLOG, DE_SAVED, DE_CHANGED}
@@ -283,6 +308,27 @@ W_FOCUS = "one strip on the focus colour; a press moves it; the command turns it
 W_LIVE = "held 80 px along, the panes have moved; nothing is written until the release"
 W_DROP = "the carried pane is out of the arrangement; the placeholder; the outer band"
 W_WELCOME = "the + opens it: the desktop's start options in its order, the recent panels"
+# M71's killer cases (codetracer#838).
+N_STATE = "State: an open value history overflows the pane, and the thumb follows scrollTop"
+N_FILES = ("Files: an overflowing tree paints a track whose thumb follows "
+           "scrollTop; one that fits keeps its last column")
+N_VCS = ("VCS: an overflowing pane paints a track whose thumb follows "
+         "scrollTop; one that fits keeps its last column")
+N_WHEEL = "a wheel over each pane scrolls it without focusing it first"
+N_PRESS = ("a press on each pane's track jumps the view; its held thumb drags; "
+           "the debugger stays")
+Y_HISTORY = ("a long value history open in the State pane draws a track whose "
+             "thumb the wheel moves")
+Q_VCS_DRAW = ("more rows than the body holds draw the list scrubber over all of "
+              "them; rows that fit, none")
+Q_VCS_MOVE = ("VCS: the wheel scrolls it; a press at the track's end shows the "
+              "last rows; the thumb drags")
+Q_FILES_DRAW = ("a tree taller than its body is drawn a window at a time, under "
+                "the list scrubber")
+Q_FILES_MOVE = ("Files: the wheel scrolls it; a press at the track's end shows "
+                "the last rows; the thumb drags")
+Q_STATE = ("a press at its track's end reaches the end the wheel does; its "
+           "start the top; the thumb drags")
 D_EVENTLOG = "gate:" + DE_EVENTLOG
 D_SAVED = "gate:" + DE_SAVED
 D_CHANGED = "gate:" + DE_CHANGED
@@ -308,6 +354,10 @@ CASE_SUITE = {
     Z_FOCUS: PTYB, Z_EDGES: PTYB, Z_LIVE: PTYB, Z_PIXEL: PTYB, Z_RECORD: PTYB,
     Z_COMPOSITE: TOUTPTY,
     W_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
+    N_STATE: SCRUBT, N_FILES: SCRUBT, N_VCS: SCRUBT, N_WHEEL: SCRUBT,
+    N_PRESS: SCRUBT, Y_HISTORY: PTY,
+    Q_VCS_DRAW: GPLANM71, Q_VCS_MOVE: GPLANM71, Q_FILES_DRAW: GPLANM71,
+    Q_FILES_MOVE: GPLANM71, Q_STATE: GPLANM71,
 }
 NAMED_CASES = list(CASE_SUITE)
 
@@ -640,6 +690,94 @@ ARMS += [
         "  var layout = gGestures.previewLayout(committedLayout(),\n",
         "  var layout = committedLayout()\n  discard gGestures.previewLayout(committedLayout(),\n",
         W_LIVE, "the window draws the committed arrangement while a divider is held"),
+
+    # --- M71 (codetracer#838): State, Files and VCS keep an ordinary scrollbar
+    # (Scrollbar-Scrubbers.md §2-§4) and the wheel scrolls them unfocused
+    # (CodeTracer-TUI.md §4.4). The terminal first, then GPUI.
+    Arm("M1", TVARS,
+        "  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells\n",
+        "  let overflow = rows.len >= bodyHeight and area.width > ScrubberTrackCells\n",
+        N_STATE, "a State pane exactly full of rows still draws a scrollbar"),
+    Arm("M2", TFILES,
+        "  let overflow = bodyRows > 0 and model.rowCount > bodyRows and\n",
+        "  let overflow = bodyRows > 0 and model.rowCount >= bodyRows and\n",
+        N_FILES, "a Files tree exactly full of rows still draws a scrollbar"),
+    Arm("M3", TVCS,
+        "  let overflow = lines.len > area.height and area.width > ScrubberTrackCells\n",
+        "  let overflow = lines.len >= area.height and area.width > ScrubberTrackCells\n",
+        N_VCS, "a VCS pane exactly full of rows still draws a scrollbar"),
+    Arm("M4", TVARS,
+        "  scrubberModel(screen.totalRows, screen.top, screen.bodyHeight)\n",
+        "  scrubberModel(screen.totalRows, 0, screen.bodyHeight)\n",
+        N_STATE, "the State thumb sits at the top whatever the pane's scrollTop"),
+    Arm("M5", TFILES,
+        "  scrubberModel(screen.totalRows, screen.top, screen.bodyRows)\n",
+        "  scrubberModel(screen.totalRows, 0, screen.bodyRows)\n",
+        N_FILES, "the Files thumb sits at the top whatever the tree's scrollTop"),
+    Arm("M6", TVCS,
+        "  scrubberModel(screen.totalRows, screen.top, screen.area.height)\n",
+        "  scrubberModel(screen.totalRows, 0, screen.area.height)\n",
+        N_VCS, "the VCS thumb sits at the top whatever the pane's scrollTop"),
+    Arm("M7", RUNTIME,
+        "    if at.found and at.region.pane in InHandPanes and\n       rt.inHandLoaded(at.region.pane):\n",
+        "    if at.found and at.region.pane in InHandPanes - {paneState} and\n       rt.inHandLoaded(at.region.pane):\n",
+        N_WHEEL, "the wheel over the State pane is not routed to it"),
+    Arm("M8", RUNTIME,
+        "    if at.found and at.region.pane in InHandPanes and\n       rt.inHandLoaded(at.region.pane):\n",
+        "    if at.found and at.region.pane in InHandPanes - {paneFileTree} and\n       rt.inHandLoaded(at.region.pane):\n",
+        N_WHEEL, "the wheel over the Files pane is not routed to it"),
+    Arm("M9", RUNTIME,
+        "    if at.found and at.region.pane in InHandPanes and\n       rt.inHandLoaded(at.region.pane):\n",
+        "    if at.found and at.region.pane in InHandPanes - {paneVcs} and\n       rt.inHandLoaded(at.region.pane):\n",
+        N_WHEEL, "the wheel over the VCS pane is not routed to it"),
+    Arm("M10", RUNTIME,
+        "  if region.pane in InHandPanes and\n     rt.pressInHandTrack(region.pane, under, event, outcome):\n    return true\n",
+        "  if region.pane in InHandPanes:\n    discard rt.pressInHandTrack(region.pane, under, event, outcome)\n",
+        N_PRESS, "a press on an in-hand pane's track also acts on the row beside it"),
+    Arm("M11", RUNTIME,
+        "    of InHandPanes:\n      # M71 (#838): State, Files and VCS — the same drag.\n      discard rt.scrubInHand(pane, area, event.row, dragging = true)\n",
+        "    of InHandPanes:\n      discard pane\n",
+        N_PRESS, "a held in-hand thumb does not drag the view"),
+    Arm("M12", TVCSSRC,
+        "  rt.app.vcs.scrollTop = top\n",
+        "  discard top\n",
+        N_WHEEL, "the VCS pane's periodic re-read resets the reader's place"),
+    Arm("M13", TVARS,
+        "  if overflow:\n    result.trackCol = area.col + width\n    g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,\n",
+        "  if false:\n    result.trackCol = area.col + width\n    g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,\n",
+        Y_HISTORY, "the shipped binary's State pane draws no track over a long history"),
+    Arm("MG1", GMAIN,
+        "  for kind in [paneFileTree, paneVcs]:\n    let sm = inHandScrubber(kind)\n",
+        "  for kind in [paneVcs]:\n    let sm = inHandScrubber(kind)\n",
+        Q_FILES_DRAW, "GPUI's Files pane draws no scrollbar while its tree overflows"),
+    Arm("MG2", GMAIN,
+        "  for kind in [paneFileTree, paneVcs]:\n    let sm = inHandScrubber(kind)\n",
+        "  for kind in [paneFileTree]:\n    let sm = inHandScrubber(kind)\n",
+        Q_VCS_DRAW, "GPUI's VCS pane draws no scrollbar while its rows overflow"),
+    Arm("MG3", GMAIN,
+        "    if sm.visible > 0 and sm.total > sm.visible:\n      result.add (kind, sm)\n",
+        "    if sm.visible > 0 and sm.total > 0:\n      result.add (kind, sm)\n",
+        Q_VCS_DRAW, "GPUI's VCS pane draws a scrollbar while its rows fit"),
+    Arm("MG4", GMAIN,
+        "    elif onPane == $paneFileTree and dy != 0.0:\n",
+        "    elif false and dy != 0.0:\n",
+        Q_FILES_MOVE, "GPUI's wheel over the Files pane scrolls nothing"),
+    Arm("MG5", GMAIN,
+        "    elif onPane == $paneVcs and dy != 0.0:\n",
+        "    elif false and dy != 0.0:\n",
+        Q_VCS_MOVE, "GPUI's wheel over the VCS pane scrolls nothing"),
+    Arm("MG6", GMAIN,
+        "    setInHandTop(kind, sm.scrubTop(hit.fraction, dragging))\n",
+        "    setInHandTop(kind, sm.firstVisible)\n",
+        Q_FILES_MOVE, "GPUI's Files / VCS track press moves no view"),
+    Arm("MG7", GMAIN,
+        "    scrubStateBar(r, y, dragging = onThumb)\n    return true\n",
+        "    discard onThumb\n    return true\n",
+        Q_STATE, "GPUI's State bar takes a press and moves no view"),
+    Arm("MG8", GMAIN,
+        "  if kind == paneState:\n    scrubStateBar(r, y, dragging)\n    return\n",
+        "  if kind == paneState:\n    return\n",
+        Q_STATE, "GPUI's held State thumb does not drag the view"),
 ]
 
 DECLARED_SURVIVORS: list = []

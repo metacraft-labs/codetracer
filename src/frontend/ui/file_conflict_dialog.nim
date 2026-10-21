@@ -48,3 +48,14 @@ when defined(js):
     if not pathEl.isNil:
       pathEl.textContent = path
     overlay
+
+  proc wireFileConflictActions*(overlay: kdom.Element;
+                                handleAction: proc(action: cstring)) =
+    ## Bind each named button to the caller's conflict resolution.
+    for action in [cstring"discard", cstring"save", cstring"merge", cstring"keep"]:
+      closureScope:
+        let capturedAction = action
+        let button = overlay.toJs.querySelector(cstring("[data-action='" & $action & "']"))
+        if not button.isNil:
+          button.addEventListener(cstring"click", proc(e: Event) =
+            handleAction(capturedAction))

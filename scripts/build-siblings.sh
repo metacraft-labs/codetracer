@@ -26,8 +26,17 @@
 # Conventions:
 #   - All builds are run via `repro exec <repo> -- <cmd>` so each repo's flake
 #     pins the toolchain. This matches what end users do interactively.
-#   - Each entry knows the output artifact path and skips if it's already
-#     present (`--force` overrides). Builds are idempotent: re-running is cheap.
+#   - Each entry knows its output artifact path, and reuses an existing artifact
+#     ONLY when its BUILD STAMP matches: a record, written after the last
+#     successful build, of the inputs it was built from — the sibling's HEAD
+#     and tracked modifications, the same for the sibling repos it compiles
+#     against (codetracer-trace-format / -nim by default), the build command,
+#     and the artifact's own sha256. An absent, unreadable or mismatching stamp
+#     means REBUILD, and the script says why. Stamps live under
+#     .tools/build-siblings-stamps/ in THIS checkout, never in the siblings.
+#     `--force` rebuilds unconditionally; `--check` reports a stale artifact as
+#     "would build" and writes nothing. Builds are incremental, so a rebuild of
+#     an artifact that turns out to be current is cheap.
 #   - Failures in one repo do NOT abort the rest — the script reports a
 #     per-repo PASS/SKIP/FAIL summary and exits non-zero only if any FAILs.
 # =============================================================================
@@ -170,9 +179,287 @@ should_skip() {
 }
 
 # ---------------------------------------------------------------------------
+# Build stamps: what an artifact was built FROM.
+#
+# A stamp is a few lines of text, written after a successful build (and its
+# smoke check), that identify every input the artifact depends on:
+#
+#   format build-siblings-stamp/1
+#   command <sha256 of the repro repo, the artifact path and the build command>
+#   artifact <sha256 of the artifact's bytes>
+#   input <repo> head=<full sha> tracked=<clean | sha256 of `git diff HEAD`>
+#   input <dependency repo> head=… tracked=…     (one line per dependency)
+#   input <dependency repo> absent               (not checked out)
+#
+# The next run recomputes the same lines and reuses the artifact only when they
+# are IDENTICAL. Any other outcome — no stamp, a stamp that cannot be read, one
+# in another format, one whose lines differ — is a rebuild, with the first
+# difference named. The stamp is one more thing that can be missing, and a
+# missing stamp must never mean "assume fresh".
+#
+# WHY THE STAMP LIVES HERE AND NOT BESIDE THE ARTIFACT. The artifact sits inside
+# the sibling's tree, and a file written there is an untracked file in someone
+# else's repository: it shows in their `git status`, and the workspace pre-push
+# gate counts it. `.tools/` in this checkout is gitignored and already holds the
+# build logs, and the stamp is about THIS checkout's use of the sibling anyway.
+# A sibling built by hand, or from another workspace, therefore has no stamp
+# here and is rebuilt once — the right direction to err in.
+#
+# The artifact's own hash is in the stamp so that an artifact replaced after
+# the build — copied in from another worktree, rebuilt by hand from other
+# inputs — is not vouched for by a stamp that was written about different
+# bytes.
+#
+# What the stamp does NOT identify: the toolchain the repro repo's dev shell
+# provides. That is pinned by the repro repo's flake lock, not recorded here;
+# the smoke check in `build_sibling` is what catches the one toolchain failure
+# seen so far (a binary that cannot start).
+# ---------------------------------------------------------------------------
+STAMP_DIR="${CT_ROOT}/.tools/build-siblings-stamps"
+STAMP_FORMAT="format build-siblings-stamp/1"
+
+# The sibling repos an entry compiles against, beyond its own. Every recorder
+# reaches the trace format through the workspace checkout — Cargo
+# `path = "../codetracer-trace-format/…"` dependencies, nim
+# `--path:../codetracer-trace-format-nim/src`, cgo `-L…/codetracer-trace-format-nim`
+# — and THAT is the move the recorder's own HEAD cannot see: the meta.dat v3
+# recorders that ct refused were sitting on an unchanged HEAD while the trace
+# format they had been compiled against had moved on. So both trace-format
+# repos are the default for every entry (minus the entry's own repo).
+#
+# Overrides, each checked against the sibling's manifests. Listing a repo that
+# is not really an input costs a needless incremental rebuild; omitting one that
+# is costs a stale artifact reported as built, so an override must be EVIDENCE
+# that the default is wrong, not a guess that it is unnecessary:
+#   noir — its root Cargo.toml reaches codetracer-trace-format by git `rev=`,
+#     and the trace-format-nim sources its writer compiles come from
+#     `.codetracer-deps/`, fetched at revisions pinned in noir's own
+#     scripts/fetch-trace-format-nim.sh. Both pins are in noir's HEAD.
+#   codetracer-flow-recorder/cadence-trace-helper — go-helper/go.mod requires
+#     only onflow/cadence and its transitive modules; no cgo, no trace format.
+DEFAULT_SIBLING_DEPS="codetracer-trace-format codetracer-trace-format-nim"
+declare -A SIBLING_DEPS=(
+	["noir"]=""
+	["codetracer-flow-recorder/cadence-trace-helper"]=""
+)
+
+# sha256sum on Linux, shasum on macOS. Neither is an error only for stamping:
+# with no hasher every stamp check fails, so every entry rebuilds and says why.
+SHA256_TOOL=()
+if command -v sha256sum >/dev/null 2>&1; then
+	SHA256_TOOL=(sha256sum)
+elif command -v shasum >/dev/null 2>&1; then
+	SHA256_TOOL=(shasum -a 256)
+fi
+
+# sha256_stdin: the hex digest of stdin.
+sha256_stdin() {
+	[ "${#SHA256_TOOL[@]}" -gt 0 ] || return 1
+	local out
+	out="$("${SHA256_TOOL[@]}")" || return 1
+	printf '%s' "${out%% *}"
+}
+
+# describe_input <repo>: sets INPUT_LINE to the stamp line identifying the
+# workspace checkout <repo>, or sets INPUT_ERROR and returns 1 when it cannot
+# be identified. Globals rather than stdout so the caller needs no subshell.
+describe_input() {
+	local name="$1"
+	local dir="$WS_ROOT/$1"
+	INPUT_LINE=""
+	INPUT_ERROR=""
+	if [ ! -e "$dir" ]; then
+		INPUT_LINE="input $name absent"
+		return 0
+	fi
+	# The checkout must be a repository OF ITS OWN. A directory that merely
+	# sits inside some other repository would report that repository's HEAD,
+	# which says nothing about these sources.
+	local top real
+	top="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || top=""
+	real="$(cd "$dir" 2>/dev/null && pwd -P)" || real=""
+	if [ -z "$top" ] || [ "$top" != "$real" ]; then
+		INPUT_ERROR="$name is not a git checkout, so the sources the artifact is built from cannot be identified"
+		return 1
+	fi
+	local head
+	if ! head="$(git -C "$dir" rev-parse --verify -q HEAD 2>/dev/null)"; then
+		INPUT_ERROR="$name has no commit at HEAD, so its sources cannot be identified"
+		return 1
+	fi
+	# TRACKED modifications only, and the reason is not style. The artifact
+	# itself usually lives INSIDE the sibling (target/release/…), so counting
+	# untracked files would count the build output as a modification and every
+	# run would rebuild forever — which ci/test/sibling-artifact-freshness-test.sh
+	# caught on the first draft of the previous version of this check. Real
+	# repos gitignore their build directories, so the bug hid behind that;
+	# depending on every sibling's .gitignore for correctness is not a
+	# dependency worth having.
+	#
+	# The CONTENT of the modifications is recorded, not just their presence:
+	# a sibling with local edits, built once, is reused until the edits change,
+	# instead of being rebuilt on every run because it is "dirty".
+	local status tracked="clean"
+	if ! status="$(git -C "$dir" status --porcelain --untracked-files=no 2>/dev/null)"; then
+		INPUT_ERROR="\`git status\` failed in $name"
+		return 1
+	fi
+	if [ -n "$status" ]; then
+		if ! tracked="$(git -C "$dir" diff HEAD --binary --no-ext-diff --no-textconv --no-color 2>/dev/null | sha256_stdin)"; then
+			INPUT_ERROR="cannot hash the tracked modifications in $name"
+			return 1
+		fi
+	fi
+	INPUT_LINE="input $name head=$head tracked=$tracked"
+}
+
+# compute_stamp <repo> <artifact> <artifact_path> <cmd> <env_repo> <deps>:
+# sets STAMP_TEXT to the stamp the artifact would carry if it were built from
+# the inputs as they are NOW, or sets STAMP_ERROR and returns 1.
+compute_stamp() {
+	local repo="$1" artifact="$2" artifact_path="$3" cmd="$4" env_repo="$5" deps="$6"
+	STAMP_TEXT=""
+	STAMP_ERROR=""
+	if [ "${#SHA256_TOOL[@]}" -eq 0 ]; then
+		STAMP_ERROR="neither sha256sum nor shasum is on PATH, so no build stamp can be computed"
+		return 1
+	fi
+	local cmd_hash art_hash
+	# NUL-separated so no two different (repo, artifact, command) triples can
+	# serialise to the same bytes.
+	cmd_hash="$(printf '%s\0%s\0%s' "$env_repo" "$artifact" "$cmd" | sha256_stdin)" || {
+		STAMP_ERROR="cannot hash the build command"
+		return 1
+	}
+	art_hash="$(sha256_stdin <"$artifact_path" 2>/dev/null)" || {
+		STAMP_ERROR="cannot read $artifact to hash it"
+		return 1
+	}
+	local text="$STAMP_FORMAT"$'\n'"command $cmd_hash"$'\n'"artifact $art_hash"
+	local input
+	# $deps is a space-separated list of repo names; splitting it is the intent.
+	# shellcheck disable=SC2086
+	for input in "$repo" $deps; do
+		if ! describe_input "$input"; then
+			STAMP_ERROR="$INPUT_ERROR"
+			return 1
+		fi
+		text+=$'\n'"$INPUT_LINE"
+	done
+	STAMP_TEXT="$text"
+}
+
+# stamp_line_key <line>: "input <repo>" for an input line, else the first word.
+# Stamp lines are matched by this key to name WHICH input differs.
+stamp_line_key() {
+	local first second _rest
+	read -r first second _rest <<<"$1"
+	if [ "$first" = "input" ]; then
+		printf 'input %s' "$second"
+	else
+		printf '%s' "$first"
+	fi
+}
+
+# stamp_stale_reason <stamp> <repo> <compute_stamp args…>: sets STALE_REASON to
+# "" when the stamp matches the inputs as they are now, else to the reason it
+# does not. Sets STALE_ARTIFACT_REPLACED=1 when the artifact's bytes are not
+# the ones stamped, so the caller can delete it before rebuilding.
+stamp_stale_reason() {
+	local stamp="$1" repo="$2"
+	shift
+	STALE_REASON=""
+	STALE_ARTIFACT_REPLACED=0
+	if [ ! -e "$stamp" ]; then
+		STALE_REASON="no build stamp at $stamp (built before stamps existed, by hand, or by a build that did not finish)"
+		return 0
+	fi
+	local recorded
+	if ! recorded="$(cat -- "$stamp" 2>/dev/null)"; then
+		STALE_REASON="the build stamp $stamp cannot be read"
+		return 0
+	fi
+	if [ "${recorded%%$'\n'*}" != "$STAMP_FORMAT" ]; then
+		STALE_REASON="the build stamp $stamp is not a '$STAMP_FORMAT' stamp"
+		return 0
+	fi
+	if ! compute_stamp "$@"; then
+		STALE_REASON="$STAMP_ERROR"
+		return 0
+	fi
+	[ "$recorded" = "$STAMP_TEXT" ] && return 0
+
+	# Name the first input that differs. Any difference at all is already a
+	# rebuild; this only decides what the message says.
+	local line key old found
+	while IFS= read -r line; do
+		key="$(stamp_line_key "$line")"
+		found=""
+		while IFS= read -r old; do
+			if [ "$(stamp_line_key "$old")" = "$key" ]; then
+				found="$old"
+				break
+			fi
+		done <<<"$recorded"
+		[ "$found" = "$line" ] && continue
+		if [ "$key" = "artifact" ]; then STALE_ARTIFACT_REPLACED=1; fi
+		[ -n "$STALE_REASON" ] && continue
+		if [ -z "$found" ]; then
+			STALE_REASON="the build stamp records no '$key'"
+			continue
+		fi
+		case "$key" in
+		command)
+			STALE_REASON="the build command changed since the stamped build"
+			;;
+		artifact)
+			STALE_REASON="the artifact is not the file the stamp was written for (replaced after the build?)"
+			;;
+		input\ *)
+			local name="${key#input }" who="dependency"
+			[ "$name" = "$repo" ] && who="sibling"
+			local _i _n old_head new_head
+			read -r _i _n old_head _ <<<"$found"
+			read -r _i _n new_head _ <<<"$line"
+			if [ "$old_head" = "absent" ]; then
+				STALE_REASON="$who $name was not checked out at the stamped build"
+			elif [ "$new_head" = "absent" ]; then
+				STALE_REASON="$who $name is no longer checked out"
+			elif [ "$old_head" != "$new_head" ]; then
+				old_head="${old_head#head=}"
+				new_head="${new_head#head=}"
+				STALE_REASON="$who $name moved since the stamped build (built at ${old_head:0:12}, now at ${new_head:0:12})"
+			else
+				STALE_REASON="$who $name has different tracked modifications than at the stamped build"
+			fi
+			;;
+		*)
+			STALE_REASON="the build stamp differs at '$key'"
+			;;
+		esac
+	done <<<"$STAMP_TEXT"
+	if [ -z "$STALE_REASON" ]; then
+		STALE_REASON="the build stamp records inputs this entry no longer has"
+	fi
+}
+
+# write_stamp <stamp>: writes $STAMP_TEXT atomically, so an interrupted write
+# can never leave a partial stamp that a later comparison reads.
+write_stamp() {
+	local stamp="$1"
+	local tmp="$stamp.tmp.$$"
+	mkdir -p "$(dirname -- "$stamp")" &&
+		printf '%s\n' "$STAMP_TEXT" >"$tmp" &&
+		mv -f -- "$tmp" "$stamp" && return 0
+	rm -f -- "$tmp"
+	return 1
+}
+
+# ---------------------------------------------------------------------------
 # Helper: run a build step for one repo.
 #   $1 — repo directory name (under WS_ROOT)
-#   $2 — artifact path (relative to repo) used to short-circuit if present
+#   $2 — artifact path (relative to repo); reused only when its build stamp
+#        matches (see "Build stamps" above)
 #   $3 — build command (executed under `repro exec <repo>`)
 #   $4 — optional logical key (defaults to $1).  Use this when a single repo
 #        produces multiple artifacts (e.g. flow recorder = Rust crate + Go
@@ -207,6 +494,19 @@ build_sibling() {
 	fi
 
 	local artifact_path="$repo_dir/$artifact"
+	# One stamp per logical key, named like its log (no slashes).
+	local stamp="$STAMP_DIR/${key//\//__}.stamp"
+	local deps=""
+	if [ -n "${SIBLING_DEPS[$key]+set}" ]; then
+		deps="${SIBLING_DEPS[$key]}"
+	else
+		local dep
+		for dep in $DEFAULT_SIBLING_DEPS; do
+			[ "$dep" = "$repo" ] || deps="${deps:+$deps }$dep"
+		done
+	fi
+
+	local stale_reason=""
 	if [ "$FORCE" -eq 0 ] && [ -e "$artifact_path" ]; then
 		# EXISTENCE IS NOT FRESHNESS, and treating it as freshness cost a whole
 		# investigation.  This arm used to be `[ -e "$artifact_path" ]` alone, so
@@ -217,36 +517,40 @@ build_sibling() {
 		# rather than the stale recorder.  The only workaround was to know to
 		# pass `--force --only <sibling>`, which means knowing the answer first.
 		#
-		# The rule: an artifact older than the commit its repo is sitting on, or
-		# built from a tree with uncommitted changes, is not known to be current.
-		# Both comparisons are cheap and need no network.  Neither is perfect —
-		# a commit that touched only documentation triggers a rebuild that was
-		# not needed — and that direction is the right one to err in: a needless
-		# rebuild costs minutes, while a stale artifact reported as built costs
-		# a false defect and the session spent chasing it.
-		local stale_reason=""
-		if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
-			local head_epoch artifact_epoch
-			head_epoch=$(git -C "$repo_dir" log -1 --format=%ct 2>/dev/null || echo 0)
-			artifact_epoch=$(date -r "$artifact_path" +%s 2>/dev/null || echo 0)
-			if [ "$head_epoch" -gt 0 ] && [ "$artifact_epoch" -gt 0 ] &&
-				[ "$artifact_epoch" -lt "$head_epoch" ]; then
-				stale_reason="artifact predates HEAD ($artifact_epoch < $head_epoch)"
-			elif [ -n "$(git -C "$repo_dir" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-				stale_reason="repo has uncommitted changes"
-			fi
-			# TRACKED modifications only, and the reason is not style.  The
-			# artifact itself usually lives INSIDE the sibling (here:
-			# target/release/…), so a plain `status --porcelain` counts the
-			# build output as a dirty tree and every run rebuilds forever —
-			# which ci/test/sibling-artifact-freshness-test.sh case (A) caught
-			# on the first draft of this very check.  Real repos gitignore
-			# their build directories, so the bug hid behind that; depending on
-			# every sibling's .gitignore for correctness is not a dependency
-			# worth having.
+		# The rule: an artifact is reused only when its build stamp (see "Build
+		# stamps" above) records EXACTLY the inputs as they are now — the
+		# sibling's HEAD and tracked modifications, the same for the
+		# trace-format repos it compiles against, the build command, and the
+		# artifact's own bytes.  Anything else is a rebuild, and the reason is
+		# printed.
+		#
+		# NOT MTIME, which is what the previous version of this check compared
+		# (artifact older than HEAD's commit time, or a dirty tree).  It missed
+		# the very case above: the recorder's HEAD had not moved, the trace
+		# format it compiled against had, and nothing about the recorder's own
+		# timestamps changed.  It also skipped a stale artifact after checking
+		# out an OLDER commit (the artifact is then newer than HEAD), and a
+		# checkout CI materialises or copies has timestamps that say nothing
+		# about content — a gate in this repository has refused itself over
+		# byte-identical copied sources for exactly that reason.  A stamp of
+		# content identities has none of these failure modes.
+		#
+		# Erring toward a rebuild is deliberate: a commit that touched only
+		# documentation still rebuilds, and the build tools' own incremental
+		# logic makes that cheap.  A stale artifact reported as built costs a
+		# false defect and the session spent chasing it.
+		stamp_stale_reason "$stamp" "$repo" "$artifact" "$artifact_path" "$cmd" "$env_repo" "$deps"
+		stale_reason="$STALE_REASON"
+		# An artifact whose bytes are not the stamped ones was replaced after
+		# the build.  Remove it, for the reason given at the smoke check below:
+		# a build tool that sees its own products current may not re-copy over
+		# a file someone replaced.  Not under --check, which promises to build
+		# (and so to change) nothing.
+		if [ "$STALE_ARTIFACT_REPLACED" -eq 1 ] && [ "$CHECK_ONLY" -eq 0 ]; then
+			rm -f "$artifact_path"
 		fi
 		# Nor is a current artifact one that runs (see the smoke check after
-		# the build): a fresh-looking binary that cannot start is rebuilt, not
+		# the build): a fresh-stamped binary that cannot start is rebuilt, not
 		# skipped.
 		if [ -z "$stale_reason" ] && [ -n "$smoke_arg" ] &&
 			! env -i PATH=/usr/bin:/bin "$artifact_path" "$smoke_arg" >/dev/null 2>&1; then
@@ -254,25 +558,34 @@ build_sibling() {
 			# Remove it, or the rebuild may leave it in place: cargo, for one,
 			# sees its own build products current and does not re-copy over a
 			# file someone replaced, but does restore one that is missing.
-			# Not under --check, which promises to build (and so to change)
-			# nothing.
 			if [ "$CHECK_ONLY" -eq 0 ]; then rm -f "$artifact_path"; fi
 		fi
 		if [ -z "$stale_reason" ]; then
 			RESULT_STATE[$key]="SKIP"
-			RESULT_DETAIL[$key]="already built ($artifact)"
+			RESULT_DETAIL[$key]="already built ($artifact; build stamp matches)"
 			return 0
 		fi
 		# Say WHY it is rebuilding.  A rebuild with no stated reason is
 		# indistinguishable from the script ignoring its own short-circuit.
-		echo "  $key: rebuilding — $stale_reason" >&2
+		if [ "$CHECK_ONLY" -eq 1 ]; then
+			echo "  $key: would rebuild — $stale_reason" >&2
+		else
+			echo "  $key: rebuilding — $stale_reason" >&2
+		fi
 	fi
 
 	if [ "$CHECK_ONLY" -eq 1 ]; then
 		RESULT_STATE[$key]="MISSING"
-		RESULT_DETAIL[$key]="would build → $artifact"
+		RESULT_DETAIL[$key]="would build → $artifact${stale_reason:+ ($stale_reason)}"
 		return 0
 	fi
+
+	# Drop the old stamp BEFORE building, so a build that fails or is killed
+	# half-way cannot leave behind a stamp that still matches: the previous
+	# stamp describes the previous inputs, and an input change that is later
+	# undone would make it match again over whatever the failed build left in
+	# place.  No stamp means the next run rebuilds — the safe answer.
+	rm -f "$stamp"
 
 	# Sanitize key for log filename (no slashes).
 	local log_name="${key//\//__}"
@@ -331,7 +644,23 @@ build_sibling() {
 		fi
 	fi
 
+	# Stamp it — LAST, after the build and the smoke check have both passed,
+	# for two reasons.  Only an artifact known to be good may be vouched for.
+	# And some builds rewrite their own tracked inputs (`npm install` updates
+	# package-lock.json), so the inputs are read as the build LEFT them: that
+	# is the state the next run compares against, and reading them before the
+	# build would make every following run see a "modification" and rebuild.
 	RESULT_STATE[$key]="PASS"
+	if ! compute_stamp "$repo" "$artifact" "$artifact_path" "$cmd" "$env_repo" "$deps"; then
+		# Not a failure of the build.  The artifact is good, but nothing can
+		# vouch for it later, so the next run rebuilds it — and says so now.
+		RESULT_DETAIL[$key]="built $artifact (not stamped, will rebuild next run: $STAMP_ERROR)"
+		return 0
+	fi
+	if ! write_stamp "$stamp"; then
+		RESULT_DETAIL[$key]="built $artifact (could not write the build stamp $stamp; will rebuild next run)"
+		return 0
+	fi
 	RESULT_DETAIL[$key]="built $artifact"
 }
 
@@ -371,11 +700,14 @@ build_sibling \
 	"cargo build --release"
 
 # Nim FFI shared lib (libcodetracer_trace_writer.so, used by wazero with CGO).
-trace_format_nim_cmd="nimble buildSharedLib"
-if [ -n "$ZSTD_CFLAGS" ] && [ -n "$ZSTD_LIBS" ]; then
-	# shellcheck disable=SC2016
-	trace_format_nim_cmd='export NIX_CFLAGS_COMPILE="${NIX_CFLAGS_COMPILE:-} $ZSTD_CFLAGS"; export NIX_LDFLAGS="${NIX_LDFLAGS:-} $ZSTD_LIBS"; nimble buildSharedLib'
-fi
+#
+# One spelling, whatever the toolchain lookup found.  This used to drop the
+# zstd exports when either value was empty; the command string is part of the
+# build stamp, and `--check` skips the lookup (so both are empty there), which
+# made `--check` report this entry stale on every run.  Appending an empty
+# value to NIX_CFLAGS_COMPILE / NIX_LDFLAGS adds a space and nothing else.
+# shellcheck disable=SC2016
+trace_format_nim_cmd='export NIX_CFLAGS_COMPILE="${NIX_CFLAGS_COMPILE:-} $ZSTD_CFLAGS"; export NIX_LDFLAGS="${NIX_LDFLAGS:-} $ZSTD_LIBS"; nimble buildSharedLib'
 build_sibling \
 	codetracer-trace-format-nim \
 	libcodetracer_trace_writer.so \
@@ -413,7 +745,9 @@ build_sibling \
 # so every GUI spec that records a native trace failed in `ct record`.
 # ci/test/build-siblings-native-backend-runs-test.sh holds the binary to
 # starting with an empty environment.
-if ! should_skip codetracer-native-backend; then
+# Not under --check: initializing submodules clones into the sibling, and
+# --check promises to build (and so to change) nothing.
+if ! should_skip codetracer-native-backend && [ "$CHECK_ONLY" -eq 0 ]; then
 	ensure_submodules codetracer-native-backend libs/rr libs/delve
 fi
 native_backend_cmd="CT_CODETRACER_NATIVE_BACKEND_SIBLING=\"\$PWD\" just --justfile '$CT_ROOT/justfile' --working-directory '$CT_ROOT' ensure-ct-native-replay"

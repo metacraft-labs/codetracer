@@ -239,7 +239,43 @@ proc findFileByPath(file: CodetracerFile; path: string): CodetracerFile =
       return found
   return nil
 
+proc nodeForPathContent*(root: CodetracerFile; parentIndices: seq[int];
+                         index: int; path: string): CodetracerFile =
+  ## The tree node an ``update-path-content`` answer replaces: the stub at
+  ## ``parentIndices`` / ``index`` below ``root``, when that walk stays in
+  ## bounds and lands on a node whose path is ``path``; otherwise the node
+  ## found by ``path``.  ``nil`` when neither finds it.
+  ##
+  ## The indices alone are not trusted.  They are positions within the tree
+  ## ONE root load built, and ``ui_js.onFilesystemCategoryLoaded`` wraps
+  ## that tree in a new "Files" root when a second category arrives, which
+  ## shifts every walk by one level.  Writing the answer over whatever node
+  ## a stale walk reaches would replace an unrelated folder; the path check
+  ## turns that into a lookup.  Now that every folder below a root arrives
+  ## as a stub (``index/files.FilesystemLoadDepth``), these answers are
+  ## the common case rather than the exception.
+  var node = root
+  var walked = not root.isNil
+  if walked:
+    for position in parentIndices:
+      if position < 0 or position >= node.children.len:
+        walked = false
+        break
+      node = node.children[position]
+  if walked and index >= 0 and index < node.children.len:
+    let candidate = node.children[index]
+    if not candidate.original.path.isNil and
+        $candidate.original.path == path:
+      return candidate
+  findFileByPath(root, path)
+
 proc loadFolderContentIfNeeded*(path: string) =
+  ## Ask the index process for the entries of the folder at ``path`` when
+  ## it is still a "Loading..." stub — every folder below a root arrives as
+  ## one (``index/files.FilesystemLoadDepth``).  The stub's
+  ## ``payloadPath`` goes with the request: it is where a self-contained
+  ## trace's payload holds the folder, which the display path alone does
+  ## not say for a folder overlaid from the payload's top level.
   if data.isNil or data.services.editor.filesystem.isNil:
     return
   let file = findFileByPath(data.services.editor.filesystem, path)
@@ -249,8 +285,14 @@ proc loadFolderContentIfNeeded*(path: string) =
     let nodeId = "j1_" & $file.index
     let nodeIndex = file.index
     let nodeParentIndices = file.parentIndices
+    # Absent (`undefined`) on a node an older index process sent.
+    let payloadPathValue = file.original.payloadPath.toJs
+    let payloadPath =
+      if payloadPathValue.isNull or payloadPathValue.isUndefined: cstring""
+      else: file.original.payloadPath
     data.ipc.send "CODETRACER::load-path-content", js{
       path: cstring(path),
+      payloadPath: payloadPath,
       nodeId: cstring(nodeId),
       nodeIndex: nodeIndex,
       nodeParentIndices: nodeParentIndices

@@ -241,6 +241,16 @@ let handleRequestPermission = functionAsJS(proc(params: JsObject): Future[JsObje
   }
 )
 
+proc sendToolPermission(connection: ClientSideConnection; params: JsObject) {.async.} =
+  # Own the send's asynchronous failure without suspending session updates:
+  # handleSessionUpdate saves a local SessionState snapshot after dispatch.
+  # Keeping the await in this helper avoids overwriting a later update with
+  # that snapshot when the transport settles.
+  try:
+    await connection.extNotification(cstring"tool_permission", params)
+  except:
+    errorPrint cstring(fmt"[acp_ipc] auto-allow tool permission failed: {getCurrentExceptionMsg()}")
+
 let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
   let acpSessionId =
     if jsHasKey(params, cstring"sessionId"):
@@ -320,7 +330,7 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                 optionId = opts[0][cstring"optionId"].to(cstring)
 
               if optionId.len > 0:
-                discard acpClient.extNotification(cstring"tool_permission", js{
+                discard sendToolPermission(acpClient, js{
                   "sessionId": acpSessionId,
                   "toolCallId": toolCallId,
                   "outcome": js{
