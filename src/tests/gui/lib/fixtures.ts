@@ -389,6 +389,23 @@ interface CodetracerOptions {
    * `codex-acp` first on the app's `PATH`.
    */
   launchEnv: Record<string, string>;
+  /**
+   * JavaScript run in every renderer document of an Electron launch BEFORE
+   * the app's own scripts, or "" for none.
+   *
+   * `page.evaluate` in a test comes too late for anything the renderer does
+   * while it starts: by the time `ctPage` is handed over, a `ct review`
+   * launch has already painted the session it loaded. A spec that has to
+   * observe that start-up installs its instrumentation here instead. It is
+   * registered on the app's browser context as soon as `_electron.launch`
+   * returns (`installRendererInitScript`), and applies to every window and
+   * navigation after that. The spec should check that its script really ran
+   * in the page it inspects (for example by a global the script sets).
+   *
+   * Per test, through `test.use`, for the reason `launchEnv` is. Web launches
+   * have no Electron context and ignore it.
+   */
+  rendererInitScript: string;
 }
 
 /**
@@ -721,6 +738,7 @@ function sleep(ms: number): Promise<void> {
  * without evaluating in the page and let us wait for the real editor window.
  */
 async function getEditorWindow(app: ElectronApplication): Promise<Page> {
+  await installRendererInitScript(app);
   await app.firstWindow({ timeout: 45_000 });
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
@@ -751,6 +769,20 @@ let activePrefixOverride = "";
 
 /** #862: the running test's `launchEnv` (see that option), or {}. */
 let activeLaunchEnv: Record<string, string> = {};
+
+/** The running test's `rendererInitScript` (see that option), or "". */
+let activeRendererInitScript = "";
+
+/**
+ * Register the running test's `rendererInitScript` on `app`'s browser
+ * context, so it runs at document start in the editor window. Called first
+ * thing in `getEditorWindow`, which every Electron launch reaches straight
+ * after `_electron.launch` returns.
+ */
+async function installRendererInitScript(app: ElectronApplication): Promise<void> {
+  if (activeRendererInitScript.length === 0) return;
+  await app.context().addInitScript({ content: activeRendererInitScript });
+}
 
 /**
  * The `ct` a launch runs. With a `codetracerPrefixOverride` it is the
@@ -1941,6 +1973,7 @@ export const test = base.extend<
   codetracerPrefixOverride: [process.env.CODETRACER_TEST_PREFIX ?? "", { option: true }],
   configTheme: ["", { option: true }],
   launchEnv: [{}, { option: true }],
+  rendererInitScript: ["", { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -2035,6 +2068,7 @@ export const test = base.extend<
         codetracerPrefixOverride,
         configTheme,
         launchEnv,
+        rendererInitScript,
       },
       use,
       testInfo,
@@ -2042,6 +2076,7 @@ export const test = base.extend<
       let result: LaunchResult;
       activePrefixOverride = codetracerPrefixOverride;
       activeLaunchEnv = launchEnv;
+      activeRendererInitScript = rendererInitScript;
 
       // Ensure each test starts with the bundled default layout in the
       // worker-local config directory.  Earlier tests in the same worker may

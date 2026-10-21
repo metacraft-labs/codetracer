@@ -19,12 +19,26 @@
  *   - typing a prompt and pressing Enter sends it to the agent and clears the
  *     field, and the router does not run `list.activate` for it;
  *   - Shift+Enter inserts a newline and sends nothing;
+ *   - the box grows with the lines typed into it, and shrinks back to one
+ *     line whenever the app empties it: after Enter has sent it, and after
+ *     Stop has ended a turn the user was typing a follow-up during. The app
+ *     empties the box programmatically (VM -> element, `syncInputValue` in
+ *     `isonim_agent_activity_view.nim`), which fires no `input` event, so
+ *     the sync has to resize the box itself (codetracer 4bf805322); on Stop
+ *     nothing else does. Nothing headless can hold this: `MockRenderer` has
+ *     no layout;
+ *   - that programmatic clear dispatches no `input` event either: only the
+ *     user's keystrokes reach the prompt (`prompt-input-counter.ts` tells
+ *     the two apart by `isTrusted`). `MockRenderer` dispatches no DOM events,
+ *     so this too is held only here, and, for a review's replay, in
+ *     `../agent-activity-deepreview/agent-activity-prompt-sync.spec.ts`;
  *   - once a turn has finished (the stub refuses the first, #862), Enter
  *     submits the next prompt and its answer appears.
  * Enter during a running turn does not submit: the view's handler checks
- * `isLoading`, which is also when Send gives way to Stop. The stub answers
- * each prompt at once, so that window is not reachable here; it is covered by
- * the view's own guard rather than claimed by this spec.
+ * `isLoading`, which is also when Send gives way to Stop. The stub can hold a
+ * turn open (`HOLD_MARKER`, used by the Stop test), but no test here presses
+ * Enter during one, so that guard is covered by the view rather than claimed
+ * by this spec.
  *
  * TEST DOUBLE JUSTIFICATION (workspace policy). One double is used: the agent
  * itself. The pane spawns `codex-acp` from `PATH`; this spec puts a
@@ -50,7 +64,7 @@
 
 import * as fs from "node:fs";
 
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { test, expect } from "../../lib/fixtures";
 import {
@@ -63,6 +77,10 @@ import {
   stubAgentLaunchEnv,
   waitForMethodCount,
 } from "./acp-stub-agent-harness";
+import {
+  promptInputCounts,
+  startCountingPromptInput,
+} from "./prompt-input-counter";
 
 /** Every operation the desktop router ran since the last `clearKeyTrace`. */
 async function keyTrace(page: Page): Promise<string[]> {
@@ -87,6 +105,15 @@ async function typePrompt(page: Page, text: string): Promise<void> {
   await input.click();
   await input.pressSequentially(text);
   await expect(input).toHaveValue(text);
+}
+
+/**
+ * The textarea's laid-out height in whole CSS pixels. Rounded because the
+ * resize writes the height in `em`, and the `px` it lays out to can carry a
+ * sub-pixel remainder that differs between two sizings of the same content.
+ */
+async function renderedHeight(input: Locator): Promise<number> {
+  return input.evaluate((el) => Math.round(el.getBoundingClientRect().height));
 }
 
 const stub = makeStubAgentDir();
@@ -142,6 +169,140 @@ test.describe("Agent Activity - Enter submits the prompt", () => {
     await waitForMethodCount(stub.logPath, "session/prompt", 1);
     await expect(promptInput(ctPage)).toHaveValue("");
     expect(methodCount(stub.logPath, "session/prompt")).toBe(1);
+  });
+
+  test("the prompt box grows with typed lines and shrinks back when Enter clears it", async ({
+    ctPage,
+  }) => {
+    await openAgentActivity(ctPage);
+    await waitForMethodCount(stub.logPath, "session/new", 1);
+    const input = promptInput(ctPage);
+
+    // The single-line height is the box auto-sized to one line of typing,
+    // not its pre-typing CSS height, so both ends of the comparison come
+    // from the same resize routine.
+    await typePrompt(ctPage, "first line");
+    const singleLine = await renderedHeight(input);
+
+    // Typing goes through the host's own resize (`onInputChange`), so this
+    // half holds whatever `syncInputValue` does; it shows the box really
+    // grows, which is what makes the shrink below observable.
+    for (const line of ["second line", "third line", "fourth line"]) {
+      await input.press("Shift+Enter");
+      await input.pressSequentially(line);
+    }
+    await expect(input).toHaveValue(
+      "first line\nsecond line\nthird line\nfourth line",
+    );
+    await expect
+      .poll(() => renderedHeight(input), {
+        message: "the four-line prompt box is taller than one line",
+      })
+      .toBeGreaterThan(singleLine);
+
+    // Enter submits, and the app empties the box programmatically: first the
+    // VM -> element sync (`syncInputValue`, `isonim_agent_activity_view.nim`)
+    // when `updateAgentUi` republishes an empty prompt, then the host's own
+    // `clear(AgentActivityComponent)`. Both resize, so this holds the
+    // behaviour, not either routine; the Stop test below is the one path
+    // that only the sync serves.
+    await input.press("Enter");
+    // Positive control: the multi-line prompt really reached the agent.
+    await waitForMethodCount(stub.logPath, "session/prompt", 1);
+    await expect(input).toHaveValue("");
+    await expect
+      .poll(() => renderedHeight(input), {
+        message: "the emptied prompt box is back to its single-line height",
+      })
+      .toBe(singleLine);
+  });
+
+  test("Stop empties a multi-line follow-up and the box shrinks back to one line", async ({
+    ctPage,
+  }) => {
+    const panel = await openAgentActivity(ctPage);
+    await waitForMethodCount(stub.logPath, "session/new", 1);
+    const input = promptInput(ctPage);
+
+    // A turn the stub holds open until it is cancelled (`HOLD_MARKER`), so
+    // Stop is on offer. Its one line also gives the single-line height.
+    const heldPrompt = `Explain ${stubAgent.HOLD_MARKER}`;
+    await typePrompt(ctPage, heldPrompt);
+    const singleLine = await renderedHeight(input);
+    await input.press("Enter");
+    // Positive control: the held prompt really reached the agent.
+    await waitForMethodCount(stub.logPath, "session/prompt", 1);
+    await expect(panel.locator(".agent-stop-button")).toHaveCount(1);
+
+    // While the turn runs, the user types a follow-up over several lines;
+    // the host's `onInputChange` grows the box.
+    await input.click();
+    await input.pressSequentially("follow-up");
+    for (const line of ["second line", "third line"]) {
+      await input.press("Shift+Enter");
+      await input.pressSequentially(line);
+    }
+    await expect(input).toHaveValue("follow-up\nsecond line\nthird line");
+    await expect
+      .poll(() => renderedHeight(input), {
+        message: "the three-line follow-up is taller than one line",
+      })
+      .toBeGreaterThan(singleLine);
+
+    // Stop (`onStopPrompt` in `src/frontend/ui/agent_activity.nim`) empties
+    // the host's prompt and republishes it, and nothing on the host resizes
+    // the box: the VM -> element sync (`syncInputValue`) is the only thing
+    // that writes the textarea here, so it has to resize it too.
+    await panel.locator(".agent-stop-button").click();
+    // Positive control: the stop really reached the agent.
+    await waitForMethodCount(stub.logPath, "session/cancel", 1);
+    await expect(input).toHaveValue("");
+    await expect
+      .poll(() => renderedHeight(input), {
+        message: "the emptied prompt box is back to its single-line height",
+      })
+      .toBe(singleLine);
+  });
+
+  test("Enter's clear writes the box without dispatching an input event", async ({
+    ctPage,
+  }) => {
+    await openAgentActivity(ctPage);
+    await waitForMethodCount(stub.logPath, "session/new", 1);
+    await startCountingPromptInput(ctPage);
+
+    // Every typed letter is one trusted `input` event, and nothing else.
+    await typePrompt(ctPage, "Explain");
+    expect(await promptInputCounts(ctPage)).toEqual({
+      trusted: 7,
+      synthetic: 0,
+      errors: [],
+    });
+
+    // Enter's clear is the path on which the VM -> element sync really
+    // writes the textarea (`updateAgentUi` republishes an empty prompt while
+    // the box still holds the text; see the resize test above). A write that
+    // dispatched `input` would run the panel's listener and the host's
+    // `onInputChange` again, which is how the sync used to loop.
+    await promptInput(ctPage).press("Enter");
+    // Positive control: the prompt really reached the agent.
+    await waitForMethodCount(stub.logPath, "session/prompt", 1);
+    await expect(promptInput(ctPage)).toHaveValue("");
+    expect(await promptInputCounts(ctPage)).toEqual({
+      trusted: 7,
+      synthetic: 0,
+      errors: [],
+    });
+
+    // Positive control: a synthetic `input` event on the prompt is counted.
+    await promptInput(ctPage).evaluate((el) =>
+      el.dispatchEvent(new Event("input")),
+    );
+    expect(await promptInputCounts(ctPage)).toEqual({
+      trusted: 7,
+      synthetic: 1,
+      errors: [],
+    });
   });
 
   test("after a finished turn, Enter submits the next prompt and it is answered", async ({

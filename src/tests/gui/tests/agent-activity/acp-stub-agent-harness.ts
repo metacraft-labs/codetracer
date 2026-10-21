@@ -14,7 +14,8 @@
  * runs the real pane. The stub's own header gives the protocol it implements.
  *
  * Users: `acp_prompt_failure.spec.ts` (#862, a refused prompt) and
- * `enter_submits_prompt.spec.ts` (Enter in the prompt submits it).
+ * `enter_submits_prompt.spec.ts` (Enter in the prompt submits it, and the
+ * box resizes when the app empties it, including on Stop during a held turn).
  */
 
 import * as fs from "node:fs";
@@ -25,11 +26,13 @@ import type { Locator, Page } from "@playwright/test";
 
 import { expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
+import { PROMPT_SELECTOR } from "./prompt-input-counter";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 export const stubAgent = require("./fixtures/acp-refusing-agent.js") as {
   REFUSAL_DETAIL: string;
   SECOND_TURN_TEXT: string;
+  HOLD_MARKER: string;
 };
 
 const stubAgentPath = path.join(__dirname, "fixtures", "acp-refusing-agent.js");
@@ -121,5 +124,5 @@ export async function openAgentActivity(page: Page): Promise<Locator> {
 
 /** The pane's prompt textarea. */
 export function promptInput(page: Page): Locator {
-  return page.locator(".agent-ha-container textarea.agent-command-input").first();
+  return page.locator(PROMPT_SELECTOR).first();
 }

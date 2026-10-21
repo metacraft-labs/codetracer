@@ -34,7 +34,14 @@
 //                      one `agent_message_chunk` and ends the turn normally,
 //                      so the spec can show that a refused turn leaves the
 //                      pane able to run the next one.
-//   session/cancel  -> ignored (a notification; nothing to answer)
+//                      Exception: a prompt whose text contains HOLD_MARKER is
+//                      held open, with no answer, until a `session/cancel`
+//                      arrives; it does not count towards the refusal above.
+//                      The spec uses it for a turn that is still running.
+//   session/cancel  -> a notification, never answered itself; it ends every
+//                      held turn with `stopReason: "cancelled"`, as
+//                      https://agentclientprotocol.com/protocol/prompt-turn#cancellation
+//                      requires of the agent.
 //
 // Any other request is answered with JSON-RPC "Method not found" (-32601).
 //
@@ -80,6 +87,24 @@ function send(message) {
 
 let promptCount = 0;
 
+/** A prompt containing this text is held until it is cancelled. */
+const HOLD_MARKER = "[hold this turn]";
+
+/** Ids of the `session/prompt` requests being held, oldest first. */
+const heldPromptIds = [];
+
+function promptText(msg) {
+  const blocks = (msg.params && msg.params.prompt) || [];
+  return blocks.map((b) => (b && typeof b.text === "string" ? b.text : "")).join("");
+}
+
+function cancelHeldPrompts() {
+  while (heldPromptIds.length > 0) {
+    const id = heldPromptIds.shift();
+    send({ jsonrpc: "2.0", id, result: { stopReason: "cancelled" } });
+  }
+}
+
 function handleRequest(msg) {
   switch (msg.method) {
     case "initialize":
@@ -93,6 +118,10 @@ function handleRequest(msg) {
       send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: SESSION_ID } });
       return;
     case "session/prompt": {
+      if (promptText(msg).includes(HOLD_MARKER)) {
+        heldPromptIds.push(msg.id);
+        return;
+      }
       promptCount += 1;
       if (promptCount === 1) {
         send({ jsonrpc: "2.0", id: msg.id, error: REFUSAL_ERROR });
@@ -139,7 +168,10 @@ function serve() {
     logMethod(msg.method);
     // A message without an id is a notification (e.g. `session/cancel`) and
     // must not be answered (JSON-RPC 2.0 §4.1).
-    if (msg.id === undefined || msg.id === null) return;
+    if (msg.id === undefined || msg.id === null) {
+      if (msg.method === "session/cancel") cancelHeldPrompts();
+      return;
+    }
     handleRequest(msg);
   });
   rl.on("close", () => process.exit(0));
@@ -151,4 +183,4 @@ if (require.main === module) {
   serve();
 }
 
-module.exports = { REFUSAL_DETAIL, SECOND_TURN_TEXT };
+module.exports = { REFUSAL_DETAIL, SECOND_TURN_TEXT, HOLD_MARKER };
