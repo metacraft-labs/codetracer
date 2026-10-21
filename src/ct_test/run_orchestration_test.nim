@@ -9,6 +9,10 @@
 ##   ``TestEvent`` streams is driven through the worker pool with and without a
 ##   partition file; exact executed/skipped/passed/failed counts and per-test
 ##   event kinds are asserted.
+## * runEvents / runEventsJsonLines and ``ct-test test run --events`` — the
+##   per-test event stream is in a worker-independent order, round-trips
+##   through the contracts reader with each test's real status, and is written
+##   by the CLI entry point (``runCtTest``) to the path ``--events`` names.
 ## * runUnits (worker-heap hand-off) — a high-thread-count run is executed in a
 ##   CHILD PROCESS and its exit status asserted, because the defect this guards
 ##   is a fatal signal (see "worker-heap hand-off" below), which no in-process
@@ -30,6 +34,7 @@ import std/[json, options, os, osproc, sets, strutils, tables, unittest]
 import contracts
 import discovery
 import run_orchestration
+import ct_test
 
 # ---------------------------------------------------------------------------
 # In-process fixture provider
@@ -724,3 +729,164 @@ suite "parallel run integration":
     check summary.runVerdict == rvNothingExecuted
     check runExitCode(summary) == ExitNothingExecuted
     check "allow-list" in runVerdictReport(summary).remedy
+
+# ---------------------------------------------------------------------------
+# `--events`: the per-test outcomes, for a consumer that renders them
+# ---------------------------------------------------------------------------
+#
+# `ct-test test run` used to print only the aggregate summary, so a consumer
+# that shows WHICH test passed and which failed — the desktop Test Results
+# pane, which runs the suite through `ct test run` — had nothing to read.
+# `--events <path>` writes every `TestEvent` the run produced as JSON Lines, by
+# the contracts serialiser, in an order that does not depend on which worker
+# finished first.
+
+# THE REAL CERTIFICATE STORE IS NEVER WRITTEN. The CLI cases below pass
+# `--no-certificate`, and on top of that both store roots are pointed at
+# scratch ABSOLUTE directories before any of them runs (the variables
+# `certificate_store_roots` reads; `certificate_cli_test.nim` does the same),
+# so an edit that drops the flag publishes into scratch, not into the
+# developer's `~/.local/state/test-certificates`.
+let cliCertificateScratch = absolutePath(getTempDir() / ("ct-orch-events-certs-" &
+                                                       $getCurrentProcessId()))
+putEnv("TEST_CERTIFICATES_DIR", cliCertificateScratch / "user-root")
+putEnv("TEST_CERTIFICATES_SYSTEM_DIR", cliCertificateScratch / "system")
+
+proc cliFixtureDetect(projectRoot: string): ProviderResult[bool] {.gcsafe.} =
+  ProviderResult[bool](
+    value: fileExists(projectRoot / "tests" / "passes.fixture"))
+
+proc cliFixtureItems(): seq[TestItem] =
+  @[fixtureItem("passes", 1, false), fixtureItem("fails", 1, true)]
+
+proc cliFixtureDiscoverProject(projectRoot: string):
+    ProviderResult[TestCatalog] {.gcsafe.} =
+  ProviderResult[TestCatalog](value: TestCatalog(
+    schemaVersion: TestCatalogSchemaVersion, provider: fixtureInfo(true),
+    items: cliFixtureItems()))
+
+proc cliFixtureRegistry(): ProviderRegistry =
+  ## The in-process fixture provider, with the two discovery procs the CLI's
+  ## `discover` step needs — the same leaf-only seam the header justifies:
+  ## discovery, orchestration, the `--events` writer and the exit status are
+  ## the shipped code.
+  var provider = TestProvider(info: fixtureInfo(true))
+  provider.detect = cliFixtureDetect
+  provider.discoverProject = cliFixtureDiscoverProject
+  provider.run = fixtureRun
+  ProviderRegistry(providers: @[M1Provider(
+    provider: provider, relevantConfigFiles: @[])])
+
+proc cliWorkspace(name: string): string =
+  result = getTempDir() / ("ct-orch-events-" & name & "-" &
+                           $getCurrentProcessId())
+  removeDir(result)
+  createDir(result / "tests")
+  writeFile(result / "tests" / "passes.fixture", "passes\n")
+  writeFile(result / "tests" / "fails.fixture", "fails\n")
+
+proc finishedStatuses(text: string): Table[string, TestResultStatus] =
+  ## testId -> status of every `test-finished`, read back with the contracts
+  ## READER — the inverse of the writer under test, not a second parser.
+  for line in text.splitLines():
+    if line.strip().len == 0:
+      continue
+    let event = eventFromJsonLine(line)
+    if event.kind == tekTestFinished and event.status.isSome:
+      result[event.testId] = event.status.get
+
+suite "run events (--events)":
+  setup:
+    let items = @[
+      fixtureItem("alpha", 2, false),
+      fixtureItem("beta", 3, true),
+      fixtureItem("gamma", 4, false),
+      fixtureItem("delta", 5, true),
+      fixtureItem("epsilon", 6, false)]
+    var registry = fixtureRegistry(canRunSingle = true)
+    let units = enumerateRunUnits(fixtureResponse(items), registry)
+
+  test "the event stream does not depend on which worker finished first":
+    ## `outcomes` is in COMPLETION order. Two runs of the same suite must
+    ## still write the same stream, or a consumer folding it sees two
+    ## different runs and a reader cannot diff them.
+    let one = runEventsJsonLines(runUnits(registry, units, emptyPartition(),
+                                          threads = 1))
+    let three = runEventsJsonLines(runUnits(registry, units, emptyPartition(),
+                                            threads = 3))
+    let again = runEventsJsonLines(runUnits(registry, units, emptyPartition(),
+                                            threads = 3))
+    check one.len > 0
+    check one == three
+    check three == again
+
+  test "each unit keeps its own event order, units in test-id order":
+    let events = runEvents(runUnits(registry, units, emptyPartition(),
+                                    threads = 3))
+    check events.len == 5 * 4
+    var previous = ""
+    for unit in 0 ..< 5:
+      let first = events[unit * 4]
+      check first.kind == tekRunStarted
+      check events[unit * 4 + 1].kind == tekTestStarted
+      check events[unit * 4 + 2].kind == tekTestFinished
+      check events[unit * 4 + 3].kind == tekRunFinished
+      check first.runId > previous
+      previous = first.runId
+
+  test "the JSON Lines carry each test's real status":
+    let statuses = finishedStatuses(runEventsJsonLines(
+      runUnits(registry, units, emptyPartition(), threads = 2)))
+    check statuses.len == 5
+    for item in items:
+      let expected =
+        if item.selector.endsWith("::fail"): tsFailed else: tsPassed
+      check statuses.getOrDefault(item.id, tsSkipped) == expected
+
+  test "ct-test test run --events writes one test-finished per test, with its status":
+    ## END TO END THROUGH THE CLI: `runCtTest`, the same entry point the
+    ## `ct-test` binary calls (and that `ct test run` hands to), with the
+    ## argument vector the desktop host's main process sends.
+    let workspace = cliWorkspace("cli")
+    let eventsPath = workspace & "-out" / "events.jsonl"
+    removeDir(workspace & "-out")
+    try:
+      let code = runCtTest(@["test", "run", "--workspace", workspace,
+                             "--threads", "2", "--no-certificate",
+                             "--events", eventsPath],
+                           cliFixtureRegistry(), newDiscoveryCache())
+      # One test failed, so the run says so in its exit status.
+      check code == ExitTestsFailed
+      check fileExists(eventsPath)
+      let statuses = finishedStatuses(readFile(eventsPath))
+      let passing = fixtureItem("passes", 1, false)
+      let failing = fixtureItem("fails", 1, true)
+      check statuses.len == 2
+      check statuses.getOrDefault(passing.id, tsSkipped) == tsPassed
+      check statuses.getOrDefault(failing.id, tsSkipped) == tsFailed
+      # And nothing was published anywhere, scratch included.
+      check not dirExists(cliCertificateScratch / "user-root")
+    finally:
+      removeDir(workspace)
+      removeDir(workspace & "-out")
+
+  test "--events without a path is an argument error, and runs nothing":
+    let workspace = cliWorkspace("missing-value")
+    # `--summary` rides along as the witness that nothing ran: the summary is
+    # written only after the tests have run, so a file there would mean the
+    # argument error was reported and the run went ahead anyway.
+    let summaryPath = workspace & "-out" / "summary.json"
+    removeDir(workspace & "-out")
+    try:
+      check runCtTest(@["test", "run", "--workspace", workspace,
+                        "--no-certificate", "--summary", summaryPath,
+                        "--events"],
+                      cliFixtureRegistry(), newDiscoveryCache()) ==
+        ExitTestsFailed
+      check not fileExists(summaryPath)
+    finally:
+      removeDir(workspace)
+      removeDir(workspace & "-out")
+
+  test "the usage text names --events":
+    check "--events <path>" in ctTestUsageMessage()

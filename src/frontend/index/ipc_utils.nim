@@ -359,6 +359,11 @@ proc configureIpcMain* =
     "save-untitled"
     "no-reload-file"
     "run-test"
+    # The Test Results pane's header ▶ on the desktop: `ct test run` over the
+    # project, answered with `CODETRACER::test-suite-settled`
+    # (`index/traces.onRunTestSuite`, `GUI/Core-Panes/Test-Results-Pane.md`
+    # §4.3).
+    "run-test-suite"
     "restart-subsystem"
 
     # welcome screen options

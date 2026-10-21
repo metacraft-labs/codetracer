@@ -1702,80 +1702,249 @@ proc sendTestRunSettled(recordingId: cstring; errorMessage: cstring) =
 
 proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   infoPrint "index: run test: ", response[]
-  let pid = nodeProcess.pid.to(int)
-  let processResult = await readProcessOutput(
-    codetracerExe,
-    @[cstring"record-test"].concat(
-        @[
-          response.testName,
-          response.path,
-          cstring($response.line),
-          cstring($response.column),
-          # TODO: maybe diff passed by frontend or constructed here?
-          cstring(fmt"--with-diff=HEAD"),
-          # TODO: maybe session id or other
-          cstring(fmt"--store-trace-folder-for-pid={pid}")
-          ])
-  )
-  if processResult.isOk: # true
-    let output = processResult.value
-    echo output
-    # `recordingIdFromOutput` scans for the last `recordingId:` line rather
-    # than reading a fixed index: `ct record-test` echoes the recorder's
-    # output, whose marker can be followed by the traced program's own
-    # output, and the old `lines[^3]` read both missed that and, behind a
-    # short guard, raised an `IndexDefect` out of this `async` proc.
-    let traceId = cstring(recordingIdFromOutput($output))
-    if traceId.len > 0:
-      infoPrint "index: traceId for test: ", traceId
-      let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
-      if trace.isNil:
-        errorPrint "index: run-test: can't find trace"
-        sendTestRunSettled(cstring"", cstring(
-          "ct record-test reported recording " & $traceId &
-          ", but CodeTracer cannot find it. Nothing about the test has " &
-          "been established."))
-        return
-      infoPrint "trace is in ", trace.outputFolder
 
-      # SETTLED BEFORE THE TRACE IS LOADED, and the order is deliberate. The
-      # run is over the moment the recorder answered; loading the recording
-      # is the next operation, it can take seconds, and on the
-      # `newWindow` arm it happens in a different process entirely. Settling
-      # afterwards would leave the button spinning across the load, and would
-      # never settle at all if the load failed.
-      sendTestRunSettled(traceId, cstring"")
-
-      if response.newWindow:
-        infoPrint "new window"
-        discard startProcess(codetracerExe,
-          @[cstring"replay", cstring(fmt"--id={traceId}")],
-          options=JsObject{stdio: cstring"inherit"}
-        )
-      else:
-        infoPrint "existing window"
-        await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
-
-        await loadExistingRecord(traceId)
-
+  # SETTLED EXACTLY ONCE, ON EVERY PATH — including the ones that are not a
+  # return value. `GUI/Core-Panes/Test-Results-Pane.md` §5 named the residual:
+  # a rejected `await` before the hoisted settle below (`findTraceWithCodetracer`
+  # was the one) escaped this `async` proc, rejected its future, reached no
+  # handler and settled nothing — the renderer's raising-dispatch defect, on
+  # this side of the IPC. The whole body is therefore inside one `try`, and
+  # the `except` settles with a sentence. `settle` is idempotent, so the
+  # recording load AFTER the hoisted send can fail without a second message
+  # contradicting the first.
+  var settled = false
+  proc settle(recordingId: cstring; errorMessage: cstring) =
+    if settled:
       return
-    warnPrint "index: run-test: traced ok, but couldn't extract traceId"
-    # EXIT 0 AND NO `recordingId:` LINE. `ct record-test` prints the marker on
-    # every route that produced a recording, so this is a recorder that
-    # answered in a shape this build does not understand — which is a fault,
-    # and a fault the pane has to state rather than absorb.
-    sendTestRunSettled(cstring"", cstring(
-      "ct record-test finished without reporting a recording id, so there " &
-      "is nothing to replay. Its output is in the CodeTracer log."))
-  else:
-    errorPrint "index: ct record-test error: ", JSON.stringify(processResult.error)
-    let errorText = cstring"ct record-test error: " & JSON.stringify(processResult.error)
-    # BOTH MESSAGES, and they are not redundant. `failed-record` is the
-    # re-record latch's release and the new-record form's error line;
-    # `test-run-settled` is what ends the RUN — the pane's `endRun` and the
-    # editor's spinner. Before this the failure arm sent only the first, which
-    # the Test Results pane does not subscribe to, so a failed run left the
-    # button turning for two minutes under a message saying it had started.
-    # That is the reported defect in its most-travelled form.
-    mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: errorText}
-    sendTestRunSettled(cstring"", errorText)
+    settled = true
+    sendTestRunSettled(recordingId, errorMessage)
+
+  try:
+    let pid = nodeProcess.pid.to(int)
+    # `readProcessOutcome`, not `readProcessOutput`: the latter turns a
+    # non-zero exit into "Exit with code <n>" and DISCARDS what the recorder
+    # printed, which is where `ct record-test` states its reason (for a Noir
+    # test: "currently `ct record-test` not supported for this db-based
+    # language"). Never rejects, so its outcome is one value to branch on.
+    let outcome = await readProcessOutcome(
+      codetracerExe,
+      @[cstring"record-test"].concat(
+          @[
+            response.testName,
+            response.path,
+            cstring($response.line),
+            cstring($response.column),
+            # TODO: maybe diff passed by frontend or constructed here?
+            cstring(fmt"--with-diff=HEAD"),
+            # TODO: maybe session id or other
+            cstring(fmt"--store-trace-folder-for-pid={pid}")
+            ])
+    )
+    if outcome.spawnError.len == 0 and outcome.signal.len == 0 and
+       outcome.exitCode == 0:
+      let output = outcome.stdout
+      echo output
+      # `recordingIdFromOutput` scans for the last `recordingId:` line rather
+      # than reading a fixed index: `ct record-test` echoes the recorder's
+      # output, whose marker can be followed by the traced program's own
+      # output, and the old `lines[^3]` read both missed that and, behind a
+      # short guard, raised an `IndexDefect` out of this `async` proc.
+      let traceId = cstring(recordingIdFromOutput($output))
+      if traceId.len > 0:
+        infoPrint "index: traceId for test: ", traceId
+        let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
+        if trace.isNil:
+          errorPrint "index: run-test: can't find trace"
+          settle(cstring"", cstring(
+            "ct record-test reported recording " & $traceId &
+            ", but CodeTracer cannot find it. Nothing about the test has " &
+            "been established."))
+          return
+        infoPrint "trace is in ", trace.outputFolder
+
+        # SETTLED BEFORE THE TRACE IS LOADED, and the order is deliberate. The
+        # run is over the moment the recorder answered; loading the recording
+        # is the next operation, it can take seconds, and on the
+        # `newWindow` arm it happens in a different process entirely.
+        # Settling afterwards would leave the button spinning across the
+        # load, and would never settle at all if the load failed.
+        settle(traceId, cstring"")
+
+        if response.keepWindow:
+          # THE ROW'S `⟳`: record and STAY. The recording now exists and the
+          # renderer has its id (the settle above); entering it is what the
+          # row's `⏵` does later, through `CODETRACER::load-recent-trace`,
+          # without running anything. Loading it here would replace the very
+          # pane the user asked to stay in.
+          infoPrint "index: run-test: recorded, keeping the window"
+        elif response.newWindow:
+          infoPrint "new window"
+          discard startProcess(codetracerExe,
+            @[cstring"replay", cstring(fmt"--id={traceId}")],
+            options=JsObject{stdio: cstring"inherit"}
+          )
+        else:
+          infoPrint "existing window"
+          await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
+
+          await loadExistingRecord(traceId)
+
+        return
+      warnPrint "index: run-test: traced ok, but couldn't extract traceId"
+      # EXIT 0 AND NO `recordingId:` LINE. `ct record-test` prints the marker
+      # on every route that produced a recording, so this is a recorder that
+      # answered in a shape this build does not understand — which is a
+      # fault, and a fault the pane has to state rather than absorb.
+      settle(cstring"", cstring(
+        "ct record-test finished without reporting a recording id, so there " &
+        "is nothing to replay. Its output is in the CodeTracer log."))
+    else:
+      # THE RECORDER'S OWN WORDS, under the same `ct record-test error:` stem
+      # (`recorder_output.recordTestFailureSentence`, pure and unit-tested).
+      let errorText = cstring(recordTestFailureSentence(
+        outcome.exitCode, $outcome.signal, $outcome.stdout, $outcome.stderr,
+        $outcome.spawnError))
+      errorPrint "index: ", errorText
+      if outcome.stdout.len > 0:
+        echo outcome.stdout
+      # BOTH MESSAGES, and they are not redundant. `failed-record` is the
+      # re-record latch's release and the new-record form's error line;
+      # `test-run-settled` is what ends the RUN — the pane's `endRun` and the
+      # editor's spinner. Before this the failure arm sent only the first,
+      # which the Test Results pane does not subscribe to, so a failed run
+      # left the button turning for two minutes under a message saying it had
+      # started. That is the reported defect in its most-travelled form.
+      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: errorText}
+      settle(cstring"", errorText)
+  except:
+    # Bare, because what reaches here on the JS backend is usually a raw JS
+    # rejection (an Error from Node or Electron), not a `CatchableError`.
+    let detail = getCurrentExceptionMsg()
+    errorPrint "index: run-test: ", detail
+    if settled:
+      # The run had already been settled — this is the recording LOAD that
+      # follows it failing. The renderer has been told how the run ended; the
+      # load failure is logged rather than reported as a second, contradictory
+      # end of the same run.
+      return
+    settle(cstring"", cstring(
+      "CodeTracer could not finish handling ct record-test's answer: " &
+      (if detail.len > 0: detail else: "an unexpected error")))
+
+# ---------------------------------------------------------------------------
+# THE WHOLE-SUITE RUN — the desktop Test Results pane's header ▶
+#
+# `GUI/Core-Panes/Test-Results-Pane.md` §4.3. The renderer's desktop host
+# (`viewmodel/viewmodels/desktop_test_host.nim`) sends
+# `CODETRACER::run-test-suite` with the project folder; this runs `ct test run
+# --workspace <folder> --events <file>` — which `ct` hands to the ORC-built
+# `ct-test` installed beside it (`src/ct_test/ct_test_delegate.nim`) — and
+# answers with `CODETRACER::test-suite-settled` on EVERY exit.
+#
+# Deliberately thin. Every decision about what the answer MEANS — which exit
+# code is a failed run, which stream is unreadable, what the pane says — is
+# the host's `settleDesktopSuiteRun`, which a headless suite asserts
+# (`test_desktop_suite_run_gives_verdicts.nim`). This side only runs the
+# process and reports what it saw.
+# ---------------------------------------------------------------------------
+
+var testSuiteRunCounter = 0
+  ## Names each run's events file, together with this process's pid, so two
+  ## windows (or two quick runs) can never read each other's file.
+
+proc nowMs(): float {.importjs: "Date.now()".}
+
+proc removeFileQuietly(path: cstring) {.importjs:
+  "(function(p){ try { require('fs').unlinkSync(p); } catch (e) {} })(#)".}
+  ## The events file is this process's own scratch, read once; a file that is
+  ## already gone is not an error worth reporting.
+
+proc makeDirRecursive(path: cstring) {.importjs:
+  "require('fs').mkdirSync(#, {recursive: true})".}
+
+proc sendTestSuiteSettled(events: cstring; exitCode: int;
+                          stderrText: cstring; errorMessage: cstring) =
+  ## TELL THE RENDERER THE SUITE RUN IS OVER, however it ended.
+  ##
+  ## `events` is what `ct-test --events` wrote (JSON Lines; "" when there is
+  ## none), `exitCode` its exit status (-1 when it never reached one), `stderr`
+  ## its stderr — where `ct-test` states its verdict and the reason for it —
+  ## and `errorMessage` this process's sentence when the run could not be
+  ## started or its answer could not be collected. A message of its own, not
+  ## `test-run-settled`: see `DesktopRunKind` for why a settle of one runner
+  ## must not end a run of the other.
+  mainWindow.webContents.send "CODETRACER::test-suite-settled", js{
+    events: events,
+    exitCode: exitCode,
+    stderr: stderrText,
+    errorMessage: errorMessage
+  }
+
+proc onRunTestSuite*(sender: JsObject,
+                     response: jsobject(workspaceRoot=cstring)) {.async.} =
+  # SETTLED EXACTLY ONCE, ON EVERY PATH — `onRunTest`'s rule, and for its
+  # reason: an exception escaping this `async` proc would settle nothing and
+  # leave the pane on "running…" for ever.
+  var settled = false
+  proc settle(events: cstring; exitCode: int; stderrText: cstring;
+              errorMessage: cstring) =
+    if settled:
+      return
+    settled = true
+    sendTestSuiteSettled(events, exitCode, stderrText, errorMessage)
+
+  var eventsPath = cstring""
+  try:
+    let root = if response.workspaceRoot.isNil: "" else: $response.workspaceRoot
+    if root.len == 0:
+      # The renderer refuses before sending this (`DesktopNoProjectText`);
+      # answered anyway, because a message that settles nothing is the defect.
+      settle(cstring"", -1, cstring"",
+             cstring"ct test run was asked to run with no project folder.")
+      return
+
+    # UNDER THE CODETRACER TMP DIR, which `CODETRACER_HOME` relocates, so a
+    # test harness's scratch home keeps these files out of the user's own.
+    let dir = codetracerTmpPath / "test-suite-runs"
+    makeDirRecursive(cstring(dir))
+    inc testSuiteRunCounter
+    eventsPath = cstring(dir / ($nodeProcess.pid.to(int) & "-" &
+                                $testSuiteRunCounter & "-" &
+                                $int64(nowMs()) & ".jsonl"))
+    infoPrint "index: run-test-suite: ct test run --workspace ", root,
+              " --events ", $eventsPath
+
+    let outcome = await readProcessOutcome(
+      codetracerExe,
+      @[cstring"test", cstring"run", cstring"--workspace", cstring(root),
+        cstring"--events", eventsPath])
+
+    if outcome.spawnError.len > 0:
+      settle(cstring"", -1, outcome.stderr,
+             cstring"ct test run could not be started: " & outcome.spawnError)
+      return
+
+    # The events file is read whatever the exit status: a failing suite (exit
+    # 1) is exactly when the per-test answer matters. Absent means the runner
+    # wrote none — an argument error, or a `ct` that found no `ct-test` — and
+    # the host says so from the exit status and stderr.
+    var events = cstring""
+    if fs.existsSync(eventsPath):
+      events = fs.readFileSync(eventsPath, cstring"utf8")
+    let signalSentence =
+      if outcome.signal.len > 0:
+        cstring"ct test run was ended by signal " & outcome.signal
+      else:
+        cstring""
+    infoPrint "index: run-test-suite: exit ", $outcome.exitCode,
+              " events bytes ", $events.len
+    settle(events, outcome.exitCode, outcome.stderr, signalSentence)
+  except:
+    let detail = getCurrentExceptionMsg()
+    errorPrint "index: run-test-suite: ", detail
+    settle(cstring"", -1, cstring"", cstring(
+      "CodeTracer could not run ct test run: " &
+      (if detail.len > 0: detail else: "an unexpected error")))
+  finally:
+    if eventsPath.len > 0:
+      removeFileQuietly(eventsPath)

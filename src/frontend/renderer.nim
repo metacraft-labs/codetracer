@@ -2103,10 +2103,41 @@ proc resetBeforeRestart*(data: Data) =
         cwarn fmt"resetBeforeRestart exception for {content}#{id}: {getCurrentExceptionMsg()}"
 
 proc runTests*(data: Data, options: RunTestOptions) =
-  data.lastRestartKind = RestartNewTrace
-  if not options.newWindow:
-    data.resetBeforeRestart()
+  # A `keepWindow` run records and stays (the Test Results row's `⟳`): no new
+  # trace will arrive in this window, so neither the restart kind nor the
+  # component reset that prepares the window for one applies — resetting here
+  # would blank the very pane the user asked to stay in.
+  if not options.keepWindow:
+    data.lastRestartKind = RestartNewTrace
+    if not options.newWindow:
+      data.resetBeforeRestart()
   data.ipc.send("CODETRACER::run-test", options)
+
+proc runTestSuite*(data: Data, workspaceRoot: string) =
+  ## The desktop Test Results pane's header ▶: ask the main process to run
+  ## `ct test run` over `workspaceRoot`. Answered, on every exit, with
+  ## `CODETRACER::test-suite-settled` (`index/traces.onRunTestSuite`).
+  ##
+  ## No restart and no reset: a suite run loads nothing into this window.
+  data.ipc.send(cstring"CODETRACER::run-test-suite",
+                js{workspaceRoot: cstring(workspaceRoot)})
+
+proc openRecordingById*(data: Data, recordingId: string) =
+  ## Enter an EXISTING recording in this window, running nothing — the Test
+  ## Results row's `⏵`. The same IPC the welcome screen's recent-traces list
+  ## and the tab-vs-window policy already use (`index/traces
+  ## .onLoadRecentTrace`: `prepareForLoadingTrace` + `loadExistingRecord`),
+  ## rather than a second path to the same two calls.
+  ##
+  ## PREPARED EXACTLY AS `runTests` PREPARES AN OPENING RUN: the main process
+  ## answers both with the same `prepareForLoadingTrace` + `loadExistingRecord`
+  ## pair into this window, so the renderer is readied the same way for the
+  ## trace that arrives — the restart kind the middleware reads, and the
+  ## component reset.
+  data.lastRestartKind = RestartNewTrace
+  data.resetBeforeRestart()
+  data.ipc.send(cstring"CODETRACER::load-recent-trace",
+                js{traceId: cstring(recordingId)})
 
 const reRecordWatchdogMs = 15_000
   ## How long a queued re-record request may wait for its saves before it is

@@ -13,7 +13,7 @@
 ## Compile and run:
 ##   nim c -r src/tests/cli/recorder_output_test.nim
 
-import std/unittest
+import std/[strutils, unittest]
 import ../../ct/trace/recorder_output
 
 suite "recordingIdFromOutput":
@@ -39,3 +39,40 @@ suite "recordingIdFromOutput":
 
   test "surrounding whitespace is not part of the id":
     check recordingIdFromOutput("recordingId:   abc  \r\n") == "abc"
+
+suite "recordTestFailureSentence":
+  test "the recorder's own sentence on stdout reaches the failure text":
+    ## The measured case: Noir on the desktop.
+    let sentence = recordTestFailureSentence(1, "",
+      "Assuming recording language LangNoir: currently `ct record-test` " &
+      "not supported for this db-based language\n", "", "")
+    check sentence.startsWith(RecordTestErrorStem)
+    check "not supported for this db-based language" in sentence
+    check sentence.endsWith("(exit code 1)")
+
+  test "stderr is preferred over stdout when it has something":
+    let sentence = recordTestFailureSentence(2, "", "progress...\n",
+      "fatal: loader could not open libfoo.so\n", "")
+    check "libfoo.so" in sentence
+    check "progress" notin sentence
+
+  test "only the last lines are kept, and the length is bounded":
+    var noisy = ""
+    for i in 0 ..< 50:
+      noisy.add "line " & $i & " " & repeat("x", 100) & "\n"
+    noisy.add "error: the real reason\n"
+    let sentence = recordTestFailureSentence(1, "", noisy, "", "")
+    check "error: the real reason" in sentence
+    check "line 0 " notin sentence
+    check sentence.len <= RecordTestErrorStem.len + RecorderDetailMaxChars +
+                          "… (exit code 1)".len
+
+  test "a recorder that said nothing still yields a sentence with the status":
+    check recordTestFailureSentence(1, "", "", "\n  \n", "") ==
+      RecordTestErrorStem & "the recorder gave no reason (exit code 1)"
+    check recordTestFailureSentence(-1, "SIGKILL", "", "", "") ==
+      RecordTestErrorStem & "the recorder gave no reason (ended by signal SIGKILL)"
+
+  test "a recorder that could not be started says so":
+    check recordTestFailureSentence(-1, "", "", "", "spawn ct ENOENT") ==
+      RecordTestErrorStem & "could not be started: spawn ct ENOENT"

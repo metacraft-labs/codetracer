@@ -4253,6 +4253,32 @@ proc onTestRunSettled(
     recordedAtText = $response.recordedAt,
     errorMessage = $response.errorMessage)
 
+proc onTestSuiteSettled(
+    sender: js,
+    response: jsobject(events=cstring, exitCode=int, stderr=cstring,
+                       errorMessage=cstring)) =
+  ## `index/traces.onRunTestSuite` answered — on EVERY one of its exits.
+  ##
+  ## The whole-suite run's settle (`GUI/Core-Panes/Test-Results-Pane.md`
+  ## §4.3, §5): what `ct-test --events` wrote, the exit status, the runner's
+  ## stderr, and the main process's own sentence when the run could not be
+  ## started. Everything about what that MEANS is decided by the host's
+  ## `settleDesktopSuiteRun`, which a headless suite asserts; this only
+  ## unpacks the IPC payload, defensively, because a field the main process
+  ## did not send arrives as `undefined`.
+  if desktopTestRunHost.isNil:
+    return
+  let events = if response.events.isNil: "" else: $response.events
+  let stderrText = if response.stderr.isNil: "" else: $response.stderr
+  let errorMessage =
+    if response.errorMessage.isNil: "" else: $response.errorMessage
+  let exitCode =
+    if response.toJs[cstring"exitCode"].isUndefined: -1
+    else: response.exitCode
+  desktopTestRunHost.settleDesktopSuiteRun(
+    eventsText = events, exitCode = exitCode,
+    stderrText = stderrText, errorMessage = errorMessage)
+
 macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
   let ipc = ident("ipc")
   let data = ident("data")
@@ -4568,6 +4594,9 @@ proc configureIPC(data: Data) =
     # WHAT SETTLES A DESKTOP TEST RUN. See `onTestRunSettled` and
     # `GUI/Core-Panes/Test-Results-Pane.md` §5.
     "test-run-settled"
+    # AND WHAT SETTLES A DESKTOP SUITE RUN (the pane's header ▶). See
+    # `onTestSuiteSettled`.
+    "test-suite-settled"
     "welcome-screen"
     # #568: the recent-traces / recent-folders push for startup paths whose own
     # startup message does not carry them (`index/recent_items.nim`).
@@ -7311,9 +7340,10 @@ if inElectron:
     # so `beginRun`, `endRun` and `editor.settleEditorTestRun` had exactly one
     # caller between them and all three were inside `startWebRenderer`.
     #
-    # `GUI/Core-Panes/Test-Results-Pane.md` §4 defines what goes here; §4.3
-    # states, as a stated gap rather than as silence, why the pane's ▶ is still
-    # left disabled on this arm.
+    # `GUI/Core-Panes/Test-Results-Pane.md` §4 defines what goes here. §4.3
+    # used to state, as a gap, why the pane's ▶ and row controls were left
+    # disabled on this arm; they are installed below, now that `ct test run`
+    # reaches the `ct-test` runner shipped beside `ct`.
     #
     # INSTALLED AFTER `configure`, for the reason `startWebRenderer` gives
     # about its own order: `configure` builds the panel services a mounted
@@ -7350,3 +7380,47 @@ if inElectron:
       editor.editorTestRunHook =
         proc(path: cstring; selector: cstring; line: int): cstring =
           cstring(desktopTestRunHost.startDesktopTestRun($selector, $path, line))
+
+      # THE PANE'S HEADER ▶ — the whole suite, through `ct test run`
+      # (`Test-Results-Pane.md` §4.3). Left nil here until `ct-test` shipped
+      # beside `ct`; it is installed BY THE HOST (`installDesktopSuiteRun`) so
+      # the claim "the desktop host installs the ▶" is one the headless suite
+      # `test_desktop_suite_run_gives_verdicts.nim` can assert.
+      #
+      # The project is the EDIT session's folder — the same
+      # `data.startOptions.folder` that `CODETRACER::ns9-panes` asks the
+      # catalog for, so the suite that runs is the catalog the pane lists. Read
+      # at click time: a replay session, or an edit session with no folder,
+      # answers "" and the host refuses with `DesktopNoProjectText` instead of
+      # spawning anything.
+      desktopTestRunHost.installDesktopSuiteRun(
+        workspaceRoot = proc(): string =
+          let folder = data.startOptions.folder
+          if not data.startOptions.edit or folder.isNil or
+             folder.toJs.isUndefined:
+            ""
+          else:
+            $folder,
+        suiteDispatch = proc(workspaceRoot: string): string =
+          data.runTestSuite(workspaceRoot)
+          "")
+
+      # AND THE PER-ROW `⟳` / `⏵`, mirroring the web arm's three actions
+      # (`startWebRenderer`): `⟳` records and stays — `keepWindow` tells
+      # `index/traces.onRunTest` not to load the recording into this window;
+      # `⏵` over an existing recording enters it by id through
+      # `CODETRACER::load-recent-trace` and runs nothing; record-and-open is
+      # the editor's own dispatch above (the host's `dispatch`).
+      desktopTestRunHost.installDesktopRowActions(
+        keepWindowDispatch = proc(selector, file: string; line: int): string =
+          data.runTests(RunTestOptions(
+            testName: cstring(selector),
+            path: cstring(file),
+            line: line,
+            column: 1,
+            newWindow: false,
+            keepWindow: true))
+          "",
+        openRecording = proc(recordingId: string): string =
+          data.openRecordingById(recordingId)
+          "")

@@ -46,11 +46,61 @@ import ../../ct_test/contracts
 # calls, so using it is not a workaround: it is the reason the split exists.
 import ../../ct_test/frameworks/noir_test_syntax
 
-proc nodeFileExists(path: string): bool {.importjs:
+# ---------------------------------------------------------------------------
+# The node side, and the one rule it has: CROSS THE BOUNDARY AS `cstring`.
+#
+# On the JS backend a Nim `string` is NOT a JavaScript string — it is an array
+# of UTF-8 byte values — while `cstring` IS one. These helpers used to take
+# and fill Nim `string`s from `importjs` / `{.emit.}` code, so node was handed
+# a byte array where it expected a path: `fs.existsSync([47, 116, …])` answers
+# false, and the desktop host told EVERY Noir project "This project has no
+# Nargo.toml". The Test Results pane on the desktop therefore never had a
+# catalog (measured 2026-10-21 in a real Electron window over a crate with a
+# `Nargo.toml`, `src/tests/gui/tests/test-results-pane/
+# desktop_suite_run_verdicts.spec.ts`). Every value now crosses as `cstring`
+# and is converted with `$` / `cstring(...)` on the Nim side, where the
+# conversion is defined.
+# ---------------------------------------------------------------------------
+
+proc nodeFileExists(path: cstring): bool {.importjs:
   "(function (p) { try { return require('fs').existsSync(p); } " &
   "catch (e) { return false; } })(#)".}
   ## `std/os`'s `fileExists` is a C-backend proc; the index is a node program
   ## and asks node.
+
+proc fileExistsIn(projectRoot, name: string): bool =
+  ## Whether `<projectRoot>/<name>` exists. Joined here rather than with
+  ## `std/os` (a C-backend module); a doubled separator — `startOptions.folder`
+  ## ends in one — is harmless to node.
+  nodeFileExists(cstring(projectRoot & "/" & name))
+
+proc nodeNoirSources(projectRoot: cstring): seq[JsObject] {.importjs: """
+  (function (root) {
+    const out = [];
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const walk = (dir) => {
+        let entries = [];
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+        catch (e) { return; }
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) { walk(full); continue; }
+          if (!entry.name.endsWith('.nr')) continue;
+          let content = '';
+          try { content = fs.readFileSync(full, 'utf8'); }
+          catch (e) { continue; }
+          const rel = path.relative(root, full).split(path.sep).join('/');
+          out.push({ path: rel, content: content });
+        }
+      };
+      walk(path.join(root, 'src'));
+    } catch (e) {}
+    return out;
+  })(#)""".}
+  ## Every readable `.nr` under `<root>/src`, as `{path, content}` objects
+  ## whose fields are JavaScript strings — `cstring`s on the Nim side.
 
 proc noirSourcesUnder(projectRoot: string): seq[NoirSourceFile] =
   ## Every `.nr` under `src/`, read, and named by its project-relative path.
@@ -65,32 +115,32 @@ proc noirSourcesUnder(projectRoot: string): seq[NoirSourceFile] =
   ## Unreadable files are skipped rather than aborting the walk, per
   ## `docs/ct-test-provider-guide.md`: one bad file must not cost a workspace
   ## its whole catalog.
-  var collected: seq[NoirSourceFile] = @[]
-  {.emit: """
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const root = `projectRoot`;
-    const srcDir = path.join(root, 'src');
-    const walk = (dir) => {
-      let entries = [];
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-      catch (e) { return; }
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) { walk(full); continue; }
-        if (!entry.name.endsWith('.nr')) continue;
-        let content = '';
-        try { content = fs.readFileSync(full, 'utf8'); }
-        catch (e) { continue; }
-        const rel = path.relative(root, full).split(path.sep).join('/');
-        `collected`.push({ path: rel, content: content });
+  for entry in nodeNoirSources(cstring(projectRoot)):
+    result.add NoirSourceFile(path: $entry.path.to(cstring),
+                              content: $entry.content.to(cstring))
+
+proc nodeNargoInfo(projectRoot: cstring): JsObject {.importjs: """
+  (function (root) {
+    try {
+      const cp = require('child_process');
+      const res = cp.spawnSync('nargo', ['info', '--json'], {
+        cwd: root, encoding: 'utf8', timeout: 60000,
+        maxBuffer: 8 * 1024 * 1024 });
+      if (res.error) {
+        return { failed: true, message: String(res.error.message), output: '' };
       }
-    };
-    walk(srcDir);
-  } catch (e) {}
-  """.}
-  collected
+      if (res.status !== 0) {
+        return { failed: true, output: '',
+                 message: (res.stderr || '').toString().trim().slice(0, 400) ||
+                   ('nargo info exited with status ' + res.status) };
+      }
+      return { failed: false, message: '', output: (res.stdout || '').toString() };
+    } catch (e) {
+      return { failed: true, output: '', message: String((e && e.message) || e) };
+    }
+  })(#)""".}
+  ## `nargo info --json` run in `root`, as `{failed, message, output}` with
+  ## JavaScript-string fields.
 
 proc nargoInfoJson(projectRoot: string): tuple[info, absence: string] =
   ## `nargo info --json` for one project root.
@@ -100,38 +150,20 @@ proc nargoInfoJson(projectRoot: string): tuple[info, absence: string] =
   ## "no circuit" — a claim about the project rather than about the attempt.
   if projectRoot.len == 0:
     return ("", "No project folder is open.")
-  if not nodeFileExists(projectRoot & "/" & NoirProjectMarker):
+  if not fileExistsIn(projectRoot, NoirProjectMarker):
     return ("", "This project has no " & NoirProjectMarker &
                 ", so it is not a Noir crate and has no circuit to measure. " &
                 "Constraint counts are produced per language; Noir is the " &
                 "first producer CodeTracer has.")
-  var output = cstring""
-  var failed = false
-  var message = ""
-  {.emit: """
-  try {
-    const cp = require('child_process');
-    const res = cp.spawnSync('nargo', ['info', '--json'], {
-      cwd: `projectRoot`, encoding: 'utf8', timeout: 60000,
-      maxBuffer: 8 * 1024 * 1024 });
-    if (res.error) { `failed` = true; `message` = String(res.error.message); }
-    else if (res.status !== 0) {
-      `failed` = true;
-      `message` = (res.stderr || '').toString().trim().slice(0, 400) ||
-        ('nargo info exited with status ' + res.status);
-    } else { `output` = (res.stdout || '').toString(); }
-  } catch (e) {
-    `failed` = true;
-    `message` = String((e && e.message) || e);
-  }
-  """.}
-  if failed:
+  let answer = nodeNargoInfo(cstring(projectRoot))
+  if answer.failed.to(bool):
+    let message = $answer.message.to(cstring)
     if message.contains("ENOENT"):
       return ("", "`nargo` is not on this machine's PATH, so the circuit " &
                   "cannot be measured. Install the Noir toolchain to see " &
                   "constraint counts.")
     return ("", "nargo info could not measure this project: " & message)
-  ($output, "")
+  ($answer.output.to(cstring), "")
 
 proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   ## Answer both halves. Sent unconditionally rather than lazily: the panes are
@@ -143,7 +175,7 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   var catalogAbsence = ""
   if folder.len == 0:
     catalogAbsence = "No project folder is open."
-  elif not nodeFileExists(folder & "/" & NoirProjectMarker):
+  elif not fileExistsIn(folder, NoirProjectMarker):
     catalogAbsence =
       "This project has no " & NoirProjectMarker & ", so CodeTracer has no " &
       "test provider for it yet. Noir is the first language wired into this " &
