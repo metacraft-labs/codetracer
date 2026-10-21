@@ -388,6 +388,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-data-breakpoints"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "ct-home"
 version = "0.1.0"
 
@@ -1511,6 +1518,7 @@ dependencies = [
  "codetracer_trace_reader",
  "codetracer_trace_types",
  "codetracer_trace_writer",
+ "ct-data-breakpoints",
  "ct-home",
  "flexi_logger",
  "futures-util",

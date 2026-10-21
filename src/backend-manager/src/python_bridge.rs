@@ -150,13 +150,62 @@ impl BreakpointState {
 
     /// Adds a watchpoint on the given expression.
     ///
-    /// Returns `(wp_id, all_active_expressions)`.
-    pub fn add_watchpoint(&mut self, expression: &str) -> (i64, Vec<String>) {
+    /// Returns `(wp_id, all_active_expressions, index)`, where `index`
+    /// is this watchpoint's position in the `setDataBreakpoints`
+    /// `breakpoints` array the caller is about to send — and therefore
+    /// the position of its own `verified` verdict in the response.
+    ///
+    /// Same contract as [`Self::add_breakpoint`], for the same reason:
+    /// the index depends on [`Self::all_watchpoint_expressions`]'s
+    /// ordering, which the caller has no business knowing, and which was
+    /// nondeterministic until this needed it.
+    pub fn add_watchpoint(&mut self, expression: &str) -> (i64, Vec<String>, usize) {
         self.next_wp_id += 1;
         let wp_id = self.next_wp_id;
         self.watchpoints.insert(wp_id, expression.to_string());
         let all = self.all_watchpoint_expressions();
-        (wp_id, all)
+        // `all_watchpoint_expressions` orders by ascending watchpoint id
+        // and ids are monotonic, so the entry just inserted is last.
+        let index = all.len() - 1;
+        (wp_id, all, index)
+    }
+
+    /// Drops a watchpoint from the daemon's table WITHOUT deriving a new
+    /// expression list for the backend.
+    ///
+    /// The watchpoint counterpart of [`Self::forget_breakpoint`], and it
+    /// rolls back an `add_watchpoint` the backend refused.  No follow-up
+    /// `setDataBreakpoints` is needed: the backend applied (or rejected)
+    /// the request it was sent, and dropping the offending expression
+    /// here leaves the two tables agreeing.
+    ///
+    /// Returns whether the id was known.
+    pub fn forget_watchpoint(&mut self, wp_id: i64) -> bool {
+        self.watchpoints.remove(&wp_id).is_some()
+    }
+
+    /// The expression a watchpoint id is watching, if the id is known.
+    ///
+    /// Read BEFORE [`Self::remove_watchpoint`] so the removal has
+    /// something to restore if the backend refuses the re-send.
+    pub fn watchpoint_expression(&self, wp_id: i64) -> Option<String> {
+        self.watchpoints.get(&wp_id).cloned()
+    }
+
+    /// Puts a watchpoint back after the backend refused the
+    /// `setDataBreakpoints` re-send that was meant to remove it.
+    ///
+    /// The inverse of [`Self::remove_watchpoint`], and the reason
+    /// [`PendingPyRequestKind::RemoveWatchpoint`] carries the
+    /// expression: without it the daemon's table would claim the
+    /// watchpoint is gone while the replay engine still has it, and the
+    /// next add for this trace would re-send a set missing an entry the
+    /// engine is still watching.
+    ///
+    /// Restores under the SAME id, so a client that was told the
+    /// removal failed can retry with the id it already holds.
+    pub fn restore_watchpoint(&mut self, wp_id: i64, expression: &str) {
+        self.watchpoints.insert(wp_id, expression.to_string());
     }
 
     /// Removes a watchpoint by its ID.
@@ -171,9 +220,26 @@ impl BreakpointState {
         }
     }
 
-    /// Returns all active watchpoint expressions.
+    /// Returns all active watchpoint expressions, ordered by ascending
+    /// watchpoint id.
+    ///
+    /// The order is part of the contract, not an accident — the same
+    /// contract [`Self::breakpoints_for_file`] documents.  The caller
+    /// sends this list as the `setDataBreakpoints` `breakpoints` array
+    /// and reads the per-entry `verified` flags back out *positionally*;
+    /// raw `HashMap::values` iteration made which answer belongs to
+    /// which watchpoint a coin flip, so a refusal could be reported
+    /// against another watchpoint's id.  It also made the `id` in the
+    /// response shuffle between otherwise identical calls: both the
+    /// real backend (`db_backend`'s `Handler::set_data_breakpoints`)
+    /// and the daemon's mock number the ACCEPTED entries 1, 2, 3… in
+    /// request order, so the numbering is only stable if the request
+    /// order is.
     pub fn all_watchpoint_expressions(&self) -> Vec<String> {
-        self.watchpoints.values().cloned().collect()
+        let mut entries: Vec<(i64, &String)> =
+            self.watchpoints.iter().map(|(id, e)| (*id, e)).collect();
+        entries.sort_by_key(|(id, _)| *id);
+        entries.into_iter().map(|(_, e)| e.clone()).collect()
     }
 
     /// Adds a tracepoint at the given source location with the given expression.
@@ -434,10 +500,119 @@ pub enum PendingPyRequestKind {
         bp_id: i64,
         index: usize,
     },
-    /// Fire-and-forget commands (e.g., `setDataBreakpoints`) whose backend
-    /// responses should be silently consumed and not forwarded to any
-    /// client.
-    FireAndForget,
+    /// `ct/py-add-watchpoint` -> backend `setDataBreakpoints`.
+    ///
+    /// The exact twin of [`Self::AddBreakpoint`], and it exists for the
+    /// same reason: `setDataBreakpoints` reports a watchpoint it could
+    /// not place per-entry, as `verified: false`, and the request-level
+    /// `success` says nothing about whether anything was watched.
+    ///
+    /// HISTORY, because it explains the shape of this variant: the
+    /// replay backend used to have **no** `setDataBreakpoints` arm in
+    /// its DAP dispatch at all.  The command fell through to
+    /// `dap_command_to_step_action` and came back as the free-text
+    /// `command setDataBreakpoints not supported here`.  While this
+    /// request fired and forgot, that refusal was dropped and
+    /// `Trace.add_watchpoint()` handed back a positive id for a
+    /// watchpoint no component anywhere had accepted.  The only
+    /// implementation of `setDataBreakpoints` in the tree was the
+    /// daemon's own mock backend, which answered `verified: true`
+    /// unconditionally — a test double more capable than the component
+    /// it stood in for, which is why no test could have caught it.
+    ///
+    /// Both halves are fixed now: the backend implements
+    /// `setDataBreakpoints` (value-change watchpoints, see the
+    /// `ct-data-breakpoints` crate) and the mock defers to the same
+    /// admission rules.  A refusal that arrives here today is a real
+    /// per-entry verdict — the expression is not a plain identifier,
+    /// names nothing this recording captured, asked for a read, and so
+    /// on — carrying a code from that crate's closed set.
+    ///
+    /// Fields mirror [`Self::AddBreakpoint`]: `index` is where this
+    /// watchpoint's verdict sits in the backend's per-entry array,
+    /// `wp_id` is the id to hand back on success, and `trace_path` keys
+    /// the [`BreakpointState`] to roll back on refusal.
+    AddWatchpoint {
+        trace_path: PathBuf,
+        wp_id: i64,
+        index: usize,
+    },
+    /// The `setDataBreakpoints` re-sent after `ct/py-remove-watchpoint`,
+    /// WAITED ON rather than fired and forgotten.
+    ///
+    /// The removal path used to sit on
+    /// [`UnobservedReason::SetPointsResyncAfterRemoval`], justified by
+    /// the fact that no watchpoint ever bound, so none could fail to be
+    /// removed.  That justification expired the moment the backend
+    /// implemented `setDataBreakpoints`: a refused re-send now leaves a
+    /// live watchpoint in the replay engine while the client has
+    /// already been told `removed: true`, and the next
+    /// `continue_forward()` stops somewhere the caller has no reason to
+    /// expect.
+    ///
+    /// So the removal waits.  On refusal the daemon restores the
+    /// watchpoint to its own table — `expression` is kept for exactly
+    /// that — so the two tables still agree, and answers the client
+    /// `success: false` rather than a `removed: true` that is not true.
+    RemoveWatchpoint {
+        trace_path: PathBuf,
+        wp_id: i64,
+        expression: String,
+    },
+    /// A backend response this daemon deliberately does not look at.
+    ///
+    /// The variant carries the REASON rather than being a bare
+    /// `FireAndForget`, because a bare one is an unanswerable question:
+    /// it records that nobody looked without recording why that was
+    /// safe.  Both defects fixed in this module — `ct/py-add-breakpoint`
+    /// and `ct/py-add-watchpoint` — were sitting on that bare variant,
+    /// and were indistinguishable from the genuinely-safe uses beside
+    /// them.  Adding a case to [`UnobservedReason`] is meant to be
+    /// uncomfortable.
+    Unobserved(UnobservedReason),
+}
+
+/// Why a particular backend response is deliberately not inspected.
+///
+/// Every variant is a claim that must be true: that nothing the client
+/// was already told depends on the answer.  If you cannot write that
+/// sentence for a new call site, it does not belong here — it needs a
+/// `PendingPyRequestKind` of its own that waits, like
+/// [`PendingPyRequestKind::AddBreakpoint`] does.
+#[derive(Debug, PartialEq)]
+pub enum UnobservedReason {
+    /// The `setBreakpoints` re-sent after `ct/py-remove-breakpoint`.
+    ///
+    /// It re-states a set the backend has already accepted, minus one
+    /// entry, so there is no new verdict to read — the entries that
+    /// remain are the ones that already bound.
+    ///
+    /// KNOWN RESIDUAL RISK, stated rather than hidden: if the backend
+    /// refuses the re-send outright, the removed breakpoint stays live
+    /// in the replay engine while the client has already been told
+    /// `removed: true`.  Fixing it properly means giving the removal
+    /// path the same waiting treatment as the add path — which is
+    /// exactly what [`PendingPyRequestKind::RemoveWatchpoint`] now does
+    /// for watchpoints, and is the model to copy here.
+    ///
+    /// WATCHPOINTS NO LONGER USE THIS VARIANT.  They used to, and the
+    /// excuse was that "a watchpoint that was never set cannot fail to
+    /// be removed either" — true only while the backend refused every
+    /// `setDataBreakpoints`.  The moment watchpoints began actually
+    /// binding, that excuse expired and the removal path became a live
+    /// lie, so it was given a waiting variant of its own.  A reason
+    /// here is a claim about the world; when the world changes the
+    /// claim has to be rechecked.
+    SetPointsResyncAfterRemoval,
+    /// The `setBreakpoints`-to-empty and `ct/run-to-entry` sent when
+    /// `ct/open-trace` re-attaches to a session that is already loaded.
+    ///
+    /// KNOWN RESIDUAL RISK, stated rather than hidden: the cached-session
+    /// reply asserts `cached: true` and the caller assumes the replay
+    /// position was reset to the entry point.  Neither reset is observed,
+    /// so a backend that refused them would leave the caller stepping
+    /// from wherever the previous script stopped.
+    OpenTraceCachedSessionReset,
 }
 
 /// A pending synchronous Python bridge request waiting for a backend
@@ -559,6 +734,97 @@ pub fn format_add_breakpoint_response(
             format!("backend did not bind a breakpoint at {path}:{line}")
         });
     (false, serde_json::json!({"message": message}))
+}
+
+/// Reads the backend's `setDataBreakpoints` answer for ONE watchpoint
+/// and says whether that watchpoint is actually being watched.
+///
+/// The watchpoint twin of [`format_add_breakpoint_response`], and the
+/// same three-way read: a request-level refusal, a response that carries
+/// no verdict for this entry, and a per-entry `verified: false` are all
+/// failures, and all three carry the backend's own words forward.
+///
+/// Both arms fire in practice.  The per-entry arm is the common one now
+/// that the backend implements `setDataBreakpoints`: a watchpoint is
+/// refused because the expression is not a plain identifier, or names
+/// nothing this recording captured, or asked for a read — each with a
+/// code from `ct_data_breakpoints`'s closed set, which this function
+/// forwards beside the prose.  The request-level arm remains for a
+/// backend that refuses the command outright.
+///
+/// Returns `(success, body_or_error)`: on success the `ct/py-add-watchpoint`
+/// body, otherwise a `{"message": ...}` object.
+pub fn format_add_watchpoint_response(
+    backend_response: &Value,
+    index: usize,
+    wp_id: i64,
+) -> (bool, Value) {
+    if !backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("backend rejected setDataBreakpoints");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let entry = backend_response
+        .get("body")
+        .and_then(|b| b.get("breakpoints"))
+        .and_then(Value::as_array)
+        .and_then(|bps| bps.get(index));
+
+    let Some(entry) = entry else {
+        return (
+            false,
+            serde_json::json!({
+                "message": format!(
+                    "backend's setDataBreakpoints response carried no verdict \
+                     for this watchpoint (wanted entry {index}); response: \
+                     {backend_response}"
+                )
+            }),
+        );
+    };
+
+    if entry
+        .get("verified")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return (true, serde_json::json!({"watchpointId": wp_id}));
+    }
+
+    let message = entry
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            let data_id = entry
+                .get("dataId")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            format!("backend did not set a watchpoint on {data_id}")
+        });
+    // Forward the CLOSED-SET refusal alongside the prose when the
+    // backend supplied one (see `ct_data_breakpoints::DataBreakpointRefusal`).
+    //
+    // The message alone would make a caller parse English to tell "you
+    // named something this recording never captured" from "this kind of
+    // watchpoint is not possible over a recording at all" — two
+    // refusals with completely different fixes.  The whole point of
+    // the closed set is that nobody has to.
+    let mut body = serde_json::json!({"message": message});
+    if let Some(code) = entry.get("refusalCode") {
+        body["refusalCode"] = code.clone();
+    }
+    if let Some(token) = entry.get("refusal") {
+        body["refusal"] = token.clone();
+    }
+    (false, body)
 }
 
 /// Formats a backend `ct/load-locals` response into the simplified
@@ -1409,6 +1675,252 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The watchpoint list the daemon sends as the `setDataBreakpoints`
+    /// `breakpoints` array must be ordered by ascending watchpoint id.
+    ///
+    /// This is not a style preference.  The daemon reads the per-entry
+    /// `verified` verdicts back out of the response POSITIONALLY, so an
+    /// unordered list pairs one watchpoint's answer with another
+    /// watchpoint's id — it would report the wrong expression as
+    /// unwatchable, or accept an id the backend refused.  It also makes
+    /// the id assigned by position shuffle between otherwise identical
+    /// calls.
+    ///
+    /// `all_watchpoint_expressions` iterated a `HashMap` before this,
+    /// which is why eight entries are used: `HashMap` iteration would
+    /// have to land on the insertion order by chance, 1 in 8! ≈ 1 in
+    /// 40320, for this to pass by accident.
+    #[test]
+    fn test_all_watchpoint_expressions_are_ordered_by_watchpoint_id() {
+        let mut state = BreakpointState::default();
+
+        let names = [
+            "zeta", "yankee", "xray", "whiskey", "victor", "uniform", "tango", "sierra",
+        ];
+        let mut ids = Vec::new();
+        for name in names {
+            let (wp_id, all, index) = state.add_watchpoint(name);
+            ids.push(wp_id);
+            assert_eq!(
+                all[index], name,
+                "add_watchpoint's index must name the slot this watchpoint's \
+                 own verdict occupies in the backend's answer; it pointed at \
+                 {:?} instead of {name:?} in {all:?}",
+                all[index]
+            );
+        }
+
+        assert_eq!(
+            state.all_watchpoint_expressions(),
+            names.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+            "watchpoints must come back in ascending-id (= insertion) order",
+        );
+
+        // And the order must survive a removal from the middle: the
+        // surviving entries keep their relative positions, so a verdict
+        // read positionally still lands on the watchpoint that asked.
+        state.remove_watchpoint(ids[3]);
+        assert_eq!(
+            state.all_watchpoint_expressions(),
+            vec![
+                "zeta".to_string(),
+                "yankee".to_string(),
+                "xray".to_string(),
+                "victor".to_string(),
+                "uniform".to_string(),
+                "tango".to_string(),
+                "sierra".to_string(),
+            ],
+        );
+    }
+
+    /// A backend that refuses `setDataBreakpoints` outright must be
+    /// reported as a failure carrying the backend's own sentence.
+    ///
+    /// This arm is no longer the one that fires in practice.  HISTORY:
+    /// it used to be the ONLY arm that could fire, because the real
+    /// replay backend had no `setDataBreakpoints` handler in its DAP
+    /// dispatch at all — the command fell through to
+    /// `dap_command_to_step_action`, which failed, and the request came
+    /// back `success: false` with the free-text
+    /// `command setDataBreakpoints not supported here`.  The fixture
+    /// below is that historical response, kept verbatim.
+    ///
+    /// Today the backend dispatches the command (see
+    /// `db_backend::dap_handler::set_data_breakpoints`) and answers a
+    /// refusable watchpoint PER ENTRY, as `verified: false` with a code
+    /// from `ct_data_breakpoints`'s closed set — including the two
+    /// cases that used to look like a whole-request refusal: an
+    /// expression that is not a plain variable name
+    /// (`expressionNotAWatchableVariable`) and a backend with no
+    /// per-step value table, i.e. MCR/recreator
+    /// (`backendLacksValueHistory`).  So
+    /// `test_format_add_watchpoint_response_reads_the_per_entry_verdict`
+    /// is the arm that covers the live path.
+    ///
+    /// This test is kept as a DEFENSIVE test rather than deleted.  The
+    /// daemon talks to whatever is on the other end of the socket: an
+    /// older backend build, a backend whose dispatch is compiled
+    /// without this feature, or a genuinely malformed request will
+    /// still produce a request-level `success: false`, and the only
+    /// thing that then distinguishes "your expression was wrong" from
+    /// "this backend cannot watch anything" is the backend's own
+    /// sentence.  Swallowing it, or replacing it with a message of the
+    /// daemon's invention, is how the original defect stayed invisible,
+    /// so the sentence must reach the caller verbatim.
+    #[test]
+    fn test_format_add_watchpoint_response_forwards_a_request_level_refusal() {
+        let refusal = json!({
+            "type": "response",
+            "request_seq": 7,
+            "success": false,
+            "command": "setDataBreakpoints",
+            "message": "command setDataBreakpoints not supported here",
+            "body": {},
+        });
+
+        let (success, body) = format_add_watchpoint_response(&refusal, 0, 1);
+        assert!(
+            !success,
+            "a refused setDataBreakpoints must not be answered as a set watchpoint",
+        );
+        assert_eq!(
+            body.get("message").and_then(Value::as_str),
+            Some("command setDataBreakpoints not supported here"),
+        );
+    }
+
+    /// A request-level success whose per-entry verdict is
+    /// `verified: false` is still a failure, and still carries the
+    /// backend's reason.
+    #[test]
+    fn test_format_add_watchpoint_response_reads_the_per_entry_verdict() {
+        let answer = json!({
+            "success": true,
+            "body": {"breakpoints": [
+                {"id": 1, "verified": true,  "dataId": "counter"},
+                {"id": 2, "verified": false, "dataId": "nope", "message": "no such data"},
+            ]},
+        });
+
+        let (ok, body) = format_add_watchpoint_response(&answer, 0, 11);
+        assert!(ok);
+        assert_eq!(body.get("watchpointId").and_then(Value::as_i64), Some(11));
+
+        let (bad, body) = format_add_watchpoint_response(&answer, 1, 12);
+        assert!(!bad);
+        assert_eq!(
+            body.get("message").and_then(Value::as_str),
+            Some("no such data"),
+        );
+    }
+
+    /// STRICT — a per-entry refusal must carry its CLOSED-SET code
+    /// through to the caller, not just the prose.
+    ///
+    /// The backend answers with `refusalCode` / `refusal` from
+    /// `ct_data_breakpoints::DataBreakpointRefusal`.  Dropping them here
+    /// would leave `Trace.add_watchpoint`'s caller parsing English to
+    /// tell "you named something this recording never captured" (retry
+    /// with a different name) from "a recording cannot watch reads at
+    /// all" (stop asking) — two refusals whose fixes have nothing in
+    /// common.  Distinguishing them WITHOUT string matching is the
+    /// entire point of the closed set.
+    #[test]
+    fn test_format_add_watchpoint_response_forwards_the_closed_set_refusal_code() {
+        let answer = json!({
+            "success": true,
+            "body": {"breakpoints": [
+                {
+                    "verified": false,
+                    "dataId": "counter",
+                    "message": "a recording samples what each variable held at each step",
+                    "refusalCode": 6203,
+                    "refusal": "accessTypeNotRecorded",
+                },
+            ]},
+        });
+
+        let (ok, body) = format_add_watchpoint_response(&answer, 0, 7);
+        assert!(!ok);
+        assert_eq!(
+            body.get("refusalCode").and_then(Value::as_u64),
+            Some(6203),
+            "the numeric code must survive the formatter; body: {body}"
+        );
+        assert_eq!(
+            body.get("refusal").and_then(Value::as_str),
+            Some("accessTypeNotRecorded"),
+            "the stable token must survive too, so a log line names the reason; body: {body}"
+        );
+        assert!(
+            body.get("message").and_then(Value::as_str).is_some(),
+            "and the human-readable sentence is still there for people; body: {body}"
+        );
+        assert!(
+            body.get("watchpointId").is_none(),
+            "a refused watchpoint must not hand back an id; body: {body}"
+        );
+    }
+
+    /// STRICT — a backend that supplies no refusal code (an older build,
+    /// or one that refuses at the request level) must still round-trip.
+    /// The code is additive: its ABSENCE must not become an absent
+    /// message, which would put the caller back to a silent failure.
+    #[test]
+    fn test_format_add_watchpoint_response_survives_a_refusal_without_a_code() {
+        let answer = json!({
+            "success": true,
+            "body": {"breakpoints": [
+                {"verified": false, "dataId": "counter", "message": "no reason given"},
+            ]},
+        });
+        let (ok, body) = format_add_watchpoint_response(&answer, 0, 7);
+        assert!(!ok);
+        assert_eq!(
+            body.get("message").and_then(Value::as_str),
+            Some("no reason given")
+        );
+        assert!(body.get("refusalCode").is_none());
+        assert!(body.get("refusal").is_none());
+    }
+
+    /// A response that carries no verdict for this watchpoint at all is
+    /// a failure that says what was missing — reporting success there
+    /// would recreate the exact silence this formatter exists to end.
+    #[test]
+    fn test_format_add_watchpoint_response_refuses_a_missing_verdict() {
+        let answer = json!({"success": true, "body": {"breakpoints": []}});
+        let (ok, body) = format_add_watchpoint_response(&answer, 0, 3);
+        assert!(!ok);
+        assert!(
+            body.get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .contains("no verdict"),
+            "got: {body}",
+        );
+    }
+
+    /// Rolling back a refused watchpoint drops it from the daemon's own
+    /// table, so it is not re-sent with the next add for this trace.
+    #[test]
+    fn test_forget_watchpoint_rolls_back_a_refused_add() {
+        let mut state = BreakpointState::default();
+        let (wp1, _, _) = state.add_watchpoint("counter");
+        let (_wp2, _, _) = state.add_watchpoint("total");
+
+        assert!(state.forget_watchpoint(wp1));
+        assert_eq!(
+            state.all_watchpoint_expressions(),
+            vec!["total".to_string()],
+        );
+        assert!(
+            !state.forget_watchpoint(wp1),
+            "forgetting an unknown id must say so rather than report success",
+        );
+    }
+
     #[test]
     fn test_method_to_dap_command_known_methods() {
         assert_eq!(method_to_dap_command("step_over"), Some(("next", false)));
@@ -2086,14 +2598,19 @@ mod tests {
     fn test_watchpoint_state_add_and_remove() {
         let mut state = BreakpointState::default();
 
-        let (wp1, all1) = state.add_watchpoint("counter");
+        let (wp1, all1, idx1) = state.add_watchpoint("counter");
         assert_eq!(wp1, 1);
         assert_eq!(all1, vec!["counter".to_string()]);
+        assert_eq!(idx1, 0);
 
-        let (wp2, all2) = state.add_watchpoint("total");
+        let (wp2, all2, idx2) = state.add_watchpoint("total");
         assert_eq!(wp2, 2);
-        assert!(all2.contains(&"counter".to_string()));
-        assert!(all2.contains(&"total".to_string()));
+        // Ordered by ascending watchpoint id, and the index names the
+        // slot this watchpoint's `verified` verdict occupies in the
+        // backend's `setDataBreakpoints` answer.
+        assert_eq!(all2, vec!["counter".to_string(), "total".to_string()]);
+        assert_eq!(idx2, 1);
+        assert_eq!(all2[idx2], "total".to_string());
 
         // Remove the first watchpoint.
         let remaining = state.remove_watchpoint(wp1);
@@ -2102,6 +2619,61 @@ mod tests {
 
         // Removing nonexistent ID returns None.
         assert!(state.remove_watchpoint(999).is_none());
+    }
+
+    /// STRICT — a removal the backend refuses must be undoable.
+    ///
+    /// `ct/py-remove-watchpoint` drops the entry from the daemon's table
+    /// and re-sends `setDataBreakpoints` with the remaining set.  If the
+    /// backend refuses that re-send, the replay engine is STILL watching
+    /// — so the daemon's table has to go back to matching it, under the
+    /// same id, or the next add for this trace sends a set that omits an
+    /// entry the engine is still holding.
+    ///
+    /// This path only became reachable when watchpoints started actually
+    /// binding.  Before that the removal was fire-and-forget, excused by
+    /// "a watchpoint that was never set cannot fail to be removed".
+    #[test]
+    fn test_restore_watchpoint_undoes_a_removal_the_backend_refused() {
+        let mut state = BreakpointState::default();
+        let (wp1, _, _) = state.add_watchpoint("counter");
+        let (wp2, _, _) = state.add_watchpoint("total");
+
+        // The expression must be readable BEFORE the removal, or there
+        // is nothing to restore.
+        let expression = state
+            .watchpoint_expression(wp1)
+            .expect("the id was just handed out by add_watchpoint");
+        assert_eq!(expression, "counter");
+
+        let remaining = state.remove_watchpoint(wp1).expect("wp1 existed");
+        assert_eq!(remaining, vec!["total".to_string()]);
+        assert_eq!(state.watchpoint_expression(wp1), None);
+
+        // Backend refused the re-send: put it back.
+        state.restore_watchpoint(wp1, &expression);
+        assert_eq!(
+            state.all_watchpoint_expressions(),
+            vec!["counter".to_string(), "total".to_string()],
+            "a restored watchpoint must return to its ORDERED slot; the order is what pairs              each per-entry verdict with the id that asked for it"
+        );
+        assert_eq!(
+            state.watchpoint_expression(wp1),
+            Some("counter".to_string()),
+            "restored under the SAME id, so a client told the removal failed can retry with              the id it already holds"
+        );
+        assert_eq!(state.watchpoint_expression(wp2), Some("total".to_string()));
+    }
+
+    /// STRICT — the expression of an unknown id is `None`, not a panic
+    /// and not an empty string.  An empty string would restore a
+    /// watchpoint on `""`, which `ct_data_breakpoints::verdict` refuses
+    /// as `EmptyDataId` — a refusal the user never asked for.
+    #[test]
+    fn test_watchpoint_expression_of_an_unknown_id_is_none() {
+        let mut state = BreakpointState::default();
+        state.add_watchpoint("counter");
+        assert_eq!(state.watchpoint_expression(999), None);
     }
 
     #[test]
@@ -2152,7 +2724,7 @@ mod tests {
         // IDs should not be reused after clear.
         let (bp_id, _, _) = state.add_breakpoint("main.nim", 10);
         assert!(bp_id > 1, "breakpoint ID should not be reused");
-        let (wp_id, _) = state.add_watchpoint("counter");
+        let (wp_id, _, _) = state.add_watchpoint("counter");
         assert!(wp_id > 1, "watchpoint ID should not be reused");
         let (tp_id, _) = state.add_tracepoint("main.c", 42, "log(x)");
         assert!(tp_id > 1, "tracepoint ID should not be reused");
