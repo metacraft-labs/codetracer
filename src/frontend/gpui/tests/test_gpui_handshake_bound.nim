@@ -25,7 +25,8 @@
 ##   * a stall AFTER the open (the engine reached its first stop, then went
 ##     quiet on a pane request) is the same exit 4, worded as such and
 ##     WITHOUT the open's "re-record it" advice, which cannot help a recording
-##     the engine has read;
+##     the engine has read — and the engine, which in that case ignores its
+##     stdin closing as a busy engine does, is killed rather than left behind;
 ##   * with no override the shipped default budget applies (it is a clock, not
 ##     an opt-in);
 ##   * the engine is reaped: the stalled child does not outlive the front-end;
@@ -115,12 +116,12 @@ const
 # FAKE_ENGINE_MODE=settle -- the same as stall, but reach the first stop
 #                            (`stopped` + `ct/complete-move`) and THEN go
 #                            silent: every later request is read and never
-#                            answered.
+#                            answered, and its stdin closing is ignored.
 #
 # stdout is the DAP channel and the front-end merges stderr into it, so this
 # script writes NOTHING to stderr. It records each command it acknowledged
 # (and its pid) in $FAKE_ENGINE_LOG.
-import json, os, sys
+import json, os, sys, time
 
 mode = os.environ.get("FAKE_ENGINE_MODE", "stall")
 log_path = os.environ["FAKE_ENGINE_LOG"]
@@ -143,6 +144,11 @@ def read():
     while True:
         line = sys.stdin.buffer.readline()
         if not line:
+            if mode == "settle":
+                # A post-open stall is an engine busy elsewhere: it does not
+                # notice its stdin closing, so only the front-end killing it
+                # ends it. The case asserts that it does.
+                time.sleep(600)
             sys.exit(0)          # the front-end closed the pipe: we are done
         line = line.strip()
         if not line:
@@ -359,7 +365,13 @@ suite "codetracer-gpui bounds the replay engine's handshake":
     ck "re-record" notin r.stderr
     let pid = enginePid(lines)
     ck pid > 0
-    ck waitGone(pid)
+    let gone = waitGone(pid)
+    ck gone
+    if not gone:
+      # This engine ignores its stdin closing (`settle`), so a front-end that
+      # failed to end it leaves it running for ten minutes: end it here, so
+      # a failing run does not leak it.
+      discard execCmd("kill -9 " & $pid & " 2>/dev/null")
 
   test "an engine that says why is reported verbatim, exit 5, not a stall":
     let log = scratch / "refuse.log"

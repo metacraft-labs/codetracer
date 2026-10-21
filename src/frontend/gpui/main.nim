@@ -8656,6 +8656,14 @@ proc runOpen(cmd: GpuiCommand): int =
   if cmd.product == pmEdit:
     return runEdit(cmd)
   let session = openGpuiTrace(cmd.traceFolder)
+  # THE ENGINE ENDS WITH THIS RUN, on every path out of it: the plan, the
+  # window, each `return 1`, and a stall raised after the open. Without this
+  # the child was reaped only if it noticed its stdin close when this process
+  # exited, and an engine stuck in a computation — the post-open stall this
+  # run reports — never reads stdin, so it outlived the front-end.
+  # `DapStdioBackend.close` is idempotent and kills a child that does not
+  # exit on its own.
+  defer: session.backend.close()
   # The shipped product default for the flow overlay — the same constant the
   # terminal host applies, pinned against `default_config.yaml` by a test.
   if not session.session.editorVM.isNil:
