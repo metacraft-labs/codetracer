@@ -26,9 +26,9 @@ from ../viewmodel/viewmodels/review_session import
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   from ../viewmodel/views/isonim_agent_activity_view import
-    mountIsoNimAgentActivityPanel, AgentActivityCallbacks
+    mountIsoNimAgentActivityPanel, AgentActivityCallbacks,
+    resizeInputToContent
 
-const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
 const DIFF_EDITOR_DIV = "diff-editor"
 const PLACEHOLDER_MSG = "placeholder-msg"
@@ -45,9 +45,6 @@ proc setDiffModel*(editor: DiffEditor, original, modified: js)
 
 proc setValue*(model: js, value: cstring)
   {.importjs: "#.setValue(#)".}
-
-proc computedFontSizePx(el: js): float
-  {.importjs: "parseFloat(window.getComputedStyle(#).fontSize)".}
 
 var originalModel = createModel("".cstring, "plaintext".cstring)
 var modifiedModel = createModel("".cstring, "plaintext".cstring)
@@ -126,17 +123,11 @@ proc scrollAgentCom() =
     e.toJs.scrollTop = e.toJs.scrollHeight
 
 proc autoResizeTextarea(id: cstring) =
+  ## The view owns the prompt's auto-resize, because its VM -> element sync
+  ## needs it too; this only finds the element by id.
   let el = document.getElementById(id)
   if el.isNil: return
-  let fontSizePx = computedFontSizePx(el.toJs)
-  el.style.height = "auto"
-  let heightInEm =
-    if fontSizePx > 0:
-      el.toJs.scrollHeight.to(float) / fontSizePx
-    else:
-      el.toJs.scrollHeight.to(float)
-  el.style.height = cstring($(heightInEm) & "em")
-  el.toJs.scrollTop = el.toJs.scrollHeight.to(int) + HEIGHT_OFFSET
+  resizeInputToContent(cast[isonim_dom_api.Element](el))
 
 proc componentBySessionId(sessionId: cstring): AgentActivityComponent =
   ## Locate the AgentActivity component for a given sessionId. Match either the

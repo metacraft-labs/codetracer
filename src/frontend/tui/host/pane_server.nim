@@ -43,7 +43,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it owns the process's stdio.".}
 
-import std/[json, net, options, os, posix, selectors, strutils, tables, times]
+import std/[base64, json, net, options, os, posix, selectors, strutils, tables, times, unicode]
 
 import headless_app/layout_model
 import codetracer_embed
@@ -59,6 +59,7 @@ import ../app/views/variables
 import ../app/views/shell
 import ./native_host
 import ./tui_session
+import ./visual_replay_host
 from ../app/source_binding import sptBreakpoint
 import ../../viewmodel/host/keymap_preference
 import ../../viewmodel/host/keybindings_file
@@ -94,6 +95,15 @@ type
     position: tuple[file: string; line: int; tick: uint64]
     sourceView: tuple[file: string; first, last: int]
     decorationsSent: string
+    graphics: GraphicsHost
+      ## The recording's graphics (`visual_replay_host`), nil without any.
+    frame: int
+      ## The frame the frame viewer shows.
+    frameView: Option[HostedPane]
+      ## The frame viewer, when the editor shows it.
+    imageSent: string
+      ## Which frame's image the editor holds, so it is sent once per frame.
+    pngCache: tuple[frame: int; png: string; width, height: int]
 
   DapEndpoint = object
     listener: Socket
@@ -256,12 +266,19 @@ proc openServerSession(srv: PaneServer; trace: string): ServerSession =
   tui.learnExtent()
   tui.refresh(rt)
   result = ServerSession(id: srv.nextId, folder: folder, app: app, rt: rt,
-                         tui: tui, product: app.modes.product)
+                         tui: tui, product: app.modes.product,
+                         pngCache: (frame: -1, png: "", width: 0, height: 0))
+  # A recording that carries a gfx stream has graphics: the player the
+  # desktop starts for it serves its frames.
+  result.graphics = startGraphics(folder)
   inc srv.nextId
   srv.sessions.add result
   srv.active = srv.sessions.len - 1
 
 proc close(s: ServerSession) =
+  if not s.graphics.isNil:
+    s.graphics.close()
+    s.graphics = nil
   if not s.tui.isNil:
     s.tui.close()
     s.tui = nil
@@ -272,6 +289,16 @@ proc modeName(p: ProductMode): string =
 proc layoutParams(s: ServerSession): JsonNode =
   %*{"session": s.id, "mode": modeName(s.app.modes.product),
      "layout": layoutJson(s.currentLayout())}
+
+proc graphicsJson(s: ServerSession): JsonNode =
+  ## What `session/open` says of the recording's graphics.
+  let g = s.graphics
+  if g.isNil:
+    return %*{"available": false}
+  result = %*{"available": g.error.len == 0, "frameCount": g.frameCount,
+              "width": g.width, "height": g.height}
+  if g.error.len > 0:
+    result["error"] = %g.error
 
 # ---------------------------------------------------------------------------
 # What is pushed after a change
@@ -304,6 +331,95 @@ proc contentOf(s: ServerSession; pane: PaneKind; full: bool): JsonNode =
   notification("pane/content",
     %*{"session": s.id, "pane": $pane, "width": hp.width,
        "height": hp.height, "full": full, "rows": changed})
+
+proc wantsImages(srv: PaneServer): bool =
+  "image" in srv.media
+
+proc frameViewerRows(s: ServerSession; withImage: bool;
+                     w, h: int): seq[JsonNode] =
+  ## The frame viewer's text: which frame of how many, and the controls that
+  ## move between frames. The text medium's whole pane, and the caption of
+  ## the image an image-capable editor draws below it.
+  let g = s.graphics
+  var lines: seq[(string, seq[JsonNode])] = @[]
+  if g.isNil:
+    lines.add ("This recording has no graphics.", @[])
+  elif g.error.len > 0:
+    lines.add ("Graphics: " & g.error, @[])
+  else:
+    let size = if g.width > 0: " · " & $g.width & "×" & $g.height else: ""
+    let unit = if g.selector == "draw": "Draw " else: "Frame "
+    lines.add (unit & $(s.frame + 1) & " of " & $g.frameCount & size, @[])
+    let prev = "◀ previous"
+    let next = "next ▶"
+    let controls = prev & "   " & next
+    lines.add (controls, @[
+      %*{"start": 0, "end": prev.len, "operation": "frame-viewer.previous-frame",
+         "args": {}},
+      %*{"start": prev.len + 3, "end": controls.len,
+         "operation": "frame-viewer.next-frame", "args": {}}])
+    if not withImage:
+      lines.add ("The frame is an image; an editor that declares the image " &
+                 "medium draws it here.", @[])
+  for i in 0 ..< h:
+    if i < lines.len:
+      let text = lines[i][0]
+      let shown = if text.runeLen > w: text.runeSubStr(0, w) else: text
+      var row = %*{"text": shown, "spans": []}
+      if lines[i][1].len > 0 and shown == text:
+        row["hotspots"] = %lines[i][1]
+      result.add row
+    else:
+      result.add %*{"text": "", "spans": []}
+
+proc frameImage(s: ServerSession): JsonNode =
+  ## The current frame as a PNG, for an editor that draws images; nil when
+  ## there is none to draw.
+  let g = s.graphics
+  if g.isNil or g.error.len > 0 or g.frameCount <= 0:
+    return nil
+  if s.pngCache.frame != s.frame:
+    let (f, png) = g.framePng(s.frame)
+    s.pngCache = (frame: s.frame, png: png, width: f.width, height: f.height)
+  %*{"mediaType": "image/png", "encoding": "base64",
+     "data": encode(s.pngCache.png), "width": s.pngCache.width,
+     "height": s.pngCache.height, "frame": s.frame,
+     "frameCount": g.frameCount}
+
+proc frameViewerContent(srv: PaneServer; s: ServerSession; full: bool): JsonNode =
+  ## `pane/content` for the frame viewer: its rows as for any pane (only the
+  ## changed ones unless `full`), and — for an editor that declared the
+  ## image medium — the frame's `image`, sent when the editor does not hold
+  ## that frame yet.
+  if s.frameView.isNone:
+    return nil
+  var hp = s.frameView.get
+  let withImage = srv.wantsImages and not s.graphics.isNil and
+                  s.graphics.error.len == 0
+  let fresh = s.frameViewerRows(withImage, hp.width, hp.height)
+  var changed = newJArray()
+  for i, r in fresh:
+    if full or i >= hp.rows.len or hp.rows[i] != r:
+      var entry = copy(r)
+      entry["index"] = %i
+      changed.add entry
+  hp.rows = fresh
+  s.frameView = some(hp)
+  var image: JsonNode = nil
+  let key = $s.frame
+  if withImage and (full or s.imageSent != key):
+    try:
+      image = s.frameImage()
+      s.imageSent = key
+    except CatchableError as e:
+      s.graphics.error = "frame " & $(s.frame + 1) & ": " & e.msg
+  if not full and changed.len == 0 and image.isNil:
+    return nil
+  result = notification("pane/content",
+    %*{"session": s.id, "pane": FrameViewerPane, "width": hp.width,
+       "height": hp.height, "full": full, "rows": changed})
+  if not image.isNil:
+    result["params"]["image"] = image
 
 proc keymapOf(srv: PaneServer; s: ServerSession; pane: PaneKind): JsonNode =
   var shadowed = srv.shadowed.getOrDefault("")
@@ -359,8 +475,8 @@ proc decorationsOf(s: ServerSession): JsonNode =
 
 proc dapEvent(srv: PaneServer; event: string; body: JsonNode)
 
-proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[]):
-    seq[JsonNode] =
+proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[];
+             fullFrameViewer = false): seq[JsonNode] =
   ## Everything the editor holds that this session's state changed: a new
   ## mode's layout, the debugger's position, the open panes' rows and the
   ## visible source lines' decorations. The DAP client is told of a move.
@@ -387,6 +503,9 @@ proc publish(srv: PaneServer; s: ServerSession; fullPanes: seq[PaneKind] = @[]):
     let n = s.contentOf(pane, pane in fullPanes)
     if not n.isNil:
       result.add n
+  let fv = srv.frameViewerContent(s, fullFrameViewer)
+  if not fv.isNil:
+    result.add fv
   let deco = s.decorationsOf()
   if not deco.isNil and $deco != s.decorationsSent:
     s.decorationsSent = $deco
@@ -423,7 +542,20 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   let text = params{"operation"}.getStr("")
   let (name, inlineArg) = splitOperation(text)
   let argument = params{"argument"}.getStr(inlineArg)
-  if params.hasKey("pane"):
+  for (op, _) in FrameViewerOperations:
+    if op == name:
+      let g = s.graphics
+      if g.isNil or g.error.len > 0:
+        fail(ErrRequestFailed, "this recording's graphics cannot be shown" &
+          (if g.isNil: "" else: ": " & g.error))
+      let last = max(0, g.frameCount - 1)
+      case name
+      of "frame-viewer.next-frame": s.frame = min(last, s.frame + 1)
+      of "frame-viewer.previous-frame": s.frame = max(0, s.frame - 1)
+      else: s.frame = clamp(int(paneArgsOf(params{"args"}).index), 0, last)
+      return %*{"ok": true, "operation": text,
+                "detail": "frame " & $(s.frame + 1) & " of " & $g.frameCount}
+  if params.hasKey("pane") and params{"pane"}.getStr("") != FrameViewerPane:
     discard s.rt.focusHostedPane(paneParam(params))
   var outcome: RuntimeOutcome
   var isPaneOp = false
@@ -466,11 +598,16 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
       "protocolVersion": PaneProtocolVersion,
       "positionEncoding": PositionEncoding,
       "serverInfo": {"name": ServerName, "version": TuiVersionText},
-      "capabilities": {"media": ["text"], "dap": dap,
-                       "panes": [$paneCalltrace, $paneState, $paneEventLog,
-                                 $panePointList, $paneScratchpad,
-                                 $paneTerminalOutput, $paneSearch,
-                                 $paneFileTree, $paneBuildOutput, $paneVcs]}}
+      "capabilities": {
+        # What this server will send: the image medium only to an editor
+        # that declared it (Q2), text to every editor.
+        "media": (if srv.wantsImages: %["text", "image"] else: %["text"]),
+        "dap": dap,
+        "panes": [$paneCalltrace, $paneState, $paneEventLog,
+                  $panePointList, $paneScratchpad,
+                  $paneTerminalOutput, $paneSearch,
+                  $paneFileTree, $paneBuildOutput, $paneVcs,
+                  FrameViewerPane]}}
   of "shutdown":
     srv.shutdownRequested = true
     for s in srv.sessions:
@@ -485,6 +622,7 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     let s = srv.openServerSession(trace)
     s.layoutSent = $layoutJson(s.currentLayout())
     result = s.layoutParams()
+    result["graphics"] = s.graphicsJson()
     extra.add srv.publish(s)
   of "session/list":
     result = newJArray()
@@ -525,6 +663,18 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     result["layout"] = layoutJson(tree)
   of "pane/open", "pane/resize":
     let s = srv.sessionById(params)
+    if params{"pane"}.getStr("") == FrameViewerPane:
+      if s.graphics.isNil:
+        fail(ErrRequestFailed, "this recording carries no graphics")
+      let (w, h) = sizeParams(params)
+      s.frameView = some(HostedPane(width: w, height: h))
+      if meth == "pane/open":
+        s.imageSent = ""
+        extra.add notification("pane/keymap",
+          %*{"session": s.id, "pane": FrameViewerPane, "bindings": []})
+      extra.add srv.publish(s, fullFrameViewer = true)
+      result = %*{"pane": FrameViewerPane, "width": w, "height": h}
+      return
     let pane = paneParam(params)
     let (w, h) = sizeParams(params)
     s.panes[pane] = HostedPane(width: w, height: h)
@@ -539,6 +689,10 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     result["height"] = %h
   of "pane/close":
     let s = srv.sessionById(params)
+    if params{"pane"}.getStr("") == FrameViewerPane:
+      s.frameView = none(HostedPane)
+      s.imageSent = ""
+      return newJNull()
     let pane = paneParam(params)
     s.panes.del(pane)
     s.rt.hostedRows[pane] = 0

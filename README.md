@@ -347,7 +347,7 @@ with the same codes as the terminal front-end:
 | exit | situation |
 |---|---|
 | 5 | the engine said it cannot read this recording (for example, a trace container version this build does not implement). Its own message is printed, and re-recording the program is the remedy. |
-| 4 | the engine accepted the recording and then sent nothing for 30 seconds: `codetracer-gpui: <folder>: the replay engine stopped answering (…)`. |
+| 4 | the engine accepted the recording and then sent nothing for 30 seconds: `codetracer-gpui: <folder>: the replay engine stopped answering (…)` while opening it, or `… stopped answering after the recording opened (…)` if it went quiet later in the run (while loading panes, `--replay-ops` or `--report-plan`). Only the first suggests re-recording; after the recording opened, re-recording will not help. |
 
 The 30 seconds apply to each message from the engine, not to the whole open,
 so a large recording that is still making progress is never cut off. They

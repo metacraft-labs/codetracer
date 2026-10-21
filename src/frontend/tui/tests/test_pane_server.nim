@@ -56,6 +56,15 @@ proc findPane(node: JsonNode; pane: string): JsonNode =
     let f = findPane(c, pane)
     if not f.isNil: return f
 
+proc regionOf(node: JsonNode; pane: string): JsonNode =
+  ## The node whose weight sizes `pane`: its stack when it is one of a
+  ## stack's tabs, else the pane's own leaf.
+  for c in node{"children"}.getElems:
+    if c{"pane"}.getStr("") == pane:
+      return (if node{"kind"}.getStr("") == "stack": node else: c)
+    let f = regionOf(c, pane)
+    if not f.isNil: return f
+
 suite "HSF-E1: the pane server, over a real recording":
 
   test "the protocol, end to end":
@@ -81,6 +90,8 @@ suite "HSF-E1: the pane server, over a real recording":
     check init{"result", "protocolVersion"}.getInt == 1
     check init{"result", "positionEncoding"}.getStr == "utf-8"
     check init{"result", "capabilities", "dap", "port"}.getInt > 0
+    # An editor that did not declare the image medium is sent text only.
+    check init{"result", "capabilities", "media"} == %["text"]
 
     # ---- operations/list: the catalogue and the panes' own ----------------
     let (ops, _) = srv.request("operations/list")
@@ -96,6 +107,12 @@ suite "HSF-E1: the pane server, over a real recording":
     let sid = opened{"result", "session"}.getInt
     check sid > 0
     check opened{"result", "mode"}.getStr == "debug"
+    # `calc` draws nothing: no graphics, and no frame viewer to open.
+    check opened{"result", "graphics", "available"}.getBool == false
+    let (noFrames, _) = srv.request("pane/open",
+      %*{"session": opened{"result", "session"}.getInt, "pane": "frameViewer",
+         "width": 40, "height": 10})
+    check noFrames{"error", "code"}.getInt == -32803
     check not findPane(opened{"result", "layout"}, "calltrace").isNil
     let firstPos = afterOpen.notes("session/position")
     check firstPos.len == 1
@@ -215,7 +232,9 @@ suite "HSF-E1: the pane server, over a real recording":
     # ---- mode switch, the user's layout edit, and back --------------------
     let (edited, _) = srv.request("layout/edited",
       %*{"session": sid, "mode": "debug", "sizes": {"calltrace": 3.0}})
-    check findPane(edited{"result", "layout"}, "calltrace"){"weight"}.getFloat == 3.0
+    # Recorded on the region the pane occupies — the call trace is a tab of a
+    # stack, so the stack's weight is what sizes it.
+    check regionOf(edited{"result", "layout"}, "calltrace"){"weight"}.getFloat == 3.0
     let (_, toEdit) = srv.request("operation/run",
       %*{"session": sid, "operation": "session.toggle-product-mode"})
     let editLayout = toEdit.notes("layout/changed")
@@ -228,7 +247,7 @@ suite "HSF-E1: the pane server, over a real recording":
     check debugLayout.len == 1 and
           debugLayout[0]{"params", "mode"}.getStr == "debug"
     # The arrangement the user left the mode in comes back with it.
-    check debugLayout.len == 1 and findPane(debugLayout[0]{"params", "layout"},
+    check debugLayout.len == 1 and regionOf(debugLayout[0]{"params", "layout"},
                                             "calltrace"){"weight"}.getFloat == 3.0
 
     # ---- source decorations for the visible lines -------------------------

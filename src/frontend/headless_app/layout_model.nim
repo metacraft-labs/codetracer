@@ -2167,12 +2167,20 @@ proc setWeight*(node: LayoutNode; kind: PaneKind; weight: float): bool =
   ## with `lpNegativeWeight` and `validate` reports as a defect. Writing one
   ## through this door and reading it back through `validate` would have been
   ## the model contradicting itself.
+  ##
+  ## A pane in a STACK shares its region with the stack's other tabs, and the
+  ## region's size is the stack's weight among its siblings — a weight on the
+  ## leaf itself sizes nothing. So it is the stack's weight that is set.
   if weight < 0.0:
     return false
   let leaf = find(node, kind)
   if leaf.isNil:
     return false
-  leaf.weight = weight
+  let parent = parentOf(node, leaf)
+  if not parent.isNil and parent.kind == lnStack:
+    parent.weight = weight
+  else:
+    leaf.weight = weight
   true
 
 proc removePane*(node: LayoutNode; kind: PaneKind): bool =
