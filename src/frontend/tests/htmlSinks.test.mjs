@@ -774,6 +774,11 @@ const INNER_HTML_BY_FILE = [
   //     and `b` escapes `&`, `<` and `>` before emitting anything. The only
   //     markup it produces is `<span class="agent-inline-code">`, and its
   //     input is the user's own textarea.
+  //     RE-TRIAGED 2026-10-21: the function now also returns `s`, so the
+  //     view can repaint after it writes the prompt itself (it no longer
+  //     dispatches a synthetic `input` event to get that). The write and its
+  //     escaping are unchanged, and `s` still reads only `ta.value`; a value
+  //     the view writes reached it before as well, through that event.
   //
   // Three entries left this table in the same change — `ui/scratchpad.nim`,
   // `ui/state.nim`, `ui/terminal_output.nim` and one of `ui/calltrace.nim`'s
@@ -808,7 +813,7 @@ const INNER_HTML_LIVE_WRITES = [
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = "Loading..."',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = NO_RESULTS_MESSAGE',
   "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: el.innerHTML = cstring(html)",
-  "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)\"\"\".}",
+  "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)\"\"\".}",
   'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
   'src/frontend/viewmodel/views/isonim_vcs_view.nim: node.innerHTML = cstring(html)',

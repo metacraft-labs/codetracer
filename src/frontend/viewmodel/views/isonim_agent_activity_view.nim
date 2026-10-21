@@ -661,11 +661,17 @@ when defined(js):
   """.}
   proc setupPasteImageHandler(ta: MockNode; onLoading: proc(): int;
                                onLoaded: proc(idx: int; dataUrl: cstring)) = discard
-  proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element)
-    {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
+  proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element): JsObject
+    {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)""".}
+  proc callJsFunction(fn: JsObject) {.importjs: "#()".}
   proc setupInputHighlight(r: WebRenderer; ta: isonim_dom.Element;
-                           hl: isonim_dom.Element) =
-    setupInputHighlightJs(ta, hl)
+                           hl: isonim_dom.Element): proc() =
+    ## Paints the inline-code overlay behind the prompt and keeps it in step
+    ## with the user's typing (its own `input` listener).  Returns the
+    ## repaint, because a value the VIEW writes fires no `input` event (see
+    ## `syncInputValue`) and must repaint the overlay itself.
+    let repaint = setupInputHighlightJs(ta, hl)
+    result = proc() = callJsFunction(repaint)
 
   proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
     ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
@@ -676,12 +682,30 @@ when defined(js):
   proc readInputValue(node: isonim_dom.Node): string =
     $node.inputValue()
 
-  proc dispatchInputEvent(el: isonim_dom.Element)
-    {.importjs: "#.dispatchEvent(new Event('input'))".}
+  proc readInputElementValue(r: WebRenderer; input: isonim_dom.Element): string =
+    readInputValue(isonim_dom.Node(input))
 
-  proc setInputElementValue(node: isonim_dom.Element; value: string) =
-    node.setInputValue(cstring(value))
-    node.dispatchInputEvent()
+  proc writeInputElementValue(r: WebRenderer; input: isonim_dom.Element;
+                              value: string) =
+    ## Assigning `.value` fires no `input` event (only user edits do:
+    ## https://html.spec.whatwg.org/multipage/input.html#common-input-element-events),
+    ## which is what keeps `syncInputValue` from echoing into the VM.
+    input.setInputValue(cstring(value))
+
+  proc resizeInputToContentJs(input: isonim_dom.Element)
+    {.importjs: """(function(el){var f=parseFloat(window.getComputedStyle(el).fontSize);el.style.height='auto';var h=f>0?el.scrollHeight/f:el.scrollHeight;el.style.height=h+'em';el.scrollTop=el.scrollHeight+2;})(#)""".}
+
+  proc resizeInputToContent*(input: isonim_dom.Element) =
+    ## Size the prompt textarea to its value: height `auto`, then the content
+    ## height in `em` (so it follows the font size), scrolled to the end.
+    ## The one implementation of the prompt's auto-resize: the host calls it
+    ## on the user's edits (`agent_activity.autoResizeTextarea`), and
+    ## `syncInputValue` on a value the VM wrote, such as a restored
+    ## multi-line draft.
+    resizeInputToContentJs(input)
+
+  proc resizeInputToContent(r: WebRenderer; input: isonim_dom.Element) =
+    resizeInputToContent(input)
 
 proc computeDiffStats(original: string; modified: string): (int, int) =
   when defined(js):
@@ -690,21 +714,53 @@ proc computeDiffStats(original: string; modified: string): (int, int) =
   else:
     (0, 0)
 
-proc syncInputValue(r: MockRenderer; input: MockNode; value: string) =
+proc readInputElementValue(r: MockRenderer; input: MockNode): string =
+  input.attributes.getOrDefault("value", "")
+
+proc writeInputElementValue(r: MockRenderer; input: MockNode; value: string) =
+  ## Like the DOM's `.value` assignment, this fires no `input` event.
   r.setAttribute(input, "value", value)
 
-proc setupInputHighlight(r: MockRenderer; ta: MockNode; hl: MockNode) = discard
+proc resizeInputToContent(r: MockRenderer; input: MockNode) =
+  ## The mock has no layout, so there is no content height to size to.
+  discard
 
-when defined(js):
-  proc syncInputValue(r: WebRenderer; input: isonim_dom.Element; value: string) =
-    input.setInputElementValue(value)
+proc syncInputValue[R, N](r: R; input: N; value: string;
+                          repaintHighlight: proc()) =
+  ## The VM -> element half of the prompt's two-way binding; the other half
+  ## is the `input` listener in `attachInputEvents`.
+  ##
+  ## This half must NOT look like typing.  It used to finish by dispatching
+  ## a synthetic `input` event (so that the inline-code overlay repainted),
+  ## and that event ran the listener: the VM was written again and the host
+  ## heard `onInputChange`, whose handler republishes the host's whole state
+  ## into the VM -- invalidating the very effect that called this.  On a
+  ## review launch each republish flips `isLoading` and the conversation, so
+  ## the cycle never settled and the renderer died with "Maximum call stack
+  ## size exceeded".  Only the user's edits are input; the two dependents a
+  ## programmatic value needs are updated directly: the textarea is resized
+  ## to the new value, and the inline-code overlay is repainted.
+  ##
+  ## The element is written only when it differs: re-assigning an equal
+  ## value would move the caret to the end while the user is typing in the
+  ## middle, which is what every keystroke's VM round trip would otherwise
+  ## do.  An unchanged value needs no resize either.
+  if r.readInputElementValue(input) != value:
+    r.writeInputElementValue(input, value)
+    r.resizeInputToContent(input)
+  if repaintHighlight != nil:
+    repaintHighlight()
+
+proc setupInputHighlight(r: MockRenderer; ta: MockNode; hl: MockNode): proc() =
+  ## The mock has no overlay to paint.
+  nil
 
 proc attachInputEvents(r: MockRenderer; input: MockNode; vm: AgentActivityVM;
                        callbacks: AgentActivityCallbacks) =
   r.addEventListener(input, "focus", proc() =
     callbacks.invokeFocus())
   r.addEventListener(input, "input", proc() =
-    vm.invokeInputChange(callbacks, input.attributes.getOrDefault("value", "")))
+    vm.invokeInputChange(callbacks, r.readInputElementValue(input)))
   r.addEventListener(input, "keydown", proc() =
     callbacks.invokeSubmit())
 
@@ -923,11 +979,30 @@ proc renderMessage[R](r: R; componentId: int;
         thoughtDuration(message.duration)
       elif message.thinkingEndedAt > 0.0:
         thinkingLabel(message.createdAt, message.thinkingEndedAt)
-      else:
+      elif message.isLoading:
         "Thinking"
+      else:
+        # Finished, with no timing to report (every row of a session loaded
+        # into a review): "Thinking" here would be the in-progress
+        # placeholder on a turn that is over, so the header says nothing.
+        ""
+    # Separated from the label only when there is a label to separate from.
+    let canceledSuffix =
+      if durationLabel.len > 0: " (canceled)" else: "(canceled)"
     # Completed messages start collapsed so the conversation stays readable.
     # The user can expand by clicking the header; ongoing messages are always open.
-    let isCollapsed = not message.isLoading
+    #
+    # Collapsing works because a finished streamed turn's last text is
+    # promoted out of the block (`finalTextContent` above).  A message with
+    # no segments has nothing to promote: its flat `content` IS the message,
+    # so collapsing it would hide all of it behind the header.  Every row of
+    # a session loaded into a review is such a message
+    # (`review_session.sessionMessages`); collapsed, a replayed transcript
+    # read as a column of bare headers, where DeepReview-GUI.md §2.1 has the
+    # reviewer read "what the agent actually did".  Such a message stays
+    # open.
+    let showsFlatContent = segGroups.len == 0 and message.content.len > 0
+    let isCollapsed = not message.isLoading and not showsFlatContent
     let chevronClass = if isCollapsed: "agent-chevron agent-chevron-collapsed" else: "agent-chevron"
     let contentClass = if isCollapsed: AgentActivityMessageContentClass & " agent-thought-collapsed" else: AgentActivityMessageContentClass
     let wrapperClass =
@@ -954,10 +1029,14 @@ proc renderMessage[R](r: R; componentId: int;
                    classListToggle(finalMsgEl, "agent-final-message-hidden")):
           tdiv(class = "agent-thought-header-left"):
             span(class = chevronClass, id = chevronId)
-            span(class = "agent-thought-label"):
-              text durationLabel
-              if message.canceled:
-                span: text " (canceled)"
+            # An empty label is left out rather than drawn as an empty
+            # span: `.agent-thought-header-left` spaces its items with a
+            # flex `gap`, which an empty item would still claim.
+            if durationLabel.len > 0 or message.canceled:
+              span(class = "agent-thought-label"):
+                text durationLabel
+                if message.canceled:
+                  span: text canceledSuffix
             # Spinner shown in header only during the pure thinking phase
             if stillThinking and not message.canceled:
               span(class = "ai-status")
@@ -1925,6 +2004,11 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
   let chip1 = "Fix a bug in my code"
   let chip2 = "Explain this codebase"
   let chip3 = "Write tests for function"
+  # A chip fills the prompt FOR the user, so it is input and goes the way
+  # typing does (`invokeInputChange`): the host keeps its own copy of the
+  # prompt and republishes it on every sync, so a value written only into
+  # the VM would be wiped by the next one.  `syncInputValue` fires no
+  # `input` event, so nothing else would tell the host.
   ui(r):
     tdiv(class = "agent-idle-state"):
       tdiv(class = "agent-idle-header"):
@@ -1935,17 +2019,17 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
       tdiv(class = "agent-idle-suggestions"):
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =
-                 vm.setInputValue(chip1)
+                 vm.invokeInputChange(callbacks, chip1)
                  callbacks.invokeFocus()):
           text chip1
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =
-                 vm.setInputValue(chip2)
+                 vm.invokeInputChange(callbacks, chip2)
                  callbacks.invokeFocus()):
           text chip2
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =
-                 vm.setInputValue(chip3)
+                 vm.invokeInputChange(callbacks, chip3)
                  callbacks.invokeFocus()):
           text chip3
 
@@ -1995,7 +2079,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
   r.setAttribute(input, ScopeKindAttribute, $ekInput)
   r.setAttribute(input, ScopeIdAttribute, AgentPromptInput)
   r.attachInputEvents(input, vm, callbacks)
-  r.setupInputHighlight(input, highlight)
+  let repaintHighlight = r.setupInputHighlight(input, highlight)
 
   createRenderEffect proc() =
     r.clearChildren(imagesStrip)
@@ -2099,7 +2183,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       callbacks.afterDynamicRender()
 
   createRenderEffect proc() =
-    r.syncInputValue(input, vm.inputValue.val)
+    r.syncInputValue(input, vm.inputValue.val, repaintHighlight)
     r.clearChildren(buttons)
     # if not vm.reRecordInProgress.val:
     #   r.appendRenderedChild(buttons, renderNewAgentButton(r, callbacks))
