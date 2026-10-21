@@ -132,7 +132,10 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     padding: 0.25em 0.5em
     border-radius: 0.375em
     background: colors-ui-surface-primary-default
-    border: 1px solid colors-ui-border-default
+    // `colors-ui-border-default` is not a design token (the generator emits
+    // border-primary/-secondary/-tertiary), so this edge was dropped. The
+    // structural border, not the stronger border-primary inputs use.
+    border: 1px solid colors-ui-border-secondary
     max-width: 20em
     flex-shrink: 0
 
@@ -141,7 +144,8 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
       overflow: hidden
       text-overflow: ellipsis
       white-space: nowrap
-      color: colors-ui-text-primary
+      // Body text: `colors-ui-text-primary` alone is not a token.
+      color: colors-ui-text-primary-body
       min-width: 0
 
     .agent-paste-remove
@@ -546,7 +550,8 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     display: block
     font-family: "SpaceMono", monospace
     font-size: 0.75rem
-    color: colors-ui-text-primary-subtle
+    // The subtle label tier; `colors-ui-text-primary-subtle` is not a token.
+    color: colors-ui-text-primary-label-subtle
     padding: 0.5em 0.75em 0.25em
 
   .agent-code-block-content
@@ -1255,7 +1260,8 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
 
   .permission-description
     font-size: 0.875rem
-    color: colors-ui-text-primary-default
+    // Body text; `colors-ui-text-primary-default` is not a token.
+    color: colors-ui-text-primary-body
     line-height: 1.4
 
   .permission-subtitle
@@ -1397,7 +1403,10 @@ AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
     border-top: none
 
   &:hover
-    background: colors-ui-surface-primary-hover
+    // LIST_HOVER_BG (button.styl), the row hover this sheet's other lists
+    // use. The name these rows carried, `colors-ui-surface-primary-hover`,
+    // is not a design token, so the hover was dropped; the same below.
+    background: LIST_HOVER_BG
 
   &.agent-model-item--active
     background: colors-ui-surface-primary-secondary
@@ -1499,8 +1508,9 @@ agent-toolbar-icon(img)
     font-size: 0.875rem
     min-width: 0
 
+    // The app-wide placeholder colour (components/input.styl).
     &::placeholder
-      color: colors-ui-text-primary-subtle
+      color: colors-ui-text-primary-label-subtle
 
 .agent-branch-list
   flex: 1 1 auto
@@ -1518,7 +1528,7 @@ agent-toolbar-icon(img)
     border-top: none
 
   &:hover
-    background: colors-ui-surface-primary-hover
+    background: LIST_HOVER_BG
 
   &.agent-branch-item--active
     background: colors-ui-surface-primary-secondary
@@ -1535,7 +1545,7 @@ agent-toolbar-icon(img)
   color: colors-ui-text-primary-body
 
   &:hover
-    background: colors-ui-surface-primary-hover
+    background: LIST_HOVER_BG
 
   .agent-branch-create-icon
     display: flex
@@ -1572,7 +1582,7 @@ agent-toolbar-icon(img)
   dropdown-surface-row()
 
   &:hover
-    background: colors-ui-surface-primary-hover
+    background: LIST_HOVER_BG
 
   .agent-add-context-menu-icon
     display: flex
@@ -1583,7 +1593,7 @@ agent-toolbar-icon(img)
 
   .ct-menu-item-label
     font-size: 0.875rem
-    color: colors-ui-text-primary
+    color: colors-ui-text-primary-body
 
 // Settings button in the agent toolbar
 
@@ -1634,13 +1644,13 @@ agent-toolbar-icon(img)
 .agent-settings-section-header
   font-size: 0.65em
   letter-spacing: 0.08em
-  color: colors-ui-text-primary-subtle
+  color: colors-ui-text-primary-label-subtle
   text-transform: uppercase
   margin-bottom: 0.25em
 
 .agent-settings-label
   font-size: 0.75em
-  color: colors-ui-text-primary-subtle
+  color: colors-ui-text-primary-label-subtle
   margin-bottom: 0.125em
 
 .agent-settings-select-wrapper
@@ -1706,7 +1716,7 @@ agent-toolbar-icon(img)
   gap: 0.5em
 
   &:hover
-    background: colors-ui-surface-primary-hover
+    background: LIST_HOVER_BG
 
   &--active
     color: colors-ui-text-primary-label

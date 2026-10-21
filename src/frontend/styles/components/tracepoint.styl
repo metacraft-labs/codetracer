@@ -611,19 +611,6 @@ RESIZING_BORDER_SIZE = 4px
   /*border-style: solid*/
   display: flex
 
-.switch
-  background-color: BACKGROUND_OPPOSITE_COLOR
-  // White would not read on the light palette's surface for this switch
-  // (BACKGROUND_OPPOSITE_COLOR); `by-mode` keeps the dark theme's white
-  // (defaults.styl).
-  color: by-mode(white, colors-ui-text-primary-body)
-  width: 78px
-  float: left
-  cursor: pointer
-
-#trace-switch
-  margin-left: 90px
-
 .select-view-kind
   position: relative
   display: none

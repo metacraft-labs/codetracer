@@ -3060,7 +3060,7 @@ jobs:
       - name: Assert the style-variable guard can observe its own failures
         # Same reasoning as the two steps above, for a guard whose entire
         # claim is that it sees something no human and no compiler sees. Its
-        # eleven arms feed it defects it must report and legal CSS it must
+        # ten arms feed it defects it must report and legal CSS it must
         # not, and include the two instrument checks that stop an empty
         # stylesheet or an unreadable Tupfile scoring as a pass — which is not
         # hypothetical, `default_white_theme.styl` compiles to zero bytes.

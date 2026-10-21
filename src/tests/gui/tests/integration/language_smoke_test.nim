@@ -29,7 +29,8 @@
 ## depends on the local environment.
 ##
 ## Prerequisites:
-##   - replay-server built: ``src/build-debug/bin/replay-server``
+##   - replay-server built, anywhere ``src/common/replay_server_path.nim``
+##     searches (``REPLAY_SERVER_BIN`` overrides)
 ##   - ct binary built: ``src/build-debug/bin/ct``
 ##   - Recorders installed for the languages you want to test
 ##
@@ -38,6 +39,7 @@
 
 import std/[json, os, unittest, strutils, osproc, sequtils]
 import headless_session
+import ../../../../common/replay_server_path   # the one search order
 import store/types
 
 # ---------------------------------------------------------------------------
@@ -45,20 +47,12 @@ import store/types
 # ---------------------------------------------------------------------------
 
 proc findReplayServer(): string =
-  ## Locate the replay-server binary.
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let thisFile = currentSourcePath()
-  # Test lives at src/tests/gui/tests/integration/<this>.nim — six
-  # parentDir hops to the codetracer/ checkout root.
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
-  let candidate = repoRoot / "src" / "build-debug" / "bin" / "replay-server"
-  if fileExists(candidate):
-    return candidate
-  raise newException(IOError,
-    "Could not find replay-server binary. Set REPLAY_SERVER_BIN or " &
-    "build it with 'cargo build' in src/db-backend/. Tried: " & candidate)
+  ## The engine `src/common/replay_server_path` resolves -- the one search
+  ## order the native front-ends use too -- or an `IOError` naming every path
+  ## searched, because this suite cannot run without one.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 proc repoRoot(): string =
   ## Return the repository root.

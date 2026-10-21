@@ -357,16 +357,17 @@ FAIL: this repo's 'runquota' pin is ${RELATION} the runquota revision that the
   reprobuild@${REPROBUILD_REV}
                       runquota-src = ${RB_RUNQUOTA}
 
-'inputs.runquota-src.follows = "runquota"' means reprobuild is COMPILED against
-the revision on the first line, while it was written against the second.
+The derived runquota input resolves to the revision on the first line,
+while reprobuild was locked against the second. The lock graph is stale.
 Divergence in EITHER direction surfaces minutes later as an 'undeclared
 identifier' inside reprobuild's own sources — behind it loses types that were
 added, ahead of it loses types that were removed.
 
-Remedy — mirror, do not freshen. In flake.nix set the runquota input url to
+Keep runquota.follows = "reprobuild/runquota-src" in flake.nix. Re-lock the
+parent and its dependency graph together from this checkout:
 
-    github:metacraft-labs/runquota/${RB_RUNQUOTA}
+    nix flake update reprobuild
 
-then 'nix flake update runquota' and confirm with 'nix develop --command true'.
+Then run this check again and confirm with 'nix develop --command true'.
 EOF
 exit 1
