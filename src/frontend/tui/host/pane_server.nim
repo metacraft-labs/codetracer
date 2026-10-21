@@ -49,6 +49,10 @@ import headless_app/layout_model
 import codetracer_embed
 
 import ../app/cli
+import ../app/edit_binding
+import ../app/views/file_tree
+from ../../viewmodel/store/types import FilesystemEntryNode
+from isonim/core/signals import val
 import ../app/pane_protocol
 import ../app/runtime
 import ../app/theme/capabilities as app_capabilities
@@ -94,6 +98,10 @@ type
     layoutSent: string
     position: tuple[file: string; line: int; tick: uint64]
     sourceView: tuple[file: string; first, last: int]
+    cursor: tuple[file: string; line, column: int]
+      ## Where the editor's cursor is in its source window
+      ## (`source/cursor`): the line an operation that acts "at the cursor"
+      ## (a breakpoint, a tracepoint) acts on, as the terminal's caret is.
     decorationsSent: string
     graphics: GraphicsHost
       ## The recording's graphics (`visual_replay_host`), nil without any.
@@ -536,6 +544,34 @@ proc sizeParams(params: JsonNode): (int, int) =
     fail(ErrInvalidParams, "a pane's width and height are positive cell counts")
   (w, h)
 
+proc recordedFiles(node: FilesystemEntryNode; acc: var seq[JsonNode]) =
+  ## The files under `node` (folders walked, not listed).
+  if not node.isFolder and node.path.len > 0:
+    acc.add %*{"path": node.path, "name": node.text}
+  for c in node.children:
+    recordedFiles(c, acc)
+
+proc applyCursor(s: ServerSession) =
+  ## The editor's cursor is the caret the operations act at. In the terminal
+  ## a debug-mode command's line is the command context's (the stop's line
+  ## until a move rebuilds it) and an edit-mode one's is the edited file's
+  ## caret; in an editor-hosted session both are the editor's cursor.
+  let c = s.cursor
+  if c.file.len == 0 or c.line <= 0:
+    return
+  s.rt.context.file = c.file
+  s.rt.context.line = c.line
+  if s.app.modes.product == pmEdit and not s.app.editSession.isNil:
+    var at = s.app.editSession.indexOfPath(c.file)
+    if at < 0 and fileExists(c.file):
+      try:
+        at = s.app.editSession.openFile(c.file, readFile(c.file))
+      except IOError, OSError:
+        at = -1
+    if at >= 0:
+      s.app.editSession.activateBuffer(at)
+      s.app.editSession.activeBuffer().moveCaretTo(c.line - 1, max(0, c.column - 1))
+
 proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode =
   ## `operation/run`: a catalogued operation, or a pane operation from a
   ## hotspot, applied to the session as a key or a click is.
@@ -561,6 +597,7 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
   var isPaneOp = false
   for (op, _) in PaneOperations:
     if op == name: isPaneOp = true
+  s.applyCursor()
   if isPaneOp:
     discard s.rt.runPaneOperation(name, paneArgsOf(params{"args"}), outcome)
   elif isCatalogued(name):
@@ -737,6 +774,49 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     let s = srv.sessionById(params)
     result = srv.runOperation(s, params)
     extra.add srv.publish(s)
+  of "session/files":
+    # The recording's source set (the file tree role's floor, §E8): what an
+    # editor that shows the files itself lists, including sources that are
+    # not in its project.
+    let s = srv.sessionById(params)
+    var files: seq[JsonNode] = @[]
+    let vm = s.tui.session.session.fileTreeVM
+    if not vm.isNil:
+      recordedFiles(vm.rootEntry.val, files)
+    result = %files
+  of "source/read":
+    # A recorded file, whole, as the recording holds it — for a source the
+    # editor cannot open from disk (§E8: a read-only buffer per trace file).
+    let s = srv.sessionById(params)
+    let file = params{"file"}.getStr("")
+    if file.len == 0:
+      fail(ErrInvalidParams, "source/read names a `file`")
+    let (ok, text, message) = s.tui.recordedSourceText(file)
+    if not ok:
+      fail(ErrRequestFailed, message)
+    result = %*{"file": file, "text": text}
+  of "files/changed":
+    # The editor's file tree, when it fills the file tree role (§E8), reports
+    # the files it created, renamed and deleted. Edit mode lists the project
+    # again so its file tree, and what a build sees, follow; a recording's
+    # source set does not change.
+    let s = srv.sessionById(params)
+    if s.app.modes.product == pmEdit and not s.rt.editServices.listFiles.isNil:
+      let open = s.app.fileTree.openPath
+      let listing = s.rt.editServices.listFiles()
+      s.app.fileTree = initFileTreeModel(files = listing.files,
+        selected = (if listing.files.len > 0: 0 else: -1),
+        truncated = listing.truncated)
+      s.app.fileTree.openPath = open
+      extra.add srv.publish(s)
+    result = newJNull()
+  of "source/cursor":
+    # The editor's cursor in its source window (§E7, the source editor
+    # role's floor): what operations "at the cursor" act on.
+    let s = srv.sessionById(params)
+    s.cursor = (file: params{"file"}.getStr(""), line: params{"line"}.getInt(0),
+                column: params{"column"}.getInt(1))
+    result = newJNull()
   of "source/viewport":
     let s = srv.sessionById(params)
     let first = params{"firstLine"}.getInt(1)

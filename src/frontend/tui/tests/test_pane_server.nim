@@ -278,6 +278,42 @@ suite "HSF-E1: the pane server, over a real recording":
     check deco.len == 1 and deco[0]{"params", "rows"}.getElems.anyIt(
       it{"line"}.getInt == execLine and it{"execution"}.getBool)
 
+    # ---- an operation "at the cursor" acts at the editor's cursor ----------
+    # The editor reports where its cursor is (`source/cursor`); toggling a
+    # breakpoint then places it there, not at the stop's line.
+    let cursorLine = execLine + 2
+    discard srv.request("source/cursor",
+      %*{"session": sid, "file": file, "line": cursorLine, "column": 1})
+    let (toggled, toggleNotes) = srv.request("operation/run",
+      %*{"session": sid, "operation": "editor.toggle-breakpoint"})
+    check toggled{"result", "ok"}.getBool
+    var marked = toggleNotes.notes("source/decorations")
+    if marked.len == 0:
+      # The decorations follow the next publish when the toggle did not
+      # change the visible range's text.
+      marked = srv.request("source/viewport",
+        %*{"session": sid, "file": file, "firstLine": max(1, execLine - 5),
+           "lastLine": execLine + 6})[1].notes("source/decorations")
+    check marked.len >= 1 and marked[^1]{"params", "rows"}.getElems.anyIt(
+      it{"line"}.getInt == cursorLine and it{"mark"}.getStr == "breakpoint")
+    check marked.len >= 1 and not marked[^1]{"params", "rows"}.getElems.anyIt(
+      it{"line"}.getInt == execLine and it{"mark"}.getStr == "breakpoint")
+
+    # ---- the recording's source set, for an editor's own file tree -------
+    let (listed, _) = srv.request("session/files", %*{"session": sid})
+    let files = listed{"result"}.getElems
+    check files.anyIt(it{"path"}.getStr == file)
+    let (read, _) = srv.request("source/read", %*{"session": sid, "file": file})
+    check read{"result", "text"}.getStr == readFile(file) or
+          read{"result", "text"}.getStr.len > 0
+    check read{"result", "text"}.getStr.splitLines.len >= execLine
+    let (missing, _) = srv.request("source/read",
+      %*{"session": sid, "file": "/no/such/recorded/file.py"})
+    check not missing{"error"}.isNil
+    let (changed, _) = srv.request("files/changed",
+      %*{"session": sid, "created": ["/tmp/new.py"], "deleted": [], "renamed": []})
+    check changed{"error"}.isNil
+
     # ---- the DAP endpoint drives the same session -------------------------
     var dseq = 0
     proc dap(command: string; args: JsonNode = newJObject()): JsonNode =
