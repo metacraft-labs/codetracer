@@ -1313,10 +1313,30 @@ impl Handler {
     }
 
     fn load_local_calltrace(&mut self, args: CalltraceLoadArgs) -> Result<Vec<CallLine>, Box<dyn Error>> {
-        let call_key = self
-            .reader
-            .call_key_for_step(self.step_id)
-            .expect("load_local_calltrace: invalid step_id");
+        // A recording with no steps has no calls either: its call tree is
+        // empty. Such recordings are legitimate — a JS boundary recording
+        // assembled by `ct-jsbound` opens with no steps, because the readers
+        // skip the container members they do not know — so this is an
+        // answer, not an error.
+        //
+        // This used to `expect()` the current step's call. On a trace with no
+        // steps that panicked the replay-server's task thread, which sends no
+        // DAP response and services no later request, so the client waited
+        // for `ct/load-calltrace-section` until its own timeout.
+        // `first_step_id`, not `step_count() == 0`: reload annotations occupy
+        // execution IDs without being steps, so a count can be non-zero on a
+        // recording with no step at all.
+        if self.reader.first_step_id().is_none() {
+            return Ok(Vec::new());
+        }
+        let Some(call_key) = self.reader.call_key_for_step(self.step_id) else {
+            return Err(format!(
+                "load_local_calltrace: execution index {} is not a source step (the trace has {} execution IDs)",
+                self.step_id.0,
+                self.reader.step_count()
+            )
+            .into());
+        };
         self.calltrace.optimize_collapse = args.optimize_collapse;
         if call_key != self.calltrace.start_call_key {
             // When not auto-collapsing (e.g. Python API bridge), pass the
@@ -8748,6 +8768,72 @@ mod tests {
         // assert_eq!(call_b.location.key, "3".to_string());
 
         Ok(())
+    }
+
+    /// The `ct/load-calltrace-section` arguments the Python bridge sends
+    /// (backend-manager `handle_py_calltrace`): no location, no collapsing.
+    fn python_bridge_calltrace_args() -> CalltraceLoadArgs {
+        CalltraceLoadArgs {
+            location: Location::default(),
+            start_call_line_index: GlobalCallLineIndex(0),
+            depth: 10,
+            height: 20,
+            raw_ignore_patterns: "".to_string(),
+            auto_collapsing: false,
+            optimize_collapse: false,
+            render_call_line_index: 0,
+        }
+    }
+
+    /// A recording with no steps (a JS boundary recording opens as one) has
+    /// an empty call tree, and `ct/load-calltrace-section` says so.
+    ///
+    /// It used to panic in `load_local_calltrace` (`expect()` on the current
+    /// step's call), which on the replay-server killed the task thread
+    /// without a response: `trace.calltrace()` never returned.
+    #[test]
+    fn calltrace_section_of_a_trace_with_no_steps_is_empty() -> Result<(), Box<dyn Error>> {
+        let db = Db::new(&PathBuf::from("/test/workdir"));
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        assert!(handler.reader.first_step_id().is_none(), "the fixture has no steps");
+        let (sender, receiver) = mpsc::channel();
+
+        handler.load_calltrace_section(dap::Request::default(), python_bridge_calltrace_args(), sender)?;
+
+        let mut responses = Vec::new();
+        let mut updates = Vec::new();
+        while let Ok(message) = receiver.try_recv() {
+            match message {
+                DapMessage::Response(r) => responses.push(r),
+                DapMessage::Event(e) if e.event == "ct/updated-calltrace" => updates.push(e.body),
+                _ => {}
+            }
+        }
+        assert_eq!(responses.len(), 1, "exactly one response: {responses:?}");
+        assert!(responses[0].success, "{:?}", responses[0]);
+        for body in updates.iter().chain(std::iter::once(&responses[0].body)) {
+            assert_eq!(body["callLines"], serde_json::json!([]), "{body}");
+            assert_eq!(body["totalCallsCount"], 0, "{body}");
+        }
+        assert_eq!(updates.len(), 1, "one ct/updated-calltrace event");
+        Ok(())
+    }
+
+    /// On a trace that has steps, a current position that is not one of them
+    /// is refused with an error (a DAP error response), never a panic.
+    #[test]
+    fn calltrace_at_a_position_that_is_not_a_step_is_an_error() {
+        let db = setup_db_with_calls();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.step_id = StepId(handler.reader.step_count() as i64 + 10);
+
+        let error = handler
+            .load_local_calltrace(python_bridge_calltrace_args())
+            .expect_err("a position past the last step is refused");
+        assert!(
+            error.to_string().contains("is not a source step"),
+            "unexpected error: {error}"
+        );
     }
 
     /// `ct/load-locals` answers for the step the debugger is on — for
