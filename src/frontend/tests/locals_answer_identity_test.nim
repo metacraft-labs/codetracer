@@ -284,8 +284,23 @@ proc settle(): Future[void] =
 # Attaching asks nothing: the store has no stop yet.
 let bootRequests = localsRequests().len
 
+var caseName = ""
+var caseFailuresBefore = 0
+
+proc beginCase(name: string) =
+  ## The checks below are ONE async walk (the stop loader applies an answer
+  ## in a continuation), not `unittest` tests; each section still reports
+  ## its verdict by name, in `unittest`'s spelling, so a reader of the run —
+  ## a mutation harness naming its killer case — finds it as any other case.
+  caseName = name
+  caseFailuresBefore = failedChecks
+
+proc endCase() =
+  echo (if failedChecks == caseFailuresBefore: "  [OK] " else: "  [FAILED] ") &
+       caseName
+
 proc sessionChecks() {.async.} =
-  # ---- one request per move, in the file's language; a stale answer is dropped
+  beginCase("one request per move, in the file's language; a stale answer is dropped")
   moveTo(100, 10)
   let atStop1 = newSince(bootRequests)
   # ONE REQUEST PER MOVE — the stop loader's; the legacy component stands
@@ -317,7 +332,8 @@ proc sessionChecks() {.async.} =
   # subscribes to nothing, and the pane renders the session's store.
   ck component.locals.len == 0
 
-  # ---- an answer overtaken by a later one is still judged by its own stop
+  endCase()
+  beginCase("an answer overtaken by a later one is still judged by its own stop")
   block:
     let base = localsRequests().len
     moveTo(300, 30)
@@ -333,7 +349,8 @@ proc sessionChecks() {.async.} =
     await settle()
     ck shown() == @["initial_shield=40"]
 
-  # ---- a repeated move asks nothing; a new stop at the same tick asks
+  endCase()
+  beginCase("a repeated move asks nothing; a new stop at the same tick asks")
   block:
     let base = localsRequests().len
     moveTo(450, 45)
@@ -353,7 +370,8 @@ proc sessionChecks() {.async.} =
     await settle()
     ck shown() == @["initial_shield=46"]
 
-  # ---- a watch-list change asks once, with the watch, in the file's language
+  endCase()
+  beginCase("a watch-list change asks once, with the watch, in the file's language")
   block:
     let base = localsRequests().len
     activeStateVM().addWatch("initial_shield")
@@ -371,7 +389,8 @@ proc sessionChecks() {.async.} =
     await settle()
     ck shown() == @["initial_shield=48"]
 
-  # ---- #855: a watch's result survives a move
+  endCase()
+  beginCase("#855: a watch's result survives a move")
   block:
     # Reported: add a watch, step, and the Watches tab is empty until
     # another watch is added. On the desktop the move reaches the store from
@@ -412,14 +431,16 @@ proc sessionChecks() {.async.} =
     await settle()
     ck watchRows().len == 0
 
-  # ---- an answer to a request this session never sent is not applied
+  endCase()
+  beginCase("an answer to a request this session never sent is not applied")
   block:
     let before = shown()
     deliver(localsAnswer(9_999, 999))
     await settle()
     ck shown() == before
 
-  # ---- an answer is named by the session that sent it, not the one on screen
+  endCase()
+  beginCase("an answer is named by the session that sent it, not the one on screen")
   block:
     # Every replay session's `DapApi` numbers its requests from zero, so two
     # sessions routinely have a request with the same `seq` in flight. An
@@ -441,6 +462,15 @@ proc sessionChecks() {.async.} =
     deliverDapResponse(dapApi, other, localsAnswer(seqOf(atStop6[0]), 71))
     await settle()
     ck "initial_shield=71" notin shown()
+    # And another session asking with the seq of the request session 0 has
+    # in flight for the stop it is AT: an answer that settled THAT request
+    # would be drawn, since it would be about the current stop.
+    let third = DapApi(ipc: recordingIpc(), seq: seqOf(atStop7[0]),
+                       sessionId: 2)
+    discard third.asyncSendCtRequest(CtLoadLocals, JsObject{})
+    deliverDapResponse(dapApi, third, localsAnswer(seqOf(atStop7[0]), 73))
+    await settle()
+    ck "initial_shield=73" notin shown()
     # Session 0's answer to that seq: about stop 6, dropped.
     deliver(localsAnswer(seqOf(atStop6[0]), 60))
     await settle()
@@ -449,7 +479,8 @@ proc sessionChecks() {.async.} =
     await settle()
     ck shown() == @["initial_shield=72"]
 
-  # ---- a status-only change is not a new stop, and asks nothing
+  endCase()
+  beginCase("a status-only change is not a new stop, and asks nothing")
   block:
     # The debugger is marked stepping at the stop it is LEAVING — a write to
     # `status` alone, which is what `store.requestStep` does before the new
@@ -464,9 +495,18 @@ proc sessionChecks() {.async.} =
     moveTo(900, 90)
     ck newSince(base).len == 1
 
+  endCase()
   ck moveFailures.len == 0
   echo "CHECKS: ", checks
   if failedChecks > 0:
     {.emit: "process.exitCode = 1;".}
 
-discard sessionChecks()
+# A section that RAISES (an index past what a broken sender sent) fails by
+# its name, as a `unittest` case that raised would, instead of leaving the
+# run with no verdict for it.
+discard sessionChecks().catch(
+  proc(e: Error) =
+    discard e
+    echo "    the section raised"
+    echo "  [FAILED] ", caseName
+    {.emit: "process.exitCode = 1;".})
