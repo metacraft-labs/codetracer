@@ -2457,6 +2457,53 @@ const
 
 var callIconFiles {.threadvar.}: Table[string, string]
 
+# ---------------------------------------------------------------------------
+# PLAT-70 Part B — the table panes' cut cells (Horizontal-Overflow.md §5)
+# ---------------------------------------------------------------------------
+
+const
+  GpuiMonoCellPx* = EditorColumnPx
+    ## (= Space Mono's advance, 612 units per em, at 16 px.)
+    ## One character of the code face at the window's text size (Space Mono,
+    ## 16 px): a table cell's "cell" in this window. A column's pixels are
+    ## turned into the cells `table_overflow.fitCell` fits a text to.
+
+const
+  EventSeparatorAttribute* = "data-ct-column-separator"
+    ## An Event Log column separator's grip — the column a drag on it
+    ## resizes.
+  TableCutAttribute* = "data-ct-cut"
+    ## On a table cell drawn CUT (its text ends in `…`) — the column's name.
+    ## A cell that fits carries none (HO-8).
+  TableDetailAttribute* = "data-ct-detail"
+    ## On each line of a row's full text open under it — the row's key.
+  StateDetailPane* = VariablesTablePane
+    ## The state pane's name in a `DetailToggle` (the terminal's).
+
+const TableScrollbarPx* = 8
+  ## The vertical scrollbar a list pane keeps at its right edge (the
+  ## desktop's 8 px `::-webkit-scrollbar`): not room for text.
+
+func cellsInPx*(px: int): int =
+  ## How many whole characters fit `px` pixels.
+  max(0, int(floor(float(px) / GpuiMonoCellPx)))
+
+func pxOfText*(cells: int): int =
+  ## How wide `cells` characters are drawn (GPUI rounds a text run up).
+  int(ceil(float(cells) * GpuiMonoCellPx))
+
+var tableDetail*: DetailToggle
+  ## The row whose full text is open under it (`list.show-detail`, a `…`
+  ## click) — one, across the three table panes. Set by the window.
+var tableCopyChord*: string
+  ## The resolved `list.copy` chord the detail's hint names (KL-8).
+var stateCuts*, eventCuts*, callCuts*: seq[CutCell]
+  ## The cells each table pane drew CUT, in pixels from its pane BODY's
+  ## top-left — what the window hit-tests a hover and a `…` click against.
+var callTraceSlots*: seq[int]
+  ## The call trace's drawn lines, top to bottom: the index into `callRows`
+  ## of a call's row, -1 for a line of an open detail.
+
 proc callIconPath(name: string): string =
   if callIconFiles.hasKey(name) and fileExists(callIconFiles[name]):
     return callIconFiles[name]
@@ -2475,6 +2522,18 @@ func callRowTopPx*(i: int): int =
 func callRowAtPx*(dy: int): int =
   ## The row a point `dy` px below the first row's top is on.
   int(floor(float(dy) / CallRowPitch))
+
+const CallTraceDetailPane* = CallTraceTablePane
+  ## The call trace's name in a `DetailToggle` (the terminal's).
+
+var callTracePaneWidthPx* = 0
+  ## The call trace pane body's width, set by the window: a row's text is
+  ## fitted to what is left of it.
+
+func callTextLeftPx*(depth: int): int =
+  ## Where a call row's text starts: the toggle's left at its depth, the
+  ## 14 px toggle and the 8 px gap after it.
+  CallToggleLeftPx + max(depth, 0) * CallIndentPx + 14 + 8
 
 proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
                       vm: CalltraceVM): bool =
@@ -2535,13 +2594,35 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
   r.setStyle(list, "margin-top", "8px")
   r.setStyle(list, "position", "relative")
   r.setStyle(list, "font-family", MonoFontFamily)
+  # PLAT-70 Part B (Horizontal-Overflow.md §5.3): the lines, top to bottom —
+  # each call's row and, under the one whose detail is open, its full text —
+  # so every y below (the rows, the connectors, the window's hit-tests) is a
+  # line's, not a call's.
+  var slotOf = newSeq[int](rows.len)
+  callTraceSlots = @[]
+  var detailLines: Table[int, seq[string]]
+  let bodyRows = max(1, rows.len)
+  for k, row in rows:
+    slotOf[k] = callTraceSlots.len
+    callTraceSlots.add k
+    if tableDetail.isOpen(CallTraceDetailPane, $row.index):
+      let textX = callTextLeftPx(row.depth)
+      let lines = detailView(row.callRowText,
+                             max(1, cellsInPx(callTracePaneWidthPx - textX -
+                                              TableScrollbarPx)),
+                             bodyRows, tableCopyChord).lines
+      detailLines[k] = lines
+      for _ in lines:
+        callTraceSlots.add -1
   # THE CONNECTOR LINES (`.calltrace-svg-line`): down each row through its
   # toggle's centre and, at the row's foot, across to the next row's.
   if rows.len >= 2:
     for k, row in rows:
       let x = CallToggleLeftPx + 7 + max(row.depth, 0) * CallIndentPx
-      let top = callRowTopPx(k)
-      let foot = callRowTopPx(k + 1)
+      let top = callRowTopPx(slotOf[k])
+      # The line runs on through the call's open detail to the next call.
+      let foot = if k < rows.high: callRowTopPx(slotOf[k + 1])
+                 else: callRowTopPx(slotOf[k] + 1)
       let centre = top + 13
       let y0 = if k == 0: centre else: top
       let y1 = if k == rows.high: centre else: foot
@@ -2570,6 +2651,7 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
           r.setStyle(h, "height", "2px")
           r.setStyle(h, "background-color", CallConnectorColour)
           r.appendChild(list, h)
+  callCuts = @[]
   for k, row in rows:
     let el = r.createElement("div")
     r.setAttribute(el, CallRowAttribute, $row.index)
@@ -2581,7 +2663,8 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
     r.setStyle(el, "white-space", "nowrap")
     r.setStyle(el, "overflow", "hidden")
     r.setStyle(el, "flex-shrink", "0")
-    r.setStyle(el, "height", $(callRowTopPx(k + 1) - callRowTopPx(k)) & "px")
+    r.setStyle(el, "height", $(callRowTopPx(slotOf[k] + 1) -
+                               callRowTopPx(slotOf[k])) & "px")
     r.setStyle(el, "items", "center")
     r.setStyle(el, "padding-left", $(CallToggleLeftPx + row.depth * CallIndentPx) & "px")
     # ONE ROUNDING PER RUN OF TEXT, not one per span. GPUI rounds every text
@@ -2606,7 +2689,21 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
     if selected:
       r.setStyle(el, "background", CallSelectedBackground)
     var afterIndex = false
+    # PLAT-70 Part B (§5.1): THE ROW IS ONE CELL — its text after the toggle,
+    # fitted to the pane in characters of the code face; a cut row keeps
+    # its parts up to `keep` characters, then `…`.
+    let textX = callTextLeftPx(row.depth)
+    let full = row.callRowText
+    # (No width yet — a plan drawn before the window laid out — fits all.)
+    let fitted = if callTracePaneWidthPx <= 0: fitCell(full, high(int) div 2)
+                 else: fitCell(full, cellsInPx(callTracePaneWidthPx - textX -
+                                               TableScrollbarPx))
+    let keep = if fitted.truncated: fitted.text.runeLen - 1 else: high(int)
+    var used = 0
+    var lastColour = CallTextColour
     for seg in row.callRowSegments(indent = false):
+      if seg.kind != csToggle and used >= keep:
+        break
       if seg.kind == csToggle:
         let icon = r.createElement("div")
         r.setAttribute(icon, CallPartAttribute, $seg.kind)
@@ -2652,18 +2749,55 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
         r.setStyle(piece, "padding-left", "5px")
         r.setStyle(piece, "padding-right", "4px")
         r.setStyle(piece, "color", CallReturnColour)
-        r.appendChild(piece, r.createTextNode(seg.text.strip()))
+        let arrow = seg.text.strip()
+        let shown = arrow.runeSubstr(0, max(0, keep - used))
+        used += seg.text.runeLen
+        r.appendChild(piece, r.createTextNode(shown))
         r.appendChild(el, piece)
+        lastColour = CallReturnColour
         continue
-      r.setStyle(piece, "color",
+      lastColour =
         case seg.kind
         of csPunct, csArgName, csArgValue: CallArgsColour
         of csReturnArrow, csReturnValue: CallReturnColour
-        else: CallTextColour)
-      r.appendChild(piece, r.createTextNode(seg.text))
+        else: CallTextColour
+      r.setStyle(piece, "color", lastColour)
+      let shown = seg.text.runeSubstr(0, max(0, keep - used))
+      used += seg.text.runeLen
+      r.appendChild(piece, r.createTextNode(shown))
       r.appendChild(el, piece)
       if seg.kind == csIndex: afterIndex = true
+    if fitted.truncated:
+      let mark = r.createElement("span")
+      r.setAttribute(mark, CallPartAttribute, "ellipsis")
+      r.setStyle(mark, "flex-shrink", "0")
+      r.setStyle(mark, "color", lastColour)
+      r.appendChild(mark, r.createTextNode(Ellipsis))
+      r.appendChild(el, mark)
+      r.setAttribute(el, TableCutAttribute, "call")
+      let rowTop = 8 + CallRowsTopPx + callRowTopPx(slotOf[k])
+      callCuts.add CutCell(row: rowTop,
+                           height: callRowTopPx(slotOf[k] + 1) -
+                                   callRowTopPx(slotOf[k]),
+                           col: textX,
+                           width: callTracePaneWidthPx - textX,
+                           ellipsisCol: textX + pxOfText(keep) + 5,
+                           ellipsisWidth: pxOfText(2),
+                           key: $row.index, column: "call", full: full)
     r.appendChild(list, el)
+    for j, text in detailLines.getOrDefault(k):
+      let at = slotOf[k] + 1 + j
+      let d = r.createElement("div")
+      r.setAttribute(d, TableDetailAttribute, $row.index)
+      r.setStyle(d, "display", "flex")
+      r.setStyle(d, "items", "center")
+      r.setStyle(d, "flex-shrink", "0")
+      r.setStyle(d, "white-space", "nowrap")
+      r.setStyle(d, "height", $(callRowTopPx(at + 1) - callRowTopPx(at)) & "px")
+      r.setStyle(d, "padding-left", $textX & "px")
+      r.setStyle(d, "color", CallTextColour)
+      r.appendChild(d, r.createTextNode(text))
+      r.appendChild(list, d)
   r.appendChild(pane, list)
   r.appendChild(parent, pane)
   true
@@ -2835,6 +2969,9 @@ type
     name*: string
     value*: string     ## the presenter's answer at the caller's budget
     typeName*: string  ## carried, NOT drawn — see `StateHeaderValueLabel`
+    presented*: PValue ## PLAT-70 Part B: the value itself, so the row asks
+                       ## the presenter for what fits ITS cell
+    whole*: string     ## the store's own rendering, when there is no value
     depth*: int
     hasChildren*: bool
     expanded*: bool
@@ -2857,7 +2994,8 @@ proc appendStateRows(v: Variable; path: string; depth: int;
     if v.presented.isNil: v.value
     else: presentText(v.presented, budget)
   acc.add StateRow(path: path, name: v.name, value: rendered,
-                   typeName: v.typeName, depth: depth,
+                   typeName: v.typeName, presented: v.presented,
+                   whole: v.value, depth: depth,
                    hasChildren: v.hasChildren or v.children.len > 0,
                    expanded: path in expanded,
                    selected: path == selected)
@@ -3009,7 +3147,6 @@ const
     ## The desktop's `::-webkit-scrollbar` (8 px, its thumb #333333, no track).
   StateScrollTrackAttribute* = "data-ct-state-scroll-track"
     ## M71: on the vertical bar's track — its height in pixels.
-  StateMonoAdvance14 = 14.0 * 612.0 / 1000.0
 
 proc stateVerticalThumb*(): tuple[start, length: int] =
   ## M71 (#838): the vertical thumb as `stateScrollbars` last drew it, in
@@ -3037,13 +3174,10 @@ proc stateScrollbars(r: GpuiRenderer; parent: GpuiElement;
     return
   let boxH = h - StateRowsTopPx
   let contentH = drawnRows * StateValueRowPx
-  var contentW = 0
-  for row in rows:
-    let natural = StateInsetPx + row.depth * StateRowIndentPx +
-      int(ceil(float((row.name & ":").runeLen +
-                     row.value.splitWhitespace.join(" ").runeLen) *
-               StateMonoAdvance14))
-    contentW = max(contentW, natural)
+  # PLAT-70 Part B (Horizontal-Overflow.md §5, Variable-State-Pane Decision 3):
+  # a TABLE PANE DOES NOT SCROLL SIDEWAYS — every row is fitted to the pane
+  # and a cut value ends in `…`, so the content is never wider than the box.
+  let contentW = 0
   var vertical = contentH > boxH
   let horizontal = contentW > w - (if vertical: StateScrollbarPx else: 0)
   vertical = vertical or (horizontal and contentH > boxH - StateScrollbarPx)
@@ -3274,6 +3408,19 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
                         14, mono = false)
     r.setAttribute(msg, "data-ct-state-empty", $vm.activeTab.val)
     r.appendChild(table, msg)
+  # PLAT-70 Part B (Horizontal-Overflow.md §5): EACH ROW FITS THE PANE. The
+  # value takes what the row has left after the name, the type and the
+  # controls, in characters of the code face; the presenter returns what fits
+  # that budget and says whether it cut (`Presentation.truncated`), and a cut
+  # value ends in `…` and is reported in `stateCuts` for the window's hover
+  # and `…` click. The rows' y is the scroll box's, slot by slot.
+  stateCuts = @[]
+  let paneW = statePaneSizePx.w
+  let bodyRows = max(1, (statePaneSizePx.h - StateRowsTopPx) div
+                        StateValueRowPx)
+  var slot = 0
+  template slotTop(): int =
+    StateRowsTopPx + slot * StateValueRowPx - stateScroll.top
   for i, row in rows:
     let el = r.createElement("div")
     r.setAttribute(el, StateRowAttribute, $i)
@@ -3329,12 +3476,45 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     r.appendChild(el, pair)
     let changed = vm.isChanged(row.path)
     r.setAttribute(el, StateChangedAttribute, (if changed: "true" else: "false"))
+    # The value's cells: the pane less the row's indent, the caret, the
+    # `name:`, the type, the controls and the gaps between them.
+    let watchControl = vm.activeTab.val == stWatches and row.depth == 0
+    let controlsPx = 20 + 20 + (if watchControl: pxOfText(1) else: 0)
+    let gaps = 8 * (2 + (if row.typeName.len > 0: 1 else: 0) +
+                    (if watchControl: 1 else: 0))
+    let caretPx = if row.hasChildren: 15 else: 0
+    let valueX = StateInsetPx + row.depth * StateRowIndentPx + caretPx +
+                 pxOfText((row.name & ":").runeLen)
+    let roomPx = paneW - valueX - controlsPx - gaps - StateScrollbarPx -
+                 (if row.typeName.len > 0: pxOfText(row.typeName.runeLen)
+                  else: 0)
+    # (No pane size yet — a plan drawn before the window laid out — fits all.)
+    let cells = if paneW <= 0: high(int) div 2 else: cellsInPx(roomPx)
+    let fitted =
+      if row.presented.isNil: fitCell(row.whole, cells)
+      else:
+        var b = budget
+        if paneW > 0: b.cells = max(1, cells)
+        let p = present(row.presented, b)
+        presentedCell(oneLine(p.root.text),
+                      (if p.truncated: fullValueText(row.presented, row.whole)
+                       else: p.root.text),
+                      p.truncated)
     # One line, as the desktop's `white-space: nowrap` collapses a value's
     # newlines and runs of space; in the warning tier (`.value-expanded-text`),
     # the changed accent when the step changed it.
-    let value = stateText(r, row.value.splitWhitespace.join(" "),
+    let value = stateText(r, oneLine(fitted.text),
                           if changed: StateChangedColour else: StateValueTextColour)
     r.setAttribute(value, StateColumnAttribute, StateValueColumn)
+    if fitted.truncated:
+      r.setAttribute(value, TableCutAttribute, StateValueColumn)
+      let drawn = fitted.text.runeLen
+      stateCuts.add CutCell(row: slotTop(), height: StateValueRowPx,
+                            col: valueX, width: pxOfText(drawn),
+                            ellipsisCol: valueX + pxOfText(drawn - 1),
+                            ellipsisWidth: pxOfText(1),
+                            key: row.path, column: StateValueColumn,
+                            full: fitted.full)
     r.appendChild(pair, value)
     if row.typeName.len > 0:
       r.appendChild(el, stateText(r, row.typeName, StateTypeColour))
@@ -3354,6 +3534,21 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
       r.setAttribute(c, StateControlAttribute, "unwatch:" & row.name)
       r.appendChild(el, c)
     r.appendChild(scroller, el)
+    inc slot
+    # The full value under the row, wrapped in the value's column (§5.3).
+    if tableDetail.isOpen(StateDetailPane, row.path):
+      let full = fullValueText(row.presented, row.whole)
+      for line in detailView(full, max(1, cells), bodyRows,
+                             tableCopyChord).lines:
+        let d = r.createElement("div")
+        r.setAttribute(d, TableDetailAttribute, row.path)
+        r.setStyle(d, "flex-shrink", "0")
+        r.setStyle(d, "height", $StateValueRowPx & "px")
+        r.setStyle(d, "padding-left", $valueX & "px")
+        r.setStyle(d, "white-space", "nowrap")
+        r.appendChild(d, stateText(r, line, StateValueTextColour))
+        r.appendChild(scroller, d)
+        inc slot
     if historyOpen:
       for e in vm.valueHistory.val.getOrDefault(row.path):
         let h = r.createElement("div")
@@ -3367,6 +3562,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         r.appendChild(h, stateText(r, "tick " & $e.locationTicks, StateEmptyColour))
         r.appendChild(h, stateText(r, e.valueText, StateValueColour))
         r.appendChild(scroller, h)
+        inc slot
     if originOpen:
       for i, hop in vm.originLines.val.getOrDefault(row.path):
         let o = r.createElement("div")
@@ -3376,6 +3572,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
         r.setStyle(o, "padding-left", $((row.depth + 1) * StateRowIndentPx) & "px")
         r.appendChild(o, stateText(r, "⇠ " & hop, StateEmptyColour))
         r.appendChild(scroller, o)
+        inc slot
   if childCount(scroller) > 0:
     r.appendChild(table, scroller)
   r.appendChild(body, table)
@@ -3803,6 +4000,84 @@ proc renderFileTree*(r: GpuiRenderer; parent: GpuiElement;
   r.appendChild(parent, tree)
   true
 
+var eventLogPaneHeightPx* = 0
+  ## The event log body's height, set by the window (the open detail's cap).
+
+const
+  EventRowsTopPx* = 8 + EventToolbarPx + EventHeaderPx
+    ## The first event row's top below the pane body's: the body's 8 px inset,
+    ## the toolbar, the header.
+  EventHeaderTopPx* = 8 + EventToolbarPx
+  EventSeparatorPx* = 6
+    ## PLAT-70 Part B: a column separator's grip, at the right edge of its
+    ## header cell (the cursor is `col-resize` there, Pointer-Affordances).
+  EventDetailPane* = EventLogTablePane
+    ## The event log's name in a `DetailToggle` (the terminal's).
+
+proc eventCellTextOf*(ev: EventLogRow; col: EventLogColumn): string =
+  ## What `col` says about `ev`, whole — the cell before it is fitted.
+  case col
+  of elcIndex: $ev.eventIndex
+  of elcKind: ""
+  of elcLocation:
+    (if ev.file.len == 0: ""
+     else: ev.file.rsplit('/', maxsplit = 1)[^1] & ":" & $ev.line)
+  of elcOutput: eventLogText(ev)
+  of elcTick: $ev.rrTicks
+
+func eventCellPad(col: EventLogColumn): int =
+  case col
+  of elcTick: 8
+  of elcOutput: EventTextLeadPx
+  else: 0
+
+proc eventColumnsPx*(c: EventLogColumns; paneW: int):
+    seq[tuple[col: EventLogColumn; x, w: int]] =
+  ## PLAT-70 Part B: each visible column's left and width in pixels from the
+  ## pane body's left — a width the user set (`EventLogColumns.widths`, in
+  ## cells of `ColumnCellPx`) or the desktop's default; the output column
+  ## takes the rest when it has no width of its own. The ONE layout the
+  ## header, the rows and the window's hit-tests read.
+  let shown = c.visibleColumns
+  let tickCol = if paneW > 0: paneW div 10 else: EventTickColPx
+  var x = 0
+  for k, col in shown:
+    let default = case col
+                  of elcTick: tickCol
+                  of elcIndex: EventIndexColPx
+                  of elcKind: EventKindColPx
+                  of elcLocation: 160
+                  of elcOutput: 0
+    var w = if c.widths[col] > 0: pxOfCells(c.widths[col]) else: default
+    if w == 0:
+      # The output column, last or not, takes what the others leave — short
+      # of the list scrubber at the pane's right edge.
+      var rest = paneW - x - TableScrollbarPx
+      for later in shown[k + 1 .. ^1]:
+        rest -= (if c.widths[later] > 0: pxOfCells(c.widths[later])
+                 else: (case later
+                        of elcTick: tickCol
+                        of elcIndex: EventIndexColPx
+                        of elcKind: EventKindColPx
+                        of elcLocation: 160
+                        of elcOutput: 0))
+      w = if paneW <= 0: 0 else: max(pxOfCells(MinColumnCells), rest)
+    result.add (col, x, w)
+    x += w
+
+proc eventSeparatorAt*(c: EventLogColumns; paneW, x, y: int):
+    tuple[found: bool; col: EventLogColumn; left, right: int] =
+  ## PLAT-70 Part B: the column whose separator a press at `(x, y)` (from the
+  ## pane body's top-left) holds — the grip at the right edge of each header
+  ## cell but the last — and that column's left and right edges.
+  if y < EventHeaderTopPx or y >= EventRowsTopPx:
+    return
+  let cols = c.eventColumnsPx(paneW)
+  for k in 0 ..< cols.len - 1:
+    let edge = cols[k].x + cols[k].w
+    if x >= edge - EventSeparatorPx and x < edge + 2:
+      return (true, cols[k].col, cols[k].x, edge)
+
 proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
                      pv: var PaneView): bool =
   ## **THE EVENT LOG AS THE DESKTOP DRAWS IT** (`ui/event_log.nim`'s dense
@@ -3834,9 +4109,6 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
   var current = 0
   let sel = vm.selectedRow.val
   if sel.isSome: current = sel.get
-  let tickCol = if eventLogPaneWidthPx > 0: eventLogPaneWidthPx div 10
-                else: EventTickColPx
-  let barPx = max(10, tickCol - 20)
 
   let pane = r.createElement("div")
   r.setStyle(pane, "display", "flex")
@@ -3908,17 +4180,24 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
   r.setStyle(head, "height", $EventHeaderPx & "px")
   r.setStyle(head, "font-weight", "600")
   r.setStyle(head, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+  let layout = vm.columns.val.eventColumnsPx(eventLogPaneWidthPx)
   proc widthOf(col: EventLogColumn): int =
-    case col
-    of elcTick: tickCol
-    of elcIndex: EventIndexColPx
-    of elcKind: EventKindColPx
-    of elcLocation: 160
-    of elcOutput: 0
+    for (c, _, w) in layout:
+      if c == col: return w
+    0
+  proc drawnWidthOf(col: EventLogColumn): int =
+    ## The width a cell is DRAWN at: the output column with no width of its
+    ## own is the flex column that takes the rest, as before.
+    if col == elcOutput and vm.columns.val.widths[elcOutput] == 0: 0
+    else: widthOf(col)
+  proc widthOfX(col: EventLogColumn): int =
+    for (c, x, _) in layout:
+      if c == col: return x
+    0
+  let barPx = max(10, widthOf(elcTick) - 20)
+  eventCuts = @[]
   for ci, col in shown:
-    let c = eventCell(r, widthOf(col),
-                      (if col == elcTick: 8 elif col == elcOutput: EventTextLeadPx
-                       else: 0))
+    let c = eventCell(r, drawnWidthOf(col), eventCellPad(col))
     r.setAttribute(c, "data-column-index", $ci)
     if col == elcIndex:
       r.setStyle(c, "justify", "center")
@@ -3927,14 +4206,33 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
       (if order != RecordedEventOrder and order.column == col:
          (if order.ascending: " ▲" else: " ▼")
        else: "")))
+    if ci < shown.high:
+      # PLAT-70 Part B (§5.2): the separator's grip at the cell's right edge
+      # — a drag on it resizes the column (`main.pressEventSeparator`). AFTER
+      # the title: the header's first child is its title, which the window's
+      # click targets read (`window_clicks`, `gcpEventHeader`).
+      r.setStyle(c, "position", "relative")
+      let grip = r.createElement("div")
+      r.setAttribute(grip, EventSeparatorAttribute, $col)
+      r.setStyle(grip, "position", "absolute")
+      r.setStyle(grip, "left", $(widthOf(col) - EventSeparatorPx) & "px")
+      r.setStyle(grip, "top", "0px")
+      r.setStyle(grip, "width", $EventSeparatorPx & "px")
+      r.setStyle(grip, "height", $EventHeaderPx & "px")
+      r.appendChild(c, grip)
     r.appendChild(head, c)
   r.appendChild(table, head)
+  let bodyRows = max(1, int(float(eventLogPaneHeightPx - EventRowsTopPx -
+                                  EventFooterPx) / EventRowPitch))
+    ## The rows the pane's body holds — the detail's cap is half of them.
+  var line = 0
   for i, ev in rows:
+    let rowTop = EventRowsTopPx + eventRowTopPx(line)
     let row = r.createElement("div")
     r.setAttribute(row, "data-row-index", $i)
     r.setStyle(row, "display", "flex")
     r.setStyle(row, "flex-shrink", "0")
-    r.setStyle(row, "height", $(eventRowTopPx(i + 1) - eventRowTopPx(i)) & "px")
+    r.setStyle(row, "height", $(eventRowTopPx(line + 1) - eventRowTopPx(line)) & "px")
     r.setStyle(row, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
     if i == current:
       r.setAttribute(row, "data-ct-event-current", "true")
@@ -3945,7 +4243,7 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
     for ci, col in shown:
       case col
       of elcTick:
-        let c = eventCell(r, tickCol, 8)
+        let c = eventCell(r, widthOf(elcTick), 8)
         r.setAttribute(c, "data-column-index", $ci)
         r.setStyle(c, "flex-direction", "column")
         r.setStyle(c, "items", "start")
@@ -3969,23 +4267,55 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
         r.appendChild(c, track)
         r.appendChild(row, c)
       else:
-        let c = eventCell(r, widthOf(col),
-                          (if col == elcOutput: EventTextLeadPx else: 0))
+        let c = eventCell(r, drawnWidthOf(col), eventCellPad(col))
         r.setAttribute(c, "data-column-index", $ci)
         if col == elcIndex:
           # `dt-type-num`, centred in its column.
           r.setStyle(c, "justify", "center")
-        let text = case col
-                   of elcIndex: $ev.eventIndex
-                   of elcKind: ""
-                   of elcLocation:
-                     (if ev.file.len == 0: ""
-                      else: ev.file.rsplit('/', maxsplit = 1)[^1] & ":" & $ev.line)
-                   of elcOutput: eventLogText(ev)
-                   of elcTick: ""
-        r.appendChild(c, r.createTextNode(text))
+        # PLAT-70 Part B (§5.1): the cell's text fitted to its column's
+        # characters; a cut one ends in `…` and is reported for the hover and
+        # the `…` click.
+        let full = eventCellTextOf(ev, col)
+        let cellX = widthOfX(col)
+        let room = widthOf(col) - eventCellPad(col)
+        let fitted = if eventLogPaneWidthPx <= 0: fitCell(full, high(int) div 2)
+                     else: fitCell(full, cellsInPx(room))
+        if fitted.truncated:
+          r.setAttribute(c, TableCutAttribute, $col)
+          let drawn = fitted.text.runeLen
+          let textX = cellX + eventCellPad(col)
+          eventCuts.add CutCell(row: rowTop,
+                                height: eventRowTopPx(line + 1) -
+                                        eventRowTopPx(line),
+                                col: cellX, width: widthOf(col),
+                                ellipsisCol: textX + pxOfText(drawn - 1),
+                                ellipsisWidth: pxOfText(1),
+                                key: $ev.eventIndex, column: $col, full: full)
+        r.appendChild(c, r.createTextNode(fitted.text))
         r.appendChild(row, c)
     r.appendChild(table, row)
+    inc line
+    # The event's full text under its row (§5.3), in its column.
+    if tableDetail.isOpen(EventDetailPane, $ev.eventIndex):
+      var col = elcOutput
+      if elcOutput notin shown and shown.len > 0: col = shown[^1]
+      for c in shown:
+        if $c == tableDetail.column: col = c
+      let room = widthOf(col) - eventCellPad(col)
+      for text in detailView(eventCellTextOf(ev, col), max(1, cellsInPx(room)),
+                             bodyRows, tableCopyChord).lines:
+        let d = r.createElement("div")
+        r.setAttribute(d, TableDetailAttribute, $ev.eventIndex)
+        r.setStyle(d, "display", "flex")
+        r.setStyle(d, "items", "center")
+        r.setStyle(d, "flex-shrink", "0")
+        r.setStyle(d, "height", $(eventRowTopPx(line + 1) - eventRowTopPx(line)) & "px")
+        r.setStyle(d, "padding-left", $(widthOfX(col) + eventCellPad(col)) & "px")
+        r.setStyle(d, "white-space", "nowrap")
+        r.setStyle(d, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+        r.appendChild(d, r.createTextNode(text))
+        r.appendChild(table, d)
+        inc line
   r.appendChild(pane, table)
 
   # The pager, at the pane's foot.

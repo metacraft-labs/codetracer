@@ -113,6 +113,10 @@ const
     BaseRow(chords: "Backspace", operation: "list.collapse", table: G, navModes: N),
     BaseRow(chords: "x", operation: "variables.toggle-hex-dec", table: G, navModes: N),
     BaseRow(chords: "m", operation: "variables.view-memory-dump", table: G, navModes: N),
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3): Vim's `K` — the focused
+    # table row's full text under it.
+    BaseRow(chords: "Shift+K", operation: "list.show-detail", table: G, navModes: N,
+            whenText: "listFocus"),
     # Search and Palette
     BaseRow(chords: "Ctrl+P", operation: "palette.open-commands", table: G, navModes: N),
     BaseRow(chords: "F1", operation: "palette.open-commands", table: G, navModes: N),
@@ -153,6 +157,8 @@ const
     BaseRow(chords: "Backspace", operation: "list.collapse", table: G, navModes: I),
     BaseRow(chords: "x", operation: "variables.toggle-hex-dec", table: G, navModes: I),
     BaseRow(chords: "m", operation: "variables.view-memory-dump", table: G, navModes: I),
+    BaseRow(chords: "Shift+K", operation: "list.show-detail", table: G, navModes: I,
+            whenText: "listFocus"),
     BaseRow(chords: "o", operation: "editor.jump-to-value-origin", table: G, navModes: I),
     BaseRow(chords: "Shift+O", operation: "debugger.reverse-origin", table: G, navModes: I),
     BaseRow(chords: "j", operation: "editor.scroll-line-down", table: G, navModes: I),

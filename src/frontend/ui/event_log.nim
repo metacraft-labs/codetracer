@@ -29,9 +29,17 @@ import
 import std/options
 from ../viewmodel/store/types as vmtypes import EventLogRow
 from ../viewmodel/viewmodels/event_log_vm import EventLogVM,
-  setSelectedKinds, selectRow, doubleClickRow, reload, resetLog, eventLogText
+  setSelectedKinds, selectRow, doubleClickRow, reload, resetLog, eventLogText,
+  EventLogColumn, setColumnWidth, resizeColumn, columnWidthEntries,
+  withColumnWidths, EventLogTableName, columnResizeTarget, parseEventLogColumn
+from ../viewmodel/viewmodels/omnibar_sources import parseColumnWidthLine
 from ../viewmodel/session_vm import SessionViewModel
-from isonim/core/signals import val
+from isonim/core/signals import val, `val=`
+# Horizontal-Overflow.md §5: the cut cells, their hover and detail, and the
+# column widths, through the shared model.
+import ../viewmodel/views/table_overflow_dom
+from ../viewmodel/views/isonim_event_log_view import columnClass,
+  EventLogColumnGripAttribute
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_filter_dropdown_view import
   FilterTabRecord, FilterTagRow, FilterKindRecord, FilterDropdownCallbacks,
@@ -379,6 +387,105 @@ proc setupOpenInEditor(host: Element; vm: EventLogVM) =
 # The panel host's decorator
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The columns' widths and the cut cells (Horizontal-Overflow.md §5)
+# ---------------------------------------------------------------------------
+#
+# The widths are the ViewModel's (`EventLogColumns.widths`, drawn by the view
+# as each cell's style); this module only reads and writes the ONE remembered
+# document through the main process (`index/table_columns`), drags a header
+# grip, and runs `table.resize-column` / `:column-width`.
+
+proc rememberEventLogWidths(vm: EventLogVM) =
+  ## The widths into the one remembered document.
+  if vm.isNil or data.isNil or data.ipc.isNil: return
+  data.ipc.send(cstring"CODETRACER::table-columns-save", js{
+    table: cstring(EventLogTableName),
+    text: cstring(encodeColumnWidths(vm.columns.val.columnWidthEntries))})
+
+var eventLogWidthsListening = false
+
+proc requestEventLogWidths(vm: EventLogVM) =
+  ## Ask the main process for the remembered widths, and apply them to the
+  ## ViewModel when they arrive (HO-9: the terminal's and GPUI's too).
+  if data.isNil or data.ipc.isNil: return
+  if not eventLogWidthsListening:
+    eventLogWidthsListening = true
+    data.ipc.on(cstring"CODETRACER::table-columns", proc(event, payload: JsObject) =
+      let decoded = decodeColumnWidths($payload.text.to(cstring))
+      let current = paneVM()
+      if decoded.ok and not current.isNil:
+        current.columns.val = current.columns.val.withColumnWidths(decoded.entries))
+  data.ipc.send(cstring"CODETRACER::table-columns-request", js{})
+
+proc drawnColumnCells(col: EventLogColumn): int =
+  ## The cells a column is drawn at: its header cell's width.
+  let header = document.querySelector(cstring(".eventLog-column-header ." &
+                                              ($columnClass(col)).split(' ')[0]))
+  if header.isNil: 0
+  else: cellsOfPx(int(header.getBoundingClientRect().width))
+
+proc resizeEventLogColumn*(arg: string) =
+  ## `table.resize-column([column,]delta)` (§5.2): the named column, else the
+  ## focused one, by `delta` cells from the width it is drawn at.
+  let vm = paneVM()
+  if vm.isNil: return
+  let target = vm.columns.val.columnResizeTarget(arg)
+  if not target.ok:
+    cwarn "event log: " & target.message
+    return
+  discard vm.resizeColumn(target.col, target.delta,
+                          drawnColumnCells(target.col))
+  rememberEventLogWidths(vm)
+
+proc runColumnWidthCommand*(line: string): string =
+  ## §5.2's `:column-width <column> <cells>` from the palette's command line:
+  ## "" when it set the width, else why not.
+  let parsed = parseColumnWidthLine(line.strip.splitWhitespace)
+  if not parsed.ok: return parsed.message
+  let vm = paneVM()
+  if vm.isNil: return "there is no event log"
+  discard vm.setColumnWidth(parsed.column, parsed.cells)
+  rememberEventLogWidths(vm)
+  ""
+
+proc closestGrip(target: Element): Element {.importjs:
+  "((e) => (e && e.closest && e.closest('.eventLog-column-grip')) || null)(#)".}
+proc listenCapture(target: JsObject; name: cstring; f: proc(ev: Event))
+  {.importjs: "#.addEventListener(#, #, true)".}
+proc unlistenCapture(target: JsObject; name: cstring; f: proc(ev: Event))
+  {.importjs: "#.removeEventListener(#, #, true)".}
+
+proc setupColumnGrips(host: Element; vm: EventLogVM) =
+  ## §5.2: a press on a header cell's grip (the view draws one per shown
+  ## column) holds the separator — each move sets the column's width to the
+  ## pointer's distance from the cell's left, in cells, never under the
+  ## minimum; the release remembers the widths. Capture phase, so the header
+  ## cell's own click (it orders the log) never sees the press.
+  cast[JsObject](host).listenCapture(cstring"mousedown", proc(ev: Event) =
+    let grip = closestGrip(cast[Element](cast[JsObject](ev).target))
+    if grip.isNil: return
+    let (known, col) = parseEventLogColumn(
+      $grip.getAttribute(cstring(EventLogColumnGripAttribute)))
+    if not known: return
+    let left = cast[Element](grip.parentNode).getBoundingClientRect().left
+    ev.preventDefault()
+    ev.stopPropagation()
+    var onMove: proc(e: Event)
+    var onUp: proc(e: Event)
+    onMove = proc(e: Event) =
+      let x = cast[JsObject](e).clientX.to(float)
+      discard vm.setColumnWidth(col, cellsOfPx(int(x - left)))
+    onUp = proc(e: Event) =
+      window.removeEventListener(cstring"mousemove", onMove)
+      cast[JsObject](window).unlistenCapture(cstring"mouseup", onUp)
+      rememberEventLogWidths(vm)
+    window.addEventListener(cstring"mousemove", onMove)
+    cast[JsObject](window).listenCapture(cstring"mouseup", onUp))
+  cast[JsObject](host).listenCapture(cstring"click", proc(ev: Event) =
+    if not closestGrip(cast[Element](cast[JsObject](ev).target)).isNil:
+      ev.stopPropagation())
+
 proc decorateEventLog(host: dom_api.Element; session: SessionViewModel) =
   let vm = session.eventLogVM
   if vm.isNil:
@@ -386,6 +493,12 @@ proc decorateEventLog(host: dom_api.Element; session: SessionViewModel) =
   let element = cast[Element](host)
   setupFilterDropdown(element, vm)
   setupOpenInEditor(element, vm)
+  setupColumnGrips(element, vm)
+  requestEventLogWidths(vm)
+  # The rows' cells are table cells (`table_overflow_dom`): fitted, hovered,
+  # their `…` pressed; a detail opens under the row.
+  discard attachTableOverflow(cast[JsObject](element), EventLogDetailPane,
+                              cstring"tr")
 
 setPanelDecorator(Content.EventLog, decorateEventLog)
 

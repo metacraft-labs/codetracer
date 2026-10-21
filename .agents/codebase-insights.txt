@@ -7457,3 +7457,75 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Desktop window tabs each own their ViewModels: `ReplaySession.viewModels` (`ui/session_viewmodels.nim`) holds the tab's `SessionViewModel`, its `DebuggerSession` (or the `ct host` mirror, first tab only), and its Test Results / Constraints VMs. `ui_js.configureSessionMiddleware` builds them once per tab; `bindWindowToSession` (called by `session_switch.switchSession`) points the window-level pane bridges (toolbar, footer panes, module-level `init*VMFromSession` slots) at the shown tab. The panel host renders each mount over the session of the tab whose `#session-container-<n>` holds it. Legacy component handlers that write a VM should resolve their own tab's (`sessionVMOfComponent`), not the module slot, or a hidden tab's answer lands in the shown tab.
 - On macOS a Playwright run's default scratch `CODETRACER_HOME` (under `$TMPDIR`, `/var/folders/.../T/codetracer-gui-home-XXXX`) makes the session-manager socket path exceed `SUN_LEN` (104), and Electron never opens a window (`path must be shorter than SUN_LEN` in the main-process log). Run GUI specs with `CODETRACER_GUI_TEST_CODETRACER_HOME=/tmp/<short>` until the socket path is fixed.
 - `#stable-status` no longer exists in the status bar; wait for a step through `data.sessions[i].status.stableBusy` instead (`multi-replay/second_tab_panes_render.spec.ts`).
+
+## PLAT-70 Part B — table panes: truncation, the full value, column widths
+
+- ONE ViewModel for every table pane on every front-end:
+  `viewmodel/viewmodels/table_overflow.nim`. `fitCell` is the presenter's
+  `clipToCells` over one line (`oneLine`); a VALUE cell is never fitted again,
+  it carries the presenter's `Presentation.truncated` (`presentedCell`) — the
+  value-presentation-boundary gate refuses a post-cut. A painter records the
+  cells it cut as `CutCell`s in its own units (terminal cells, GPUI px) and the
+  pointer, the `…` press and the tooltip anchor are hit-tested against those,
+  never against a second layout. `DetailToggle` (one row open), `HoverClock`
+  (500 ms, only a truncated cell starts it), `detailView` / `tooltipView`
+  (capped at `detailMaxLines` with the copy hint) are the shared answers.
+- The whole value (tooltip, detail, `list.copy`) is `fullValueText`: the
+  presenter at `surfaces.tableFullBudget()` (the state panel's depth and
+  member caps, one line, no cell bound) — NOT a `SurfaceBudgets` member, for
+  `tuiRowBudget`'s reason.
+- Column widths live in the MODEL (`EventLogColumns.widths`, cells of
+  `ColumnCellPx` = 8 px, minimum 3) and are remembered in ONE document,
+  `table-columns` in the native state root (`host/table_column_widths.nim`;
+  the desktop's main process: `index/table_columns.nim` over IPC
+  `table-columns-request` / `-save`). Front-ends never keep a width of their
+  own. GPUI applies it in `applyRememberedColumnWidths` wherever `gSession` is
+  assigned.
+- GPUI: a real press reaches the ROW'S element listeners first
+  (`window_clicks`, `onPaneClick`) and the window root's pointer router after.
+  A gesture the root owns over a row (a cut cell's `…`, an Event Log column
+  separator over its header cell) must be refused in `onPaneClick`
+  (`tableGestureAt`), or the row jumps the debugger / the header orders the
+  log. The plan's `press:` op reaches only the root, so it cannot see this;
+  `click:<part>:<key>@<x>x<y>` delivers a pixel press as the window does (row,
+  then root). Also: `redrawListPane` does not wire clicks — a redraw that
+  makes new rows must call `wireClicks` (`redrawTablePane` does), and a
+  header cell's FIRST child must be its title (`window_clicks` matches the
+  header by `textContent(nthChild(el, 0))`).
+- Desktop: a row carries only its cell KEY (`data-ct-cell`); the whole value
+  is asked of the pane (`attachTableOverflow(..., fullValueOf)`,
+  `state_view.fullValueOf`) only once the fit pass finds the cell cut, and kept
+  on the cell beside the drawn text it belongs to. Sending every row's whole
+  value doubled the state panel's marshalled bytes (plat18's probe: MOUNT
+  7834 -> 15144).
+- Desktop: the state pane's value span is `display: contents` and parts are
+  absolutely positioned; `table_overflow.styl` overrides that for the fitted
+  cell. Fit with the cell's FRACTIONAL inner width over one character's width
+  (integer `clientWidth` rounds a cell that fits down a pixel). The `…` press
+  is a capture-phase mousedown that swallows the following click — otherwise
+  the row's click jumps the debugger.
+- Nim's JS backend: a closure created inside a `for` loop captures the loop
+  variable BY REFERENCE (every grip resized the last column). Build each
+  listener in a factory proc (`columnGrip`).
+- Desktop event-log cells are HTML strings: escape the output and location
+  text (`escapeCellHtml`) — `<<LEFT-EDGE>>` was eaten as a tag.
+- The desktop's Call Trace is NOT a table pane: it keeps scrolling sideways
+  (`list_scrubber.styl`, requested 2026-10-16) and its rows carry no
+  `data-ct-cell`; the terminal and GPUI cut theirs. Which one wins is an open
+  user decision (Horizontal-Overflow.md, Part B notes) — do not "fix" either
+  side without it.
+- The table panes' names (`VariablesTablePane`, `EventLogTablePane`,
+  `CallTraceTablePane`), the remembered document's merge
+  (`mergeColumnWidths`) and `table.resize-column`'s target
+  (`event_log_vm.columnResizeTarget`) are shared; a front-end only measures
+  the column's drawn width.
+- A desktop build from a worktree needs the pinned siblings beside it (tup's
+  `../isonim` paths): copy the tree's `git ls-files` (with
+  `--recurse-submodules`; a `.gitignore`-filtered rsync drops tracked files
+  such as `frontend/tests/test_suites/`) into a scratch workspace whose
+  siblings are at the pins and `just build-once` there with
+  `CODETRACER_SKIP_SIBLING_CHECK=1` (the copy's submodules have no `.git`).
+- Electron specs that call `readyOnEntryTest` cannot pass on a tree whose
+  status bar hides `.location-path` (the "HIDDEN FOR NOW" rule of
+  2026-10-15, issue 2026-10-20-ready-on-entry-...): to compare two trees,
+  apply the same local removal of that rule to both scratch copies.

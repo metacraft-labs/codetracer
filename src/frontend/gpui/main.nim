@@ -132,6 +132,7 @@ import ../viewmodel/host/keymap_preference
 import ../viewmodel/keymap/alt_tap
 import ../viewmodel/host/keybindings_file
 import ../viewmodel/host/layout_preferences
+import ../viewmodel/host/table_column_widths
 import ../viewmodel/host/native_state
 import ./host/gpui_host
 import ./host/pixel_capture             # PLAT-35: `--pixels-out`'s capture
@@ -1276,6 +1277,34 @@ proc drawTopBar(r: GpuiRenderer)
 proc toolAvailable(tool: GToolButton): bool
   ## PLAT-48: the top bar over the window (defined with its handlers below).
 proc handleTopPress(r: GpuiRenderer; x, y: int): bool
+var gCellHover: HoverClock
+  ## The truncated cell the pointer rests on, and since when (§5.3).
+var gCellHoverAnchor: tuple[x, y, h, bodyRows: int]
+  ## Where that cell was drawn (window px) and its pane's body rows.
+var gCellTooltip: seq[string]
+  ## The tooltip shown, once the 500 ms are up.
+
+const CellTooltipAttribute* = "data-ct-cell-tooltip"
+  ## On the tooltip's box: the cell's row key and column.
+var gColumnDrag: tuple[active, moved: bool; col: EventLogColumn;
+                       left, grab, startX: int]
+  ## An Event Log column separator held: the column, its left (window px),
+  ## and where on the grip it was taken (px right of the column's edge), so
+  ## a press and release in place leave the width as it was (`moved`: the
+  ## pointer left `startX`, the press's x).
+
+proc dismissCellHover(r: GpuiRenderer)
+proc pressEventSeparator(r: GpuiRenderer; x, y: int): bool
+proc pressEllipsis(r: GpuiRenderer; x, y: int): bool
+proc dragEventSeparator(r: GpuiRenderer; x: int; release: bool)
+proc showTableDetail(r: GpuiRenderer)
+proc resizeEventLogColumn(r: GpuiRenderer; arg: string)
+proc rememberEventLogWidths(vm: EventLogVM)
+proc applyRememberedColumnWidths()
+proc windowSessionFacts(): SessionFacts
+proc windowScopePath(): ScopePath
+  ## PLAT-70 Part B: forward-declared; defined with the table panes' hover
+  ## (and the router's facts, below).
 proc handleTopHover(r: GpuiRenderer; x, y: int)
 proc handleTopKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
 proc topBarGeometry(): JsonNode
@@ -1871,6 +1900,15 @@ proc writeGeometry() =
          "rect": rect(gGeom.revealRectOf(gGestures.reveal.edge))}
     else: newJNull()
   let top = topBarGeometry()
+  # PLAT-70 Part B: the Event Log's columns as drawn (window px), so a lane
+  # aims at a column separator (its grip is the cell's right `EventSeparatorPx`).
+  var eventColumns = newJArray()
+  let ev = gGeom.tabsNodeOfPane($paneEventLog)
+  if ev >= 0 and not gSession.isNil and not gSession.session.eventLogVM.isNil:
+    let body = gGeom.nodes[ev].body
+    for (col, x, w) in gSession.session.eventLogVM.columns.val.eventColumnsPx(body.w):
+      eventColumns.add %*{"column": $col, "x": body.x + x, "w": w,
+                          "headerY": body.y + EventHeaderTopPx}
   try:
     # PLAT-49 part B: the footer (the status bar the bottom labels live in)
     # and the docked pane shown open, with its band.
@@ -1884,7 +1922,8 @@ proc writeGeometry() =
                                 "footer": rect(gGeom.footer),
                                 "openDock": openDock,
                                 "editorVScrollbar":
-                                  editorVScrollbarGeometry(rect)}))
+                                  editorVScrollbarGeometry(rect),
+                                "eventColumns": eventColumns}))
   except IOError:
     discard
 
@@ -2053,6 +2092,7 @@ proc syncLeafContext() =
   let i = gGeom.tabsNodeOfPane($paneEventLog)
   if i >= 0:
     eventLogPaneWidthPx = gGeom.nodes[i].body.w
+    eventLogPaneHeightPx = gGeom.nodes[i].body.h
   let st = gGeom.tabsNodeOfPane($paneState)
   if st >= 0:
     statePaneSizePx = (gGeom.nodes[st].body.w, gGeom.nodes[st].body.h)
@@ -2065,6 +2105,9 @@ proc syncLeafContext() =
         float(b.h - StateRowsTopPx), float(b.w), float(StateValueRowPx),
         float(stateScroll.top)))
   syncInHandRows(gGeom)
+  let ct = gGeom.tabsNodeOfPane($paneCalltrace)
+  if ct >= 0:
+    callTracePaneWidthPx = gGeom.nodes[ct].body.w
 
 proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
@@ -3107,6 +3150,14 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # M73 (#840): and its vertical scrubber.
     if pressEditorVBar(r, x, y):
       return
+    # PLAT-70 Part B (Horizontal-Overflow.md §5): a press hides a shown
+    # tooltip; an Event Log column separator is held for a resize; a cut
+    # cell's `…` opens its row's detail — each before the row under it.
+    dismissCellHover(r)
+    if pressEventSeparator(r, x, y):
+      return
+    if pressEllipsis(r, x, y):
+      return
     if clickCalltrace(r, x, y):
       return
     # PLAT-52: the Terminal Output pane's presses.
@@ -3117,6 +3168,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     step = gGestures.pointerDown(committedLayout(), gGeom, x, y)
   of gekPointerMove:
+    if gColumnDrag.active:
+      dragEventSeparator(r, x, release = false)
+      return
     if gEditorBarDrag:
       scrubEditorBar(r, x, click = false)
       return
@@ -3143,6 +3197,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
   of gekPointerUp:
+    if gColumnDrag.active:
+      dragEventSeparator(r, x, release = true)
+      return
     if gEditorBarDrag:
       scrubEditorBar(r, x, click = false)
       gEditorBarDrag = false
@@ -3296,6 +3353,8 @@ proc windowKey(key: string; mods: seq[string]) =
   # Any key between Alt's press and release makes it a chord, not a tap.
   if key != "alt":
     gAltTap.interrupted()
+  # PLAT-70 Part B (§5.3): a key hides a shown table-cell tooltip.
+  dismissCellHover(r)
   if handleTopKey(r, key, mods):
     return
   # PLAT-51: a new tab's Welcome Screen, and a folder tab's editor.
@@ -4345,6 +4404,37 @@ proc drawTopBar(r: GpuiRenderer) =
     else:
       r.appendChild(hb, r.createTextNode(hoverText))
     gTopEls.add hb
+  # PLAT-70 Part B (Horizontal-Overflow.md §5.3): A TRUNCATED CELL'S FULL
+  # TEXT, after the pointer rested on it 500 ms — under the cell (above it
+  # when the window has no room below), wrapped at min(80 columns, the
+  # window), at most `DetailMaxLines` lines.
+  if gCellTooltip.len > 0:
+    var widest = 0
+    for l in gCellTooltip:
+      widest = max(widest, l.runeLen)
+    let a = gCellHoverAnchor
+    let w = min(pendingViewportWidth, pxOfText(widest) + 2 * TabPadPx)
+    let h = gCellTooltip.len * HoverLabelPx
+    let below = a.y + a.h
+    let y = if below + h <= pendingViewportHeight: below else: max(0, a.y - h)
+    let x = max(0, min(a.x, pendingViewportWidth - w))
+    let tb = absBox(r, PxRect(x: x, y: y, w: w, h: h),
+                    chromeOf(crWindowBackground))
+    r.setAttribute(tb, CellTooltipAttribute, gCellHover.key & "|" &
+                                             gCellHover.column)
+    r.setStyle(tb, "display", "flex")
+    r.setStyle(tb, "flex-direction", "column")
+    r.setStyle(tb, "items", "start")   # the lines left-aligned, as wrapped
+    r.setStyle(tb, "padding-left", $TabPadPx & "px")
+    r.setStyle(tb, "font-family", MonoFontFamily)
+    for (k, v) in paneOutlineStyle(true): r.setStyle(tb, k, v)
+    for l in gCellTooltip:
+      let line = r.createElement("div")
+      r.setStyle(line, "height", $HoverLabelPx & "px")
+      r.setStyle(line, "white-space", "nowrap")
+      r.appendChild(line, r.createTextNode(l))
+      r.appendChild(tb, line)
+    gTopEls.add tb
   for e in gTopEls:
     # PLAT-69 (C2): EVERY PART AND POPOVER IS `no-drag`, so a press on one
     # stays a press. They are absolutely placed SIBLINGS of the strip, not
@@ -4642,6 +4732,7 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   if not gShell.showSessionIn(gWindow, id):
     return
   gSession = gSessionsOpened[int(id)]
+  applyRememberedColumnWidths()
   let rows = editorRowsOf(gGeom)
   gSourceService = newGpuiSourceService(gSession, gSession.tracePath, rows)
   var leafSet = gShell.leavesFor(gWindow)
@@ -5269,6 +5360,17 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
       redrawEditorRows(r)
       drawTerminalPane(r)
     return
+  # PLAT-70 Part B: the palette's operation entries (**Show Detail**,
+  # **Widen Column**, **Narrow Column** — `omnibar_sources.tableCommands`).
+  let operation = parseOperationCommand(action)
+  if operation.ok:
+    let (name, arg) = splitOperation(operation.operation)
+    case name
+    of "list.show-detail": showTableDetail(r)
+    of "table.resize-column": resizeEventLogColumn(r, arg)
+    else: traceGesture(operation.operation & " is not available here")
+    drawTopBar(r)
+    return
   # PLAT-49 part B (finding 14): the omnibar's event-log column commands,
   # over the session's `EventLogVM.columns`, then the event log drawn again.
   let col = parseEventLogColumnCommand(action)
@@ -5413,6 +5515,21 @@ proc acceptOmnibar(r: GpuiRenderer) =
       gOmnibar.close()
       drawTopBar(r)
       runGpuiFindInFiles(r, needle)
+    return
+  # PLAT-70 Part B (§5.2): `:column-width <column> <cells>`.
+  if mode == omCommand and needle.startsWith(ColumnWidthVerb):
+    gOmnibar.close()
+    drawTopBar(r)
+    let parsed = parseColumnWidthLine(needle.splitWhitespace)
+    if not parsed.ok:
+      traceGesture(parsed.message)
+    elif not gSession.isNil and not gSession.session.eventLogVM.isNil:
+      let vm = gSession.session.eventLogVM
+      discard vm.setColumnWidth(parsed.column, parsed.cells)
+      rememberEventLogWidths(vm)
+      traceGesture("event log column " & $parsed.column & " " &
+                   $vm.columns.val.widths[parsed.column] & " cells")
+      redrawListPane(r, paneEventLog)
     return
   if mode == omCommand and needle in ["cnext", "cn", "cprev", "cp"]:
     gOmnibar.close()
@@ -5725,7 +5842,11 @@ var gArmedTick = (due: -2'i64, vcs: false)
 proc armHoverTick() =
   ## Wake the loop when the hover machine has something due (a preview, a
   ## dismissal) — the shim's one tick, shared with the VCS refresh.
-  let due = gAutoHide.nextDueMs
+  var due = gAutoHide.nextDueMs
+  # PLAT-70 Part B: and a truncated cell's tooltip, on the same tick.
+  let cellDue = gCellHover.dueMs
+  if cellDue >= 0 and (due < 0 or cellDue < due):
+    due = cellDue
   # PLAT-57: a Find in Files search streaming is pumped on the same tick,
   # every `SearchPollMs`, while it runs.
   if due < 0 and nativeFindInFiles.running:
@@ -5754,12 +5875,259 @@ proc armHoverTick() =
   else:
     gpui_set_tick(0'u32, nil)
 
+# ---------------------------------------------------------------------------
+# PLAT-70 Part B — the table panes' cut cells: hover, the `…` click, the open
+# detail, the Event Log's column widths (Horizontal-Overflow.md §5)
+# ---------------------------------------------------------------------------
+
+const TablePaneNames = [$paneState, $paneEventLog, $paneCalltrace]
+
+proc tableDetailPaneOf(pane: string): string =
+  ## A pane's name in a `DetailToggle` — the terminal's spelling.
+  if pane == $paneState: StateDetailPane
+  elif pane == $paneEventLog: EventDetailPane
+  else: CallTraceDetailPane
+
+proc tableCellAtWindow(x, y: int):
+    tuple[found: bool; pane: string; cut: CutCell; bodyRows: int] =
+  ## The cut cell the window drew at `(x, y)`, as the pane's renderer
+  ## recorded it (`leaves.stateCuts` / `eventCuts` / `callCuts`, from the
+  ## pane body's top-left) — the paint's own geometry, hit-tested.
+  let pane = gGeom.activePaneAt(x, y)
+  if pane notin TablePaneNames:
+    return
+  let i = gGeom.tabsNodeOfPane(pane)
+  if i < 0 or not gGeom.nodes[i].body.contains(x, y):
+    return
+  let body = gGeom.nodes[i].body
+  let cuts = if pane == $paneState: stateCuts
+             elif pane == $paneEventLog: eventCuts
+             else: callCuts
+  let k = cuts.cutCellAt(y - body.y, x - body.x)
+  if k < 0:
+    return
+  var placed = cuts[k]
+  placed.row += body.y
+  placed.col += body.x
+  placed.ellipsisCol += body.x
+  let pitch = max(1, placed.height)
+  (true, pane, placed, max(1, body.h div pitch))
+
+proc showCellTooltip() =
+  let a = gCellHoverAnchor
+  let cols = max(1, pendingViewportWidth div max(1, pxOfText(1)))
+  let chord = gRouter.chordFor("list.copy", windowSessionFacts(),
+                               windowScopePath(), nmNormal, "")
+  gCellTooltip = tooltipView(gCellHover.full, cols, a.bodyRows, chord).lines
+  traceGesture("cell tooltip " & $gCellTooltip.len & " line(s)")
+
+proc cellHoverAt(r: GpuiRenderer; x, y: int) =
+  ## §5.3: the pointer moving with no button — a truncated cell under it
+  ## starts the 500 ms clock; anywhere else hides a shown tooltip.
+  let hit = tableCellAtWindow(x, y)
+  let entered = hit.found and
+    not gCellHover.sameCell(tableDetailPaneOf(hit.pane), hit.cut.key,
+                            hit.cut.column)
+  let changed =
+    if hit.found:
+      gCellHoverAnchor = (hit.cut.col, hit.cut.row, hit.cut.height,
+                          hit.bodyRows)
+      gCellHover.pointerOver(tableDetailPaneOf(hit.pane), hit.cut.key,
+                             hit.cut.column, hit.cut.full, true, hoverNowMs())
+    else:
+      gCellHover.pointerOver("", "", "", "", false, hoverNowMs())
+  if entered:
+    # Where the paint put the cut cell and its `…`, in window px — what a
+    # capture aims at (`ci/test/plat70b_gpui_window.py`).
+    let c = hit.cut
+    traceGesture("cell hover " & hit.pane & " " & c.column & " cell=" &
+                 $c.col & ".." & $(c.col + c.width) & " row=" & $c.row &
+                 ".." & $(c.row + max(1, c.height)) & " ellipsis=" &
+                 $c.ellipsisCol & ".." &
+                 $(c.ellipsisCol + max(1, c.ellipsisWidth)))
+  if changed:
+    gCellTooltip = @[]
+    drawTopBar(r)
+  armHoverTick()
+
+proc tickCellHover(r: GpuiRenderer): bool =
+  ## The clock: the tooltip shows once the pointer has rested 500 ms.
+  if not gCellHover.tick(hoverNowMs()):
+    return false
+  showCellTooltip()
+  drawTopBar(r)
+  true
+
+proc dismissCellHover(r: GpuiRenderer) =
+  ## A key or a press hides a shown tooltip (§5.3).
+  if gCellHover.dismiss():
+    gCellTooltip = @[]
+    drawTopBar(r)
+
+proc redrawTablePane(r: GpuiRenderer; pane: string) =
+  ## A table pane drawn again for a detail or a width — its new rows (and
+  ## the Event Log's header cells) wired for their clicks, as
+  ## `redrawPaneOf`'s are.
+  if pane == $paneCalltrace: redrawCalltrace(r)
+  elif pane == $paneState: redrawListPane(r, paneState)
+  else: redrawListPane(r, paneEventLog)
+  wireClicks(r)
+
+proc toggleTableDetail(r: GpuiRenderer; pane, key, column: string) =
+  ## §5.3: the row's full text under it; again closes it; one at a time.
+  let before = tableDetail.pane
+  let open = tableDetail.toggleDetail(tableDetailPaneOf(pane), key, column)
+  tableCopyChord = gRouter.chordFor("list.copy", windowSessionFacts(),
+                                    windowScopePath(), nmNormal, "")
+  traceGesture("detail " & (if open: "open " else: "closed ") & pane & " " &
+               key & (if column.len > 0: " " & column else: ""))
+  for p in TablePaneNames:
+    if tableDetailPaneOf(p) == before or p == pane:
+      redrawTablePane(r, p)
+
+proc ellipsisAtWindow(x, y: int):
+    tuple[found: bool; pane: string; cut: CutCell; bodyRows: int] =
+  ## The cut cell whose drawn `…` is at `(x, y)`.
+  let hit = tableCellAtWindow(x, y)
+  if hit.found and [hit.cut].ellipsisAt(y, x) >= 0:
+    return hit
+
+proc pressEllipsis(r: GpuiRenderer; x, y: int): bool =
+  ## §5.3: a press on a cut cell's `…` opens (or closes) its row's detail.
+  let hit = ellipsisAtWindow(x, y)
+  if not hit.found:
+    return false
+  toggleTableDetail(r, hit.pane, hit.cut.key, hit.cut.column)
+  true
+
+proc focusedTableRow(): tuple[pane, key: string] =
+  ## `list.show-detail`'s row: the focused pane's selected one — the
+  ## variable, the event, the call.
+  if gSession.isNil:
+    return
+  case gFocusPane
+  of $paneState:
+    let vm = gSession.session.stateVM
+    if not vm.isNil and vm.selectedPath.val.len > 0:
+      return (gFocusPane, vm.selectedPath.val)
+  of $paneEventLog:
+    let vm = gSession.session.eventLogVM
+    if not vm.isNil:
+      let rows = vm.eventRows.val
+      let sel = vm.selectedRow.val
+      let at = if sel.isSome: sel.get else: 0
+      if at >= 0 and at < rows.len:
+        return (gFocusPane, $rows[at].eventIndex)
+  of $paneCalltrace:
+    let vm = gSession.session.calltraceVM
+    if not vm.isNil:
+      for row in vm.callRows():
+        if crfSelected in row.flags: return (gFocusPane, $row.index)
+  else: discard
+
+proc showTableDetail(r: GpuiRenderer) =
+  let (pane, key) = focusedTableRow()
+  if pane.len == 0:
+    traceGesture("Show Detail works in the Variables, Event Log and Call " &
+                 "Trace panes")
+    return
+  toggleTableDetail(r, pane, key, "")
+
+proc rememberEventLogWidths(vm: EventLogVM) =
+  let failure = saveColumnWidths(EventLogTableName,
+                                 vm.columns.val.columnWidthEntries)
+  if failure.len > 0: traceGesture(failure)
+
+proc applyRememberedColumnWidths() =
+  ## §5.2 / HO-9: the session's Event Log opens at the widths the ONE
+  ## remembered document (`table-columns`) holds — the terminal's and the
+  ## desktop's too.
+  if gSession.isNil or gSession.session.eventLogVM.isNil:
+    return
+  let stored = loadColumnWidths()
+  if stored.message.len > 0: traceGesture(stored.message)
+  let vm = gSession.session.eventLogVM
+  vm.columns.val = vm.columns.val.withColumnWidths(stored.entries)
+
+proc resizeEventLogColumn(r: GpuiRenderer; arg: string) =
+  ## `table.resize-column([column,]delta)` on the Event Log (§5.2).
+  if gSession.isNil or gSession.session.eventLogVM.isNil:
+    return
+  let vm = gSession.session.eventLogVM
+  let target = vm.columns.val.columnResizeTarget(arg)
+  if not target.ok:
+    traceGesture(target.message)
+    return
+  let col = target.col
+  var current = 0
+  for (c, _, w) in vm.columns.val.eventColumnsPx(eventLogPaneWidthPx):
+    if c == col: current = cellsOfPx(w)
+  discard vm.resizeColumn(col, target.delta, current)
+  rememberEventLogWidths(vm)
+  traceGesture("event log column " & $col & " " &
+               $vm.columns.val.widths[col] & " cells")
+  redrawTablePane(r, $paneEventLog)
+
+proc separatorAtWindow(x, y: int):
+    tuple[found: bool; col: EventLogColumn; left, right: int] =
+  ## The Event Log column separator at `(x, y)`; `left` is its column's left
+  ## edge in window px.
+  if gSession.isNil or gSession.session.eventLogVM.isNil or
+     gGeom.activePaneAt(x, y) != $paneEventLog:
+    return
+  let i = gGeom.tabsNodeOfPane($paneEventLog)
+  if i < 0:
+    return
+  let body = gGeom.nodes[i].body
+  let vm = gSession.session.eventLogVM
+  let hit = vm.columns.val.eventSeparatorAt(body.w, x - body.x, y - body.y)
+  if hit.found:
+    return (true, hit.col, body.x + hit.left, body.x + hit.right)
+
+proc tableGestureAt(x, y: int): bool =
+  ## Whether a press at `(x, y)` is a table pane's own gesture — a cut
+  ## cell's `…` or a column separator — which the row or the header under it
+  ## must not also answer (a jump, an order): the window's pointer handler
+  ## takes it (`pressEllipsis`, `pressEventSeparator`).
+  ellipsisAtWindow(x, y).found or separatorAtWindow(x, y).found
+
+proc pressEventSeparator(r: GpuiRenderer; x, y: int): bool =
+  ## §5.2: a press on an Event Log column separator holds it.
+  let hit = separatorAtWindow(x, y)
+  if not hit.found:
+    return false
+  gColumnDrag = (active: true, moved: false, col: hit.col, left: hit.left,
+                 grab: x - hit.right, startX: x)
+  traceGesture("column separator " & $hit.col)
+  true
+
+proc dragEventSeparator(r: GpuiRenderer; x: int; release: bool) =
+  ## The held separator follows the pointer: the column's width is the
+  ## distance from its left, in cells, never under the minimum.
+  let vm = gSession.session.eventLogVM
+  if x != gColumnDrag.startX:
+    gColumnDrag.moved = true
+  if gColumnDrag.moved:
+    discard vm.setColumnWidth(gColumnDrag.col,
+                             cellsOfPx(x - gColumnDrag.grab - gColumnDrag.left))
+    redrawListPane(r, paneEventLog)
+  if release:
+    gColumnDrag.active = false
+    if not gColumnDrag.moved:
+      return
+    rememberEventLogWidths(vm)
+    wireClicks(r)
+    traceGesture("event log column " & $gColumnDrag.col & " " &
+                 $vm.columns.val.widths[gColumnDrag.col] & " cells")
+
 proc handleTopHover(r: GpuiRenderer; x, y: int) =
   ## The pointer moving with no button: a control's tooltip, an auto-hide
   ## label's hover label, an open menu's hovered item.
   if gMenu.isNil or (x, y) == gHoverAt:
     return
   gHoverAt = (x, y)
+  # PLAT-70 Part B (§5.3): a truncated table cell's tooltip clock.
+  cellHoverAt(r, x, y)
   # The editor's scrollbar shows while the pointer is over the editor
   # (Monaco's fading scrollbars).
   block:
@@ -5873,6 +6241,7 @@ proc hoverTick() {.cdecl.} =
   # The arming this tick answered is spent: whatever is due next is armed.
   gArmedTick = (due: -2'i64, vcs: false)
   applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
+  discard tickCellHover(r)
   armHoverTick()
 
 proc refreshVcsPane() =
@@ -6928,9 +7297,24 @@ proc focusedRowText(): tuple[text, what: string] =
       for row in vm.callRows():
         if crfSelected in row.flags: return (row.callRowText, "the call")
   of $paneState:
+    # PLAT-70 Part B (§5.3): the variable's WHOLE value, untruncated — what
+    # its detail and its tooltip show.
     let vm = gSession.session.stateVM
     if not vm.isNil and vm.selectedPath.val.len > 0:
-      return (vm.selectedPath.val, "the variable")
+      let path = vm.selectedPath.val
+      for row in stateRows(vm, gpuiRowBudget()):
+        if row.path == path:
+          return (fullValueText(row.presented, row.whole),
+                  "the value of " & row.name)
+      return (path, "the variable")
+  of $paneEventLog:
+    let vm = gSession.session.eventLogVM
+    if not vm.isNil:
+      let rows = vm.eventRows.val
+      let sel = vm.selectedRow.val
+      let at = if sel.isSome: sel.get else: 0
+      if at >= 0 and at < rows.len:
+        return (rows[at].value, "event #" & $rows[at].eventIndex)
   else: discard
   ("", "")
 
@@ -7066,6 +7450,14 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
       of "editor.scroll-page-down": scrollEditorLines(r, rows)
       else: scrollEditorLines(r, -rows)
       return
+  of "list.show-detail":
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
+    showTableDetail(r)
+    return
+  of "table.resize-column":
+    # PLAT-70 Part B (§5.2): the Event Log is the table whose columns resize.
+    resizeEventLogColumn(r, res.argument)
+    return
   of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
      "view.scroll-right-half", "view.scroll-to-line-start":
     # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view — the
@@ -7201,6 +7593,12 @@ proc onPaneClick(c: GPaneClick) =
      (not gMenu.isNil and gMenu.isOpen) or
      (not gOmnibar.isNil and gOmnibar.isOpen):
     return
+  # PLAT-70 Part B: a press on a `…` or a column separator is the table's
+  # gesture; GPUI hands the row under it the press first, and the row must
+  # not jump the debugger or reorder the log for it.
+  if c.button == gbLeft and tableGestureAt(c.x, c.y):
+    traceGesture("pane click " & $c.part & " left to the table gesture")
+    return
   traceGesture("pane click " & $c.part & " " & c.key & " #" & $c.index &
                " line " & $c.line & " " & $c.button &
                (if c.ctrl: "+ctrl" else: "") & (if c.alt: "+alt" else: ""))
@@ -7252,6 +7650,9 @@ proc onPaneClick(c: GPaneClick) =
     if c.button == gbRight:
       openContextMenuAt(r, variablesContextMenu(c.key), c.x, c.y)
     elif c.button == gbLeft:
+      # PLAT-70 Part B: the pressed variable is the pane's row — the one
+      # `list.show-detail` and `list.copy` act on.
+      session.stateVM.selectPath(c.key)
       session.stateVM.toggleExpand(c.key)
       redrawPaneOf(r, paneState)
   of gcpStateTab:
@@ -8254,6 +8655,18 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         try: column = parseInt(key[key.find('@') + 1 .. ^1])
         except ValueError: return "bad column in '" & key & "'"
         key = key[0 ..< key.find('@')]
+      # PLAT-70 Part B: a table row's press can name its PIXEL,
+      # `<key>@<x>x<y>` (the op's own `,` and `:` are taken) — the row's listeners hear it there, and then the
+      # window root's pointer router does, as a real press reaches both (a
+      # `…` or a column separator is the root's to take, and the row must
+      # leave it).
+      var at = (x: -1, y: -1)
+      if part in {gcpEventRow, gcpEventHeader, gcpVariable, gcpCallRow} and
+         '@' in key:
+        let xy = key[key.find('@') + 1 .. ^1].split('x')
+        try: at = (parseInt(xy[0]), parseInt(xy[1]))
+        except ValueError, IndexDefect: return "bad pixel in '" & key & "'"
+        key = key[0 ..< key.find('@')]
       # A LEFT press on a pane tab is the window's own (it activates the tab):
       # pressed where the strip drew the tab.
       if part == gcpTab and button == "left":
@@ -8290,13 +8703,17 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # on Shift + right-click like any right-click — a GPUI window has no
       # native menu to fall back to (Native-Front-End-Parity.md §1).
       if "shift" in mods: modifiers.incl gmShift
-      let ev = GpuiEvent(kind: kind, key: $x & ",0", modifiers: modifiers)
+      let ev = GpuiEvent(kind: kind,
+                         key: (if at.x >= 0: $at.x & "," & $at.y else: $x & ",0"),
+                         modifiers: modifiers)
       var node = el
       while not node.isNil and
             getAttribute(node, WindowRootAttribute) != "true":
         discard fireEvent(node, name, ev)
         node = r.parentNode(node)
       gPressDedupe.clear()
+      if at.x >= 0 and kind == gekPointerDown:
+        pressAt(at.x, at.y)
       return ""
     of "modifiers":
       # PLAT-68: `modifiers:[<mod>+<mod>]` — the held modifiers are now these
@@ -8352,6 +8769,7 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       # has no loop to wait in) and run what fell due.
       gHoverClockOffsetMs += int64(at(1))
       applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
+      discard tickCellHover(r)
       # PLAT-51: and a welcome tab's running `ct record` — REALLY waited
       # for, up to `ms`, polled as the window's tick polls it.
       if not gRecordJob.isNil and not gRecordJob.done:
@@ -9142,6 +9560,7 @@ proc runOpen(cmd: GpuiCommand): int =
   # The session is the window's from here (the first frame's leaves read its
   # flow); it was assigned only after the first frame until 2026-10-17.
   gSession = session
+  applyRememberedColumnWidths()
   gEditorSurface = surface
   gEditorViewportPx = editorBodyWidthFor(
     shell.windows.windows[shell.windows.indexOf(windowId)].layout,
@@ -9164,10 +9583,14 @@ proc runOpen(cmd: GpuiCommand): int =
                              (if proj.status == dpsRefused: nil else: proj.state),
                              cmd.width, cmd.height, GpuiTopBandPx)
     let i = g.tabsNodeOfPane($paneEventLog)
-    if i >= 0: eventLogPaneWidthPx = g.nodes[i].body.w
+    if i >= 0:
+      eventLogPaneWidthPx = g.nodes[i].body.w
+      eventLogPaneHeightPx = g.nodes[i].body.h
     let st = g.tabsNodeOfPane($paneState)
     if st >= 0: statePaneSizePx = (g.nodes[st].body.w, g.nodes[st].body.h)
     syncInHandRows(g)
+    let ct = g.tabsNodeOfPane($paneCalltrace)
+    if ct >= 0: callTracePaneWidthPx = g.nodes[ct].body.w
     let e = g.tabsNodeOfPane($paneEditor)
     if e >= 0: editorPaneHeightPx = g.nodes[e].body.h
     # The call trace and the event log read the windows their panes show
@@ -9191,6 +9614,7 @@ proc runOpen(cmd: GpuiCommand): int =
   gWindow = windowId
   gRemember = not quarantined and cmd.layoutFile.len == 0
   gSession = session
+  applyRememberedColumnWidths()
   wireSearch(session)
   # PLAT-48: the top bar's shared ViewModels. The menu is the product's tree
   # with what this window performs enabled, its chords none (the window has

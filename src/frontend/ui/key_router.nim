@@ -59,6 +59,9 @@ import ../viewmodel/viewmodels/video_player_vm
 from ../viewmodel/views/list_scrubber_dom import viewOperation
 from ../viewmodel/views/context_menu_bridge import contextMenuIsOpen,
                                                   contextMenuOperation
+# PLAT-70 Part B (Horizontal-Overflow.md §5): the table panes' detail, copy
+# and column widths.
+import ../viewmodel/views/table_overflow_dom
 
 type
   NativeKind = enum
@@ -132,6 +135,9 @@ var
   toggleMacroExpansionHook*: proc(editor: EditorViewComponent) = nil
     ## `ui/editor.toggleMacroExpansion`, installed by `ui_js` likewise.
   editorJumpHook*: proc(editor: EditorViewComponent; operation: string): bool = nil
+  resizeEventLogColumnHook*: proc(arg: string) = nil
+    ## PLAT-70 Part B: `ui/event_log.resizeEventLogColumn`
+    ## (`table.resize-column`), installed by `ui_js` likewise.
     ## `ui/editor.runEditorJump` (the caret's smart jump, run to cursor and
     ## call jump), installed by `ui_js` likewise.
 
@@ -423,6 +429,58 @@ proc registerHostOperation*(operation: string; run: proc()) =
   ## `build.run-program` and `project.export`, `frontEnd == web`).
   hostOperations[operation] = run
 
+func selectedRowSelectorOf(pane: string): cstring =
+  ## The selector of a table pane's selected row ("" for the Variables pane,
+  ## which marks none: its row is the one last pressed). The desktop's Call
+  ## Trace is not a table pane: it scrolls sideways instead of cutting its
+  ## rows (`table_overflow.styl`).
+  if pane == EventLogDetailPane: cstring"tr.event-selected"
+  else: cstring""
+
+proc focusedTablePane(): tuple[pane: string; selected: cstring] =
+  ## The table pane the focus is in — its name in a `DetailToggle` and the
+  ## selector of its selected row — else the one last pressed (the palette
+  ## holds the focus while one of its entries runs), else ("", "").
+  for e in desktopScopePath():
+    let pane = case e.paneKind
+               of "state": StateDetailPane
+               of "eventLog": EventLogDetailPane
+               else: ""
+    if pane.len > 0:
+      return (pane, selectedRowSelectorOf(pane))
+  if lastPressedTablePane.len > 0:
+    return (lastPressedTablePane, selectedRowSelectorOf(lastPressedTablePane))
+  ("", cstring"")
+
+proc runTableOperation(res: EditingResolution): bool =
+  ## PLAT-70 Part B: `list.show-detail` and `list.copy` on the focused table
+  ## pane's row (its WHOLE text), `table.resize-column` on the Event Log.
+  let (pane, selected) = focusedTablePane()
+  case res.operation
+  of "list.show-detail":
+    if pane.len == 0 or not showDetailOf(pane, selected):
+      cwarn "keys: Show Detail works in the Variables and Event Log panes, " &
+            "on a row"
+    true
+  of "list.copy":
+    pane.len > 0 and copyRowOf(pane, selected)
+  of "table.resize-column":
+    if not resizeEventLogColumnHook.isNil:
+      resizeEventLogColumnHook(res.argument)
+    true
+  else: false
+
+proc runDesktopOperation(res: EditingResolution): NativeKind
+
+proc runPaletteOperation*(operation, argument: string) =
+  ## A palette entry's catalogued operation (PLAT-70 Part B: **Show Detail**,
+  ## **Widen Column**, **Narrow Column**), run as a key's would be.
+  traceOperation(if argument.len > 0: operation & "(" & argument & ")"
+                 else: operation)
+  discard runTableOperation(EditingResolution(kind: erOperation,
+                                              operation: operation,
+                                              argument: argument))
+
 proc runDesktopOperation(res: EditingResolution): NativeKind =
   ## **THE DESKTOP'S DISPATCH** of a resolved operation.
   let op = if res.argument.len > 0: res.operation & "(" & res.argument & ")"
@@ -444,6 +502,8 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
     return nkLeaveToElement
   if res.operation in HostIntents:
     if not data.functions.update.isNil: data.functions.update(data, false)
+    return nkHandled
+  if runTableOperation(res):
     return nkHandled
   if runMonaco(res.operation):
     return nkHandled
@@ -660,6 +720,12 @@ proc chordForAction*(action: ClientAction): cstring =
   cstring(chordMemo.chords[op])
 
 chord_display.chordOfAction = chordForAction
+
+# PLAT-70 Part B: the copy hint under a table row names the chord that
+# copies it where the focus is (KL-8).
+copyChordOf = proc(): string =
+  deskRouter.chordFor("list.copy", desktopFacts(), desktopScopePath(),
+                      nmNormal, "")
 
 proc importStoredPreset() =
   ## The ONE-TIME IMPORT of the old shortcuts dialog's stepping preset, which

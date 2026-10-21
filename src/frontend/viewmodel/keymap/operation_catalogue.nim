@@ -40,6 +40,10 @@ type
       ## A pane name: `layout.focus-pane(file-tree)`.
     oaMenuFolder = "menu folder"
       ## A top-level folder of the program menu: `menu.open-folder(debug)`.
+    oaColumnResize = "column resize"
+      ## A signed number of cells, after an optional column name:
+      ## `table.resize-column(output,+4)`, or `table.resize-column(-2)` for
+      ## the focused column (Horizontal-Overflow.md §5.2).
 
   CataloguedOperation* = object
     name*: string
@@ -149,6 +153,9 @@ const
     op("list.clear-selection", ListTable, "Clear Selection"),
     op("list.filter", ListTable, "Filter"),
     op("list.copy", ListTable, "Copy"),
+    # --- The table panes' overflow (Horizontal-Overflow.md §5) -------------
+    op("list.show-detail", ListTable, "Show Detail"),
+    op("table.resize-column", ListTable, "Resize Column", oaColumnResize),
 
     # --- Single-line inputs (§3.6) ----------------------------------------
     op("input.move-left", InputTable, "Left"),
@@ -285,6 +292,22 @@ const
     op("modal.return-to-normal", GlobalTable, "Return to NORMAL"),
   ]
 
+func parseColumnResize*(arg: string):
+    tuple[ok: bool; column: string; delta: int] =
+  ## `table.resize-column`'s argument: `[column,]delta`, `delta` a non-zero
+  ## signed number of cells; `column` "" for the focused one.
+  let comma = arg.rfind(',')
+  let column = if comma < 0: "" else: arg[0 ..< comma].strip
+  let number = (if comma < 0: arg else: arg[comma + 1 .. ^1]).strip
+  var delta = 0
+  try:
+    delta = parseInt(if number.startsWith("+"): number[1 .. ^1] else: number)
+  except ValueError:
+    return (false, "", 0)
+  if delta == 0:
+    return (false, "", 0)
+  (true, column, delta)
+
 func operationIndex*(name: string): int =
   for i, o in Catalogue:
     if o.name == name: return i
@@ -324,6 +347,10 @@ func argumentProblem*(name, arg: string): string =
       "'" & name & "' takes a menu folder (" & MenuFolderArguments.join(", ") &
         ")"
     else: ""
+  of oaColumnResize:
+    let parsed = parseColumnResize(arg)
+    if parsed.ok: ""
+    else: "'" & name & "' takes [column,]cells, a signed number of cells"
 
 func tableOfOperation*(name: string): string =
   ## Where a user row naming `name` is installed: the catalogue's table for

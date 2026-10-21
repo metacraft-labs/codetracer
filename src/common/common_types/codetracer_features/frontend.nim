@@ -318,7 +318,15 @@ type
     # the desktop's own saved layout files (the terminal and the GPUI window
     # keep theirs, and are not touched). Appended at the end, for the reason
     # every note above gives.
-    aResetLayout                  # View > Reset Layout
+    aResetLayout,                 # View > Reset Layout
+    # PLAT-70 Part B (Horizontal-Overflow.md §5): the table panes' palette
+    # entries — **Show Detail** (`list.show-detail`, the focused row's full
+    # text under it) and **Widen Column** / **Narrow Column**
+    # (`table.resize-column` on the Event Log's focused column). Appended at
+    # the end, for the reason every note above gives.
+    aShowDetail,                  # palette: Show Detail
+    aWidenColumn,                 # palette: Widen Column
+    aNarrowColumn                 # palette: Narrow Column
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

@@ -63,7 +63,9 @@ import ./navigation_table
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 326
+const ExpectedAssertions = 329
+  ## PLAT-70 Part B: +3 — `Shift+K` (`list.show-detail`) in NORMAL and
+  ## INSPECT (their two reachability checks), and `K` decoded.
   ## PLAT-70 Part A: +8 — five output-pane view bindings (`z h`, `z l`, `z H`,
   ## `z L`, `0`), their three new key bytes decoded.
   ## The shared jump history: +6 — `Alt+Left` / `Alt+Right` bound (two chord
@@ -102,7 +104,7 @@ const
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 100
+  ExpectedBindingCount = 102
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
@@ -125,6 +127,10 @@ const
     ##
     ## 95 SINCE the shared jump history: `Alt+Left` / `Alt+Right`, history
     ## back / forward (CodeTracer-TUI.md §4.2's "History Back / Forward").
+    ##
+    ## 102 SINCE PLAT-70 Part B: `Shift+K` (`list.show-detail`) in NORMAL and
+    ## INSPECT — an operation of the shared Vim base with no terminal
+    ## `KeyAction`, like Part A's output-pane view rows (100), so not a §4.2 row.
 
   # Real xterm byte sequences, and the canonical name each must decode to.
   # This list is the "reachability" oracle of check 4, and it is written from
@@ -137,7 +143,7 @@ const
     ("f", "f"), ("r", "r"), ("c", "c"), ("o", "o"), ("O", "O"), ("j", "j"),
     ("k", "k"), ("l", "l"), ("h", "h"), ("m", "m"), ("x", "x"), ("q", "q"),
     ("g", "g"), ("G", "G"), ("t", "t"), ("T", "T"), ("i", "i"),
-    ("H", "H"), ("L", "L"), ("0", "0"),
+    ("H", "H"), ("L", "L"), ("0", "0"), ("K", "K"),
     ("[", "["), ("]", "]"), ("{", "{"), ("}", "}"), (".", "."),
     ("/", "/"), ("?", "?"), (":", ":"), (" ", "Space"),
     ("\r", "Enter"), ("\n", "Enter"), ("\x7f", "Backspace"),
@@ -484,7 +490,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 76
+    ck decoded == 77
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0

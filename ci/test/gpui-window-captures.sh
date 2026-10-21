@@ -2,13 +2,13 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a] [m71]
-#   just gpui-window-captures                 # all seven
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a] [plat70b] [m71]
+#   just gpui-window-captures                 # all eight
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
 # `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
 # `test_plat68_cua_window.nim`, `test_plat70a_gpui_window.nim`,
-# `test_m71_gpui_window.nim`) assert
+# `test_plat70b_gpui_window.nim`, `test_m71_gpui_window.nim`) assert
 # COMMITTED records measured off a real window on a headless sway. A record
 # nobody re-takes stops describing the product the first time the window
 # changes — which is how PLAT-45's and PLAT-47's records came to predate the
@@ -62,11 +62,11 @@ fail() {
 }
 
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a m71)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a plat70b m71)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a | m71) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a, m71)" ;;
+	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a | plat70b | m71) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a, plat70b, m71)" ;;
 	esac
 done
 
@@ -226,6 +226,14 @@ for w in "${which[@]}"; do
 		in_compositor_shell "bash ci/test/m71-gpui-window.sh" &&
 			python3 ci/test/m71_gpui_window.py record &&
 			suite gpui-shell src/frontend/gpui/tests/test_m71_gpui_window.nim ||
+			failed+=("${w}")
+		;;
+	plat70b)
+		# PLAT-70 Part B: the Event Log on `wide_lines` — a cut cell hovered
+		# and a fitting one, its `…` pressed twice, the `#` separator dragged.
+		in_compositor_shell "bash ci/test/plat70b-gpui-window.sh" &&
+			python3 ci/test/plat70b_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat70b_gpui_window.nim ||
 			failed+=("${w}")
 		;;
 	plat45)

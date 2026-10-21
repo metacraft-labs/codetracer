@@ -145,7 +145,9 @@ const AsciiFallbacks: array[21, (string, string)] = [
   ("▶", ">"), ("▼", "v"), ("▲", "^")]
 
 const ExtraAsciiFallbacks: array[22, (string, string)] = [
-  ("█", "#"), ("…", "."), ("·", "."),
+  # PLAT-70 Part B (Horizontal-Overflow.md §5.1): a cut table cell's `…` is
+  # `~` on the ASCII tier (the mark that says "there is more").
+  ("█", "#"), ("…", "~"), ("·", "."),
   # PLAT-70: a text row's overflow markers (`scrubber_track.PrecedesGlyph` /
   # `ExtendsGlyph`, Horizontal-Overflow.md §4.6): `<` and `>`.
   ("‹", "<"), ("›", ">"),

@@ -179,6 +179,17 @@ type
       ## PLAT-51: a press held on a list pane's scrollbar scrubber thumb (the
       ## Event Log's or the Call Trace's) — the motion that follows drags the
       ## VIEW (never the debugger) until the release.
+    eventLogResize*: tuple[active: bool, column: EventLogColumn, startCol: int]
+      ## PLAT-70 Part B: an Event Log column separator is held — the motion
+      ## that follows sets the column's width until the release
+      ## (Horizontal-Overflow.md §5.2).
+    cellHover*: HoverClock
+      ## PLAT-70 Part B: the truncated cell the pointer rests on (`?1003`
+      ## motion), and since when (§5.3's 500 ms).
+    cellHoverAnchor*: tuple[row, col, bodyRows: int]
+      ## Where that cell was drawn, and its pane's body rows (the cap).
+    cellTooltip*: CellTooltip
+      ## The tooltip shown, once the clock is up.
     variablesResize*: tuple[active: bool, area: CellArea]
       ## PLAT-51: the Variables pane's name / value separator is held — the
       ## motion that follows resizes the name column (the desktop's column
@@ -556,6 +567,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                      else: (false, "", -1, 0)),
     contextMenu: app.contextMenu,
     content: app.content,
+    cellTooltip: app.cellTooltip,
     topBar: TopBarModel(menu: app.menu, omnibar: app.omnibar,
                         icons: app.icons, graphicsDrawn: app.graphicsDrawn,
                         controlsEnabled: app.controlsEnabledOf(),

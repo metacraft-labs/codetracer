@@ -5351,6 +5351,17 @@ m71-gpui-window:
 m71-gpui-window-record:
   python3 ci/test/m71_gpui_window.py record
 
+# PLAT-70 Part B: the GPUI window's Event Log on a headless sway — a cut cell
+# hovered and a fitting one, the `…` pressed twice, the `#` separator dragged
+# (`ci/test/plat70b_gpui_window.py` says what each frame is).
+plat70b-gpui-window:
+  bash ci/test/plat70b-gpui-window.sh
+
+# Measure those frames into `src/tests/visual/plat70b-gpui-window.json`, which
+# `src/frontend/gpui/tests/test_plat70b_gpui_window.nim` asserts.
+plat70b-gpui-window-record:
+  python3 ci/test/plat70b_gpui_window.py record
+
 # The GPUI window captures, RE-TAKEN AND ASSERTED from a checkout: build
 # isonim-gpui's windowed shim and virtual pointer (in its own dev shell), this
 # checkout's windowed front-end against it, record `calc` / `call_pages` when

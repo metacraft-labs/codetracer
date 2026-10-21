@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1867
+const ExpectedAssertions = 1876
+  ## *1867 -> 1876 on 2026-10-22: three table-overflow production modules —
+  ## `viewmodels/table_overflow.nim`, `host/table_column_widths.nim` and
+  ## `views/table_overflow_dom.nim` — x three assertions. None calls `rebase(`.*
   ## *1864 -> 1867 on 2026-10-22: `viewmodels/point_menu_ops.nim` (the Debug
   ## menu's Stop and its breakpoint and tracepoint items, codetracer#843) x
   ## three assertions. It calls no `rebase(` and spells no `mapOver`.*

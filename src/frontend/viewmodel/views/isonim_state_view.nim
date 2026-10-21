@@ -40,6 +40,9 @@ when defined(js):
 import ../viewmodels/state_vm
 import ../viewmodels/origin_chain_types
 import ../views/state_view
+when defined(js):
+  import std/jsffi
+  import ./table_overflow_dom
 import ../store/types as store_types
 
 # Re-export the shared origin types so the headless tests that ``import
@@ -744,7 +747,13 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
             discard
         tdiv:
           span(class = "value-view"):
-            span(class = valueTextClass(vm, item)):
+            # PLAT-70 Part B (Horizontal-Overflow.md §5): the value is a
+            # TABLE CELL — its own text is what the fit pass in
+            # `views/table_overflow_dom` measures, and its whole value is asked
+            # for only when the pass finds it cut (`fullValueOf`, below), so a
+            # row carries nothing more than its key.
+            span(class = valueTextClass(vm, item),
+                 `data-ct-cell` = "variables|" & item().path & "|value"):
               text item().value
             span(ref = valueTypeSlot, display = "contents"):
               discard
@@ -948,6 +957,16 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
   panel
 
 when defined(js):
+  proc attachStateTableOverflow*(panel: JsObject; vm: StateVM) =
+    ## The values are table cells — fitted, hovered and their `…` pressed
+    ## through the shared model (`table_overflow_dom`, Horizontal-Overflow.md
+    ## §5); a cut value's whole text is asked of the ViewModel. Every host
+    ## that mounts the panel calls this: the desktop's panel decorator
+    ## (`ui/state`) and the extension's mount below.
+    discard attachTableOverflow(panel, StateDetailPane,
+                                cstring".value-expanded",
+                                proc(path: string): string = vm.fullValueOf(path))
+
   proc mountIsoNimStatePanel*(container: isonim_dom.Element;
                               vm: StateVM) =
     ## Mount the State panel as a child of `container` — for the VS Code
@@ -956,6 +975,7 @@ when defined(js):
     let r = WebRenderer()
     let panel = renderStatePanel[WebRenderer, isonim_dom.Element](r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+    attachStateTableOverflow(cast[JsObject](panel), vm)
 
 # ---------------------------------------------------------------------------
 # PLAT-18's vertical slice: a THIRD renderer, behind a define

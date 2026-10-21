@@ -15,12 +15,15 @@
     padding-left: PANEL_INSET
     padding-right: PANEL_INSET
 
+  // PLAT-70 Part B (Variable-State-Pane Decision 3): the pane does NOT
+  // scroll sideways. A value that does not fit is cut with `…`
+  // (`components/table_overflow.styl`), and its whole text is on hover and
+  // under the row.
   .value-components-container
     padding-right: 0
-    overflow-x: auto
+    overflow-x: hidden
 
-  // Prevent value rows from wrapping when the panel is narrow;
-  // the container scrolls horizontally instead.
+  // Value rows do not wrap: a long value is cut instead.
   .value-view
     flex-wrap: nowrap
 

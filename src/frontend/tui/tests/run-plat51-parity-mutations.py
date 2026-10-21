@@ -512,8 +512,11 @@ ARMS = [
     # RE-AIMED 2026-10-16, PLAT-70 Part A: the editor's horizontal bar is
     # pressed between the scrubber and the call row; the arm still puts the
     # call row first.
+    # G1 RE-AIMED 2026-10-21 (PLAT-70 Part B): the table panes' own gestures
+    # (a `…`, a column separator) sit between the bars and the call row now;
+    # the defect is unchanged — the call row answers before the scrubber.
     Arm("G1", GMAIN,
-        "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # M73 (#840): and its vertical scrubber.\n    if pressEditorVBar(r, x, y):\n      return\n    if clickCalltrace(r, x, y):\n      return\n",
+        "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # M73 (#840): and its vertical scrubber.\n    if pressEditorVBar(r, x, y):\n      return\n",
         "    if clickCalltrace(r, x, y):\n      return\n    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # M73 (#840): and its vertical scrubber.\n    if pressEditorVBar(r, x, y):\n      return\n",
         G_CALLS, "a press on GPUI's call-trace track jumps to the call row under it"),
     Arm("G2", GLIST,

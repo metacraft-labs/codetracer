@@ -45,6 +45,7 @@ suite "the GPUI window capture lane's recordings":
   test "each capture opens the recording its driver reads":
     check windowCaptureFixtures("plat47").names == @["calc", "call_pages"]
     check windowCaptureFixtures("plat70a").names == @["calc", "wide_lines"]
+    check windowCaptureFixtures("plat70b").names == @["calc", "wide_lines"]
     check windowCaptureFixtures("m71").names == @["calc", "multi_root"]
     for capture in ["plat45", "plat48", "plat68", "plat69"]:
       check windowCaptureFixtures(capture).names == @["calc"]

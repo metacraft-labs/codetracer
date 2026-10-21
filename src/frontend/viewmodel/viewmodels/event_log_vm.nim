@@ -66,6 +66,8 @@ import ../backend/backend_service
 import ../store/[replay_data_store, types]
 import ../viewport
 export viewport
+import ./table_overflow
+from ../keymap/operation_catalogue import parseColumnResize
 
 const
   ## Default `format` hint applied when a marker omits the field
@@ -199,6 +201,15 @@ type
     order*: seq[EventLogColumn]
       ## EVERY column, in display order; hidden ones keep their place.
     hidden*: set[EventLogColumn]
+    widths*: array[EventLogColumn, int]
+      ## PLAT-70 Part B (Horizontal-Overflow.md §5.2): the width the user gave
+      ## each column, in CELLS (`table_overflow.ColumnCellPx` pixels each on
+      ## GPUI and the desktop); 0 is the front-end's own default. The model
+      ## owns it, so a width dragged on one front-end is the width on the
+      ## others (HO-9).
+    focused*: EventLogColumn
+      ## The column **Widen Column** / **Narrow Column** act on: the last one
+      ## whose separator was dragged or that was resized by name.
 
 const
   DesktopEventLogColumnOrder* = [elcTick, elcIndex, elcLocation, elcKind,
@@ -281,6 +292,70 @@ func moveColumn*(c: var EventLogColumns; col: EventLogColumn;
       c.order[i] = reordered[k]
       inc k
   true
+
+const EventLogTableName* = EventLogTablePane
+  ## The event log's name in the remembered widths
+  ## (`table_overflow.encodeColumnWidths`).
+
+func columnWidthOr*(c: EventLogColumns; col: EventLogColumn;
+                    default: int): int =
+  ## `col`'s width in cells: the one the user set, else `default` (the
+  ## front-end's own).
+  if c.widths[col] > 0: c.widths[col] else: default
+
+func setColumnWidth*(c: var EventLogColumns; col: EventLogColumn;
+                     cells: int): bool =
+  ## §5.2: `col` is `cells` wide, never narrower than `MinColumnCells`.
+  ## False when that is its width already.
+  let w = clampColumnCells(cells)
+  c.focused = col
+  if c.widths[col] == w:
+    return false
+  c.widths[col] = w
+  true
+
+func resizeColumn*(c: var EventLogColumns; col: EventLogColumn;
+                   delta, current: int): bool =
+  ## §5.2's `table.resize-column(column, delta)`: `col`, which is drawn
+  ## `current` cells wide, by `delta` cells.
+  c.setColumnWidth(col, c.columnWidthOr(col, current) + delta)
+
+func columnWidthEntries*(c: EventLogColumns): seq[ColumnWidthEntry] =
+  ## The widths the user set, for the remembered document.
+  for col in EventLogColumn:
+    if c.widths[col] > 0:
+      result.add (table: EventLogTableName, column: $col,
+                  cells: c.widths[col])
+
+func parseEventLogColumn*(name: string): (bool, EventLogColumn)
+
+func withColumnWidths*(c: EventLogColumns;
+                       entries: openArray[ColumnWidthEntry]): EventLogColumns =
+  ## `c` with the event log's remembered widths applied (other tables' and
+  ## unknown columns' entries are skipped).
+  result = c
+  for e in entries:
+    if e.table != EventLogTableName:
+      continue
+    let (ok, col) = parseEventLogColumn(e.column)
+    if ok:
+      result.widths[col] = clampColumnCells(e.cells)
+
+func columnResizeTarget*(c: EventLogColumns; arg: string):
+    tuple[ok: bool; col: EventLogColumn; delta: int; message: string] =
+  ## `table.resize-column([column,]delta)`'s target (§5.2): the named column,
+  ## else the focused one, and by how many cells — or why not, for the
+  ## front-end's status line.
+  let parsed = parseColumnResize(arg)
+  if not parsed.ok:
+    return (false, c.focused, 0, "table.resize-column takes [column,]cells")
+  var col = c.focused
+  if parsed.column.len > 0:
+    let (found, named) = parseEventLogColumn(parsed.column)
+    if not found:
+      return (false, col, 0, "no event log column '" & parsed.column & "'")
+    col = named
+  (true, col, parsed.delta, "")
 
 func parseEventLogColumn*(name: string): (bool, EventLogColumn) =
   ## A column by its title or its enum name, case-insensitively — what a
@@ -632,6 +707,21 @@ proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
   var c = vm.columns.val
   result = c.moveColumn(col, delta)
   if result: vm.columns.val = c
+
+proc setColumnWidth*(vm: EventLogVM; col: EventLogColumn;
+                     cells: int): bool =
+  ## PLAT-70 Part B: `col` is `cells` wide (§5.2) — a drag on a separator,
+  ## `:column-width`, the desktop's `colResize`.
+  var c = vm.columns.val
+  result = c.setColumnWidth(col, cells)
+  vm.columns.val = c
+
+proc resizeColumn*(vm: EventLogVM; col: EventLogColumn;
+                   delta, current: int): bool =
+  ## PLAT-70 Part B: `table.resize-column(column, delta)`.
+  var c = vm.columns.val
+  result = c.resizeColumn(col, delta, current)
+  vm.columns.val = c
 
 proc setSearchQuery*(vm: EventLogVM; query: string) =
   ## Search the log: the engine returns only the matching events

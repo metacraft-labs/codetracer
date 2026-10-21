@@ -520,7 +520,7 @@ suite "CTUI-9: the modal state machine decides every event":
     # neither this file nor `resolve`. Until it is repaired, RUN THE `tui` LANE
     # ALONE — the number above is what it says otherwise.
     ck worstNs < 2_000_000
-    # THE NON-VACUITY FLOOR: 100 bindings x 13 tokens = 1300. A sweep that
+    # THE NON-VACUITY FLOOR: 102 bindings x 13 tokens = 1326. A sweep that
     # measured nothing would satisfy the gate above trivially.
     #
     # 1105 UNTIL PLAT-16 ADDED ONE BINDING (`Ctrl+F5`, the product-mode
@@ -528,14 +528,16 @@ suite "CTUI-9: the modal state machine decides every event":
     # `Ctrl+Tab`, `Ctrl+Shift+Tab` — CodeTracer-TUI.md §3.3.1), 1170 until
     # PLAT-68 added THREE (`F6`, `Shift+F6`, `Ctrl+Shift+p`), 1209 until the
     # shared jump history added TWO (`Alt+Left`, `Alt+Right`), 1235 until
-    # PLAT-70 added FIVE (the output panes' `z h`, `z l`, `z H`, `z L`, `0`).
+    # PLAT-70 added FIVE (the output panes' `z h`, `z l`, `z H`, `z L`, `0`),
+    # 1300 until the table panes' Show Detail added TWO (`Shift+K` under the
+    # Vim and Kakoune modes, Horizontal-Overflow.md §5.3).
     # The literal
     # moves with `ExpectedBindingCount` in `test_keymap_no_conflicts.nim`,
     # and it is still written as a literal BESIDE the computed form rather
     # than replacing it: the line above is satisfied by any binding count,
     # and this one is what notices that the count changed.
     ck dispatches == table.bindings.len * 13
-    ck dispatches == 1300
+    ck dispatches == 1326
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

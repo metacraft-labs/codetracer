@@ -33,6 +33,12 @@ from codetracer_embed import CallLine, currentCallInSectionOf,
   csReturnArrow, csReturnValue
 # PLAT-51: the scrollbar scrubber's shared model.
 from codetracer_embed import ScrubberModel, scrubberModel
+# PLAT-70 Part B: the row's one composite text, cut with `…`, its full text
+# on hover and under the row (Horizontal-Overflow.md §5).
+from codetracer_embed import callRowText, fitCell, CutCell, DetailToggle, Ellipsis,
+  CallTraceTablePane,
+  detailView, isOpen
+from ../formatters/type_formatters import terminalMeasure
 
 import ../layout/profile
 import ./styled_row
@@ -82,8 +88,34 @@ type
       ## PLAT-51: the TRACE index of the call the debugger is in, from the
       ## engine (`currentCallLineIndex`) — known even when that call is not in
       ## the loaded section — or -1. The scrubber track's mark.
+    detail*: DetailToggle
+      ## PLAT-70 Part B: the call whose full text is open under its row; its
+      ## key is the call's trace index.
+    copyChord*: string
+      ## The resolved `list.copy` chord the detail's hint names (KL-8).
+
+  CallTraceLine* = object
+    ## PLAT-70 Part B: one body line — a call's row, or a line of the full
+    ## text open under it.
+    index*: int
+      ## The trace index of the call.
+    detail*: int
+      ## -1 for the call's own row, else the detail line's number.
+    text*: string
+      ## A detail line's text.
+
+  CallTraceScreen* = object
+    ## What `paintCallTraceScreen` drew.
+    drawn*: int
+      ## Call rows drawn (a row whose section has not arrived is not counted).
+    cuts*: seq[CutCell]
+      ## Every row drawn cut, with its `…` (HO-8).
+    detailRows*: seq[int]
+      ## The SCREEN rows the open detail's lines are on.
 
 const
+  CallTracePaneName* = CallTraceTablePane
+    ## PLAT-70 Part B: this pane's name in a `DetailToggle` / a cut cell.
   CallTraceTitle* = "CALL TRACE"
   StackFallbackTitle* = "Call stack: this recording has no call trace"
     ## The fallback's note, painted over the call stack's own heading row.
@@ -94,6 +126,7 @@ const
   CallTraceCountStyle = CellStyle(role: srChromeMuted)
   CallTraceRuleStyle = CellStyle(role: srBorderPane)
   CallTraceLoadingStyle = CellStyle(role: srChromeMuted)
+  CallTraceDetailStyle = CellStyle(role: srChromeText)
   CallTraceRuleGlyph = "─"
 
 proc initCallTraceModel*(rows: seq[CallTraceRow] = @[];
@@ -239,13 +272,40 @@ proc titleText*(m: CallTraceModel; width: int): string =
     line.add repeatGlyph(CallTraceRuleGlyph, width - cellWidthOf(line))
   truncateToCells(line, width)
 
-proc paintCallTrace*(g: var StyledGrid; area: CellArea;
-                     m: CallTraceModel): int =
-  ## Paint the pane into `area`; returns the number of call rows drawn (a
-  ## row whose section has not arrived is drawn as `CallTraceLoadingText` and
-  ## not counted).
+proc rowStartCol(r: CallTraceRow): int =
+  ## Cells before the row's text: the depth's indent, the toggle and its gap.
+  let call = r.callOf
+  call.depth * CallRowIndentCells + 2
+
+proc bodyLines*(m: CallTraceModel; area: CellArea): seq[CallTraceLine] =
+  ## PLAT-70 Part B: the pane's body, line by line — each call from the
+  ## visible top, and under the one whose detail is open its full text
+  ## (Horizontal-Overflow.md §5.3) — as many as the body has rows. The ONE
+  ## layout `paintCallTraceScreen` draws and `callTraceHitAt` reads.
+  let bodyRows = area.height - 1
+  if area.width <= 0 or bodyRows <= 0:
+    return
+  let rowWidth = if area.tracked: area.width - ScrubberTrackCells
+                 else: area.width
+  var index = m.visibleTop(bodyRows)
+  while result.len < bodyRows and index < m.total:
+    result.add CallTraceLine(index: index, detail: -1)
+    let (loaded, r) = m.rowAt(index)
+    if loaded and m.detail.isOpen(CallTracePaneName, $index):
+      let at = min(rowWidth - 1, r.rowStartCol)
+      let view = detailView(callRowText(r.callOf), max(1, rowWidth - at),
+                            bodyRows, m.copyChord, terminalMeasure)
+      for k, text in view.lines:
+        if result.len >= bodyRows:
+          break
+        result.add CallTraceLine(index: index, detail: k, text: text)
+    inc index
+
+proc paintCallTraceScreen*(g: var StyledGrid; area: CellArea;
+                           m: CallTraceModel): CallTraceScreen =
+  ## Paint the pane into `area`, and report what was drawn.
   if area.width <= 0 or area.height <= 0:
-    return 0
+    return
   let title = titleText(m, area.width)
   g.paint(area.row, area.col, title, CallTraceRuleStyle)
   let label = CallTraceTitle
@@ -257,7 +317,6 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
             truncateToCells(count, area.width - cellWidthOf(label)),
             CallTraceCountStyle)
   let bodyRows = area.height - 1
-  let top = m.visibleTop(bodyRows)
   let current = if m.current >= 0: m.firstIndex.int + m.current else: -1
   # PLAT-51: THE RIGHTMOST COLUMN IS THE SCROLLBAR SCRUBBER (Scrollbar-
   # Scrubbers.md §4), the rows laid out in the cells left of it.
@@ -266,14 +325,17 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
   if hasTrack:
     paintVerticalScrubber(g, area.col + rowWidth, area.row + 1, bodyRows,
                           m.scrubberOf(bodyRows))
-  for i in 0 ..< bodyRows:
-    let index = top + i
-    if index >= m.total:
-      break
+  for i, line in m.bodyLines(area):
+    let index = line.index
+    let y = area.row + 1 + i
     let (loaded, r) = m.rowAt(index)
+    if line.detail >= 0:
+      let at = area.col + min(rowWidth - 1, r.rowStartCol)
+      g.paint(y, at, line.text, CallTraceDetailStyle)
+      result.detailRows.add y
+      continue
     if not loaded:
-      g.paint(area.row + 1 + i, area.col,
-              truncateToCells(CallTraceLoadingText, rowWidth),
+      g.paint(y, area.col, truncateToCells(CallTraceLoadingText, rowWidth),
               CallTraceLoadingStyle)
       continue
     # PLAT-49 part B: EACH PART IN ITS OWN STYLE (`segmentStyle`), and the
@@ -281,20 +343,42 @@ proc paintCallTrace*(g: var StyledGrid; area: CellArea;
     # (`onCompleteMove` -> `selectEntry`: `.event-selected`, its own ground,
     # and `.call-current`, bold) — the whole row on the active-row ground.
     let isCurrent = index == current
-    let y = area.row + 1 + i
     var x = area.col
     let stop = area.col + rowWidth
     if isCurrent:
       g.paint(y, area.col, spaces(rowWidth), CurrentRowFill)
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.1): THE ROW IS ONE CELL — its
+    # text (name, arguments, return) after the indent and the toggle — fitted
+    # by `fitCell`; a cut row keeps its parts' styles up to the `…`.
+    let textAt = area.col + min(rowWidth, r.rowStartCol)
+    let full = callRowText(r.callOf)
+    let fitted = fitCell(full, stop - textAt, terminalMeasure)
+    let keep = if fitted.truncated: textAt + cellWidthOf(fitted.text) - 1
+               else: stop
+    var lastStyle = segmentStyle(csCallee, isCurrent)
     for seg in callRowSegments(r.callOf):
-      if x >= stop:
+      if x >= keep:
         break
-      let fitted = truncateToCells(seg.text, stop - x)
-      if fitted.len == 0:
+      let piece = truncateToCells(seg.text, keep - x)
+      if piece.len == 0:
         continue
-      g.paint(y, x, fitted, segmentStyle(seg.kind, isCurrent))
-      x += cellWidthOf(fitted)
-    inc result
+      lastStyle = segmentStyle(seg.kind, isCurrent)
+      g.paint(y, x, piece, lastStyle)
+      x += cellWidthOf(piece)
+    if fitted.truncated and stop > textAt:
+      g.paint(y, keep, fitted.text.substr(fitted.text.len - Ellipsis.len),
+              lastStyle)
+      result.cuts.add CutCell(row: y, col: textAt, width: stop - textAt,
+                              ellipsisCol: keep, key: $index,
+                              column: "call", full: full)
+    inc result.drawn
+
+proc paintCallTrace*(g: var StyledGrid; area: CellArea;
+                     m: CallTraceModel): int =
+  ## Paint the pane into `area`; returns the number of call rows drawn (a
+  ## row whose section has not arrived is drawn as `CallTraceLoadingText` and
+  ## not counted).
+  paintCallTraceScreen(g, area, m).drawn
 
 proc paintFallbackCaption*(g: var StyledGrid; area: CellArea) =
   ## The call-stack fallback's note, on the pane's first content row (in
@@ -343,9 +427,11 @@ proc callTraceHitAt*(m: CallTraceModel; area: CellArea;
     return CallTraceHit(kind: (if hit.kind == shThumb: cthThumb
                                else: cthTrack),
                         index: -1, arg: -1, fraction: hit.fraction)
-  let index = m.visibleTop(bodyRows) + (row - area.row - 1)
-  if index >= m.total:
+  let lines = m.bodyLines(area)
+  let at = row - area.row - 1
+  if at < 0 or at >= lines.len or lines[at].detail >= 0:
     return CallTraceHit(kind: cthNone, arg: -1)
+  let index = lines[at].index
   let (loaded, r) = m.rowAt(index)
   if not loaded:
     return CallTraceHit(kind: cthNone, arg: -1)

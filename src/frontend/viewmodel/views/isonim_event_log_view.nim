@@ -39,6 +39,7 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/event_log_vm
+from ../viewmodels/table_overflow import pxOfCells, EventLogTablePane
 
 export signals, computation, components
 
@@ -54,6 +55,11 @@ const
   EventLogColumnCheckClass* = "eventLog-column-check"
   EventLogColumnLeftClass* = "eventLog-column-left"
   EventLogColumnRightClass* = "eventLog-column-right"
+  EventLogColumnGripClass* = "eventLog-column-grip"
+    ## A header cell's separator grip, at its right edge (Horizontal-
+    ## Overflow.md §5.2): a drag on it resizes the column (`ui/event_log`).
+  EventLogColumnGripAttribute* = "data-ct-column-separator"
+    ## On the grip: its column.
   EventLogRowClass* = "eventLog-row"
     ## Every event row; the panel host measures the rows' advance by it.
   EventLogScrollBodyClass* = "eventLog-scroll-body"
@@ -87,6 +93,17 @@ proc columnClass*(col: EventLogColumn): string =
   of elcKind: "eventLog-event eventLog-cell"
   of elcOutput: "eventLog-text eventLog-cell"
 
+proc columnWidthStyle*(vm: EventLogVM; col: EventLogColumn): string =
+  ## A column's width as its cells' style — header and body alike — when the
+  ## user set one (`EventLogColumns.widths`, `ColumnCellPx` pixels a cell),
+  ## else nothing: the stylesheet's own width (Horizontal-Overflow.md §5.2).
+  let cells = vm.columns.val.widths[col]
+  if cells <= 0: ""
+  else:
+    let px = $pxOfCells(cells) & "px"
+    "flex: 0 0 " & px & "; width: " & px & "; max-width: " & px &
+      "; min-width: " & px
+
 proc columnHeaderText*(vm: EventLogVM; col: EventLogColumn): string =
   ## A header's label, with the order's arrow on the ordering column once the
   ## order is not the recorded one (tick, ascending).
@@ -110,6 +127,12 @@ proc rowAt*(vm: EventLogVM; position: int): EventLogRow =
   let at = position - vm.store.eventLog.loadedStart.val
   let rows = vm.eventRows.val
   if at >= 0 and at < rows.len: rows[at] else: EventLogRow()
+
+proc cellKey*(vm: EventLogVM; position: int; col: EventLogColumn): string =
+  ## A body cell's name in the table panes' model (`data-ct-cell`): the pane,
+  ## the event's id and the column, so it is cut, hovered and its `…`
+  ## pressed through `table_overflow_dom` (Horizontal-Overflow.md §5).
+  EventLogTablePane & "|" & $vm.rowAt(position).eventId & "|" & $col
 
 proc rowClass*(vm: EventLogVM; position: int): string =
   ## A row's class: where it is against the debugger's position (`past`,
@@ -258,7 +281,7 @@ proc renderEventCell*[R, N](r: R; vm: EventLogVM; position: int;
   case col
   of elcTick:
     ui(r):
-      td(class = columnClass(col)):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col)):
         tdiv(class = "rr-ticks-time-container"):
           span(class = "rr-ticks-time"):
             text $vm.rowAt(position).rrTicks
@@ -271,20 +294,23 @@ proc renderEventCell*[R, N](r: R; vm: EventLogVM; position: int;
             discard
   of elcIndex:
     ui(r):
-      td(class = columnClass(col)):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col),
+         `data-ct-cell` = cellKey(vm, position, col)):
         text $vm.rowAt(position).eventId
   of elcLocation:
     ui(r):
-      td(class = columnClass(col)):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col),
+         `data-ct-cell` = cellKey(vm, position, col)):
         text rowLocation(vm.rowAt(position))
   of elcKind:
     ui(r):
-      td(class = columnClass(col)):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col)):
         span(class = expanderClass(vm, position)):
           discard
   of elcOutput:
     ui(r):
-      td(class = columnClass(col)):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col),
+         `data-ct-cell` = cellKey(vm, position, col)):
         text eventLogText(vm.rowAt(position))
 
 proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int): N =
@@ -508,9 +534,14 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
     proc(col: proc(): EventLogColumn; index: proc(): int): N =
       ui(r):
         span(class = columnClass(col()), `data-column` = $col(),
+             style = columnWidthStyle(vm, col()),
              onclick = onHeaderClick(vm, col())):
           span(class = "eventLog-column-label"):
-            text columnHeaderText(vm, col()))
+            text columnHeaderText(vm, col())
+          # Its separator: the grip a drag resizes the column by (§5.2).
+          span(class = EventLogColumnGripClass,
+               `data-ct-column-separator` = $col()):
+            discard)
 
   # The rows: the held window, keyed by position in the list.
   forEachKeyed[int, R, N](r, tbodyEl,

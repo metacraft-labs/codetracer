@@ -38,7 +38,9 @@ import std/[strutils, tables, unittest]
 
 import ../../editing_core
 
-const ExpectedAssertions = 1178
+const ExpectedAssertions = 1180
+  ## 1178 → 1180 with PLAT-70 Part B's `list.show-detail` rows (CUA
+  ## `Ctrl+K Ctrl+I`, Emacs `Ctrl+H .`; one `when` assertion per shipped row).
   ## 1149 → 1160 with the program-menu rows (10 CUA, 1 Emacs; one `when`
   ## assertion per shipped row) → 1162 with the web Run and Export rows →
   ## 1163 with `Alt+1` → 1164 with Emacs's `Enter` in the read-only Debug

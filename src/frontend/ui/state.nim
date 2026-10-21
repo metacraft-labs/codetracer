@@ -28,6 +28,9 @@ import isonim/core/[signals, computation]
 from isonim/web/dom_api import nil
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
+# Horizontal-Overflow.md §5: the State pane's values are table cells.
+from ../viewmodel/views/isonim_state_view import attachStateTableOverflow
+from std/jsffi import JsObject
 import isonim_origin_chain
 import origin_chain_runtime
 
@@ -118,7 +121,8 @@ proc observePlaceholderBadges(container: dom_api.Element; vm: StateVM) =
 
 setPanelDecorator(Content.State,
   proc(host: dom_api.Element; session: SessionViewModel) =
-    observePlaceholderBadges(host, session.stateVM))
+    observePlaceholderBadges(host, session.stateVM)
+    attachStateTableOverflow(cast[JsObject](host), session.stateVM))
 
 # ---------------------------------------------------------------------------
 # Origin Chain side-panel mount (M4 deliverable #9). The panel lives

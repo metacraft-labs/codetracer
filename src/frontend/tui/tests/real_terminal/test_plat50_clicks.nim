@@ -476,12 +476,12 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
   test "a click on a value expands it; a right click offers history and origin":
     var sess = open()
     sess.send(":goto 114\r")
-    let (rx, cx) = sess.waitFor("▶ EXPRESSION")
+    let (rx, cx) = sess.waitFor("▶ EXPRESSI")
     sess.press(rx, cx + 4)
-    discard sess.waitFor("▼ EXPRESSION")
+    discard sess.waitFor("▼ EXPRESSI")
     ck sess.snap().findRow("[0]", fromCol = cx)[0] == rx + 1
     sess.press(rx, cx + 4)
-    discard sess.waitFor("▶ EXPRESSION")
+    discard sess.waitFor("▶ EXPRESSI")
     sess.press(rx, cx + 4, RightButton)
     let (rh, ch) = sess.waitFor("Toggle value history")
     let s = sess.snap()
@@ -548,9 +548,9 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
   test "`o` on the selected variable asks for its origin and answers":
     var sess = open()
     sess.send(":goto 114\r")
-    let (rx, cx) = sess.waitFor("▶ EXPRESSION")
+    let (rx, cx) = sess.waitFor("▶ EXPRESSI")
     sess.press(rx, cx + 4)                    # selects (and expands) it
-    discard sess.waitFor("▼ EXPRESSION")
+    discard sess.waitFor("▼ EXPRESSI")
     sess.send("o")
     # The walk's first hop, as `:origin` answers it: no freeze on the query.
     discard sess.waitFor("EXPRESSIONS computed from", timeoutMs = 30000)

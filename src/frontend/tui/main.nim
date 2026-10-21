@@ -108,6 +108,8 @@ const ShippedDesktopConfig = staticRead("../../config/default_config.yaml")
   ## `keybindings.json` (Base-Keymaps-And-Layer-Stack.md §3.5).
 import ../viewmodel/host/icons_preference
 import ../viewmodel/host/layout_preferences
+import ../viewmodel/host/table_column_widths
+from codetracer_embed import withColumnWidths, ColumnWidthEntry
 
 const
   IdlePollMs = 200
@@ -130,7 +132,11 @@ proc idleWaitMs(rt: TuiRuntime): int =
   ## while a search streams (PLAT-57).
   if nativeFindInFiles.running:
     return SearchPollMs
-  let due = rt.autoHideDueMs()
+  # PLAT-70 Part B: a truncated cell's tooltip is due too (500 ms of rest).
+  var due = rt.autoHideDueMs()
+  let hover = rt.cellHoverDueMs()
+  if hover >= 0 and (due < 0 or hover < due):
+    due = hover
   if due < 0:
     return IdlePollMs
   clamp(int(due - nowMs()), 5, IdlePollMs)
@@ -311,6 +317,20 @@ proc wireLayoutPreferences(rt: TuiRuntime;
     let (known, which) = parseSettingName(name)
     if not known: "unknown setting " & name
     else: saveLayoutPreference(product, which, on)
+
+proc wireColumnWidths(rt: TuiRuntime) =
+  ## PLAT-70 Part B (Horizontal-Overflow.md §5.2): the column widths every
+  ## front-end remembers (`host/table_column_widths`), read at start-up into
+  ## the Event Log's model, and written whenever one changes here. A stored
+  ## document that is not widths is refused by name on the status line.
+  let stored = loadColumnWidths()
+  if stored.message.len > 0:
+    rt.app.notification = stored.message
+  rt.app.eventLog.columns =
+    rt.app.eventLog.columns.withColumnWidths(stored.entries)
+  rt.saveColumnWidths = proc(table: string;
+                             entries: seq[ColumnWidthEntry]): string =
+    saveColumnWidths(table, entries)
 
 proc adoptMouseMetrics(driver: TerminalDriver; n: StartupNegotiation) =
   ## PLAT-51 (Layout-ViewModel §4.2.2): what the start-up round said about
@@ -666,6 +686,7 @@ proc interactive(command: TuiCommand): int =
   discard rt.enableLayoutBinding()
   wireLayoutPreferences(rt, command.focusHighlight, command.liveResize,
                         command.overflowMarkers)
+  wireColumnWidths(rt)
   rt.layoutCommitted = proc(rt: TuiRuntime) =
     # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
     # know about, on the status line, and is not fatal: the arrangement is
@@ -1129,7 +1150,8 @@ proc interactive(command: TuiCommand): int =
       let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
-      let hoverChanged = rt.tickAutoHide(nowMs())
+      let hoverChanged = rt.tickAutoHide(nowMs()) or
+                         rt.tickCellHover(nowMs())
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched:
@@ -1399,6 +1421,7 @@ proc editInteractive(command: TuiCommand): int =
   # written.
   discard rt.enableLayoutBinding()
   wireLayoutPreferences(rt, soUnset, soUnset, soUnset)
+  wireColumnWidths(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -1440,7 +1463,8 @@ proc editInteractive(command: TuiCommand): int =
       # session is checked on every tick. See `host/build_runner.pollBuild`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
-      let hoverChanged = rt.tickAutoHide(nowMs())
+      let hoverChanged = rt.tickAutoHide(nowMs()) or
+                         rt.tickCellHover(nowMs())
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or keysChanged:

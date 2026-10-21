@@ -56,6 +56,9 @@ import ../../../../common/value_presentation
 import ../formatters/type_formatters
 import ./diff_highlighter
 import ./styled_row
+# PLAT-70 Part B: the cut cells (Horizontal-Overflow.md §5.1).
+from codetracer_embed import FittedCell, fitCell, presentedCell, CutCell,
+  fullValueText
 
 export type_formatters, diff_highlighter
 
@@ -150,6 +153,9 @@ type
     nameCells*: int
       ## PLAT-51: the name column's width the user dragged its separator to
       ## (the desktop's column resize), 0 for the default share.
+    key*: string
+      ## PLAT-70 Part B: the row's variable path — what a cut cell, its hover
+      ## and its detail name.
 
 const
   CollapsedGlyph* = "▶"
@@ -249,7 +255,7 @@ proc presentation*(spec: TreeRowSpec; cells: int): Presentation =
   ## PLAT-12 needs three things off it that a string cannot carry — the
   ## attribution (WHICH visualiser rendered the row), the media gaps (what a
   ## declaration asked for that this surface could not draw), and the node's
-  ## kind — and `formattedValue` below now calls this rather than `present`
+  ## kind — and `valueCell` below calls this rather than `present`
   ## directly, so the row's text and the row's provenance are the SAME
   ## presentation rather than two renderings that could differ. The same value
   ## at two budgets is two byte strings, which is precisely the confusion
@@ -258,24 +264,25 @@ proc presentation*(spec: TreeRowSpec; cells: int): Presentation =
           measure = terminalMeasure,
           presenters = withVisualisers(spec.visualisers))
 
-proc formattedValue*(spec: TreeRowSpec; cells: int): string =
-  ## The value as this row shows it, ALREADY FITTED.
-  ##
-  ## The signature is the deliverable: it takes the cells the row has and
-  ## returns what fits. `formattedValue(spec)` used to return an unbounded
-  ## string that `treeRow` then handed to `truncateValue` — render everything,
-  ## clip afterwards. The presenter now stops at the budget, which is why a
-  ## 600-entry mapping costs the width of the column rather than 12 KB.
-  ##
-  ## §3.3.4's four rules still meet here; they are just no longer implemented
-  ## here. A byte buffer is a hex dump (`builtin.byte-buffer`), a compound gets
-  ## its type name in front of its member list (`builtin.record`), a focused
-  ## number gains its second base (`Budget.annotated`), and a `0x…` literal
-  ## loses its padding (`normalisedHexLiteral`) — all inside the pipeline, so
-  ## every other surface gets them too.
+proc fullValue*(spec: TreeRowSpec): string =
+  ## PLAT-70 Part B: the row's WHOLE value (`table_overflow.fullValueText`:
+  ## the state panel's caps on one line) — what its tooltip, its detail and
+  ## `list.copy` show, on every front-end the same.
+  fullValueText(spec.presented, spec.value, withVisualisers(spec.visualisers))
+
+proc valueCell*(spec: TreeRowSpec; cells: int): FittedCell =
+  ## PLAT-70 Part B: the VALUE cell, decided by the presenter — its text at
+  ## the row's budget and `Presentation.truncated` — with the whole value
+  ## (`fullValue`, what the tooltip, the detail and `list.copy` show) beside
+  ## it when it was cut. Never a cut of a presentation (PLAT-2's rule).
   if spec.presented.isNil:
-    return truncateToCells(spec.value, cells)
-  spec.presentation(cells).root.text
+    return fitCell(spec.value, cells, terminalMeasure)
+  let p = spec.presentation(cells)
+  # The whole value only where it is needed — a cut cell's hover and detail
+  # — so a row that fits costs one presentation, as before.
+  presentedCell(p.root.text,
+                (if p.truncated: spec.fullValue() else: p.root.text),
+                p.truncated)
 
 proc valueStyleFor*(spec: TreeRowSpec): CellStyle =
   ## The value's style: its presentation class's, or — on a row whose value
@@ -325,18 +332,23 @@ proc moreRowText*(remaining: int): string =
   ## `… 550 more`.
   MoreRowPrefix & $remaining & MoreRowSuffix
 
-proc treeRow*(spec: TreeRowSpec): StyledRow =
+proc treeRowLayout*(spec: TreeRowSpec): tuple[spans: StyledRow; cuts: seq[CutCell]] =
   ## One row of the pane, exactly `spec.width` cells wide.
   ##
   ## Built as spans and fitted, never by string concatenation with an `align`
   ## at the end: a span is what carries the style, and the fixed marker columns
   ## are only fixed if every field before them is measured in cells.
-  result = @[]
+  ##
+  ## PLAT-70 Part B (Horizontal-Overflow.md §5.1): a variable's name, type and
+  ## value are table CELLS — each drawn as `fitCell` / the presenter decided,
+  ## cut with `…` only when it does not fit, and reported in `cuts` (columns
+  ## relative to the row's first cell, `row` 0).
   let width = spec.width
   if width <= 0:
     return
 
   var spans: seq[StyledSpan] = @[]
+  var cuts: seq[CutCell] = @[]
   var used = 0
 
   # The parameters are NOT called `text` and `style`, for the reason
@@ -391,19 +403,30 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
                               else: DefaultCellStyle))
     put(" ", DefaultCellStyle)
     let nameEnd = NameFieldCol + widths.name
-    put(truncateToCells(spec.name, max(0, nameEnd - used)),
-        nameStyleFor(spec))
+    template cell(decided: FittedCell; room: int; columnName: string;
+                  cellStyle: CellStyle) =
+      let fc = decided
+      let at = used
+      put(fc.text, cellStyle)
+      if fc.truncated and room > 0:
+        cuts.add CutCell(row: 0, col: at, width: room,
+                         ellipsisCol: at + cellWidthOf(fc.text) - 1,
+                         key: spec.key, column: columnName, full: fc.full)
+    let nameRoom = max(0, nameEnd - used)
+    cell(fitCell(spec.name, nameRoom, terminalMeasure), nameRoom, "name",
+         nameStyleFor(spec))
     if used < nameEnd:
       put(repeat(' ', nameEnd - used), DefaultCellStyle)
     put(" ", DefaultCellStyle)
     if widths.typ > 0:
-      let typeText = truncateToCells(spec.typeName, widths.typ)
-      put(typeText, TypeStyle)
+      cell(fitCell(spec.typeName, widths.typ, terminalMeasure), widths.typ,
+           "type", TypeStyle)
       let typeEnd = nameEnd + 1 + widths.typ
       if used < typeEnd:
         put(repeat(' ', typeEnd - used), DefaultCellStyle)
       put(" ", DefaultCellStyle)
-    put(formattedValue(spec, widths.value), valueStyleFor(spec))
+    cell(valueCell(spec, widths.value), widths.value, "value",
+         valueStyleFor(spec))
     if spec.controls:
       # PLAT-51: the desktop's value controls, at one computed column on
       # every row (`controlColumn`) so a click reads them where they are.
@@ -431,7 +454,12 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
       if not spans[i].style.hasOwnBackground:
         spans[i].style = spans[i].style.withBackground(SelectedRowBackground)
 
-  result = spans
+  result.spans = spans
+  result.cuts = cuts
+
+proc treeRow*(spec: TreeRowSpec): StyledRow =
+  ## One row of the pane, exactly `spec.width` cells wide.
+  treeRowLayout(spec).spans
 
 proc treeRowText*(spec: TreeRowSpec): string =
   ## The row as text, derived from the spans — so a Tier-2 `regionText` read and

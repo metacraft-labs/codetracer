@@ -1,0 +1,85 @@
+// PLAT-70 Part B (Horizontal-Overflow.md §5): THE TABLE PANES TRUNCATE. A
+// cell whose text does not fit its column is drawn cut with `…` by the
+// browser (`text-overflow: ellipsis`); which cells are cut is the shared
+// model's decision, marked `[data-ct-cut]` by `views/table_overflow_dom.nim`,
+// and that mark is what takes the hover and the `…` click. The Variables pane
+// does not scroll sideways (Variable-State-Pane Decision 3).
+
+[data-ct-cell]
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  min-width: 0
+
+// THE DESKTOP'S CALL TRACE IS NOT HERE: it keeps scrolling sideways
+// (`list_scrubber.styl`, requested 2026-10-16), so its rows are not cut and
+// carry no `data-ct-cell`. Whether it should truncate like the terminal's and
+// GPUI's is open (Horizontal-Overflow.md, Part B's notes).
+
+// The Variables pane's value takes what the row has left, and is cut there:
+// every box from the row down to the value gives up its content width
+// (`min-width: 0`), and the value — otherwise `display: contents`, which
+// has no box to cut — is a block that shrinks.
+.isonim-state .value-expanded > .value-expanded-atom-parent,
+.isonim-state .value-expanded > .value-expanded-compound-parent
+  flex: 1 1 auto
+  min-width: 0
+  max-width: 100%
+
+.isonim-state .value-expanded-atom-parent > div,
+.isonim-state .value-expanded-compound-parent > div
+  min-width: 0
+  flex: 1 1 auto
+  overflow: hidden
+
+.isonim-state .value-view
+  min-width: 0
+  max-width: 100%
+  overflow: hidden
+
+.isonim-state .value-view > [data-ct-cell]
+  display: block
+  position: static
+  width: auto
+  flex: 0 1 auto
+
+// A cut cell's `…` is its last character: the pointer says it can be pressed
+// (Pointer-Affordances: a truncated cell's `…` is `pointer`).
+[data-ct-cut]
+  cursor: pointer
+
+// The Event Log's column separators: a grip at each header cell's right edge.
+.eventLog-column-header > span
+  position: relative
+
+.eventLog-column-grip
+  position: absolute
+  top: 0
+  right: 0
+  width: 6px
+  height: 100%
+  cursor: col-resize
+
+// A row's full text, open under it.
+.ct-table-detail
+  display: block
+  white-space: pre
+  color: colors-ui-text-primary-body
+  font-family: inherit
+
+td > .ct-table-detail-line,
+.ct-table-detail > .ct-table-detail-line
+  white-space: pre
+
+// The full text of a truncated cell, after the pointer rested on it.
+.ct-table-tooltip
+  position: fixed
+  z-index: 1000
+  background-color: colors-ui-surface-base-canvas
+  color: colors-ui-text-primary-body
+  padding: 0.25em 0.5em
+  border-radius: 0.25em
+  box-shadow: 0 0.25em 0.5em rgba(0, 0, 0, 0.2)
+  font-family: inherit
+  white-space: pre
+  pointer-events: none

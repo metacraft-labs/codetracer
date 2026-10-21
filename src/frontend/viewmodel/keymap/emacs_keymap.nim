@@ -281,6 +281,10 @@ const
             whenText: "listFocus && !dragActive",
             table: ListTable),
     BaseRow(chords: "Ctrl+S", operation: "list.filter", whenText: "listFocus", table: ListTable),
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3): `display-local-help`, the
+    # help at point — the focused row's full text under it.
+    BaseRow(chords: "Ctrl+H .", operation: "list.show-detail", whenText: "listFocus",
+            table: ListTable),
     BaseRow(chords: "Up", operation: "context-menu.focus-previous", table: ContextMenuTable),
     BaseRow(chords: "Ctrl+P", operation: "context-menu.focus-previous", table: ContextMenuTable),
     BaseRow(chords: "Down", operation: "context-menu.focus-next", table: ContextMenuTable),

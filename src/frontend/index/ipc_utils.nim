@@ -1,7 +1,7 @@
 import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, host_clients, base_handlers, bootstrap_cache, lsp_bridge,
-  review_dataset, keybindings,
+  review_dataset, keybindings, table_columns,
   ns9_panes,
   hcr_launch,
   file_tree_operations,
@@ -435,6 +435,10 @@ proc configureIpcMain* =
     # into `keybindings.json` (`index/keybindings.onKeybindingsImport`).
     "keybindings-import"
     "keybindings-request"
+    # PLAT-70 Part B: the table panes' remembered column widths, one
+    # document with the terminal and GPUI (`index/table_columns`).
+    "table-columns-request"
+    "table-columns-save"
     # Auto-hide (pinned panel) state.  It is persisted separately from the
     # GoldenLayout config because pinning a panel REMOVES it from the
     # GoldenLayout tree — see `onSaveAutoHideState` in `index/window.nim`.

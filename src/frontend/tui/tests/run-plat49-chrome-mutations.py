@@ -762,9 +762,11 @@ ARMS = [
         "  let header = false\n",
         S2_LOGHEAD,
         "the terminal's event log draws no column header"),
+    # EL5 RE-AIMED 2026-10-21 (PLAT-70 Part B): the rows and the header are
+    # laid out by ONE table, `columnCellsOf`; hidden columns enter there.
     Arm("EL5", EVLOGVIEW,
-        "  let shown = model.columns.visibleColumns\n  for k, col in shown:\n",
-        "  let shown = model.columns.order\n  for k, col in shown:\n",
+        "  let shown = model.columns.visibleColumns\n  var at = startCol\n",
+        "  let shown = model.columns.order\n  var at = startCol\n",
         S2_LOGHEAD,
         "the terminal's rows draw every column, hidden ones included"),
     Arm("EL6", RUNTIME,
@@ -897,9 +899,11 @@ ARMS = [
         "        discard\n",
         P2_HOVER,
         "the terminal's pointer passing over a label previews nothing"),
+    # FT10 RE-AIMED 2026-10-21 (PLAT-70 Part B): the same clock line now
+    # also ticks the table cells' hover (`or rt.tickCellHover`).
     Arm("FT10", TUIMAIN,
-        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = rt.tickAutoHide(nowMs())\n",
-        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = false\n",
+        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = rt.tickAutoHide(nowMs()) or\n",
+        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = false or\n",
         P2_HOVER,
         "the terminal's loop never runs the hover's clock"),
     Arm("FT11", GESTURES,
@@ -1135,9 +1139,11 @@ ARMS = [
         "GPUI's window keeps the first session's ViewModels in every leaf"),
 
     # --- review: the desktop's column menu --------------------------------------
+    # EM1 RE-AIMED 2026-10-21 (PLAT-70 Part B): a width alone no longer
+    # rebuilds the table, so the rebuild is gated on order and hidden set.
     Arm("EM1", DESKEVLOG,
-        "        if comp.init and wanted != appliedEventLogColumns:\n",
-        "        if false:\n",
+        "        if comp.init and (wanted.order != appliedEventLogColumns.order or\n",
+        "        if false and (wanted.order != appliedEventLogColumns.order or\n",
         D_DESKTOP_B,
         "the desktop's column menu changes the ViewModel and not the table"),
     Arm("EM2", DESKEVLOGVIEW,

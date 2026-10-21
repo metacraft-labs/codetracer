@@ -32,7 +32,7 @@ import std/strutils
 import fixture_provider
 
 const WindowCaptures* = ["plat45", "plat47", "plat48", "plat68", "plat69",
-                         "plat70a", "m71"]
+                         "plat70a", "plat70b", "m71"]
   ## Every capture `gpui-window-captures.sh` accepts, in its default order.
 
 proc pythonScript(name, program: string): FixtureSpec =
@@ -57,8 +57,9 @@ proc windowCaptureFixtures*(capture: string): seq[FixtureSpec] =
   of "plat47":
     # PLAT-47's driver scrolls a call trace longer than any section.
     result.add(pythonScript("call_pages", "test-programs/call_pages/main.py"))
-  of "plat70a":
-    # PLAT-70 Part A scrolls a line wider than any pane.
+  of "plat70a", "plat70b":
+    # PLAT-70 Part A scrolls a line wider than any pane; Part B cuts the
+    # Event Log's cells of the same recording.
     result.add(pythonScript("wide_lines", "test-programs/wide_lines/main.py"))
   of "m71":
     # M71 overflows the State, Files and VCS panes of a two-root program.

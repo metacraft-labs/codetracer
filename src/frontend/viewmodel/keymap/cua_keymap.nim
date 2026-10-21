@@ -260,6 +260,11 @@ const
             table: ListTable),
     BaseRow(chords: "Ctrl+F", operation: "list.filter", whenText: "listFocus", table: ListTable),
     BaseRow(chords: "Ctrl+C", operation: "list.copy", whenText: "listFocus", table: ListTable),
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3): the focused row's full
+    # text under it — VS Code's `editor.action.showHover` chord, applied to a
+    # focused row (CUA-Keymap.md §3.11 → §3.10).
+    BaseRow(chords: "Ctrl+K Ctrl+I", operation: "list.show-detail", whenText: "listFocus",
+            table: ListTable),
     # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes have no caret
     # and are not trees, so the arrows move their view sideways.
     BaseRow(chords: "Left", operation: "view.scroll-left", whenText: OutputPanesWhen,

@@ -99,6 +99,10 @@ import
   .. / common / ct_event
 # Find in Files' toggles: the operations the pane's field keys run.
 from viewmodel/viewmodels/search_results_vm import SearchOptionOperations
+# PLAT-70 Part B: the table panes' palette entries.
+from viewmodel/viewmodels/omnibar_sources import ShowDetailLabel,
+  WidenColumnLabel, NarrowColumnLabel
+from viewmodel/viewmodels/table_overflow import ColumnStepCells
 
 
 # Desktop-test machinery: it drives an agentic worktree by running arbitrary
@@ -1725,6 +1729,9 @@ proc configure(data: Data) =
   # overwrote their neighbours) went with the binding table. The router's two
   # hooks into modules it cannot import:
   toggleSidePanelsHook = proc(data: Data) = toggleSidePanels(data)
+  # PLAT-70 Part B: `table.resize-column` on the Event Log.
+  resizeEventLogColumnHook = proc(arg: string) =
+    event_log.resizeEventLogColumn(arg)
   # Find in Files' field toggles (`Alt+C` / `Alt+W` / `Alt+R` where the
   # field has the focus, `searchInputFocus`).
   proc registerSearchToggle(operation: string) =
@@ -1862,6 +1869,14 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
     return
 
   data.ui.commandPalette.interpreter.commands = getCommands(data.ui.menuNode)
+  # PLAT-70 Part B: the table panes' palette entries, which no menu item
+  # carries (the terminal's and GPUI's are `omnibar_sources.tableCommands`).
+  for (label, action) in [(ShowDetailLabel, aShowDetail),
+                          (WidenColumnLabel, aWidenColumn),
+                          (NarrowColumnLabel, aNarrowColumn)]:
+    data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
+      name: cstring(label), kind: ActionCommand, action: action,
+      shortcut: displayedChord(action))
   data.ui.commandPalette.interpreter.commandsPrepared = @[]
   for key, command in data.ui.commandPalette.interpreter.commands:
     data.ui.commandPalette.interpreter.commandsPrepared.add(
@@ -6087,6 +6102,13 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aResetLayout: proc(actionData: JsObject) = # aResetLayout
     ## PLAT-45. View > Reset Layout — see `resetLayoutToSharedDefault`.
     resetLayoutToSharedDefault(data),
+  aShowDetail: proc(actionData: JsObject) = # aShowDetail
+    ## PLAT-70 Part B: the palette's **Show Detail** (`list.show-detail`).
+    runPaletteOperation("list.show-detail", ""),
+  aWidenColumn: proc(actionData: JsObject) = # aWidenColumn
+    runPaletteOperation("table.resize-column", "+" & $ColumnStepCells),
+  aNarrowColumn: proc(actionData: JsObject) = # aNarrowColumn
+    runPaletteOperation("table.resize-column", "-" & $ColumnStepCells),
 ]
 
 data.actions = actions

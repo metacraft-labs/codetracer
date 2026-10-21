@@ -245,7 +245,11 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 3269
+  ExpectedAssertions = 3263
+    ## **3269 → 3263, 2026-10-20 (PLAT-70 Part B): NO HORIZONTAL THUMB** — the
+    ## state pane does not scroll sideways (Horizontal-Overflow §5), so the
+    ## thumb's three readings (`position`, `h`, `left`) are gone at each of the
+    ## two viewports; `horizontal == 0` is asserted instead.
     ## **3291 → 3269, 2026-10-17: THE NAME-COLUMN RULE'S SUITE WAS REMOVED**
     ## with `leaves.stateNameColumnPx` / `stateValueColumnPx` themselves — six
     ## cases, 21 assertions, plus the one reading in the empty-ViewModel case
@@ -796,7 +800,9 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
       # at rest at its origin, and the scroll box lets each row take its
       # natural width (`items: start`) so a long value reaches past the pane.
       # `stepIn=5` holds `__builtins__`, whose value is thousands of columns
-      # wide, so a horizontal thumb must be drawn: 8 px thick, at the origin.
+      # wide. Since PLAT-70 Part B (Horizontal-Overflow §5, Variable-State-Pane
+      # Decision 3) a table pane does not scroll sideways: the value is cut
+      # with `…` and revealed by its hover / detail, so NO horizontal thumb.
       let plan = windowPlan(w, h, PopulatedOps[0])
       let pane = plan.paneOf("state")
       ck not pane.isNil
@@ -830,7 +836,7 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
           ck t.pxStyle("w") == 8
         else:
           ck false
-      ck horizontal == 1
+      ck horizontal == 0
 
     test "at " & vp & " the pane's TAB STRIP is the desktop's segmented control":
       let plan = windowPlan(w, h, PopulatedOps[0])

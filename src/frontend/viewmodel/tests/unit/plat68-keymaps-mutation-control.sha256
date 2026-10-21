@@ -3,18 +3,12 @@
 # `specs:` is $CT_SPECS_DIR, `nim-termctl:` is
 # $NIM_TERMCTL_SRC. Refreshed with --record-control-hashes,
 # gated by the needle scan (§39a).
-# RE-RECORD, 2026-10-21, on `951f9f5ce` (agents) with the VCS pane's
-# focus-gain refresh uncommitted (CT_SPECS_DIR=../codetracer-pm, whose
-# CUA-Keymap.md matches the recorded digest). MOVED: src/frontend/tui/main.nim,
-# src/frontend/tui/host/terminal_driver.nim, src/frontend/gpui/main.nim, and
-# nothing else. GRADED: baseline green (13 suites), 41 of 41 arms KILLED, and
-# the declared survivor N1 survived. Measured on nixos-ci-bare-002.
 81f87d59e91be6f955683c856920521ec27991d225c46115f20661d483986064  src/common/key_names.nim
 e4e1aa250db4ae5618efed59727aa4886e38349f67e6bf808ac9bea66569646a  src/frontend/viewmodel/keymap/editing_keymap.nim
 87d56b404425487fd8d6f0ac598dad1a1385ac7f5ec02fd9d2f4f41d4449ab71  src/frontend/viewmodel/keymap/keymap_selection.nim
 39b43aeaa420b733bc2b8df2299aa5f25b0954f054606f1026a83c83be0d8b9e  src/frontend/viewmodel/keymap/when_expr.nim
-9357299ebbadc2a4c1e992d8524458cc7e762a543b7d42d55bd24cb99f5eb929  src/frontend/viewmodel/keymap/cua_keymap.nim
-2c77745c37dbecf5c141d47fa9e92a744ed6b75b13aa1c6250fd1ccbb4e008da  specs:spec/GUI/CUA-Keymap.md
+f85be95a20f9570fbba1b329204851ad7f2ea04ba8d8c95efd95e76f22f88b44  src/frontend/viewmodel/keymap/cua_keymap.nim
+352ad5cf4b12568c5f15efbd9b6e44a83674f898d6e1be24d4d200ac37aecda8  specs:spec/GUI/CUA-Keymap.md
 faee4585c9cb3d80f313f91bc9d21558054a45042c1cacac97ab9dbd1515a7df  nim-termctl:nim_termctl/posix_backend.nim
 87473cf81da38eaede1515e3e1d3b08b86d729f83724e10366fa126c25d8989b  src/frontend/viewmodel/keymap/keymap_router.nim
 a46221e9805ad8c30ce885c064a3aec08bc29dbb53929bb9d855d7e347c55bba  src/frontend/viewmodel/keymap/layer_stack.nim
@@ -22,32 +16,32 @@ a46221e9805ad8c30ce885c064a3aec08bc29dbb53929bb9d855d7e347c55bba  src/frontend/v
 22091e34cac128635c133093fe54db4b5aaffb70f6403f77232291833912770d  src/frontend/viewmodel/editing_core.nim
 ac1765ef010c344e12e6f44cc271de52488c61e774b3372fa65d8e7fd7329b21  src/frontend/tui/app/theme/roles.nim
 0587764dba7f18066eeb0ff826504824bdad1db9b8e8ae07c3054fa3c7d90be8  src/frontend/gpui/chrome.nim
-2950b5dc87c8070005bff8b6452bbd9ae9d27d51ed5e6fd3b1eb034af3892a1e  src/frontend/tui/main.nim
+bbf8d7a66f86bbbb646cd77e2b2c5fe5a608dbcf67b6bb9ec5ea0e298a66ab19  src/frontend/tui/main.nim
 1ce72f94c60951775db5ea07c83f9caef1bd1137583427760cb2320db999109b  src/frontend/tui/host/terminal_driver.nim
 d22b436a31d0fa8139ed2c80bc91362c43f11e4da4b5097cdd00b2e008b336e5  src/frontend/tui/app/input/motions.nim
-f2d6e4db241c0429347d7f6299ca7a43d7fa4fcb043e3768d0c06db05dcaff31  src/frontend/gpui/main.nim
+2ee31097ae613900b9f1f6be1b86900f84e0a2f6ad1bf16370ff42b69716973c  src/frontend/gpui/main.nim
 dd1855c0f91ad81ceec06ea40b8cc74ef692970801d4230a068dbe296a3fe527  src/frontend/ui/monaco_operations.nim
 9b466a2a6f53333f2f1fe2543cc3fec00509317ef8ef410b1ac222e6b58ecae1  isonim-tui:isonim_tui/event_dispatch.nim
-3d189e863baf61829b2415058b6e36d1e38cc42c84dd1deee9debd02fe5cf6d0  src/frontend/tui/app/runtime.nim
+7a1f850f56fb8b102f3052c4b4fbcbc35e2f357b45c5f82116c92e2b8791c47e  src/frontend/tui/app/runtime.nim
 5bbea98e89ce91e8c0aaee1620c9f92c728efab5b34b63ab1e20b39bbf4b0169  src/frontend/viewmodel/keymap/alt_tap.nim
 b57f435ae94a864eeeaf4f026cf926c095925500492ccfa89165a28eb47b1ba4  src/frontend/viewmodel/viewmodels/product_menu.nim
-9a6b2f97517e3536bd65c917a6fa3ae929daa046ceaaa085c83a15a08fc6b8fe  src/frontend/tui/app/views/top_bar.nim
+fa8a8c492958370ee0bab09d3b85ce25a0f2a33dc2c743a4d8decef665fc9772  src/frontend/tui/app/views/top_bar.nim
 4243f588d96eef7748616586dfe85e692273aa467242a17221f3a2341b5730b4  src/frontend/viewmodel/editor/operations.nim
-ee358b413428a63b0205b3a4ff18d3187eab9ac50d31a7dc5e535e8c7b26cb74  src/frontend/viewmodel/keymap/navigation_keymap.nim
-68fb6322508534db461630bc5c78b4d81fd9765b0893d199aa1a10bb04be340f  src/frontend/viewmodel/keymap/emacs_keymap.nim
+86b5793c2d03dc436859709655716ccec51b5a73b19a305f95c583de2175eba7  src/frontend/viewmodel/keymap/navigation_keymap.nim
+da220e63cacd6a0800761fa2855ef3308c5e419eab81cfc3c2e0fd0385a8009c  src/frontend/viewmodel/keymap/emacs_keymap.nim
 a8e9df0a2bd6733d79f217a70813e0f76f968f796b1c4c319d4ab22f9615589a  src/frontend/viewmodel/tests/unit/test_plat68_key_decoding.nim
-6eab044cc60510ca546005247d5fca3f67c2555feb75b8b4422e6d381201012b  src/frontend/viewmodel/tests/unit/test_plat68_base_keymaps.nim
-36e83ce75f9d19c30272f3146309771fa6c8c3df60b9f637bbe415d5cc1a976a  src/frontend/viewmodel/tests/unit/test_plat68_cua_oracle.nim
+8bb8955c92299ac7367c44c7ac3e32d7b575fe99c72ea8ac2ca4cb79c5d47f51  src/frontend/viewmodel/tests/unit/test_plat68_base_keymaps.nim
+2e50a4981be15729f4af82dba176be51f45e46d28666db836e671f1556acc0fc  src/frontend/viewmodel/tests/unit/test_plat68_cua_oracle.nim
 1dfb6b59d5fa4a482dbd190b20e35b1476e287b60240f50c3830007bcaff0c45  src/frontend/tui/tests/real_terminal/test_plat68_keymaps_pty.nim
 8329970f0614fc19f62bd78705e8f7dece1c0ed9d639ffb82f5c88a337025597  ci/test/cua-keymap-extractor.sh
 fd211cdc0fbb42e5618881f8d06d424a4b3401fbf46bf2ff3659ed0984ad291a  tools/cua-keymap-extractor.py
 87cad810dab8033e42c324c43ae137662e164f09b835be9b292e0a5ef1e5cda2  src/frontend/viewmodel/tests/unit/test_plat68_layers.nim
 b40d6b4b64d8567be93d69ca051d28e22c5f52b6d92f85259ab6e9656ab1bd37  src/frontend/tui/tests/real_terminal/test_plat68b_pty.nim
-f8be5afb4773bb8da0de8bb25f2feefdc4c792efbb7b6754264a0d5dd70b1d18  src/frontend/gpui/tests/test_plat68_gpui_keys_plan.nim
+8d9cec65d7a569fc116ddc0c138a810977855ff01ed76b137d176680bdb1dba7  src/frontend/gpui/tests/test_plat68_gpui_keys_plan.nim
 74b076480426dfae3b1452f87c76d479912fc9f9c03d2397608a47d2fb301472  src/frontend/tui/tests/test_plat68_diff13.nim
 81514a366d2cbdd508218a9f879ede5b6b579f76ceafb8b05b5525ff8174c9d3  src/frontend/tui/tests/test_plat51b_parity.nim
 c374edc16244a310c022e68829ac1a7734013337787921a483e166781c8eca8c  src/frontend/tui/tests/test_plat28_edit_breakpoints.nim
-e3f28185cab7af342ab7f3ee4af2816c7c19735f7522077d2990210afad6ee6b  src/frontend/tui/app/tests/test_keymap_no_conflicts.nim
+fb0b3adfad04cc260cb16f7537a719f13c39dc4ef42c78553932d83209a3fb8d  src/frontend/tui/app/tests/test_keymap_no_conflicts.nim
 ef58bbca4cefc00557653ca49aa385c717bce88fb46cb9fa024adf4ea5d310fd  src/frontend/tests/monaco_operations_test.nim
 2dc51099c5a0cf6318bba5a8f34c88eb19a42561644f5282cba716d18c7a7b35  isonim-tui:../tests/test_event_propagation.nim
 8bbfb54adb39ff422430a504a871ef1740814aee93599b63734b1d532327b5ac  src/frontend/viewmodel/tests/unit/test_plat68_menu_access.nim

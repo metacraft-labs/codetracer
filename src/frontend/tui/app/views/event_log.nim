@@ -72,6 +72,11 @@ from codetracer_embed import EventLogColumn, EventLogColumns,
   RecordedEventOrder, clickedHeader
 # PLAT-51: the scrollbar scrubber's shared model.
 from codetracer_embed import ScrubberModel, scrubberModel
+# PLAT-70 Part B: the cut cells, the open detail and the column widths
+# (Horizontal-Overflow.md §5).
+from codetracer_embed import FittedCell, fitCell, CutCell, DetailToggle,
+  detailView, isOpen, isOpenIn, columnWidthOr, EventLogTableName
+from ../formatters/type_formatters import terminalMeasure
 
 import ../layout/profile
 import ./styled_row
@@ -180,6 +185,11 @@ type
       ## PLAT-51: the row of the CURRENT recording position in the whole log
       ## (the last event at or before the debugger's tick — the engine's
       ## `indexAtTick`), -1 when unknown: the scrubber track's mark.
+    detail*: DetailToggle
+      ## PLAT-70 Part B: the event whose full text is open under its row
+      ## (`list.show-detail`, a click on a `…`); its key is the event's number.
+    copyChord*: string
+      ## The resolved `list.copy` chord the detail's hint names (KL-8).
 
   EventLogScreen* = object
     ## One painted pane, plus the counts and coordinates a test asserts on.
@@ -205,6 +215,15 @@ type
     columnCells*: seq[(EventLogColumn, int, int)]
       ## Each visible column with its first screen column and its width, in
       ## display order — the header's cells, for a click and for a test.
+    separators*: seq[(EventLogColumn, int)]
+      ## PLAT-70 Part B: each column separator on the header row — the gap
+      ## cell right of a column — and the column a drag on it resizes.
+    cuts*: seq[CutCell]
+      ## PLAT-70 Part B: every cell drawn cut, with its `…` (HO-8).
+    lineRows*: seq[int]
+      ## Each body line's index in `visible`, -1 for a line of an open detail.
+    detailRows*: seq[int]
+      ## The SCREEN rows the open detail's lines are on.
     trackCol*: int
       ## PLAT-51: the scrollbar scrubber's column (the pane's rightmost), -1
       ## when the pane is too small to draw one.
@@ -261,6 +280,8 @@ const
   EmptyLogText* = "no recorded events"
   EmptyLogStyle* = CellStyle(role: srChromeMuted, italic: true)
   PendingStyle* = CellStyle(role: srChromeMuted, italic: true)
+  DetailStyle* = CellStyle(role: srChromeText)
+    ## PLAT-70 Part B: an open detail's lines, the row's text in full.
 
   OutputStyle* = CellStyle(role: srEventOutput)
   MutationStyle* = CellStyle(role: srEventMutation)
@@ -601,16 +622,40 @@ proc locationTextFor*(event: EventRow): string =
   if event.file.len == 0: ""
   else: pathBaseName(event.file) & ":" & $event.line
 
-proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
-                    width: int): StyledRow =
-  ## One body row: `     38 out  main.py:111  2 + 3 = 5`.
-  result = @[]
+proc columnCellsOf*(model: EventLogModel; startCol, width: int):
+    seq[(EventLogColumn, int, int)]
+  ## Defined with the header, below.
+
+func eventCellText*(event: EventRow; col: EventLogColumn): string =
+  ## What `col` says about `event`, whole — the cell before it is fitted.
+  case col
+  of elcTick: $event.tick
+  of elcIndex:
+    # The EVENT's number in the recorded log (`EventRow.index`), not the
+    # row's position — the two differ once a header click ordered the log
+    # by another column (PLAT-50).
+    $event.index
+  of elcLocation: locationTextFor(event)
+  of elcKind: categoryLabel(event.category).strip
+  of elcOutput: event.content.strip(leading = false, trailing = true)
+
+proc eventRowLayout*(model: EventLogModel; row: EventLogRow; startCol,
+                     width, screenRow: int):
+    tuple[spans: StyledRow; cuts: seq[CutCell]] =
+  ## One body row, `     38 out  main.py:111  2 + 3 = 5`, and the cells it
+  ## drew cut.
+  ##
+  ## PLAT-70 Part B (Horizontal-Overflow.md §5.1): EVERY CELL IS FITTED TO ITS
+  ## COLUMN BY `fitCell` — cut with `…` when it does not fit, untouched when
+  ## it does — so the `…` on screen is exactly the shared decision's
+  ## `truncated` (HO-8). The columns are `columnCellsOf`'s, the header's.
   if width <= 0:
     return
   case row.kind
   of elrPending:
-    result.add StyledSpan(text: truncateToCells(PendingText, width),
-                          style: PendingStyle)
+    result.spans.add StyledSpan(text: fitCell(PendingText, width,
+                                              terminalMeasure).text,
+                                style: PendingStyle)
     return
   of elrEvent:
     discard
@@ -618,48 +663,35 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
   let atCurrent = event.tick == model.currentTick
   let selected = row.index == model.selected
   var spans: seq[StyledSpan] = @[]
-  # PLAT-49 part B: THE VISIBLE COLUMNS, in the model's order, each at the
-  # width `columnCellsOf` gives the header — one table of widths, so a
-  # header title sits over its column whatever the order.
-  let shown = model.columns.visibleColumns
-  for k, col in shown:
-    if k > 0:
-      spans.add StyledSpan(text: " ", style: DefaultCellStyle)
-    case col
-    of elcTick:
-      spans.add StyledSpan(
-        text: padLeft($event.tick, TickFieldCells),
-        style: (if atCurrent: CurrentTickStyle else: TickStyle))
-    of elcIndex:
-      # The EVENT's number in the recorded log (`EventRow.index`), not the
-      # row's position — the two differ once a header click ordered the log
-      # by another column (PLAT-50).
-      spans.add StyledSpan(text: padLeft($event.index, IndexFieldCells),
-                           style: TickStyle)
-    of elcLocation:
-      spans.add StyledSpan(
-        text: padRight(truncateToCells(locationTextFor(event),
-                                       LocationFieldCells),
-                       LocationFieldCells),
-        style: LocationStyle)
-    of elcKind:
-      spans.add StyledSpan(text: categoryLabel(event.category),
-                           style: categoryStyle(event.category))
-    of elcOutput:
-      let text = event.content.strip(leading = false, trailing = true)
-      # The output takes the rest of the row unless a column follows it.
-      spans.add StyledSpan(
-        text: (if k == shown.high: text
-               else: padRight(truncateToCells(text, OutputFieldCells),
-                              OutputFieldCells)),
-        style: ContentStyle)
   var used = 0
-  for span in spans:
-    if used >= width:
-      break
-    let fitted = truncateToCells(span.text, width - used)
-    if fitted.len == 0:
+  for (col, at, w) in model.columnCellsOf(0, width):
+    if at > used:
+      spans.add StyledSpan(text: repeat(' ', at - used), style: DefaultCellStyle)
+      used = at
+    if w <= 0 or used >= width:
       continue
+    let room = min(w, width - used)
+    let cell = fitCell(eventCellText(event, col), room, terminalMeasure)
+    let drawn = cellWidthOf(cell.text)
+    # Numbers are right-aligned in their column; text is left-aligned.
+    let text = if col in {elcTick, elcIndex}: padLeft(cell.text, room)
+               else: padRight(cell.text, room)
+    let style = case col
+                of elcTick: (if atCurrent: CurrentTickStyle else: TickStyle)
+                of elcIndex: TickStyle
+                of elcLocation: LocationStyle
+                of elcKind: categoryStyle(event.category)
+                of elcOutput: ContentStyle
+    spans.add StyledSpan(text: text, style: style)
+    if cell.truncated:
+      let first = startCol + used +
+                  (if col in {elcTick, elcIndex}: room - drawn else: 0)
+      result.cuts.add CutCell(row: screenRow, col: startCol + used,
+                              width: room, ellipsisCol: first + drawn - 1,
+                              key: $event.index, column: $col,
+                              full: eventCellText(event, col))
+    used += room
+  for span in spans:
     var style = span.style
     # THE CURSOR'S HIGHLIGHT ONLY TOUCHES SPANS WITH NO BACKGROUND OF THEIR OWN.
     # CTUI-7's first draft of `tree_node.treeRow` painted the selection over
@@ -667,15 +699,25 @@ proc eventRowSpans*(model: EventLogModel; row: EventLogRow;
     # the same shape and takes the fix rather than the defect.
     if selected and not style.hasOwnBackground:
       style = style.withBackground(SelectedBackground)
-    result.add StyledSpan(text: fitted, style: style)
-    used += cellWidthOf(fitted)
+    result.spans.add StyledSpan(text: span.text, style: style)
   if selected and used < width:
-    result.add StyledSpan(text: repeat(' ', width - used),
-                          style: CellStyle(surface: SelectedBackground))
+    result.spans.add StyledSpan(text: repeat(' ', width - used),
+                                style: CellStyle(surface: SelectedBackground))
+
+func detailColumnOf*(model: EventLogModel; column: string): EventLogColumn =
+  ## The column an open detail shows: the one named (a `…` click), else the
+  ## event's text — the output column when it is shown, else the last one.
+  let shown = model.columns.visibleColumns
+  for col in shown:
+    if $col == column:
+      return col
+  if elcOutput in shown: elcOutput
+  elif shown.len > 0: shown[^1]
+  else: elcOutput
 
 func columnCells*(col: EventLogColumn; last: bool; rest: int): int =
-  ## One column's width in cells: fixed for every column but a LAST output
-  ## column, which takes `rest`.
+  ## One column's DEFAULT width in cells: fixed for every column but a LAST
+  ## output column, which takes `rest`.
   case col
   of elcTick: TickFieldCells
   of elcIndex: IndexFieldCells
@@ -686,19 +728,22 @@ func columnCells*(col: EventLogColumn; last: bool; rest: int): int =
 proc columnCellsOf*(model: EventLogModel; startCol, width: int):
     seq[(EventLogColumn, int, int)] =
   ## Every visible column with its first screen column and width — the ONE
-  ## table both the header and the rows are laid out by.
+  ## table both the header and the rows are laid out by. A width the user set
+  ## (PLAT-70 Part B, `EventLogColumns.widths`) replaces the default.
   let shown = model.columns.visibleColumns
   var at = startCol
   for k, col in shown:
     if k > 0:
       at += GapCells
-    let w = columnCells(col, k == shown.high, startCol + width - at)
+    let w = model.columns.columnWidthOr(
+      col, columnCells(col, k == shown.high, startCol + width - at))
     result.add (col, at, w)
     at += w
 
 proc headerRowSpans*(model: EventLogModel; width: int): StyledRow =
   ## The column header: each visible column's title over its cells, in the
-  ## model's order (the desktop's `.eventLog-column-header`).
+  ## model's order (the desktop's `.eventLog-column-header`). A title is
+  ## clipped to its column (chrome: a header is not a table cell).
   var line = ""
   for (col, at, w) in model.columnCellsOf(0, width):
     while cellWidthOf(line) < at:
@@ -712,7 +757,7 @@ proc headerRowSpans*(model: EventLogModel; width: int): StyledRow =
        else: "")
     # Numbers are right-aligned under a right-aligned title.
     line.add (if col in {elcTick, elcIndex}: padLeft(title, w)
-              else: title)
+              else: truncateToCells(title, w))
   @[StyledSpan(text: truncateToCells(line, width), style: HeaderStyle)]
 
 proc paintEventLog*(g: var StyledGrid; area: CellArea;
@@ -775,13 +820,29 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
+  # PLAT-70 Part B: the separators a drag on the header resizes — the gap
+  # cell right of each column but the last.
+  if header:
+    for k in 0 ..< result.columnCells.len - 1:
+      let (col, at, w) = result.columnCells[k]
+      result.separators.add (col, at + w)
+
+  # The body: each event's row, and under the one whose detail is open its
+  # full text (Horizontal-Overflow.md §5.3), until the body is full.
+  var line = 0
   for i, row in rows:
-    let screenRow = firstBody + i
+    if line >= bodyHeight:
+      break
+    let screenRow = firstBody + line
+    let laid = eventRowLayout(model, row, area.col, width, screenRow)
     var at = area.col
-    for span in eventRowSpans(model, row, width):
+    for span in laid.spans:
       g.paint(screenRow, at, span.text, span.style)
       at += cellWidthOf(span.text)
+    result.cuts.add laid.cuts
     result.visible.add row
+    result.lineRows.add result.visible.high
+    inc line
     case row.kind
     of elrEvent:
       inc result.eventRows
@@ -789,11 +850,51 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
         result.selectedRow = screenRow
       if row.event.tick == model.currentTick and result.currentRow < 0:
         result.currentRow = screenRow
+      if model.detail.isOpenIn(EventLogTableName) and
+         model.detail.key == $row.event.index:
+        let col = model.detailColumnOf(model.detail.column)
+        var colAt, colW = 0
+        for (c, cAt, cW) in result.columnCells:
+          if c == col:
+            colAt = cAt
+            colW = min(cW, area.col + width - cAt)
+        let view = detailView(eventCellText(row.event, col), colW,
+                              bodyHeight, model.copyChord, terminalMeasure)
+        for text in view.lines:
+          if line >= bodyHeight:
+            break
+          g.paint(firstBody + line, colAt, padRight(text, colW), DetailStyle)
+          result.detailRows.add firstBody + line
+          result.lineRows.add -1
+          inc line
     of elrPending:
       inc result.pendingRows
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
+
+proc eventRowAtScreen*(screen: EventLogScreen; row: int):
+    (bool, EventLogRow) =
+  ## The event row painted on SCREEN row `row` — not a header, not a line of
+  ## an open detail, not a pending placeholder.
+  let firstBody = screen.area.row + (if screen.headerRow >= 0: 2 else: 1)
+  let i = row - firstBody
+  if i < 0 or i >= screen.lineRows.len or screen.lineRows[i] < 0:
+    return (false, EventLogRow())
+  let r = screen.visible[screen.lineRows[i]]
+  if r.kind != elrEvent:
+    return (false, EventLogRow())
+  (true, r)
+
+proc separatorAt*(screen: EventLogScreen; row, col: int):
+    (bool, EventLogColumn) =
+  ## PLAT-70 Part B: the column whose separator a press at `(row, col)` holds.
+  if screen.headerRow < 0 or row != screen.headerRow:
+    return (false, elcTick)
+  for (c, at) in screen.separators:
+    if col == at:
+      return (true, c)
+  (false, elcTick)
 
 proc eventLogScreen*(model: EventLogModel;
                      width, height: int): EventLogScreen =

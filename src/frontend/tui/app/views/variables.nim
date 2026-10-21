@@ -84,6 +84,9 @@ import ../layout/profile
 import ./styled_row
 import ./tree_node
 import ./scrubber_track
+from codetracer_embed import DetailToggle, CutCell, detailView, isOpen,
+  VariablesTablePane,
+  fullValueText
 
 export tree_node, styled_row, profile
 
@@ -115,7 +118,7 @@ type
     value*: string
       ## The presenter's answer at the `tui-value` budget. Carried for the rows
       ## that have no `presented` (a scope header, a `… n more` marker) and as
-      ## what a diff compares; `tree_node.formattedValue` re-presents from
+      ## what a diff compares; `tree_node.valueCell` re-presents from
       ## `presented` at the ROW's budget, so nothing here reformats and two
       ## panes cannot disagree.
     memberCount*: int
@@ -153,6 +156,11 @@ type
       ## PLAT-51: a hop of the row above's value origin chain.
     vrkAddWatch
       ## PLAT-51: the Watches group's "Add watch expression…" row.
+    vrkDetail
+      ## PLAT-70 Part B: one line of the full value open under the row above
+      ## (`list.show-detail`, a click on its `…`). Painted, never a pane row:
+      ## `paneRows` does not produce it, so the cursor and the scroll do not
+      ## count it.
 
   HistoryEntry* = object
     ## PLAT-51: one value of a variable's history — where (the tick a click
@@ -223,6 +231,11 @@ type
     nameCells*: int
       ## PLAT-51: the name column's width, when the user dragged its
       ## separator (0: the default share).
+    detail*: DetailToggle
+      ## PLAT-70 Part B: the variable whose full value is open under its row
+      ## (Horizontal-Overflow.md §5.3); its key is the variable's path.
+    copyChord*: string
+      ## The resolved `list.copy` chord the detail's hint names (KL-8).
     populations*: int
       ## How many times `children` has been called. Asserted by the expansion
       ## suite: a re-expansion that did no work — the CTUI-4 shape, where the
@@ -256,6 +269,10 @@ type
     trackCol*: int
       ## M71: the scrollbar's column (the body's rows, `bodyHeight` of them,
       ## from the row under the title), -1 while the rows fit.
+    cuts*: seq[CutCell]
+      ## PLAT-70 Part B: every cell drawn cut, with its `…` (HO-8).
+    detailRows*: seq[int]
+      ## The SCREEN rows the open detail's lines are on.
 
 const
   ProvenanceBudgetCells* = 40
@@ -294,6 +311,10 @@ const
   TitleDetailStyle* = CellStyle(role: srChromeMuted)
   RuleStyle* = CellStyle(role: srBorderPane)
   EmptyPaneText* = "no variables reported"
+  DetailPaneName* = VariablesTablePane
+    ## PLAT-70 Part B: this pane's name in a `DetailToggle` / a cut cell.
+  DetailValueStyle* = CellStyle(role: srChromeText)
+    ## An open detail's lines: the value in full.
   EmptyPaneStyle* = CellStyle(role: srChromeMuted, italic: true)
 
 func categoryOf*(kind: ScopeKind): VariableCategory =
@@ -524,6 +545,11 @@ proc paneRows*(model: VariablesModel): seq[VariablesRow] =
     if scope.kind == skWatches:
       result.add VariablesRow(kind: vrkAddWatch, scope: scope.kind, depth: 1)
 
+proc fullValueOf*(model: VariablesModel; node: VarNode): string =
+  ## PLAT-70 Part B: a variable's WHOLE value — its detail's, its tooltip's
+  ## and `list.copy`'s text (`table_overflow.fullValueText`).
+  fullValueText(node.presented, node.value, withVisualisers(model.visualisers))
+
 proc rowOfPath*(rows: openArray[VariablesRow]; path: string): int =
   ## The row showing `path`, or -1.
   result = -1
@@ -579,7 +605,10 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
       historyOpen: model.histories.hasKey(row.node.path),
       originOpen: model.origins.hasKey(row.node.path),
       watch: row.scope == skWatches and row.depth == 1,
-      nameCells: model.nameCells)
+      nameCells: model.nameCells, key: row.node.path)
+  of vrkDetail:
+    TreeRowSpec(kind: trkNote, name: row.note, depth: row.depth,
+                memberCount: -1, width: width, tag: tag, tagRole: tagRole)
 
 # ---------------------------------------------------------------------------
 # Painting
@@ -827,25 +856,55 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
   let width = if overflow: area.width - ScrubberTrackCells else: area.width
   result.contentWidth = width
   result.valueColumn = area.col + valueFieldColumn(width, model.nameCells)
-  for i in 0 ..< bodyHeight:
-    let rowIndex = top + i
-    if rowIndex >= rows.len:
-      break
-    let screenRow = area.row + 1 + i
+  var line = 0
+  var rowIndex = top
+  while line < bodyHeight and rowIndex < rows.len:
+    let screenRow = area.row + 1 + line
     let modelRow = rows[rowIndex]
+    inc rowIndex
     let spec = rowSpecFor(model, modelRow, width)
+    let laid = treeRowLayout(spec)
     var at = area.col
-    for span in treeRow(spec):
+    for span in laid.spans:
       g.paint(screenRow, at, span.text, span.style)
       at += cellWidthOf(span.text)
+    for c in laid.cuts:
+      var placed = c
+      placed.row = screenRow
+      placed.col += area.col
+      placed.ellipsisCol += area.col
+      result.cuts.add placed
     result.visible.add modelRow
+    inc line
     case modelRow.kind
     of vrkScope: inc result.scopeRows
     of vrkVariable: inc result.variableRows
     of vrkMore: inc result.moreRows
-    of vrkNote, vrkHistory, vrkOrigin, vrkAddWatch: inc result.noteRows
+    of vrkNote, vrkHistory, vrkOrigin, vrkAddWatch, vrkDetail:
+      inc result.noteRows
     if spec.modified:
       inc result.modifiedRows
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3): the open row's full value
+    # under it, wrapped inside the value column, capped at `DetailMaxLines`
+    # with the copy hint — rows that are painted, not pane rows.
+    if modelRow.kind == vrkVariable and
+       model.detail.isOpen(DetailPaneName, modelRow.node.path):
+      let valueAt = valueFieldColumn(width, model.nameCells)
+      let cells = max(1, fieldWidths(width, model.nameCells).value)
+      let view = detailView(model.fullValueOf(modelRow.node), cells,
+                            bodyHeight, model.copyChord, terminalMeasure)
+      for text in view.lines:
+        if line >= bodyHeight:
+          break
+        let detailRow = area.row + 1 + line
+        g.paint(detailRow, area.col + valueAt, padRight(text, cells),
+                DetailValueStyle)
+        result.visible.add VariablesRow(kind: vrkDetail, scope: modelRow.scope,
+                                        depth: modelRow.depth,
+                                        node: modelRow.node, note: text)
+        result.detailRows.add detailRow
+        inc result.noteRows
+        inc line
   if overflow:
     result.trackCol = area.col + width
     g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,

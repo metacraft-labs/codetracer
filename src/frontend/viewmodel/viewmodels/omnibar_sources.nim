@@ -26,6 +26,7 @@ import ../keymap/keymap_selection
 export layout_settings
 from ./event_log_vm import EventLogColumn, eventLogColumnTitle,
   parseEventLogColumn
+from ./table_overflow import ColumnStepCells
 
 export omnibar_vm
 
@@ -113,6 +114,55 @@ proc parseEventLogColumnCommand*(target: string):
     return (false, "", EventLogColumn.low)
   (true, rest[0], col)
 
+const
+  OperationCommandPrefix* = "operation:"
+    ## PLAT-70 Part B: a palette entry that runs a catalogued OPERATION —
+    ## `operation:list.show-detail`, `operation:table.resize-column(+2)` — so
+    ## the palette reaches what no base binds a chord to (Input-Routing IR-2).
+  ShowDetailLabel* = "Show Detail"
+  WidenColumnLabel* = "Widen Column"
+  NarrowColumnLabel* = "Narrow Column"
+  ColumnWidthVerb* = "column-width"
+    ## Horizontal-Overflow.md §5.2: `:column-width <title> <cells>`, beside
+    ## the `:column-*` verbs.
+
+proc tableCommands*(): seq[OmnibarEntry] =
+  ## THE TABLE PANES' PALETTE ENTRIES (Horizontal-Overflow.md §5.2, §5.3):
+  ## **Show Detail** (`list.show-detail`) and **Widen Column** /
+  ## **Narrow Column** (`table.resize-column`) for the focused column.
+  result.add OmnibarEntry(kind: omCommand, label: ShowDetailLabel,
+                          target: OperationCommandPrefix & "list.show-detail")
+  result.add OmnibarEntry(kind: omCommand, label: WidenColumnLabel,
+                          target: OperationCommandPrefix &
+                                  "table.resize-column(+" & $ColumnStepCells &
+                                  ")")
+  result.add OmnibarEntry(kind: omCommand, label: NarrowColumnLabel,
+                          target: OperationCommandPrefix &
+                                  "table.resize-column(-" & $ColumnStepCells &
+                                  ")")
+
+proc parseOperationCommand*(target: string): tuple[ok: bool; operation: string] =
+  ## `operation:<name>[(<arg>)]` -> the operation text; `ok` false otherwise.
+  if not target.startsWith(OperationCommandPrefix):
+    return (false, "")
+  (true, target[OperationCommandPrefix.len .. ^1])
+
+proc parseColumnWidthLine*(words: openArray[string]):
+    tuple[ok: bool; column: EventLogColumn; cells: int; message: string] =
+  ## `column-width <title> <cells>` (the verb first) -> its parts, or why not.
+  if words.len != 3 or words[0] != ColumnWidthVerb:
+    return (false, EventLogColumn.low, 0,
+            "usage: :" & ColumnWidthVerb & " <column> <cells>")
+  let (found, col) = parseEventLogColumn(words[1])
+  if not found:
+    return (false, EventLogColumn.low, 0, "no event log column `" & words[1] & "`")
+  var cells = 0
+  try:
+    cells = parseInt(words[2])
+  except ValueError:
+    return (false, col, 0, "`" & words[2] & "` is not a number of cells")
+  (true, col, cells, "")
+
 proc layoutSettingCommands*(): seq[OmnibarEntry]
 proc baseKeymapCommands*(): seq[OmnibarEntry]
   ## Forward-declared; defined at the end of this module.
@@ -125,6 +175,7 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add symbolsOf(store)
   result.add commandsOf(menu)
   result.add eventLogColumnCommands()
+  result.add tableCommands()
   result.add layoutSettingCommands()
   result.add baseKeymapCommands()
 

@@ -271,6 +271,12 @@ export scrollbar_scrubber
 import viewmodels/horizontal_scroll
 export horizontal_scroll
 
+# PLAT-70 Part B: the table panes' cut cells, their full text on hover and
+# under the row, and the columns' widths (Horizontal-Overflow.md §5). Pure;
+# imports only `std/*` and the presenter's vocabulary, already here.
+import viewmodels/table_overflow
+export table_overflow
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #

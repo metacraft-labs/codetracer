@@ -122,7 +122,7 @@ proc pv(kind: PValueKind; text, typeName, sourceKind: string): PValue =
 
 proc rowSpec(pval: PValue; focused = false; cells = 40): TreeRowSpec =
   ## One variable row over a value, at a stated width. The width is the point:
-  ## `formattedValue` takes it and returns what fits.
+  ## `valueCell` takes it and returns what fits.
   TreeRowSpec(kind: trkVariable, name: "v",
               typeName: (if pval.isNil: "" else: pval.typeName),
               value: present(pval, tuiValueBudget()).root.text,
@@ -199,18 +199,18 @@ suite "CTUI-7 after PLAT-2: what is still this front-end's":
     ck terminalMeasure("世") == 2
     # …and the row's own value, asked for at five cells, comes back at five.
     let wide = pv(pvkString, "世界世界", "String", "String")
-    let shown = formattedValue(rowSpec(wide, cells = 5), 5)
+    let shown = valueCell(rowSpec(wide, cells = 5), 5).text
     checkpoint("clipped: '" & shown & "' = " & $terminalMeasure(shown) & " cells")
     ck terminalMeasure(shown) <= 5
     ck shown.endsWith("…")
     # The same value at a width that fits is NOT clipped.
-    let full = formattedValue(rowSpec(wide, cells = 20), 20)
+    let full = valueCell(rowSpec(wide, cells = 20), 20).text
     ck full == "\"世界世界\""
     ck not full.endsWith("…")
 
   test "a row asks for the width it has, rather than clipping what it was given":
-    # THE DELIVERABLE, at the row. `formattedValue(spec, cells)` returns what
-    # fits; there is no `truncate(formattedValue(spec))` anywhere, and
+    # THE DELIVERABLE, at the row. `valueCell(spec, cells).text` returns what
+    # fits; there is no `truncate(valueCell(spec).text)` anywhere, and
     # `ci/test/value-presentation-boundary.sh` fails if one appears.
     var members: seq[PMember] = @[]
     for k in 0 ..< 600:
@@ -218,22 +218,22 @@ suite "CTUI-7 after PLAT-2: what is still this front-end's":
     let wideValue = PValue(kind: pvkSequence, typeName: "list",
                            sourceKind: "Seq", members: members)
     for cells in [4, 8, 20, 40]:
-      let text = formattedValue(rowSpec(wideValue, cells = cells), cells)
+      let text = valueCell(rowSpec(wideValue, cells = cells), cells).text
       checkpoint("at " & $cells & " cells: '" & text & "'")
       ck terminalMeasure(text) <= cells
 
   test "the focused row carries the second numeric base, and only when focused":
     let n = pv(pvkInt, "306", "Int", "Int")
-    ck formattedValue(rowSpec(n, focused = false), 40) == "306"
-    ck formattedValue(rowSpec(n, focused = true), 40) == "306 (0x132)"
+    ck valueCell(rowSpec(n, focused = false), 40).text == "306"
+    ck valueCell(rowSpec(n, focused = true), 40).text == "306 (0x132)"
     let field = pv(pvkString,
       "0x0000000000000000000000000000000000000000000000000000000000002710",
       "Field", "String")
-    ck formattedValue(rowSpec(field, focused = true), 40) == "0x2710 (10000)"
+    ck valueCell(rowSpec(field, focused = true), 40).text == "0x2710 (10000)"
     # A class with no second rendering is unchanged by focus.
     let s2 = pv(pvkString, "x", "String", "String")
-    ck formattedValue(rowSpec(s2, focused = true), 40) ==
-       formattedValue(rowSpec(s2, focused = false), 40)
+    ck valueCell(rowSpec(s2, focused = true), 40).text ==
+       valueCell(rowSpec(s2, focused = false), 40).text
 
   test "a byte buffer is decided by its members, and the length is always reported":
     var bytes: seq[PMember] = @[]
@@ -241,7 +241,7 @@ suite "CTUI-7 after PLAT-2: what is still this front-end's":
       bytes.add member("", pv(pvkInt, $b, "Int", "Int"))
     let buffer = PValue(kind: pvkSequence, typeName: "Bytes",
                         sourceKind: "Seq", members: bytes)
-    let dump = formattedValue(rowSpec(buffer, cells = 60), 60)
+    let dump = valueCell(rowSpec(buffer, cells = 60), 60).text
     checkpoint("byte dump: '" & dump & "'")
     ck dump == "00 11 22 ff (4 bytes)"
     ck valueClassOf(rowSpec(buffer)) == pcSequence

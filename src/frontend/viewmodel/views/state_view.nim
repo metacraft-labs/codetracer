@@ -16,12 +16,13 @@
 ##   for v in vs.variables:
 ##     echo "  ".repeat(v.depth) & v.name & " = " & v.value
 
-import std/[sets, tables]
+import std/[sets, strutils, tables]
 
 import isonim/core/[signals, computation]
 
 import ../store/types as store_types
 import ../viewmodels/state_vm
+from ../viewmodels/table_overflow import fullValueText
 
 type
   VariableHistoryRowView* = state_vm.ValueHistoryRow
@@ -129,6 +130,27 @@ proc flattenVariables(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+proc fullValueOf*(vm: StateVM; path: string): string =
+  ## PLAT-70 Part B: the WHOLE value of the variable at `path` (child names
+  ## joined with `.`, `VariableViewState.path`) — `table_overflow.fullValueText`,
+  ## the same text on every front-end. Asked for by the desktop's table pass
+  ## only for a cell it found CUT, so a row that fits never pays for it and the
+  ## rows the view receives carry no second copy of every value.
+  let parts = path.split('.')
+  var level = vm.currentVariables.val
+  for i, part in parts:
+    var found = false
+    for v in level:
+      if v.name == part:
+        if i == parts.high:
+          return fullValueText(v.presented, v.value)
+        level = v.children
+        found = true
+        break
+    if not found:
+      return ""
+  ""
 
 proc getStateViewState*(vm: StateVM): StateViewState =
   ## Extract the current view state from the StateVM.

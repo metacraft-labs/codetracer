@@ -170,25 +170,29 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
       expect(hasContent(restored, ClosedContent)).toBe(false);
 
       // View > Reset Layout — the menu element exists, and its action runs.
-      const menuHasIt = await ctPage.evaluate(() => {
+      // The menu entry's own action — its `ClientAction` is the index of its
+      // handler (no assumption about where in the enum it sits).
+      const resetAction = await ctPage.evaluate(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = (window as any).data;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const walk = (node: any): boolean => {
-          if (!node) return false;
-          if (node.name === "Reset Layout") return true;
-          for (const c of node.elements ?? []) if (walk(c)) return true;
-          return false;
+        const walk = (node: any): number => {
+          if (!node) return -1;
+          if (node.name === "Reset Layout") return Number(node.action);
+          for (const c of node.elements ?? []) {
+            const found = walk(c);
+            if (found >= 0) return found;
+          }
+          return -1;
         };
         return walk(data.ui.menuNode);
       });
-      expect(menuHasIt).toBe(true);
-      await ctPage.evaluate(() => {
+      expect(resetAction).toBeGreaterThanOrEqual(0);
+      await ctPage.evaluate((action: number) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = (window as any).data;
-        // `aResetLayout` is the last `ClientAction`, so the last handler.
-        data.actions[data.actions.length - 1](null);
-      });
+        data.actions[action](null);
+      }, resetAction);
       // THE SHARED DEFAULT IS BACK, in place — the same window, no restart…
       await expect.poll(async () => hasContent(await stackContents(ctPage), ClosedContent),
         { timeout: 30_000 }).toBe(true);

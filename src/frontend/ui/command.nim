@@ -38,6 +38,8 @@
 
 import ui_imports, kdom, ../renderer, command_interpreter, shell, ./agent_activity
 import ./session_viewmodels
+from ./event_log import runColumnWidthCommand
+from ../viewmodel/viewmodels/omnibar_sources import ColumnWidthVerb
 
 import ../communication
 import std/json
@@ -165,6 +167,14 @@ proc runQuery(self: CommandPaletteComponent) =
 
   case self.query.kind:
   of CommandQuery:
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.2): `:column-width <column>
+    # <cells>` sets an Event Log column's width.
+    if ($value).substr(1).strip.startsWith(ColumnWidthVerb):
+      let why = runColumnWidthCommand(($value).substr(1))
+      if why.len > 0: cwarn "palette: " & why
+      self.close()
+      self.resetCommandPalette()
+      return
     if self.results.len == 0:
       return
 

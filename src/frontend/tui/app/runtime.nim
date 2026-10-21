@@ -434,6 +434,11 @@ type
     saveIcons*: proc(mode: IconsMode): string {.closure.}
       ## PLAT-48: the HOST's write of the `icons` setting (`:icons`), "" on
       ## success. Nil in a host that keeps no state.
+    saveColumnWidths*: proc(table: string;
+                            entries: seq[ColumnWidthEntry]): string {.closure.}
+      ## PLAT-70 Part B: the HOST's write of a table's column widths
+      ## (`host/table_column_widths`, the one document every front-end reads),
+      ## "" on success. Nil in a host that keeps no state.
     autoHide*: AutoHideHover
       ## PLAT-49 part B (finding 9): the pointer's timing over the auto-hide
       ## labels — the desktop's hover preview and leave dismissal
@@ -890,7 +895,7 @@ proc refreshMenuForKeymap*(rt: TuiRuntime)
   ## FORWARD-DECLARED for `:keys`; defined with the top bar below.
 
 const EventLogColumnVerbs* = ["columns", "column-show", "column-hide",
-                              "column-left", "column-right"]
+                              "column-left", "column-right", ColumnWidthVerb]
 const WatchVerbs* = ["watch", "unwatch", "watch-edit"]
   ## PLAT-51: the watch verbs (`runPromptLine`).
   ## PLAT-49 part B: the event log's column verbs (`runColumnVerb`).
@@ -902,11 +907,32 @@ proc describeColumns(c: EventLogColumns): string =
               (if c.isVisible(col): "" else: ")")
   "event log columns: " & parts.join(" ") & " — hidden in parentheses"
 
+proc rememberEventLogWidths(rt: TuiRuntime): string =
+  ## PLAT-70 Part B: the Event Log's widths into the remembered document
+  ## (Horizontal-Overflow.md §5.2, HO-9); "" when written or not kept.
+  if rt.saveColumnWidths.isNil: ""
+  else: rt.saveColumnWidths(EventLogTableName,
+                            rt.app.eventLog.columns.columnWidthEntries)
+
+proc describeWidth(rt: TuiRuntime; col: EventLogColumn): string =
+  let failure = rt.rememberEventLogWidths()
+  "event log column " & eventLogColumnTitle(col) & ": " &
+    $rt.app.eventLog.columns.widths[col] & " cells" &
+    (if failure.len > 0: " (" & failure & ")" else: "")
+
 proc runColumnVerb*(rt: TuiRuntime; verb, arg: string): string =
   ## One column verb against the event log's `EventLogColumns`; answers the
   ## status line's text (every verb says what it did, or why it did nothing).
   if verb == "columns":
     return describeColumns(rt.app.eventLog.columns)
+  if verb == ColumnWidthVerb:
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.2): `:column-width <title>
+    # <cells>`, never narrower than `MinColumnCells`.
+    let parsed = parseColumnWidthLine(@[verb] & arg.splitWhitespace)
+    if not parsed.ok:
+      return parsed.message
+    discard rt.app.eventLog.columns.setColumnWidth(parsed.column, parsed.cells)
+    return rt.describeWidth(parsed.column)
   if arg.len == 0:
     return ":" & verb & " needs a column: tick, #, location, kind or output"
   let (ok, col) = parseEventLogColumn(arg)
@@ -1094,7 +1120,8 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
     let words = text.splitWhitespace()
     if words.len > 0 and words[0] in EventLogColumnVerbs:
       rt.note(rt.runColumnVerb(words[0],
-                               (if words.len > 1: words[1] else: "")))
+                               (if words.len > 1: words[1 .. ^1].join(" ")
+                                else: "")))
       outcome.detail = rt.app.notification
       outcome.repaint = true
       return
@@ -1745,11 +1772,8 @@ proc eventRowAt(model: EventLogModel; area: CellArea;
   ## that screen (its header, for a header press).
   var g = newStyledGrid(area.col + area.width, area.row + area.height)
   let screen = paintEventLog(g, area, model)
-  let firstBody = area.row + (if screen.headerRow >= 0: 2 else: 1)
-  let i = row - firstBody
-  if i < 0 or i >= screen.visible.len or screen.visible[i].kind != elrEvent:
-    return (false, event_log.EventLogRow(), screen)
-  (true, screen.visible[i], screen)
+  let (ok, hit) = screen.eventRowAtScreen(row)
+  (ok, hit, screen)
 
 proc paneAt(geometry: LayoutGeometry; row, col: int):
     tuple[found: bool, region: PaneRegion, under: CellArea] =
@@ -2244,6 +2268,202 @@ proc routeVariablesResize(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
   true
 
+# ---------------------------------------------------------------------------
+# PLAT-70 Part B — the table panes' cut cells, their full text, and the Event
+# Log's column widths (Horizontal-Overflow.md §5)
+# ---------------------------------------------------------------------------
+
+const TablePanes = {paneState, paneEventLog, paneCalltrace}
+  ## The panes whose cells truncate with `…` (§5).
+
+proc tablePaneName(pane: PaneKind): string =
+  ## A pane's name in a `DetailToggle` / a hover: the names the panes' own
+  ## modules use.
+  case pane
+  of paneState: DetailPaneName
+  of paneEventLog: EventLogTableName
+  of paneCalltrace: CallTracePaneName
+  else: ""
+
+proc chordOfOperation(rt: TuiRuntime; name: string): string =
+  ## The chord that runs operation `name` where the focus is now (KL-8).
+  rt.router.chordFor(name, rt.sessionFacts, rt.scopePath, rt.navMode, "")
+
+type TableCellHit = object
+  found: bool
+  pane: PaneKind
+  cut: CutCell
+  bodyRows: int
+
+proc tableCellAt(rt: TuiRuntime; row, col: int): TableCellHit =
+  ## The cut cell drawn at `(row, col)` in a table pane, as that pane's
+  ## painter drew it (re-run on a scratch grid, so the hit is the paint's).
+  let geometry = rt.layoutGeometry()
+  let (onPane, region, under) = geometry.paneAt(row, col)
+  if not onPane or region.pane notin TablePanes or
+     not under.contains(row, col):
+    return
+  var g = newStyledGrid(under.col + under.width, under.row + under.height)
+  var cuts: seq[CutCell] = @[]
+  var body = 0
+  case region.pane
+  of paneState:
+    if rt.app.variables.isEmpty: return
+    let screen = paintVariables(g, under, rt.app.variables)
+    cuts = screen.cuts
+    body = screen.bodyHeight
+  of paneEventLog:
+    if not rt.app.eventLog.hasContent: return
+    let screen = paintEventLog(g, under, rt.app.eventLog)
+    cuts = screen.cuts
+    body = screen.bodyHeight
+  of paneCalltrace:
+    if rt.app.callTrace.isEmpty: return
+    cuts = paintCallTraceScreen(g, under, rt.app.callTrace).cuts
+    body = under.height - 1
+  else: return
+  let i = cuts.cutCellAt(row, col)
+  if i < 0:
+    return
+  TableCellHit(found: true, pane: region.pane, cut: cuts[i], bodyRows: body)
+
+proc cellHoverPointer(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
+                      outcome: var RuntimeOutcome) =
+  ## §5.3: the pointer passing over the screen (`?1003` motion, no button) —
+  ## a truncated cell under it starts the 500 ms clock; anywhere else hides
+  ## a shown tooltip.
+  let hit = rt.tableCellAt(event.row, event.col)
+  let changed =
+    if hit.found:
+      rt.app.cellHoverAnchor = (hit.cut.row, hit.cut.col, hit.bodyRows)
+      rt.app.cellHover.pointerOver(tablePaneName(hit.pane), hit.cut.key,
+                                   hit.cut.column, hit.cut.full, true, nowMs)
+    else:
+      rt.app.cellHover.pointerOver("", "", "", "", false, nowMs)
+  if changed:
+    rt.app.cellTooltip = CellTooltip()
+    outcome.repaint = true
+
+proc tickCellHover*(rt: TuiRuntime; nowMs: int64): bool =
+  ## The hover's clock: the tooltip shows once the pointer has rested
+  ## `HoverDelayMs` on a truncated cell. True when the screen changed.
+  if not rt.app.cellHover.tick(nowMs):
+    return false
+  let a = rt.app.cellHoverAnchor
+  let view = tooltipView(rt.app.cellHover.full, rt.width, a.bodyRows,
+                         rt.chordOfOperation("list.copy"), terminalMeasure)
+  rt.app.cellTooltip = CellTooltip(lines: view.lines, row: a.row, col: a.col)
+  true
+
+proc cellHoverDueMs*(rt: TuiRuntime): int64 =
+  ## When `tickCellHover` next has something to do, -1 for never.
+  rt.app.cellHover.dueMs
+
+proc dismissCellHover(rt: TuiRuntime): bool =
+  ## A key or a press: the tooltip goes (§5.3).
+  result = rt.app.cellHover.dismiss()
+  rt.app.cellTooltip = CellTooltip()
+
+proc openDetail(rt: TuiRuntime; pane: PaneKind; key, column: string): bool =
+  ## §5.3: the row's full text under it — again closes it; one row at a time
+  ## (opening one closes any other pane's). True when it is now open.
+  let name = tablePaneName(pane)
+  var toggle = case pane
+               of paneState: rt.app.variables.detail
+               of paneEventLog: rt.app.eventLog.detail
+               else: rt.app.callTrace.detail
+  result = toggle.toggleDetail(name, key, column)
+  rt.app.variables.detail = DetailToggle()
+  rt.app.eventLog.detail = DetailToggle()
+  rt.app.callTrace.detail = DetailToggle()
+  let chord = rt.chordOfOperation("list.copy")
+  case pane
+  of paneState:
+    rt.app.variables.detail = toggle
+    rt.app.variables.copyChord = chord
+  of paneEventLog:
+    rt.app.eventLog.detail = toggle
+    rt.app.eventLog.copyChord = chord
+  else:
+    rt.app.callTrace.detail = toggle
+    rt.app.callTrace.copyChord = chord
+
+proc routeEllipsisClick(rt: TuiRuntime; event: MouseEvent;
+                        outcome: var RuntimeOutcome): bool =
+  ## §5.3: a left press on a cut cell's `…` opens (or closes) its row's
+  ## detail. A press anywhere else in the cell is the row's ordinary click.
+  if event.kind != mekPress or event.button != mbLeft:
+    return false
+  let hit = rt.tableCellAt(event.row, event.col)
+  if not hit.found or [hit.cut].ellipsisAt(event.row, event.col) < 0:
+    return false
+  discard rt.openDetail(hit.pane, hit.cut.key, hit.cut.column)
+  outcome.repaint = true
+  true
+
+proc showDetail(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `list.show-detail`: the FOCUSED row's full text, under it (§5.3) — the
+  ## variable under the cursor, the selected event, the call the debugger is
+  ## in.
+  outcome.repaint = true
+  let (had, focused) = rt.focus.focusedPane()
+  if not had or focused notin TablePanes:
+    rt.note("Show Detail works in the Variables, Event Log and Call Trace panes")
+    return
+  var key = ""
+  case focused
+  of paneState:
+    key = rt.app.variables.focused
+    if key.len == 0: key = rt.app.variables.selected
+  of paneEventLog:
+    let (ok, ev) = rt.app.eventLog.rowAt(rt.app.eventLog.selected)
+    if ok: key = $ev.index
+  else:
+    let at = rt.app.callTrace.currentTraceIndex
+    if at >= 0: key = $at
+  if key.len == 0:
+    rt.note("no row is selected here to show")
+    return
+  discard rt.openDetail(focused, key, "")
+
+proc eventLogArea(rt: TuiRuntime): CellArea =
+  rt.paneAreaOf(paneEventLog)
+
+proc resizeEventLogColumn(rt: TuiRuntime; arg: string;
+                          outcome: var RuntimeOutcome) =
+  ## `table.resize-column([column,]delta)` on the Event Log (§5.2): the named
+  ## column, else the focused one, by `delta` cells from the width it is
+  ## drawn at.
+  outcome.repaint = true
+  let target = rt.app.eventLog.columns.columnResizeTarget(arg)
+  if not target.ok:
+    rt.note(target.message)
+    return
+  let area = rt.eventLogArea()
+  var current = 0
+  for (c, _, w) in rt.app.eventLog.columnCellsOf(area.col, max(1, area.width)):
+    if c == target.col: current = w
+  discard rt.app.eventLog.columns.resizeColumn(target.col, target.delta, current)
+  rt.note(rt.describeWidth(target.col))
+
+proc routeEventLogResize(rt: TuiRuntime; event: MouseEvent;
+                         outcome: var RuntimeOutcome): bool =
+  ## §5.2: an Event Log column separator held — each motion puts the
+  ## separator under the pointer (the column's width, never under
+  ## `MinColumnCells`), the release ends it and remembers the widths.
+  if not rt.app.eventLogResize.active:
+    return false
+  if event.kind == mekPress:
+    rt.app.eventLogResize.active = false
+    return false
+  let r = rt.app.eventLogResize
+  discard rt.app.eventLog.columns.setColumnWidth(r.column, event.col - r.startCol)
+  if event.kind != mekMotion:
+    rt.app.eventLogResize.active = false
+    rt.note(rt.describeWidth(r.column))
+  outcome.repaint = true
+  true
+
 proc routeListScrubDrag(rt: TuiRuntime; event: MouseEvent;
                         outcome: var RuntimeOutcome): bool =
   ## PLAT-51: a press held on a list pane's scrubber thumb owns the pointer
@@ -2316,6 +2536,17 @@ proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
       return true
   let (ok, row, screen) = eventRowAt(rt.app.eventLog, area, event.row)
   if not ok:
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.2): a press on a separator
+    # holds it — the motion that follows resizes the column to its left.
+    let (onSeparator, sepColumn) = screen.separatorAt(event.row, event.col)
+    if onSeparator and event.button == mbLeft:
+      var startCol = 0
+      for (c, at, _) in screen.columnCells:
+        if c == sepColumn: startCol = at
+      rt.app.eventLogResize = (active: true, column: sepColumn,
+                               startCol: startCol)
+      outcome.repaint = true
+      return true
     let (onHeader, column) = screen.headerColumnAt(event.row, event.col)
     if onHeader and event.button == mbLeft:
       outcome.requestClick(PaneClickRequest(
@@ -3098,6 +3329,11 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   # PLAT-49 part B: A CLICK ON THE CALL TRACE — on a row, go to that call;
   # on its toggle, expand or collapse it — as the desktop's row does
   # (`isonim_calltrace_view.rowHandlers`).
+  # PLAT-70 Part B (Horizontal-Overflow.md §5.3): a press on a cut cell's
+  # `…` opens its row's detail, in every table pane.
+  if acted.status == lasNoGesture and not inGesture and
+     rt.routeEllipsisClick(event, outcome):
+    return
   if acted.status == lasNoGesture and event.kind == mekPress and
      event.button == mbLeft and not rt.app.callTrace.isEmpty:
     let idx = geometry.regionIndexAt(event.row, event.col)
@@ -4264,6 +4500,17 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
     rt.note(rt.runColumnVerb(verb, eventLogColumnTitle(col.column)))
     outcome.repaint = true
     return
+  # PLAT-70 Part B: the palette's operation entries (**Show Detail**,
+  # **Widen Column**, **Narrow Column** — `omnibar_sources.tableCommands`).
+  let operation = parseOperationCommand(action)
+  if operation.ok:
+    let (name, arg) = splitOperation(operation.operation)
+    case name
+    of "list.show-detail": rt.showDetail(outcome)
+    of "table.resize-column": rt.resizeEventLogColumn(arg, outcome)
+    else: rt.note(operation.operation & " is not available in the terminal")
+    outcome.repaint = true
+    return
   # PLAT-68: the palette's base-keymap commands
   # (`keymap_selection.baseKeymapCommandTargets`).
   let base = parseBaseKeymapCommand(action)
@@ -5045,8 +5292,23 @@ proc focusedRowText(rt: TuiRuntime): (string, string) =
     if t.selected >= 0 and t.selected < t.files.len:
       return (t.files[t.selected], "the path")
   of paneState:
-    if rt.app.variables.selected.len > 0:
-      return (rt.app.variables.selected, "the variable")
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3): the variable's WHOLE
+    # value, untruncated — what its detail and its tooltip show.
+    let path = rt.app.variables.selected
+    if path.len > 0:
+      for r in rt.app.variables.paneRows():
+        if r.kind == vrkVariable and r.node.path == path:
+          return (rt.app.variables.fullValueOf(r.node),
+                  "the value of " & r.node.name)
+      return (path, "the variable")
+  of paneEventLog:
+    let (ok, ev) = rt.app.eventLog.rowAt(rt.app.eventLog.selected)
+    if ok:
+      return (ev.content, "event #" & $ev.index)
+  of paneCalltrace:
+    let (ok, r) = rt.app.callTrace.rowAt(rt.app.callTrace.currentTraceIndex)
+    if ok:
+      return (callRowText(r.callOf), "the call")
   else: discard
   ("", "")
 
@@ -5222,6 +5484,14 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     rt.tabMovesFocus = not rt.tabMovesFocus
     rt.note(if rt.tabMovesFocus: "Tab moves the focus (Ctrl+M again to indent)"
             else: "Tab indents")
+    return
+  of "list.show-detail":
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
+    rt.showDetail(outcome)
+    return
+  of "table.resize-column":
+    # PLAT-70 Part B (§5.2): the Event Log is the table whose columns resize.
+    rt.resizeEventLogColumn(res.argument, outcome)
     return
   of "list.copy":
     let (text, what) = rt.focusedRowText()
@@ -5422,6 +5692,12 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       if event.kind == mekMotion and event.button != mbLeft and
          rt.layoutBindingEnabled():
         rt.autoHidePointer(event, nowMs, result)
+      # PLAT-70 Part B (Horizontal-Overflow.md §5.3): and a truncated table
+      # cell's tooltip clock; a press hides a shown tooltip.
+      if event.kind == mekMotion and event.button != mbLeft:
+        rt.cellHoverPointer(event, nowMs, result)
+      elif event.kind == mekPress and rt.dismissCellHover():
+        result.repaint = true
       # PLAT-50: an open right-click menu or content overlay first — it is
       # over everything, the top bar included.
       if rt.routeOverlayMouse(event, result):
@@ -5438,6 +5714,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         return
       if rt.routeVariablesResize(event, result):
         return
+      # PLAT-70 Part B: and on an Event Log column separator.
+      if rt.routeEventLogResize(event, result):
+        return
       # PLAT-70: and on a text pane's horizontal bar thumb.
       if rt.routeHorizontalBarDrag(event, result):
         return
@@ -5450,6 +5729,10 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         return
       if event.kind == mekMotion and event.button != mbLeft:
         return
+    elif rt.dismissCellHover():
+      # PLAT-70 Part B (Horizontal-Overflow.md §5.3): a key hides a shown
+      # tooltip.
+      result.repaint = true
   if rt.layoutBindingEnabled():
     let (isMouse, event) = decodeMouse(token)
     if isMouse:

@@ -99,10 +99,20 @@ export scratchpad_pane
 export terminal_output_pane
 
 type
+  CellTooltip* = object
+    ## PLAT-70 Part B: the tooltip's lines (`table_overflow.tooltipView`) and
+    ## the cell it belongs to (its first screen cell): drawn under the cell,
+    ## above it when there is no room below.
+    lines*: seq[string]
+    row*, col*: int
+
   ShellModel* = object
     ## Everything the screen shows, as a value. Constructed by
     ## `app/tui_app.nim` from a `HeadlessApp`; this module never learns that a
     ## debugger exists.
+    cellTooltip*: CellTooltip
+      ## PLAT-70 Part B: a truncated table cell's full text, shown after the
+      ## pointer rested on it (Horizontal-Overflow.md §5.3); no lines, none.
     header*: HeaderModel
     fileInfo*: string
       ## The status bar's file info — the current file's language and
@@ -1051,6 +1061,35 @@ proc frameOverlaysOf*(decorations: seq[LayoutDecoration]): seq[FrameOverlay] =
                                 width: d.area.width, height: 1,
                                 text: d.label, style: DragGhostStyle)
 
+
+const CellTooltipStyle* = CellStyle(role: srChromeText, surface: srSurfaceMenu)
+  ## PLAT-70 Part B: the tooltip's text on the menu's card surface.
+
+proc cellTooltipArea*(t: CellTooltip; width, height: int): CellArea =
+  ## Where the tooltip goes: one cell of padding each side of its widest
+  ## line, under the cell (above it when the screen has no room below),
+  ## moved left to stay on the screen.
+  if t.lines.len == 0 or width <= 0 or height <= 0:
+    return CellArea()
+  var w = 0
+  for l in t.lines:
+    w = max(w, cellWidthOf(l))
+  w = min(width, w + 2)
+  let h = min(height, t.lines.len)
+  let below = t.row + 1
+  let row = if below + h <= height - 1: below else: max(0, t.row - h)
+  let col = max(0, min(t.col, width - w))
+  CellArea(row: row, col: col, width: w, height: h)
+
+proc paintCellTooltip*(g: var StyledGrid; t: CellTooltip; width, height: int) =
+  let a = cellTooltipArea(t, width, height)
+  if a.width <= 0 or a.height <= 0:
+    return
+  g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceMenu)
+  for i in 0 ..< a.height:
+    g.paint(a.row + i, a.col + 1, truncateToCells(t.lines[i], a.width - 2),
+            CellTooltipStyle)
+
 proc shellScreen*(model: ShellModel; width, height: int;
                   policy = DefaultProjectionPolicy): ShellScreen =
   ## The whole frame: `height` rows of exactly `width` cells, plus the geometry
@@ -1192,6 +1231,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # menu over everything.
   result.contentArea = contentOverlayArea(model.content, body)
   paintContentOverlay(g, model.content, result.contentArea)
+  paintCellTooltip(g, model.cellTooltip, width, height)
   result.contextMenuArea = contextMenuArea(model.contextMenu, width, height)
   paintContextMenu(g, model.contextMenu, result.contextMenuArea)
 
