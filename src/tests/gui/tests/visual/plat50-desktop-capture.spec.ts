@@ -364,9 +364,36 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
     moved: argTo.ticks !== argFrom.ticks,
   };
   // The status bar's copy control: the location on the clipboard.
+  //
+  // THE CONTROL IS HIDDEN BY DESIGN, AND THE ACTION IS WHAT IS MEASURED.
+  // `status_bar.styl`'s "HIDDEN FOR NOW" rule (2026-10-15) sets the location
+  // path and `#copy-path-image` to `display: none`, so a pointer click waits
+  // for a box that never appears and the capture died here, before writing
+  // any answers. Whether the readout comes back is an open design decision
+  // (codetracer-pm issue 2026-10-20-ready-on-entry-waits-for-a-location-path-
+  // the-status-bar-now-hides-by-design.md), not this capture's to make. What
+  // the native front-ends are compared against is the copy ACTION the control
+  // is wired to (`isonim_status_view`'s `onclick`, `invokeCopyLocation`), so
+  // a hidden control gets the same `click` event dispatched straight to it.
+  // `statusCopyControlVisible` records which of the two happened, so the
+  // answers file says whether a user could have made this press at all.
+  //
+  // Not a way around a failure: the clipboard is emptied first and read
+  // after, and a gate below requires the location on it, so a copy action
+  // that did not run fails this capture rather than writing answers. The
+  // emptying matters when the capture runs on a real desktop's DISPLAY,
+  // whose clipboard can still hold the path an earlier run copied.
   const copy = ctPage.locator("#copy-path-image").first();
   if ((await copy.count()) > 0) {
-    await copy.click();
+    await ctPage.evaluate(() => {
+      (globalThis as any).require?.("electron")?.clipboard?.writeText?.("");
+    });
+    clicks.statusCopyControlVisible = await copy.isVisible();
+    if (clicks.statusCopyControlVisible) {
+      await copy.click();
+    } else {
+      await copy.dispatchEvent("click");
+    }
     await ctPage.waitForTimeout(500);
     clicks.statusLocationCopied = await ctPage.evaluate(async () => {
       try {
@@ -393,6 +420,9 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   expect(clicks.gutterRightClickMenu).toBe(false);
   expect(menus.editorTextOnBreakpointFirst).toContain("Enable breakpoint");
   expect(menus.editorTextOnBreakpoint).toContain("Enable breakpoint");
+  // The status bar's copy action put the location on the clipboard (pressed
+  // or, while the control is hidden, dispatched to it; see above).
+  expect(String(clicks.statusLocationCopied ?? "")).toContain("main.py");
   // An argument takes no left press of its own on the desktop: no tooltip,
   // and the debugger stays (only the call's name is the row's target).
   expect(clicks.callArgumentClick).toMatchObject({ tooltip: false, moved: false });

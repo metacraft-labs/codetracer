@@ -37,7 +37,16 @@
  *      numbers opens the editor's context menu", the same section), built
  *      from the current state ("Disable breakpoint"), and the breakpoint
  *      stays enabled. Toggling there as well as opening the menu would build
- *      the menu before the toggle, which is this defect again.
+ *      the menu before the toggle, which is this defect again;
+ *   6. a right click on the EMPTY glyph slot of line 36 (`return left -
+ *      right`, code and no breakpoint), the transparent
+ *      `.gutter-no-breakpoint` placeholder `trace.editorLineNumber` draws
+ *      where a marker would be, does nothing ("On a line without a
+ *      breakpoint it does nothing", gesture 8): no menu opens, no marker
+ *      appears on the line and `breakpointTable` gains no entry for it.
+ *      Until `isGutterToggleTarget` matched the placeholder, Monaco's
+ *      listener took the press for an ordinary margin right click and opened
+ *      the editor's menu.
  *
  * No mocks: the real Electron app (`src/build-debug/bin/ct`, this checkout's
  * build), a real `replay-server`, and a real `.ct` recording — the terminal
@@ -83,8 +92,15 @@ const MENU = "#context-menu-container";
 const gutterOf = (page: Page) =>
   page.locator(`.monaco-editor .margin-view-overlays .gutter[data-line='${LINE}']`).first();
 
-/** The breakpoint `breakpointTable` holds on line 31 of any `main.py`, or null. */
-async function breakpointOnLine(page: Page): Promise<{ enabled: boolean } | null> {
+/** `calc/main.py` line 36, `return left - right`: a line with code on it that
+ *  no step of this test puts a breakpoint on (step 6). */
+const EMPTY_LINE = 36;
+const emptyGutterOf = (page: Page) =>
+  page.locator(`.monaco-editor .margin-view-overlays .gutter[data-line='${EMPTY_LINE}']`).first();
+
+/** The breakpoint `breakpointTable` holds on `line` (default 31) of any
+ *  `main.py`, or null. */
+async function breakpointOnLine(page: Page, line: number = LINE): Promise<{ enabled: boolean } | null> {
   return page.evaluate((line) => {
     const table = (globalThis as any).data?.services?.debugger?.breakpointTable ?? {};
     for (const file of Object.keys(table)) {
@@ -93,19 +109,19 @@ async function breakpointOnLine(page: Page): Promise<{ enabled: boolean } | null
       if (bp) return { enabled: !!bp.enabled };
     }
     return null;
-  }, LINE);
+  }, line);
 }
 
-/** Brings line 31 to the editor's centre. Once the debugger has moved, the
- *  editor can have scrolled line 31 under Monaco's sticky-scroll header
- *  (`.overlayWidgets`), which then takes a press aimed at the line. */
-async function centreLine(page: Page): Promise<void> {
+/** Brings `line` (default 31) to the editor's centre. Once the debugger has
+ *  moved, the editor can have scrolled the line under Monaco's sticky-scroll
+ *  header (`.overlayWidgets`), which then takes a press aimed at the line. */
+async function centreLine(page: Page, line: number = LINE): Promise<void> {
   await page.evaluate((line) => {
     const editors = (globalThis as any).data?.ui?.editors ?? {};
     for (const key of Object.keys(editors)) {
       editors[key]?.monacoEditor?.revealLineInCenter?.(line);
     }
-  }, LINE);
+  }, line);
   await page.waitForTimeout(300);
 }
 
@@ -196,4 +212,21 @@ test("a right click on a breakpoint's gutter marker toggles it and opens no menu
   expect(onNumber).not.toContain("Enable breakpoint");
   await expect(gutterOf(ctPage).locator(".gutter-breakpoint-enabled")).toHaveCount(1);
   expect(await breakpointOnLine(ctPage)).toEqual({ enabled: true });
+
+  // 6. The empty glyph slot of a line with no breakpoint does nothing: no
+  //    menu opens and no breakpoint appears.
+  await centreLine(ctPage, EMPTY_LINE);
+  const placeholder = emptyGutterOf(ctPage).locator(".gutter-no-breakpoint");
+  await expect(placeholder).toHaveCount(1, { timeout: 10_000 });
+  expect(await breakpointOnLine(ctPage, EMPTY_LINE), "line 36 had a breakpoint before step 6").toBeNull();
+  await placeholder.first().click({ button: "right" });
+  // Long enough for a menu the press opened to have appeared (Monaco shows
+  // its menu synchronously) and for a breakpoint it added to have reached the
+  // table and the gutter.
+  await ctPage.waitForTimeout(500);
+  const leftOpenOnEmpty = (await ctPage.locator(MENU).isVisible()) ? await openMenuLabels(ctPage) : null;
+  expect(leftOpenOnEmpty, "the empty glyph slot's right click opened a context menu").toBeNull();
+  await expect(emptyGutterOf(ctPage).locator("[class*='gutter-breakpoint-']")).toHaveCount(0);
+  expect(await breakpointOnLine(ctPage, EMPTY_LINE), "the empty glyph slot's right click added a breakpoint")
+    .toBeNull();
 });

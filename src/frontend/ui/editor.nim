@@ -546,6 +546,25 @@ proc isGutterToggleTarget(target: js): bool =
   ## `-error`, drawn by `trace.editorLineNumber`). An exact
   ## `gutter-breakpoint` matched no element the gutter draws (PLAT-50).
   ##
+  ## AND THE EMPTY SLOT, `gutter-no-breakpoint`. On a line with no breakpoint
+  ## `trace.editorLineNumber` draws this placeholder where the marker would
+  ## be (it is what shows the faint dot on hover), so it IS that line's glyph
+  ## column, and gesture 8 governs it too: "On a line without a breakpoint it
+  ## does nothing." Before it was matched here, a right click on it reached
+  ## Monaco's `onContextMenu` as an ordinary margin press and opened the
+  ## editor's menu (`gutter_right_click_menu.spec.ts`, step 6).
+  ##
+  ## Matching it gives "does nothing" from the two listeners as they are:
+  ## Monaco's menu stands down, and the container listener's
+  ## `lineActionContextMenu` changes nothing. With no breakpoint on the line
+  ## `DebuggerService.isEnabled` answers false, so it calls
+  ## `DebuggerService.enable`, which acts only on a line `breakpointTable`
+  ## already holds: no entry is added and no `dapSetBreakpoints` is sent. The
+  ## `refreshEditorLine` after it adds and removes a zero-height view zone to
+  ## make Monaco redraw the line, which draws the same placeholder again. The
+  ## class is drawn only by `trace.editorLineNumber`, in the gutter, so no
+  ## surface where the menu should open carries it.
+  ##
   ## NOT THE LINE NUMBER. `gutter-line` is the element holding the line's
   ## number, and a right click on the line numbers opens the editor's menu for
   ## that line (the same section, after its table). It used to toggle here as
@@ -561,7 +580,8 @@ proc isGutterToggleTarget(target: js): bool =
   if target.isNil or target.classList.isNil:
     return false
   for element in cast[seq[cstring]](target.classList):
-    if cstrutils.startsWith(element, cstring"gutter-breakpoint"):
+    if cstrutils.startsWith(element, cstring"gutter-breakpoint") or
+        element == cstring"gutter-no-breakpoint":
       return true
   false
 
@@ -3615,6 +3635,10 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     # The gutter's right-click toggle. Monaco's `onContextMenu` above has
     # already seen this press and, for these same targets, stood down without
     # a menu (`isGutterToggleTarget`), so the toggle here is the whole answer.
+    # On the empty slot of a line with no breakpoint that answer is nothing
+    # at all: `lineActionContextMenu` finds no breakpoint to enable (see
+    # `isGutterToggleTarget`), and the `preventDefault` keeps the browser's
+    # menu away too.
     if isGutterToggleTarget(ev.target.toJs):
       ev.preventDefault()
       ev.stopPropagation()

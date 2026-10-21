@@ -2,7 +2,9 @@
  "_comment": [
   "PLAT-50 — the desktop's chrome and click behaviours, read from the real Electron app on calc.",
   "Produced by src/tests/gui/tests/visual/plat50-desktop-capture.spec.ts",
-  "(`bash scripts/plat50-capture-electron.sh`)."
+  "(`bash scripts/plat50-capture-electron.sh`).",
+  "NOT ONE CAPTURE. menus.editorTextOnBreakpointFirst, clicks.gutterRightClickMenu and clicks.statusCopyControlVisible are from a 2026-10-21 capture; every other field is from the capture before it.",
+  "That capture also differed elsewhere (the event log's header reads `OUTPUT ▼` since the panel-header restyle, caption geometry moved, flowValue appeared), and its header fails test_plat50_desktop_reference.nim, so those fields wait for a full recapture."
  ],
  "chrome": {
   "viewportWidth": 1900,
@@ -121,7 +123,7 @@
    "Jump to call",
    "Jump forward to call",
    "Jump backward to call",
-   "Disable breakpoint",
+   "Enable breakpoint",
    "Delete breakpoint",
    "Delete breakpoints in file",
    "Delete ALL breakpoints",
@@ -149,6 +151,7 @@
  },
  "clicks": {
   "gutterBreakpoint": true,
+  "gutterRightClickMenu": false,
   "gutterDisabled": true,
   "callTraceRow": {
    "from": {
@@ -183,6 +186,7 @@
    "rowClass": "calltrace-call-line calltrace-row",
    "moved": false
   },
+  "statusCopyControlVisible": false,
   "statusLocationCopied": "/home/zahary/m/codetracer-gui/codetracer-green2/test-programs/calc/main.py"
  },
  "pageErrors": []
