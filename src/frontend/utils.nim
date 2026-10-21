@@ -152,15 +152,123 @@ proc makeEditorViewDetailed*(
   ## `openNewEditorView`, which exists to ASK a host for the source and would
   ## send a `tab-load` for a path no filesystem has.
 
+const WindowUniqueIdContents* = {Content.EditorView, Content.UnifiedDiff}
+  ## The panes whose ids must be unique across EVERY tab of the window, not
+  ## only within the tab that opens them (issue #835).
+  ##
+  ## Each tab is a `ReplaySession` with its own `ui.componentMapping`, but all
+  ## tabs share one document: a hidden tab keeps its `session-container-<n>`
+  ## mounted so switching back is instant (`ui/session_switch.nim`). These two
+  ## panes are found by a document-global id derived from the component id —
+  ## `editorComponent-<id>` (`ui/layout.nim`'s editor registration, then
+  ## `ui/editor.renderTopLevelEditorDirect`'s `getElementById` and the
+  ## `jq("#editorComponent-<id>")` Monaco is created on) and
+  ## `unifiedDiffComponent-<id>` (`ui/unified_diff.nim`) — and the editor's
+  ## id also keys module-global state (`ui/editor.isoNimEditorMountedIds`).
+  ## `getElementById` returns the FIRST match in document order, which is the
+  ## earlier tab's. So a second tab's editor 0 mounted into the replay tab's
+  ## `editorComponent-0`: Monaco refused a second editor on that host
+  ## ("Element already has context attribute: editor, code-editor, tab") and
+  ## the new tab's own host stayed blank.
+  ##
+  ## Only these two, deliberately. They are the panes a tab opens any number
+  ## of at runtime, so their ids come from `generateId`. The singleton chrome
+  ## (Build, BuildErrors, Menu, WelcomeScreen, CommandPalette, Shell, …) is
+  ## looked up by id 0 in every tab — `buildComponent(0)`, `shellComponent(0)`,
+  ## `componentMapping[Content.Build][0]` in `ui/layout.nim` — and mounts into
+  ## fixed, non-id hosts, so making those window-unique would break each of
+  ## those lookups in every tab after the first.
+
+proc componentIdUsedInWindow(data: Data, content: Content, id: int): bool =
+  ## Whether `id` is taken for `content` — in the active tab always, and in
+  ## any other tab of the window as well for `WindowUniqueIdContents`.
+  if data.ui.componentMapping[content].hasKey(id):
+    return true
+  if content notin WindowUniqueIdContents:
+    return false
+  for session in data.sessions:
+    if session.isNil or session.ui.isNil:
+      continue
+    let mapping = session.ui.componentMapping[content]
+    # A session whose maps were never initialised has no components to clash
+    # with; `closeSession` guards the same way.
+    if not mapping.isNil and mapping.hasKey(id):
+      return true
+  false
+
 proc generateId*(data: Data, content: Content): int =
-  if data.ui.componentMapping[content].len > 0:
-    var id = 0
-    while true:
-      if not data.ui.componentMapping[content].hasKey(id):
-        return id
-      id += 1
-  else:
-    return 0
+  ## The lowest id that is free for `content`: within the active tab for most
+  ## panes, and across the whole window for `WindowUniqueIdContents`.
+  result = 0
+  while data.componentIdUsedInWindow(content, result):
+    result += 1
+
+proc claimWindowUniqueLayoutIds*(data: Data, root: JsObject) =
+  ## Re-number, IN PLACE, every `WindowUniqueIdContents` pane in a GoldenLayout
+  ## config tree whose id another tab of the window already uses — before the
+  ## tree is turned into components and loaded.
+  ##
+  ## `generateId` covers the panes a tab opens at runtime. This covers the
+  ## ones that arrive with a layout: a restored edit layout carries one
+  ## `editorComponent` node per tab that was open, with the ids it was saved
+  ## with, and a "+" tab inherits the layout of the tab it was opened from
+  ## (`session_switch.createNewSession`). Those ids collide exactly the way a
+  ## generated one used to.
+  ##
+  ## Only a clash with ANOTHER tab is re-numbered. An id this tab already owns
+  ## is kept, because `renderer.createUIComponents` can run twice for the same
+  ## tab and must find its own components again rather than mint copies. The
+  ## mutation is what makes it stick: `componentState.id` is what
+  ## `createUIComponents` builds the component from, and what GoldenLayout
+  ## hands back to the `editorComponent` registration that builds the host id.
+  if root.isNil or root.isUndefined:
+    return
+
+  # Every node first, so a fresh id is never one a LATER node already holds.
+  var states: seq[JsObject] = @[]
+  proc collect(node: JsObject) =
+    if node.isNil or node.isUndefined:
+      return
+    if node["type"].to(cstring) == cstring"component":
+      let state = node["componentState"]
+      if state.isNil or state.isUndefined or state["content"].isUndefined or
+          state["id"].isUndefined:
+        return
+      let raw = state["content"].to(int)
+      if raw >= ord(low(Content)) and raw <= ord(high(Content)) and
+          Content(raw) in WindowUniqueIdContents:
+        states.add(state)
+    elif not node["content"].isNil and not node["content"].isUndefined:
+      for _, child in node["content"]:
+        collect(child)
+  collect(root)
+
+  proc usedByAnotherTab(content: Content, id: int): bool =
+    for index, session in data.sessions:
+      if index == data.activeSessionIndex or session.isNil or session.ui.isNil:
+        continue
+      let mapping = session.ui.componentMapping[content]
+      if not mapping.isNil and mapping.hasKey(id):
+        return true
+    false
+
+  var held: seq[(Content, int)] = @[]
+  for state in states:
+    held.add((Content(state["content"].to(int)), state["id"].to(int)))
+
+  var claimed: seq[(Content, int)] = @[]
+  for state in states:
+    let content = Content(state["content"].to(int))
+    let id = state["id"].to(int)
+    if not usedByAnotherTab(content, id) and (content, id) notin claimed:
+      claimed.add((content, id))
+      continue
+    var fresh = 0
+    while data.componentIdUsedInWindow(content, fresh) or
+        (content, fresh) in claimed or (content, fresh) in held:
+      fresh += 1
+    state["id"] = fresh
+    claimed.add((content, fresh))
 
 proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): EventLogComponent =
   var dropDownsInit: array[EventDropDownBox,bool]

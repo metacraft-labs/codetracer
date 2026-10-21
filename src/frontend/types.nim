@@ -2221,6 +2221,15 @@ type
     visualReplayAvailable*: bool
     visualReplayPlayerUrl*: cstring
     visualReplayPlayerError*: cstring
+    # What this tab last showed in the panes whose ViewModels are shared by
+    # every tab of the window (Files, Test Results, Constraints), saved when
+    # the tab is left and put back when it is entered again (#835, rule 6 of
+    # Multi-Window-Tab-Management.md §Tab Behavior). Opaque here: it is a
+    # `viewmodel/viewmodels/shared_pane_state.SharedPaneSnapshot`, read and
+    # written only by `ui/session_switch.nim`; this module cannot import the
+    # ViewModel types it holds. Nil until the tab has been left once, which is
+    # how a tab entered for the first time is told apart.
+    sharedPaneSnapshot*: JsObject
 
   Data* = ref object
     redraw*:                proc: void
