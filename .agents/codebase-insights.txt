@@ -4453,6 +4453,11 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   reported `SKIP ... already built`. The failure names the TRACE, not the stale
   recorder, so it reads as a corrupt fixture. Remedy until this is fixed:
   `bash scripts/build-siblings.sh --force --only <sibling>`.
+  FIXED 2026-10-21: an artifact is reused only when its build stamp (under
+  `.tools/build-siblings-stamps/`) matches the sibling's and both trace-format
+  repos' HEADs and tracked modifications, the build command and the artifact's
+  sha256. A trace-format move now rebuilds every recorder. Contract:
+  `ci/test/sibling-artifact-freshness-test.sh`.
 - 2026-09-14: A STALE RENDERER BUNDLE CAN SURVIVE A "SUCCESSFUL" SOURCE REVERT,
   and it looks exactly like a product bug. `just build-once` runs tup, and tup
   ABORTS ON THE FIRST FAILED JOB — so when the `db-backend` step dies (e.g. the
