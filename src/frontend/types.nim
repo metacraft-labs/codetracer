@@ -27,6 +27,16 @@ type
   CodetracerFileData* = object
     text*:          langstring
     path*:          langstring
+      ## The display path: the folder or file the node stands for.
+    payloadPath*:   langstring
+      ## Where the index process read the node in a self-contained trace's
+      ## payload, relative to its ``files/`` root (``src/lib``); empty for
+      ## a node read from the live disk.  Sent back with
+      ## ``load-path-content`` so a "Loading..." stub is listed from the
+      ## same place the root load read it (``index/files.loadFile``).  A
+      ## DECLARED field on purpose: ``ui_js.onUpdatePathContent`` copies
+      ## the answer into the tree with ``node[] = content[]``, which keeps
+      ## only the fields the Nim type declares.
 
   Group* = ref object
     baseID*:        int

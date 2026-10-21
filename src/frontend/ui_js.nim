@@ -3465,13 +3465,20 @@ proc onUpdatePathContent(
   except:
     discard
 
-  # update component state
-  var nodeParent = data.services.editor.filesystem
-
-  for index in response.nodeParentIndices:
-    nodeParent = nodeParent.children[index]
-
-  var node = nodeParent.children[response.nodeIndex]
+  # update component state.  `nodeForPathContent` checks the indices
+  # against the answer's path before trusting them (see its doc).
+  let contentPath =
+    if response.content.original.path.isNil: ""
+    else: $response.content.original.path
+  var node = filesystem.nodeForPathContent(
+    data.services.editor.filesystem,
+    response.nodeParentIndices,
+    response.nodeIndex,
+    contentPath)
+  if node.isNil:
+    # The tree was replaced (a new root load) while the request was in
+    # flight; the folder it answers is no longer shown.
+    return
   node[] = response.content[]
   filesystem.refreshIsoNimFilesystemPanel()
 

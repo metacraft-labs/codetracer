@@ -157,10 +157,16 @@ proc collectActiveFileAncestors*(node: FilesystemEntryNode;
   ##   whose ``path`` is empty; it must be descended through but is not
   ##   itself expandable,
   ## - a self-contained trace's tree is rooted at the recorded source
-  ##   folder, not at the filesystem root,
+  ##   folder, not at the filesystem root, and when its roots are payload
+  ##   folders (a Noir recording's `src`) its nodes carry paths RELATIVE to
+  ##   the payload while ``target`` is absolute (`isTreeAncestorOf`),
   ## - folders that are still lazy "Loading..." stubs carry no children
   ##   yet, and the walk must simply stop there (the caller re-runs once
-  ##   the stub is filled).
+  ##   the stub is filled).  That is every folder below a root's own
+  ##   entries until it is expanded: the index process lists one level
+  ##   per load (`index/files.FilesystemLoadDepth`), for a trace payload
+  ##   as for the live disk, so revealing a file N folders below a root
+  ##   takes N round-trips.
   ##
   ## Root-first order matters: expanding an ancestor is what triggers
   ## the lazy load of its children, so parents must be expanded before
@@ -168,7 +174,10 @@ proc collectActiveFileAncestors*(node: FilesystemEntryNode;
   if target.len == 0:
     return
 
-  let isRealAncestor = node.path.len > 0 and isAncestorPathOf(node.path, target)
+  # `isTreeAncestorOf`, not `isAncestorPathOf`: an imported trace's nodes
+  # carry paths relative to its payload (`src`, `src/sub`) while `target`
+  # is the absolute path the debugger reports.
+  let isRealAncestor = node.path.len > 0 and isTreeAncestorOf(node.path, target)
   # A node with an empty path is the synthetic container root — descend
   # into it unconditionally, since its children carry the real paths.
   let isSyntheticContainer = node.path.len == 0
@@ -355,8 +364,11 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     # - the active file only appears after the first DAP stop, and then
     #   changes on every step into another file;
     # - the tree itself is re-published each time a lazily-loaded
-    #   subtree is filled in, which is how ancestors deeper than the
-    #   initial depth limit become expandable at all.
+    #   subtree is filled in.  Every folder below a root arrives as a
+    #   "Loading..." stub (one level per load, `index/files.
+    #   FilesystemLoadDepth`), payload and live trees alike, so this is
+    #   how any ancestor below a root's own entries becomes expandable
+    #   at all: one level per answer.
     #
     # ``expandedPaths`` is deliberately NOT an input (and the expansion
     # write is ``untrack``ed so it cannot become one): a manual collapse

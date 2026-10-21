@@ -19,13 +19,13 @@ const gitEditFixture = fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-edit-mo
 fs.mkdirSync(path.join(gitEditFixture, "src"), { recursive: true });
 fs.writeFileSync(path.join(gitEditFixture, "README.md"), "# Edit mode fixture\n");
 fs.writeFileSync(path.join(gitEditFixture, "src", "main.nim"), "proc main() =\n  echo \"edit mode\"\n");
-// `src/db` sits at depth 2, which is exactly the depth at which the
-// index process stops recursing for a plain folder open
-// (`editFilesystemDepthLimit(selfContained = false) == 2`).  It is
-// therefore delivered as a single "Loading..." stub child, and only a
-// successful `CODETRACER::load-path-content` round-trip can replace it.
-// Without a folder at this depth the tree never exercises the lazy
-// fill at all — which is why #574 survived the earlier edit-mode specs.
+// The index process lists one level per load (`index/files.FilesystemLoadDepth`):
+// the opened folder's own entries arrive, and every folder among them --
+// `src` here -- is a single "Loading..." stub until it is expanded.  `src/db`
+// is one stub further down, so reaching `store.nim` takes TWO successful
+// `CODETRACER::load-path-content` round-trips.  Without a folder at this
+// depth the tree never exercises the lazy fill at all -- which is why #574
+// survived the earlier edit-mode specs.
 fs.mkdirSync(path.join(gitEditFixture, "src", "db"), { recursive: true });
 fs.writeFileSync(
   path.join(gitEditFixture, "src", "db", "store.nim"),
@@ -108,6 +108,11 @@ test.describe("Edit Mode", () => {
     const filesystem = ctPage.locator(".filesystem").first();
     await expect(filesystem).toBeVisible({ timeout: 10_000 });
 
+    // The folder's own entries are listed; `calc` is a "Loading..." stub
+    // (one level per load), so expanding it is what brings `main.py` in.
+    const calc = filesystem.locator(".jstree-anchor").filter({ hasText: /^calc$/ }).first();
+    await expect(calc).toBeVisible({ timeout: 10_000 });
+    await calc.locator("..").locator(":scope > .jstree-ocl").click();
     const mainFile = filesystem.locator(".jstree-anchor", { hasText: "main.py" }).first();
     await expect(mainFile).toBeVisible({ timeout: 10_000 });
     await mainFile.click();
@@ -216,7 +221,9 @@ test.describe("Welcome Open Folder", () => {
     }, { timeout: 15_000 }).toBe(true);
 
     await expect(ctPage.locator(".lm_goldenlayout")).toBeVisible({ timeout: 15_000 });
-    await assertWorkspacePanelsPopulated(ctPage, /main\.py/i);
+    // Only the folder's own entries are listed at first (one level per
+    // load), so look for one of them rather than a file inside a subfolder.
+    await assertWorkspacePanelsPopulated(ctPage, /py_sudoku_solver|noir_example/i);
   });
 
   test("delegated edit-folder event opens a populated new tab", async ({ ctPage }) => {
@@ -271,8 +278,8 @@ test.describe("Welcome Open Folder through main-process dialog handler", () => {
   // Regression cover for #574 — "the file tree stays on Loading... after
   // Open Folder".
   //
-  // A plain folder open loads the tree only two levels deep; anything
-  // deeper arrives as a `Loading...` stub that is filled in on demand by
+  // A folder open lists only the folder's own entries; every folder below
+  // it arrives as a `Loading...` stub that is filled in on demand by
   // `CODETRACER::load-path-content`.  The main-process handler for that
   // message used to build its payload root from `data.trace.outputFolder`
   // unconditionally — and in folder mode there IS no trace, so the
@@ -303,24 +310,32 @@ test.describe("Welcome Open Folder through main-process dialog handler", () => {
     await ctPage.locator(".start-option.open-folder").click();
     await assertWorkspacePanelsPopulated(ctPage, /src|README|main\.nim/i);
 
+    // `assertWorkspacePanelsPopulated` ends on the VCS tab, which shares a
+    // stack with FILES, so bring the Files pane back to the front.
+    await ctPage.locator(".lm_tab", { hasText: "FILES" }).first().click();
+
+    // Rows are matched by `.jstree-anchor`, the class the Files pane's DOM
+    // renderer gives each row's label (`isonim_filesystem_view.renderWebEntry`).
+    // `.filesystem-entry-label` exists only in that view's mock renderer, so a
+    // locator on it never matched in Electron and this test could not pass.
     const label = (name: string) =>
-      ctPage.locator(".filesystem-entry-label").filter({
+      ctPage.locator(".filesystem .jstree-anchor").filter({
         hasText: new RegExp(`^${name.replace(/\./g, "\\.")}$`),
       });
 
-    // `src` is inside the depth limit, so its children are already there.
+    // `src` is a stub: expanding it is the first round-trip, and is what
+    // brings `db` into the tree at all.
+    await expect(label("src").first()).toBeVisible({ timeout: 30_000 });
+    await label("src").first().click();
     await expect(label("db").first()).toBeVisible({ timeout: 30_000 });
 
-    // `src/db` is at the depth limit: expanding it is what asks the main
-    // process for its children.
+    // `src/db` is a stub in turn: expanding it is the second round-trip.
     await label("db").first().click();
 
     // The lazily loaded child must actually appear …
     await expect(label("store.nim").first()).toBeVisible({ timeout: 30_000 });
     // … and no stub may be left anywhere in the tree.
-    await expect(
-      ctPage.locator(".filesystem-entry-label").filter({ hasText: /^Loading\.\.\.$/ }),
-    ).toHaveCount(0, { timeout: 30_000 });
+    await expect(label("Loading...")).toHaveCount(0, { timeout: 30_000 });
 
     const mainProcessFailures = mainProcessOutput.filter(
       (line) =>

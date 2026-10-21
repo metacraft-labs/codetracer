@@ -17,6 +17,9 @@
 ## - The roots an imported trace's file tree is built from (#785).  The rule
 ##   is pure; the payload is described by a predicate instead of a directory
 ##   on disk, so each case states exactly which payload folders hold files.
+## - Where a lazily loaded payload folder is read (`payloadPathOf` /
+##   `payloadReadPathFor`): a location relative to `files/`, refused when it
+##   is empty, absolute or leaves `files/` (`..`).
 ##
 ## DR-R8 removed ``setDeepReview`` / ``deepReviewFiles`` /
 ## ``FilesystemDeepReviewFile`` and the "FilesystemVM deep review" suite that
@@ -258,6 +261,106 @@ suite "lazy file-tree content roots (#574)":
     # The synthetic container root is a grouping node, not a folder.
     check not isAncestorPathOf("", "/proj/main.rs")
     check not isAncestorPathOf("/proj", "")
+
+suite "payload locations of lazily loaded folders":
+  ## A trace payload's Files tree arrives one level at a time
+  ## (`Viewport-Driven-Loading.md` § V5, codetracer-pm issue
+  ## 2026-10-21-filesystem-pane-renders-the-whole-enclosing-checkout-
+  ## expanded-and-freezes-the-window.md).  Each payload node carries the
+  ## place it was read from (`payloadPath`), and the lazy load of a folder
+  ## reads from there again.  The value comes back from the renderer, so the
+  ## index process may only follow it INSIDE the payload.
+
+  const filesRoot = "/traces/trace-7/files"
+
+  test "a node's payload location is relative to files/":
+    check payloadPathOf(filesRoot, "/traces/trace-7/files/src") == "src"
+    check payloadPathOf(filesRoot, "/traces/trace-7/files/home/dev/p/lib") ==
+      "home/dev/p/lib"
+    check payloadPathOf("D:\\traces\\t\\files", "D:\\traces\\t\\files\\src\\a") ==
+      "src/a"
+
+  test "a node outside the payload has no payload location":
+    check payloadPathOf(filesRoot, "/home/dev/p/src") == ""
+    check payloadPathOf(filesRoot, filesRoot) == ""
+    check payloadPathOf(filesRoot, "/traces/trace-7/filesx/src") == ""
+    check payloadPathOf("", "/traces/trace-7/files/src") == ""
+
+  test "a relative payload location is read below files/":
+    check payloadReadPathFor(filesRoot, "src") == "/traces/trace-7/files/src"
+    check payloadReadPathFor(filesRoot, "home/dev/p/lib") ==
+      "/traces/trace-7/files/home/dev/p/lib"
+    check payloadReadPathFor(filesRoot & "/", "src\\lib") ==
+      "/traces/trace-7/files/src/lib"
+    check payloadReadPathFor(filesRoot, "./src//lib/") ==
+      "/traces/trace-7/files/src/lib"
+
+  test "the location round-trips through payloadPathOf":
+    let readPath = "/traces/trace-7/files/home/dev/p/src"
+    check payloadReadPathFor(filesRoot, payloadPathOf(filesRoot, readPath)) ==
+      readPath
+
+  test "an empty location, or no payload, is refused":
+    check payloadReadPathFor(filesRoot, "") == ""
+    check payloadReadPathFor(filesRoot, ".") == ""
+    check payloadReadPathFor(filesRoot, "/") == ""
+    check payloadReadPathFor("", "src") == ""
+
+  test "a location with a .. segment is refused":
+    check payloadReadPathFor(filesRoot, "..") == ""
+    check payloadReadPathFor(filesRoot, "../trace-8/files/src") == ""
+    check payloadReadPathFor(filesRoot, "src/../../../etc") == ""
+    check payloadReadPathFor(filesRoot, "src\\..\\..\\etc") == ""
+    # Even one that would land back inside the payload.
+    check payloadReadPathFor(filesRoot, "src/../src") == ""
+
+  test "an absolute location is refused":
+    check payloadReadPathFor(filesRoot, "/etc") == ""
+    check payloadReadPathFor(filesRoot, "/traces/trace-7/files/src") == ""
+    check payloadReadPathFor(filesRoot, "\\etc") == ""
+    check payloadReadPathFor(filesRoot, "C:\\Windows") == ""
+    check payloadReadPathFor(filesRoot, "C:/Windows") == ""
+    check payloadReadPathFor(filesRoot, "C:Windows") == ""
+    check payloadReadPathFor(filesRoot, "\\\\server\\share") == ""
+
+  test "a location with a NUL byte is refused":
+    check payloadReadPathFor(filesRoot, "src\0/x") == ""
+
+suite "file-tree ancestors of the active file":
+  ## `isTreeAncestorOf`, which reveal-active-file uses to match a tree node
+  ## (absolute, or relative for a payload root such as `src`) against the
+  ## absolute path the debugger reports.
+
+  test "a relative tree folder matches an absolute target on segment boundaries":
+    # A payload root is relative (`src`); the debugger's path is absolute.
+    check isTreeAncestorOf("src", "/home/u/proj/src/main.nr")
+    check isTreeAncestorOf("src/sub", "/home/u/proj/src/sub/deep.nr")
+    check isTreeAncestorOf("src/", "/home/u/proj/src/main.nr")
+    check isTreeAncestorOf("./src", "/home/u/proj/src/main.nr")
+    # Absolute folders keep the strict-prefix rule.
+    check isTreeAncestorOf("/home/u/proj/src", "/home/u/proj/src/main.nr")
+    check not isTreeAncestorOf("/home/u/other/src", "/home/u/proj/src/main.nr")
+
+  test "a relative tree folder does not match a partial segment or itself":
+    check not isTreeAncestorOf("src", "/x/mysrc/a.nr")
+    check not isTreeAncestorOf("src", "/x/srcs/a.nr")
+    check not isTreeAncestorOf("src/sub", "/x/src/subway/a.nr")
+    check not isTreeAncestorOf("lib", "/home/u/proj/src/main.nr")
+    # A file is not the ancestor of itself.
+    check not isTreeAncestorOf("src/main.nr", "/home/u/proj/src/main.nr")
+    # Empty paths are never ancestors.
+    check not isTreeAncestorOf("", "/home/u/proj/src/main.nr")
+    check not isTreeAncestorOf("src", "")
+
+  test "Windows separators and drive letters are matched as segments":
+    check isTreeAncestorOf("src", "C:\\Users\\u\\proj\\src\\main.nr")
+    check isTreeAncestorOf("src\\sub", "C:\\Users\\u\\proj\\src\\sub\\deep.nr")
+    check not isTreeAncestorOf("src", "C:\\Users\\u\\mysrc\\main.nr")
+    check isTreeAncestorOf("C:\\Users\\u\\proj", "C:/Users/u/proj/src/main.nr")
+
+  test "a relative target keeps the prefix rule":
+    check isTreeAncestorOf("src", "src/main.nr")
+    check not isTreeAncestorOf("src", "lib/src/main.nr")
 
 suite "FilesystemVM initial state":
 
@@ -550,8 +653,8 @@ suite "FilesystemVM reveals the active file":
       dispose()
 
   test "onFolderExpanded fires for each ancestor so lazy subtrees load":
-    # Folders deeper than the edit-mode depth limit arrive as
-    # "Loading..." stubs; only the ``onFolderExpanded`` bridge asks the
+    # Every folder below a root's own entries arrives as a
+    # "Loading..." stub (one level per load); only the ``onFolderExpanded`` bridge asks the
     # index process for their children.  A bulk ``expandedPaths`` write
     # would mark them open and leave them empty, so the ordering AND the
     # per-ancestor callback are both load-bearing.
@@ -573,8 +676,8 @@ suite "FilesystemVM reveals the active file":
       dispose()
 
   test "a lazily filled subtree expands the next-deeper ancestor":
-    # In folder/edit mode the tree is only loaded two levels deep, so
-    # ``/proj/src/db`` is not in the tree at first.  When the index
+    # The tree is listed one level per load, so ``/proj/src/db`` is not
+    # in the tree at first.  When the index
     # process answers ``load-path-content`` the bridge re-publishes the
     # tree, and the newly revealed ancestor must expand in turn.
     createRoot proc(dispose: proc()) =
@@ -584,7 +687,7 @@ suite "FilesystemVM reveals the active file":
       vm.onFolderExpanded = proc(path: string) =
         expandedOrder.add(path)
 
-      # Depth-limited tree: ``/proj/src`` still shows the stub child.
+      # ``/proj/src`` still shows the stub child.
       vm.setRoot(makeSourceFoldersRoot(@[
         makeEntry("proj", path = "/proj", isFolder = true, children = @[
           makeEntry("src", path = "/proj/src", isFolder = true, children = @[
@@ -607,6 +710,129 @@ suite "FilesystemVM reveals the active file":
       check vm.isExpanded("/proj/src/db")
 
       dispose()
+
+  test "a relative payload root reveals an absolute active file one answer at a time":
+    # What a Noir recording really shows (measured in the GUI on the
+    # noir_example and noir_space_ship traces): the tree's root is the
+    # payload folder `src`, whose nodes carry RELATIVE paths (`src`,
+    # `src/main.nr`), while the debugger reports the ABSOLUTE path it was
+    # recorded at (`/…/test-programs/noir_space_ship/src/main.nr`).  When a
+    # payload was walked whole every folder arrived expanded and hid the
+    # mismatch; with one level per load the reveal must match the relative
+    # folders itself, or a file below a stub is never shown.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      var listed = false
+
+      proc publish() =
+        let sub =
+          if listed:
+            makeEntry("sub", path = "src/sub", isFolder = true, children = @[
+              makeEntry("deep.nr", path = "src/sub/deep.nr"),
+              makeEntry("notes.md", path = "src/sub/notes.md")])
+          else:
+            makeEntry("sub", path = "src/sub", isFolder = true,
+                      children = @[makeEntry("Loading...", path = "")])
+        vm.setRoot(makeSourceFoldersRoot(@[
+          makeEntry("src", path = "src", isFolder = true, children = @[
+            sub, makeEntry("main.nr", path = "src/main.nr")]),
+        ]))
+
+      var requested: seq[string] = @[]
+      var pending: seq[string] = @[]
+      vm.onFolderExpanded = proc(path: string) =
+        requested.add path
+        pending.add path
+
+      publish()
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/home/u/proj/src/sub/deep.nr",
+                                   line = 3)
+      var answers = 0
+      while pending.len > 0 and answers < 10:
+        let path = pending[0]
+        pending.delete(0)
+        inc answers
+        if path == "src/sub" and not listed:
+          listed = true
+          publish()
+
+      check requested == @["src", "src/sub"]
+      check vm.isExpanded("src")
+      check vm.isExpanded("src/sub")
+      check not vm.isExpanded("src/sub/deep.nr")
+
+      dispose()
+
+  test "a tree listed one level per load reveals the file one answer at a time":
+    # Every folder below a root's own entries arrives as a "Loading..."
+    # stub, for a trace payload as for the live disk
+    # (`Viewport-Driven-Loading.md` § V5; codetracer-pm issue 2026-10-21-
+    # filesystem-pane-renders-the-whole-enclosing-checkout-expanded-and-
+    # freezes-the-window).  A file three folders below the root therefore
+    # needs three round-trips, each started by the previous answer.  The
+    # index process is played by hand: a request ``onFolderExpanded`` makes
+    # is answered afterwards, as the IPC answer is, by publishing the tree
+    # with that folder listed — what ``ui_js.onUpdatePathContent`` →
+    # ``syncLegacyFilesystemIntoVM`` does.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let chain = @["/work/src", "/work/src/game", "/work/src/game/ship"]
+      var listed = 0
+
+      proc folderAt(depth: int): FilesystemEntryNode =
+        ## ``chain[depth]`` as the tree holds it once ``listed`` folders of
+        ## the chain have been answered.  A listed folder also holds a file,
+        ## so no single-child chain lets ``collectSmartExpansionPaths``
+        ## expand anything on its own.
+        let folder = chain[depth]
+        let children =
+          if depth >= listed:
+            @[makeEntry("Loading...", path = "")]
+          elif depth == chain.len - 1:
+            @[makeEntry("main.nr", path = folder & "/main.nr"),
+              makeEntry("notes.md", path = folder & "/notes.md")]
+          else:
+            @[folderAt(depth + 1),
+              makeEntry("notes.md", path = folder & "/notes.md")]
+        makeEntry(folder.split('/')[^1], path = folder, isFolder = true,
+                  children = children)
+
+      proc publish() =
+        vm.setRoot(makeSourceFoldersRoot(@[
+          makeEntry("work", path = "/work", isFolder = true, children = @[
+            folderAt(0), makeEntry("Nargo.toml", path = "/work/Nargo.toml")]),
+        ]))
+
+      var requested: seq[string] = @[]
+      var pending: seq[string] = @[]
+      vm.onFolderExpanded = proc(path: string) =
+        requested.add path
+        pending.add path
+
+      publish()
+      store.updateDebuggerPosition(rrTicks = 1'u64,
+                                   file = "/work/src/game/ship/main.nr",
+                                   line = 3)
+      var answers = 0
+      while pending.len > 0 and answers < 10:
+        let path = pending[0]
+        pending.delete(0)
+        inc answers
+        if listed < chain.len and path == chain[listed]:
+          inc listed
+          publish()
+
+      check listed == chain.len
+      check requested == @["/work"] & chain
+      for folder in chain:
+        check vm.isExpanded(folder)
+      check not vm.isExpanded("/work/src/game/ship/main.nr")
+
+      dispose()
+
 
   test "a manual collapse survives while the active file is unchanged":
     createRoot proc(dispose: proc()) =

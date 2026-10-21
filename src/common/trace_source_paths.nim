@@ -45,6 +45,37 @@ proc isAbsoluteTraceSourcePath*(path: string): bool =
     return true
   path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/')
 
+proc isTreeAncestorOf*(nodePath, target: string): bool =
+  ## True when the Files-pane folder at ``nodePath`` contains ``target``,
+  ## the file the debugger reports — the test reveal-active-file walks the
+  ## tree with (``filesystem_vm.collectActiveFileAncestors``).
+  ##
+  ## An absolute ``nodePath``, or a relative ``target``, keeps
+  ## ``isAncestorPathOf``'s strict-prefix rule.  A RELATIVE ``nodePath``
+  ## against an ABSOLUTE ``target`` is the imported-trace case: the tree is
+  ## rooted in payload folders named relative to ``files/`` (``src``,
+  ## ``src/sub``), while the debugger reports the absolute path the program
+  ## was recorded at (``/home/u/proj/src/sub/deep.nr``).  The two share no
+  ## prefix, so the folder matches when ``"/" & nodePath & "/"`` occurs in
+  ## ``"/" & target`` — on whole segments, so ``src`` does not match
+  ## ``/x/mysrc/a.nr``.  It is a suffix match on the recorded layout and
+  ## cannot tell two ``src`` folders of the target's path apart; the tree
+  ## below the root only ever offers the one the payload holds.
+  ##
+  ## Separators are normalized to ``/``; ``./`` prefixes and trailing
+  ## separators on ``nodePath`` are dropped.  An empty path matches nothing.
+  var node = normalizeSourcePath(nodePath)
+  while node.startsWith("./"):
+    node = node[2 .. ^1]
+  node = node.strip(leading = false, trailing = true, chars = {'/'})
+  let normalizedTarget = normalizeSourcePath(target)
+  if node.len == 0 or normalizedTarget.len == 0:
+    return isAncestorPathOf(nodePath, target)
+  if isAbsoluteTraceSourcePath(node) or
+      not isAbsoluteTraceSourcePath(normalizedTarget):
+    return isAncestorPathOf(nodePath, target)
+  ("/" & normalizedTarget).contains("/" & node & "/")
+
 proc stripTraceSourceRoot*(path: string): string =
   ## Strip an OS root/drive so an absolute source path can be placed below
   ## a self-contained trace's ``files/`` directory.
@@ -175,6 +206,68 @@ proc pathContentRootFor*(
   TraceContentRoot(
     filesRoot: traceFilesRootFor(traceOutputFolder),
     selfContained: traceImported)
+
+proc payloadPathOf*(filesRoot, readPath: string): string =
+  ## **Where a file-tree node was read in a trace payload**, as a path
+  ## relative to the payload's ``files/`` root (``filesRoot``), with ``/``
+  ## separators.  ``""`` when ``readPath`` is not strictly below
+  ## ``filesRoot`` (the node came from the live disk) or either is empty.
+  ##
+  ## The index process records it on every node it reads from the payload
+  ## (``CodetracerFileData.payloadPath``) so that a later lazy load of that
+  ## node (``load-path-content``) reads from the SAME place.  The displayed
+  ## path is not enough to find it again: a portable payload stores
+  ## ``files/src/main.nr`` while the tree shows it under the absolute
+  ## recorded folder, so ``files/<root-stripped display path>`` names a
+  ## folder that does not exist (see ``index/files.loadFile``'s overlay).
+  ##
+  ## Both arguments must be in the same normal form (``index/files`` passes
+  ## them through ``path.normalize`` / ``path.join``); no ``..`` resolution
+  ## is attempted here.
+  relativePathInsideRoot(readPath, filesRoot)
+
+proc payloadReadPathFor*(filesRoot, payloadPath: string): string =
+  ## **The payload location a lazy file-tree load may read**, for a
+  ## ``payloadPath`` the renderer sent back: ``<filesRoot>/<payloadPath>``,
+  ## or ``""`` when the value must be refused.
+  ##
+  ## The value arrives over IPC from the renderer, so it is checked rather
+  ## than trusted: it may only name something INSIDE the payload.  Refused,
+  ## and answered with ``""`` so the caller falls back to its ordinary
+  ## resolution:
+  ##
+  ## - an empty value, or an empty ``filesRoot`` (no trace payload);
+  ## - an absolute path (``/etc``, ``C:\x``, ``\\server\share``);
+  ## - any ``..`` segment, wherever it sits — even one that would resolve
+  ##   back inside the payload is refused, because nothing the index
+  ##   process produces contains one;
+  ## - a value with a NUL byte, which no filesystem path may carry;
+  ## - anything else whose joined form is not strictly below ``filesRoot``
+  ##   (checked last, with ``isAncestorPathOf``, as a backstop).
+  ##
+  ## ``.`` segments and doubled or trailing separators are dropped.
+  ## Backslashes are treated as separators, as everywhere in this module.
+  let root = normalizeForCompare(filesRoot)
+  if root.len == 0 or payloadPath.len == 0 or '\0' in payloadPath:
+    return ""
+  let normalized = normalizeSourcePath(payloadPath)
+  if isAbsoluteTraceSourcePath(normalized) or
+      (normalized.len >= 2 and normalized[1] == ':'):
+    # The second test also refuses a drive-relative ``C:x``.
+    return ""
+  var segments: seq[string] = @[]
+  for segment in normalized.split('/'):
+    if segment == "..":
+      return ""
+    if segment.len == 0 or segment == ".":
+      continue
+    segments.add segment
+  if segments.len == 0:
+    return ""
+  let joined = root & "/" & segments.join("/")
+  if not isAncestorPathOf(root, joined):
+    return ""
+  joined
 
 proc sourceFolderRootsOf*(tracePaths: openArray[string]): seq[string] =
   ## **The folders a recording's sources live in**, from its `paths.json` —

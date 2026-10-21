@@ -70,8 +70,10 @@ for (const fixture of [
       : { sourcePath: `${testProgramsPath}/${fixture.source}`, launchMode: "trace" });
     if (fixture.source === "") {
       test.beforeAll(() => {
-        // A real source file behind the live loader's depth-two boundary.
-        // Expanding src invokes update-path-content and its normal icon map.
+        // A real source file two stubs below the opened folder: the loader
+        // lists one level per load, so `project` and then `src` each arrive
+        // as a "Loading..." stub. Expanding them invokes update-path-content
+        // and its normal icon map.
         mkdirSync(join(liveFolder, "project", "src"), { recursive: true });
         cpSync(join(testProgramsPath, "noir_example", "src", "main.nr"),
           join(liveFolder, "project", "src", "main.nr"));
@@ -95,6 +97,9 @@ for (const fixture of [
       if (fixture.name === "Noir")
         await filesystem.nodeByPath("source folders", "src", "main.nr");
       if (fixture.name === "lazy Noir") {
+        const project = tree.locator(".jstree-anchor").filter({ hasText: /^project$/ });
+        await expect(project).toBeVisible();
+        await project.locator("..").locator(":scope > .jstree-ocl").click();
         const src = tree.locator(".jstree-anchor").filter({ hasText: /^src$/ });
         await expect(src).toBeVisible();
         await src.locator("..").locator(":scope > .jstree-ocl").click();
