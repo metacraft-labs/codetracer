@@ -244,8 +244,10 @@
       .value-expanded-default
         background-color: colors-ui-surface-base-panel !important
 
+    // A return value's name: orange for the dark ground; the editor's
+    // parameter colour, its orange, on the light one (`by-mode`, defaults.styl).
     &.return-value .value-expanded-name-text
-      color: #e48e59
+      color: by-mode(#e48e59, colors-editor-syntax-parameter)
 
   .value-expanded-name
     color: CALLTRACE_ARGS_COLOR
@@ -473,8 +475,10 @@
     background-color: SPEED_FAST_BG
   // box-shadow: 0.625em 0.3125em 0.3125em SPEED_FAST_BG
 
+  // The light palette's OPPOSITE_COLOR is its window ground, which does not
+  // read on the yellow medium-speed chip: body text there (`by-mode`, defaults.styl).
   .speed-medium
-    color: OPPOSITE_COLOR
+    color: by-mode(OPPOSITE_COLOR, colors-ui-text-primary-body)
     // background: linear-gradient(to right, #fff, SPEED_MEDIUM_BG)
     background-color: SPEED_MEDIUM_BG
   // box-shadow: 0.625em 0.3125em 0.3125em SPEED_MEDIUM_BG
@@ -583,7 +587,7 @@
 
   .step-line-location
     width: auto
-    color: #9cdcfe
+    color: by-mode(#9cdcfe, colors-ui-text-information-primary)
 
   .step-line-source-code
     width: auto

@@ -721,7 +721,10 @@ input:checked ~ .checkmark:after
   // panel header the hamburger sat in, and never matched any other menu.
   border-radius: DROPDOWN_RADIUS
   background: colors-ui-surface-base-raised
-  color: colors-ui-surface-input-default
+  // A surface token as text: the window ground's colour on the raised menu
+  // in the light theme (1.03:1), so there the body text token (`by-mode`,
+  // defaults.styl).
+  color: by-mode(colors-ui-surface-input-default, colors-ui-text-primary-body)
   display: flex
   flex-direction: column
   // border: 1px solid colors-ui-border-secondary

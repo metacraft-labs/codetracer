@@ -34,11 +34,13 @@
 .continuation-jump-link
   display inline-block
   margin-left 4px
-  color #58a6ff
+  // A link and its hover: GitHub-dark blues, 2.3:1 and 1.8:1 on the light
+  // ground, which takes the information text tokens (`by-mode`, defaults.styl).
+  color by-mode(#58a6ff, colors-ui-text-information-primary)
   cursor pointer
   font-size 14px
   &:hover
-    color #79c0ff
+    color by-mode(#79c0ff, colors-ui-text-information-primary-hover)
     text-decoration underline
 
 .calltrace-virtual-placeholder

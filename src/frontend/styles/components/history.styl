@@ -85,7 +85,8 @@
 
 .history-list-item.active
   background-color: colors-ui-surface-primary-secondary-hover
-  color: red
+  // The error text token in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(red, colors-ui-text-error-primary)
 
 #history
   display: flex

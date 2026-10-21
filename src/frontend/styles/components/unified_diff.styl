@@ -285,7 +285,10 @@
   // the #282828 editor / #1b1b1b panel / #3a3a3a border palette". A file
   // header is a surface, not an accent.
   background-color rgba(255, 255, 255, 0.045)
-  border-bottom 1px solid rgba(255, 255, 255, 0.10)
+  // A white hairline, invisible on the light ground. White at 10% over the
+  // dark panel is about `border/secondary`'s Dark value, so the light theme
+  // takes that token (`by-mode`, defaults.styl).
+  border-bottom 1px solid by-mode(rgba(255, 255, 255, 0.10), colors-ui-border-secondary)
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
@@ -601,7 +604,10 @@
     align-self center
     height 12px
     line-height 12px
-    border 1px solid rgba(255, 255, 255, 0.30)
+    // The pill's outline and its hover: white at 30% / 55%, about
+    // `border/primary` / `-hover` on the dark band; those tokens in the
+    // light theme (`by-mode`, defaults.styl).
+    border 1px solid by-mode(rgba(255, 255, 255, 0.30), colors-ui-border-primary)
     // A fill, for the same reason. An outline-only pill on a band that already
     // has two rules is one more line among lines; a filled one is an object on
     // top of them.
@@ -621,7 +627,7 @@
 
     &::after
       background-color rgba(255, 255, 255, 0.14)
-      border-color rgba(255, 255, 255, 0.55)
+      border-color by-mode(rgba(255, 255, 255, 0.55), colors-ui-border-primary-hover)
 
 // --- The boundary's context menu (UD-2) ----------------------------------
 //
@@ -726,7 +732,8 @@
 // has to be per line, not per side, or every context line in the new revision
 // would read as an addition.
 .ct-diff-linenum-added
-  color #3fb950 !important
+  // The success text token in the light theme (`by-mode`, defaults.styl).
+  color by-mode(#3fb950, colors-ui-text-success-primary) !important
 
 .ct-diff-linenum-removed
   color #f85149 !important

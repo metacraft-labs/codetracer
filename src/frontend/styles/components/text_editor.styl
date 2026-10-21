@@ -1232,7 +1232,9 @@ line-number-type()
   color: red
 
 .expand-inline
-  color: #0ff
+  // A link: cyan on the dark ground, the information text token on the light
+  // one (`by-mode`, defaults.styl).
+  color: by-mode(#0ff, colors-ui-text-information-primary)
 
 .expand-trace:hover
   opacity: 1
@@ -1431,11 +1433,14 @@ else
 
 .line-diff-added
   background-color: rgba(63, 185, 80, 0.18)
-  border-left: 0.1875em solid #3fb950
+  // The gutter stripes are graphics that carry the change kind: in the light
+  // theme the success / warning icon tokens, as the dark theme's GitHub-dark
+  // greens and ambers are 2.3:1 there (`by-mode`, defaults.styl).
+  border-left: 0.1875em solid by-mode(#3fb950, colors-ui-icon-success-primary)
 
 .line-diff-modified
   background-color: rgba(210, 153, 34, 0.18)
-  border-left: 0.1875em solid #d29922
+  border-left: 0.1875em solid by-mode(#d29922, colors-ui-icon-warning-primary)
 
 .line-diff-removed
   background-color: rgba(248, 81, 73, 0.18)

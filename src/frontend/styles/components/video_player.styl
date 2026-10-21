@@ -259,8 +259,11 @@
     &:active,
     &.pressed
       background: var(--video-player-button-active-bg)
-      border-color: rgba(80, 160, 255, 0.85)
-      color: #ffffff
+      // The pressed button: a blue ring and white glyph on the dark
+      // transport bar; on the light one the focus border and body text
+      // tokens (`by-mode`, defaults.styl).
+      border-color: by-mode(rgba(80, 160, 255, 0.85), colors-ui-border-focus)
+      color: by-mode(#ffffff, colors-ui-text-primary-body)
 
   .video-player-divider
     width: 1px
@@ -273,7 +276,9 @@
     padding: 2px 8px
     border-radius: 3px
     background: rgba(80, 160, 255, 0.18)
-    color: #cfe7ff
+    // Pale blue on the dark bar, the information text token on the light
+    // one (`by-mode`, defaults.styl).
+    color: by-mode(#cfe7ff, colors-ui-text-information-primary)
     font-size: 11px
     font-weight: 600
     text-transform: uppercase
@@ -369,7 +374,9 @@ body.theme-light .video-player-component
   --video-player-fg: #464646
   --video-player-bg: #F5F5F5
   --video-player-chrome-bg: #b8c0cf
-  --video-player-chrome-border: #9aa3b5
+  // In the light sheet the primary border token, as everything else there
+  // (`by-mode`, defaults.styl); the dark sheet keeps this block's own value.
+  --video-player-chrome-border: by-mode(#9aa3b5, colors-ui-border-primary)
   --video-player-button-hover-bg: rgba(0, 0, 0, 0.08)
   --video-player-button-active-bg: rgba(0, 0, 0, 0.14)
   --video-player-divider: rgba(0, 0, 0, 0.18)

@@ -114,7 +114,9 @@
   color: green !important
 
 .diff-file-changed
-  color: orange !important
+  // The warning text token in the light theme, where orange is 1.8:1
+  // (`by-mode`, defaults.styl).
+  color: by-mode(orange, colors-ui-text-warning-primary) !important
 
 .diff-file-deleted
   color: red !important
@@ -142,3 +144,15 @@
   background: colors-ui-surface-primary-secondary
 .path-even
   background: colors-ui-surface-primary-secondary-hover
+
+// file-icons-js gives fallback glyphs fixed pixel font sizes, widths and
+// baseline offsets. Use the tree's scalable icon slot instead, so a glyph
+// cannot outgrow its row when the application's root font size changes.
+.filesystem .jstree-themeicon.icon::before
+  font-size: 1em
+  width: 100%
+  height: 100%
+  line-height: inherit
+  position: absolute
+  top: 0
+  left: 0
