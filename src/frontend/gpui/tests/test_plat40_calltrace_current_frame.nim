@@ -97,7 +97,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 369
+  ExpectedAssertions = 371
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
   CalcSource = "test-programs/calc/main.py"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
@@ -317,6 +317,17 @@ suite "PLAT-40 / PLAT35-F2: the rule that names the call the debugger is in":
     ck currentCallOf(lines, 9, @["fact", "fact", ModuleFrame]).get == 2'i64
     ck currentCallOf(lines, 9, @["fact", "fact", "fact", ModuleFrame]).get ==
        3'i64
+
+  test "a call hidden by a collapsed parent: not its returned namesake (#845)":
+    # The current `fact` (depth 2, inside `main #3`) is hidden: `main #3` is
+    # collapsed. `fact #2`, the same name at the same depth, returned before
+    # `main #3` was entered; the collapsed `main #3`, listed after it at a
+    # shallower depth, shows that. No loaded line is the current call.
+    let lines = @[cl(0, ModuleFrame, 0, 1), cl(1, "main", 1, 2),
+                  cl(2, "fact", 2, 3), cl(3, "main", 1, 5)]
+    let at = currentCallOf(lines, 9, @["fact", "main", ModuleFrame])
+    ck at != some(2'i64)
+    ck at.isNone
 
   test "a call entered after the tick is never current":
     let lines = @[cl(0, ModuleFrame, 0, 1), cl(1, "main", 1, 2),

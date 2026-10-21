@@ -13,6 +13,8 @@
 ##     the one-frame call STACK the pane drew before PLAT-47 — and marks the
 ##     call the debugger is in (the innermost frame's call at the stack's
 ##     depth), at the first stop and at a later one;
+##   * a collapse that hides the current call leaves NO row marked, never an
+##     earlier call of the same name that has returned (codetracer#845);
 ##   * GPUI's calltrace view (`pane_views.calltracePaneView`, over the same
 ##     VM) lists the same rows;
 ##   * the FILES pane lists the recording's tree (`source folders`, `calc`,
@@ -32,7 +34,7 @@
 ## (`stackTrace`), and the real painters draw it. Nothing answers in the
 ## backend's place.
 
-import std/[os, strutils, unittest]
+import std/[options, os, strutils, unittest]
 
 import isonim/core/signals
 
@@ -47,8 +49,10 @@ import codetracer_embed   # `bkVim`, `ksFlag`
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/views/shell
-from ../app/views/call_trace import StackFallbackTitle
+from ../app/views/call_trace import StackFallbackTitle, paintCallTrace,
+  currentTraceIndex
 import ../host/native_host
+from ../host/session_driver import jumpToCall
 import ../host/tui_session
 import ./fixtures/fixture_provider
 
@@ -164,6 +168,101 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
       ck rt.app.callStack.frames[0].name == "evaluate"
       ck rt.app.callStack.frames[1].name == "main"
       ck rt.app.callTrace.rows[cur].depth == rt.app.callStack.frames.len - 1
+
+  test "collapsing the current call's parent marks no call that returned (#845)":
+    # codetracer#845: at a stop inside a later `apply_op`, collapsing the
+    # `evaluate` that contains it hid the current call, and the pane then
+    # marked an EARLIER `apply_op` — same name, same depth, already
+    # returned. `calc` evaluates its expressions each in its own `evaluate`,
+    # each with one or more `apply_op`s, so the trace has that shape.
+    require resolved.outcome == foRecorded
+    let rt = newRuntime()
+    let session = openTuiSession(resolved.tracePath, viewportHeight = Rows - 6)
+    defer: session.close()
+    session.header(rt)
+    session.learnExtent()
+    session.refresh(rt)
+    let store = session.session.session.store
+    let vm = session.session.session.calltraceVM
+    # Found by what the calls are, not by number. The parent: the first
+    # `evaluate` after an `apply_op`. The target: the first `apply_op`
+    # inside it. The namesake: the last `apply_op` before the parent, which
+    # returned before the parent was entered.
+    var parent, target, namesake = -1'i64
+    var targetDepth, namesakeDepth = -1
+    var targetKey = ""
+    for l in session.session.getCalltraceLines():
+      if parent < 0:
+        if l.name == "evaluate" and namesake >= 0:
+          parent = l.index
+          targetDepth = l.depth + 1
+        elif l.name == "apply_op":
+          namesake = l.index
+          namesakeDepth = l.depth
+      elif target < 0 and l.name == "apply_op" and l.depth == targetDepth:
+        target = l.index
+        targetKey = l.callKey
+    checkpoint("parent " & $parent & ", target " & $target & ", namesake " &
+               $namesake)
+    require parent >= 0 and target > parent and namesake >= 0
+    ck namesakeDepth == targetDepth   # the instrument: a true namesake
+    ck targetKey.len > 0
+
+    # ---- step into the later call, as a click on its row does ------------
+    ck session.session.jumpToCall(target) == ""
+    # The section at the NEW stop. The engine re-expands its listing when a
+    # section is read at a stop in a different call than the last read, so a
+    # collapse sent before any read at this stop would be undone by the read
+    # that follows it. Reading here first is what makes the collapse below
+    # stick; the order is not what this case is about.
+    session.session.requestAndLoadCalltrace(startIndex = 0, height = 200,
+                                            depth = RecordingCalltraceDepth)
+    session.refresh(rt)
+    session.session.selectCurrentCall()
+    ck rt.app.callStack.frames.len > 0
+    ck rt.app.callStack.frames[0].name == "apply_op"
+    # The control: expanded, the current call is the target, marked and
+    # selected.
+    ck rt.app.callTrace.currentTraceIndex == target.int
+    ck vm.selectedEntry.val == some(target)
+    let selectedBefore = vm.selectedEntry.val
+
+    # ---- collapse its parent, as a click on the row's toggle does --------
+    session.toggleCallChildren(rt, parent)
+    checkpoint("notification: " & rt.app.notification)
+    var targetListed, namesakeListed, parentCollapsed = false
+    for l in store.calltrace.lines.val:
+      if l.callKey == targetKey: targetListed = true
+      if l.index == namesake and l.name == "apply_op": namesakeListed = true
+      if l.index == parent and not l.isExpanded: parentCollapsed = true
+    # The instrument: the parent is collapsed, so the current call is not
+    # listed; its returned namesake still is.
+    ck parentCollapsed
+    ck not targetListed
+    ck namesakeListed
+    checkpoint("current row after the collapse: " & $rt.app.callTrace.current)
+    # THE DEFECT: the returned namesake was the current row. No row is now.
+    ck rt.app.callTrace.current == -1
+    ck rt.app.callTrace.currentTraceIndex != namesake.int
+    # And the painted pane carries no current-call ground on any row.
+    var g = newStyledGrid(Cols, Rows)
+    discard paintCallTrace(g, CellArea(col: 0, row: 0, width: Cols,
+                                       height: Rows), rt.app.callTrace)
+    var marked = 0
+    for r in 0 ..< Rows:
+      for sp in g.rowSpans(r):
+        if sp.text.strip.len > 0 and sp.style.surface == srSurfaceActiveRow:
+          inc marked
+          break
+    ck marked == 0
+    # The collapse moved no selection.
+    ck vm.selectedEntry.val == selectedBefore
+    # GPUI selects by the same rule (`selectCurrentCall`): over the
+    # collapsed listing it selects nothing rather than the returned
+    # namesake.
+    session.session.selectCurrentCall()
+    ck vm.selectedEntry.val != some(namesake)
+    ck vm.selectedEntry.val.isNone
 
   test "no call trace: the pane shows the call stack and says so, in both front-ends":
     require resolved.outcome == foRecorded

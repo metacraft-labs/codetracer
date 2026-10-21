@@ -52,7 +52,7 @@ import sdk/stop_loader   # the SDK's per-stop loads, which `loadStopPanes` runs
 import store/types as store_types   # `FilesystemEntryNode`
 from store/replay_data_store import applySymbolsResponse   # the omnibar's symbols
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
-from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
+from viewmodels/calltrace_vm import selectEntry, currentCallInSectionOf   # PLAT-49 part B
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
 import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
@@ -669,9 +669,14 @@ proc selectCurrentCall*(s: HeadlessDebugSession) =
   ## PLAT-49 part B: select the call the debugger is in, as the desktop does
   ## on every move (`CalltraceComponent.onCompleteMove` -> `selectEntry`) —
   ## `calltrace_vm.currentCallOf` over the section held, the stop's tick and
-  ## its call stack.
+  ## its call stack, through `currentCallInSectionOf`: never a call that has
+  ## returned (codetracer#845: a collapsed parent hides the current call),
+  ## and, when the section cannot show its answer has not returned, only the
+  ## call the engine's `currentCallLineIndex` names too. Otherwise nothing
+  ## is selected.
   let vm = s.session.calltraceVM
-  let lines = s.session.store.calltrace.lines.val
+  let calltrace = s.session.store.calltrace
+  let lines = calltrace.lines.val
   if vm.isNil or lines.len == 0:
     return
   var names: seq[string] = @[]
@@ -683,7 +688,12 @@ proc selectCurrentCall*(s: HeadlessDebugSession) =
       names.add f{"name"}.getStr("")
   except CatchableError:
     return
-  vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), names))
+  # The lines carry their trace index (`startCallLineIndex + i`), the
+  # numbering of `totalCallsCount` and `currentCallLineIndex` too.
+  let reachesEnd =
+    lines[^1].index + 1 >= calltrace.totalCallsCount.val.int64
+  vm.selectEntry(currentCallInSectionOf(lines, s.getCurrentRRTicks(), names,
+    reachesEnd, calltrace.currentLineIndex.val))
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-STOP producers — the values in scope where the debugger now is

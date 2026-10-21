@@ -544,24 +544,82 @@ func currentCallOf*(lines: openArray[CallLine]; tick: uint64;
   ## THE CALL THE DEBUGGER IS IN, among `lines`, at `tick` with the call
   ## STACK `stack` (innermost first): the last line entered at or before
   ## `tick` whose name is the innermost frame's and whose depth is the
-  ## stack's (`stack.len - 1`, the trace's root being depth 0). A call that
-  ## already returned was entered before `tick` too, so "the last line
-  ## entered" alone would name `mul` while the debugger is back in `main`;
-  ## with no stack, it is that fallback. `none` when no line qualifies. The
+  ## stack's (`stack.len - 1`, the trace's root being depth 0), and which
+  ## has not provably RETURNED by `tick`. `none` when no line qualifies. The
   ## desktop selects this call on every move (`CalltraceComponent
   ## .onCompleteMove` -> `selectEntry`); the terminal and GPUI mark it from
   ## this rule (PLAT-49 part B).
+  ##
+  ## `lines` are the trace in preorder at its current expansion: a collapsed
+  ## call is listed and its descendants are not. So a line at depth `d` has
+  ## RETURNED by `tick` when a LATER line, entered at or before `tick`, has
+  ## depth `<= d`: that call is not inside it, so it ran after it returned.
+  ## Such a line is never the answer. Without this, collapsing the parent of
+  ## the current call (which hides it) moved the mark to an earlier call of
+  ## the same name at the same depth (codetracer#845): the collapsed parent,
+  ## listed after that namesake and entered before `tick`, is the proof
+  ## that the namesake returned. A call that returned without a later line
+  ## to show it (`mul`, the last line, while the debugger is back in `main`)
+  ## is excluded by the depth: the stack's innermost frame is `main`.
+  ##
+  ## With no stack, the answer is the last line entered at or before `tick`
+  ## (`mul` above): the scrubbers' mark. The return test never excludes it,
+  ## because no later line is entered by `tick`.
+  ##
+  ## `lines` are taken as the WHOLE listing. When they are a section of it,
+  ## the line that shows the answer returned may lie past the section's end;
+  ## `currentCallInSectionOf` answers only what the section can show.
   var lastEntered = none(int64)
-  for l in lines:
+  var candidate = -1
+    ## Position in `lines` of the last qualifying line not yet shown to have
+    ## returned. Only the last qualifying line can be the answer: a later
+    ## one, at the same depth and entered by `tick`, shows an earlier one
+    ## returned.
+  for i, l in lines:
     if l.rrTicks > tick:
       continue
     lastEntered = some(l.index)
+    if candidate >= 0 and l.depth <= lines[candidate].depth:
+      candidate = -1
     let name = if l.displayName.len > 0: l.displayName else: l.name
     if stack.len > 0 and (name == stack[0] or l.name == stack[0]) and
        l.depth == stack.len - 1:
-      result = some(l.index)
-  if result.isNone and stack.len == 0:
+      candidate = i
+  if candidate >= 0:
+    result = some(lines[candidate].index)
+  elif stack.len == 0:
     result = lastEntered
+
+func currentCallInSectionOf*(lines: openArray[CallLine]; tick: uint64;
+                             stack: openArray[string];
+                             reachesTraceEnd: bool;
+                             engineIndex = -1'i64): Option[int64] =
+  ## `currentCallOf` over a loaded SECTION of the listing, answered only when
+  ## the section can show it is right.
+  ##
+  ## The line showing that a candidate returned is a later line entered at
+  ## or before `tick`, so it lies between the candidate and the first line
+  ## entered after `tick`. The answer stands when the section holds that
+  ## stretch: it ends the listing (`reachesTraceEnd`), or it holds a line
+  ## after the answer entered after `tick`. Otherwise the line that shows
+  ## the answer returned may be past the section's end (codetracer#845 with
+  ## the section ending just after the returned namesake). The answer then
+  ## stands only when the engine's own current line (`engineIndex`, the
+  ## `currentCallLineIndex` of `ct/load-calltrace-section`, in the same
+  ## numbering as `lines[i].index`; -1 when unknown) names the same line.
+  ## Otherwise the answer is `none`: an unmarked current call, not a
+  ## marked one that has returned.
+  result = currentCallOf(lines, tick, stack)
+  if result.isNone or reachesTraceEnd:
+    return
+  var after = false
+  for l in lines:
+    if after and l.rrTicks > tick:
+      return
+    if l.index == result.get:
+      after = true
+  if engineIndex < 0 or engineIndex != result.get:
+    result = none(int64)
 
 proc callRows*(vm: CalltraceVM): seq[CallRow] =
   ## The visible rows as `CallRow`s, with their arguments and return values

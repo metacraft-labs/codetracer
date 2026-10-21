@@ -471,10 +471,12 @@ proc callTraceModelOf(s: TuiSession; rt: TuiRuntime): CallTraceModel =
                               firstIndex = store.calltrace.startLineIndex.val,
                               total = int(store.calltrace.totalCallsCount.val),
                               scrollTop = rt.app.callTrace.scrollTop,
-                              follow = not rt.app.callTraceScrolled)
-  # PLAT-51: where the debugger is in the WHOLE trace (the engine's), for the
-  # scrubber's mark.
-  result.currentIndex = int(store.calltrace.currentLineIndex.val)
+                              follow = not rt.app.callTraceScrolled,
+                              # PLAT-51: where the debugger is in the WHOLE
+                              # trace (the engine's): the scrubber's mark, and
+                              # the check on a section's unprovable answer.
+                              currentIndex =
+                                int(store.calltrace.currentLineIndex.val))
 
 proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
   ## PLAT-47: **the call trace, a section at a time.** Build the pane's model
