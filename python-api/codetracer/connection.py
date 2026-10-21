@@ -27,20 +27,192 @@ from typing import Optional, Union
 from codetracer.exceptions import TraceError
 
 
-def default_daemon_socket_path() -> Path:
-    """Return the platform-specific well-known daemon socket path.
+# ---------------------------------------------------------------------------
+# Where the daemon listens
+# ---------------------------------------------------------------------------
+#
+# The daemon (``session-manager``, ``src/backend-manager``) resolves its socket
+# in ONE function, ``DaemonConfig::daemon_paths`` (``src/backend-manager/src/
+# config.rs``), fed by ``DaemonConfig::load`` and ``Paths::default``
+# (``src/backend-manager/src/paths.rs``) and ``ct_home::tmp_dir``
+# (``libs/ct-home/src/lib.rs``).  This module cannot call it, so
+# :func:`default_daemon_socket_path` mirrors it step for step.  A change to
+# the Rust precedence must be made here too; backend-manager's
+# ``python_daemon_socket_agreement_test`` starts the real daemon under each
+# override and fails when the two disagree.
 
-    On macOS the path lives under ``~/Library/Caches/com.codetracer.CodeTracer/``.
-    On Linux (and other POSIX systems) it is ``/tmp/codetracer/daemon.sock``.
+#: The socket the daemon itself handed to this process.  The daemon sets it
+#: for the Python process that runs an ``exec_script`` / ``ct trace query``
+#: script (``script_executor.rs``); the MCP server reads it the same way.
+_ENV_HANDED_SOCKET = "CODETRACER_DAEMON_SOCK"
+#: ``config.rs`` ``ENV_SOCKET``: overrides the socket for daemon and clients.
+_ENV_SOCKET = "CODETRACER_DAEMON_SOCKET"
+#: ``config.rs`` ``ENV_CONFIG``: an alternative daemon config file.
+_ENV_CONFIG = "CODETRACER_DAEMON_CONFIG"
+#: ``paths.rs``: the Electron main process's per-run tmp directory.
+_ENV_TMP_PATH = "CODETRACER_TMP_PATH"
+#: ``ct_home::CODETRACER_HOME_ENV``: relocates every per-user location.
+_ENV_HOME = "CODETRACER_HOME"
+
+#: The characters Rust's ``str::trim`` removes (``char::is_whitespace``, the
+#: Unicode ``White_Space`` property).  ``str.strip()`` with no argument uses
+#: ``str.isspace``, which also strips U+001C..U+001F, so the config parser
+#: names the set explicitly.
+#: https://doc.rust-lang.org/std/primitive.char.html#method.is_whitespace
+_RUST_WHITESPACE = (
+    "\t\n\x0b\x0c\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005"
+    "\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+)
+
+
+def _env_var(name: str) -> Optional[str]:
+    """``std::env::var(name).ok()``: the value when set and valid Unicode.
+
+    An empty value counts as set, as it does in Rust.  On POSIX, Python
+    decodes undecodable environment bytes to lone surrogates
+    (``surrogateescape``); Rust's ``env::var`` refuses such a value, which
+    the call sites mirrored here treat as unset.
+    """
+    value = os.environ.get(name)
+    if value is None or any("\udc80" <= c <= "\udcff" for c in value):
+        return None
+    return value
+
+
+def _codetracer_home() -> Optional[Path]:
+    """``ct_home::codetracer_home``: ``$CODETRACER_HOME`` made absolute.
+
+    Unset or empty is ``None``; a relative value is resolved against the
+    current directory.
+    """
+    raw = os.environ.get(_ENV_HOME)
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else Path.cwd() / path
+
+
+def _rust_temp_dir() -> Path:
+    """``std::env::temp_dir()``.
+
+    On Unix it is ``$TMPDIR`` when set (even empty), else ``/tmp``.  On
+    Windows it is ``GetTempPath2W``: ``%TMP%``, ``%TEMP%``, ``%USERPROFILE%``,
+    then the Windows directory.
+    https://doc.rust-lang.org/std/env/fn.temp_dir.html
+    """
+    if sys.platform == "win32":
+        for name in ("TMP", "TEMP", "USERPROFILE"):
+            value = os.environ.get(name)
+            if value:
+                return Path(value)
+        return Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    tmpdir = os.environ.get("TMPDIR")
+    return Path(tmpdir) if tmpdir is not None else Path("/tmp")
+
+
+def _codetracer_tmp_dir() -> Path:
+    """``Paths::default().tmp_path``: where the socket goes without an override.
+
+    ``$CODETRACER_TMP_PATH``, else ``ct_home::tmp_dir()``:
+    ``$CODETRACER_HOME/tmp``, else (macOS)
+    ``$HOME/Library/Caches/com.codetracer.CodeTracer``, else
+    ``<temp dir>/codetracer``.
+    """
+    tmp_path = _env_var(_ENV_TMP_PATH)
+    if tmp_path is not None:
+        return Path(tmp_path)
+    home = _codetracer_home()
+    if home is not None:
+        return home / "tmp"
+    if sys.platform == "darwin":
+        user_home = _env_var("HOME")
+        return Path(user_home if user_home is not None else "/") / (
+            "Library/Caches/com.codetracer.CodeTracer"
+        )
+    return _rust_temp_dir() / "codetracer"
+
+
+def _daemon_config_path() -> Optional[Path]:
+    """The daemon config file ``DaemonConfig::load`` reads, if any.
+
+    ``$CODETRACER_DAEMON_CONFIG``, else ``default_config_path()``:
+    ``$CODETRACER_HOME/config/daemon.conf``, else
+    ``$HOME/.codetracer/daemon.conf``.
+    """
+    explicit = _env_var(_ENV_CONFIG)
+    if explicit is not None:
+        return Path(explicit)
+    home = _codetracer_home()
+    if home is not None:
+        return home / "config" / "daemon.conf"
+    user_home = _env_var("HOME")
+    if user_home is not None:
+        return Path(user_home) / ".codetracer" / "daemon.conf"
+    return None
+
+
+def _configured_socket_path() -> Optional[str]:
+    """``socket_path`` from the daemon config file, as ``config.rs`` parses it.
+
+    ``KEY = VALUE`` lines, ``#`` comments, keys and values trimmed, a later
+    key overriding an earlier one (``parse_config_file``).  A file that is
+    missing, unreadable or not UTF-8 is ignored, as the daemon ignores it.
+    """
+    path = _daemon_config_path()
+    if path is None:
+        return None
+    try:
+        # `Path::exists` is false for a path it cannot stat; so is this.
+        if not path.exists():
+            return None
+        contents = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    socket_path: Optional[str] = None
+    # `str::lines` splits on "\n" only (a trailing "\r" is trimmed below);
+    # `str.splitlines` would also split on "\x0b", "\x1c", "\u2028", ...
+    for line in contents.split("\n"):
+        trimmed = line.strip(_RUST_WHITESPACE)
+        if not trimmed or trimmed.startswith("#") or "=" not in trimmed:
+            continue
+        key, value = trimmed.split("=", 1)
+        if key.strip(_RUST_WHITESPACE) == "socket_path":
+            socket_path = value.strip(_RUST_WHITESPACE)
+    return socket_path
+
+
+def default_daemon_socket_path() -> Path:
+    """Return the socket of the daemon this process should talk to.
+
+    In order:
+
+    1. ``$CODETRACER_DAEMON_SOCK``: the socket the daemon handed to this
+       process (it sets it for the scripts it runs).  Nothing is guessed.
+    2. Otherwise the daemon's own resolution (``DaemonConfig::daemon_paths``
+       in ``src/backend-manager/src/config.rs``), mirrored exactly:
+       ``$CODETRACER_DAEMON_SOCKET``; else ``socket_path`` in the daemon
+       config file (``$CODETRACER_DAEMON_CONFIG``, else
+       ``$CODETRACER_HOME/config/daemon.conf``, else
+       ``~/.codetracer/daemon.conf``); else ``daemon.sock`` (``daemon.port``
+       on Windows) in ``$CODETRACER_TMP_PATH``, else in
+       ``$CODETRACER_HOME/tmp``, else in the per-OS default
+       (``~/Library/Caches/com.codetracer.CodeTracer`` on macOS,
+       ``$TMPDIR/codetracer`` -- ``/tmp/codetracer`` without ``TMPDIR`` --
+       elsewhere).
 
     Returns:
         A :class:`Path` pointing to the expected daemon socket file.
     """
-    if sys.platform == "darwin":
-        home = os.environ.get("HOME", "/")
-        return Path(home) / "Library" / "Caches" / "com.codetracer.CodeTracer" / "daemon.sock"
-    # Linux and other POSIX systems use /tmp.
-    return Path("/tmp/codetracer/daemon.sock")
+    handed = _env_var(_ENV_HANDED_SOCKET)
+    if handed is not None:
+        return Path(handed)
+    override = _env_var(_ENV_SOCKET)
+    if override is None:
+        override = _configured_socket_path()
+    if override is not None:
+        return Path(override)
+    name = "daemon.port" if sys.platform == "win32" else "daemon.sock"
+    return _codetracer_tmp_dir() / name
 
 
 class DaemonConnection:
@@ -51,8 +223,8 @@ class DaemonConnection:
 
     Parameters:
         socket_path: Path to the daemon's Unix socket.  When *None*, the
-            default well-known path returned by
-            :func:`default_daemon_socket_path` is used.
+            path returned by :func:`default_daemon_socket_path`
+            (the one the daemon itself resolves) is used.
     """
 
     def __init__(self, socket_path: Optional[Union[str, Path]] = None) -> None:

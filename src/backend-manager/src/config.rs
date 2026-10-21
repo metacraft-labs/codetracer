@@ -155,6 +155,11 @@ impl DaemonConfig {
     /// config file) the PID file sits beside the socket as `<socket>.pid`;
     /// otherwise both come from `defaults` (`$CODETRACER_TMP_PATH`, else
     /// `$CODETRACER_HOME/tmp`, else the per-OS default).
+    ///
+    /// The Python API cannot call this and mirrors it in
+    /// `python-api/codetracer/connection.py` (`default_daemon_socket_path`);
+    /// change both together. `tests/python_daemon_socket_agreement_test.rs`
+    /// starts the daemon under each override and fails when they disagree.
     pub fn daemon_paths(&self, defaults: &Paths) -> DaemonPaths {
         match &self.socket_path {
             Some(socket) => DaemonPaths {

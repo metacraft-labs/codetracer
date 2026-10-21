@@ -58,7 +58,9 @@ def open_trace(
     Parameters:
         path: Filesystem path to the trace directory or file.
         daemon_socket: Optional explicit path to the daemon's Unix socket.
-            When *None*, the default well-known path is used.
+            When *None*, :func:`codetracer.connection.default_daemon_socket_path`
+            decides: the socket the daemon handed to this process, else the
+            one the daemon resolves for itself.
 
     Returns:
         A :class:`Trace` instance connected to the backend daemon.

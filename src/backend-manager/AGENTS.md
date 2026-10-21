@@ -112,10 +112,14 @@ and communicating via stdin/stdout with newline-delimited JSON-RPC 2.0.
   becomes `<socket>.pid`; `socket_path` in the daemon config file does the
   same). The daemon and every client (the `trace` verbs, `daemon
   stop`/`status`/`connect`, the MCP server) resolve it through one function,
-  `DaemonConfig::daemon_paths`, so it moves both sides or neither.
-- `CODETRACER_DAEMON_SOCK` - The MCP server only: connect to the daemon at
-  this socket and never auto-start one (used in tests). The daemon also sets
-  it for `exec_script`'s Python process.
+  `DaemonConfig::daemon_paths`, so it moves both sides or neither. The Python
+  API (`python-api/codetracer/connection.py`, `default_daemon_socket_path`)
+  cannot call it and mirrors it instead; `python_daemon_socket_agreement_test`
+  fails when the two disagree, so change both together.
+- `CODETRACER_DAEMON_SOCK` - The MCP server: connect to the daemon at this
+  socket and never auto-start one (used in tests). The daemon also sets it
+  for `exec_script`'s Python process, and the Python API connects to it
+  ahead of any other resolution.
 - `CODETRACER_TMP_PATH`, else `$CODETRACER_HOME/tmp`, else the per-OS default
   (`TMPDIR`-based on Linux) - where the daemon socket and PID file go without
   an override.
