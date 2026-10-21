@@ -314,6 +314,7 @@ pub trait ReplaySession: std::fmt::Debug {
             ppid: 0,
             exit_code: None,
             command: "main".to_string(),
+            replayed: true,
         }])
     }
 

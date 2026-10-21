@@ -475,6 +475,33 @@ pub fn reserve_run_id_for_recording(recording_id: &str) -> String {
     }
 }
 
+/// Spawner-side: reserve an index for a new replay worker named
+/// `worker_name`, unique among the workers of that name this process creates.
+///
+/// A worker's socket and log are named by `(worker_name, index)` inside the
+/// run directory ([`recreator_socket_file_name`]), and the run directory is
+/// shared by every worker of this process when no recording id is plumbed
+/// (`reserve_run_id_for_recording("")` is the pid). Each handler used to
+/// count indices on its own, from 0: the `flow` task thread's handler gives
+/// its own replay `("flow", 0)` and so did the first `ct/load-flow` worker,
+/// and the `tracepoint` thread's handler and the first history/tracepoint
+/// worker collided the same way — two workers on one socket. Reserving every
+/// index here makes the pair unique for the process's lifetime, whichever
+/// handler or thread creates the worker. Indices start at 0 and increase by
+/// one per name.
+pub fn reserve_worker_index(worker_name: &str) -> usize {
+    use std::collections::HashMap;
+    static NEXT: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+    let mut next = match NEXT.lock() {
+        Ok(next) => next,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entry = next.entry(worker_name.to_string()).or_insert(0);
+    let index = *entry;
+    *entry += 1;
+    index
+}
+
 /// Worker-side: resolve the per-run identifier for the current process.
 ///
 /// Resolution order (matches the Nim sibling `replay_worker_cmd.nim`):
@@ -510,7 +537,7 @@ pub fn resolve_run_id_for_worker() -> String {
 mod tests {
     use super::{
         CODETRACER_RUN_ID_ENV, PidLivenessProbe, gc_stale_run_dirs_in, reserve_run_id_for_recording,
-        resolve_run_id_for_worker, run_dir_for,
+        reserve_worker_index, resolve_run_id_for_worker, run_dir_for,
     };
     use std::collections::HashSet;
     use std::fs;
@@ -552,6 +579,18 @@ mod tests {
     #[test]
     fn reserve_run_id_empty_recording_falls_back_to_pid() {
         assert_eq!(reserve_run_id_for_recording(""), std::process::id().to_string());
+    }
+
+    /// Every worker index reserved for a name is distinct, and names count
+    /// independently. A name unique to this test keeps it independent of other
+    /// tests reserving in the same process.
+    #[test]
+    fn reserve_worker_index_never_hands_out_a_name_index_pair_twice() {
+        let name = "reserve-worker-index-test";
+        let reserved: Vec<usize> = (0..5).map(|_| reserve_worker_index(name)).collect();
+        assert_eq!(reserved, vec![0, 1, 2, 3, 4]);
+        assert_eq!(reserve_worker_index("reserve-worker-index-test-other"), 0);
+        assert_eq!(reserve_worker_index(name), 5);
     }
 
     /// Fake liveness probe driven by an explicit set of "alive" PIDs.

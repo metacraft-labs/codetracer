@@ -852,6 +852,20 @@ impl RecreatorReplaySession {
         }
     }
 
+    /// A session for a new worker named `name`, with an index reserved through
+    /// [`crate::paths::reserve_worker_index`] so no other worker this process
+    /// creates shares its `(name, index)` socket. Production code creates
+    /// sessions through this; [`RecreatorReplaySession::new`] with an explicit
+    /// index is for callers that own the namespace (tests).
+    pub fn with_reserved_index(name: &str, ct_rr_args: RecreatorArgs) -> RecreatorReplaySession {
+        Self::new(name, crate::paths::reserve_worker_index(name), ct_rr_args)
+    }
+
+    /// The `(name, index)` pair that names this session's worker socket.
+    pub fn worker_identity(&self) -> (&str, usize) {
+        (&self.name, self.index)
+    }
+
     pub fn ensure_active_stable(&mut self) -> Result<(), Box<dyn Error>> {
         // start stable process if not active, store fields, setup ipc? store in stable
         if !self.stable.active {
@@ -1278,6 +1292,7 @@ impl ReplaySession for RecreatorReplaySession {
                 ppid: 0,
                 exit_code: None,
                 command: "main".to_string(),
+                replayed: true,
             }]);
         }
         Ok(processes)
