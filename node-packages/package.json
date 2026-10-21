@@ -84,7 +84,7 @@
     "stylus": "^0.64.0",
     "typescript": "5.9.3",
     "typescript-eslint": "^8.47.0",
-    "vite": "7.2.2",
+    "vite": "7.3.7",
     "wdio-electron-service": "^9.2.1",
     "webpack": "5.102.1",
     "webpack-cli": "6.0.1"
