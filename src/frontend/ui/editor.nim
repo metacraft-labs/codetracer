@@ -11,7 +11,12 @@ import
   ../../common/[ ct_event, review_source_paths ]
 
 from welcome_screen import resetView
-from event_log import findTRNode
+
+proc findTRNode(node: js): js =
+  ## The table row `node` is in (or is).
+  return if node.tagName.to(cstring) == cstring("TR"):
+    node else: findTRNode(node.parentNode)
+
 # The generated-code operation's open path, reached from the context menu
 # below. Imported for exactly these three symbols; `generated_code` imports
 # `ui_imports` and the viewmodels and nothing from here, so there is no cycle.
@@ -3202,15 +3207,20 @@ proc initialEventLogFlowLocation(self: EditorViewComponent): tuple[found: bool, 
       if location.found:
         return location
 
-  if not self.data.ui.isNil:
-    for _, component in self.data.ui.componentMapping[Content.EventLog]:
-      let eventLog = EventLogComponent(component)
-      if eventLog.isNil:
-        continue
-      for event in eventLog.programEvents:
-        let location = self.eventFlowLocationForEditor(event)
-        if location.found:
-          return location
+  # The rows the Event Log holds: the session's store, which its pane renders.
+  let session = panelSession()
+  if not session.isNil and not session.store.isNil:
+    for row in session.store.eventLog.rows.val:
+      let event = ProgramEvent(
+        highLevelPath: cstring(row.file),
+        highLevelLine: row.line,
+        rrEventId: int(row.eventId),
+        directLocationRRTicks: int(row.rrTicks),
+        sourceGeneration: row.sourceGeneration,
+        sourceDigest: cstring(row.sourceDigest))
+      let location = self.eventFlowLocationForEditor(event)
+      if location.found:
+        return location
 
 proc initialFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   let tabLocation = self.usableInitialFlowLocation(self.tabInfo.location)

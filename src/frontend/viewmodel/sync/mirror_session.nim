@@ -48,6 +48,10 @@ type
       ## The primary session mirrored; "" before the host names one.
     unknownSession*: string
       ## The last session the host said it does not have.
+    viewports: JsonNode
+      ## The last viewport this mirror reported for each pane, by pane name
+      ## (the `args` of a `viewport` / `set` action): sent again to every
+      ## primary the mirror starts to follow (`switchTo`).
     disposeRoot: proc()
 
 proc inertBackend*(): BackendService =
@@ -68,9 +72,22 @@ proc switchTo*(m: MirrorSession; sessionId: string) =
   ## Follow the primary session `sessionId`: ask for its snapshot, and apply
   ## its batches from then on. Messages about the session left are refused
   ## from this moment, so a late batch cannot show it again.
+  ##
+  ## THE PANES THE MIRROR MEASURED ARE REPORTED AGAIN, to the session it now
+  ## follows. A pane reports its size when it is mounted and when it is
+  ## resized or scrolled (Viewport-Driven-Loading V3), not when the primary
+  ## changes: a report sent before this primary was hosted was dropped by the
+  ## host (a `ct host` page measures its panes before the replay's first stop
+  ## creates its session), and one sent to the session left was that
+  ## session's. Without its viewport the primary's pane is unmeasured and
+  ## loads nothing, so the mirror would show an empty pane until the user
+  ## happened to resize it.
   m.following = sessionId
   m.subscriber.follow(sessionId)
   m.channel.send(%*{"type": "subscribe", "session": sessionId})
+  if not m.viewports.isNil:
+    for _, args in m.viewports.pairs:
+      m.channel.send(serializeAction("viewport", "set", args, sessionId))
 
 proc onHostMessage(m: MirrorSession; msg: JsonNode) =
   if msg.isNil or msg.kind != JObject:
@@ -95,12 +112,21 @@ proc onHostMessage(m: MirrorSession; msg: JsonNode) =
 proc relay*(m: MirrorSession; vm, action: string;
             args: JsonNode = newJObject())
 
-proc relayActions(m: MirrorSession) =
-  ## Hand every panel ViewModel's user actions to the primary
-  ## (`viewmodels/action_sink`): the views call the ViewModels as anywhere,
-  ## and the actions run where the session is.
-  let sink: ActionSink = proc(vm, action: string; args: JsonNode) =
+type
+  RelayFilter* = proc(vm, action: string): bool {.closure.}
+    ## Whether the mirror relays `vm`.`action` to the primary (`true`) or
+    ## leaves it to its own ViewModel (`false`).
+
+proc relayActions(m: MirrorSession; relays: RelayFilter) =
+  ## Hand the panel ViewModels' user actions that `relays` accepts (every
+  ## one when it is nil) to the primary (`viewmodels/action_sink`): the views
+  ## call the ViewModels as anywhere, and those actions run where the session
+  ## is.
+  let sink: ActionSink = proc(vm, action: string; args: JsonNode): bool =
+    if not relays.isNil and not relays(vm, action):
+      return false
     m.relay(vm, action, args)
+    true
   let s = m.session
   if not s.calltraceVM.isNil: s.calltraceVM.actionSink = sink
   if not s.stateVM.isNil: s.stateVM.actionSink = sink
@@ -115,7 +141,8 @@ proc relayActions(m: MirrorSession) =
 proc createMirrorSession*(
     channel: SyncChannel;
     debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil;
-    relayActions = false
+    relayActions = false;
+    relays: RelayFilter = nil
 ): MirrorSession =
   ## A mirror over `channel`. It follows the session the host activates, or
   ## the one `switchTo` names.
@@ -129,10 +156,10 @@ proc createMirrorSession*(
   ## its steps go nowhere.
   ##
   ## `relayActions`: the panels' user actions run on the primary
-  ## (Shared-DOM-Front-Ends D6) — a VS Code webview, whose host owns the
-  ## session and the replay. Off for a mirror whose page drives the replay
-  ## itself (`ct host`).
-  let m = MirrorSession(channel: channel)
+  ## (Shared-DOM-Front-Ends D6) — a VS Code webview, and a `ct host` page
+  ## (`createHostedPageMirror`). Off for a mirror that only shows a session.
+  ## `relays` narrows them to the actions it accepts; nil relays every one.
+  let m = MirrorSession(channel: channel, viewports: newJObject())
   createRoot proc(dispose: proc()) =
     m.disposeRoot = dispose
     m.session = createSessionVM(inertBackend(), vrrCollaborator)
@@ -140,7 +167,7 @@ proc createMirrorSession*(
       m.session.debugCommands = debugCommandsFor(m.session)
     m.session.initializePanelViewModels()
     if relayActions:
-      m.relayActions()
+      m.relayActions(relays)
   m.subscriber = createSyncSubscriber(m.session)
   channel.setHandler(proc(msg: JsonNode) = m.onHostMessage(msg))
   # THE VIEW STATE IS THE PRIMARY'S. A tab chosen, a row expanded or a watch
@@ -163,17 +190,61 @@ proc createMirrorSession*(
   channel.send(%*{"type": "hello"})
   m
 
+proc hostedPageRelays*(vm, action: string): bool =
+  ## The actions a `ct host` page relays to the server's session
+  ## (`createHostedPageMirror`): the panes' viewports and the call trace's
+  ## actions. The call trace's ViewModel takes no callback from the page, so
+  ## all its actions run the same on either side.
+  vm == "viewport" or vm == "calltrace"
+
+proc createHostedPageMirror*(
+    channel: SyncChannel;
+    debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil
+): MirrorSession =
+  ## The mirror a `ct host` page renders (Shared-DOM-Front-Ends D2): the
+  ## server owns the client's session, and the page relays to it, with
+  ## `action_relay`, the panel actions whose effect lives entirely in that
+  ## session (`hostedPageRelays`):
+  ##
+  ## * every pane's measured viewport: the server's session has no screen,
+  ##   so a pane loads nothing until the page's measurement reaches it
+  ##   (Viewport-Driven-Loading V3);
+  ## * the call trace's actions: a click on a call jumps over the server's
+  ##   connection to the replay, not the mirror's inert backend.
+  ##
+  ## The other panels' actions stay on the page, as before: several reach
+  ## callbacks only the page installs — the file tree opens a file in the
+  ## page's editor and loads a folder through it, the event log and the state
+  ## pane switch the page's process, the terminal output saves the view the
+  ## page chose — and the server's session has none of them. The toolbar
+  ## stays the page's too, through `debugCommandsFor`: the page drives the
+  ## replay it launched, and the server's session follows the moves it makes
+  ## (`hosted_primary`).
+  createMirrorSession(channel, debugCommandsFor, relayActions = true,
+                      relays = hostedPageRelays)
+
+proc rememberViewport(m: MirrorSession; args: JsonNode) =
+  ## Keep `args` as the pane's last report, for the next primary `switchTo`
+  ## follows. A report that names no pane is not one the primary can apply.
+  let pane = args{"pane"}.getStr("")
+  if pane.len > 0:
+    m.viewports[pane] = args.copy
+
 proc relay*(m: MirrorSession; vm, action: string;
             args: JsonNode = newJObject()) =
   ## Run `vm`.`action` on the primary this mirror follows. Encode typed
   ## arguments with `action_relay.actionArg`.
+  if vm == "viewport" and action == "set" and not args.isNil:
+    m.rememberViewport(args)
   m.channel.send(serializeAction(vm, action, args, m.following))
 
 proc setViewport*(m: MirrorSession; pane: string; rows: int; depth = 0;
                   firstRow = -1) =
   ## Report the viewport this mirror measured for `pane` to the primary,
   ## which decides what to load for it.
-  m.channel.send(viewportAction(pane, rows, depth, firstRow, m.following))
+  let msg = viewportAction(pane, rows, depth, firstRow, m.following)
+  m.rememberViewport(msg["args"])
+  m.channel.send(msg)
 
 proc dispose*(m: MirrorSession) =
   if m.isNil:

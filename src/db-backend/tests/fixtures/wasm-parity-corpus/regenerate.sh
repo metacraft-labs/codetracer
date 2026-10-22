@@ -381,8 +381,13 @@ record_module() {
 	cp "$out/$program.ct" "$out_dir/$program.ct"
 	rm -rf "$out"
 
-	if [ "$name" = "vault_apply" ] &&
-		! "$CT_PRINT" --full "$out_dir/$program.ct" | grep -q 'wasm-host-state'; then
+	# Captured, then searched as a here-string: piping ct-print into `grep -q`
+	# under pipefail reports an early match as a failure (SIGPIPE; see
+	# ci/test/grep-q-pipefail-gate.sh). ct-print's own failure still fails.
+	if [ "$name" = "vault_apply" ] && {
+		! host_state_dump="$("$CT_PRINT" --full "$out_dir/$program.ct")" ||
+			! grep -q 'wasm-host-state' <<<"$host_state_dump"
+	}; then
 		echo "[regenerate] $program.ct carries no host-state record." >&2
 		echo "[regenerate] vault_apply exists to exercise spec §3.3/§3.4;" >&2
 		echo "[regenerate] a recording without that state is not one." >&2

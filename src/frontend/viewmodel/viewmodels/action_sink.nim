@@ -17,13 +17,21 @@
 ## (the view compares against it), so `setViewport` forwards the report AND
 ## records it locally.
 ##
+## A sink may DECLINE an action (answer `false`): the ViewModel then runs it
+## itself, as it would without a sink. A `ct host` page relays only the
+## actions whose effect lives entirely in the session
+## (`mirror_session.createHostedPageMirror`); the rest reach callbacks only
+## the page installs (opening a file in its editor, switching its process)
+## and must keep running there.
+##
 ## Works on both the C and JS backends.
 
 import std/[json, options]
 
 type
-  ActionSink* = proc(vm, action: string; args: JsonNode) {.closure.}
-    ## Send `vm`.`action`(`args`) to the primary session.
+  ActionSink* = proc(vm, action: string; args: JsonNode): bool {.closure.}
+    ## Send `vm`.`action`(`args`) to the primary session and answer `true`,
+    ## or answer `false` to leave the action to the ViewModel itself.
 
 # An argument is encoded as `action_relay` decodes it (`std/jsonutils`,
 # `joptEnumString`): an `Option` as its value or `null`, an enum by name, the
@@ -44,8 +52,8 @@ proc sinkArg*[T: not enum](value: T): JsonNode =
 proc forwards*(sink: ActionSink; vm, action: string;
                args: JsonNode = newJObject()): bool =
   ## Hand the action to `sink` and answer `true` — the caller then returns
-  ## without running it — or answer `false` when there is no sink.
+  ## without running it — or answer `false` when there is no sink or the sink
+  ## declined it.
   if sink.isNil:
     return false
   sink(vm, action, args)
-  true

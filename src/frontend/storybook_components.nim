@@ -607,83 +607,6 @@ proc applyEmptyState(store: ReplayDataStore) =
   store.locals.locals.val = @[]
   store.locals.globals.val = @[]
 
-proc htmlEscape(text: string): string =
-  result = text
-  result = result.replace("&", "&amp;")
-  result = result.replace("<", "&lt;")
-  result = result.replace(">", "&gt;")
-  result = result.replace("\"", "&quot;")
-
-proc storyEventPath(row: EventLogRow): string =
-  if row.line in [13, 17, 23, 24, 25, 32]: "main.nr:" & $row.line
-  elif row.line >= 38 and row.line <= 43: "combat.nr:" & $row.line
-  else: "shield.nr:" & $row.line
-
-proc storyEventDenseHtml(rows: seq[EventLogRow]; selected: Option[int]): string =
-  result.add "<div class=\"dt-container dts DTS dt-empty-footer\">"
-  result.add "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">"
-  result.add "<div class=\"dt-scroll\"><div class=\"dt-scroll-head\"><div class=\"dt-scroll-headInner\">"
-  result.add "<table class=\"dataTable\"><thead><tr><th>tick</th><th>#</th><th>location</th><th></th><th>output</th></tr></thead></table>"
-  result.add "</div></div><div class=\"dt-scroll-body\"><table class=\"dataTable\"><tbody>"
-  for i, row in rows:
-    let rowState =
-      if selected.isSome and selected.get == i: "future event-selected"
-      else: "future"
-    let rrTicksPercent = formatFloat(float(row.eventId) / 1000.0, ffDecimal, 3)
-    let rrTicksRemaining = formatFloat(101.0 - (float(row.eventId) / 1000.0),
-                                       ffDecimal, 3)
-    result.add "<tr class=\"" & rowState & "\">"
-    result.add "<td class=\"direct-location-rr-ticks eventLog-cell dt-type-numeric sorting_1\">"
-    result.add "<div class=\"rr-ticks-time-container\"><span class=\"rr-ticks-time\">" & $row.eventId & "</span></div>"
-    result.add "<div class=\"rr-ticks-line-container\"><span class=\"rr-ticks-line event-rr-ticks-line\"></span>"
-    result.add "<span class=\"rr-ticks-empty-remaining\" style=\"width:" &
-               rrTicksRemaining & "%; left:" & rrTicksPercent & "%\"></span></div></td>"
-    result.add "<td class=\"eventLog-index eventLog-cell dt-type-numeric\">" & $i & "</td>"
-    result.add "<td class=\"eventLog-fullpath eventLog-cell\">" & htmlEscape(storyEventPath(row)) & "</td>"
-    result.add "<td class=\"eventLog-event eventLog-cell\">" & htmlEscape(row.kind) & "</td>"
-    result.add "<td class=\"eventLog-text eventLog-cell\">" & htmlEscape(row.value) & "</td>"
-    result.add "</tr>"
-  result.add "</tbody></table></div></div></div></div></div>"
-
-proc storyEventDetailedHtml(): string =
-  "<div class=\"dt-container dt-empty-footer\" style=\"display: none;\">" &
-    "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">" &
-    "<table class=\"dataTable\"><tbody><tr><td class=\"dt-empty\">No data available in table</td></tr></tbody></table>" &
-    "</div></div></div>"
-
-proc populateStorybookEventLogTables(
-    denseTableId, detailedTableId, denseHtml, detailedHtml: cstring) =
-  {.emit: """
-    const denseTable = document.getElementById(`denseTableId`);
-    if (denseTable) {
-      const denseHost = denseTable.closest('.eventLog-dense-table');
-      if (denseHost) {
-        denseHost.innerHTML = `denseHtml`;
-        const eventLog = denseHost.closest('.eventLog');
-        const rowCount = denseHost.querySelectorAll('tbody tr').length;
-        const footer = eventLog && eventLog.querySelector('.data-tables-footer');
-        if (footer) {
-          footer.className = 'data-tables-footer 1to40';
-          const startInput = footer.querySelector('input');
-          const endRow = footer.querySelector('.data-tables-footer-end-row');
-          const rowsCount = footer.querySelector('.data-tables-footer-rows-count');
-          if (startInput) {
-            const startValue = rowCount > 0 ? '1' : '0';
-            startInput.value = startValue;
-            startInput.setAttribute('value', startValue);
-          }
-          if (endRow) endRow.textContent = String(Math.min(40, rowCount));
-          if (rowsCount) rowsCount.textContent = String(rowCount);
-        }
-      }
-    }
-    const detailedTable = document.getElementById(`detailedTableId`);
-    if (detailedTable) {
-      const detailedHost = detailedTable.closest('.eventLog-detailed-table');
-      if (detailedHost) detailedHost.innerHTML = `detailedHtml`;
-    }
-  """.}
-
 proc applyFilesystem(vm: FilesystemVM) =
   vm.setRoot(storyFilesystem())
   vm.expandPath("/workspace/source folders")
@@ -922,22 +845,8 @@ proc mountEventLog(container: isonim_dom.Element; fixture: string): DisposeProc 
       vm.loadingState.val = lsLoading
     else:
       vm.applyEventLog()
-    let denseTableId = "eventLog-story-dense-table-0"
-    let detailedTableId = "eventLog-story-detailed-table-0"
-    let searchInputId = "eventLog-story-search"
-    mountIsoNimEventLogWithDataTables(
-      container,
-      vm,
-      0,
-      denseTableId,
-      detailedTableId,
-      searchInputId,
-      proc() =
-        populateStorybookEventLogTables(
-          cstring(denseTableId),
-          cstring(detailedTableId),
-          cstring(storyEventDenseHtml(vm.eventRows.val, vm.selectedRow.val)),
-          cstring(storyEventDetailedHtml())))
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderEventLogPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1567,22 +1476,8 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "event-log":
         let vm = createEventLogVM(store); vm.applyEventLog()
-        let denseTableId = "eventLog-default-dense-table-0"
-        let detailedTableId = "eventLog-default-detailed-table-0"
-        let searchInputId = "eventLog-default-search"
-        mountIsoNimEventLogWithDataTables(
-          section.content,
-          vm,
-          0,
-          denseTableId,
-          detailedTableId,
-          searchInputId,
-          proc() =
-            populateStorybookEventLogTables(
-              cstring(denseTableId),
-              cstring(detailedTableId),
-              cstring(storyEventDenseHtml(vm.eventRows.val, vm.selectedRow.val)),
-              cstring(storyEventDetailedHtml())))
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderEventLogPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "flow":
         let vm = createFlowVM(store); vm.iterationCount.val = 12; vm.selectIteration(5)

@@ -478,4 +478,3 @@ method restart*(self: RequestPanelComponent) =
 
 method clear*(self: RequestPanelComponent) =
   self.clearRequests()
-

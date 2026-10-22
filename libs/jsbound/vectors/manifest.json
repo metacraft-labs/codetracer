@@ -135,6 +135,13 @@
       "name": "mark"
     },
     {
+      "bytes": "xhr_event.bin",
+      "class": "valid",
+      "description": "one XhrEvent record at seq 1",
+      "expected": "xhr_event.json",
+      "name": "xhr_event"
+    },
+    {
       "bytes": "gap.bin",
       "class": "valid",
       "description": "a Gap covering seq 2..4 between seq 1 and seq 5",
@@ -168,6 +175,13 @@
       "description": "a fetch whose body streams: its head (NetResponse outcome 5, no body), two pieces (WsMessage dir 1), the second in a network task of its own, and the end (WsMessage dir 4)",
       "expected": "streamed_response.json",
       "name": "streamed_response"
+    },
+    {
+      "bytes": "xhr_events.bin",
+      "class": "valid",
+      "description": "an XMLHttpRequest's ProgressEvents (XhrEvent): loadstart inside send(), the upload object's progress, load and loadend each in a network task, the response's progress events with the values the page reads, the last at DONE, then load and loadend",
+      "expected": "xhr_events.json",
+      "name": "xhr_events"
     },
     {
       "bytes": "storage_shape_reads.bin",
@@ -602,6 +616,46 @@
       "description": "End.reason is 0, one before its least value (1 to 4)",
       "expected": "enum_end_reason_0.json",
       "name": "enum_end_reason_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_target_3.bin",
+      "class": "refusal",
+      "description": "XhrEvent.target is 3, one past its greatest value (1 to 2)",
+      "expected": "enum_xhr_event_target_3.json",
+      "name": "enum_xhr_event_target_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_target_0.bin",
+      "class": "refusal",
+      "description": "XhrEvent.target is 0, one before its least value (1 to 2)",
+      "expected": "enum_xhr_event_target_0.json",
+      "name": "enum_xhr_event_target_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_event_8.bin",
+      "class": "refusal",
+      "description": "XhrEvent.event is 8, one past its greatest value (1 to 7)",
+      "expected": "enum_xhr_event_event_8.json",
+      "name": "enum_xhr_event_event_8"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_event_0.bin",
+      "class": "refusal",
+      "description": "XhrEvent.event is 0, one before its least value (1 to 7)",
+      "expected": "enum_xhr_event_event_0.json",
+      "name": "enum_xhr_event_event_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_length_computable_2.bin",
+      "class": "refusal",
+      "description": "XhrEvent.length_computable is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_xhr_event_length_computable_2.json",
+      "name": "enum_xhr_event_length_computable_2"
     }
   ],
   "vocab": 1

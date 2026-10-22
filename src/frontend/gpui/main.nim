@@ -6956,8 +6956,8 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     case res.operation
     of "context-menu.focus-previous": gCtxMenu.move(-1)
     of "context-menu.focus-next": gCtxMenu.move(1)
-    of "context-menu.focus-first": gCtxMenu.move(-1000)
-    of "context-menu.focus-last": gCtxMenu.move(1000)
+    of "context-menu.focus-first": gCtxMenu.moveToEnd(last = false)
+    of "context-menu.focus-last": gCtxMenu.moveToEnd(last = true)
     of "context-menu.accept":
       let chosen = gCtxMenu.choose(-1)
       if chosen.chosen:

@@ -815,4 +815,3 @@ static:
       TabGroundContrastFloor,
       "the focused strip's selected tab is below the tab-contrast floor in " &
       $mode & " mode"
-

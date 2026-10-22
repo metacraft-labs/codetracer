@@ -35,7 +35,7 @@ import viewmodels/event_log_vm
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 217
+const ExpectedAssertions = 248
 
 var countedAssertions = 0
 
@@ -237,6 +237,43 @@ suite "PLAT-50: an open menu":
     var leaf: ContextMenuState
     leaf.openAt(callTraceContextMenu(4, false, false), 0, 0)
     ck leaf.selected == -1                    # nothing enabled
+
+  test "Home and End: the first and the last ENABLED entry, at every size":
+    # They used to be `move(-1000)` / `move(1000)`, which wrap rather than
+    # clamp: End from the first entry of a two-entry menu stayed on the first,
+    # and Home from its last entry computed index -1 (Nim's `mod` keeps a
+    # negative operand's sign) — out of range.
+    for n in 1 .. 9:
+      var s: ContextMenuState
+      var entries: seq[ContextMenuEntry]
+      for i in 0 ..< n:
+        entries.add ContextMenuEntry(label: $i, action: caCopy, enabled: true)
+      s.openAt(ContextMenuModel(entries: entries), 0, 0)
+      s.moveToEnd(last = true)
+      ck s.selected == n - 1
+      s.moveToEnd(last = false)
+      ck s.selected == 0
+      s.move(-1)
+      s.moveToEnd(last = false)
+      ck s.selected == 0
+    # Disabled entries at both ends are skipped; with none enabled nothing is.
+    var mixed: ContextMenuState
+    mixed.openAt(ContextMenuModel(entries: @[
+      ContextMenuEntry(label: "a", action: caCopy, enabled: false),
+      ContextMenuEntry(label: "b", action: caFind, enabled: true),
+      ContextMenuEntry(label: "c", action: caCopy, enabled: true),
+      ContextMenuEntry(label: "d", action: caFind, enabled: false)]), 0, 0)
+    mixed.moveToEnd(last = true)
+    ck mixed.selected == 2
+    mixed.moveToEnd(last = false)
+    ck mixed.selected == 1
+    var leaf: ContextMenuState
+    leaf.openAt(callTraceContextMenu(4, false, false), 0, 0)
+    leaf.moveToEnd(last = true)
+    ck leaf.selected == -1
+    var closed: ContextMenuState
+    closed.moveToEnd(last = true)             # a closed menu: nothing moves
+    ck closed.selected == 0 and not closed.open
 
   test "choosing: a disabled entry keeps the menu, an enabled one closes it":
     var s: ContextMenuState

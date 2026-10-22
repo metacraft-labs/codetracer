@@ -2326,9 +2326,12 @@ proc configureMiddleware =
     if serverOwnsSession():
       # SERVER-MANAGED (`ct host`): the server owns the session and this
       # page mirrors it over its socket. The mirror's ViewModels are the
-      # ones the panels read; its locals are the server's, so the page's
-      # own decoders stand down (`claimLocalsLoading`).
-      activeMirror = createMirrorSession(newSocketSyncChannel(pageSocket),
+      # ones the panels read; the panes' measured viewports and the call
+      # trace's actions run on the server's session, the other panels'
+      # actions on the page (`createHostedPageMirror`). Its locals are the
+      # server's, so the page's own decoders stand down
+      # (`claimLocalsLoading`).
+      activeMirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
         debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
           desktopDebugCommands(data, session.store, toolbarApi))
       activeSessionVM = activeMirror.session
@@ -4760,10 +4763,6 @@ proc updateEditors(data: Data) =
       diff.updateOptions(cast[MonacoEditorOptions](options))
 
 proc updateDataTables(data: Data) =
-  for _, component in data.ui.componentMapping[Content.EventLog]:
-    if not component.isNil:
-      EventLogComponent(component).resizeEventLogHandler()
-
   for _, component in data.ui.componentMapping[Content.Trace]:
     if not component.isNil:
       let trace = TraceComponent(component)

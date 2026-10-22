@@ -671,3 +671,177 @@ suite "SB-2b: the indicator decides on W, H and S in a real repository":
     check vm.model.label == CertifiedUncommittedLabel
     check readFile(repo / ".git" / "index") == indexBefore
     check git(repo, ["status", "--porcelain=v1"]) == statusBefore
+
+# ---------------------------------------------------------------------------
+# Gathering the facts asynchronously (Status-Bar.md, "A refresh never stalls
+# the window")
+# ---------------------------------------------------------------------------
+#
+# On the desktop, `vcs.contentId` and `vcs.repositoryRoot` answer on a later
+# turn of the event loop. This suite drives the SHIPPED source
+# (`gatherCertificateFacts`) over the shipped native platform with those two
+# operations deferred: each call is recorded, its future is returned pending,
+# and the test completes it later with the real platform's own answer — real
+# git, real repository. Only the moment of delivery is the test's, which is
+# what is under test: the facts handed over are complete (no answer still
+# being computed is ever read as an answer), and they are the facts the
+# synchronous reader gathers.
+
+type
+  DeferredVcs = ref object
+    pending: seq[proc()]
+      ## Each completes one deferred future with the real platform's answer.
+    asked: seq[string]
+      ## Every content id asked for, as `<state> <algorithm> <scope>`, in
+      ## order, with the wave it was asked in.
+    wave: int
+
+proc deferringPlatform(deferred: DeferredVcs): Platform =
+  ## The shipped native instantiation, with its two VCS reads answered late.
+  result = newDesktopNativePlatform()
+  let realContentId = result.vcs.contentId
+  let realRoot = result.vcs.repositoryRoot
+  result.vcs.contentId = proc(repository: string; state: VcsBlobSource;
+                              algorithm: string; scope: seq[string]):
+      PlatformFuture[PlatformOutcome[VcsContentId]] =
+    deferred.asked.add $deferred.wave & " " & $state & " " & algorithm & " " &
+                       scope.join(",")
+    let future = newFuture[PlatformOutcome[VcsContentId]]("deferred contentId")
+    deferred.pending.add proc() =
+      future.complete(awaitSync(realContentId(repository, state, algorithm, scope)))
+    future
+  result.vcs.repositoryRoot = proc(path: string):
+      PlatformFuture[PlatformOutcome[string]] =
+    let future = newFuture[PlatformOutcome[string]]("deferred repositoryRoot")
+    deferred.pending.add proc() =
+      future.complete(awaitSync(realRoot(path)))
+    future
+
+proc sameDecision(a, b: CertificateIndicatorModel): bool =
+  if a.state != b.state or a.label != b.label or a.summary != b.summary or
+     a.remedy != b.remedy or a.certificateName != b.certificateName or
+     a.searched != b.searched or a.detail.len != b.detail.len:
+    return false
+  for i in 0 ..< a.detail.len:
+    if a.detail[i].label != b.detail[i].label or
+       a.detail[i].value != b.detail[i].value:
+      return false
+  true
+
+proc gatheredLate(repo: string; deferred: DeferredVcs):
+    tuple[facts: CertificateIndicatorFacts; waves: int; finishedInline: bool] =
+  ## Run `gatherCertificateFacts` to completion, one wave of deliveries at a
+  ## time, and say how many waves it took.
+  var finished = false
+  var facts: CertificateIndicatorFacts
+  gatherCertificateFacts(deferringPlatform(deferred), repo, Platform, nil,
+    proc(gathered: CertificateIndicatorFacts) =
+      check not finished      # `done` runs once
+      finished = true
+      facts = gathered)
+  result.finishedInline = finished
+  while not finished:
+    # Nothing pending and not finished would be a hang: fail instead.
+    check deferred.pending.len > 0
+    if deferred.pending.len == 0:
+      break
+    inc deferred.wave
+    inc result.waves
+    let wave = deferred.pending
+    deferred.pending = @[]
+    for complete in wave:
+      complete()
+    drainPlatformCallbacks()
+  result.facts = facts
+
+suite "SB-2b: the facts gathered asynchronously":
+
+  setup:
+    discard freshStoreRoot()
+    resetPlatformForTesting()
+
+  teardown:
+    resetPlatformForTesting()
+
+  test "late answers converge on the synchronous reader's decision":
+    let repo = newRepository("gathered-late")
+    writeRecord(repo, headContent(repo))
+    let deferred = DeferredVcs()
+    let late = gatheredLate(repo, deferred)
+    check not late.finishedInline
+    check deferred.pending.len == 0
+    # The root first, then the content ids it names.
+    check late.waves >= 2
+    let model = evaluateCertificateIndicator(late.facts)
+    let expected = evaluateCertificateIndicator(
+      platformCertificateFacts(newDesktopNativePlatform(), repo, Platform))
+    checkpoint $model.state & " — " & model.summary
+    check model.state == cisCertified
+    check sameDecision(model, expected)
+
+  test "a scoped record is decided on its scope, whose id arrives late":
+    ## The scoped id is asked only once the root is known and the store has
+    ## been read — reprobuild's pooled carrier is read in the same pass that
+    ## first asks W, H and S, so it is asked alongside them — and the facts
+    ## must not be handed over before it is in: a record decided on a scoped
+    ## id still being computed would read *unverifiable*, not certified.
+    let repo = newRepository("gathered-scoped")
+    createDir(repo / "src")
+    writeFile(repo / "src" / "lib.nim", "proc lib(): int = 1\n")
+    discard git(repo, ["add", "-A"])
+    discard git(repo, ["commit", "-q", "-m", "src"])
+    let scoped = awaitSync(newDesktopNativePlatform().vcs.contentId(
+      repo, vbsWorkingTree, "git-tree-sha1", @["src"]))
+    check scoped.ok and scoped.value.kind == vcikComputed
+    check scoped.value.id != headContent(repo)
+    let cert = TestCertificate(
+      schema: CertificateSchema, framework: "ct-test",
+      project: repo.lastPathPart, platform: Platform,
+      targets: @["src_test.nim"], result: "passed",
+      issuedAt: "2026-10-22T09:00:00Z", issuer: "ct-test",
+      vcs: VcsState(repo: repo.lastPathPart, paths: @["src"],
+                    content: scoped.value.id, untracked: false,
+                    base: UnrelatedBase),
+      commands: @[@["ct", "test", "run"]])
+    createDir(repo / ReprobuildStoreDir)
+    writeFile(repo / ReprobuildStoreDir / "scoped.toml", renderCertificate(cert))
+
+    let deferred = DeferredVcs()
+    let late = gatheredLate(repo, deferred)
+    check not late.finishedInline
+    var scopedWave = -1
+    var wholeWave = -1
+    for entry in deferred.asked:
+      let fields = entry.split(' ')
+      if fields.len == 4 and fields[1] == $vbsWorkingTree and fields[3] == "src":
+        scopedWave = parseInt(fields[0])
+      if fields.len == 4 and fields[1] == $vbsWorkingTree and fields[3] == "" and
+         wholeWave < 0:
+        wholeWave = parseInt(fields[0])
+    checkpoint deferred.asked.join("; ")
+    check wholeWave >= 1          # after the root
+    check scopedWave >= 1         # after the root, once the store was read
+    check late.waves >= 2
+    let model = evaluateCertificateIndicator(late.facts)
+    let expected = evaluateCertificateIndicator(
+      platformCertificateFacts(newDesktopNativePlatform(), repo, Platform))
+    checkpoint $model.state & " — " & model.summary
+    check model.state == cisCertified
+    check sameDecision(model, expected)
+
+  test "the gathered facts never answer \"still being computed\"":
+    ## Re-asking the handed-over facts asks nothing new: every content id the
+    ## decision reads was settled before `done`.
+    let repo = newRepository("gathered-settled")
+    writeRecord(repo, headContent(repo))
+    let deferred = DeferredVcs()
+    let late = gatheredLate(repo, deferred)
+    let before = deferred.asked.len
+    discard evaluateCertificateIndicator(late.facts)
+    check deferred.asked.len == before
+    check deferred.pending.len == 0
+    for oracle in [late.facts.vcs.workingTree, late.facts.vcs.head,
+                   late.facts.vcs.index]:
+      check not oracle.isNil
+      let answer = oracle("git-tree-sha1", @[])
+      check answer.computed

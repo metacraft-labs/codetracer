@@ -129,9 +129,9 @@ all_subs=()
 uninitialised=()
 while IFS= read -r line || [ -n "$line" ]; do
 	[ -z "$line" ] && continue
-	rest="${line:1}"    # drop the status char
-	rest="${rest#* }"   # drop the sha
-	sub="${rest%% *}"   # take the path
+	rest="${line:1}"  # drop the status char
+	rest="${rest#* }" # drop the sha
+	sub="${rest%% *}" # take the path
 	[ -z "$sub" ] && continue
 	if [ "${line:0:1}" = "-" ]; then
 		uninitialised+=("$sub")
@@ -175,7 +175,10 @@ else
 	# -------------------------------------------------------------------
 	top_level=()
 	for sub in "${all_subs[@]}"; do
-		mode="$(git -C "$PARENT" ls-files --stage -- "$sub" | { read -r m _ || true; printf '%s' "${m:-}"; })"
+		mode="$(git -C "$PARENT" ls-files --stage -- "$sub" | {
+			read -r m _ || true
+			printf '%s' "${m:-}"
+		})"
 		# 160000 is git's gitlink mode; anything else is not a submodule
 		# entry of THIS index.
 		[ "$mode" = "160000" ] && top_level+=("$sub")

@@ -23,4 +23,3 @@ import
 
 method register*(self: PointListComponent, api: MediatorWithSubscribers) =
   self.api = api
-

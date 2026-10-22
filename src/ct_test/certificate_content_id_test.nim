@@ -800,4 +800,368 @@ suite "content ids (Content-Id.md)":
   test "no temporary directory is left behind":
     check hostLitter().len == 0
 
+# ---------------------------------------------------------------------------
+# runResumable: the same recipe, with git answered later
+# ---------------------------------------------------------------------------
+#
+# The Electron renderer cannot wait for git (Status-Bar.md, "A refresh never
+# stalls the window"), so it drives the recipe through `runResumable` over an
+# asynchronous git runner. These cases drive it over a DEFERRED runner — each
+# call is queued, and the test answers it later, in order, by running it
+# through the real native runner — and require exactly the synchronous
+# recipe's answers. Not a mock of git: every reply is git's own; only the
+# moment it is delivered is the test's, which is the property under test.
+
+type
+  DeferredGit = ref object
+    queue: seq[tuple[call: GitCall; done: proc(reply: GitReply) {.closure, gcsafe.}]]
+    delivered: int
+
+  HostLedger = ref object
+    ## What the file operations and git actually did, counted at the host.
+    gitRuns, temps, copies, removals: int
+    gitRunsAtRemoval: seq[int]
+
+proc ledgerHost(ledger: HostLedger): ContentIdHost =
+  ## The native host, counting. Every operation is the real one.
+  let base = nativeContentIdHost()
+  result = base
+  result.git = proc(call: GitCall): GitReply {.closure, gcsafe.} =
+    inc ledger.gitRuns
+    base.git(call)
+  result.makeTempDir = proc(): HostFileResult {.closure, gcsafe.} =
+    inc ledger.temps
+    base.makeTempDir()
+  result.copyFile = proc(source, destination: string): HostFileResult
+                        {.closure, gcsafe.} =
+    inc ledger.copies
+    base.copyFile(source, destination)
+  result.removeDir = proc(path: string) {.closure, gcsafe.} =
+    inc ledger.removals
+    ledger.gitRunsAtRemoval.add ledger.gitRuns
+    base.removeDir(path)
+
+proc deferredHost(files: ContentIdHost; deferred: DeferredGit): AsyncContentIdHost =
+  asyncContentIdHost(files,
+    proc(call: GitCall; done: proc(reply: GitReply) {.closure, gcsafe.})
+        {.closure, gcsafe.} =
+      deferred.queue.add (call, done))
+
+proc pump(deferred: DeferredGit; files: ContentIdHost) =
+  ## Answer every queued call, oldest first, with the real git.
+  while deferred.queue.len > 0:
+    let (call, done) = deferred.queue[0]
+    deferred.queue.delete(0)
+    inc deferred.delivered
+    done(files.git(call))
+
+type ResumableRun = object
+  result: ContentIdResult
+  finishedInline: bool
+  queuedAfterStart: int
+  ledger: HostLedger
+  deliveries: int
+
+proc resumable(repo: string; state: ContentState; algorithm: ContentAlgorithm;
+               scope: seq[string] = @[]): ResumableRun =
+  let ledger = HostLedger()
+  let files = ledgerHost(ledger)
+  let deferred = DeferredGit()
+  var finished = false
+  var got: ContentIdResult
+  runResumable(deferredHost(files, deferred),
+    proc(h: ContentIdHost): ContentIdResult =
+      computeContentId(h, repo, state, algorithm, scope),
+    proc(value: ContentIdResult) =
+      check not finished      # `done` runs exactly once
+      finished = true
+      got = value)
+  result.finishedInline = finished
+  result.queuedAfterStart = deferred.queue.len
+  pump(deferred, files)
+  check finished
+  result.result = got
+  result.ledger = ledger
+  result.deliveries = deferred.delivered
+
+proc sameResult(a, b: ContentIdResult): bool =
+  a.outcome == b.outcome and a.id == b.id and a.reason == b.reason and
+    a.states == b.states and
+    (a.outcome == cioFailed or a.algorithm == b.algorithm)
+
+suite "runResumable (the recipe over an asynchronous git)":
+
+  test "every state gives the synchronous recipe's answer, git answered later":
+    let repo = newRepo()
+    put(repo, "a.txt", "alpha\n")
+    put(repo, "src/b.nim", "echo 1\n")
+    var binary = newString(256)
+    for i in 0 ..< 256: binary[i] = char(i)
+    put(repo, "blob.bin", binary & "\x80\xc0\xaf\xff")
+    commitAll(repo)
+    put(repo, "src/b.nim", "echo 2\n")
+    discard git(repo, "add", "src/b.nim")
+    put(repo, "a.txt", "alpha, edited\n")
+
+    let assumed = newRepo()
+    put(assumed, "hidden.txt", "one\n")
+    commitAll(assumed)
+    discard git(assumed, "update-index", "--assume-unchanged", "hidden.txt")
+    put(assumed, "hidden.txt", "two\n")
+
+    let outside = createTempDir("ct-content-id-outside-", "", suiteDir)
+
+    let cases = @[
+      ("W", repo, workingTreeState(), caGitTreeSha1, newSeq[string]()),
+      ("H", repo, commitState("HEAD"), caGitTreeSha1, newSeq[string]()),
+      ("S", repo, indexState(), caGitTreeSha1, newSeq[string]()),
+      ("W scoped", repo, workingTreeState(), caGitTreeSha1, @["src"]),
+      ("W sha256 in sha1", repo, workingTreeState(), caGitTreeSha256, newSeq[string]()),
+      ("W manifest, binary blob", repo, workingTreeState(), caManifestV1Sha256,
+       newSeq[string]()),
+      ("H manifest, binary blob", repo, commitState("HEAD"), caManifestV1Sha256,
+       newSeq[string]()),
+      ("W assume-unchanged", assumed, workingTreeState(), caGitTreeSha1,
+       newSeq[string]()),
+      ("outside any repository", outside, workingTreeState(), caGitTreeSha1,
+       newSeq[string]())]
+    var kinds: seq[ContentIdOutcome]
+    for (label, dir, state, algorithm, scope) in cases:
+      checkpoint label
+      let indexBefore = indexBytes(dir)
+      let expected = computeContentId(host, dir, state, algorithm, scope)
+      let run = resumable(dir, state, algorithm, scope)
+      check sameResult(run.result, expected)
+      if not sameResult(run.result, expected):
+        checkpoint "resumable: " & $run.result.outcome & " " & run.result.id &
+                   " " & run.result.reason
+        checkpoint "sync:      " & $expected.outcome & " " & expected.id &
+                   " " & expected.reason
+      kinds.add run.result.outcome
+      # No reply arrives inside the initial call: it launched exactly one git
+      # call (the first) and returned without an answer.
+      check not run.finishedInline
+      check run.queuedAfterStart == 1
+      # Each git call is run exactly once: replaying the journal never
+      # re-runs git, so the count of real runs equals the deliveries.
+      check run.ledger.gitRuns == run.deliveries
+      # The index is copied at most once (once for W and S), a temporary
+      # directory is made at most once, and it is removed exactly as often
+      # as it was made — after the LAST git call, never mid-computation.
+      check run.ledger.copies == (if state.kind in {cskWorkingTree, cskIndex} and
+                                    run.result.outcome != cioFailed and
+                                    algorithm != caGitTreeSha256: 1 else: 0)
+      check run.ledger.temps <= 1
+      check run.ledger.removals == run.ledger.temps
+      if run.ledger.removals == 1:
+        check run.ledger.gitRunsAtRemoval == @[run.ledger.gitRuns]
+      check indexBytes(dir) == indexBefore
+      check hostLitter().len == 0
+    # The cases cover every outcome the indicator can meet.
+    check cioComputed in kinds
+    check cioCannotCompute in kinds
+    check cioNoContentId in kinds
+    check cioFailed in kinds
+    # W, H and S really are three computations.
+    let ids = [resumable(repo, workingTreeState(), caGitTreeSha1).result.id,
+               resumable(repo, commitState("HEAD"), caGitTreeSha1).result.id,
+               resumable(repo, indexState(), caGitTreeSha1).result.id]
+    check ids[0] != ids[1] and ids[1] != ids[2] and ids[0] != ids[2]
+
+  test "a runner that answers inside the call still gives one answer":
+    ## A host may deliver a reply synchronously (a cached answer, a launch
+    ## error reported inline). `runResumable` must neither re-enter the
+    ## attempt nor lose the reply, and with every reply inline it finishes
+    ## inside the call.
+    let repo = newRepo()
+    put(repo, "a.txt", "a\n")
+    commitAll(repo)
+    let native = host   # a local: a gcsafe closure cannot read a GC'd global
+    let inline = asyncContentIdHost(native,
+      proc(call: GitCall; done: proc(reply: GitReply) {.closure, gcsafe.})
+          {.closure, gcsafe.} =
+        done(native.git(call)))
+    var answers = 0
+    var got: ContentIdResult
+    runResumable(inline,
+      proc(h: ContentIdHost): ContentIdResult =
+        computeContentId(h, repo, workingTreeState(), caGitTreeSha1),
+      proc(value: ContentIdResult) =
+        inc answers
+        got = value)
+    check answers == 1
+    check sameResult(got, computeContentId(host, repo, workingTreeState(),
+                                           caGitTreeSha1))
+    check hostLitter().len == 0
+
+  test "a computation that needs no git finishes inside the call":
+    var answers = 0
+    let deferred = DeferredGit()
+    runResumable(deferredHost(host, deferred),
+      proc(h: ContentIdHost): ContentIdResult =
+        computeContentId(h, suiteDir, workingTreeState(), caGitTreeSha1,
+                         ["/absolute"]),
+      proc(value: ContentIdResult) =
+        inc answers
+        check value.outcome == cioFailed)
+    check answers == 1
+    check deferred.queue.len == 0
+
+  test "a non-deterministic computation ends in a failure, not a hang":
+    ## Replay is only sound for a deterministic computation. One that asks a
+    ## DIFFERENT git command on its second attempt must be told so, and must
+    ## finish — a hang would freeze the indicator forever.
+    var attempts = 0
+    var answers = 0
+    var last: GitReply
+    let deferred = DeferredGit()
+    runResumable(deferredHost(host, deferred),
+      proc(h: ContentIdHost): GitReply =
+        inc attempts
+        h.git(GitCall(argv: @["git", "--version", "--attempt-" & $attempts],
+                      cwd: suiteDir)),
+      proc(value: GitReply) =
+        inc answers
+        last = value)
+    check answers == 0
+    check deferred.queue.len == 1
+    pump(deferred, host)
+    check answers == 1
+    check attempts == 2
+    check last.exitCode < 0
+    check "non-deterministic" in last.stderr
+
+  test "a late or repeated reply is ignored":
+    var answers = 0
+    var saved: seq[proc(reply: GitReply) {.closure, gcsafe.}]
+    let capturing = asyncContentIdHost(host,
+      proc(call: GitCall; done: proc(reply: GitReply) {.closure, gcsafe.})
+          {.closure, gcsafe.} =
+        saved.add done)
+    runResumable(capturing,
+      proc(h: ContentIdHost): int =
+        h.git(GitCall(argv: @["git", "--version"], cwd: suiteDir)).exitCode,
+      proc(value: int) =
+        inc answers
+        check value == 0)
+    check saved.len == 1
+    saved[0](GitReply(exitCode: 0, complete: true))
+    saved[0](GitReply(exitCode: 7, complete: true))
+    check answers == 1
+
+  test "a manifest's blobs are one operation: the attempts do not grow with the tree":
+    ## Journaled one `git cat-file` at a time, a manifest over F files would
+    ## re-run the recipe F times, each re-reading every blob before it — main-
+    ## thread work quadratic in the tree (measured: 48 s and 326 ms tasks
+    ## over 400 files under node). The blobs are one journaled operation
+    ## instead, so a tree of 3 files and one of 60 take the same number of
+    ## attempts, and every blob is still read exactly once, by real git.
+    proc attemptsFor(repo: string; state: ContentState):
+        tuple[attempts: int; run: ResumableRun] =
+      let ledger = HostLedger()
+      let files = ledgerHost(ledger)
+      let deferred = DeferredGit()
+      var attempts = 0
+      var got: ContentIdResult
+      var answers = 0
+      runResumable(deferredHost(files, deferred),
+        proc(h: ContentIdHost): ContentIdResult =
+          inc attempts
+          computeContentId(h, repo, state, caManifestV1Sha256),
+        proc(value: ContentIdResult) =
+          inc answers
+          got = value)
+      pump(deferred, files)
+      check answers == 1
+      result.attempts = attempts
+      result.run = ResumableRun(result: got, ledger: ledger,
+                                deliveries: deferred.delivered)
+
+    let small = newRepo()
+    for i in 0 ..< 3:
+      put(small, "f" & $i & ".txt", "small " & $i & "\n")
+    commitAll(small)
+    let large = newRepo()
+    for i in 0 ..< 60:
+      put(large, "dir" & $(i mod 4) & "/f" & $i & ".txt", "large " & $i & "\n")
+    commitAll(large)
+    put(large, "dir0/f0.txt", "edited\n")
+
+    for state in [workingTreeState(), commitState("HEAD")]:
+      checkpoint $state.kind
+      let a = attemptsFor(small, state)
+      let b = attemptsFor(large, state)
+      check sameResult(a.run.result, computeContentId(host, small, state,
+                                                      caManifestV1Sha256))
+      check sameResult(b.run.result, computeContentId(host, large, state,
+                                                      caManifestV1Sha256))
+      check b.run.result.outcome == cioComputed
+      check a.attempts == b.attempts
+      # Each blob read once: 60 of them, plus the recipe's own calls, all
+      # delivered by the deferred runner and run once by the real git.
+      check b.run.ledger.gitRuns == b.run.deliveries
+      check b.run.deliveries - a.run.deliveries == 60 - 3
+      check b.run.ledger.removals == b.run.ledger.temps
+      check hostLitter().len == 0
+
+  test "a manifest whose every blob answers inline gives the synchronous answer":
+    ## The blob reader handles a reply delivered inside the call in a loop,
+    ## not by recursion, so the stack does not grow with the tree.
+    let repo = newRepo()
+    for i in 0 ..< 500:
+      put(repo, "many/f" & $i & ".txt", $i & "\n")
+    commitAll(repo)
+    let native = host
+    let inline = asyncContentIdHost(native,
+      proc(call: GitCall; done: proc(reply: GitReply) {.closure, gcsafe.})
+          {.closure, gcsafe.} =
+        done(native.git(call)))
+    var answers = 0
+    var got: ContentIdResult
+    runResumable(inline,
+      proc(h: ContentIdHost): ContentIdResult =
+        computeContentId(h, repo, commitState("HEAD"), caManifestV1Sha256),
+      proc(value: ContentIdResult) =
+        inc answers
+        got = value)
+    check answers == 1
+    check got.outcome == cioComputed
+    check sameResult(got, computeContentId(host, repo, commitState("HEAD"),
+                                           caManifestV1Sha256))
+
+  test "a blob that cannot be read fails the manifest, as the synchronous loop does":
+    ## The driver folds each reply with the recipe's own `stepOf`, so a
+    ## failed `git cat-file` is the same failure on both paths, and the
+    ## computation finishes rather than waiting.
+    let repo = newRepo()
+    put(repo, "a.txt", "a\n")
+    put(repo, "b.txt", "b\n")
+    commitAll(repo)
+    let native = host
+    proc failingBlobs(call: GitCall): GitReply =
+      if "cat-file" in call.argv:
+        GitReply(exitCode: 128, stderr: "fatal: planted", complete: true)
+      else:
+        native.git(call)
+    var syncHost = host
+    syncHost.git = proc(call: GitCall): GitReply {.closure, gcsafe.} =
+      {.cast(gcsafe).}: failingBlobs(call)
+    let expected = computeContentId(syncHost, repo, commitState("HEAD"),
+                                    caManifestV1Sha256)
+    check expected.outcome == cioFailed
+    check "planted" in expected.reason
+    let deferred = DeferredGit()
+    var answers = 0
+    var got: ContentIdResult
+    runResumable(deferredHost(host, deferred),
+      proc(h: ContentIdHost): ContentIdResult =
+        computeContentId(h, repo, commitState("HEAD"), caManifestV1Sha256),
+      proc(value: ContentIdResult) =
+        inc answers
+        got = value)
+    pump(deferred, syncHost)
+    check answers == 1
+    check sameResult(got, expected)
+    check hostLitter().len == 0
+
 removeDir(suiteDir)

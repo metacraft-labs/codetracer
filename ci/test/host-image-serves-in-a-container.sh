@@ -235,7 +235,7 @@ fi
 # And WD1c's descriptor endpoint, from the same outside. A 200 on `/` could be a
 # static file; this is the server answering a question only it can answer.
 descriptor="$(curl -sS --max-time 20 -H "X-CodeTracer-Session: ${secret}" "http://${ip}:${port}/deployment.json" 2>/dev/null || true)"
-if printf '%s' "${descriptor}" | grep -q '"connection"'; then
+if grep -q '"connection"' <<<"${descriptor}"; then
 	ok "and /deployment.json answers — WD1c's endpoint, from inside a session"
 else
 	bad "and /deployment.json answers (got: ${descriptor})"

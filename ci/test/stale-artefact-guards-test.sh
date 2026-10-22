@@ -123,7 +123,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=114
+EXPECTED_ASSERTIONS=117
 
 ASSERTIONS=0
 FAILURES=0
@@ -576,7 +576,7 @@ assert_contains "${UNKNOWN}" "cannot tell whether" \
 
 # -- a MOVING ref is compared against what it points at now ------------------
 #
-# The one workflow step that calls this script passes `RR_BACKEND_REF: dev`. A
+# `RR_BACKEND_REF` may name a branch (the workflow step used to pass `dev`). A
 # reused workspace's local `dev` branch is exactly as stale as the checkout
 # sitting on it, so resolving the name locally would answer "is this checkout at
 # the `dev` it was at last week" — which is not a freshness question.
@@ -610,6 +610,49 @@ assert_contains "${END_TO_END}" "Using rr-backend ref: ${REV_NEW}" \
 	"the locked revision is resolved even when the sibling is already present"
 assert_contains "${END_TO_END}" "stale codetracer-native-backend checkout" \
 	"...and the present-but-wrong sibling is refused rather than built against"
+
+# -- a FRESH clone of a ref the repository does not have is a refusal --------
+#
+# The clone path (no sibling at `$CLONE_DIR`) answered a failed
+# `git checkout "$ref"` with "Warning: ref not found, falling back to main" and
+# went on to build `main` — a tree nobody pinned — while the job reported the
+# pinned revision it had been asked for. The script's own header promised
+# "there is no main fallback". The pinned ref now comes from flake.lock (the
+# workflow passes a commit), so a mistyped or unpublished pin is exactly what
+# this path must refuse.
+#
+# The clone URL is the real GitHub one; a temporary global git config maps it
+# onto a local fixture with `insteadOf`, the same mechanism the script itself
+# uses for credentials, so no network or token is involved. The fixture HAS a
+# `main`, so the old fallback would have succeeded — the case can only pass by
+# refusing.
+CLONE_UPSTREAM="${TEST_ROOT}/clone-upstream-backend"
+git clone -q "${BACKEND}" "${CLONE_UPSTREAM}"
+git -C "${CLONE_UPSTREAM}" branch -q -f main "${REV_NEW}"
+CLONE_GITCONFIG="${TEST_ROOT}/clone-gitconfig"
+git config --file "${CLONE_GITCONFIG}" \
+	url."file://${CLONE_UPSTREAM}".insteadOf \
+	"https://x-access-token:fixture-token@github.com/metacraft-labs/codetracer-native-backend.git"
+CLONE_TARGET="${TEST_ROOT}/fresh-clone-backend"
+# Sourced in a separate bash, not a subshell of this suite: the fixture
+# credentials and the script's assignments never touch this shell, and the
+# linter has no subshell-scoped CLONE_DIR to pair with `rr_guard`'s.
+# shellcheck disable=SC2016  # the inner script is single-quoted on purpose: $1/$2 are its own arguments
+rr_fresh_clone() {
+	(cd "${SUITE_ROOT}" &&
+		env CLONE_DIR="$1" GH_TOKEN=fixture-token GIT_CONFIG_GLOBAL="$2" \
+			bash -c 'source "$1" && clone_rr_backend "$2"' rr-fresh-clone "${RR_SETUP}" "$3") 2>&1
+}
+CLONE_RC=0
+FRESH_CLONE="$(rr_fresh_clone "${CLONE_TARGET}" "${CLONE_GITCONFIG}" \
+	0123456789abcdef0123456789abcdef01234567)" || CLONE_RC=$?
+FRESH_CLONE="${FRESH_CLONE}"$'\n'"exit=${CLONE_RC}"
+assert_not_contains "${FRESH_CLONE}" "exit=0" \
+	"a fresh clone of a ref the repository does not have fails"
+assert_contains "${FRESH_CLONE}" "0123456789abcdef0123456789abcdef01234567" \
+	"...and the refusal names the ref it could not check out"
+assert_not_contains "${FRESH_CLONE}" "falling back to main" \
+	"...and no other tree is checked out in its place"
 
 # ---------------------------------------------------------------------------
 section "storybook deps are keyed on the lockfile, not on the tree existing"
@@ -661,43 +704,96 @@ section "the browser-replay certificate is checked for validity, not presence"
 # ---------------------------------------------------------------------------
 #
 # `[ -f server.crt ] && [ -f server.key ]` -> "Certificates already exist" ->
-# exit 0. The certificate is issued for 365 days and for one SAN set, so
-# presence answers neither of the questions that decide whether it works.
+# exit 0. Presence answers neither "is it still in date" nor "does it cover the
+# name this server is reached by".
+#
+# Since `848e47b0d` the script issues nothing: it VERIFIES the org development
+# leaf at `/etc/mcl-dev-certs/codetracer.localhost/` and fails loudly when that
+# material is absent, expiring, for the wrong names, or paired with the wrong
+# key (metacraft-dev-guidelines `environment-domains-and-dev-certificates.md`
+# §5). The cases below grade that, one property at a time.
+#
+# THE ONE THING THIS SECTION FAKES, AND WHY. The script reads a fixed location
+# and by design accepts no override: §5 forbids a dev environment to "accept a
+# path from the environment", because an overridable path is one that can be
+# pointed at a second root. Run as-is, the cases would grade whatever the host
+# happens to have installed — absent on a CI bare-metal host, a real 90-day leaf
+# on a workstation — which is neither hermetic nor able to show any guard going
+# red. So the script is run from a COPY in which that one assignment is
+# rewritten to a fixture directory laid out exactly as §5 specifies, holding a
+# fixture root CA and leaves this suite mints. Every other byte of the script
+# runs unchanged, and the rewrite is refused unless it matches exactly one line
+# and leaves no executable reference to the real location behind, so a renamed
+# variable fails this suite instead of silently grading the host.
+# A mount namespace bound over `/etc/mcl-dev-certs` would avoid even that edit,
+# and was rejected: unprivileged user namespaces are disabled on some runners
+# (Ubuntu's AppArmor default), and on a host where the real directory exists an
+# overlay merges it with the fixture instead of replacing it.
 
 CERTS_HOME="${TEST_ROOT}/browser-replay"
+FIXTURE_DEV_CERTS="${TEST_ROOT}/mcl-dev-certs"
 mkdir -p "${CERTS_HOME}"
-cp "${SETUP_CERTS}" "${CERTS_HOME}/setup-certs.sh"
-CERT_DIR="${CERTS_HOME}/certs"
+REAL_CERTS_LINE='MCL_DEV_CERTS=/etc/mcl-dev-certs'
+if [[ $(grep -cxF "${REAL_CERTS_LINE}" "${SETUP_CERTS}") != 1 ]]; then
+	echo "stale-artefact-guards-test: ${SETUP_CERTS} no longer has exactly one line '${REAL_CERTS_LINE}'." >&2
+	echo "  The certificate cases redirect that one assignment to a fixture; update the section with the script." >&2
+	exit 3
+fi
+sed "s|^${REAL_CERTS_LINE}\$|MCL_DEV_CERTS='${FIXTURE_DEV_CERTS}'|" "${SETUP_CERTS}" \
+	>"${CERTS_HOME}/setup-certs.sh"
+if grep -v '^[[:space:]]*#' "${CERTS_HOME}/setup-certs.sh" | grep -F '/etc/mcl-dev-certs' >/dev/null; then
+	echo "stale-artefact-guards-test: the redirected copy of ${SETUP_CERTS} still names /etc/mcl-dev-certs outside a comment." >&2
+	echo "  The certificate cases would read the host's real material; update the section with the script." >&2
+	exit 3
+fi
+
+LEAF_DIR="${FIXTURE_DEV_CERTS}/codetracer.localhost"
+FIXTURE_CA_KEY="${TEST_ROOT}/fixture-ca.key"
 
 run_certs() { bash "${CERTS_HOME}/setup-certs.sh" 2>&1; }
 
-assert_contains "$(run_certs)" "Certificate generated" \
-	"a missing certificate is issued"
-assert_contains "$(run_certs)" "are current" \
-	"a valid, in-date, correctly-named certificate is left alone"
+# mint_leaf <days> <subjectAltName> — a leaf signed by the fixture root, with a
+# fresh key that belongs to it, written where §5 puts the real one.
+mint_leaf() {
+	openssl req -new -newkey rsa:2048 -nodes -keyout "${LEAF_DIR}/key.pem" \
+		-subj "/CN=codetracer.localhost" -out "${TEST_ROOT}/leaf.csr" >/dev/null 2>&1
+	openssl x509 -req -in "${TEST_ROOT}/leaf.csr" -days "$1" \
+		-CA "${FIXTURE_DEV_CERTS}/root-ca.crt" -CAkey "${FIXTURE_CA_KEY}" -CAcreateserial \
+		-extfile <(printf 'subjectAltName=%s\n' "$2") \
+		-out "${LEAF_DIR}/fullchain.pem" >/dev/null 2>&1
+}
+
+# Nothing installed: a loud failure that names the location, not an issuance.
+run_expect_failure "an absent certificate set is refused loudly, not issued" \
+	"${FIXTURE_DEV_CERTS} does not exist" -- run_certs
+
+mkdir -p "${LEAF_DIR}"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "${FIXTURE_CA_KEY}" \
+	-out "${FIXTURE_DEV_CERTS}/root-ca.crt" -days 30 \
+	-subj "/CN=stale-artefact-guards fixture root" >/dev/null 2>&1
+# The shape of the real org leaf: an apex and a one-label wildcard.
+mint_leaf 90 "DNS:codetracer.localhost,DNS:*.codetracer.localhost"
+assert_contains "$(run_certs)" "TLS material OK" \
+	"a valid, in-date, correctly-named certificate is accepted"
 
 # An expiring certificate: presence is unchanged, validity is not.
-openssl req -x509 -newkey rsa:2048 -nodes -keyout "${CERT_DIR}/server.key" \
-	-out "${CERT_DIR}/server.crt" -days 1 -subj "/CN=localhost" \
-	-addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >/dev/null 2>&1
-EXPIRING="$(run_certs)"
-assert_contains "${EXPIRING}" "expires within 7 days" \
-	"a certificate about to expire is re-issued, not accepted for existing"
+mint_leaf 1 "DNS:codetracer.localhost,DNS:*.codetracer.localhost"
+run_expect_failure "a certificate about to expire is refused, not accepted for existing" \
+	"expires within 7 days" -- run_certs
 
 # A certificate for the wrong names: also present, also in date, also useless.
-openssl req -x509 -newkey rsa:2048 -nodes -keyout "${CERT_DIR}/server.key" \
-	-out "${CERT_DIR}/server.crt" -days 365 -subj "/CN=localhost" \
-	-addext "subjectAltName=DNS:example.invalid" >/dev/null 2>&1
-WRONG_SAN="$(run_certs)"
-assert_contains "${WRONG_SAN}" "but this server is reached at" \
-	"a certificate covering the wrong names is re-issued"
+# `*.localhost` covers `codetracer.localhost` but not one label deeper, which is
+# where the server is reached — the wildcard rule the script spells out.
+mint_leaf 90 "DNS:codetracer.localhost,DNS:*.localhost"
+run_expect_failure "a certificate covering the wrong names is refused" \
+	"does not cover 'replay.codetracer.localhost'" -- run_certs
 
-# A key that does not belong to the certificate — what a half-finished run of
-# this very script leaves behind, since `openssl req` writes the key first.
-openssl genrsa -out "${CERT_DIR}/server.key" 2048 >/dev/null 2>&1
-MISMATCHED_KEY="$(run_certs)"
-assert_contains "${MISMATCHED_KEY}" "does not match the certificate" \
-	"a key that does not belong to the certificate is re-issued"
+# A key that does not belong to the certificate: present, in date, correctly
+# named and still unusable — what a partial activation leaves behind.
+mint_leaf 90 "DNS:codetracer.localhost,DNS:*.codetracer.localhost"
+openssl genrsa -out "${LEAF_DIR}/key.pem" 2048 >/dev/null 2>&1
+run_expect_failure "a key that does not belong to the certificate is refused" \
+	"does not belong to the certificate" -- run_certs
 
 # ---------------------------------------------------------------------------
 section "the book's WebP animations cannot be named from a stale video dir"
@@ -986,13 +1082,36 @@ section "the cross-repo runner dates the sibling backend it tests against"
 # The runner is copied into a synthetic checkout so its `target/` logs and its
 # `cd src/db-backend` land in the throwaway tree, and `cargo` / `rustc` / `rr`
 # — which its own prerequisite check demands by name — are stubbed on PATH.
+#
+# THE LIBRARIES IT SOURCES ARE READ FROM THE RUNNER, NOT LISTED HERE. This
+# fixture used to copy the runner and one hand-named library. When the runner
+# began sourcing `ci/lib/codetracer-home.sh` (`6db923c20`) that list was not
+# updated, and all seven cases below died at the `source` line, before the
+# guard they exist to show going red. A copy list kept in a second file goes
+# stale exactly the way the artefacts this suite grades do, so it is derived
+# from the runner's own `source "$REPO_ROOT/<path>"` lines. A runner in which
+# that pattern finds nothing is refused rather than copied bare.
 
 XREPO="${TEST_ROOT}/xrepo"
 XWS="${TEST_ROOT}/xws"
 NB="${XWS}/codetracer-native-backend"
-mkdir -p "${XREPO}/scripts/docs" "${XREPO}/src/db-backend" "${NB}/src"
+mkdir -p "${XREPO}/scripts" "${XREPO}/src/db-backend" "${NB}/src"
 cp "${CROSS_REPO}" "${XREPO}/scripts/run-cross-repo-tests.sh"
-cp "${CAPTURE_LIB}" "${XREPO}/scripts/docs/deep-review-capture-lib.sh"
+# shellcheck disable=SC2016 # `$REPO_ROOT` is matched literally in the runner's text
+mapfile -t XREPO_SOURCED < <(sed -nE 's#^[[:space:]]*(source|\.)[[:space:]]+"\$REPO_ROOT/([^"]*)".*#\2#p' "${CROSS_REPO}")
+if [[ ${#XREPO_SOURCED[@]} -eq 0 ]]; then
+	echo "stale-artefact-guards-test: no 'source \"\$REPO_ROOT/...\"' line found in ${CROSS_REPO}." >&2
+	echo "  The cross-repo fixture copies exactly what the runner sources, so it cannot be built." >&2
+	exit 3
+fi
+for sourced in "${XREPO_SOURCED[@]}"; do
+	if [[ ! -f "${SUITE_ROOT}/${sourced}" ]]; then
+		echo "stale-artefact-guards-test: ${CROSS_REPO} sources '${sourced}', which does not exist." >&2
+		exit 3
+	fi
+	mkdir -p "${XREPO}/$(dirname -- "${sourced}")"
+	cp "${SUITE_ROOT}/${sourced}" "${XREPO}/${sourced}"
+done
 
 for stub in cargo rustc rr; do
 	# shellcheck disable=SC2016

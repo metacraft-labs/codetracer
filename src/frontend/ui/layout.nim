@@ -1846,15 +1846,6 @@ proc mountPaneForState(state: GoldenItemState) =
         ensurePanelMountedById(containerId, state.content,
                                data.activeSessionIndex)
 
-      # EventLog mounts from `register` and nowhere else, and is in
-      # `isDirectMountComponent`. It is joined here so the invariant
-      # `test_every_mountable_pane_has_a_factory_arm.nim` asserts — every
-      # direct-mount `Content` has an arm — holds without an allowlist of
-      # unexamined exemptions. Their mounts are idempotent and additionally
-      # guarded on their own component ref, so this arm can only help.
-      if state.content == Content.EventLog:
-        tryMountIsoNimEventLogPanel()
-
       if state.content == Content.Shell:
         let shellComponent = ShellComponent(component)
         if shellComponent.shell.isNil:
