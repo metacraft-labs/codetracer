@@ -186,11 +186,23 @@ type
   VCSVM* = ref object of ViewModel
     historyViewport*: Signal[Viewport]
       ## What the history list was given: it decides how many commits the
-      ## native refresh reads (`historyCommitCount`). NOTHING WRITES IT YET.
-      ## Its setter had no caller in any front-end and was deleted on
-      ## 2026-10-22 (the reachability guard's "nothing reaches it" bucket),
-      ## so every refresh reads `VcsHistoryUnmeasured` commits until a history
-      ## view reports its viewport into this signal.
+      ## native refresh reads (`historyCommitCount`). Written by the native
+      ## history views through `setHistoryViewport` — the terminal's
+      ## (`tui/host/vcs_source.reportViewport`) and GPUI's
+      ## (`gpui_host.followGpuiVcsViewport`) — whenever their list's height or
+      ## scroll position changes (Viewport-Driven-Loading V6). Until a view
+      ## has reported, it is unmeasured and a refresh reads
+      ## `VcsHistoryUnmeasured` commits. The desktop's panel pages its history
+      ## itself (`ui/vcs.nim`) and does not write it.
+      ##
+      ## (Its setter had no caller from `0d7cf7926` until the codetracer-pm
+      ## issue 2026-10-22 "the VCS history list's viewport is written by
+      ## nothing", and was deleted in between as an export nothing reached.)
+    historyAsked: int
+      ## How many commits the last native refresh asked `git log` for; 0
+      ## before the first. With `commits.len` it says whether that read was
+      ## cut by the count (more history may follow) or held the whole
+      ## history (`setHistoryViewport`'s answer).
     deepReviewMode*: Signal[bool]
     headerTitle*: Signal[string]
     headerIcon*: Signal[string]
@@ -599,6 +611,46 @@ func historyCommitCount*(v: Viewport): int =
   if not v.measured: VcsHistoryUnmeasured
   else: max(0, v.firstRow) + v.rows + LeadRows
 
+proc setHistoryViewport*(vm: VCSVM; v: Viewport): bool =
+  ## The size and scroll position the history list was given
+  ## (Viewport-Driven-Loading V1, V6): `rows` the rows the pane gives the
+  ## list, `firstRow` the commits above the first row it shows. The next
+  ## refresh reads `historyCommitCount(v)` commits.
+  ##
+  ## ANSWERS WHETHER THE LIST NOW REACHES THE END OF WHAT WAS READ — the
+  ## native Load More: the rows `v` shows from `firstRow` on reach the count
+  ## the last refresh asked for, and that refresh got all it asked for (so
+  ## more history may follow). The view then re-reads at once rather than
+  ## leaving the reader at the end of the old read until the periodic
+  ## refresh. `rows` also holds the captions and an opened commit's files,
+  ## so the answer can come a few rows early, never late.
+  ##
+  ## Not "the count `v` calls for grew": that count carries the lead, so it
+  ## grows with every step down the list, and each step would re-run `git`
+  ## synchronously on a native front-end's loop — a wheel turned through the
+  ## history would re-read it per notch. Reaching the end re-reads once per
+  ## lead (`LeadRows` commits) scrolled.
+  ##
+  ## A read that got fewer commits than it asked for held the whole history,
+  ## so nothing more is asked for at its end; a smaller viewport is not
+  ## urgent either — the next periodic refresh reads the smaller count.
+  if vm.isNil:
+    return false
+  vm.historyViewport.val = v
+  vm.historyAsked > 0 and vm.commits.val.len >= vm.historyAsked and
+    max(0, v.firstRow) + v.rows >= vm.historyAsked
+
+func sameHistoryDeeper(previous, rows: openArray[VCSCommitRow]): bool =
+  ## Whether `rows` is the history `previous` was, read to a different depth:
+  ## one of the two lists is a prefix of the other, commit for commit. The
+  ## log is read from the newest commit, so a read that only asked for more
+  ## (or fewer) commits differs from the last one exactly like this.
+  let n = min(previous.len, rows.len)
+  for i in 0 ..< n:
+    if previous[i].fullHash != rows[i].fullHash:
+      return false
+  true
+
 proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
                         directory: string; commitCount = -1) =
   ## `commitCount` -1 (the default) reads what the history list's viewport
@@ -631,20 +683,30 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
   let log = awaitSync(facade.log(directory, wanted, ""))
   var rows: seq[VCSCommitRow] = @[]
   if log.ok:
+    vm.historyAsked = wanted
     for c in log.value:
       rows.add VCSCommitRow(hash: c.shortId, message: c.subject,
                             author: c.authorName, fullHash: c.id, dotLane: -1)
+  else:
+    # Nothing was read: no claim about how deep the history goes.
+    vm.historyAsked = 0
   # PLAT-50: A REFRESH KEEPS THE OPEN COMMIT while the history is the same
-  # history (the periodic refresh used to close it every few seconds).
+  # history (the periodic refresh used to close it every few seconds) — and
+  # (V6) while it is the same history read deeper or shallower, which is
+  # what a list growing as the reader scrolls, or shrinking with its pane,
+  # produces. An open commit the shallower read no longer lists closes, and
+  # its files go with it.
   let previous = vm.commits.val
-  var same = previous.len == rows.len
-  if same:
-    for i in 0 ..< rows.len:
-      if previous[i].fullHash != rows[i].fullHash:
-        same = false
-        break
-  if same:
-    vm.setCommits(rows, vm.selectedCommitIndices.val, vm.lastClickedIndex.val)
+  if previous.len > 0 and sameHistoryDeeper(previous, rows):
+    if previous.len > rows.len:
+      var kept: seq[(int, seq[VCSFileRow])] = @[]
+      for entry in vm.commitFilesMap.val:
+        if entry[0] < rows.len:
+          kept.add entry
+      vm.syncCommitFilesMap(kept)
+    vm.setCommits(rows, vm.selectedCommitIndices.val,
+                  (if vm.lastClickedIndex.val < rows.len:
+                     vm.lastClickedIndex.val else: -1))
   else:
     vm.setCommits(rows, [])
     vm.syncCommitFilesMap([])

@@ -180,6 +180,34 @@ proc vcsLines(model: VcsPaneModel): seq[VcsLine] =
                VcsRowTarget(kind: vrCommitFile, index: fi, status: f.status,
                             path: f.path, hash: c.hash))
 
+type
+  VcsHistoryWindow* = object
+    ## What the pane gives its commit history, in the pane's own units — the
+    ## two numbers the host reports as the history list's viewport
+    ## (`VCSVM.setHistoryViewport`, Viewport-Driven-Loading V6). Plain ints:
+    ## this layer reads no ViewModel.
+    rows*: int
+      ## The rows the list is given: the pane's height (every row of it is a
+      ## list row, PLAT-49). 0 for an empty rectangle — not on screen.
+    firstRow*: int
+      ## How many commits are listed above the first row shown: 0 while the
+      ## commits start at or below the top.
+
+proc vcsHistoryWindow*(area: CellArea; model: VcsPaneModel): VcsHistoryWindow =
+  ## The history window of the pane painted into `area` from `model`: its
+  ## height, and the commits scrolled past at `paintVcsPane`'s own clamped
+  ## top. Counting commit ROWS (not lines) above the top keeps an opened
+  ## commit's file rows and the working tree out of the count, so the read
+  ## asks for exactly the commits up to the last that can be on screen.
+  if area.width <= 0 or area.height <= 0:
+    return
+  let lines = vcsLines(model)
+  let top = clamp(model.scrollTop, 0, max(0, lines.len - area.height))
+  result.rows = area.height
+  for i in 0 ..< top:
+    if lines[i].target.kind == vrCommit:
+      inc result.firstRow
+
 proc scrubberOf*(screen: VcsPaneScreen): ScrubberModel =
   ## M71: the pane's ordinary scrollbar over what `paintVcsPane` drew — the
   ## population is every row it lists, the view the area from `top`.

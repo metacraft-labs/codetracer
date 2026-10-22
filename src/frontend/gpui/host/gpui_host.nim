@@ -528,6 +528,23 @@ proc refreshGpuiVcs*(vm: VCSVM; directory: string): bool =
   vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
   vm.workingStateKey() != before
 
+proc followGpuiVcsViewport*(vm: VCSVM; directory: string;
+                            rows, firstRow: int): bool =
+  ## The VCS pane's history list was given `rows` rows with `firstRow`
+  ## commits scrolled past (`leaves.vcsHistoryWindow`, from the body's
+  ## laid-out height and the reader's place): write it as the list's viewport
+  ## (Viewport-Driven-Loading V6), so every read asks `git log` for the
+  ## commits the pane can show rather than a fixed 50 — and when the list now
+  ## reaches the last commit the last read got, re-read `directory` AT ONCE
+  ## (`refreshGpuiVcs`), the native Load More. Answers whether what the pane
+  ## draws changed, so the window redraws it only then. An unmeasured body
+  ## (`rows` 0) reports nothing and keeps the last viewport.
+  if vm.isNil or rows <= 0:
+    return false
+  if vm.setHistoryViewport(Viewport(rows: rows, firstRow: max(0, firstRow))):
+    return refreshGpuiVcs(vm, directory)
+  false
+
 const GpuiCalltraceBuffer* = CALLTRACE_BUFFER
   ## Rows read above and below the ones the pane shows: the desktop's
   ## `CalltraceVM` pre-fetch, as the terminal's `tui_session.CallTraceBuffer`.

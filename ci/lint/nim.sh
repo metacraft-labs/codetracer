@@ -706,7 +706,10 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #       `hosted_primary`, hosts a single session for the server's life),
 #       `vcs_vm.setHistoryViewport` (NOTHING SETS `historyViewport` now, so the
 #       history reads `VcsHistoryUnmeasured` commits — the field's comment says
-#       so), and `edit_toolbar_marks.attachEditToolbarMarks` (the toolbar
+#       so; since restored WITH callers, the terminal's and GPUI's history
+#       views, by the fix for codetracer-pm issue 2026-10-22 "the VCS history
+#       list's viewport is written by nothing", the count staying 1196), and
+#       `edit_toolbar_marks.attachEditToolbarMarks` (the toolbar
 #       attaches per button through `attachEditMark`). Twelve exports in all;
 #       `MonoAdvance` and `MessageLevel` were uncounted while their one reader
 #       lived, so the count falls by ten.

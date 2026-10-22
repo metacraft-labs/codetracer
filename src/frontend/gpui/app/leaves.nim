@@ -3562,6 +3562,49 @@ proc vocabularyRows*(v: ViewNode): int =
     for c in v.children:
       result += vocabularyRows(c)
 
+const VcsCommitOptionPrefix = "commit-"
+  ## The id of a commit's row in the VCS view's `vcs.commits.list`
+  ## (`pane_views.vcsPaneView`); an opened commit's file rows are
+  ## `commitfile-…`, which this prefix does not match.
+
+proc commitRowsAbove(v: ViewNode; line: int; at: var int): int =
+  ## The commit rows `v` draws above pane line `line`, walking the view in
+  ## `vocabularyRows`'s order and arithmetic; `at` is the line `v` starts on
+  ## and leaves the line after it.
+  if v.isNil:
+    return 0
+  case v.kind
+  of pkList, pkSelect, pkMenu:
+    for o in v.options:
+      if at < line and o.id.startsWith(VcsCommitOptionPrefix):
+        inc result
+      inc at
+    return
+  of pkText, pkMarkdown:
+    inc at
+    return
+  else: discard
+  if v.label.len > 0:
+    inc at
+  if v.kind != pkCollapsible or v.expanded:
+    for c in v.children:
+      result += commitRowsAbove(c, line, at)
+
+proc vcsHistoryWindow*(view: ViewNode; top, rows: int):
+    tuple[rows, firstRow: int] =
+  ## What the VCS pane drawn from `view` gives its commit history
+  ## (Viewport-Driven-Loading V6): the `rows` its body holds, and how many
+  ## commits are listed above the first row shown at the reader's `top` (as
+  ## `renderVcsScrolled` clamps it) — the history list's viewport, which the
+  ## window reports through `gpui_host.followGpuiVcsViewport`. Commit ROWS
+  ## are counted, so the captions, the working tree and an opened commit's
+  ## files are not mistaken for history. `(0, 0)` for an unmeasured body.
+  if rows <= 0 or view.isNil:
+    return (0, 0)
+  let shownTop = inHandTop(top, vocabularyRows(view), rows)
+  var at = 0
+  (rows, commitRowsAbove(view, shownTop, at))
+
 proc pinVcsRowPitch(r: GpuiRenderer; el: GpuiElement) =
   ## Every element of the VCS pane's vocabulary tree on one `VcsRowPx` line:
   ## a caption's text and an option's row alike, never wrapped, so the

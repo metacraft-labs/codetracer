@@ -1908,6 +1908,10 @@ proc adoptNewLeaves(r: GpuiRenderer) =
 proc redrawReplayEditor(r: GpuiRenderer)
   ## Forward-declared for `drawArrangement`'s first frame.
 
+proc followVcsViewport(r: GpuiRenderer)
+  ## Forward-declared for `drawArrangement` and the in-hand scroll gestures;
+  ## defined beside the VCS refresh it shares `gVcsDirectory` with.
+
 proc drawArrangement(r: GpuiRenderer): bool =
   ## Lay the window out from the layout it should show NOW — the committed
   ## one, or, while a divider is dragged, the committed one with the pending
@@ -1954,6 +1958,11 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawSearchPane(r)
   # PLAT-51: and the list panes' scrubbers from theirs.
   drawListScrubbers(r)
+  # V6: the VCS history follows the body it was laid out with — once the
+  # arrangement is committed, never on the frames of a held divider (the
+  # terminal's rule for the source pane, Layout-ViewModel §4.3a).
+  if not gGestures.active:
+    followVcsViewport(r)
   if not gRoot.isNil:
     drawOverlay(r)
     drawTopBar(r)
@@ -2863,6 +2872,9 @@ proc scrubListPane(r: GpuiRenderer; kind: PaneKind; y: int; dragging: bool) =
   else:
     return
   redrawListPane(r, kind)
+  # V6: a scrub that reaches the last commit read reads more at once.
+  if kind == paneVcs:
+    followVcsViewport(r)
 
 proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
   ## A left press on a list pane's scrubber: the track jumps the view, the
@@ -2911,6 +2923,9 @@ proc scrollInHand(r: GpuiRenderer; kind: PaneKind; dy: float) =
   setInHandTop(kind, clamp(sm.firstVisible + delta, 0, sm.maxFirstVisible))
   traceInHand(kind)
   redrawListPane(r, kind)
+  # V6: the wheel at the end of the commits read reads more at once.
+  if kind == paneVcs:
+    followVcsViewport(r)
 
 proc refreshEventLogMark() =
   ## After a move: ask the engine which row of the whole log is now "now"
@@ -5811,6 +5826,30 @@ proc refreshVcsPane() =
         redrawWindowLeaf(r, pane, leaf)
         applyTextFaces(r, pane)
         traceGesture("vcs refreshed")
+      break
+
+proc followVcsViewport(r: GpuiRenderer) =
+  ## THE VCS HISTORY READS WHAT ITS LIST SHOWS (Viewport-Driven-Loading V6):
+  ## the rows the pane's body holds at `VcsRowPx` and the commits the
+  ## reader's place has passed (`leaves.vcsHistoryWindow` over the view the
+  ## pane draws) are reported as the history list's viewport, so every read
+  ## asks `git log` for that many commits plus a lead instead of a fixed 50;
+  ## and when the list now reaches the last commit the last read got, the
+  ## repository is read again now and the pane drawn again — the native Load
+  ## More. Run after each arrangement and each wheel or scrubber move over
+  ## the pane.
+  if gVcsDirectory.len == 0:
+    return
+  syncInHandRows(gGeom)
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneVcs and
+       not leaf.vm.isNil:
+      let vm = VCSVM(leaf.vm)
+      let w = vcsHistoryWindow(vcsPaneView(vm).root, vcsScroll.top,
+                               vcsScroll.rows)
+      if followGpuiVcsViewport(vm, gVcsDirectory, w.rows, w.firstRow):
+        redrawListPane(r, paneVcs)
+        traceGesture("vcs history read to " & $vm.commits.val.len)
       break
 
 proc vcsTick() {.cdecl.} =

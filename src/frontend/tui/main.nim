@@ -1109,6 +1109,9 @@ proc interactive(command: TuiCommand): int =
       viewRows = rt.sourcePaneRows()
       session.setViewportHeight(viewRows)
       session.refresh(rt)
+      # The VCS pane's history follows its new height (Viewport-Driven-Loading
+      # V6): a taller pane reads the commits it can now show.
+      discard vcs.followViewport(rt)
       paint(driver, rt)
     of dekFocus:
       # THE VCS PANE'S SECOND TRIGGER (VCS-Panel.md's auto-refresh, the
@@ -1160,6 +1163,10 @@ proc interactive(command: TuiCommand): int =
         # PLAT-50: a click in the VCS pane is the VCS source's.
         if not vcs.applyClick(rt, outcome.paneClick):
           session.applyOutcome(rt, outcome)
+        # V6: THE VCS HISTORY FOLLOWS ITS LIST. The token may have scrolled the
+        # pane, revealed its tab or committed an arrangement that resized it;
+        # a list that now reaches the last commit read reads more at once.
+        let vcsFollowed = vcs.followViewport(rt)
         # PLAT-51 (Layout-ViewModel §4.3a): A COMMITTED ARRANGEMENT MAY HAVE
         # RESIZED THE SOURCE PANE — it fetches for its new height now, once,
         # after the release; never while a divider is still held (the frames
@@ -1190,7 +1197,7 @@ proc interactive(command: TuiCommand): int =
         # repaints nothing was never drawn: the step the click made happened
         # and the screen kept the old tick. `frameOwed` carries it to the
         # next token and to the next idle tick.
-        if outcome.repaint or frameOwed:
+        if outcome.repaint or frameOwed or vcsFollowed:
           if driver.holdFrame(journal.pendingReplay > 0):
             frameOwed = true
           else:
@@ -1374,6 +1381,7 @@ proc editInteractive(command: TuiCommand): int =
     of dekResize:
       size = ev.size
       rt.resize(size.cols, size.rows)
+      discard vcs.followViewport(rt)
       paint(driver, rt)
     of dekFocus:
       # The terminal window regained focus: the project's VCS pane re-reads
@@ -1398,10 +1406,12 @@ proc editInteractive(command: TuiCommand): int =
         # PLAT-50: a click in the VCS pane is the VCS source's, in Edit mode
         # too.
         discard vcs.applyClick(rt, outcome.paneClick)
+        # V6: the history follows its list, as in the replay loop above.
+        let vcsFollowed = vcs.followViewport(rt)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         discard advanceBuild(rt, edit, report = false)
-        if outcome.repaint:
+        if outcome.repaint or vcsFollowed:
           paint(driver, rt)
   ExitOk
 

@@ -2068,6 +2068,21 @@ proc inHandLoaded(rt: TuiRuntime; pane: PaneKind): bool =
   of paneVcs: rt.app.vcs.loaded
   else: false
 
+proc vcsHistoryWindow*(rt: TuiRuntime): VcsHistoryWindow =
+  ## The VCS pane's history window on the current screen — what the host
+  ## reports as the history list's viewport (Viewport-Driven-Loading V6, the
+  ## terminal's reporter is the layout projection): the rows of the pane's
+  ## rectangle below its tab strip, as `inHandTrack` paints it, and the
+  ## commits its scroll position has passed. `rows` 0 when the pane is not
+  ## on screen (another tab of its stack shown, or closed), so the host keeps
+  ## the viewport it last reported instead of reporting an unmeasured one.
+  let under = rt.paneAreaOf(paneVcs)
+  if under.width <= 0 or under.height <= 1:
+    return
+  vcsHistoryWindow(CellArea(col: under.col, row: under.row + 1,
+                            width: under.width, height: under.height - 1),
+                   rt.app.vcs)
+
 proc scrubInHand(rt: TuiRuntime; pane: PaneKind; under: CellArea; row: int;
                  dragging: bool): bool =
   ## §3: the pane's track pressed (the view jumps, centring the row at the
