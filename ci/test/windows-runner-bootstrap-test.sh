@@ -78,9 +78,26 @@
 # reconstructed: the parse runs over `.github/workflows/codetracer.yml` as
 # committed, which is the artefact GitHub executes.
 #
+# # Which jobs are "Windows jobs"
+#
+# Written when the lane ran on `runs-on: eph-win-x64`, and it selected its jobs
+# by comparing `runs-on` with that one scalar. `2aa72ffe1` ("ci: migrate
+# runs-on to capability label sets (RC4)", 2026-09-20) moved the jobs to
+# `runs-on: [self-hosted, windows, x64]` -- the capability label sets of
+# infra's Ephemeral-Runner-Fleet runbook, section 1 "The label model" -- and
+# from then on this suite selected NO job: its never-pass-on-an-empty-set
+# assertions fired, and ci-contract-suites was red on every run
+# (codetracer-pm issues/2026-10-22-ci-contract-suites-recognise-windows-jobs-
+# by-a-retired-runner-label.md). A job is now a self-hosted Windows job when
+# its `runs-on` is a label set with a `windows` member, or one of the
+# `eph-win-*` class scalars (`eph-win-x64-release` is still one). Both are
+# images this fleet builds, which ship neither git nor bash. A GitHub-hosted
+# `windows-*` image is a Windows job for section 4's flavor contract but not
+# for the bootstrap contract: that image has both.
+#
 # Run: bash ci/test/windows-runner-bootstrap-test.sh
-# Lane: a step of the `ci-verdict` job (stock ubuntu-latest, bash only -- no
-#       Nix, no dev shell), alongside the verdict gate's own self-test.
+# Lane: a step of the `ci-contract-suites` job in codetracer.yml (stock
+#       ubuntu-latest, bash only -- no Nix, no dev shell).
 # =============================================================================
 set -uo pipefail
 
@@ -96,15 +113,19 @@ readonly ACTIONS_DIR
 BOOTSTRAP_SCRIPT="$REPO_ROOT/ci/ensure-git-for-checkout.ps1"
 readonly BOOTSTRAP_SCRIPT
 
-# The exact display name every eph-win-x64 job must open with.
+# The exact display name every self-hosted Windows job must open with.
 readonly BOOTSTRAP_STEP_NAME="Ensure Git and Git Bash are on PATH"
-readonly WINDOWS_RUNNER_LABEL="eph-win-x64"
-# Every runner label that lands a job on Windows. `eph-win-x64` is the only one
-# in use today; the rest are the labels a Windows job could plausibly be moved
-# to (the hosted images the lane came from, and the arm64 class the header note
-# says to revisit). Section 4's contract is about the OS, not about one class,
-# and must not be escapable by relabelling.
-readonly WINDOWS_RUNNER_LABELS="eph-win-x64 eph-win-arm64 windows-latest windows-2025 windows-2022 windows-2019 windows-11-arm"
+# How the messages below name the jobs `is_self_hosted_windows_runs_on`
+# selects (see "Which jobs are Windows jobs" in the header).
+readonly WINDOWS_RUNNER_LABEL="self-hosted Windows"
+# Every runner label that lands a job on Windows. `windows` is the capability
+# label of the self-hosted fleet's label sets (`[self-hosted, windows, x64]`),
+# which is what the jobs use today; `eph-win-x64-release` is the one class
+# scalar still in use. The rest are the labels a Windows job could plausibly be
+# moved to (the retired class scalars, the hosted images the lane came from,
+# and the arm64 class the header note says to revisit). Section 4's contract is
+# about the OS, not about one class, and must not be escapable by relabelling.
+readonly WINDOWS_RUNNER_LABELS="windows eph-win-x64 eph-win-x64-release eph-win-arm64 windows-latest windows-2025 windows-2022 windows-2019 windows-11-arm"
 # The action that materialises a job's dev environment, and the flavor of it
 # that cannot exist on Windows.
 readonly SETUP_DEV_ENV_USES="metacraft-labs/metacraft-github-actions/setup-dev-env@"
@@ -196,7 +217,7 @@ if [ -f "$BOOTSTRAP_SCRIPT" ]; then
 else
 	fail "ci/ensure-git-for-checkout.ps1 exists" \
 		"the workflow fetches this path at the run's own commit SHA;" \
-		"if it is gone or moved, every eph-win-x64 job fails at its very first step"
+		"if it is gone or moved, every self-hosted Windows job fails at its very first step"
 fi
 
 if grep -q 'bash\.exe' "$BOOTSTRAP_SCRIPT" 2>/dev/null; then
@@ -238,7 +259,7 @@ fi
 #     of those as the first step would break every job that has one.
 # ---------------------------------------------------------------------------
 echo
-echo "eph-win-x64 jobs"
+echo "self-hosted Windows jobs"
 
 declare -a windows_jobs=()
 declare -A job_first_step=()
@@ -324,9 +345,29 @@ is_windows_runs_on() {
 	return 1
 }
 
+# Is this `runs-on:` value one of the fleet's OWN Windows images -- the ones
+# that ship neither git nor bash, so every job on them needs the bootstrap? A
+# label set with a `windows` member (`[self-hosted, windows, x64]`, the
+# capability label model), or an `eph-win-*` class scalar. A hosted
+# `windows-latest` is not: it has both tools, and is checked by section 4 only.
+is_self_hosted_windows_runs_on() {
+	local value="$1"
+	local token
+	case "$value" in
+	'['*)
+		for token in ${value//[\[\],]/ }; do
+			[ "$token" = windows ] && return 0
+		done
+		return 1
+		;;
+	eph-win-*) return 0 ;;
+	esac
+	return 1
+}
+
 flush_job() {
 	flush_step
-	if [ -n "$current_job" ] && [ "$current_runs_on" = "$WINDOWS_RUNNER_LABEL" ]; then
+	if [ -n "$current_job" ] && is_self_hosted_windows_runs_on "$current_runs_on"; then
 		windows_jobs+=("$current_job")
 		job_first_step["$current_job"]="$seen_first_step"
 		if [ -n "${job_wsl_stub_body[$current_job]:-}" ]; then
@@ -516,9 +557,9 @@ echo
 echo "System32 WSL bash-stub steps"
 
 if [ "${#wsl_stub_jobs[@]}" -gt 0 ]; then
-	ok "the workflow still has eph-win-x64 steps that clear the WSL bash stub (${#wsl_stub_jobs[@]})"
+	ok "the workflow still has ${WINDOWS_RUNNER_LABEL} steps that clear the WSL bash stub (${#wsl_stub_jobs[@]})"
 else
-	fail "the workflow still has eph-win-x64 steps that clear the WSL bash stub" \
+	fail "the workflow still has ${WINDOWS_RUNNER_LABEL} steps that clear the WSL bash stub" \
 		"none were found. Either they were removed -- in which case this contract" \
 		"must be retargeted, not deleted -- or the scanner no longer matches." \
 		"Passing with zero of them would assert nothing."
@@ -740,15 +781,21 @@ fi
 # rather than quietly stop covering it -- which is what this assertion says out
 # loud.
 matrix_windows_legs=""
-for label in $WINDOWS_RUNNER_LABELS; do
-	# Matrix legs are written both as a bare `runner:` key under an `include:`
-	# entry and as the first key of one (`- runner: ...`); match either.
-	if grep -qE "^[[:space:]]*(-[[:space:]]+)?runner:[[:space:]]*$label([[:space:]]|#|$)" "$WORKFLOW"; then
-		matrix_windows_legs="$matrix_windows_legs $label"
+matrix_runner_values=0
+# Matrix legs are written both as a bare `runner:` key under an `include:`
+# entry and as the first key of one (`- runner: ...`); read either, and
+# classify the value -- a scalar or a label set -- the way `runs-on:` is
+# classified, so a `[self-hosted, windows, x64]` leg is seen as well.
+while IFS= read -r line; do
+	[[ $line =~ ^[[:space:]]*(-[[:space:]]+)?runner:[[:space:]]*([^#]*) ]] || continue
+	matrix_runner_values=$((matrix_runner_values + 1))
+	value="$(trim_trailing "${BASH_REMATCH[2]}")"
+	if is_windows_runs_on "$value"; then
+		matrix_windows_legs="$matrix_windows_legs $value"
 	fi
-done
+done <"$WORKFLOW"
 if [ -z "$matrix_windows_legs" ]; then
-	ok "no build-matrix leg selects a Windows runner behind an expression"
+	ok "no build-matrix leg selects a Windows runner behind an expression ($matrix_runner_values matrix runner values read)"
 else
 	fail "no build-matrix leg selects a Windows runner behind an expression" \
 		"found matrix runner value(s):$matrix_windows_legs." \
@@ -1027,7 +1074,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Every eph-win-x64 job must BOUND itself.
+# Every self-hosted Windows job must BOUND itself.
 #
 # Omitting `timeout-minutes` does not mean "no limit", it means GitHub's
 # DEFAULT limit of 360 minutes, and this lane has already paid that in full.
@@ -1065,26 +1112,14 @@ job_timeout_minutes() {
 	' "$WORKFLOW"
 }
 
-# Derive this section's OWN job list rather than reusing $windows_jobs. That
-# array is scoped to the `eph-win-x64` CI label, and the job with the largest
-# unbounded blast radius is not on it: `windows-installer-build` runs on
-# `eph-win-x64-release`, runs the same env.ps1 bootstrap, and is additionally
-# gated on a branch that does not exist -- so it would go from never running to
-# running unbounded the moment that gate is repaired. Matching any `eph-win`
-# label keeps this check honest as new Windows scale sets are added.
-declare -a win_timeout_jobs=()
-while IFS= read -r line; do
-	win_timeout_jobs+=("$line")
-done < <(awk '
-	/^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
-		name = $1
-		sub(/:$/, "", name)
-		next
-	}
-	/^    runs-on:[[:space:]]*eph-win/ {
-		if (name != "" && name != last) { print name; last = name }
-	}
-' "$WORKFLOW")
+# This section's job list is EVERY job on a Windows runner (section 4's
+# `windows_runner_jobs`, any label in WINDOWS_RUNNER_LABELS), which is wider
+# than the bootstrap set: a job moved onto a hosted image still holds the
+# branch's concurrency group for as long as it runs. It used to be derived
+# here by matching `runs-on: eph-win`, and after the move to label sets that
+# matched only `windows-installer-build` (`eph-win-x64-release`), so the six
+# `[self-hosted, windows, x64]` jobs went unbounded by this check.
+declare -a win_timeout_jobs=("${windows_runner_jobs[@]+"${windows_runner_jobs[@]}"}")
 
 if [ "${#win_timeout_jobs[@]}" -gt 0 ]; then
 	ok "the workflow declares Windows-runner jobs to bound (${#win_timeout_jobs[@]} of them)"
@@ -1097,9 +1132,15 @@ fi
 for job in "${win_timeout_jobs[@]+"${win_timeout_jobs[@]}"}"; do
 	timeout_value="$(job_timeout_minutes "$job")"
 	if [ -z "$timeout_value" ]; then
-		fail "$job declares timeout-minutes" 			"without it the job inherits GitHub's ${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default," 			"which is the six hours this job already spent holding the branch's" 			"concurrency group in run 33880354195 without ever reporting."
+		fail "$job declares timeout-minutes" \
+			"without it the job inherits GitHub's ${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default," \
+			"which is the six hours this job already spent holding the branch's" \
+			"concurrency group in run 33880354195 without ever reporting."
 	elif [ "$timeout_value" -ge "$GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES" ]; then
-		fail "$job bounds itself below GitHub's default" 			"timeout-minutes: $timeout_value is not lower than the" 			"${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default it is supposed to replace," 			"so this job can still starve the concurrency group for six hours."
+		fail "$job bounds itself below GitHub's default" \
+			"timeout-minutes: $timeout_value is not lower than the" \
+			"${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default it is supposed to replace," \
+			"so this job can still starve the concurrency group for six hours."
 	else
 		ok "$job bounds itself (timeout-minutes: $timeout_value)"
 	fi

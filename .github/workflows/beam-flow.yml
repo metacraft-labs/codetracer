@@ -143,7 +143,7 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
 
       - name: Swap libs/codetracer-trace-format for the pinned sibling clone
         # The beam recorder's trace shim reuses the shared CTFS writer at

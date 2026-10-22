@@ -1365,8 +1365,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
             codetracer-native-recorder=dev
             codetracer-native-backend
 
@@ -1657,8 +1657,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
 
       - name: Install Nim dependencies
         shell: bash
@@ -2105,8 +2105,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
             codetracer-native-recorder=dev
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
@@ -4961,8 +4961,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
             codetracer-native-recorder=dev
 
       - name: Remove WSL bash stub from System32
@@ -6545,8 +6545,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
             codetracer-native-recorder=dev
             nim-stackable-hooks=dev
             codetracer-visual-replay=dev
@@ -7119,8 +7119,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -7460,8 +7460,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
             io-mon=3b6196efc2021ba202add54a21b25f0268d70c79
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
@@ -7765,8 +7765,8 @@ jobs:
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=c8e57b1f21b1c4e82db5e14ab70fd16ecf217ce0
-            codetracer-trace-format-nim=808ffdb4507634c3aba0661d96cbc353420ed856
+            codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
+            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
             io-mon=3b6196efc2021ba202add54a21b25f0268d70c79
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
@@ -8667,6 +8667,18 @@ jobs:
     # node or python3. A watchdog must not share the failure mode it watches
     # for; if these needed the dev shell, the outages they report would take
     # them down too.
+    #
+    # EVERY SUITE RUNS, AND THE JOB FAILS AT THE END. Each step after the
+    # checkout carries `if: !cancelled() && steps.checkout.outcome ==
+    # 'success'`, so a failing suite does not skip the ones after it; the job
+    # is still red when any step failed. Without it the job stopped at the
+    # first red suite: from 2026-09-20 the Windows-runner suite failed on every
+    # run (it selected jobs by a retired runner label), and the sibling-
+    # provisioning suite behind it went unread while it drifted from the lock
+    # (codetracer-pm issues/2026-10-22-ci-contract-suites-recognise-windows-
+    # jobs-by-a-retired-runner-label.md). Gated on the checkout, because with
+    # no checkout every suite would fail for that one reason. A new step here
+    # takes the same `if:`.
     if: always()
     runs-on: ubuntu-latest
     # 200-run window: 20 green, median 0.6m, max 0.8m. Shell self-tests only.
@@ -8674,6 +8686,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@v5
         with:
           # Same reasoning as `ci-verdict`: no step here talks to a git remote
@@ -8682,6 +8695,7 @@ jobs:
           submodules: false
 
       - name: Assert the Windows lane provisions its own git and bash
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # The eph-win-x64 image ships neither; five of the six Windows jobs
         # did not run the bootstrap that supplies them, and the lane failed
         # in three places that looked unrelated. This is a static contract
@@ -8691,6 +8705,7 @@ jobs:
         run: bash ci/test/windows-runner-bootstrap-test.sh
 
       - name: Assert the Windows dev-deps root degrades to somewhere writable
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # Every eph-win-x64 job died in Ensure-Ttd with "Access to the path
         # 'D:\metacraft-dev-deps\ttd' is denied", because env.ps1 read
         # "D:\ exists" as "there is a writable dev drive here". On these
@@ -8701,6 +8716,7 @@ jobs:
         run: bash ci/test/windows-install-root-test.sh
 
       - name: Assert every job's sibling checkout is self-sufficient
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # Two halves of one contract, both static checks over this workflow
         # file, so they run here from a stock runner where they cannot be
         # taken down by the outages they watch for.
@@ -8726,9 +8742,11 @@ jobs:
         run: bash ci/test/sibling-provisioning-test.sh
 
       - name: Assert the WebAssembly recording fixture lane stays required
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash ci/test/wasm-recordings-ci-test.sh
 
       - name: Assert every job in this workflow declares a timeout
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # A third static check over this same file, here for the same reason as
         # the two above: it needs no runner and no siblings, so it must not sit
         # behind either.
@@ -8752,9 +8770,11 @@ jobs:
         run: python3 ci/verdict/job-timeouts.py .github/workflows/codetracer.yml
 
       - name: Self-test the job-timeout contract
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash ci/test/job-timeouts-test.sh
 
       - name: Check every build-once job provisions the workspace the build needs
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # The other end of the sibling contract. The suite above asks whether a
         # `siblings:` entry is PINNED reproducibly; this one asks whether the
         # list is COMPLETE for a job that compiles the desktop core.
@@ -8777,6 +8797,7 @@ jobs:
         run: bash ci/test/build-once-workspace-test.sh
 
       - name: Check the launcher<->recorder gate's cross-repo workflow wiring
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # The other half of the same class of defect, reached from the
         # `workflow_call` side. `actionlint` does not check a caller's `with:`
         # against a reusable workflow's declared `inputs:`, so a misspelled key
@@ -8792,6 +8813,7 @@ jobs:
         run: bash ci/test/launcher-recorder-e2e-workflow-test.sh
 
       - name: Check that a failed sibling build shows its cause
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # scripts/build-siblings.sh and the launcher<->recorder driver used to
         # report a failed sibling build as "build exited 101 — see <log>", with
         # <log> a file on the runner that no step uploads. The ruby arm of run
@@ -8802,6 +8824,7 @@ jobs:
         run: bash ci/test/sibling-build-failure-test.sh
 
       - name: Check that a stale sibling artifact is rebuilt, not skipped
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # scripts/build-siblings.sh decided "already built" from the artifact
         # merely EXISTING, so a sibling built against an older dependency was
         # reported `SKIP … already built` on every run forever. Observed: a
@@ -8820,6 +8843,7 @@ jobs:
         run: bash ci/test/sibling-artifact-freshness-test.sh
 
       - name: Self-test the private-registry credential preflight
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # This suite is also run by `visual-replay-regression-gate`, but that
         # job needs a GPU runner, a workspace lock and eight sibling
         # checkouts, so it is exactly the kind of lane that can stop
@@ -8832,6 +8856,7 @@ jobs:
         run: bash ci/test/visual-replay-private-cargo-preflight-test.sh
 
       - name: Self-test the docs publish channels
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # `build-and-deploy-docs` writes three channels -- the released site,
         # the nightly book and one preview per open pull request -- into ONE
         # `gh-pages` branch, each run replacing only its own subtree. Nothing
@@ -8848,6 +8873,7 @@ jobs:
         run: bash ci/test/docs-deploy-channels-test.sh
 
       - name: Self-test the docs preview comment
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # The preview comment must be posted once and EDITED thereafter. A
         # regression here is invisible in CI -- it looks like a working
         # preview, with one more bot comment per push burying the review
@@ -8856,6 +8882,7 @@ jobs:
         run: bash ci/test/docs-preview-comment-test.sh
 
       - name: Assert the JS ViewModel lane can observe its own failures
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # `test-vm-js` believed it was checking node's exit code. It was not:
         # without `-d:nodejs` std/unittest cannot set a failing exit code on
         # the js backend, so a failing suite exited 0 -- and the compile
@@ -8880,6 +8907,7 @@ jobs:
         run: bash ci/test/vm-js-lane-test.sh
 
       - name: Assert a crashed test binary cannot be reported as a partial run
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # Contract suite for ci/lib/test-lane-report.sh, the shared verdict the
         # six compile-and-run lanes classify through. Unlike the lane suites
         # above it needs no toolchain at all -- its fixtures are shell scripts
@@ -8888,6 +8916,7 @@ jobs:
         run: bash ci/test/test-lane-report-test.sh
 
       - name: Self-test the DeepReview design-review harness
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # UD-0's visual-design-iteration harness is what every later milestone
         # of the unified-diff campaign is reviewed through, so its failure mode
         # is the worst kind: it keeps producing ratings, for a matrix that has

@@ -58,7 +58,9 @@ description: |
   only the BUILD INPUTS: the members of the develop set that are also solved
   packages in the lock, i.e. what ``repro.nim`` ``uses`` from source --
 
-      isonim, isonim-tui, nim-everywhere, nim-agent-harbor, nim-agents, nim-acp
+      isonim, isonim-tui, codetracer-trace-format-nim, nim-everywhere,
+      nim-agent-harbor, nim-agents, nim-acp, isonim-render-serve, nim-termctl,
+      nim-pty, isonim-gpui, isonim-freya, isonim-cocoa   (repro.lock, 2026-10-22)
 
   ``ci/repro-lock-build-input-siblings.sh`` derives that list from the lock
   and the step passes it as ``--only=``, so the lock stays the only answer
@@ -85,7 +87,12 @@ description: |
   since come back, DECLARED this time: the editor model imports
   ``isonim_tui/text/width``, so it is in ``repro.nim`` and pinned by
   ``repro.lock`` -- exactly the route the next paragraph asks for. What follows
-  holds for the other three.) Nothing in this
+  was written about the other three. Since then the lock has also come to solve
+  ``isonim-gpui``, ``nim-termctl`` and ``nim-pty`` as packages, so the
+  selector lists them among the build inputs above and this action clones
+  them at their locked revisions; that is the lock speaking, not a list
+  written here, and the paragraph below is the history of why that is the
+  only acceptable route.) Nothing in this
   repo compiles against them. ``scripts/require-siblings.sh`` puts all four
   in its ADVISORY tier with the reason "src/Tuprules.tup puts it on the Nim
   search path" and says so in as many words: "builds succeed without them".
