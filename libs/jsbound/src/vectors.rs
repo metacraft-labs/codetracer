@@ -20,6 +20,11 @@
 //!   and one cut inside a frame (`TruncatedMidRecord`).
 //! * `refusal`: a valid `base` vector with exactly one edit, which the
 //!   decoder must refuse with the named error.
+//!
+//! Every enumerated field is held at both ends of its value set: the
+//! `enum_greatest` vector carries each at its greatest value, and one
+//! refusal vector per field steps one past it (and, for a set that starts
+//! at 1, one before it, 0).
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -27,7 +32,7 @@ use std::collections::BTreeMap;
 
 use crate::decode::{decode_log, DecodeErrorKind, Termination};
 use crate::encode::{encode_frame, encode_log};
-use crate::record::{hex, BlobRef, Record, MAX_FRAME_LEN, MAX_INLINE_BLOB, VOCAB};
+use crate::record::{hex, BlobRef, Record, MAX_FRAME_LEN, MAX_INLINE_BLOB, VALUE_SETS, VOCAB};
 
 /// The class of a vector, with what the decoder must make of it.
 #[derive(Debug, Clone, PartialEq)]
@@ -337,6 +342,135 @@ fn session_records() -> Vec<Record> {
     records
 }
 
+/// A streamed `fetch` response (spec §5.2, §6, §10.4).
+fn streamed_response_records() -> Vec<Record> {
+    let piece = |seq, data: &[u8]| Record::WsMessage {
+        seq,
+        req_id: 1,
+        dir: 1,
+        data: BlobRef::Inline(data.to_vec()),
+    };
+    vec![
+        header(),
+        env(),
+        Record::NetRequest {
+            seq: 1,
+            req_id: 1,
+            api: 1,
+            method: "GET".into(),
+            url: "https://shop.example/api/stream".into(),
+            body_digest: String::new(),
+        },
+        Record::TaskReg {
+            seq: 2,
+            task_id: 1,
+            kind: 4,
+            delay_ms: 0.0,
+        },
+        Record::Task {
+            seq: 3,
+            task_id: 1,
+            kind: 4,
+        },
+        Record::NetResponse {
+            seq: 4,
+            req_id: 1,
+            outcome: 5,
+            status: 200,
+            headers: r#"[["content-type","text/plain"]]"#.into(),
+            body: BlobRef::Inline(Vec::new()),
+        },
+        piece(5, b"c0\n"),
+        Record::Task {
+            seq: 6,
+            task_id: 1,
+            kind: 4,
+        },
+        piece(7, b"c1\n"),
+        Record::WsMessage {
+            seq: 8,
+            req_id: 1,
+            dir: 4,
+            data: BlobRef::Inline(br#"{"outcome":1}"#.to_vec()),
+        },
+        end(8),
+    ]
+}
+
+/// The `session` records with every enumerated field (`Header`, `Env`,
+/// `Gap` and `End` included) set to the greatest value of its set.
+fn enum_greatest_records() -> Vec<Record> {
+    let mut records = session_records();
+    for r in &mut records {
+        for &(record, field, _, hi) in VALUE_SETS {
+            if r.kind_name() == record {
+                assert!(r.set_u8_field(field, hi), "{record}.{field} is a u8 field");
+            }
+        }
+    }
+    records
+}
+
+/// `NetResponse` -> `net_response`.
+fn snake(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// One refusal vector per end of every value set: the `enum_greatest`
+/// vector with one enumerated field one past its greatest value, or one
+/// before its least (0, for a set that starts at 1). Each differs from the
+/// base in exactly that one byte.
+fn enum_refusal_vectors(valid: &BTreeMap<String, Vector>) -> Vec<Vector> {
+    let base = &valid["enum_greatest"];
+    let mut out = Vec::new();
+    for &(record, field, lo, hi) in VALUE_SETS {
+        let mut values = vec![(hi.checked_add(1), "one past its greatest value")];
+        if lo > 0 {
+            values.push((Some(lo - 1), "one before its least value"));
+        }
+        for (value, which) in values {
+            let Some(value) = value else { continue };
+            let mut records = enum_greatest_records();
+            let at = records
+                .iter()
+                .position(|r| r.kind_name() == record)
+                .expect("enum_greatest has every record kind");
+            assert!(records[at].set_u8_field(field, value));
+            let bytes = encode_log(&records).0;
+            let differing = bytes
+                .iter()
+                .zip(&base.bytes)
+                .filter(|(a, b)| a != b)
+                .count();
+            assert!(
+                bytes.len() == base.bytes.len() && differing == 1,
+                "the {record}.{field} edit is one byte"
+            );
+            out.push(Vector {
+                name: format!("enum_{}_{field}_{value}", snake(record)),
+                description: format!("{record}.{field} is {value}, {which} ({lo} to {hi})"),
+                bytes,
+                expectation: Expectation::Refused {
+                    base: "enum_greatest".into(),
+                    error: DecodeErrorKind::UnknownEnumValue,
+                },
+            });
+        }
+    }
+    out
+}
+
 fn set_seq(r: &mut Record, value: u64) {
     match r {
         Record::Task { seq, .. }
@@ -437,6 +571,76 @@ fn decoding_vectors() -> Vec<Vector> {
         "session",
         "every record kind in one stream, with a Gap after the Checkpoint",
         session_records(),
+    ));
+    out.push(complete(
+        "streamed_response",
+        "a fetch whose body streams: its head (NetResponse outcome 5, no body), \
+         two pieces (WsMessage dir 1), the second in a network task of its \
+         own, and the end (WsMessage dir 4)",
+        streamed_response_records(),
+    ));
+    out.push(complete(
+        "storage_shape_reads",
+        "StorageRead present 2: the key list, length and key(n) of an area",
+        vec![
+            header(),
+            env(),
+            Record::StorageRead {
+                seq: 1,
+                area: 1,
+                key: "keys".into(),
+                present: 2,
+                value: r#"["a","b"]"#.into(),
+            },
+            Record::StorageRead {
+                seq: 2,
+                area: 2,
+                key: "length".into(),
+                present: 2,
+                value: "0".into(),
+            },
+            Record::StorageRead {
+                seq: 3,
+                area: 1,
+                key: "key".into(),
+                present: 2,
+                value: "null".into(),
+            },
+            end(3),
+        ],
+    ));
+    out.push(complete(
+        "clock_event_time_stamp",
+        "Clock src 5: a read of an event's timeStamp",
+        vec![
+            header(),
+            env(),
+            Record::Clock {
+                seq: 1,
+                src: 5,
+                bits: 0x4059_0000_0000_0000,
+            },
+            end(1),
+        ],
+    ));
+    out.push(complete(
+        "refusal_timer_handler",
+        "a Refusal of a timer handler that is not a function",
+        vec![
+            header(),
+            env(),
+            Record::Refusal {
+                seq: 1,
+                feature: "unrecordable-timer-handler".into(),
+                detail: "setTimeout string".into(),
+            },
+            end(1),
+        ],
+    ));
+    out.push(complete(
+        "enum_greatest",
+        "every enumerated field at the greatest value of its set",
+        enum_greatest_records(),
     ));
 
     // Truncation: the session without its End, and the session cut inside
@@ -670,6 +874,7 @@ pub fn catalogue() -> Vec<Vector> {
         .collect();
     let mut all = decoding;
     all.extend(refusal_vectors(&by_name));
+    all.extend(enum_refusal_vectors(&by_name));
     all
 }
 

@@ -163,6 +163,41 @@
       "name": "session"
     },
     {
+      "bytes": "streamed_response.bin",
+      "class": "valid",
+      "description": "a fetch whose body streams: its head (NetResponse outcome 5, no body), two pieces (WsMessage dir 1), the second in a network task of its own, and the end (WsMessage dir 4)",
+      "expected": "streamed_response.json",
+      "name": "streamed_response"
+    },
+    {
+      "bytes": "storage_shape_reads.bin",
+      "class": "valid",
+      "description": "StorageRead present 2: the key list, length and key(n) of an area",
+      "expected": "storage_shape_reads.json",
+      "name": "storage_shape_reads"
+    },
+    {
+      "bytes": "clock_event_time_stamp.bin",
+      "class": "valid",
+      "description": "Clock src 5: a read of an event's timeStamp",
+      "expected": "clock_event_time_stamp.json",
+      "name": "clock_event_time_stamp"
+    },
+    {
+      "bytes": "refusal_timer_handler.bin",
+      "class": "valid",
+      "description": "a Refusal of a timer handler that is not a function",
+      "expected": "refusal_timer_handler.json",
+      "name": "refusal_timer_handler"
+    },
+    {
+      "bytes": "enum_greatest.bin",
+      "class": "valid",
+      "description": "every enumerated field at the greatest value of its set",
+      "expected": "enum_greatest.json",
+      "name": "enum_greatest"
+    },
+    {
       "bytes": "truncated_unterminated.bin",
       "class": "truncation",
       "description": "the session vector without its End frame",
@@ -311,6 +346,262 @@
       "description": "one 0x00 byte after the End frame",
       "expected": "bytes_after_end.json",
       "name": "bytes_after_end"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_header_protocol_level_2.bin",
+      "class": "refusal",
+      "description": "Header.protocol_level is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_header_protocol_level_2.json",
+      "name": "enum_header_protocol_level_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_env_color_scheme_3.bin",
+      "class": "refusal",
+      "description": "Env.color_scheme is 3, one past its greatest value (0 to 2)",
+      "expected": "enum_env_color_scheme_3.json",
+      "name": "enum_env_color_scheme_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_env_reduced_motion_2.bin",
+      "class": "refusal",
+      "description": "Env.reduced_motion is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_env_reduced_motion_2.json",
+      "name": "enum_env_reduced_motion_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_kind_13.bin",
+      "class": "refusal",
+      "description": "Task.kind is 13, one past its greatest value (1 to 12)",
+      "expected": "enum_task_kind_13.json",
+      "name": "enum_task_kind_13"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_kind_0.bin",
+      "class": "refusal",
+      "description": "Task.kind is 0, one before its least value (1 to 12)",
+      "expected": "enum_task_kind_0.json",
+      "name": "enum_task_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_reg_kind_13.bin",
+      "class": "refusal",
+      "description": "TaskReg.kind is 13, one past its greatest value (1 to 12)",
+      "expected": "enum_task_reg_kind_13.json",
+      "name": "enum_task_reg_kind_13"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_reg_kind_0.bin",
+      "class": "refusal",
+      "description": "TaskReg.kind is 0, one before its least value (1 to 12)",
+      "expected": "enum_task_reg_kind_0.json",
+      "name": "enum_task_reg_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_clock_src_6.bin",
+      "class": "refusal",
+      "description": "Clock.src is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_clock_src_6.json",
+      "name": "enum_clock_src_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_clock_src_0.bin",
+      "class": "refusal",
+      "description": "Clock.src is 0, one before its least value (1 to 5)",
+      "expected": "enum_clock_src_0.json",
+      "name": "enum_clock_src_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_random_src_4.bin",
+      "class": "refusal",
+      "description": "Random.src is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_random_src_4.json",
+      "name": "enum_random_src_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_random_src_0.bin",
+      "class": "refusal",
+      "description": "Random.src is 0, one before its least value (1 to 3)",
+      "expected": "enum_random_src_0.json",
+      "name": "enum_random_src_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_request_api_6.bin",
+      "class": "refusal",
+      "description": "NetRequest.api is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_net_request_api_6.json",
+      "name": "enum_net_request_api_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_request_api_0.bin",
+      "class": "refusal",
+      "description": "NetRequest.api is 0, one before its least value (1 to 5)",
+      "expected": "enum_net_request_api_0.json",
+      "name": "enum_net_request_api_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_response_outcome_6.bin",
+      "class": "refusal",
+      "description": "NetResponse.outcome is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_net_response_outcome_6.json",
+      "name": "enum_net_response_outcome_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_response_outcome_0.bin",
+      "class": "refusal",
+      "description": "NetResponse.outcome is 0, one before its least value (1 to 5)",
+      "expected": "enum_net_response_outcome_0.json",
+      "name": "enum_net_response_outcome_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_ws_message_dir_5.bin",
+      "class": "refusal",
+      "description": "WsMessage.dir is 5, one past its greatest value (1 to 4)",
+      "expected": "enum_ws_message_dir_5.json",
+      "name": "enum_ws_message_dir_5"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_ws_message_dir_0.bin",
+      "class": "refusal",
+      "description": "WsMessage.dir is 0, one before its least value (1 to 4)",
+      "expected": "enum_ws_message_dir_0.json",
+      "name": "enum_ws_message_dir_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_storage_read_area_4.bin",
+      "class": "refusal",
+      "description": "StorageRead.area is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_storage_read_area_4.json",
+      "name": "enum_storage_read_area_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_storage_read_area_0.bin",
+      "class": "refusal",
+      "description": "StorageRead.area is 0, one before its least value (1 to 3)",
+      "expected": "enum_storage_read_area_0.json",
+      "name": "enum_storage_read_area_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_storage_read_present_3.bin",
+      "class": "refusal",
+      "description": "StorageRead.present is 3, one past its greatest value (0 to 2)",
+      "expected": "enum_storage_read_present_3.json",
+      "name": "enum_storage_read_present_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_dom_effect_effect_7.bin",
+      "class": "refusal",
+      "description": "DomEffect.effect is 7, one past its greatest value (1 to 6)",
+      "expected": "enum_dom_effect_effect_7.json",
+      "name": "enum_dom_effect_effect_7"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_dom_effect_effect_0.bin",
+      "class": "refusal",
+      "description": "DomEffect.effect is 0, one before its least value (1 to 6)",
+      "expected": "enum_dom_effect_effect_0.json",
+      "name": "enum_dom_effect_effect_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_navigation_kind_6.bin",
+      "class": "refusal",
+      "description": "Navigation.kind is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_navigation_kind_6.json",
+      "name": "enum_navigation_kind_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_navigation_kind_0.bin",
+      "class": "refusal",
+      "description": "Navigation.kind is 0, one before its least value (1 to 5)",
+      "expected": "enum_navigation_kind_0.json",
+      "name": "enum_navigation_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_error_kind_3.bin",
+      "class": "refusal",
+      "description": "Error.kind is 3, one past its greatest value (1 to 2)",
+      "expected": "enum_error_kind_3.json",
+      "name": "enum_error_kind_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_error_kind_0.bin",
+      "class": "refusal",
+      "description": "Error.kind is 0, one before its least value (1 to 2)",
+      "expected": "enum_error_kind_0.json",
+      "name": "enum_error_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_scrubbed_class_5.bin",
+      "class": "refusal",
+      "description": "Scrubbed.class is 5, one past its greatest value (1 to 4)",
+      "expected": "enum_scrubbed_class_5.json",
+      "name": "enum_scrubbed_class_5"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_scrubbed_class_0.bin",
+      "class": "refusal",
+      "description": "Scrubbed.class is 0, one before its least value (1 to 4)",
+      "expected": "enum_scrubbed_class_0.json",
+      "name": "enum_scrubbed_class_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_gap_reason_4.bin",
+      "class": "refusal",
+      "description": "Gap.reason is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_gap_reason_4.json",
+      "name": "enum_gap_reason_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_gap_reason_0.bin",
+      "class": "refusal",
+      "description": "Gap.reason is 0, one before its least value (1 to 3)",
+      "expected": "enum_gap_reason_0.json",
+      "name": "enum_gap_reason_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_end_reason_5.bin",
+      "class": "refusal",
+      "description": "End.reason is 5, one past its greatest value (1 to 4)",
+      "expected": "enum_end_reason_5.json",
+      "name": "enum_end_reason_5"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_end_reason_0.bin",
+      "class": "refusal",
+      "description": "End.reason is 0, one before its least value (1 to 4)",
+      "expected": "enum_end_reason_0.json",
+      "name": "enum_end_reason_0"
     }
   ],
   "vocab": 1
