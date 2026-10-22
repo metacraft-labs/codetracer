@@ -27,6 +27,7 @@ import native_host
 from backend/stdio_backend import sendDapRequestNoResponse, drainEvents,
   waitForEvent
 import store/types as store_types   # `CallLine`
+from viewmodels/calltrace_vm import reloadWindow
 from ../app/origin_binding import OriginEventName
 from viewmodels/debug_controls_vm import DebugControlsVM, transportAvailable,
   stepForward, stepBackward, stepIn, stepOut, reverseStepIn, reverseStepOut,
@@ -234,13 +235,13 @@ proc jumpToCall*(s: HeadlessDebugSession; index: int64): string =
   except CatchableError as e:
     "could not go to the call: " & e.msg
 
-proc toggleCallChildren*(s: HeadlessDebugSession; index: int64;
-                         startIndex: int64; height: int): string =
+proc toggleCallChildren*(s: HeadlessDebugSession; index: int64): string =
   ## Expand or collapse the children of the call at trace `index` — the
   ## desktop's toggle (`CalltraceVM.toggleExpandCallChildren`: `ct/expand-calls`
-  ## or `ct/collapse-calls` for the call's key) — then read the section
-  ## `startIndex .. startIndex + height` again. Returns "" on success (or
-  ## when the call has no children to toggle), else why not.
+  ## or `ct/collapse-calls` for the call's key) — then have the call trace's
+  ## ViewModel read the window its pane reported again
+  ## (`CalltraceVM.reloadWindow`). Returns "" on success (or when the call has
+  ## no children to toggle), else why not.
   var line: CallLine
   if not s.heldCallLine(index, line) or not line.hasChildren:
     return ""
@@ -254,9 +255,8 @@ proc toggleCallChildren*(s: HeadlessDebugSession; index: int64;
     s.backend.sendDapRequestNoResponse(command, %*{
       "callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
     discard s.backend.drainEvents()
-    s.requestAndLoadCalltrace(startIndex = max(0'i64, startIndex),
-                              height = max(1, height),
-                              depth = RecordingCalltraceDepth)
+    s.session.calltraceVM.reloadWindow()
+    s.settle()
     ""
   except CatchableError as e:
     "could not " & (if collapse: "collapse" else: "expand") &

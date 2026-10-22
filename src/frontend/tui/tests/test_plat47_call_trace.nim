@@ -130,11 +130,14 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
     # FILES: the recording's tree, on the interactive path.
     ck screen.contains("source folders")
     ck screen.contains("main.py")
-    # GPUI's view over the same VM lists the same calls.
+    # GPUI's view over the same VM lists the same calls — the ones the pane
+    # shows (`visibleLines`: the viewport the terminal reported, HSF-V2),
+    # each held row it shows once.
     let pv = calltracePaneView(session.calltrace)
     var labels: seq[string] = @[]
     viewLabels(pv.root, labels)
-    ck labels.len >= lines.len
+    ck labels.len > 0
+    ck labels.len >= session.calltrace.visibleLines.val.len
     # A row is "callee #index(args) => return" (PLAT-49 part B); its head
     # names the call.
     let head = labels[0].strip().split('(')[0]

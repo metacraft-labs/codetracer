@@ -222,7 +222,10 @@ const
   PaneRule* = "─"
 
   DefaultEventPageSize* = 16
-    ## Events fetched per window.
+    ## Events fetched per window by a model built without a pane — the
+    ## suites' models. A host passes its pane's own window instead
+    ## (`tui_session.eventLogPageRows`, HSF-V2: the shared window policy for
+    ## the rows the pane shows), so no shipped pane pages by this number.
     ##
     ## Smaller than the 70 events `noir_space_ship` records, which is what makes
     ## `test_event_log_virtualization.nim`'s assertion a real one rather than a

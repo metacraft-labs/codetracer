@@ -756,6 +756,7 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     let (w, h) = sizeParams(params)
     s.panes[pane] = HostedPane(width: w, height: h)
     s.rt.hostedRows[pane] = h
+    s.rt.hostedCols[pane] = w
     s.resyncViewports()
     if meth == "pane/open":
       extra.add srv.keymapOf(s, pane)
@@ -773,6 +774,7 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     let pane = paneParam(params)
     s.panes.del(pane)
     s.rt.hostedRows[pane] = 0
+    s.rt.hostedCols[pane] = 0
     result = newJNull()
   of "pane/keymap":
     let s = srv.sessionById(params)

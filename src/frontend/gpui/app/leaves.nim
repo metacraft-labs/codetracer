@@ -2367,9 +2367,10 @@ const
     ## (`main.clickCalltrace`). Derived from the pitch rather than restated:
     ## it was a standalone `26` while the pitch said 25.78, and the two
     ## disagreeing is what a reader had to notice by hand.
-  CallIndentPx* = 8
+  CallIndentPx* = CallRowIndentPx
     ## The desktop's depth offset per level (`.call-depth`, measured 8 px a
-    ## level 2026-10-17: toggles at 1053, 1061, 1069 …; 16 until then).
+    ## level 2026-10-17: toggles at 1053, 1061, 1069 …; 16 until then) —
+    ## `calltrace_vm.CallRowIndentPx`, the one the web view draws too.
   CallArgsColour* = DesignTokenHex[dtColorsUiTextSuccessPrimary][dmDark]
     ## CALLTRACE_ARGS_COLOR (#BBF7D0) — the token the terminal's `srCallArgs`
     ## paints.

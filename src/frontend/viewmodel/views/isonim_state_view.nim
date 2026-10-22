@@ -22,7 +22,7 @@
 ## expressed via the DSL inside the `indexEach` body so the structure is
 ## visible at a glance.
 
-import std/[math, options, sets]
+import std/[options, sets]
 from std/strutils import find
 
 import isonim/core/[signals, computation]
@@ -838,28 +838,6 @@ when defined(js):
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
 
-  proc stateRowHeight(values: isonim_dom.Element): float {.importjs:
-    "(function(v){const r=v.querySelector('.value-expanded');const h=r?r.getBoundingClientRect().height:0;return h>0?h:22;})(#)".}
-  proc onStateRowsScrollOrResize(values: isonim_dom.Element;
-                                 cb: proc(height, scrollTop: float)) {.importjs: """
-    (function(v, cb) {
-      const report = function() { cb(v.clientHeight, v.scrollTop); };
-      v.addEventListener('scroll', report, {passive: true});
-      if (typeof ResizeObserver === 'function') new ResizeObserver(report).observe(v);
-      report();
-    })(#, #)""".}
-
-  proc reportStateRows(values: isonim_dom.Element; vm: StateVM) =
-    ## The rows the pane shows (Viewport-Driven-Loading V1), from the value
-    ## list's size and scroll: they size the stop's value budget
-    ## (`localsCountBudgetFor`) and one "Load More" (`loadMoreCountFor`). A
-    ## hidden pane reports no rows, and both keep their defaults.
-    onStateRowsScrollOrResize(values, proc(height, scrollTop: float) =
-      let h = stateRowHeight(values)
-      vm.setViewport(Viewport(
-        rows: (if height <= 0.0: 0 else: int(ceil(height / h))),
-        firstRow: int(floor(scrollTop / h)))))
-
   proc wireWatchInputForm(form, input: isonim_dom.Element; vm: StateVM) =
     ## Read the input value on submit, push it to the VM, then clear
     ## the input. Uses raw `dom_api` so the handler can call
@@ -891,7 +869,7 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
   ##       div.empty-overlay[display: flex when no variables]
   ##       div                                         (row container)
   ##         indexEach VariableViewState -> renderVariableRow(...)
-  var formEl, inputEl, rowContainer, valuesEl: N
+  var formEl, inputEl, rowContainer: N
 
   let panel = ui(r):
     tdiv(class = "component-container active-state state-component isonim-state"):
@@ -930,7 +908,7 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
       tdiv(class = "loading-indicator",
            display = displayIf(vm.isLoading.val)):
         text "Loading..."
-      tdiv(class = "value-components-container", ref = valuesEl):
+      tdiv(class = "value-components-container"):
         tdiv(class = "empty-overlay",
              display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
           text emptyOverlayText(vm.activeTab.val)
@@ -945,7 +923,6 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
   when defined(js):
     when N is isonim_dom.Element:
       wireWatchInputForm(formEl, inputEl, vm)
-      reportStateRows(valuesEl, vm)
 
   panel
 

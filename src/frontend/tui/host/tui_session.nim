@@ -61,6 +61,7 @@ import ../../viewmodel/viewmodels/inline_value_timeline
 
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
+import ../../viewmodel/pane_viewport   # HSF-V2: the pane's cells as a Viewport
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
 import viewmodels/search_results_vm   # PLAT-57: Find in Files
 from ../../viewmodel/host/find_in_files import FindInFilesScope, pump
@@ -85,7 +86,6 @@ const
     ## How many lines beyond the viewport `SourceVM` holds. CTUI-5's own
     ## number, kept so the shipped front-end fetches the window its Tier-1
     ## suites measured.
-  EventLogPageSize* = 64
   EndedSessionNote* =
     "the debugging session has ended; open a recording to debug again"
     ## M76: what an entry point answers once *Stop* ended the session.
@@ -407,6 +407,18 @@ func eventRowOf(row: store_types.EventLogRow): EventRow =
     category: categoryFor(row.kindId, row.stdout),
     kindId: row.kindId)
 
+proc eventLogBodyRows(rt: TuiRuntime): int =
+  ## HSF-V2: the rows the Event Log pane shows on the current screen (its
+  ## layout rectangle, `paneBodyRows`), at least one.
+  max(1, rt.paneBodyRows(paneEventLog))
+
+proc eventLogPageRows(rt: TuiRuntime): int =
+  ## HSF-V2: how many events one page of the pane holds — the window the
+  ## shared policy asks for a pane of that height (`viewport.listWindow`:
+  ## the rows shown and the lead below them), never a fixed number
+  ## (UI-Data-Loading-Guidelines AP 6; it was 64).
+  listWindow(Viewport(rows: rt.eventLogBodyRows)).count
+
 proc loadedEventRows(s: TuiSession; offset, limit: int;
                      order = RecordedEventOrder;
                      atRRTicks: int64 = -1): seq[EventRow] =
@@ -541,39 +553,43 @@ proc callTraceModelOf(s: TuiSession; rt: TuiRuntime): CallTraceModel =
                                 int(store.calltrace.currentLineIndex.val))
 
 proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
-  ## PLAT-47: **the call trace, a section at a time.** Build the pane's model
-  ## from the section the store holds and, when the rows the pane shows are
-  ## not all in it, load the section around them — the rows on screen plus
-  ## `CallTraceBuffer` either side, through `ct/load-calltrace-section`, the
-  ## request the desktop's `CalltraceVM` pages with — and build it again.
+  ## PLAT-47: **the call trace, a section at a time.** HSF-V2: the pane
+  ## REPORTS what it shows — its body's rows, the row it is scrolled to, and
+  ## the depth levels that fit across it (`pane_viewport.cellPaneViewport`) —
+  ## and `CalltraceVM` asks for the window that viewport needs
+  ## (`ct/load-calltrace-section`, the window policy every front-end shares),
+  ## then the pane is built from the section the store holds.
   ##
   ## So there is no cap on the trace: the store holds one section, the title
   ## counts the whole trace (`totalCallsCount`), and scrolling past the
-  ## section loads the next. A row the store does not hold is drawn as
+  ## section asks for the next. A row the store does not hold is drawn as
   ## loading, never as the end of the trace.
   if s.ended:
     return
   var model = s.callTraceModelOf(rt)
   rt.app.callTrace = model
-  if model.total == 0 or s.calltrace.isNil:
+  if s.calltrace.isNil:
+    return
+  if model.total == 0 and s.callTraceAsked:
+    # The recording has no calls (`learnExtent` asked, the engine counted
+    # none): the pane shows the call stack instead and has nothing to page
+    # to, so it reports no window and the ViewModel asks for none.
+    s.calltrace.setViewport(Viewport())
     return
   let body = rt.paneBodyRows(paneCalltrace)
   if body <= 0:
     return
   let top = model.visibleTop(body)
-  let first = model.firstIndex.int
-  let last = top + min(body, model.total - top)
-  if top >= first and last <= first + model.rows.len:
+  let held = (model.firstIndex.int, model.rows.len)
+  s.calltrace.setViewport(cellPaneViewport(
+    body, rt.paneBodyCols(paneCalltrace), top,
+    colsPerLevel = CallRowIndentCells))
+  s.session.settle()
+  let store = s.session.session.store
+  if (store.calltrace.startLineIndex.val.int, store.calltrace.lines.val.len) ==
+     held and model.total > 0:
     return
-  let start = max(0, top - CallTraceBuffer)
   inc rt.app.listScrubFetches
-  try:
-    s.session.requestAndLoadCalltrace(
-      startIndex = start.int64, height = body + 2 * CallTraceBuffer,
-      depth = RecordingCalltraceDepth)
-  except CatchableError:
-    # The rows stay drawn as loading; the next scroll asks again.
-    return
   rt.app.callTrace = s.callTraceModelOf(rt)
   if not rt.app.callTraceScrolled:
     return
@@ -940,6 +956,13 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # M71 (#838): the pane's reading position is the reader's too — a click on
   # a history entry moves the debugger, and the reader stays where they were
   # in the history (the painter clamps it to the new stop's rows).
+  # HSF-V2: the Variables pane REPORTS what it shows (its layout rectangle's
+  # rows and columns, scrolled to the reader's row); the stop loader sizes the
+  # locals it asks for at the next stop from it.
+  if not s.state.isNil:
+    s.state.setViewport(cellPaneViewport(
+      rt.paneBodyRows(paneState), rt.paneBodyCols(paneState),
+      rt.app.variables.scrollTop))
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
                                        tickLabel = "tick " & $tick,
                                        scrollTop = rt.app.variables.scrollTop)
@@ -985,7 +1008,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
       EventPage(rows: rows, atEnd: rows.len < limit,
                 total: (if ev.totalReported.val: ev.recordsTotal.val
                         else: -1)),
-    currentTick = tick, pageSize = EventLogPageSize)
+    currentTick = tick, pageSize = rt.eventLogPageRows)
   if keptColumns.order.len > 0:
     rt.app.eventLog.columns = keptColumns
   rt.app.eventLog.order = keptOrder
@@ -998,12 +1021,12 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # is held — so a caller that wants rows asks for them. A caller that forgets
   # gets `elrPending` rows, which is exactly what the first run of this loop
   # showed: five `…` lines under a `TRACEPOINTS loading` title.
-  rt.app.eventLog.ensureWindow(0, EventLogPageSize)
+  rt.app.eventLog.ensureWindow(0, rt.eventLogBodyRows)
   rt.app.eventLog.current = s.session.session.store.eventLog.currentIndex.val
   if keptScroll > 0:
     rt.app.eventLog.scrollTop = event_log.clampScrollTop(
-      keptScroll, rt.app.eventLog.knownTotal, EventLogPageSize)
-    rt.app.eventLog.ensureWindow(rt.app.eventLog.scrollTop, EventLogPageSize)
+      keptScroll, rt.app.eventLog.knownTotal, rt.eventLogBodyRows)
+    rt.app.eventLog.ensureWindow(rt.app.eventLog.scrollTop, rt.eventLogBodyRows)
   rt.app.eventLog.selected = keptSelected
 
   # PLAT-48: the top bar reads the transport ViewModel for which controls
@@ -1121,12 +1144,7 @@ proc toggleCallChildren*(s: TuiSession; rt: TuiRuntime; index: int64) =
   ## redraw the pane from the section the pane shows, read again.
   if s.ended:
     return
-  let body = rt.paneBodyRows(paneCalltrace)
-  let start = max(0, rt.app.callTrace.visibleTop(max(1, body)) -
-                     CallTraceBuffer)
-  let why = s.session.toggleCallChildren(
-    index, startIndex = start.int64,
-    height = max(1, body) + 2 * CallTraceBuffer)
+  let why = s.session.toggleCallChildren(index)
   if why.len > 0:
     rt.app.notification = why
     return
@@ -1198,7 +1216,7 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     # K26: the engine orders the log (`ct/event-load`'s `sortKey`); the pane
     # pages through it in that order from the top.
     rt.app.eventLog.reorder(c.order)
-    rt.app.eventLog.ensureWindow(0, EventLogPageSize)
+    rt.app.eventLog.ensureWindow(0, rt.eventLogBodyRows)
     rt.app.notification =
       if c.order == RecordedEventOrder: "event log in recorded order"
       else: "event log ordered by " & eventLogColumnTitle(c.order.column) &

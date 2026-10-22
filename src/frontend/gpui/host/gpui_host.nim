@@ -76,6 +76,8 @@ import ../../view_vocabulary/editor_surface
 import tui/host/native_host
 export native_host
 
+import pane_viewport   # HSF-V2: a pane's size as a Viewport
+
 # PLAT-22. The working-tree reader, for the same reason and at the same cost as
 # `native_host` above: `editProjectProblem`, `listProjectFiles` and
 # `readProjectFile` are "open a project" concerns rather than terminal ones, and
@@ -541,44 +543,31 @@ type
     total*: int
       ## The whole trace's call count.
 
-proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int):
-    CalltracePage =
+proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int;
+                    widthPx, pxPerLevel: int): CalltracePage =
   ## PLAT-47 B3: scroll the call trace by `delta` rows in a pane that shows
-  ## `rows`, and read the section around the rows then shown — plus the
-  ## desktop's buffer either side — when the store does not hold them all.
-  ## `ct/load-calltrace-section`, the desktop's paging, exactly as the
-  ## terminal's `tui_session.pageCallTrace` does. The ViewModel's
-  ## `scrollPosition` / `viewportHeight` are what the pane then lists
-  ## (`CalltraceVM.visibleLines`).
+  ## `rows` and is `widthPx` wide. HSF-V2: the pane REPORTS that — rows,
+  ## the row it is scrolled to, the depth levels that fit at `pxPerLevel`
+  ## (`pane_viewport.cellPaneViewport`) — and `CalltraceVM` asks for the
+  ## window it needs (the policy every front-end shares). `loaded` says
+  ## whether the section the store holds changed.
   if session.isNil:
     return
   let vm = session.session.calltraceVM
   if vm.isNil:
     return
   let store = session.session.store
-  result.total = int(store.calltrace.totalCallsCount.val)
-  if result.total <= 0:
-    return
   let body = max(1, rows)
+  let total = int(store.calltrace.totalCallsCount.val)
   result.top = clamp(int(vm.scrollPosition.val) + delta, 0,
-                     max(0, result.total - body))
-  vm.setViewport(Viewport(rows: body, cols: vm.viewport.val.cols,
-                          firstRow: result.top))
-  let first = int(store.calltrace.startLineIndex.val)
-  let held = store.calltrace.lines.val.len
-  let last = result.top + min(body, result.total - result.top)
-  if result.top >= first and last <= first + held:
-    return
-  let start = max(0, result.top - GpuiCalltraceBuffer)
-  try:
-    session.requestAndLoadCalltrace(startIndex = int64(start),
-                                    height = body + 2 * GpuiCalltraceBuffer,
-                                    depth = RecordingCalltraceDepth)
-    result.loaded = true
-  except CatchableError:
-    # The rows stay unlisted; the next scroll asks again.
-    discard
-  vm.setViewport(vm.viewport.val.scrolledTo(result.top))
+                     max(0, total - body))
+  let held = (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len)
+  vm.setViewport(cellPaneViewport(body, widthPx, result.top,
+                                  colsPerLevel = pxPerLevel))
+  session.settle()
+  result.total = int(store.calltrace.totalCallsCount.val)
+  result.loaded =
+    (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len) != held
 
 # ---------------------------------------------------------------------------
 # PLAT-51: the Event Log's window, for its scrollbar scrubber
