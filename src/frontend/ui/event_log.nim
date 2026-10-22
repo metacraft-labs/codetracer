@@ -859,6 +859,32 @@ proc detailedId*(context: EventLogComponent): cstring =
 template local*(expression: untyped): untyped {.dirty.} =
   cstring(self.type.name[0 .. 0].toLowerAscii() & self.type.name[1..^10] & "-" & expression)
 
+proc syncFooterOnScroll(table: DataTableComponent, tableId: cstring) =
+  ## Keep `table`'s footer ("Rows A to B of N") in step with its scroll
+  ## position: on every scroll of the table's scroll body, recompute the
+  ## Scroller's window and write it into the footer.
+  ##
+  ## The listener belongs to the scroll body ELEMENT, and DataTables replaces
+  ## that element whenever the table is rebuilt (`events`, on a column
+  ## change), so this has to run for every table, not once per component. A
+  ## scroll that lands on rows already loaded fetches nothing, so without the
+  ## listener nothing else updates the footer (codetracer#853). The element is
+  ## marked once it has the listener, so calling this again for the same table
+  ## does not stack a second one.
+  if table.isNil:
+    return
+  let scrollBody = cast[Node](jq(cstring"#" & tableId & cstring"_wrapper")).findNodeInElement(".dt-scroll-body")
+  if scrollBody.isNil or scrollBody.toJs.ctFooterScrollSync != jsUndefined:
+    return
+  scrollBody.toJs.ctFooterScrollSync = true
+  scrollBody.addEventListener(
+    cstring"scroll",
+    proc () =
+      table.updateTableRows(redraw = false)
+      if not table.footerDom.isNil:
+        table.updateTableFooter()
+  )
+
 proc resizeEventLogHandler*(self: EventLogComponent) =
   if self.denseTable.isNil or self.denseTable.context.isNil:
     return
@@ -1741,6 +1767,9 @@ proc events(self: EventLogComponent) =
     context.redrawColumns = context.tableCallback.isNil
     context.eventsIndex = self.programEvents.len
 
+    syncFooterOnScroll(context.denseTable, context.denseId)
+    syncFooterOnScroll(context.detailedTable, context.detailedId)
+
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
     jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
@@ -1765,27 +1794,8 @@ proc events(self: EventLogComponent) =
     cdebug "event_log: setup " & $(cstring"#" & context.denseId & cstring" tbody")
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
     jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
-    let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"
-    let denseScrollBody = cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
-    if not denseScrollBody.isNil:
-      denseScrollBody.addEventListener(
-        cstring"scroll",
-        proc () =
-          self.denseTable.updateTableRows(redraw = false)
-          if not self.denseTable.footerDom.isNil:
-            self.denseTable.updateTableFooter()
-      )
-
-    let detailedWrapper = cstring"#" & self.detailedId & cstring"_wrapper"
-    let detailedScrollBody = cast[Node](jq(detailedWrapper)).findNodeInElement(".dt-scroll-body")
-    if not detailedScrollBody.isNil:
-      detailedScrollBody.addEventListener(
-        cstring"scroll",
-        proc () =
-          self.detailedTable.updateTableRows(redraw = false)
-          if not self.detailedTable.footerDom.isNil:
-            self.detailedTable.updateTableFooter()
-      )
+    syncFooterOnScroll(self.denseTable, self.denseId)
+    syncFooterOnScroll(self.detailedTable, self.detailedId)
     jqFind(cstring"#" & context.detailedId & cstring" tbody").off(cstring"click").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
     jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"mouseover").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
     jqFind(cstring"#" & context.denseId & cstring" tbody").off(cstring"contextmenu").on(cstring"contextmenu", cstring"tr", proc(e: js) = handlerRightClick(context.denseTable.context, e))
@@ -2132,27 +2142,8 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
   self.denseTable.footerDom =
     cast[Element](componentTab.findNodeInElement(".data-tables-footer"))
 
-  # Attach scroll → footer-row-range sync listeners.
-  # These were previously in the dead else-branch of events() which was never
-  # reached because events() is only called once (with self.init = false).
-  let denseScrollBody = cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
-  if not denseScrollBody.isNil:
-    denseScrollBody.addEventListener(
-      cstring"scroll",
-      proc () =
-        self.denseTable.updateTableRows(redraw = false)
-        if not self.denseTable.footerDom.isNil:
-          self.denseTable.updateTableFooter()
-    )
-  let detailedScrollBody = cast[Node](jq(detailedWrapper)).findNodeInElement(".dt-scroll-body")
-  if not detailedScrollBody.isNil:
-    detailedScrollBody.addEventListener(
-      cstring"scroll",
-      proc () =
-        self.detailedTable.updateTableRows(redraw = false)
-        if not self.detailedTable.footerDom.isNil:
-          self.detailedTable.updateTableFooter()
-    )
+  syncFooterOnScroll(self.denseTable, self.denseId)
+  syncFooterOnScroll(self.detailedTable, self.detailedId)
 
   # Set up ResizeObserver so the DataTable is re-fitted whenever the event log
   # panel changes size. Previously in the dead else-branch of events() where it
