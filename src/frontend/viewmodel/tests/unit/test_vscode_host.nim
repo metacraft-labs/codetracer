@@ -137,8 +137,8 @@ proc main() {.async.} =
   let s1 = host.sessionView("s1")
   s1.store.locals.locals.val = @[makeVariable(name = "x", value = "42",
                                               typeName = "int")]
-  host.addToScratchpad("x")
-  host.addToScratchpad("nope")
+  ck host.addToScratchpad("x"), "a local of the stop is added"
+  ck not host.addToScratchpad("nope"), "a name the stop has no value for is not"
   ck s1.scratchpadVM.entries.val.len == 1 and
     s1.scratchpadVM.entries.val[0].valueText == "42",
     "a local added in the editor is pinned in the session's scratchpad"

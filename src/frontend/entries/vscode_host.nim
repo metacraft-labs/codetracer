@@ -300,11 +300,12 @@ proc onFlowLines*(host: VsCodeHost;
       listener(path, flowLineValues(window, debugger.rrTicks.int),
                flowLoopLines(window, debugger.location.line))
 
-proc addToScratchpad*(host: VsCodeHost; expression: string) =
+proc addToScratchpad*(host: VsCodeHost; expression: string): bool
+    {.discardable.} =
   ## Add `expression`'s value at the current stop to the active session's
   ## scratchpad: the editor's "Add to scratchpad". The value is the stop's
-  ## local or watch of that name, as the State pane shows it; an expression
-  ## the stop has no value for adds nothing.
+  ## local or watch of that name, as the State pane shows it. False when the
+  ## stop has none, so the editor can say so instead of adding nothing.
   let s = host.activeSession
   if s.isNil or s.scratchpadVM.isNil:
     return
@@ -314,7 +315,7 @@ proc addToScratchpad*(host: VsCodeHost; expression: string) =
         s.scratchpadVM.addValue(ScratchpadValueEntry(
           expression: v.name, valueText: v.value, typeName: v.typeName,
           hasChildren: v.hasChildren, children: v.children))
-        return
+        return true
 
 proc moveInHistory*(host: VsCodeHost; back: bool) =
   ## The debug toolbar's history back / forward: move the active session's
@@ -398,7 +399,7 @@ proc ctHostOnFlowLines(host: VsCodeHost;
       loopArr.add %*{"line": l.line, "locationInside": l.locationInside}
     listener(cstring(path), jsOf(lineArr), jsOf(loopArr)))
 
-proc ctHostAddToScratchpad(host: VsCodeHost; expression: cstring)
+proc ctHostAddToScratchpad(host: VsCodeHost; expression: cstring): bool
     {.exportc.} =
   host.addToScratchpad($expression)
 
