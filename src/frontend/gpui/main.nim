@@ -2849,8 +2849,7 @@ proc scrubListPane(r: GpuiRenderer; kind: PaneKind; y: int; dragging: bool) =
     if not hit.onTrack:
       return
     let page = gSession.pageEventLog(sm.scrubTop(hit.fraction, dragging),
-                                     eventLogRows(),
-                                     int64(gSession.getCurrentRRTicks()))
+                                     eventLogRows())
     if page.loaded:
       inc gEventLogLoads
     traceGesture("eventlog top=" & $page.top & " loads=" & $gEventLogLoads &

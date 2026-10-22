@@ -324,6 +324,13 @@ type
       ## What the view was given (`setViewport`); `currentPage` and
       ## `pageSize` are derived from it for the pager and collaboration.
     viewportGate: ViewportGate
+    followsStop*: bool
+      ## Whether each window request names the current stop (`atRRTicks`), so
+      ## the answer also says which row is "now" (`store.eventLog
+      ## .currentIndex`, the list scrubber's mark), and a move asks again
+      ## (HSF-D6). The terminal and GPUI set it (`followStop`); the desktop's
+      ## DataTables table does not, because a reload it did not ask for races
+      ## its own draws (see the window effect below).
     currentPage*: Signal[int]
     pageSize*: Signal[int]
     searchQuery*: Signal[string]
@@ -484,6 +491,11 @@ proc setViewport*(vm: EventLogVM; v: Viewport) =
     "pane": "eventLog", "rows": v.rows, "depth": v.cols,
     "firstRow": v.firstRow})
   vm.viewportGate.submit(v)
+
+proc followStop*(vm: EventLogVM; follow = true) =
+  ## Name the current stop in each window request, and ask again on a move
+  ## (`followsStop`).
+  vm.followsStop = follow
 
 proc nextPage*(vm: EventLogVM) =
   ## Show the next screenful of rows, clamped to the last page.
@@ -1241,6 +1253,12 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         args["sortKey"] = %($shown[col])
       if query.len > 0:
         args["search"] = %query
+      # The stop, for a pane that follows it: read only then, so a move
+      # re-asks only there.
+      let atTicks =
+        if vm.followsStop: int64(store.debugger.val.rrTicks) else: -1'i64
+      if atTicks >= 0:
+        args["atRRTicks"] = %atTicks
       let key = $args
       if key == lastKey:
         return
@@ -1259,6 +1277,9 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
           # `applyEventLogResponse` leaves the store alone when the payload
           # has no `events` key, so a marker-only answer cannot empty the log.
           storeRef.applyEventLogResponse(response, start, searched = searched)
+          if atTicks >= 0 and responseSucceeded(response):
+            storeRef.eventLog.currentIndex.val =
+              responseBody(response).getOrDefault("indexAtTick").getInt(-1)
           vmRef.applyMarkerRowsResponse(response),
         proc(message: string) =
           discard)

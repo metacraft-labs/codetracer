@@ -420,20 +420,21 @@ proc eventLogPageRows(rt: TuiRuntime): int =
   listWindow(Viewport(rows: rt.eventLogBodyRows)).count
 
 proc loadedEventRows(s: TuiSession; offset, limit: int;
-                     order = RecordedEventOrder;
-                     atRRTicks: int64 = -1): seq[EventRow] =
-  ## Ask the backend for a window and read the answer OUT OF THE STORE.
-  ##
-  ## `requestAndLoadEventLog` decodes into `store.eventLog.rows` — see its
-  ## header — so the request is issued for its effect and the rows are read
-  ## from the one place they live. This used to convert the returned sequence
-  ## itself, which made the terminal one of three independent decoders of the
-  ## same payload.
-  discard s.session.requestAndLoadEventLog(start = offset, count = limit,
-                                           order = order, atRRTicks = atRRTicks)
+                     order = RecordedEventOrder): seq[EventRow] =
+  ## The rows `[offset, offset + limit)` of the log in `order`, read OUT OF
+  ## THE STORE after the pane's window is reported to the session's
+  ## `EventLogVM` (`showEventLogWindow`, HSF-D6): the ViewModel asks for the
+  ## window, naming the stop so the answer also says which row is "now", and
+  ## the store holds the answer — the one place the rows live.
+  s.session.showEventLogWindow(offset, limit, order)
   result = @[]
-  for row in s.session.session.store.eventLog.rows.val:
-    result.add eventRowOf(row)
+  let ev = s.session.session.store.eventLog
+  let first = ev.loadedStart.val
+  let held = ev.rows.val
+  for i in offset ..< offset + limit:
+    let at = i - first
+    if at >= 0 and at < held.len:
+      result.add eventRowOf(held[at])
 
 proc fileTreeModelOf*(vm: FilesystemVM): FileTreeModel =
   ## The Files pane's rows for a replay: the `FilesystemVM`'s tree, root
@@ -1000,8 +1001,7 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
       try:
         # PLAT-51: naming the stop's tick, so the answer also says which row
         # of the whole log is "now" — the scrubber's mark.
-        rows = sess.loadedEventRows(offset, limit, runtime.app.eventLog.order,
-                                    atRRTicks = int64(tick))
+        rows = sess.loadedEventRows(offset, limit, runtime.app.eventLog.order)
       except CatchableError:
         discard
       let ev = sess.session.session.store.eventLog

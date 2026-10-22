@@ -600,15 +600,11 @@ type
       ## The whole log's event count (the engine's, `ct/event-load`'s
       ## `total`), -1 while unknown.
 
-const GpuiEventLogBuffer* = 10
-  ## Rows read below the ones the pane shows.
-
-proc pageEventLog*(session: HeadlessDebugSession; top, rows: int;
-                   atRRTicks: int64 = -1): EventLogPage =
-  ## Show the event log from row `top` in a pane that shows `rows`: read the
-  ## window `[top, top + rows + buffer)` of the WHOLE log when the store does
-  ## not hold it (`ct/event-load`, naming the stop so the answer also says
-  ## which row is "now"). The view moves; the debugger does not.
+proc pageEventLog*(session: HeadlessDebugSession; top, rows: int): EventLogPage =
+  ## Show the event log from row `top` in a pane that shows `rows`: when the
+  ## store does not hold that window, report it to the session's
+  ## `EventLogVM`, which asks for it naming the stop, so the answer also says
+  ## which row is "now". The view moves; the debugger does not.
   if session.isNil:
     return EventLogPage(total: -1)
   let ev = session.session.store.eventLog
@@ -622,10 +618,11 @@ proc pageEventLog*(session: HeadlessDebugSession; top, rows: int;
   if result.top == first and (last <= first + held or
                               (total >= 0 and first + held >= total)):
     return
+  # HSF-D6: the pane's window is reported to the session's `EventLogVM`,
+  # which asks for it (naming the stop, so the answer says which row is
+  # "now") and leaves the answer in the store.
   try:
-    discard session.requestAndLoadEventLog(start = result.top,
-                                           count = rows + GpuiEventLogBuffer,
-                                           atRRTicks = atRRTicks)
+    session.showEventLogWindow(result.top, rows)
     result.loaded = true
   except CatchableError:
     discard

@@ -1153,6 +1153,26 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
       for row in s.session.store.eventLog.rows.val:
         result.add(toEventLogEntry(row))
 
+proc showEventLogWindow*(s: HeadlessDebugSession; top, rows: int;
+                         order = RecordedEventOrder) =
+  ## Show the event log from row `top` in a pane that shows `rows`, through
+  ## the session's ``EventLogVM`` (Viewport-Driven-Loading V3, HSF-D6): the
+  ## pane's order and its viewport are reported, the ViewModel asks for the
+  ## window the shared policy derives (``listWindow``) naming the stop
+  ## (``followStop``), and its answer lands in the store — rows,
+  ## ``loadedStart``, ``recordsTotal`` and the "now" row
+  ## (``eventLog.currentIndex``). The window is settled before this returns:
+  ## the answer's callback runs on the dispatcher, so it is polled here.
+  let vm = s.session.eventLogVM
+  if vm.isNil or rows <= 0:
+    return
+  vm.followStop()
+  if vm.order != order:
+    vm.sortBy(order)
+  vm.setViewport(Viewport(rows: rows, firstRow: max(0, top)))
+  for _ in 0 ..< 4:
+    drain()
+
 proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
   ## Jump to the location of an event log entry.
   ## Sends ``ct/event-jump`` and waits for the position update.
