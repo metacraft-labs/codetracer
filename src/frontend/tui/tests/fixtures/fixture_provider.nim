@@ -14,7 +14,10 @@
 ##
 ##   1. a cache lookup under `test-logs/tui-fixtures/<name>-<key>`, where
 ##      `<key>` is a digest of the program's own sources, so a program edit
-##      invalidates its recording rather than silently reusing a stale one;
+##      invalidates its recording rather than silently reusing a stale one —
+##      and adopted only if this build's CTFS reader opens it, so a container
+##      from an older trace format is a miss, not a launch failure
+##      (`cachedRecordingRefusal`);
 ##   2. failing that, a *recording*, driven through `ct record -o <dir>` — the
 ##      same binary and the same subcommand a user records with, so a fixture
 ##      cannot be produced by a path the product does not have;
@@ -66,6 +69,9 @@
 import std/[algorithm, md5, os, osproc, strutils]
 
 import ../../../../common/replay_server_path   # the one search order
+from ../../../../ct/trace/ctfs_sources import readCtfsMetaDat
+  # This build's own CTFS reader. `cachedRecordingRefusal` asks it whether a
+  # cached container is one this build can open; see the note there.
 
 const FixtureCacheSchema = 2
   ## Bumped whenever the *shape* of a cached fixture directory changes, so a
@@ -447,7 +453,9 @@ const StampRecorderPrefix = "recorder-identity="
 # the lookup still finds the directory, and then asks whether the recorder
 # that produced it is the one running now. Unknown on either side means "no
 # opinion" and the cached directory is kept — which is exactly the warm-cache-
-# without-a-recorder case, preserved rather than argued away.
+# without-a-recorder case, preserved rather than argued away. (Kept, that is,
+# provided this build can read it: the identity says nothing about the
+# READER, which is the question `cachedRecordingRefusal` answers first.)
 
 proc nargoIdentity(): string =
   ## `nargo --version`, verbatim-ish. The Noir recorder is an external
@@ -575,6 +583,60 @@ proc isUsableTraceDir*(dir: string): bool =
   findCtFile(dir).len > 0
 
 # ---------------------------------------------------------------------------
+# Readability — can THIS build open the cached container?
+# ---------------------------------------------------------------------------
+#
+# The recorder-identity check above answers "was this made by the recorder
+# installed now". It cannot answer the question a cache hit actually depends
+# on, "can the reader built from this checkout open it", in two cases:
+#
+#   * NO RECORDER HERE. The current identity is "", which means keep — the
+#     warm-cache-without-a-recorder case. A shared cache copied into a fresh
+#     worktree with no recorder installed was therefore adopted unconditionally,
+#     and a CTFS v4 container in it reached a `replay-server` that reads 5 and
+#     6 only, so every fixture suite died at launch naming itself
+#     (codetracer-pm `issues/2026-10-11-tui-fixture-cache-adopts-a-container-
+#     the-reader-refuses.md`).
+#   * THE SAME RECORDER, A NEWER READER. A trace-format bump moves the reader
+#     without moving the recorder's identity, and the stamp still matches.
+#
+# So adoption also asks the reader. `codetracer-pm spec/Testing/Testing-
+# Guidelines.md` ("A cached recording is adopted only if this build can read
+# it") states the rule: a container this build refuses is a cache MISS — it
+# is re-recorded, or, with nothing to record it with, a counted MISSING-PREREQ
+# skip that names the refusal — never a test failure in whichever suite opened
+# it first.
+#
+# The question is put to `ctfs_sources.readCtfsMetaDat`, the CTFS reader this
+# checkout's `ct` opens every recording with, rather than to a copy of its
+# version numbers kept here: it gates the container version (`ctfs-container.md`
+# §1, §2 "Older versions are refused") and the `meta.dat` schema version, which
+# have each stranded this cache on their own (container v4, 2026-10-11;
+# `meta.dat` v6 against a v7 engine, the PLAT-68 review), and both of its
+# gates mirror `replay-server`'s (`ctfs_container.rs` `CTFS_VERSION` /
+# `CTFS_VERSION_V6`, `meta_dat.rs` `SUPPORTED_VERSIONS`).
+
+proc cachedRecordingRefusal*(dir: string): string =
+  ## "" when this build's CTFS reader opens the recording in `dir`; otherwise
+  ## the reader's own refusal, verbatim, so a skip or a failure that cites it
+  ## names the version found and the versions read.
+  ##
+  ## A directory without a `.ct` container (`trace.bin`, `rr/`) is "" — this
+  ## probe has nothing to say about a shape it does not read, and the other
+  ## shapes are not the CTFS versioning this guards.
+  let container = findCtFile(dir)
+  if container.len == 0:
+    return ""
+  try:
+    discard readCtfsMetaDat(container)
+    ""
+  except CatchableError as e:
+    # `ValueError` is the reader's refusal; `IOError` an unreadable file. Both
+    # mean this build cannot open it, and neither may escape as a crash of the
+    # suite that merely asked for a fixture.
+    container & ": " & e.msg
+
+# ---------------------------------------------------------------------------
 # Recording
 # ---------------------------------------------------------------------------
 
@@ -641,6 +703,19 @@ proc recordFixture(root, ctBin: string; spec: FixtureSpec;
       "recognisable trace under " & staging & " (looked for trace.bin, an " &
       "rr/ directory, or a .ct container)\n  command: " & command & "\n" &
       output)
+
+  # A recorder that is present and writes a container this build refuses is a
+  # FAILURE, and it is raised here, naming the recorder, rather than cached for
+  # the first suite to trip over at `launch`. Nothing is left under the cache
+  # name: adopting it would only move the same refusal one run later.
+  let refusal = cachedRecordingRefusal(recorded)
+  if refusal.len > 0:
+    removeDir(staging)
+    raise newException(IOError,
+      "fixture '" & spec.name & "': " & spec.recorder & " recorded a trace " &
+      "this build cannot read — the recorder and this checkout's reader are " &
+      "at different trace-format revisions: " & refusal &
+      "\n  command: " & command)
 
   writeFile(recorded / FixtureStampFile,
             stampContent(spec, recorderIdentity(spec.probe)))
@@ -718,17 +793,34 @@ proc resolveFixture*(spec: FixtureSpec): FixtureResolution =
   #
   #    The cost of the asymmetry is one re-recording per pre-existing fixture
   #    per checkout, once. That is the migration, not a regression.
+  #
+  #    And before either identity is consulted, the READER is: a container
+  #    this build refuses is never adopted, whatever its stamp says and
+  #    whether or not a recorder is here (see `cachedRecordingRefusal`). That
+  #    is the one case the "unknown current identity means keep" rule must not
+  #    cover — keeping a recording nothing here can open is not keeping a warm
+  #    cache, it is moving the failure to `launch`.
+  var refusal = ""
   if fileExists(cached / FixtureStampFile) and isUsableTraceDir(cached):
-    let stamped = stampRecorder(cached / FixtureStampFile)
-    let current = recorderIdentity(spec.probe)
-    if current.len == 0 or stamped == current:
-      result.outcome = foRecorded
-      result.tracePath = cached
-      return
-    # Stale by recorder. Remove it rather than recording alongside it: the
-    # path is the cache key's whole address, so leaving it would make the
-    # re-recording below `moveDir` onto an existing directory.
-    removeDir(cached)
+    refusal = cachedRecordingRefusal(cached)
+    if refusal.len == 0:
+      let stamped = stampRecorder(cached / FixtureStampFile)
+      let current = recorderIdentity(spec.probe)
+      if current.len == 0 or stamped == current:
+        result.outcome = foRecorded
+        result.tracePath = cached
+        return
+
+  # A cache miss from here on, for one of four reasons: nothing cached, an
+  # unfinished directory, a different recorder, or a container this build
+  # refuses. The last is the only one worth naming in a skip, because it is
+  # the only one where something IS cached under the fixture's name.
+  let missed =
+    if refusal.len > 0:
+      "the recording cached at " & cached & " cannot be read by this build (" &
+      refusal & ")"
+    else:
+      "nothing usable is cached at " & cached
 
   # 3. Record. `ct` is only required HERE — a warm cache needs no recorder at
   #    all, and failing a run for a missing recorder it never had to use would
@@ -738,15 +830,21 @@ proc resolveFixture*(spec: FixtureSpec): FixtureResolution =
     result.outcome = foMissingPrereq
     result.detail =
       "`ct` is not built (set $CT_BIN, or run `just build-once`), so " &
-      spec.name & " cannot be recorded and nothing is cached at " & cached
+      spec.name & " cannot be recorded and " & missed
     return
 
   let probed = probeRecorder(spec.probe)
   if not probed.ok:
     result.outcome = foMissingPrereq
-    result.detail = probed.detail
+    result.detail = probed.detail & "; " & missed
     return
 
+  # Remove whatever is under the cache name — a stale recording, or a
+  # directory an interrupted run left without its stamp — only NOW, when a
+  # re-recording is certain to be attempted: the path is the cache key's whole
+  # address, so leaving it would make `recordFixture` `moveDir` onto an
+  # existing directory. Removed no earlier, so a skip discards nothing.
+  removeDir(cached)
   createDir(fixtureCacheRoot(root))
   result.outcome = foRecorded
   result.tracePath = recordFixture(root, ctBin, spec, cached)
