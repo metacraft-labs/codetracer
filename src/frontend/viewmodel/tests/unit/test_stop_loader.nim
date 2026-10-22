@@ -518,6 +518,26 @@ suite "V1 / Load More: the State pane's next elements":
     check whole.children.len == 120
     check not whole.moreElements
 
+  test "Load More adds the rows the measured pane shows, plus the lead buffer":
+    # Viewport-Driven-Loading V2, "Value children": the count is the expanded
+    # node's visible region, never a fixed number; unmeasured, the default.
+    check loadMoreCountFor(Viewport()) == LoadMoreCount
+    check loadMoreCountFor(Viewport(rows: 12)) == 12 + LeadRows
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(14, 2)
+    mock.expect("ct/load-locals", cutLocal("xs", 50, 120))
+    let loader = createStopLoader(session)
+    loader.loadStop()
+    drainPlatformCallbacks()
+    session.stateVM.setViewport(Viewport(rows: 12))
+    mock.clearReceivedCommands()
+    mock.expect("ct/load-value-elements", elementsAnswer(50, 32, true))
+    session.stateVM.loadMore("xs")
+    let args = mock.findCommand("ct/load-value-elements").get.args
+    check args["startIndex"].getInt == 50
+    check args["count"].getInt == 12 + LeadRows
+
   test "a row with nothing more asks nothing":
     let mock = newMockBackendService(autoRespond = true)
     let session = newLoaderSession(mock)

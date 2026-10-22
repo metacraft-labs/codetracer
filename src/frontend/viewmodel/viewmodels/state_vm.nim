@@ -480,8 +480,19 @@ proc setViewport*(vm: StateVM; v: Viewport) =
 
 const
   LoadMoreCount* = LocalsMinCountLimit
-    ## Elements one "Load More" adds — the locals request's per-collection
-    ## floor, so a collection grows by the same step it was first cut to.
+    ## Elements one "Load More" adds while the state pane has not been
+    ## measured — the locals request's per-collection floor, so a collection
+    ## grows by the same step it was first cut to.
+
+func loadMoreCountFor*(v: Viewport): int =
+  ## Elements one "Load More" adds for a state pane showing `v`
+  ## (Viewport-Driven-Loading V2, "Value children": the expanded node's
+  ## visible region, never a fixed number): the rows the pane shows — the
+  ## most of a node's new children that can be on screen at once — plus the
+  ## `LeadRows` every windowed list fetches past its last visible row.
+  ## `LoadMoreCount` for an unmeasured pane.
+  if not v.measured: LoadMoreCount
+  else: v.rows + LeadRows
 
 proc variableAt(locals: seq[Variable]; path: string;
                 indices: var seq[int]): Option[Variable] =
@@ -525,9 +536,9 @@ proc appendElements(v: var Variable; path: openArray[int];
 
 proc loadMore*(vm: StateVM; path: string) =
   ## "Load More" (UI-Data-Loading-Guidelines Pattern 3): the next
-  ## `LoadMoreCount` elements of the collection at row `path`, which the
-  ## locals budget cut short (`Variable.moreElements`), appended to its
-  ## children. Asked once at a time per row; an answer about a stop the
+  ## `loadMoreCountFor(viewport)` elements of the collection at row `path`,
+  ## which the locals budget cut short (`Variable.moreElements`), appended to
+  ## its children. Asked once at a time per row; an answer about a stop the
   ## debugger has since left is dropped. A row with nothing more does nothing.
   let store = vm.store
   if store.isNil or path.len == 0 or path in vm.loadingMore.val:
@@ -549,7 +560,8 @@ proc loadMore*(vm: StateVM; path: string) =
     theVm.loadingMore.val = b
   onComplete(store.backend.send("ct/load-value-elements", %*{
       "expression": expression, "path": indices, "startIndex": start,
-      "count": LoadMoreCount, "rrTicks": store.debugger.val.rrTicks}),
+      "count": loadMoreCountFor(vm.viewport.val),
+      "rrTicks": store.debugger.val.rrTicks}),
     onSuccess = proc(resp: JsonNode) =
       done()
       if not responseSucceeded(resp) or
