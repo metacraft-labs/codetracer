@@ -778,9 +778,14 @@ when defined(js):
     ## the spec needs without touching production code paths — the
     ## actual tick math is exercised headlessly by
     ## ``video_player_polish_test.nim``.
-    if not isInTest():
-      installPlaybackTickLoop(panel,
-        proc(nowMs: float) =
+    ##
+    ## Asked on every tick rather than once here: the panel host can mount
+    ## the pane before the renderer installs its test hooks
+    ## (``initVideoPlayerVMWithStore``), and a check made at mount time would
+    ## then miss them.
+    installPlaybackTickLoop(panel,
+      proc(nowMs: float) =
+        if not isInTest():
           vm.tickPlayback(nowMs))
 
     ## Escape → cancelPicker flows through the standard ClientAction
