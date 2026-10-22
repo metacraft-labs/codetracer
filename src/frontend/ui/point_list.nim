@@ -10,91 +10,19 @@
 ## commented out and its `else` raised, so the pane could not be constructed
 ## at all, and its menu entry was commented out so nothing reached the raise.
 ## The component is stateless, like `ConstraintsComponent`: everything it
-## draws lives in the ViewModel. It exists so the pane is constructed,
-## registered and mounted the way every other pane is.
+## draws lives in the ViewModel. It exists so the pane is constructed and
+## registered the way every other pane is.
 
 import
   ui_imports,
   ../[ types, communication ]
 
-from ../viewmodel/viewmodels/point_list_vm import PointListVM
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_point_list_view import mountIsoNimPointList
-
-var pointListVMInstance*: PointListVM
-  ## The ViewModel session's `PointListVM`, set by the renderer when the
-  ## session exists (`setPointListVM`). Nil before that; the mount waits.
-var pointListComponentRef: PointListComponent
-var isoNimPointListMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
-proc tryMountIsoNimPointListPanel*()
-
-proc setPointListVM*(vm: PointListVM) =
-  ## Hand the pane the session's point list, and mount if the pane is open.
-  pointListVMInstance = vm
-  tryMountIsoNimPointListPanel()
-
-when defined(js):
-  proc tryMountIsoNimPointListPanel*() =
-    ## Mount into `pointListComponent-{id}` once both the VM and the
-    ## GoldenLayout container exist — `ui/layout.nim`'s direct-mount dispatch
-    ## calls this when it has just built the container.
-    if pointListVMInstance.isNil or pointListComponentRef.isNil:
-      return
-    let componentId = pointListComponentRef.id
-    let key = cstring("pointListComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cwarn "tryMountIsoNimPointListPanel: container not ready after 200 " &
-            "retries; this poll is abandoned and the layout's mount retries"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-      # Per HOST, not per id: tab 0's mount set the latch for a host this
-      # tab does not share. See `isoNimPanelNeedsMountInHost`.
-      if not isoNimPanelNeedsMountInHost(
-          latchSaysMounted = isoNimPointListMountedIds.hasKey(componentId),
-          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-      isoNimPointListMountedIds[componentId] = true
-      markIsoNimPanelContainerMounted(container)
-      try:
-        mountIsoNimPointList(container, pointListVMInstance)
-      except:
-        cerror "tryMountIsoNimPointListPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-    doMount()
-else:
-  proc tryMountIsoNimPointListPanel*() =
-    discard
+# The pane's view is mounted by the panel host (`ui/panel_host`), into the
+# container GoldenLayout creates, over the session's `PointListVM`. The
+# component only takes part in registration.
 
 method register*(self: PointListComponent, api: MediatorWithSubscribers) =
   self.api = api
-  if pointListComponentRef.isNil:
-    pointListComponentRef = self
-    tryMountIsoNimPointListPanel()
-
-method unregister*(self: PointListComponent) =
-  ## Release the module slot and the mounted marker, for `ui/constraints`'
-  ## reason: both are write-once, and a pane reopened after a teardown would
-  ## otherwise return early at the guard and draw nothing. The VM is the
-  ## session's and is not reset.
-  if pointListComponentRef == self:
-    pointListComponentRef = nil
-  discard jsDelete(isoNimPointListMountedIds[self.id])
-  procCall unregister(Component(self))
 
 proc registerPointListComponent*(component: PointListComponent,
                                  api: MediatorWithSubscribers) {.exportc.} =

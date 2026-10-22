@@ -887,14 +887,16 @@ proc mountBuild(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createBuildVM(store)
     vm.applyBuild(fixture)
-    mountIsoNimBuild(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderBuildPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountErrors(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createErrorsVM(store)
     if fixture != "empty": vm.applyErrors()
-    mountIsoNimErrors(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderErrorsPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountScratchpad(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1210,7 +1212,8 @@ proc mountStepList(container: isonim_dom.Element; fixture: string): DisposeProc 
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createStepListVM(store)
     if fixture != "empty": vm.applyStepList()
-    mountIsoNimStepList(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderStepListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountNoSource(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1381,7 +1384,8 @@ proc mountPointList(container: isonim_dom.Element; fixture: string): DisposeProc
                      path: "src/shield.nr", line: 61, enabled: false),
     ])
     vm.selectPoint(some(0))
-    mountIsoNimPointList(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderPointListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountSearch(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1413,7 +1417,8 @@ proc mountShell(container: isonim_dom.Element; fixture: string): DisposeProc =
 proc mountCalltraceEditor(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createCalltraceEditorVM(store)
-    mountIsoNimCalltraceEditor(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderCalltraceEditorPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1578,7 +1583,8 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "point-list":
         let vm = createPointListVM(store); vm.selectPoint(some(0))
-        mountIsoNimPointList(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderPointListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "scratchpad":
         let vm = createScratchpadVM(store); vm.applyScratchpad()

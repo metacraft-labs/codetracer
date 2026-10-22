@@ -440,16 +440,11 @@ proc ensureBuildPaneVisible() =
   ## that carries it as a strip label. A browser gets the second; a user who
   ## has dragged BUILD into the layout gets the first.
   ##
-  ## `tryMountIsoNimBuildPanel` is called again rather than relied upon from
-  ## start-up: it retries for ~2 s after `initBuildVMFromSession` and then gives
-  ## up, which is long expired by the time a user clicks anything. It is
-  ## idempotent (`isoNimBuildMounted` guards it), so calling it here costs
-  ## nothing when the pane was already mounted and is the difference between a
-  ## painted result and an empty container when it was not.
+  ## Either way the pane is mounted by the panel host: GoldenLayout's factory
+  ## for a tab, the auto-hide reveal (`onPanelShown`) for a strip label.
   if not data.isNil and not data.ui.layout.isNil:
     data.openLayoutTab(Content.Build)
   build_pane.autoRevealBuildPanel()
-  build_pane.tryMountIsoNimBuildPanel()
 
 proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
   ## One producer per pane, rebuilt if the VM was replaced underneath it OR if

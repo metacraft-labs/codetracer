@@ -138,7 +138,7 @@ suite "a BUILD diagnostic row is a place the caret can go":
                             "src/main.nr", 9, blsWarning))
 
       let r = MockRenderer()
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       # Located by the class the USER's cursor is over. `status_bar.styl:106`
       # gives `.build-clickable` `cursor: pointer` and a hover underline, so
@@ -185,7 +185,7 @@ suite "a BUILD diagnostic row is a place the caret can go":
       vm.appendLine(plain(" 3 |     let b: bool = a;"))
 
       let r = MockRenderer()
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       ck allByClass(panel, "build-clickable").len == 0
 
@@ -217,7 +217,7 @@ suite "a BUILD diagnostic row is a place the caret can go":
                             "src/main.nr", 3, blsError))
 
       let r = MockRenderer()
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       ck allByClass(panel, "build-clickable").len == 2
       ck allByClass(panel, "build-line-warning").len == 1

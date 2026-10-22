@@ -3,30 +3,29 @@
 ## IsoNim DOM-rendering view for the Point List (breakpoints /
 ## tracepoints) panel.
 ##
-## Renders a live, reactive DOM tree driven by `PointListVM` signals.
-## Both renderer overloads (Mock and Web) produce the same structure,
-## hoisted into a single template that is materialised into one
-## concrete proc per renderer.
+## Renders a live, reactive DOM tree driven by `PointListVM` signals: one
+## generic view (`renderPointListPanel[R, N]`) for every renderer, mounted on
+## the desktop by `ui/panel_host`.
 ##
 ## Structure:
 ##   div.point-list-component
 ##     div.point-list-header
 ##       span.point-list-title             "Points"
-##     div.point-list-items                 reactive item list
+##     div.point-list-items                 indexEach over the points
+##     div.point-list-empty                 shown while there are none
 ##     span.point-selected-indicator       text + class reactive
 ##     span.point-edit-indicator           text + display reactive
 
 import std/options
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
-
-when defined(js):
-  import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
+import isonim/dsl/[ui, components]
 
 import ../viewmodels/point_list_vm
+
+# The generic view expands the DSL (`val=`, `createRenderEffect`, `indexEach`)
+# where it is instantiated.
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Reactive expressions used inside DSL attributes
@@ -68,64 +67,48 @@ proc onPointClick(vm: PointListVM; index: int): proc() =
   result = proc() = vm.selectPoint(some(captured))
 
 # ---------------------------------------------------------------------------
-# Panel template
+# The panel
 # ---------------------------------------------------------------------------
 
-template renderPointListPanelImpl(r, vm, rootClass: untyped): untyped =
+proc emptyDisplay(vm: PointListVM): string =
+  if vm.points.val.len == 0: "block" else: "none"
+
+proc renderPointRow[R, N](r: R; vm: PointListVM; point: proc(): PointListEntry;
+                          index: int): N =
+  ## One point. `indexEach` reuses a row for whatever point now sits at
+  ## `index`, so every attribute and text reads `point()`.
   ui(r):
-    tdiv(class = rootClass):
+    tdiv(class = pointRowClass(vm, index, point().enabled),
+         onclick = onPointClick(vm, index)):
+      span(class = "point-list-kind"):
+        text point().kind
+      span(class = "point-list-label"):
+        text point().label
+      span(class = "point-list-location"):
+        text pointLocationText(point())
+
+proc renderPointListPanel*[R, N](r: R; vm: PointListVM): N =
+  ## The Point List panel, under any renderer (Shared-DOM-Front-Ends D3).
+  ## The rows are an `indexEach` over `vm.points`, so a breakpoint set after
+  ## the pane opened appears without re-rendering the panel.
+  var items: N
+  let panel = ui(r):
+    tdiv(class = "point-list-component isonim-point-list"):
       tdiv(class = "point-list-header"):
         span(class = "point-list-title"):
           text "Points"
-      tdiv(class = "point-list-items"):
-        for i, point in vm.points.val:
-          tdiv(class = pointRowClass(vm, i, point.enabled),
-               onclick = onPointClick(vm, i)):
-            span(class = "point-list-kind"):
-              text point.kind
-            span(class = "point-list-label"):
-              text point.label
-            span(class = "point-list-location"):
-              text pointLocationText(point)
-        if vm.points.val.len == 0:
-          tdiv(class = "point-list-empty"):
-            text "No breakpoints or tracepoints."
+      tdiv(class = "point-list-items", ref = items):
+        discard
+      tdiv(class = "point-list-empty", display = emptyDisplay(vm)):
+        text "No breakpoints or tracepoints."
       tdiv(class = "point-list-footer"):
         span(class = selectedIndicatorClass(vm)):
           text selectedIndicatorText(vm)
         span(class = "point-edit-indicator",
              display = displayIf(vm.editingPoint.val.isSome)):
           text editIndicatorText(vm)
-
-# ---------------------------------------------------------------------------
-# Renderer overloads
-# ---------------------------------------------------------------------------
-
-proc renderPointListPanel*(r: MockRenderer; vm: PointListVM): MockNode =
-  renderPointListPanelImpl(r, vm, "point-list-component")
-
-when defined(js):
-  proc renderPointListPanel*(r: WebRenderer;
-                             vm: PointListVM): isonim_dom.Element =
-    renderPointListPanelImpl(r, vm, "point-list-component isonim-point-list")
-
-  proc mountIsoNimPointList*(container: isonim_dom.Element;
-                             vm: PointListVM) =
-    ## Mount the IsoNim Point List panel as a child of `container`, and
-    ## RE-RENDER it whenever the points change.
-    ##
-    ## **THE ROWS ARE A `for` IN THE `ui:` BLOCK, AND THAT LOOP RUNS ONCE.**
-    ## isonim's DOM renderer expands a `for` into a plain loop at render time
-    ## (`dsl/ui.processForStmt`), so the rows present at mount were the rows
-    ## the pane showed for ever: the header said "no longer needed" for
-    ## redraws, and a breakpoint set after the pane opened never appeared.
-    ## Found by PLAT-40's Electron test. The render runs inside an effect, so
-    ## every signal it reads — `points`, `selectedPoint`, `editingPoint` — is
-    ## tracked and a change redraws the panel, the way
-    ## `isonim_verification_view` mounts.
-    createEffect proc() =
-      let panel = renderPointListPanel(WebRenderer(), vm)
-      let containerNode = isonim_dom.Node(container)
-      while not isonim_dom.isNodeNil(containerNode.firstChild):
-        discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
-      isonim_dom.appendChild(containerNode, isonim_dom.Node(panel))
+  indexEach[PointListEntry, R, N](r, items,
+    proc(): seq[PointListEntry] = vm.points.val,
+    proc(point: proc(): PointListEntry; index: int): N =
+      renderPointRow[R, N](r, vm, point, index))
+  panel
