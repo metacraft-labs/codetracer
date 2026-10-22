@@ -33,15 +33,15 @@
 ## 1. ``utils.nim::makeRequestPanelComponent`` constructs the legacy
 ##    ``RequestPanelComponent`` and registers it under
 ##    ``Content.RequestPanel`` (one instance per panel id).
-## 2. ``layout.nim`` registers the GL container, then detects
-##    ``Content.RequestPanel`` is in ``isIsoNimComponent`` and calls
-##    ``tryMountIsoNimRequestPanel`` instead of invoking Karax.
-## 3. The mount helper appends the IsoNim panel inside the
-##    ``requestPanelComponent-{id}`` container and the reactive
-##    effects keep the DOM in sync with the VM.
-## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initRequestPanelVMFromSession`` so
-##    the panel uses the production ``ReplayDataStore``.
+## 2. GoldenLayout's factory (``layout.nim``) creates the
+##    ``requestPanelComponent-{id}`` container and the panel host
+##    (``ui/panel_host``) mounts the view into it, on the session's
+##    ``RequestPanelVM`` (``setPanelRenderer`` below); reactive effects keep
+##    the DOM in sync with the VM, and the host reports the rows it shows.
+## 3. ``configureMiddleware`` (in ``ui_js.nim``) hands the module the
+##    session's VM via ``initRequestPanelVMFromSession``. The VS Code
+##    extension, which has no session store, keeps a stub-backed VM fed by
+##    the component's own subscription.
 ## ---------------------------------------------------------------------------
 
 import
@@ -51,6 +51,7 @@ import
   ../../common/ct_event
 
 import std/json
+from isonim/core/batch import untrack
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import RequestRecord
@@ -60,8 +61,13 @@ from ../viewmodel/viewmodels/request_panel_vm import
   jumpToHandler, setFilterMethod, setFilterStatus, setSearchText
 when defined(js):
   from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_request_panel_view import
-    mountIsoNimRequestPanel
+  import ../viewmodel/views/isonim_request_panel_view
+  when not defined(ctInExtension):
+    import isonim/web/web_renderer
+    import ./panel_host
+    from ../viewmodel/session_vm import SessionViewModel
+  else:
+    import isonim/web/web_renderer
 
 # ---------------------------------------------------------------------------
 # Module-level VM/store/component slots so the IsoNim mount and the
@@ -92,14 +98,6 @@ var requestSpanPollingStarted = false
   ## Guards against installing a second timer when the panel is re-mounted
   ## or a second Request panel instance is opened — the tail is per-store,
   ## not per-panel.
-# Track which RequestPanelComponent ids have already mounted their
-# IsoNim view.  The GL container is keyed by
-# ``requestPanelComponent-{id}`` so each panel instance gets its own
-# mount.
-var isoNimRequestPanelMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
-proc tryMountIsoNimRequestPanel*()
 
 # ---------------------------------------------------------------------------
 # Component extension (ctInExtension boiler-plate).
@@ -125,6 +123,22 @@ when defined(ctInExtension):
     # The extension request-panel surface is an empty compatibility host; keep
     # the exported component usable without retaining a Karax renderer.
     host.innerHTML = cstring""
+
+  proc mountRequestPanelForExtension() =
+    ## The VS Code extension's webview hosts the view itself.
+    if requestPanelVMInstance.isNil or
+        requestPanelComponentForExtension.extensionRendererId.len == 0:
+      return
+    let host = dom_api.getElementById(dom_api.document,
+      requestPanelComponentForExtension.extensionRendererId)
+    if dom_api.isNodeNil(dom_api.Node(host)):
+      return
+    let node = dom_api.Node(host)
+    while not dom_api.isNodeNil(node.firstChild):
+      discard dom_api.removeChild(node, node.firstChild)
+    discard dom_api.appendChild(node, dom_api.Node(
+      renderRequestPanel[WebRenderer, dom_api.Element](
+        WebRenderer(), requestPanelVMInstance)))
 
   proc makeRequestPanelComponentForExtension*(id: cstring): RequestPanelComponent {.exportc.} =
     if requestPanelComponentForExtension.extensionRendererId.len == 0:
@@ -452,9 +466,6 @@ proc initRequestPanelVMFromSession*(vm: RequestPanelVM) =
   ## If a stub-backed instance already exists (created before the session
   ## was available), it is replaced so the panel uses the real backend.
   let store = vm.store
-  if requestPanelVMInstance != nil:
-    clog "RequestPanelVM: replacing existing instance with shared-store version"
-    isoNimRequestPanelMountedIds = JsAssoc[int, bool]{}
   requestPanelVMStore = store
   requestPanelVMInstance = vm
   clog "RequestPanelVM: parallel ViewModel instance created (shared store)"
@@ -463,105 +474,54 @@ proc initRequestPanelVMFromSession*(vm: RequestPanelVM) =
   requestPanelVMInstance.openExternalTrace =
     proc(tracePath: string; startGeid: int64) =
       openExternalRequestTrace(tracePath, startGeid)
-  tryMountIsoNimRequestPanel()
+  # RS-M4 — the panel is hidden behind an edge strip by default; a recording
+  # that actually serves requests brings it on screen once. The store merges
+  # every delta (the poll's answer and the `ct/updated-http-requests` event),
+  # so its rows are the signal.
+  createEffect proc() =
+    if store.requestSpans.requests.val.len > 0:
+      untrack(proc() = scheduleRequestPanelReveal())
   startRequestSpanPolling()
 
-proc initRequestPanelVM*() =
-  ## Lazy fallback used when no shared store has been provided yet.
-  ## Same shape as ``initStepListVM`` / ``initReplVM`` /
-  ## ``initLowLevelCodeVM`` — a stub backend so the panel can still
-  ## render before ``configureMiddleware`` runs.
-  if requestPanelVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  requestPanelVMStore = createReplayDataStore(stubBackend)
-  requestPanelVMInstance = createRequestPanelVM(requestPanelVMStore)
-  clog "RequestPanelVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimRequestPanel()
-
-# ---------------------------------------------------------------------------
-# Mount helper — Web only
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc tryMountIsoNimRequestPanel*() =
-    ## Mount the IsoNim Request panel view into the GoldenLayout-
-    ## managed container.  The container's id is
-    ## ``requestPanelComponent-{id}`` — each open Request panel
-    ## instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component
-    ## id.  Retries via ``setTimeout`` until the DOM container appears
-    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
-    ## host slightly after the layout state changes (mirrors
-    ## ``tryMountIsoNimReplPanel``).
-    if requestPanelVMInstance.isNil:
+when defined(ctInExtension):
+  proc initRequestPanelVM*() =
+    ## Lazy fallback used when no shared store has been provided yet.
+    ## Same shape as ``initStepListVM`` / ``initReplVM`` /
+    ## ``initLowLevelCodeVM`` — a stub backend so the panel can still
+    ## render before ``configureMiddleware`` runs.
+    if requestPanelVMInstance != nil:
       return
-    if requestPanelComponentRef.isNil:
-      return
-    let componentId = requestPanelComponentRef.id
 
-    let key = cstring("requestPanelComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimRequestPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
+    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+      when defined(js):
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          resolve(%*{})
+      else:
+        var fut = newFuture[JsonNode]("stub-backend")
+        fut.complete(%*{})
+        result = fut
 
-      # Per HOST, not per id: tab 0's mount set the latch for a host this
-      # tab does not share. See `isoNimPanelNeedsMountInHost`.
-      if not isoNimPanelNeedsMountInHost(
-          latchSaysMounted = isoNimRequestPanelMountedIds.hasKey(componentId),
-          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
+    let stubBackend = BackendService(
+      sendProc: stubSend,
+      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+      disconnectProc: proc() = discard,
+    )
 
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
+    requestPanelVMStore = createReplayDataStore(stubBackend)
+    requestPanelVMInstance = createRequestPanelVM(requestPanelVMStore)
+    clog "RequestPanelVM: parallel ViewModel instance created (stub backend)"
+    mountRequestPanelForExtension()
 
-      isoNimRequestPanelMountedIds[componentId] = true
-      markIsoNimPanelContainerMounted(container)
-      try:
-        mountIsoNimRequestPanel(container, requestPanelVMInstance)
-      except:
-        cerror "tryMountIsoNimRequestPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-      # Re-sync any rows the legacy component already carries so the
-      # freshly-mounted view reflects the latest list.
+when not defined(ctInExtension):
+  # The panel host mounts the pane into the container GoldenLayout (or the
+  # auto-hide strip) creates (`ui/panel_host`), on the session's ViewModel.
+  setPanelRenderer(Content.RequestPanel,
+    proc(r: WebRenderer; host: dom_api.Element;
+         session: SessionViewModel): dom_api.Element =
       if not requestPanelComponentRef.isNil:
         syncLegacyRequestPanelIntoVM(requestPanelComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimRequestPanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initRequestPanelVM*``) compile on every backend.
-    discard
+      renderRequestPanel[WebRenderer, dom_api.Element](
+        r, session.requestPanelVM))
 
 # ---------------------------------------------------------------------------
 # Component registration — IsoNim primary renderer; no Karax method
@@ -573,34 +533,13 @@ when defined(ctInExtension):
     self.bindRequestPanelExtensionHost()
 
 method unregister*(self: RequestPanelComponent) =
-  ## Release the module-global slot and the mounted marker before the base
-  ## implementation drops the event-bus subscriptions.
-  ##
-  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY, AND SILENTLY. Both
-  ## globals are write-once: `register` assigns `requestPanelComponentRef` only
-  ## `if isNil`, and the mount returns early at its
-  ## `isoNimRequestPanelMountedIds.hasKey` guard. Neither was ever cleared. After a
-  ## teardown `requestPanelComponentRef` still points at a component whose DOM
-  ## container is gone, and the marker for its id survives into the next
-  ## component handed the same id — GoldenLayout reuses them, and ids restart
-  ## from 0 after a layout reset — whose mount then returns at the guard and
-  ## draws nothing.
-  ##
-  ## It is an ordinary transition, not an exotic one:
-  ## `ui/session_switch.nim:337` unregisters EVERY component of a closing
-  ## session and `ui/layout.nim` unregisters a closed panel. And the failure is
-  ## silent, which is what made it survive — a pane that returns early at a
-  ## guard is indistinguishable from a pane with nothing to show.
-  ##
-  ## The VM is deliberately NOT reset: it is a singleton by design and holds
-  ## state about the trace rather than about this panel, so dropping it would
-  ## make closing and reopening the pane lose data that is still true.
-  ##
-  ## Modelled on `ui/constraints.nim`, which is the worked example, and
-  ## `ui/scratchpad.nim`, which is the original.
+  ## Release the module-global slot before the base implementation drops the
+  ## event-bus subscriptions, so a component handed the same id after a
+  ## teardown (GoldenLayout reuses ids, and they restart from 0 after a
+  ## layout reset) becomes the module's component. The VM is deliberately NOT
+  ## reset: it holds state about the trace, not about this panel.
   if requestPanelComponentRef == self:
     requestPanelComponentRef = nil
-  discard jsDelete(isoNimRequestPanelMountedIds[self.id])
   procCall unregister(Component(self))
 
 method register*(self: RequestPanelComponent, api: MediatorWithSubscribers) =
@@ -615,13 +554,14 @@ method register*(self: RequestPanelComponent, api: MediatorWithSubscribers) =
   ## id and the VM's mirror effect repaints the table.  ``middleware.nim``
   ## forwards the DAP event onto this mediator.
   self.api = api
-  api.subscribe(CtUpdatedHttpRequests,
-    proc(kind: CtEventKind, raw: JsObject, sub: Subscriber) =
-      applyRequestSpanDeltaEvent(raw))
-  initRequestPanelVM()
   if requestPanelComponentRef.isNil:
     requestPanelComponentRef = self
-    tryMountIsoNimRequestPanel()
+  when defined(ctInExtension):
+    # The extension's webview has no session store: it feeds its own.
+    api.subscribe(CtUpdatedHttpRequests,
+      proc(kind: CtEventKind, raw: JsObject, sub: Subscriber) =
+        applyRequestSpanDeltaEvent(raw))
+    initRequestPanelVM()
 
 method restart*(self: RequestPanelComponent) =
   self.clearRequests()

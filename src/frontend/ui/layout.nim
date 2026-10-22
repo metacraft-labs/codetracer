@@ -1872,20 +1872,15 @@ proc mountPaneForState(state: GoldenItemState) =
         repl.syncReplConfigIntoVM()
         repl.tryMountIsoNimReplPanel()
 
-      # RequestPanel is now an IsoNim view -- its DOM is mounted by
-      # ``request_panel.tryMountIsoNimRequestPanel`` against the
-      # ``requestPanelComponent-{id}`` container, and reactive
-      # effects keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy ``RequestPanelComponent``
-      # remains as the event-bus carrier (its ``register`` subscribes to
-      # ``CtUpdatedHttpRequests`` — RS-M3) and its mutators feed the VM via
-      # ``syncLegacyRequestPanelIntoVM`` so the IsoNim view tracks
-      # any rows already accumulated when the panel becomes visible.
-      if state.content == Content.RequestPanel:
-        request_panel.syncLegacyRequestPanelIntoVM(
-          RequestPanelComponent(component))
-        request_panel.tryMountIsoNimRequestPanel()
-
+      # TraceLog is now an IsoNim view -- its DOM is mounted by
+      # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
+      # ``traceLogComponent-{id}`` container, and reactive effects
+      # keep it in sync. No direct-DOM redraw hook is needed here.
+      # The legacy ``TraceLogComponent`` remains
+      # as the event-bus carrier (its ``register`` method still
+      # subscribes to tracepoint-result events) and
+      # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
+      # accumulated when the panel becomes visible.
       # TestResults and Constraints are IsoNim views with no legacy half,
       # so there is nothing to sync -- the mount is the whole hook.
       if state.content == Content.TestResults:
@@ -1964,10 +1959,6 @@ proc mountPaneForState(state: GoldenItemState) =
       if state.content == Content.Verification:
         verification.tryMountIsoNimVerificationPanel()
 
-      if state.content == Content.AgentActivity:
-        agent_activity.syncLegacyAgentActivityIntoVM(
-          AgentActivityComponent(component))
-        agent_activity.tryMountIsoNimAgentActivityPanel(component.id)
 
       # ``Content.AgentActivityDeepReview`` has no renderer of its own since
       # AA-1 deleted the roll-up.  The id survives as the review's layout
@@ -1976,10 +1967,6 @@ proc mountPaneForState(state: GoldenItemState) =
       # constructs its component and gets an empty pane; there is nothing to
       # mount into it until AA-2/AA-3 render the session's own content.
 
-      if state.content == Content.AgentWorkspace:
-        agent_workspace.syncLegacyAgentWorkspaceIntoVM(
-          AgentWorkspaceComponent(component))
-        agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
 
       # Content.FrameViewer pane dispatch was retired in M3.  The legacy
       # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
@@ -2363,6 +2350,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # THE PANEL HOST (Shared-DOM-Front-Ends D4): the container exists now,
       # because it was just built, so the pane is mounted into it now.
       if state.content in PanelHostKinds:
+        # The pane's component (its key handling, its legacy state) exists
+        # before its view does, as `mountPaneForState` ensured for it.
+        if not data.ui.componentMapping[state.content].hasKey(state.id):
+          discard data.makeComponent(state.content, state.id)
         discard mountPanel(cast[dom_api.Element](element.firstChild),
                            state.content)
 
@@ -2562,10 +2553,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       ensurePanelMountedById(label, panel.content, data.activeSessionIndex)
       return
     if panel.content == Content.RequestPanel:
-      let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
-      if not reqComp.isNil:
-        request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
-      request_panel.tryMountIsoNimRequestPanel()
+      # The panel host's pane, in the container the reveal just built.
+      ensurePanelMountedById(cstring"requestPanelComponent-0",
+                             Content.RequestPanel, data.activeSessionIndex)
       return
     # A PANEL RESTORED FROM `auto_hide_state.json` HAS NEVER BEEN MOUNTED.
     #
@@ -2791,13 +2781,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # The panel host mounts the pane into the container just built.
         discard mountPanel(cast[dom_api.Element](innerDiv), panelDef.content)
       elif panelDef.content == Content.RequestPanel:
-        try:
-          let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
-          if not reqComp.isNil:
-            request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
-          request_panel.tryMountIsoNimRequestPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimRequestPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+        # The panel host's pane, in the standalone host just built.
+        ensurePanelMountedById(cstring"requestPanelComponent-0",
+                               Content.RequestPanel, data.activeSessionIndex)
       addStandaloneAutoHidePanel(
         panelDef.title,
         panelDef.content,

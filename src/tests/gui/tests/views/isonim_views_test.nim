@@ -8566,7 +8566,7 @@ suite "IsoNim Request Panel — structure":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       check "component-container" in panel.attributes["class"]
       check RequestPanelClass in panel.attributes["class"]
@@ -8586,7 +8586,7 @@ suite "IsoNim Request Panel — structure":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       check findByClassOrNil(panel, "request-panel-filters") != nil
       check findByClassOrNil(panel, "request-table-header") != nil
@@ -8608,7 +8608,7 @@ suite "IsoNim Request Panel — row rendering":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "request-table-body")
       check body.children.len == 0
 
@@ -8625,7 +8625,7 @@ suite "IsoNim Request Panel — row rendering":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("POST", "/api/x", 201, 1500, 2048, 1)
 
       let body = findByClass(panel, "request-table-body")
@@ -8663,7 +8663,7 @@ suite "IsoNim Request Panel — row rendering":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/ok", 200, 0, 0, 0)
       vm.addRequest("GET", "/redirect", 301, 0, 0, 0)
       vm.addRequest("GET", "/missing", 404, 0, 0, 0)
@@ -8689,7 +8689,7 @@ suite "IsoNim Request Panel — selection":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("GET", "/b", 200, 0, 0, 0)
       vm.addRequest("GET", "/c", 200, 0, 0, 0)
@@ -8715,7 +8715,7 @@ suite "IsoNim Request Panel — selection":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
 
       vm.selectRequest(0)
@@ -8733,7 +8733,7 @@ suite "IsoNim Request Panel — selection":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("GET", "/b", 200, 0, 0, 0)
 
@@ -8757,7 +8757,7 @@ suite "IsoNim Request Panel — filters":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("POST", "/b", 200, 0, 0, 0)
       vm.addRequest("GET", "/c", 200, 0, 0, 0)
@@ -8783,7 +8783,7 @@ suite "IsoNim Request Panel — filters":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/ok", 200, 0, 0, 0)
       vm.addRequest("GET", "/missing", 404, 0, 0, 0)
       vm.addRequest("GET", "/boom", 500, 0, 0, 0)
@@ -8809,7 +8809,7 @@ suite "IsoNim Request Panel — filters":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/api/Users", 200, 0, 0, 0)
       vm.addRequest("GET", "/api/items", 200, 0, 0, 0)
 
@@ -8864,7 +8864,7 @@ suite "IsoNim Request Panel — clearRequests":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("GET", "/b", 200, 0, 0, 0)
       vm.selectRequest(0)
@@ -8908,7 +8908,7 @@ suite "IsoNim Request Panel — interactions":
       let (store, mock) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.setRequests(@[parseRequestRecord(%*{
         "id": 1, "httpMethod": "GET", "url": "/excluded",
         "startGeid": 10,
@@ -8934,7 +8934,7 @@ suite "IsoNim Request Panel — interactions":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 12345)
       vm.addRequest("POST", "/b", 200, 0, 0, 67890)
 
@@ -9040,7 +9040,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       check vm.selectedIndex.val == NO_SELECTED_INDEX
       let host = findByClass(panel, "request-detail-host")
@@ -9054,7 +9054,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
       vm.selectRequest(0)
@@ -9068,7 +9068,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
       vm.selectRequest(0)
@@ -9095,7 +9095,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, mock) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/health", 200, 5, 64, 9999)
       vm.selectRequest(0)
@@ -9115,7 +9115,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/x", 200, 10, 100, 1)
       vm.selectRequest(0)
@@ -9139,7 +9139,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("POST", "/api/jobs", 201, 65, 512, 1)
       vm.selectRequest(0)
@@ -9161,7 +9161,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/x", 200, 0, 0, 1)
       vm.selectRequest(0)
@@ -9177,7 +9177,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/users", 200, 10, 100, 1)
       vm.addRequest("DELETE", "/api/items/1", 404, 20, 50, 2)
@@ -10760,7 +10760,7 @@ suite "IsoNim Agent Activity Panel — no DeepReview roll-up (AA-1)":
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
 
-      let panel = renderAgentActivityPanel(r, vm, componentId = 71)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 71)
 
       check findByClassOrNil(panel, "agent-ha-deepreview-host") == nil
       for cls in ["activity-dr-container", "activity-dr-header",
@@ -11284,7 +11284,7 @@ suite "IsoNim Agent Activity Panel — structure":
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
 
-      let panel = renderAgentActivityPanel(r, vm, componentId = 7)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 7)
 
       check panel.kind == mnkElement
       check panel.attributes["class"] == AgentActivityContainerClass
@@ -11302,7 +11302,7 @@ suite "IsoNim Agent Activity Panel — structure":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 4)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 4)
 
       vm.setMessages(@[
         makeAgentActivityMessage("u1", "hello", role = aamrUser),
@@ -11328,7 +11328,7 @@ suite "IsoNim Agent Activity Panel — structure":
       var openedTargets: seq[string] = @[]
       let callbacks = AgentActivityCallbacks(
         onOpenFileDiff: proc(target: string) = openedTargets.add(target))
-      let panel = renderAgentActivityPanel(r, vm, componentId = 3,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 3,
                                           callbacks = callbacks)
 
       vm.setMessages(@[
@@ -11366,7 +11366,7 @@ suite "IsoNim Agent Activity Panel — structure":
         onSubmitPrompt: proc() = (inc submitted),
         onStopPrompt: proc() = (inc stopped),
       )
-      let panel = renderAgentActivityPanel(r, vm, componentId = 5,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 5,
                                            callbacks = callbacks)
 
       findByClass(panel, "agent-start-button").fireEvent("click")
@@ -11387,7 +11387,7 @@ suite "IsoNim Agent Activity Panel — structure":
       let callbacks = AgentActivityCallbacks(
         onInputChange: proc(value: string) = (changed = value),
       )
-      let panel = renderAgentActivityPanel(r, vm, componentId = 6,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 6,
                                            callbacks = callbacks)
       let input = findByTag(panel, "textarea")
 
@@ -11433,7 +11433,7 @@ suite "IsoNim Agent Workspace Panel — structure":
       let vm = createAgentWorkspaceVM(store)
       let r = MockRenderer()
 
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 8)
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 8)
 
       check panel.kind == mnkElement
       check panel.attributes["class"] == AgentWorkspaceContainerClass
@@ -11449,7 +11449,7 @@ suite "IsoNim Agent Workspace Panel — structure":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentWorkspaceVM(store)
       let r = MockRenderer()
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 9)
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 9)
 
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
       vm.setSummary(AgentWorkspaceSummary(
@@ -11484,7 +11484,7 @@ suite "IsoNim Agent Workspace Panel — structure":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentWorkspaceVM(store)
       let r = MockRenderer()
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 10)
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 10)
 
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
       vm.setFiles(@[
@@ -11518,7 +11518,7 @@ suite "IsoNim Agent Workspace Panel — interactions":
       let callbacks = AgentWorkspaceCallbacks(
         onSelectFile: proc(index: int) = (selected = index),
       )
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 11,
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 11,
                                             callbacks = callbacks)
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
       vm.setFiles(@[
@@ -11545,7 +11545,7 @@ suite "IsoNim Agent Workspace Panel — interactions":
         onToggleOverlay: proc() = (inc overlayToggles),
         onToggleView: proc() = (inc viewToggles),
       )
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 12,
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 12,
                                             callbacks = callbacks)
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
 
@@ -12134,7 +12134,7 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       # The first picker is the Method one; open it.
       findByClass(panel, "ct-picker-trigger").fireEvent("click")
       let options = findAllByClass(findByClass(panel, "ct-picker-dropdown"),
@@ -12184,7 +12184,7 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
       var openedTargets: seq[string] = @[]
-      let panel = renderAgentActivityPanel(r, vm, componentId = 3,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 3,
         callbacks = AgentActivityCallbacks(
           onOpenFileDiff: proc(target: string) = openedTargets.add(target)))
 
@@ -12210,7 +12210,7 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 4)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 4)
 
       vm.settingsOpen.val = true
       vm.settingsActiveDropdown.val = "permissions"
@@ -12231,7 +12231,7 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 5)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 5)
 
       vm.pastedImages.val = @["data:image/png;base64,AAAA",
                               "data:image/png;base64,BBBB"]

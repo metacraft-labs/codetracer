@@ -157,7 +157,7 @@ suite "#861 the settings panel survives its own dropdowns":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let root = renderAgentActivityPanel(r, vm, componentId = 861,
+      let root = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 861,
                                           callbacks = appCallbacks(vm))
       let host = findByClass(root, "agent-settings-host")
       check host != nil
@@ -205,7 +205,7 @@ suite "#861 the settings panel survives its own dropdowns":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let root = renderAgentActivityPanel(r, vm, componentId = 862,
+      let root = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 862,
                                           callbacks = appCallbacks(vm))
       let host = findByClass(root, "agent-settings-host")
       let panel = openSettings(vm, root, host)
@@ -249,7 +249,7 @@ suite "#861 the settings panel survives its own dropdowns":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let root = renderAgentActivityPanel(r, vm, componentId = 863,
+      let root = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 863,
                                           callbacks = appCallbacks(vm))
       let host = findByClass(root, "agent-settings-host")
       let panel = openSettings(vm, root, host)
@@ -346,7 +346,7 @@ suite "#861 the settings panel survives its own dropdowns":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let root = renderAgentActivityPanel(r, vm, componentId = 864,
+      let root = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 864,
                                           callbacks = appCallbacks(vm))
       let host = findByClass(root, "agent-settings-host")
       let first = openSettings(vm, root, host)

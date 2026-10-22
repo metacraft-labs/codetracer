@@ -270,7 +270,7 @@ suite "RequestPanelVM in-flight rows":
       let (store, mock) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "request-table-body")
 
       # --- The recorder publishes the request as it STARTS ---------------

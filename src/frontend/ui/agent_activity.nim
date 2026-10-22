@@ -25,9 +25,11 @@ from ../viewmodel/viewmodels/review_session import
   ReviewSession, ReviewSessionState, rssAbsent, applyReviewSession
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_agent_activity_view import
-    mountIsoNimAgentActivityPanel, AgentActivityCallbacks,
-    resizeInputToContent
+  import ../viewmodel/views/isonim_agent_activity_view
+  when not defined(ctInExtension):
+    import isonim/web/web_renderer
+    import ./panel_host
+    from ../viewmodel/session_vm import SessionViewModel
 
 const AGENT_MSG_DIV = "msg-content"
 const DIFF_EDITOR_DIV = "diff-editor"
@@ -58,16 +60,12 @@ var msgSegmentStartOffset = JsAssoc[cstring, int]{}
   ## Buffer byte offset where the current text segment began.
   ## Updated each time a tool call arrives so subsequent text chunks show only
   ## post-tool content rather than the full accumulated message buffer.
-var isoNimAgentActivityMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
 var agentActivityTraceOpenService: TraceOpenService = nil
   ## AA-2 — how this panel opens the recording of a `ct test` test.
   ##
   ## Latched at the host level for the same reason `reviewSessionForPanels`
-  ## is: `tryMountIsoNimAgentActivityPanel` retries asynchronously, so a
-  ## panel's VM can be created either side of the moment `ui_js` installs the
-  ## service, and both orders have to end up wired.
+  ## is: a panel's VM can be created either side of the moment `ui_js`
+  ## installs the service, and both orders have to end up wired.
   ##
   ## The service itself is supplied by `ui_js`, because that is where the tab
   ## model lives — the current-tab / new-tab distinction is `createNewSession`
@@ -114,7 +112,6 @@ proc applyAgentActivityEvidenceDataset*(datasetPath: string;
       vm.applyEvidenceDataset(datasetPath, dataset)
 
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
-proc tryMountIsoNimAgentActivityPanel*(componentId: int)
 proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent)
 proc clear(self: AgentActivityComponent)
   ## Declared ahead because `updateAgentUi` calls it before its body. Without
@@ -260,7 +257,7 @@ var reviewSessionForPanels = ReviewSession(state: rssAbsent)
   ## entered ends up in the state that routine already computed.  Two things
   ## make it necessary:
   ##
-  ##   * `tryMountIsoNimAgentActivityPanel` retries asynchronously, so the
+  ##   * the panel host mounts a panel when its container is created, so the
   ##     panel's VM can be created after `startDeepReviewNavigation` has run;
   ##   * `syncLegacyAgentActivityIntoVM` republishes the *legacy* conversation
   ##     over the VM on every sync, which would otherwise wipe a loaded
@@ -301,22 +298,10 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
   if agentActivityVMInstances.hasKey(self.id):
     return agentActivityVMInstances[self.id]
 
+  # On the session's store (`initAgentActivityVMWithStore`); the panel host
+  # mounts the pane only once the session exists.
   if agentActivityVMStore.isNil:
-    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-      when defined(js):
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
-      else:
-        var fut = newFuture[JsonNode]("stub-backend")
-        fut.complete(%*{})
-        result = fut
-    let stubBackend = BackendService(
-      sendProc: stubSend,
-      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-      disconnectProc: proc() = discard,
-    )
-    agentActivityVMStore = createReplayDataStore(stubBackend)
-
+    return nil
   result = createAgentActivityVM(agentActivityVMStore)
   agentActivityVMInstances[self.id] = result
   # AA-2: a panel created after `ui_js` installed the service still opens
@@ -329,16 +314,12 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
   replayReviewSessionInto(result)
 
 proc initAgentActivityVMWithStore*(store: ReplayDataStore) =
-  ## Install the shared ViewModel store used by production panels.
-  ## Existing per-component VM instances are recreated so they stop
-  ## using the early stub backend.
+  ## Install the session's store; the per-component VMs are built on it.
   agentActivityVMStore = store
   agentActivityVMInstances = JsAssoc[int, AgentActivityVM]{}
-  isoNimAgentActivityMountedIds = JsAssoc[int, bool]{}
   for _, component in agentActivityComponentRefs:
     discard ensureAgentActivityVM(component)
     component.syncLegacyAgentActivityIntoVM()
-    tryMountIsoNimAgentActivityPanel(component.id)
 
 proc initAgentActivityVM*(self: AgentActivityComponent) =
   discard ensureAgentActivityVM(self)
@@ -482,13 +463,11 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   replayReviewSessionInto(vm)
 
 proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent) =
-  ## Refresh the Agent Activity IsoNim mount after legacy component state
-  ## changes. Signal writes update mounted views; the mount attempt covers the
-  ## first refresh after the GoldenLayout host is created.
+  ## Bring the pane's ViewModel up to the component's state; the mounted
+  ## view follows its signals.
   if self.isNil:
     return
   self.syncLegacyAgentActivityIntoVM()
-  tryMountIsoNimAgentActivityPanel(self.id)
 
 proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring) =
   if not self.sessionMessageIds.hasKey(sessionKey):
@@ -783,62 +762,38 @@ when defined(js):
       self.data.openLayoutTab(Content.UnifiedDiff, newId, isEditor = true,
                               path = cstring("diff:agent-diff:" & target))
 
-  proc tryMountIsoNimAgentActivityPanel*(componentId: int) =
-    if not agentActivityVMInstances.hasKey(componentId):
-      return
-    if not agentActivityComponentRefs.hasKey(componentId):
-      return
+  when not defined(ctInExtension):
+    proc hostComponentId(host: isonim_dom_api.Element): int {.importjs:
+      "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
+      ## The `<id>` of the host's `agentActivityComponent-<id>`.
 
-    let component = agentActivityComponentRefs[componentId]
-    let key = cstring("agentActivityComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if isonim_dom_api.isNodeNil(isonim_dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimAgentActivityPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Per HOST, not per id: tab 0's mount set the latch for a host this
-      # tab does not share. See `isoNimPanelNeedsMountInHost`.
-      if not isoNimPanelNeedsMountInHost(
-          latchSaysMounted = isoNimAgentActivityMountedIds.hasKey(componentId),
-          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      let containerNode = isonim_dom_api.Node(container)
-      while not isonim_dom_api.isNodeNil(containerNode.firstChild):
-        discard isonim_dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimAgentActivityMountedIds[componentId] = true
-      markIsoNimPanelContainerMounted(container)
-      try:
+    # The panel host mounts each Agent Activity pane into the container
+    # GoldenLayout creates (`ui/panel_host`); the factory has created its
+    # component by then.
+    setPanelRenderer(Content.AgentActivity,
+      proc(r: WebRenderer; host: isonim_dom_api.Element;
+           session: SessionViewModel): isonim_dom_api.Element =
+        if agentActivityVMStore.isNil and not session.isNil:
+          agentActivityVMStore = session.store
+        let componentId = hostComponentId(host)
+        let component =
+          if agentActivityComponentRefs.hasKey(componentId):
+            agentActivityComponentRefs[componentId]
+          else: nil
+        let vm = ensureAgentActivityVM(component)
+        if vm.isNil:
+          return isonim_dom_api.createElement(isonim_dom_api.document,
+                                              cstring"div")
         component.syncLegacyAgentActivityIntoVM()
-        mountIsoNimAgentActivityPanel(
-          container,
-          agentActivityVMInstances[componentId],
-          componentId,
-          safeStr(component.commandInputId),
-          component.buildAgentActivityCallbacks())
-      except:
-        cerror "tryMountIsoNimAgentActivityPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-    doMount()
-else:
-  proc tryMountIsoNimAgentActivityPanel*(componentId: int) = discard
+        renderAgentActivityPanel[WebRenderer, isonim_dom_api.Element](
+          r, vm, componentId, safeStr(component.commandInputId),
+          component.buildAgentActivityCallbacks()))
 
 method register*(self: AgentActivityComponent, api: MediatorWithSubscribers) =
   self.api = api
   agentActivityComponentRefs[self.id] = self
   self.initAgentActivityVM()
   self.syncLegacyAgentActivityIntoVM()
-  tryMountIsoNimAgentActivityPanel(self.id)
 
 proc asyncSleep(ms: int): Future[void] =
   newPromise(proc(resolve: proc(): void) =

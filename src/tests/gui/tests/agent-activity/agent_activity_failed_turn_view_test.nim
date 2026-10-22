@@ -78,7 +78,7 @@ suite "#862 a refused turn renders as AgentFailed":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 91)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 91)
 
       vm.setMessages(@[userTurn(), refusedTurn()])
 
@@ -96,7 +96,7 @@ suite "#862 a refused turn renders as AgentFailed":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 92)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 92)
 
       vm.setMessages(@[userTurn(), refusedTurn()])
       vm.setLoading(false)
@@ -114,7 +114,7 @@ suite "#862 a refused turn renders as AgentFailed":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 93)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 93)
 
       vm.setMessages(@[userTurn(), refusedTurn()])
 
@@ -131,7 +131,7 @@ suite "#862 a refused turn renders as AgentFailed":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 94)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 94)
 
       vm.setMessages(@[userTurn(), refusedTurn(errorMessage = "")])
 
@@ -150,7 +150,7 @@ suite "#862 a refused turn renders as AgentFailed":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 96)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 96)
 
       var turn = refusedTurn()
       turn.failed = false
@@ -171,7 +171,7 @@ suite "#862 a refused turn renders as AgentFailed":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 95)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 95)
 
       vm.setMessages(@[
         userTurn(),

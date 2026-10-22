@@ -52,7 +52,7 @@
 import std/[strutils, tables]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -62,6 +62,9 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/request_panel_vm
+
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
 
 const RequestPanelContainerClass* = "component-container request-panel"
   ## Verbatim string the legacy ``componentContainerClass(
@@ -282,17 +285,17 @@ proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
   ## helper of the same name so ``renderFilterPicker`` can stay generic.
   r.appendChild(host, child)
 
-proc setInnerHtml(r: MockRenderer; node: MockNode; html: string) =
+proc setPickerChevron(r: MockRenderer; node: MockNode; html: string) =
   ## Set the inner HTML of a mock node.  ``renderFilterPicker`` uses this to
   ## inject the chevron SVG.  In the mock renderer this is a no-op: tests do
   ## not inspect the chevron SVG content.
   discard
 
 # Web-renderer picker helpers forward-declared here (before renderFilterPicker)
-# so that generic instantiation for WebRenderer finds setInnerHtml /
+# so that generic instantiation for WebRenderer finds setPickerChevron /
 # appendRenderedChild. Mirrors the VCS view's pattern exactly.
 when defined(js):
-  proc setInnerHtml(r: WebRenderer; node: isonim_dom.Element; html: string) =
+  proc setPickerChevron(r: WebRenderer; node: isonim_dom.Element; html: string) =
     ## Inject raw HTML into a DOM element.  Used by ``renderFilterPicker`` to
     ## insert the chevron SVG into ``.ct-picker-chevron`` spans.
     node.innerHTML = cstring(html)
@@ -316,7 +319,7 @@ when defined(js):
     {.importjs: "#.getBoundingClientRect().bottom".}
     ## Live bottom edge of an element's bounding box (viewport-relative).
 
-  proc preventDefault(e: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+  proc preventDragDefault(e: isonim_dom.Event) {.importjs: "#.preventDefault()".}
     ## Suppress the default browser action for an event (used on mousedown to
     ## prevent text-selection during a drag).
 
@@ -378,7 +381,7 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
           text displayLabel
       if isOpen:
         tdiv(ref = dropdown, class = "ct-picker-dropdown")
-  r.setInnerHtml(chevronHost, chevronSvg)
+  r.setPickerChevron(chevronHost, chevronSvg)
   if isOpen:
     for (optValue, optLabel) in options:
       let v = optValue
@@ -393,12 +396,11 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
   panel
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel, for every renderer
 # ---------------------------------------------------------------------------
 
-proc renderDetailContentMock(r: MockRenderer; req: RequestRecord;
-                              tab: string): MockNode =
-  ## Renders the content area for the active detail tab.
+proc renderDetailContent[R, N](r: R; req: RequestRecord; tab: string): N =
+  ## The content area for the active detail tab.
   case tab
   of "timing":
     ui(r):
@@ -421,20 +423,20 @@ proc renderDetailContentMock(r: MockRenderer; req: RequestRecord;
       tdiv(class = "request-detail-placeholder"):
         text "No data available for this tab."
 
-proc renderDetailMock(r: MockRenderer; vm: RequestPanelVM;
-                      req: RequestRecord; tab: string): MockNode =
-  ## Full detail panel for the selected request — Mock renderer variant.
-  ## Header bar: method badge | URL | status text | Handler button.
-  ## Below: tab bar + content area driven by ``vm.detailTab``.
+proc renderDetail[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
+                        tab: string; handle: var N): N =
+  ## The detail panel of the selected request: header bar (method badge, URL,
+  ## status, Handler button), tab bar, and the active tab's content. `handle`
+  ## is the resize handle, for the browser to wire the drag to.
+  mixin appendRenderedChild
   let badgeCls = methodBadgeClass(req.httpMethod)
   let statusCls = statusCellClass(req)
   let statusDisplayText = if req.isOpen: InFlightPlaceholder
                           else: detailStatusText(req.statusCode)
-  var tabBarHost: MockNode
-  var contentHost: MockNode
+  var handleEl, tabBarHost, contentHost: N
   let panel = ui(r):
     tdiv(class = "request-detail"):
-      tdiv(class = "request-detail-resize-handle")
+      tdiv(ref = handleEl, class = "request-detail-resize-handle")
       tdiv(class = "request-detail-header"):
         tdiv(class = "request-detail-header-left"):
           span(class = badgeCls):
@@ -457,25 +459,23 @@ proc renderDetailMock(r: MockRenderer; vm: RequestPanelVM;
       span(class = tabCls, onclick = makeTabClickHandler(vm, tabId)):
         text tl
     r.appendRenderedChild(tabBarHost, tabEl)
-  r.appendRenderedChild(contentHost, renderDetailContentMock(r, req, tab))
+  let content: N = renderDetailContent[R, N](r, req, tab)
+  r.appendRenderedChild(contentHost, content)
+  handle = handleEl
   panel
 
-proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
-                   req: RequestRecord; index: int;
-                   selected: bool): MockNode =
-  ## Render a single filtered request row.  Click/dblclick handlers
-  ## map onto the VM actions.  The method column wraps the text in a
-  ## ``span`` with a per-method badge class; the status column wraps
-  ## the code in a ``span`` carrying ``request-status-<bucket>`` so
-  ## CSS rules colour both independently.
-  let onClick = onRowClick(vm, index)
-  let onDblClick = onRowDoubleClick(vm, index)
+proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
+                     index: int; selected: bool): N =
+  ## One filtered request row; a click selects it, a double click goes to it.
+  ## The method column wraps the text in a per-method badge ``span``; the
+  ## status column's ``span`` carries ``request-status-<bucket>`` so CSS
+  ## colours both independently.
   let statusCls = statusCellClass(req)
   let badgeCls = methodBadgeClass(req.httpMethod)
-  let row = ui(r):
+  ui(r):
     tdiv(class = rowClass(selected, req.isOpen),
-         onclick = onClick,
-         ondblclick = onDblClick):
+         onclick = onRowClick(vm, index),
+         ondblclick = onRowDoubleClick(vm, index)):
       tdiv(class = "request-col-id"):
         text formatReqId(req.id)
       tdiv(class = "request-col-method"):
@@ -490,27 +490,54 @@ proc renderRowMock(r: MockRenderer; vm: RequestPanelVM;
         text durationText(req)
       tdiv(class = "request-col-size"):
         text formatSize(req.responseSize)
-  row
 
-proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
-  ## Render the HTTP Request panel for the Mock renderer.
+when defined(js):
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc requestRowHeight(body: JsObject): float {.importjs:
+    "(function(b){const r=b.querySelector('.request-row');return r?r.getBoundingClientRect().height:0;})(#)".}
+  proc setRequestPadding(body: JsObject; top, bottom: cstring) {.importjs:
+    "(function(b,t,o){b.style.paddingTop=t;b.style.paddingBottom=o;})(#,#,#)".}
+  proc decorateRequestPanel(searchInputEl, bodyEl: isonim_dom.Element;
+                            vm: RequestPanelVM) =
+    ## The browser's half: the search box reads the live input, and the held
+    ## window of rows is padded to every matching row (Viewport-Driven-Loading
+    ## V2; the panel host reports the rows the body shows).
+    let searchNode = isonim_dom.Node(searchInputEl)
+    isonim_dom.addEventListener(searchNode, cstring"input",
+      proc(ev: isonim_dom.Event) =
+        vm.setSearchText($searchNode.inputValue()))
+    let body = cast[JsObject](bodyEl)
+    createEffect proc() =
+      let held = vm.filteredRequests.val.len
+      let start = vm.windowStart.val
+      let total = vm.matchingCount
+      let measured = requestRowHeight(body)
+      let h = if measured > 0.0: measured else: 24.0
+      if vm.windowed:
+        setRequestPadding(body, cstring($(float(start) * h) & "px"),
+          cstring($(float(max(0, total - start - held)) * h) & "px"))
+      else:
+        setRequestPadding(body, cstring"", cstring"")
+
+proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
+  ## The HTTP Request panel, under any renderer (Shared-DOM-Front-Ends D3);
+  ## the panel host (`ui/panel_host`) mounts it and reports its rows.
   ##
-  ## The static shell (filter-bar + table-header + table-body containers)
-  ## is built once via the DSL.  Reactive ``createRenderEffect`` procs
-  ## rebuild each picker and the table body whenever their signals change.
+  ## The static shell is built once via the DSL; the pickers, the table body
+  ## and the detail panel are rebuilt by effects when their signals change.
   ## The Method and Status pickers use the shared ``renderFilterPicker``
-  ## helper (``ct-picker ct-picker--chevron-right``) so they visually
-  ## match the VCS branch-picker style with the chevron on the right.
+  ## (``ct-picker ct-picker--chevron-right``), matching the VCS branch picker.
+  mixin clearChildren, appendChild, appendRenderedChild, addEventListener
   let methodPickerOpen = createSignal(false)
   let statusPickerOpen = createSignal(false)
-  var methodPickerHost: MockNode
-  var statusPickerHost: MockNode
-  var searchInputEl: MockNode
-  var bodyContainer: MockNode
-  var detailContainer: MockNode
+  # Percentage of the panel height claimed by the detail pane, updated by the
+  # drag-resize handle (browser only).
+  let detailHeightPct = createSignal(50.0)
+  var panelRef, methodPickerHost, statusPickerHost, searchInputEl: N
+  var bodyContainer, detailContainer: N
 
   let panel = ui(r):
-    tdiv(class = RequestPanelContainerClass, tabIndex = "2"):
+    tdiv(ref = panelRef, class = RequestPanelContainerClass, tabIndex = "2"):
       # Filter bar: [🔍 Find by URL...]  [Method ▼]  [Status ▼]
       tdiv(class = "request-panel-filters"):
         input(ref = searchInputEl,
@@ -541,17 +568,14 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
       tdiv(ref = detailContainer, class = "request-detail-host"):
         discard
 
-  # Search input handler.  Tests set ``value`` via ``r.setAttribute``
-  # then fire ``"input"``; the handler reads it back the same way.
-  let captureSearchEl = searchInputEl
-  let captureVm = vm
-  r.addEventListener(searchInputEl, "input", proc() =
-    let v = captureSearchEl.attributes.getOrDefault("value", "")
-    captureVm.setSearchText(v)
-  )
+  when N is MockNode:
+    # Headless tests set ``value`` via ``r.setAttribute`` then fire "input";
+    # the handler reads it back the same way.
+    let captureSearchEl = searchInputEl
+    r.addEventListener(searchInputEl, "input", proc() =
+      vm.setSearchText(captureSearchEl.attributes.getOrDefault("value", "")))
 
-  # Method picker — rebuilt reactively whenever its open flag or the
-  # current filter value changes.
+  # Method picker — rebuilt whenever its open flag or the filter changes.
   createRenderEffect proc() =
     let isOpen = methodPickerOpen.val
     let currentMethod = vm.filterMethod.val
@@ -564,8 +588,7 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
         methodPickerOpen.val = false)
     r.appendRenderedChild(methodPickerHost, picker)
 
-  # Status picker — rebuilt reactively whenever its open flag or the
-  # current filter value changes.
+  # Status picker — rebuilt whenever its open flag or the filter changes.
   createRenderEffect proc() =
     let isOpen = statusPickerOpen.val
     let currentStatus = vm.filterStatus.val
@@ -578,352 +601,55 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
         statusPickerOpen.val = false)
     r.appendRenderedChild(statusPickerHost, picker)
 
-  # Table body — rebuilt whenever the filtered list or selection changes.
+  # Table body — rebuilt whenever the filtered list or the selection changes.
   createRenderEffect proc() =
     let filtered = vm.filteredRequests.val
     let selected = vm.selectedIndex.val
     r.clearChildren(bodyContainer)
-    for i, req in filtered:
-      let row = renderRowMock(r, vm, req, i, i == selected)
+    for i in 0 ..< filtered.len:
+      let row: N = renderRow[R, N](r, vm, filtered[i], i, i == selected)
       r.appendChild(bodyContainer, row)
 
-  # Detail panel — rebuilt when selection, filtered list, or active tab changes.
+  when defined(js):
+    when N is isonim_dom.Element:
+      # The detail host's flex-basis follows the drag (kept apart from the
+      # content effect so drag ticks don't rebuild the detail).
+      createRenderEffect proc() =
+        let pct = detailHeightPct.val
+        let idx = vm.selectedIndex.val
+        if idx >= 0:
+          isonim_dom.setAttribute(detailContainer, cstring"style",
+            cstring("flex: 0 0 " & $int(pct) & "%; min-height: 0"))
+        else:
+          isonim_dom.setAttribute(detailContainer, cstring"style", cstring"")
+
+  # Detail panel — rebuilt when the selection, the list or the tab changes.
   createRenderEffect proc() =
     let idx = vm.selectedIndex.val
     let filtered = vm.filteredRequests.val
     let tab = vm.detailTab.val
     r.clearChildren(detailContainer)
     if idx >= 0 and idx < filtered.len:
-      r.appendRenderedChild(detailContainer,
-                            renderDetailMock(r, vm, filtered[idx], tab))
+      var handle: N
+      let detail: N = renderDetail[R, N](r, vm, filtered[idx], tab, handle)
+      r.appendRenderedChild(detailContainer, detail)
+      when defined(js):
+        when N is isonim_dom.Element:
+          let capturePanel = panelRef
+          let capturePct = detailHeightPct
+          isonim_dom.addEventListener(isonim_dom.Node(handle), cstring"mousedown",
+            proc(e: isonim_dom.Event) =
+              e.preventDragDefault()
+              let h = capturePanel.elemHeight
+              let b = capturePanel.elemBottom
+              setDocMouseMove proc(me: isonim_dom.Event) =
+                let newPct = (b - me.clientY) / h * 100.0
+                capturePct.val = max(15.0, min(85.0, newPct))
+              setDocMouseUp proc(ue: isonim_dom.Event) =
+                clearDocMouseMove()
+                clearDocMouseUp())
 
+  when defined(js):
+    when N is isonim_dom.Element:
+      decorateRequestPanel(searchInputEl, bodyContainer, vm)
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
-
-  proc createWebElement(tag: string; cssClass: string = "";
-                        elemId: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with optional class + id
-    ## attributes.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    if elemId.len > 0:
-      isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = "";
-                            elemId: string = ""): isonim_dom.Element =
-    ## Helper: create an element with a text-node child in one shot.
-    let n = createWebElement(tag, cssClass, elemId)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc renderRowWeb(vm: RequestPanelVM; req: RequestRecord;
-                    index: int; selected: bool): isonim_dom.Element =
-    ## Build a request row in the real DOM.  Same shape as the Mock
-    ## variant; click / dblclick handlers wired imperatively via
-    ## ``addEventListener``.
-    let row = createWebElement("div", rowClass(selected, req.isOpen))
-
-    let idDiv = createWebTextElement("div", formatReqId(req.id), "request-col-id")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(idDiv))
-
-    # Method badge: <div.request-col-method><span.request-method-badge ...>
-    let methodDiv = createWebElement("div", "request-col-method")
-    let methodBadge = createWebTextElement("span", req.httpMethod,
-                                           methodBadgeClass(req.httpMethod))
-    isonim_dom.appendChild(isonim_dom.Node(methodDiv),
-                           isonim_dom.Node(methodBadge))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(methodDiv))
-
-    let urlDiv = createWebTextElement("div", req.url, "request-col-url")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(urlDiv))
-
-    let statusDiv = createWebElement("div", "request-col-status")
-    let statusSpan = createWebTextElement("span", statusText(req),
-                                           statusCellClass(req))
-    isonim_dom.appendChild(isonim_dom.Node(statusDiv),
-                           isonim_dom.Node(statusSpan))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(statusDiv))
-
-    let durationDiv = createWebTextElement("div",
-                                            durationText(req),
-                                            "request-col-duration")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(durationDiv))
-
-    let sizeDiv = createWebTextElement("div", formatSize(req.responseSize),
-                                        "request-col-size")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(sizeDiv))
-
-    let onClick = onRowClick(vm, index)
-    let onDbl = onRowDoubleClick(vm, index)
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                proc(ev: isonim_dom.Event) = onClick())
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"dblclick",
-                                proc(ev: isonim_dom.Event) = onDbl())
-    row
-
-  proc renderDetailContentWeb(r: WebRenderer; req: RequestRecord;
-                               tab: string): isonim_dom.Element =
-    ## Tab content for the detail panel — Web renderer variant.
-    case tab
-    of "timing":
-      ui(r):
-        tdiv(class = "request-detail-timing"):
-          tdiv(class = "request-detail-section-title"):
-            text "Timing (" & durationText(req) & ")"
-          tdiv(class = "request-timing-row"):
-            span(class = "request-timing-label"): text "Total"
-            span(class = "request-timing-value"): text durationText(req)
-    of "response":
-      ui(r):
-        tdiv(class = "request-detail-response"):
-          tdiv(class = "request-detail-section-title"):
-            text "Response"
-          tdiv(class = "request-detail-row"):
-            span(class = "request-detail-key"): text "Size"
-            span(class = "request-detail-value"): text formatSize(req.responseSize)
-    else:
-      ui(r):
-        tdiv(class = "request-detail-placeholder"):
-          text "No data available for this tab."
-
-  proc renderDetailWeb(r: WebRenderer; vm: RequestPanelVM;
-                       req: RequestRecord; tab: string;
-                       onHandleDown: proc(e: isonim_dom.Event)): isonim_dom.Element =
-    ## Full detail panel for the selected request — Web renderer variant.
-    ## ``onHandleDown`` is wired to the resize handle's mousedown event so the
-    ## caller (``renderRequestPanel``) can install the drag logic with access to
-    ## the outer panel element and the ``detailHeightPct`` signal.
-    let badgeCls = methodBadgeClass(req.httpMethod)
-    let statusCls = statusCellClass(req)
-    let statusDisplayText = if req.isOpen: InFlightPlaceholder
-                            else: detailStatusText(req.statusCode)
-    var handleEl: isonim_dom.Element
-    var tabBarHost: isonim_dom.Element
-    var contentHost: isonim_dom.Element
-    let panel = ui(r):
-      tdiv(class = "request-detail"):
-        tdiv(ref = handleEl, class = "request-detail-resize-handle")
-        tdiv(class = "request-detail-header"):
-          tdiv(class = "request-detail-header-left"):
-            span(class = badgeCls):
-              text req.httpMethod
-            span(class = "request-detail-header-url"):
-              text req.url
-            span(class = "request-detail-header-status " & statusCls):
-              text statusDisplayText
-          tdiv(class = "request-detail-header-right"):
-            button(class = "ct-button-md-primary request-detail-handler-btn",
-                   onclick = proc() = vm.jumpToHandler(vm.selectedIndex.val)):
-              text "Handler >"
-        tdiv(ref = tabBarHost, class = "request-detail-tabs")
-        tdiv(ref = contentHost, class = "request-detail-content")
-    for (tabId, tabLabel) in DetailTabs:
-      let tl = tabLabel
-      let tabCls = if tabId == tab: "request-detail-tab request-detail-tab--active"
-                   else: "request-detail-tab"
-      let tabEl = ui(r):
-        span(class = tabCls, onclick = makeTabClickHandler(vm, tabId)):
-          text tl
-      r.appendRenderedChild(tabBarHost, tabEl)
-    r.appendRenderedChild(contentHost, renderDetailContentWeb(r, req, tab))
-    isonim_dom.addEventListener(isonim_dom.Node(handleEl), cstring"mousedown", onHandleDown)
-    panel
-
-  proc renderRequestPanel*(r: WebRenderer; vm: RequestPanelVM): isonim_dom.Element =
-    ## Render the HTTP Request panel for the real DOM.  Matches the Mock
-    ## variant: static shell via the DSL, three reactive effects for the
-    ## Method picker, Status picker, and table body.  The pickers use the
-    ## shared ``renderFilterPicker`` helper (``ct-picker--chevron-right``)
-    ## so they visually match the VCS branch-picker with the chevron on
-    ## the right side of the label.
-    let methodPickerOpen = createSignal(false)
-    let statusPickerOpen = createSignal(false)
-    # Percentage of the panel height claimed by the detail pane.
-    # Starts at 50% and is updated by the drag-resize handle.
-    # Stored as a signal so the style-sync effect updates the inline flex-basis
-    # reactively on every drag tick without rebuilding the detail content.
-    let detailHeightPct = createSignal(50.0)
-    var panelRef: isonim_dom.Element
-    var methodPickerHost: isonim_dom.Element
-    var statusPickerHost: isonim_dom.Element
-    var searchInputEl: isonim_dom.Element
-    var bodyContainer: isonim_dom.Element
-    var detailContainer: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(ref = panelRef, class = RequestPanelContainerClass, tabIndex = "2"):
-        # Filter bar: [🔍 Find by URL...]  [Method ▼]  [Status ▼]
-        tdiv(class = "request-panel-filters"):
-          input(ref = searchInputEl,
-                class = "request-filter-search ct-input-panel ct-input-search-image",
-                `type` = "text",
-                placeholder = "Find by URL...")
-          tdiv(ref = methodPickerHost)
-          tdiv(ref = statusPickerHost)
-        tdiv(class = "request-navigation-status", role = "status"):
-          text vm.navigationMessage.val
-        # Column headers
-        tdiv(class = "request-table-header"):
-          tdiv(class = "request-col-id"):
-            text "#"
-          tdiv(class = "request-col-method"):
-            text "method"
-          tdiv(class = "request-col-url"):
-            text "URL"
-          tdiv(class = "request-col-status"):
-            text "Status"
-          tdiv(class = "request-col-duration"):
-            text "Duration"
-          tdiv(class = "request-col-size"):
-            text "Size"
-        tdiv(ref = bodyContainer, class = "request-table-body"):
-          discard
-        # Detail panel host — empty when no row is selected, populated reactively
-        tdiv(ref = detailContainer, class = "request-detail-host"):
-          discard
-
-    # Search handler — reads directly from the live input element.
-    let searchNode = isonim_dom.Node(searchInputEl)
-    isonim_dom.addEventListener(searchNode, cstring"input",
-      proc(ev: isonim_dom.Event) =
-        vm.setSearchText($searchNode.inputValue()))
-
-    # Method picker — rebuilt reactively on open/filter state changes.
-    createRenderEffect proc() =
-      let isOpen = methodPickerOpen.val
-      let currentMethod = vm.filterMethod.val
-      clearWebChildren(methodPickerHost)
-      let picker = renderFilterPicker(r, "Method: All", isOpen, currentMethod,
-        MethodPickerOptions,
-        onToggle = proc() = methodPickerOpen.val = not methodPickerOpen.val,
-        onSelect = proc(v: string) =
-          vm.setFilterMethod(v)
-          methodPickerOpen.val = false)
-      isonim_dom.appendChild(isonim_dom.Node(methodPickerHost),
-                             isonim_dom.Node(picker))
-
-    # Status picker — rebuilt reactively on open/filter state changes.
-    createRenderEffect proc() =
-      let isOpen = statusPickerOpen.val
-      let currentStatus = vm.filterStatus.val
-      clearWebChildren(statusPickerHost)
-      let picker = renderFilterPicker(r, "Status: All", isOpen, currentStatus,
-        StatusPickerOptions,
-        onToggle = proc() = statusPickerOpen.val = not statusPickerOpen.val,
-        onSelect = proc(v: string) =
-          vm.setFilterStatus(v)
-          statusPickerOpen.val = false)
-      isonim_dom.appendChild(isonim_dom.Node(statusPickerHost),
-                             isonim_dom.Node(picker))
-
-    # Table body — rebuilt on filteredRequests / selectedIndex changes.
-    createRenderEffect proc() =
-      let filtered = vm.filteredRequests.val
-      let selected = vm.selectedIndex.val
-      clearWebChildren(bodyContainer)
-      for i, req in filtered:
-        let row = renderRowWeb(vm, req, i, i == selected)
-        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
-                               isonim_dom.Node(row))
-
-    # Style effect: sync the detail host's flex-basis to detailHeightPct.
-    # Runs on every drag tick (detailHeightPct changes) and on selection change
-    # (to set or clear the style).  Kept separate from the content effect so
-    # drag ticks don't trigger a full DOM rebuild.
-    createRenderEffect proc() =
-      let pct = detailHeightPct.val
-      let idx = vm.selectedIndex.val
-      if idx >= 0:
-        isonim_dom.setAttribute(detailContainer, cstring"style",
-          cstring("flex: 0 0 " & $int(pct) & "%; min-height: 0"))
-      else:
-        isonim_dom.setAttribute(detailContainer, cstring"style", cstring"")
-
-    # Content effect: rebuild the detail panel DOM when selection, filtered
-    # list, or active tab changes.  Wires the resize-handle drag each time
-    # so the drag closure always captures a fresh panel bounding rect.
-    createRenderEffect proc() =
-      let idx = vm.selectedIndex.val
-      let filtered = vm.filteredRequests.val
-      let tab = vm.detailTab.val
-      clearWebChildren(detailContainer)
-      if idx >= 0 and idx < filtered.len:
-        let capturePanel = panelRef
-        let capturePct = detailHeightPct
-        let onHandleDown = proc(e: isonim_dom.Event) =
-          e.preventDefault()
-          let h = capturePanel.elemHeight
-          let b = capturePanel.elemBottom
-          setDocMouseMove proc(me: isonim_dom.Event) =
-            let newPct = (b - me.clientY) / h * 100.0
-            capturePct.val = max(15.0, min(85.0, newPct))
-          setDocMouseUp proc(ue: isonim_dom.Event) =
-            clearDocMouseMove()
-            clearDocMouseUp()
-        isonim_dom.appendChild(isonim_dom.Node(detailContainer),
-                               isonim_dom.Node(renderDetailWeb(r, vm, filtered[idx], tab, onHandleDown)))
-
-    panel
-
-  proc requestTableBody(panel: JsObject): JsObject {.importjs:
-    "(#.querySelector('.request-table-body') || null)".}
-  proc requestRowHeight(body: JsObject): float {.importjs:
-    "(function(b){const r=b.querySelector('.request-row');return r?r.getBoundingClientRect().height:0;})(#)".}
-  proc requestClientHeight(body: JsObject): float {.importjs: "#.clientHeight".}
-  proc requestScrollTop(body: JsObject): float {.importjs: "#.scrollTop".}
-  proc setRequestPadding(body: JsObject; top, bottom: cstring) {.importjs:
-    "(function(b,t,o){b.style.paddingTop=t;b.style.paddingBottom=o;})(#,#,#)".}
-  proc onRequestRowsScrollOrResize(body: JsObject; cb: proc()) {.importjs: """
-    (function(b, cb) {
-      b.addEventListener('scroll', function() { cb(); }, {passive: true});
-      if (typeof ResizeObserver === 'function') new ResizeObserver(function() { cb(); }).observe(b);
-      cb();
-    })(#, #)""".}
-
-  proc mountIsoNimRequestPanel*(container: isonim_dom.Element;
-                                 vm: RequestPanelVM) =
-    ## Mount the IsoNim Request panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderRequestPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container),
-                           isonim_dom.Node(panel))
-    # THE ROWS IT SHOWS (Viewport-Driven-Loading V2): the table body's size
-    # and scroll, in rows; the held window is padded to every matching row.
-    let body = requestTableBody(cast[JsObject](panel))
-    if not body.isNil:
-      proc rowHeight(): float =
-        let h = requestRowHeight(body)
-        if h > 0.0: h else: 24.0
-      onRequestRowsScrollOrResize(body, proc() =
-        let h = rowHeight()
-        let height = requestClientHeight(body)
-        vm.setViewport(Viewport(
-          rows: (if height <= 0.0: 0 else: int(ceil(height / h))),
-          firstRow: int(floor(requestScrollTop(body) / h)))))
-      createEffect proc() =
-        let held = vm.filteredRequests.val.len
-        let start = vm.windowStart.val
-        let total = vm.matchingCount
-        let h = rowHeight()
-        if vm.windowed:
-          setRequestPadding(body, cstring($(float(start) * h) & "px"),
-            cstring($(float(max(0, total - start - held)) * h) & "px"))
-        else:
-          setRequestPadding(body, cstring"", cstring"")

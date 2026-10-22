@@ -1255,7 +1255,8 @@ proc mountRequestPanel(container: isonim_dom.Element; fixture: string): DisposeP
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createRequestPanelVM(store)
     if fixture != "empty": vm.applyRequestPanel()
-    mountIsoNimRequestPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderRequestPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountAgentActivity(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1264,14 +1265,17 @@ proc mountAgentActivity(container: isonim_dom.Element; fixture: string): Dispose
     if fixture != "empty": vm.applyAgentActivity()
     if fixture == "reference": vm.setTerminals(@[])
     if fixture == "loading": vm.setLoading(true)
-    mountIsoNimAgentActivityPanel(container, vm, 101, "storybook-agent-input")
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderAgentActivityPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm, 101,
+        "storybook-agent-input")))
     return proc() = vm.dispose())
 
 proc mountAgentWorkspace(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createAgentWorkspaceVM(store)
     if fixture != "empty": vm.applyAgentWorkspace()
-    mountIsoNimAgentWorkspacePanel(container, vm, 103)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderAgentWorkspacePanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm, 103)))
     return proc() = vm.dispose())
 
 proc mountWelcome(container: isonim_dom.Element; fixture: string): DisposeProc =

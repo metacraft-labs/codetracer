@@ -50,7 +50,8 @@ when not defined(ctInExtension):
   # (`ui/panel_host`); its view follows the ViewModel reactively, so nothing
   # here re-mounts it when a history loads.
   setPanelRenderer(Content.PixelHistory,
-    proc(r: WebRenderer; session: SessionViewModel): dom_api.Element =
+    proc(r: WebRenderer; host: dom_api.Element;
+         session: SessionViewModel): dom_api.Element =
       initPixelHistoryVM()
       renderPixelHistoryPanel[WebRenderer, dom_api.Element](
         r, pixelHistoryVMInstance))

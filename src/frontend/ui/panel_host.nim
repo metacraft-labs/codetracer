@@ -30,6 +30,7 @@ from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall,
   setViewport, setRowHeightPx
 from ../viewmodel/viewmodels/state_vm import setViewport
 from ../viewmodel/viewmodels/low_level_code_vm import setShown
+from ../viewmodel/viewmodels/request_panel_vm import setViewport
 from ../viewmodel/store/replay_data_store import nil
 import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_low_level_code_view,
@@ -47,8 +48,12 @@ const
                      Content.VideoPlayer, Content.PointList, Content.StepList,
                      Content.CalltraceEditor, Content.Build,
                      Content.BuildErrors, Content.SearchResults,
-                     Content.TraceLog, Content.TerminalOutput}
+                     Content.TraceLog, Content.TerminalOutput,
+                     Content.AgentWorkspace, Content.RequestPanel,
+                     Content.AgentActivity}
     ## The panes `mountPanel` renders.
+  RequestRowFallbackPx = 24.0
+    ## The Request panel's row pitch until a row is rendered to measure.
   StateRowFallbackPx = 22.0
     ## The State pane's row pitch until a row is rendered to measure.
   TraceRowFallbackPx = 22.0
@@ -57,9 +62,11 @@ const
     ## A terminal line's height until one is drawn to measure.
 
 type
-  PanelRenderer* = proc(r: WebRenderer; session: SessionViewModel): dom_api.Element
+  PanelRenderer* = proc(r: WebRenderer; host: dom_api.Element;
+                        session: SessionViewModel): dom_api.Element
     ## Renders a pane whose ViewModel its own module owns, inside the mount's
-    ## reactive root.
+    ## reactive root; `host` is the container (its id names the component of
+    ## a pane that has several).
 
   PanelDecorator* = proc(host: dom_api.Element; session: SessionViewModel)
     ## Browser behaviour a pane's host adds around its view — run inside the
@@ -194,6 +201,18 @@ proc measureOf(kind: Content; session: SessionViewModel): PaneMeasure =
       report: proc(v: Viewport; rowPx: float) =
         terminal_output_vm.setViewport(vm, v),
       changed: proc() = discard vm.lines.val)
+  of Content.RequestPanel:
+    # The rows the table body shows (Viewport-Driven-Loading V2): a partly
+    # visible row counts; the window held is padded by the view.
+    let vm = session.requestPanelVM
+    PaneMeasure(
+      scroller: cstring".request-table-body",
+      row: cstring".request-row",
+      pxPerLevel: 0.0,
+      countPartialRow: true,
+      fallbackRowPx: proc(): float = RequestRowFallbackPx,
+      report: proc(v: Viewport; rowPx: float) = vm.setViewport(v),
+      changed: proc() = discard vm.filteredRequests.val)
   else:
     PaneMeasure()
 
@@ -281,7 +300,7 @@ proc render(m: PanelMount; session: SessionViewModel) =
     else:
       let renderPane = renderers[mount.kind]
       if not renderPane.isNil:
-        dom_api.appendChild(node, dom_api.Node(renderPane(r, session)))
+        dom_api.appendChild(node, dom_api.Node(renderPane(r, host, session)))
     let decorate = decorators[mount.kind]
     if not decorate.isNil:
       decorate(host, session)

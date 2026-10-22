@@ -55,7 +55,7 @@ suite "the Agent Activity prompt names itself in the scope path":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 95)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 95)
 
       let areas = findByTag(panel, "textarea")
       check areas.len == 1
@@ -80,7 +80,7 @@ suite "the Agent Activity prompt names itself in the scope path":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 96)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 96)
 
       vm.setLoading(true)
       let prompt = findByTag(panel, "textarea")[0]

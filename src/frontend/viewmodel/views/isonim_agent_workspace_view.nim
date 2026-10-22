@@ -5,15 +5,14 @@
 import std/[strformat, strutils]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
-
-when defined(js):
-  import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
 
 import ../store/types
 import ../viewmodels/agent_workspace_vm
+
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
 
 const AgentWorkspaceContainerClass* = "agent-workspace-container"
 const AgentWorkspaceEmptyClass* = "agent-workspace-empty"
@@ -134,11 +133,12 @@ proc overlayToggleText*(enabled: bool): string =
   else:
     "Show Coverage"
 
-proc renderFileRow(r: MockRenderer; vm: AgentWorkspaceVM; index: int;
-                   entry: AgentWorkspaceFileEntry;
-                   callbacks: AgentWorkspaceCallbacks): MockNode =
+proc renderFileRow[R, N](r: R; vm: AgentWorkspaceVM; index: int;
+                         entry: AgentWorkspaceFileEntry;
+                         callbacks: AgentWorkspaceCallbacks): N =
   let selected = index == vm.selectedFileIndex.val
   let fileIdx = index
+  let hasFlow = entry.hasFlow
   ui(r):
     tdiv(class = fileItemClass(selected),
          onclick = proc() =
@@ -151,16 +151,22 @@ proc renderFileRow(r: MockRenderer; vm: AgentWorkspaceVM; index: int;
         text entry.path
       span(class = "agent-workspace-coverage-badge"):
         text coverageBadgeText(entry)
-      if entry.hasFlow:
+      if hasFlow:
         span(class = "agent-workspace-flow-badge"):
           text "flow"
 
-proc renderAgentWorkspacePanel*(r: MockRenderer; vm: AgentWorkspaceVM;
+proc renderAgentWorkspacePanel*[R, N](r: R; vm: AgentWorkspaceVM;
     componentId: int; callbacks: AgentWorkspaceCallbacks =
-      AgentWorkspaceCallbacks()): MockNode =
-  var header: MockNode
-  var summary: MockNode
-  var body: MockNode
+      AgentWorkspaceCallbacks()): N =
+  ## The Agent Workspace panel, under any renderer (Shared-DOM-Front-Ends
+  ## D3); the panel host (`ui/panel_host`) mounts it.
+  ##
+  ## The header, the summary and the body are rebuilt from the ViewModel by
+  ## one effect: the body hosts the Monaco editor the component creates after
+  ## each rebuild (`callbacks.afterDynamicRender`), and that editor is tied to
+  ## the element the rebuild makes.
+  mixin clearChildren, appendChild
+  var header, summary, body: N
 
   let panel = ui(r):
     tdiv(class = AgentWorkspaceContainerClass):
@@ -187,6 +193,9 @@ proc renderAgentWorkspacePanel*(r: MockRenderer; vm: AgentWorkspaceVM;
     let currentPath = vm.workspacePath.val
     let currentSummary = vm.summary.val
     let overlayEnabled = vm.coverageOverlayEnabled.val
+    let coverageText = summaryCoverageText(currentSummary)
+    let testsLine = testsText(currentSummary)
+    let tracedText = functionsTracedText(currentSummary)
 
     let headerNode = ui(r):
       tdiv(class = AgentWorkspaceHeaderClass):
@@ -212,15 +221,15 @@ proc renderAgentWorkspacePanel*(r: MockRenderer; vm: AgentWorkspaceVM;
         # rendered "Coverage: 0.0%" / "Tests: 0/0 passed" for a workspace
         # nothing measured is the zero-that-reads-as-a-measurement AA-1
         # preserved its rule against and AA-2 owns; see `summaryCoverageText`.
-        if summaryCoverageText(currentSummary).len > 0:
+        if coverageText.len > 0:
           span(class = "agent-workspace-summary-item"):
-            text "Coverage: " & summaryCoverageText(currentSummary)
-        if testsText(currentSummary).len > 0:
+            text "Coverage: " & coverageText
+        if testsLine.len > 0:
           span(class = "agent-workspace-summary-item"):
-            text "Tests: " & testsText(currentSummary)
-        if functionsTracedText(currentSummary).len > 0:
+            text "Tests: " & testsLine
+        if tracedText.len > 0:
           span(class = "agent-workspace-summary-item"):
-            text "Functions traced: " & functionsTracedText(currentSummary)
+            text "Functions traced: " & tracedText
         tdiv(class = "agent-workspace-overlay-toggle",
              onclick = proc() =
                vm.toggleCoverageOverlay()
@@ -229,138 +238,20 @@ proc renderAgentWorkspacePanel*(r: MockRenderer; vm: AgentWorkspaceVM;
           text overlayToggleText(overlayEnabled)
     r.appendChild(summary, summaryNode)
 
-    var fileList: MockNode
+    var fileList: N
     let bodyNode = ui(r):
       tdiv(class = AgentWorkspaceBodyClass):
         tdiv(ref = fileList, class = AgentWorkspaceFileListClass)
         tdiv(class = AgentWorkspaceEditorAreaClass):
           tdiv(class = AgentWorkspaceEditorClass,
                id = editorId(componentId))
-    for i, entry in vm.files.val:
-      r.appendChild(fileList, renderFileRow(r, vm, i, entry, callbacks))
     r.appendChild(body, bodyNode)
+    let files = vm.files.val
+    for i in 0 ..< files.len:
+      let row: N = renderFileRow[R, N](r, vm, i, files[i], callbacks)
+      r.appendChild(fileList, row)
+
+    if callbacks.afterDynamicRender != nil:
+      callbacks.afterDynamicRender()
 
   panel
-
-when defined(js):
-  proc renderFileRow(r: WebRenderer; vm: AgentWorkspaceVM; index: int;
-                     entry: AgentWorkspaceFileEntry;
-                     callbacks: AgentWorkspaceCallbacks):
-      isonim_dom.Element =
-    let selected = index == vm.selectedFileIndex.val
-    let fileIdx = index
-    ui(r):
-      tdiv(class = fileItemClass(selected),
-           onclick = proc() =
-             vm.setSelectedFileIndex(fileIdx)
-             if callbacks.onSelectFile != nil:
-               callbacks.onSelectFile(fileIdx)):
-        tdiv(class = "agent-workspace-file-name"):
-          text fileBasename(entry.path)
-        tdiv(class = "agent-workspace-file-path"):
-          text entry.path
-        span(class = "agent-workspace-coverage-badge"):
-          text coverageBadgeText(entry)
-        if entry.hasFlow:
-          span(class = "agent-workspace-flow-badge"):
-            text "flow"
-
-  proc renderAgentWorkspacePanel*(r: WebRenderer; vm: AgentWorkspaceVM;
-      componentId: int; callbacks: AgentWorkspaceCallbacks =
-        AgentWorkspaceCallbacks()): isonim_dom.Element =
-    var header: isonim_dom.Element
-    var summary: isonim_dom.Element
-    var body: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = AgentWorkspaceContainerClass):
-        tdiv(ref = header):
-          discard
-        tdiv(ref = summary):
-          discard
-        tdiv(ref = body):
-          discard
-
-    createRenderEffect proc() =
-      # Host slots captured by `ref` are intentionally cleared here; all
-      # replacement children are built through the IsoNim DSL below.
-      r.clearChildren(header)
-      r.clearChildren(summary)
-      r.clearChildren(body)
-
-      if not vm.hasWorkspace.val:
-        let empty = ui(r):
-          tdiv(class = AgentWorkspaceEmptyClass):
-            text AgentWorkspaceEmptyText
-        r.appendChild(body, empty)
-        return
-
-      let currentKind = vm.viewKind.val
-      let currentPath = vm.workspacePath.val
-      let currentSummary = vm.summary.val
-      let overlayEnabled = vm.coverageOverlayEnabled.val
-
-      let headerNode = ui(r):
-        tdiv(class = AgentWorkspaceHeaderClass):
-          span(class = "agent-workspace-header-label"):
-            text viewLabel(currentKind)
-          if currentPath.len > 0:
-            span(class = "agent-workspace-header-path"):
-              text currentPath
-          tdiv(class = "agent-workspace-view-toggle",
-               onclick = proc() =
-                 if vm.viewKind.val == awvkUserWorkspace:
-                   vm.setViewKind(awvkAgentWorkspace)
-                 else:
-                   vm.setViewKind(awvkUserWorkspace)
-                 if callbacks.onToggleView != nil:
-                   callbacks.onToggleView()):
-            text toggleViewText(currentKind)
-      r.appendChild(header, headerNode)
-
-      let summaryNode = ui(r):
-        tdiv(class = AgentWorkspaceSummaryClass):
-          # See the MockRenderer branch above: an item without a measurement
-          # behind it is not rendered at all.
-          if summaryCoverageText(currentSummary).len > 0:
-            span(class = "agent-workspace-summary-item"):
-              text "Coverage: " & summaryCoverageText(currentSummary)
-          if testsText(currentSummary).len > 0:
-            span(class = "agent-workspace-summary-item"):
-              text "Tests: " & testsText(currentSummary)
-          if functionsTracedText(currentSummary).len > 0:
-            span(class = "agent-workspace-summary-item"):
-              text "Functions traced: " & functionsTracedText(currentSummary)
-          tdiv(class = "agent-workspace-overlay-toggle",
-               onclick = proc() =
-                 vm.toggleCoverageOverlay()
-                 if callbacks.onToggleOverlay != nil:
-                   callbacks.onToggleOverlay()):
-            text overlayToggleText(overlayEnabled)
-      r.appendChild(summary, summaryNode)
-
-      var fileList: isonim_dom.Element
-      let bodyNode = ui(r):
-        tdiv(class = AgentWorkspaceBodyClass):
-          tdiv(ref = fileList, class = AgentWorkspaceFileListClass)
-          tdiv(class = AgentWorkspaceEditorAreaClass):
-            tdiv(class = AgentWorkspaceEditorClass,
-                 id = editorId(componentId))
-      r.appendChild(body, bodyNode)
-
-      for i, entry in vm.files.val:
-        r.appendChild(fileList, renderFileRow(r, vm, i, entry, callbacks))
-
-      if callbacks.afterDynamicRender != nil:
-        callbacks.afterDynamicRender()
-
-    panel
-
-  proc mountIsoNimAgentWorkspacePanel*(container: isonim_dom.Element;
-                                       vm: AgentWorkspaceVM;
-                                       componentId: int;
-                                       callbacks: AgentWorkspaceCallbacks =
-                                         AgentWorkspaceCallbacks()) =
-    let r = WebRenderer()
-    let panel = renderAgentWorkspacePanel(r, vm, componentId, callbacks)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

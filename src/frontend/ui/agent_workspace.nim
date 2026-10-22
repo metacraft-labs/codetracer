@@ -36,8 +36,11 @@ from ../viewmodel/viewmodels/agent_workspace_vm import
   setCoverageOverlayEnabled, setNotificationCount
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_agent_workspace_view import
-    mountIsoNimAgentWorkspacePanel, AgentWorkspaceCallbacks
+  import ../viewmodel/views/isonim_agent_workspace_view
+  when not defined(ctInExtension):
+    import isonim/web/web_renderer
+    import ./panel_host
+    from ../viewmodel/session_vm import SessionViewModel
 
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers (similar to deepreview.nim but prefixed to avoid
@@ -64,11 +67,8 @@ var agentWorkspaceVMInstances*: JsAssoc[int, AgentWorkspaceVM] =
   JsAssoc[int, AgentWorkspaceVM]{}
 var agentWorkspaceComponentRefs: JsAssoc[int, AgentWorkspaceComponent] =
   JsAssoc[int, AgentWorkspaceComponent]{}
-var isoNimAgentWorkspaceMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
 
 proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent)
-proc tryMountIsoNimAgentWorkspacePanel*(componentId: int)
 proc requestAgentWorkspacePanelRefresh*(self: AgentWorkspaceComponent)
 
 # ---------------------------------------------------------------------------
@@ -161,38 +161,22 @@ proc legacyFileEntriesToVm(entries: seq[ActivityFileEntry]):
     result.add(legacyFileEntryToVm(entry))
 
 proc ensureAgentWorkspaceVM(self: AgentWorkspaceComponent): AgentWorkspaceVM =
-  if self.isNil:
+  ## The ViewModel of the pane `self`, on the session's store. `nil` until the
+  ## session's store is installed (`initAgentWorkspaceVMWithStore`): the
+  ## panel host mounts the pane only once the session exists.
+  if self.isNil or agentWorkspaceVMStore.isNil:
     return nil
   if agentWorkspaceVMInstances.hasKey(self.id):
     return agentWorkspaceVMInstances[self.id]
-
-  if agentWorkspaceVMStore.isNil:
-    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-      when defined(js):
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
-      else:
-        var fut = newFuture[JsonNode]("stub-backend")
-        fut.complete(%*{})
-        result = fut
-    let stubBackend = BackendService(
-      sendProc: stubSend,
-      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-      disconnectProc: proc() = discard,
-    )
-    agentWorkspaceVMStore = createReplayDataStore(stubBackend)
-
   result = createAgentWorkspaceVM(agentWorkspaceVMStore)
   agentWorkspaceVMInstances[self.id] = result
 
 proc initAgentWorkspaceVMWithStore*(store: ReplayDataStore) =
   agentWorkspaceVMStore = store
   agentWorkspaceVMInstances = JsAssoc[int, AgentWorkspaceVM]{}
-  isoNimAgentWorkspaceMountedIds = JsAssoc[int, bool]{}
   for _, component in agentWorkspaceComponentRefs:
     discard ensureAgentWorkspaceVM(component)
     component.syncLegacyAgentWorkspaceIntoVM()
-    tryMountIsoNimAgentWorkspacePanel(component.id)
 
 proc initAgentWorkspaceVM*(self: AgentWorkspaceComponent) =
   discard ensureAgentWorkspaceVM(self)
@@ -215,13 +199,11 @@ proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent) =
   vm.setNotificationCount(self.notifications.len)
 
 proc requestAgentWorkspacePanelRefresh*(self: AgentWorkspaceComponent) =
-  ## Refresh the Agent Workspace IsoNim mount after legacy component state
-  ## changes.  Signal writes update mounted views; the mount attempt covers the
-  ## first refresh after the GoldenLayout host is created.
+  ## Bring the pane's ViewModel up to the component's state; the mounted
+  ## view follows its signals.
   if self.isNil:
     return
   self.syncLegacyAgentWorkspaceIntoVM()
-  tryMountIsoNimAgentWorkspacePanel(self.id)
 
 # ---------------------------------------------------------------------------
 # Notification handling
@@ -437,44 +419,41 @@ proc toggleCoverageOverlay(self: AgentWorkspaceComponent) =
   self.updateDecorations()
   self.syncLegacyAgentWorkspaceIntoVM()
 
-proc tryMountIsoNimAgentWorkspacePanel*(componentId: int) =
-  when defined(js):
-    if not agentWorkspaceComponentRefs.hasKey(componentId):
-      return
-    let component = agentWorkspaceComponentRefs[componentId]
-    let vm = ensureAgentWorkspaceVM(component)
-    if vm.isNil:
-      return
-    # This tab's host, not the first in the document — see
-    # `findIsoNimPaneHost`; and a latch that describes THAT host — see
-    # `isoNimPanelNeedsMountInHost`.
-    let host = findIsoNimPaneHost(
-      cstring(fmt"agentWorkspaceComponent-{componentId}"),
-      data.activeSessionIndex)
-    if host.isNil:
-      return
-    if not isoNimPanelNeedsMountInHost(
-        latchSaysMounted = isoNimAgentWorkspaceMountedIds.hasKey(componentId) and
-                           isoNimAgentWorkspaceMountedIds[componentId],
-        hostCarriesMark = isoNimPanelContainerIsMounted(host)):
-      return
-    let container = cast[kdom.Element](host)
-    let callbacks = AgentWorkspaceCallbacks(
-      onToggleView: proc() =
-        component.toggleWorkspaceView(),
-      onToggleOverlay: proc() =
-        component.toggleCoverageOverlay(),
-      onSelectFile: proc(index: int) =
-        component.switchToFile(index),
-      afterDynamicRender: proc() =
-        component.initEditor(),
-    )
-    mountIsoNimAgentWorkspacePanel(
-      cast[isonim_dom_api.Element](container), vm, componentId, callbacks)
-    markIsoNimPanelContainerMounted(host)
-    isoNimAgentWorkspaceMountedIds[componentId] = true
-  else:
-    discard
+when defined(js) and not defined(ctInExtension):
+  proc hostComponentId(host: isonim_dom_api.Element): int {.importjs:
+    "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
+    ## The `<id>` of the host's `agentWorkspaceComponent-<id>`.
+
+  # The panel host mounts each Agent Workspace pane into the container
+  # GoldenLayout creates (`ui/panel_host`); the factory has created its
+  # component by then.
+  setPanelRenderer(Content.AgentWorkspace,
+    proc(r: WebRenderer; host: isonim_dom_api.Element;
+         session: SessionViewModel): isonim_dom_api.Element =
+      if agentWorkspaceVMStore.isNil and not session.isNil:
+        agentWorkspaceVMStore = session.store
+      let componentId = hostComponentId(host)
+      let mapping = data.ui.componentMapping[Content.AgentWorkspace]
+      let component =
+        if not mapping.isNil and mapping.hasKey(componentId):
+          AgentWorkspaceComponent(mapping[componentId])
+        else: nil
+      component.syncLegacyAgentWorkspaceIntoVM()
+      let vm = ensureAgentWorkspaceVM(component)
+      if vm.isNil:
+        return isonim_dom_api.createElement(isonim_dom_api.document, cstring"div")
+      let callbacks = AgentWorkspaceCallbacks(
+        onToggleView: proc() =
+          component.toggleWorkspaceView(),
+        onToggleOverlay: proc() =
+          component.toggleCoverageOverlay(),
+        onSelectFile: proc(index: int) =
+          component.switchToFile(index),
+        afterDynamicRender: proc() =
+          component.initEditor(),
+      )
+      renderAgentWorkspacePanel[WebRenderer, isonim_dom_api.Element](
+        r, vm, componentId, callbacks))
 
 # ---------------------------------------------------------------------------
 # IPC handlers

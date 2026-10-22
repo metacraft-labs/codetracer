@@ -120,7 +120,7 @@ suite "the prompt's VM -> element sync does not feed back":
       let vm = createAgentActivityVM(makeStore())
       let host = Host(vm: vm, prompt: "a draft", liveIsLoading: true)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 97,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 97,
                                            callbacks = callbacksFor(host))
       let prompt = findByTag(panel, "textarea")[0]
 
@@ -140,7 +140,7 @@ suite "the prompt's VM -> element sync does not feed back":
       let vm = createAgentActivityVM(makeStore())
       let host = Host(vm: vm)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 98,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 98,
                                            callbacks = callbacksFor(host))
       let prompt = findByTag(panel, "textarea")[0]
 
@@ -159,7 +159,7 @@ suite "the prompt's VM -> element sync does not feed back":
       let vm = createAgentActivityVM(makeStore())
       let host = Host(vm: vm, liveIsLoading: true)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 99,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 99,
                                            callbacks = callbacksFor(host))
       let prompt = findByTag(panel, "textarea")[0]
 
@@ -185,7 +185,7 @@ suite "the prompt's VM -> element sync does not feed back":
       let vm = createAgentActivityVM(makeStore())
       let host = Host(vm: vm)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 100,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 100,
                                            callbacks = callbacksFor(host))
       let prompt = findByTag(panel, "textarea")[0]
       var chip: MockNode

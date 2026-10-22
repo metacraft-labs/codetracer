@@ -64,7 +64,7 @@ proc renderWith(vm: AgentWorkspaceVM; summary: AgentWorkspaceSummary):
   vm.setWorkspaceMetadata("/tmp/agent-workspace", "session-1")
   vm.setFiles(@[AgentWorkspaceFileEntry(path: "src/main.nim")])
   vm.setSummary(summary)
-  renderAgentWorkspacePanel(MockRenderer(), vm, componentId = 91)
+  renderAgentWorkspacePanel[MockRenderer, MockNode](MockRenderer(), vm, componentId = 91)
 
 suite "AA-2 the Agent Workspace summary states absent data":
 

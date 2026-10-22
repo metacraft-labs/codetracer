@@ -341,7 +341,8 @@ when not defined(ctInExtension):
   # (`ui/panel_host`), after syncing the session's visual-replay player into
   # the ViewModel, as the layout's dispatch arm did before mounting.
   setPanelRenderer(Content.VideoPlayer,
-    proc(r: WebRenderer; session: SessionViewModel): dom_api.Element =
+    proc(r: WebRenderer; host: dom_api.Element;
+         session: SessionViewModel): dom_api.Element =
       initVideoPlayerVM()
       syncVisualReplaySessionIntoPlayerVM()
       renderVideoPlayerPanel[WebRenderer, dom_api.Element](

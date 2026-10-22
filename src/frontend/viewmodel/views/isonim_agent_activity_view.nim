@@ -14,7 +14,7 @@
 import std/[options, tables, math, strutils, sets]
 
 import isonim/core/[signals, computation, owner, batch]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -26,7 +26,15 @@ import ../store/types
 import ../viewmodels/agent_activity_vm
 import ../keymap/scope_path   # the prompt's scope element
 
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
+
 var expandedToolRowIds = initHashSet[string]()
+
+proc isToolRowExpanded(rowId: string): bool =
+  ## Whether the user expanded the tool-call row `rowId`. Not generic, so the
+  ## set's `contains` binds here rather than where a panel is instantiated.
+  rowId in expandedToolRowIds
 
 const AgentActivityContainerClass* = "component-container agent-ha-container"
 const AgentActivityConversationClass* = "agent-com"
@@ -528,9 +536,10 @@ proc invokeSettingsSelect(callbacks: AgentActivityCallbacks) =
   if callbacks.onSettingsSelect != nil:
     callbacks.onSettingsSelect()
 
-proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
+proc appendRenderedChild[R, N](r: R; host, child: N) =
   ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
   ## snapshots. The row markup itself stays declarative in helper ui blocks.
+  mixin appendChild
   r.appendChild(host, child)
 
 when defined(js):
@@ -538,7 +547,7 @@ when defined(js):
   proc setInputValue(node: isonim_dom.Element; value: cstring) {.importjs: "#.value = #".}
   proc eventKey(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
   proc shiftKey(ev: isonim_dom.Event): bool {.importjs: "!!#.shiftKey".}
-  proc preventDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+  proc preventKeyDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
   proc jsSetTimeout(fn: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
   proc clipboardWriteText(text: cstring) {.importjs: "navigator.clipboard.writeText(#)".}
   proc classListAdd(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.add(#)".}
@@ -664,33 +673,8 @@ when defined(js):
   proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element): JsObject
     {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)""".}
   proc callJsFunction(fn: JsObject) {.importjs: "#()".}
-  proc setupInputHighlight(r: WebRenderer; ta: isonim_dom.Element;
-                           hl: isonim_dom.Element): proc() =
-    ## Paints the inline-code overlay behind the prompt and keeps it in step
-    ## with the user's typing (its own `input` listener).  Returns the
-    ## repaint, because a value the VIEW writes fires no `input` event (see
-    ## `syncInputValue`) and must repaint the overlay itself.
-    let repaint = setupInputHighlightJs(ta, hl)
-    result = proc() = callJsFunction(repaint)
-
-  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
-    ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
-    ## snapshots. appendChild is the browser interop needed to attach a
-    ## finished IsoNim row node to that host.
-    r.appendChild(host, child)
-
   proc readInputValue(node: isonim_dom.Node): string =
     $node.inputValue()
-
-  proc readInputElementValue(r: WebRenderer; input: isonim_dom.Element): string =
-    readInputValue(isonim_dom.Node(input))
-
-  proc writeInputElementValue(r: WebRenderer; input: isonim_dom.Element;
-                              value: string) =
-    ## Assigning `.value` fires no `input` event (only user edits do:
-    ## https://html.spec.whatwg.org/multipage/input.html#common-input-element-events),
-    ## which is what keeps `syncInputValue` from echoing into the VM.
-    input.setInputValue(cstring(value))
 
   proc resizeInputToContentJs(input: isonim_dom.Element)
     {.importjs: """(function(el){var f=parseFloat(window.getComputedStyle(el).fontSize);el.style.height='auto';var h=f>0?el.scrollHeight/f:el.scrollHeight;el.style.height=h+'em';el.scrollTop=el.scrollHeight+2;})(#)""".}
@@ -704,9 +688,6 @@ when defined(js):
     ## multi-line draft.
     resizeInputToContentJs(input)
 
-  proc resizeInputToContent(r: WebRenderer; input: isonim_dom.Element) =
-    resizeInputToContent(input)
-
 proc computeDiffStats(original: string; modified: string): (int, int) =
   when defined(js):
     let stats = computeLineStatsJs(cstring(original), cstring(modified))
@@ -714,16 +695,33 @@ proc computeDiffStats(original: string; modified: string): (int, int) =
   else:
     (0, 0)
 
-proc readInputElementValue(r: MockRenderer; input: MockNode): string =
-  input.attributes.getOrDefault("value", "")
+proc readInputElementValue[R, N](r: R; input: N): string =
+  ## The prompt's current value.
+  when N is MockNode:
+    input.attributes.getOrDefault("value", "")
+  else:
+    when defined(js):
+      readInputValue(isonim_dom.Node(input))
+    else:
+      ""
 
-proc writeInputElementValue(r: MockRenderer; input: MockNode; value: string) =
-  ## Like the DOM's `.value` assignment, this fires no `input` event.
-  r.setAttribute(input, "value", value)
+proc writeInputElementValue[R, N](r: R; input: N; value: string) =
+  ## Assigning `.value` fires no `input` event (only user edits do:
+  ## https://html.spec.whatwg.org/multipage/input.html#common-input-element-events),
+  ## which is what keeps `syncInputValue` from echoing into the VM; the mock's
+  ## attribute write behaves the same.
+  mixin setAttribute
+  when N is MockNode:
+    r.setAttribute(input, "value", value)
+  else:
+    when defined(js):
+      input.setInputValue(cstring(value))
 
-proc resizeInputToContent(r: MockRenderer; input: MockNode) =
-  ## The mock has no layout, so there is no content height to size to.
-  discard
+proc resizeInputToContent[R, N](r: R; input: N) =
+  ## Size the prompt to its value in the browser; the mock has no layout.
+  when defined(js):
+    when N is isonim_dom.Element:
+      resizeInputToContent(input)
 
 proc syncInputValue[R, N](r: R; input: N; value: string;
                           repaintHighlight: proc()) =
@@ -751,42 +749,50 @@ proc syncInputValue[R, N](r: R; input: N; value: string;
   if repaintHighlight != nil:
     repaintHighlight()
 
-proc setupInputHighlight(r: MockRenderer; ta: MockNode; hl: MockNode): proc() =
-  ## The mock has no overlay to paint.
+proc setupInputHighlight[R, N](r: R; ta, hl: N): proc() =
+  ## Paints the inline-code overlay behind the prompt and keeps it in step
+  ## with the user's typing (its own `input` listener).  Returns the repaint,
+  ## because a value the VIEW writes fires no `input` event (see
+  ## `syncInputValue`) and must repaint the overlay itself. The mock has no
+  ## overlay to paint.
+  when defined(js):
+    when N is isonim_dom.Element:
+      let repaint = setupInputHighlightJs(ta, hl)
+      return proc() = callJsFunction(repaint)
   nil
 
-proc attachInputEvents(r: MockRenderer; input: MockNode; vm: AgentActivityVM;
-                       callbacks: AgentActivityCallbacks) =
-  r.addEventListener(input, "focus", proc() =
-    callbacks.invokeFocus())
-  r.addEventListener(input, "input", proc() =
-    vm.invokeInputChange(callbacks, r.readInputElementValue(input)))
-  r.addEventListener(input, "keydown", proc() =
-    callbacks.invokeSubmit())
-
-when defined(js):
-  proc attachInputEvents(r: WebRenderer; input: isonim_dom.Element;
-                         vm: AgentActivityVM;
-                         callbacks: AgentActivityCallbacks) =
-    ## Input and keydown need native DOM event fields/value; WebRenderer's
-    ## declarative event adapter intentionally exposes only proc().
-    isonim_dom.addEventListener(isonim_dom.Node(input), cstring"focus",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeFocus())
-    isonim_dom.addEventListener(isonim_dom.Node(input), cstring"input",
-      proc(ev: isonim_dom.Event) =
-        vm.invokeInputChange(callbacks, readInputValue(isonim_dom.Node(input))))
-    isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
-      proc(ev: isonim_dom.Event) =
-        if ev.eventKey() == cstring"Enter" and not ev.shiftKey():
-          ev.preventDefault()
-          if not vm.isLoading.val:
-            callbacks.invokeSubmit()
-            vm.setInputValue("")
-            vm.clearPastedImages())
-    setupPasteImageHandler(input,
-      proc(): int = vm.addPastedImageLoading(),
-      proc(idx: int; dataUrl: cstring) = vm.updatePastedImage(idx, $dataUrl))
+proc attachInputEvents[R, N](r: R; input: N; vm: AgentActivityVM;
+                             callbacks: AgentActivityCallbacks) =
+  ## The prompt's focus, input and keydown handling. In the browser input and
+  ## keydown need native DOM event fields (the value, Enter without Shift),
+  ## which WebRenderer's declarative event adapter does not expose.
+  mixin addEventListener
+  when N is MockNode:
+    r.addEventListener(input, "focus", proc() =
+      callbacks.invokeFocus())
+    r.addEventListener(input, "input", proc() =
+      vm.invokeInputChange(callbacks, r.readInputElementValue(input)))
+    r.addEventListener(input, "keydown", proc() =
+      callbacks.invokeSubmit())
+  else:
+    when defined(js):
+      isonim_dom.addEventListener(isonim_dom.Node(input), cstring"focus",
+        proc(ev: isonim_dom.Event) =
+          callbacks.invokeFocus())
+      isonim_dom.addEventListener(isonim_dom.Node(input), cstring"input",
+        proc(ev: isonim_dom.Event) =
+          vm.invokeInputChange(callbacks, readInputValue(isonim_dom.Node(input))))
+      isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
+        proc(ev: isonim_dom.Event) =
+          if ev.eventKey() == cstring"Enter" and not ev.shiftKey():
+            ev.preventKeyDefault()
+            if not vm.isLoading.val:
+              callbacks.invokeSubmit()
+              vm.setInputValue("")
+              vm.clearPastedImages())
+      setupPasteImageHandler(input,
+        proc(): int = vm.addPastedImageLoading(),
+        proc(idx: int; dataUrl: cstring) = vm.updatePastedImage(idx, $dataUrl))
 
 proc makeToolRowClickHandler(rowId: string): proc() =
   ## Captures rowId in a fresh proc scope to avoid Nim JS for-loop closure bug
@@ -1131,7 +1137,7 @@ proc renderMessage[R](r: R; componentId: int;
                           elif tc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
                           else: "agent-tc-dot agent-tc-dot-running"
                         let stableId = "tc-" & tc.toolCallId
-                        let initExpanded = stableId in expandedToolRowIds
+                        let initExpanded = isToolRowExpanded(stableId)
                         let rowClass = if initExpanded: "agent-tc-row agent-tc-row-expanded" else: "agent-tc-row"
                         let histClickHandler = makeToolRowClickHandler(stableId)
                         tdiv(class = rowClass, id = stableId):
@@ -1148,7 +1154,7 @@ proc renderMessage[R](r: R; componentId: int;
                     elif currentTc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
                     else: "agent-tc-dot agent-tc-dot-running"
                   let currentStableId = "tc-" & currentTc.toolCallId
-                  let currentInitExpanded = currentStableId in expandedToolRowIds
+                  let currentInitExpanded = isToolRowExpanded(currentStableId)
                   let currentRowClass = if currentInitExpanded:
                       "agent-tc-row agent-tc-row-current agent-tc-row-expanded"
                     else:
@@ -2215,26 +2221,9 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
   panel
 
-proc renderAgentActivityPanel*(r: MockRenderer; vm: AgentActivityVM;
+proc renderAgentActivityPanel*[R, N](r: R; vm: AgentActivityVM;
     componentId: int; commandInputId: string = "";
-    callbacks: AgentActivityCallbacks = AgentActivityCallbacks()): MockNode =
+    callbacks: AgentActivityCallbacks = AgentActivityCallbacks()): N =
+  ## The Agent Activity panel, under any renderer (Shared-DOM-Front-Ends D3);
+  ## the panel host (`ui/panel_host`) mounts it.
   renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks)
-
-when defined(js):
-  proc renderAgentActivityPanel*(r: WebRenderer; vm: AgentActivityVM;
-      componentId: int; commandInputId: string = "";
-      callbacks: AgentActivityCallbacks = AgentActivityCallbacks()):
-      isonim_dom.Element =
-    renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks)
-
-  proc mountIsoNimAgentActivityPanel*(container: isonim_dom.Element;
-                                      vm: AgentActivityVM;
-                                      componentId: int;
-                                      commandInputId: string = "";
-                                      callbacks: AgentActivityCallbacks =
-                                        AgentActivityCallbacks()) =
-    let r = WebRenderer()
-    let panel = renderAgentActivityPanel(r, vm, componentId,
-                                         commandInputId, callbacks)
-    # External mount interop: the AgentActivity component owns this container.
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

@@ -95,7 +95,7 @@ suite "a session loaded into a review shows its messages":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 110)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 110)
 
       applyReviewSession(vm, loaded(
         ReviewSessionEvent(kind: "thought",
@@ -124,7 +124,7 @@ suite "a session loaded into a review shows its messages":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 111)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 111)
 
       vm.setMessages([AgentActivityMessageEntry(
         id: "live-0", content: "Reading the tokenizer", role: aamrAgent,
@@ -141,7 +141,7 @@ suite "a session loaded into a review shows its messages":
     createRoot proc(dispose: proc()) =
       let vm = createAgentActivityVM(makeStore())
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 112)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 112)
 
       vm.setMessages([AgentActivityMessageEntry(
         id: "live-1", content: "", role: aamrAgent, isLoading: false,
