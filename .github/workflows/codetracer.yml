@@ -1857,6 +1857,25 @@ jobs:
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
 
+      - name: Clone codetracer-pm sibling
+        # `ci/test/cua-keymap-extractor.sh` (PLAT-68's CUA keymap step in
+        # ci/lint/nim.sh) re-extracts every binding CUA-Keymap.md cites, and
+        # reads that document from the specification checkout beside this one
+        # (`$CT_SPECS_DIR`, else `../codetracer-pm`). A missing checkout is
+        # red by design, never a skip, and nothing in this job provided one,
+        # so the step could not pass here. `codetracer-pm` is not a build
+        # input and is not in `repro.lock`, so it is cloned at its mainline
+        # `latest`, as `ct-test-certificates` clones the test-certificates
+        # standard -- the gate checks this commit against the document as
+        # published.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
       # lint one -- a job whose earlier `nix develop` dies never reaches a
