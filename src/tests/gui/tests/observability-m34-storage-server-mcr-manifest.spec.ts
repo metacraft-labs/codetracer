@@ -25,7 +25,11 @@ import {
 } from "../lib/fixtures";
 import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
-import { ctHostPageUrl, withCtHostSessionSecret } from "../lib/ct-host-session";
+import {
+  CT_HOST_SESSION_SECRET,
+  ctHostPageUrl,
+  withCtHostSessionSecret,
+} from "../lib/ct-host-session";
 import { retry } from "../lib/retry-helpers";
 import { LayoutPage } from "../page-objects/layout-page";
 
@@ -1191,19 +1195,64 @@ async function startPolicyDeniedHarness(
   };
 }
 
-function parseReplayAgentEnv(commandLine: string): Record<string, string> {
+/**
+ * What the ReplayAgent's runner would start for a replay, as codetracer-ci's
+ * `ReplayAgent print-runner-command` prints it: the `docker run` command line,
+ * and the environment the runner gives the docker client. The runner passes
+ * credentials (the ct host session secret, the storage replay token) as
+ * `-e NAME` with the value in that environment, never on the command line,
+ * which its process executor logs.
+ */
+interface ReplayAgentRunnerCommand {
+  commandLine: string;
+  environment: Record<string, string>;
+}
+
+/**
+ * The environment `docker run` would give the replay container: each
+ * `-e 'NAME=VALUE'` sets NAME to VALUE, and each bare `-e NAME` copies NAME
+ * from the docker client's environment, or leaves it unset when that has none
+ * (https://docs.docker.com/reference/cli/docker/container/run/#env). The runner
+ * single-quotes every `NAME=VALUE`, writing a quote inside one as `'"'"'`.
+ */
+function parseReplayAgentEnv(command: ReplayAgentRunnerCommand): Record<string, string> {
   const env: Record<string, string> = {};
-  const pattern = /-e '([^=']+)=([^']*)'/g;
-  for (const match of commandLine.matchAll(pattern)) {
-    env[match[1]] = match[2];
+  const pattern = /(?:^|\s)-e (?:'((?:[^']|'"'"')*)'|([A-Za-z_][A-Za-z0-9_]*))(?=\s|$)/g;
+  for (const match of command.commandLine.matchAll(pattern)) {
+    if (match[1] !== undefined) {
+      const assignment = match[1].replace(/'"'"'/g, "'");
+      const equals = assignment.indexOf("=");
+      if (equals > 0) {
+        env[assignment.slice(0, equals)] = assignment.slice(equals + 1);
+      }
+    } else if (Object.hasOwn(command.environment, match[2])) {
+      env[match[2]] = command.environment[match[2]];
+    }
   }
   return env;
 }
 
-function generateReplayAgentCommand(payload: any, rootDir: string): string {
+/**
+ * Runs the ReplayAgent's runner on `payload` (codetracer-ci
+ * `print-runner-command`) and returns what it would start.
+ *
+ * The payload's `hostSessionSecret` is set to `CT_HOST_SESSION_SECRET` first.
+ * In production the Monolith chooses that secret, puts it in this command, and
+ * the replay proxy presents it; here the test is the client that opens the
+ * `ct host` page (`ctHostPageUrl`), so it is the one choosing it. The runner
+ * hands the secret to the container by name like any credential, so without
+ * this the container's secret would be one the page does not present.
+ */
+function generateReplayAgentCommand(payload: any, rootDir: string): ReplayAgentRunnerCommand {
+  const payloadWithSecret: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    // The agent reads the payload case-insensitively; drop every spelling.
+    if (key.toLowerCase() !== "hostsessionsecret") payloadWithSecret[key] = value;
+  }
+  payloadWithSecret.hostSessionSecret = CT_HOST_SESSION_SECRET;
   const payloadPath = path.join(rootDir, "replay-provisioning-requested.json");
-  fs.writeFileSync(payloadPath, JSON.stringify(payload, null, 2));
-  return childProcess.execFileSync(
+  fs.writeFileSync(payloadPath, JSON.stringify(payloadWithSecret, null, 2));
+  const printed = childProcess.execFileSync(
     "direnv",
     [
       "exec",
@@ -1225,6 +1274,18 @@ function generateReplayAgentCommand(payload: any, rootDir: string): string {
       windowsHide: true,
     },
   ).trim();
+  // The verb prints one JSON object on its last line.
+  const lastLine = printed.split("\n").pop() ?? "";
+  let command: ReplayAgentRunnerCommand;
+  try {
+    command = JSON.parse(lastLine) as ReplayAgentRunnerCommand;
+  } catch (error) {
+    throw new Error(`print-runner-command printed no JSON object (${String(error)}):\n${printed}`);
+  }
+  if (typeof command.commandLine !== "string" || typeof command.environment !== "object" || command.environment === null) {
+    throw new Error(`print-runner-command printed no commandLine/environment:\n${printed}`);
+  }
+  return command;
 }
 
 function shellQuote(value: string): string {
@@ -2855,11 +2916,11 @@ function startPlatformLaunchBridge(options: {
       const replayPayload = await fetchJsonFromUrl(
         `${options.ready.baseUrl}/__tests/replay-provisioning/latest`,
       );
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         replayPayload,
         options.runnerRoot,
       );
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
       const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
@@ -2993,18 +3054,18 @@ function startMaterializedPlatformLaunchBridge(options: {
         linkReady.materializedArtifactKey,
       );
       options.bridgeEvents.push("generating-runner-command");
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         replayPayload,
         options.runnerRoot,
       );
       options.bridgeEvents.push("generated-runner-command");
-      expect(replayAgentCommandLine).toContain("docker run ");
-      expect(replayAgentCommandLine).toContain(
+      expect(replayAgentCommand.commandLine).toContain("docker run ");
+      expect(replayAgentCommand.commandLine).toContain(
         "CODETRACER_TRACE_MATERIALIZED_ARTIFACTS=",
       );
-      expect(replayAgentCommandLine).toContain("trace_metadata.json");
-      expect(replayAgentCommandLine).toContain("trace_paths.json");
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      expect(replayAgentCommand.commandLine).toContain("trace_metadata.json");
+      expect(replayAgentCommand.commandLine).toContain("trace_paths.json");
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       expect(replayEnv.CODETRACER_TRACE_MANIFEST_KEY).toBeTruthy();
       expect(replayEnv.CODETRACER_STORAGE_BASE_URL).toBe(options.ready.baseUrl);
       expect(replayEnv.CODETRACER_STORAGE_REPLAY_TOKEN).toBe(
@@ -3012,6 +3073,10 @@ function startMaterializedPlatformLaunchBridge(options: {
       );
       expect(replayEnv.CODETRACER_STORAGE_REPLAY_TOKEN).toMatch(
         /^ct_replay_storage_/,
+      );
+      // It reaches the container by name only: never on the command line.
+      expect(replayAgentCommand.commandLine).not.toContain(
+        replayPayload.traceSource.storageReplayToken,
       );
 
       const httpPort = await getFreeTcpPort();
@@ -3149,16 +3214,16 @@ function startMixedPlatformLaunchBridge(options: {
         );
       }
 
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         replayPayload,
         options.runnerRoot,
       );
       if (materializedLink) {
-        expect(replayAgentCommandLine).toContain("CODETRACER_TRACE_MATERIALIZED_ARTIFACTS=");
+        expect(replayAgentCommand.commandLine).toContain("CODETRACER_TRACE_MATERIALIZED_ARTIFACTS=");
       } else {
-        expect(replayAgentCommandLine).toContain("CODETRACER_TRACE_MANIFEST_KEY=");
+        expect(replayAgentCommand.commandLine).toContain("CODETRACER_TRACE_MANIFEST_KEY=");
       }
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
       const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
@@ -3866,19 +3931,31 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
             ),
         ),
       ).toBe(true);
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         debugHarness.ready.replayPayload,
         runnerRoot,
       );
-      expect(replayAgentCommandLine).toContain("docker run ");
-      expect(replayAgentCommandLine).toContain(
+      expect(replayAgentCommand.commandLine).toContain("docker run ");
+      expect(replayAgentCommand.commandLine).toContain(
         "CODETRACER_TRACE_SHARDED_MCR_SEGMENTS=",
       );
-      expect(replayAgentCommandLine).toContain(
+      // The storage replay token is a credential: the runner names it on the
+      // command line, which its executor logs, and hands the value to docker
+      // through the client's environment.
+      expect(replayAgentCommand.commandLine).toContain(
+        " -e CODETRACER_STORAGE_REPLAY_TOKEN ",
+      );
+      expect(replayAgentCommand.commandLine).not.toContain(
         "CODETRACER_STORAGE_REPLAY_TOKEN=",
       );
+      expect(replayAgentCommand.commandLine).not.toContain(
+        debugHarness.ready.replayToken,
+      );
+      expect(replayAgentCommand.environment.CODETRACER_STORAGE_REPLAY_TOKEN).toBe(
+        debugHarness.ready.replayToken,
+      );
 
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       expect(replayEnv.CODETRACER_TRACE_MANIFEST_KEY).toBe(
         debugHarness.ready.manifestKey,
       );
@@ -4092,11 +4169,11 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       );
       expect(supportFileServers).toContain(secondaryServerId);
 
-      const replayAgentCommandLine = generateReplayAgentCommand(
+      const replayAgentCommand = generateReplayAgentCommand(
         debugHarness.ready.replayPayload,
         runnerRoot,
       );
-      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const replayEnv = parseReplayAgentEnv(replayAgentCommand);
       expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).toContain(
         primaryServerId,
       );
