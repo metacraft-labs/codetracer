@@ -53,6 +53,7 @@ import {
   LIMIT_CT_HOST_STARTUP_MS,
   timed,
 } from "./performance-limits";
+import { deploymentModeFromEnv, type DeploymentMode } from "./deployment-mode";
 
 // ---------------------------------------------------------------------------
 // Platform detection
@@ -276,14 +277,20 @@ const PORT_RELEASE_DELAY_MS = 500;
 // Types
 // ---------------------------------------------------------------------------
 
-export type DeploymentMode = "electron" | "web";
+// Defined in ./deployment-mode beside the run-wide default it computes;
+// re-exported so specs keep importing it from here.
+export type { DeploymentMode };
 export type LaunchMode = "trace" | "trace-folder" | "welcome" | "edit" | "deepreview";
 
 /**
  * Configurable options set via `test.use({ ... })`.
  */
 interface CodetracerOptions {
-  /** Electron (default) or Web (ct host + chromium). */
+  /**
+   * Electron or Web (ct host + chromium). Defaults to the run-wide mode set
+   * by `CODETRACER_TEST_IN_BROWSER` (Electron when unset); a spec's own
+   * `test.use({ deploymentMode })` overrides that default.
+   */
   deploymentMode: DeploymentMode;
   /** Path to test program — relative to test-programs/ or absolute (for sibling repos). */
   sourcePath: string;
@@ -1966,7 +1973,11 @@ export const test = base.extend<
   CodetracerWorkerFixtures
 >({
   // Options (set via test.use)
-  deploymentMode: ["electron", { option: true }],
+  // Run-wide default from CODETRACER_TEST_IN_BROWSER ("1" = web), read once
+  // when this module loads; an invalid value throws here, failing the run
+  // instead of quietly running Electron. `test.use({ deploymentMode })` in a
+  // spec still overrides it.
+  deploymentMode: [deploymentModeFromEnv(), { option: true }],
   sourcePath: ["", { option: true }],
   launchMode: ["trace" as LaunchMode, { option: true }],
   newTracePolicy: ["window" as "window" | "tab", { option: true }],
