@@ -423,6 +423,43 @@ proc deleteAllBreakpoints*(self: DebuggerService, path: cstring = cstring"") =
   if not st.isNil:
     clearBreakpoints(st, $path)
 
+proc newJsArray(): JsObject {.importjs: "(new Array())".}
+
+proc breakpointRowsForTests(): JsObject {.exportc: "ctBreakpointRows".} =
+  ## The active session's breakpoints as plain objects — `{path, line,
+  ## column, enabled, condition, logMessage}` — for the GUI tests, which read
+  ## breakpoint state from the page. The rows are the session store's
+  ## (`sdk/breakpoints`); there is no other breakpoint state to read.
+  result = newJsArray()
+  if data.isNil or data.services.isNil or data.services.debugger.isNil:
+    return
+  let st = data.services.debugger.store
+  if st.isNil:
+    return
+  for file in breakpointFiles(st):
+    let path = cstring(file)
+    let held = heldBreakpoints(st, file)
+    for i in 0 ..< held.len:
+      let line = held[i].line
+      let column = held[i].column
+      let enabled = held[i].enabled
+      let condition = cstring(held[i].condition)
+      let logMessage = cstring(held[i].logMessage)
+      discard result.push(js{
+        path: path, line: line, column: column, enabled: enabled,
+        condition: condition, logMessage: logMessage})
+
+proc deleteBreakpointForTests(path: cstring; line: int): bool {.exportc: "ctDeleteBreakpoint".} =
+  ## Delete the active session's breakpoint on `path:line` — for the GUI
+  ## tests, which cannot call the name-mangled service procs. False when the
+  ## line has none.
+  if data.isNil or data.services.isNil or data.services.debugger.isNil:
+    return false
+  let st = data.services.debugger.store
+  if st.isNil:
+    return false
+  deleteBreakpoint(st, $path, line)
+
 proc toggleAssemblyBreakpoint*(self: DebuggerService, address: cstring) =
   discard
 

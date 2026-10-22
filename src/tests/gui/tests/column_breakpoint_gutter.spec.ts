@@ -10,7 +10,7 @@
  *   1. Alt+clicking on a line's text at a column > 1 invokes the
  *      M1 `addColumnBreakpoint(path, line, column)` service path —
  *      the breakpoint stored in
- *      `data.services.debugger.breakpointTable[path][line]` carries
+ *      the session's breakpoint row for `(path, line)` (`ctBreakpointRows`) carries
  *      the exact column Monaco resolved from the click x-offset.
  *   2. After Alt+click + Continue the replay engine halts at the
  *      bound column — end-to-end proof that the M6 click→column
@@ -149,7 +149,7 @@ interface BreakpointSnapshot {
 }
 
 /** Read the breakpoint at `(path, line)` from the frontend's
- *  `breakpointTable`.  Mirrors the M1 spec helper of the same name. */
+ *  the session's breakpoint rows.  Mirrors the M1 spec helper of the same name. */
 async function readBreakpoint(
   editor: EditorPane,
   line: number,
@@ -157,7 +157,7 @@ async function readBreakpoint(
   return editor.page.evaluate(
     ({ path: p, line: l }) => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      const table = w?.data?.services?.debugger?.breakpointTable;
+      const table = (w?.ctBreakpointRows ? w.ctBreakpointRows().reduce((t: any, r: any) => { (t[r.path] ??= {})[r.line] = r; return t; }, {}) : undefined);
       if (!table) return null;
       const aliases = [p];
       if (p.startsWith("/private/var/")) aliases.push(p.slice("/private".length));
