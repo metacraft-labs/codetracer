@@ -881,12 +881,20 @@ ARMS = [
         "the stop the debugger left, so it is dropped: the pane shows nothing "
         "current",
     ),
+    # L6 RE-AIMED 2026-10-22: since `d883db0e2` (one per-stop loader for
+    # every front-end) the native host's request is built by the shared
+    # `ReplayDataStore.localsLoadArgs` (L2's subject). What remains the native
+    # host's own is the hook that names a file's language, installed in
+    # `newHeadlessDebugSession`; answering `c` there is the old request.
     Arm(
         "L6", HEADLESS,
-        "    \"lang\": s.session.store.localsLanguage(),\n",
-        "    \"lang\": LoadLocalsDefaultLang,\n",
+        "    store.sourceLanguageOf = proc(file: string): string =\n"
+        "      langWireName(toLangFromFilename(file))\n",
+        "    store.sourceLanguageOf = proc(file: string): string =\n"
+        "      LoadLocalsDefaultLang\n",
         W_NATIVE_WIRE,
-        "**THE NATIVE HOST'S REQUEST SAYS `c`** about every file, as it did",
+        "**THE NATIVE HOST'S REQUEST SAYS `c`** about every file, as it did: "
+        "its language hook answers the default whatever the file",
     ),
     Arm(
         "A6", GATE,
